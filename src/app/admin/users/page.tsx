@@ -165,9 +165,7 @@ export default function AdminUsersPage() {
         <div className="h-14 px-7 flex items-center justify-between">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-[#0f172a] rounded-lg flex items-center justify-center text-white text-sm font-bold shadow-sm">
-                W
-              </div>
+              <img src="/western-head-logo-2025.png" alt="Logo" className="w-8 h-8 rounded-lg object-contain shadow-sm" />
               <h1 className="text-[14px] font-bold text-[#0f172a] leading-none">Admin</h1>
             </div>
             

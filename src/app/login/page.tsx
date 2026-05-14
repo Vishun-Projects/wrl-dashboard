@@ -32,71 +32,86 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-6 bg-background relative transition-colors duration-300 font-sans">
-      
-      <div className="w-full max-w-sm space-y-8">
-        <div className="text-center space-y-2">
-          <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-primary/20">
-             <div className="w-8 h-8 border-4 border-white rounded-full" />
+    <div className="flex min-h-screen items-center justify-center bg-[#f8fafc] p-6 font-sans">
+      {/* Background decoration */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-100 blur-[120px]" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-slate-200 blur-[120px]" />
+      </div>
+
+      <div className="relative w-full max-w-[400px] bg-white rounded-[32px] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.08)] border border-slate-100 p-10">
+        <div className="flex flex-col items-center text-center">
+          {/* Logo Section */}
+          <div className="mb-8">
+            <img
+              src="/western-head-logo-2025.png"
+              alt="Western Logo"
+              className="w-40 h-auto object-contain"
+            />
           </div>
-          <h1 className="text-4xl font-bold tracking-tight font-brand text-primary">FastClose</h1>
-          <p className="text-sm text-muted-foreground font-medium">
-            Western Refrigeration Portal
-          </p>
+
+          <div className="space-y-1 mb-10">
+            <h1 className="text-2xl font-black text-[#0f172a] tracking-tight">
+              WRL Dashboard
+            </h1>
+            <p className="text-[13px] font-medium text-slate-400">
+              Western Refrigeration Pvt. Ltd.
+            </p>
+          </div>
         </div>
 
-        <div className="mt-8 space-y-4">
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Email Address</label>
+        <form onSubmit={handleLogin} className="space-y-6">
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">
+                Email Address
+              </label>
               <input
-                id="email-address"
-                name="email"
                 type="email"
                 required
-                className="relative block w-full rounded-xl border-0 py-3 text-foreground bg-secondary ring-1 ring-inset ring-border placeholder:text-muted-foreground focus:ring-2 focus:ring-inset focus:ring-primary-brand sm:text-sm px-4 outline-none transition-all"
-                placeholder="name@western-vass.com"
+                className="w-full h-13 bg-slate-50/50 border border-slate-100 rounded-2xl px-5 py-3 text-[14px] font-medium text-slate-900 placeholder:text-slate-300 outline-none focus:ring-2 focus:ring-slate-900/5 focus:border-slate-400 transition-all"
+                placeholder="name@westernequipments.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleLogin(e as any)}
               />
             </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Password</label>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">
+                Password
+              </label>
               <input
-                id="password"
-                name="password"
                 type="password"
                 required
-                className="relative block w-full rounded-xl border-0 py-3 text-foreground bg-secondary ring-1 ring-inset ring-border placeholder:text-muted-foreground focus:ring-2 focus:ring-inset focus:ring-primary-brand sm:text-sm px-4 outline-none transition-all"
+                className="w-full h-13 bg-slate-50/50 border border-slate-100 rounded-2xl px-5 py-3 text-[14px] font-medium text-slate-900 placeholder:text-slate-300 outline-none focus:ring-2 focus:ring-slate-900/5 focus:border-slate-400 transition-all"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleLogin(e as any)}
               />
             </div>
           </div>
 
           {error && (
-            <div className="text-red-500 text-xs text-center font-bold bg-red-50 p-2 rounded-lg border border-red-100">
-              {error}
+            <div className="flex items-center gap-2 p-4 bg-rose-50 rounded-2xl border border-rose-100 animate-in fade-in slide-in-from-top-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+              <p className="text-[12px] font-bold text-rose-600">{error}</p>
             </div>
           )}
 
-          <div className="pt-2">
-            <button
-              onClick={handleLogin}
-              disabled={loading}
-              className="group relative flex w-full justify-center rounded-xl bg-primary-brand px-3 py-4 text-sm font-bold text-white hover:bg-primary shadow-lg shadow-primary-brand/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-brand disabled:opacity-50 transition-all active:scale-[0.98]"
-            >
-              {loading ? 'Authenticating...' : 'Access Portal'}
-            </button>
-          </div>
-        </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full h-14 bg-[#0f172a] text-white rounded-2xl text-[15px] font-black shadow-[0_20px_40px_-12px_rgba(15,23,42,0.3)] hover:bg-slate-800 transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100"
+          >
+            {loading ? 'Authenticating...' : 'Login'}
+          </button>
+        </form>
 
-        <p className="mt-8 text-center text-[10px] text-muted-foreground uppercase font-bold tracking-widest opacity-50">
-          Internal Management Review System
-        </p>
+        <div className="mt-10 pt-8 border-t border-slate-50 text-center">
+          <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">
+            Internal Access Only
+          </p>
+        </div>
       </div>
     </div>
   );

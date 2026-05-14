@@ -85,11 +85,9 @@ export function MobileView({
       {/* Top Bar */}
       <header className="flex items-center justify-between px-4 py-3.5 bg-white border-b border-[#f1f5f9] flex-shrink-0">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-[#0f172a] rounded-lg flex items-center justify-center text-white text-sm font-bold">
-            W
-          </div>
+          <img src="/western-head-logo-2025.png" alt="Logo" className="w-8 h-8 rounded-lg object-contain" />
           <div>
-            <div className="text-[14px] font-bold text-[#0f172a] leading-none">WRL Viewer</div>
+            <div className="text-[14px] font-bold text-[#0f172a] leading-none">Western Viewer</div>
             <div className="flex items-center gap-1 mt-1">
               <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
               <span className="text-[11px] font-medium text-[#94a3b8]">
@@ -267,7 +265,7 @@ export function MobileView({
           <div className="absolute inset-0 bg-slate-900/60" onClick={() => setIsDrawerOpen(false)} />
           <div className="absolute inset-x-0 bottom-0 top-[5%] bg-white rounded-t-[32px] overflow-hidden flex flex-col animate-in slide-in-from-bottom-full duration-500">
             <div className="flex-shrink-0 h-1.5 w-12 bg-slate-200 rounded-full mx-auto my-4" />
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 flex flex-col min-h-0">
               <CallDetail
                 call={selectedCall}
                 onClose={() => setIsDrawerOpen(false)}

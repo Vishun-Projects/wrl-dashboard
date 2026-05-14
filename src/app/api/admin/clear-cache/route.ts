@@ -19,7 +19,7 @@ export async function POST() {
     
     return NextResponse.json({ success: true, message: 'Database cache cleared successfully.' });
   } catch (err: any) {
-    console.error('[Admin] Failed to clear cache:', err);
+
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
