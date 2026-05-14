@@ -193,15 +193,15 @@ export default function CallsPage() {
     setIsDrawerOpen(true);
 
     const targetCall = calls.find(c => c.id === id);
-    if (targetCall && (!targetCall.visits || targetCall.visits.length === 0)) {
+    if (targetCall) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const res = await axios.get(`/api/calls/${id}?officeId=${targetCall.office_id}&vtrnno=${targetCall.vtrnno}`, {
           headers: { 'Authorization': `Bearer ${session?.access_token}` }
         });
         setCalls(prev => prev.map(c => c.id === id ? { ...c, ...res.data } : c));
-      } catch (err) {
-
+      } catch (err: any) {
+        toast.error(err.response?.data?.error || "Failed to load call details");
       }
     }
   };

@@ -23,11 +23,16 @@ export async function GET(
     const vtrnno = searchParams.get('vtrnno');
 
     // 1. Fetch everything in parallel
-    const [visitsRes, partsRes, serialsRes, parentRes, docsRes] = await Promise.all([
+    const [visitsRes, faultsRes, partsRes, serialsRes, parentRes, docsRes] = await Promise.all([
       postQuery({ 
-        fields: "v.vVisitTrnNo as vtrnno, v.vpersoncontected, CONVERT(varchar(30), v.dvisitdatetime, 126) as dvisitdatetime, v.vvisitremark, v.vcustomerRemarks, v.vPartsReplacedDetails, v.ntimespent, v.nvisitexpense, v.nofficeid, v.vcustomersignPath, v.vengineersignPath, (SELECT TOP 1 r.vname FROM trdcalls2fault f (NOLOCK) LEFT JOIN mstrepair r (NOLOCK) ON f.nrepair = r.ncode WHERE f.ncalls1 = v.ncode) as repair", 
+        fields: "v.vVisitTrnNo as vtrnno, v.vpersoncontected, CONVERT(varchar(30), v.dvisitdatetime, 126) as dvisitdatetime, v.vvisitremark, v.vcustomerRemarks, v.vPartsReplacedDetails, v.ntimespent, v.nvisitexpense, v.nofficeid, v.vcustomersignPath, v.vengineersignPath", 
         tableName: "trdcalls1visit v (NOLOCK)", 
         condition: `v.ncalls = '${id}' AND v.nofficeid = '${officeId}'` 
+      }),
+      postQuery({
+        fields: "f.ncalls1 as visit_id, c.vname as complaint, d.vname as defect, r.vname as repair, f.bsolve as is_solved",
+        tableName: "trdcalls2fault f (NOLOCK) LEFT JOIN mstcomplaint c (NOLOCK) ON f.ncomplaint = c.ncode LEFT JOIN mstdefect d (NOLOCK) ON f.ndefect = d.ncode LEFT JOIN mstrepair r (NOLOCK) ON f.nrepair = r.ncode",
+        condition: `f.ncalls = '${id}' AND f.nofficeid = '${officeId}'`
       }),
       postQuery({ 
         fields: "p.ncode as part_id, i.vname as vpartname, i.vitemcode as vpartcode, p.nitem, p.nquantity as nqty, p.nofficeid, p.nrate, p.ndiscountamt, p.ntaxamt, p.bclaimed, p.vremarks as vpartremarks, p.vnewbarcode, p.voldbarcode", 
@@ -40,8 +45,8 @@ export async function GET(
         condition: `ncalls = '${id}' AND nofficeid = '${officeId}'`
       }),
       postQuery({
-        fields: "tc.vtrnno, tc.vtransfercallno, vsolveremarks, cr.vname as ncancelreason, CONVERT(varchar(30), tc.dfastclosedatetime, 126) as dfastclosedatetime, tc.vcomplaint, tc.bBMreject, tc.vBMrejectreason, CONVERT(varchar(30), tc.dBMrejectdatetime, 126) as dBMrejectdatetime",
-        tableName: "trhcalls tc (NOLOCK) LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode",
+        fields: "tc.vtrnno, tc.vtransfercallno, tc.vserialno, tc.vmanualjobno, tc.vlocation, tc.vpersoncalling, tc.vcomplaint, tc.vsolveremarks, tc.ncancelreason, cr.vname as ncancelreason_label, tc.callStatus, tc.bsolved, tc.bfastclose, tc.baccepted, tc.nengineer, u.vname as engineer_name, p.vname as customer_name, o.vcompanyname as branch_name, CONVERT(varchar(30), tc.dtrndate, 126) as dtrndate, CONVERT(varchar(30), tc.dallocationdatetime, 126) as dallocationdatetime, CONVERT(varchar(30), tc.dsolvedatetime, 126) as dsolvedatetime, CONVERT(varchar(30), tc.dfastclosedatetime, 126) as dfastclosedatetime, tc.bBMreject, tc.vBMrejectreason, CONVERT(varchar(30), tc.dBMrejectdatetime, 126) as dBMrejectdatetime",
+        tableName: "trhcalls tc (NOLOCK) LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode",
         condition: `tc.ncode = '${id}' AND tc.nofficeid = '${officeId}'`
       }),
       postQuery({
@@ -52,6 +57,7 @@ export async function GET(
     ]);
 
     const visits = visitsRes.data || [];
+    const faults = faultsRes.data || [];
     const rawParts = partsRes.data || [];
     const serials = serialsRes.data || [];
     const parentData = parentRes.data?.[0] || {};
@@ -115,8 +121,14 @@ export async function GET(
         vpersoncontected: v.vpersoncontected,
         office_id: String(v.nofficeid),
         customer_sign: v.vcustomersignPath,
-        engineer_sign: v.vengineersignPath,
-        repair: v.repair
+        engineer_sign: v.vengineersignPath
+      })),
+      faults: faults.map((f: any) => ({
+        visit_id: f.visit_id,
+        complaint: f.complaint,
+        defect: f.defect,
+        repair: f.repair,
+        is_solved: f.is_solved === 'True' || f.is_solved === true || f.is_solved === 1
       })),
       parts: parts.map((p: any) => ({
         vpartname: p.vpartname,

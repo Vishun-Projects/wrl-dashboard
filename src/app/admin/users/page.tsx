@@ -15,7 +15,8 @@ import {
   Search,
   ArrowLeft,
   ChevronDown,
-  LayoutDashboard
+  LayoutDashboard,
+  Key
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
@@ -31,6 +32,10 @@ export default function AdminUsersPage() {
   const [branchSearch, setBranchSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'profile' | 'access'>('profile');
   const [showOnlySelectedBranches, setShowOnlySelectedBranches] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [selectedUserForPassword, setSelectedUserForPassword] = useState<any>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [updatingPassword, setUpdatingPassword] = useState(false);
   
   // Form State
   const [formData, setFormData] = useState({
@@ -116,6 +121,30 @@ export default function AdminUsersPage() {
       fetchInitialData();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Delete failed');
+    }
+  };
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUserForPassword || !newPassword.trim()) return;
+    
+    setUpdatingPassword(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      await axios.post('/api/admin/users/password', { 
+        userId: selectedUserForPassword.id, 
+        newPassword 
+      }, {
+        headers: { 'Authorization': `Bearer ${session?.access_token}` }
+      });
+      toast.success('Password updated successfully');
+      setShowPasswordModal(false);
+      setNewPassword('');
+      setSelectedUserForPassword(null);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Password update failed');
+    } finally {
+      setUpdatingPassword(false);
     }
   };
 
@@ -308,9 +337,20 @@ export default function AdminUsersPage() {
                     </td>
                     <td className="px-6 py-5">
                       <div className="flex items-center justify-end gap-2">
-                        <button 
-                          onClick={() => {
-                            setEditingUser(u);
+                          <button 
+                            onClick={() => {
+                              setSelectedUserForPassword(u);
+                              setNewPassword('');
+                              setShowPasswordModal(true);
+                            }}
+                            className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all text-slate-400 opacity-0 group-hover:opacity-100 shadow-sm"
+                            title="Reset Password"
+                          >
+                            <Key size={13} />
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setEditingUser(u);
                             setFormData({ 
                               name: u.name, 
                               email: u.email, 
@@ -591,6 +631,61 @@ export default function AdminUsersPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Password Reset Modal */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-xl border border-slate-200 shadow-2xl p-6 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-amber-600">
+                  <Key size={20} />
+                </div>
+                <div>
+                  <h3 className="text-[15px] font-bold text-slate-900">Reset Password</h3>
+                  <p className="text-[11px] text-slate-500">Updating for {selectedUserForPassword?.name}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowPasswordModal(false)}
+                className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdatePassword} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-[12px] font-medium text-slate-700">New Password</label>
+                <input 
+                  required type="password"
+                  autoFocus
+                  placeholder="Enter new secure password"
+                  className="w-full h-10 bg-white border border-slate-200 rounded-lg px-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button 
+                  type="button" onClick={() => setShowPasswordModal(false)}
+                  className="px-4 h-10 text-slate-600 rounded-lg font-medium text-[13px] hover:bg-slate-100 transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  disabled={updatingPassword || !newPassword.trim()}
+                  className="px-6 h-10 bg-amber-500 text-white rounded-lg font-bold text-[13px] hover:bg-amber-600 transition-all shadow-sm active:scale-95 disabled:opacity-50"
+                >
+                  {updatingPassword ? 'Updating...' : 'Update Password'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

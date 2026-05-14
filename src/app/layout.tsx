@@ -13,7 +13,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "FastClose | Western Refrigeration",
+  title: "WRL",
   description: "Real-time call review and management portal",
 };
 

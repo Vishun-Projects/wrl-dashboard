@@ -294,7 +294,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
         </div>
       </div>
 
-      <div 
+      <div
         className="flex-1 flex flex-col overflow-hidden"
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
@@ -305,186 +305,243 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
           {/* Tabs Container - Scrollable without triggering swipe */}
           <div className="flex-1 flex flex-col border-r border-slate-100 overflow-hidden">
             {/* Tabs */}
-            <div 
-              className="flex border-b border-slate-100 px-4 lg:px-6 overflow-x-auto scrollbar-hide touch-pan-x"
+            <div
+              className="flex border-b border-slate-100 px-4 lg:px-6 scrollbar-hide touch-pan-x"
               onTouchStart={(e) => e.stopPropagation()}
               onTouchMove={(e) => e.stopPropagation()}
             >
-            {[
-              { id: 'details', label: 'Details' },
-              { id: 'visits', label: 'Visits', count: call.visits?.length || 0 },
-              { id: 'parts', label: 'Parts', count: call.parts?.length || 0 },
-              { id: 'images', label: 'Images', count: allImages.length },
-              { id: 'comments', label: 'Comments', count: call.comments?.length || 0 },
-            ].map((t: any) => (
-              <button
-                key={t.id}
-                onClick={() => setActiveTab(t.id)}
-                className={`flex items-center gap-1 px-4 py-3.5 text-[13px] font-medium transition-all border-b-2 -mb-px whitespace-nowrap ${activeTab === t.id
-                  ? 'text-slate-900 border-slate-900'
-                  : 'text-slate-400 border-transparent hover:text-slate-600'
-                  }`}
-              >
-                {t.label}
-                {t.count !== undefined && (
-                  <span className={`text-[10px] rounded-md px-1.5 py-0.5 min-w-[20px] text-center font-bold ${activeTab === t.id ? 'bg-slate-100 text-slate-900' : 'bg-slate-50 text-slate-400'
-                    } border border-slate-200`}>
-                    {t.count}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+              {[
+                { id: 'details', label: 'Details' },
+                { id: 'visits', label: 'Visits', count: call.visits?.length || 0 },
+                { id: 'faults', label: 'Faults', count: call.faults?.length || 0 },
+                { id: 'parts', label: 'Parts', count: call.parts?.length || 0 },
+                { id: 'images', label: 'Images', count: allImages.length },
+                { id: 'comments', label: 'Comments', count: call.comments?.length || 0 },
+              ].map((t: any) => (
+                <button
+                  key={t.id}
+                  onClick={() => setActiveTab(t.id)}
+                  className={`flex items-center gap-1 px-4 py-3.5 text-[13px] font-medium transition-all border-b-2 -mb-px whitespace-nowrap ${activeTab === t.id
+                    ? 'text-slate-900 border-slate-900'
+                    : 'text-slate-400 border-transparent hover:text-slate-600'
+                    }`}
+                >
+                  {t.label}
+                  {t.count !== undefined && (
+                    <span className={`text-[10px] rounded-md px-1.5 py-0.5 min-w-[20px] text-center font-bold ${activeTab === t.id ? 'bg-slate-100 text-slate-900' : 'bg-slate-50 text-slate-400'
+                      } border border-slate-200`}>
+                      {t.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
 
-          <div className="flex-1 overflow-y-auto p-4 lg:p-6 custom-scrollbar">
-            {activeTab === 'details' && (
-              <div className="space-y-8">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-5">
-                  <Field label="Serial no." value={call.vserialno || '—'} muted={!call.vserialno} />
-                  <Field label="Client ticket" value={call.vmanualjobno || '—'} muted={!call.vmanualjobno} />
-                  <Field label="Technician" value={call.engineer_name || 'Unassigned'} muted={!call.engineer_name} />
-                  <Field label="Branch / Franchisee" value={call.vlocation || call.branch_name} />
-                  <Field label="Reported by" value={call.vpersoncalling || 'Not recorded'} muted={!call.vpersoncalling} />
-                  <Field label="Category" value={call.npriority === '1' ? 'Major (Service)' : 'Minor (Installation)'} />
-                </div>
-
-                <div className="space-y-2">
-                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Complaint</div>
-                  <div className="p-3.5 bg-slate-50 rounded-lg text-[13px] text-slate-500 italic border border-slate-100">
-                    {call.complaint_label || 'No description provided'}
+            <div className="flex-1 overflow-y-auto p-4 lg:p-6 custom-scrollbar">
+              {activeTab === 'details' && (
+                <div className="space-y-8">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-5">
+                    <Field label="Serial no." value={call.vserialno || '—'} muted={!call.vserialno} />
+                    <Field label="Client ticket" value={call.vmanualjobno || '—'} muted={!call.vmanualjobno} />
+                    <Field label="Technician" value={call.engineer_name || 'Unassigned'} muted={!call.engineer_name} />
+                    <Field label="Branch / Franchisee" value={call.vlocation || call.branch_name} />
+                    <Field label="Reported by" value={call.vpersoncalling || 'Not recorded'} muted={!call.vpersoncalling} />
                   </div>
-                </div>
 
-                {isMobile && (
-                  <div className="space-y-2 border-t border-slate-50 pt-6">
-                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Lifecycle Timeline</div>
-                    <div className="bg-slate-50/50 p-4 rounded-2xl space-y-3">
-                      <TimelineItem label="Logged" date={call.logged_at} />
-                      {call.started_at && <TimelineItem label="Started" date={call.started_at} />}
-                      {call.resolved_at && <TimelineItem label="Solved" date={call.resolved_at} highlight />}
+                  <div className="space-y-2">
+                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Complaint</div>
+                    <div className="p-3.5 bg-slate-50 rounded-lg text-[13px] text-slate-500 italic border border-slate-100">
+                      {call.complaint_label || 'No description provided'}
                     </div>
                   </div>
-                )}
-              </div>
-            )}
-            {activeTab === 'visits' && (
-              <div className="space-y-4">
-                {(call.visits || []).length > 0 ? (
-                  call.visits.map((v: any, i: number) => (
-                    <div key={i} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-[11px] font-black uppercase tracking-widest text-slate-900">Visit #{i + 1}</span>
-                        <span className="text-[11px] font-bold text-slate-400">
-                          {v.dvisitdatetime ? new Date(v.dvisitdatetime).toLocaleDateString() : 'N/A'}
-                        </span>
+
+                  {isMobile && (
+                    <div className="space-y-2 border-t border-slate-50 pt-6">
+                      <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Lifecycle Timeline</div>
+                      <div className="bg-slate-50/50 p-4 rounded-2xl space-y-3">
+                        <TimelineItem label="Logged" date={call.logged_at} />
+                        {call.started_at && <TimelineItem label="Started" date={call.started_at} />}
+                        {call.resolved_at && <TimelineItem label="Solved" date={call.resolved_at} highlight />}
                       </div>
-                      <div className="text-[13px] text-slate-600 italic mb-2">
-                        {v.vvisitremark || v.vcustomerRemarks || 'No visit description.'}
+                    </div>
+                  )}
+                </div>
+              )}
+              {activeTab === 'visits' && (
+                <div className="space-y-4">
+                  {(call.visits || []).length > 0 ? (
+                    call.visits.map((v: any, i: number) => (
+                      <div key={i} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-[11px] font-black uppercase tracking-widest text-slate-900">Visit #{i + 1}</span>
+                          <span className="text-[11px] font-bold text-slate-400">
+                            {v.dvisitdatetime ? new Date(v.dvisitdatetime).toLocaleDateString() : 'N/A'}
+                          </span>
+                        </div>
+                        <div className="text-[13px] text-slate-600 italic">
+                          {v.vvisitremark || v.vcustomerRemarks || 'No visit description.'}
+                        </div>
                       </div>
-                      {(v.repair || v.vPartsReplacedDetails) && (
-                        <div className="mt-2 pt-2 border-t border-slate-50">
-                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Work done / Repair</div>
-                          <div className="text-[12px] font-bold text-slate-900 bg-slate-50 p-2 rounded-lg">
-                            {v.repair || v.vPartsReplacedDetails || 'N/A'}
+                    ))
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-[13px]">No visits recorded</div>
+                  )}
+                </div>
+              )}
+              {activeTab === 'faults' && (
+                <div className="space-y-4">
+                  {(call.faults || []).length > 0 ? (
+                    call.faults.map((f: any, i: number) => (
+                      <div key={i} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-black uppercase tracking-widest text-slate-900">Fault #{i + 1}</span>
+                          {f.is_solved && (
+                            <span className="bg-emerald-50 text-emerald-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-100">
+                              Solved
+                            </span>
+                          )}
+                        </div>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Complaint</div>
+                            <div className="text-[13px] text-slate-700 font-medium">{f.complaint || '—'}</div>
+                          </div>
+                          <div className="space-y-1">
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Defect</div>
+                            <div className="text-[13px] text-slate-700 font-medium">{f.defect || '—'}</div>
                           </div>
                         </div>
-                      )}
-                    </div>
-                  ))
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-[13px]">No visits recorded</div>
-                )}
-              </div>
-            )}
 
-            {activeTab === 'parts' && (
-              <div className="space-y-3">
-                {(call.parts || []).length > 0 ? (
-                  call.parts.map((p: any, i: number) => (
-                    <div key={i} className="bg-slate-50 rounded-xl border border-slate-100 overflow-hidden">
-                      <div className="p-3.5 flex items-center justify-between bg-white">
-                        <div className="text-[13px] font-bold text-slate-900">{p.vpartname}</div>
-                        <div className="text-[14px] font-black text-slate-900">x{p.nqty || 1}</div>
+                        <div className="pt-2 border-t border-slate-50">
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Work Done / Repair</div>
+                          <div className="text-[13px] font-bold text-slate-900 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                            {f.repair || 'No repair recorded'}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-[13px]">No faults recorded</div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'parts' && (
+                <div className="space-y-3">
+                  {(call.parts || []).length > 0 ? (
+                    call.parts.map((p: any, i: number) => (
+                      <div key={i} className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+                        <div className="p-4 flex items-center justify-between border-b border-slate-50">
+                          <div className="space-y-1">
+                            <div className="text-[13px] font-bold text-slate-900">{p.vpartname}</div>
+                            <div className="text-[11px] text-slate-400 font-medium">{p.vpartcode}</div>
+                          </div>
+                          <div className="text-[16px] font-black text-slate-900 bg-slate-50 px-3 py-1 rounded-lg">x{p.nqty || 1}</div>
+                        </div>
+                        
+                        {(p.voldbarcode || p.vnewbarcode) && (
+                          <div className="p-4 bg-slate-50/50 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {p.voldbarcode && (
+                              <div className="space-y-1">
+                                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Old Barcode</div>
+                                <div className="text-[12px] font-mono text-slate-600 bg-white px-2 py-1.5 rounded border border-slate-100">{p.voldbarcode}</div>
+                              </div>
+                            )}
+                            {p.vnewbarcode && (
+                              <div className="space-y-1">
+                                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">New Barcode</div>
+                                <div className="text-[12px] font-mono text-slate-600 bg-white px-2 py-1.5 rounded border border-slate-100">{p.vnewbarcode}</div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {p.vremarks && (
+                          <div className="px-4 py-3 border-t border-slate-50 text-[12px] text-slate-500 italic">
+                            Note: {p.vremarks}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-[13px]">No parts recorded</div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'images' && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {allImages.map((img, i) => (
+                    <ImageCard key={i} img={img} onPreview={() => setPreviewImage(img.url)} onLoaded={() => handleImageLoad(img.url)} />
+                  ))}
+                </div>
+              )}
+
+              {activeTab === 'comments' && (
+                <div className="space-y-4">
+                  {(call.comments || []).map((c: any, i: number) => (
+                    <div key={i} className="flex gap-3">
+                      <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold uppercase">{c.author_name?.charAt(0)}</div>
+                      <div className="flex-1 text-[13px]">
+                        <div className="font-bold text-slate-900">{c.author_name}</div>
+                        <div className="text-slate-600 mt-1">{c.comment}</div>
                       </div>
                     </div>
-                  ))
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-[13px]">No parts recorded</div>
-                )}
-              </div>
-            )}
+                  ))}
 
-            {activeTab === 'images' && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {allImages.map((img, i) => (
-                  <ImageCard key={i} img={img} onPreview={() => setPreviewImage(img.url)} onLoaded={() => handleImageLoad(img.url)} />
-                ))}
-              </div>
-            )}
-
-            {activeTab === 'comments' && (
-              <div className="space-y-4">
-                {(call.comments || []).map((c: any, i: number) => (
-                  <div key={i} className="flex gap-3">
-                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold uppercase">{c.author_name?.charAt(0)}</div>
-                    <div className="flex-1 text-[13px]">
-                      <div className="font-bold text-slate-900">{c.author_name}</div>
-                      <div className="text-slate-600 mt-1">{c.comment}</div>
+                  {isMobile && (
+                    <div className="mt-8 space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                      <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Quick Note</div>
+                      <textarea
+                        value={note}
+                        onChange={(e) => setNote(e.target.value)}
+                        placeholder="Add observations..."
+                        className="w-full bg-white border border-slate-200 rounded-xl p-3 text-[13px] outline-none resize-none focus:border-slate-400"
+                        rows={3}
+                      />
+                      <button
+                        onClick={handlePostComment}
+                        disabled={!note.trim()}
+                        className="w-full py-3 bg-slate-900 text-white rounded-xl text-sm font-bold disabled:opacity-30 flex items-center justify-center gap-2"
+                      >
+                        <Send size={16} />
+                        Post Comment
+                      </button>
                     </div>
-                  </div>
-                ))}
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
 
-                {isMobile && (
-                  <div className="mt-8 space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Quick Note</div>
-                    <textarea
-                      value={note}
-                      onChange={(e) => setNote(e.target.value)}
-                      placeholder="Add observations..."
-                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-[13px] outline-none resize-none focus:border-slate-400"
-                      rows={3}
-                    />
-                    <button
-                      onClick={handlePostComment}
-                      disabled={!note.trim()}
-                      className="w-full py-3 bg-slate-900 text-white rounded-xl text-sm font-bold disabled:opacity-30 flex items-center justify-center gap-2"
-                    >
-                      <Send size={16} />
-                      Post Comment
-                    </button>
-                  </div>
-                )}
+          {/* Right Panel - Stats & Sidebar (Hidden on Mobile, Integrated in Tabs/Footer) */}
+          {!isMobile && (
+            <div className="w-[280px] flex flex-col p-6 space-y-6 overflow-y-auto">
+              <div className="space-y-2 pb-4 border-b border-slate-50">
+                <TimelineItem label="Logged" date={call.logged_at} />
+                {call.started_at && <TimelineItem label="Started" date={call.started_at} />}
+                {call.resolved_at && <TimelineItem label="Solved" date={call.resolved_at} highlight />}
               </div>
-            )}
-          </div>
-        </div>
 
-        {/* Right Panel - Stats & Sidebar (Hidden on Mobile, Integrated in Tabs/Footer) */}
-        {!isMobile && (
-          <div className="w-[280px] flex flex-col p-6 space-y-6 overflow-y-auto">
-            <div className="space-y-2 pb-4 border-b border-slate-50">
-              <TimelineItem label="Logged" date={call.logged_at} />
-              {call.started_at && <TimelineItem label="Started" date={call.started_at} />}
-              {call.resolved_at && <TimelineItem label="Solved" date={call.resolved_at} highlight />}
+              <div className="flex-1 flex flex-col space-y-2">
+                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Notes / query</div>
+                <textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Add observations..."
+                  className="flex-1 w-full bg-white border border-slate-200 rounded-lg p-3 text-[13px] outline-none resize-none focus:border-slate-400"
+                />
+                <button
+                  onClick={handlePostComment}
+                  disabled={!note.trim()}
+                  className="w-full py-2.5 bg-slate-900 text-white rounded-lg text-sm font-bold disabled:opacity-30"
+                >
+                  Post Comment
+                </button>
+              </div>
             </div>
-
-            <div className="flex-1 flex flex-col space-y-2">
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Notes / query</div>
-              <textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Add observations..."
-                className="flex-1 w-full bg-white border border-slate-200 rounded-lg p-3 text-[13px] outline-none resize-none focus:border-slate-400"
-              />
-              <button
-                onClick={handlePostComment}
-                disabled={!note.trim()}
-                className="w-full py-2.5 bg-slate-900 text-white rounded-lg text-sm font-bold disabled:opacity-30"
-              >
-                Post Comment
-              </button>
-            </div>
-          </div>
+          )}
         </div>
       </div>
 
