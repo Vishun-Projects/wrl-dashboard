@@ -1,26 +1,76 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  --color-border: #e2e8f0;
+  --color-primary: #0f172a;
+  --color-primary-soft: #f1f5f9;
+  --color-accent: #3b82f6;
+  --color-bg-canvas: #ffffff;
+  --color-bg-soft: #f8fafc;
+  --font-sans: 'Inter', system-ui, sans-serif;
+  
+  --shadow-premium: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  --shadow-glass: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-700 antialiased font-sans text-[13px] selection:bg-slate-900 selection:text-white;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  .glass-panel {
+    @apply bg-white/80 backdrop-blur-md border border-white/20 shadow-glass;
+  }
+
+  .soft-card {
+    @apply bg-white border border-slate-100 rounded-2xl shadow-premium hover:shadow-lg hover:border-slate-200 transition-all duration-300;
+  }
+
+  /* Accessible Tooltip System */
+  .tooltip-trigger {
+    @apply relative cursor-help;
+  }
+
+  .tooltip-content {
+    @apply absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 
+           bg-slate-900 text-white text-[10px] font-bold uppercase tracking-widest
+           rounded-lg opacity-0 invisible transition-all duration-200 z-50 whitespace-nowrap pointer-events-none
+           shadow-xl scale-95 origin-bottom;
+  }
+
+  .tooltip-wrapper:hover .tooltip-content {
+    @apply opacity-100 visible scale-100;
+  }
+
+  .tooltip-arrow {
+    @apply absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-slate-900;
+  }
+
+  /* Interaction Utilities */
+  .interactive-tap {
+    @apply active:scale-[0.98] transition-transform duration-100;
+  }
+}
+
+/* Custom Scrollbar for Premium Feel */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+/* Fluid Animations */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }

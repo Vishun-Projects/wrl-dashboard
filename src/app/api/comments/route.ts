@@ -1,0 +1,105 @@
+import { NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
+
+export async function GET(request: Request) {
+  const authHeader = request.headers.get('Authorization');
+  const token = authHeader?.split(' ')[1];
+  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const callId = searchParams.get('callId');
+
+    if (!callId) {
+      return NextResponse.json({ error: 'callId is required' }, { status: 400 });
+    }
+
+    // Get User Profile for filtering
+    const { data: profile } = await supabaseAdmin
+      .from('app_users')
+      .select('*')
+      .eq('id', user.id)
+      .single();
+
+    const isHod = profile?.role === 'hod' || profile?.role === 'super_admin';
+    const assignedOffices = profile?.office_ids || [];
+
+    let query = supabaseAdmin
+      .from('call_comments')
+      .select('*')
+      .eq('call_id', callId);
+
+    // If not HOD, only show comments for their offices
+    if (!isHod) {
+      query = query.in('office_id', assignedOffices);
+    }
+
+    const { data: comments, error } = await query.order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return NextResponse.json(comments || []);
+  } catch (err: any) {
+
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  const authHeader = request.headers.get('Authorization');
+  const token = authHeader?.split(' ')[1];
+  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  try {
+    const body = await request.json();
+    const callId = body.callId || body.call_id;
+    const content = body.content || body.text;
+    const office_id = body.office_id;
+    const author_name = body.author_name;
+
+    if (!callId || !content || !office_id) {
+      return NextResponse.json({ error: 'callId, content, and office_id are required' }, { status: 400 });
+    }
+
+    // Get User Profile for filtering
+    const { data: profile } = await supabaseAdmin
+      .from('app_users')
+      .select('*')
+      .eq('id', user.id)
+      .single();
+
+    const isHod = profile?.role === 'hod' || profile?.role === 'super_admin';
+    const assignedOffices = profile?.office_ids || [];
+
+    // If not HOD, check if they have permission for this office
+    if (!isHod && !assignedOffices.includes(String(office_id))) {
+      return NextResponse.json({ error: 'Forbidden: You do not have permission to comment for this office' }, { status: 403 });
+    }
+
+    const { data: comment, error } = await supabaseAdmin
+      .from('call_comments')
+      .insert([{
+        call_id: String(callId),
+        office_id: String(office_id),
+        comment: content,
+        author_name: author_name || profile?.name || 'User',
+        author_id: user.id
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return NextResponse.json(comment);
+  } catch (err: any) {
+
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
