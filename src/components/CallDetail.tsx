@@ -176,12 +176,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
   };
 
   return (
-    <div
-      className="flex flex-col h-full bg-white font-sans w-full overflow-hidden relative"
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
-    >
+    <div className="flex flex-col h-full bg-white font-sans w-full overflow-hidden relative">
       {/* Swipe Feedback Overlay */}
       {Math.abs(swipeOffset) > 20 && (
         <div
@@ -272,7 +267,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                   <ArrowRight size={12} className="rotate-180" />
                 </button>
                 <div className="px-2 text-[10px] font-black tracking-tighter border-x border-slate-800 mx-1 min-w-[50px] text-center uppercase">
-                  {typeof currentIndex === 'number' ? `${currentIndex + 1} of ${totalCount}` : 'Navigate'}
+                  WRL Dashboard
                 </div>
                 <button
                   onClick={onNext}
@@ -299,11 +294,22 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col lg:flex-row overflow-hidden">
-        {/* Main Content */}
-        <div className="flex-1 flex flex-col border-r border-slate-100 overflow-hidden">
-          {/* Tabs */}
-          <div className="flex border-b border-slate-100 px-4 lg:px-6 scrollbar-hide">
+      <div 
+        className="flex-1 flex flex-col overflow-hidden"
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+      >
+        {/* Main Content Area (Tabs & Content) */}
+        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+          {/* Tabs Container - Scrollable without triggering swipe */}
+          <div className="flex-1 flex flex-col border-r border-slate-100 overflow-hidden">
+            {/* Tabs */}
+            <div 
+              className="flex border-b border-slate-100 px-4 lg:px-6 overflow-x-auto scrollbar-hide touch-pan-x"
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchMove={(e) => e.stopPropagation()}
+            >
             {[
               { id: 'details', label: 'Details' },
               { id: 'visits', label: 'Visits', count: call.visits?.length || 0 },
@@ -372,9 +378,17 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                           {v.dvisitdatetime ? new Date(v.dvisitdatetime).toLocaleDateString() : 'N/A'}
                         </span>
                       </div>
-                      <div className="text-[13px] text-slate-600 italic">
+                      <div className="text-[13px] text-slate-600 italic mb-2">
                         {v.vvisitremark || v.vcustomerRemarks || 'No visit description.'}
                       </div>
+                      {(v.repair || v.vPartsReplacedDetails) && (
+                        <div className="mt-2 pt-2 border-t border-slate-50">
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Work done / Repair</div>
+                          <div className="text-[12px] font-bold text-slate-900 bg-slate-50 p-2 rounded-lg">
+                            {v.repair || v.vPartsReplacedDetails || 'N/A'}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))
                 ) : (
@@ -419,6 +433,27 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                     </div>
                   </div>
                 ))}
+
+                {isMobile && (
+                  <div className="mt-8 space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Quick Note</div>
+                    <textarea
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="Add observations..."
+                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-[13px] outline-none resize-none focus:border-slate-400"
+                      rows={3}
+                    />
+                    <button
+                      onClick={handlePostComment}
+                      disabled={!note.trim()}
+                      className="w-full py-3 bg-slate-900 text-white rounded-xl text-sm font-bold disabled:opacity-30 flex items-center justify-center gap-2"
+                    >
+                      <Send size={16} />
+                      Post Comment
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -450,7 +485,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
               </button>
             </div>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Mobile Footer Actions */}

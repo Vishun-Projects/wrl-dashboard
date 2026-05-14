@@ -101,7 +101,7 @@ export function DesktopView({
           <div className="flex items-center gap-3">
             <img src="/western-head-logo-2025.png" alt="Logo" className="w-8 h-8 rounded-lg object-contain shadow-sm" />
             <div>
-              <h1 className="text-[14px] font-bold text-[#0f172a] leading-none">Western Viewer</h1>
+              <h1 className="text-[14px] font-bold text-[#0f172a] leading-none">WRL</h1>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
                 <span className="text-[11px] font-medium text-[#94a3b8]">

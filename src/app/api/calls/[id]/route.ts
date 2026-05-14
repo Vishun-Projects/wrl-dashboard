@@ -25,7 +25,7 @@ export async function GET(
     // 1. Fetch everything in parallel
     const [visitsRes, partsRes, serialsRes, parentRes, docsRes] = await Promise.all([
       postQuery({ 
-        fields: "v.vVisitTrnNo as vtrnno, v.vpersoncontected, CONVERT(varchar(30), v.dvisitdatetime, 126) as dvisitdatetime, v.vvisitremark, v.vcustomerRemarks, v.vPartsReplacedDetails, v.ntimespent, v.nvisitexpense, v.nofficeid, v.vcustomersignPath, v.vengineersignPath", 
+        fields: "v.vVisitTrnNo as vtrnno, v.vpersoncontected, CONVERT(varchar(30), v.dvisitdatetime, 126) as dvisitdatetime, v.vvisitremark, v.vcustomerRemarks, v.vPartsReplacedDetails, v.ntimespent, v.nvisitexpense, v.nofficeid, v.vcustomersignPath, v.vengineersignPath, (SELECT TOP 1 r.vname FROM trdcalls2fault f (NOLOCK) LEFT JOIN mstrepair r (NOLOCK) ON f.nrepair = r.ncode WHERE f.ncalls1 = v.ncode) as repair", 
         tableName: "trdcalls1visit v (NOLOCK)", 
         condition: `v.ncalls = '${id}' AND v.nofficeid = '${officeId}'` 
       }),
@@ -115,7 +115,8 @@ export async function GET(
         vpersoncontected: v.vpersoncontected,
         office_id: String(v.nofficeid),
         customer_sign: v.vcustomersignPath,
-        engineer_sign: v.vengineersignPath
+        engineer_sign: v.vengineersignPath,
+        repair: v.repair
       })),
       parts: parts.map((p: any) => ({
         vpartname: p.vpartname,

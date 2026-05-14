@@ -87,7 +87,7 @@ export function MobileView({
         <div className="flex items-center gap-2.5">
           <img src="/western-head-logo-2025.png" alt="Logo" className="w-8 h-8 rounded-lg object-contain" />
           <div>
-            <div className="text-[14px] font-bold text-[#0f172a] leading-none">Western Viewer</div>
+            <div className="text-[14px] font-bold text-[#0f172a] leading-none">WRL</div>
             <div className="flex items-center gap-1 mt-1">
               <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
               <span className="text-[11px] font-medium text-[#94a3b8]">
