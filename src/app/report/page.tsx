@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import ExcelJS from 'exceljs';
 import { supabase } from '@/lib/supabase';
 import axios from 'axios';
 import {
@@ -25,7 +26,8 @@ export default function ReportPage() {
   const [limit] = useState(50);
   const [search, setSearch] = useState('');
   const [offices, setOffices] = useState<any[]>([]);
-  const [selectedOfficeId, setSelectedOfficeId] = useState('All');
+  const [selectedOfficeIds, setSelectedOfficeIds] = useState<string[]>([]);
+  const [showOfficeDropdown, setShowOfficeDropdown] = useState(false);
   const [dateRange, setDateRange] = useState({
     start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0]
@@ -35,7 +37,8 @@ export default function ReportPage() {
   const [fetchingEngs, setFetchingEngs] = useState(false);
   const [expandedBranches, setExpandedBranches] = useState<Record<string, boolean>>({});
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
-  const [filterRegion, setFilterRegion] = useState('All');
+  const [filterRegion, setFilterRegion] = useState<string[]>([]); // Array for multiselect
+  const [showRegionDropdown, setShowRegionDropdown] = useState(false);
   const [filterAccount, setFilterAccount] = useState('All');
 
   useEffect(() => {
@@ -66,12 +69,14 @@ export default function ReportPage() {
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   }; const fetchData = async (p = 1) => {
     setLoading(true);
+    const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const headers = { 'Authorization': `Bearer ${session?.access_token}` };
 
       // Register data URL
-      let url = `/api/report?page=${p}&limit=${limit}&officeId=${selectedOfficeId}`;
+      let url = `/api/report?page=${p}&limit=${limit}&officeId=${officeIdsParam}`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
       if (dateRange.start) url += `&startDate=${dateRange.start}`;
       if (dateRange.end) url += `&endDate=${dateRange.end}`;
@@ -80,7 +85,7 @@ export default function ReportPage() {
       const needsSummary = p === 1;
       let summaryUrl = '';
       if (needsSummary) {
-        summaryUrl = `/api/report/summary?officeId=${selectedOfficeId}`;
+        summaryUrl = `/api/report/summary?officeId=${officeIdsParam}`;
         if (dateRange.start) summaryUrl += `&startDate=${dateRange.start}`;
         if (dateRange.end) summaryUrl += `&endDate=${dateRange.end}`;
       }
@@ -142,53 +147,203 @@ export default function ReportPage() {
     fetchData(1);
   };
 
-  const exportToCSV = () => {
-    if (data.length === 0) return;
+  const handleExport = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Report');
+    let fileName = `WRL_MIS_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
 
-    const columnMapping: Record<string, string> = {
-      'callsntrnno': 'Reference',
-      'callsdtrndate': 'Date',
-      'PartyName': 'Customer',
-      'vlocation': 'Location',
-      'itemname': 'Product',
-      'callsvserialno': 'Serial',
-      'serviceman': 'Technician',
-      'vcomplaint': 'Complaint',
-      'Status': 'Status',
-      'Priority': 'Priority',
-      'callsolveddate': 'Solved Date',
-      'vsolveremarks': 'Remarks',
-      'UniqueCallNo': 'Call ID',
-      'vpersoncalling': 'Contact Person',
-      'vinsttel1': 'Phone',
-      'vinstaddress': 'Address',
-      'addedby': 'User',
-      'officename': 'Branch'
+    const getRegionColor = (region: string) => {
+      const r = (region || '').toUpperCase();
+      if (r.includes('NORTH')) return 'FFC6E0B4';
+      if (r.includes('EAST')) return 'FFBDD7EE';
+      if (r.includes('WEST')) return 'FFF8CBAD';
+      if (r.includes('SOUTH')) return 'FFD9D9D9';
+      return 'FFF1F5F9';
     };
 
-    const headers = Object.keys(columnMapping);
-    const readableHeaders = Object.values(columnMapping);
+    const applyHeaderStyle = (row: ExcelJS.Row) => {
+      row.eachCell((cell) => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } };
+        cell.font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 10 };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+      });
+    };
 
-    const csvContent = [
-      readableHeaders.join(','),
-      ...data.map(row => headers.map(h => {
-        let val = row[h] || '';
-        if (h === 'callsdtrndate' || h === 'callsolveddate') {
-          val = val ? new Date(val).toLocaleDateString('en-GB') : '';
+    if (activeTab === 'register') {
+      sheet.columns = [
+        { header: 'Reference', key: 'ref', width: 15 },
+        { header: 'Date', key: 'date', width: 12 },
+        { header: 'Customer', key: 'customer', width: 30 },
+        { header: 'Location', key: 'location', width: 20 },
+        { header: 'Product', key: 'product', width: 20 },
+        { header: 'Serial', key: 'serial', width: 15 },
+        { header: 'Technician', key: 'tech', width: 20 },
+        { header: 'Complaint', key: 'complaint', width: 40 },
+        { header: 'Status', key: 'status', width: 12 },
+        { header: 'Priority', key: 'priority', width: 10 },
+        { header: 'Solved Date', key: 'solvedDate', width: 12 },
+        { header: 'Remarks', key: 'remarks', width: 30 },
+        { header: 'Branch', key: 'branch', width: 20 },
+      ];
+
+      applyHeaderStyle(sheet.getRow(1));
+
+      data.forEach(row => {
+        const isSolved = row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True';
+        const isAssigned = row.Status === 'Assigned' || row.callstatus === 'Assigned';
+        const statusText = row.Status === 'UNKNOWN' ? 'PENDING' : (row.Status || row.callstatus || 'OPEN');
+
+        const r = sheet.addRow({
+          ref: row.callsntrnno,
+          date: formatDate(row.callsdtrndate),
+          customer: row.PartyName,
+          location: row.vlocation,
+          product: row.itemname,
+          serial: row.callsvserialno,
+          tech: row.serviceman,
+          complaint: row.vcomplaint,
+          status: statusText,
+          priority: row.Priority,
+          solvedDate: formatDate(row.callsolveddate),
+          remarks: row.vsolveremarks,
+          branch: row.officename
+        });
+
+        // Style status cell
+        const statusCell = r.getCell('status');
+        statusCell.font = { bold: true, color: { argb: isSolved ? 'FF059669' : isAssigned ? 'FF1D4ED8' : 'FF64748B' } };
+        if (isSolved || isAssigned) {
+          statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isSolved ? 'FFF8FAFC' : 'FFE8F0FE' } };
         }
-        if (h === 'Status' && val === 'UNKNOWN') val = 'PENDING';
-        return `"${val.toString().replace(/"/g, '""')}"`;
-      }).join(','))
-    ].join('\n');
+      });
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    } else if (activeTab === 'summary') {
+      const regions = Array.from(new Set(summaryData.map(b => b.region))).sort();
+      const topLevelBranches = summaryData.filter(b => b.parentId === 0 || !summaryData.find(p => p.officeId === b.parentId));
+
+      const getAggregate = (item: any, key: string, regionBranches: any[]) => {
+        const getAllChildren = (id: number): any[] => {
+          let direct = regionBranches.filter(b => b.parentId === id);
+          let all = [...direct];
+          direct.forEach(d => { all = [...all, ...getAllChildren(d.officeId)]; });
+          return all;
+        };
+        const allDescendants = getAllChildren(item.officeId);
+        return Number(item[key] || 0) + allDescendants.reduce((sum, d) => sum + Number(d[key] || 0), 0);
+      };
+
+      // 1. Regional Performance
+      sheet.addRow(['Regional Performance']).font = { bold: true, size: 12 };
+      const regHeader = sheet.addRow(['Region', 'Total', 'Solved', 'Cancelled', 'Open', '<2 Days', '2-7 Days', '7-15 Days', '>15 Days', 'Parts', 'Engineers']);
+      applyHeaderStyle(regHeader);
+
+      regions.forEach(region => {
+        const rb = summaryData.filter(b => b.region === region);
+        const t = rb.reduce((acc, b) => ({
+          t: acc.t + Number(b.total_calls || 0), s: acc.s + Number(b.solved_calls || 0), c: acc.c + Number(b.cancelled_calls || 0), o: acc.o + Number(b.open_calls || 0),
+          a2: acc.a2 + Number(b.age_2 || 0), a3: acc.a3 + Number(b.age_3 || 0), a7: acc.a7 + Number(b.age_7 || 0), a15: acc.a15 + Number(b.age_15 || 0),
+          p: acc.p + Number(b.part_pending || 0), e: acc.e + Number(b.active_eng || 0)
+        }), { t: 0, s: 0, c: 0, o: 0, a2: 0, a3: 0, a7: 0, a15: 0, p: 0, e: 0 });
+
+        const r = sheet.addRow([region, t.t, t.s, t.c, t.o, t.a2, t.a3, t.a7, t.a15, t.p, t.e]);
+        r.eachCell(cell => {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: getRegionColor(region) } };
+          cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+        });
+        r.getCell(3).font = { color: { argb: 'FF059669' } };
+        r.getCell(4).font = { color: { argb: 'FFDC2626' } };
+        r.getCell(5).font = { bold: true };
+      });
+
+      // AI Total
+      const aiRow = sheet.addRow([
+        'AI TOTAL',
+        summaryData.reduce((s, b) => s + Number(b.total_calls || 0), 0),
+        summaryData.reduce((s, b) => s + Number(b.solved_calls || 0), 0),
+        summaryData.reduce((s, b) => s + Number(b.cancelled_calls || 0), 0),
+        summaryData.reduce((s, b) => s + Number(b.open_calls || 0), 0),
+        summaryData.reduce((s, b) => s + Number(b.age_2 || 0), 0),
+        summaryData.reduce((s, b) => s + Number(b.age_3 || 0), 0),
+        summaryData.reduce((s, b) => s + Number(b.age_7 || 0), 0),
+        summaryData.reduce((s, b) => s + Number(b.age_15 || 0), 0),
+        summaryData.reduce((s, b) => s + Number(b.part_pending || 0), 0),
+        summaryData.reduce((s, b) => s + Number(b.active_eng || 0), 0)
+      ]);
+      aiRow.eachCell(cell => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+        cell.font = { bold: true };
+        cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+      });
+
+      sheet.addRow([]); // Gap
+
+      // 2. Branch Wise Performance
+      sheet.addRow(['Branch Wise Performance']).font = { bold: true, size: 12 };
+      const brHeader = sheet.addRow(['Branch', 'Total', 'Solved', 'Cancelled', 'Open', '<2 Days', '2-7 Days', '7-15 Days', '>15 Days', 'Parts', 'Engineers']);
+      applyHeaderStyle(brHeader);
+
+      topLevelBranches
+        .sort((a, b) => a.region.localeCompare(b.region))
+        .forEach(b => {
+          const rb = summaryData.filter(x => x.region === b.region);
+          const r = sheet.addRow([
+            b.branch,
+            getAggregate(b, 'total_calls', rb),
+            getAggregate(b, 'solved_calls', rb),
+            getAggregate(b, 'cancelled_calls', rb),
+            getAggregate(b, 'open_calls', rb),
+            getAggregate(b, 'age_2', rb),
+            getAggregate(b, 'age_3', rb),
+            getAggregate(b, 'age_7', rb),
+            getAggregate(b, 'age_15', rb),
+            getAggregate(b, 'part_pending', rb),
+            getAggregate(b, 'active_eng', rb)
+          ]);
+          r.eachCell(cell => {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: getRegionColor(b.region) } };
+            cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+          });
+          r.getCell(3).font = { color: { argb: 'FF059669' } };
+          r.getCell(4).font = { color: { argb: 'FFDC2626' } };
+          r.getCell(5).font = { bold: true };
+        });
+
+    } else {
+      // Key Account MIS
+      const filtered = accountsData.filter(a => {
+        const matchRegion = filterRegion.length === 0 || filterRegion.includes(a.region);
+        const matchAccount = filterAccount === 'All' || a.account.toLowerCase().includes(filterAccount.toLowerCase());
+        return matchRegion && matchAccount;
+      }).sort((a, b) => a.region.localeCompare(b.region));
+
+      const kaHeader = sheet.addRow(['Region', 'Account', 'Population', 'Total', 'Solved', 'Cancelled', 'Open', '<2 Days', '2-7 Days', '7-15 Days', '>15 Days', 'Parts', 'Engineers']);
+      applyHeaderStyle(kaHeader);
+
+      filtered.forEach(a => {
+        const openCalls = Number(a.age_2 || 0) + Number(a.age_3 || 0) + Number(a.age_7 || 0) + Number(a.age_15 || 0);
+        const r = sheet.addRow([
+          a.region, a.account, a.population || 0, a.total_calls, a.total_solved, a.cancelled_calls, openCalls,
+          a.age_2, a.age_3, a.age_7, a.age_15, a.part_pending, a.active_eng
+        ]);
+        r.eachCell(cell => {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: getRegionColor(a.region) } };
+          cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+        });
+        r.getCell(5).font = { color: { argb: 'FF059669' } };
+        r.getCell(6).font = { color: { argb: 'FFDC2626' } };
+        r.getCell(7).font = { bold: true };
+      });
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `WRL_MIS_Report_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
+    link.href = url;
+    link.download = fileName;
     link.click();
-    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const totalPages = Math.ceil(total / limit);
@@ -244,11 +399,11 @@ export default function ReportPage() {
             Refresh
           </button>
           <button
-            onClick={exportToCSV}
+            onClick={handleExport}
             className="flex items-center gap-2 bg-white text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-slate-50 transition-all shadow-sm"
           >
             <Download size={14} />
-            Export CSV
+            Export Excel
           </button>
         </div>
       </div>
@@ -268,43 +423,96 @@ export default function ReportPage() {
 
         <div className="flex items-center gap-4 ml-auto">
           <div className="flex items-center gap-2">
-            <select
-              className="bg-white border border-slate-200 rounded-md px-2 py-1.5 text-xs font-medium text-slate-700 outline-none focus:ring-1 focus:ring-slate-400"
-              value={selectedOfficeId}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val === 'All') {
-                  setSelectedOfficeId('All');
-                } else {
-                  // Find all children recursively
-                  const getAllChildren = (id: string): string[] => {
-                    const children = offices.filter(o => String(o.nunder) === String(id));
-                    let ids = [id];
-                    children.forEach(c => {
-                      ids = [...ids, ...getAllChildren(String(c.ncode))];
-                    });
-                    return ids;
-                  };
-                  const allIds = getAllChildren(val);
-                  setSelectedOfficeId(allIds.join(','));
-                }
-              }}
-            >
-              <option value="All">All Branches</option>
-              {(() => {
-                const buildTree = (parentId: string | null = '0', level = 0): React.ReactNode[] => {
-                  return offices
-                    .filter(o => String(o.nunder || '0') === String(parentId || '0'))
-                    .map(o => [
-                      <option key={o.ncode} value={o.ncode}>
-                        {'\u00A0'.repeat(level * 4)}{o.vcompanyname}
-                      </option>,
-                      ...buildTree(o.ncode, level + 1)
-                    ]).flat();
-                };
-                return buildTree('0', 0);
-              })()}
-            </select>
+            <div className="flex items-center gap-2 relative">
+              <button
+                onClick={() => setShowOfficeDropdown(!showOfficeDropdown)}
+                className="min-w-[140px] max-w-[200px] bg-white border border-slate-200 rounded-md px-3 py-1.5 text-xs font-bold text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all shadow-sm"
+              >
+                <span className="truncate">
+                  {selectedOfficeIds.length === 0 ? 'All Branches' : `${selectedOfficeIds.length} Selected`}
+                </span>
+                <ChevronDown size={14} className={`transition-transform duration-200 ${showOfficeDropdown ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showOfficeDropdown && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowOfficeDropdown(false)} />
+                  <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 shadow-xl rounded-lg z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                    <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Branches</span>
+                      <button
+                        onClick={() => setSelectedOfficeIds([])}
+                        className="text-[10px] font-bold text-slate-400 hover:text-slate-900 px-2 py-1 rounded hover:bg-white"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                    <div className="max-h-72 overflow-y-auto p-1 custom-scrollbar">
+                      {(() => {
+                        const buildTree = (parentId: string | null = '0', level = 0): React.ReactNode[] => {
+                          return offices
+                            .filter(o => String(o.nunder || '0') === String(parentId || '0'))
+                            .map(o => {
+                              const isSelected = selectedOfficeIds.includes(String(o.ncode));
+                              return [
+                                <label key={o.ncode} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
+                                  <div style={{ width: `${level * 12}px` }} />
+                                  <input
+                                    type="checkbox"
+                                    className="w-3.5 h-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                                    checked={isSelected}
+                                    onChange={(e) => {
+                                      const val = String(o.ncode);
+                                      if (e.target.checked) {
+                                        // Add this and all descendants
+                                        const getAllChildren = (id: string): string[] => {
+                                          const children = offices.filter(c => String(c.nunder) === String(id));
+                                          let ids = [id];
+                                          children.forEach(c => {
+                                            ids = [...ids, ...getAllChildren(String(c.ncode))];
+                                          });
+                                          return ids;
+                                        };
+                                        const allToAdd = getAllChildren(val);
+                                        setSelectedOfficeIds(prev => Array.from(new Set([...prev, ...allToAdd])));
+                                      } else {
+                                        // Remove this and all descendants
+                                        const getAllChildren = (id: string): string[] => {
+                                          const children = offices.filter(c => String(c.nunder) === String(id));
+                                          let ids = [id];
+                                          children.forEach(c => {
+                                            ids = [...ids, ...getAllChildren(String(c.ncode))];
+                                          });
+                                          return ids;
+                                        };
+                                        const allToRemove = getAllChildren(val);
+                                        setSelectedOfficeIds(prev => prev.filter(id => !allToRemove.includes(id)));
+                                      }
+                                    }}
+                                  />
+                                  <span className={`text-[11px] font-medium ${isSelected ? 'text-slate-900 font-bold' : 'text-slate-600'} group-hover:text-slate-900`}>
+                                    {o.vcompanyname}
+                                  </span>
+                                </label>,
+                                ...buildTree(o.ncode, level + 1)
+                              ];
+                            }).flat();
+                        };
+                        return buildTree('0', 0);
+                      })()}
+                    </div>
+                    <div className="p-2 border-t border-slate-100 bg-slate-50 flex justify-end">
+                      <button
+                        onClick={() => setShowOfficeDropdown(false)}
+                        className="bg-slate-900 text-white px-4 py-1 rounded text-[10px] font-bold hover:bg-slate-800 transition-colors"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-1">
@@ -597,7 +805,7 @@ export default function ReportPage() {
                                         ) : (
                                           <div className="w-4" />
                                         )}
-                                        <span className="truncate">{branch.officeId} - {branch.branch}</span>
+                                        <span className="truncate">{branch.branch}</span>
                                       </div>
                                     </td>
                                     <td className="p-2 border border-slate-300 text-center">{getAggregate(branch, 'total_calls')}</td>
@@ -617,7 +825,7 @@ export default function ReportPage() {
                                       <td className="p-1.5 pl-8 border border-slate-300">
                                         <div className="flex items-center gap-2">
                                           <div className="w-1 h-1 rounded-full bg-slate-300" />
-                                          <span>{child.officeId} - {child.branch}</span>
+                                          <span>{child.branch}</span>
                                         </div>
                                       </td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px]">{child.total_calls}</td>
@@ -646,7 +854,7 @@ export default function ReportPage() {
             <div className="p-6 space-y-4">
               {(() => {
                 const filteredAccounts = accountsData.filter(a => {
-                  const matchRegion = filterRegion === 'All' || a.region === filterRegion;
+                  const matchRegion = filterRegion.length === 0 || filterRegion.includes(a.region);
                   const matchAccount = filterAccount === 'All' || a.account.toLowerCase().includes(filterAccount.toLowerCase());
                   return matchRegion && matchAccount;
                 });
@@ -669,18 +877,58 @@ export default function ReportPage() {
                           </tr>
                           <tr className="bg-slate-100 text-slate-700 font-bold">
                             <th className="p-1.5 border border-slate-300">
-                              <div className="flex flex-col gap-1">
+                              <div className="flex flex-col gap-1 relative">
                                 <span>Region</span>
-                                <select
-                                  className="w-full bg-white border border-slate-200 rounded px-1 py-0.5 text-[9px] font-medium text-slate-700 outline-none focus:ring-1 focus:ring-slate-400"
-                                  value={filterRegion}
-                                  onChange={(e) => setFilterRegion(e.target.value)}
+                                <button
+                                  onClick={() => setShowRegionDropdown(!showRegionDropdown)}
+                                  className="w-full bg-white border border-slate-200 rounded px-1.5 py-1 text-[9px] font-bold text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all"
                                 >
-                                  <option value="All">All</option>
-                                  {Array.from(new Set(accountsData.map(a => a.region))).sort().map(r => (
-                                    <option key={r} value={r}>{r}</option>
-                                  ))}
-                                </select>
+                                  <span className="truncate">
+                                    {filterRegion.length === 0 ? 'All' : `${filterRegion.length} Selected`}
+                                  </span>
+                                  <ChevronDown size={10} />
+                                </button>
+
+                                {showRegionDropdown && (
+                                  <>
+                                    <div className="fixed inset-0 z-[60]" onClick={() => setShowRegionDropdown(false)} />
+                                    <div className="absolute top-full left-0 mt-1 w-40 bg-white border border-slate-200 shadow-xl rounded-md z-[70] overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+                                      <div className="p-1 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                                        <button
+                                          onClick={() => setFilterRegion([])}
+                                          className="text-[9px] font-bold text-slate-400 hover:text-slate-900 px-1.5 py-0.5"
+                                        >
+                                          Clear
+                                        </button>
+                                        <button
+                                          onClick={() => setShowRegionDropdown(false)}
+                                          className="text-[9px] font-bold text-slate-900 px-1.5 py-0.5"
+                                        >
+                                          Done
+                                        </button>
+                                      </div>
+                                      <div className="max-h-48 overflow-y-auto p-1">
+                                        {Array.from(new Set(accountsData.map(a => a.region))).sort().map(r => (
+                                          <label key={r} className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
+                                            <input
+                                              type="checkbox"
+                                              className="w-3 h-3 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                                              checked={filterRegion.includes(r)}
+                                              onChange={(e) => {
+                                                if (e.target.checked) {
+                                                  setFilterRegion([...filterRegion, r]);
+                                                } else {
+                                                  setFilterRegion(filterRegion.filter(x => x !== r));
+                                                }
+                                              }}
+                                            />
+                                            <span className="text-[10px] font-bold text-slate-600 group-hover:text-slate-900 uppercase">{r}</span>
+                                          </label>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             </th>
                             <th className="p-1.5 border border-slate-300">

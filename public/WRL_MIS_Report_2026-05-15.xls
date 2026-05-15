@@ -1,0 +1,199 @@
+
+        
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Report</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
+      <style>
+        table { border-collapse: collapse; font-family: sans-serif; font-size: 11px; }
+        th { background-color: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 5px; text-transform: uppercase; }
+        td { border: 1px solid #e2e8f0; padding: 4px; }
+        .north { background-color: #c6e0b4; }
+        .east { background-color: #bdd7ee; }
+        .west { background-color: #f8cbad; }
+        .south { background-color: #d9d9d9; }
+        .total { background-color: #ffff00; font-weight: bold; }
+        .header-main { background-color: #0070c0; color: white; font-weight: bold; }
+        .solved { color: #059669; }
+        .cancelled { color: #dc2626; }
+        .open { font-weight: bold; background-color: #f8fafc; }
+      </style>
+      </head><body>
+        <h3>Regional Performance</h3>
+        <table>
+          <thead>
+            <tr class="header-main">
+              <th>Region</th><th>Total</th><th>Solved</th><th>Cancelled</th><th>Open</th><th><2 Days</th><th>2-7 Days</th><th>7-15 Days</th><th>>15 Days</th><th>Parts</th><th>Engineers</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="east zone">
+                <td>EAST ZONE</td><td>6953</td><td class="solved">1030</td><td class="cancelled">3432</td><td class="open">2491</td>
+                <td>637</td><td>707</td><td>1147</td><td>0</td><td>2</td><td>183</td>
+              </tr><tr class="north zone">
+                <td>NORTH ZONE</td><td>16554</td><td class="solved">2891</td><td class="cancelled">8666</td><td class="open">4997</td>
+                <td>1316</td><td>1715</td><td>1966</td><td>0</td><td>788</td><td>300</td>
+              </tr><tr class="south zone">
+                <td>SOUTH ZONE</td><td>10547</td><td class="solved">1251</td><td class="cancelled">5796</td><td class="open">3500</td>
+                <td>844</td><td>1183</td><td>1473</td><td>0</td><td>3</td><td>227</td>
+              </tr><tr class="west zone">
+                <td>WEST ZONE</td><td>8101</td><td class="solved">737</td><td class="cancelled">4354</td><td class="open">3010</td>
+                <td>745</td><td>1014</td><td>1251</td><td>0</td><td>0</td><td>183</td>
+              </tr>
+            <tr class="total">
+              <td>AI TOTAL</td>
+              <td>42155</td>
+              <td>5909</td>
+              <td>22248</td>
+              <td>13998</td>
+              <td>3542</td>
+              <td>4619</td>
+              <td>5837</td>
+              <td>0</td>
+              <td>793</td>
+              <td>893</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <br/>
+        <h3>Branch Wise Performance (Main Only)</h3>
+        <table>
+          <thead>
+            <tr class="header-main">
+              <th>Branch</th><th>Total</th><th>Solved</th><th>Cancelled</th><th>Open</th><th><2 Days</th><th>2-7 Days</th><th>7-15 Days</th><th>>15 Days</th><th>Parts</th><th>Engineers</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+              <tr class="east zone">
+                <td>32 - 1182 - PATNA BRANCH</td><td>431</td><td class="solved">0</td><td class="cancelled">428</td><td class="open">3</td>
+                <td>3</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="east zone">
+                <td>13 - 1150 - RANCHI BRANCH</td><td>663</td><td class="solved">0</td><td class="cancelled">633</td><td class="open">30</td>
+                <td>5</td><td>11</td><td>14</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="east zone">
+                <td>16 - 1154 - KOLKATA BRANCH</td><td>1497</td><td class="solved">0</td><td class="cancelled">1367</td><td class="open">130</td>
+                <td>70</td><td>41</td><td>19</td><td>0</td><td>1</td><td>0</td>
+              </tr>
+            
+              <tr class="east zone">
+                <td>31 - 1176 - BHUBANESWAR BRANCH</td><td>374</td><td class="solved">0</td><td class="cancelled">358</td><td class="open">16</td>
+                <td>6</td><td>9</td><td>1</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="east zone">
+                <td>11 - 1127 - GUWAHATI BRANCH</td><td>398</td><td class="solved">0</td><td class="cancelled">258</td><td class="open">140</td>
+                <td>16</td><td>22</td><td>102</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="north zone">
+                <td>26 - 1166 - LUCKNOW BRANCH</td><td>1224</td><td class="solved">0</td><td class="cancelled">1223</td><td class="open">1</td>
+                <td>1</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="north zone">
+                <td>24 - 1163 - JAIPUR BRANCH</td><td>1125</td><td class="solved">0</td><td class="cancelled">1109</td><td class="open">16</td>
+                <td>16</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="north zone">
+                <td>25 - 1164 - JAMMU BRANCH</td><td>479</td><td class="solved">0</td><td class="cancelled">474</td><td class="open">5</td>
+                <td>4</td><td>1</td><td>0</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="north zone">
+                <td>8 - 1173 - DELHI BRANCH</td><td>3706</td><td class="solved">0</td><td class="cancelled">3564</td><td class="open">142</td>
+                <td>52</td><td>78</td><td>12</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="north zone">
+                <td>27 - 1167 - LUDHIANA BRANCH</td><td>1240</td><td class="solved">0</td><td class="cancelled">1182</td><td class="open">58</td>
+                <td>48</td><td>10</td><td>0</td><td>0</td><td>7</td><td>0</td>
+              </tr>
+            
+              <tr class="north zone">
+                <td>17 - 1155 - CHANDIGARH BRANCH</td><td>21</td><td class="solved">0</td><td class="cancelled">0</td><td class="open">21</td>
+                <td>0</td><td>21</td><td>0</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="south zone">
+                <td>23 - 1162 - HYDERABAD BRANCH</td><td>742</td><td class="solved">0</td><td class="cancelled">687</td><td class="open">55</td>
+                <td>20</td><td>22</td><td>13</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="south zone">
+                <td>20 - 1158 - COIMBATORE BRANCH</td><td>734</td><td class="solved">0</td><td class="cancelled">718</td><td class="open">16</td>
+                <td>12</td><td>3</td><td>1</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="south zone">
+                <td>12 - 1128 - HUBLI BRANCH</td><td>218</td><td class="solved">0</td><td class="cancelled">188</td><td class="open">30</td>
+                <td>19</td><td>6</td><td>5</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="south zone">
+                <td>18 - 1159 - CHENNAI BRANCH</td><td>902</td><td class="solved">0</td><td class="cancelled">857</td><td class="open">45</td>
+                <td>20</td><td>14</td><td>11</td><td>0</td><td>1</td><td>0</td>
+              </tr>
+            
+              <tr class="south zone">
+                <td>22 - 1161 - GOA BRANCH</td><td>96</td><td class="solved">0</td><td class="cancelled">90</td><td class="open">6</td>
+                <td>2</td><td>0</td><td>4</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="south zone">
+                <td>15 - 1152 - BANGALORE BRANCH</td><td>794</td><td class="solved">0</td><td class="cancelled">794</td><td class="open">0</td>
+                <td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="south zone">
+                <td>36 - 1181 - VIJAYAWADA BRANCH</td><td>763</td><td class="solved">0</td><td class="cancelled">734</td><td class="open">29</td>
+                <td>24</td><td>5</td><td>0</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="south zone">
+                <td>19 - 1157 - COCHIN BRANCH</td><td>899</td><td class="solved">0</td><td class="cancelled">899</td><td class="open">0</td>
+                <td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="west zone">
+                <td>14 - 1140 - AHMEDABAD BRANCH</td><td>800</td><td class="solved">0</td><td class="cancelled">790</td><td class="open">10</td>
+                <td>7</td><td>2</td><td>1</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="west zone">
+                <td>28 - 1170 - NAGPUR BRANCH</td><td>344</td><td class="solved">0</td><td class="cancelled">333</td><td class="open">11</td>
+                <td>11</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="west zone">
+                <td>30 - 1175 - PUNE BRANCH</td><td>1275</td><td class="solved">0</td><td class="cancelled">1174</td><td class="open">101</td>
+                <td>39</td><td>31</td><td>31</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="west zone">
+                <td>10 - 1126 - INDORE BRANCH</td><td>686</td><td class="solved">0</td><td class="cancelled">623</td><td class="open">63</td>
+                <td>25</td><td>24</td><td>14</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="west zone">
+                <td>289 - 1134 - RAIPUR BRANCH</td><td>148</td><td class="solved">0</td><td class="cancelled">146</td><td class="open">2</td>
+                <td>2</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="west zone">
+                <td>29 - 1171 - MUMBAI BRANCH</td><td>748</td><td class="solved">0</td><td class="cancelled">688</td><td class="open">60</td>
+                <td>44</td><td>13</td><td>3</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+              <tr class="west zone">
+                <td>1 - WESTERN HEAD OFFICE - 1100</td><td>1</td><td class="solved">0</td><td class="cancelled">1</td><td class="open">0</td>
+                <td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td>
+              </tr>
+            
+          </tbody>
+        </table>
+        </body></html>

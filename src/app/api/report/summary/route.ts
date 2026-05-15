@@ -110,7 +110,8 @@ export async function GET(req: NextRequest) {
         GROUP BY nofficeid
       ) t
       JOIN mstoffice o ON t.nofficeid = o.ncode
-      LEFT JOIN mstzones z ON o.nzone = z.ncode
+      LEFT JOIN mstoffice op ON o.nunder = op.ncode AND o.nunder <> 0
+      LEFT JOIN mstzones z ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
       LEFT JOIN mstpartyprofile p ON t.npartyprofile = p.ncode`,
       condition: `1=1`,
       orderBy: `region ASC`
