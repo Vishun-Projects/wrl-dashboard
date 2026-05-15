@@ -26,10 +26,11 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const officeId = searchParams.get('officeId');
+    const callType = searchParams.get('callType');
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
 
-    let baseCondition = "1=1";
+    let baseCondition = "callsntrnno IS NOT NULL AND callsntrnno <> ''";
     if (officeId && officeId !== 'All') {
       if (officeId.includes(',')) {
         baseCondition += ` AND nofficeid IN (${officeId})`;
@@ -37,11 +38,24 @@ export async function GET(req: NextRequest) {
         baseCondition += ` AND nofficeid = ${officeId}`;
       }
     }
-    if (startDate) {
-      baseCondition += ` AND callsdtrndate >= '${startDate}'`;
+
+    if (callType && callType !== 'All') {
+      if (callType.includes(',')) {
+        const types = callType.split(',').map(t => `'${t.trim()}'`).join(',');
+        baseCondition += ` AND calltype IN (${types})`;
+      } else {
+        baseCondition += ` AND calltype = '${callType}'`;
+      }
     }
-    if (endDate) {
-      baseCondition += ` AND callsdtrndate <= '${endDate} 23:59:59'`;
+    const dateFilter = (startDate && endDate) 
+      ? `ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104))`
+      : null;
+
+    if (startDate && dateFilter) {
+      baseCondition += ` AND ${dateFilter} >= '${startDate}'`;
+    }
+    if (endDate && dateFilter) {
+      baseCondition += ` AND ${dateFilter} <= '${endDate} 23:59:59'`;
     }
 
     const agingDate = endDate ? `'${endDate} 23:59:59'` : 'GETDATE()';
@@ -49,7 +63,7 @@ export async function GET(req: NextRequest) {
     // Agg-First, Join-Later pattern for maximum performance
     // This aggregates IDs first (fast) and joins names only on the small result set (~1000 rows)
     const rawRes = await postQuery({
-      fields: `
+      "fields": `
         t.row_type,
         ISNULL(UPPER(z.vname), 'OTHER') as region,
         ISNULL(o.vcompanyname, '') as branch,
@@ -71,50 +85,56 @@ export async function GET(req: NextRequest) {
         t.deployment_done,
         t.installation_total,
         t.installation_done`,
-      tableName: `(
-        -- 1. Account Level Metrics
+      "tableName": `(
         SELECT 
-          'DATA' as row_type,
-          nofficeid, npartyprofile,
-          COUNT(DISTINCT callsvserialno) as population,
+          CASE WHEN GROUPING(npartyprofile) = 1 THEN 'BRANCH_ENG' ELSE 'DATA' END as row_type,
+          nofficeid,
+          ISNULL(npartyprofile, 0) as npartyprofile,
+          COUNT(*) as population,
           COUNT(*) as total_calls,
-          SUM(CASE WHEN (callsolved = '1' OR callsolved = 'True' OR callstatus = 'Solved' OR CAST(Status AS NVARCHAR(MAX)) = 'Closed') THEN 1 ELSE 0 END) as solved_calls,
-          SUM(CASE WHEN ISNULL(callstatus,'') = 'Cancel' THEN 1 ELSE 0 END) as cancelled_calls,
-          SUM(CASE WHEN (callsolved = '0' OR callsolved = 'False') AND ISNULL(callstatus,'') != 'Cancel' THEN 1 ELSE 0 END) as open_calls,
-          SUM(CASE WHEN DATEDIFF(day, callsdtrndate, ${agingDate}) <= 2 AND (callsolved = '0' OR callsolved = 'False') AND ISNULL(callstatus,'') != 'Cancel' THEN 1 ELSE 0 END) as age_2,
-          SUM(CASE WHEN DATEDIFF(day, callsdtrndate, ${agingDate}) > 2 AND DATEDIFF(day, callsdtrndate, ${agingDate}) <= 7 AND (callsolved = '0' OR callsolved = 'False') AND ISNULL(callstatus,'') != 'Cancel' THEN 1 ELSE 0 END) as age_3,
-          SUM(CASE WHEN DATEDIFF(day, callsdtrndate, ${agingDate}) > 7 AND DATEDIFF(day, callsdtrndate, ${agingDate}) <= 15 AND (callsolved = '0' OR callsolved = 'False') AND ISNULL(callstatus,'') != 'Cancel' THEN 1 ELSE 0 END) as age_7,
-          SUM(CASE WHEN DATEDIFF(day, callsdtrndate, ${agingDate}) > 15 AND (callsolved = '0' OR callsolved = 'False') AND ISNULL(callstatus,'') != 'Cancel' THEN 1 ELSE 0 END) as age_15,
-          SUM(CASE WHEN vsolveremarks LIKE '%PART%' OR vcomplaint LIKE '%PART%' THEN 1 ELSE 0 END) as part_pending,
-          COUNT(DISTINCT serviceman) as active_eng_count,
-          SUM(CASE WHEN calltype = 'DEPLOYMENT' THEN 1 ELSE 0 END) as deployment_total,
-          SUM(CASE WHEN calltype = 'DEPLOYMENT' AND (callsolved = '1' OR callsolved = 'True' OR callstatus = 'Solved' OR CAST(Status AS NVARCHAR(MAX)) = 'Closed') THEN 1 ELSE 0 END) as deployment_done,
-          SUM(CASE WHEN calltype = 'INSTALLATION CALL' THEN 1 ELSE 0 END) as installation_total,
-          SUM(CASE WHEN calltype = 'INSTALLATION CALL' AND (callsolved = '1' OR callsolved = 'True' OR callstatus = 'Solved' OR CAST(Status AS NVARCHAR(MAX)) = 'Closed') THEN 1 ELSE 0 END) as installation_done
-        FROM uv_findtrhcalls_callsearch
-        WHERE ${baseCondition}
-        GROUP BY nofficeid, npartyprofile
-
-        UNION ALL
-
-        -- 2. Branch Level Unique Engineers
-        SELECT 
-          'BRANCH_ENG' as row_type,
-          nofficeid, 0 as npartyprofile,
-          0 as population, 0 as total_calls, 0 as solved_calls, 0 as cancelled_calls, 0 as open_calls,
-          0 as age_2, 0 as age_3, 0 as age_7, 0 as age_15, 0 as part_pending,
-          COUNT(DISTINCT serviceman) as active_eng_count,
-          0 as deployment_total, 0 as deployment_done, 0 as installation_total, 0 as installation_done
-        FROM uv_findtrhcalls_callsearch
-        WHERE ${baseCondition}
-        GROUP BY nofficeid
+          SUM(is_solved) as solved_calls,
+          SUM(is_cancelled) as cancelled_calls,
+          SUM(is_open) as open_calls,
+          SUM(is_age_2) as age_2,
+          SUM(is_age_3) as age_3,
+          SUM(is_age_7) as age_7,
+          SUM(is_age_15) as age_15,
+          SUM(is_part_pending) as part_pending,
+          COUNT(DISTINCT eng_name) as active_eng_count,
+          SUM(is_deployment) as deployment_total,
+          SUM(is_deployment_done) as deployment_done,
+          SUM(is_installation) as installation_total,
+          SUM(is_installation_done) as installation_done
+        FROM (
+          SELECT 
+            nofficeid,
+            npartyprofile,
+            callsntrnno,
+            MAX(CASE WHEN callsolved = 'True' OR callsolved = '1' THEN 1 ELSE 0 END) as is_solved,
+            MAX(CASE WHEN ncancelreason IS NOT NULL AND ncancelreason <> 0 THEN 1 ELSE 0 END) as is_cancelled,
+            MAX(CASE WHEN (callsolved = '0' OR callsolved = 'False' OR callsolved IS NULL) AND (ncancelreason IS NULL OR ncancelreason = 0) THEN 1 ELSE 0 END) as is_open,
+            MAX(CASE WHEN DATEDIFF(day, ${dateFilter}, ${agingDate}) <= 2 AND (callsolved = '0' OR callsolved = 'False' OR callsolved IS NULL) AND (ncancelreason IS NULL OR ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_2,
+            MAX(CASE WHEN DATEDIFF(day, ${dateFilter}, ${agingDate}) > 2 AND DATEDIFF(day, ${dateFilter}, ${agingDate}) <= 7 AND (callsolved = '0' OR callsolved = 'False' OR callsolved IS NULL) AND (ncancelreason IS NULL OR ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_3,
+            MAX(CASE WHEN DATEDIFF(day, ${dateFilter}, ${agingDate}) > 7 AND DATEDIFF(day, ${dateFilter}, ${agingDate}) <= 15 AND (callsolved = '0' OR callsolved = 'False' OR callsolved IS NULL) AND (ncancelreason IS NULL OR ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_7,
+            MAX(CASE WHEN DATEDIFF(day, ${dateFilter}, ${agingDate}) > 15 AND (callsolved = '0' OR callsolved = 'False' OR callsolved IS NULL) AND (ncancelreason IS NULL OR ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_15,
+            MAX(CASE WHEN vsolveremarks LIKE '%PART%' OR vcomplaint LIKE '%PART%' THEN 1 ELSE 0 END) as is_part_pending,
+            MAX(CASE WHEN calltype = 'DEPLOYMENT' THEN 1 ELSE 0 END) as is_deployment,
+            MAX(CASE WHEN calltype = 'DEPLOYMENT' AND (callsolved = '1' OR callsolved = 'True') THEN 1 ELSE 0 END) as is_deployment_done,
+            MAX(CASE WHEN calltype = 'INSTALLATION CALL' THEN 1 ELSE 0 END) as is_installation,
+            MAX(CASE WHEN calltype = 'INSTALLATION CALL' AND (callsolved = '1' OR callsolved = 'True') THEN 1 ELSE 0 END) as is_installation_done,
+            MAX(CAST(serviceman AS NVARCHAR(MAX))) as eng_name
+          FROM uv_findtrhcalls_callsearch (NOLOCK)
+          WHERE ${baseCondition}
+          GROUP BY nofficeid, npartyprofile, callsntrnno
+        ) t_base
+        GROUP BY GROUPING SETS ((nofficeid, npartyprofile), (nofficeid))
       ) t
-      JOIN mstoffice o ON t.nofficeid = o.ncode
-      LEFT JOIN mstoffice op ON o.nunder = op.ncode AND o.nunder <> 0
-      LEFT JOIN mstzones z ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
-      LEFT JOIN mstpartyprofile p ON t.npartyprofile = p.ncode`,
-      condition: `1=1`,
-      orderBy: `region ASC`
+      JOIN mstoffice o (NOLOCK) ON t.nofficeid = o.ncode
+      LEFT JOIN mstoffice op (NOLOCK) ON o.nunder = op.ncode AND o.nunder <> 0
+      LEFT JOIN mstzones z (NOLOCK) ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
+      LEFT JOIN mstpartyprofile p (NOLOCK) ON t.npartyprofile = p.ncode`,
+      "condition": `1=1`,
+      "orderBy": `region ASC`
     });
 
     const rawData = rawRes.data || [];

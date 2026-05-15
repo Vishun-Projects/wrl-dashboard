@@ -11,6 +11,7 @@ import {
   ChevronRight,
   ChevronDown,
   FileSpreadsheet,
+  FileText,
   X
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -40,14 +41,41 @@ export default function ReportPage() {
   const [filterRegion, setFilterRegion] = useState<string[]>([]); // Array for multiselect
   const [showRegionDropdown, setShowRegionDropdown] = useState(false);
   const [filterAccount, setFilterAccount] = useState('All');
+  const [selectedCallType, setSelectedCallType] = useState('All');
+  const [callTypes, setCallTypes] = useState<string[]>([]);
+  const [showCallTypeDropdown, setShowCallTypeDropdown] = useState(false);
+  const [drillDown, setDrillDown] = useState<{
+    isOpen: boolean;
+    loading: boolean;
+    data: any[];
+    sql: string;
+    type: string;
+    title: string;
+    params: any;
+  }>({
+    isOpen: false,
+    loading: false,
+    data: [],
+    sql: '',
+    type: '',
+    title: '',
+    params: null
+  });
+  const fetchControllerRef = React.useRef<AbortController | null>(null);
+  const drillDownControllerRef = React.useRef<AbortController | null>(null);
 
   useEffect(() => {
     async function fetchOffices() {
       const { data: { session } } = await supabase.auth.getSession();
-      const res = await axios.get('/api/offices', {
-        headers: { 'Authorization': `Bearer ${session?.access_token}` }
-      });
-      setOffices(res.data || []);
+      const headers = { 'Authorization': `Bearer ${session?.access_token}` };
+      
+      const [officeRes, typesRes] = await Promise.all([
+        axios.get('/api/offices', { headers }),
+        axios.get('/api/report/call-types', { headers })
+      ]);
+      
+      setOffices(officeRes.data || []);
+      setCallTypes(typesRes.data || []);
     }
     fetchOffices();
   }, []);
@@ -67,16 +95,27 @@ export default function ReportPage() {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return dateStr; // Return raw if still invalid, might be a string already
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  }; const fetchData = async (p = 1) => {
+  };
+
+  const fetchData = async (p = 1) => {
+    // Cancel previous request if it's still running
+    if (fetchControllerRef.current) {
+      fetchControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    fetchControllerRef.current = controller;
+
     setLoading(true);
     const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const headers = { 'Authorization': `Bearer ${session?.access_token}` };
+      const headers = { 
+        'Authorization': `Bearer ${session?.access_token}`,
+      };
 
       // Register data URL
-      let url = `/api/report?page=${p}&limit=${limit}&officeId=${officeIdsParam}`;
+      let url = `/api/report?page=${p}&limit=${limit}&officeId=${officeIdsParam}&callType=${selectedCallType}`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
       if (dateRange.start) url += `&startDate=${dateRange.start}`;
       if (dateRange.end) url += `&endDate=${dateRange.end}`;
@@ -85,7 +124,7 @@ export default function ReportPage() {
       const needsSummary = p === 1;
       let summaryUrl = '';
       if (needsSummary) {
-        summaryUrl = `/api/report/summary?officeId=${officeIdsParam}`;
+        summaryUrl = `/api/report/summary?officeId=${officeIdsParam}&callType=${selectedCallType}`;
         if (dateRange.start) summaryUrl += `&startDate=${dateRange.start}`;
         if (dateRange.end) summaryUrl += `&endDate=${dateRange.end}`;
       }
@@ -93,8 +132,8 @@ export default function ReportPage() {
       // Execute in parallel if summary needed
       if (needsSummary) {
         const [regRes, summRes] = await Promise.all([
-          axios.get(url, { headers }),
-          axios.get(summaryUrl, { headers })
+          axios.get(url, { headers, signal: controller.signal }),
+          axios.get(summaryUrl, { headers, signal: controller.signal })
         ]);
 
         setData(regRes.data.data);
@@ -104,16 +143,73 @@ export default function ReportPage() {
         setSummaryData(summRes.data.branchSummary);
         setAccountsData(summRes.data.accountSummary);
       } else {
-        const regRes = await axios.get(url, { headers });
+        const regRes = await axios.get(url, { headers, signal: controller.signal });
         setData(regRes.data.data);
         setTotal(regRes.data.total);
         setPage(p);
       }
     } catch (err: any) {
+      if (axios.isCancel(err)) {
+        return; // Silently handle cancellation
+      }
       toast.error("Failed to fetch report data");
     } finally {
-      setLoading(false);
-      setLastRefreshed(new Date());
+      // Only set loading to false if this was the last request
+      if (fetchControllerRef.current === controller) {
+        setLoading(false);
+        setLastRefreshed(new Date());
+      }
+    }
+  };
+
+  const handleDrillDown = async (type: string, title: string, params: any) => {
+    if (drillDownControllerRef.current) {
+      drillDownControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    drillDownControllerRef.current = controller;
+
+    setDrillDown(prev => ({ ...prev, isOpen: true, loading: true, type, title, params, data: [], sql: '' }));
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await axios.post('/api/report/drilldown', {
+        type,
+        ...params,
+        startDate: dateRange.start,
+        endDate: dateRange.end
+      }, {
+        headers: { 'Authorization': `Bearer ${session?.access_token}` },
+        signal: controller.signal
+      });
+      setDrillDown(prev => ({ ...prev, loading: false, data: res.data.data, sql: res.data.sql }));
+    } catch (err: any) {
+      if (axios.isCancel(err)) return;
+      toast.error('Failed to fetch details');
+      setDrillDown(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const runCustomQuery = async (customSql: string) => {
+    if (drillDownControllerRef.current) {
+      drillDownControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    drillDownControllerRef.current = controller;
+
+    setDrillDown(prev => ({ ...prev, loading: true }));
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await axios.post('/api/report/drilldown', {
+        customQuery: customSql
+      }, {
+        headers: { 'Authorization': `Bearer ${session?.access_token}` },
+        signal: controller.signal
+      });
+      setDrillDown(prev => ({ ...prev, loading: false, data: res.data.data, sql: res.data.sql }));
+    } catch (err: any) {
+      if (axios.isCancel(err)) return;
+      toast.error('Query Error: ' + (err.response?.data?.error || err.message));
+      setDrillDown(prev => ({ ...prev, loading: false }));
     }
   };
   ;
@@ -138,19 +234,20 @@ export default function ReportPage() {
     }
   };
 
+  // Automatically fetch data when filters change
   useEffect(() => {
     fetchData(1);
-  }, []); // Only load once on mount. Subsequent refreshes are manual via the Refresh button.
+  }, [dateRange.start, dateRange.end, selectedOfficeIds, filterAccount, selectedCallType]); 
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     fetchData(1);
   };
 
-  const handleExport = async () => {
+  const handleExport = async (format: 'excel' | 'csv' = 'excel') => {
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Report');
-    let fileName = `WRL_MIS_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
+    let fileName = `WRL_MIS_Report_${new Date().toISOString().split('T')[0]}.${format === 'csv' ? 'csv' : 'xlsx'}`;
 
     const getRegionColor = (region: string) => {
       const r = (region || '').toUpperCase();
@@ -385,7 +482,7 @@ export default function ReportPage() {
         <div className="flex items-center gap-3">
           {lastRefreshed && (
             <span className="text-[10px] text-slate-400 font-medium">
-              Last Refreshed: {lastRefreshed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              Last Refreshed: {lastRefreshed?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </span>
           )}
           <button
@@ -402,8 +499,15 @@ export default function ReportPage() {
             onClick={handleExport}
             className="flex items-center gap-2 bg-white text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-slate-50 transition-all shadow-sm"
           >
-            <Download size={14} />
-            Export Excel
+            <FileSpreadsheet size={14} className="text-emerald-600" />
+            Excel
+          </button>
+          <button
+            onClick={() => handleExport('csv')}
+            className="flex items-center gap-2 bg-white text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-slate-50 transition-all shadow-sm"
+          >
+            <FileText size={14} className="text-blue-600" />
+            CSV
           </button>
         </div>
       </div>
@@ -422,8 +526,48 @@ export default function ReportPage() {
         </form>
 
         <div className="flex items-center gap-4 ml-auto">
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 relative">
+            <div className="flex items-center gap-2">
+              {/* Call Type Filter */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowCallTypeDropdown(!showCallTypeDropdown)}
+                  className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium hover:border-slate-300 transition-colors min-w-[160px]"
+                >
+                  <span className="flex-1 text-left truncate">
+                    {selectedCallType === 'All' ? 'All Call Types' : selectedCallType}
+                  </span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${showCallTypeDropdown ? 'rotate-180' : ''}`} />
+                </button>
+
+                {showCallTypeDropdown && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-10" 
+                      onClick={() => setShowCallTypeDropdown(false)} 
+                    />
+                    <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-20 py-2 max-h-96 overflow-y-auto animate-in fade-in zoom-in duration-200">
+                      {['All', ...callTypes].map(type => (
+                        <button
+                          key={type}
+                          onClick={() => {
+                            setSelectedCallType(type);
+                            setShowCallTypeDropdown(false);
+                            setPage(1);
+                          }}
+                          className={`w-full text-left px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${
+                            selectedCallType === type ? 'text-blue-600 font-semibold bg-blue-50/50 dark:bg-blue-500/10' : 'text-slate-600 dark:text-slate-300'
+                          }`}
+                        >
+                          {type === 'All' ? 'All Call Types' : type}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Branch Filter */}
+              <div className="relative">
               <button
                 onClick={() => setShowOfficeDropdown(!showOfficeDropdown)}
                 className="min-w-[140px] max-w-[200px] bg-white border border-slate-200 rounded-md px-3 py-1.5 text-xs font-bold text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all shadow-sm"
@@ -698,15 +842,15 @@ export default function ReportPage() {
                         return (
                           <tr key={region} className={`${getRegionBg(region)} font-bold text-slate-900`}>
                             <td className="p-2 border border-slate-300 uppercase">{region}</td>
-                            <td className="p-2 border border-slate-300 text-center">{totals.total}</td>
-                            <td className="p-2 border border-slate-300 text-center text-emerald-600">{totals.solved}</td>
-                            <td className="p-2 border border-slate-300 text-center text-rose-600">{totals.cancelled}</td>
-                            <td className="p-2 border border-slate-300 text-center font-bold bg-slate-100/50">{totals.open}</td>
-                            <td className="p-2 border border-slate-300 text-center">{totals.age2}</td>
-                            <td className="p-2 border border-slate-300 text-center">{totals.age3}</td>
-                            <td className="p-2 border border-slate-300 text-center">{totals.age7}</td>
-                            <td className="p-2 border border-slate-300 text-center">{totals.age15}</td>
-                            <td className="p-2 border border-slate-300 text-center">{totals.parts}</td>
+                            <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${region} - Total Calls`, { region })}>{totals.total}</td>
+                            <td className="p-2 border border-slate-300 text-center text-emerald-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${region} - Solved Calls`, { region })}>{totals.solved}</td>
+                            <td className="p-2 border border-slate-300 text-center text-rose-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('cancelled_calls', `${region} - Cancelled Calls`, { region })}>{totals.cancelled}</td>
+                            <td className="p-2 border border-slate-300 text-center font-bold bg-slate-100/50 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('open_calls', `${region} - Open Calls`, { region })}>{totals.open}</td>
+                            <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_2', `${region} - <2 Days`, { region })}>{totals.age2}</td>
+                            <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_3', `${region} - 2-7 Days`, { region })}>{totals.age3}</td>
+                            <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${region} - 7-15 Days`, { region })}>{totals.age7}</td>
+                            <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_15', `${region} - >15 Days`, { region })}>{totals.age15}</td>
+                            <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${region} - Part Pending`, { region })}>{totals.parts}</td>
                             <td className="p-2 border border-slate-300 text-center">{totals.engs}</td>
                           </tr>
                         );
@@ -808,15 +952,15 @@ export default function ReportPage() {
                                         <span className="truncate">{branch.branch}</span>
                                       </div>
                                     </td>
-                                    <td className="p-2 border border-slate-300 text-center">{getAggregate(branch, 'total_calls')}</td>
-                                    <td className="p-2 border border-slate-300 text-center">{getAggregate(branch, 'solved_calls')}</td>
-                                    <td className="p-2 border border-slate-300 text-center">{getAggregate(branch, 'cancelled_calls')}</td>
-                                    <td className="p-2 border border-slate-300 text-center font-bold">{getAggregate(branch, 'open_calls')}</td>
-                                    <td className="p-2 border border-slate-300 text-center">{getAggregate(branch, 'age_2')}</td>
-                                    <td className="p-2 border border-slate-300 text-center">{getAggregate(branch, 'age_3')}</td>
-                                    <td className="p-2 border border-slate-300 text-center">{getAggregate(branch, 'age_7')}</td>
-                                    <td className="p-2 border border-slate-300 text-center">{getAggregate(branch, 'age_15')}</td>
-                                    <td className="p-2 border border-slate-300 text-center">{getAggregate(branch, 'part_pending')}</td>
+                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${branch.branch} - Total Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'total_calls')}</td>
+                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${branch.branch} - Solved Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'solved_calls')}</td>
+                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('cancelled_calls', `${branch.branch} - Cancelled Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'cancelled_calls')}</td>
+                                    <td className="p-2 border border-slate-300 text-center font-bold cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('open_calls', `${branch.branch} - Open Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'open_calls')}</td>
+                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_2', `${branch.branch} - <2 Days`, { officeId: branch.officeId })}>{getAggregate(branch, 'age_2')}</td>
+                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_3', `${branch.branch} - 2-7 Days`, { officeId: branch.officeId })}>{getAggregate(branch, 'age_3')}</td>
+                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${branch.branch} - 7-15 Days`, { officeId: branch.officeId })}>{getAggregate(branch, 'age_7')}</td>
+                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_15', `${branch.branch} - >15 Days`, { officeId: branch.officeId })}>{getAggregate(branch, 'age_15')}</td>
+                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${branch.branch} - Part Pending`, { officeId: branch.officeId })}>{getAggregate(branch, 'part_pending')}</td>
                                     <td className="p-2 border border-slate-300 text-center">{getAggregate(branch, 'active_eng')}</td>
                                   </tr>
 
@@ -828,14 +972,14 @@ export default function ReportPage() {
                                           <span>{child.branch}</span>
                                         </div>
                                       </td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px]">{child.total_calls}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px]">{child.solved_calls}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] font-bold">{child.open_calls}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px]">{child.age_2}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px]">{child.age_3}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px]">{child.age_7}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px]">{child.age_15}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px]">{child.part_pending}</td>
+                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${child.branch} - Total Calls`, { officeId: child.officeId })}>{child.total_calls}</td>
+                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${child.branch} - Solved Calls`, { officeId: child.officeId })}>{child.solved_calls}</td>
+                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] font-bold cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('open_calls', `${child.branch} - Open Calls`, { officeId: child.officeId })}>{child.open_calls}</td>
+                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_2', `${child.branch} - <2 Days`, { officeId: child.officeId })}>{child.age_2}</td>
+                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_3', `${child.branch} - 2-7 Days`, { officeId: child.officeId })}>{child.age_3}</td>
+                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${child.branch} - 7-15 Days`, { officeId: child.officeId })}>{child.age_7}</td>
+                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_15', `${child.branch} - >15 Days`, { officeId: child.officeId })}>{child.age_15}</td>
+                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${child.branch} - Part Pending`, { officeId: child.officeId })}>{child.part_pending}</td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px]">{child.active_eng}</td>
                                     </tr>
                                   ))}
@@ -870,7 +1014,7 @@ export default function ReportPage() {
                           {/* Category Headers */}
                           <tr className="bg-slate-800 text-white font-bold">
                             <th className="p-1.5 border border-slate-600" colSpan={3}>Basics</th>
-                            <th className="p-1.5 border border-slate-600 text-center" colSpan={4}>Calls Summary</th>
+                            <th className="p-1.5 border border-slate-600 text-center" colSpan={4}>Calls Summary (Breakdown)</th>
                             <th className="p-1.5 border border-slate-600 text-center bg-blue-600" colSpan={7}>Breakdown (Aging)</th>
                             <th className="p-1.5 border border-slate-600 text-center bg-amber-600" colSpan={3}>Deployment</th>
                             <th className="p-1.5 border border-slate-600 text-center bg-emerald-600" colSpan={2}>Installation</th>
@@ -994,18 +1138,18 @@ export default function ReportPage() {
                                 <td className={`p-1.5 border border-slate-300 font-bold ${regColor}`}>{a.region}</td>
                                 <td className="p-1.5 border border-slate-300 font-medium uppercase text-[9px] bg-slate-50/30">{a.account}</td>
                                 <td className="p-1.5 border border-slate-300 text-center font-bold text-slate-500">{a.population || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center">{a.total_calls}</td>
-                                <td className="p-1.5 border border-slate-300 text-center text-emerald-600">{a.total_solved}</td>
-                                <td className="p-1.5 border border-slate-300 text-center text-rose-600">{a.cancelled_calls}</td>
-                                <td className="p-1.5 border border-slate-300 text-center font-black text-slate-900 bg-slate-100/50">{open_calls_sum}</td>
+                                <td className="p-1.5 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${a.account} - Total Calls`, { account: a.account, region: a.region })}>{a.total_calls}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-emerald-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_solved', `${a.account} - Solved Calls`, { account: a.account, region: a.region })}>{a.total_solved}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-rose-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('cancelled_calls', `${a.account} - Cancelled Calls`, { account: a.account, region: a.region })}>{a.cancelled_calls}</td>
+                                <td className="p-1.5 border border-slate-300 text-center font-black text-slate-900 bg-slate-100/50 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('open_calls', `${a.account} - Open Calls`, { account: a.account, region: a.region })}>{open_calls_sum}</td>
 
-                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30">{a.age_2 || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30">{a.age_3 || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30">{a.age_7 || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30">{a.age_15 || 0}</td>
+                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_2', `${a.account} - <2 Days`, { account: a.account, region: a.region })}>{a.age_2 || 0}</td>
+                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_3', `${a.account} - 2-7 Days`, { account: a.account, region: a.region })}>{a.age_3 || 0}</td>
+                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${a.account} - 7-15 Days`, { account: a.account, region: a.region })}>{a.age_7 || 0}</td>
+                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_15', `${a.account} - >15 Days`, { account: a.account, region: a.region })}>{a.age_15 || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center font-bold text-blue-700 bg-blue-100/20">{perc_gt_7}</td>
 
-                                <td className="p-1.5 border border-slate-300 text-center">{a.part_pending || 0}</td>
+                                <td className="p-1.5 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${a.account} - Part Pending`, { account: a.account, region: a.region })}>{a.part_pending || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center">{a.active_eng || 0}</td>
 
                                 <td className="p-1.5 border border-slate-300 text-center bg-amber-50/30">{a.deployment_total || 0}</td>
@@ -1024,16 +1168,16 @@ export default function ReportPage() {
                             <td className="p-1.5 border border-slate-700 text-center">
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.population || 0), 0).toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center">
+                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_calls', `All India - Total Calls`, { account: filterAccount || 'All India', region: 'AI' })}>
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.total_calls || 0), 0).toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center">
+                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_solved', `All India - Solved Calls`, { account: filterAccount || 'All India', region: 'AI' })}>
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.total_solved || 0), 0).toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center text-rose-400">
+                            <td className="p-1.5 border border-slate-700 text-center text-rose-400 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('cancelled_calls', `All India - Cancelled Calls`, { account: filterAccount || 'All India', region: 'AI' })}>
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.cancelled_calls || 0), 0).toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center bg-slate-800">
+                            <td className="p-1.5 border border-slate-700 text-center bg-slate-800 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('open_calls', `All India - Open Calls`, { account: filterAccount || 'All India', region: 'AI' })}>
                               {filteredAccounts.reduce((sum, a) => sum + (Number(a.age_2 || 0) + Number(a.age_3 || 0) + Number(a.age_7 || 0) + Number(a.age_15 || 0)), 0).toLocaleString()}
                             </td>
 
@@ -1169,6 +1313,106 @@ export default function ReportPage() {
               >
                 Close
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Drill Down Side Panel */}
+      {drillDown.isOpen && (
+        <div className="fixed inset-0 z-[200] flex justify-end">
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setDrillDown(prev => ({ ...prev, isOpen: false }))} />
+          <div className="relative w-full max-w-5xl bg-white h-full shadow-2xl border-l border-slate-200 flex flex-col animate-in slide-in-from-right duration-300">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-tight">{drillDown.title}</h3>
+                <p className="text-[10px] text-slate-500 font-medium">Detailed breakdown of selected metric</p>
+              </div>
+              <button onClick={() => setDrillDown(prev => ({ ...prev, isOpen: false }))} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+                <X size={18} className="text-slate-500" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* SQL Query Runner */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-slate-500">
+                    <Search size={14} />
+                    <span className="text-[10px] font-bold uppercase tracking-wider">SQL Query Context</span>
+                  </div>
+                  <button
+                    onClick={() => runCustomQuery(drillDown.sql)}
+                    className="px-3 py-1 bg-slate-900 text-white rounded text-[10px] font-bold uppercase hover:bg-slate-800 transition-all flex items-center gap-2"
+                  >
+                    <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                    Run Custom Query
+                  </button>
+                </div>
+                <div className="relative group">
+                  <textarea
+                    className="w-full h-32 p-3 font-mono text-[11px] bg-slate-900 text-emerald-400 border border-slate-800 rounded-lg outline-none focus:ring-2 focus:ring-slate-400 transition-all"
+                    value={drillDown.sql}
+                    onChange={(e) => setDrillDown(prev => ({ ...prev, sql: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {/* Results */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-widest flex items-center gap-2">
+                    Detail Records 
+                    <span className="px-2 py-0.5 bg-slate-100 rounded-full text-[9px] font-black">{drillDown.data.length} Results</span>
+                  </h4>
+                  {drillDown.data.length > 0 && (
+                    <button className="text-[10px] font-bold text-blue-600 hover:underline uppercase">Export Details</button>
+                  )}
+                </div>
+
+                <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                  <div className="overflow-x-auto max-h-[500px]">
+                    <table className="w-full text-left border-collapse text-[10px]">
+                      <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
+                        <tr>
+                          {drillDown.data.length > 0 && Object.keys(drillDown.data[0]).map(key => (
+                            <th key={key} className="p-3 font-bold text-slate-500 uppercase tracking-wider border-r border-slate-100 whitespace-nowrap">{key}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {drillDown.loading ? (
+                          <tr>
+                            <td colSpan={10} className="p-20 text-center">
+                              <div className="flex flex-col items-center gap-3">
+                                <div className="w-6 h-6 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
+                                <p className="text-[10px] font-medium text-slate-400 uppercase tracking-widest">Executing Query...</p>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : drillDown.data.length === 0 ? (
+                          <tr>
+                            <td colSpan={10} className="p-20 text-center">
+                              <p className="text-xs font-medium text-slate-400 uppercase tracking-widest">No data available for this metric</p>
+                            </td>
+                          </tr>
+                        ) : (
+                          drillDown.data.map((row, i) => (
+                            <tr key={i} className="hover:bg-slate-50 transition-colors group">
+                              {Object.values(row).map((val: any, j) => (
+                                <td key={j} className="p-3 border-r border-slate-50 whitespace-nowrap text-slate-600 group-hover:text-slate-900 font-medium uppercase truncate max-w-[200px]">
+                                  {String(val || '—')}
+                                </td>
+                              ))}
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

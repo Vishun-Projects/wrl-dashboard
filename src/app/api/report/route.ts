@@ -9,6 +9,7 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '50');
     const search = searchParams.get('search') || '';
     const officeId = searchParams.get('officeId') || 'All';
+    const callType = searchParams.get('callType');
     const startDate = searchParams.get('startDate') || '';
     const endDate = searchParams.get('endDate') || '';
 
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
     const isHod = profile?.role === 'HOD' || profile?.role === 'ADMIN';
     const assignedOffices = profile?.office_ids || [];
 
-    let condition = "1=1";
+    let condition = "callsntrnno IS NOT NULL AND callsntrnno <> ''";
 
     if (officeId && officeId !== 'All') {
       if (officeId.includes(',')) {
@@ -46,10 +47,10 @@ export async function GET(req: NextRequest) {
     }
 
     if (startDate) {
-      condition += ` AND callsdtrndate >= '${startDate}'`;
+      condition += ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) >= '${startDate}'`;
     }
     if (endDate) {
-      condition += ` AND callsdtrndate <= '${endDate} 23:59:59'`;
+      condition += ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) <= '${endDate} 23:59:59'`;
     }
 
     const topValue = page * limit;
@@ -63,7 +64,7 @@ export async function GET(req: NextRequest) {
         fields: "callsntrnno, callsdtrndate, PartyName, vlocation, itemname, callsvserialno, serviceman, vcomplaint, Status, callstatus, callsolved, Priority, callsolveddate, vsolveremarks, UniqueCallNo, vpersoncalling, vinsttel1, vinstaddress, addedby, officename",
         tableName: "uv_findtrhcalls_callsearch (NOLOCK)",
         condition,
-        orderBy: "callsdtrndate DESC",
+        orderBy: "ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) DESC",
         top: String(topValue)
       })
     ]);

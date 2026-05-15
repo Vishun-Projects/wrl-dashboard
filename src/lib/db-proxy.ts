@@ -33,11 +33,24 @@ async function executePostWithRetry(params: any) {
     formData.append('__VIEWSTATEGENERATOR', viewStateGenerator);
     if (eventValidation) formData.append('__EVENTVALIDATION', eventValidation);
     
-    formData.append('txt_Top', params.top || '');
-    formData.append('txt_Fields', params.fields || '');
-    formData.append('txt_TableName', params.tableName);
-    formData.append('txt_Condition', params.condition || '1=1');
-    formData.append('txt_OrderBy', params.orderBy || '');
+    if (params.rawSql) {
+        let sql = params.rawSql.trim();
+        // SQL Server requires TOP or OFFSET if ORDER BY is used in a subquery
+        if (sql.toUpperCase().includes('ORDER BY') && !sql.toUpperCase().includes('TOP ')) {
+            // Find the first SELECT and ensure it has TOP 100 PERCENT
+            sql = sql.replace(/^(\s*SELECT)\b/i, '$1 TOP 100 PERCENT');
+        }
+        formData.append('txt_Fields', '*');
+        formData.append('txt_TableName', `(${sql}) as t`);
+        formData.append('txt_Condition', '1=1');
+        formData.append('txt_OrderBy', '');
+    } else {
+        formData.append('txt_Top', params.top || '');
+        formData.append('txt_Fields', params.fields || '');
+        formData.append('txt_TableName', params.tableName || '');
+        formData.append('txt_Condition', params.condition || '1=1');
+        formData.append('txt_OrderBy', params.orderBy || '');
+    }
     formData.append('btn_View', 'Execute');
 
 
@@ -88,9 +101,10 @@ async function executePostWithRetry(params: any) {
 export async function postQuery(params: {
     top?: string;
     fields?: string;
-    tableName: string;
+    tableName?: string;
     condition?: string;
     orderBy?: string;
+    rawSql?: string;
 }) {
     const result = await executePostWithRetry(params);
     if ('data' in result) return result; // Return if no records found early exit
