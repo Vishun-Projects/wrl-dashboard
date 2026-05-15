@@ -64,8 +64,7 @@ export async function GET(req: NextRequest) {
         tableName: "uv_findtrhcalls_callsearch (NOLOCK)",
         condition,
         orderBy: "callsdtrndate DESC",
-        top: topValue,
-        skip: (page - 1) * limit
+        top: String(topValue)
       })
     ]);
 
