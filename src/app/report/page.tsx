@@ -44,6 +44,8 @@ export default function ReportPage() {
   const [selectedCallType, setSelectedCallType] = useState('All');
   const [callTypes, setCallTypes] = useState<string[]>([]);
   const [showCallTypeDropdown, setShowCallTypeDropdown] = useState(false);
+  const [exportingDetailed, setExportingDetailed] = useState(false);
+  const [agingAsOf, setAgingAsOf] = useState(new Date().toISOString().split('T')[0]);
   const [drillDown, setDrillDown] = useState<{
     isOpen: boolean;
     loading: boolean;
@@ -64,16 +66,27 @@ export default function ReportPage() {
   const fetchControllerRef = React.useRef<AbortController | null>(null);
   const drillDownControllerRef = React.useRef<AbortController | null>(null);
 
+  // Auto-sync agingAsOf with dateRange.end if it falls behind
+  useEffect(() => {
+    if (dateRange.end && agingAsOf) {
+      const endD = new Date(dateRange.end);
+      const agingD = new Date(agingAsOf);
+      if (agingD < endD) {
+        setAgingAsOf(dateRange.end);
+      }
+    }
+  }, [dateRange.end, agingAsOf]);
+
   useEffect(() => {
     async function fetchOffices() {
       const { data: { session } } = await supabase.auth.getSession();
       const headers = { 'Authorization': `Bearer ${session?.access_token}` };
-      
+
       const [officeRes, typesRes] = await Promise.all([
         axios.get('/api/offices', { headers }),
         axios.get('/api/report/call-types', { headers })
       ]);
-      
+
       setOffices(officeRes.data || []);
       setCallTypes(typesRes.data || []);
     }
@@ -83,12 +96,15 @@ export default function ReportPage() {
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '—';
 
-    // Handle DD/MM/YYYY
+    // Handle DD/MM/YYYY with optional time
     if (typeof dateStr === 'string' && dateStr.includes('/') && dateStr.split('/')[0].length <= 2) {
-      const [d, m, y] = dateStr.split('/');
-      const date = new Date(`${y}-${m}-${d}`);
-      if (!isNaN(date.getTime())) {
-        return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      const parts = dateStr.split(' ')[0].split('/');
+      if (parts.length === 3) {
+        const [d, m, y] = parts;
+        const date = new Date(`${y}-${m}-${d}`);
+        if (!isNaN(date.getTime())) {
+          return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        }
       }
     }
 
@@ -110,7 +126,7 @@ export default function ReportPage() {
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const headers = { 
+      const headers = {
         'Authorization': `Bearer ${session?.access_token}`,
       };
 
@@ -127,6 +143,7 @@ export default function ReportPage() {
         summaryUrl = `/api/report/summary?officeId=${officeIdsParam}&callType=${selectedCallType}`;
         if (dateRange.start) summaryUrl += `&startDate=${dateRange.start}`;
         if (dateRange.end) summaryUrl += `&endDate=${dateRange.end}`;
+        if (agingAsOf) summaryUrl += `&agingAsOf=${agingAsOf}`;
       }
 
       // Execute in parallel if summary needed
@@ -237,12 +254,123 @@ export default function ReportPage() {
   // Automatically fetch data when filters change
   useEffect(() => {
     fetchData(1);
-  }, [dateRange.start, dateRange.end, selectedOfficeIds, filterAccount, selectedCallType]); 
+  }, [dateRange.start, dateRange.end, selectedOfficeIds, filterAccount, selectedCallType]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     fetchData(1);
   };
+
+  const handleExportDetailed = async (format: 'excel' | 'csv' = 'excel') => {
+    setExportingDetailed(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers = { 'Authorization': `Bearer ${session?.access_token}` };
+
+      const res = await axios.get('/api/report', {
+        headers,
+        params: {
+          page: 1,
+          limit: 100000,
+          officeId: selectedOfficeIds.length ? selectedOfficeIds.join(',') : 'All',
+          callType: selectedCallType,
+          startDate: dateRange.start,
+          endDate: dateRange.end,
+          ...(activeTab === 'accounts' ? {
+            account: filterAccount,
+            region: filterRegion.length ? filterRegion.join(',') : undefined
+          } : {})
+        }
+      });
+
+      const rawData = res.data?.data || [];
+      if (rawData.length === 0) {
+        alert("No data to export");
+        return;
+      }
+
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('Detailed Breakdown');
+      const fileName = `WRL_Detailed_Breakdown_${new Date().toISOString().split('T')[0]}.${format === 'csv' ? 'csv' : 'xlsx'}`;
+
+      sheet.columns = [
+        { header: 'Reference', key: 'ref', width: 15 },
+        { header: 'Date', key: 'date', width: 12 },
+        { header: 'Customer', key: 'customer', width: 30 },
+        { header: 'Location', key: 'location', width: 20 },
+        { header: 'Product', key: 'product', width: 20 },
+        { header: 'Serial', key: 'serial', width: 15 },
+        { header: 'Technician', key: 'tech', width: 20 },
+        { header: 'Complaint', key: 'complaint', width: 40 },
+        { header: 'Status', key: 'status', width: 12 },
+        { header: 'Priority', key: 'priority', width: 10 },
+        { header: 'Solved Date', key: 'solvedDate', width: 12 },
+        { header: 'Remarks', key: 'remarks', width: 30 },
+        { header: 'Branch', key: 'branch', width: 20 },
+      ];
+
+      sheet.getRow(1).eachCell((cell) => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } };
+        cell.font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 10 };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+      });
+
+      rawData.forEach((row: any) => {
+        const isSolved = row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True';
+        const isAssigned = row.Status === 'Assigned' || row.callstatus === 'Assigned';
+        const statusText = row.Status === 'UNKNOWN' ? 'PENDING' : (row.Status || row.callstatus || 'OPEN');
+
+        const r = sheet.addRow({
+          ref: row.callsntrnno,
+          date: formatDate(row.callsdtrndate),
+          customer: row.PartyName,
+          location: row.vlocation,
+          product: row.itemname,
+          serial: row.callsvserialno,
+          tech: row.serviceman,
+          complaint: row.vcomplaint,
+          status: statusText,
+          priority: row.Priority,
+          solvedDate: formatDate(row.callsolveddate),
+          remarks: row.vsolveremarks,
+          branch: row.officename
+        });
+
+        if (isSolved) {
+          r.getCell('status').font = { color: { argb: 'FF10B981' }, bold: true };
+        } else if (isAssigned) {
+          r.getCell('status').font = { color: { argb: 'FFF59E0B' }, bold: true };
+        } else {
+          r.getCell('status').font = { color: { argb: 'FFEF4444' }, bold: true };
+        }
+      });
+
+      let buffer;
+      let mimeType;
+      if (format === 'csv') {
+        buffer = await workbook.csv.writeBuffer();
+        mimeType = 'text/csv;charset=utf-8;';
+      } else {
+        buffer = await workbook.xlsx.writeBuffer();
+        mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      }
+
+      const blob = new Blob([buffer], { type: mimeType });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(link.href);
+
+    } catch (err) {
+      console.error("Failed to export detailed breakdown:", err);
+      alert("Failed to export detailed breakdown");
+    } finally {
+      setExportingDetailed(false);
+    }
+  };
+
 
   const handleExport = async (format: 'excel' | 'csv' = 'excel') => {
     const workbook = new ExcelJS.Workbook();
@@ -433,8 +561,17 @@ export default function ReportPage() {
       });
     }
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    let buffer;
+    let mimeType;
+    if (format === 'csv') {
+      buffer = await workbook.csv.writeBuffer();
+      mimeType = 'text/csv;charset=utf-8;';
+    } else {
+      buffer = await workbook.xlsx.writeBuffer();
+      mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    }
+
+    const blob = new Blob([buffer], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -496,18 +633,11 @@ export default function ReportPage() {
             Refresh
           </button>
           <button
-            onClick={handleExport}
+            onClick={() => handleExport('excel')}
             className="flex items-center gap-2 bg-white text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-slate-50 transition-all shadow-sm"
           >
             <FileSpreadsheet size={14} className="text-emerald-600" />
-            Excel
-          </button>
-          <button
-            onClick={() => handleExport('csv')}
-            className="flex items-center gap-2 bg-white text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-slate-50 transition-all shadow-sm"
-          >
-            <FileText size={14} className="text-blue-600" />
-            CSV
+            Excel Export
           </button>
         </div>
       </div>
@@ -526,48 +656,9 @@ export default function ReportPage() {
         </form>
 
         <div className="flex items-center gap-4 ml-auto">
-            <div className="flex items-center gap-2">
-              {/* Call Type Filter */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowCallTypeDropdown(!showCallTypeDropdown)}
-                  className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium hover:border-slate-300 transition-colors min-w-[160px]"
-                >
-                  <span className="flex-1 text-left truncate">
-                    {selectedCallType === 'All' ? 'All Call Types' : selectedCallType}
-                  </span>
-                  <ChevronDown className={`w-4 h-4 transition-transform ${showCallTypeDropdown ? 'rotate-180' : ''}`} />
-                </button>
-
-                {showCallTypeDropdown && (
-                  <>
-                    <div 
-                      className="fixed inset-0 z-10" 
-                      onClick={() => setShowCallTypeDropdown(false)} 
-                    />
-                    <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-20 py-2 max-h-96 overflow-y-auto animate-in fade-in zoom-in duration-200">
-                      {['All', ...callTypes].map(type => (
-                        <button
-                          key={type}
-                          onClick={() => {
-                            setSelectedCallType(type);
-                            setShowCallTypeDropdown(false);
-                            setPage(1);
-                          }}
-                          className={`w-full text-left px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${
-                            selectedCallType === type ? 'text-blue-600 font-semibold bg-blue-50/50 dark:bg-blue-500/10' : 'text-slate-600 dark:text-slate-300'
-                          }`}
-                        >
-                          {type === 'All' ? 'All Call Types' : type}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Branch Filter */}
-              <div className="relative">
+          <div className="flex items-center gap-3">
+            {/* Branch Filter */}
+            <div className="relative">
               <button
                 onClick={() => setShowOfficeDropdown(!showOfficeDropdown)}
                 className="min-w-[140px] max-w-[200px] bg-white border border-slate-200 rounded-md px-3 py-1.5 text-xs font-bold text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all shadow-sm"
@@ -659,21 +750,42 @@ export default function ReportPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1">
-            <input
-              type="date"
-              className="bg-white border border-slate-200 rounded-md px-2 py-1.5 text-xs font-medium text-slate-700"
-              value={dateRange.start}
-              onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-            />
-            <span className="text-slate-300">—</span>
-            <input
-              type="date"
-              className="bg-white border border-slate-200 rounded-md px-2 py-1.5 text-xs font-medium text-slate-700"
-              value={dateRange.end}
-              onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-            />
+          <div className="flex items-center gap-2 border-l border-slate-200 pl-4 h-6">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">From</span>
+              <input
+                type="date"
+                className="bg-white border border-slate-200 rounded-md px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400 transition-all"
+                value={dateRange.start}
+                max={new Date().toISOString().split('T')[0]}
+                onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">To</span>
+              <input
+                type="date"
+                className="bg-white border border-slate-200 rounded-md px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400 transition-all"
+                value={dateRange.end}
+                max={new Date().toISOString().split('T')[0]}
+                onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+              />
+            </div>
           </div>
+
+          {/* Aging As Of — only relevant on Summary/Accounts tabs */}
+          {(activeTab === 'summary' || activeTab === 'accounts') && (
+            <div className="flex items-center gap-2 border-l border-slate-200 pl-4 h-6">
+              <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider whitespace-nowrap">Aging As Of</span>
+              <input
+                type="date"
+                className="bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 text-xs font-bold text-amber-900 focus:outline-none focus:ring-1 focus:ring-amber-400 shadow-sm"
+                value={agingAsOf}
+                max={new Date().toISOString().split('T')[0]}
+                onChange={(e) => setAgingAsOf(e.target.value)}
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -1363,7 +1475,7 @@ export default function ReportPage() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-widest flex items-center gap-2">
-                    Detail Records 
+                    Detail Records
                     <span className="px-2 py-0.5 bg-slate-100 rounded-full text-[9px] font-black">{drillDown.data.length} Results</span>
                   </h4>
                   {drillDown.data.length > 0 && (

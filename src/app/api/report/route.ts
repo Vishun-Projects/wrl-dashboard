@@ -12,6 +12,8 @@ export async function GET(req: NextRequest) {
     const callType = searchParams.get('callType');
     const startDate = searchParams.get('startDate') || '';
     const endDate = searchParams.get('endDate') || '';
+    const account = searchParams.get('account') || '';
+    const region = searchParams.get('region') || '';
 
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -51,6 +53,21 @@ export async function GET(req: NextRequest) {
     }
     if (endDate) {
       condition += ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) <= '${endDate} 23:59:59'`;
+    }
+
+    if (account && account !== 'All') {
+      const accountNameSafe = account.replace(/'/g, "''");
+      condition += ` AND npartyprofile IN (SELECT ncode FROM mstpartyprofile WHERE vname LIKE '%${accountNameSafe}%')`;
+    }
+
+    if (region && region !== 'All') {
+      const regionsArray = region.split(',').map(r => `'${r.replace(/'/g, "''")}'`).join(',');
+      condition += ` AND nofficeid IN (
+        SELECT o.ncode FROM mstoffice o
+        LEFT JOIN mstoffice op ON o.nunder = op.ncode AND o.nunder <> 0
+        LEFT JOIN mstzones z ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
+        WHERE z.vname IN (${regionsArray})
+      )`;
     }
 
     const topValue = page * limit;

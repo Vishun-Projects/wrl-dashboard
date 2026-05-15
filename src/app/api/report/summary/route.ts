@@ -11,14 +11,12 @@ export async function GET(req: NextRequest) {
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
     if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Fetch user profile for role check
     const { data: profile } = await supabaseAdmin
       .from('app_users')
       .select('role, office_ids')
       .eq('id', user.id)
       .single();
 
-    // Allow hod, super_admin and admin
     const allowedRoles = ['super_admin', 'hod', 'admin'];
     if (!profile?.role || !allowedRoles.includes(profile.role)) {
       return NextResponse.json({ error: 'Forbidden', role: profile?.role }, { status: 403 });
@@ -29,41 +27,40 @@ export async function GET(req: NextRequest) {
     const callType = searchParams.get('callType');
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
+    const agingAsOf = searchParams.get('agingAsOf'); // explicit aging reference date
 
-    let baseCondition = "callsntrnno IS NOT NULL AND callsntrnno <> ''";
+    // Build WHERE conditions for trhcalls (c)
+    // vtrnno IS NOT NULL = only real transactions
+    let baseCondition = "c.vtrnno IS NOT NULL AND c.vtrnno <> ''";
+
     if (officeId && officeId !== 'All') {
       if (officeId.includes(',')) {
-        baseCondition += ` AND nofficeid IN (${officeId})`;
+        baseCondition += ` AND c.nofficeid IN (${officeId})`;
       } else {
-        baseCondition += ` AND nofficeid = ${officeId}`;
+        baseCondition += ` AND c.nofficeid = ${officeId}`;
       }
     }
 
-    if (callType && callType !== 'All') {
-      if (callType.includes(',')) {
-        const types = callType.split(',').map(t => `'${t.trim()}'`).join(',');
-        baseCondition += ` AND calltype IN (${types})`;
-      } else {
-        baseCondition += ` AND calltype = '${callType}'`;
-      }
-    }
-    const dateFilter = (startDate && endDate) 
-      ? `ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104))`
-      : null;
+    // calltype filter is handled via dedicated joins inside the SQL to populate columns
+    let callTypeJoin = '';
 
-    if (startDate && dateFilter) {
-      baseCondition += ` AND ${dateFilter} >= '${startDate}'`;
+    // dtrndate is a native datetime column — no casting needed
+    if (startDate) {
+      baseCondition += ` AND c.dtrndate >= '${startDate}'`;
     }
-    if (endDate && dateFilter) {
-      baseCondition += ` AND ${dateFilter} <= '${endDate} 23:59:59'`;
+    if (endDate) {
+      baseCondition += ` AND c.dtrndate <= '${endDate} 23:59:59'`;
     }
 
-    const agingDate = endDate ? `'${endDate} 23:59:59'` : 'GETDATE()';
+    // agingAsOf wins > endDate > today
+    const agingDate = agingAsOf
+      ? `'${agingAsOf} 23:59:59'`
+      : endDate
+      ? `'${endDate} 23:59:59'`
+      : 'GETDATE()';
 
-    // Agg-First, Join-Later pattern for maximum performance
-    // This aggregates IDs first (fast) and joins names only on the small result set (~1000 rows)
-    const rawRes = await postQuery({
-      "fields": `
+    const rawSql = `
+      SELECT
         t.row_type,
         ISNULL(UPPER(z.vname), 'OTHER') as region,
         ISNULL(o.vcompanyname, '') as branch,
@@ -84,14 +81,14 @@ export async function GET(req: NextRequest) {
         t.deployment_total,
         t.deployment_done,
         t.installation_total,
-        t.installation_done`,
-      "tableName": `(
-        SELECT 
+        t.installation_done
+      FROM (
+        SELECT
           CASE WHEN GROUPING(npartyprofile) = 1 THEN 'BRANCH_ENG' ELSE 'DATA' END as row_type,
           nofficeid,
           ISNULL(npartyprofile, 0) as npartyprofile,
           COUNT(*) as population,
-          COUNT(*) as total_calls,
+          SUM(is_breakdown) as total_calls,
           SUM(is_solved) as solved_calls,
           SUM(is_cancelled) as cancelled_calls,
           SUM(is_open) as open_calls,
@@ -106,46 +103,51 @@ export async function GET(req: NextRequest) {
           SUM(is_installation) as installation_total,
           SUM(is_installation_done) as installation_done
         FROM (
-          SELECT 
-            nofficeid,
-            npartyprofile,
-            callsntrnno,
-            MAX(CASE WHEN callsolved = 'True' OR callsolved = '1' THEN 1 ELSE 0 END) as is_solved,
-            MAX(CASE WHEN ncancelreason IS NOT NULL AND ncancelreason <> 0 THEN 1 ELSE 0 END) as is_cancelled,
-            MAX(CASE WHEN (callsolved = '0' OR callsolved = 'False' OR callsolved IS NULL) AND (ncancelreason IS NULL OR ncancelreason = 0) THEN 1 ELSE 0 END) as is_open,
-            MAX(CASE WHEN DATEDIFF(day, ${dateFilter}, ${agingDate}) <= 2 AND (callsolved = '0' OR callsolved = 'False' OR callsolved IS NULL) AND (ncancelreason IS NULL OR ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_2,
-            MAX(CASE WHEN DATEDIFF(day, ${dateFilter}, ${agingDate}) > 2 AND DATEDIFF(day, ${dateFilter}, ${agingDate}) <= 7 AND (callsolved = '0' OR callsolved = 'False' OR callsolved IS NULL) AND (ncancelreason IS NULL OR ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_3,
-            MAX(CASE WHEN DATEDIFF(day, ${dateFilter}, ${agingDate}) > 7 AND DATEDIFF(day, ${dateFilter}, ${agingDate}) <= 15 AND (callsolved = '0' OR callsolved = 'False' OR callsolved IS NULL) AND (ncancelreason IS NULL OR ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_7,
-            MAX(CASE WHEN DATEDIFF(day, ${dateFilter}, ${agingDate}) > 15 AND (callsolved = '0' OR callsolved = 'False' OR callsolved IS NULL) AND (ncancelreason IS NULL OR ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_15,
-            MAX(CASE WHEN vsolveremarks LIKE '%PART%' OR vcomplaint LIKE '%PART%' THEN 1 ELSE 0 END) as is_part_pending,
-            MAX(CASE WHEN calltype = 'DEPLOYMENT' THEN 1 ELSE 0 END) as is_deployment,
-            MAX(CASE WHEN calltype = 'DEPLOYMENT' AND (callsolved = '1' OR callsolved = 'True') THEN 1 ELSE 0 END) as is_deployment_done,
-            MAX(CASE WHEN calltype = 'INSTALLATION CALL' THEN 1 ELSE 0 END) as is_installation,
-            MAX(CASE WHEN calltype = 'INSTALLATION CALL' AND (callsolved = '1' OR callsolved = 'True') THEN 1 ELSE 0 END) as is_installation_done,
-            MAX(CAST(serviceman AS NVARCHAR(MAX))) as eng_name
-          FROM uv_findtrhcalls_callsearch (NOLOCK)
+          SELECT
+            c.nofficeid,
+            c.npartyprofile,
+            c.vtrnno,
+            MAX(CASE WHEN bd_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as is_breakdown,
+            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND c.bsolved = 1 THEN 1 ELSE 0 END) as is_solved,
+            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND c.ncancelreason IS NOT NULL AND c.ncancelreason <> 0 THEN 1 ELSE 0 END) as is_cancelled,
+            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_open,
+            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 2 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_2,
+            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 2 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 7 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_3,
+            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 7 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_7,
+            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_15,
+            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.vsolveremarks LIKE '%PART%' OR c.vcomplaint LIKE '%PART%') THEN 1 ELSE 0 END) as is_part_pending,
+            MAX(CASE WHEN dep_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as is_deployment,
+            MAX(CASE WHEN dep_ct.ncode IS NOT NULL AND c.bsolved = 1 THEN 1 ELSE 0 END) as is_deployment_done,
+            MAX(CASE WHEN ins_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as is_installation,
+            MAX(CASE WHEN ins_ct.ncode IS NOT NULL AND c.bsolved = 1 THEN 1 ELSE 0 END) as is_installation_done,
+            MAX(u.vname) as eng_name
+          FROM trhcalls c (NOLOCK)
+          LEFT JOIN mstusers u (NOLOCK) ON c.nengineer = u.ncode
+          LEFT JOIN mstfixedselection bd_ct (NOLOCK) ON c.ncalltype = bd_ct.ncode AND bd_ct.vfieldname = 'ncalltype' AND bd_ct.vdisplayvalue = 'BREAKDOWN'
+          LEFT JOIN mstfixedselection dep_ct (NOLOCK) ON c.ncalltype = dep_ct.ncode AND dep_ct.vfieldname = 'ncalltype' AND dep_ct.vdisplayvalue = 'DEPLOYMENT'
+          LEFT JOIN mstfixedselection ins_ct (NOLOCK) ON c.ncalltype = ins_ct.ncode AND ins_ct.vfieldname = 'ncalltype' AND ins_ct.vdisplayvalue = 'INSTALLATION CALL'
           WHERE ${baseCondition}
-          GROUP BY nofficeid, npartyprofile, callsntrnno
+          GROUP BY c.nofficeid, c.npartyprofile, c.vtrnno
         ) t_base
         GROUP BY GROUPING SETS ((nofficeid, npartyprofile), (nofficeid))
       ) t
       JOIN mstoffice o (NOLOCK) ON t.nofficeid = o.ncode
       LEFT JOIN mstoffice op (NOLOCK) ON o.nunder = op.ncode AND o.nunder <> 0
       LEFT JOIN mstzones z (NOLOCK) ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
-      LEFT JOIN mstpartyprofile p (NOLOCK) ON t.npartyprofile = p.ncode`,
-      "condition": `1=1`,
-      "orderBy": `region ASC`
-    });
+      LEFT JOIN mstpartyprofile p (NOLOCK) ON t.npartyprofile = p.ncode
+      ORDER BY region ASC
+    `;
 
+    const rawRes = await postQuery({ rawSql });
     const rawData = rawRes.data || [];
 
     // Aggregate in Node.js
     const branchMap = new Map();
     const accountMap = new Map();
 
-    rawData.forEach(row => {
+    rawData.forEach((row: any) => {
       const isBranchEng = row.row_type === 'BRANCH_ENG';
-      
+
       if (isBranchEng) {
         if (!branchMap.has(row.officeId)) {
           branchMap.set(row.officeId, {
@@ -157,7 +159,6 @@ export async function GET(req: NextRequest) {
         }
         branchMap.get(row.officeId).active_eng = Number(row.active_eng_count);
       } else {
-        // Add to branch metrics
         if (!branchMap.has(row.officeId)) {
           branchMap.set(row.officeId, {
             officeId: row.officeId, parentId: row.parentId, branch: row.branch, region: row.region,
@@ -177,7 +178,6 @@ export async function GET(req: NextRequest) {
         b.age_15 += Number(row.age_15);
         b.part_pending += Number(row.part_pending);
 
-        // Add to account metrics
         const aKey = `${row.region}-${row.account}`;
         if (!accountMap.has(aKey)) {
           accountMap.set(aKey, {
@@ -207,9 +207,9 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    return NextResponse.json({ 
-      branchSummary: Array.from(branchMap.values()), 
-      accountSummary: Array.from(accountMap.values()) 
+    return NextResponse.json({
+      branchSummary: Array.from(branchMap.values()),
+      accountSummary: Array.from(accountMap.values())
     });
 
   } catch (err: any) {
