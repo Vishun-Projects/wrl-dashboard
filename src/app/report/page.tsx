@@ -76,8 +76,8 @@ export default function ReportPage() {
       if (dateRange.start) url += `&startDate=${dateRange.start}`;
       if (dateRange.end) url += `&endDate=${dateRange.end}`;
 
-      // Decide if we need to fetch summary
-      const needsSummary = (activeTab === 'summary' || activeTab === 'accounts') && p === 1;
+      // Fetch summary only on the first page load or full refresh
+      const needsSummary = p === 1;
       let summaryUrl = '';
       if (needsSummary) {
         summaryUrl = `/api/report/summary?officeId=${selectedOfficeId}`;
@@ -134,11 +134,8 @@ export default function ReportPage() {
   };
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchData(1);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [selectedOfficeId, dateRange, activeTab]);
+    fetchData(1);
+  }, []); // Only load once on mount. Subsequent refreshes are manual via the Refresh button.
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
