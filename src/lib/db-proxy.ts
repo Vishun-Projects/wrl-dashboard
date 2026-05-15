@@ -38,7 +38,6 @@ async function executePostWithRetry(params: any) {
     formData.append('txt_TableName', params.tableName);
     formData.append('txt_Condition', params.condition || '1=1');
     formData.append('txt_OrderBy', params.orderBy || '');
-    formData.append('txt_GroupBy', params.groupBy || '');
     formData.append('btn_View', 'Execute');
 
 
@@ -92,7 +91,6 @@ export async function postQuery(params: {
     tableName: string;
     condition?: string;
     orderBy?: string;
-    groupBy?: string;
 }) {
     const result = await executePostWithRetry(params);
     if ('data' in result) return result; // Return if no records found early exit

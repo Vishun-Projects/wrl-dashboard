@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { 
   Search, Building2, Filter, ArrowRight, 
   ChevronDown, LayoutGrid, List, SlidersHorizontal,
-  Clock, Shield, ArrowUpRight, RefreshCw, ArrowUp, Database
+  Clock, Shield, ArrowUpRight, RefreshCw, ArrowUp, Database, FileSpreadsheet
 } from 'lucide-react';
 import { CallCard } from './CallCard';
 import { CallDetail } from './CallDetail';
@@ -67,6 +68,7 @@ export function MobileView({
   onNext, onPrev, hasNext, hasPrev,
   currentIndex, carouselTotalCount
 }: MobileViewProps) {
+  const router = useRouter();
   const [showFilters, setShowFilters] = useState(false);
 
   const STATUSES = [
@@ -96,12 +98,22 @@ export function MobileView({
             </div>
           </div>
         </div>
-        <button 
-          onClick={() => setShowFilters(!showFilters)}
-          className="bg-white border border-[#e2e8f0] rounded-lg px-2.5 py-1.5 text-[14px] text-[#64748b]"
-        >
-          ⚙
-        </button>
+        <div className="flex items-center gap-2">
+          {(userProfile?.role === 'hod' || userProfile?.role === 'super_admin') && (
+            <button 
+              onClick={() => router.push('/report')}
+              className="bg-white border border-[#e2e8f0] rounded-lg px-2.5 py-1.5 text-[14px] text-emerald-600"
+            >
+              <FileSpreadsheet size={16} />
+            </button>
+          )}
+          <button 
+            onClick={() => setShowFilters(!showFilters)}
+            className="bg-white border border-[#e2e8f0] rounded-lg px-2.5 py-1.5 text-[14px] text-[#64748b]"
+          >
+            ⚙
+          </button>
+        </div>
       </header>
 
       {/* Search */}

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef } from 'react';
-import { LogOut, Shield, Search, Building2, ChevronDown, ArrowRight, RefreshCw, ArrowUp, Database } from 'lucide-react';
+import { LogOut, Shield, Search, Building2, ChevronDown, ArrowRight, RefreshCw, ArrowUp, Database, FileSpreadsheet } from 'lucide-react';
 import { CallTable } from './CallTable';
 import { CallDetail } from './CallDetail';
 import { DateRangePicker } from './DateRangePicker';
@@ -178,6 +178,15 @@ export function DesktopView({
               </div>
             )}
             <div className="h-6 w-px bg-slate-100 mx-1" />
+            {(userProfile?.role === 'hod' || userProfile?.role === 'super_admin') && (
+              <button 
+                onClick={() => router.push('/report')}
+                className="flex items-center gap-2 h-9 px-4 bg-emerald-50 text-emerald-700 rounded-lg text-[13px] font-bold border border-emerald-100 hover:bg-emerald-100 transition-all shadow-sm"
+              >
+                <FileSpreadsheet size={16} />
+                <span>Reports</span>
+              </button>
+            )}
             <button onClick={() => supabase.auth.signOut().then(() => router.push('/login'))} className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-50 hover:text-slate-900 transition-all">
               <LogOut size={16} />
             </button>

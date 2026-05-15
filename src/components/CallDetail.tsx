@@ -19,7 +19,7 @@ interface CallDetailProps {
 
 export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext, onPrev, hasNext, hasPrev, currentIndex, totalCount }: CallDetailProps) {
 
-  const [activeTab, setActiveTab] = useState<'details' | 'visits' | 'parts' | 'comments' | 'images'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'visits' | 'faults' | 'parts' | 'comments' | 'images'>('details');
   const [note, setNote] = useState('');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
@@ -306,7 +306,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
           <div className="flex-1 flex flex-col border-r border-slate-100 overflow-hidden">
             {/* Tabs */}
             <div
-              className="flex border-b border-slate-100 px-4 lg:px-6 scrollbar-hide touch-pan-x"
+              className="flex border-b border-slate-100 px-4 lg:px-6 scrollbar-hide touch-pan-x overflow-x-auto lg:overflow-x-hidden overflow-y-hidden flex-nowrap"
               onTouchStart={(e) => e.stopPropagation()}
               onTouchMove={(e) => e.stopPropagation()}
             >

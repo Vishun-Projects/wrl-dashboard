@@ -30,7 +30,7 @@ export async function GET(request: Request) {
 
     
     const offices = await postQuery({
-      fields: 'ncode, vcompanyname',
+      fields: 'ncode, vcompanyname, nunder',
       tableName: 'mstoffice',
       condition: isHod ? '1=1' : `ncode IN (${assignedOffices.map((id: string) => `'${id}'`).join(',') || "''"})`,
       orderBy: 'vcompanyname ASC'
