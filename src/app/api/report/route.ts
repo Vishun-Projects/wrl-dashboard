@@ -60,6 +60,15 @@ export async function GET(req: NextRequest) {
       condition += ` AND npartyprofile IN (SELECT ncode FROM mstpartyprofile WHERE vname LIKE '%${accountNameSafe}%')`;
     }
 
+    if (callType && callType !== 'All') {
+      if (callType.includes(',')) {
+        const types = callType.split(',').map(t => `'${t.trim().replace(/'/g, "''")}'`).join(',');
+        condition += ` AND calltype IN (${types})`;
+      } else {
+        condition += ` AND calltype = '${callType.replace(/'/g, "''")}'`;
+      }
+    }
+
     if (region && region !== 'All') {
       const regionsArray = region.split(',').map(r => `'${r.replace(/'/g, "''")}'`).join(',');
       condition += ` AND nofficeid IN (
@@ -78,7 +87,7 @@ export async function GET(req: NextRequest) {
         condition
       }),
       postQuery({
-        fields: "callsntrnno, callsdtrndate, PartyName, vlocation, itemname, callsvserialno, serviceman, vcomplaint, Status, callstatus, callsolved, Priority, callsolveddate, vsolveremarks, UniqueCallNo, vpersoncalling, vinsttel1, vinstaddress, addedby, officename",
+        fields: "callsntrnno, callsdtrndate, PartyName, vlocation, itemname, callsvserialno, serviceman, vcomplaint, Status, callstatus, callsolved, Priority, callsolveddate, vsolveremarks, UniqueCallNo, vpersoncalling, vinsttel1, vinstaddress, addedby, officename, calltype",
         tableName: "uv_findtrhcalls_callsearch (NOLOCK)",
         condition,
         orderBy: "ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) DESC",

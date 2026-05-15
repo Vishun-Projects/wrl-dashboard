@@ -68,6 +68,15 @@ export async function GET(req: NextRequest) {
         o.ncode as officeId,
         o.nunder as parentId,
         t.population,
+        t.all_total,
+        t.all_solved,
+        t.all_cancelled,
+        t.all_open,
+        t.all_age_2,
+        t.all_age_3,
+        t.all_age_7,
+        t.all_age_15,
+        t.all_part_pending,
         t.total_calls,
         t.solved_calls,
         t.cancelled_calls,
@@ -88,6 +97,15 @@ export async function GET(req: NextRequest) {
           nofficeid,
           ISNULL(npartyprofile, 0) as npartyprofile,
           COUNT(*) as population,
+          SUM(is_all) as all_total,
+          SUM(is_all_solved) as all_solved,
+          SUM(is_all_cancelled) as all_cancelled,
+          SUM(is_all_open) as all_open,
+          SUM(is_all_age_2) as all_age_2,
+          SUM(is_all_age_3) as all_age_3,
+          SUM(is_all_age_7) as all_age_7,
+          SUM(is_all_age_15) as all_age_15,
+          SUM(is_all_part_pending) as all_part_pending,
           SUM(is_breakdown) as total_calls,
           SUM(is_solved) as solved_calls,
           SUM(is_cancelled) as cancelled_calls,
@@ -107,6 +125,15 @@ export async function GET(req: NextRequest) {
             c.nofficeid,
             c.npartyprofile,
             c.vtrnno,
+            1 as is_all,
+            MAX(CASE WHEN c.bsolved = 1 THEN 1 ELSE 0 END) as is_all_solved,
+            MAX(CASE WHEN c.ncancelreason IS NOT NULL AND c.ncancelreason <> 0 THEN 1 ELSE 0 END) as is_all_cancelled,
+            MAX(CASE WHEN (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_all_open,
+            MAX(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) <= 2 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_all_age_2,
+            MAX(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 2 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 7 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_all_age_3,
+            MAX(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 7 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_all_age_7,
+            MAX(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_all_age_15,
+            MAX(CASE WHEN c.vsolveremarks LIKE '%PART%' OR c.vcomplaint LIKE '%PART%' THEN 1 ELSE 0 END) as is_all_part_pending,
             MAX(CASE WHEN bd_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as is_breakdown,
             MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND c.bsolved = 1 THEN 1 ELSE 0 END) as is_solved,
             MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND c.ncancelreason IS NOT NULL AND c.ncancelreason <> 0 THEN 1 ELSE 0 END) as is_cancelled,
@@ -154,7 +181,10 @@ export async function GET(req: NextRequest) {
             officeId: row.officeId, parentId: row.parentId, branch: row.branch, region: row.region,
             total_calls: 0, solved_calls: 0, cancelled_calls: 0, open_calls: 0,
             age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
-            active_eng: 0
+            all_total: 0, all_solved: 0, all_cancelled: 0, all_open: 0,
+            all_age_2: 0, all_age_3: 0, all_age_7: 0, all_age_15: 0, all_part_pending: 0,
+            deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
+            active_eng: 0, population: 0
           });
         }
         branchMap.get(row.officeId).active_eng = Number(row.active_eng_count);
@@ -164,19 +194,28 @@ export async function GET(req: NextRequest) {
             officeId: row.officeId, parentId: row.parentId, branch: row.branch, region: row.region,
             total_calls: 0, solved_calls: 0, cancelled_calls: 0, open_calls: 0,
             age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
-            active_eng: 0
+            all_total: 0, all_solved: 0, all_cancelled: 0, all_open: 0,
+            all_age_2: 0, all_age_3: 0, all_age_7: 0, all_age_15: 0, all_part_pending: 0,
+            deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
+            active_eng: 0, population: 0
           });
         }
         const b = branchMap.get(row.officeId);
-        b.total_calls += Number(row.total_calls);
-        b.solved_calls += Number(row.solved_calls);
-        b.cancelled_calls += Number(row.cancelled_calls);
-        b.open_calls += Number(row.open_calls);
-        b.age_2 += Number(row.age_2);
-        b.age_3 += Number(row.age_3);
-        b.age_7 += Number(row.age_7);
-        b.age_15 += Number(row.age_15);
-        b.part_pending += Number(row.part_pending);
+        b.population += Number(row.population);
+        b.total_calls += Number(row.all_total);
+        b.solved_calls += Number(row.all_solved);
+        b.cancelled_calls += Number(row.all_cancelled);
+        b.open_calls += Number(row.all_open);
+        b.age_2 += Number(row.all_age_2);
+        b.age_3 += Number(row.all_age_3);
+        b.age_7 += Number(row.all_age_7);
+        b.age_15 += Number(row.all_age_15);
+        b.part_pending += Number(row.all_part_pending);
+
+        b.deployment_total += Number(row.deployment_total);
+        b.deployment_done += Number(row.deployment_done);
+        b.installation_total += Number(row.installation_total);
+        b.installation_done += Number(row.installation_done);
 
         const aKey = `${row.region}-${row.account}`;
         if (!accountMap.has(aKey)) {

@@ -46,6 +46,7 @@ export default function ReportPage() {
   const [showCallTypeDropdown, setShowCallTypeDropdown] = useState(false);
   const [exportingDetailed, setExportingDetailed] = useState(false);
   const [agingAsOf, setAgingAsOf] = useState(new Date().toISOString().split('T')[0]);
+  const [officeSearch, setOfficeSearch] = useState('');
   const [drillDown, setDrillDown] = useState<{
     isOpen: boolean;
     loading: boolean;
@@ -398,6 +399,7 @@ export default function ReportPage() {
     if (activeTab === 'register') {
       sheet.columns = [
         { header: 'Reference', key: 'ref', width: 15 },
+        { header: 'Call Type', key: 'type', width: 15 },
         { header: 'Date', key: 'date', width: 12 },
         { header: 'Customer', key: 'customer', width: 30 },
         { header: 'Location', key: 'location', width: 20 },
@@ -414,13 +416,39 @@ export default function ReportPage() {
 
       applyHeaderStyle(sheet.getRow(1));
 
-      data.forEach(row => {
+      let exportData = data;
+      // For Call Register, if there's more than one page, fetch everything for export
+      if (activeTab === 'register' && total > limit) {
+        setExportingDetailed(true);
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const headers = { 'Authorization': `Bearer ${session?.access_token}` };
+          const params = new URLSearchParams({
+            officeId: selectedOfficeIds.join(',') || 'All',
+            callType: selectedCallType,
+            startDate: dateRange.start,
+            endDate: dateRange.end,
+            limit: '20000', // Fetch a large batch for export
+            page: '1'
+          });
+          const res = await axios.get(`/api/report?${params}`, { headers });
+          exportData = res.data.data || [];
+        } catch (err) {
+          console.error("Full data fetch failed:", err);
+          // Fallback to current page data
+        } finally {
+          setExportingDetailed(false);
+        }
+      }
+
+      exportData.forEach(row => {
         const isSolved = row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True';
         const isAssigned = row.Status === 'Assigned' || row.callstatus === 'Assigned';
         const statusText = row.Status === 'UNKNOWN' ? 'PENDING' : (row.Status || row.callstatus || 'OPEN');
 
         const r = sheet.addRow({
           ref: row.callsntrnno,
+          type: row.calltype,
           date: formatDate(row.callsdtrndate),
           customer: row.PartyName,
           location: row.vlocation,
@@ -656,6 +684,49 @@ export default function ReportPage() {
         </form>
 
         <div className="flex items-center gap-4 ml-auto">
+          {/* Call Type Filter — only for Call Register tab */}
+          {activeTab === 'register' && (
+            <div className="relative">
+              <button
+                onClick={() => setShowCallTypeDropdown(!showCallTypeDropdown)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-md text-xs font-bold text-slate-700 hover:border-slate-400 transition-all shadow-sm min-w-[140px]"
+              >
+                <span className="flex-1 text-left truncate">
+                  {selectedCallType === 'All' ? 'All Call Types' : selectedCallType}
+                </span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showCallTypeDropdown ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showCallTypeDropdown && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowCallTypeDropdown(false)}
+                  />
+                  <div className="absolute top-full right-0 mt-1 w-64 bg-white border border-slate-200 shadow-xl rounded-lg z-50 py-1 max-h-72 overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+                    <div className="px-3 py-1.5 border-b border-slate-100 bg-slate-50">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Call Type</span>
+                    </div>
+                    {['All', ...callTypes].map(type => (
+                      <button
+                        key={type}
+                        onClick={() => {
+                          setSelectedCallType(type);
+                          setShowCallTypeDropdown(false);
+                          setPage(1);
+                        }}
+                        className={`w-full text-left px-4 py-2 text-[11px] hover:bg-slate-50 transition-colors font-medium ${selectedCallType === type ? 'text-blue-600 bg-blue-50/50 font-bold' : 'text-slate-600'
+                          }`}
+                      >
+                        {type === 'All' ? 'All Call Types' : type}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-3">
             {/* Branch Filter */}
             <div className="relative">
@@ -676,14 +747,50 @@ export default function ReportPage() {
                     <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
                       <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Branches</span>
                       <button
-                        onClick={() => setSelectedOfficeIds([])}
+                        onClick={() => { setSelectedOfficeIds([]); setOfficeSearch(''); }}
                         className="text-[10px] font-bold text-slate-400 hover:text-slate-900 px-2 py-1 rounded hover:bg-white"
                       >
                         Clear All
                       </button>
                     </div>
+                    <div className="p-2 border-b border-slate-100">
+                      <div className="relative">
+                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                        <input
+                          type="text"
+                          placeholder="Search branches..."
+                          className="w-full pl-7 pr-2 py-1.5 text-[11px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-slate-400"
+                          value={officeSearch}
+                          onChange={(e) => setOfficeSearch(e.target.value)}
+                        />
+                      </div>
+                    </div>
                     <div className="max-h-72 overflow-y-auto p-1 custom-scrollbar">
-                      {(() => {
+                      {officeSearch ? (
+                        offices.filter(o => o.vcompanyname.toLowerCase().includes(officeSearch.toLowerCase())).map(o => {
+                          const isSelected = selectedOfficeIds.includes(String(o.ncode));
+                          return (
+                            <label key={o.ncode} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
+                              <input
+                                type="checkbox"
+                                className="w-3.5 h-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                                checked={isSelected}
+                                onChange={(e) => {
+                                  const val = String(o.ncode);
+                                  if (e.target.checked) {
+                                    setSelectedOfficeIds(prev => Array.from(new Set([...prev, val])));
+                                  } else {
+                                    setSelectedOfficeIds(prev => prev.filter(id => id !== val));
+                                  }
+                                }}
+                              />
+                              <span className={`text-[11px] font-medium ${isSelected ? 'text-slate-900 font-bold' : 'text-slate-600'} group-hover:text-slate-900`}>
+                                {o.vcompanyname}
+                              </span>
+                            </label>
+                          );
+                        })
+                      ) : ((() => {
                         const buildTree = (parentId: string | null = '0', level = 0): React.ReactNode[] => {
                           return offices
                             .filter(o => String(o.nunder || '0') === String(parentId || '0'))
@@ -734,7 +841,7 @@ export default function ReportPage() {
                             }).flat();
                         };
                         return buildTree('0', 0);
-                      })()}
+                      })())}
                     </div>
                     <div className="p-2 border-t border-slate-100 bg-slate-50 flex justify-end">
                       <button
@@ -833,6 +940,7 @@ export default function ReportPage() {
                   <th className="px-4 py-2.5 text-[11px] font-medium text-slate-500 uppercase tracking-wider w-12 text-center border-r border-slate-100">#</th>
                   {[
                     { key: 'callsntrnno', label: 'Reference' },
+                    { key: 'calltype', label: 'Call Type' },
                     { key: 'callsdtrndate', label: 'Date' },
                     { key: 'PartyName', label: 'Customer' },
                     { key: 'vlocation', label: 'Location' },
@@ -864,6 +972,11 @@ export default function ReportPage() {
                       {(page - 1) * limit + idx + 1}
                     </td>
                     <td className="px-4 py-2 text-[11px] font-medium text-slate-900 border-r border-slate-50 whitespace-nowrap">{row.callsntrnno}</td>
+                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap">
+                      <span className="px-2 py-0.5 bg-slate-100 rounded text-[9px] font-bold text-slate-600 border border-slate-200">
+                        {row.calltype || 'N/A'}
+                      </span>
+                    </td>
                     <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap uppercase">
                       {formatDate(row.callsdtrndate)}
                     </td>
