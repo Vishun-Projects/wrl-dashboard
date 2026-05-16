@@ -1,21 +1,21 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { supabase } from '@/lib/supabase';
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 // Admin operations require service role for auth management
-const supabaseAdmin = createClient(
+const supabaseAdmin = createSupabaseClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
 export async function GET(request: Request) {
-  const authHeader = request.headers.get('Authorization');
-  const token = authHeader?.split(' ')[1];
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-  if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (authError || !user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   // Check if requester is HOD via raw SQL
   const result: any[] = await prisma.$queryRawUnsafe(
@@ -36,12 +36,12 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const authHeader = request.headers.get('Authorization');
-  const token = authHeader?.split(' ')[1];
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const supabase = await createClient();
+  const { data: { user: adminUser }, error: authError } = await supabase.auth.getUser();
 
-  const { data: { user: adminUser }, error: authError } = await supabase.auth.getUser(token);
-  if (authError || !adminUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (authError || !adminUser) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const result: any[] = await prisma.$queryRawUnsafe(
     'SELECT role FROM public.app_users WHERE id = $1 LIMIT 1',
@@ -83,12 +83,12 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const authHeader = request.headers.get('Authorization');
-  const token = authHeader?.split(' ')[1];
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const supabase = await createClient();
+  const { data: { user: adminUser }, error: authError } = await supabase.auth.getUser();
 
-  const { data: { user: adminUser }, error: authError } = await supabase.auth.getUser(token);
-  if (authError || !adminUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (authError || !adminUser) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const result: any[] = await prisma.$queryRawUnsafe(
     'SELECT role FROM public.app_users WHERE id = $1 LIMIT 1',
@@ -114,12 +114,12 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const authHeader = request.headers.get('Authorization');
-  const token = authHeader?.split(' ')[1];
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const supabase = await createClient();
+  const { data: { user: adminUser }, error: authError } = await supabase.auth.getUser();
 
-  const { data: { user: adminUser }, error: authError } = await supabase.auth.getUser(token);
-  if (authError || !adminUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (authError || !adminUser) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const result: any[] = await prisma.$queryRawUnsafe(
     'SELECT role FROM public.app_users WHERE id = $1 LIMIT 1',

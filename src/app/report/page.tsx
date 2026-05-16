@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import ExcelJS from 'exceljs';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client';
 import axios from 'axios';
 import {
   Download,
@@ -12,15 +12,18 @@ import {
   ChevronDown,
   FileSpreadsheet,
   FileText,
+  AlertCircle,
   X
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function ReportPage() {
+  const supabase = createClient();
   const [activeTab, setActiveTab] = useState<'register' | 'summary' | 'accounts'>('register');
   const [data, setData] = useState<any[]>([]);
   const [summaryData, setSummaryData] = useState<any[]>([]);
   const [accountsData, setAccountsData] = useState<any[]>([]);
+  const [globalHeadcount, setGlobalHeadcount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -41,7 +44,7 @@ export default function ReportPage() {
   const [filterRegion, setFilterRegion] = useState<string[]>([]); // Array for multiselect
   const [showRegionDropdown, setShowRegionDropdown] = useState(false);
   const [filterAccount, setFilterAccount] = useState('All');
-  const [selectedCallType, setSelectedCallType] = useState('All');
+  const [selectedCallTypes, setSelectedCallTypes] = useState<string[]>([]);
   const [callTypes, setCallTypes] = useState<string[]>([]);
   const [showCallTypeDropdown, setShowCallTypeDropdown] = useState(false);
   const [exportingDetailed, setExportingDetailed] = useState(false);
@@ -64,6 +67,7 @@ export default function ReportPage() {
     title: '',
     params: null
   });
+  const [registerSummary, setRegisterSummary] = useState<{ total: number, transferred: number, cancelled: number, solved: number, open: number } | null>(null);
   const fetchControllerRef = React.useRef<AbortController | null>(null);
   const drillDownControllerRef = React.useRef<AbortController | null>(null);
 
@@ -124,6 +128,7 @@ export default function ReportPage() {
 
     setLoading(true);
     const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
+    const callTypesParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -132,7 +137,7 @@ export default function ReportPage() {
       };
 
       // Register data URL
-      let url = `/api/report?page=${p}&limit=${limit}&officeId=${officeIdsParam}&callType=${selectedCallType}`;
+      let url = `/api/report?page=${p}&limit=${limit}&officeId=${officeIdsParam}&callType=${callTypesParam}`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
       if (dateRange.start) url += `&startDate=${dateRange.start}`;
       if (dateRange.end) url += `&endDate=${dateRange.end}`;
@@ -141,7 +146,7 @@ export default function ReportPage() {
       const needsSummary = p === 1;
       let summaryUrl = '';
       if (needsSummary) {
-        summaryUrl = `/api/report/summary?officeId=${officeIdsParam}&callType=${selectedCallType}`;
+        summaryUrl = `/api/report/summary?officeId=${officeIdsParam}&callType=${callTypesParam}`;
         if (dateRange.start) summaryUrl += `&startDate=${dateRange.start}`;
         if (dateRange.end) summaryUrl += `&endDate=${dateRange.end}`;
         if (agingAsOf) summaryUrl += `&agingAsOf=${agingAsOf}`;
@@ -157,14 +162,17 @@ export default function ReportPage() {
         setData(regRes.data.data);
         setTotal(regRes.data.total);
         setPage(p);
+        setRegisterSummary(regRes.data.summary || null);
 
         setSummaryData(summRes.data.branchSummary);
         setAccountsData(summRes.data.accountSummary);
+        setGlobalHeadcount(summRes.data.globalHeadcount || 0);
       } else {
         const regRes = await axios.get(url, { headers, signal: controller.signal });
         setData(regRes.data.data);
         setTotal(regRes.data.total);
         setPage(p);
+        setRegisterSummary(regRes.data.summary || null);
       }
     } catch (err: any) {
       if (axios.isCancel(err)) {
@@ -230,7 +238,6 @@ export default function ReportPage() {
       setDrillDown(prev => ({ ...prev, loading: false }));
     }
   };
-  ;
 
   const fetchEngineers = async (branch: string) => {
     setFetchingEngs(true);
@@ -255,7 +262,7 @@ export default function ReportPage() {
   // Automatically fetch data when filters change
   useEffect(() => {
     fetchData(1);
-  }, [dateRange.start, dateRange.end, selectedOfficeIds, filterAccount, selectedCallType]);
+  }, [dateRange.start, dateRange.end, selectedOfficeIds, filterAccount, selectedCallTypes]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -274,7 +281,7 @@ export default function ReportPage() {
           page: 1,
           limit: 100000,
           officeId: selectedOfficeIds.length ? selectedOfficeIds.join(',') : 'All',
-          callType: selectedCallType,
+          callType: selectedCallTypes.length ? selectedCallTypes.join(',') : 'All',
           startDate: dateRange.start,
           endDate: dateRange.end,
           ...(activeTab === 'accounts' ? {
@@ -411,6 +418,11 @@ export default function ReportPage() {
         { header: 'Priority', key: 'priority', width: 10 },
         { header: 'Solved Date', key: 'solvedDate', width: 12 },
         { header: 'Remarks', key: 'remarks', width: 30 },
+        { header: 'ID', key: 'id', width: 15 },
+        { header: 'Contact Person', key: 'contact', width: 20 },
+        { header: 'Phone', key: 'phone', width: 15 },
+        { header: 'Address', key: 'address', width: 40 },
+        { header: 'User', key: 'user', width: 15 },
         { header: 'Branch', key: 'branch', width: 20 },
       ];
 
@@ -425,12 +437,14 @@ export default function ReportPage() {
           const headers = { 'Authorization': `Bearer ${session?.access_token}` };
           const params = new URLSearchParams({
             officeId: selectedOfficeIds.join(',') || 'All',
-            callType: selectedCallType,
+            callType: selectedCallTypes.join(',') || 'All',
             startDate: dateRange.start,
             endDate: dateRange.end,
             limit: '20000', // Fetch a large batch for export
             page: '1'
           });
+          if (search) params.append('search', search);
+
           const res = await axios.get(`/api/report?${params}`, { headers });
           exportData = res.data.data || [];
         } catch (err) {
@@ -451,15 +465,20 @@ export default function ReportPage() {
           type: row.calltype,
           date: formatDate(row.callsdtrndate),
           customer: row.PartyName,
-          location: row.vlocation,
+          location: row.vlocation || row.vcity || row.routeName || '—',
           product: row.itemname,
           serial: row.callsvserialno,
           tech: row.serviceman,
           complaint: row.vcomplaint,
           status: statusText,
           priority: row.Priority,
-          solvedDate: formatDate(row.callsolveddate),
-          remarks: row.vsolveremarks,
+          solvedDate: isSolved ? formatDate(row.callsolveddate) : '—',
+          remarks: row.vsolveremarks || row.cancel_reason || '—',
+          id: row.UniqueCallNo,
+          contact: row.vpersoncalling,
+          phone: row.vinsttel1,
+          address: row.vinstaddress,
+          user: row.addedby,
           branch: row.officename
         });
 
@@ -671,190 +690,199 @@ export default function ReportPage() {
       </div>
 
       {/* Control Bar */}
-      <div className="bg-white border-b border-slate-100 px-6 py-3 flex items-center gap-4 flex-wrap lg:flex-nowrap flex-shrink-0">
-        <form onSubmit={handleSearch} className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-          <input
-            type="text"
-            placeholder="Filter records..."
-            className="w-full bg-white border border-slate-200 rounded-md py-1.5 pl-9 pr-4 text-xs focus:outline-none focus:ring-1 focus:ring-slate-400 transition-all"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </form>
+      <div className="flex flex-wrap items-center gap-3 px-6 py-3 bg-white border-b border-slate-200">
+        <div className="flex items-center gap-3">
+          {/* Call Type Filter */}
+          <div className="relative">
+            <button
+              onClick={() => setShowCallTypeDropdown(!showCallTypeDropdown)}
+              className="min-w-[140px] max-w-[200px] bg-white border border-slate-200 rounded-md px-3 py-1.5 text-xs font-bold text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all shadow-sm"
+            >
+              <span className="truncate">
+                {selectedCallTypes.length === 0 ? 'All Call Types' : `${selectedCallTypes.length} Types Selected`}
+              </span>
+              <ChevronDown size={14} className={`transition-transform duration-200 ${showCallTypeDropdown ? 'rotate-180' : ''}`} />
+            </button>
 
-        <div className="flex items-center gap-4 ml-auto">
-          {/* Call Type Filter — only for Call Register tab */}
-          {activeTab === 'register' && (
-            <div className="relative">
-              <button
-                onClick={() => setShowCallTypeDropdown(!showCallTypeDropdown)}
-                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-md text-xs font-bold text-slate-700 hover:border-slate-400 transition-all shadow-sm min-w-[140px]"
-              >
-                <span className="flex-1 text-left truncate">
-                  {selectedCallType === 'All' ? 'All Call Types' : selectedCallType}
-                </span>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showCallTypeDropdown ? 'rotate-180' : ''}`} />
-              </button>
-
-              {showCallTypeDropdown && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setShowCallTypeDropdown(false)}
-                  />
-                  <div className="absolute top-full right-0 mt-1 w-64 bg-white border border-slate-200 shadow-xl rounded-lg z-50 py-1 max-h-72 overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
-                    <div className="px-3 py-1.5 border-b border-slate-100 bg-slate-50">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Call Type</span>
-                    </div>
-                    {['All', ...callTypes].map(type => (
-                      <button
-                        key={type}
-                        onClick={() => {
-                          setSelectedCallType(type);
-                          setShowCallTypeDropdown(false);
-                          setPage(1);
-                        }}
-                        className={`w-full text-left px-4 py-2 text-[11px] hover:bg-slate-50 transition-colors font-medium ${selectedCallType === type ? 'text-blue-600 bg-blue-50/50 font-bold' : 'text-slate-600'
-                          }`}
-                      >
-                        {type === 'All' ? 'All Call Types' : type}
-                      </button>
-                    ))}
+            {showCallTypeDropdown && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setShowCallTypeDropdown(false)}
+                />
+                <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 shadow-xl rounded-lg z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                  <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Call Type</span>
+                    <button
+                      onClick={() => setSelectedCallTypes([])}
+                      className="text-[10px] font-bold text-slate-400 hover:text-slate-900 px-2 py-1 rounded hover:bg-white"
+                    >
+                      Clear All
+                    </button>
                   </div>
-                </>
-              )}
-            </div>
-          )}
+                  <div className="max-h-72 overflow-y-auto p-1 custom-scrollbar">
+                    {callTypes.map(type => {
+                      const isSelected = selectedCallTypes.includes(type);
+                      return (
+                        <label key={type} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
+                          <input
+                            type="checkbox"
+                            className="w-3.5 h-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedCallTypes(prev => [...prev, type]);
+                              } else {
+                                setSelectedCallTypes(prev => prev.filter(t => t !== type));
+                              }
+                            }}
+                          />
+                          <span className={`text-[11px] font-medium ${isSelected ? 'text-slate-900 font-bold' : 'text-slate-600'} group-hover:text-slate-900`}>
+                            {type}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="p-2 border-t border-slate-100 bg-slate-50 flex justify-end">
+                    <button
+                      onClick={() => setShowCallTypeDropdown(false)}
+                      className="bg-slate-900 text-white px-4 py-1 rounded text-[10px] font-bold hover:bg-slate-800 transition-colors"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
 
-          <div className="flex items-center gap-3">
-            {/* Branch Filter */}
-            <div className="relative">
-              <button
-                onClick={() => setShowOfficeDropdown(!showOfficeDropdown)}
-                className="min-w-[140px] max-w-[200px] bg-white border border-slate-200 rounded-md px-3 py-1.5 text-xs font-bold text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all shadow-sm"
-              >
-                <span className="truncate">
-                  {selectedOfficeIds.length === 0 ? 'All Branches' : `${selectedOfficeIds.length} Selected`}
-                </span>
-                <ChevronDown size={14} className={`transition-transform duration-200 ${showOfficeDropdown ? 'rotate-180' : ''}`} />
-              </button>
+          {/* Branch Filter */}
+          <div className="relative">
+            <button
+              onClick={() => setShowOfficeDropdown(!showOfficeDropdown)}
+              className="min-w-[140px] max-w-[200px] bg-white border border-slate-200 rounded-md px-3 py-1.5 text-xs font-bold text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all shadow-sm"
+            >
+              <span className="truncate">
+                {selectedOfficeIds.length === 0 ? 'All Branches' : `${selectedOfficeIds.length} Selected`}
+              </span>
+              <ChevronDown size={14} className={`transition-transform duration-200 ${showOfficeDropdown ? 'rotate-180' : ''}`} />
+            </button>
 
-              {showOfficeDropdown && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowOfficeDropdown(false)} />
-                  <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 shadow-xl rounded-lg z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-                    <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Branches</span>
-                      <button
-                        onClick={() => { setSelectedOfficeIds([]); setOfficeSearch(''); }}
-                        className="text-[10px] font-bold text-slate-400 hover:text-slate-900 px-2 py-1 rounded hover:bg-white"
-                      >
-                        Clear All
-                      </button>
-                    </div>
-                    <div className="p-2 border-b border-slate-100">
-                      <div className="relative">
-                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
-                        <input
-                          type="text"
-                          placeholder="Search branches..."
-                          className="w-full pl-7 pr-2 py-1.5 text-[11px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-slate-400"
-                          value={officeSearch}
-                          onChange={(e) => setOfficeSearch(e.target.value)}
-                        />
-                      </div>
-                    </div>
-                    <div className="max-h-72 overflow-y-auto p-1 custom-scrollbar">
-                      {officeSearch ? (
-                        offices.filter(o => o.vcompanyname.toLowerCase().includes(officeSearch.toLowerCase())).map(o => {
-                          const isSelected = selectedOfficeIds.includes(String(o.ncode));
-                          return (
-                            <label key={o.ncode} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
-                              <input
-                                type="checkbox"
-                                className="w-3.5 h-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
-                                checked={isSelected}
-                                onChange={(e) => {
-                                  const val = String(o.ncode);
-                                  if (e.target.checked) {
-                                    setSelectedOfficeIds(prev => Array.from(new Set([...prev, val])));
-                                  } else {
-                                    setSelectedOfficeIds(prev => prev.filter(id => id !== val));
-                                  }
-                                }}
-                              />
-                              <span className={`text-[11px] font-medium ${isSelected ? 'text-slate-900 font-bold' : 'text-slate-600'} group-hover:text-slate-900`}>
-                                {o.vcompanyname}
-                              </span>
-                            </label>
-                          );
-                        })
-                      ) : ((() => {
-                        const buildTree = (parentId: string | null = '0', level = 0): React.ReactNode[] => {
-                          return offices
-                            .filter(o => String(o.nunder || '0') === String(parentId || '0'))
-                            .map(o => {
-                              const isSelected = selectedOfficeIds.includes(String(o.ncode));
-                              return [
-                                <label key={o.ncode} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
-                                  <div style={{ width: `${level * 12}px` }} />
-                                  <input
-                                    type="checkbox"
-                                    className="w-3.5 h-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
-                                    checked={isSelected}
-                                    onChange={(e) => {
-                                      const val = String(o.ncode);
-                                      if (e.target.checked) {
-                                        // Add this and all descendants
-                                        const getAllChildren = (id: string): string[] => {
-                                          const children = offices.filter(c => String(c.nunder) === String(id));
-                                          let ids = [id];
-                                          children.forEach(c => {
-                                            ids = [...ids, ...getAllChildren(String(c.ncode))];
-                                          });
-                                          return ids;
-                                        };
-                                        const allToAdd = getAllChildren(val);
-                                        setSelectedOfficeIds(prev => Array.from(new Set([...prev, ...allToAdd])));
-                                      } else {
-                                        // Remove this and all descendants
-                                        const getAllChildren = (id: string): string[] => {
-                                          const children = offices.filter(c => String(c.nunder) === String(id));
-                                          let ids = [id];
-                                          children.forEach(c => {
-                                            ids = [...ids, ...getAllChildren(String(c.ncode))];
-                                          });
-                                          return ids;
-                                        };
-                                        const allToRemove = getAllChildren(val);
-                                        setSelectedOfficeIds(prev => prev.filter(id => !allToRemove.includes(id)));
-                                      }
-                                    }}
-                                  />
-                                  <span className={`text-[11px] font-medium ${isSelected ? 'text-slate-900 font-bold' : 'text-slate-600'} group-hover:text-slate-900`}>
-                                    {o.vcompanyname}
-                                  </span>
-                                </label>,
-                                ...buildTree(o.ncode, level + 1)
-                              ];
-                            }).flat();
-                        };
-                        return buildTree('0', 0);
-                      })())}
-                    </div>
-                    <div className="p-2 border-t border-slate-100 bg-slate-50 flex justify-end">
-                      <button
-                        onClick={() => setShowOfficeDropdown(false)}
-                        className="bg-slate-900 text-white px-4 py-1 rounded text-[10px] font-bold hover:bg-slate-800 transition-colors"
-                      >
-                        Done
-                      </button>
+            {showOfficeDropdown && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowOfficeDropdown(false)} />
+                <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 shadow-xl rounded-lg z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                  <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Branches</span>
+                    <button
+                      onClick={() => { setSelectedOfficeIds([]); setOfficeSearch(''); }}
+                      className="text-[10px] font-bold text-slate-400 hover:text-slate-900 px-2 py-1 rounded hover:bg-white"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                  <div className="p-2 border-b border-slate-100">
+                    <div className="relative">
+                      <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Search branches..."
+                        className="w-full pl-7 pr-2 py-1.5 text-[11px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-slate-400"
+                        value={officeSearch}
+                        onChange={(e) => setOfficeSearch(e.target.value)}
+                      />
                     </div>
                   </div>
-                </>
-              )}
-            </div>
+                  <div className="max-h-72 overflow-y-auto p-1 custom-scrollbar">
+                    {officeSearch ? (
+                      offices.filter(o => o.vcompanyname.toLowerCase().includes(officeSearch.toLowerCase())).map(o => {
+                        const isSelected = selectedOfficeIds.includes(String(o.ncode));
+                        return (
+                          <label key={o.ncode} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
+                            <input
+                              type="checkbox"
+                              className="w-3.5 h-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                const val = String(o.ncode);
+                                if (e.target.checked) {
+                                  setSelectedOfficeIds(prev => Array.from(new Set([...prev, val])));
+                                } else {
+                                  setSelectedOfficeIds(prev => prev.filter(id => id !== val));
+                                }
+                              }}
+                            />
+                            <span className={`text-[11px] font-medium ${isSelected ? 'text-slate-900 font-bold' : 'text-slate-600'} group-hover:text-slate-900`}>
+                              {o.vcompanyname}
+                            </span>
+                          </label>
+                        );
+                      })
+                    ) : ((() => {
+                      const buildTree = (parentId: string | null = '0', level = 0): React.ReactNode[] => {
+                        return offices
+                          .filter(o => String(o.nunder || '0') === String(parentId || '0'))
+                          .map(o => {
+                            const isSelected = selectedOfficeIds.includes(String(o.ncode));
+                            return [
+                              <label key={o.ncode} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
+                                <div style={{ width: `${level * 12}px` }} />
+                                <input
+                                  type="checkbox"
+                                  className="w-3.5 h-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    const val = String(o.ncode);
+                                    if (e.target.checked) {
+                                      // Add this and all descendants
+                                      const getAllChildren = (id: string): string[] => {
+                                        const children = offices.filter(c => String(c.nunder) === String(id));
+                                        let ids = [id];
+                                        children.forEach(c => {
+                                          ids = [...ids, ...getAllChildren(String(c.ncode))];
+                                        });
+                                        return ids;
+                                      };
+                                      const allToAdd = getAllChildren(val);
+                                      setSelectedOfficeIds(prev => Array.from(new Set([...prev, ...allToAdd])));
+                                    } else {
+                                      // Remove this and all descendants
+                                      const getAllChildren = (id: string): string[] => {
+                                        const children = offices.filter(c => String(c.nunder) === String(id));
+                                        let ids = [id];
+                                        children.forEach(c => {
+                                          ids = [...ids, ...getAllChildren(String(c.ncode))];
+                                        });
+                                        return ids;
+                                      };
+                                      const allToRemove = getAllChildren(val);
+                                      setSelectedOfficeIds(prev => prev.filter(id => !allToRemove.includes(id)));
+                                    }
+                                  }}
+                                />
+                                <span className={`text-[11px] font-medium ${isSelected ? 'text-slate-900 font-bold' : 'text-slate-600'} group-hover:text-slate-900`}>
+                                  {o.vcompanyname}
+                                </span>
+                              </label>,
+                              ...buildTree(o.ncode, level + 1)
+                            ];
+                          }).flat();
+                      };
+                      return buildTree('0', 0);
+                    })())}
+                  </div>
+                  <div className="p-2 border-t border-slate-100 bg-slate-50 flex justify-end">
+                    <button
+                      onClick={() => setShowOfficeDropdown(false)}
+                      className="bg-slate-900 text-white px-4 py-1 rounded text-[10px] font-bold hover:bg-slate-800 transition-colors"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="flex items-center gap-2 border-l border-slate-200 pl-4 h-6">
@@ -891,6 +919,47 @@ export default function ReportPage() {
                 max={new Date().toISOString().split('T')[0]}
                 onChange={(e) => setAgingAsOf(e.target.value)}
               />
+            </div>
+          )}
+
+          {activeTab === 'register' && registerSummary && (
+            <div className="flex items-center gap-4 border-l border-slate-200 pl-4 h-6">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Total</span>
+                <span className="text-[13px] font-black text-slate-900">{(registerSummary.total || 0).toLocaleString()}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-tighter">Solved</span>
+                <span className="text-[13px] font-black text-emerald-600">{(registerSummary.solved || 0).toLocaleString()}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-bold text-blue-500 uppercase tracking-tighter">Open</span>
+                <span className="text-[13px] font-black text-blue-600">{(registerSummary.open || 0).toLocaleString()}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Trf</span>
+                <span className="text-[13px] font-black text-slate-600">{(registerSummary.transferred || 0).toLocaleString()}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-bold text-rose-500 uppercase tracking-tighter">Can</span>
+                <span className="text-[13px] font-black text-rose-600">{(registerSummary.cancelled || 0).toLocaleString()}</span>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'register' && (
+            <div className="flex-1 flex items-center gap-3 border-l border-slate-200 pl-4 h-6">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Filter records..."
+                  className="w-full pl-8 pr-4 py-1.5 bg-slate-50 border-none rounded-md text-[11px] font-medium focus:ring-1 focus:ring-slate-200 transition-all"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && fetchData(1)}
+                />
+              </div>
             </div>
           )}
         </div>
@@ -932,6 +1001,8 @@ export default function ReportPage() {
               </div>
             </div>
           )}
+
+
 
           {activeTab === 'register' ? (
             <table className="w-full text-left border-collapse min-w-[2400px]">
@@ -980,27 +1051,35 @@ export default function ReportPage() {
                     <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap uppercase">
                       {formatDate(row.callsdtrndate)}
                     </td>
-                    <td className="px-4 py-2 text-[11px] font-medium text-slate-800 border-r border-slate-50 max-w-[250px] truncate uppercase">{row.PartyName}</td>
-                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap uppercase">{row.vlocation}</td>
+                    <td className="px-4 py-2 text-[11px] font-medium text-slate-800 border-r border-slate-50 max-w-[250px] truncate uppercase" title={row.PartyName}>{row.PartyName}</td>
+                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap uppercase">
+                      {row.vlocation || row.vcity || row.routeName || '—'}
+                    </td>
                     <td className="px-4 py-2 text-[11px] text-slate-700 border-r border-slate-50 whitespace-nowrap uppercase">{row.itemname}</td>
                     <td className="px-4 py-2 text-[11px] font-mono text-slate-500 border-r border-slate-50 whitespace-nowrap">{row.callsvserialno}</td>
                     <td className="px-4 py-2 text-[11px] text-slate-900 border-r border-slate-50 whitespace-nowrap uppercase">{row.serviceman}</td>
-                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 max-w-[200px] truncate uppercase">{row.vcomplaint}</td>
+                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 max-w-[200px] truncate uppercase" title={row.vcomplaint}>{row.vcomplaint}</td>
                     <td className="px-4 py-2 border-r border-slate-50 whitespace-nowrap">
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border ${(row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True') ? 'bg-slate-50 text-slate-700 border-slate-200' :
-                        (row.Status === 'Assigned' || row.callstatus === 'Assigned') ? 'bg-blue-50 text-blue-700 border-blue-100' :
-                          'bg-slate-50 text-slate-500 border-slate-100'
-                        }`}>
-                        {row.Status === 'UNKNOWN' ? 'PENDING' : (row.Status || row.callstatus || 'OPEN')}
-                      </span>
+                      {(() => {
+                        const isTransferred = (row.vtransfercallno && row.vtransfercallno !== '') || row.cancel_reason?.includes('Transfer');
+                        const isSolved = row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True';
+                        const isCancelled = (row.callstatus === 'Cancel' || row.Status === 'Cancel') && !isTransferred;
+
+                        if (isTransferred) return <span className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase">Transferred</span>;
+                        if (isSolved) return <span className="bg-slate-50 text-slate-700 border-slate-200 text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase">Solved</span>;
+                        if (isCancelled) return <span className="bg-rose-50 text-rose-700 border-rose-200 text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase">Cancelled</span>;
+                        return <span className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase">Open</span>;
+                      })()}
                     </td>
-                    <td className="px-4 py-2 text-[11px] text-slate-400 border-r border-slate-50 whitespace-nowrap uppercase">
-                      {row.Priority}
+                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap uppercase">
+                      {row.Priority || '—'}
                     </td>
                     <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap uppercase">
                       {formatDate(row.callsolveddate)}
                     </td>
-                    <td className="px-4 py-2 text-[11px] text-slate-400 border-r border-slate-50 max-w-[300px] truncate uppercase">{row.vsolveremarks}</td>
+                    <td className="px-4 py-2 text-[11px] text-slate-400 border-r border-slate-50 max-w-[300px] truncate uppercase" title={row.vsolveremarks || row.cancel_reason}>
+                      {row.vsolveremarks || row.cancel_reason || '—'}
+                    </td>
                     <td className="px-4 py-2 text-[11px] font-mono text-slate-400 border-r border-slate-50">{row.UniqueCallNo}</td>
                     <td className="px-4 py-2 text-[11px] text-slate-600 border-r border-slate-50 whitespace-nowrap uppercase">{row.vpersoncalling}</td>
                     <td className="px-4 py-2 text-[11px] text-slate-900 border-r border-slate-50 whitespace-nowrap">{row.vinsttel1}</td>
@@ -1081,8 +1160,17 @@ export default function ReportPage() {
                         );
                       })}
                       {/* All India Total Row */}
-                      <tr className="bg-[#ffff00] font-bold text-slate-900">
-                        <td className="p-2 border border-slate-300">AI</td>
+                      <tr className="bg-[#ffff00] font-bold text-slate-900 group">
+                        <td className="p-2 border border-slate-300 flex items-center justify-between">
+                          <span>AI</span>
+                          <button 
+                            onClick={() => handleDrillDown('discrepancy', 'AI - Discrepancy Records', { region: 'AI' })}
+                            className="p-1 hover:bg-black/10 rounded transition-colors"
+                            title="View records handled by multiple branches"
+                          >
+                            <AlertCircle className="w-3 h-3 text-slate-700" />
+                          </button>
+                        </td>
                         <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.total_calls || 0), 0)}</td>
                         <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.solved_calls || 0), 0)}</td>
                         <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.cancelled_calls || 0), 0)}</td>
@@ -1186,7 +1274,12 @@ export default function ReportPage() {
                                     <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${branch.branch} - 7-15 Days`, { officeId: branch.officeId })}>{getAggregate(branch, 'age_7')}</td>
                                     <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_15', `${branch.branch} - >15 Days`, { officeId: branch.officeId })}>{getAggregate(branch, 'age_15')}</td>
                                     <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${branch.branch} - Part Pending`, { officeId: branch.officeId })}>{getAggregate(branch, 'part_pending')}</td>
-                                    <td className="p-2 border border-slate-300 text-center">{getAggregate(branch, 'active_eng')}</td>
+                                    <td className="p-2 border border-slate-300 text-center">
+                                      <div className="flex flex-col items-center justify-center leading-tight">
+                                        <span className="text-blue-700 font-bold">{getAggregate(branch, 'active_eng')}</span>
+                                        <span className="text-[9px] text-slate-400 font-medium">of {getAggregate(branch, 'headcount')}</span>
+                                      </div>
+                                    </td>
                                   </tr>
 
                                   {isExpanded && children.map(child => (
@@ -1205,7 +1298,10 @@ export default function ReportPage() {
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${child.branch} - 7-15 Days`, { officeId: child.officeId })}>{child.age_7}</td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_15', `${child.branch} - >15 Days`, { officeId: child.officeId })}>{child.age_15}</td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${child.branch} - Part Pending`, { officeId: child.officeId })}>{child.part_pending}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px]">{child.active_eng}</td>
+                                      <td className="p-1.5 border border-slate-300 text-center text-[10px]">
+                                        <span className="text-blue-600 font-bold">{child.active_eng}</span>
+                                        <span className="text-slate-400 ml-1">/ {child.headcount}</span>
+                                      </td>
                                     </tr>
                                   ))}
                                 </React.Fragment>
@@ -1375,7 +1471,12 @@ export default function ReportPage() {
                                 <td className="p-1.5 border border-slate-300 text-center font-bold text-blue-700 bg-blue-100/20">{perc_gt_7}</td>
 
                                 <td className="p-1.5 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${a.account} - Part Pending`, { account: a.account, region: a.region })}>{a.part_pending || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center">{a.active_eng || 0}</td>
+                                <td className="p-1.5 border border-slate-300 text-center">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    <span className="text-blue-700 font-bold">{a.active_eng || 0}</span>
+                                    <span className="text-[9px] text-slate-400 font-medium">({a.headcount || 0})</span>
+                                  </div>
+                                </td>
 
                                 <td className="p-1.5 border border-slate-300 text-center bg-amber-50/30">{a.deployment_total || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center bg-amber-50/30">{a.deployment_done || 0}</td>
@@ -1432,8 +1533,9 @@ export default function ReportPage() {
                             <td className="p-1.5 border border-slate-700 text-center">
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.part_pending || 0), 0).toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center">
-                              {filteredAccounts.reduce((sum, a) => sum + Number(a.active_eng || 0), 0).toLocaleString()}
+                            <td className="p-1.5 border border-slate-700 text-center text-blue-400">
+                               {filteredAccounts.reduce((sum, a) => sum + Number(a.active_eng || 0), 0)}
+                               <span className="text-[9px] text-slate-400 ml-1">({globalHeadcount})</span>
                             </td>
 
                             {/* Deployment Totals */}
@@ -1643,5 +1745,6 @@ export default function ReportPage() {
         </div>
       )}
     </div>
+
   );
 }

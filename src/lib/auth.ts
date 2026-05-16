@@ -1,8 +1,10 @@
-import { supabase } from './supabase';
+import { createClient } from './supabase/server';
 
 export async function getCurrentUser() {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const supabase = await createClient();
+  const { data: { user }, error } = await supabase.auth.getUser();
+  
+  if (error || !user) return null;
 
   const { data: profile } = await supabase
     .from('app_users')
@@ -17,6 +19,7 @@ export type UserProfile = {
   id: string;
   name: string;
   email: string;
-  role: 'branch_manager' | 'hod';
+  role: 'branch_manager' | 'hod' | 'super_admin';
   office_ids: string[];
+  visible_statuses?: string[];
 };

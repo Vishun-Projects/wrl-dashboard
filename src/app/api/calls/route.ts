@@ -1,9 +1,16 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { postQuery } from '@/lib/db-proxy';
 
 export async function GET(request: Request) {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
   const officeId = searchParams.get('officeId');
   const page = parseInt(searchParams.get('page') || '1');
@@ -13,14 +20,6 @@ export async function GET(request: Request) {
   const startDate = searchParams.get('startDate');
   const endDate = searchParams.get('endDate');
   const search = searchParams.get('search');
-
-  // Authentication
-  const authHeader = request.headers.get('Authorization');
-  const token = authHeader?.split(' ')[1];
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-  if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
     // 1. Get User Profile for filtering
@@ -35,7 +34,7 @@ export async function GET(request: Request) {
     const visibleStatuses = profile?.visible_statuses || [];
 
     // 2. Build CRM Condition
-    let condition = "(tc.ncancelreason IS NULL OR tc.ncancelreason = 0)"; // Properly exclude cancelled calls
+    let condition = "(tc.ncancelreason IS NULL OR tc.ncancelreason = 0 OR tc.ncancelreason = 2)"; // Exclude cancelled, but include transferred
 
     if (search && search.length > 2) {
       // Global search: be aggressive, ignore formatting like dashes
@@ -169,7 +168,8 @@ export async function GET(request: Request) {
       }));
 
       let statusLabel = 'Open Unallocated';
-      if (c.ncancelreason && c.ncancelreason !== '') statusLabel = 'Cancelled Call';
+      if (c.ncancelreason && String(c.ncancelreason) === '2') statusLabel = 'Transferred';
+      else if (c.ncancelreason && c.ncancelreason !== '' && c.ncancelreason !== '0') statusLabel = 'Cancelled Call';
       else if (c.bsolved === 'True' || c.bsolved === 1 || c.bsolved === true) statusLabel = 'Closed';
       else if (c.bfastclose === 'True' || c.bfastclose === 1 || c.bfastclose === true) statusLabel = 'Tech. Solve Call';
       else if (c.baccepted === 'True' || c.baccepted === 1 || c.baccepted === true) statusLabel = 'Allocated - Accepted';

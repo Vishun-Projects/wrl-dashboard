@@ -2,14 +2,15 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { ShieldCheck } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { createClient } from '@/lib/supabase/client';
 import { MobileView } from '@/components/MobileView';
 import { DesktopView } from '@/components/DesktopView';
 
 export default function CallsPage() {
+  const supabase = createClient();
   const [calls, setCalls] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);

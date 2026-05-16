@@ -41,6 +41,15 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    if (callType && callType !== 'All') {
+      if (callType.includes(',')) {
+        const types = callType.split(',').map(t => `'${t.trim().replace(/'/g, "''")}'`).join(',');
+        baseCondition += ` AND c.ncalltype IN (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${types}))`;
+      } else {
+        baseCondition += ` AND c.ncalltype = (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${callType.replace(/'/g, "''")}')`;
+      }
+    }
+
     // calltype filter is handled via dedicated joins inside the SQL to populate columns
     let callTypeJoin = '';
 
@@ -67,6 +76,7 @@ export async function GET(req: NextRequest) {
         ISNULL(p.vname, 'UNCLASSIFIED') as account,
         o.ncode as officeId,
         o.nunder as parentId,
+        hc.branch_headcount,
         t.population,
         t.all_total,
         t.all_solved,
@@ -87,6 +97,7 @@ export async function GET(req: NextRequest) {
         t.age_15,
         t.part_pending,
         t.active_eng_count,
+        t.eng_list,
         t.deployment_total,
         t.deployment_done,
         t.installation_total,
@@ -116,6 +127,7 @@ export async function GET(req: NextRequest) {
           SUM(is_age_15) as age_15,
           SUM(is_part_pending) as part_pending,
           COUNT(DISTINCT eng_name) as active_eng_count,
+          STRING_AGG(CAST(eng_name AS VARCHAR(MAX)), ',') as eng_list,
           SUM(is_deployment) as deployment_total,
           SUM(is_deployment_done) as deployment_done,
           SUM(is_installation) as installation_total,
@@ -153,12 +165,18 @@ export async function GET(req: NextRequest) {
           LEFT JOIN mstfixedselection bd_ct (NOLOCK) ON c.ncalltype = bd_ct.ncode AND bd_ct.vfieldname = 'ncalltype' AND bd_ct.vdisplayvalue = 'BREAKDOWN'
           LEFT JOIN mstfixedselection dep_ct (NOLOCK) ON c.ncalltype = dep_ct.ncode AND dep_ct.vfieldname = 'ncalltype' AND dep_ct.vdisplayvalue = 'DEPLOYMENT'
           LEFT JOIN mstfixedselection ins_ct (NOLOCK) ON c.ncalltype = ins_ct.ncode AND ins_ct.vfieldname = 'ncalltype' AND ins_ct.vdisplayvalue = 'INSTALLATION CALL'
-          WHERE ${baseCondition}
+          WHERE ${baseCondition} AND ISNULL(c.ncancelreason, 0) <> 2
           GROUP BY c.nofficeid, c.npartyprofile, c.vtrnno
         ) t_base
         GROUP BY GROUPING SETS ((nofficeid, npartyprofile), (nofficeid))
       ) t
       JOIN mstoffice o (NOLOCK) ON t.nofficeid = o.ncode
+      LEFT JOIN (
+        SELECT nofficeid, COUNT(DISTINCT ncode) as branch_headcount
+        FROM mstusers (NOLOCK)
+        WHERE bactive = 'True'
+        GROUP BY nofficeid
+      ) hc ON o.ncode = hc.nofficeid
       LEFT JOIN mstoffice op (NOLOCK) ON o.nunder = op.ncode AND o.nunder <> 0
       LEFT JOIN mstzones z (NOLOCK) ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
       LEFT JOIN mstpartyprofile p (NOLOCK) ON t.npartyprofile = p.ncode
@@ -171,9 +189,11 @@ export async function GET(req: NextRequest) {
     // Aggregate in Node.js
     const branchMap = new Map();
     const accountMap = new Map();
+    const regionHeadcountMap = new Map();
 
     rawData.forEach((row: any) => {
       const isBranchEng = row.row_type === 'BRANCH_ENG';
+      const engSet = new Set(row.eng_list ? row.eng_list.split(',').filter(Boolean) : []);
 
       if (isBranchEng) {
         if (!branchMap.has(row.officeId)) {
@@ -184,10 +204,13 @@ export async function GET(req: NextRequest) {
             all_total: 0, all_solved: 0, all_cancelled: 0, all_open: 0,
             all_age_2: 0, all_age_3: 0, all_age_7: 0, all_age_15: 0, all_part_pending: 0,
             deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
-            active_eng: 0, population: 0
+            active_eng: 0, population: 0, headcount: Number(row.branch_headcount || 0)
           });
+          // Update regional headcount total
+          const currentHc = regionHeadcountMap.get(row.region) || 0;
+          regionHeadcountMap.set(row.region, currentHc + Number(row.branch_headcount || 0));
         }
-        branchMap.get(row.officeId).active_eng = Number(row.active_eng_count);
+        branchMap.get(row.officeId).active_eng = engSet.size;
       } else {
         if (!branchMap.has(row.officeId)) {
           branchMap.set(row.officeId, {
@@ -197,8 +220,11 @@ export async function GET(req: NextRequest) {
             all_total: 0, all_solved: 0, all_cancelled: 0, all_open: 0,
             all_age_2: 0, all_age_3: 0, all_age_7: 0, all_age_15: 0, all_part_pending: 0,
             deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
-            active_eng: 0, population: 0
+            active_eng: 0, population: 0, headcount: Number(row.branch_headcount || 0)
           });
+          // Update regional headcount total (if not already added by BRANCH_ENG row)
+          const currentHc = regionHeadcountMap.get(row.region) || 0;
+          regionHeadcountMap.set(row.region, currentHc + Number(row.branch_headcount || 0));
         }
         const b = branchMap.get(row.officeId);
         b.population += Number(row.population);
@@ -224,7 +250,7 @@ export async function GET(req: NextRequest) {
             population: 0, total_calls: 0, total_solved: 0, cancelled_calls: 0, open_calls: 0,
             age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
             deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
-            active_eng: 0
+            active_eng: 0, active_eng_names: new Set(), headcount: 0
           });
         }
         const a = accountMap.get(aKey);
@@ -242,13 +268,28 @@ export async function GET(req: NextRequest) {
         a.deployment_done += Number(row.deployment_done);
         a.installation_total += Number(row.installation_total);
         a.installation_done += Number(row.installation_done);
-        a.active_eng += Number(row.active_eng_count);
+        
+        // Add names to the set for the account
+        engSet.forEach(name => a.active_eng_names.add(name));
       }
     });
 
+    // Finalize account active counts and assign regional headcount
+    const accountResults = Array.from(accountMap.values()).map(a => {
+      const { active_eng_names, ...rest } = a;
+      return {
+        ...rest,
+        active_eng: active_eng_names.size,
+        headcount: regionHeadcountMap.get(a.region) || 0 // Every row in the same region gets the same total headcount
+      };
+    });
+
+    const globalHeadcount = Array.from(regionHeadcountMap.values()).reduce((sum, val) => sum + val, 0);
+
     return NextResponse.json({
       branchSummary: Array.from(branchMap.values()),
-      accountSummary: Array.from(accountMap.values())
+      accountSummary: accountResults,
+      globalHeadcount
     });
 
   } catch (err: any) {

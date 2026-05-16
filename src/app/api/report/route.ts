@@ -80,26 +80,39 @@ export async function GET(req: NextRequest) {
     }
 
     const topValue = page * limit;
-    const [countRes, res] = await Promise.all([
+    const [countRes, res, summaryRes] = await Promise.all([
       postQuery({
         fields: "COUNT(callsntrnno) as total",
         tableName: "uv_findtrhcalls_callsearch (NOLOCK)",
         condition
       }),
       postQuery({
-        fields: "callsntrnno, callsdtrndate, PartyName, vlocation, itemname, callsvserialno, serviceman, vcomplaint, Status, callstatus, callsolved, Priority, callsolveddate, vsolveremarks, UniqueCallNo, vpersoncalling, vinsttel1, vinstaddress, addedby, officename, calltype",
+        fields: `callsntrnno, callsdtrndate, PartyName, vlocation, itemname, callsvserialno, serviceman, vcomplaint, Status, callstatus, callsolved, Priority, callsolveddate, vsolveremarks, UniqueCallNo, vpersoncalling, vinsttel1, vinstaddress, addedby, officename, calltype, vtransfercallno, vtransferofficename, (SELECT TOP 1 vname FROM mstcallcancelreasons (NOLOCK) WHERE ncode = CAST(NULLIF(ncancelreason, '') AS NVARCHAR(50))) as cancel_reason`,
         tableName: "uv_findtrhcalls_callsearch (NOLOCK)",
         condition,
         orderBy: "ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) DESC",
         top: String(topValue)
+      }),
+      postQuery({
+        fields: "COUNT(*) as total, SUM(CASE WHEN ISNULL(vtransfercallno, '') <> '' OR CAST(ncancelreason AS NVARCHAR(50)) = '2' THEN 1 ELSE 0 END) as transferred, SUM(CASE WHEN ISNULL(ncancelreason, '') <> '' AND CAST(ncancelreason AS NVARCHAR(50)) <> '0' AND CAST(ncancelreason AS NVARCHAR(50)) <> '2' THEN 1 ELSE 0 END) as cancelled, SUM(CASE WHEN callsolved = 'True' OR CAST(Status AS NVARCHAR(MAX)) = 'Closed' THEN 1 ELSE 0 END) as solved, SUM(CASE WHEN (callsolved = 'False' OR callsolved IS NULL) AND ISNULL(ncancelreason, '') = '' THEN 1 ELSE 0 END) as open_calls",
+        tableName: "uv_findtrhcalls_callsearch (NOLOCK)",
+        condition
       })
     ]);
 
     const totalCount = parseInt(countRes.data?.[0]?.total || "0");
+    const summary = summaryRes.data?.[0] || { total: 0, transferred: 0, cancelled: 0, solved: 0, open_calls: 0 };
 
     return NextResponse.json({
       data: res.data || [],
-      total: totalCount
+      total: totalCount,
+      summary: {
+        total: parseInt(summary.total || "0"),
+        transferred: parseInt(summary.transferred || "0"),
+        cancelled: parseInt(summary.cancelled || "0"),
+        solved: parseInt(summary.solved || "0"),
+        open: parseInt(summary.open_calls || "0")
+      }
     });
 
   } catch (error: any) {

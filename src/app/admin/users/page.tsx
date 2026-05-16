@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client';
 import axios from 'axios';
 import { 
   Users, 
@@ -22,6 +22,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
 export default function AdminUsersPage() {
+  const supabase = createClient();
   const [users, setUsers] = useState<any[]>([]);
   const [offices, setOffices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);

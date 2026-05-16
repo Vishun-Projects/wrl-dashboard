@@ -7,7 +7,7 @@ import { CallDetail } from './CallDetail';
 import { DateRangePicker } from './DateRangePicker';
 import { DateRangeSelector } from './DateRangeSelector';
 import { Tooltip } from './Tooltip';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 
 interface DesktopViewProps {
@@ -74,6 +74,7 @@ export function DesktopView({
   currentIndex, carouselTotalCount
 }: DesktopViewProps) {
   const router = useRouter();
+  const supabase = createClient();
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const selectedOfficeName = offices.find(o => o.ncode === selectedOfficeId)?.vcompanyname || 'All Branches';

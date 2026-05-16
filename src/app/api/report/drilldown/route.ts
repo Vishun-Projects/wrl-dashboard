@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     if (customQuery) {
       sql = customQuery;
     } else {
-      let condition = "callsntrnno IS NOT NULL AND callsntrnno <> ''";
+      let condition = "callsntrnno IS NOT NULL AND callsntrnno <> '' AND ISNULL(ncancelreason, 0) <> 2";
       if (startDate) condition += ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) >= '${startDate}'`;
       if (endDate) condition += ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) <= '${endDate} 23:59:59'`;
       
@@ -86,9 +86,21 @@ export async function POST(req: NextRequest) {
         case 'part_pending':
           condition += ` AND (vsolveremarks LIKE '%PART%' OR vcomplaint LIKE '%PART%')`;
           break;
+        case 'discrepancy':
+          // Identify calls handled by more than one branch
+          condition += ` AND callsntrnno IN (
+            SELECT callsntrnno 
+            FROM uv_findtrhcalls_callsearch (NOLOCK)
+            WHERE callsntrnno IS NOT NULL AND callsntrnno <> '' AND ISNULL(ncancelreason, 0) <> 2
+            ${startDate ? ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) >= '${startDate}'` : ''}
+            ${endDate ? ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) <= '${endDate} 23:59:59'` : ''}
+            GROUP BY callsntrnno
+            HAVING COUNT(DISTINCT nofficeid) > 1
+          )`;
+          break;
       }
 
-      sql = `SELECT TOP 5 
+      sql = `SELECT TOP 500 
                 callsntrnno as [Ref No], 
                 CONVERT(VARCHAR, callsdtrndate, 105) as [Date],
                 vlocation as [Location],
