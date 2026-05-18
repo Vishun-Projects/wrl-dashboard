@@ -16,12 +16,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Check if requester is HOD
-  const result: any[] = await prisma.$queryRawUnsafe(
-    'SELECT role FROM public.app_users WHERE id = $1 LIMIT 1',
-    adminUser.id
-  );
-  if (result?.[0]?.role !== 'hod') {
+  const permissions = await (prisma as any).getUserPermissions(adminUser.id);
+  if (!permissions.includes('manage_users')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 

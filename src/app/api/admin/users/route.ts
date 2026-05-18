@@ -17,13 +17,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Check if requester is HOD via raw SQL
-  const result: any[] = await prisma.$queryRawUnsafe(
-    'SELECT role FROM public.app_users WHERE id = $1 LIMIT 1',
-    user.id
-  );
-  
-  if (result?.[0]?.role !== 'hod') {
+  const permissions = await (prisma as any).getUserPermissions(user.id);
+  if (!permissions.includes('manage_users')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -43,17 +38,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const result: any[] = await prisma.$queryRawUnsafe(
-    'SELECT role FROM public.app_users WHERE id = $1 LIMIT 1',
-    adminUser.id
-  );
-  if (result?.[0]?.role !== 'hod') {
+  const permissions = await (prisma as any).getUserPermissions(adminUser.id);
+  if (!permissions.includes('manage_users')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   try {
     const body = await request.json();
-    const { email, password, name, role, office_ids, visible_statuses } = body;
+    const { email, password, name, role, role_id, office_ids, visible_statuses } = body;
 
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
       throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured. User creation aborted.');
@@ -71,13 +63,12 @@ export async function POST(request: Request) {
 
     // 2. Create Public Profile via raw SQL
     await prisma.$queryRawUnsafe(
-      'INSERT INTO public.app_users (id, email, name, role, office_ids, visible_statuses) VALUES ($1, $2, $3, $4, $5, $6)',
-      authData.user.id, email, name, role, office_ids || [], visible_statuses || []
+      'INSERT INTO public.app_users (id, email, name, role, role_id, office_ids, visible_statuses) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      authData.user.id, email, name, role, role_id, office_ids || [], visible_statuses || []
     );
 
     return NextResponse.json({ success: true, id: authData.user.id });
   } catch (err: any) {
-
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
@@ -90,21 +81,18 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const result: any[] = await prisma.$queryRawUnsafe(
-    'SELECT role FROM public.app_users WHERE id = $1 LIMIT 1',
-    adminUser.id
-  );
-  if (result?.[0]?.role !== 'hod') {
+  const permissions = await (prisma as any).getUserPermissions(adminUser.id);
+  if (!permissions.includes('manage_users')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   try {
     const body = await request.json();
-    const { id, name, role, office_ids, visible_statuses } = body;
+    const { id, name, role, role_id, office_ids, visible_statuses } = body;
 
     await prisma.$queryRawUnsafe(
-      'UPDATE public.app_users SET name = $1, role = $2, office_ids = $3, visible_statuses = $4 WHERE id = $5',
-      name, role, office_ids, visible_statuses || [], id
+      'UPDATE public.app_users SET name = $1, role = $2, role_id = $3, office_ids = $4, visible_statuses = $5 WHERE id = $6',
+      name, role, role_id, office_ids, visible_statuses || [], id
     );
 
     return NextResponse.json({ success: true });
@@ -121,11 +109,8 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const result: any[] = await prisma.$queryRawUnsafe(
-    'SELECT role FROM public.app_users WHERE id = $1 LIMIT 1',
-    adminUser.id
-  );
-  if (result?.[0]?.role !== 'hod') {
+  const permissions = await (prisma as any).getUserPermissions(adminUser.id);
+  if (!permissions.includes('manage_users')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 

@@ -45,6 +45,20 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
+  // Synthesize comments from CRM rejection if present
+  const reasonText = call.crm_reject_reason || call.reject_reason || call.vBMrejectreason;
+  const displayComments: any[] = [...(call.comments || [])];
+  if ((call.crm_reject || call.rejected_at || call.bBMreject) && reasonText) {
+    const hasCrmComment = displayComments.some((c: any) => c.comment === reasonText || c.comment?.includes(reasonText));
+    if (!hasCrmComment) {
+      displayComments.unshift({
+        author_name: 'Branch Manager',
+        comment: `[CRM REJECTION REMARK] ${reasonText}`,
+        created_at: call.crm_reject_at || call.rejected_at || call.dBMrejectdatetime || new Date().toISOString()
+      });
+    }
+  }
+
   // 1. Unified Image Collection
   const allImages: any[] = [];
   (call.documents || []).forEach((d: any) => {
@@ -316,7 +330,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                 { id: 'faults', label: 'Faults', count: call.faults?.length || 0 },
                 { id: 'parts', label: 'Parts', count: call.parts?.length || 0 },
                 { id: 'images', label: 'Images', count: allImages.length },
-                { id: 'comments', label: 'Comments', count: call.comments?.length || 0 },
+                { id: 'comments', label: 'Comments', count: displayComments.length },
               ].map((t: any) => (
                 <button
                   key={t.id}
@@ -340,6 +354,21 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
             <div className="flex-1 overflow-y-auto p-4 lg:p-6 custom-scrollbar">
               {activeTab === 'details' && (
                 <div className="space-y-8">
+                  {reasonText && (
+                    <div className="bg-rose-50 border border-rose-100 rounded-xl p-4 flex gap-3 text-rose-800">
+                      <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <div className="text-[12px] font-black uppercase tracking-wider">CRM Rejection Remark</div>
+                        <div className="text-[13px] font-semibold mt-1">{reasonText}</div>
+                        {(call.crm_reject_at || call.rejected_at || call.dBMrejectdatetime) && (
+                          <div className="text-[10px] text-rose-400 font-medium mt-1">
+                            Rejected on {new Date(call.crm_reject_at || call.rejected_at || call.dBMrejectdatetime).toLocaleDateString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-5">
                     <Field label="Serial no." value={call.vserialno || '—'} muted={!call.vserialno} />
                     <Field label="Client ticket" value={call.vmanualjobno || '—'} muted={!call.vmanualjobno} />
@@ -396,7 +425,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                         <div className="flex items-center justify-between">
                           <span className="text-[11px] font-black uppercase tracking-widest text-slate-900">Fault #{i + 1}</span>
                           {f.is_solved && (
-                            <span className="bg-emerald-50 text-emerald-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-100">
+                            <span className="badge-solved">
                               Solved
                             </span>
                           )}
@@ -480,15 +509,19 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
 
               {activeTab === 'comments' && (
                 <div className="space-y-4">
-                  {(call.comments || []).map((c: any, i: number) => (
-                    <div key={i} className="flex gap-3">
-                      <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold uppercase">{c.author_name?.charAt(0)}</div>
-                      <div className="flex-1 text-[13px]">
-                        <div className="font-bold text-slate-900">{c.author_name}</div>
-                        <div className="text-slate-600 mt-1">{c.comment}</div>
+                  {displayComments.length > 0 ? (
+                    displayComments.map((c: any, i: number) => (
+                      <div key={i} className="flex gap-3">
+                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold uppercase">{c.author_name?.charAt(0)}</div>
+                        <div className="flex-1 text-[13px]">
+                          <div className="font-bold text-slate-900">{c.author_name}</div>
+                          <div className="text-slate-600 mt-1">{c.comment}</div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-[13px]">No comments recorded</div>
+                  )}
 
                   {isMobile && (
                     <div className="mt-8 space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">

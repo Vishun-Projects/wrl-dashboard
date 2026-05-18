@@ -77,7 +77,12 @@ export function MobileView({
     'Tech. Solve Call',
     'Closed'
   ].filter(s => {
-    if (userProfile?.role === 'hod' || userProfile?.role === 'super_admin') return true;
+    const isGlobal = 
+      userProfile?.permissions?.includes('view_reports') ||
+      userProfile?.permissions?.includes('view_all_offices') ||
+      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(userProfile?.role || '');
+
+    if (isGlobal) return true;
     if (!userProfile?.visible_statuses || userProfile.visible_statuses.length === 0) return true;
     return userProfile.visible_statuses.includes(s);
   });
@@ -99,7 +104,9 @@ export function MobileView({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {(userProfile?.role === 'hod' || userProfile?.role === 'super_admin') && (
+          {(userProfile?.permissions?.includes('view_reports') || 
+            userProfile?.permissions?.includes('view_all_offices') || 
+            ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(userProfile?.role || '')) && (
             <button 
               onClick={() => router.push('/report')}
               className="bg-white border border-[#e2e8f0] rounded-lg px-2.5 py-1.5 text-[14px] text-emerald-600"

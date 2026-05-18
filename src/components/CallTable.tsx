@@ -112,38 +112,47 @@ export const CallTable = React.memo(function CallTable({ calls, onFlagUpdate, on
                 </td>
                 <td className="px-5 py-4">
                   {(() => {
-                    const getStatusStyle = (label: string) => {
-                      if (label === 'Tech. Solve Call') return { label: 'Tech. Solve', color: 'text-indigo-600', bg: 'bg-indigo-50', dot: 'bg-indigo-500' };
-                      if (label.includes('Assigned') || label.includes('Allocated')) return { label: 'Assigned', color: 'text-blue-600', bg: 'bg-blue-50', dot: 'bg-blue-500' };
-                      if (label === 'Closed') return { label: 'Closed', color: 'text-emerald-600', bg: 'bg-emerald-50', dot: 'bg-emerald-500' };
-                      if (label === 'Rejected') return { label: 'Rejected', color: 'text-rose-600', bg: 'bg-rose-50', dot: 'bg-rose-500' };
-                      if (label === 'Approved') return { label: 'Approved', color: 'text-emerald-600', bg: 'bg-emerald-50', dot: 'bg-emerald-500' };
-                      return { label: 'Open', color: 'text-slate-600', bg: 'bg-slate-50', dot: 'bg-slate-400' };
+                    const getBadgeClass = (label: string) => {
+                      if (label === 'Tech. Solve Call') return 'badge-transferred';
+                      if (label.includes('Assigned') || label.includes('Allocated')) return 'badge-assigned';
+                      if (label === 'Closed') return 'badge-solved';
+                      if (label === 'Closed - Rejected') return 'badge-cancelled';
+                      if (label === 'Rejected') return 'badge-cancelled';
+                      if (label === 'Approved') return 'badge-solved';
+                      return 'badge-open';
                     };
 
-                    const isAuditClosed = call.status_label === 'Closed';
-                    const displayStatus = (isAuditClosed && call.rejected_at) ? 'Rejected' : ((isAuditClosed && call.approved_at) ? 'Approved' : (call.status_label || 'Open Unallocated'));
-                    const style = getStatusStyle(displayStatus);
+                    const statusLabel = call.status_label || 'Open Unallocated';
+                    const isRejectedClosed = statusLabel === 'Closed - Rejected';
+                    // For audit overlay: approved/rejected at overrides the raw status label display
+                    const isAuditClosed = statusLabel === 'Closed' || statusLabel === 'Closed - Rejected';
+                    const displayStatus = isRejectedClosed ? 'Closed - Rejected' :
+                      (isAuditClosed && call.rejected_at) ? 'Rejected' :
+                      ((isAuditClosed && call.approved_at) ? 'Approved' : statusLabel);
+                    const badgeClass = getBadgeClass(displayStatus);
 
                     return (
-                      <div className={`inline-flex flex-col items-start gap-1 ${style.bg} ${style.color} px-2.5 py-1.5 rounded-lg border border-current/10 min-w-[140px] shadow-sm`}>
-                        <div className="flex items-center gap-1.5">
-                          <div className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
-                          <span className="text-[10px] font-bold uppercase tracking-tight leading-none">
-                            {displayStatus === 'Approved' ? 'Closed - Approved' :
-                              displayStatus === 'Rejected' ? 'Closed - Rejected' :
-                                displayStatus === 'Tech. Solve Call' ? 'Tech Solved' :
-                                (displayStatus.includes('Assigned') || displayStatus.includes('Allocated')) ? 'Assigned' :
-                                  displayStatus}
-                          </span>
-                        </div>
-                        {(call.approved_at || call.rejected_at || (call.status_label === 'Closed' && call.resolved_at)) && (
-                          <span className="text-[9px] opacity-70 font-medium">
+                      <div className="flex flex-col items-start gap-1 min-w-[140px]">
+                        <span className={badgeClass}>
+                          {displayStatus === 'Approved' ? 'Closed - Approved' :
+                            displayStatus === 'Rejected' ? 'Closed - Rejected' :
+                            displayStatus === 'Closed - Rejected' ? 'Closed - Rejected' :
+                            displayStatus === 'Tech. Solve Call' ? 'Tech Solved' :
+                            (displayStatus.includes('Assigned') || displayStatus.includes('Allocated')) ? 'Assigned' :
+                              displayStatus}
+                        </span>
+                        {(call.approved_at || call.rejected_at || (isAuditClosed && call.resolved_at)) && (
+                          <span className="text-[9px] text-slate-400 font-medium ml-1 mt-0.5">
                             {new Date(call.approved_at || call.rejected_at || call.resolved_at).toLocaleDateString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                           </span>
                         )}
-                        {call.status_label === 'Assigned - Acceptance Pending' && !call.rejected_at && !call.approved_at && (
-                          <span className="text-[9px] opacity-70 font-medium">Assigned to Tech</span>
+                        {call.reject_reason && (
+                          <span className="text-[9px] text-rose-400 font-medium ml-1 truncate max-w-[130px]" title={call.reject_reason}>
+                            ⚑ {call.reject_reason}
+                          </span>
+                        )}
+                        {statusLabel === 'Assigned - Acceptance Pending' && !call.rejected_at && !call.approved_at && (
+                          <span className="text-[9px] text-slate-400 font-medium ml-1 mt-0.5">Assigned to Tech</span>
                         )}
                       </div>
                     );
@@ -171,17 +180,29 @@ export const CallTable = React.memo(function CallTable({ calls, onFlagUpdate, on
                 <td className="px-5 py-4">
                   <div className="flex flex-col gap-1.5 items-center">
                     <span
-                      className="text-[11px] font-semibold px-2.5 py-1 rounded-full uppercase transition-colors"
-                      style={{ background: colors.bg, color: colors.text }}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
+                        currentAudit === 'noted' ? 'badge-solved' :
+                        currentAudit === 'query' ? 'badge-assigned' :
+                        currentAudit === 'escalate' ? 'badge-cancelled' :
+                        'badge-unseen'
+                      }`}
                     >
                       {currentAudit === 'unseen' ? 'Unseen' : currentAudit === 'noted' ? 'Verified' : currentAudit === 'query' ? 'Hold' : 'Rejected'}
                     </span>
-                    {call.comments?.length > 0 && (
-                      <div className="flex items-center gap-1 opacity-60">
-                        <MessageSquare size={12} className="text-rose-500" />
-                        <span className="text-[10px] text-slate-400 font-medium">{call.comments.length}</span>
-                      </div>
-                    )}
+                    {(() => {
+                      const commentCount = (call.comments?.length || 0) + (
+                        ((call.rejected_at || call.bBMreject) && (call.reject_reason || call.vBMrejectreason)) ? 1 : 0
+                      );
+                      if (commentCount > 0) {
+                        return (
+                          <div className="flex items-center gap-1 opacity-60">
+                            <MessageSquare size={12} className="text-rose-500" />
+                            <span className="text-[10px] text-slate-400 font-medium">{commentCount}</span>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                 </td>
               </tr>

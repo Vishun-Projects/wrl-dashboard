@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { postQuery } from '@/lib/db-proxy';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { prisma } from '@/lib/prisma';
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,15 +12,9 @@ export async function GET(req: NextRequest) {
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
     if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { data: profile } = await supabaseAdmin
-      .from('app_users')
-      .select('role, office_ids')
-      .eq('id', user.id)
-      .single();
-
-    const allowedRoles = ['super_admin', 'hod', 'admin'];
-    if (!profile?.role || !allowedRoles.includes(profile.role)) {
-      return NextResponse.json({ error: 'Forbidden', role: profile?.role }, { status: 403 });
+    const permissions = await (prisma as any).getUserPermissions(user.id);
+    if (!permissions.includes('view_reports')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const { searchParams } = new URL(req.url);
@@ -61,12 +56,19 @@ export async function GET(req: NextRequest) {
       baseCondition += ` AND c.dtrndate <= '${endDate} 23:59:59'`;
     }
 
-    // agingAsOf wins > endDate > today
-    const agingDate = agingAsOf
-      ? `'${agingAsOf} 23:59:59'`
-      : endDate
-      ? `'${endDate} 23:59:59'`
-      : 'GETDATE()';
+    // agingAsOf wins > endDate > today. Safely parse to ensure clean YYYY-MM-DD 23:59:59 formatting.
+    const agingDate = (() => {
+      if (agingAsOf) {
+        const d = new Date(agingAsOf);
+        if (!isNaN(d.getTime())) {
+          return `'${d.toISOString().split('T')[0]} 23:59:59'`;
+        }
+      }
+      if (endDate) {
+        return `'${endDate} 23:59:59'`;
+      }
+      return 'GETDATE()';
+    })();
 
     const rawSql = `
       SELECT

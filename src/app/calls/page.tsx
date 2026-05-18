@@ -8,40 +8,77 @@ import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import { MobileView } from '@/components/MobileView';
 import { DesktopView } from '@/components/DesktopView';
+import { useUser } from '@/components/DashboardLayout';
+
+interface GlobalCallsCacheType {
+  calls: any[];
+  totalCount: number;
+  totalPages: number;
+  page: number;
+  activeTab: 'all' | 'major' | 'minor';
+  selectedOfficeId: string;
+  dateRange: { start: Date; end: Date; label: string };
+  selectedStatus: string;
+  globalSearch: string;
+  freezePoint: Date;
+  newCallsCount: number;
+}
+
+let globalCallsCache: GlobalCallsCacheType | null = null;
 
 export default function CallsPage() {
   const supabase = createClient();
-  const [calls, setCalls] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalCount, setTotalCount] = useState(0);
-  const [activeTab, setActiveTab] = useState<'all' | 'major' | 'minor'>('all');
-  const [userProfile, setUserProfile] = useState<any>(null);
+  const [calls, setCalls] = useState<any[]>(globalCallsCache?.calls || []);
+  const [loading, setLoading] = useState(!globalCallsCache);
+  const [page, setPage] = useState(globalCallsCache?.page || 1);
+  const [totalPages, setTotalPages] = useState(globalCallsCache?.totalPages || 1);
+  const [totalCount, setTotalCount] = useState(globalCallsCache?.totalCount || 0);
+  const [activeTab, setActiveTab] = useState<'all' | 'major' | 'minor'>(globalCallsCache?.activeTab || 'all');
+  const { userProfile } = useUser();
   const [offices, setOffices] = useState<any[]>([]);
-  const [selectedOfficeId, setSelectedOfficeId] = useState<string>('');
+  const [selectedOfficeId, setSelectedOfficeId] = useState<string>(globalCallsCache?.selectedOfficeId || '');
   const [branchSearch, setBranchSearch] = useState('');
   const [showBranchDropdown, setShowBranchDropdown] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [dateRange, setDateRange] = useState<{start: Date, end: Date, label: string}>(() => {
+    if (globalCallsCache) return globalCallsCache.dateRange;
     const end = new Date();
     const start = new Date();
     start.setDate(end.getDate() - 30);
     return { start, end, label: 'Last 30 Days' };
   });
-  const [selectedStatus, setSelectedStatus] = useState('All');
+  const [selectedStatus, setSelectedStatus] = useState(globalCallsCache?.selectedStatus || 'All');
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
-  const [globalSearch, setGlobalSearch] = useState('');
+  const [globalSearch, setGlobalSearch] = useState(globalCallsCache?.globalSearch || '');
 
   // High-Performance States
-  const [freezePoint, setFreezePoint] = useState<Date>(() => new Date());
-  const [newCallsCount, setNewCallsCount] = useState(0);
+  const lastSyncTimeRef = useRef<string>(new Date().toISOString().replace('T', ' ').substring(0, 19));
+  const [lastSyncTime, setLastSyncTime] = useState<string>(() => lastSyncTimeRef.current);
+  const [freezePoint, setFreezePoint] = useState<Date>(() => globalCallsCache?.freezePoint || new Date());
+  const [newCallsCount, setNewCallsCount] = useState(globalCallsCache?.newCallsCount || 0);
   const [pendingCalls, setPendingCalls] = useState<any[] | null>(null);
   const [updateInfo, setUpdateInfo] = useState<{ newCount: number, updatedCount: number } | null>(null);
 
   const router = useRouter();
+
+  // Sync state variables to the global cache on every change
+  useEffect(() => {
+    globalCallsCache = {
+      calls,
+      totalCount,
+      totalPages,
+      page,
+      activeTab,
+      selectedOfficeId,
+      dateRange,
+      selectedStatus,
+      globalSearch,
+      freezePoint,
+      newCallsCount
+    };
+  }, [calls, totalCount, totalPages, page, activeTab, selectedOfficeId, dateRange, selectedStatus, globalSearch, freezePoint, newCallsCount]);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -50,43 +87,57 @@ export default function CallsPage() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // INIT
   useEffect(() => {
-    async function init() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { router.push('/login'); return; }
-      const { data: profile } = await supabase.from('app_users').select('*').eq('id', user.id).single();
-      setUserProfile(profile);
+    if (!userProfile) return;
+    async function loadOffices() {
+      try {
+        const isGlobalUser = 
+          userProfile?.permissions?.includes('view_reports') || 
+          userProfile?.permissions?.includes('view_all_offices') ||
+          ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(userProfile?.role || '');
 
-      // Fetch offices for HODs or managers with multiple branches
-      if (profile?.role === 'hod' || profile?.role === 'super_admin' || (profile?.office_ids && profile.office_ids.length > 1)) {
-        const { data: { session } } = await supabase.auth.getSession();
-        const res = await axios.get('/api/offices', {
-          headers: { 'Authorization': `Bearer ${session?.access_token}` }
-        });
-        setOffices(res.data || []);
+        if (isGlobalUser || (userProfile?.office_ids && userProfile.office_ids.length > 1)) {
+          const { data: { session } } = await supabase.auth.getSession();
+          const resOffices = await axios.get('/api/offices', {
+            headers: { 'Authorization': `Bearer ${session?.access_token}` }
+          });
+          setOffices(resOffices.data || []);
+        }
+      } catch (err) {
+        console.error('Failed to load offices:', err);
       }
     }
-    init();
-  }, []);
+    loadOffices();
+  }, [userProfile]);
 
   // Fetch Logic with Race Condition Prevention (AbortController)
   useEffect(() => {
     if (!userProfile) return;
+
+    const filtersChanged = !globalCallsCache ||
+      globalCallsCache.selectedOfficeId !== selectedOfficeId ||
+      globalCallsCache.selectedStatus !== selectedStatus ||
+      globalCallsCache.activeTab !== activeTab ||
+      globalCallsCache.dateRange.start.getTime() !== dateRange.start.getTime() ||
+      globalCallsCache.dateRange.end.getTime() !== dateRange.end.getTime() ||
+      globalCallsCache.globalSearch !== globalSearch;
     
     const controller = new AbortController();
-    setPage(1);
-    const now = new Date();
-    setFreezePoint(now);
+
+    if (filtersChanged) {
+      setPage(1);
+      const now = new Date();
+      setFreezePoint(now);
+      fetchCalls(1, true, controller.signal);
+    }
     
-    fetchCalls(1, true, controller.signal);
-    
-    // Auto-refresh every 10 seconds (disabled if searching)
+    // Auto-refresh every 15 seconds using lightweight delta syncing (disabled if searching or backgrounded)
     const intervalId = setInterval(() => {
+      if (document.hidden) return;
       if (!globalSearch || globalSearch.length <= 2) {
-        fetchCalls(1, false, undefined, true);
+        fetchCalls(page, false, undefined, true);
       }
-    }, 10000);
+    }, 15000);
 
     return () => {
       controller.abort();
@@ -114,6 +165,82 @@ export default function CallsPage() {
     fetchCalls(1);
   };
 
+  const handleManualSync = async () => {
+    setLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const limit = 100;
+      let finalUrl = `/api/calls?priority=${activeTab}&limit=${limit}&page=${page}&freezePoint=${freezePoint.toISOString()}`;
+      
+      if (selectedOfficeId) finalUrl += `&officeId=${selectedOfficeId}`;
+      if (selectedStatus !== 'All') finalUrl += `&status=${selectedStatus}`;
+      if (globalSearch && globalSearch.length > 2) finalUrl += `&search=${encodeURIComponent(globalSearch)}`;
+      
+      finalUrl += `&startDate=${dateRange.start.toISOString().split('T')[0]}&endDate=${dateRange.end.toISOString().split('T')[0]}`;
+      
+      if (lastSyncTimeRef.current) {
+        finalUrl += `&lastSync=${lastSyncTimeRef.current}`;
+      }
+
+      const res = await axios.get(finalUrl, { 
+        headers: { 'Authorization': `Bearer ${session?.access_token}` }
+      });
+
+      const { data: fetchedCalls, total, totalPages: fetchedTotalPages, isDelta } = res.data;
+
+      if (isDelta) {
+        if (fetchedCalls && fetchedCalls.length > 0) {
+          const updatedCalls = [...calls];
+          let updatedCount = 0;
+          let addedCount = 0;
+          fetchedCalls.forEach((nc: any) => {
+            const idx = updatedCalls.findIndex(c => String(c.id) === String(nc.id));
+            if (idx > -1) {
+              updatedCalls[idx] = nc;
+              updatedCount++;
+            } else {
+              updatedCalls.unshift(nc);
+              addedCount++;
+            }
+          });
+          setCalls(updatedCalls);
+          toast.success(`Sync completed! ${addedCount} new, ${updatedCount} updated records.`);
+        } else {
+          toast.success("Sync completed! Everything up to date.");
+        }
+      } else {
+        setCalls(fetchedCalls);
+        setTotalCount(total);
+        setTotalPages(fetchedTotalPages);
+        toast.success("Full sync completed.");
+      }
+      
+      lastSyncTimeRef.current = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      setLastSyncTime(lastSyncTimeRef.current);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || "Failed to sync data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFullReset = async () => {
+    setLoading(true);
+    try {
+      const now = new Date();
+      setFreezePoint(now);
+      setNewCallsCount(0);
+      lastSyncTimeRef.current = now.toISOString().replace('T', ' ').substring(0, 19);
+      setLastSyncTime(lastSyncTimeRef.current);
+      await fetchCalls(1, true);
+      toast.success("Full reload completed from scratch.");
+    } catch (err: any) {
+      toast.error("Failed to run full reload.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fetchCalls = async (pageToFetch: number = 1, isInitial: boolean = false, signal?: AbortSignal, silent: boolean = false) => {
     if (isInitial) {
       setLoading(true);
@@ -136,6 +263,11 @@ export default function CallsPage() {
       // Pass absolute date bounds
       finalUrl += `&startDate=${dateRange.start.toISOString().split('T')[0]}&endDate=${dateRange.end.toISOString().split('T')[0]}`;
       
+      // Pass lastSync if doing background silent synchronization
+      if (silent && lastSyncTimeRef.current) {
+        finalUrl += `&lastSync=${lastSyncTimeRef.current}`;
+      }
+
       const res = await axios.get(finalUrl, { 
         headers: { 'Authorization': `Bearer ${session?.access_token}` },
         signal
@@ -143,22 +275,32 @@ export default function CallsPage() {
 
       if (signal?.aborted) return;
       
-      const { data: fetchedCalls, total, totalPages: fetchedTotalPages } = res.data;
+      const { data: fetchedCalls, total, totalPages: fetchedTotalPages, isDelta } = res.data;
 
-      if (silent) {
-        // Silent update handling
-        const currentIds = new Set(calls.map(c => String(c.id)));
+      if (silent && isDelta) {
+        if (!fetchedCalls || fetchedCalls.length === 0) return;
+
+        // Background update handling (delta sync)
+        lastSyncTimeRef.current = new Date().toISOString().replace('T', ' ').substring(0, 19);
+        setLastSyncTime(lastSyncTimeRef.current);
+
+        const updatedCalls = [...calls];
         let newCount = 0;
 
         fetchedCalls.forEach((nc: any) => {
-          if (!currentIds.has(String(nc.id))) {
+          const idx = updatedCalls.findIndex(c => String(c.id) === String(nc.id));
+          if (idx > -1) {
+            updatedCalls[idx] = nc;
+          } else {
+            // New call! Prepend to the list
+            updatedCalls.unshift(nc);
             newCount++;
           }
         });
 
-        if (newCount > 0 && !signal?.aborted) {
-          setPendingCalls(fetchedCalls);
-          setUpdateInfo({ newCount, updatedCount: 0 });
+        if (fetchedCalls.length > 0 && !signal?.aborted) {
+          setPendingCalls(updatedCalls);
+          setUpdateInfo({ newCount, updatedCount: fetchedCalls.length - newCount });
         }
         return;
       }
@@ -169,6 +311,8 @@ export default function CallsPage() {
       setTotalPages(fetchedTotalPages);
       setPage(pageToFetch);
       setLoading(false);
+      lastSyncTimeRef.current = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      setLastSyncTime(lastSyncTimeRef.current);
 
     } catch (err: any) {
       if (axios.isCancel(err)) return;
@@ -243,12 +387,19 @@ export default function CallsPage() {
   };
 
   const localFilteredCalls = calls.filter(c => {
-    const matchesSearch = !globalSearch ||
-      c.customer_name?.toLowerCase().includes(globalSearch.toLowerCase()) ||
-      c.engineer_name?.toLowerCase().includes(globalSearch.toLowerCase()) ||
-      c.vtrnno?.includes(globalSearch) ||
-      c.vcomplaint?.toLowerCase().includes(globalSearch.toLowerCase());
-    return matchesSearch;
+    if (!globalSearch) return true;
+    const searchLower = globalSearch.toLowerCase();
+    return (
+      String(c.customer_name || '').toLowerCase().includes(searchLower) ||
+      String(c.engineer_name || '').toLowerCase().includes(searchLower) ||
+      String(c.vtrnno || '').toLowerCase().includes(searchLower) ||
+      String(c.vcomplaint || '').toLowerCase().includes(searchLower) ||
+      String(c.vserialno || '').toLowerCase().includes(searchLower) ||
+      String(c.branch_name || '').toLowerCase().includes(searchLower) ||
+      String(c.vlocation || '').toLowerCase().includes(searchLower) ||
+      String(c.id || '').toLowerCase().includes(searchLower) ||
+      String(c.ncode || '').toLowerCase().includes(searchLower)
+    );
   });
 
   const currentIndex = selectedCallId ? localFilteredCalls.findIndex((c: any) => c.id === selectedCallId) : -1;
@@ -319,11 +470,11 @@ export default function CallsPage() {
     onApplyUpdates: handleApplyUpdates,
     newCallsCount,
     onCatchUp: handleCatchUp,
-    onFullReset: () => { },
-    lastSyncTime: null,
-    isSyncing: false,
+    onFullReset: handleFullReset,
+    lastSyncTime: lastSyncTime,
+    isSyncing: loading,
     syncProgress: 0,
-    onManualSync: () => { },
+    onManualSync: handleManualSync,
     onStopSync: () => { },
     onNext: handleNextCall,
     onPrev: handlePrevCall,

@@ -20,10 +20,13 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { useUser } from '@/components/DashboardLayout';
 
 export default function AdminUsersPage() {
+  const { userProfile } = useUser();
   const supabase = createClient();
   const [users, setUsers] = useState<any[]>([]);
+  const [roles, setRoles] = useState<any[]>([]);
   const [offices, setOffices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -44,6 +47,7 @@ export default function AdminUsersPage() {
     email: '',
     password: '',
     role: 'branch_manager',
+    role_id: '',
     office_ids: [] as string[],
     visible_statuses: [] as string[]
   });
@@ -62,9 +66,10 @@ export default function AdminUsersPage() {
 
       setCurrentUserInfo(session.user);
 
-      const [usersRes, officesRes] = await Promise.all([
+      const [usersRes, officesRes, rolesRes] = await Promise.all([
         axios.get('/api/admin/users', { headers: { 'Authorization': `Bearer ${session.access_token}` } }),
-        axios.get('/api/offices', { headers: { 'Authorization': `Bearer ${session.access_token}` } })
+        axios.get('/api/offices', { headers: { 'Authorization': `Bearer ${session.access_token}` } }),
+        axios.get('/api/admin/roles')
       ]);
 
 
@@ -75,6 +80,7 @@ export default function AdminUsersPage() {
 
       setUsers(usersRes.data);
       setOffices(officesRes.data);
+      setRoles(rolesRes.data.roles);
     } catch (err) {
       // Silently handle fetch errors for production
       // If forbidden, redirect
@@ -102,7 +108,7 @@ export default function AdminUsersPage() {
       }
       setShowAddModal(false);
       setEditingUser(null);
-      setFormData({ name: '', email: '', password: '', role: 'branch_manager', office_ids: [], visible_statuses: [] });
+      setFormData({ name: '', email: '', password: '', role: 'branch_manager', role_id: '', office_ids: [], visible_statuses: [] });
       setBranchSearch('');
       fetchInitialData();
       toast.success(editingUser ? 'User updated successfully' : 'User created successfully');
@@ -189,47 +195,26 @@ export default function AdminUsersPage() {
   );
 
   return (
-    <div className="flex flex-col h-screen bg-[#f8fafc] overflow-hidden text-slate-700 font-sans">
-      {/* Header - Matching Calls Page */}
-      <header className="flex-shrink-0 bg-white border-b border-[#e2e8f0]">
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#f8fafc]">
+      
+      <header className="bg-white border-b border-slate-200 flex-shrink-0">
         <div className="h-14 px-7 flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-3">
-              <img src="/western-head-logo-2025.png" alt="Logo" className="w-8 h-8 rounded-lg object-contain shadow-sm" />
-              <h1 className="text-[14px] font-bold text-[#0f172a] leading-none">Admin</h1>
-            </div>
-            
-            <nav className="h-14 flex items-center border-l border-slate-100 pl-6 ml-2 gap-1">
-              <button 
-                onClick={() => router.push('/calls')}
-                className="h-9 px-4 rounded-lg text-[13px] font-medium text-slate-500 hover:bg-slate-50 transition-all flex items-center gap-2"
-              >
-                <LayoutDashboard size={16} />
-                Calls
-              </button>
-              <div className="h-9 px-4 rounded-lg text-[13px] font-bold text-[#0f172a] bg-slate-50 border border-slate-200 flex items-center gap-2">
-                <Users size={16} />
-                Users
-              </div>
-            </nav>
+          <div className="flex items-center gap-4">
+            <Users className="text-slate-900" size={18} />
+            <h1 className="text-sm font-black tracking-tight uppercase text-slate-900">User Management</h1>
           </div>
 
           <div className="flex items-center gap-4">
-            <div className="flex flex-col items-end mr-2">
-              <span className="text-[12px] font-bold text-[#0f172a]">{currentUserInfo?.user_metadata?.name || 'Administrator'}</span>
-              <span className="text-[10px] text-slate-400 font-medium">{currentUserInfo?.email}</span>
-            </div>
-            
             <button 
               onClick={() => {
                 setEditingUser(null);
-                setFormData({ name: '', email: '', password: '', role: 'branch_manager', office_ids: [], visible_statuses: [] });
+                setFormData({ name: '', email: '', password: '', role: 'branch_manager', role_id: '', office_ids: [], visible_statuses: [] });
                 setBranchSearch('');
                 setActiveTab('profile');
                 setShowOnlySelectedBranches(false);
                 setShowAddModal(true);
               }}
-              className="h-9 px-4 bg-[#0f172a] text-white rounded-lg font-bold text-[12px] flex items-center gap-2 hover:bg-slate-800 transition-all shadow-sm active:scale-95 uppercase tracking-wider"
+              className="h-9 px-4 bg-slate-900 text-white rounded-xl font-bold text-[12px] flex items-center gap-2 hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 active:scale-95 uppercase tracking-wider"
             >
               <UserPlus size={14} />
               Add User
@@ -288,12 +273,18 @@ export default function AdminUsersPage() {
                       </div>
                     </td>
                     <td className="px-6 py-5">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${
-                        u.role === 'hod' ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 'bg-slate-50 text-slate-500 border border-slate-200'
-                      }`}>
-                        <Shield size={12} />
-                        {u.role === 'hod' ? 'HOD' : 'Manager'}
-                      </span>
+                      {(() => {
+                        const roleObj = roles.find(r => r.id === u.role_id);
+                        const isHod = roleObj ? roleObj.name.toLowerCase() === 'hod' : u.role === 'hod';
+                        return (
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${
+                            isHod ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 'bg-slate-50 text-slate-500 border border-slate-200'
+                          }`}>
+                            <Shield size={12} />
+                            {roleObj?.name || (u.role === 'hod' ? 'HOD' : 'Manager')}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-6 py-5">
                       {u.role === 'hod' ? (
@@ -357,6 +348,7 @@ export default function AdminUsersPage() {
                               email: u.email, 
                               password: '', 
                               role: u.role, 
+                              role_id: u.role_id,
                               office_ids: u.office_ids || [],
                               visible_statuses: u.visible_statuses || []
                             });
@@ -492,24 +484,21 @@ export default function AdminUsersPage() {
                       <div className="space-y-1.5 pt-2">
                         <label className="text-[12px] font-medium text-slate-700">System Role</label>
                         <div className="grid grid-cols-2 gap-2">
-                          {[
-                            { id: 'branch_manager', label: 'Branch Manager', desc: 'Limited branch access' },
-                            { id: 'hod', label: 'HOD', desc: 'Full system access' }
-                          ].map(role => (
+                          {roles.map(role => (
                             <button
                               key={role.id}
                               type="button"
-                              onClick={() => setFormData({...formData, role: role.id})}
+                              onClick={() => setFormData({...formData, role: role.name.toLowerCase().replace(' ', '_'), role_id: role.id})}
                               className={`p-3 text-left border rounded-lg transition-all ${
-                                formData.role === role.id 
+                                formData.role_id === role.id 
                                   ? 'border-indigo-600 bg-indigo-50/50' 
                                   : 'border-slate-200 hover:border-slate-300'
                               }`}
                             >
-                              <div className={`text-[12px] font-bold ${formData.role === role.id ? 'text-indigo-600' : 'text-slate-700'}`}>
-                                {role.label}
+                              <div className={`text-[12px] font-bold ${formData.role_id === role.id ? 'text-indigo-600' : 'text-slate-700'}`}>
+                                {role.name}
                               </div>
-                              <div className="text-[10px] text-slate-400 mt-0.5">{role.desc}</div>
+                              <div className="text-[10px] text-slate-400 mt-0.5 truncate">{role.description}</div>
                             </button>
                           ))}
                         </div>
@@ -690,6 +679,6 @@ export default function AdminUsersPage() {
           </div>
         </div>
       )}
-    </div>
+      </div>
   );
 }

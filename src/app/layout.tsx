@@ -18,6 +18,7 @@ export const metadata: Metadata = {
 };
 
 import { Toaster } from 'sonner';
+import { DashboardLayout } from '@/components/DashboardLayout';
 
 export default function RootLayout({
   children,
@@ -25,9 +26,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body className={`${dmSans.variable} ${jetbrainsMono.variable} antialiased font-sans`}>
-        {children}
+        <DashboardLayout>
+          {children}
+        </DashboardLayout>
         <Toaster position="bottom-right" richColors closeButton />
       </body>
     </html>

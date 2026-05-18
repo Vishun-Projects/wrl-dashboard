@@ -1,18 +1,18 @@
 import { createClient } from './supabase/server';
+import { prisma } from './prisma';
 
-export async function getCurrentUser() {
+export async function getUserInfo() {
   const supabase = await createClient();
-  const { data: { user }, error } = await supabase.auth.getUser();
-  
-  if (error || !user) return null;
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
 
-  const { data: profile } = await supabase
-    .from('app_users')
-    .select('*')
-    .eq('id', user.id)
-    .single();
+  const [profileResult, permissions] = await Promise.all([
+    prisma.$queryRawUnsafe('SELECT * FROM public.app_users WHERE id = $1', user.id),
+    (prisma as any).getUserPermissions(user.id)
+  ]);
 
-  return { ...user, profile };
+  const profile = (profileResult as any[])[0];
+  return profile ? { ...profile, permissions } : null;
 }
 
 export type UserProfile = {
@@ -22,4 +22,5 @@ export type UserProfile = {
   role: 'branch_manager' | 'hod' | 'super_admin';
   office_ids: string[];
   visible_statuses?: string[];
+  permissions: string[];
 };

@@ -7,7 +7,8 @@
   --color-accent: #3b82f6;
   --color-bg-canvas: #ffffff;
   --color-bg-soft: #f8fafc;
-  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-sans: var(--font-dm-sans), 'Inter', system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), monospace;
   
   --shadow-premium: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
   --shadow-glass: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
@@ -26,6 +27,26 @@
 
   .soft-card {
     @apply bg-white border border-slate-100 rounded-2xl shadow-premium hover:shadow-lg hover:border-slate-200 transition-all duration-300;
+  }
+
+  /* Centralized Status & Action Badges */
+  .badge-solved, .badge-closed, .badge-approved {
+    @apply bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wider inline-flex items-center gap-1.5 shadow-sm;
+  }
+  .badge-transferred {
+    @apply bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wider inline-flex items-center gap-1.5 shadow-sm;
+  }
+  .badge-cancelled, .badge-rejected {
+    @apply bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wider inline-flex items-center gap-1.5 shadow-sm;
+  }
+  .badge-open, .badge-pending {
+    @apply bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wider inline-flex items-center gap-1.5 shadow-sm;
+  }
+  .badge-assigned, .badge-allocated {
+    @apply bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wider inline-flex items-center gap-1.5 shadow-sm;
+  }
+  .badge-unseen {
+    @apply bg-slate-50 text-slate-500 border border-slate-200 text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wider inline-flex items-center gap-1.5 shadow-sm;
   }
 
   /* Accessible Tooltip System */

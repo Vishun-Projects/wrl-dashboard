@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { postQuery } from '@/lib/db-proxy';
+import { prisma } from '@/lib/prisma';
+
+function getExactTrnQuery(search: string): string | null {
+  const cleaned = search.trim().replace(/-/g, '');
+  if (/^[A-Za-z0-9]{3}\d{2}\d+$/.test(cleaned)) {
+    return cleaned;
+  }
+  return null;
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,6 +23,8 @@ export async function GET(req: NextRequest) {
     const endDate = searchParams.get('endDate') || '';
     const account = searchParams.get('account') || '';
     const region = searchParams.get('region') || '';
+    const status = searchParams.get('status') || '';
+    const lastSync = searchParams.get('lastSync') || '';
 
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -22,61 +33,105 @@ export async function GET(req: NextRequest) {
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
     if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+    const permissions = await (prisma as any).getUserPermissions(user.id);
+
     // Get user profile for office restrictions
     const { data: profile } = await supabaseAdmin
-      .from('profiles')
+      .from('app_users')
       .select('office_ids, role')
       .eq('id', user.id)
       .single();
 
-    const isHod = profile?.role === 'HOD' || profile?.role === 'ADMIN';
     const assignedOffices = profile?.office_ids || [];
+
+    const isHod = 
+      permissions.includes('view_all_offices') || 
+      permissions.includes('view_reports') ||
+      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
 
     let condition = "callsntrnno IS NOT NULL AND callsntrnno <> ''";
 
-    if (officeId && officeId !== 'All') {
-      if (officeId.includes(',')) {
-        condition += ` AND nofficeid IN (${officeId})`;
-      } else {
-        condition += ` AND nofficeid = ${officeId}`;
-      }
-    } else if (!isHod && assignedOffices.length > 0) {
-      condition += ` AND nofficeid IN (${assignedOffices.join(',')})`;
-    }
-
     if (search && search.length > 2) {
-      condition += ` AND (callsntrnno LIKE '%${search}%' OR itemname LIKE '%${search}%' OR PartyName LIKE '%${search}%' OR callsvserialno LIKE '%${search}%')`;
-    }
-
-    if (startDate) {
-      condition += ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) >= '${startDate}'`;
-    }
-    if (endDate) {
-      condition += ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) <= '${endDate} 23:59:59'`;
-    }
-
-    if (account && account !== 'All') {
-      const accountNameSafe = account.replace(/'/g, "''");
-      condition += ` AND npartyprofile IN (SELECT ncode FROM mstpartyprofile WHERE vname LIKE '%${accountNameSafe}%')`;
-    }
-
-    if (callType && callType !== 'All') {
-      if (callType.includes(',')) {
-        const types = callType.split(',').map(t => `'${t.trim().replace(/'/g, "''")}'`).join(',');
-        condition += ` AND calltype IN (${types})`;
+      const searchSafe = search.replace(/'/g, "''");
+      const exactTrn = getExactTrnQuery(searchSafe);
+      if (exactTrn) {
+        condition += ` AND (UniqueCallNo = '${exactTrn}')`;
       } else {
-        condition += ` AND calltype = '${callType.replace(/'/g, "''")}'`;
+        // Global search: ignore all filters (dates, status, etc.) to look up the specific record historically across the entire database
+        condition += ` AND (CAST(callsntrnno AS NVARCHAR(50)) LIKE '%${searchSafe}%' OR itemname LIKE '%${searchSafe}%' OR PartyName LIKE '%${searchSafe}%' OR callsvserialno LIKE '%${searchSafe}%' OR UniqueCallNo LIKE '%${searchSafe}%')`;
+      }
+    } else {
+      if (officeId && officeId !== 'All') {
+        if (officeId.includes(',')) {
+          condition += ` AND nofficeid IN (${officeId})`;
+        } else {
+          condition += ` AND nofficeid = ${officeId}`;
+        }
+      } else if (!isHod && assignedOffices.length > 0) {
+        condition += ` AND nofficeid IN (${assignedOffices.join(',')})`;
+      }
+
+      if (startDate) {
+        condition += ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) >= '${startDate}'`;
+      }
+      if (endDate) {
+        condition += ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) <= '${endDate} 23:59:59'`;
+      }
+
+      if (account && account !== 'All') {
+        const accountNameSafe = account.replace(/'/g, "''");
+        condition += ` AND npartyprofile IN (SELECT ncode FROM mstpartyprofile WHERE vname LIKE '%${accountNameSafe}%')`;
+      }
+
+      if (callType && callType !== 'All') {
+        if (callType.includes(',')) {
+          const types = callType.split(',').map(t => `'${t.trim().replace(/'/g, "''")}'`).join(',');
+          condition += ` AND calltype IN (${types})`;
+        } else {
+          condition += ` AND calltype = '${callType.replace(/'/g, "''")}'`;
+        }
+      }
+
+      if (region && region !== 'All') {
+        const regionsArray = region.split(',').map(r => `'${r.replace(/'/g, "''")}'`).join(',');
+        condition += ` AND nofficeid IN (
+          SELECT o.ncode FROM mstoffice o
+          LEFT JOIN mstoffice op ON o.nunder = op.ncode AND o.nunder <> 0
+          LEFT JOIN mstzones z ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
+          WHERE z.vname IN (${regionsArray})
+        )`;
+      }
+
+      if (status && status !== 'All') {
+        if (status === 'Open Unallocated') {
+          condition += " AND (nengineer = 0 OR nengineer IS NULL OR CAST(nengineer AS NVARCHAR(50)) = '0') AND (bfastclose = 'False' OR bfastclose IS NULL OR bfastclose = '0') AND (callsolved = 'False' OR callsolved IS NULL OR callsolved = '0') AND ISNULL(callstatus, '') <> 'Cancel'";
+        } else if (status === 'Assigned') {
+          condition += " AND (nengineer > 0 OR (nengineer IS NOT NULL AND CAST(nengineer AS NVARCHAR(50)) <> '0')) AND (bfastclose = 'False' OR bfastclose IS NULL OR bfastclose = '0') AND (callsolved = 'False' OR callsolved IS NULL OR callsolved = '0') AND ISNULL(callstatus, '') <> 'Cancel'";
+        } else if (status === 'Tech. Solve Call') {
+          condition += " AND (bfastclose = 'True' OR bfastclose = '1') AND (callsolved = 'False' OR callsolved IS NULL OR callsolved = '0') AND ISNULL(callstatus, '') <> 'Cancel'";
+        } else if (status === 'Closed') {
+          condition += " AND (callsolved = 'True' OR callsolved = '1' OR CAST(Status AS NVARCHAR(MAX)) = 'Closed')";
+        }
       }
     }
 
-    if (region && region !== 'All') {
-      const regionsArray = region.split(',').map(r => `'${r.replace(/'/g, "''")}'`).join(',');
-      condition += ` AND nofficeid IN (
-        SELECT o.ncode FROM mstoffice o
-        LEFT JOIN mstoffice op ON o.nunder = op.ncode AND o.nunder <> 0
-        LEFT JOIN mstzones z ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
-        WHERE z.vname IN (${regionsArray})
+    if (lastSync) {
+      condition += ` AND (
+        ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) >= '${lastSync}'
+        OR ISNULL(TRY_CAST(callsolveddate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsolveddate AS NVARCHAR(50)), 10), 104)) >= '${lastSync}'
       )`;
+
+      const res = await postQuery({
+        fields: `callsntrnno, callsdtrndate, PartyName, vlocation, itemname, callsvserialno, serviceman, vcomplaint, Status, callstatus, callsolved, Priority, callsolveddate, vsolveremarks, UniqueCallNo, vpersoncalling, vinsttel1, vinstaddress, addedby, officename, calltype, vtransfercallno, vtransferofficename, bfastclose, nengineer, nofficeid, bmreject, horeject, rejectionstatus, vcomment, (SELECT TOP 1 vname FROM mstcallcancelreasons (NOLOCK) WHERE ncode = CAST(NULLIF(ncancelreason, '') AS NVARCHAR(50))) as cancel_reason`,
+        tableName: "uv_findtrhcalls_callsearch (NOLOCK)",
+        condition,
+        orderBy: "ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) DESC"
+      });
+
+      return NextResponse.json({
+        data: res.data || [],
+        isDelta: true
+      });
     }
 
     const topValue = page * limit;
@@ -87,7 +142,7 @@ export async function GET(req: NextRequest) {
         condition
       }),
       postQuery({
-        fields: `callsntrnno, callsdtrndate, PartyName, vlocation, itemname, callsvserialno, serviceman, vcomplaint, Status, callstatus, callsolved, Priority, callsolveddate, vsolveremarks, UniqueCallNo, vpersoncalling, vinsttel1, vinstaddress, addedby, officename, calltype, vtransfercallno, vtransferofficename, (SELECT TOP 1 vname FROM mstcallcancelreasons (NOLOCK) WHERE ncode = CAST(NULLIF(ncancelreason, '') AS NVARCHAR(50))) as cancel_reason`,
+        fields: `callsntrnno, callsdtrndate, PartyName, vlocation, itemname, callsvserialno, serviceman, vcomplaint, Status, callstatus, callsolved, Priority, callsolveddate, vsolveremarks, UniqueCallNo, vpersoncalling, vinsttel1, vinstaddress, addedby, officename, calltype, vtransfercallno, vtransferofficename, bfastclose, nengineer, nofficeid, bmreject, horeject, rejectionstatus, vcomment, (SELECT TOP 1 vname FROM mstcallcancelreasons (NOLOCK) WHERE ncode = CAST(NULLIF(ncancelreason, '') AS NVARCHAR(50))) as cancel_reason`,
         tableName: "uv_findtrhcalls_callsearch (NOLOCK)",
         condition,
         orderBy: "ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) DESC",

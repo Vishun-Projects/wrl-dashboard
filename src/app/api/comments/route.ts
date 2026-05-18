@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { prisma } from '@/lib/prisma';
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -25,7 +26,11 @@ export async function GET(request: Request) {
       .eq('id', user.id)
       .single();
 
-    const isHod = profile?.role === 'hod' || profile?.role === 'super_admin';
+    const permissions = await (prisma as any).getUserPermissions(user.id);
+    const isHod = 
+      permissions.includes('view_all_offices') || 
+      permissions.includes('view_reports') ||
+      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
     const assignedOffices = profile?.office_ids || [];
 
     let query = supabaseAdmin
@@ -75,7 +80,11 @@ export async function POST(request: Request) {
       .eq('id', user.id)
       .single();
 
-    const isHod = profile?.role === 'hod' || profile?.role === 'super_admin';
+    const permissions = await (prisma as any).getUserPermissions(user.id);
+    const isHod = 
+      permissions.includes('view_all_offices') || 
+      permissions.includes('view_reports') ||
+      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
     const assignedOffices = profile?.office_ids || [];
 
     // If not HOD, check if they have permission for this office

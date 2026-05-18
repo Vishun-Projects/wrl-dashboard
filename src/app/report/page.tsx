@@ -16,39 +16,83 @@ import {
   X
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useUser } from '@/components/DashboardLayout';
+import { DateRangeSelector } from '@/components/DateRangeSelector';
+
+interface GlobalReportCacheType {
+  data: any[];
+  summaryData: any[];
+  accountsData: any[];
+  globalHeadcount: number;
+  total: number;
+  page: number;
+  search: string;
+  selectedOfficeIds: string[];
+  dateRange: { start: Date; end: Date; label: string };
+  filterRegion: string[];
+  filterAccount: string;
+  selectedCallTypes: string[];
+  registerSummary: { total: number, transferred: number, cancelled: number, solved: number, open: number } | null;
+  lastRefreshed: Date | null;
+  agingAsOf: string;
+  selectedStatus: string;
+}
+
+let globalReportCache: GlobalReportCacheType | null = null;
 
 export default function ReportPage() {
+  const { userProfile } = useUser();
   const supabase = createClient();
   const [activeTab, setActiveTab] = useState<'register' | 'summary' | 'accounts'>('register');
-  const [data, setData] = useState<any[]>([]);
-  const [summaryData, setSummaryData] = useState<any[]>([]);
-  const [accountsData, setAccountsData] = useState<any[]>([]);
-  const [globalHeadcount, setGlobalHeadcount] = useState<number>(0);
-  const [loading, setLoading] = useState(true);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
+  const [data, setData] = useState<any[]>(globalReportCache?.data || []);
+  const [summaryData, setSummaryData] = useState<any[]>(globalReportCache?.summaryData || []);
+  const [accountsData, setAccountsData] = useState<any[]>(globalReportCache?.accountsData || []);
+  const [globalHeadcount, setGlobalHeadcount] = useState<number>(globalReportCache?.globalHeadcount || 0);
+  const [loading, setLoading] = useState(!globalReportCache);
+  const [total, setTotal] = useState(globalReportCache?.total || 0);
+  const [page, setPage] = useState(globalReportCache?.page || 1);
   const [limit] = useState(50);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(globalReportCache?.search || '');
+  const [debouncedSearch, setDebouncedSearch] = useState(globalReportCache?.search || '');
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
   const [offices, setOffices] = useState<any[]>([]);
-  const [selectedOfficeIds, setSelectedOfficeIds] = useState<string[]>([]);
+  const [selectedOfficeIds, setSelectedOfficeIds] = useState<string[]>(globalReportCache?.selectedOfficeIds || []);
   const [showOfficeDropdown, setShowOfficeDropdown] = useState(false);
-  const [dateRange, setDateRange] = useState({
-    start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0]
+  const [dateRange, setDateRange] = useState<{start: Date, end: Date, label: string}>(() => {
+    if (globalReportCache) return {
+      start: new Date(globalReportCache.dateRange.start),
+      end: new Date(globalReportCache.dateRange.end),
+      label: globalReportCache.dateRange.label || 'Last 30 Days'
+    };
+    const end = new Date();
+    const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+    return { start, end, label: 'Last 30 Days' };
   });
   const [selectedBranchEngs, setSelectedBranchEngs] = useState<string[]>([]);
   const [showEngPopup, setShowEngPopup] = useState<string | null>(null);
   const [fetchingEngs, setFetchingEngs] = useState(false);
   const [expandedBranches, setExpandedBranches] = useState<Record<string, boolean>>({});
-  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
-  const [filterRegion, setFilterRegion] = useState<string[]>([]); // Array for multiselect
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(globalReportCache?.lastRefreshed || null);
+  const [filterRegion, setFilterRegion] = useState<string[]>(globalReportCache?.filterRegion || []); // Array for multiselect
   const [showRegionDropdown, setShowRegionDropdown] = useState(false);
-  const [filterAccount, setFilterAccount] = useState('All');
-  const [selectedCallTypes, setSelectedCallTypes] = useState<string[]>([]);
+  const [filterAccount, setFilterAccount] = useState(globalReportCache?.filterAccount || 'All');
+  const [selectedCallTypes, setSelectedCallTypes] = useState<string[]>(globalReportCache?.selectedCallTypes || []);
   const [callTypes, setCallTypes] = useState<string[]>([]);
   const [showCallTypeDropdown, setShowCallTypeDropdown] = useState(false);
   const [exportingDetailed, setExportingDetailed] = useState(false);
-  const [agingAsOf, setAgingAsOf] = useState(new Date().toISOString().split('T')[0]);
+  const [agingAsOf, setAgingAsOf] = useState<string>(() => {
+    if (globalReportCache && typeof globalReportCache.agingAsOf === 'string' && globalReportCache.agingAsOf.includes('-') && !globalReportCache.agingAsOf.includes(':')) {
+      return globalReportCache.agingAsOf;
+    }
+    return new Date().toISOString().split('T')[0];
+  });
+  const [selectedStatus, setSelectedStatus] = useState<string>(globalReportCache?.selectedStatus || 'All');
   const [officeSearch, setOfficeSearch] = useState('');
   const [drillDown, setDrillDown] = useState<{
     isOpen: boolean;
@@ -67,33 +111,38 @@ export default function ReportPage() {
     title: '',
     params: null
   });
-  const [registerSummary, setRegisterSummary] = useState<{ total: number, transferred: number, cancelled: number, solved: number, open: number } | null>(null);
+  const [registerSummary, setRegisterSummary] = useState<{ total: number, transferred: number, cancelled: number, solved: number, open: number } | null>(globalReportCache?.registerSummary || null);
   const fetchControllerRef = React.useRef<AbortController | null>(null);
   const drillDownControllerRef = React.useRef<AbortController | null>(null);
 
   // Auto-sync agingAsOf with dateRange.end if it falls behind
   useEffect(() => {
     if (dateRange.end && agingAsOf) {
-      const endD = new Date(dateRange.end);
+      const endD = dateRange.end;
       const agingD = new Date(agingAsOf);
       if (agingD < endD) {
-        setAgingAsOf(dateRange.end);
+        setAgingAsOf(endD.toISOString().split('T')[0]);
       }
     }
   }, [dateRange.end, agingAsOf]);
 
+  // Fetch Offices and Call Types
   useEffect(() => {
     async function fetchOffices() {
-      const { data: { session } } = await supabase.auth.getSession();
-      const headers = { 'Authorization': `Bearer ${session?.access_token}` };
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const headers = { 'Authorization': `Bearer ${session?.access_token}` };
 
-      const [officeRes, typesRes] = await Promise.all([
-        axios.get('/api/offices', { headers }),
-        axios.get('/api/report/call-types', { headers })
-      ]);
+        const [officeRes, typesRes] = await Promise.all([
+          axios.get('/api/offices', { headers }),
+          axios.get('/api/report/call-types', { headers })
+        ]);
 
-      setOffices(officeRes.data || []);
-      setCallTypes(typesRes.data || []);
+        setOffices(officeRes.data || []);
+        setCallTypes(typesRes.data || []);
+      } catch (err) {
+        console.error('Failed to fetch report resources:', err);
+      }
     }
     fetchOffices();
   }, []);
@@ -130,6 +179,9 @@ export default function ReportPage() {
     const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
     const callTypesParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
 
+    const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+    const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const headers = {
@@ -139,18 +191,26 @@ export default function ReportPage() {
       // Register data URL
       let url = `/api/report?page=${p}&limit=${limit}&officeId=${officeIdsParam}&callType=${callTypesParam}`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
-      if (dateRange.start) url += `&startDate=${dateRange.start}`;
-      if (dateRange.end) url += `&endDate=${dateRange.end}`;
+      if (startDateStr) url += `&startDate=${startDateStr}`;
+      if (endDateStr) url += `&endDate=${endDateStr}`;
+      if (selectedStatus !== 'All') url += `&status=${selectedStatus}`;
 
       // Fetch summary only on the first page load or full refresh
       const needsSummary = p === 1;
       let summaryUrl = '';
       if (needsSummary) {
         summaryUrl = `/api/report/summary?officeId=${officeIdsParam}&callType=${callTypesParam}`;
-        if (dateRange.start) summaryUrl += `&startDate=${dateRange.start}`;
-        if (dateRange.end) summaryUrl += `&endDate=${dateRange.end}`;
-        if (agingAsOf) summaryUrl += `&agingAsOf=${agingAsOf}`;
+        if (startDateStr) summaryUrl += `&startDate=${startDateStr}`;
+        if (endDateStr) summaryUrl += `&endDate=${endDateStr}`;
+        if (agingAsOf) {
+          const agingStr = agingAsOf.includes(' ') || agingAsOf.includes(':')
+            ? new Date(agingAsOf).toISOString().split('T')[0]
+            : agingAsOf;
+          summaryUrl += `&agingAsOf=${agingStr}`;
+        }
       }
+
+      const newDate = new Date();
 
       // Execute in parallel if summary needed
       if (needsSummary) {
@@ -167,12 +227,41 @@ export default function ReportPage() {
         setSummaryData(summRes.data.branchSummary);
         setAccountsData(summRes.data.accountSummary);
         setGlobalHeadcount(summRes.data.globalHeadcount || 0);
+
+        // Save to global cache
+        globalReportCache = {
+          data: regRes.data.data,
+          summaryData: summRes.data.branchSummary,
+          accountsData: summRes.data.accountSummary,
+          globalHeadcount: summRes.data.globalHeadcount || 0,
+          total: regRes.data.total,
+          page: p,
+          search,
+          selectedOfficeIds,
+          dateRange,
+          filterRegion,
+          filterAccount,
+          selectedCallTypes,
+          registerSummary: regRes.data.summary || null,
+          lastRefreshed: newDate,
+          agingAsOf,
+          selectedStatus
+        };
       } else {
         const regRes = await axios.get(url, { headers, signal: controller.signal });
         setData(regRes.data.data);
         setTotal(regRes.data.total);
         setPage(p);
         setRegisterSummary(regRes.data.summary || null);
+
+        // Update global cache for pagination
+        if (globalReportCache) {
+          globalReportCache.data = regRes.data.data;
+          globalReportCache.total = regRes.data.total;
+          globalReportCache.page = p;
+          globalReportCache.registerSummary = regRes.data.summary || null;
+          globalReportCache.lastRefreshed = newDate;
+        }
       }
     } catch (err: any) {
       if (axios.isCancel(err)) {
@@ -188,6 +277,199 @@ export default function ReportPage() {
     }
   };
 
+  const formatSQLDate = (date: Date) => {
+    const pad = (num: number) => String(num).padStart(2, '0');
+    const yyyy = date.getFullYear();
+    const MM = pad(date.getMonth() + 1);
+    const dd = pad(date.getDate());
+    const hh = pad(date.getHours());
+    const mm = pad(date.getMinutes());
+    const ss = pad(date.getSeconds());
+    return `${yyyy}-${MM}-${dd} ${hh}:${mm}:${ss}`;
+  };
+
+  const isSolved = (rec: any) => {
+    const statusStr = String(rec.Status || rec.callstatus || '').toLowerCase();
+    return String(rec.callsolved).toLowerCase() === 'true' || String(rec.callsolved) === '1' || statusStr === 'closed' || statusStr === 'solved';
+  };
+
+  const isCancelled = (rec: any) => {
+    const statusStr = String(rec.Status || rec.callstatus || '').toLowerCase();
+    return statusStr === 'cancel' || (rec.cancel_reason && String(rec.cancel_reason).trim() !== '');
+  };
+
+  const isTransferred = (rec: any) => {
+    return (rec.vtransfercallno && String(rec.vtransfercallno).trim() !== '') || String(rec.ncancelreason) === '2';
+  };
+
+  const isOpen = (rec: any) => {
+    return !isSolved(rec) && !isCancelled(rec) && !isTransferred(rec);
+  };
+
+  const fetchDelta = async () => {
+    if (!lastRefreshed) {
+      fetchData(1);
+      return;
+    }
+
+    setLoading(true);
+    const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
+    const callTypesParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
+
+    const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+    const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers = { 'Authorization': `Bearer ${session?.access_token}` };
+
+      // Subtract 10 minutes to safely avoid clock drift
+      const safeSyncTime = new Date(lastRefreshed.getTime() - 10 * 60 * 1000);
+      const lastSyncStr = formatSQLDate(safeSyncTime);
+
+      let url = `/api/report?officeId=${officeIdsParam}&callType=${callTypesParam}&lastSync=${encodeURIComponent(lastSyncStr)}`;
+      if (search) url += `&search=${encodeURIComponent(search)}`;
+      if (startDateStr) url += `&startDate=${startDateStr}`;
+      if (endDateStr) url += `&endDate=${endDateStr}`;
+      if (selectedStatus !== 'All') url += `&status=${selectedStatus}`;
+
+      const res = await axios.get(url, { headers });
+      const newRecords = res.data.data || [];
+      const newDate = new Date();
+
+      if (newRecords.length > 0) {
+        const updatedData = [...data];
+        let newAddedCount = 0;
+
+        newRecords.forEach((newRec: any) => {
+          const idx = updatedData.findIndex(r => String(r.UniqueCallNo) === String(newRec.UniqueCallNo) || String(r.callsntrnno) === String(newRec.callsntrnno));
+          if (idx > -1) {
+            updatedData[idx] = newRec;
+          } else {
+            updatedData.unshift(newRec);
+            newAddedCount++;
+          }
+        });
+
+        // Sort by date descending
+        updatedData.sort((a, b) => {
+          const dateA = new Date(a.callsdtrndate || 0).getTime();
+          const dateB = new Date(b.callsdtrndate || 0).getTime();
+          return dateB - dateA;
+        });
+
+        // Update branch summaries incrementally
+        setSummaryData(prevSummary => {
+          const newSummary = [...prevSummary];
+          newRecords.forEach((newRec: any) => {
+            const isRecSolved = isSolved(newRec);
+            const isRecCancelled = isCancelled(newRec);
+            const isRecTransferred = isTransferred(newRec);
+            const isRecOpen = isOpen(newRec);
+
+            const branchRowIdx = newSummary.findIndex(b => b.officeId === newRec.nofficeid || b.branch?.toLowerCase() === newRec.officename?.toLowerCase());
+            if (branchRowIdx > -1) {
+              const row = { ...newSummary[branchRowIdx] };
+              const oldRec = data.find(r => String(r.UniqueCallNo) === String(newRec.UniqueCallNo));
+              if (oldRec) {
+                if (isSolved(oldRec)) row.solved_calls = Math.max(0, (row.solved_calls || 0) - 1);
+                else if (isCancelled(oldRec) || isTransferred(oldRec)) row.cancelled_calls = Math.max(0, (row.cancelled_calls || 0) - 1);
+                else if (isOpen(oldRec)) row.open_calls = Math.max(0, (row.open_calls || 0) - 1);
+              }
+              if (isRecSolved) row.solved_calls = (row.solved_calls || 0) + 1;
+              else if (isRecCancelled || isRecTransferred) row.cancelled_calls = (row.cancelled_calls || 0) + 1;
+              else if (isRecOpen) row.open_calls = (row.open_calls || 0) + 1;
+              
+              newSummary[branchRowIdx] = row;
+            }
+          });
+          return newSummary;
+        });
+
+        // Update key account summaries incrementally
+        setAccountsData(prevAccounts => {
+          const newAccounts = [...prevAccounts];
+          newRecords.forEach((newRec: any) => {
+            const isRecSolved = isSolved(newRec);
+            const isRecCancelled = isCancelled(newRec);
+            const isRecTransferred = isTransferred(newRec);
+            const isRecOpen = isOpen(newRec);
+
+            const accRowIdx = newAccounts.findIndex(a => a.branch?.toLowerCase() === newRec.officename?.toLowerCase() && a.account?.toLowerCase() === newRec.PartyName?.toLowerCase());
+            if (accRowIdx > -1) {
+              const row = { ...newAccounts[accRowIdx] };
+              const oldRec = data.find(r => String(r.UniqueCallNo) === String(newRec.UniqueCallNo));
+              if (oldRec) {
+                if (isSolved(oldRec)) row.solved_calls = Math.max(0, (row.solved_calls || 0) - 1);
+                else if (isCancelled(oldRec) || isTransferred(oldRec)) row.cancelled_calls = Math.max(0, (row.cancelled_calls || 0) - 1);
+                else if (isOpen(oldRec)) row.open_calls = Math.max(0, (row.open_calls || 0) - 1);
+              }
+              if (isRecSolved) row.solved_calls = (row.solved_calls || 0) + 1;
+              else if (isRecCancelled || isRecTransferred) row.cancelled_calls = (row.cancelled_calls || 0) + 1;
+              else if (isRecOpen) row.open_calls = (row.open_calls || 0) + 1;
+              
+              newAccounts[accRowIdx] = row;
+            }
+          });
+          return newAccounts;
+        });
+
+        // Update register count metrics
+        setRegisterSummary(prev => {
+          if (!prev) return null;
+          let newTotal = prev.total;
+          let newSolved = prev.solved;
+          let newCancelled = prev.cancelled;
+          let newTransferred = prev.transferred;
+          let newOpen = prev.open;
+
+          newRecords.forEach((newRec: any) => {
+            const oldRec = data.find(r => String(r.UniqueCallNo) === String(newRec.UniqueCallNo));
+            if (oldRec) {
+              if (isSolved(oldRec)) newSolved = Math.max(0, newSolved - 1);
+              else if (isCancelled(oldRec)) newCancelled = Math.max(0, newCancelled - 1);
+              else if (isTransferred(oldRec)) newTransferred = Math.max(0, newTransferred - 1);
+              else if (isOpen(oldRec)) newOpen = Math.max(0, newOpen - 1);
+            } else {
+              newTotal++;
+            }
+
+            if (isSolved(newRec)) newSolved++;
+            else if (isCancelled(newRec)) newCancelled++;
+            else if (isTransferred(newRec)) newTransferred++;
+            else if (isOpen(newRec)) newOpen++;
+          });
+
+          return {
+            total: newTotal,
+            solved: newSolved,
+            cancelled: newCancelled,
+            transferred: newTransferred,
+            open: newOpen
+          };
+        });
+
+        setData(updatedData);
+        setTotal(total + newAddedCount);
+
+        // Update cache
+        if (globalReportCache) {
+          globalReportCache.data = updatedData;
+          globalReportCache.total = total + newAddedCount;
+          globalReportCache.registerSummary = registerSummary;
+          globalReportCache.lastRefreshed = newDate;
+        }
+      }
+
+      setLastRefreshed(newDate);
+      toast.success(newRecords.length > 0 ? `Synced successfully: ${newRecords.length} call(s) synchronized!` : "Sync completed. No new calls found.");
+    } catch (err: any) {
+      toast.error("Failed to perform delta sync: " + (err.response?.data?.error || err.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleDrillDown = async (type: string, title: string, params: any) => {
     if (drillDownControllerRef.current) {
       drillDownControllerRef.current.abort();
@@ -198,11 +480,13 @@ export default function ReportPage() {
     setDrillDown(prev => ({ ...prev, isOpen: true, loading: true, type, title, params, data: [], sql: '' }));
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+      const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
       const res = await axios.post('/api/report/drilldown', {
         type,
         ...params,
-        startDate: dateRange.start,
-        endDate: dateRange.end
+        startDate: startDateStr,
+        endDate: endDateStr
       }, {
         headers: { 'Authorization': `Bearer ${session?.access_token}` },
         signal: controller.signal
@@ -244,9 +528,11 @@ export default function ReportPage() {
     setShowEngPopup(branch);
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+      const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
       let url = `/api/report/engineers?branch=${encodeURIComponent(branch)}`;
-      if (dateRange.start) url += `&startDate=${dateRange.start}`;
-      if (dateRange.end) url += `&endDate=${dateRange.end}`;
+      if (startDateStr) url += `&startDate=${startDateStr}`;
+      if (endDateStr) url += `&endDate=${endDateStr}`;
 
       const res = await axios.get(url, {
         headers: { 'Authorization': `Bearer ${session?.access_token}` }
@@ -259,10 +545,21 @@ export default function ReportPage() {
     }
   };
 
-  // Automatically fetch data when filters change
+  // Automatically fetch data when filters change, but skip the first fetch if the cache is already present and matches the filters
   useEffect(() => {
-    fetchData(1);
-  }, [dateRange.start, dateRange.end, selectedOfficeIds, filterAccount, selectedCallTypes]);
+    const filtersChanged = !globalReportCache ||
+      globalReportCache.dateRange.start.getTime() !== dateRange.start.getTime() ||
+      globalReportCache.dateRange.end.getTime() !== dateRange.end.getTime() ||
+      JSON.stringify(globalReportCache.selectedOfficeIds) !== JSON.stringify(selectedOfficeIds) ||
+      globalReportCache.filterAccount !== filterAccount ||
+      JSON.stringify(globalReportCache.selectedCallTypes) !== JSON.stringify(selectedCallTypes) ||
+      globalReportCache.selectedStatus !== selectedStatus ||
+      globalReportCache.search !== debouncedSearch;
+
+    if (filtersChanged) {
+      fetchData(1);
+    }
+  }, [dateRange, selectedOfficeIds, filterAccount, selectedCallTypes, selectedStatus, debouncedSearch]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -282,8 +579,9 @@ export default function ReportPage() {
           limit: 100000,
           officeId: selectedOfficeIds.length ? selectedOfficeIds.join(',') : 'All',
           callType: selectedCallTypes.length ? selectedCallTypes.join(',') : 'All',
-          startDate: dateRange.start,
-          endDate: dateRange.end,
+          startDate: dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start,
+          endDate: dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end,
+          status: selectedStatus !== 'All' ? selectedStatus : undefined,
           ...(activeTab === 'accounts' ? {
             account: filterAccount,
             region: filterRegion.length ? filterRegion.join(',') : undefined
@@ -302,19 +600,22 @@ export default function ReportPage() {
       const fileName = `WRL_Detailed_Breakdown_${new Date().toISOString().split('T')[0]}.${format === 'csv' ? 'csv' : 'xlsx'}`;
 
       sheet.columns = [
+        { header: 'ID', key: 'id', width: 15 },
         { header: 'Reference', key: 'ref', width: 15 },
+        { header: 'Call Type', key: 'type', width: 15 },
         { header: 'Date', key: 'date', width: 12 },
         { header: 'Customer', key: 'customer', width: 30 },
-        { header: 'Location', key: 'location', width: 20 },
+        { header: 'Branch', key: 'branch', width: 20 },
         { header: 'Product', key: 'product', width: 20 },
         { header: 'Serial', key: 'serial', width: 15 },
         { header: 'Technician', key: 'tech', width: 20 },
         { header: 'Complaint', key: 'complaint', width: 40 },
         { header: 'Status', key: 'status', width: 12 },
-        { header: 'Priority', key: 'priority', width: 10 },
         { header: 'Solved Date', key: 'solvedDate', width: 12 },
         { header: 'Remarks', key: 'remarks', width: 30 },
-        { header: 'Branch', key: 'branch', width: 20 },
+        { header: 'Contact Person', key: 'contact', width: 20 },
+        { header: 'Phone', key: 'phone', width: 15 },
+        { header: 'Address', key: 'address', width: 40 },
       ];
 
       sheet.getRow(1).eachCell((cell) => {
@@ -330,19 +631,22 @@ export default function ReportPage() {
         const statusText = row.Status === 'UNKNOWN' ? 'PENDING' : (row.Status || row.callstatus || 'OPEN');
 
         const r = sheet.addRow({
+          id: row.UniqueCallNo,
           ref: row.callsntrnno,
+          type: row.calltype,
           date: formatDate(row.callsdtrndate),
           customer: row.PartyName,
-          location: row.vlocation,
+          branch: row.officename || row.Branch || '—',
           product: row.itemname,
           serial: row.callsvserialno,
           tech: row.serviceman,
           complaint: row.vcomplaint,
           status: statusText,
-          priority: row.Priority,
-          solvedDate: formatDate(row.callsolveddate),
-          remarks: row.vsolveremarks,
-          branch: row.officename
+          solvedDate: isSolved ? formatDate(row.callsolveddate) : '—',
+          remarks: row.vsolveremarks || row.cancel_reason || '—',
+          contact: row.vpersoncalling,
+          phone: row.vinsttel1,
+          address: row.vinstaddress
         });
 
         if (isSolved) {
@@ -405,25 +709,22 @@ export default function ReportPage() {
 
     if (activeTab === 'register') {
       sheet.columns = [
+        { header: 'ID', key: 'id', width: 15 },
         { header: 'Reference', key: 'ref', width: 15 },
         { header: 'Call Type', key: 'type', width: 15 },
         { header: 'Date', key: 'date', width: 12 },
         { header: 'Customer', key: 'customer', width: 30 },
-        { header: 'Location', key: 'location', width: 20 },
+        { header: 'Branch', key: 'branch', width: 20 },
         { header: 'Product', key: 'product', width: 20 },
         { header: 'Serial', key: 'serial', width: 15 },
         { header: 'Technician', key: 'tech', width: 20 },
         { header: 'Complaint', key: 'complaint', width: 40 },
         { header: 'Status', key: 'status', width: 12 },
-        { header: 'Priority', key: 'priority', width: 10 },
         { header: 'Solved Date', key: 'solvedDate', width: 12 },
         { header: 'Remarks', key: 'remarks', width: 30 },
-        { header: 'ID', key: 'id', width: 15 },
         { header: 'Contact Person', key: 'contact', width: 20 },
         { header: 'Phone', key: 'phone', width: 15 },
         { header: 'Address', key: 'address', width: 40 },
-        { header: 'User', key: 'user', width: 15 },
-        { header: 'Branch', key: 'branch', width: 20 },
       ];
 
       applyHeaderStyle(sheet.getRow(1));
@@ -438,8 +739,8 @@ export default function ReportPage() {
           const params = new URLSearchParams({
             officeId: selectedOfficeIds.join(',') || 'All',
             callType: selectedCallTypes.join(',') || 'All',
-            startDate: dateRange.start,
-            endDate: dateRange.end,
+            startDate: dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start,
+            endDate: dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end,
             limit: '20000', // Fetch a large batch for export
             page: '1'
           });
@@ -461,25 +762,22 @@ export default function ReportPage() {
         const statusText = row.Status === 'UNKNOWN' ? 'PENDING' : (row.Status || row.callstatus || 'OPEN');
 
         const r = sheet.addRow({
+          id: row.UniqueCallNo,
           ref: row.callsntrnno,
           type: row.calltype,
           date: formatDate(row.callsdtrndate),
           customer: row.PartyName,
-          location: row.vlocation || row.vcity || row.routeName || '—',
+          branch: row.officename || '—',
           product: row.itemname,
           serial: row.callsvserialno,
           tech: row.serviceman,
           complaint: row.vcomplaint,
           status: statusText,
-          priority: row.Priority,
           solvedDate: isSolved ? formatDate(row.callsolveddate) : '—',
           remarks: row.vsolveremarks || row.cancel_reason || '—',
-          id: row.UniqueCallNo,
           contact: row.vpersoncalling,
           phone: row.vinsttel1,
-          address: row.vinstaddress,
-          user: row.addedby,
-          branch: row.officename
+          address: row.vinstaddress
         });
 
         // Style status cell
@@ -629,16 +927,25 @@ export default function ReportPage() {
 
   const totalPages = Math.ceil(total / limit);
 
-  return (
-    <div className="flex flex-col h-screen bg-white font-sans overflow-hidden text-slate-900">
-      {/* Top Header */}
-      <div className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-6 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <FileSpreadsheet className="text-slate-900" size={18} />
-          <h1 className="text-sm font-semibold tracking-tight">MIS Reports</h1>
-          <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded font-medium uppercase tracking-wider">BD & Deployment</span>
-        </div>
+  const localFilteredData = React.useMemo(() => {
+    return data.filter(c => {
+      if (!search) return true;
+      const searchLower = search.toLowerCase();
+      return (
+        String(c.UniqueCallNo || '').toLowerCase().includes(searchLower) ||
+        String(c.callsntrnno || '').toLowerCase().includes(searchLower) ||
+        String(c.PartyName || '').toLowerCase().includes(searchLower) ||
+        String(c.officename || '').toLowerCase().includes(searchLower) ||
+        String(c.serviceman || '').toLowerCase().includes(searchLower) ||
+        String(c.vcomplaint || '').toLowerCase().includes(searchLower)
+      );
+    });
+  }, [data, search]);
 
+  return (
+    <div className="flex-1 flex flex-col h-full overflow-hidden text-slate-900 bg-white">
+      {/* Page Header / Controls */}
+      <div className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-6 flex-shrink-0">
         <div className="flex items-center gap-6">
           <div className="flex">
             {[
@@ -670,14 +977,26 @@ export default function ReportPage() {
             </span>
           )}
           <button
-            onClick={() => fetchData(1)}
+            onClick={() => fetchDelta()}
             disabled={loading}
-            className="flex items-center gap-2 bg-white text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
+            className="flex items-center gap-1.5 bg-slate-900 text-white px-3 py-1.5 rounded-md text-xs font-bold hover:bg-slate-800 transition-all shadow-sm disabled:opacity-50"
+            title="Fast delta sync (fetches only new or updated calls since last sync)"
           >
             <div className={`${loading ? 'animate-spin' : ''}`}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M16 16h5v5" /></svg>
             </div>
-            Refresh
+            Sync
+          </button>
+          <button
+            onClick={() => fetchData(1)}
+            disabled={loading}
+            className="flex items-center gap-1.5 bg-white text-slate-700 px-3 py-1.5 rounded-md text-xs font-bold border border-slate-200 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm disabled:opacity-50"
+            title="Full reload (re-runs all branch and account queries from scratch)"
+          >
+            <div className={`${loading ? 'animate-spin' : ''}`}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></svg>
+            </div>
+            Full Reload
           </button>
           <button
             onClick={() => handleExport('excel')}
@@ -755,6 +1074,21 @@ export default function ReportPage() {
                 </div>
               </>
             )}
+          </div>
+
+          {/* Status Filter */}
+          <div className="relative">
+            <select
+              className="h-[30px] bg-white border border-slate-200 rounded-md px-3 py-1 text-xs font-bold text-slate-700 outline-none cursor-pointer hover:border-slate-400 transition-all shadow-sm"
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+            >
+              <option value="All">All Statuses</option>
+              <option value="Open Unallocated">Open Unallocated</option>
+              <option value="Assigned">Assigned</option>
+              <option value="Tech. Solve Call">Tech. Solve Call</option>
+              <option value="Closed">Closed</option>
+            </select>
           </div>
 
           {/* Branch Filter */}
@@ -885,27 +1219,13 @@ export default function ReportPage() {
             )}
           </div>
 
-          <div className="flex items-center gap-2 border-l border-slate-200 pl-4 h-6">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">From</span>
-              <input
-                type="date"
-                className="bg-white border border-slate-200 rounded-md px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400 transition-all"
-                value={dateRange.start}
-                max={new Date().toISOString().split('T')[0]}
-                onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-              />
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">To</span>
-              <input
-                type="date"
-                className="bg-white border border-slate-200 rounded-md px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400 transition-all"
-                value={dateRange.end}
-                max={new Date().toISOString().split('T')[0]}
-                onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-              />
-            </div>
+          <div className="flex items-center border-l border-slate-200 pl-4 h-6">
+            <DateRangeSelector
+              value={dateRange.label}
+              onChange={(range) => {
+                setDateRange(range);
+              }}
+            />
           </div>
 
           {/* Aging As Of — only relevant on Summary/Accounts tabs */}
@@ -1010,25 +1330,22 @@ export default function ReportPage() {
                 <tr>
                   <th className="px-4 py-2.5 text-[11px] font-medium text-slate-500 uppercase tracking-wider w-12 text-center border-r border-slate-100">#</th>
                   {[
+                    { key: 'UniqueCallNo', label: 'ID' },
                     { key: 'callsntrnno', label: 'Reference' },
                     { key: 'calltype', label: 'Call Type' },
                     { key: 'callsdtrndate', label: 'Date' },
                     { key: 'PartyName', label: 'Customer' },
-                    { key: 'vlocation', label: 'Location' },
+                    { key: 'officename', label: 'Branch' },
                     { key: 'itemname', label: 'Product' },
                     { key: 'callsvserialno', label: 'Serial' },
                     { key: 'serviceman', label: 'Technician' },
                     { key: 'vcomplaint', label: 'Complaint' },
                     { key: 'Status', label: 'Status' },
-                    { key: 'Priority', label: 'Prio' },
                     { key: 'callsolveddate', label: 'Solved' },
                     { key: 'vsolveremarks', label: 'Remarks' },
-                    { key: 'UniqueCallNo', label: 'ID' },
                     { key: 'vpersoncalling', label: 'Contact Person' },
                     { key: 'vinsttel1', label: 'Phone' },
-                    { key: 'vinstaddress', label: 'Address' },
-                    { key: 'addedby', label: 'User' },
-                    { key: 'officename', label: 'Branch' }
+                    { key: 'vinstaddress', label: 'Address' }
                   ].map(col => (
                     <th key={col.key} className="px-4 py-2.5 text-[11px] font-medium text-slate-500 uppercase tracking-wider border-r border-slate-100 whitespace-nowrap">
                       {col.label}
@@ -1037,11 +1354,12 @@ export default function ReportPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {data.length > 0 ? data.map((row, idx) => (
+                {localFilteredData.length > 0 ? localFilteredData.map((row, idx) => (
                   <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-4 py-2 text-[11px] text-slate-400 border-r border-slate-50 text-center">
                       {(page - 1) * limit + idx + 1}
                     </td>
+                    <td className="px-4 py-2 text-[11px] font-mono text-slate-400 border-r border-slate-50">{row.UniqueCallNo}</td>
                     <td className="px-4 py-2 text-[11px] font-medium text-slate-900 border-r border-slate-50 whitespace-nowrap">{row.callsntrnno}</td>
                     <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap">
                       <span className="px-2 py-0.5 bg-slate-100 rounded text-[9px] font-bold text-slate-600 border border-slate-200">
@@ -1052,9 +1370,7 @@ export default function ReportPage() {
                       {formatDate(row.callsdtrndate)}
                     </td>
                     <td className="px-4 py-2 text-[11px] font-medium text-slate-800 border-r border-slate-50 max-w-[250px] truncate uppercase" title={row.PartyName}>{row.PartyName}</td>
-                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap uppercase">
-                      {row.vlocation || row.vcity || row.routeName || '—'}
-                    </td>
+                    <td className="px-4 py-2 text-[11px] text-slate-700 border-r border-slate-50 uppercase">{row.officename}</td>
                     <td className="px-4 py-2 text-[11px] text-slate-700 border-r border-slate-50 whitespace-nowrap uppercase">{row.itemname}</td>
                     <td className="px-4 py-2 text-[11px] font-mono text-slate-500 border-r border-slate-50 whitespace-nowrap">{row.callsvserialno}</td>
                     <td className="px-4 py-2 text-[11px] text-slate-900 border-r border-slate-50 whitespace-nowrap uppercase">{row.serviceman}</td>
@@ -1063,33 +1379,44 @@ export default function ReportPage() {
                       {(() => {
                         const isTransferred = (row.vtransfercallno && row.vtransfercallno !== '') || row.cancel_reason?.includes('Transfer');
                         const isSolved = row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True';
+                        const isRejected = isSolved && (row.bmreject === 'Yes' || String(row.rejectionstatus) === '1' || String(row.rejectionstatus) === '2');
                         const isCancelled = (row.callstatus === 'Cancel' || row.Status === 'Cancel') && !isTransferred;
+                        const isTechSolved = (row.bfastclose === 'True' || row.bfastclose === '1') && !isSolved && !isCancelled && !isTransferred;
+                        const isAssigned = (row.nengineer && String(row.nengineer) !== '0') && !isSolved && !isCancelled && !isTransferred && !isTechSolved;
 
-                        if (isTransferred) return <span className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase">Transferred</span>;
-                        if (isSolved) return <span className="bg-slate-50 text-slate-700 border-slate-200 text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase">Solved</span>;
-                        if (isCancelled) return <span className="bg-rose-50 text-rose-700 border-rose-200 text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase">Cancelled</span>;
-                        return <span className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase">Open</span>;
+                        if (isTransferred) return <span className="badge-transferred">Transferred</span>;
+                        if (isRejected) return <span className="badge-cancelled">Closed - Rejected</span>;
+                        if (isSolved) return <span className="badge-solved">Solved</span>;
+                        if (isCancelled) return <span className="badge-cancelled">Cancelled</span>;
+                        if (isTechSolved) return <span className="badge-transferred">Tech. Solved</span>;
+                        if (isAssigned) return <span className="badge-assigned">Assigned</span>;
+                        return <span className="badge-open">Open</span>;
                       })()}
-                    </td>
-                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap uppercase">
-                      {row.Priority || '—'}
                     </td>
                     <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap uppercase">
                       {formatDate(row.callsolveddate)}
                     </td>
-                    <td className="px-4 py-2 text-[11px] text-slate-400 border-r border-slate-50 max-w-[300px] truncate uppercase" title={row.vsolveremarks || row.cancel_reason}>
-                      {row.vsolveremarks || row.cancel_reason || '—'}
+                    <td className="px-4 py-2 text-[11px] border-r border-slate-50 max-w-[300px] uppercase" title={row.vcomment || row.vsolveremarks || row.cancel_reason}>
+                      {(() => {
+                        const rejectionRemark = row.vcomment || null;
+                        const solveRemark = row.vsolveremarks || row.cancel_reason || null;
+                        if (rejectionRemark) {
+                          return (
+                            <span className="text-rose-600 font-medium truncate block" title={rejectionRemark}>
+                              ⚑ {rejectionRemark}
+                            </span>
+                          );
+                        }
+                        return <span className="text-slate-400 truncate block">{solveRemark || '—'}</span>;
+                      })()}
                     </td>
-                    <td className="px-4 py-2 text-[11px] font-mono text-slate-400 border-r border-slate-50">{row.UniqueCallNo}</td>
                     <td className="px-4 py-2 text-[11px] text-slate-600 border-r border-slate-50 whitespace-nowrap uppercase">{row.vpersoncalling}</td>
                     <td className="px-4 py-2 text-[11px] text-slate-900 border-r border-slate-50 whitespace-nowrap">{row.vinsttel1}</td>
                     <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 max-w-[400px] truncate uppercase">{row.vinstaddress}</td>
-                    <td className="px-4 py-2 text-[11px] text-slate-400 border-r border-slate-50 uppercase">{row.addedby}</td>
-                    <td className="px-4 py-2 text-[11px] text-slate-700 border-r border-slate-50 uppercase">{row.officename}</td>
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan={20} className="px-6 py-20 text-center">
+                    <td colSpan={17} className="px-6 py-20 text-center">
                       <p className="text-xs font-medium text-slate-400 uppercase tracking-widest">No matching records found</p>
                     </td>
                   </tr>
@@ -1163,7 +1490,7 @@ export default function ReportPage() {
                       <tr className="bg-[#ffff00] font-bold text-slate-900 group">
                         <td className="p-2 border border-slate-300 flex items-center justify-between">
                           <span>AI</span>
-                          <button 
+                          <button
                             onClick={() => handleDrillDown('discrepancy', 'AI - Discrepancy Records', { region: 'AI' })}
                             className="p-1 hover:bg-black/10 rounded transition-colors"
                             title="View records handled by multiple branches"
@@ -1534,8 +1861,8 @@ export default function ReportPage() {
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.part_pending || 0), 0).toLocaleString()}
                             </td>
                             <td className="p-1.5 border border-slate-700 text-center text-blue-400">
-                               {filteredAccounts.reduce((sum, a) => sum + Number(a.active_eng || 0), 0)}
-                               <span className="text-[9px] text-slate-400 ml-1">({globalHeadcount})</span>
+                              {filteredAccounts.reduce((sum, a) => sum + Number(a.active_eng || 0), 0)}
+                              <span className="text-[9px] text-slate-400 ml-1">({globalHeadcount})</span>
                             </td>
 
                             {/* Deployment Totals */}
@@ -1745,6 +2072,5 @@ export default function ReportPage() {
         </div>
       )}
     </div>
-
   );
 }

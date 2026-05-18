@@ -29,5 +29,20 @@ export const prisma = {
 
       throw err;
     }
+  },
+  getUserPermissions: async (userId: string): Promise<string[]> => {
+    try {
+      const res = await pool.query(`
+        SELECT p.name 
+        FROM public.app_permissions p
+        JOIN public.app_role_permissions rp ON p.id = rp.permission_id
+        JOIN public.app_users u ON rp.role_id = u.role_id
+        WHERE u.id = $1
+      `, [userId]);
+      return res.rows.map(row => row.name);
+    } catch (err) {
+      console.error('Error fetching user permissions:', err);
+      return [];
+    }
   }
 };

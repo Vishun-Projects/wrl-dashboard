@@ -12,20 +12,19 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Fallback to raw SQL if Prisma client isn't regenerated yet
-    let profile: any = null;
-    try {
-      const result = await prisma.$queryRawUnsafe(
-        'SELECT * FROM public.app_users WHERE id = $1 LIMIT 1',
-        user.id
-      );
-      profile = (result as any[])?.[0];
-    } catch (e) {
+    const permissions = await (prisma as any).getUserPermissions(user.id);
 
-    }
-
-    const isHod = profile?.role === 'hod';
+    const result = await prisma.$queryRawUnsafe(
+      'SELECT office_ids, role FROM public.app_users WHERE id = $1 LIMIT 1',
+      user.id
+    );
+    const profile = (result as any[])?.[0];
     const assignedOffices = profile?.office_ids || [];
+
+    const isHod = 
+      permissions.includes('view_all_offices') || 
+      permissions.includes('view_reports') ||
+      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
 
 
     
