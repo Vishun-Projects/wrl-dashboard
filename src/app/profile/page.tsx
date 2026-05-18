@@ -19,7 +19,7 @@ import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function ProfilePage() {
+function ProfileContent() {
   const { userProfile: user, loadingProfile: loading, refreshProfile: fetchProfile } = useUser();
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('general');
@@ -312,5 +312,17 @@ export default function ProfilePage() {
         </main>
       </div>
     </div>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <React.Suspense fallback={
+      <div className="flex-1 flex items-center justify-center">
+        <Loader2 className="animate-spin text-slate-400" size={32} />
+      </div>
+    }>
+      <ProfileContent />
+    </React.Suspense>
   );
 }
