@@ -10,7 +10,7 @@ export function FlaggingDisclaimer() {
         <ShieldAlert size={24} className="text-[#92400e]" />
       </div>
       <div>
-        <h4 className="text-[14px] font-bold text-[#92400e]">Administrative Data Governance</h4>
+        <h4 className="text-[14px] text-[#92400e] ui-strong">Administrative Data Governance</h4>
         <p className="text-[12px] text-[#b45309] leading-relaxed mt-1">
           Modifying user roles and branch assignments directly impacts audit integrity and data visibility across the Fast-Close Portal. 
           Changes made here are logged and will restrict user access to historical CRM records immediately. 

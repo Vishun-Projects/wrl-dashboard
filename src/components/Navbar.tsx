@@ -84,8 +84,8 @@ export function Navbar({ user }: NavbarProps) {
                 <img src="/western-head-logo-2025.png" alt="W" className="w-6 h-6 object-contain" />
               </div>
               <div className="flex flex-col">
-                <span className="text-sm font-black text-slate-900 leading-tight tracking-tight uppercase">WRL</span>
-                {/* <span className="text-[10px] font-bold text-slate-400 leading-none uppercase tracking-widest">Portal 2025</span> */}
+                <span className="text-sm text-slate-900 leading-tight ui-label">WRL</span>
+                {/* <span className="text-[10px] text-slate-400 leading-none ui-label">Portal 2025</span> */}
               </div>
             </div>
 
@@ -97,10 +97,7 @@ export function Navbar({ user }: NavbarProps) {
                   <button
                     key={item.name}
                     onClick={() => router.push(item.href)}
-                    className={`flex items-center gap-2.5 px-4 py-2 rounded-xl text-[13px] font-bold transition-all duration-200 ${isActive
-                      ? 'bg-slate-50 text-slate-900 ring-1 ring-slate-200'
-                      : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50/50'
-                      }`}
+                    className={`flex items-center gap-2.5 px-4 py-2 rounded-xl text-[13px] transition-all duration-200 ${isActive ? 'bg-slate-50 text-slate-900 ring-1 ring-slate-200' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50/50' } ui-label`}
                   >
                     <item.icon size={16} className={isActive ? 'text-slate-900' : 'text-slate-400'} />
                     {item.name}
@@ -114,7 +111,7 @@ export function Navbar({ user }: NavbarProps) {
           <div className="flex items-center gap-4">
             <div className="hidden sm:flex items-center gap-4 border-l border-slate-100 pl-6 h-10">
               <div className="flex flex-col items-end">
-                <span className="text-[12px] font-bold text-slate-900 leading-none">{user?.name || 'Loading...'}</span>
+                <span className="text-[12px] text-slate-900 leading-none ui-label">{user?.name || 'Loading...'}</span>
                 <span className="text-[10px] font-medium text-slate-400 mt-1">{user?.email}</span>
               </div>
 
@@ -135,20 +132,20 @@ export function Navbar({ user }: NavbarProps) {
                     <div className="fixed inset-0 z-10" onClick={() => setIsProfileOpen(false)} />
                     <div className="absolute right-0 mt-2 w-56 bg-white border border-slate-200 shadow-2xl rounded-2xl z-20 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                       <div className="p-4 bg-slate-50 border-b border-slate-100">
-                        <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Signed in as</p>
-                        <p className="text-[13px] font-bold text-slate-900 truncate">{user?.email}</p>
+                        <p className="text-[11px] text-slate-400 mb-1 ui-label">Signed in as</p>
+                        <p className="text-[13px] text-slate-900 truncate ui-label">{user?.email}</p>
                       </div>
                       <div className="p-1.5 space-y-1">
                         <button
                           onClick={() => { router.push('/profile'); setIsProfileOpen(false); }}
-                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-bold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all group"
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all group ui-label"
                         >
                           <Users size={16} className="text-slate-400 group-hover:text-slate-900" />
                           My Profile
                         </button>
                         <button
                           onClick={() => { router.push('/profile?tab=settings'); setIsProfileOpen(false); }}
-                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-bold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all group"
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all group ui-label"
                         >
                           <Settings size={16} className="text-slate-400 group-hover:text-slate-900" />
                           Settings
@@ -156,7 +153,7 @@ export function Navbar({ user }: NavbarProps) {
                         <div className="h-px bg-slate-100 mx-2 my-1" />
                         <button
                           onClick={handleSignOut}
-                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-bold text-rose-600 hover:bg-rose-50 transition-all group"
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] text-rose-600 hover:bg-rose-50 transition-all group ui-label"
                         >
                           <LogOut size={16} className="text-rose-400 group-hover:text-rose-600" />
                           Sign Out
@@ -194,10 +191,7 @@ export function Navbar({ user }: NavbarProps) {
                     router.push(item.href);
                     setIsMobileMenuOpen(false);
                   }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-[14px] font-bold transition-all ${isActive
-                    ? 'bg-slate-900 text-white shadow-lg shadow-slate-200'
-                    : 'text-slate-600 hover:bg-slate-50'
-                    }`}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-[14px] transition-all ${isActive ? 'bg-slate-900 text-white shadow-lg shadow-slate-200' : 'text-slate-600 hover:bg-slate-50' } ui-strong`}
                 >
                   <item.icon size={18} />
                   {item.name}
@@ -207,7 +201,7 @@ export function Navbar({ user }: NavbarProps) {
             <div className="pt-4 border-t border-slate-100 mt-4">
               <button
                 onClick={handleSignOut}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-[14px] font-bold text-rose-600 hover:bg-rose-50 transition-all"
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-[14px] text-rose-600 hover:bg-rose-50 transition-all ui-strong"
               >
                 <LogOut size={18} />
                 Sign Out

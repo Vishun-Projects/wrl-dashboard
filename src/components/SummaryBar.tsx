@@ -19,16 +19,16 @@ export function SummaryBar({ totalCalls, unflaggedCount, escalationCount }: Summ
         <div className="flex items-center gap-3">
           <Target size={14} className="text-slate-400" />
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Batch</span>
-            <span className="text-[12px] font-black text-slate-900">{totalCalls}</span>
+            <span className="text-[10px] text-slate-400 ui-label">Total Batch</span>
+            <span className="text-[12px] text-slate-900 ui-label">{totalCalls}</span>
           </div>
         </div>
         
         <div className="flex items-center gap-3">
           <Clock size={14} className="text-slate-400" />
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Pending Review</span>
-            <span className="text-[12px] font-black text-slate-900">{unflaggedCount}</span>
+            <span className="text-[10px] text-slate-400 ui-label">Pending Review</span>
+            <span className="text-[12px] text-slate-900 ui-label">{unflaggedCount}</span>
           </div>
         </div>
       </div>
@@ -38,8 +38,8 @@ export function SummaryBar({ totalCalls, unflaggedCount, escalationCount }: Summ
           <div className="flex items-center gap-3">
             <AlertTriangle size={14} className="text-rose-500" />
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-bold text-rose-500 uppercase tracking-widest">High Priority</span>
-              <span className="text-[12px] font-black text-rose-600">{escalationCount}</span>
+              <span className="text-[10px] text-rose-500 ui-label">High Priority</span>
+              <span className="text-[12px] text-rose-600 ui-label">{escalationCount}</span>
             </div>
           </div>
         )}
@@ -47,14 +47,14 @@ export function SummaryBar({ totalCalls, unflaggedCount, escalationCount }: Summ
         <div className="flex items-center gap-4">
            <Tooltip content={`${Math.round(progress)}% Processed`}>
             <div className="flex items-center gap-3">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Review Progress</span>
+              <span className="text-[10px] text-slate-400 ui-label">Review Progress</span>
               <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200/50">
                 <div 
                   className="h-full bg-slate-900 transition-all duration-1000 ease-out"
                   style={{ width: `${progress}%` }}
                 />
               </div>
-              <span className="text-[11px] font-black text-slate-900 tabular-nums">{Math.round(progress)}%</span>
+              <span className="text-[11px] text-slate-900 tabular-nums ui-label">{Math.round(progress)}%</span>
             </div>
            </Tooltip>
         </div>

@@ -30,6 +30,7 @@ export async function GET(request: Request) {
   const endDate = searchParams.get('endDate');
   const search = searchParams.get('search');
   const lastSync = searchParams.get('lastSync');
+  const portalFilter = searchParams.get('portalFilter');
 
   try {
     const permissions = await (prisma as any).getUserPermissions(user.id);
@@ -49,9 +50,22 @@ export async function GET(request: Request) {
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
 
     // 2. Build CRM Condition
+    const LATEST_CALLS_SUBQUERY = `(
+      SELECT *
+      FROM (
+        SELECT *,
+               ROW_NUMBER() OVER (
+                 PARTITION BY vtrnno 
+                 ORDER BY ISNULL(editedon, addedon) DESC, ncode DESC
+               ) as rn
+        FROM trhcalls (NOLOCK)
+      ) s
+      WHERE s.rn = 1
+    ) tc`;
+
     let condition = "(tc.ncancelreason IS NULL OR tc.ncancelreason = 0 OR tc.ncancelreason = 2)"; // Exclude cancelled, but include transferred
 
-    if (search && search.length > 2) {
+    if (search && search.trim().length > 0) {
       const searchSafe = search.replace(/'/g, "''");
       const exactTrn = getExactTrnQuery(searchSafe);
       if (exactTrn) {
@@ -94,6 +108,40 @@ export async function GET(request: Request) {
       // Filter by Date
       if (startDate && endDate) {
         condition += ` AND ISNULL(TRY_CAST(tc.dtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(tc.dtrndate AS NVARCHAR(50)), 10), 104)) >= '${startDate}' AND ISNULL(TRY_CAST(tc.dtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(tc.dtrndate AS NVARCHAR(50)), 10), 104)) <= '${endDate} 23:59:59'`;
+      }
+    }
+
+    // Portal-level verification/comments filter
+    if (portalFilter && portalFilter !== 'All') {
+      let portalCallIds: string[] = [];
+      if (portalFilter === 'verified') {
+        const { data } = await supabaseAdmin.from('call_flags').select('call_id').eq('flag_type', 'noted');
+        portalCallIds = (data || []).map(d => d.call_id);
+      } else if (portalFilter === 'rejected') {
+        const { data } = await supabaseAdmin.from('call_flags').select('call_id').eq('flag_type', 'escalate');
+        portalCallIds = (data || []).map(d => d.call_id);
+      } else if (portalFilter === 'hold') {
+        const { data } = await supabaseAdmin.from('call_flags').select('call_id').eq('flag_type', 'query');
+        portalCallIds = (data || []).map(d => d.call_id);
+      } else if (portalFilter === 'comments') {
+        const { data } = await supabaseAdmin.from('call_comments').select('call_id');
+        portalCallIds = Array.from(new Set((data || []).map(d => d.call_id)));
+      }
+
+      if (portalFilter === 'unseen') {
+        const { data } = await supabaseAdmin.from('call_flags').select('call_id').in('flag_type', ['noted', 'escalate', 'query']);
+        portalCallIds = (data || []).map(d => d.call_id);
+        const numericIds = portalCallIds.map(id => parseInt(id)).filter(id => !isNaN(id));
+        if (numericIds.length > 0) {
+          condition += ` AND tc.ncode NOT IN (${numericIds.join(',')})`;
+        }
+      } else {
+        const numericIds = portalCallIds.map(id => parseInt(id)).filter(id => !isNaN(id));
+        if (numericIds.length > 0) {
+          condition += ` AND tc.ncode IN (${numericIds.join(',')})`;
+        } else {
+          condition += ` AND 1=0`; // No records match this filter
+        }
       }
     }
 
@@ -151,7 +199,7 @@ export async function GET(request: Request) {
 
       const crmRes = await postQuery({
         fields: `tc.ncode, tc.vtrnno, tc.vtransfercallno, tc.nofficeid, CONVERT(varchar(30), tc.dtrndate, 126) as dtrndate, CONVERT(varchar(30), tc.approvedon, 126) as approvedon, CONVERT(varchar(30), tc.dallocationdatetime, 126) as dallocationdatetime, CONVERT(varchar(30), tc.dsolvedatetime, 126) as dsolvedatetime, p.vname as customer_name, o.vcompanyname as branch_name, tc.vcomplaint, CONVERT(varchar(30), tc.dfastclosedatetime, 126) as dfastclosedatetime, tc.vsolveremarks, tc.vpersoncalling, cr.vname as ncancelreason, tc.callStatus, tc.bsolved, tc.bfastclose, tc.baccepted, tc.nengineer, tc.vserialno, tc.vlocation, tc.vcclid, tc.vmanualjobno, u.vname as engineer_name, tc.npriority, tc.bapproval, CONVERT(varchar(30), tc.editedon, 126) as editedon, tc.bBMreject, tc.vBMrejectreason, CONVERT(varchar(30), tc.dBMrejectdatetime, 126) as dBMrejectdatetime, (SELECT TOP 1 r.bmajor FROM trdcalls2fault tf (NOLOCK) JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode WHERE tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid ORDER BY CASE WHEN r.bmajor = 'True' THEN 1 ELSE 2 END) as is_major_repair, (SELECT COUNT(*) FROM trdcalls3parts tp (NOLOCK) WHERE tp.ncalls = tc.ncode AND tp.nofficeid = tc.nofficeid) as part_count`,
-        tableName: "trhcalls tc (NOLOCK) LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode",
+        tableName: `${LATEST_CALLS_SUBQUERY} LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode`,
         condition,
         orderBy: `tc.ncode DESC`
       });
@@ -169,14 +217,28 @@ export async function GET(request: Request) {
       const flags = flagsRes.data || [];
       const comments = commentsRes.data || [];
 
+      const authorIds = Array.from(new Set(comments.map((cm: any) => cm.author_id).filter(Boolean)));
+      let authors: any[] = [];
+      if (authorIds.length > 0) {
+        const { data: authorsData } = await supabaseAdmin
+          .from('app_users')
+          .select('id, avatar_url')
+          .in('id', authorIds);
+        authors = authorsData || [];
+      }
+
       const mergedData = crmRes.data.map((c: any) => {
         const id = String(c.ncode);
         const callFlag = flags.find(f => f.call_id === id);
-        const callComments = comments.filter(cm => cm.call_id === id).map(cm => ({
-          author_name: cm.author_name,
-          comment: cm.comment || cm.content,
-          created_at: cm.created_at
-        }));
+        const callComments = comments.filter(cm => cm.call_id === id).map(cm => {
+          const author = authors.find((a: any) => a.id === cm.author_id);
+          return {
+            author_name: cm.author_name,
+            comment: cm.comment || cm.content,
+            created_at: cm.created_at,
+            author_avatar_url: author?.avatar_url || null
+          };
+        });
 
         let statusLabel = 'Open Unallocated';
         if (c.ncancelreason && String(c.ncancelreason) === '2') statusLabel = 'Transferred';
@@ -218,9 +280,9 @@ export async function GET(request: Request) {
     // 3. Get Total Count (with basic caching to avoid repeated heavy queries)
     const countRes = await postQuery({
       fields: "COUNT(*) as total",
-      tableName: (search && search.length > 2)
-        ? "trhcalls tc (NOLOCK) LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode"
-        : "trhcalls tc (NOLOCK)",
+      tableName: (search && search.trim().length > 0)
+        ? `${LATEST_CALLS_SUBQUERY} LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode`
+        : LATEST_CALLS_SUBQUERY,
       condition
     });
     const totalCount = parseInt(countRes.data?.[0]?.total || "0");
@@ -247,7 +309,7 @@ export async function GET(request: Request) {
 
     const crmRes = await postQuery({
       fields: `tc.ncode, tc.vtrnno, tc.vtransfercallno, tc.nofficeid, CONVERT(varchar(30), tc.dtrndate, 126) as dtrndate, CONVERT(varchar(30), tc.approvedon, 126) as approvedon, CONVERT(varchar(30), tc.dallocationdatetime, 126) as dallocationdatetime, CONVERT(varchar(30), tc.dsolvedatetime, 126) as dsolvedatetime, p.vname as customer_name, o.vcompanyname as branch_name, tc.vcomplaint, CONVERT(varchar(30), tc.dfastclosedatetime, 126) as dfastclosedatetime, tc.vsolveremarks, tc.vpersoncalling, cr.vname as ncancelreason, tc.callStatus, tc.bsolved, tc.bfastclose, tc.baccepted, tc.nengineer, tc.vserialno, tc.vlocation, tc.vcclid, tc.vmanualjobno, u.vname as engineer_name, tc.npriority, tc.bapproval, CONVERT(varchar(30), tc.editedon, 126) as editedon, tc.bBMreject, tc.vBMrejectreason, CONVERT(varchar(30), tc.dBMrejectdatetime, 126) as dBMrejectdatetime, (SELECT TOP 1 r.bmajor FROM trdcalls2fault tf (NOLOCK) JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode WHERE tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid ORDER BY CASE WHEN r.bmajor = 'True' THEN 1 ELSE 2 END) as is_major_repair, (SELECT TOP 1 r.vname FROM trdcalls2fault tf (NOLOCK) JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode WHERE tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid ORDER BY CASE WHEN r.bmajor = 'True' THEN 1 ELSE 2 END) as repair_category, (SELECT COUNT(*) FROM trdcalls3parts tp (NOLOCK) WHERE tp.ncalls = tc.ncode AND tp.nofficeid = tc.nofficeid) as part_count`,
-      tableName: "trhcalls tc (NOLOCK) LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode",
+      tableName: `${LATEST_CALLS_SUBQUERY} LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode`,
       condition,
       orderBy: `tc.ncode ${fetchDirection}`,
       top: String(topValue)
@@ -274,14 +336,28 @@ export async function GET(request: Request) {
     const flags = flagsRes.data || [];
     const comments = commentsRes.data || [];
 
+    const authorIds = Array.from(new Set(comments.map((cm: any) => cm.author_id).filter(Boolean)));
+    let authors: any[] = [];
+    if (authorIds.length > 0) {
+      const { data: authorsData } = await supabaseAdmin
+        .from('app_users')
+        .select('id, avatar_url')
+        .in('id', authorIds);
+      authors = authorsData || [];
+    }
+
     const mergedData = paginatedCalls.map((c: any) => {
       const id = String(c.ncode);
       const callFlag = flags.find(f => f.call_id === id);
-      const callComments = comments.filter(cm => cm.call_id === id).map(cm => ({
-        author_name: cm.author_name,
-        comment: cm.comment || cm.content,
-        created_at: cm.created_at
-      }));
+      const callComments = comments.filter(cm => cm.call_id === id).map(cm => {
+        const author = authors.find((a: any) => a.id === cm.author_id);
+        return {
+          author_name: cm.author_name,
+          comment: cm.comment || cm.content,
+          created_at: cm.created_at,
+          author_avatar_url: author?.avatar_url || null
+        };
+      });
 
       let statusLabel = 'Open Unallocated';
       if (c.ncancelreason && String(c.ncancelreason) === '2') statusLabel = 'Transferred';

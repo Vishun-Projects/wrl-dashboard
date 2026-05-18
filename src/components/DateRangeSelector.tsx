@@ -19,44 +19,58 @@ export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const ranges = [
-    { label: 'Today', getValue: () => {
-      const d = new Date();
-      return { start: new Date(d.setHours(0,0,0,0)), end: new Date(d.setHours(23,59,59,999)), label: 'Today' };
-    }},
-    { label: 'Yesterday', getValue: () => {
-      const d = new Date();
-      d.setDate(d.getDate() - 1);
-      return { start: new Date(d.setHours(0,0,0,0)), end: new Date(d.setHours(23,59,59,999)), label: 'Yesterday' };
-    }},
-    { label: 'Last 7 Days', getValue: () => {
-      const end = new Date();
-      const start = new Date();
-      start.setDate(end.getDate() - 7);
-      return { start: new Date(start.setHours(0,0,0,0)), end, label: 'Last 7 Days' };
-    }},
-    { label: 'Last 30 Days', getValue: () => {
-      const end = new Date();
-      const start = new Date();
-      start.setDate(end.getDate() - 30);
-      return { start: new Date(start.setHours(0,0,0,0)), end, label: 'Last 30 Days' };
-    }},
-    { label: 'This Month', getValue: () => {
-      const d = new Date();
-      const start = new Date(d.getFullYear(), d.getMonth(), 1);
-      return { start, end: new Date(), label: 'This Month' };
-    }},
-    { label: 'Last Month', getValue: () => {
-      const d = new Date();
-      const start = new Date(d.getFullYear(), d.getMonth() - 1, 1);
-      const end = new Date(d.getFullYear(), d.getMonth(), 0);
-      return { start, end, label: 'Last Month' };
-    }},
-    { label: 'All Time', getValue: () => {
-      const end = new Date();
-      const start = new Date();
-      start.setFullYear(end.getFullYear() - 100); // 100 years for true 'All Time'
-      return { start: new Date(start.setHours(0,0,0,0)), end, label: 'All Time' };
-    }}
+    {
+      label: 'Today', getValue: () => {
+        const d = new Date();
+        return { start: new Date(d.setHours(0, 0, 0, 0)), end: new Date(d.setHours(23, 59, 59, 999)), label: 'Today' };
+      }
+    },
+    {
+      label: 'Yesterday', getValue: () => {
+        const d = new Date();
+        d.setDate(d.getDate() - 1);
+        return { start: new Date(d.setHours(0, 0, 0, 0)), end: new Date(d.setHours(23, 59, 59, 999)), label: 'Yesterday' };
+      }
+    },
+    {
+      label: 'Last 7 Days', getValue: () => {
+        const end = new Date();
+        const start = new Date();
+        start.setDate(end.getDate() - 7);
+        return { start: new Date(start.setHours(0, 0, 0, 0)), end, label: 'Last 7 Days' };
+      }
+    },
+    {
+      label: 'Last 30 Days', getValue: () => {
+        const end = new Date();
+        const start = new Date();
+        start.setDate(end.getDate() - 30);
+        return { start: new Date(start.setHours(0, 0, 0, 0)), end, label: 'Last 30 Days' };
+      }
+    },
+    {
+      label: 'This Month', getValue: () => {
+        const d = new Date();
+        const start = new Date(d.getFullYear(), d.getMonth(), 1);
+        return { start, end: new Date(), label: 'This Month' };
+      }
+    },
+    {
+      label: 'Last Month', getValue: () => {
+        const d = new Date();
+        const start = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+        const end = new Date(d.getFullYear(), d.getMonth(), 0);
+        return { start, end, label: 'Last Month' };
+      }
+    },
+    {
+      label: 'All Time', getValue: () => {
+        const end = new Date();
+        const start = new Date();
+        start.setFullYear(end.getFullYear() - 20); // 20 years for true 'All Time'
+        return { start: new Date(start.setHours(0, 0, 0, 0)), end, label: 'All Time' };
+      }
+    }
   ];
 
   useEffect(() => {
@@ -94,11 +108,7 @@ export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {
                     onChange(range.getValue());
                     setIsOpen(false);
                   }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[12px] transition-colors ${
-                    isSelected 
-                      ? 'bg-slate-900 text-white font-bold' 
-                      : 'text-slate-600 hover:bg-slate-50'
-                  }`}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[12px] transition-colors ${isSelected ? 'bg-slate-900 text-white font-bold' : 'text-slate-600 hover:bg-slate-50'}`}
                 >
                   {range.label}
                   {isSelected && <Check size={12} className="text-emerald-400" />}
@@ -108,9 +118,9 @@ export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {
           </div>
           <div className="p-3 bg-slate-50 border-t border-slate-100 space-y-2">
             <div className="space-y-1">
-              <label className="text-[10px] text-slate-500 font-bold uppercase">Custom Start</label>
-              <input 
-                type="date" 
+              <label className="text-[10px] text-slate-500 ui-label">Custom Start</label>
+              <input
+                type="date"
                 className="w-full h-8 px-2 bg-white border border-slate-200 rounded text-[11px] outline-none focus:border-slate-400"
                 onChange={(e) => {
                   const d = new Date(e.target.value);
@@ -122,9 +132,9 @@ export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] text-slate-500 font-bold uppercase">Custom End</label>
-              <input 
-                type="date" 
+              <label className="text-[10px] text-slate-500 ui-label">Custom End</label>
+              <input
+                type="date"
                 className="w-full h-8 px-2 bg-white border border-slate-200 rounded text-[11px] outline-none focus:border-slate-400"
                 onChange={(e) => {
                   const d = new Date(e.target.value);

@@ -45,9 +45,6 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // calltype filter is handled via dedicated joins inside the SQL to populate columns
-    let callTypeJoin = '';
-
     // dtrndate is a native datetime column — no casting needed
     if (startDate) {
       baseCondition += ` AND c.dtrndate >= '${startDate}'`;
@@ -68,111 +65,60 @@ export async function GET(req: NextRequest) {
         return `'${endDate} 23:59:59'`;
       }
       return 'GETDATE()';
-    })();
-
+    })();    // Collapsed and highly optimized single-level group by query
     const rawSql = `
       SELECT
-        t.row_type,
+        CASE WHEN GROUPING(c.npartyprofile) = 1 THEN 'BRANCH_ENG' ELSE 'DATA' END as row_type,
         ISNULL(UPPER(z.vname), 'OTHER') as region,
         ISNULL(o.vcompanyname, '') as branch,
         ISNULL(p.vname, 'UNCLASSIFIED') as account,
         o.ncode as officeId,
         o.nunder as parentId,
         hc.branch_headcount,
-        t.population,
-        t.all_total,
-        t.all_solved,
-        t.all_cancelled,
-        t.all_open,
-        t.all_age_2,
-        t.all_age_3,
-        t.all_age_7,
-        t.all_age_15,
-        t.all_part_pending,
-        t.total_calls,
-        t.solved_calls,
-        t.cancelled_calls,
-        t.open_calls,
-        t.age_2,
-        t.age_3,
-        t.age_7,
-        t.age_15,
-        t.part_pending,
-        t.active_eng_count,
-        t.eng_list,
-        t.deployment_total,
-        t.deployment_done,
-        t.installation_total,
-        t.installation_done
+        COUNT(*) as population,
+        COUNT(*) as all_total,
+        SUM(CASE WHEN c.bsolved = 1 THEN 1 ELSE 0 END) as all_solved,
+        SUM(CASE WHEN c.ncancelreason IS NOT NULL AND c.ncancelreason <> 0 AND c.ncancelreason <> 2 THEN 1 ELSE 0 END) as all_cancelled,
+        SUM(CASE WHEN ISNULL(c.vtransfercallno, '') <> '' OR c.ncancelreason = 2 THEN 1 ELSE 0 END) as all_transferred,
+        SUM(CASE WHEN (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_open,
+        SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) <= 2 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_2,
+        SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 2 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 7 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_3,
+        SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 7 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_7,
+        SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_15,
+        SUM(CASE WHEN c.vsolveremarks LIKE '%PART%' OR c.vcomplaint LIKE '%PART%' THEN 1 ELSE 0 END) as all_part_pending,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as total_calls,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND c.bsolved = 1 THEN 1 ELSE 0 END) as solved_calls,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND c.ncancelreason IS NOT NULL AND c.ncancelreason <> 0 AND c.ncancelreason <> 2 THEN 1 ELSE 0 END) as cancelled_calls,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND (ISNULL(c.vtransfercallno, '') <> '' OR c.ncancelreason = 2) THEN 1 ELSE 0 END) as transferred_calls,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 2 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_2,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 2 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 7 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_3,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 7 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_7,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_15,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.vsolveremarks LIKE '%PART%' OR c.vcomplaint LIKE '%PART%') THEN 1 ELSE 0 END) as part_pending,
+        COUNT(DISTINCT u.vname) as active_eng_count,
+        STRING_AGG(CAST(u.vname AS VARCHAR(MAX)), ',') as eng_list,
+        SUM(CASE WHEN dep_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as deployment_total,
+        SUM(CASE WHEN dep_ct.ncode IS NOT NULL AND c.bsolved = 1 THEN 1 ELSE 0 END) as deployment_done,
+        SUM(CASE WHEN ins_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as installation_total,
+        SUM(CASE WHEN ins_ct.ncode IS NOT NULL AND c.bsolved = 1 THEN 1 ELSE 0 END) as installation_done
       FROM (
-        SELECT
-          CASE WHEN GROUPING(npartyprofile) = 1 THEN 'BRANCH_ENG' ELSE 'DATA' END as row_type,
-          nofficeid,
-          ISNULL(npartyprofile, 0) as npartyprofile,
-          COUNT(*) as population,
-          SUM(is_all) as all_total,
-          SUM(is_all_solved) as all_solved,
-          SUM(is_all_cancelled) as all_cancelled,
-          SUM(is_all_open) as all_open,
-          SUM(is_all_age_2) as all_age_2,
-          SUM(is_all_age_3) as all_age_3,
-          SUM(is_all_age_7) as all_age_7,
-          SUM(is_all_age_15) as all_age_15,
-          SUM(is_all_part_pending) as all_part_pending,
-          SUM(is_breakdown) as total_calls,
-          SUM(is_solved) as solved_calls,
-          SUM(is_cancelled) as cancelled_calls,
-          SUM(is_open) as open_calls,
-          SUM(is_age_2) as age_2,
-          SUM(is_age_3) as age_3,
-          SUM(is_age_7) as age_7,
-          SUM(is_age_15) as age_15,
-          SUM(is_part_pending) as part_pending,
-          COUNT(DISTINCT eng_name) as active_eng_count,
-          STRING_AGG(CAST(eng_name AS VARCHAR(MAX)), ',') as eng_list,
-          SUM(is_deployment) as deployment_total,
-          SUM(is_deployment_done) as deployment_done,
-          SUM(is_installation) as installation_total,
-          SUM(is_installation_done) as installation_done
+        SELECT *
         FROM (
-          SELECT
-            c.nofficeid,
-            c.npartyprofile,
-            c.vtrnno,
-            1 as is_all,
-            MAX(CASE WHEN c.bsolved = 1 THEN 1 ELSE 0 END) as is_all_solved,
-            MAX(CASE WHEN c.ncancelreason IS NOT NULL AND c.ncancelreason <> 0 THEN 1 ELSE 0 END) as is_all_cancelled,
-            MAX(CASE WHEN (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_all_open,
-            MAX(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) <= 2 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_all_age_2,
-            MAX(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 2 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 7 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_all_age_3,
-            MAX(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 7 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_all_age_7,
-            MAX(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_all_age_15,
-            MAX(CASE WHEN c.vsolveremarks LIKE '%PART%' OR c.vcomplaint LIKE '%PART%' THEN 1 ELSE 0 END) as is_all_part_pending,
-            MAX(CASE WHEN bd_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as is_breakdown,
-            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND c.bsolved = 1 THEN 1 ELSE 0 END) as is_solved,
-            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND c.ncancelreason IS NOT NULL AND c.ncancelreason <> 0 THEN 1 ELSE 0 END) as is_cancelled,
-            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_open,
-            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 2 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_2,
-            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 2 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 7 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_3,
-            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 7 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_7,
-            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as is_age_15,
-            MAX(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.vsolveremarks LIKE '%PART%' OR c.vcomplaint LIKE '%PART%') THEN 1 ELSE 0 END) as is_part_pending,
-            MAX(CASE WHEN dep_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as is_deployment,
-            MAX(CASE WHEN dep_ct.ncode IS NOT NULL AND c.bsolved = 1 THEN 1 ELSE 0 END) as is_deployment_done,
-            MAX(CASE WHEN ins_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as is_installation,
-            MAX(CASE WHEN ins_ct.ncode IS NOT NULL AND c.bsolved = 1 THEN 1 ELSE 0 END) as is_installation_done,
-            MAX(u.vname) as eng_name
-          FROM trhcalls c (NOLOCK)
-          LEFT JOIN mstusers u (NOLOCK) ON c.nengineer = u.ncode
-          LEFT JOIN mstfixedselection bd_ct (NOLOCK) ON c.ncalltype = bd_ct.ncode AND bd_ct.vfieldname = 'ncalltype' AND bd_ct.vdisplayvalue = 'BREAKDOWN'
-          LEFT JOIN mstfixedselection dep_ct (NOLOCK) ON c.ncalltype = dep_ct.ncode AND dep_ct.vfieldname = 'ncalltype' AND dep_ct.vdisplayvalue = 'DEPLOYMENT'
-          LEFT JOIN mstfixedselection ins_ct (NOLOCK) ON c.ncalltype = ins_ct.ncode AND ins_ct.vfieldname = 'ncalltype' AND ins_ct.vdisplayvalue = 'INSTALLATION CALL'
-          WHERE ${baseCondition} AND ISNULL(c.ncancelreason, 0) <> 2
-          GROUP BY c.nofficeid, c.npartyprofile, c.vtrnno
-        ) t_base
-        GROUP BY GROUPING SETS ((nofficeid, npartyprofile), (nofficeid))
-      ) t
-      JOIN mstoffice o (NOLOCK) ON t.nofficeid = o.ncode
+          SELECT *,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY vtrnno 
+                   ORDER BY ISNULL(editedon, addedon) DESC, ncode DESC
+                 ) as rn
+          FROM trhcalls (NOLOCK)
+        ) s
+        WHERE s.rn = 1
+      ) c
+      JOIN mstoffice o (NOLOCK) ON c.nofficeid = o.ncode
+      LEFT JOIN mstusers u (NOLOCK) ON c.nengineer = u.ncode
+      LEFT JOIN mstfixedselection bd_ct (NOLOCK) ON c.ncalltype = bd_ct.ncode AND bd_ct.vfieldname = 'ncalltype' AND bd_ct.vdisplayvalue = 'BREAKDOWN'
+      LEFT JOIN mstfixedselection dep_ct (NOLOCK) ON c.ncalltype = dep_ct.ncode AND dep_ct.vfieldname = 'ncalltype' AND dep_ct.vdisplayvalue = 'DEPLOYMENT'
+      LEFT JOIN mstfixedselection ins_ct (NOLOCK) ON c.ncalltype = ins_ct.ncode AND ins_ct.vfieldname = 'ncalltype' AND ins_ct.vdisplayvalue = 'INSTALLATION CALL'
       LEFT JOIN (
         SELECT nofficeid, COUNT(DISTINCT ncode) as branch_headcount
         FROM mstusers (NOLOCK)
@@ -181,7 +127,12 @@ export async function GET(req: NextRequest) {
       ) hc ON o.ncode = hc.nofficeid
       LEFT JOIN mstoffice op (NOLOCK) ON o.nunder = op.ncode AND o.nunder <> 0
       LEFT JOIN mstzones z (NOLOCK) ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
-      LEFT JOIN mstpartyprofile p (NOLOCK) ON t.npartyprofile = p.ncode
+      LEFT JOIN mstpartyprofile p (NOLOCK) ON c.npartyprofile = p.ncode
+      WHERE ${baseCondition}
+      GROUP BY GROUPING SETS (
+        (ISNULL(UPPER(z.vname), 'OTHER'), ISNULL(o.vcompanyname, ''), o.ncode, o.nunder, hc.branch_headcount, c.nofficeid, c.npartyprofile, ISNULL(p.vname, 'UNCLASSIFIED')),
+        (ISNULL(UPPER(z.vname), 'OTHER'), ISNULL(o.vcompanyname, ''), o.ncode, o.nunder, hc.branch_headcount, c.nofficeid)
+      )
       ORDER BY region ASC
     `;
 
@@ -201,9 +152,9 @@ export async function GET(req: NextRequest) {
         if (!branchMap.has(row.officeId)) {
           branchMap.set(row.officeId, {
             officeId: row.officeId, parentId: row.parentId, branch: row.branch, region: row.region,
-            total_calls: 0, solved_calls: 0, cancelled_calls: 0, open_calls: 0,
+            total_calls: 0, solved_calls: 0, cancelled_calls: 0, open_calls: 0, transferred_calls: 0,
             age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
-            all_total: 0, all_solved: 0, all_cancelled: 0, all_open: 0,
+            all_total: 0, all_solved: 0, all_cancelled: 0, all_open: 0, all_transferred: 0,
             all_age_2: 0, all_age_3: 0, all_age_7: 0, all_age_15: 0, all_part_pending: 0,
             deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
             active_eng: 0, population: 0, headcount: Number(row.branch_headcount || 0)
@@ -217,9 +168,9 @@ export async function GET(req: NextRequest) {
         if (!branchMap.has(row.officeId)) {
           branchMap.set(row.officeId, {
             officeId: row.officeId, parentId: row.parentId, branch: row.branch, region: row.region,
-            total_calls: 0, solved_calls: 0, cancelled_calls: 0, open_calls: 0,
+            total_calls: 0, solved_calls: 0, cancelled_calls: 0, open_calls: 0, transferred_calls: 0,
             age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
-            all_total: 0, all_solved: 0, all_cancelled: 0, all_open: 0,
+            all_total: 0, all_solved: 0, all_cancelled: 0, all_open: 0, all_transferred: 0,
             all_age_2: 0, all_age_3: 0, all_age_7: 0, all_age_15: 0, all_part_pending: 0,
             deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
             active_eng: 0, population: 0, headcount: Number(row.branch_headcount || 0)
@@ -233,6 +184,7 @@ export async function GET(req: NextRequest) {
         b.total_calls += Number(row.all_total);
         b.solved_calls += Number(row.all_solved);
         b.cancelled_calls += Number(row.all_cancelled);
+        b.transferred_calls += Number(row.all_transferred);
         b.open_calls += Number(row.all_open);
         b.age_2 += Number(row.all_age_2);
         b.age_3 += Number(row.all_age_3);
@@ -249,7 +201,7 @@ export async function GET(req: NextRequest) {
         if (!accountMap.has(aKey)) {
           accountMap.set(aKey, {
             region: row.region, account: row.account,
-            population: 0, total_calls: 0, total_solved: 0, cancelled_calls: 0, open_calls: 0,
+            population: 0, total_calls: 0, total_solved: 0, cancelled_calls: 0, open_calls: 0, transferred_calls: 0,
             age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
             deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
             active_eng: 0, active_eng_names: new Set(), headcount: 0
@@ -260,6 +212,7 @@ export async function GET(req: NextRequest) {
         a.total_calls += Number(row.total_calls);
         a.total_solved += Number(row.solved_calls);
         a.cancelled_calls += Number(row.cancelled_calls);
+        a.transferred_calls += Number(row.transferred_calls);
         a.open_calls += Number(row.open_calls);
         a.age_2 += Number(row.age_2);
         a.age_3 += Number(row.age_3);

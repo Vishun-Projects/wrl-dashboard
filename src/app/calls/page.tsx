@@ -22,6 +22,7 @@ interface GlobalCallsCacheType {
   globalSearch: string;
   freezePoint: Date;
   newCallsCount: number;
+  portalFilter: string;
 }
 
 let globalCallsCache: GlobalCallsCacheType | null = null;
@@ -50,6 +51,7 @@ export default function CallsPage() {
     return { start, end, label: 'Last 30 Days' };
   });
   const [selectedStatus, setSelectedStatus] = useState(globalCallsCache?.selectedStatus || 'All');
+  const [portalFilter, setPortalFilter] = useState(globalCallsCache?.portalFilter || 'All');
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [globalSearch, setGlobalSearch] = useState(globalCallsCache?.globalSearch || '');
 
@@ -76,9 +78,10 @@ export default function CallsPage() {
       selectedStatus,
       globalSearch,
       freezePoint,
-      newCallsCount
+      newCallsCount,
+      portalFilter
     };
-  }, [calls, totalCount, totalPages, page, activeTab, selectedOfficeId, dateRange, selectedStatus, globalSearch, freezePoint, newCallsCount]);
+  }, [calls, totalCount, totalPages, page, activeTab, selectedOfficeId, dateRange, selectedStatus, globalSearch, freezePoint, newCallsCount, portalFilter]);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -117,6 +120,7 @@ export default function CallsPage() {
     const filtersChanged = !globalCallsCache ||
       globalCallsCache.selectedOfficeId !== selectedOfficeId ||
       globalCallsCache.selectedStatus !== selectedStatus ||
+      globalCallsCache.portalFilter !== portalFilter ||
       globalCallsCache.activeTab !== activeTab ||
       globalCallsCache.dateRange.start.getTime() !== dateRange.start.getTime() ||
       globalCallsCache.dateRange.end.getTime() !== dateRange.end.getTime() ||
@@ -134,7 +138,7 @@ export default function CallsPage() {
     // Auto-refresh every 15 seconds using lightweight delta syncing (disabled if searching or backgrounded)
     const intervalId = setInterval(() => {
       if (document.hidden) return;
-      if (!globalSearch || globalSearch.length <= 2) {
+      if (!globalSearch) {
         fetchCalls(page, false, undefined, true);
       }
     }, 15000);
@@ -143,7 +147,7 @@ export default function CallsPage() {
       controller.abort();
       clearInterval(intervalId);
     };
-  }, [selectedOfficeId, selectedStatus, activeTab, dateRange, userProfile, globalSearch]);
+  }, [selectedOfficeId, selectedStatus, portalFilter, activeTab, dateRange, userProfile, globalSearch]);
 
   const checkNewCalls = async () => {
     try {
@@ -174,7 +178,8 @@ export default function CallsPage() {
       
       if (selectedOfficeId) finalUrl += `&officeId=${selectedOfficeId}`;
       if (selectedStatus !== 'All') finalUrl += `&status=${selectedStatus}`;
-      if (globalSearch && globalSearch.length > 2) finalUrl += `&search=${encodeURIComponent(globalSearch)}`;
+      if (portalFilter !== 'All') finalUrl += `&portalFilter=${portalFilter}`;
+      if (globalSearch && globalSearch.trim().length > 0) finalUrl += `&search=${encodeURIComponent(globalSearch)}`;
       
       finalUrl += `&startDate=${dateRange.start.toISOString().split('T')[0]}&endDate=${dateRange.end.toISOString().split('T')[0]}`;
       
@@ -258,7 +263,8 @@ export default function CallsPage() {
       
       if (selectedOfficeId) finalUrl += `&officeId=${selectedOfficeId}`;
       if (selectedStatus !== 'All') finalUrl += `&status=${selectedStatus}`;
-      if (globalSearch && globalSearch.length > 2) finalUrl += `&search=${encodeURIComponent(globalSearch)}`;
+      if (portalFilter !== 'All') finalUrl += `&portalFilter=${portalFilter}`;
+      if (globalSearch && globalSearch.trim().length > 0) finalUrl += `&search=${encodeURIComponent(globalSearch)}`;
       
       // Pass absolute date bounds
       finalUrl += `&startDate=${dateRange.start.toISOString().split('T')[0]}&endDate=${dateRange.end.toISOString().split('T')[0]}`;
@@ -368,7 +374,12 @@ export default function CallsPage() {
   const handlePostComment = async (id: string, text: string) => {
     const { data: { session } } = await supabase.auth.getSession();
     const targetCall = calls.find(c => c.id === id);
-    const newComment = { author_name: userProfile?.name || 'User', comment: text, created_at: new Date().toISOString() };
+    const newComment = { 
+      author_name: userProfile?.name || 'User', 
+      comment: text, 
+      created_at: new Date().toISOString(),
+      author_avatar_url: userProfile?.avatar_url || null
+    };
     setCalls(prev => prev.map(c => c.id === id ? { ...c, comments: [newComment, ...(c.comments || [])] } : c));
     await axios.post('/api/comments', { 
       call_id: id, 
@@ -435,6 +446,8 @@ export default function CallsPage() {
     setActiveTab,
     selectedStatus,
     setSelectedStatus,
+    portalFilter,
+    setPortalFilter,
     globalSearch,
     setGlobalSearch,
     onLoadMore: () => { },
@@ -504,7 +517,7 @@ export default function CallsPage() {
         <div className="fixed bottom-24 md:bottom-8 left-1/2 -translate-x-1/2 z-[200] animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="bg-slate-900 text-white px-5 py-2.5 rounded-full shadow-2xl flex items-center gap-3 border border-slate-800">
             <ShieldCheck size={16} className="text-emerald-400" />
-            <span className="text-[11px] font-extrabold uppercase tracking-widest whitespace-nowrap">Captured: {copyStatus}</span>
+            <span className="text-[11px] whitespace-nowrap ui-label">Captured: {copyStatus}</span>
           </div>
         </div>
       )}

@@ -21,6 +21,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { useUser } from '@/components/DashboardLayout';
+import BranchTree from '@/components/BranchTree';
 
 export default function AdminUsersPage() {
   const { userProfile } = useUser();
@@ -189,7 +190,7 @@ export default function AdminUsersPage() {
     <div className="min-h-screen bg-slate-50 flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
         <div className="w-10 h-10 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
-        <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Loading...</p>
+        <p className="text-sm font-medium text-slate-500">Loading...</p>
       </div>
     </div>
   );
@@ -201,9 +202,8 @@ export default function AdminUsersPage() {
         <div className="h-14 px-7 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Users className="text-slate-900" size={18} />
-            <h1 className="text-sm font-black tracking-tight uppercase text-slate-900">User Management</h1>
-          </div>
-
+            </div>
+            <h1 className="text-base font-medium text-slate-900">User Management</h1>
           <div className="flex items-center gap-4">
             <button 
               onClick={() => {
@@ -214,7 +214,7 @@ export default function AdminUsersPage() {
                 setShowOnlySelectedBranches(false);
                 setShowAddModal(true);
               }}
-              className="h-9 px-4 bg-slate-900 text-white rounded-xl font-bold text-[12px] flex items-center gap-2 hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 active:scale-95 uppercase tracking-wider"
+              className="h-9 px-4 bg-slate-950 text-white rounded-xl font-medium text-[12px] flex items-center gap-2 hover:bg-slate-800 transition-colors"
             >
               <UserPlus size={14} />
               Add User
@@ -238,10 +238,10 @@ export default function AdminUsersPage() {
               />
             </div>
             
-            <div className="flex items-center gap-4 bg-white px-4 py-2 border border-[#e2e8f0] rounded-xl shadow-sm">
+            <div className="flex items-center gap-3 bg-white px-3 py-2 border border-[#e2e8f0] rounded-xl shadow-sm">
               <div className="flex items-center gap-2">
                 <span className="text-[12px] text-slate-400">Total Users:</span>
-                <span className="text-[13px] font-bold text-slate-700">{users.length}</span>
+                <span className="text-[13px] font-medium text-slate-700">{users.length}</span>
               </div>
             </div>
           </div>
@@ -250,36 +250,38 @@ export default function AdminUsersPage() {
           <div className="bg-white border border-[#e2e8f0] rounded-2xl overflow-hidden shadow-sm">
             <table className="w-full text-left border-collapse">
               <thead className="bg-[#f8fafc] border-b border-[#e2e8f0]">
-                <tr>
-                  <th className="px-6 py-4 text-[11px] font-bold text-slate-400 uppercase tracking-widest">User</th>
-                  <th className="px-6 py-4 text-[11px] font-bold text-slate-400 uppercase tracking-widest">Role</th>
-                  <th className="px-6 py-4 text-[11px] font-bold text-slate-400 uppercase tracking-widest">Statuses</th>
-                  <th className="px-6 py-4 text-[11px] font-bold text-slate-400 uppercase tracking-widest">Branches</th>
-                  <th className="px-6 py-4 text-[11px] font-bold text-slate-400 uppercase tracking-widest text-right">Actions</th>
+                    <tr>
+                  <th className="px-4 py-3 text-[11px] font-medium text-slate-500">User</th>
+                  <th className="px-4 py-3 text-[11px] font-medium text-slate-500">Role</th>
+                  <th className="px-4 py-3 text-[11px] font-medium text-slate-500">Statuses</th>
+                  <th className="px-4 py-3 text-[11px] font-medium text-slate-500">Branches</th>
+                  <th className="px-4 py-3 text-[11px] font-medium text-slate-500 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {filteredUsers.map((u) => (
                   <tr key={u.id} className="hover:bg-slate-50/50 transition-colors group">
-                    <td className="px-6 py-5">
+                    <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-[13px] font-bold text-slate-500 border border-slate-200">
-                          {u.name?.charAt(0)}
+                        <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-[12px] font-medium text-slate-500 border border-slate-200 overflow-hidden flex-shrink-0">
+                          {u.avatar_url ? (
+                            <img src={u.avatar_url} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            u.name?.charAt(0)
+                          )}
                         </div>
                         <div>
-                          <div className="text-[13px] font-bold text-slate-700">{u.name}</div>
+                          <div className="text-[13px] font-medium text-slate-700">{u.name}</div>
                           <div className="text-[11px] text-slate-400">{u.email}</div>
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-5">
+                    <td className="px-4 py-3">
                       {(() => {
                         const roleObj = roles.find(r => r.id === u.role_id);
                         const isHod = roleObj ? roleObj.name.toLowerCase() === 'hod' : u.role === 'hod';
                         return (
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${
-                            isHod ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 'bg-slate-50 text-slate-500 border border-slate-200'
-                          }`}>
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[10px] font-medium ${ isHod ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 'bg-slate-50 text-slate-500 border-slate-200' }`}>
                             <Shield size={12} />
                             {roleObj?.name || (u.role === 'hod' ? 'HOD' : 'Manager')}
                           </span>
@@ -288,14 +290,14 @@ export default function AdminUsersPage() {
                     </td>
                     <td className="px-6 py-5">
                       {u.role === 'hod' ? (
-                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 italic">
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400 italic">
                           All Statuses Visible
                         </div>
                       ) : (
                         <div className="flex flex-wrap gap-1">
                           {u.visible_statuses?.length > 0 ? (
                             u.visible_statuses.map((s: string) => (
-                              <span key={s} className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded text-[9px] font-bold text-indigo-600">
+                              <span key={s} className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded text-[9px] font-medium text-indigo-600">
                                 {s}
                               </span>
                             ))
@@ -305,9 +307,9 @@ export default function AdminUsersPage() {
                         </div>
                       )}
                     </td>
-                    <td className="px-6 py-5">
+                    <td className="px-4 py-3">
                       {u.role === 'hod' ? (
-                        <div className="flex items-center gap-2 text-[12px] font-bold text-emerald-600">
+                        <div className="flex items-center gap-2 text-[12px] font-medium text-emerald-600">
                           <Check size={14} /> Full Access
                         </div>
                       ) : (
@@ -335,7 +337,7 @@ export default function AdminUsersPage() {
                               setNewPassword('');
                               setShowPasswordModal(true);
                             }}
-                            className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all text-slate-400 opacity-0 group-hover:opacity-100 shadow-sm"
+                            className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center hover:bg-amber-100 hover:text-amber-700 transition-colors text-slate-500"
                             title="Reset Password"
                           >
                             <Key size={13} />
@@ -356,7 +358,7 @@ export default function AdminUsersPage() {
                             setShowOnlySelectedBranches(false);
                             setShowAddModal(true);
                           }}
-                          className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all text-slate-400 opacity-0 group-hover:opacity-100 shadow-sm"
+                          className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center hover:bg-slate-100 hover:text-slate-900 transition-colors text-slate-500"
                           title="Edit User"
                         >
                           <Pencil size={13} />
@@ -364,7 +366,7 @@ export default function AdminUsersPage() {
                         {currentUserInfo?.id !== u.id && (
                           <button 
                             onClick={() => handleDelete(u.id)}
-                            className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all text-slate-400 opacity-0 group-hover:opacity-100 shadow-sm"
+                            className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center hover:bg-rose-50 hover:text-rose-600 transition-colors text-slate-500"
                             title="Delete User"
                           >
                             <Trash2 size={13} />
@@ -383,12 +385,12 @@ export default function AdminUsersPage() {
       {/* Modal - Simplified Sidebar Layout (Shadcn Style) */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-4xl rounded-xl border border-slate-200 shadow-2xl flex h-[600px] overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="bg-white w-full max-w-3xl rounded-xl border border-slate-200 flex min-h-[520px] overflow-hidden animate-in zoom-in-95 duration-200">
             
             {/* Sidebar Navigation */}
-            <div className="w-64 bg-slate-50 border-r border-slate-200 flex flex-col">
-              <div className="p-6 border-b border-slate-200">
-                <h2 className="text-[15px] font-bold text-slate-900">
+            <div className="w-56 bg-slate-50 border-r border-slate-200 flex flex-col">
+              <div className="p-5 border-b border-slate-200">
+                <h2 className="text-base font-medium text-slate-900">
                   {editingUser ? 'Edit User' : 'New User'}
                 </h2>
                 <p className="text-[11px] text-slate-500 mt-1">Configure account & access</p>
@@ -402,11 +404,7 @@ export default function AdminUsersPage() {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id as any)}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-colors ${
-                      activeTab === tab.id 
-                        ? 'bg-white text-indigo-600 shadow-sm border border-slate-200' 
-                        : 'text-slate-600 hover:bg-slate-100'
-                    }`}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-colors ${ activeTab === tab.id ? 'bg-white text-indigo-600 shadow-sm border border-slate-200' : 'text-slate-600 hover:bg-slate-100' }`}
                   >
                     <tab.icon size={16} />
                     {tab.label}
@@ -415,15 +413,15 @@ export default function AdminUsersPage() {
               </nav>
 
               <div className="p-4 border-t border-slate-200 bg-white/50">
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Summary</div>
+                <div className="text-[10px] font-medium text-slate-500 mb-2">Summary</div>
                 <div className="space-y-2">
                   <div className="flex justify-between text-[11px]">
                     <span className="text-slate-500">Branches</span>
-                    <span className="font-bold text-slate-700">{formData.office_ids.length}</span>
+                    <span className="font-medium text-slate-700">{formData.office_ids.length}</span>
                   </div>
                   <div className="flex justify-between text-[11px]">
                     <span className="text-slate-500">Statuses</span>
-                    <span className="font-bold text-slate-700">{formData.visible_statuses.length}</span>
+                    <span className="font-medium text-slate-700">{formData.visible_statuses.length}</span>
                   </div>
                 </div>
               </div>
@@ -433,7 +431,7 @@ export default function AdminUsersPage() {
             <div className="flex-1 flex flex-col bg-white">
               {/* Content Header */}
               <div className="h-14 px-6 border-b border-slate-100 flex items-center justify-between">
-                <span className="text-[13px] font-bold text-slate-700 uppercase tracking-wider">
+                <span className="text-[13px] font-medium text-slate-700">
                   {activeTab === 'profile' ? 'User Profile' : 'Permissions & Visibility'}
                 </span>
                 <button 
@@ -445,9 +443,9 @@ export default function AdminUsersPage() {
               </div>
 
               {/* Form Body */}
-              <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+              <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 custom-scrollbar">
                 {activeTab === 'profile' ? (
-                  <div className="max-w-md space-y-6 animate-in fade-in duration-200">
+                  <div className="max-w-md space-y-5 animate-in fade-in duration-200">
                     <div className="space-y-4">
                       <div className="space-y-1.5">
                         <label className="text-[12px] font-medium text-slate-700">Full Name</label>
@@ -489,13 +487,9 @@ export default function AdminUsersPage() {
                               key={role.id}
                               type="button"
                               onClick={() => setFormData({...formData, role: role.name.toLowerCase().replace(' ', '_'), role_id: role.id})}
-                              className={`p-3 text-left border rounded-lg transition-all ${
-                                formData.role_id === role.id 
-                                  ? 'border-indigo-600 bg-indigo-50/50' 
-                                  : 'border-slate-200 hover:border-slate-300'
-                              }`}
+                              className={`p-2.5 text-left border rounded-lg transition-all ${ formData.role_id === role.id ? 'border-indigo-600 bg-indigo-50/50' : 'border-slate-200 hover:border-slate-300' }`}
                             >
-                              <div className={`text-[12px] font-bold ${formData.role_id === role.id ? 'text-indigo-600' : 'text-slate-700'}`}>
+                              <div className={`text-[12px] font-medium ${formData.role_id === role.id ? 'text-indigo-600' : 'text-slate-700'}`}>
                                 {role.name}
                               </div>
                               <div className="text-[10px] text-slate-400 mt-0.5 truncate">{role.description}</div>
@@ -506,10 +500,10 @@ export default function AdminUsersPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-8 animate-in fade-in duration-200">
+                  <div className="space-y-6 animate-in fade-in duration-200">
                     {/* Status Section */}
                     <div className="space-y-3">
-                      <h4 className="text-[12px] font-bold text-slate-900 flex items-center gap-2">
+                      <h4 className="text-[12px] font-medium text-slate-900 flex items-center gap-2">
                         <Shield size={14} className="text-slate-400" />
                         Visible Call Statuses
                       </h4>
@@ -519,11 +513,7 @@ export default function AdminUsersPage() {
                           return (
                             <button
                               key={status} type="button" onClick={() => toggleStatus(status)}
-                              className={`px-3 py-1.5 rounded-md text-[12px] font-medium border transition-all ${
-                                isSelected 
-                                  ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' 
-                                  : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                              }`}
+                              className={`px-3 py-1.5 rounded-md text-[12px] font-medium border transition-all ${ isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300' }`}
                             >
                               {status}
                             </button>
@@ -535,7 +525,7 @@ export default function AdminUsersPage() {
                     {/* Branches Section */}
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <h4 className="text-[12px] font-bold text-slate-900 flex items-center gap-2">
+                        <h4 className="text-[12px] font-medium text-slate-900 flex items-center gap-2">
                           <Building2 size={14} className="text-slate-400" />
                           Branch Access
                         </h4>
@@ -543,7 +533,7 @@ export default function AdminUsersPage() {
                           <button 
                             type="button"
                             onClick={() => setShowOnlySelectedBranches(!showOnlySelectedBranches)}
-                            className="text-[10px] font-bold px-2 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition-colors"
+                            className="text-[10px] font-medium px-2 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition-colors"
                           >
                             {showOnlySelectedBranches ? 'Show All' : `Show Selected (${formData.office_ids.length})`}
                           </button>
@@ -562,38 +552,14 @@ export default function AdminUsersPage() {
                             />
                           </div>
                         </div>
-                        <div className="max-h-[250px] overflow-y-auto custom-scrollbar divide-y divide-slate-100">
-                          {offices
-                            .filter(o => {
-                              const matchesSearch = o.vcompanyname?.toLowerCase().includes(branchSearch.toLowerCase()) || String(o.ncode).includes(branchSearch);
-                              const isSelected = formData.office_ids.includes(String(o.ncode));
-                              return showOnlySelectedBranches ? (isSelected && matchesSearch) : matchesSearch;
-                            })
-                            .map(o => {
-                              const isSelected = formData.office_ids.includes(String(o.ncode));
-                              return (
-                                <button
-                                  key={o.ncode} type="button" onClick={() => toggleOffice(String(o.ncode))}
-                                  className={`w-full flex items-center justify-between p-3 transition-colors text-left group ${
-                                    isSelected ? 'bg-indigo-50/50' : 'bg-white hover:bg-slate-50'
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-3 min-w-0">
-                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
-                                      isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300'
-                                    }`}>
-                                      {isSelected && <Check size={10} />}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <div className={`text-[12px] font-medium truncate ${isSelected ? 'text-indigo-900' : 'text-slate-700'}`}>
-                                        {o.vcompanyname}
-                                      </div>
-                                      <div className="text-[10px] text-slate-400">#{o.ncode}</div>
-                                    </div>
-                                  </div>
-                                </button>
-                              );
-                            })}
+                        <div className="max-h-[250px] overflow-y-auto custom-scrollbar p-2">
+                          <BranchTree
+                            offices={offices}
+                            selectedIds={formData.office_ids}
+                            setSelectedIds={(ids) => setFormData({ ...formData, office_ids: ids })}
+                            single={false}
+                            search={branchSearch}
+                          />
                         </div>
                       </div>
                     </div>
@@ -602,10 +568,10 @@ export default function AdminUsersPage() {
               </form>
 
               {/* Action Footer */}
-              <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50/50">
+              <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50/50">
                 <button 
                   type="button" onClick={() => setShowAddModal(false)}
-                  className="px-4 h-9 text-slate-600 rounded-md font-medium text-[13px] hover:bg-slate-200 transition-all"
+                  className="px-4 h-9 text-slate-600 rounded-xl font-medium text-[13px] hover:bg-slate-100 transition-colors"
                 >
                   Cancel
                 </button>
@@ -615,7 +581,7 @@ export default function AdminUsersPage() {
                     const form = document.querySelector('form');
                     if (form) form.requestSubmit();
                   }}
-                  className="px-6 h-9 bg-indigo-600 text-white rounded-md font-bold text-[13px] hover:bg-indigo-700 transition-all shadow-sm active:scale-95"
+                  className="px-6 h-9 bg-slate-950 text-white rounded-xl font-medium text-[13px] hover:bg-slate-800 transition-colors"
                 >
                   {editingUser ? 'Save Changes' : 'Create Account'}
                 </button>
@@ -635,7 +601,7 @@ export default function AdminUsersPage() {
                   <Key size={20} />
                 </div>
                 <div>
-                  <h3 className="text-[15px] font-bold text-slate-900">Reset Password</h3>
+                  <h3 className="text-[15px] font-medium text-slate-900">Reset Password</h3>
                   <p className="text-[11px] text-slate-500">Updating for {selectedUserForPassword?.name}</p>
                 </div>
               </div>
@@ -670,7 +636,7 @@ export default function AdminUsersPage() {
                 <button 
                   type="submit"
                   disabled={updatingPassword || !newPassword.trim()}
-                  className="px-6 h-10 bg-amber-500 text-white rounded-lg font-bold text-[13px] hover:bg-amber-600 transition-all shadow-sm active:scale-95 disabled:opacity-50"
+                  className="px-6 h-10 bg-slate-950 text-white rounded-xl font-medium text-[13px] hover:bg-slate-800 transition-colors disabled:opacity-50"
                 >
                   {updatingPassword ? 'Updating...' : 'Update Password'}
                 </button>

@@ -47,7 +47,25 @@ export async function GET(request: Request) {
 
     if (error) throw error;
 
-    return NextResponse.json(comments || []);
+    const authorIds = Array.from(new Set((comments || []).map((cm: any) => cm.author_id).filter(Boolean)));
+    let authors: any[] = [];
+    if (authorIds.length > 0) {
+      const { data: authorsData } = await supabaseAdmin
+        .from('app_users')
+        .select('id, avatar_url')
+        .in('id', authorIds);
+      authors = authorsData || [];
+    }
+
+    const commentsWithAvatars = (comments || []).map((cm: any) => {
+      const author = authors.find((a: any) => a.id === cm.author_id);
+      return {
+        ...cm,
+        author_avatar_url: author?.avatar_url || null
+      };
+    });
+
+    return NextResponse.json(commentsWithAvatars);
   } catch (err: any) {
 
     return NextResponse.json({ error: err.message }, { status: 500 });

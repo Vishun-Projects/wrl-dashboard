@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, AlertCircle, Send, Image, ExternalLink, Package, MessageSquare, ArrowRight, Wrench, Copy, CheckCircle, XCircle } from 'lucide-react';
+import { X, AlertCircle, Send, Image, ExternalLink, Package, MessageSquare, ArrowRight, Wrench, Copy, CheckCircle, XCircle, Clock, UserCheck } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CallDetailProps {
@@ -17,9 +17,51 @@ interface CallDetailProps {
   totalCount?: number;
 }
 
+const getHistoryEventMeta = (h: any) => {
+  let statusLabel = 'Open Unallocated';
+  let color = 'text-amber-500 bg-amber-50 border-amber-200';
+  let icon = <Clock className="w-4 h-4 text-amber-500" />;
+
+  if (h.cancel_reason_label || (h.cancel_reason && h.cancel_reason !== '0')) {
+    statusLabel = h.cancel_reason_label || 'Cancelled';
+    color = 'text-rose-500 bg-rose-50 border-rose-200';
+    icon = <XCircle className="w-4 h-4 text-rose-500" />;
+  }
+  else if (h.bsolved) {
+    const isRejected = h.bBMreject;
+    statusLabel = isRejected ? 'Closed - Rejected' : 'Closed';
+    color = isRejected ? 'text-rose-500 bg-rose-50 border-rose-200' : 'text-emerald-500 bg-emerald-50 border-emerald-200';
+    icon = isRejected ? <XCircle className="w-4 h-4 text-rose-500" /> : <CheckCircle className="w-4 h-4 text-emerald-500" />;
+  }
+  else if (h.bfastclose) {
+    statusLabel = 'Tech. Solve Call';
+    color = 'text-indigo-500 bg-indigo-50 border-indigo-200';
+    icon = <Wrench className="w-4 h-4 text-indigo-500" />;
+  }
+  else if (h.baccepted) {
+    statusLabel = 'Allocated - Accepted';
+    color = 'text-sky-500 bg-sky-50 border-sky-200';
+    icon = <UserCheck className="w-4 h-4 text-sky-500" />;
+  }
+  else if (h.nengineer && h.nengineer !== 0 && h.nengineer !== '0') {
+    statusLabel = 'Assigned - Acceptance Pending';
+    color = 'text-blue-500 bg-blue-50 border-blue-200';
+    icon = <Clock className="w-4 h-4 text-blue-500" />;
+  }
+
+  // Handle re-opened or branch manager rejects
+  if (h.bBMreject && !h.bsolved) {
+    statusLabel = 'Rejected by Branch Manager';
+    color = 'text-rose-500 bg-rose-50 border-rose-200';
+    icon = <AlertCircle className="w-4 h-4 text-rose-500" />;
+  }
+
+  return { statusLabel, color, icon };
+};
+
 export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext, onPrev, hasNext, hasPrev, currentIndex, totalCount }: CallDetailProps) {
 
-  const [activeTab, setActiveTab] = useState<'details' | 'visits' | 'faults' | 'parts' | 'comments' | 'images'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'visits' | 'faults' | 'parts' | 'comments' | 'images' | 'history'>('details');
   const [note, setNote] = useState('');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
@@ -202,7 +244,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
           <div className={`p-6 rounded-full bg-white shadow-2xl scale-[1.5] transition-transform ${Math.abs(swipeOffset) > minSwipeDistance ? 'scale-[2]' : ''}`}>
             {swipeOffset > 0 ? <XCircle size={32} className="text-rose-500" /> : <CheckCircle size={32} className="text-emerald-500" />}
           </div>
-          <div className="absolute bottom-24 text-[14px] font-black uppercase tracking-widest text-slate-900 bg-white px-4 py-2 rounded-full shadow-lg">
+          <div className="absolute bottom-24 text-[14px] text-slate-900 bg-white px-4 py-2 rounded-full shadow-lg ui-strong">
             {swipeOffset > 0 ? 'Swipe Right to Reject' : 'Swipe Left to Approve'}
           </div>
         </div>
@@ -216,7 +258,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
               <div className={`p-2 rounded-xl ${pendingAction === 'reject' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'}`}>
                 <AlertCircle size={24} />
               </div>
-              <h3 className="text-lg font-black text-slate-900">
+              <h3 className="text-lg text-slate-900 ui-strong">
                 {pendingAction === 'reject' ? 'Rejection Reason' : 'Hold Reason'}
               </h3>
             </div>
@@ -230,15 +272,14 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
             <div className="flex gap-3">
               <button
                 onClick={() => { setPendingAction('none'); setReason(''); }}
-                className="flex-1 py-4 text-sm font-bold text-slate-500 hover:bg-slate-50 rounded-2xl transition-all"
+                className="flex-1 py-4 text-sm text-slate-500 hover:bg-slate-50 rounded-2xl transition-all ui-label"
               >
                 Cancel
               </button>
               <button
                 onClick={() => handleStatusUpdate(pendingAction === 'reject' ? 'escalate' : 'query', reason)}
                 disabled={!reason.trim()}
-                className={`flex-1 py-4 text-sm font-black text-white rounded-2xl shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 ${pendingAction === 'reject' ? 'bg-rose-600 shadow-rose-100' : 'bg-amber-500 shadow-amber-100'
-                  }`}
+                className={`flex-1 py-4 text-sm text-white rounded-2xl shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 ${pendingAction === 'reject' ? 'bg-rose-600 shadow-rose-100' : 'bg-amber-500 shadow-amber-100' } ui-label`}
               >
                 Confirm {pendingAction === 'reject' ? 'Reject' : 'Hold'}
               </button>
@@ -280,7 +321,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                 >
                   <ArrowRight size={12} className="rotate-180" />
                 </button>
-                <div className="px-2 text-[10px] font-black tracking-tighter border-x border-slate-800 mx-1 min-w-[50px] text-center uppercase">
+                <div className="px-2 text-[10px] border-x border-slate-800 mx-1 min-w-[50px] text-center ui-label">
                   WRL Dashboard
                 </div>
                 <button
@@ -292,7 +333,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                 </button>
               </div>
             </div>
-            <h1 className="text-[20px] lg:text-[22px] font-black text-slate-900 leading-tight">
+            <h1 className="text-[20px] lg:text-[22px] text-slate-900 leading-tight ui-strong">
               {call.customer_name}
             </h1>
           </div>
@@ -331,19 +372,16 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                 { id: 'parts', label: 'Parts', count: call.parts?.length || 0 },
                 { id: 'images', label: 'Images', count: allImages.length },
                 { id: 'comments', label: 'Comments', count: displayComments.length },
+                { id: 'history', label: 'History', count: call.history?.length || 0 },
               ].map((t: any) => (
                 <button
                   key={t.id}
                   onClick={() => setActiveTab(t.id)}
-                  className={`flex items-center gap-1 px-4 py-3.5 text-[13px] font-medium transition-all border-b-2 -mb-px whitespace-nowrap ${activeTab === t.id
-                    ? 'text-slate-900 border-slate-900'
-                    : 'text-slate-400 border-transparent hover:text-slate-600'
-                    }`}
+                  className={`flex items-center gap-1 px-4 py-3.5 text-[13px] font-medium transition-all border-b-2 -mb-px whitespace-nowrap ${activeTab === t.id ? 'text-slate-900 border-slate-900' : 'text-slate-400 border-transparent hover:text-slate-600' }`}
                 >
                   {t.label}
                   {t.count !== undefined && (
-                    <span className={`text-[10px] rounded-md px-1.5 py-0.5 min-w-[20px] text-center font-bold ${activeTab === t.id ? 'bg-slate-100 text-slate-900' : 'bg-slate-50 text-slate-400'
-                      } border border-slate-200`}>
+                    <span className={`text-[10px] rounded-md px-1.5 py-0.5 min-w-[20px] text-center ${activeTab === t.id ? 'bg-slate-100 text-slate-900' : 'bg-slate-50 text-slate-400' } border border-slate-200 ui-label`}>
                       {t.count}
                     </span>
                   )}
@@ -358,8 +396,8 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                     <div className="bg-rose-50 border border-rose-100 rounded-xl p-4 flex gap-3 text-rose-800">
                       <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
                       <div>
-                        <div className="text-[12px] font-black uppercase tracking-wider">CRM Rejection Remark</div>
-                        <div className="text-[13px] font-semibold mt-1">{reasonText}</div>
+                        <div className="text-[12px] ui-label">CRM Rejection Remark</div>
+                        <div className="text-[13px] mt-1 ui-label">{reasonText}</div>
                         {(call.crm_reject_at || call.rejected_at || call.dBMrejectdatetime) && (
                           <div className="text-[10px] text-rose-400 font-medium mt-1">
                             Rejected on {new Date(call.crm_reject_at || call.rejected_at || call.dBMrejectdatetime).toLocaleDateString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
@@ -378,7 +416,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                   </div>
 
                   <div className="space-y-2">
-                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Complaint</div>
+                    <div className="text-[11px] text-slate-400 ui-label">Complaint</div>
                     <div className="p-3.5 bg-slate-50 rounded-lg text-[13px] text-slate-500 italic border border-slate-100">
                       {call.complaint_label || 'No description provided'}
                     </div>
@@ -386,7 +424,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
 
                   {isMobile && (
                     <div className="space-y-2 border-t border-slate-50 pt-6">
-                      <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Lifecycle Timeline</div>
+                      <div className="text-[11px] text-slate-400 ui-label">Lifecycle Timeline</div>
                       <div className="bg-slate-50/50 p-4 rounded-2xl space-y-3">
                         <TimelineItem label="Logged" date={call.logged_at} />
                         {call.started_at && <TimelineItem label="Started" date={call.started_at} />}
@@ -402,8 +440,8 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                     call.visits.map((v: any, i: number) => (
                       <div key={i} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
                         <div className="flex items-center justify-between mb-3">
-                          <span className="text-[11px] font-black uppercase tracking-widest text-slate-900">Visit #{i + 1}</span>
-                          <span className="text-[11px] font-bold text-slate-400">
+                          <span className="text-[11px] text-slate-900 ui-label">Visit #{i + 1}</span>
+                          <span className="text-[11px] text-slate-400 ui-label">
                             {v.dvisitdatetime ? new Date(v.dvisitdatetime).toLocaleDateString() : 'N/A'}
                           </span>
                         </div>
@@ -423,7 +461,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                     call.faults.map((f: any, i: number) => (
                       <div key={i} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm space-y-3">
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-black uppercase tracking-widest text-slate-900">Fault #{i + 1}</span>
+                          <span className="text-[11px] text-slate-900 ui-label">Fault #{i + 1}</span>
                           {f.is_solved && (
                             <span className="badge-solved">
                               Solved
@@ -433,18 +471,18 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="space-y-1">
-                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Complaint</div>
+                            <div className="text-[10px] text-slate-400 ui-label">Complaint</div>
                             <div className="text-[13px] text-slate-700 font-medium">{f.complaint || '—'}</div>
                           </div>
                           <div className="space-y-1">
-                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Defect</div>
+                            <div className="text-[10px] text-slate-400 ui-label">Defect</div>
                             <div className="text-[13px] text-slate-700 font-medium">{f.defect || '—'}</div>
                           </div>
                         </div>
 
                         <div className="pt-2 border-t border-slate-50">
-                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Work Done / Repair</div>
-                          <div className="text-[13px] font-bold text-slate-900 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                          <div className="text-[10px] text-slate-400 mb-1 ui-label">Work Done / Repair</div>
+                          <div className="text-[13px] text-slate-900 bg-slate-50 p-3 rounded-lg border border-slate-100 ui-label">
                             {f.repair || 'No repair recorded'}
                           </div>
                         </div>
@@ -463,23 +501,23 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                       <div key={i} className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
                         <div className="p-4 flex items-center justify-between border-b border-slate-50">
                           <div className="space-y-1">
-                            <div className="text-[13px] font-bold text-slate-900">{p.vpartname}</div>
+                            <div className="text-[13px] text-slate-900 ui-label">{p.vpartname}</div>
                             <div className="text-[11px] text-slate-400 font-medium">{p.vpartcode}</div>
                           </div>
-                          <div className="text-[16px] font-black text-slate-900 bg-slate-50 px-3 py-1 rounded-lg">x{p.nqty || 1}</div>
+                          <div className="text-[16px] text-slate-900 bg-slate-50 px-3 py-1 rounded-lg ui-strong">x{p.nqty || 1}</div>
                         </div>
                         
                         {(p.voldbarcode || p.vnewbarcode) && (
                           <div className="p-4 bg-slate-50/50 grid grid-cols-1 sm:grid-cols-2 gap-4">
                             {p.voldbarcode && (
                               <div className="space-y-1">
-                                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Old Barcode</div>
+                                <div className="text-[10px] text-slate-400 ui-label">Old Barcode</div>
                                 <div className="text-[12px] font-mono text-slate-600 bg-white px-2 py-1.5 rounded border border-slate-100">{p.voldbarcode}</div>
                               </div>
                             )}
                             {p.vnewbarcode && (
                               <div className="space-y-1">
-                                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">New Barcode</div>
+                                <div className="text-[10px] text-slate-400 ui-label">New Barcode</div>
                                 <div className="text-[12px] font-mono text-slate-600 bg-white px-2 py-1.5 rounded border border-slate-100">{p.vnewbarcode}</div>
                               </div>
                             )}
@@ -512,9 +550,15 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                   {displayComments.length > 0 ? (
                     displayComments.map((c: any, i: number) => (
                       <div key={i} className="flex gap-3">
-                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold uppercase">{c.author_name?.charAt(0)}</div>
+                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] ui-label overflow-hidden flex-shrink-0">
+                          {c.author_avatar_url ? (
+                            <img src={c.author_avatar_url} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            c.author_name?.charAt(0)
+                          )}
+                        </div>
                         <div className="flex-1 text-[13px]">
-                          <div className="font-bold text-slate-900">{c.author_name}</div>
+                          <div className="text-slate-900 ui-strong">{c.author_name}</div>
                           <div className="text-slate-600 mt-1">{c.comment}</div>
                         </div>
                       </div>
@@ -525,7 +569,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
 
                   {isMobile && (
                     <div className="mt-8 space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                      <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Quick Note</div>
+                      <div className="text-[11px] text-slate-400 ui-label">Quick Note</div>
                       <textarea
                         value={note}
                         onChange={(e) => setNote(e.target.value)}
@@ -536,11 +580,82 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                       <button
                         onClick={handlePostComment}
                         disabled={!note.trim()}
-                        className="w-full py-3 bg-slate-900 text-white rounded-xl text-sm font-bold disabled:opacity-30 flex items-center justify-center gap-2"
+                        className="w-full py-3 bg-slate-900 text-white rounded-xl text-sm disabled:opacity-30 flex items-center justify-center gap-2 ui-label"
                       >
                         <Send size={16} />
                         Post Comment
                       </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'history' && (
+                <div className="relative border-l border-slate-200 ml-4 pl-6 space-y-6">
+                  {call.history && call.history.length > 0 ? (
+                    call.history.map((h: any, i: number) => {
+                      const { statusLabel, color, icon } = getHistoryEventMeta(h);
+                      const eventDate = h.editedon || h.addedon || h.dtrndate;
+                      return (
+                        <div key={i} className="relative">
+                          {/* Timeline dot */}
+                          <span className={`absolute -left-[35px] top-1.5 flex items-center justify-center w-6 h-6 rounded-full border ${color} bg-white shadow-sm ring-4 ring-white`}>
+                            {icon}
+                          </span>
+                          
+                          {/* Timeline Card */}
+                          <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 space-y-2 hover:bg-slate-100/50 transition-colors">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${color}`}>
+                                {statusLabel}
+                              </span>
+                              {eventDate && (
+                                <span className="text-[10px] text-slate-400 font-medium">
+                                  {new Date(eventDate).toLocaleString([], { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600">
+                              {h.engineer_name && (
+                                <div>
+                                  <span className="text-slate-400 font-medium">Engineer: </span>
+                                  <span className="text-slate-700 font-semibold">{h.engineer_name}</span>
+                                </div>
+                              )}
+                              {h.branch_name && (
+                                <div>
+                                  <span className="text-slate-400 font-medium">Branch: </span>
+                                  <span className="text-slate-700">{h.branch_name}</span>
+                                </div>
+                              )}
+                              {h.addedby && (
+                                <div className="sm:col-span-2">
+                                  <span className="text-slate-400 font-medium">Action by: </span>
+                                  <span className="text-slate-700">{h.addedby}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {h.vcomment && h.vcomment.trim() && (
+                              <div className="text-xs text-slate-500 bg-white border border-slate-100 rounded-lg p-2.5 italic">
+                                &ldquo;{h.vcomment}&rdquo;
+                              </div>
+                            )}
+
+                            {h.bBMreject && h.vBMrejectreason && h.vBMrejectreason.trim() && (
+                              <div className="text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded-lg p-2.5 font-medium">
+                                Rejection Reason: {h.vBMrejectreason}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-[13px]">
+                      <Clock size={36} className="text-slate-300 mb-2" />
+                      No history recorded
                     </div>
                   )}
                 </div>
@@ -558,7 +673,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
               </div>
 
               <div className="flex-1 flex flex-col space-y-2">
-                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Notes / query</div>
+                <div className="text-[11px] text-slate-400 ui-label">Notes / query</div>
                 <textarea
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
@@ -568,7 +683,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                 <button
                   onClick={handlePostComment}
                   disabled={!note.trim()}
-                  className="w-full py-2.5 bg-slate-900 text-white rounded-lg text-sm font-bold disabled:opacity-30"
+                  className="w-full py-2.5 bg-slate-900 text-white rounded-lg text-sm disabled:opacity-30 ui-label"
                 >
                   Post Comment
                 </button>
@@ -582,19 +697,19 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
       <div className="px-4 py-4 border-t border-slate-100 flex items-center gap-2 bg-white pb-safe">
         <button
           onClick={() => handleStatusUpdate('noted')}
-          className="flex-1 py-3.5 bg-slate-900 text-white rounded-2xl text-[13px] font-black uppercase tracking-widest"
+          className="flex-1 py-3.5 bg-slate-900 text-white rounded-2xl text-[13px] ui-label"
         >
           Approve
         </button>
         <button
           onClick={() => setPendingAction('hold')}
-          className="px-6 py-3.5 bg-slate-50 text-slate-600 rounded-2xl text-[13px] font-bold border border-slate-200"
+          className="px-6 py-3.5 bg-slate-50 text-slate-600 rounded-2xl text-[13px] border border-slate-200 ui-label"
         >
           Hold
         </button>
         <button
           onClick={() => setPendingAction('reject')}
-          className="px-6 py-3.5 bg-rose-50 text-rose-600 rounded-2xl text-[13px] font-bold border border-rose-100"
+          className="px-6 py-3.5 bg-rose-50 text-rose-600 rounded-2xl text-[13px] border border-rose-100 ui-label"
         >
           Reject
         </button>
@@ -633,7 +748,7 @@ function TimelineItem({ label, date, highlight, status }: { label: string; date:
     <div className="flex justify-between items-start text-[12px] lg:text-[13px] py-0.5">
       <span className="text-slate-400 font-medium">{label}</span>
       <div className="text-right">
-        <div className={`${colors[status || 'default']} font-bold leading-none`}>
+        <div className={`${colors[status || 'default']} leading-none ui-strong`}>
           {date ? new Date(date).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '—'}
         </div>
         {date && <div className="text-[10px] text-slate-400 mt-0.5">{new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>}
@@ -645,8 +760,8 @@ function TimelineItem({ label, date, highlight, status }: { label: string; date:
 function Field({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
   return (
     <div className="w-full">
-      <div className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">{label}</div>
-      <div className={`text-[13px] font-bold leading-tight ${muted ? 'text-slate-300' : 'text-slate-900'}`}>
+      <div className="text-[10px] text-slate-400 mb-1 ui-label">{label}</div>
+      <div className={`text-[13px] leading-tight ${muted ? 'text-slate-300' : 'text-slate-900'} ui-label`}>
         {value}
       </div>
     </div>

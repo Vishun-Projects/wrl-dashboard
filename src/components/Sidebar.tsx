@@ -112,7 +112,7 @@ export function Sidebar({ user }: SidebarProps) {
           </div>
           {!isCollapsed && (
             <div className="flex flex-col justify-center animate-in fade-in slide-in-from-left-2 duration-300">
-              <span className="text-xs font-black text-slate-900 tracking-wider uppercase leading-none">WRL PORTAL</span>
+              <span className="text-xs text-slate-900 leading-none ui-label">WRL PORTAL</span>
             </div>
           )}
         </div>
@@ -120,14 +120,14 @@ export function Sidebar({ user }: SidebarProps) {
         {/* Collapsible toggle button on desktop */}
         <button
           onClick={toggleCollapse}
-          className="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-slate-800 items-center justify-center transition-all hover:scale-105 active:scale-95 z-50 shadow-sm"
+          className="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-slate-800 items-center justify-center transition-colors z-50"
         >
           {isCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
         </button>
       </div>
 
       {/* Navigation links */}
-      <div className="flex-1 py-4 px-3 space-y-1.5 overflow-y-auto custom-scrollbar">
+      <div className="flex-1 py-4 px-3 space-y-1.5 custom-scrollbar">
         {filteredNavigation.map((item) => {
           const isActive = pathname === item.href;
           return (
@@ -137,10 +137,7 @@ export function Sidebar({ user }: SidebarProps) {
                 router.push(item.href);
                 setIsMobileOpen(false);
               }}
-              className={`w-full flex items-center gap-3 py-3 rounded-xl text-xs font-bold transition-all group relative ${isActive
-                  ? 'bg-slate-900 text-white shadow-md border-transparent'
-                  : 'hover:bg-slate-50 hover:text-slate-900 text-slate-500'
-                } ${isCollapsed ? 'justify-center px-0' : 'px-3'}`}
+              className={`w-full flex items-center gap-3 py-3 rounded-xl text-xs transition-colors relative ${isActive ? 'bg-slate-950 text-white' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'} ${isCollapsed ? 'justify-center px-0' : 'px-3'} ui-label`}
             >
               <item.icon
                 size={18}
@@ -155,7 +152,7 @@ export function Sidebar({ user }: SidebarProps) {
 
               {/* Tooltip for collapsed view */}
               {isCollapsed && (
-                <div className="absolute left-full ml-3 px-2.5 py-1.5 text-[10px] font-bold tracking-wide uppercase bg-slate-900 text-white rounded-lg border border-slate-850 shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 pointer-events-none z-50 whitespace-nowrap">
+                <div className="absolute left-full ml-3 px-2.5 py-1.5 text-[10px] bg-slate-900 text-white rounded-lg border border-slate-850 shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 pointer-events-none z-50 whitespace-nowrap ui-label">
                   {item.name}
                 </div>
               )}
@@ -168,8 +165,7 @@ export function Sidebar({ user }: SidebarProps) {
       <div className="p-3 border-t border-slate-100 flex-shrink-0 relative" ref={dropdownRef}>
         <div
           onClick={() => setIsProfileOpen(!isProfileOpen)}
-          className={`flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 cursor-pointer transition-all ${isCollapsed ? 'justify-center' : ''
-            }`}
+          className={`flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 cursor-pointer transition-all ${isCollapsed ? 'justify-center' : ''}`}
         >
           <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 overflow-hidden flex-shrink-0">
             {user?.avatar_url ? (
@@ -181,8 +177,8 @@ export function Sidebar({ user }: SidebarProps) {
 
           {!isCollapsed && (
             <div className="flex-1 min-w-0 animate-in fade-in slide-in-from-left-2 duration-300">
-              <p className="text-[11px] font-bold text-slate-900 truncate leading-tight">{user?.name || 'Loading...'}</p>
-              <p className="text-[9px] text-slate-450 font-bold tracking-wider truncate mt-0.5 uppercase">
+              <p className="text-[11px] text-slate-900 truncate leading-tight ui-label">{user?.name || 'Loading...'}</p>
+              <p className="text-[9px] text-slate-450 truncate mt-0.5 ui-strong">
                 {user?.role || 'User'}
               </p>
             </div>
@@ -191,16 +187,15 @@ export function Sidebar({ user }: SidebarProps) {
 
         {/* Profile Popover / Dropdown */}
         {isProfileOpen && (
-          <div className={`absolute bottom-full mb-2 bg-white border border-slate-250/80 shadow-2xl rounded-xl z-[150] p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-200 ${isCollapsed ? 'left-3 w-48' : 'left-3 right-3'
-            }`}>
+          <div className={`absolute bottom-full mb-2 bg-white border border-slate-200 shadow-sm rounded-xl z-[150] p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-200 ${isCollapsed ? 'left-3 w-48' : 'right-3'}`}>
             <div className="p-2 border-b border-slate-100 text-slate-500">
-              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Signed in as</p>
-              <p className="text-[11px] font-bold text-slate-700 truncate">{user?.email}</p>
+              <p className="text-[9px] text-slate-400 mb-0.5 ui-strong">Signed in as</p>
+              <p className="text-[11px] text-slate-700 truncate ui-label">{user?.email}</p>
             </div>
 
             <button
               onClick={() => { router.push('/profile'); setIsProfileOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] font-bold text-slate-600 hover:text-slate-950 hover:bg-slate-50 transition-all"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] text-slate-600 hover:text-slate-950 hover:bg-slate-50 transition-all ui-label"
             >
               <User size={14} />
               My Profile
@@ -208,7 +203,7 @@ export function Sidebar({ user }: SidebarProps) {
 
             <button
               onClick={() => { router.push('/profile?tab=settings'); setIsProfileOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] font-bold text-slate-600 hover:text-slate-950 hover:bg-slate-50 transition-all"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] text-slate-600 hover:text-slate-950 hover:bg-slate-50 transition-all ui-label"
             >
               <Settings size={14} />
               Settings
@@ -218,7 +213,7 @@ export function Sidebar({ user }: SidebarProps) {
 
             <button
               onClick={handleSignOut}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] font-bold text-rose-650 hover:text-rose-700 hover:bg-rose-50/60 transition-all"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] text-rose-650 hover:text-rose-700 hover:bg-rose-50/60 transition-all ui-label"
             >
               <LogOut size={14} />
               Sign Out
@@ -237,7 +232,7 @@ export function Sidebar({ user }: SidebarProps) {
           <div className="w-8 h-8 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center shadow-sm">
             <img src="/western-head-logo-2025.png" alt="W" className="w-5 h-5 object-contain" />
           </div>
-          <span className="text-xs font-black text-slate-900 tracking-wider uppercase">WRL PORTAL</span>
+          <span className="text-xs text-slate-900 ui-label">WRL PORTAL</span>
         </div>
         <button
           onClick={() => setIsMobileOpen(!isMobileOpen)}
@@ -262,14 +257,12 @@ export function Sidebar({ user }: SidebarProps) {
 
       {/* Desktop Persistent Collapsible Spacer */}
       <div
-        className={`hidden md:block transition-all duration-300 ease-in-out flex-shrink-0 ${isCollapsed ? 'w-20' : 'w-64'
-          }`}
+        className={`hidden md:block transition-all duration-300 ease-in-out flex-shrink-0 ${isCollapsed ? 'w-20' : 'w-64'}`}
       />
 
       {/* Desktop Persistent Collapsible Sidebar Panel */}
       <aside
-        className={`hidden md:flex flex-col fixed top-0 left-0 bottom-0 z-[100] transition-all duration-300 ease-in-out ${isCollapsed ? 'w-20' : 'w-64'
-          }`}
+        className={`hidden md:flex flex-col fixed top-0 left-0 bottom-0 z-[100] transition-all duration-300 ease-in-out ${isCollapsed ? 'w-20' : 'w-64'}`}
       >
         {sidebarContent}
       </aside>

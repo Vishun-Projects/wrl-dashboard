@@ -22,7 +22,7 @@ export async function GET(
     const vtrnno = searchParams.get('vtrnno');
 
     // 1. Fetch everything in parallel
-    const [visitsRes, faultsRes, partsRes, serialsRes, parentRes, docsRes] = await Promise.all([
+    const [visitsRes, faultsRes, partsRes, serialsRes, parentRes, docsRes, historyRes] = await Promise.all([
       postQuery({ 
         fields: "v.vVisitTrnNo as vtrnno, v.vpersoncontected, CONVERT(varchar(30), v.dvisitdatetime, 126) as dvisitdatetime, v.vvisitremark, v.vcustomerRemarks, v.vPartsReplacedDetails, v.ntimespent, v.nvisitexpense, v.nofficeid, v.vcustomersignPath, v.vengineersignPath", 
         tableName: "trdcalls1visit v (NOLOCK)", 
@@ -52,6 +52,12 @@ export async function GET(
         fields: "vnewfilename, vorigionalfilename, vremarks, nofficeid, CONVERT(varchar(30), addedon, 126) as addedon",
         tableName: "trhdoc (NOLOCK)",
         condition: `ncalls = '${id}' AND nofficeid = '${officeId}'`
+      }),
+      postQuery({
+        fields: "tc.ncode, tc.vtrnno, tc.vtransfercallno, tc.nofficeid, CONVERT(varchar(30), tc.dtrndate, 126) as dtrndate, CONVERT(varchar(30), tc.dallocationdatetime, 126) as dallocationdatetime, CONVERT(varchar(30), tc.dsolvedatetime, 126) as dsolvedatetime, CONVERT(varchar(30), tc.dfastclosedatetime, 126) as dfastclosedatetime, tc.callStatus, tc.bsolved, tc.bfastclose, tc.baccepted, tc.nengineer, u.vname as engineer_name, o.vcompanyname as branch_name, tc.addedby, CONVERT(varchar(30), tc.addedon, 126) as addedon, CONVERT(varchar(30), tc.editedon, 126) as editedon, tc.vcomment, tc.bBMreject, tc.vBMrejectreason, CONVERT(varchar(30), tc.dBMrejectdatetime, 126) as dBMrejectdatetime, cr.vname as cancel_reason_label",
+        tableName: "trhcalls tc (NOLOCK) LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode",
+        condition: `tc.vtrnno = '${vtrnno}' OR tc.vtransfercallno = '${vtrnno}'`,
+        orderBy: "ISNULL(tc.editedon, tc.addedon) ASC, tc.ncode ASC"
       })
     ]);
 
@@ -157,6 +163,31 @@ export async function GET(
         remarks: d.vremarks,
         office_id: d.nofficeid,
         uploaded_at: d.addedon
+      })),
+      history: (historyRes.data || []).map((h: any) => ({
+        ncode: h.ncode,
+        vtrnno: h.vtrnno,
+        vtransfercallno: h.vtransfercallno,
+        office_id: String(h.nofficeid),
+        dtrndate: h.dtrndate,
+        dallocationdatetime: h.dallocationdatetime,
+        dsolvedatetime: h.dsolvedatetime,
+        dfastclosedatetime: h.dfastclosedatetime,
+        callStatus: h.callStatus,
+        bsolved: h.bsolved === 'True' || h.bsolved === true || h.bsolved === 1,
+        bfastclose: h.bfastclose === 'True' || h.bfastclose === true || h.bfastclose === 1,
+        baccepted: h.baccepted === 'True' || h.baccepted === true || h.baccepted === 1,
+        nengineer: h.nengineer,
+        engineer_name: h.engineer_name,
+        branch_name: h.branch_name,
+        addedby: h.addedby,
+        addedon: h.addedon,
+        editedon: h.editedon,
+        vcomment: h.vcomment,
+        bBMreject: h.bBMreject === 'True' || h.bBMreject === true || h.bBMreject === 1,
+        vBMrejectreason: h.vBMrejectreason,
+        dBMrejectdatetime: h.dBMrejectdatetime,
+        cancel_reason_label: h.cancel_reason_label
       }))
     });
 

@@ -18,15 +18,15 @@ export async function GET(req: NextRequest) {
 
     if (!branch) return NextResponse.json({ error: 'Branch is required' }, { status: 400 });
 
-    let condition = `officename = '${branch}'`;
+    const branchSafe = branch.replace(/'/g, "''");
+    let condition = `o.vcompanyname = '${branchSafe}' AND u.vname IS NOT NULL AND u.vname <> ''`;
     if (startDate && endDate) {
-      condition += ` AND callsdtrndate >= '${startDate}' AND callsdtrndate <= '${endDate} 23:59:59'`;
+      condition += ` AND tc.dtrndate >= '${startDate}' AND tc.dtrndate <= '${endDate} 23:59:59'`;
     }
-    condition += " AND serviceman IS NOT NULL AND serviceman != ''";
 
     const res = await postQuery({
-      fields: "DISTINCT serviceman",
-      tableName: "uv_findtrhcalls_callsearch WITH (NOLOCK)",
+      fields: "DISTINCT u.vname as serviceman",
+      tableName: "trhcalls tc (NOLOCK) JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode",
       condition: `${condition} ORDER BY serviceman ASC`,
     });
 

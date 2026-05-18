@@ -2,33 +2,23 @@ import { postQuery } from '../src/lib/db-proxy';
 
 async function run() {
   try {
-    console.log("1. Querying column info for callsntrnno and ncancelreason in uv_findtrhcalls_callsearch...");
-    const cols = await postQuery({
-      fields: "COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH",
-      tableName: "INFORMATION_SCHEMA.COLUMNS",
-      condition: "TABLE_NAME = 'uv_findtrhcalls_callsearch' AND COLUMN_NAME IN ('callsntrnno', 'ncancelreason')"
-    });
-    console.log("Columns:", JSON.stringify(cols.data, null, 2));
+    // Find where vinsttel1 lives
+    console.log("Finding vinsttel1 table...");
+    const r1 = await postQuery({ fields: 'TABLE_NAME, COLUMN_NAME', tableName: 'INFORMATION_SCHEMA.COLUMNS', condition: "COLUMN_NAME = 'vinsttel1'", orderBy: 'TABLE_NAME' });
+    console.log("vinsttel1 tables:", JSON.stringify(r1.data));
 
-    console.log("2. Querying 5 rows from uv_findtrhcalls_callsearch...");
-    const sample = await postQuery({
-      top: "5",
-      fields: "callsntrnno, ncancelreason, PartyName",
-      tableName: "uv_findtrhcalls_callsearch (NOLOCK)"
-    });
-    console.log("Sample rows:", JSON.stringify(sample.data, null, 2));
+    // Find item/product master
+    console.log("\nFinding item/product table...");
+    const r2 = await postQuery({ top: "10", fields: 'TABLE_NAME', tableName: 'INFORMATION_SCHEMA.TABLES', condition: "TABLE_TYPE='BASE TABLE' AND (TABLE_NAME LIKE 'mstproduct%' OR TABLE_NAME LIKE 'mstitem%' OR TABLE_NAME LIKE 'mst%item%')" });
+    console.log("product/item tables:", JSON.stringify(r2.data));
 
-    console.log("3. Querying status and remarks fields for UniqueCallNo = '26D23748'...");
-    const specific = await postQuery({
-      fields: "callsntrnno, ncancelreason, Status, callstatus, callsolved, bfastclose, bmreject, horeject, rejectionstatus, vsolveremarks, vcomment",
-      tableName: "uv_findtrhcalls_callsearch (NOLOCK)",
-      condition: "UniqueCallNo = '26D23748'"
-    });
-    console.log("Matched row status details:", JSON.stringify(specific.data, null, 2));
+    // Check mstproducts
+    console.log("\nChecking mstproducts...");
+    const r3 = await postQuery({ top: "1", fields: "ncode, vname", tableName: "mstproducts (NOLOCK)", condition: "1=1" });
+    console.log("mstproducts:", JSON.stringify(r3.data));
 
   } catch (err: any) {
-    console.error("Error:", err.message);
+    console.error("Error:", err.message.substring(0, 200));
   }
 }
-
 run();

@@ -37,13 +37,13 @@ export const CallTable = React.memo(function CallTable({ calls, onFlagUpdate, on
         </colgroup>
         <thead>
           <tr className="bg-[#f8fafc] border-b border-[#e2e8f0]">
-            <th className="px-5 py-3 text-[11px] font-semibold text-[#94a3b8] uppercase tracking-wider">Reference</th>
-            <th className="px-5 py-3 text-[11px] font-semibold text-[#94a3b8] uppercase tracking-wider">Logged Date</th>
-            <th className="px-5 py-3 text-[11px] font-semibold text-[#94a3b8] uppercase tracking-wider">Customer</th>
-            <th className="px-5 py-3 text-[11px] font-semibold text-[#94a3b8] uppercase tracking-wider">Complaint</th>
-            <th className="px-5 py-3 text-[11px] font-semibold text-[#94a3b8] uppercase tracking-wider">Status</th>
-            <th className="px-5 py-3 text-[11px] font-semibold text-[#94a3b8] uppercase tracking-wider">Technician</th>
-            <th className="px-5 py-3 text-[11px] font-semibold text-[#94a3b8] uppercase tracking-wider text-center">Action</th>
+            <th className="px-5 py-3 text-[11px] text-[#94a3b8] ui-label">Reference</th>
+            <th className="px-5 py-3 text-[11px] text-[#94a3b8] ui-label">Logged Date</th>
+            <th className="px-5 py-3 text-[11px] text-[#94a3b8] ui-label">Customer</th>
+            <th className="px-5 py-3 text-[11px] text-[#94a3b8] ui-label">Complaint</th>
+            <th className="px-5 py-3 text-[11px] text-[#94a3b8] ui-label">Status</th>
+            <th className="px-5 py-3 text-[11px] text-[#94a3b8] ui-label">Technician</th>
+            <th className="px-5 py-3 text-[11px] text-[#94a3b8] text-center ui-label">Action</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-[#f1f5f9]">
@@ -65,8 +65,12 @@ export const CallTable = React.memo(function CallTable({ calls, onFlagUpdate, on
               <tr
                 key={`${callId}-${index}`}
                 onClick={() => onSelectCall(callId)}
-                className={`group cursor-pointer transition-all ${selectedId === callId ? 'bg-[#f8fafc]' : index % 2 === 0 ? 'bg-white' : 'bg-[#fafafa]'} hover:bg-[#f1f5f9]/40`}
-              >
+                className={`group cursor-pointer transition-all ${selectedId === callId
+                    ? 'bg-[#f8fafc]'
+                    : index % 2 === 0
+                      ? 'bg-white'
+                      : 'bg-[#fafafa]'
+                  } hover:bg-[#f1f5f9]/40`}              >
                 <td className="px-5 py-4">
                   <div className="flex items-center gap-2">
                     <Tooltip content={copiedId === call.id ? "Copied to clipboard!" : "Click to Copy"}>
@@ -96,7 +100,7 @@ export const CallTable = React.memo(function CallTable({ calls, onFlagUpdate, on
                   <div className="flex items-center gap-2 overflow-hidden">
                     <div className="text-[13px] text-[#0f172a] font-medium leading-tight truncate">{call.customer_name}</div>
                     {activeTab === 'all' && call.is_major_repair === 'True' && (
-                      <span className="text-[9px] font-black bg-rose-500 text-white px-1.5 py-0.5 rounded-sm tracking-tighter shadow-sm flex-shrink-0">
+                      <span className="text-[9px] bg-rose-500 text-white px-1.5 py-0.5 rounded-sm shadow-sm flex-shrink-0 ui-strong">
                         MAJOR
                       </span>
                     )}
@@ -128,7 +132,7 @@ export const CallTable = React.memo(function CallTable({ calls, onFlagUpdate, on
                     const isAuditClosed = statusLabel === 'Closed' || statusLabel === 'Closed - Rejected';
                     const displayStatus = isRejectedClosed ? 'Closed - Rejected' :
                       (isAuditClosed && call.rejected_at) ? 'Rejected' :
-                      ((isAuditClosed && call.approved_at) ? 'Approved' : statusLabel);
+                        ((isAuditClosed && call.approved_at) ? 'Approved' : statusLabel);
                     const badgeClass = getBadgeClass(displayStatus);
 
                     return (
@@ -136,10 +140,10 @@ export const CallTable = React.memo(function CallTable({ calls, onFlagUpdate, on
                         <span className={badgeClass}>
                           {displayStatus === 'Approved' ? 'Closed - Approved' :
                             displayStatus === 'Rejected' ? 'Closed - Rejected' :
-                            displayStatus === 'Closed - Rejected' ? 'Closed - Rejected' :
-                            displayStatus === 'Tech. Solve Call' ? 'Tech Solved' :
-                            (displayStatus.includes('Assigned') || displayStatus.includes('Allocated')) ? 'Assigned' :
-                              displayStatus}
+                              displayStatus === 'Closed - Rejected' ? 'Closed - Rejected' :
+                                displayStatus === 'Tech. Solve Call' ? 'Tech Solved' :
+                                  (displayStatus.includes('Assigned') || displayStatus.includes('Allocated')) ? 'Assigned' :
+                                    displayStatus}
                         </span>
                         {(call.approved_at || call.rejected_at || (isAuditClosed && call.resolved_at)) && (
                           <span className="text-[9px] text-slate-400 font-medium ml-1 mt-0.5">
@@ -180,13 +184,14 @@ export const CallTable = React.memo(function CallTable({ calls, onFlagUpdate, on
                 <td className="px-5 py-4">
                   <div className="flex flex-col gap-1.5 items-center">
                     <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
-                        currentAudit === 'noted' ? 'badge-solved' :
-                        currentAudit === 'query' ? 'badge-assigned' :
-                        currentAudit === 'escalate' ? 'badge-cancelled' :
-                        'badge-unseen'
-                      }`}
-                    >
+                      className={`text-[10px] px-2 py-0.5 rounded ${currentAudit === 'noted'
+                          ? 'badge-solved'
+                          : currentAudit === 'query'
+                            ? 'badge-assigned'
+                            : currentAudit === 'escalate'
+                              ? 'badge-cancelled'
+                              : 'badge-unseen'
+                        } ui-label`}                    >
                       {currentAudit === 'unseen' ? 'Unseen' : currentAudit === 'noted' ? 'Verified' : currentAudit === 'query' ? 'Hold' : 'Rejected'}
                     </span>
                     {(() => {
@@ -206,10 +211,10 @@ export const CallTable = React.memo(function CallTable({ calls, onFlagUpdate, on
                   </div>
                 </td>
               </tr>
-        );
+            );
           })}
-      </tbody>
-    </table>
+        </tbody>
+      </table>
     </div >
   );
 });

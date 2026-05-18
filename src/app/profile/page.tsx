@@ -126,7 +126,7 @@ export default function ProfilePage() {
         <div className="h-14 px-7 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <User className="text-slate-900" size={18} />
-            <h1 className="text-sm font-black tracking-tight uppercase text-slate-900">User Profile</h1>
+            <h1 className="text-base text-slate-900 ui-strong">User Profile</h1>
           </div>
         </div>
       </header>
@@ -136,66 +136,65 @@ export default function ProfilePage() {
           <div className="flex flex-col md:flex-row gap-8">
           
           {/* Sidebar */}
-          <aside className="w-full md:w-64 space-y-2">
-            <button
-              onClick={() => setActiveTab('general')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${
-                activeTab === 'general' 
-                  ? 'bg-white text-slate-900 shadow-sm border border-slate-200' 
-                  : 'text-slate-500 hover:bg-slate-100'
-              }`}
-            >
-              <User size={18} />
-              General
-            </button>
-            <button
-              onClick={() => setActiveTab('settings')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${
-                activeTab === 'settings' 
-                  ? 'bg-white text-slate-900 shadow-sm border border-slate-200' 
-                  : 'text-slate-500 hover:bg-slate-100'
-              }`}
-            >
-              <Shield size={18} />
-              Security & Settings
-            </button>
+          <aside className="w-full md:w-64 space-y-3">
+            <div className="rounded-3xl border border-slate-200 bg-white p-4">
+              <p className="text-xs font-medium text-slate-500 mb-3">Profile Sections</p>
+              <button
+                type="button"
+                onClick={() => setActiveTab('general')}
+                aria-current={activeTab === 'general' ? 'page' : undefined}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-3xl text-sm font-medium transition-colors ${ activeTab === 'general' ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-50' }`}
+              >
+                <User size={18} />
+                General
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('settings')}
+                aria-current={activeTab === 'settings' ? 'page' : undefined}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-3xl text-sm transition-colors ${ activeTab === 'settings' ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-50' } ui-label`}
+              >
+                <Shield size={18} />
+                Security
+              </button>
+            </div>
           </aside>
 
           {/* Content */}
           <div className="flex-1 space-y-6">
             
             {activeTab === 'general' && (
-              <div className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <form onSubmit={(e) => { e.preventDefault(); handleUpdateProfile(); }} className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="p-8 border-b border-slate-100">
-                  <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight">Account Profile</h2>
-                  <p className="text-sm text-slate-400 font-medium">Manage your public information and identity.</p>
+                  <h2 className="text-xl text-slate-900 ui-strong">Account Profile</h2>
+                  <p className="text-sm text-slate-500">Manage your public information and identity.</p>
                 </div>
 
                 <div className="p-8 space-y-8">
                   {/* Avatar Section */}
-                  <div className="flex items-center gap-8">
+                  <div className="flex flex-col lg:flex-row items-start gap-8">
                     <div className="relative group">
-                      <div className="w-24 h-24 rounded-3xl bg-slate-100 border-2 border-slate-200 overflow-hidden flex items-center justify-center text-3xl font-black text-slate-400 group-hover:border-slate-300 transition-all">
+                      <div className="w-24 h-24 rounded-3xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center text-3xl text-slate-400 transition-colors ui-strong">
                         {user?.avatar_url ? (
-                          <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+                          <img src={user.avatar_url} alt={`${user?.name} avatar`} className="w-full h-full object-cover" />
                         ) : (
                           user?.name?.charAt(0).toUpperCase()
                         )}
                       </div>
-                      <label className="absolute -bottom-2 -right-2 w-10 h-10 bg-slate-900 text-white rounded-xl flex items-center justify-center cursor-pointer hover:scale-110 active:scale-95 transition-all shadow-lg border-2 border-white">
+                      <label className="absolute -bottom-2 -right-2 w-10 h-10 bg-slate-900 text-white rounded-2xl flex items-center justify-center cursor-pointer hover:bg-slate-800 transition-colors border-2 border-white">
                         <Camera size={18} />
                         <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} disabled={uploadingImage} />
                       </label>
                       {uploadingImage && (
-                        <div className="absolute inset-0 bg-white/60 backdrop-blur-sm rounded-3xl flex items-center justify-center">
+                        <div className="absolute inset-0 bg-white/70 backdrop-blur-sm rounded-3xl flex items-center justify-center">
                           <Loader2 className="animate-spin text-slate-900" size={24} />
                         </div>
                       )}
                     </div>
-                    <div className="space-y-1">
-                      <h3 className="font-bold text-slate-900">Profile Photo</h3>
-                      <p className="text-xs text-slate-400 leading-relaxed max-w-xs">
-                        High resolution recommended. JPG or PNG, max 2MB.
+                    <div className="space-y-2 max-w-xl">
+                      <h3 className="text-lg text-slate-900 ui-strong">Profile Photo</h3>
+                      <p className="text-sm text-slate-500 leading-relaxed">
+                        Upload a high-resolution picture. JPG or PNG only, max 2MB.
                       </p>
                     </div>
                   </div>
@@ -203,26 +202,26 @@ export default function ProfilePage() {
                   {/* Form */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Full Name</label>
+                      <label className="text-xs font-medium text-slate-500 ml-1">Full Name</label>
                       <div className="relative">
                         <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
                         <input
                           type="text"
                           value={name}
                           onChange={(e) => setName(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 pl-12 pr-4 text-sm font-bold text-slate-900 outline-none focus:bg-white focus:ring-4 focus:ring-slate-100 transition-all"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 pl-12 pr-4 text-sm font-medium text-slate-900 outline-none focus:bg-white focus:ring-4 focus:ring-slate-100 transition-colors"
                         />
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Email Address</label>
+                      <label className="text-xs font-medium text-slate-500 ml-1">Email Address</label>
                       <div className="relative">
                         <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
                         <input
                           type="email"
                           value={user?.email}
                           disabled
-                          className="w-full bg-slate-100 border border-slate-200 rounded-2xl py-3 pl-12 pr-4 text-sm font-bold text-slate-400 cursor-not-allowed"
+                          className="w-full bg-slate-100 border border-slate-200 rounded-2xl py-3 pl-12 pr-4 text-sm font-medium text-slate-400 cursor-not-allowed"
                         />
                       </div>
                     </div>
@@ -230,31 +229,31 @@ export default function ProfilePage() {
 
                   <div className="pt-4 flex justify-end">
                     <button
-                      onClick={handleUpdateProfile}
-                      disabled={saving}
-                      className="flex items-center gap-2 bg-slate-900 text-white px-8 py-3 rounded-2xl text-sm font-bold hover:bg-slate-800 transition-all active:scale-95 shadow-xl shadow-slate-200 disabled:opacity-50"
+                      type="submit"
+                      disabled={saving || !name.trim()}
+                      className="flex items-center gap-2 bg-slate-950 text-white px-6 py-3 rounded-xl text-sm hover:bg-slate-800 transition-colors disabled:opacity-50 ui-label"
                     >
                       {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
                       Save Changes
                     </button>
                   </div>
                 </div>
-              </div>
+              </form>
             )}
 
             {activeTab === 'settings' && (
               <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 {/* Security Card */}
-                <div className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
+                <form onSubmit={(e) => { e.preventDefault(); handleChangePassword(); }} className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
                   <div className="p-8 border-b border-slate-100">
-                    <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight">Security</h2>
-                    <p className="text-sm text-slate-400 font-medium">Protect your account with a strong password.</p>
+                    <h2 className="text-xl text-slate-900 ui-strong">Security</h2>
+                    <p className="text-sm text-slate-500">Protect your account with a strong password.</p>
                   </div>
 
                   <div className="p-8 space-y-6">
                     <div className="space-y-4 max-w-md">
                       <div className="space-y-2">
-                        <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">New Password</label>
+                        <label className="text-xs font-medium text-slate-500 ml-1">New Password</label>
                         <div className="relative">
                           <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
                           <input
@@ -262,19 +261,19 @@ export default function ProfilePage() {
                             value={newPassword}
                             onChange={(e) => setNewPassword(e.target.value)}
                             placeholder="Min 6 characters"
-                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 pl-12 pr-4 text-sm font-bold text-slate-900 outline-none focus:bg-white focus:ring-4 focus:ring-slate-100 transition-all"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 pl-12 pr-4 text-sm font-medium text-slate-900 outline-none focus:bg-white focus:ring-4 focus:ring-slate-100 transition-colors"
                           />
                         </div>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Confirm New Password</label>
+                        <label className="text-xs font-medium text-slate-500 ml-1">Confirm New Password</label>
                         <div className="relative">
                           <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
                           <input
                             type="password"
                             value={confirmPassword}
                             onChange={(e) => setConfirmPassword(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 pl-12 pr-4 text-sm font-bold text-slate-900 outline-none focus:bg-white focus:ring-4 focus:ring-slate-100 transition-all"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 pl-12 pr-4 text-sm font-medium text-slate-900 outline-none focus:bg-white focus:ring-4 focus:ring-slate-100 transition-colors"
                           />
                         </div>
                       </div>
@@ -282,16 +281,16 @@ export default function ProfilePage() {
 
                     <div className="pt-4 flex justify-end">
                       <button
-                        onClick={handleChangePassword}
-                        disabled={saving || !newPassword}
-                        className="flex items-center gap-2 bg-slate-900 text-white px-8 py-3 rounded-2xl text-sm font-bold hover:bg-slate-800 transition-all active:scale-95 shadow-xl shadow-slate-200 disabled:opacity-50"
+                        type="submit"
+                        disabled={saving || !newPassword || newPassword !== confirmPassword}
+                        className="flex items-center gap-2 bg-slate-950 text-white px-6 py-3 rounded-xl text-sm hover:bg-slate-800 transition-colors disabled:opacity-50 ui-label"
                       >
                         {saving ? <Loader2 className="animate-spin" size={18} /> : <Shield size={18} />}
                         Update Password
                       </button>
                     </div>
                   </div>
-                </div>
+                </form>
 
                 {/* Info Card */}
                 <div className="bg-emerald-50 border border-emerald-100 rounded-3xl p-6 flex items-start gap-4">
@@ -299,10 +298,9 @@ export default function ProfilePage() {
                     <AlertCircle size={20} />
                   </div>
                   <div>
-                    <h4 className="font-bold text-emerald-900 mb-1">Role & Permissions</h4>
+                    <h4 className="text-emerald-900 mb-1 ui-strong">Role & Permissions</h4>
                     <p className="text-sm text-emerald-700 leading-relaxed">
-                      Your account is currently assigned the <span className="font-bold uppercase">{user?.role}</span> role. 
-                      Permissions are managed by the administrator and cannot be changed here.
+                      Your account is currently assigned the <span className="ui-strong">{user?.role || 'Member'}</span> role. Permissions are managed by the administrator and cannot be changed here.
                     </p>
                   </div>
                 </div>

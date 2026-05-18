@@ -73,6 +73,20 @@
   .interactive-tap {
     @apply active:scale-[0.98] transition-transform duration-100;
   }
+
+  /* Semantic typography utilities */
+  .ui-body {
+    @apply text-[13px] font-normal text-slate-700;
+  }
+  .ui-strong {
+    @apply font-medium text-slate-900;
+  }
+  .ui-muted {
+    @apply text-sm text-slate-500 font-normal;
+  }
+  .ui-label {
+    @apply text-[11px] text-slate-500 font-medium;
+  }
 }
 
 /* Custom Scrollbar for Premium Feel */

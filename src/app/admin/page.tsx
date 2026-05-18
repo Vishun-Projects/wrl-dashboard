@@ -14,7 +14,7 @@ export default function AdminRedirect() {
     <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
         <div className="w-10 h-10 border-4 border-slate-200 border-t-[#0f172a] rounded-full animate-spin" />
-        <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Redirecting to Management...</p>
+        <p className="text-[11px] tracking-[0.2em] text-slate-400 ui-label">Redirecting to Management...</p>
       </div>
     </div>
   );

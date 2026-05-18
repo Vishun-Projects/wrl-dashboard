@@ -94,7 +94,7 @@ export function MobileView({
         <div className="flex items-center gap-2.5">
           <img src="/western-head-logo-2025.png" alt="Logo" className="w-8 h-8 rounded-lg object-contain" />
           <div>
-            <div className="text-[14px] font-bold text-[#0f172a] leading-none">WRL</div>
+            <div className="text-[14px] text-[#0f172a] leading-none ui-strong">WRL</div>
             <div className="flex items-center gap-1 mt-1">
               <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
               <span className="text-[11px] font-medium text-[#94a3b8]">
@@ -147,7 +147,7 @@ export function MobileView({
       {syncProgress?.is_running && (
         <div className="bg-slate-900 px-4 py-2 flex flex-col gap-1">
           <div className="flex justify-between items-center">
-            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Syncing {syncProgress.progress}%</span>
+            <span className="text-[10px] text-amber-400 ui-label">Syncing {syncProgress.progress}%</span>
             <span className="text-[10px] text-slate-400 truncate max-w-[150px]">{syncProgress.current_step}</span>
           </div>
           <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
@@ -168,7 +168,7 @@ export function MobileView({
         {loading && calls.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3">
             <div className="w-8 h-8 border-3 border-[#0f172a] border-t-transparent rounded-full animate-spin" />
-            <span className="text-[11px] font-medium text-[#94a3b8] uppercase tracking-wider">Syncing...</span>
+            <span className="text-[11px] font-medium text-[#94a3b8]">Syncing...</span>
           </div>
         ) : (
           calls.map(call => (
@@ -208,7 +208,7 @@ export function MobileView({
           <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-[32px] p-6 animate-in slide-in-from-bottom-full duration-400">
             <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8" />
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-black text-slate-900">Audit Filters</h2>
+              <h2 className="text-xl text-slate-900 ui-strong">Audit Filters</h2>
               <button onClick={() => setShowFilters(false)} className="p-2 bg-slate-100 rounded-full">
                 <X size={20} />
               </button>
@@ -216,11 +216,11 @@ export function MobileView({
 
             <div className="space-y-6">
               <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-3">Service Location</label>
+                <label className="text-[10px] text-slate-400 block mb-3 ui-label">Service Location</label>
                 <div className="relative">
                   <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                   <select 
-                    className="w-full h-12 bg-slate-50 border border-slate-200 rounded-2xl pl-10 pr-4 text-sm font-bold text-slate-900 outline-none appearance-none"
+                    className="w-full h-12 bg-slate-50 border border-slate-200 rounded-2xl pl-10 pr-4 text-sm text-slate-900 outline-none appearance-none ui-label"
                     value={selectedOfficeId}
                     onChange={(e) => setSelectedOfficeId(e.target.value)}
                   >
@@ -232,9 +232,9 @@ export function MobileView({
               </div>
 
               <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-3">Time Window</label>
+                <label className="text-[10px] text-slate-400 block mb-3 ui-label">Time Window</label>
                 <select
-                  className="w-full h-12 bg-white border border-[#e2e8f0] rounded-xl px-4 text-[13px] font-bold text-[#0f172a] outline-none"
+                  className="w-full h-12 bg-white border border-[#e2e8f0] rounded-xl px-4 text-[13px] text-[#0f172a] outline-none ui-label"
                   value={timePeriod}
                   onChange={(e) => setTimePeriod(e.target.value)}
                 >
@@ -249,17 +249,13 @@ export function MobileView({
               </div>
 
               <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-3">Lifecycle Status</label>
+                <label className="text-[10px] text-slate-400 block mb-3 ui-label">Lifecycle Status</label>
                 <div className="grid grid-cols-2 gap-2">
                   {STATUSES.map(s => (
                     <button
                       key={s}
                       onClick={() => setSelectedStatus(s)}
-                      className={`px-3 py-3 rounded-2xl text-[11px] font-bold transition-all border ${
-                        selectedStatus === s 
-                          ? 'bg-slate-900 text-white border-slate-900 shadow-lg' 
-                          : 'bg-slate-50 text-slate-600 border-slate-200'
-                      }`}
+                      className={`px-3 py-3 rounded-2xl text-[11px] transition-all border ${ selectedStatus === s ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-slate-50 text-slate-600 border-slate-200' } ui-label`}
                     >
                       {s}
                     </button>
@@ -269,7 +265,7 @@ export function MobileView({
 
               <button 
                 onClick={() => setShowFilters(false)}
-                className="w-full py-4 bg-slate-900 text-white rounded-3xl font-black text-sm uppercase tracking-widest mt-4 shadow-xl shadow-slate-200 active:scale-[0.98] transition-all"
+                className="w-full py-4 bg-slate-900 text-white rounded-3xl text-sm mt-4 shadow-xl shadow-slate-200 active:scale-[0.98] transition-all ui-label"
               >
                 Apply Configuration
               </button>

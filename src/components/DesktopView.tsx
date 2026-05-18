@@ -7,6 +7,7 @@ import { CallDetail } from './CallDetail';
 import { DateRangePicker } from './DateRangePicker';
 import { DateRangeSelector } from './DateRangeSelector';
 import { Tooltip } from './Tooltip';
+import BranchTree from '@/components/BranchTree';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 
@@ -21,6 +22,8 @@ interface DesktopViewProps {
   setActiveTab: (tab: 'all' | 'major' | 'minor') => void;
   selectedStatus: string;
   setSelectedStatus: (status: string) => void;
+  portalFilter: string;
+  setPortalFilter: (filter: string) => void;
   globalSearch: string;
   setGlobalSearch: (search: string) => void;
   onSelectCall: (id: string) => void;
@@ -63,7 +66,7 @@ interface DesktopViewProps {
 
 export function DesktopView({
   calls, loading, page, totalPages, totalCount, onPageChange, activeTab, setActiveTab,
-  selectedStatus, setSelectedStatus, globalSearch, setGlobalSearch,
+  selectedStatus, setSelectedStatus, portalFilter, setPortalFilter, globalSearch, setGlobalSearch,
   onSelectCall, selectedCall, selectedCallId, isDrawerOpen, setIsDrawerOpen,
   onFlagUpdate, onPostComment, offices, selectedOfficeId, setSelectedOfficeId,
   userProfile, stats, branchSearch, setBranchSearch, showBranchDropdown, setShowBranchDropdown,
@@ -76,6 +79,11 @@ export function DesktopView({
   const router = useRouter();
   const supabase = createClient();
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const selectedOfficeName = offices.find(o => o.ncode === selectedOfficeId)?.vcompanyname || 'All Branches';
   const filteredOffices = offices.filter(o =>
@@ -100,14 +108,60 @@ export function DesktopView({
   });
 
   return (
-    <div className="flex flex-col h-screen bg-[#f8fafc] overflow-hidden text-slate-700 font-sans">
-      <header className="flex-shrink-0 bg-white border-b border-slate-200">
-        <div className="h-14 px-7 flex items-center justify-between">
-          <div className="flex items-center gap-6">
+    <div className="flex flex-col h-screen bg-[#f8fafc] overflow-hidden font-sans">
+      {/* Syncing Progress Header Banner */}
+      {syncProgress?.is_running && (
+        <div className="bg-slate-900 px-6 py-2 flex items-center justify-between gap-4 border-b border-slate-800 flex-shrink-0 animate-in slide-in-from-top duration-300">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="text-[10px] text-amber-400 flex items-center gap-1.5 shrink-0 ui-label">
+              <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-ping" />
+              Syncing {syncProgress.progress}%
+            </span>
+            <span className="text-[11px] text-slate-400 font-medium truncate">
+              {syncProgress.current_step}
+            </span>
+          </div>
+          <div className="flex items-center gap-4 flex-1 max-w-md">
+            <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-amber-400 transition-all duration-500 rounded-full" 
+                style={{ width: `${syncProgress.progress}%` }} 
+              />
+            </div>
+            {onStopSync && (
+              <button 
+                onClick={onStopSync}
+                className="text-[10px] text-slate-400 hover:text-white transition-colors ui-label"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Main Top Bar */}
+      <header className="flex-shrink-0 border-b border-slate-200/80 bg-white">
+        <div className="h-14 px-7 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <img src="/western-head-logo-2025.png" alt="Logo" className="w-8 h-8 rounded-lg object-contain" />
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-900 ui-label">Western CRM</span>
+                <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 text-[9px] rounded border border-emerald-100 ui-strong">
+                  Live
+                </span>
+              </div>
+              <p className="text-[9px] text-slate-400 font-medium">Fast-Close Executive Operations Portal</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* Catch Up Banner */}
             {newCallsCount > 0 && (
               <button
                 onClick={onCatchUp}
-                className="bg-amber-50 border border-amber-200 rounded-full px-4 py-1.5 text-[11px] font-bold text-amber-700 hover:bg-amber-100 transition-all animate-bounce"
+                className="bg-amber-50 border border-amber-200 rounded-full px-4 py-1.5 text-[11px] text-amber-700 hover:bg-amber-100 transition-all animate-bounce ui-label"
               >
                 {newCallsCount} NEW UPDATES — CATCH UP
               </button>
@@ -115,15 +169,15 @@ export function DesktopView({
           </div>
 
           <div className="flex items-center gap-2">
-            {lastSyncTime && (
-              <span className="text-[10px] text-slate-400 font-medium">
+            {lastSyncTime && mounted && (
+              <span suppressHydrationWarning className="text-[10px] text-slate-400 font-medium">
                 Last Refreshed: {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
               </span>
             )}
             <button
               onClick={onManualSync}
               disabled={isSyncing}
-              className="flex items-center gap-1.5 bg-slate-900 text-white px-3 py-1.5 rounded-md text-xs font-bold hover:bg-slate-800 transition-all shadow-sm disabled:opacity-50"
+              className="flex items-center gap-1.5 bg-slate-900 text-white px-3 py-1.5 rounded-md text-xs hover:bg-slate-800 transition-all shadow-sm disabled:opacity-50 ui-label"
               title="Fast delta sync (fetches only new or updated calls since last sync)"
             >
               <div className={`${isSyncing ? 'animate-spin' : ''}`}>
@@ -134,7 +188,7 @@ export function DesktopView({
             <button
               onClick={onFullReset}
               disabled={isSyncing}
-              className="flex items-center gap-1.5 bg-white text-slate-700 px-3 py-1.5 rounded-md text-xs font-bold border border-slate-200 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm disabled:opacity-50"
+              className="flex items-center gap-1.5 bg-white text-slate-700 px-3 py-1.5 rounded-md text-xs border border-slate-200 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm disabled:opacity-50 ui-label"
               title="Full reload (re-runs all queries from scratch)"
             >
               <div className={`${isSyncing ? 'animate-spin' : ''}`}>
@@ -185,20 +239,22 @@ export function DesktopView({
                     <div className="max-h-[300px] overflow-y-auto custom-scrollbar p-2">
                       <button
                         onClick={() => { setSelectedOfficeId(''); setShowBranchDropdown(false); setBranchSearch(''); }}
-                        className={`w-full text-left px-3 py-2 text-[11px] font-bold rounded-lg uppercase tracking-tight mb-1 transition-all ${!selectedOfficeId ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                        className={`w-full text-left px-3 py-2 text-[11px] font-medium rounded-lg mb-1 transition-all ${!selectedOfficeId ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
                       >
                         Global View
                       </button>
-                      {filteredOffices.map(o => (
-                        <button
-                          key={o.ncode}
-                          onClick={() => { setSelectedOfficeId(o.ncode); setShowBranchDropdown(false); setBranchSearch(''); }}
-                          className={`w-full text-left px-3 py-2 hover:bg-slate-50 rounded-lg flex flex-col transition-all group ${selectedOfficeId === o.ncode ? 'bg-slate-50 ring-1 ring-slate-200' : ''}`}
-                        >
-                          <span className="text-[12px] font-bold text-slate-900 group-hover:text-slate-900 transition-colors truncate">{o.vcompanyname}</span>
-                          <span className="text-[10px] text-slate-400">CODE: {o.ncode}</span>
-                        </button>
-                      ))}
+                      <BranchTree
+                        offices={offices}
+                        selectedIds={selectedOfficeId ? [String(selectedOfficeId)] : []}
+                        setSelectedIds={(ids) => {
+                          const id = ids[0] || '';
+                          setSelectedOfficeId(id);
+                          setShowBranchDropdown(false);
+                          setBranchSearch('');
+                        }}
+                        single
+                        search={branchSearch}
+                      />
                     </div>
                   </div>
                 )}
@@ -211,6 +267,18 @@ export function DesktopView({
             >
               <option value="All">All Statuses</option>
               {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select
+              className="h-8 bg-white border border-[#e2e8f0] rounded-lg px-2.5 text-[12px] text-[#475569] outline-none cursor-pointer"
+              value={portalFilter}
+              onChange={(e) => setPortalFilter(e.target.value)}
+            >
+              <option value="All">All Actions</option>
+              <option value="unseen">Unseen</option>
+              <option value="verified">Verified</option>
+              <option value="rejected">Rejected</option>
+              <option value="hold">On Hold</option>
+              <option value="comments">With Comments</option>
             </select>
             <DateRangeSelector
               value={timePeriod}
@@ -232,7 +300,7 @@ export function DesktopView({
           <div className="h-10 px-7 bg-slate-900 flex items-center gap-4 animate-in slide-in-from-top-full duration-300">
             <div className="flex items-center gap-2 min-w-[140px]">
               <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-[11px] font-bold text-white uppercase tracking-wider">Syncing Data</span>
+              <span className="text-[11px] text-white ui-label">Syncing Data</span>
             </div>
             <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
               <div
@@ -246,7 +314,7 @@ export function DesktopView({
               </div>
               <button
                 onClick={onStopSync}
-                className="px-2 py-0.5 bg-rose-500 hover:bg-rose-600 text-white text-[10px] font-bold rounded uppercase tracking-tighter transition-all active:scale-95 shadow-lg shadow-rose-500/20"
+                className="px-2 py-0.5 bg-rose-500 hover:bg-rose-600 text-white text-[10px] rounded transition-all active:scale-95 shadow-lg shadow-rose-500/20 ui-label"
               >
                 Stop
               </button>
@@ -258,11 +326,11 @@ export function DesktopView({
         <div className="flex items-center gap-6 px-7 py-2.5 bg-white border-t border-[#f1f5f9]">
           <div className="flex items-center gap-1.5">
             <span className="text-[12px] text-[#94a3b8]">Total batch</span>
-            <span className="text-[13px] font-bold text-[#0f172a]">{stats.total}</span>
+            <span className="text-[13px] text-[#0f172a] ui-label">{stats.total}</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-[12px] text-[#94a3b8]">Pending review</span>
-            <span className="text-[13px] font-bold text-[#e11d48]">{stats.unflagged}</span>
+            <span className="text-[13px] text-[#e11d48] ui-label">{stats.unflagged}</span>
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-2">
@@ -273,7 +341,7 @@ export function DesktopView({
                 style={{ width: `${stats.total > 0 ? Math.round(((stats.total - stats.unflagged) / stats.total) * 100) : 0}%` }}
               />
             </div>
-            <span className="text-[11px] font-bold text-[#16a34a] min-w-[32px]">
+            <span className="text-[11px] text-[#16a34a] min-w-[32px] ui-label">
               {stats.total > 0 ? Math.round(((stats.total - stats.unflagged) / stats.total) * 100) : 0}%
             </span>
           </div>
@@ -291,7 +359,7 @@ export function DesktopView({
               <RefreshCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
               <div className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full animate-ping" />
             </div>
-            <span className="text-[13px] font-bold whitespace-nowrap">
+            <span className="text-[13px] whitespace-nowrap ui-label">
               {updateInfo.newCount > 0 && `${updateInfo.newCount} new`}
               {updateInfo.newCount > 0 && updateInfo.updatedCount > 0 && ' & '}
               {updateInfo.updatedCount > 0 && `${updateInfo.updatedCount} updated`}
@@ -306,7 +374,7 @@ export function DesktopView({
           <div className="absolute inset-0 flex items-center justify-center bg-white z-10">
             <div className="flex flex-col items-center gap-4">
               <div className="w-10 h-10 border-4 border-slate-900 border-t-transparent rounded-full animate-spin"></div>
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest animate-pulse">Synchronizing Data...</div>
+              <div className="text-[11px] text-slate-400 animate-pulse ui-label">Synchronizing Data...</div>
             </div>
           </div>
         ) : (
@@ -328,7 +396,7 @@ export function DesktopView({
             </div>
 
             <div className="mt-8 flex items-center justify-between border-t border-slate-100 pt-6">
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+              <div className="text-[11px] text-slate-400 ui-label">
                 Showing Page <span className="text-slate-900">{page}</span> of <span className="text-slate-900">{totalPages}</span>
                 <span className="ml-2 text-slate-300">({totalCount} records total)</span>
               </div>
@@ -369,7 +437,7 @@ export function DesktopView({
                         <button
                           key={p}
                           onClick={() => onPageChange(p as number)}
-                          className={`w-8 h-8 flex items-center justify-center rounded-lg text-[12px] font-semibold transition-all ${page === p ? 'bg-[#0f172a] text-white' : 'bg-white border border-[#e2e8f0] text-[#475569] hover:bg-slate-50'}`}
+                          className={`w-8 h-8 flex items-center justify-center rounded-lg text-[12px] transition-all ${page === p ? 'bg-[#0f172a] text-white' : 'bg-white border border-[#e2e8f0] text-[#475569] hover:bg-slate-50'} ui-label`}
                         >
                           {p}
                         </button>

@@ -89,9 +89,7 @@ export function DateRangePicker({ startDate, setStartDate, endDate, setEndDate }
                     setEndDate(end);
                     setIsOpen(false);
                   }}
-                  className={`flex items-center justify-between px-3 py-1.5 rounded-md text-[12px] transition-colors ${
-                    isActive ? 'bg-[#0f172a] text-white' : 'text-[#475569] hover:bg-slate-50'
-                  }`}
+                  className={`flex items-center justify-between px-3 py-1.5 rounded-md text-[12px] transition-colors ${ isActive ? 'bg-[#0f172a] text-white' : 'text-[#475569] hover:bg-slate-50' }`}
                 >
                   {p.label}
                   {isActive && <Check size={12} />}
@@ -101,7 +99,7 @@ export function DateRangePicker({ startDate, setStartDate, endDate, setEndDate }
           </div>
           
           <div className="border-t border-[#f1f5f9] mt-1.5 pt-2 px-1 pb-1">
-            <span className="text-[10px] font-bold text-[#94a3b8] uppercase tracking-wider block mb-1.5 px-2">Custom</span>
+            <span className="text-[10px] text-[#94a3b8] block mb-1.5 px-2 ui-label">Custom</span>
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center gap-2 px-2">
                 <span className="text-[10px] text-[#94a3b8] w-8">From</span>

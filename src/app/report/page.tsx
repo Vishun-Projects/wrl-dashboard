@@ -30,7 +30,7 @@ interface GlobalReportCacheType {
   selectedOfficeIds: string[];
   dateRange: { start: Date; end: Date; label: string };
   filterRegion: string[];
-  filterAccount: string;
+  filterAccount: string[];
   selectedCallTypes: string[];
   registerSummary: { total: number, transferred: number, cancelled: number, solved: number, open: number } | null;
   lastRefreshed: Date | null;
@@ -52,6 +52,7 @@ export default function ReportPage() {
   const [total, setTotal] = useState(globalReportCache?.total || 0);
   const [page, setPage] = useState(globalReportCache?.page || 1);
   const [limit] = useState(50);
+  const [loadingPage, setLoadingPage] = useState<number | null>(null);
   const [search, setSearch] = useState(globalReportCache?.search || '');
   const [debouncedSearch, setDebouncedSearch] = useState(globalReportCache?.search || '');
 
@@ -81,7 +82,12 @@ export default function ReportPage() {
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(globalReportCache?.lastRefreshed || null);
   const [filterRegion, setFilterRegion] = useState<string[]>(globalReportCache?.filterRegion || []); // Array for multiselect
   const [showRegionDropdown, setShowRegionDropdown] = useState(false);
-  const [filterAccount, setFilterAccount] = useState(globalReportCache?.filterAccount || 'All');
+  const [filterAccount, setFilterAccount] = useState<string[]>(Array.isArray(globalReportCache?.filterAccount) ? globalReportCache.filterAccount : []);
+  const [showAccountDropdown, setShowAccountDropdown] = useState(false);
+  const [tempFilterRegion, setTempFilterRegion] = useState<string[]>([]);
+  const [tempFilterAccount, setTempFilterAccount] = useState<string[]>([]);
+  const [tempSelectedCallTypes, setTempSelectedCallTypes] = useState<string[]>([]);
+  const [tempSelectedOfficeIds, setTempSelectedOfficeIds] = useState<string[]>([]);
   const [selectedCallTypes, setSelectedCallTypes] = useState<string[]>(globalReportCache?.selectedCallTypes || []);
   const [callTypes, setCallTypes] = useState<string[]>([]);
   const [showCallTypeDropdown, setShowCallTypeDropdown] = useState(false);
@@ -114,6 +120,7 @@ export default function ReportPage() {
   const [registerSummary, setRegisterSummary] = useState<{ total: number, transferred: number, cancelled: number, solved: number, open: number } | null>(globalReportCache?.registerSummary || null);
   const fetchControllerRef = React.useRef<AbortController | null>(null);
   const drillDownControllerRef = React.useRef<AbortController | null>(null);
+  const sentinelRef = React.useRef<HTMLDivElement | null>(null);
 
   // Auto-sync agingAsOf with dateRange.end if it falls behind
   useEffect(() => {
@@ -176,6 +183,7 @@ export default function ReportPage() {
     fetchControllerRef.current = controller;
 
     setLoading(true);
+    setLoadingPage(p);
     const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
     const callTypesParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
 
@@ -249,14 +257,15 @@ export default function ReportPage() {
         };
       } else {
         const regRes = await axios.get(url, { headers, signal: controller.signal });
-        setData(regRes.data.data);
+        const newChunk = regRes.data.data || [];
+        setData(prev => [...prev, ...newChunk]);
         setTotal(regRes.data.total);
         setPage(p);
         setRegisterSummary(regRes.data.summary || null);
 
         // Update global cache for pagination
         if (globalReportCache) {
-          globalReportCache.data = regRes.data.data;
+          globalReportCache.data = [...(globalReportCache.data || []), ...newChunk];
           globalReportCache.total = regRes.data.total;
           globalReportCache.page = p;
           globalReportCache.registerSummary = regRes.data.summary || null;
@@ -272,6 +281,7 @@ export default function ReportPage() {
       // Only set loading to false if this was the last request
       if (fetchControllerRef.current === controller) {
         setLoading(false);
+        setLoadingPage(null);
         setLastRefreshed(new Date());
       }
     }
@@ -293,13 +303,14 @@ export default function ReportPage() {
     return String(rec.callsolved).toLowerCase() === 'true' || String(rec.callsolved) === '1' || statusStr === 'closed' || statusStr === 'solved';
   };
 
-  const isCancelled = (rec: any) => {
-    const statusStr = String(rec.Status || rec.callstatus || '').toLowerCase();
-    return statusStr === 'cancel' || (rec.cancel_reason && String(rec.cancel_reason).trim() !== '');
-  };
-
   const isTransferred = (rec: any) => {
     return (rec.vtransfercallno && String(rec.vtransfercallno).trim() !== '') || String(rec.ncancelreason) === '2';
+  };
+
+  const isCancelled = (rec: any) => {
+    if (isTransferred(rec)) return false;
+    const statusStr = String(rec.Status || rec.callstatus || '').toLowerCase();
+    return statusStr === 'cancel' || (rec.cancel_reason && String(rec.cancel_reason).trim() !== '');
   };
 
   const isOpen = (rec: any) => {
@@ -373,11 +384,13 @@ export default function ReportPage() {
               const oldRec = data.find(r => String(r.UniqueCallNo) === String(newRec.UniqueCallNo));
               if (oldRec) {
                 if (isSolved(oldRec)) row.solved_calls = Math.max(0, (row.solved_calls || 0) - 1);
-                else if (isCancelled(oldRec) || isTransferred(oldRec)) row.cancelled_calls = Math.max(0, (row.cancelled_calls || 0) - 1);
+                else if (isCancelled(oldRec)) row.cancelled_calls = Math.max(0, (row.cancelled_calls || 0) - 1);
+                else if (isTransferred(oldRec)) row.transferred_calls = Math.max(0, (row.transferred_calls || 0) - 1);
                 else if (isOpen(oldRec)) row.open_calls = Math.max(0, (row.open_calls || 0) - 1);
               }
               if (isRecSolved) row.solved_calls = (row.solved_calls || 0) + 1;
-              else if (isRecCancelled || isRecTransferred) row.cancelled_calls = (row.cancelled_calls || 0) + 1;
+              else if (isRecCancelled) row.cancelled_calls = (row.cancelled_calls || 0) + 1;
+              else if (isRecTransferred) row.transferred_calls = (row.transferred_calls || 0) + 1;
               else if (isRecOpen) row.open_calls = (row.open_calls || 0) + 1;
               
               newSummary[branchRowIdx] = row;
@@ -395,17 +408,19 @@ export default function ReportPage() {
             const isRecTransferred = isTransferred(newRec);
             const isRecOpen = isOpen(newRec);
 
-            const accRowIdx = newAccounts.findIndex(a => a.branch?.toLowerCase() === newRec.officename?.toLowerCase() && a.account?.toLowerCase() === newRec.PartyName?.toLowerCase());
+            const accRowIdx = newAccounts.findIndex(a => a.account?.toLowerCase() === newRec.PartyName?.toLowerCase());
             if (accRowIdx > -1) {
               const row = { ...newAccounts[accRowIdx] };
               const oldRec = data.find(r => String(r.UniqueCallNo) === String(newRec.UniqueCallNo));
               if (oldRec) {
-                if (isSolved(oldRec)) row.solved_calls = Math.max(0, (row.solved_calls || 0) - 1);
-                else if (isCancelled(oldRec) || isTransferred(oldRec)) row.cancelled_calls = Math.max(0, (row.cancelled_calls || 0) - 1);
+                if (isSolved(oldRec)) row.total_solved = Math.max(0, (row.total_solved || 0) - 1);
+                else if (isCancelled(oldRec)) row.cancelled_calls = Math.max(0, (row.cancelled_calls || 0) - 1);
+                else if (isTransferred(oldRec)) row.transferred_calls = Math.max(0, (row.transferred_calls || 0) - 1);
                 else if (isOpen(oldRec)) row.open_calls = Math.max(0, (row.open_calls || 0) - 1);
               }
-              if (isRecSolved) row.solved_calls = (row.solved_calls || 0) + 1;
-              else if (isRecCancelled || isRecTransferred) row.cancelled_calls = (row.cancelled_calls || 0) + 1;
+              if (isRecSolved) row.total_solved = (row.total_solved || 0) + 1;
+              else if (isRecCancelled) row.cancelled_calls = (row.cancelled_calls || 0) + 1;
+              else if (isRecTransferred) row.transferred_calls = (row.transferred_calls || 0) + 1;
               else if (isRecOpen) row.open_calls = (row.open_calls || 0) + 1;
               
               newAccounts[accRowIdx] = row;
@@ -560,6 +575,31 @@ export default function ReportPage() {
       fetchData(1);
     }
   }, [dateRange, selectedOfficeIds, filterAccount, selectedCallTypes, selectedStatus, debouncedSearch]);
+
+  useEffect(() => {
+    if (activeTab !== 'register') return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const first = entries[0];
+        if (first.isIntersecting && !loading && data.length < total) {
+          fetchData(page + 1);
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    const currentSentinel = sentinelRef.current;
+    if (currentSentinel) {
+      observer.observe(currentSentinel);
+    }
+
+    return () => {
+      if (currentSentinel) {
+        observer.unobserve(currentSentinel);
+      }
+    };
+  }, [activeTab, loading, data.length, total, page]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -805,25 +845,26 @@ export default function ReportPage() {
 
       // 1. Regional Performance
       sheet.addRow(['Regional Performance']).font = { bold: true, size: 12 };
-      const regHeader = sheet.addRow(['Region', 'Total', 'Solved', 'Cancelled', 'Open', '<2 Days', '2-7 Days', '7-15 Days', '>15 Days', 'Parts', 'Engineers']);
+      const regHeader = sheet.addRow(['Region', 'Total', 'Solved', 'Transferred', 'Cancelled', 'Open', '<2 Days', '2-7 Days', '7-15 Days', '>15 Days', 'Parts', 'Engineers']);
       applyHeaderStyle(regHeader);
 
       regions.forEach(region => {
         const rb = summaryData.filter(b => b.region === region);
         const t = rb.reduce((acc, b) => ({
-          t: acc.t + Number(b.total_calls || 0), s: acc.s + Number(b.solved_calls || 0), c: acc.c + Number(b.cancelled_calls || 0), o: acc.o + Number(b.open_calls || 0),
+          t: acc.t + Number(b.total_calls || 0), s: acc.s + Number(b.solved_calls || 0), tr: acc.tr + Number(b.transferred_calls || 0), c: acc.c + Number(b.cancelled_calls || 0), o: acc.o + Number(b.open_calls || 0),
           a2: acc.a2 + Number(b.age_2 || 0), a3: acc.a3 + Number(b.age_3 || 0), a7: acc.a7 + Number(b.age_7 || 0), a15: acc.a15 + Number(b.age_15 || 0),
           p: acc.p + Number(b.part_pending || 0), e: acc.e + Number(b.active_eng || 0)
-        }), { t: 0, s: 0, c: 0, o: 0, a2: 0, a3: 0, a7: 0, a15: 0, p: 0, e: 0 });
+        }), { t: 0, s: 0, tr: 0, c: 0, o: 0, a2: 0, a3: 0, a7: 0, a15: 0, p: 0, e: 0 });
 
-        const r = sheet.addRow([region, t.t, t.s, t.c, t.o, t.a2, t.a3, t.a7, t.a15, t.p, t.e]);
+        const r = sheet.addRow([region, t.t, t.s, t.tr, t.c, t.o, t.a2, t.a3, t.a7, t.a15, t.p, t.e]);
         r.eachCell(cell => {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: getRegionColor(region) } };
           cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
         });
         r.getCell(3).font = { color: { argb: 'FF059669' } };
-        r.getCell(4).font = { color: { argb: 'FFDC2626' } };
-        r.getCell(5).font = { bold: true };
+        r.getCell(4).font = { color: { argb: 'FF2563EB' } }; // Transferred Blue
+        r.getCell(5).font = { color: { argb: 'FFDC2626' } };
+        r.getCell(6).font = { bold: true };
       });
 
       // AI Total
@@ -831,6 +872,7 @@ export default function ReportPage() {
         'AI TOTAL',
         summaryData.reduce((s, b) => s + Number(b.total_calls || 0), 0),
         summaryData.reduce((s, b) => s + Number(b.solved_calls || 0), 0),
+        summaryData.reduce((s, b) => s + Number(b.transferred_calls || 0), 0),
         summaryData.reduce((s, b) => s + Number(b.cancelled_calls || 0), 0),
         summaryData.reduce((s, b) => s + Number(b.open_calls || 0), 0),
         summaryData.reduce((s, b) => s + Number(b.age_2 || 0), 0),
@@ -850,7 +892,7 @@ export default function ReportPage() {
 
       // 2. Branch Wise Performance
       sheet.addRow(['Branch Wise Performance']).font = { bold: true, size: 12 };
-      const brHeader = sheet.addRow(['Branch', 'Total', 'Solved', 'Cancelled', 'Open', '<2 Days', '2-7 Days', '7-15 Days', '>15 Days', 'Parts', 'Engineers']);
+      const brHeader = sheet.addRow(['Branch', 'Total', 'Solved', 'Transferred', 'Cancelled', 'Open', '<2 Days', '2-7 Days', '7-15 Days', '>15 Days', 'Parts', 'Engineers']);
       applyHeaderStyle(brHeader);
 
       topLevelBranches
@@ -861,6 +903,7 @@ export default function ReportPage() {
             b.branch,
             getAggregate(b, 'total_calls', rb),
             getAggregate(b, 'solved_calls', rb),
+            getAggregate(b, 'transferred_calls', rb),
             getAggregate(b, 'cancelled_calls', rb),
             getAggregate(b, 'open_calls', rb),
             getAggregate(b, 'age_2', rb),
@@ -875,25 +918,26 @@ export default function ReportPage() {
             cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
           });
           r.getCell(3).font = { color: { argb: 'FF059669' } };
-          r.getCell(4).font = { color: { argb: 'FFDC2626' } };
-          r.getCell(5).font = { bold: true };
+          r.getCell(4).font = { color: { argb: 'FF2563EB' } }; // Transferred Blue
+          r.getCell(5).font = { color: { argb: 'FFDC2626' } };
+          r.getCell(6).font = { bold: true };
         });
 
     } else {
       // Key Account MIS
       const filtered = accountsData.filter(a => {
         const matchRegion = filterRegion.length === 0 || filterRegion.includes(a.region);
-        const matchAccount = filterAccount === 'All' || a.account.toLowerCase().includes(filterAccount.toLowerCase());
+        const matchAccount = filterAccount.length === 0 || filterAccount.includes(a.account);
         return matchRegion && matchAccount;
       }).sort((a, b) => a.region.localeCompare(b.region));
 
-      const kaHeader = sheet.addRow(['Region', 'Account', 'Population', 'Total', 'Solved', 'Cancelled', 'Open', '<2 Days', '2-7 Days', '7-15 Days', '>15 Days', 'Parts', 'Engineers']);
+      const kaHeader = sheet.addRow(['Region', 'Account', 'Population', 'Total', 'Solved', 'Transferred', 'Cancelled', 'Open', '<2 Days', '2-7 Days', '7-15 Days', '>15 Days', 'Parts', 'Engineers']);
       applyHeaderStyle(kaHeader);
 
       filtered.forEach(a => {
         const openCalls = Number(a.age_2 || 0) + Number(a.age_3 || 0) + Number(a.age_7 || 0) + Number(a.age_15 || 0);
         const r = sheet.addRow([
-          a.region, a.account, a.population || 0, a.total_calls, a.total_solved, a.cancelled_calls, openCalls,
+          a.region, a.account, a.population || 0, a.total_calls, a.total_solved, a.transferred_calls || 0, a.cancelled_calls, openCalls,
           a.age_2, a.age_3, a.age_7, a.age_15, a.part_pending, a.active_eng
         ]);
         r.eachCell(cell => {
@@ -901,8 +945,9 @@ export default function ReportPage() {
           cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
         });
         r.getCell(5).font = { color: { argb: 'FF059669' } };
-        r.getCell(6).font = { color: { argb: 'FFDC2626' } };
-        r.getCell(7).font = { bold: true };
+        r.getCell(6).font = { color: { argb: 'FF2563EB' } }; // Transferred Blue
+        r.getCell(7).font = { color: { argb: 'FFDC2626' } };
+        r.getCell(8).font = { bold: true };
       });
     }
 
@@ -956,10 +1001,7 @@ export default function ReportPage() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-4 h-14 text-xs font-medium transition-all relative ${activeTab === tab.id
-                  ? 'text-slate-900'
-                  : 'text-slate-400 hover:text-slate-600'
-                  }`}
+                className={`px-4 h-14 text-xs font-medium transition-all relative ${activeTab === tab.id ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600' }`}
               >
                 {tab.label}
                 {activeTab === tab.id && (
@@ -979,7 +1021,7 @@ export default function ReportPage() {
           <button
             onClick={() => fetchDelta()}
             disabled={loading}
-            className="flex items-center gap-1.5 bg-slate-900 text-white px-3 py-1.5 rounded-md text-xs font-bold hover:bg-slate-800 transition-all shadow-sm disabled:opacity-50"
+            className="flex items-center gap-1.5 bg-slate-900 text-white px-3 py-1.5 rounded-md text-xs hover:bg-slate-800 transition-all shadow-sm disabled:opacity-50 ui-label"
             title="Fast delta sync (fetches only new or updated calls since last sync)"
           >
             <div className={`${loading ? 'animate-spin' : ''}`}>
@@ -990,7 +1032,7 @@ export default function ReportPage() {
           <button
             onClick={() => fetchData(1)}
             disabled={loading}
-            className="flex items-center gap-1.5 bg-white text-slate-700 px-3 py-1.5 rounded-md text-xs font-bold border border-slate-200 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm disabled:opacity-50"
+            className="flex items-center gap-1.5 bg-white text-slate-700 px-3 py-1.5 rounded-md text-xs border border-slate-200 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm disabled:opacity-50 ui-label"
             title="Full reload (re-runs all branch and account queries from scratch)"
           >
             <div className={`${loading ? 'animate-spin' : ''}`}>
@@ -1014,8 +1056,13 @@ export default function ReportPage() {
           {/* Call Type Filter */}
           <div className="relative">
             <button
-              onClick={() => setShowCallTypeDropdown(!showCallTypeDropdown)}
-              className="min-w-[140px] max-w-[200px] bg-white border border-slate-200 rounded-md px-3 py-1.5 text-xs font-bold text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all shadow-sm"
+              onClick={() => {
+                if (!showCallTypeDropdown) {
+                  setTempSelectedCallTypes(selectedCallTypes);
+                }
+                setShowCallTypeDropdown(!showCallTypeDropdown);
+              }}
+              className="min-w-[140px] max-w-[200px] bg-white border border-slate-200 rounded-md px-3 py-1.5 text-xs text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all shadow-sm ui-label"
             >
               <span className="truncate">
                 {selectedCallTypes.length === 0 ? 'All Call Types' : `${selectedCallTypes.length} Types Selected`}
@@ -1031,17 +1078,17 @@ export default function ReportPage() {
                 />
                 <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 shadow-xl rounded-lg z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
                   <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Call Type</span>
+                    <span className="text-[10px] text-slate-500 ui-label">Select Call Type</span>
                     <button
-                      onClick={() => setSelectedCallTypes([])}
-                      className="text-[10px] font-bold text-slate-400 hover:text-slate-900 px-2 py-1 rounded hover:bg-white"
+                      onClick={() => setTempSelectedCallTypes([])}
+                      className="text-[10px] text-slate-400 hover:text-slate-900 px-2 py-1 rounded hover:bg-white ui-label"
                     >
                       Clear All
                     </button>
                   </div>
                   <div className="max-h-72 overflow-y-auto p-1 custom-scrollbar">
                     {callTypes.map(type => {
-                      const isSelected = selectedCallTypes.includes(type);
+                      const isSelected = tempSelectedCallTypes.includes(type);
                       return (
                         <label key={type} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
                           <input
@@ -1050,9 +1097,9 @@ export default function ReportPage() {
                             checked={isSelected}
                             onChange={(e) => {
                               if (e.target.checked) {
-                                setSelectedCallTypes(prev => [...prev, type]);
+                                setTempSelectedCallTypes(prev => [...prev, type]);
                               } else {
-                                setSelectedCallTypes(prev => prev.filter(t => t !== type));
+                                setTempSelectedCallTypes(prev => prev.filter(t => t !== type));
                               }
                             }}
                           />
@@ -1065,8 +1112,11 @@ export default function ReportPage() {
                   </div>
                   <div className="p-2 border-t border-slate-100 bg-slate-50 flex justify-end">
                     <button
-                      onClick={() => setShowCallTypeDropdown(false)}
-                      className="bg-slate-900 text-white px-4 py-1 rounded text-[10px] font-bold hover:bg-slate-800 transition-colors"
+                      onClick={() => {
+                        setSelectedCallTypes(tempSelectedCallTypes);
+                        setShowCallTypeDropdown(false);
+                      }}
+                      className="bg-slate-900 text-white px-4 py-1 rounded text-[10px] hover:bg-slate-800 transition-colors ui-label"
                     >
                       Done
                     </button>
@@ -1079,7 +1129,7 @@ export default function ReportPage() {
           {/* Status Filter */}
           <div className="relative">
             <select
-              className="h-[30px] bg-white border border-slate-200 rounded-md px-3 py-1 text-xs font-bold text-slate-700 outline-none cursor-pointer hover:border-slate-400 transition-all shadow-sm"
+              className="h-[30px] bg-white border border-slate-200 rounded-md px-3 py-1 text-xs text-slate-700 outline-none cursor-pointer hover:border-slate-400 transition-all shadow-sm ui-label"
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
             >
@@ -1094,8 +1144,13 @@ export default function ReportPage() {
           {/* Branch Filter */}
           <div className="relative">
             <button
-              onClick={() => setShowOfficeDropdown(!showOfficeDropdown)}
-              className="min-w-[140px] max-w-[200px] bg-white border border-slate-200 rounded-md px-3 py-1.5 text-xs font-bold text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all shadow-sm"
+              onClick={() => {
+                if (!showOfficeDropdown) {
+                  setTempSelectedOfficeIds(selectedOfficeIds);
+                }
+                setShowOfficeDropdown(!showOfficeDropdown);
+              }}
+              className="min-w-[140px] max-w-[200px] bg-white border border-slate-200 rounded-md px-3 py-1.5 text-xs text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all shadow-sm ui-label"
             >
               <span className="truncate">
                 {selectedOfficeIds.length === 0 ? 'All Branches' : `${selectedOfficeIds.length} Selected`}
@@ -1108,10 +1163,10 @@ export default function ReportPage() {
                 <div className="fixed inset-0 z-40" onClick={() => setShowOfficeDropdown(false)} />
                 <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 shadow-xl rounded-lg z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
                   <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Branches</span>
+                    <span className="text-[10px] text-slate-500 ui-label">Select Branches</span>
                     <button
-                      onClick={() => { setSelectedOfficeIds([]); setOfficeSearch(''); }}
-                      className="text-[10px] font-bold text-slate-400 hover:text-slate-900 px-2 py-1 rounded hover:bg-white"
+                      onClick={() => { setTempSelectedOfficeIds([]); setOfficeSearch(''); }}
+                      className="text-[10px] text-slate-400 hover:text-slate-900 px-2 py-1 rounded hover:bg-white ui-label"
                     >
                       Clear All
                     </button>
@@ -1131,7 +1186,7 @@ export default function ReportPage() {
                   <div className="max-h-72 overflow-y-auto p-1 custom-scrollbar">
                     {officeSearch ? (
                       offices.filter(o => o.vcompanyname.toLowerCase().includes(officeSearch.toLowerCase())).map(o => {
-                        const isSelected = selectedOfficeIds.includes(String(o.ncode));
+                        const isSelected = tempSelectedOfficeIds.includes(String(o.ncode));
                         return (
                           <label key={o.ncode} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
                             <input
@@ -1141,9 +1196,9 @@ export default function ReportPage() {
                               onChange={(e) => {
                                 const val = String(o.ncode);
                                 if (e.target.checked) {
-                                  setSelectedOfficeIds(prev => Array.from(new Set([...prev, val])));
+                                  setTempSelectedOfficeIds(prev => Array.from(new Set([...prev, val])));
                                 } else {
-                                  setSelectedOfficeIds(prev => prev.filter(id => id !== val));
+                                  setTempSelectedOfficeIds(prev => prev.filter(id => id !== val));
                                 }
                               }}
                             />
@@ -1158,7 +1213,7 @@ export default function ReportPage() {
                         return offices
                           .filter(o => String(o.nunder || '0') === String(parentId || '0'))
                           .map(o => {
-                            const isSelected = selectedOfficeIds.includes(String(o.ncode));
+                            const isSelected = tempSelectedOfficeIds.includes(String(o.ncode));
                             return [
                               <label key={o.ncode} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
                                 <div style={{ width: `${level * 12}px` }} />
@@ -1179,7 +1234,7 @@ export default function ReportPage() {
                                         return ids;
                                       };
                                       const allToAdd = getAllChildren(val);
-                                      setSelectedOfficeIds(prev => Array.from(new Set([...prev, ...allToAdd])));
+                                      setTempSelectedOfficeIds(prev => Array.from(new Set([...prev, ...allToAdd])));
                                     } else {
                                       // Remove this and all descendants
                                       const getAllChildren = (id: string): string[] => {
@@ -1191,7 +1246,7 @@ export default function ReportPage() {
                                         return ids;
                                       };
                                       const allToRemove = getAllChildren(val);
-                                      setSelectedOfficeIds(prev => prev.filter(id => !allToRemove.includes(id)));
+                                      setTempSelectedOfficeIds(prev => prev.filter(id => !allToRemove.includes(id)));
                                     }
                                   }}
                                 />
@@ -1208,8 +1263,11 @@ export default function ReportPage() {
                   </div>
                   <div className="p-2 border-t border-slate-100 bg-slate-50 flex justify-end">
                     <button
-                      onClick={() => setShowOfficeDropdown(false)}
-                      className="bg-slate-900 text-white px-4 py-1 rounded text-[10px] font-bold hover:bg-slate-800 transition-colors"
+                      onClick={() => {
+                        setSelectedOfficeIds(tempSelectedOfficeIds);
+                        setShowOfficeDropdown(false);
+                      }}
+                      className="bg-slate-900 text-white px-4 py-1 rounded text-[10px] hover:bg-slate-800 transition-colors ui-label"
                     >
                       Done
                     </button>
@@ -1231,10 +1289,10 @@ export default function ReportPage() {
           {/* Aging As Of — only relevant on Summary/Accounts tabs */}
           {(activeTab === 'summary' || activeTab === 'accounts') && (
             <div className="flex items-center gap-2 border-l border-slate-200 pl-4 h-6">
-              <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider whitespace-nowrap">Aging As Of</span>
+              <span className="text-[10px] text-amber-600 whitespace-nowrap ui-label">Aging As Of</span>
               <input
                 type="date"
-                className="bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 text-xs font-bold text-amber-900 focus:outline-none focus:ring-1 focus:ring-amber-400 shadow-sm"
+                className="bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 text-xs text-amber-900 focus:outline-none focus:ring-1 focus:ring-amber-400 shadow-sm ui-label"
                 value={agingAsOf}
                 max={new Date().toISOString().split('T')[0]}
                 onChange={(e) => setAgingAsOf(e.target.value)}
@@ -1245,24 +1303,24 @@ export default function ReportPage() {
           {activeTab === 'register' && registerSummary && (
             <div className="flex items-center gap-4 border-l border-slate-200 pl-4 h-6">
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Total</span>
-                <span className="text-[13px] font-black text-slate-900">{(registerSummary.total || 0).toLocaleString()}</span>
+                <span className="text-[9px] text-slate-400 ui-strong">Total</span>
+                <span className="text-[13px] text-slate-900 ui-label">{(registerSummary.total || 0).toLocaleString()}</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-tighter">Solved</span>
-                <span className="text-[13px] font-black text-emerald-600">{(registerSummary.solved || 0).toLocaleString()}</span>
+                <span className="text-[9px] text-emerald-500 ui-strong">Solved</span>
+                <span className="text-[13px] text-emerald-600 ui-label">{(registerSummary.solved || 0).toLocaleString()}</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] font-bold text-blue-500 uppercase tracking-tighter">Open</span>
-                <span className="text-[13px] font-black text-blue-600">{(registerSummary.open || 0).toLocaleString()}</span>
+                <span className="text-[9px] text-blue-500 ui-strong">Open</span>
+                <span className="text-[13px] text-blue-600 ui-label">{(registerSummary.open || 0).toLocaleString()}</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Trf</span>
-                <span className="text-[13px] font-black text-slate-600">{(registerSummary.transferred || 0).toLocaleString()}</span>
+                <span className="text-[9px] text-slate-400 ui-strong">Trf</span>
+                <span className="text-[13px] text-slate-600 ui-label">{(registerSummary.transferred || 0).toLocaleString()}</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] font-bold text-rose-500 uppercase tracking-tighter">Can</span>
-                <span className="text-[13px] font-black text-rose-600">{(registerSummary.cancelled || 0).toLocaleString()}</span>
+                <span className="text-[9px] text-rose-500 ui-strong">Can</span>
+                <span className="text-[13px] text-rose-600 ui-label">{(registerSummary.cancelled || 0).toLocaleString()}</span>
               </div>
             </div>
           )}
@@ -1313,11 +1371,11 @@ export default function ReportPage() {
           }
         `}</style>
         <div className="h-full overflow-y-auto inner-scrollbar">
-          {loading && (
+          {loading && (!loadingPage || loadingPage === 1) && (
             <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] flex items-center justify-center z-50">
               <div className="flex items-center gap-2 bg-white border border-slate-200 px-4 py-2 rounded-lg shadow-xl">
                 <div className="w-3 h-3 border-2 border-slate-900 border-t-transparent rounded-full animate-spin"></div>
-                <p className="text-[11px] font-medium text-slate-900 uppercase tracking-widest">Loading...</p>
+                <p className="text-[11px] font-medium text-slate-900">Loading...</p>
               </div>
             </div>
           )}
@@ -1325,10 +1383,11 @@ export default function ReportPage() {
 
 
           {activeTab === 'register' ? (
-            <table className="w-full text-left border-collapse min-w-[2400px]">
+            <>
+              <table className="w-full text-left border-collapse min-w-[2400px]">
               <thead className="sticky top-0 z-20 bg-slate-50 border-b border-slate-200">
                 <tr>
-                  <th className="px-4 py-2.5 text-[11px] font-medium text-slate-500 uppercase tracking-wider w-12 text-center border-r border-slate-100">#</th>
+                  <th className="px-4 py-2.5 text-[11px] font-medium text-slate-500 w-12 text-center border-r border-slate-100">#</th>
                   {[
                     { key: 'UniqueCallNo', label: 'ID' },
                     { key: 'callsntrnno', label: 'Reference' },
@@ -1347,7 +1406,7 @@ export default function ReportPage() {
                     { key: 'vinsttel1', label: 'Phone' },
                     { key: 'vinstaddress', label: 'Address' }
                   ].map(col => (
-                    <th key={col.key} className="px-4 py-2.5 text-[11px] font-medium text-slate-500 uppercase tracking-wider border-r border-slate-100 whitespace-nowrap">
+                    <th key={col.key} className="px-4 py-2.5 text-[11px] font-medium text-slate-500 border-r border-slate-100 whitespace-nowrap">
                       {col.label}
                     </th>
                   ))}
@@ -1357,24 +1416,24 @@ export default function ReportPage() {
                 {localFilteredData.length > 0 ? localFilteredData.map((row, idx) => (
                   <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-4 py-2 text-[11px] text-slate-400 border-r border-slate-50 text-center">
-                      {(page - 1) * limit + idx + 1}
+                      {idx + 1}
                     </td>
                     <td className="px-4 py-2 text-[11px] font-mono text-slate-400 border-r border-slate-50">{row.UniqueCallNo}</td>
                     <td className="px-4 py-2 text-[11px] font-medium text-slate-900 border-r border-slate-50 whitespace-nowrap">{row.callsntrnno}</td>
                     <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap">
-                      <span className="px-2 py-0.5 bg-slate-100 rounded text-[9px] font-bold text-slate-600 border border-slate-200">
+                      <span className="px-2 py-0.5 bg-slate-100 rounded text-[9px] text-slate-600 border border-slate-200 ui-strong">
                         {row.calltype || 'N/A'}
                       </span>
                     </td>
-                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap uppercase">
+                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap">
                       {formatDate(row.callsdtrndate)}
                     </td>
-                    <td className="px-4 py-2 text-[11px] font-medium text-slate-800 border-r border-slate-50 max-w-[250px] truncate uppercase" title={row.PartyName}>{row.PartyName}</td>
-                    <td className="px-4 py-2 text-[11px] text-slate-700 border-r border-slate-50 uppercase">{row.officename}</td>
-                    <td className="px-4 py-2 text-[11px] text-slate-700 border-r border-slate-50 whitespace-nowrap uppercase">{row.itemname}</td>
+                    <td className="px-4 py-2 text-[11px] font-medium text-slate-800 border-r border-slate-50 max-w-[250px] truncate" title={row.PartyName}>{row.PartyName}</td>
+                    <td className="px-4 py-2 text-[11px] text-slate-700 border-r border-slate-50">{row.officename}</td>
+                    <td className="px-4 py-2 text-[11px] text-slate-700 border-r border-slate-50 whitespace-nowrap">{row.itemname}</td>
                     <td className="px-4 py-2 text-[11px] font-mono text-slate-500 border-r border-slate-50 whitespace-nowrap">{row.callsvserialno}</td>
-                    <td className="px-4 py-2 text-[11px] text-slate-900 border-r border-slate-50 whitespace-nowrap uppercase">{row.serviceman}</td>
-                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 max-w-[200px] truncate uppercase" title={row.vcomplaint}>{row.vcomplaint}</td>
+                    <td className="px-4 py-2 text-[11px] text-slate-900 border-r border-slate-50 whitespace-nowrap">{row.serviceman}</td>
+                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 max-w-[200px] truncate" title={row.vcomplaint}>{row.vcomplaint}</td>
                     <td className="px-4 py-2 border-r border-slate-50 whitespace-nowrap">
                       {(() => {
                         const isTransferred = (row.vtransfercallno && row.vtransfercallno !== '') || row.cancel_reason?.includes('Transfer');
@@ -1393,10 +1452,10 @@ export default function ReportPage() {
                         return <span className="badge-open">Open</span>;
                       })()}
                     </td>
-                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap uppercase">
+                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap">
                       {formatDate(row.callsolveddate)}
                     </td>
-                    <td className="px-4 py-2 text-[11px] border-r border-slate-50 max-w-[300px] uppercase" title={row.vcomment || row.vsolveremarks || row.cancel_reason}>
+                    <td className="px-4 py-2 text-[11px] border-r border-slate-50 max-w-[300px]" title={row.vcomment || row.vsolveremarks || row.cancel_reason}>
                       {(() => {
                         const rejectionRemark = row.vcomment || null;
                         const solveRemark = row.vsolveremarks || row.cancel_reason || null;
@@ -1410,31 +1469,48 @@ export default function ReportPage() {
                         return <span className="text-slate-400 truncate block">{solveRemark || '—'}</span>;
                       })()}
                     </td>
-                    <td className="px-4 py-2 text-[11px] text-slate-600 border-r border-slate-50 whitespace-nowrap uppercase">{row.vpersoncalling}</td>
+                    <td className="px-4 py-2 text-[11px] text-slate-600 border-r border-slate-50 whitespace-nowrap">{row.vpersoncalling}</td>
                     <td className="px-4 py-2 text-[11px] text-slate-900 border-r border-slate-50 whitespace-nowrap">{row.vinsttel1}</td>
-                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 max-w-[400px] truncate uppercase">{row.vinstaddress}</td>
+                    <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 max-w-[400px] truncate">{row.vinstaddress}</td>
                   </tr>
                 )) : (
                   <tr>
                     <td colSpan={17} className="px-6 py-20 text-center">
-                      <p className="text-xs font-medium text-slate-400 uppercase tracking-widest">No matching records found</p>
+                      <p className="text-xs font-medium text-slate-400">No matching records found</p>
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
+            {/* Sentinel for Infinite Scroll */}
+            <div ref={sentinelRef} className="h-16 w-full flex items-center justify-center bg-slate-50/50 border-t border-slate-100">
+              {loading && loadingPage && loadingPage > 1 && (
+                <div className="flex items-center gap-2 text-slate-500 py-4">
+                  <div className="w-3.5 h-3.5 border-2 border-slate-600 border-t-transparent rounded-full animate-spin"></div>
+                  <span className="text-[10px] font-medium ui-label">Loading more records...</span>
+                </div>
+              )}
+              {!loading && data.length < total && (
+                <span className="text-[10px] text-slate-400 font-medium ui-label">Scroll down to load more</span>
+              )}
+              {!loading && data.length >= total && total > 0 && (
+                <span className="text-[10px] text-slate-400 font-semibold ui-label">All {total.toLocaleString()} records loaded</span>
+              )}
+            </div>
+          </>
           ) : activeTab === 'summary' ? (
             <div className="p-6 space-y-8">
               {/* Region Summary Table */}
               <section className="mb-8">
-                <h2 className="text-[11px] font-bold text-slate-500 mb-2 uppercase tracking-wider px-2">Regional Performance (AI)</h2>
+                <h2 className="text-[11px] text-slate-500 mb-2 px-2 ui-label">Regional Performance (AI)</h2>
                 <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
                   <table className="w-full text-left border-collapse text-[11px]">
                     <thead>
-                      <tr className="bg-[#0070c0] text-white font-bold uppercase tracking-tighter text-[10px]">
+                      <tr className="bg-[#0070c0] text-white text-[10px] ui-label">
                         <th className="p-2 border border-slate-300">Region</th>
                         <th className="p-2 border border-slate-300 text-center">Total calls</th>
                         <th className="p-2 border border-slate-300 text-center">Total solved</th>
+                        <th className="p-2 border border-slate-300 text-center text-blue-200">Transferred</th>
                         <th className="p-2 border border-slate-300 text-center">Cancelled</th>
                         <th className="p-2 border border-slate-300 text-center"># open calls</th>
                         <th className="p-2 border border-slate-300 text-center">{'<2 days'}</th>
@@ -1452,6 +1528,7 @@ export default function ReportPage() {
                           total: acc.total + Number(b.total_calls || 0),
                           solved: acc.solved + Number(b.solved_calls || 0),
                           cancelled: acc.cancelled + Number(b.cancelled_calls || 0),
+                          transferred: acc.transferred + Number(b.transferred_calls || 0),
                           open: acc.open + Number(b.open_calls || 0),
                           age2: acc.age2 + Number(b.age_2 || 0),
                           age3: acc.age3 + Number(b.age_3 || 0),
@@ -1459,7 +1536,7 @@ export default function ReportPage() {
                           age15: acc.age15 + Number(b.age_15 || 0),
                           parts: acc.parts + Number(b.part_pending || 0),
                           engs: acc.engs + Number(b.active_eng || 0)
-                        }), { total: 0, solved: 0, cancelled: 0, open: 0, age2: 0, age3: 0, age7: 0, age15: 0, parts: 0, engs: 0 });
+                        }), { total: 0, solved: 0, cancelled: 0, transferred: 0, open: 0, age2: 0, age3: 0, age7: 0, age15: 0, parts: 0, engs: 0 });
 
                         const getRegionBg = (reg: string) => {
                           const r = reg.toUpperCase();
@@ -1471,12 +1548,13 @@ export default function ReportPage() {
                         };
 
                         return (
-                          <tr key={region} className={`${getRegionBg(region)} font-bold text-slate-900`}>
-                            <td className="p-2 border border-slate-300 uppercase">{region}</td>
+                          <tr key={region} className={`${getRegionBg(region)} text-slate-900 ui-strong`}>
+                            <td className="p-2 border border-slate-300">{region}</td>
                             <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${region} - Total Calls`, { region })}>{totals.total}</td>
                             <td className="p-2 border border-slate-300 text-center text-emerald-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${region} - Solved Calls`, { region })}>{totals.solved}</td>
+                            <td className="p-2 border border-slate-300 text-center text-blue-600 cursor-pointer hover:bg-black/5 font-semibold" onClick={() => handleDrillDown('transferred_calls', `${region} - Transferred Calls`, { region })}>{totals.transferred}</td>
                             <td className="p-2 border border-slate-300 text-center text-rose-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('cancelled_calls', `${region} - Cancelled Calls`, { region })}>{totals.cancelled}</td>
-                            <td className="p-2 border border-slate-300 text-center font-bold bg-slate-100/50 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('open_calls', `${region} - Open Calls`, { region })}>{totals.open}</td>
+                            <td className="p-2 border border-slate-300 text-center bg-slate-100/50 cursor-pointer hover:bg-black/5 ui-strong" onClick={() => handleDrillDown('open_calls', `${region} - Open Calls`, { region })}>{totals.open}</td>
                             <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_2', `${region} - <2 Days`, { region })}>{totals.age2}</td>
                             <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_3', `${region} - 2-7 Days`, { region })}>{totals.age3}</td>
                             <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${region} - 7-15 Days`, { region })}>{totals.age7}</td>
@@ -1487,7 +1565,7 @@ export default function ReportPage() {
                         );
                       })}
                       {/* All India Total Row */}
-                      <tr className="bg-[#ffff00] font-bold text-slate-900 group">
+                      <tr className="bg-[#ffff00] text-slate-900 group ui-strong">
                         <td className="p-2 border border-slate-300 flex items-center justify-between">
                           <span>AI</span>
                           <button
@@ -1500,6 +1578,7 @@ export default function ReportPage() {
                         </td>
                         <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.total_calls || 0), 0)}</td>
                         <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.solved_calls || 0), 0)}</td>
+                        <td className="p-2 border border-slate-300 text-center text-blue-700">{summaryData.reduce((sum, b) => sum + Number(b.transferred_calls || 0), 0)}</td>
                         <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.cancelled_calls || 0), 0)}</td>
                         <td className="p-2 border border-slate-300 text-center bg-slate-800/20">{summaryData.reduce((sum, b) => sum + Number(b.open_calls || 0), 0)}</td>
                         <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.age_2 || 0), 0)}</td>
@@ -1516,14 +1595,15 @@ export default function ReportPage() {
 
               {/* Branch Summary Table */}
               <section>
-                <h2 className="text-[11px] font-bold text-slate-500 mb-2 uppercase tracking-wider px-2">Branch Wise Performance</h2>
+                <h2 className="text-[11px] text-slate-500 mb-2 px-2 ui-label">Branch Wise Performance</h2>
                 <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden overflow-x-auto">
                   <table className="w-full text-left border-collapse text-[11px]">
                     <thead>
-                      <tr className="bg-[#0070c0] text-white font-bold uppercase tracking-tighter text-[10px]">
+                      <tr className="bg-[#0070c0] text-white text-[10px] ui-label">
                         <th className="p-2 border border-slate-300 min-w-[200px]">Branches</th>
                         <th className="p-2 border border-slate-300 text-center">Total calls</th>
                         <th className="p-2 border border-slate-300 text-center">Total solved</th>
+                        <th className="p-2 border border-slate-300 text-center text-blue-200">Transferred</th>
                         <th className="p-2 border border-slate-300 text-center">Cancelled</th>
                         <th className="p-2 border border-slate-300 text-center"># open calls</th>
                         <th className="p-2 border border-slate-300 text-center">{'<2 days'}</th>
@@ -1594,8 +1674,9 @@ export default function ReportPage() {
                                     </td>
                                     <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${branch.branch} - Total Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'total_calls')}</td>
                                     <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${branch.branch} - Solved Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'solved_calls')}</td>
-                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('cancelled_calls', `${branch.branch} - Cancelled Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'cancelled_calls')}</td>
-                                    <td className="p-2 border border-slate-300 text-center font-bold cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('open_calls', `${branch.branch} - Open Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'open_calls')}</td>
+                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5 text-blue-600" onClick={() => handleDrillDown('transferred_calls', `${branch.branch} - Transferred Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'transferred_calls')}</td>
+                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5 text-rose-600" onClick={() => handleDrillDown('cancelled_calls', `${branch.branch} - Cancelled Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'cancelled_calls')}</td>
+                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5 ui-strong" onClick={() => handleDrillDown('open_calls', `${branch.branch} - Open Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'open_calls')}</td>
                                     <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_2', `${branch.branch} - <2 Days`, { officeId: branch.officeId })}>{getAggregate(branch, 'age_2')}</td>
                                     <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_3', `${branch.branch} - 2-7 Days`, { officeId: branch.officeId })}>{getAggregate(branch, 'age_3')}</td>
                                     <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${branch.branch} - 7-15 Days`, { officeId: branch.officeId })}>{getAggregate(branch, 'age_7')}</td>
@@ -1603,7 +1684,7 @@ export default function ReportPage() {
                                     <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${branch.branch} - Part Pending`, { officeId: branch.officeId })}>{getAggregate(branch, 'part_pending')}</td>
                                     <td className="p-2 border border-slate-300 text-center">
                                       <div className="flex flex-col items-center justify-center leading-tight">
-                                        <span className="text-blue-700 font-bold">{getAggregate(branch, 'active_eng')}</span>
+                                        <span className="text-blue-700 ui-strong">{getAggregate(branch, 'active_eng')}</span>
                                         <span className="text-[9px] text-slate-400 font-medium">of {getAggregate(branch, 'headcount')}</span>
                                       </div>
                                     </td>
@@ -1619,14 +1700,16 @@ export default function ReportPage() {
                                       </td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${child.branch} - Total Calls`, { officeId: child.officeId })}>{child.total_calls}</td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${child.branch} - Solved Calls`, { officeId: child.officeId })}>{child.solved_calls}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] font-bold cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('open_calls', `${child.branch} - Open Calls`, { officeId: child.officeId })}>{child.open_calls}</td>
+                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5 text-blue-600" onClick={() => handleDrillDown('transferred_calls', `${child.branch} - Transferred Calls`, { officeId: child.officeId })}>{child.transferred_calls || 0}</td>
+                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5 text-rose-600" onClick={() => handleDrillDown('cancelled_calls', `${child.branch} - Cancelled Calls`, { officeId: child.officeId })}>{child.cancelled_calls}</td>
+                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5 ui-label" onClick={() => handleDrillDown('open_calls', `${child.branch} - Open Calls`, { officeId: child.officeId })}>{child.open_calls}</td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_2', `${child.branch} - <2 Days`, { officeId: child.officeId })}>{child.age_2}</td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_3', `${child.branch} - 2-7 Days`, { officeId: child.officeId })}>{child.age_3}</td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${child.branch} - 7-15 Days`, { officeId: child.officeId })}>{child.age_7}</td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_15', `${child.branch} - >15 Days`, { officeId: child.officeId })}>{child.age_15}</td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${child.branch} - Part Pending`, { officeId: child.officeId })}>{child.part_pending}</td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px]">
-                                        <span className="text-blue-600 font-bold">{child.active_eng}</span>
+                                        <span className="text-blue-600 ui-strong">{child.active_eng}</span>
                                         <span className="text-slate-400 ml-1">/ {child.headcount}</span>
                                       </td>
                                     </tr>
@@ -1647,33 +1730,38 @@ export default function ReportPage() {
               {(() => {
                 const filteredAccounts = accountsData.filter(a => {
                   const matchRegion = filterRegion.length === 0 || filterRegion.includes(a.region);
-                  const matchAccount = filterAccount === 'All' || a.account.toLowerCase().includes(filterAccount.toLowerCase());
+                  const matchAccount = filterAccount.length === 0 || filterAccount.includes(a.account);
                   return matchRegion && matchAccount;
                 });
 
                 return (
                   <>
                     <div className="flex items-center justify-between px-2 mb-2">
-                      <h2 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Key Account Wise Performance</h2>
+                      <h2 className="text-[11px] text-slate-500 ui-label">Key Account Wise Performance</h2>
                     </div>
                     <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-x-auto">
                       <table className="w-full text-left border-collapse text-[10px]">
                         <thead>
                           {/* Category Headers */}
-                          <tr className="bg-slate-800 text-white font-bold">
+                          <tr className="bg-slate-800 text-white ui-strong">
                             <th className="p-1.5 border border-slate-600" colSpan={3}>Basics</th>
-                            <th className="p-1.5 border border-slate-600 text-center" colSpan={4}>Calls Summary (Breakdown)</th>
+                            <th className="p-1.5 border border-slate-600 text-center" colSpan={5}>Calls Summary (Breakdown)</th>
                             <th className="p-1.5 border border-slate-600 text-center bg-blue-600" colSpan={7}>Breakdown (Aging)</th>
                             <th className="p-1.5 border border-slate-600 text-center bg-amber-600" colSpan={3}>Deployment</th>
                             <th className="p-1.5 border border-slate-600 text-center bg-emerald-600" colSpan={2}>Installation</th>
                           </tr>
-                          <tr className="bg-slate-100 text-slate-700 font-bold">
+                          <tr className="bg-slate-100 text-slate-700 ui-strong">
                             <th className="p-1.5 border border-slate-300">
                               <div className="flex flex-col gap-1 relative">
                                 <span>Region</span>
                                 <button
-                                  onClick={() => setShowRegionDropdown(!showRegionDropdown)}
-                                  className="w-full bg-white border border-slate-200 rounded px-1.5 py-1 text-[9px] font-bold text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all"
+                                  onClick={() => {
+                                    if (!showRegionDropdown) {
+                                      setTempFilterRegion(filterRegion);
+                                    }
+                                    setShowRegionDropdown(!showRegionDropdown);
+                                  }}
+                                  className="w-full bg-white border border-slate-200 rounded px-1.5 py-1 text-[9px] text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all ui-strong"
                                 >
                                   <span className="truncate">
                                     {filterRegion.length === 0 ? 'All' : `${filterRegion.length} Selected`}
@@ -1687,14 +1775,17 @@ export default function ReportPage() {
                                     <div className="absolute top-full left-0 mt-1 w-40 bg-white border border-slate-200 shadow-xl rounded-md z-[70] overflow-hidden animate-in fade-in zoom-in-95 duration-100">
                                       <div className="p-1 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
                                         <button
-                                          onClick={() => setFilterRegion([])}
-                                          className="text-[9px] font-bold text-slate-400 hover:text-slate-900 px-1.5 py-0.5"
+                                          onClick={() => setTempFilterRegion([])}
+                                          className="text-[9px] text-slate-400 hover:text-slate-900 px-1.5 py-0.5 ui-strong"
                                         >
                                           Clear
                                         </button>
                                         <button
-                                          onClick={() => setShowRegionDropdown(false)}
-                                          className="text-[9px] font-bold text-slate-900 px-1.5 py-0.5"
+                                          onClick={() => {
+                                            setFilterRegion(tempFilterRegion);
+                                            setShowRegionDropdown(false);
+                                          }}
+                                          className="text-[9px] text-slate-900 px-1.5 py-0.5 ui-strong"
                                         >
                                           Done
                                         </button>
@@ -1705,16 +1796,16 @@ export default function ReportPage() {
                                             <input
                                               type="checkbox"
                                               className="w-3 h-3 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
-                                              checked={filterRegion.includes(r)}
+                                              checked={tempFilterRegion.includes(r)}
                                               onChange={(e) => {
                                                 if (e.target.checked) {
-                                                  setFilterRegion([...filterRegion, r]);
+                                                  setTempFilterRegion([...tempFilterRegion, r]);
                                                 } else {
-                                                  setFilterRegion(filterRegion.filter(x => x !== r));
+                                                  setTempFilterRegion(tempFilterRegion.filter(x => x !== r));
                                                 }
                                               }}
                                             />
-                                            <span className="text-[10px] font-bold text-slate-600 group-hover:text-slate-900 uppercase">{r}</span>
+                                            <span className="text-[10px] text-slate-600 group-hover:text-slate-900 ui-label">{r}</span>
                                           </label>
                                         ))}
                                       </div>
@@ -1724,48 +1815,90 @@ export default function ReportPage() {
                               </div>
                             </th>
                             <th className="p-1.5 border border-slate-300">
-                              <div className="flex flex-col gap-1">
+                              <div className="flex flex-col gap-1 relative">
                                 <span>Key Account</span>
-                                <div className="relative">
-                                  <input
-                                    type="text"
-                                    placeholder="Type to search..."
-                                    className="w-full bg-white border border-slate-200 rounded px-1.5 py-0.5 text-[9px] font-medium text-slate-700 outline-none focus:ring-1 focus:ring-slate-400 pr-4"
-                                    value={filterAccount === 'All' ? '' : filterAccount}
-                                    onChange={(e) => setFilterAccount(e.target.value || 'All')}
-                                  />
-                                  {filterAccount !== 'All' && (
-                                    <button
-                                      onClick={() => setFilterAccount('All')}
-                                      className="absolute right-1 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                                    >
-                                      <X size={10} />
-                                    </button>
-                                  )}
-                                </div>
+                                <button
+                                  onClick={() => {
+                                    if (!showAccountDropdown) {
+                                      setTempFilterAccount(filterAccount);
+                                    }
+                                    setShowAccountDropdown(!showAccountDropdown);
+                                  }}
+                                  className="w-full bg-white border border-slate-200 rounded px-1.5 py-1 text-[9px] text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all ui-strong font-medium"
+                                >
+                                  <span className="truncate">
+                                    {filterAccount.length === 0 ? 'All' : `${filterAccount.length} Selected`}
+                                  </span>
+                                  <ChevronDown size={10} />
+                                </button>
+
+                                {showAccountDropdown && (
+                                  <>
+                                    <div className="fixed inset-0 z-[60]" onClick={() => setShowAccountDropdown(false)} />
+                                    <div className="absolute top-full left-0 mt-1 w-48 bg-white border border-slate-200 shadow-xl rounded-md z-[70] overflow-hidden animate-in fade-in zoom-in-95 duration-100 font-medium">
+                                      <div className="p-1 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                                        <button
+                                          onClick={() => setTempFilterAccount([])}
+                                          className="text-[9px] text-slate-400 hover:text-slate-900 px-1.5 py-0.5 ui-strong font-semibold"
+                                        >
+                                          Clear
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            setFilterAccount(tempFilterAccount);
+                                            setShowAccountDropdown(false);
+                                          }}
+                                          className="text-[9px] text-slate-900 px-1.5 py-0.5 ui-strong font-semibold"
+                                        >
+                                          Done
+                                        </button>
+                                      </div>
+                                      <div className="max-h-48 overflow-y-auto p-1">
+                                        {Array.from(new Set(accountsData.map(a => a.account))).sort().map(acc => (
+                                          <label key={acc} className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
+                                            <input
+                                              type="checkbox"
+                                              className="w-3 h-3 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                                              checked={tempFilterAccount.includes(acc)}
+                                              onChange={(e) => {
+                                                if (e.target.checked) {
+                                                  setTempFilterAccount([...tempFilterAccount, acc]);
+                                                } else {
+                                                  setTempFilterAccount(tempFilterAccount.filter(x => x !== acc));
+                                                }
+                                              }}
+                                            />
+                                            <span className="text-[10px] text-slate-600 group-hover:text-slate-900 ui-label">{acc}</span>
+                                          </label>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             </th>
                             <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3">Population</th>
                             <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3">Total calls</th>
                             <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3">Total solved</th>
-                            <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3">Cancelled</th>
+                            <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3 text-blue-700 font-semibold">Transferred</th>
+                            <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3 text-rose-700 font-semibold">Cancelled</th>
                             <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3"># open calls</th>
 
-                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 font-black tracking-tighter align-bottom pb-3">&lt;2 Days</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 font-black tracking-tighter align-bottom pb-3">2-7 Days</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 font-black tracking-tighter align-bottom pb-3">7-15 Days</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 font-black tracking-tighter align-bottom pb-3">&gt;15 Days</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 font-black tracking-tighter align-bottom pb-3">% &gt;7 Days</th>
+                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong">&lt;2 Days</th>
+                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong">2-7 Days</th>
+                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong">7-15 Days</th>
+                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong">&gt;15 Days</th>
+                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong">% &gt;7 Days</th>
 
-                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 font-black tracking-tighter align-bottom pb-3">Part pending</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 font-black tracking-tighter align-bottom pb-3"># of active Eng.</th>
+                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong">Part pending</th>
+                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong"># of active Eng.</th>
 
-                            <th className="p-1.5 border border-slate-300 text-center text-amber-700 font-black tracking-tighter">Total</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-amber-700 font-black tracking-tighter">Done</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-amber-700 font-black tracking-tighter">Pending</th>
+                            <th className="p-1.5 border border-slate-300 text-center text-amber-700 ui-strong">Total</th>
+                            <th className="p-1.5 border border-slate-300 text-center text-amber-700 ui-strong">Done</th>
+                            <th className="p-1.5 border border-slate-300 text-center text-amber-700 ui-strong">Pending</th>
 
-                            <th className="p-1.5 border border-slate-300 text-center text-emerald-700 font-black tracking-tighter">Done</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-emerald-700 font-black tracking-tighter">Pending</th>
+                            <th className="p-1.5 border border-slate-300 text-center text-emerald-700 ui-strong">Done</th>
+                            <th className="p-1.5 border border-slate-300 text-center text-emerald-700 ui-strong">Pending</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -1783,54 +1916,58 @@ export default function ReportPage() {
 
                             return (
                               <tr key={i} className="hover:bg-slate-50 transition-colors text-slate-900 border-b border-slate-200">
-                                <td className={`p-1.5 border border-slate-300 font-bold ${regColor}`}>{a.region}</td>
-                                <td className="p-1.5 border border-slate-300 font-medium uppercase text-[9px] bg-slate-50/30">{a.account}</td>
-                                <td className="p-1.5 border border-slate-300 text-center font-bold text-slate-500">{a.population || 0}</td>
+                                <td className={`p-1.5 border border-slate-300 ${regColor} ui-strong`}>{a.region}</td>
+                                <td className="p-1.5 border border-slate-300 font-medium text-[9px] bg-slate-50/30">{a.account}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-slate-500 ui-strong">{a.population || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${a.account} - Total Calls`, { account: a.account, region: a.region })}>{a.total_calls}</td>
                                 <td className="p-1.5 border border-slate-300 text-center text-emerald-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_solved', `${a.account} - Solved Calls`, { account: a.account, region: a.region })}>{a.total_solved}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-blue-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('transferred_calls', `${a.account} - Transferred Calls`, { account: a.account, region: a.region })}>{a.transferred_calls || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center text-rose-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('cancelled_calls', `${a.account} - Cancelled Calls`, { account: a.account, region: a.region })}>{a.cancelled_calls}</td>
-                                <td className="p-1.5 border border-slate-300 text-center font-black text-slate-900 bg-slate-100/50 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('open_calls', `${a.account} - Open Calls`, { account: a.account, region: a.region })}>{open_calls_sum}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-slate-900 bg-slate-100/50 cursor-pointer hover:bg-black/5 ui-strong" onClick={() => handleDrillDown('open_calls', `${a.account} - Open Calls`, { account: a.account, region: a.region })}>{open_calls_sum}</td>
 
                                 <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_2', `${a.account} - <2 Days`, { account: a.account, region: a.region })}>{a.age_2 || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_3', `${a.account} - 2-7 Days`, { account: a.account, region: a.region })}>{a.age_3 || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${a.account} - 7-15 Days`, { account: a.account, region: a.region })}>{a.age_7 || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_15', `${a.account} - >15 Days`, { account: a.account, region: a.region })}>{a.age_15 || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center font-bold text-blue-700 bg-blue-100/20">{perc_gt_7}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-blue-700 bg-blue-100/20 ui-strong">{perc_gt_7}</td>
 
                                 <td className="p-1.5 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${a.account} - Part Pending`, { account: a.account, region: a.region })}>{a.part_pending || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center">
                                   <div className="flex items-center justify-center gap-1.5">
-                                    <span className="text-blue-700 font-bold">{a.active_eng || 0}</span>
+                                    <span className="text-blue-700 ui-strong">{a.active_eng || 0}</span>
                                     <span className="text-[9px] text-slate-400 font-medium">({a.headcount || 0})</span>
                                   </div>
                                 </td>
 
                                 <td className="p-1.5 border border-slate-300 text-center bg-amber-50/30">{a.deployment_total || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center bg-amber-50/30">{a.deployment_done || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center font-bold text-amber-700 bg-amber-100/20">{dep_pending}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-amber-700 bg-amber-100/20 ui-strong">{dep_pending}</td>
 
                                 <td className="p-1.5 border border-slate-300 text-center bg-emerald-50/30">{a.installation_done || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center font-bold text-emerald-700 bg-emerald-100/20">{inst_pending}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-emerald-700 bg-emerald-100/20 ui-strong">{inst_pending}</td>
                               </tr>
                             );
                           })}
 
                           {/* Account Total Row */}
-                          <tr className="bg-slate-900 text-white font-bold text-[10px]">
+                          <tr className="bg-slate-900 text-white text-[10px] ui-label">
                             <td className="p-1.5 border border-slate-700" colSpan={2}>GRAND TOTAL (AI)</td>
                             <td className="p-1.5 border border-slate-700 text-center">
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.population || 0), 0).toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_calls', `All India - Total Calls`, { account: filterAccount || 'All India', region: 'AI' })}>
+                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_calls', `All India - Total Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI' })}>
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.total_calls || 0), 0).toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_solved', `All India - Solved Calls`, { account: filterAccount || 'All India', region: 'AI' })}>
+                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_solved', `All India - Solved Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI' })}>
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.total_solved || 0), 0).toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center text-rose-400 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('cancelled_calls', `All India - Cancelled Calls`, { account: filterAccount || 'All India', region: 'AI' })}>
+                            <td className="p-1.5 border border-slate-700 text-center text-blue-400 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('transferred_calls', `All India - Transferred Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI' })}>
+                              {filteredAccounts.reduce((sum, a) => sum + Number(a.transferred_calls || 0), 0).toLocaleString()}
+                            </td>
+                            <td className="p-1.5 border border-slate-700 text-center text-rose-400 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('cancelled_calls', `All India - Cancelled Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI' })}>
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.cancelled_calls || 0), 0).toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center bg-slate-800 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('open_calls', `All India - Open Calls`, { account: filterAccount || 'All India', region: 'AI' })}>
+                            <td className="p-1.5 border border-slate-700 text-center bg-slate-800 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('open_calls', `All India - Open Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI' })}>
                               {filteredAccounts.reduce((sum, a) => sum + (Number(a.age_2 || 0) + Number(a.age_3 || 0) + Number(a.age_7 || 0) + Number(a.age_15 || 0)), 0).toLocaleString()}
                             </td>
 
@@ -1897,29 +2034,42 @@ export default function ReportPage() {
 
       {/* Pagination Footer */}
       {activeTab === 'register' && (
-        <div className="h-12 bg-white border-t border-slate-200 flex items-center justify-between px-6 flex-shrink-0">
-          <div className="text-[11px] font-medium text-slate-400">
-            Showing {data.length} of {total.toLocaleString()} records
+        <div className="h-12 bg-slate-50 border-t border-slate-200 flex items-center justify-between px-6 flex-shrink-0">
+          <div className="flex items-center gap-4">
+            <span className="text-[11px] font-medium text-slate-500 ui-label">
+              Showing <span className="text-slate-950 font-bold">{data.length}</span> of{" "}
+              <span className="text-slate-950 font-bold">{total.toLocaleString()}</span> records
+            </span>
+            <div className="w-32 bg-slate-200 h-1.5 rounded-full overflow-hidden hidden sm:block">
+              <div 
+                className="bg-[#0070c0] h-full transition-all duration-300 ease-out" 
+                style={{ width: `${total > 0 ? Math.min((data.length / total) * 100, 100) : 0}%` }}
+              ></div>
+            </div>
+            {total > 0 && (
+              <span className="text-[10px] text-slate-400 font-medium ui-label">
+                ({Math.round(Math.min((data.length / total) * 100, 100))}% loaded)
+              </span>
+            )}
           </div>
 
-          <div className="flex items-center gap-1">
-            <button
-              disabled={page === 1}
-              onClick={() => fetchData(page - 1)}
-              className="p-1 text-slate-400 hover:text-slate-900 disabled:opacity-20 transition-all"
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <span className="text-[11px] font-medium text-slate-900 min-w-[60px] text-center">
-              Page {page} of {totalPages || 1}
-            </span>
-            <button
-              disabled={page === totalPages}
-              onClick={() => fetchData(page + 1)}
-              className="p-1 text-slate-400 hover:text-slate-900 disabled:opacity-20 transition-all"
-            >
-              <ChevronRight size={18} />
-            </button>
+          <div className="flex items-center gap-3">
+            {loading && loadingPage !== null && loadingPage > 1 && (
+              <div className="flex items-center gap-1.5 text-slate-500">
+                <div className="w-3.5 h-3.5 border-2 border-slate-600 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-[10px] font-medium ui-label">Loading next batch...</span>
+              </div>
+            )}
+            {data.length < total && (
+              <span className="text-[10px] text-[#0070c0] font-semibold bg-blue-50 px-2 py-0.5 rounded border border-blue-100 animate-pulse ui-strong">
+                Scroll to load more
+              </span>
+            )}
+            {data.length >= total && total > 0 && (
+              <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 ui-strong">
+                All records loaded
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -1930,8 +2080,8 @@ export default function ReportPage() {
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
               <div>
-                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-tight">Engineer List</h3>
-                <p className="text-[10px] text-slate-400 font-medium uppercase mt-0.5">{showEngPopup}</p>
+                <h3 className="text-sm text-slate-900 ui-label">Engineer List</h3>
+                <p className="text-[10px] text-slate-400 font-medium mt-0.5">{showEngPopup}</p>
               </div>
               <button
                 onClick={() => setShowEngPopup(null)}
@@ -1944,18 +2094,18 @@ export default function ReportPage() {
               {fetchingEngs ? (
                 <div className="py-10 flex flex-col items-center justify-center gap-3">
                   <div className="w-5 h-5 border-2 border-slate-200 border-t-slate-800 rounded-full animate-spin" />
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fetching Names...</p>
+                  <p className="text-[10px] text-slate-400 ui-label">Fetching Names...</p>
                 </div>
               ) : selectedBranchEngs.length > 0 ? (
                 <div className="grid grid-cols-1 gap-1">
                   {selectedBranchEngs.map((name, i) => (
-                    <div key={i} className="px-3 py-2 text-[11px] font-medium text-slate-700 bg-slate-50/50 rounded-lg border border-slate-100/50 hover:border-slate-200 hover:bg-white transition-all uppercase">
+                    <div key={i} className="px-3 py-2 text-[11px] font-medium text-slate-700 bg-slate-50/50 rounded-lg border border-slate-100/50 hover:border-slate-200 hover:bg-white transition-all">
                       {name}
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="py-10 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                <div className="py-10 text-center text-[10px] text-slate-400 ui-label">
                   No engineers found
                 </div>
               )}
@@ -1963,7 +2113,7 @@ export default function ReportPage() {
             <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex justify-end">
               <button
                 onClick={() => setShowEngPopup(null)}
-                className="px-4 py-1.5 bg-slate-900 text-white text-[10px] font-bold rounded-lg uppercase tracking-widest hover:bg-slate-800 transition-all"
+                className="px-4 py-1.5 bg-slate-900 text-white text-[10px] rounded-lg hover:bg-slate-800 transition-all ui-label"
               >
                 Close
               </button>
@@ -1980,7 +2130,7 @@ export default function ReportPage() {
             {/* Header */}
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
               <div>
-                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-tight">{drillDown.title}</h3>
+                <h3 className="text-sm text-slate-900 ui-label">{drillDown.title}</h3>
                 <p className="text-[10px] text-slate-500 font-medium">Detailed breakdown of selected metric</p>
               </div>
               <button onClick={() => setDrillDown(prev => ({ ...prev, isOpen: false }))} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
@@ -1994,11 +2144,11 @@ export default function ReportPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-slate-500">
                     <Search size={14} />
-                    <span className="text-[10px] font-bold uppercase tracking-wider">SQL Query Context</span>
+                    <span className="text-[10px] ui-label">SQL Query Context</span>
                   </div>
                   <button
                     onClick={() => runCustomQuery(drillDown.sql)}
-                    className="px-3 py-1 bg-slate-900 text-white rounded text-[10px] font-bold uppercase hover:bg-slate-800 transition-all flex items-center gap-2"
+                    className="px-3 py-1 bg-slate-900 text-white rounded text-[10px] hover:bg-slate-800 transition-all flex items-center gap-2 ui-label"
                   >
                     <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
                     Run Custom Query
@@ -2016,12 +2166,12 @@ export default function ReportPage() {
               {/* Results */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-widest flex items-center gap-2">
+                  <h4 className="text-[11px] text-slate-700 flex items-center gap-2 ui-label">
                     Detail Records
-                    <span className="px-2 py-0.5 bg-slate-100 rounded-full text-[9px] font-black">{drillDown.data.length} Results</span>
+                    <span className="px-2 py-0.5 bg-slate-100 rounded-full text-[9px] ui-strong">{drillDown.data.length} Results</span>
                   </h4>
                   {drillDown.data.length > 0 && (
-                    <button className="text-[10px] font-bold text-blue-600 hover:underline uppercase">Export Details</button>
+                    <button className="text-[10px] text-blue-600 hover:underline ui-label">Export Details</button>
                   )}
                 </div>
 
@@ -2031,7 +2181,7 @@ export default function ReportPage() {
                       <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
                         <tr>
                           {drillDown.data.length > 0 && Object.keys(drillDown.data[0]).map(key => (
-                            <th key={key} className="p-3 font-bold text-slate-500 uppercase tracking-wider border-r border-slate-100 whitespace-nowrap">{key}</th>
+                            <th key={key} className="p-3 text-slate-500 border-r border-slate-100 whitespace-nowrap ui-strong">{key}</th>
                           ))}
                         </tr>
                       </thead>
@@ -2041,21 +2191,21 @@ export default function ReportPage() {
                             <td colSpan={10} className="p-20 text-center">
                               <div className="flex flex-col items-center gap-3">
                                 <div className="w-6 h-6 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
-                                <p className="text-[10px] font-medium text-slate-400 uppercase tracking-widest">Executing Query...</p>
+                                <p className="text-[10px] font-medium text-slate-400">Executing Query...</p>
                               </div>
                             </td>
                           </tr>
                         ) : drillDown.data.length === 0 ? (
                           <tr>
                             <td colSpan={10} className="p-20 text-center">
-                              <p className="text-xs font-medium text-slate-400 uppercase tracking-widest">No data available for this metric</p>
+                              <p className="text-xs font-medium text-slate-400">No data available for this metric</p>
                             </td>
                           </tr>
                         ) : (
                           drillDown.data.map((row, i) => (
                             <tr key={i} className="hover:bg-slate-50 transition-colors group">
                               {Object.values(row).map((val: any, j) => (
-                                <td key={j} className="p-3 border-r border-slate-50 whitespace-nowrap text-slate-600 group-hover:text-slate-900 font-medium uppercase truncate max-w-[200px]">
+                                <td key={j} className="p-3 border-r border-slate-50 whitespace-nowrap text-slate-600 group-hover:text-slate-900 font-medium truncate max-w-[200px]">
                                   {String(val || '—')}
                                 </td>
                               ))}

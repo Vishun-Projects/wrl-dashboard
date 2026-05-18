@@ -58,7 +58,7 @@ export function CallCard({ call, onFlagUpdate, onPostComment, onCopy, isMobile, 
         <div className="flex items-center gap-2">
           <Tooltip content={copied ? "Copied!" : "Click to Copy"}>
             <span 
-              className="text-[11px] text-[#94a3b8] font-mono uppercase bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 cursor-pointer active:bg-slate-200 transition-colors"
+              className="text-[11px] text-[#94a3b8] font-mono bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 cursor-pointer active:bg-slate-200 transition-colors"
               onClick={(e) => {
                 e.stopPropagation();
                 navigator.clipboard.writeText(call.vtrnno || call.vtransfercallno);
@@ -70,7 +70,7 @@ export function CallCard({ call, onFlagUpdate, onPostComment, onCopy, isMobile, 
             </span>
           </Tooltip>
           {activeTab === 'all' && call.is_major_repair === 'True' && (
-            <span className="text-[9px] font-black bg-rose-500 text-white px-1.5 py-0.5 rounded-sm tracking-tighter shadow-sm animate-pulse">
+            <span className="text-[9px] bg-rose-500 text-white px-1.5 py-0.5 rounded-sm shadow-sm animate-pulse ui-strong">
               MAJOR
             </span>
           )}
@@ -79,14 +79,14 @@ export function CallCard({ call, onFlagUpdate, onPostComment, onCopy, isMobile, 
           )}
         </div>
         <span 
-          className="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase"
+          className="text-[10px] px-2 py-0.5 rounded-full ui-label"
           style={{ background: colors.bg, color: colors.text }}
         >
           {currentAudit === 'unseen' ? 'Unseen' : currentAudit === 'noted' ? 'Verified' : currentAudit === 'query' ? 'Hold' : 'Rejected'}
         </span>
       </div>
       
-      <div className="text-[14px] font-semibold text-[#0f172a] mb-0.5 leading-tight">
+      <div className="text-[14px] text-[#0f172a] mb-0.5 leading-tight ui-strong">
         {call.customer_name}
       </div>
       <div className="text-[11px] text-[#94a3b8] mb-2 font-normal">

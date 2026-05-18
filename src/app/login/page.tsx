@@ -52,7 +52,7 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-1 mb-10">
-            <h1 className="text-2xl font-black text-[#0f172a] tracking-tight">
+            <h1 className="text-2xl text-[#0f172a] ui-strong">
               WRL Dashboard
             </h1>
             <p className="text-[13px] font-medium text-slate-400">
@@ -64,7 +64,7 @@ export default function LoginPage() {
         <form onSubmit={handleLogin} className="space-y-6">
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">
+              <label className="text-[11px] text-slate-400 ml-1 ui-label">
                 Email Address
               </label>
               <input
@@ -78,7 +78,7 @@ export default function LoginPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">
+              <label className="text-[11px] text-slate-400 ml-1 ui-label">
                 Password
               </label>
               <input
@@ -95,21 +95,21 @@ export default function LoginPage() {
           {error && (
             <div className="flex items-center gap-2 p-4 bg-rose-50 rounded-2xl border border-rose-100 animate-in fade-in slide-in-from-top-1">
               <div className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
-              <p className="text-[12px] font-bold text-rose-600">{error}</p>
+              <p className="text-[12px] text-rose-600 ui-label">{error}</p>
             </div>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full h-14 bg-[#0f172a] text-white rounded-2xl text-[15px] font-black shadow-[0_20px_40px_-12px_rgba(15,23,42,0.3)] hover:bg-slate-800 transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100"
+            className="w-full h-14 bg-[#0f172a] text-white rounded-2xl text-[15px] shadow-[0_20px_40px_-12px_rgba(15,23,42,0.3)] hover:bg-slate-800 transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 ui-strong"
           >
             {loading ? 'Authenticating...' : 'Login'}
           </button>
         </form>
 
         <div className="mt-10 pt-8 border-t border-slate-50 text-center">
-          <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">
+          <p className="text-[10px] text-slate-300 tracking-[0.2em] ui-label">
             Internal Access Only
           </p>
         </div>

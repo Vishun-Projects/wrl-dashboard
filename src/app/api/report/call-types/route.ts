@@ -11,11 +11,11 @@ export async function GET(req: NextRequest) {
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
     if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Fetch unique call types from the report view
+    // Fetch unique call types directly from mstfixedselection for efficiency, filtering to only active types with call records
     const res = await postQuery({
-      fields: "DISTINCT ISNULL(calltype, 'Unknown') as callType",
-      tableName: "uv_findtrhcalls_callsearch (NOLOCK)",
-      condition: "calltype IS NOT NULL AND calltype <> ''",
+      fields: "DISTINCT fs.vdisplayvalue as callType",
+      tableName: "mstfixedselection fs (NOLOCK)",
+      condition: "fs.vfieldname = 'ncalltype' AND fs.vdisplayvalue IS NOT NULL AND fs.vdisplayvalue <> '' AND EXISTS (SELECT 1 FROM trhcalls tc (NOLOCK) WHERE tc.ncalltype = fs.ncode)",
       orderBy: "callType ASC"
     });
 
