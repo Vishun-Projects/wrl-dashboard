@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import axios from 'axios';
 import { 
   MapPin, 
@@ -109,6 +109,7 @@ export default function CallDistributionPage() {
   const [sortField, setSortField] = useState('ratio');
   const [sortAsc, setSortAsc] = useState(false);
   const [highlightedFranchisee, setHighlightedFranchisee] = useState<string | null>(null);
+  const [visibleRowsCount, setVisibleRowsCount] = useState(100);
 
   // Initialize: set default dates and load call types configuration
   useEffect(() => {
@@ -197,11 +198,15 @@ export default function CallDistributionPage() {
     }
   };
 
-  // Trigger fetch when primary filters change
+  // Trigger fetch when primary filters change (debounced to avoid network request spam during rapid user selections)
   useEffect(() => {
-    if (startDate && endDate && !loadingMeta) {
+    if (!startDate || !endDate || loadingMeta) return;
+
+    const timer = setTimeout(() => {
       fetchDashboardData();
-    }
+    }, 350);
+
+    return () => clearTimeout(timer);
   }, [startDate, endDate, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, selectedCallType, loadingMeta]);
 
   // Leaflet Map Initialization
@@ -228,7 +233,8 @@ export default function CallDistributionPage() {
         try {
           const map = L.map(mapRef.current, {
             zoomControl: false,
-            attributionControl: false
+            attributionControl: false,
+            preferCanvas: true
           }).setView([20.5937, 78.9629], 5);
 
           // Premium Light Theme CartoDB Tile Layer (Positron)
@@ -284,85 +290,89 @@ export default function CallDistributionPage() {
     });
     if (!L || !map || !layer || !pincodeSummary || !mapReady) return;
 
-    // Force map to recalculate container size on data updates
-    map.invalidateSize();
+    const timer = setTimeout(() => {
+      // Force map to recalculate container size on data updates
+      map.invalidateSize();
 
-    // Reset markers
-    layer.clearLayers();
+      // Reset markers
+      layer.clearLayers();
 
-    const bounds: any[] = [];
+      const bounds: any[] = [];
 
-    // Filter points based on highlighted Franchisee or selected Pincode
-    const filteredPoints = pincodeSummary.filter(pin => {
-      if (selectedPincode !== 'All' && pin.pincode !== selectedPincode) return false;
-      if (highlightedFranchisee) {
-        return pin.franchisees.some((f: any) => f.franchisee_code === highlightedFranchisee);
-      }
-      return true;
-    });
-
-    filteredPoints.forEach((pin: any) => {
-      // Metric logic: Health status by open calls backlog
-      // Orange/Red for high backlog pincodes, Green for balanced
-      let color = '#10b981'; // Green
-      if (pin.open_calls > 15) {
-        color = '#ef4444'; // Red
-      } else if (pin.open_calls >= 8) {
-        color = '#f59e0b'; // Amber
-      }
-
-      // Radius scale in pixels for clean, zoom-consistent plotting
-      const pixelRadius = Math.min(Math.max(pin.total_calls * 1.5, 6), 18);
-
-      const circle = L.circleMarker([pin.lat, pin.lng], {
-        radius: pixelRadius,
-        color: '#ffffff',
-        fillColor: color,
-        fillOpacity: 0.7,
-        weight: 1.5
+      // Filter points based on highlighted Franchisee or selected Pincode
+      const filteredPoints = pincodeSummary.filter(pin => {
+        if (selectedPincode !== 'All' && pin.pincode !== selectedPincode) return false;
+        if (highlightedFranchisee) {
+          return pin.franchisees.some((f: any) => f.franchisee_code === highlightedFranchisee);
+        }
+        return true;
       });
 
-      // HTML Tooltip contents (Premium Light Mode styling)
-      const popupContent = `
-        <div class="p-2.5 text-slate-800 font-sans min-w-[220px] bg-white rounded-xl border border-slate-200/80 shadow-xl">
-          <h4 class="font-bold border-b border-slate-100 pb-1.5 mb-1.5 flex justify-between items-center text-xs text-slate-900">
-            <span>Pincode: <b class="text-teal-650">${pin.pincode}</b></span>
-            <span class="px-1.5 py-0.5 rounded-full text-[9px] bg-slate-100 text-slate-650 font-bold">Cluster</span>
-          </h4>
-          <div class="space-y-1 text-[11px] text-slate-600">
-            <p>Total Active Calls: <b class="text-slate-950 font-semibold">${pin.total_calls}</b></p>
-            <p>Open Backlog: <b class="text-amber-600 font-bold">${pin.open_calls}</b></p>
-            <div class="border-t border-slate-100 mt-1.5 pt-1.5 max-h-[90px] overflow-y-auto space-y-1">
-              ${pin.franchisees.map((f: any) => `
-                <div class="flex justify-between items-center text-[10px] text-slate-500">
-                  <span class="truncate pr-1 font-medium">${f.franchisee_name}</span>
-                  <span class="font-bold text-slate-800">${f.total_calls}</span>
-                </div>
-              `).join('')}
+      filteredPoints.forEach((pin: any) => {
+        // Metric logic: Health status by open calls backlog
+        // Orange/Red for high backlog pincodes, Green for balanced
+        let color = '#10b981'; // Green
+        if (pin.open_calls > 15) {
+          color = '#ef4444'; // Red
+        } else if (pin.open_calls >= 8) {
+          color = '#f59e0b'; // Amber
+        }
+
+        // Radius scale in pixels for clean, zoom-consistent plotting
+        const pixelRadius = Math.min(Math.max(pin.total_calls * 1.5, 6), 18);
+
+        const circle = L.circleMarker([pin.lat, pin.lng], {
+          radius: pixelRadius,
+          color: '#ffffff',
+          fillColor: color,
+          fillOpacity: 0.7,
+          weight: 1.5
+        });
+
+        // HTML Tooltip contents (Premium Light Mode styling)
+        const popupContent = `
+          <div class="p-2.5 text-slate-800 font-sans min-w-[220px] bg-white rounded-xl border border-slate-200/80 shadow-xl">
+            <h4 class="font-bold border-b border-slate-100 pb-1.5 mb-1.5 flex justify-between items-center text-xs text-slate-900">
+              <span>Pincode: <b class="text-teal-650">${pin.pincode}</b></span>
+              <span class="px-1.5 py-0.5 rounded-full text-[9px] bg-slate-100 text-slate-650 font-bold">Cluster</span>
+            </h4>
+            <div class="space-y-1 text-[11px] text-slate-600">
+              <p>Total Active Calls: <b class="text-slate-950 font-semibold">${pin.total_calls}</b></p>
+              <p>Open Backlog: <b class="text-amber-600 font-bold">${pin.open_calls}</b></p>
+              <div class="border-t border-slate-100 mt-1.5 pt-1.5 max-h-[90px] overflow-y-auto space-y-1">
+                ${pin.franchisees.map((f: any) => `
+                  <div class="flex justify-between items-center text-[10px] text-slate-500">
+                    <span class="truncate pr-1 font-medium">${f.franchisee_name}</span>
+                    <span class="font-bold text-slate-800">${f.total_calls}</span>
+                  </div>
+                `).join('')}
+              </div>
             </div>
+            <p class="mt-2 text-[9px] text-teal-600 italic font-semibold cursor-pointer">Click to focus details table</p>
           </div>
-          <p class="mt-2 text-[9px] text-teal-600 italic font-semibold cursor-pointer">Click to focus details table</p>
-        </div>
-      `;
+        `;
 
-      circle.bindPopup(popupContent, {
-        className: 'custom-leaflet-popup'
+        circle.bindPopup(popupContent, {
+          className: 'custom-leaflet-popup'
+        });
+
+        // Filter table on click
+        circle.on('click', () => {
+          setSelectedPincode(pin.pincode);
+          toast.info(`Focused on Pincode cluster ${pin.pincode}`);
+        });
+
+        circle.addTo(layer);
+        bounds.push([pin.lat, pin.lng]);
       });
 
-      // Filter table on click
-      circle.on('click', () => {
-        setSelectedPincode(pin.pincode);
-        toast.info(`Focused on Pincode cluster ${pin.pincode}`);
-      });
+      // Auto-fit to active bounds
+      if (bounds.length > 0) {
+        map.fitBounds(bounds, { padding: [40, 40] });
+      }
+    }, 150);
 
-      circle.addTo(layer);
-      bounds.push([pin.lat, pin.lng]);
-    });
-
-    // Auto-fit to active bounds
-    if (bounds.length > 0) {
-      map.fitBounds(bounds, { padding: [40, 40] });
-    }
+    return () => clearTimeout(timer);
   }, [pincodeSummary, highlightedFranchisee, selectedPincode, mapReady]);
 
   // Trigger cascades on selections
@@ -392,14 +402,18 @@ export default function CallDistributionPage() {
     }
   };
 
-  const sortedFranchiseeList = [...franchiseeSummary].sort((a, b) => {
-    let valA = a[sortField];
-    let valB = b[sortField];
-    if (typeof valA === 'string') {
-      return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
-    }
-    return sortAsc ? valA - valB : valB - valA;
-  });
+  const sortedFranchiseeList = useMemo(() => {
+    const s = [...franchiseeSummary];
+    s.sort((a, b) => {
+      let valA = a[sortField];
+      let valB = b[sortField];
+      if (typeof valA === 'string') {
+        return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      }
+      return sortAsc ? valA - valB : valB - valA;
+    });
+    return s;
+  }, [franchiseeSummary, sortField, sortAsc]);
 
   useEffect(() => {
     if (selectedPincode && selectedPincode !== 'All') {
@@ -424,6 +438,7 @@ export default function CallDistributionPage() {
       return true;
     });
     setFilteredDetailsRows(filtered);
+    setVisibleRowsCount(100);
   }, [detailsRows, selectedPincode, highlightedFranchisee]);
 
   if (loadingMeta) {
@@ -866,7 +881,7 @@ export default function CallDistributionPage() {
                         <tr>
                           <td colSpan={5} className="p-4 text-center text-slate-500">No detail rows available for the current selection.</td>
                         </tr>
-                      ) : filteredDetailsRows.map((row: any, index: number) => (
+                      ) : filteredDetailsRows.slice(0, visibleRowsCount).map((row: any, index: number) => (
                         <tr key={`${row.branch}-${row.franchisee}-${row.vtrnno}-${row.city}-${row.pincode}-${index}`} className="hover:bg-slate-50">
                           <td className="px-3 py-2 text-slate-700">{row.branch}</td>
                           <td className="px-3 py-2 text-slate-700">{row.franchisee}</td>
@@ -877,6 +892,17 @@ export default function CallDistributionPage() {
                       ))}
                     </tbody>
                   </table>
+                  {filteredDetailsRows.length > visibleRowsCount && (
+                    <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-center sticky bottom-0 z-20">
+                      <button
+                        onClick={() => setVisibleRowsCount(prev => prev + 250)}
+                        className="px-4 py-2 text-xs font-bold text-teal-700 bg-teal-50 border border-teal-100 rounded-lg hover:bg-teal-100 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+                      >
+                        <RefreshCw size={12} className="animate-spin-slow" />
+                        Load More Rows ({filteredDetailsRows.length - visibleRowsCount} remaining)
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : null}
