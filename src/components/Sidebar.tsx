@@ -13,7 +13,8 @@ import {
   ChevronRight,
   ShieldCheck,
   User,
-  ExternalLink
+  ExternalLink,
+  Map
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -76,6 +77,12 @@ export function Sidebar({ user }: SidebarProps) {
       permission: 'view_calls'
     },
     {
+      name: 'Call Distribution',
+      href: '/report/distribution',
+      icon: Map,
+      permission: 'view_reports'
+    },
+    {
       name: 'MIS Reports',
       href: '/report',
       icon: FileSpreadsheet,
@@ -96,7 +103,7 @@ export function Sidebar({ user }: SidebarProps) {
   ];
 
   const filteredNavigation = navigation.filter(item =>
-    !item.permission || user?.permissions.includes(item.permission)
+    !item.permission || user?.permissions?.includes(item.permission)
   );
 
   const sidebarContent = (

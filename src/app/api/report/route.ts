@@ -210,7 +210,7 @@ export async function GET(req: NextRequest) {
         fields,
         tableName,
         condition,
-        orderBy: "tc.ncode DESC", // Order by recently edited/added
+        orderBy: "tc.ncode DESC",
         top: String(topValue)
       }),
       postQuery({
@@ -218,8 +218,8 @@ export async function GET(req: NextRequest) {
           COUNT(*) as total,
           SUM(CASE WHEN ISNULL(tc.vtransfercallno, '') <> '' OR tc.ncancelreason = 2 THEN 1 ELSE 0 END) as transferred,
           SUM(CASE WHEN tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 AND tc.ncancelreason <> 2 THEN 1 ELSE 0 END) as cancelled,
-          SUM(CASE WHEN tc.bsolved = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed' THEN 1 ELSE 0 END) as solved,
-          SUM(CASE WHEN (tc.bsolved = 0 OR tc.bsolved IS NULL) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls
+          SUM(CASE WHEN tc.bsolved = 1 OR tc.bfastclose = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed' THEN 1 ELSE 0 END) as solved,
+          SUM(CASE WHEN (tc.bsolved = 0 OR tc.bsolved IS NULL) AND (tc.bfastclose = 0 OR tc.bfastclose IS NULL) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls
         `,
         tableName,
         condition

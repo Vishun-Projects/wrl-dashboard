@@ -35,8 +35,9 @@ async function executePostWithRetry(params: any) {
     
     if (params.rawSql) {
         let sql = params.rawSql.trim();
-        // SQL Server requires TOP or OFFSET if ORDER BY is used in a subquery
-        if (sql.toUpperCase().includes('ORDER BY') && !sql.toUpperCase().includes('TOP ')) {
+        // SQL Server requires TOP or OFFSET if ORDER BY is used in a subquery.
+        // We only check if the outermost query already starts with SELECT TOP.
+        if (sql.toUpperCase().includes('ORDER BY') && !/^\s*SELECT\s+TOP\b/i.test(sql)) {
             // Find the first SELECT and ensure it has TOP 100 PERCENT
             sql = sql.replace(/^(\s*SELECT)\b/i, '$1 TOP 100 PERCENT');
         }

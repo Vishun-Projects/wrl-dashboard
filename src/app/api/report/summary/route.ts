@@ -77,31 +77,33 @@ export async function GET(req: NextRequest) {
         hc.branch_headcount,
         COUNT(*) as population,
         COUNT(*) as all_total,
-        SUM(CASE WHEN c.bsolved = 1 THEN 1 ELSE 0 END) as all_solved,
+        SUM(CASE WHEN c.bsolved = 1 OR c.bfastclose = 1 THEN 1 ELSE 0 END) as all_solved,
         SUM(CASE WHEN c.ncancelreason IS NOT NULL AND c.ncancelreason <> 0 AND c.ncancelreason <> 2 THEN 1 ELSE 0 END) as all_cancelled,
         SUM(CASE WHEN ISNULL(c.vtransfercallno, '') <> '' OR c.ncancelreason = 2 THEN 1 ELSE 0 END) as all_transferred,
-        SUM(CASE WHEN (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_open,
-        SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) <= 2 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_2,
-        SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 2 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 7 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_3,
-        SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 7 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_7,
-        SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_15,
+        SUM(CASE WHEN (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_open,
+        SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) <= 2 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_2,
+        SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 2 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 7 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_3,
+        SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 7 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_7,
+        SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_15,
         SUM(CASE WHEN c.vsolveremarks LIKE '%PART%' OR c.vcomplaint LIKE '%PART%' THEN 1 ELSE 0 END) as all_part_pending,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as total_calls,
-        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND c.bsolved = 1 THEN 1 ELSE 0 END) as solved_calls,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.bsolved = 1 OR c.bfastclose = 1) THEN 1 ELSE 0 END) as solved_calls,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND c.bfastclose = 1 THEN 1 ELSE 0 END) as tech_solved_calls,
+        SUM(CASE WHEN c.bfastclose = 1 THEN 1 ELSE 0 END) as all_tech_solved,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND c.ncancelreason IS NOT NULL AND c.ncancelreason <> 0 AND c.ncancelreason <> 2 THEN 1 ELSE 0 END) as cancelled_calls,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND (ISNULL(c.vtransfercallno, '') <> '' OR c.ncancelreason = 2) THEN 1 ELSE 0 END) as transferred_calls,
-        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls,
-        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 2 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_2,
-        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 2 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 7 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_3,
-        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 7 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_7,
-        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_15,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 2 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_2,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 2 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 7 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_3,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 7 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_7,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_15,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.vsolveremarks LIKE '%PART%' OR c.vcomplaint LIKE '%PART%') THEN 1 ELSE 0 END) as part_pending,
         COUNT(DISTINCT u.vname) as active_eng_count,
         STRING_AGG(CAST(u.vname AS VARCHAR(MAX)), ',') as eng_list,
         SUM(CASE WHEN dep_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as deployment_total,
-        SUM(CASE WHEN dep_ct.ncode IS NOT NULL AND c.bsolved = 1 THEN 1 ELSE 0 END) as deployment_done,
+        SUM(CASE WHEN dep_ct.ncode IS NOT NULL AND (c.bsolved = 1 OR c.bfastclose = 1) THEN 1 ELSE 0 END) as deployment_done,
         SUM(CASE WHEN ins_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as installation_total,
-        SUM(CASE WHEN ins_ct.ncode IS NOT NULL AND c.bsolved = 1 THEN 1 ELSE 0 END) as installation_done
+        SUM(CASE WHEN ins_ct.ncode IS NOT NULL AND (c.bsolved = 1 OR c.bfastclose = 1) THEN 1 ELSE 0 END) as installation_done
       FROM (
         SELECT *
         FROM (
@@ -156,6 +158,7 @@ export async function GET(req: NextRequest) {
             age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
             all_total: 0, all_solved: 0, all_cancelled: 0, all_open: 0, all_transferred: 0,
             all_age_2: 0, all_age_3: 0, all_age_7: 0, all_age_15: 0, all_part_pending: 0,
+            all_tech_solved: 0, tech_solved_calls: 0,
             deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
             active_eng: 0, population: 0, headcount: Number(row.branch_headcount || 0)
           });
@@ -183,6 +186,8 @@ export async function GET(req: NextRequest) {
         b.population += Number(row.population);
         b.total_calls += Number(row.all_total);
         b.solved_calls += Number(row.all_solved);
+        b.all_tech_solved += Number(row.all_tech_solved || 0);
+        b.tech_solved_calls += Number(row.tech_solved_calls || 0);
         b.cancelled_calls += Number(row.all_cancelled);
         b.transferred_calls += Number(row.all_transferred);
         b.open_calls += Number(row.all_open);
@@ -204,13 +209,15 @@ export async function GET(req: NextRequest) {
             population: 0, total_calls: 0, total_solved: 0, cancelled_calls: 0, open_calls: 0, transferred_calls: 0,
             age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
             deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
-            active_eng: 0, active_eng_names: new Set(), headcount: 0
+            active_eng: 0, active_eng_names: new Set(), headcount: 0,
+            total_tech_solved: 0
           });
         }
         const a = accountMap.get(aKey);
         a.population += Number(row.population);
         a.total_calls += Number(row.total_calls);
         a.total_solved += Number(row.solved_calls);
+        a.total_tech_solved += Number(row.tech_solved_calls || 0);
         a.cancelled_calls += Number(row.cancelled_calls);
         a.transferred_calls += Number(row.transferred_calls);
         a.open_calls += Number(row.open_calls);

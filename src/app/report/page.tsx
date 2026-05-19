@@ -256,21 +256,25 @@ export default function ReportPage() {
           selectedStatus
         };
       } else {
-        const regRes = await axios.get(url, { headers, signal: controller.signal });
-        const newChunk = regRes.data.data || [];
-        setData(prev => [...prev, ...newChunk]);
-        setTotal(regRes.data.total);
-        setPage(p);
-        setRegisterSummary(regRes.data.summary || null);
+          const regRes = await axios.get(url, { headers, signal: controller.signal });
+          const allReturned = regRes.data.data || [];
+          // The API returns top(page * limit) rows (cumulative). Only append the slice
+          // that corresponds to the requested page to avoid duplicating earlier pages.
+          const startIndex = (p - 1) * limit;
+          const newChunk = startIndex < allReturned.length ? allReturned.slice(startIndex) : [];
+          setData(prev => [...prev, ...newChunk]);
+          setTotal(regRes.data.total);
+          setPage(p);
+          setRegisterSummary(regRes.data.summary || null);
 
-        // Update global cache for pagination
-        if (globalReportCache) {
-          globalReportCache.data = [...(globalReportCache.data || []), ...newChunk];
-          globalReportCache.total = regRes.data.total;
-          globalReportCache.page = p;
-          globalReportCache.registerSummary = regRes.data.summary || null;
-          globalReportCache.lastRefreshed = newDate;
-        }
+          // Update global cache for pagination
+          if (globalReportCache) {
+            globalReportCache.data = [...(globalReportCache.data || []), ...newChunk];
+            globalReportCache.total = regRes.data.total;
+            globalReportCache.page = p;
+            globalReportCache.registerSummary = regRes.data.summary || null;
+            globalReportCache.lastRefreshed = newDate;
+          }
       }
     } catch (err: any) {
       if (axios.isCancel(err)) {
@@ -1510,6 +1514,8 @@ export default function ReportPage() {
                         <th className="p-2 border border-slate-300">Region</th>
                         <th className="p-2 border border-slate-300 text-center">Total calls</th>
                         <th className="p-2 border border-slate-300 text-center">Total solved</th>
+                        <th className="p-2 border border-slate-300 text-center">Tech Solved</th>
+                        <th className="p-2 border border-slate-300 text-center">Tech Solved</th>
                         <th className="p-2 border border-slate-300 text-center text-blue-200">Transferred</th>
                         <th className="p-2 border border-slate-300 text-center">Cancelled</th>
                         <th className="p-2 border border-slate-300 text-center"># open calls</th>
@@ -1552,6 +1558,7 @@ export default function ReportPage() {
                             <td className="p-2 border border-slate-300">{region}</td>
                             <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${region} - Total Calls`, { region })}>{totals.total}</td>
                             <td className="p-2 border border-slate-300 text-center text-emerald-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${region} - Solved Calls`, { region })}>{totals.solved}</td>
+                            <td className="p-2 border border-slate-300 text-center text-emerald-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${region} - Tech Solved`, { region })}>{regionBranches.reduce((s, b) => s + Number(b.tech_solved_calls || 0), 0)}</td>
                             <td className="p-2 border border-slate-300 text-center text-blue-600 cursor-pointer hover:bg-black/5 font-semibold" onClick={() => handleDrillDown('transferred_calls', `${region} - Transferred Calls`, { region })}>{totals.transferred}</td>
                             <td className="p-2 border border-slate-300 text-center text-rose-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('cancelled_calls', `${region} - Cancelled Calls`, { region })}>{totals.cancelled}</td>
                             <td className="p-2 border border-slate-300 text-center bg-slate-100/50 cursor-pointer hover:bg-black/5 ui-strong" onClick={() => handleDrillDown('open_calls', `${region} - Open Calls`, { region })}>{totals.open}</td>
@@ -1578,6 +1585,7 @@ export default function ReportPage() {
                         </td>
                         <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.total_calls || 0), 0)}</td>
                         <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.solved_calls || 0), 0)}</td>
+                        <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.tech_solved_calls || 0), 0)}</td>
                         <td className="p-2 border border-slate-300 text-center text-blue-700">{summaryData.reduce((sum, b) => sum + Number(b.transferred_calls || 0), 0)}</td>
                         <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.cancelled_calls || 0), 0)}</td>
                         <td className="p-2 border border-slate-300 text-center bg-slate-800/20">{summaryData.reduce((sum, b) => sum + Number(b.open_calls || 0), 0)}</td>
@@ -1674,6 +1682,7 @@ export default function ReportPage() {
                                     </td>
                                     <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${branch.branch} - Total Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'total_calls')}</td>
                                     <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${branch.branch} - Solved Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'solved_calls')}</td>
+                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${branch.branch} - Tech Solved`, { officeId: branch.officeId })}>{getAggregate(branch, 'tech_solved_calls')}</td>
                                     <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5 text-blue-600" onClick={() => handleDrillDown('transferred_calls', `${branch.branch} - Transferred Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'transferred_calls')}</td>
                                     <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5 text-rose-600" onClick={() => handleDrillDown('cancelled_calls', `${branch.branch} - Cancelled Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'cancelled_calls')}</td>
                                     <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5 ui-strong" onClick={() => handleDrillDown('open_calls', `${branch.branch} - Open Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'open_calls')}</td>
@@ -1700,6 +1709,7 @@ export default function ReportPage() {
                                       </td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${child.branch} - Total Calls`, { officeId: child.officeId })}>{child.total_calls}</td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${child.branch} - Solved Calls`, { officeId: child.officeId })}>{child.solved_calls}</td>
+                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${child.branch} - Tech Solved`, { officeId: child.officeId })}>{child.tech_solved_calls || 0}</td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5 text-blue-600" onClick={() => handleDrillDown('transferred_calls', `${child.branch} - Transferred Calls`, { officeId: child.officeId })}>{child.transferred_calls || 0}</td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5 text-rose-600" onClick={() => handleDrillDown('cancelled_calls', `${child.branch} - Cancelled Calls`, { officeId: child.officeId })}>{child.cancelled_calls}</td>
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5 ui-label" onClick={() => handleDrillDown('open_calls', `${child.branch} - Open Calls`, { officeId: child.officeId })}>{child.open_calls}</td>
@@ -1880,6 +1890,7 @@ export default function ReportPage() {
                             <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3">Population</th>
                             <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3">Total calls</th>
                             <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3">Total solved</th>
+                            <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3">Tech Solved</th>
                             <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3 text-blue-700 font-semibold">Transferred</th>
                             <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3 text-rose-700 font-semibold">Cancelled</th>
                             <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3"># open calls</th>
@@ -1921,6 +1932,7 @@ export default function ReportPage() {
                                 <td className="p-1.5 border border-slate-300 text-center text-slate-500 ui-strong">{a.population || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${a.account} - Total Calls`, { account: a.account, region: a.region })}>{a.total_calls}</td>
                                 <td className="p-1.5 border border-slate-300 text-center text-emerald-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_solved', `${a.account} - Solved Calls`, { account: a.account, region: a.region })}>{a.total_solved}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-emerald-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_solved', `${a.account} - Tech Solved`, { account: a.account, region: a.region })}>{a.total_tech_solved || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center text-blue-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('transferred_calls', `${a.account} - Transferred Calls`, { account: a.account, region: a.region })}>{a.transferred_calls || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center text-rose-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('cancelled_calls', `${a.account} - Cancelled Calls`, { account: a.account, region: a.region })}>{a.cancelled_calls}</td>
                                 <td className="p-1.5 border border-slate-300 text-center text-slate-900 bg-slate-100/50 cursor-pointer hover:bg-black/5 ui-strong" onClick={() => handleDrillDown('open_calls', `${a.account} - Open Calls`, { account: a.account, region: a.region })}>{open_calls_sum}</td>
@@ -1960,6 +1972,9 @@ export default function ReportPage() {
                             </td>
                             <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_solved', `All India - Solved Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI' })}>
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.total_solved || 0), 0).toLocaleString()}
+                            </td>
+                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10">
+                              {filteredAccounts.reduce((sum, a) => sum + Number(a.total_tech_solved || 0), 0).toLocaleString()}
                             </td>
                             <td className="p-1.5 border border-slate-700 text-center text-blue-400 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('transferred_calls', `All India - Transferred Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI' })}>
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.transferred_calls || 0), 0).toLocaleString()}

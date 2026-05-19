@@ -70,7 +70,8 @@ export async function POST(req: NextRequest) {
       switch (type) {
         case 'solved_calls':
         case 'total_solved':
-          condition += ` AND (callsolved = '1' OR callsolved = 'True' OR callstatus = 'Solved' OR CAST(Status AS NVARCHAR(MAX)) = 'Closed')`;
+          // Include tech-solved (bfastclose) as solved as well
+          condition += ` AND (callsolved = '1' OR callsolved = 'True' OR callstatus = 'Solved' OR CAST(Status AS NVARCHAR(MAX)) = 'Closed' OR EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = callsntrnno AND (tc2.bfastclose = 1)))`;
           break;
         case 'cancelled_calls':
           condition += ` AND ISNULL(callstatus,'') = 'Cancel'`;
@@ -79,19 +80,20 @@ export async function POST(req: NextRequest) {
           condition += ` AND (ISNULL(ncancelreason, 0) = 2 OR (vtransfercallno IS NOT NULL AND vtransfercallno <> ''))`;
           break;
         case 'open_calls':
-          condition += ` AND (callsolved = '0' OR callsolved = 'False') AND ISNULL(callstatus,'') != 'Cancel'`;
+          // Open if not solved and not tech-solved
+          condition += ` AND (callsolved = '0' OR callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(callstatus,'') != 'Cancel'`;
           break;
         case 'age_2':
-          condition += ` AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) <= 2 AND (callsolved = '0' OR callsolved = 'False') AND ISNULL(callstatus,'') != 'Cancel'`;
+          condition += ` AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) <= 2 AND (callsolved = '0' OR callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(callstatus,'') != 'Cancel'`;
           break;
         case 'age_3':
-          condition += ` AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) > 2 AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) <= 7 AND (callsolved = '0' OR callsolved = 'False') AND ISNULL(callstatus,'') != 'Cancel'`;
+          condition += ` AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) > 2 AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) <= 7 AND (callsolved = '0' OR callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(callstatus,'') != 'Cancel'`;
           break;
         case 'age_7':
-          condition += ` AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) > 7 AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) <= 15 AND (callsolved = '0' OR callsolved = 'False') AND ISNULL(callstatus,'') != 'Cancel'`;
+          condition += ` AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) > 7 AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) <= 15 AND (callsolved = '0' OR callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(callstatus,'') != 'Cancel'`;
           break;
         case 'age_15':
-          condition += ` AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) > 15 AND (callsolved = '0' OR callsolved = 'False') AND ISNULL(callstatus,'') != 'Cancel'`;
+          condition += ` AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) > 15 AND (callsolved = '0' OR callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(callstatus,'') != 'Cancel'`;
           break;
         case 'part_pending':
           condition += ` AND (vsolveremarks LIKE '%PART%' OR vcomplaint LIKE '%PART%')`;

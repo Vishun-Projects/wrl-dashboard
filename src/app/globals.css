@@ -1,4 +1,6 @@
+@import url("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css");
 @import "tailwindcss";
+
 
 @theme {
   --color-border: #e2e8f0;
