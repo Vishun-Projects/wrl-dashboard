@@ -13,7 +13,8 @@ import {
   FileSpreadsheet,
   FileText,
   AlertCircle,
-  X
+  X,
+  MapPin
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUser } from '@/components/DashboardLayout';
@@ -27,6 +28,7 @@ interface GlobalReportCacheType {
   total: number;
   page: number;
   search: string;
+  pincodeSearch: string;
   selectedOfficeIds: string[];
   dateRange: { start: Date; end: Date; label: string };
   filterRegion: string[];
@@ -36,13 +38,111 @@ interface GlobalReportCacheType {
   lastRefreshed: Date | null;
   agingAsOf: string;
   selectedStatus: string;
+  selectedState?: string;
+  selectedCity?: string;
+  selectedBranch?: string;
+  selectedFranchisee?: string;
+  selectedTechnician?: string;
 }
+
+// --- IndexedDB Local Storage Cache Helpers ---
+const openDB = (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      reject('Not in browser');
+      return;
+    }
+    const request = indexedDB.open('wrl_reports_db', 1);
+    request.onupgradeneeded = (e: any) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('calls')) {
+        db.createObjectStore('calls', { keyPath: 'UniqueCallNo' });
+      }
+      if (!db.objectStoreNames.contains('meta')) {
+        db.createObjectStore('meta');
+      }
+    };
+    request.onsuccess = (e: any) => resolve(e.target.result);
+    request.onerror = (e: any) => reject(e.target.error);
+  });
+};
+
+const saveCallsToDB = async (calls: any[]) => {
+  try {
+    const db = await openDB();
+    const tx = db.transaction('calls', 'readwrite');
+    const store = tx.objectStore('calls');
+    calls.forEach((c) => {
+      if (c.UniqueCallNo) {
+        store.put(c);
+      }
+    });
+    return new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.error('IndexedDB save error:', err);
+  }
+};
+
+const getCallsFromDB = async (): Promise<any[]> => {
+  try {
+    const db = await openDB();
+    const tx = db.transaction('calls', 'readonly');
+    const store = tx.objectStore('calls');
+    const request = store.getAll();
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.error('IndexedDB read error:', err);
+    return [];
+  }
+};
+
+const saveMeta = async (key: string, val: any) => {
+  try {
+    const db = await openDB();
+    const tx = db.transaction('meta', 'readwrite');
+    tx.objectStore('meta').put(val, key);
+  } catch (err) {
+    console.error('IndexedDB meta save error:', err);
+  }
+};
+
+const getMeta = async (key: string): Promise<any> => {
+  try {
+    const db = await openDB();
+    const tx = db.transaction('meta', 'readonly');
+    const request = tx.objectStore('meta').get(key);
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    return null;
+  }
+};
+
+const clearCallsDB = async () => {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(['calls', 'meta'], 'readwrite');
+    tx.objectStore('calls').clear();
+    tx.objectStore('meta').clear();
+  } catch (err) {
+    console.error('IndexedDB clear error:', err);
+  }
+};
 
 let globalReportCache: GlobalReportCacheType | null = null;
 
 export default function ReportPage() {
   const { userProfile } = useUser();
   const supabase = createClient();
+  const [dbInitialized, setDbInitialized] = useState(!!globalReportCache);
   const [activeTab, setActiveTab] = useState<'register' | 'summary' | 'accounts'>('register');
   const [data, setData] = useState<any[]>(globalReportCache?.data || []);
   const [summaryData, setSummaryData] = useState<any[]>(globalReportCache?.summaryData || []);
@@ -51,10 +151,14 @@ export default function ReportPage() {
   const [loading, setLoading] = useState(!globalReportCache);
   const [total, setTotal] = useState(globalReportCache?.total || 0);
   const [page, setPage] = useState(globalReportCache?.page || 1);
-  const [limit] = useState(50);
+  const [limit] = useState(2000);
+  const [visibleLimit, setVisibleLimit] = useState(100);
+  const [backgroundProgress, setBackgroundProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [loadingPage, setLoadingPage] = useState<number | null>(null);
   const [search, setSearch] = useState(globalReportCache?.search || '');
   const [debouncedSearch, setDebouncedSearch] = useState(globalReportCache?.search || '');
+  const [pincodeSearch, setPincodeSearch] = useState(globalReportCache?.pincodeSearch || '');
+  const [debouncedPincodeSearch, setDebouncedPincodeSearch] = useState(globalReportCache?.pincodeSearch || '');
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -62,6 +166,14 @@ export default function ReportPage() {
     }, 300);
     return () => clearTimeout(timer);
   }, [search]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedPincodeSearch(pincodeSearch);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [pincodeSearch]);
+
   const [offices, setOffices] = useState<any[]>([]);
   const [selectedOfficeIds, setSelectedOfficeIds] = useState<string[]>(globalReportCache?.selectedOfficeIds || []);
   const [showOfficeDropdown, setShowOfficeDropdown] = useState(false);
@@ -99,6 +211,163 @@ export default function ReportPage() {
     return new Date().toISOString().split('T')[0];
   });
   const [selectedStatus, setSelectedStatus] = useState<string>(globalReportCache?.selectedStatus || 'All');
+
+  const [selectedState, setSelectedState] = useState<string>(globalReportCache?.selectedState || 'All');
+  const [statesList, setStatesList] = useState<any[]>([]);
+
+  const [selectedCity, setSelectedCity] = useState<string>(globalReportCache?.selectedCity || 'All');
+  const [citiesList, setCitiesList] = useState<any[]>([]);
+
+  const [selectedBranch, setSelectedBranch] = useState<string>(globalReportCache?.selectedBranch || 'All');
+  const [branchesList, setBranchesList] = useState<any[]>([]);
+
+  const [selectedFranchisee, setSelectedFranchisee] = useState<string>(globalReportCache?.selectedFranchisee || 'All');
+  const [franchiseesList, setFranchiseesList] = useState<any[]>([]);
+
+  const [selectedTechnician, setSelectedTechnician] = useState<string>(globalReportCache?.selectedTechnician || 'All');
+  const [techniciansList, setTechniciansList] = useState<any[]>([]);
+
+  useEffect(() => {
+    setVisibleLimit(100);
+  }, [
+    search,
+    pincodeSearch,
+    selectedOfficeIds,
+    dateRange,
+    selectedState,
+    selectedCity,
+    selectedBranch,
+    selectedFranchisee,
+    selectedTechnician,
+    selectedStatus,
+    selectedCallTypes,
+    filterRegion,
+    filterAccount
+  ]);
+
+  const startBackgroundPrefetch = async (startPage: number, totalPages: number) => {
+    if (startPage > totalPages) return;
+    backgroundPrefetchControllerRef.current?.abort();
+
+    const controller = new AbortController();
+    backgroundPrefetchControllerRef.current = controller;
+    setBackgroundProgress({ loaded: startPage - 1, total: totalPages });
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers = { 'Authorization': `Bearer ${session?.access_token}` };
+      const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
+      const callTypesParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
+      const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+      const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+
+      for (let currentPage = startPage; currentPage <= totalPages; currentPage += 1) {
+        if (controller.signal.aborted) break;
+
+        let pageUrl = `/api/report?page=${currentPage}&limit=${limit}&officeId=${officeIdsParam}&callType=${callTypesParam}`;
+        if (search) pageUrl += `&search=${encodeURIComponent(search)}`;
+        if (debouncedPincodeSearch) pageUrl += `&pincode=${encodeURIComponent(debouncedPincodeSearch)}`;
+        if (startDateStr) pageUrl += `&startDate=${startDateStr}`;
+        if (endDateStr) pageUrl += `&endDate=${endDateStr}`;
+
+        const regRes = await axios.get(pageUrl, { headers, signal: controller.signal });
+        const allReturned = regRes.data.data || [];
+        const startIndex = (currentPage - 1) * limit;
+        const newChunk = startIndex < allReturned.length ? allReturned.slice(startIndex) : [];
+
+        if (newChunk.length > 0) {
+          setData(prev => {
+            const existingIds = new Set(prev.map((r: any) => String(r.UniqueCallNo)));
+            return [...prev, ...newChunk.filter((row: any) => !existingIds.has(String(row.UniqueCallNo)))];
+          });
+
+          if (globalReportCache) {
+            const existingCalls = [...(globalReportCache.data || [])];
+            const existingIds = new Set(existingCalls.map((r: any) => String(r.UniqueCallNo)));
+            const uniqueChunk = newChunk.filter((row: any) => !existingIds.has(String(row.UniqueCallNo)));
+            if (uniqueChunk.length > 0) {
+              globalReportCache.data = [...existingCalls, ...uniqueChunk];
+              globalReportCache.page = currentPage;
+              globalReportCache.lastRefreshed = new Date();
+
+              persistCurrentCache(
+                globalReportCache.data,
+                globalReportCache.summaryData,
+                globalReportCache.accountsData,
+                globalReportCache.globalHeadcount,
+                globalReportCache.total,
+                globalReportCache.registerSummary,
+                globalReportCache.lastRefreshed
+              );
+            }
+          }
+        }
+
+        setPage(currentPage);
+        setBackgroundProgress({ loaded: currentPage, total: totalPages });
+      }
+    } catch (err: any) {
+      if (!axios.isCancel(err) && err.name !== 'AbortError') {
+        console.error('Background prefetch failed:', err);
+      }
+    } finally {
+      if (backgroundPrefetchControllerRef.current === controller) {
+        backgroundPrefetchControllerRef.current = null;
+        setBackgroundProgress(null);
+      }
+    }
+  };
+
+  // CSR Dropdown change handlers to reset lower levels safely
+  const handleStateChange = (val: string) => {
+    setSelectedState(val);
+    setSelectedCity('All');
+    setSelectedBranch('All');
+    setSelectedFranchisee('All');
+    setSelectedTechnician('All');
+  };
+
+  const handleCityChange = (val: string) => {
+    setSelectedCity(val);
+    setSelectedBranch('All');
+    setSelectedFranchisee('All');
+    setSelectedTechnician('All');
+  };
+
+  const handleBranchChange = (val: string) => {
+    setSelectedBranch(val);
+    setSelectedFranchisee('All');
+    setSelectedTechnician('All');
+  };
+
+  const handleFranchiseeChange = (val: string) => {
+    setSelectedFranchisee(val);
+    setSelectedTechnician('All');
+  };
+
+  // Helper to filter calls on the client
+  const filterCallsCSR = (calls: any[], criteria: any, exclude?: string) => {
+    return calls.filter((c) => {
+      if (exclude !== 'state' && criteria.state && criteria.state !== 'All') {
+        if (c.state !== criteria.state) return false;
+      }
+      if (exclude !== 'city' && criteria.city && criteria.city !== 'All') {
+        if (c.city !== criteria.city) return false;
+      }
+      if (exclude !== 'branch' && criteria.branch && criteria.branch !== 'All') {
+        if (String(c.resolved_branch_code) !== criteria.branch) return false;
+      }
+      if (exclude !== 'franchisee' && criteria.franchisee && criteria.franchisee !== 'All') {
+        const cFranCode = c.franchisee_code ? String(c.franchisee_code) : 'UNASSIGNED';
+        if (cFranCode !== criteria.franchisee) return false;
+      }
+      if (exclude !== 'technician' && criteria.technician && criteria.technician !== 'All') {
+        if (String(c.nengineer) !== criteria.technician) return false;
+      }
+      return true;
+    });
+  };
+
   const [officeSearch, setOfficeSearch] = useState('');
   const [drillDown, setDrillDown] = useState<{
     isOpen: boolean;
@@ -119,6 +388,7 @@ export default function ReportPage() {
   });
   const [registerSummary, setRegisterSummary] = useState<{ total: number, transferred: number, cancelled: number, solved: number, open: number } | null>(globalReportCache?.registerSummary || null);
   const fetchControllerRef = React.useRef<AbortController | null>(null);
+  const backgroundPrefetchControllerRef = React.useRef<AbortController | null>(null);
   const drillDownControllerRef = React.useRef<AbortController | null>(null);
   const sentinelRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -132,6 +402,132 @@ export default function ReportPage() {
       }
     }
   }, [dateRange.end, agingAsOf]);
+
+  // CSR Dropdown Cascades Computation
+  useEffect(() => {
+    if (data.length === 0) {
+      setStatesList([]);
+      setCitiesList([]);
+      setBranchesList([]);
+      setFranchiseesList([]);
+      setTechniciansList([]);
+      return;
+    }
+
+    const criteria = {
+      state: selectedState,
+      city: selectedCity,
+      branch: selectedBranch,
+      franchisee: selectedFranchisee,
+      technician: selectedTechnician
+    };
+
+    // States (exclude state filter)
+    const statesFiltered = filterCallsCSR(data, criteria, 'state');
+    const stateCounts: Record<string, { ncode: string; vname: string; call_count: number }> = {};
+    statesFiltered.forEach((c) => {
+      if (!c.state) return;
+      const sName = c.state;
+      if (!stateCounts[sName]) {
+        stateCounts[sName] = { ncode: sName, vname: sName, call_count: 0 };
+      }
+      stateCounts[sName].call_count++;
+    });
+    const states = Object.values(stateCounts).sort((a, b) => a.vname.localeCompare(b.vname));
+    setStatesList(states);
+
+    // Cities (exclude city filter)
+    const citiesFiltered = filterCallsCSR(data, criteria, 'city');
+    const cityCounts: Record<string, { ncode: string; vname: string; nstate: string; call_count: number }> = {};
+    citiesFiltered.forEach((c) => {
+      if (!c.city) return;
+      const cName = c.city;
+      if (!cityCounts[cName]) {
+        cityCounts[cName] = { ncode: cName, vname: cName, nstate: c.state || '', call_count: 0 };
+      }
+      cityCounts[cName].call_count++;
+    });
+    const cities = Object.values(cityCounts).sort((a, b) => a.vname.localeCompare(b.vname));
+    setCitiesList(cities);
+
+    // Branches (exclude branch filter)
+    const branchesFiltered = filterCallsCSR(data, criteria, 'branch');
+    const branchCallCounts: Record<string, number> = {};
+    branchesFiltered.forEach((c) => {
+      if (!c.resolved_branch_code) return;
+      const bCode = String(c.resolved_branch_code);
+      branchCallCounts[bCode] = (branchCallCounts[bCode] || 0) + 1;
+    });
+    const branches = offices.map((dbB: any) => {
+      const bCode = String(dbB.ncode);
+      return {
+        ncode: bCode,
+        vcompanyname: dbB.vcompanyname,
+        call_count: branchCallCounts[bCode] || 0
+      };
+    }).filter((b: any) => b.call_count > 0);
+    setBranchesList(branches);
+
+    // Franchisees (exclude franchisee filter)
+    const franchiseesFiltered = filterCallsCSR(data, criteria, 'franchisee');
+    const franchiseeCounts: Record<string, { ncode: string; vcompanyname: string; nunder: string; call_count: number }> = {};
+    franchiseesFiltered.forEach((c) => {
+      const fCode = String(c.franchisee_code || 'UNASSIGNED');
+      const fName = c.franchisee_name || 'Unallocated';
+      if (!franchiseeCounts[fCode]) {
+        franchiseeCounts[fCode] = { ncode: fCode, vcompanyname: fName, nunder: String(c.office_under || ''), call_count: 0 };
+      }
+      franchiseeCounts[fCode].call_count++;
+    });
+    const franchisees = Object.values(franchiseeCounts).sort((a, b) => a.vcompanyname.localeCompare(b.vcompanyname));
+    setFranchiseesList(franchisees);
+
+    // Technicians (exclude technician filter)
+    const techniciansFiltered = filterCallsCSR(data, criteria, 'technician');
+    const techCounts: Record<string, { ncode: string; vname: string; nofficeid: string; call_count: number }> = {};
+    techniciansFiltered.forEach((c) => {
+      if (!c.nengineer || c.nengineer === '0' || c.nengineer === 0) return;
+      const tCode = String(c.nengineer);
+      if (!techCounts[tCode]) {
+        techCounts[tCode] = { ncode: tCode, vname: c.technician_name || 'UNKNOWN', nofficeid: String(c.technician_office_id || ''), call_count: 0 };
+      }
+      techCounts[tCode].call_count++;
+    });
+    const technicians = Object.values(techCounts).sort((a, b) => a.vname.localeCompare(b.vname));
+    setTechniciansList(technicians);
+
+  }, [data, offices, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician]);
+
+  // CSR Dropdown Option Validation & Safe Resets
+  useEffect(() => {
+    if (statesList.length > 0 && selectedState !== 'All' && !statesList.some((s: any) => s.vname === selectedState)) {
+      setSelectedState('All');
+    }
+    if (citiesList.length > 0 && selectedCity !== 'All' && !citiesList.some((c: any) => String(c.ncode) === String(selectedCity))) {
+      setSelectedCity('All');
+    }
+    if (branchesList.length > 0 && selectedBranch !== 'All' && !branchesList.some((b: any) => String(b.ncode) === String(selectedBranch))) {
+      setSelectedBranch('All');
+    }
+    if (franchiseesList.length > 0 && selectedFranchisee !== 'All' && !franchiseesList.some((f: any) => String(f.ncode) === String(selectedFranchisee))) {
+      setSelectedFranchisee('All');
+    }
+    if (techniciansList.length > 0 && selectedTechnician !== 'All' && !techniciansList.some((t: any) => String(t.ncode) === String(selectedTechnician))) {
+      setSelectedTechnician('All');
+    }
+  }, [statesList, citiesList, branchesList, franchiseesList, techniciansList]);
+
+  // Save selections to global cache dynamically
+  useEffect(() => {
+    if (globalReportCache) {
+      globalReportCache.selectedState = selectedState;
+      globalReportCache.selectedCity = selectedCity;
+      globalReportCache.selectedBranch = selectedBranch;
+      globalReportCache.selectedFranchisee = selectedFranchisee;
+      globalReportCache.selectedTechnician = selectedTechnician;
+      globalReportCache.selectedStatus = selectedStatus;
+    }
+  }, [selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, selectedStatus]);
 
   // Fetch Offices and Call Types
   useEffect(() => {
@@ -174,11 +570,46 @@ export default function ReportPage() {
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
+  const persistCurrentCache = async (
+    calls: any[],
+    summaryData: any[],
+    accountsData: any[],
+    globalHeadcount: number,
+    total: number,
+    registerSummary: any,
+    lastRefreshedDate: Date
+  ) => {
+    try {
+      const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
+      const callTypesParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
+      const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+      const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+
+      await saveCallsToDB(calls);
+      await saveMeta('cacheParams', {
+        startDate: startDateStr,
+        endDate: endDateStr,
+        officeIds: officeIdsParam,
+        callTypes: callTypesParam,
+        lastRefreshed: lastRefreshedDate.toISOString(),
+        total,
+        registerSummary,
+        summaryData,
+        accountsData,
+        globalHeadcount
+      });
+    } catch (err) {
+      console.error('Failed to persist cache to IndexedDB:', err);
+    }
+  };
+
   const fetchData = async (p = 1) => {
     // Cancel previous request if it's still running
     if (fetchControllerRef.current) {
       fetchControllerRef.current.abort();
     }
+    backgroundPrefetchControllerRef.current?.abort();
+
     const controller = new AbortController();
     fetchControllerRef.current = controller;
 
@@ -199,9 +630,9 @@ export default function ReportPage() {
       // Register data URL
       let url = `/api/report?page=${p}&limit=${limit}&officeId=${officeIdsParam}&callType=${callTypesParam}`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
+      if (debouncedPincodeSearch) url += `&pincode=${encodeURIComponent(debouncedPincodeSearch)}`;
       if (startDateStr) url += `&startDate=${startDateStr}`;
       if (endDateStr) url += `&endDate=${endDateStr}`;
-      if (selectedStatus !== 'All') url += `&status=${selectedStatus}`;
 
       // Fetch summary only on the first page load or full refresh
       const needsSummary = p === 1;
@@ -245,6 +676,7 @@ export default function ReportPage() {
           total: regRes.data.total,
           page: p,
           search,
+          pincodeSearch,
           selectedOfficeIds,
           dateRange,
           filterRegion,
@@ -253,8 +685,29 @@ export default function ReportPage() {
           registerSummary: regRes.data.summary || null,
           lastRefreshed: newDate,
           agingAsOf,
-          selectedStatus
+          selectedStatus,
+          selectedState,
+          selectedCity,
+          selectedBranch,
+          selectedFranchisee,
+          selectedTechnician
         };
+
+        // Save to IndexedDB
+        persistCurrentCache(
+          regRes.data.data,
+          summRes.data.branchSummary,
+          summRes.data.accountSummary,
+          summRes.data.globalHeadcount || 0,
+          regRes.data.total,
+          regRes.data.summary || null,
+          newDate
+        );
+
+        const totalPages = Math.max(1, Math.ceil(regRes.data.total / limit));
+        if (p < totalPages) {
+          startBackgroundPrefetch(p + 1, totalPages);
+        }
       } else {
           const regRes = await axios.get(url, { headers, signal: controller.signal });
           const allReturned = regRes.data.data || [];
@@ -262,18 +715,40 @@ export default function ReportPage() {
           // that corresponds to the requested page to avoid duplicating earlier pages.
           const startIndex = (p - 1) * limit;
           const newChunk = startIndex < allReturned.length ? allReturned.slice(startIndex) : [];
-          setData(prev => [...prev, ...newChunk]);
+          setData(prev => {
+            const existingIds = new Set(prev.map((r: any) => String(r.UniqueCallNo)));
+            return [...prev, ...newChunk.filter((row: any) => !existingIds.has(String(row.UniqueCallNo)))];
+          });
           setTotal(regRes.data.total);
           setPage(p);
           setRegisterSummary(regRes.data.summary || null);
 
+          const totalPages = Math.max(1, Math.ceil(regRes.data.total / limit));
+
           // Update global cache for pagination
           if (globalReportCache) {
-            globalReportCache.data = [...(globalReportCache.data || []), ...newChunk];
+            const existingCalls = [...(globalReportCache.data || [])];
+            const existingIds = new Set(existingCalls.map((r: any) => String(r.UniqueCallNo)));
+            const uniqueChunk = newChunk.filter((row: any) => !existingIds.has(String(row.UniqueCallNo)));
+            globalReportCache.data = [...existingCalls, ...uniqueChunk];
             globalReportCache.total = regRes.data.total;
             globalReportCache.page = p;
             globalReportCache.registerSummary = regRes.data.summary || null;
             globalReportCache.lastRefreshed = newDate;
+
+            persistCurrentCache(
+              globalReportCache.data,
+              globalReportCache.summaryData,
+              globalReportCache.accountsData,
+              globalReportCache.globalHeadcount,
+              globalReportCache.total,
+              globalReportCache.registerSummary,
+              newDate
+            );
+          }
+
+          if (p < totalPages) {
+            startBackgroundPrefetch(p + 1, totalPages);
           }
       }
     } catch (err: any) {
@@ -344,9 +819,9 @@ export default function ReportPage() {
 
       let url = `/api/report?officeId=${officeIdsParam}&callType=${callTypesParam}&lastSync=${encodeURIComponent(lastSyncStr)}`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
+      if (debouncedPincodeSearch) url += `&pincode=${encodeURIComponent(debouncedPincodeSearch)}`;
       if (startDateStr) url += `&startDate=${startDateStr}`;
       if (endDateStr) url += `&endDate=${endDateStr}`;
-      if (selectedStatus !== 'All') url += `&status=${selectedStatus}`;
 
       const res = await axios.get(url, { headers });
       const newRecords = res.data.data || [];
@@ -468,16 +943,125 @@ export default function ReportPage() {
           };
         });
 
+        // Calculate new registerSummary value to save
+        const nextSummary = (() => {
+          if (!registerSummary) return null;
+          let newTotal = registerSummary.total;
+          let newSolved = registerSummary.solved;
+          let newCancelled = registerSummary.cancelled;
+          let newTransferred = registerSummary.transferred;
+          let newOpen = registerSummary.open;
+
+          newRecords.forEach((newRec: any) => {
+            const oldRec = data.find(r => String(r.UniqueCallNo) === String(newRec.UniqueCallNo));
+            if (oldRec) {
+              if (isSolved(oldRec)) newSolved = Math.max(0, newSolved - 1);
+              else if (isCancelled(oldRec)) newCancelled = Math.max(0, newCancelled - 1);
+              else if (isTransferred(oldRec)) newTransferred = Math.max(0, newTransferred - 1);
+              else if (isOpen(oldRec)) newOpen = Math.max(0, newOpen - 1);
+            } else {
+              newTotal++;
+            }
+
+            if (isSolved(newRec)) newSolved++;
+            else if (isCancelled(newRec)) newCancelled++;
+            else if (isTransferred(newRec)) newTransferred++;
+            else if (isOpen(newRec)) newOpen++;
+          });
+          return {
+            total: newTotal,
+            solved: newSolved,
+            cancelled: newCancelled,
+            transferred: newTransferred,
+            open: newOpen
+          };
+        })();
+
+        // Get the latest summaryData and accountsData arrays to save
+        const nextSummaryData = (() => {
+          const newSummary = [...summaryData];
+          newRecords.forEach((newRec: any) => {
+            const isRecSolved = isSolved(newRec);
+            const isRecCancelled = isCancelled(newRec);
+            const isRecTransferred = isTransferred(newRec);
+            const isRecOpen = isOpen(newRec);
+
+            const branchRowIdx = newSummary.findIndex(b => b.officeId === newRec.nofficeid || b.branch?.toLowerCase() === newRec.officename?.toLowerCase());
+            if (branchRowIdx > -1) {
+              const row = { ...newSummary[branchRowIdx] };
+              const oldRec = data.find(r => String(r.UniqueCallNo) === String(newRec.UniqueCallNo));
+              if (oldRec) {
+                if (isSolved(oldRec)) row.solved_calls = Math.max(0, (row.solved_calls || 0) - 1);
+                else if (isCancelled(oldRec)) row.cancelled_calls = Math.max(0, (row.cancelled_calls || 0) - 1);
+                else if (isTransferred(oldRec)) row.transferred_calls = Math.max(0, (row.transferred_calls || 0) - 1);
+                else if (isOpen(oldRec)) row.open_calls = Math.max(0, (row.open_calls || 0) - 1);
+              }
+              if (isRecSolved) row.solved_calls = (row.solved_calls || 0) + 1;
+              else if (isRecCancelled) row.cancelled_calls = (row.cancelled_calls || 0) + 1;
+              else if (isRecTransferred) row.transferred_calls = (row.transferred_calls || 0) + 1;
+              else if (isRecOpen) row.open_calls = (row.open_calls || 0) + 1;
+              
+              newSummary[branchRowIdx] = row;
+            }
+          });
+          return newSummary;
+        })();
+
+        const nextAccountsData = (() => {
+          const newAccounts = [...accountsData];
+          newRecords.forEach((newRec: any) => {
+            const isRecSolved = isSolved(newRec);
+            const isRecCancelled = isCancelled(newRec);
+            const isRecTransferred = isTransferred(newRec);
+            const isRecOpen = isOpen(newRec);
+
+            const accRowIdx = newAccounts.findIndex(a => a.account?.toLowerCase() === newRec.PartyName?.toLowerCase());
+            if (accRowIdx > -1) {
+              const row = { ...newAccounts[accRowIdx] };
+              const oldRec = data.find(r => String(r.UniqueCallNo) === String(newRec.UniqueCallNo));
+              if (oldRec) {
+                if (isSolved(oldRec)) row.total_solved = Math.max(0, (row.total_solved || 0) - 1);
+                else if (isCancelled(oldRec)) row.cancelled_calls = Math.max(0, (row.cancelled_calls || 0) - 1);
+                else if (isTransferred(oldRec)) row.transferred_calls = Math.max(0, (row.transferred_calls || 0) - 1);
+                else if (isOpen(oldRec)) row.open_calls = Math.max(0, (row.open_calls || 0) - 1);
+              }
+              if (isRecSolved) row.total_solved = (row.total_solved || 0) + 1;
+              else if (isRecCancelled) row.cancelled_calls = (row.cancelled_calls || 0) + 1;
+              else if (isRecTransferred) row.transferred_calls = (row.transferred_calls || 0) + 1;
+              else if (isRecOpen) row.open_calls = (row.open_calls || 0) + 1;
+              
+              newAccounts[accRowIdx] = row;
+            }
+          });
+          return newAccounts;
+        })();
+
         setData(updatedData);
         setTotal(total + newAddedCount);
+        setRegisterSummary(nextSummary);
+        setSummaryData(nextSummaryData);
+        setAccountsData(nextAccountsData);
 
         // Update cache
         if (globalReportCache) {
           globalReportCache.data = updatedData;
           globalReportCache.total = total + newAddedCount;
-          globalReportCache.registerSummary = registerSummary;
+          globalReportCache.registerSummary = nextSummary;
+          globalReportCache.summaryData = nextSummaryData;
+          globalReportCache.accountsData = nextAccountsData;
           globalReportCache.lastRefreshed = newDate;
         }
+
+        // Save to IndexedDB
+        persistCurrentCache(
+          updatedData,
+          nextSummaryData,
+          nextAccountsData,
+          globalHeadcount,
+          total + newAddedCount,
+          nextSummary,
+          newDate
+        );
       }
 
       setLastRefreshed(newDate);
@@ -503,6 +1087,7 @@ export default function ReportPage() {
       const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
       const res = await axios.post('/api/report/drilldown', {
         type,
+        callType: params.callType || (selectedCallTypes.length ? selectedCallTypes.join(',') : 'All'),
         ...params,
         startDate: startDateStr,
         endDate: endDateStr
@@ -564,46 +1149,89 @@ export default function ReportPage() {
     }
   };
 
+  // Initialize cache from IndexedDB on mount
+  useEffect(() => {
+    const initDBAndCache = async () => {
+      try {
+        const cacheParams = await getMeta('cacheParams');
+        if (cacheParams) {
+          const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
+          const callTypesParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
+          const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+          const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+
+          if (
+            cacheParams.startDate === startDateStr &&
+            cacheParams.endDate === endDateStr &&
+            cacheParams.officeIds === officeIdsParam &&
+            cacheParams.callTypes === callTypesParam
+          ) {
+            const cachedCalls = await getCallsFromDB();
+            if (cachedCalls && cachedCalls.length > 0) {
+              setData(cachedCalls);
+              setSummaryData(cacheParams.summaryData || []);
+              setAccountsData(cacheParams.accountsData || []);
+              setGlobalHeadcount(cacheParams.globalHeadcount || 0);
+              setTotal(cacheParams.total || 0);
+              setRegisterSummary(cacheParams.registerSummary || null);
+              
+              const refreshedDate = new Date(cacheParams.lastRefreshed);
+              setLastRefreshed(refreshedDate);
+
+              globalReportCache = {
+                data: cachedCalls,
+                summaryData: cacheParams.summaryData || [],
+                accountsData: cacheParams.accountsData || [],
+                globalHeadcount: cacheParams.globalHeadcount || 0,
+                total: cacheParams.total || 0,
+                page: 1,
+                search,
+                pincodeSearch,
+                selectedOfficeIds,
+                dateRange,
+                filterRegion,
+                filterAccount,
+                selectedCallTypes,
+                registerSummary: cacheParams.registerSummary || null,
+                lastRefreshed: refreshedDate,
+                agingAsOf,
+                selectedStatus
+              };
+
+              // Let the UI render the loaded cache first
+              setLoading(false);
+
+              // Perform silent background sync
+              setTimeout(() => {
+                fetchDelta();
+              }, 500);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error initializing cache from IndexedDB:', err);
+      } finally {
+        setDbInitialized(true);
+      }
+    };
+    initDBAndCache();
+  }, []);
+
   // Automatically fetch data when filters change, but skip the first fetch if the cache is already present and matches the filters
   useEffect(() => {
+    if (!dbInitialized) return;
+
     const filtersChanged = !globalReportCache ||
       globalReportCache.dateRange.start.getTime() !== dateRange.start.getTime() ||
       globalReportCache.dateRange.end.getTime() !== dateRange.end.getTime() ||
       JSON.stringify(globalReportCache.selectedOfficeIds) !== JSON.stringify(selectedOfficeIds) ||
       globalReportCache.filterAccount !== filterAccount ||
-      JSON.stringify(globalReportCache.selectedCallTypes) !== JSON.stringify(selectedCallTypes) ||
-      globalReportCache.selectedStatus !== selectedStatus ||
-      globalReportCache.search !== debouncedSearch;
+      JSON.stringify(globalReportCache.selectedCallTypes) !== JSON.stringify(selectedCallTypes);
 
     if (filtersChanged) {
       fetchData(1);
     }
-  }, [dateRange, selectedOfficeIds, filterAccount, selectedCallTypes, selectedStatus, debouncedSearch]);
-
-  useEffect(() => {
-    if (activeTab !== 'register') return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const first = entries[0];
-        if (first.isIntersecting && !loading && data.length < total) {
-          fetchData(page + 1);
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    const currentSentinel = sentinelRef.current;
-    if (currentSentinel) {
-      observer.observe(currentSentinel);
-    }
-
-    return () => {
-      if (currentSentinel) {
-        observer.unobserve(currentSentinel);
-      }
-    };
-  }, [activeTab, loading, data.length, total, page]);
+  }, [dbInitialized, dateRange, selectedOfficeIds, filterAccount, selectedCallTypes]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -626,6 +1254,7 @@ export default function ReportPage() {
           startDate: dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start,
           endDate: dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end,
           status: selectedStatus !== 'All' ? selectedStatus : undefined,
+          pincode: debouncedPincodeSearch || undefined,
           ...(activeTab === 'accounts' ? {
             account: filterAccount,
             region: filterRegion.length ? filterRegion.join(',') : undefined
@@ -650,6 +1279,7 @@ export default function ReportPage() {
         { header: 'Date', key: 'date', width: 12 },
         { header: 'Customer', key: 'customer', width: 30 },
         { header: 'Branch', key: 'branch', width: 20 },
+        { header: 'Pincode', key: 'pincode', width: 12 },
         { header: 'Product', key: 'product', width: 20 },
         { header: 'Serial', key: 'serial', width: 15 },
         { header: 'Technician', key: 'tech', width: 20 },
@@ -681,6 +1311,7 @@ export default function ReportPage() {
           date: formatDate(row.callsdtrndate),
           customer: row.PartyName,
           branch: row.officename || row.Branch || '—',
+          pincode: row.Pincode || '—',
           product: row.itemname,
           serial: row.callsvserialno,
           tech: row.serviceman,
@@ -759,6 +1390,7 @@ export default function ReportPage() {
         { header: 'Date', key: 'date', width: 12 },
         { header: 'Customer', key: 'customer', width: 30 },
         { header: 'Branch', key: 'branch', width: 20 },
+        { header: 'Pincode', key: 'pincode', width: 12 },
         { header: 'Product', key: 'product', width: 20 },
         { header: 'Serial', key: 'serial', width: 15 },
         { header: 'Technician', key: 'tech', width: 20 },
@@ -789,6 +1421,7 @@ export default function ReportPage() {
             page: '1'
           });
           if (search) params.append('search', search);
+          if (debouncedPincodeSearch) params.append('pincode', debouncedPincodeSearch);
 
           const res = await axios.get(`/api/report?${params}`, { headers });
           exportData = res.data.data || [];
@@ -812,6 +1445,7 @@ export default function ReportPage() {
           date: formatDate(row.callsdtrndate),
           customer: row.PartyName,
           branch: row.officename || '—',
+          pincode: row.Pincode || '—',
           product: row.itemname,
           serial: row.callsvserialno,
           tech: row.serviceman,
@@ -977,19 +1611,113 @@ export default function ReportPage() {
   const totalPages = Math.ceil(total / limit);
 
   const localFilteredData = React.useMemo(() => {
-    return data.filter(c => {
-      if (!search) return true;
-      const searchLower = search.toLowerCase();
-      return (
-        String(c.UniqueCallNo || '').toLowerCase().includes(searchLower) ||
-        String(c.callsntrnno || '').toLowerCase().includes(searchLower) ||
-        String(c.PartyName || '').toLowerCase().includes(searchLower) ||
-        String(c.officename || '').toLowerCase().includes(searchLower) ||
-        String(c.serviceman || '').toLowerCase().includes(searchLower) ||
-        String(c.vcomplaint || '').toLowerCase().includes(searchLower)
-      );
+    const criteria = {
+      state: selectedState,
+      city: selectedCity,
+      branch: selectedBranch,
+      franchisee: selectedFranchisee,
+      technician: selectedTechnician
+    };
+
+    let filtered = filterCallsCSR(data, criteria);
+
+    // Apply status filter client-side (CSR)
+    if (selectedStatus && selectedStatus !== 'All') {
+      filtered = filtered.filter(c => {
+        if (selectedStatus === 'Open Unallocated') {
+          const noEng = !c.nengineer || c.nengineer === 0 || String(c.nengineer) === '0';
+          const noFastClose = !c.bfastclose || String(c.bfastclose).toLowerCase() === 'false' || String(c.bfastclose) === '0' || c.bfastclose === 0;
+          return isOpen(c) && noEng && noFastClose;
+        } else if (selectedStatus === 'Assigned') {
+          const hasEng = c.nengineer && c.nengineer !== 0 && String(c.nengineer) !== '0';
+          const noFastClose = !c.bfastclose || String(c.bfastclose).toLowerCase() === 'false' || String(c.bfastclose) === '0' || c.bfastclose === 0;
+          return isOpen(c) && hasEng && noFastClose;
+        } else if (selectedStatus === 'Tech. Solve Call') {
+          const isFastClose = c.bfastclose && (String(c.bfastclose).toLowerCase() === 'true' || String(c.bfastclose) === '1' || c.bfastclose === 1);
+          return isOpen(c) && isFastClose;
+        } else if (selectedStatus === 'Closed') {
+          return isSolved(c);
+        }
+        return true;
+      });
+    }
+
+    // Apply pincodeSearch
+    const pincodeFilter = pincodeSearch.trim().toLowerCase();
+    if (pincodeFilter) {
+      filtered = filtered.filter(c => String(c.Pincode || '').toLowerCase().includes(pincodeFilter));
+    }
+
+    // Apply general search
+    const searchFilter = search.trim().toLowerCase();
+    if (searchFilter) {
+      filtered = filtered.filter(c => (
+        String(c.UniqueCallNo || '').toLowerCase().includes(searchFilter) ||
+        String(c.callsntrnno || '').toLowerCase().includes(searchFilter) ||
+        String(c.PartyName || '').toLowerCase().includes(searchFilter) ||
+        String(c.officename || '').toLowerCase().includes(searchFilter) ||
+        String(c.serviceman || '').toLowerCase().includes(searchFilter) ||
+        String(c.vcomplaint || '').toLowerCase().includes(searchFilter) ||
+        String(c.Pincode || '').toLowerCase().includes(searchFilter)
+      ));
+    }
+
+    return filtered;
+  }, [data, search, pincodeSearch, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, selectedStatus]);
+
+  const displayedData = React.useMemo(() => {
+    return localFilteredData.slice(0, visibleLimit);
+  }, [localFilteredData, visibleLimit]);
+
+  const liveStats = React.useMemo(() => {
+    let total = localFilteredData.length;
+    let solved = 0;
+    let open = 0;
+    let transferred = 0;
+    let cancelled = 0;
+
+    localFilteredData.forEach(row => {
+      const isTransferred = (row.vtransfercallno && row.vtransfercallno !== '') || row.cancel_reason?.includes('Transfer');
+      const isSolved = row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True';
+      const isCancelled = (row.callstatus === 'Cancel' || row.Status === 'Cancel') && !isTransferred;
+
+      if (isTransferred) transferred++;
+      else if (isSolved) solved++;
+      else if (isCancelled) cancelled++;
+      else open++;
     });
-  }, [data, search]);
+
+    return { total, solved, open, transferred, cancelled };
+  }, [localFilteredData]);
+
+  useEffect(() => {
+    if (activeTab !== 'register') return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const first = entries[0];
+        if (first.isIntersecting && !loading) {
+          if (visibleLimit < localFilteredData.length) {
+            setVisibleLimit(prev => Math.min(prev + 100, localFilteredData.length));
+          } else if (data.length < total) {
+            fetchData(page + 1);
+          }
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    const currentSentinel = sentinelRef.current;
+    if (currentSentinel) {
+      observer.observe(currentSentinel);
+    }
+
+    return () => {
+      if (currentSentinel) {
+        observer.unobserve(currentSentinel);
+      }
+    };
+  }, [activeTab, loading, data.length, total, page, visibleLimit, localFilteredData.length]);
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden text-slate-900 bg-white">
@@ -1146,140 +1874,142 @@ export default function ReportPage() {
           </div>
 
           {/* Branch Filter */}
-          <div className="relative">
-            <button
-              onClick={() => {
-                if (!showOfficeDropdown) {
-                  setTempSelectedOfficeIds(selectedOfficeIds);
-                }
-                setShowOfficeDropdown(!showOfficeDropdown);
-              }}
-              className="min-w-[140px] max-w-[200px] bg-white border border-slate-200 rounded-md px-3 py-1.5 text-xs text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all shadow-sm ui-label"
-            >
-              <span className="truncate">
-                {selectedOfficeIds.length === 0 ? 'All Branches' : `${selectedOfficeIds.length} Selected`}
-              </span>
-              <ChevronDown size={14} className={`transition-transform duration-200 ${showOfficeDropdown ? 'rotate-180' : ''}`} />
-            </button>
+          {activeTab !== 'register' && (
+            <div className="relative">
+              <button
+                onClick={() => {
+                  if (!showOfficeDropdown) {
+                    setTempSelectedOfficeIds(selectedOfficeIds);
+                  }
+                  setShowOfficeDropdown(!showOfficeDropdown);
+                }}
+                className="min-w-[140px] max-w-[200px] bg-white border border-slate-200 rounded-md px-3 py-1.5 text-xs text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all shadow-sm ui-label"
+              >
+                <span className="truncate">
+                  {selectedOfficeIds.length === 0 ? 'All Branches' : `${selectedOfficeIds.length} Selected`}
+                </span>
+                <ChevronDown size={14} className={`transition-transform duration-200 ${showOfficeDropdown ? 'rotate-180' : ''}`} />
+              </button>
 
-            {showOfficeDropdown && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowOfficeDropdown(false)} />
-                <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 shadow-xl rounded-lg z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-                  <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-                    <span className="text-[10px] text-slate-500 ui-label">Select Branches</span>
-                    <button
-                      onClick={() => { setTempSelectedOfficeIds([]); setOfficeSearch(''); }}
-                      className="text-[10px] text-slate-400 hover:text-slate-900 px-2 py-1 rounded hover:bg-white ui-label"
-                    >
-                      Clear All
-                    </button>
-                  </div>
-                  <div className="p-2 border-b border-slate-100">
-                    <div className="relative">
-                      <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
-                      <input
-                        type="text"
-                        placeholder="Search branches..."
-                        className="w-full pl-7 pr-2 py-1.5 text-[11px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-slate-400"
-                        value={officeSearch}
-                        onChange={(e) => setOfficeSearch(e.target.value)}
-                      />
+              {showOfficeDropdown && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowOfficeDropdown(false)} />
+                  <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 shadow-xl rounded-lg z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                    <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                      <span className="text-[10px] text-slate-500 ui-label">Select Branches</span>
+                      <button
+                        onClick={() => { setTempSelectedOfficeIds([]); setOfficeSearch(''); }}
+                        className="text-[10px] text-slate-400 hover:text-slate-900 px-2 py-1 rounded hover:bg-white ui-label"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                    <div className="p-2 border-b border-slate-100">
+                      <div className="relative">
+                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                        <input
+                          type="text"
+                          placeholder="Search branches..."
+                          className="w-full pl-7 pr-2 py-1.5 text-[11px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-slate-400"
+                          value={officeSearch}
+                          onChange={(e) => setOfficeSearch(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="max-h-72 overflow-y-auto p-1 custom-scrollbar">
+                      {officeSearch ? (
+                        offices.filter(o => o.vcompanyname.toLowerCase().includes(officeSearch.toLowerCase())).map(o => {
+                          const isSelected = tempSelectedOfficeIds.includes(String(o.ncode));
+                          return (
+                            <label key={o.ncode} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
+                              <input
+                                type="checkbox"
+                                className="w-3.5 h-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                                checked={isSelected}
+                                onChange={(e) => {
+                                  const val = String(o.ncode);
+                                  if (e.target.checked) {
+                                    setTempSelectedOfficeIds(prev => Array.from(new Set([...prev, val])));
+                                  } else {
+                                    setTempSelectedOfficeIds(prev => prev.filter(id => id !== val));
+                                  }
+                                }}
+                              />
+                              <span className={`text-[11px] font-medium ${isSelected ? 'text-slate-900 font-bold' : 'text-slate-600'} group-hover:text-slate-900`}>
+                                {o.vcompanyname}
+                              </span>
+                            </label>
+                          );
+                        })
+                      ) : ((() => {
+                        const buildTree = (parentId: string | null = '0', level = 0): React.ReactNode[] => {
+                          return offices
+                            .filter(o => String(o.nunder || '0') === String(parentId || '0'))
+                            .map(o => {
+                              const isSelected = tempSelectedOfficeIds.includes(String(o.ncode));
+                              return [
+                                <label key={o.ncode} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
+                                  <div style={{ width: `${level * 12}px` }} />
+                                  <input
+                                    type="checkbox"
+                                    className="w-3.5 h-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                                    checked={isSelected}
+                                    onChange={(e) => {
+                                      const val = String(o.ncode);
+                                      if (e.target.checked) {
+                                        // Add this and all descendants
+                                        const getAllChildren = (id: string): string[] => {
+                                          const children = offices.filter(c => String(c.nunder) === String(id));
+                                          let ids = [id];
+                                          children.forEach(c => {
+                                            ids = [...ids, ...getAllChildren(String(c.ncode))];
+                                          });
+                                          return ids;
+                                        };
+                                        const allToAdd = getAllChildren(val);
+                                        setTempSelectedOfficeIds(prev => Array.from(new Set([...prev, ...allToAdd])));
+                                      } else {
+                                        // Remove this and all descendants
+                                        const getAllChildren = (id: string): string[] => {
+                                          const children = offices.filter(c => String(c.nunder) === String(id));
+                                          let ids = [id];
+                                          children.forEach(c => {
+                                            ids = [...ids, ...getAllChildren(String(c.ncode))];
+                                          });
+                                          return ids;
+                                        };
+                                        const allToRemove = getAllChildren(val);
+                                        setTempSelectedOfficeIds(prev => prev.filter(id => !allToRemove.includes(id)));
+                                      }
+                                    }}
+                                  />
+                                  <span className={`text-[11px] font-medium ${isSelected ? 'text-slate-900 font-bold' : 'text-slate-600'} group-hover:text-slate-900`}>
+                                    {o.vcompanyname}
+                                  </span>
+                                </label>,
+                                ...buildTree(o.ncode, level + 1)
+                              ];
+                            }).flat();
+                        };
+                        return buildTree('0', 0);
+                      })())}
+                    </div>
+                    <div className="p-2 border-t border-slate-100 bg-slate-50 flex justify-end">
+                      <button
+                        onClick={() => {
+                          setSelectedOfficeIds(tempSelectedOfficeIds);
+                          setShowOfficeDropdown(false);
+                        }}
+                        className="bg-slate-900 text-white px-4 py-1 rounded text-[10px] hover:bg-slate-800 transition-colors ui-label"
+                      >
+                        Done
+                      </button>
                     </div>
                   </div>
-                  <div className="max-h-72 overflow-y-auto p-1 custom-scrollbar">
-                    {officeSearch ? (
-                      offices.filter(o => o.vcompanyname.toLowerCase().includes(officeSearch.toLowerCase())).map(o => {
-                        const isSelected = tempSelectedOfficeIds.includes(String(o.ncode));
-                        return (
-                          <label key={o.ncode} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
-                            <input
-                              type="checkbox"
-                              className="w-3.5 h-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
-                              checked={isSelected}
-                              onChange={(e) => {
-                                const val = String(o.ncode);
-                                if (e.target.checked) {
-                                  setTempSelectedOfficeIds(prev => Array.from(new Set([...prev, val])));
-                                } else {
-                                  setTempSelectedOfficeIds(prev => prev.filter(id => id !== val));
-                                }
-                              }}
-                            />
-                            <span className={`text-[11px] font-medium ${isSelected ? 'text-slate-900 font-bold' : 'text-slate-600'} group-hover:text-slate-900`}>
-                              {o.vcompanyname}
-                            </span>
-                          </label>
-                        );
-                      })
-                    ) : ((() => {
-                      const buildTree = (parentId: string | null = '0', level = 0): React.ReactNode[] => {
-                        return offices
-                          .filter(o => String(o.nunder || '0') === String(parentId || '0'))
-                          .map(o => {
-                            const isSelected = tempSelectedOfficeIds.includes(String(o.ncode));
-                            return [
-                              <label key={o.ncode} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
-                                <div style={{ width: `${level * 12}px` }} />
-                                <input
-                                  type="checkbox"
-                                  className="w-3.5 h-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
-                                  checked={isSelected}
-                                  onChange={(e) => {
-                                    const val = String(o.ncode);
-                                    if (e.target.checked) {
-                                      // Add this and all descendants
-                                      const getAllChildren = (id: string): string[] => {
-                                        const children = offices.filter(c => String(c.nunder) === String(id));
-                                        let ids = [id];
-                                        children.forEach(c => {
-                                          ids = [...ids, ...getAllChildren(String(c.ncode))];
-                                        });
-                                        return ids;
-                                      };
-                                      const allToAdd = getAllChildren(val);
-                                      setTempSelectedOfficeIds(prev => Array.from(new Set([...prev, ...allToAdd])));
-                                    } else {
-                                      // Remove this and all descendants
-                                      const getAllChildren = (id: string): string[] => {
-                                        const children = offices.filter(c => String(c.nunder) === String(id));
-                                        let ids = [id];
-                                        children.forEach(c => {
-                                          ids = [...ids, ...getAllChildren(String(c.ncode))];
-                                        });
-                                        return ids;
-                                      };
-                                      const allToRemove = getAllChildren(val);
-                                      setTempSelectedOfficeIds(prev => prev.filter(id => !allToRemove.includes(id)));
-                                    }
-                                  }}
-                                />
-                                <span className={`text-[11px] font-medium ${isSelected ? 'text-slate-900 font-bold' : 'text-slate-600'} group-hover:text-slate-900`}>
-                                  {o.vcompanyname}
-                                </span>
-                              </label>,
-                              ...buildTree(o.ncode, level + 1)
-                            ];
-                          }).flat();
-                      };
-                      return buildTree('0', 0);
-                    })())}
-                  </div>
-                  <div className="p-2 border-t border-slate-100 bg-slate-50 flex justify-end">
-                    <button
-                      onClick={() => {
-                        setSelectedOfficeIds(tempSelectedOfficeIds);
-                        setShowOfficeDropdown(false);
-                      }}
-                      className="bg-slate-900 text-white px-4 py-1 rounded text-[10px] hover:bg-slate-800 transition-colors ui-label"
-                    >
-                      Done
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+                </>
+              )}
+            </div>
+          )}
 
           <div className="flex items-center border-l border-slate-200 pl-4 h-6">
             <DateRangeSelector
@@ -1308,23 +2038,53 @@ export default function ReportPage() {
             <div className="flex items-center gap-4 border-l border-slate-200 pl-4 h-6">
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-slate-400 ui-strong">Total</span>
-                <span className="text-[13px] text-slate-900 ui-label">{(registerSummary.total || 0).toLocaleString()}</span>
+                <span className="text-[13px] text-slate-900 ui-label">
+                  {liveStats.total < (registerSummary.total || 0) ? (
+                    <span>{liveStats.total.toLocaleString()}<span className="text-[10px] text-slate-400 font-normal">/{(registerSummary.total || 0).toLocaleString()}</span></span>
+                  ) : (
+                    (registerSummary.total || 0).toLocaleString()
+                  )}
+                </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-emerald-500 ui-strong">Solved</span>
-                <span className="text-[13px] text-emerald-600 ui-label">{(registerSummary.solved || 0).toLocaleString()}</span>
+                <span className="text-[13px] text-emerald-600 ui-label">
+                  {liveStats.total < (registerSummary.total || 0) ? (
+                    <span>{liveStats.solved.toLocaleString()}<span className="text-[10px] text-emerald-400 font-normal">/{(registerSummary.solved || 0).toLocaleString()}</span></span>
+                  ) : (
+                    (registerSummary.solved || 0).toLocaleString()
+                  )}
+                </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-blue-500 ui-strong">Open</span>
-                <span className="text-[13px] text-blue-600 ui-label">{(registerSummary.open || 0).toLocaleString()}</span>
+                <span className="text-[13px] text-blue-600 ui-label">
+                  {liveStats.total < (registerSummary.total || 0) ? (
+                    <span>{liveStats.open.toLocaleString()}<span className="text-[10px] text-blue-400 font-normal">/{(registerSummary.open || 0).toLocaleString()}</span></span>
+                  ) : (
+                    (registerSummary.open || 0).toLocaleString()
+                  )}
+                </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-slate-400 ui-strong">Trf</span>
-                <span className="text-[13px] text-slate-600 ui-label">{(registerSummary.transferred || 0).toLocaleString()}</span>
+                <span className="text-[13px] text-slate-600 ui-label">
+                  {liveStats.total < (registerSummary.total || 0) ? (
+                    <span>{liveStats.transferred.toLocaleString()}<span className="text-[10px] text-slate-400 font-normal">/{(registerSummary.transferred || 0).toLocaleString()}</span></span>
+                  ) : (
+                    (registerSummary.transferred || 0).toLocaleString()
+                  )}
+                </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-rose-500 ui-strong">Can</span>
-                <span className="text-[13px] text-rose-600 ui-label">{(registerSummary.cancelled || 0).toLocaleString()}</span>
+                <span className="text-[13px] text-rose-600 ui-label">
+                  {liveStats.total < (registerSummary.total || 0) ? (
+                    <span>{liveStats.cancelled.toLocaleString()}<span className="text-[10px] text-rose-400 font-normal">/{(registerSummary.cancelled || 0).toLocaleString()}</span></span>
+                  ) : (
+                    (registerSummary.cancelled || 0).toLocaleString()
+                  )}
+                </span>
               </div>
             </div>
           )}
@@ -1342,10 +2102,223 @@ export default function ReportPage() {
                   onKeyDown={(e) => e.key === 'Enter' && fetchData(1)}
                 />
               </div>
+              <div className="relative flex-1 max-w-[150px]">
+                <MapPin className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Pincode..."
+                  className="w-full pl-8 pr-4 py-1.5 bg-slate-50 border-none rounded-md text-[11px] font-medium focus:ring-1 focus:ring-slate-200 transition-all font-mono"
+                  value={pincodeSearch}
+                  onChange={(e) => setPincodeSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && fetchData(1)}
+                />
+              </div>
             </div>
           )}
         </div>
       </div>
+
+      {/* Cascading Geographic & Assignment Filter Panel */}
+      {activeTab === 'register' && (() => {
+        const isAnyFilterActive = selectedState !== 'All' || 
+                                  selectedCity !== 'All' || 
+                                  selectedBranch !== 'All' || 
+                                  selectedFranchisee !== 'All' || 
+                                  selectedTechnician !== 'All' || 
+                                  search !== '' || 
+                                  pincodeSearch !== '' ||
+                                  selectedCallTypes.length > 0 ||
+                                  selectedStatus !== 'All';
+
+        return (
+          <div className="bg-gradient-to-r from-slate-50 via-white to-slate-50 border-b border-slate-200 px-6 py-3 flex flex-wrap items-center gap-4 text-xs shadow-[inset_0_-2px_4px_rgba(0,0,0,0.015)]">
+            {/* 1. State Selector */}
+            <div className={`group flex items-center gap-3 px-3 py-1.5 bg-white border rounded-xl shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition-all focus-within:ring-2 focus-within:ring-blue-100 focus-within:border-blue-400 min-w-[160px] max-w-[200px] flex-1 ${
+              selectedState !== 'All' 
+                ? 'border-blue-200 bg-blue-50/20' 
+                : 'border-slate-200 hover:border-slate-300'
+            }`}>
+              <div className={`p-1.5 rounded-lg transition-colors ${selectedState !== 'All' ? 'bg-blue-100 text-blue-600' : 'bg-slate-50 text-slate-400 group-hover:bg-slate-100 group-hover:text-slate-500'}`}>
+                {/* Map/Globe Icon */}
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3V6z"/><path d="M9 3v15"/><path d="M15 6v15"/></svg>
+              </div>
+              <div className="flex flex-col flex-1 min-w-0">
+                <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider leading-none mb-0.5 select-none text-[8.5px]">State</span>
+                <div className="relative flex items-center pr-3">
+                  <select
+                    value={selectedState}
+                    onChange={(e) => handleStateChange(e.target.value)}
+                    className="bg-transparent border-none p-0 text-[11.5px] text-slate-700 font-bold focus:outline-none focus:ring-0 cursor-pointer w-full select-none appearance-none"
+                  >
+                    <option value="All">All States ({statesList.reduce((acc, curr) => acc + curr.call_count, 0)})</option>
+                    {statesList.map(s => (
+                      <option key={s.vname} value={s.vname}>
+                        {s.vname} ({s.call_count})
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. City Selector */}
+            <div className={`group flex items-center gap-3 px-3 py-1.5 bg-white border rounded-xl shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition-all focus-within:ring-2 focus-within:ring-teal-100 focus-within:border-teal-400 min-w-[170px] max-w-[210px] flex-1 ${
+              selectedCity !== 'All' 
+                ? 'border-teal-200 bg-teal-50/20' 
+                : 'border-slate-200 hover:border-slate-300'
+            }`}>
+              <div className={`p-1.5 rounded-lg transition-colors ${selectedCity !== 'All' ? 'bg-teal-100 text-teal-600' : 'bg-slate-50 text-slate-400 group-hover:bg-slate-100 group-hover:text-slate-500'}`}>
+                {/* MapPin Icon */}
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+              </div>
+              <div className="flex flex-col flex-1 min-w-0">
+                <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider leading-none mb-0.5 select-none text-[8.5px]">City</span>
+                <div className="relative flex items-center pr-3">
+                  <select
+                    value={selectedCity}
+                    onChange={(e) => handleCityChange(e.target.value)}
+                    className="bg-transparent border-none p-0 text-[11.5px] text-slate-700 font-bold focus:outline-none focus:ring-0 cursor-pointer w-full select-none appearance-none"
+                  >
+                    <option value="All">All Cities ({citiesList.reduce((acc, curr) => acc + curr.call_count, 0)})</option>
+                    {citiesList.map(c => (
+                      <option key={c.ncode} value={c.ncode}>
+                        {c.vname} ({c.call_count})
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Branch Selector */}
+            <div className={`group flex items-center gap-3 px-3 py-1.5 bg-white border rounded-xl shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition-all focus-within:ring-2 focus-within:ring-violet-100 focus-within:border-violet-400 min-w-[200px] max-w-[260px] flex-1 ${
+              selectedBranch !== 'All' 
+                ? 'border-violet-200 bg-violet-50/20' 
+                : 'border-slate-200 hover:border-slate-300'
+            }`}>
+              <div className={`p-1.5 rounded-lg transition-colors ${selectedBranch !== 'All' ? 'bg-violet-100 text-violet-600' : 'bg-slate-50 text-slate-400 group-hover:bg-slate-100 group-hover:text-slate-500'}`}>
+                {/* Building2 Icon */}
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="22" width="18" height="2" /><rect x="4" y="2" width="16" height="20" rx="2" /><line x1="9" y1="22" x2="9" y2="16" /><line x1="15" y1="22" x2="15" y2="16" /><path d="M9 16h6" /><path d="M8 6h.01" /><path d="M16 6h.01" /><path d="M8 10h.01" /><path d="M16 10h.01" /></svg>
+              </div>
+              <div className="flex flex-col flex-1 min-w-0">
+                <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider leading-none mb-0.5 select-none text-[8.5px]">Branch</span>
+                <div className="relative flex items-center pr-3">
+                  <select
+                    value={selectedBranch}
+                    onChange={(e) => handleBranchChange(e.target.value)}
+                    className="bg-transparent border-none p-0 text-[11.5px] text-slate-700 font-bold focus:outline-none focus:ring-0 cursor-pointer w-full select-none appearance-none"
+                  >
+                    <option value="All">All Branches ({branchesList.reduce((acc, curr) => acc + curr.call_count, 0)})</option>
+                    {branchesList.map(b => (
+                      <option key={b.ncode} value={b.ncode}>
+                        {b.vcompanyname} ({b.call_count})
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Franchisee Selector */}
+            <div className={`group flex items-center gap-3 px-3 py-1.5 bg-white border rounded-xl shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition-all focus-within:ring-2 focus-within:ring-amber-100 focus-within:border-amber-400 min-w-[200px] max-w-[260px] flex-1 ${
+              selectedFranchisee !== 'All' 
+                ? 'border-amber-200 bg-amber-50/20' 
+                : 'border-slate-200 hover:border-slate-300'
+            }`}>
+              <div className={`p-1.5 rounded-lg transition-colors ${selectedFranchisee !== 'All' ? 'bg-amber-100 text-amber-600' : 'bg-slate-50 text-slate-400 group-hover:bg-slate-100 group-hover:text-slate-500'}`}>
+                {/* Users Icon */}
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              </div>
+              <div className="flex flex-col flex-1 min-w-0">
+                <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider leading-none mb-0.5 select-none text-[8.5px]">Franchisee</span>
+                <div className="relative flex items-center pr-3">
+                  <select
+                    value={selectedFranchisee}
+                    onChange={(e) => handleFranchiseeChange(e.target.value)}
+                    className="bg-transparent border-none p-0 text-[11.5px] text-slate-700 font-bold focus:outline-none focus:ring-0 cursor-pointer w-full select-none appearance-none"
+                  >
+                    <option value="All">All Franchisees ({franchiseesList.reduce((acc, curr) => acc + curr.call_count, 0)})</option>
+                    {franchiseesList.map(f => (
+                      <option key={f.ncode} value={f.ncode}>
+                        {f.vcompanyname} ({f.call_count})
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 5. Technician Selector */}
+            <div className={`group flex items-center gap-3 px-3 py-1.5 bg-white border rounded-xl shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition-all focus-within:ring-2 focus-within:ring-emerald-100 focus-within:border-emerald-400 min-w-[200px] max-w-[260px] flex-1 ${
+              selectedTechnician !== 'All' 
+                ? 'border-emerald-200 bg-emerald-50/20' 
+                : 'border-slate-200 hover:border-slate-300'
+            }`}>
+              <div className={`p-1.5 rounded-lg transition-colors ${selectedTechnician !== 'All' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-50 text-slate-400 group-hover:bg-slate-100 group-hover:text-slate-500'}`}>
+                {/* Wrench Icon */}
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+              </div>
+              <div className="flex flex-col flex-1 min-w-0">
+                <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider leading-none mb-0.5 select-none text-[8.5px]">Technician</span>
+                <div className="relative flex items-center pr-3">
+                  <select
+                    value={selectedTechnician}
+                    onChange={(e) => setSelectedTechnician(e.target.value)}
+                    className="bg-transparent border-none p-0 text-[11.5px] text-slate-700 font-bold focus:outline-none focus:ring-0 cursor-pointer w-full select-none appearance-none"
+                  >
+                    <option value="All">All Technicians ({techniciansList.reduce((acc, curr) => acc + curr.call_count, 0)})</option>
+                    {techniciansList.map(t => (
+                      <option key={t.ncode} value={t.ncode}>
+                        {t.vname} ({t.call_count})
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 6. Clear Filters Button */}
+            <button
+              onClick={() => {
+                setSelectedState('All');
+                setSelectedCity('All');
+                setSelectedBranch('All');
+                setSelectedFranchisee('All');
+                setSelectedTechnician('All');
+                setSearch('');
+                setPincodeSearch('');
+                setSelectedCallTypes([]);
+                setSelectedStatus('All');
+              }}
+              disabled={!isAnyFilterActive}
+              className={`ml-auto flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-[11px] font-extrabold transition-all shadow-[0_1px_2px_rgba(0,0,0,0.02)] active:scale-95 ${
+                isAnyFilterActive 
+                  ? 'bg-rose-500 text-white hover:bg-rose-600 hover:shadow-[0_4px_12px_rgba(244,63,94,0.2)] cursor-pointer' 
+                  : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed shadow-none'
+              }`}
+              title="Reset all search queries, status selectors and cascading options instantly"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+              <span>Clear Filters</span>
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Main Area */}
       <div className="flex-1 overflow-x-auto overflow-y-hidden bg-white relative custom-scrollbar">
@@ -1399,6 +2372,7 @@ export default function ReportPage() {
                     { key: 'callsdtrndate', label: 'Date' },
                     { key: 'PartyName', label: 'Customer' },
                     { key: 'officename', label: 'Branch' },
+                    { key: 'Pincode', label: 'Pincode' },
                     { key: 'itemname', label: 'Product' },
                     { key: 'callsvserialno', label: 'Serial' },
                     { key: 'serviceman', label: 'Technician' },
@@ -1417,7 +2391,7 @@ export default function ReportPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {localFilteredData.length > 0 ? localFilteredData.map((row, idx) => (
+                {displayedData.length > 0 ? displayedData.map((row, idx) => (
                   <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-4 py-2 text-[11px] text-slate-400 border-r border-slate-50 text-center">
                       {idx + 1}
@@ -1434,6 +2408,7 @@ export default function ReportPage() {
                     </td>
                     <td className="px-4 py-2 text-[11px] font-medium text-slate-800 border-r border-slate-50 max-w-[250px] truncate" title={row.PartyName}>{row.PartyName}</td>
                     <td className="px-4 py-2 text-[11px] text-slate-700 border-r border-slate-50">{row.officename}</td>
+                    <td className="px-4 py-2 text-[11px] text-slate-700 border-r border-slate-50 font-mono">{row.Pincode || '—'}</td>
                     <td className="px-4 py-2 text-[11px] text-slate-700 border-r border-slate-50 whitespace-nowrap">{row.itemname}</td>
                     <td className="px-4 py-2 text-[11px] font-mono text-slate-500 border-r border-slate-50 whitespace-nowrap">{row.callsvserialno}</td>
                     <td className="px-4 py-2 text-[11px] text-slate-900 border-r border-slate-50 whitespace-nowrap">{row.serviceman}</td>
@@ -1492,6 +2467,20 @@ export default function ReportPage() {
                 <div className="flex items-center gap-2 text-slate-500 py-4">
                   <div className="w-3.5 h-3.5 border-2 border-slate-600 border-t-transparent rounded-full animate-spin"></div>
                   <span className="text-[10px] font-medium ui-label">Loading more records...</span>
+                </div>
+              )}
+              {backgroundProgress && (
+                <div className="w-full max-w-[640px] space-y-2 px-4 py-3 bg-slate-900/95 rounded-2xl border border-slate-700 text-white shadow-lg">
+                  <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.2em]">
+                    <span>Background prefetching</span>
+                    <span>{Math.min(backgroundProgress.loaded, backgroundProgress.total)}/{backgroundProgress.total} pages</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-700 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-emerald-400 transition-all"
+                      style={{ width: `${Math.round((backgroundProgress.loaded / backgroundProgress.total) * 100)}%` }}
+                    />
+                  </div>
                 </div>
               )}
               {!loading && data.length < total && (
@@ -1924,19 +2913,19 @@ export default function ReportPage() {
                                 <td className={`p-1.5 border border-slate-300 ${regColor} ui-strong`}>{a.region}</td>
                                 <td className="p-1.5 border border-slate-300 font-medium text-[9px] bg-slate-50/30">{a.account}</td>
                                 <td className="p-1.5 border border-slate-300 text-center text-slate-500 ui-strong">{a.population || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${a.account} - Total Calls`, { account: a.account, region: a.region })}>{a.total_calls}</td>
-                                <td className="p-1.5 border border-slate-300 text-center text-emerald-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_solved', `${a.account} - Solved Calls`, { account: a.account, region: a.region })}>{a.total_solved}</td>
-                                <td className="p-1.5 border border-slate-300 text-center text-blue-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('transferred_calls', `${a.account} - Transferred Calls`, { account: a.account, region: a.region })}>{a.transferred_calls || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center text-rose-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('cancelled_calls', `${a.account} - Cancelled Calls`, { account: a.account, region: a.region })}>{a.cancelled_calls}</td>
-                                <td className="p-1.5 border border-slate-300 text-center text-slate-900 bg-slate-100/50 cursor-pointer hover:bg-black/5 ui-strong" onClick={() => handleDrillDown('open_calls', `${a.account} - Open Calls`, { account: a.account, region: a.region })}>{open_calls_sum}</td>
+                                <td className="p-1.5 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${a.account} - Total Calls`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.total_calls}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-emerald-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_solved', `${a.account} - Solved Calls`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.total_solved}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-blue-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('transferred_calls', `${a.account} - Transferred Calls`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.transferred_calls || 0}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-rose-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('cancelled_calls', `${a.account} - Cancelled Calls`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.cancelled_calls}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-slate-900 bg-slate-100/50 cursor-pointer hover:bg-black/5 ui-strong" onClick={() => handleDrillDown('open_calls', `${a.account} - Open Calls`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{open_calls_sum}</td>
 
-                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_2', `${a.account} - <2 Days`, { account: a.account, region: a.region })}>{a.age_2 || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_3', `${a.account} - 2-7 Days`, { account: a.account, region: a.region })}>{a.age_3 || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${a.account} - 7-15 Days`, { account: a.account, region: a.region })}>{a.age_7 || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_15', `${a.account} - >15 Days`, { account: a.account, region: a.region })}>{a.age_15 || 0}</td>
+                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_2', `${a.account} - <2 Days`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.age_2 || 0}</td>
+                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_3', `${a.account} - 2-7 Days`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.age_3 || 0}</td>
+                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${a.account} - 7-15 Days`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.age_7 || 0}</td>
+                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_15', `${a.account} - >15 Days`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.age_15 || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center text-blue-700 bg-blue-100/20 ui-strong">{perc_gt_7}</td>
 
-                                <td className="p-1.5 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${a.account} - Part Pending`, { account: a.account, region: a.region })}>{a.part_pending || 0}</td>
+                                <td className="p-1.5 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${a.account} - Part Pending`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.part_pending || 0}</td>
                                 <td className="p-1.5 border border-slate-300 text-center">
                                   <div className="flex items-center justify-center gap-1.5">
                                     <span className="text-blue-700 ui-strong">{a.active_eng || 0}</span>
@@ -1960,19 +2949,19 @@ export default function ReportPage() {
                             <td className="p-1.5 border border-slate-700 text-center">
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.population || 0), 0).toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_calls', `All India - Total Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI' })}>
+                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_calls', `All India - Total Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.total_calls || 0), 0).toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_solved', `All India - Solved Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI' })}>
+                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_solved', `All India - Solved Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.total_solved || 0), 0).toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center text-blue-400 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('transferred_calls', `All India - Transferred Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI' })}>
+                            <td className="p-1.5 border border-slate-700 text-center text-blue-400 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('transferred_calls', `All India - Transferred Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.transferred_calls || 0), 0).toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center text-rose-400 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('cancelled_calls', `All India - Cancelled Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI' })}>
+                            <td className="p-1.5 border border-slate-700 text-center text-rose-400 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('cancelled_calls', `All India - Cancelled Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
                               {filteredAccounts.reduce((sum, a) => sum + Number(a.cancelled_calls || 0), 0).toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center bg-slate-800 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('open_calls', `All India - Open Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI' })}>
+                            <td className="p-1.5 border border-slate-700 text-center bg-slate-800 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('open_calls', `All India - Open Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
                               {filteredAccounts.reduce((sum, a) => sum + (Number(a.age_2 || 0) + Number(a.age_3 || 0) + Number(a.age_7 || 0) + Number(a.age_15 || 0)), 0).toLocaleString()}
                             </td>
 

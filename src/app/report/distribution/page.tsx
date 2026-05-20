@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import Link from 'next/link';
 import axios from 'axios';
 import { 
   MapPin, 
@@ -13,7 +14,7 @@ import {
   CheckCircle,
   Calendar,
   Layers,
-  Map,
+  Map as LucideMap,
   FilterX
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -75,6 +76,7 @@ export default function CallDistributionPage() {
   const [selectedTechnician, setSelectedTechnician] = useState('All');
   const [selectedCallType, setSelectedCallType] = useState('BREAKDOWN');
   const [selectedPincode, setSelectedPincode] = useState('All');
+  const [pincodeSearch, setPincodeSearch] = useState('');
 
   // Dynamic filter lists
   const [statesList, setStatesList] = useState<any[]>([]);
@@ -100,16 +102,14 @@ export default function CallDistributionPage() {
   });
   const [franchiseeSummary, setFranchiseeSummary] = useState<any[]>([]);
   const [pincodeSummary, setPincodeSummary] = useState<any[]>([]);
-  const [detailsRows, setDetailsRows] = useState<any[]>([]);
-  const [showDetails, setShowDetails] = useState(false);
-  const [filteredDetailsRows, setFilteredDetailsRows] = useState<any[]>([]);
+  const [allCalls, setAllCalls] = useState<any[]>([]);
+  const [dbBranches, setDbBranches] = useState<any[]>([]);
   
   // Loading & Sorting States
   const [loading, setLoading] = useState(true);
   const [sortField, setSortField] = useState('ratio');
   const [sortAsc, setSortAsc] = useState(false);
   const [highlightedFranchisee, setHighlightedFranchisee] = useState<string | null>(null);
-  const [visibleRowsCount, setVisibleRowsCount] = useState(100);
 
   // Initialize: set default dates and load call types configuration
   useEffect(() => {
@@ -136,6 +136,29 @@ export default function CallDistributionPage() {
       });
   }, []);
 
+  // Helper to filter calls on the client
+  const filterCallsCSR = (calls: any[], criteria: any, exclude?: string) => {
+    return calls.filter((c) => {
+      if (exclude !== 'state' && criteria.state && criteria.state !== 'All') {
+        if (c.state !== criteria.state) return false;
+      }
+      if (exclude !== 'city' && criteria.city && criteria.city !== 'All') {
+        if (c.city !== criteria.city) return false;
+      }
+      if (exclude !== 'branch' && criteria.branch && criteria.branch !== 'All') {
+        if (String(c.resolved_branch_code) !== criteria.branch) return false;
+      }
+      if (exclude !== 'franchisee' && criteria.franchisee && criteria.franchisee !== 'All') {
+        const cFranCode = c.franchisee_code ? String(c.franchisee_code) : 'UNASSIGNED';
+        if (cFranCode !== criteria.franchisee) return false;
+      }
+      if (exclude !== 'technician' && criteria.technician && criteria.technician !== 'All') {
+        if (String(c.nengineer) !== criteria.technician) return false;
+      }
+      return true;
+    });
+  };
+
   // Fetch Dashboard Stats, Coordinates & Cascading Filter Options
   const fetchDashboardData = async (refresh: boolean = false) => {
     if (!startDate || !endDate) return;
@@ -144,52 +167,15 @@ export default function CallDistributionPage() {
       const params = {
         startDate,
         endDate,
-        state: selectedState,
-        city: selectedCity,
-        branch: selectedBranch,
-        franchisee: selectedFranchisee,
-        technician: selectedTechnician,
         callType: selectedCallType,
         refresh: refresh ? 'true' : 'false'
       };
 
       const res = await axios.get('/api/distribution', { params });
-      const { metrics, franchiseeSummary, pincodeSummary, details, states, cities, branches, franchisees, technicians } = res.data || {};
+      const { allCalls: fetchedCalls, dbBranches: fetchedBranches } = res.data || {};
 
-      if (metrics) setMetrics(metrics);
-      if (franchiseeSummary) setFranchiseeSummary(franchiseeSummary);
-      if (pincodeSummary) setPincodeSummary(pincodeSummary);
-      if (details) setDetailsRows(details);
-
-      // Populate filter option dropdown lists
-      const newStates = states || [];
-      const newCities = cities || [];
-      const newBranches = branches || [];
-      const newFranchisees = franchisees || [];
-      const newTechs = technicians || [];
-
-      setStatesList(newStates);
-      setCitiesList(newCities);
-      setBranchesList(newBranches);
-      setFranchiseesList(newFranchisees);
-      setTechniciansList(newTechs);
-
-      // Validation and auto-resets
-      if (selectedState !== 'All' && !newStates.some((s: any) => s.vname === selectedState)) {
-        setSelectedState('All');
-      }
-      if (selectedCity !== 'All' && !newCities.some((c: any) => String(c.ncode) === String(selectedCity))) {
-        setSelectedCity('All');
-      }
-      if (selectedBranch !== 'All' && !newBranches.some((b: any) => String(b.ncode) === String(selectedBranch))) {
-        setSelectedBranch('All');
-      }
-      if (selectedFranchisee !== 'All' && !newFranchisees.some((f: any) => String(f.ncode) === String(selectedFranchisee))) {
-        setSelectedFranchisee('All');
-      }
-      if (selectedTechnician !== 'All' && !newTechs.some((t: any) => String(t.ncode) === String(selectedTechnician))) {
-        setSelectedTechnician('All');
-      }
+      if (fetchedCalls) setAllCalls(fetchedCalls);
+      if (fetchedBranches) setDbBranches(fetchedBranches);
     } catch (err) {
       toast.error('Error fetching call distribution report');
       console.error(err);
@@ -198,7 +184,7 @@ export default function CallDistributionPage() {
     }
   };
 
-  // Trigger fetch when primary filters change (debounced to avoid network request spam during rapid user selections)
+  // Trigger fetch when primary date range or call type changes (debounced to avoid network request spam)
   useEffect(() => {
     if (!startDate || !endDate || loadingMeta) return;
 
@@ -207,7 +193,291 @@ export default function CallDistributionPage() {
     }, 350);
 
     return () => clearTimeout(timer);
-  }, [startDate, endDate, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, selectedCallType, loadingMeta]);
+  }, [startDate, endDate, selectedCallType, loadingMeta]);
+
+  // CSR Dropdown Cascades Computation
+  useEffect(() => {
+    if (allCalls.length === 0) {
+      setStatesList([]);
+      setCitiesList([]);
+      setBranchesList([]);
+      setFranchiseesList([]);
+      setTechniciansList([]);
+      return;
+    }
+
+    const criteria = {
+      state: selectedState,
+      city: selectedCity,
+      branch: selectedBranch,
+      franchisee: selectedFranchisee,
+      technician: selectedTechnician
+    };
+
+    // States (exclude state filter)
+    const statesFiltered = filterCallsCSR(allCalls, criteria, 'state');
+    const stateCounts: Record<string, { ncode: string; vname: string; call_count: number }> = {};
+    statesFiltered.forEach((c) => {
+      if (!c.state) return;
+      const sName = c.state;
+      if (!stateCounts[sName]) {
+        stateCounts[sName] = { ncode: sName, vname: sName, call_count: 0 };
+      }
+      stateCounts[sName].call_count++;
+    });
+    const states = Object.values(stateCounts).sort((a, b) => a.vname.localeCompare(b.vname));
+    setStatesList(states);
+
+    // Cities (exclude city filter)
+    const citiesFiltered = filterCallsCSR(allCalls, criteria, 'city');
+    const cityCounts: Record<string, { ncode: string; vname: string; nstate: string; call_count: number }> = {};
+    citiesFiltered.forEach((c) => {
+      if (!c.city) return;
+      const cName = c.city;
+      if (!cityCounts[cName]) {
+        cityCounts[cName] = { ncode: cName, vname: cName, nstate: c.state || '', call_count: 0 };
+      }
+      cityCounts[cName].call_count++;
+    });
+    const cities = Object.values(cityCounts).sort((a, b) => a.vname.localeCompare(b.vname));
+    setCitiesList(cities);
+
+    // Branches (exclude branch filter)
+    const branchesFiltered = filterCallsCSR(allCalls, criteria, 'branch');
+    const branchCallCounts: Record<string, number> = {};
+    branchesFiltered.forEach((c) => {
+      if (!c.resolved_branch_code) return;
+      const bCode = String(c.resolved_branch_code);
+      branchCallCounts[bCode] = (branchCallCounts[bCode] || 0) + 1;
+    });
+    const branches = dbBranches.map((dbB: any) => {
+      const bCode = String(dbB.ncode);
+      return {
+        ncode: bCode,
+        vcompanyname: dbB.vcompanyname,
+        call_count: branchCallCounts[bCode] || 0
+      };
+    }).filter((b: any) => b.call_count > 0);
+    setBranchesList(branches);
+
+    // Franchisees (exclude franchisee filter)
+    const franchiseesFiltered = filterCallsCSR(allCalls, criteria, 'franchisee');
+    const franchiseeCounts: Record<string, { ncode: string; vcompanyname: string; nunder: string; call_count: number }> = {};
+    franchiseesFiltered.forEach((c) => {
+      const fCode = String(c.franchisee_code || 'UNASSIGNED');
+      const fName = c.franchisee_name || 'Unallocated';
+      if (!franchiseeCounts[fCode]) {
+        franchiseeCounts[fCode] = { ncode: fCode, vcompanyname: fName, nunder: String(c.office_under || ''), call_count: 0 };
+      }
+      franchiseeCounts[fCode].call_count++;
+    });
+    const franchisees = Object.values(franchiseeCounts).sort((a, b) => a.vcompanyname.localeCompare(b.vcompanyname));
+    setFranchiseesList(franchisees);
+
+    // Technicians (exclude technician filter)
+    const techniciansFiltered = filterCallsCSR(allCalls, criteria, 'technician');
+    const techCounts: Record<string, { ncode: string; vname: string; nofficeid: string; call_count: number }> = {};
+    techniciansFiltered.forEach((c) => {
+      if (!c.nengineer || c.nengineer === '0' || c.nengineer === 0) return;
+      const tCode = String(c.nengineer);
+      if (!techCounts[tCode]) {
+        techCounts[tCode] = { ncode: tCode, vname: c.technician_name || 'UNKNOWN', nofficeid: String(c.technician_office_id || ''), call_count: 0 };
+      }
+      techCounts[tCode].call_count++;
+    });
+    const technicians = Object.values(techCounts).sort((a, b) => a.vname.localeCompare(b.vname));
+    setTechniciansList(technicians);
+
+  }, [allCalls, dbBranches, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician]);
+
+  // CSR Dropdown Option Validation & Safe Resets
+  useEffect(() => {
+    if (statesList.length > 0 && selectedState !== 'All' && !statesList.some((s: any) => s.vname === selectedState)) {
+      setSelectedState('All');
+    }
+    if (citiesList.length > 0 && selectedCity !== 'All' && !citiesList.some((c: any) => String(c.ncode) === String(selectedCity))) {
+      setSelectedCity('All');
+    }
+    if (branchesList.length > 0 && selectedBranch !== 'All' && !branchesList.some((b: any) => String(b.ncode) === String(selectedBranch))) {
+      setSelectedBranch('All');
+    }
+    if (franchiseesList.length > 0 && selectedFranchisee !== 'All' && !franchiseesList.some((f: any) => String(f.ncode) === String(selectedFranchisee))) {
+      setSelectedFranchisee('All');
+    }
+    if (techniciansList.length > 0 && selectedTechnician !== 'All' && !techniciansList.some((t: any) => String(t.ncode) === String(selectedTechnician))) {
+      setSelectedTechnician('All');
+    }
+  }, [statesList, citiesList, branchesList, franchiseesList, techniciansList]);
+
+  // CSR Metrics & Dashboard Aggregations Computation
+  useEffect(() => {
+    if (allCalls.length === 0) {
+      setMetrics({
+        totalCalls: 0,
+        openCalls: 0,
+        closedCalls: 0,
+        franchiseesCount: 0,
+        activeTechniciansCount: 0,
+        callToTechnicianRatio: 0
+      });
+      setFranchiseeSummary([]);
+      setPincodeSummary([]);
+      return;
+    }
+
+    const criteria = {
+      state: selectedState,
+      city: selectedCity,
+      branch: selectedBranch,
+      franchisee: selectedFranchisee,
+      technician: selectedTechnician
+    };
+
+    const filteredCalls = filterCallsCSR(allCalls, criteria);
+
+    const franchiseeMap = new Map();
+    const pincodeMap = new Map();
+
+    let totalCallsCount = 0;
+    let openCallsCount = 0;
+    let closedCallsCount = 0;
+    const activeTechsSet = new Set();
+    const activeFranchiseesSet = new Set();
+
+    filteredCalls.forEach((c: any) => {
+      totalCallsCount++;
+      const isSolved = c.bsolved === true || c.bsolved === 1 || String(c.bsolved).toLowerCase() === 'true';
+      const isTechSolved = c.bfastclose === true || c.bfastclose === 1 || String(c.bfastclose).toLowerCase() === 'true';
+      
+      if (isSolved || isTechSolved) {
+        closedCallsCount++;
+      } else {
+        openCallsCount++;
+      }
+
+      if (c.nengineer && c.nengineer !== 0 && c.nengineer !== '0') {
+        activeTechsSet.add(c.nengineer);
+      }
+
+      const fCode = c.franchisee_code || 'UNASSIGNED';
+      const fName = c.franchisee_name || 'Unallocated';
+      if (c.franchisee_code) {
+        activeFranchiseesSet.add(c.franchisee_code);
+      }
+
+      // Franchisee aggregate
+      if (!franchiseeMap.has(fCode)) {
+        franchiseeMap.set(fCode, {
+          franchisee_code: fCode,
+          franchisee_name: fName,
+          techs: new Set(),
+          total_calls: 0,
+          open_calls: 0,
+          closed_calls: 0,
+          tech_solved: 0
+        });
+      }
+      const fObj = franchiseeMap.get(fCode);
+      fObj.total_calls++;
+      if (isSolved) {
+        fObj.closed_calls++;
+      } else if (isTechSolved) {
+        fObj.closed_calls++;
+        fObj.tech_solved++;
+      } else {
+        fObj.open_calls++;
+      }
+      if (c.nengineer && c.nengineer !== 0 && c.nengineer !== '0') {
+        fObj.techs.add(c.nengineer);
+      }
+
+      // Pincode aggregate
+      const pincode = c.pincode || 'UNKNOWN';
+      const pinKey = `${pincode}-${fCode}`;
+
+      if (!pincodeMap.has(pinKey)) {
+        pincodeMap.set(pinKey, {
+          pincode,
+          lat: c.lat,
+          lng: c.lng,
+          city_name: c.city,
+          state_name: c.state,
+          franchisee_name: fName,
+          franchisee_code: fCode,
+          total_calls: 0,
+          open_calls: 0
+        });
+      }
+      const pinObj = pincodeMap.get(pinKey);
+      pinObj.total_calls++;
+      if (!isSolved) {
+        pinObj.open_calls++;
+      }
+    });
+
+    const franchiseeSummary = Array.from(franchiseeMap.values()).map((f: any) => {
+      const techCount = f.techs.size;
+      const ratio = techCount > 0 ? parseFloat((f.total_calls / techCount).toFixed(2)) : f.total_calls;
+      return {
+        franchisee_code: f.franchisee_code,
+        franchisee_name: f.franchisee_name,
+        technicians_count: techCount,
+        total_calls: f.total_calls,
+        open_calls: f.open_calls,
+        closed_calls: f.closed_calls,
+        tech_solved: f.tech_solved || 0,
+        ratio
+      };
+    });
+
+    franchiseeSummary.sort((a, b) => b.ratio - a.ratio);
+
+    const pincodeFinalMap = new Map();
+    pincodeMap.forEach((pin: any) => {
+      if (!pincodeFinalMap.has(pin.pincode)) {
+        pincodeFinalMap.set(pin.pincode, {
+          pincode: pin.pincode,
+          lat: pin.lat,
+          lng: pin.lng,
+          city_name: pin.city_name,
+          state_name: pin.state_name,
+          total_calls: 0,
+          open_calls: 0,
+          franchisees: []
+        });
+      }
+      const pf = pincodeFinalMap.get(pin.pincode);
+      pf.total_calls += pin.total_calls;
+      pf.open_calls += pin.open_calls;
+      pf.franchisees.push({
+        franchisee_name: pin.franchisee_name,
+        franchisee_code: pin.franchisee_code,
+        total_calls: pin.total_calls
+      });
+    });
+
+    const pincodeSummary = Array.from(pincodeFinalMap.values()).map((pin: any) => {
+      return {
+        pincode: pin.pincode,
+        lat: pin.lat,
+        lng: pin.lng,
+        total_calls: pin.total_calls,
+        open_calls: pin.open_calls,
+        franchisees: pin.franchisees
+      };
+    });
+
+    setMetrics({
+      totalCalls: totalCallsCount,
+      openCalls: openCallsCount,
+      closedCalls: closedCallsCount,
+      franchiseesCount: activeFranchiseesSet.size,
+      activeTechniciansCount: activeTechsSet.size,
+      callToTechnicianRatio: activeTechsSet.size > 0 ? parseFloat((totalCallsCount / activeTechsSet.size).toFixed(2)) : totalCallsCount
+    });
+    setFranchiseeSummary(franchiseeSummary);
+    setPincodeSummary(pincodeSummary);
+  }, [allCalls, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician]);
 
   // Leaflet Map Initialization
   useEffect(() => {
@@ -299,8 +569,9 @@ export default function CallDistributionPage() {
 
       const bounds: any[] = [];
 
-      // Filter points based on highlighted Franchisee or selected Pincode
+      // Filter points based on highlighted Franchisee, selected Pincode, or Pincode Search
       const filteredPoints = pincodeSummary.filter(pin => {
+        if (pincodeSearch && !pin.pincode.toLowerCase().includes(pincodeSearch.toLowerCase())) return false;
         if (selectedPincode !== 'All' && pin.pincode !== selectedPincode) return false;
         if (highlightedFranchisee) {
           return pin.franchisees.some((f: any) => f.franchisee_code === highlightedFranchisee);
@@ -415,31 +686,30 @@ export default function CallDistributionPage() {
     return s;
   }, [franchiseeSummary, sortField, sortAsc]);
 
-  useEffect(() => {
-    if (selectedPincode && selectedPincode !== 'All') {
-      setShowDetails(true);
-    }
-  }, [selectedPincode]);
 
-  useEffect(() => {
-    if (highlightedFranchisee) {
-      setShowDetails(true);
-    }
-  }, [highlightedFranchisee]);
-
-  useEffect(() => {
-    const filtered = detailsRows.filter((row: any) => {
-      if (selectedPincode && selectedPincode !== 'All') {
-        return row.pincode === selectedPincode;
-      }
-      if (highlightedFranchisee) {
-        return row.franchisee_code === highlightedFranchisee;
-      }
-      return true;
-    });
-    setFilteredDetailsRows(filtered);
-    setVisibleRowsCount(100);
-  }, [detailsRows, selectedPincode, highlightedFranchisee]);
+  const hasActiveFilters = useMemo(() => {
+    return (
+      selectedState !== 'All' ||
+      selectedCity !== 'All' ||
+      selectedBranch !== 'All' ||
+      selectedFranchisee !== 'All' ||
+      selectedTechnician !== 'All' ||
+      selectedCallType !== 'BREAKDOWN' ||
+      selectedPincode !== 'All' ||
+      pincodeSearch !== '' ||
+      highlightedFranchisee !== null
+    );
+  }, [
+    selectedState,
+    selectedCity,
+    selectedBranch,
+    selectedFranchisee,
+    selectedTechnician,
+    selectedCallType,
+    selectedPincode,
+    pincodeSearch,
+    highlightedFranchisee
+  ]);
 
   if (loadingMeta) {
     return (
@@ -457,7 +727,7 @@ export default function CallDistributionPage() {
       <header className="px-6 py-4 bg-white border-b border-slate-200/80 flex justify-between items-center flex-shrink-0 shadow-sm z-10">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 bg-teal-50 border border-teal-100 rounded-xl flex items-center justify-center text-teal-600 shadow-sm">
-            <Map size={18} />
+            <LucideMap size={18} />
           </div>
           <div>
             <h1 className="text-sm font-extrabold text-slate-900 tracking-wide">Call Distribution Audit</h1>
@@ -466,6 +736,26 @@ export default function CallDistributionPage() {
         </div>
         
         <div className="flex items-center gap-3">
+          {hasActiveFilters && (
+            <button
+              onClick={() => {
+                setSelectedState('All');
+                setSelectedCity('All');
+                setSelectedBranch('All');
+                setSelectedFranchisee('All');
+                setSelectedTechnician('All');
+                setSelectedCallType('BREAKDOWN');
+                setSelectedPincode('All');
+                setPincodeSearch('');
+                setHighlightedFranchisee(null);
+                toast.success('All filters cleared');
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700 hover:bg-rose-100/50 hover:border-rose-300 transition-all font-semibold shadow-sm active:scale-98 cursor-pointer"
+            >
+              <FilterX size={13} className="text-rose-600" />
+              Clear Filters
+            </button>
+          )}
           {selectedPincode !== 'All' && (
             <button
               onClick={() => setSelectedPincode('All')}
@@ -483,11 +773,18 @@ export default function CallDistributionPage() {
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
             Recalculate
           </button>
+          <Link
+            href="/report"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-750 text-xs transition-all text-white font-bold shadow-sm hover:shadow active:scale-98 cursor-pointer"
+          >
+            <SlidersHorizontal size={13} />
+            Detailed Register
+          </Link>
         </div>
       </header>
 
       {/* Cascading Filter Bar */}
-      <section className="px-6 py-4 bg-slate-50 border-b border-slate-200/80 flex-shrink-0 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 items-end">
+      <section className="px-6 py-4 bg-slate-50 border-b border-slate-200/80 flex-shrink-0 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-3 items-end">
         
         {/* 1. Date Range Start */}
         <div className="space-y-1.5">
@@ -547,6 +844,20 @@ export default function CallDistributionPage() {
             <option value="All">All Cities</option>
             {citiesList.map(c => <option key={c.ncode} value={c.ncode}>{c.vname} ({c.call_count || 0})</option>)}
           </select>
+        </div>
+
+        {/* 5. Pincode Search Text Input */}
+        <div className="space-y-1.5">
+          <label className="text-[9px] uppercase tracking-wider text-slate-500 font-extrabold block">Pincode Search</label>
+          <div className="relative">
+            <input 
+              type="text" 
+              placeholder="Search pincode..."
+              value={pincodeSearch}
+              onChange={e => setPincodeSearch(e.target.value)}
+              className="w-full bg-white border border-slate-250 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 shadow-sm placeholder-slate-400"
+            />
+          </div>
         </div>
 
         {/* 5. Branch Cascading Dropdown */}
@@ -732,12 +1043,12 @@ export default function CallDistributionPage() {
               <span className="text-[10px] text-slate-650 font-bold bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
                 Count: {franchiseeSummary.length}
               </span>
-              <button
-                onClick={() => setShowDetails(prev => !prev)}
-                className="text-[10px] font-semibold text-teal-700 bg-teal-50 border border-teal-100 px-3 py-1 rounded-lg hover:bg-teal-100 transition-all"
+              <Link
+                href="/report"
+                className="text-[10px] font-extrabold text-teal-700 bg-teal-50 border border-teal-100 px-3 py-1.5 rounded-lg hover:bg-teal-100 transition-all flex items-center gap-1 active:scale-98 shadow-sm cursor-pointer"
               >
-                {showDetails ? 'Hide All Details' : 'Show All Details'}
-              </button>
+                View Detailed Register →
+              </Link>
             </div>
 
             {/* Scrollable Table Wrapper */}
@@ -855,57 +1166,6 @@ export default function CallDistributionPage() {
               )}
 
             </div>
-
-            {showDetails ? (
-              <div className="mt-4 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                <div className="px-4 py-3 bg-slate-100 border-b border-slate-200 flex items-center justify-between gap-3">
-                  <div>
-                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-900">All Details</h4>
-                    <p className="text-[10px] text-slate-500">Branch, Franchisee, vtrnno, city - pincode, and status for the current filter set.</p>
-                  </div>
-                  <span className="text-[10px] text-slate-600 font-semibold">Rows: {filteredDetailsRows.length}</span>
-                </div>
-                <div className="max-h-[320px] overflow-auto">
-                  <table className="min-w-full text-left border-collapse text-xs">
-                    <thead className="sticky top-0 bg-white border-b border-slate-200 text-slate-500 font-semibold">
-                      <tr>
-                        <th className="px-3 py-2">Branch</th>
-                        <th className="px-3 py-2">Franchisee</th>
-                        <th className="px-3 py-2">vtrnno</th>
-                        <th className="px-3 py-2">City - Pincode</th>
-                        <th className="px-3 py-2 text-center">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 bg-white">
-                      {filteredDetailsRows.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="p-4 text-center text-slate-500">No detail rows available for the current selection.</td>
-                        </tr>
-                      ) : filteredDetailsRows.slice(0, visibleRowsCount).map((row: any, index: number) => (
-                        <tr key={`${row.branch}-${row.franchisee}-${row.vtrnno}-${row.city}-${row.pincode}-${index}`} className="hover:bg-slate-50">
-                          <td className="px-3 py-2 text-slate-700">{row.branch}</td>
-                          <td className="px-3 py-2 text-slate-700">{row.franchisee}</td>
-                          <td className="px-3 py-2 text-slate-700">{row.vtrnno}</td>
-                          <td className="px-3 py-2 text-slate-700">{`${row.city} - ${row.pincode}`}</td>
-                          <td className="px-3 py-2 text-center font-semibold text-slate-900">{row.status}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {filteredDetailsRows.length > visibleRowsCount && (
-                    <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-center sticky bottom-0 z-20">
-                      <button
-                        onClick={() => setVisibleRowsCount(prev => prev + 250)}
-                        className="px-4 py-2 text-xs font-bold text-teal-700 bg-teal-50 border border-teal-100 rounded-lg hover:bg-teal-100 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-                      >
-                        <RefreshCw size={12} className="animate-spin-slow" />
-                        Load More Rows ({filteredDetailsRows.length - visibleRowsCount} remaining)
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : null}
 
           </div>
 

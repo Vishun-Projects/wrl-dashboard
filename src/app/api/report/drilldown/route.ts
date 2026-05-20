@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json();
-    const { type, officeId, account, region, startDate, endDate, customQuery } = body;
+    const { type, officeId, account, region, startDate, endDate, customQuery, callType } = body;
 
     const agingDate = endDate ? `'${endDate} 23:59:59'` : 'GETDATE()';
 
@@ -21,32 +21,39 @@ export async function POST(req: NextRequest) {
     if (customQuery) {
       sql = customQuery;
     } else {
-      let condition = "callsntrnno IS NOT NULL AND callsntrnno <> ''";
+      let condition = "view_c.callsntrnno IS NOT NULL AND view_c.callsntrnno <> ''";
       if (type !== 'transferred_calls') {
-        condition += " AND ISNULL(ncancelreason, 0) <> 2";
+        condition += " AND ISNULL(view_c.ncancelreason, 0) <> 2";
       }
-      if (startDate) condition += ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) >= '${startDate}'`;
-      if (endDate) condition += ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) <= '${endDate} 23:59:59'`;
+      if (startDate) condition += ` AND view_c.callsdtrndate >= '${startDate}'`;
+      if (endDate) condition += ` AND view_c.callsdtrndate <= '${endDate} 23:59:59'`;
+
+      let innerCondition = "1=1";
+      if (startDate) innerCondition += ` AND dtrndate >= '${startDate}'`;
+      if (endDate) innerCondition += ` AND dtrndate <= '${endDate} 23:59:59'`;
 
       if (officeId && officeId !== 'All') {
-        condition += ` AND nofficeid IN (SELECT ncode FROM mstoffice WHERE ncode = ${officeId} OR nunder = ${officeId})`;
+        condition += ` AND view_c.nofficeid IN (SELECT ncode FROM mstoffice WHERE ncode = ${officeId} OR nunder = ${officeId})`;
+        innerCondition += ` AND nofficeid IN (SELECT ncode FROM mstoffice WHERE ncode = ${officeId} OR nunder = ${officeId})`;
       }
 
       if (region && region !== 'AI' && (!officeId || officeId === 'All')) {
-        // Filter by region name only if no specific office is selected
+        const cleanRegion = region.trim().replace(/\s+ZONE$/i, '').trim();
         const zoneRes = await postQuery({
           fields: "ncode",
           tableName: "mstzones",
-          condition: `vname LIKE '${region}%'`
+          condition: `vname LIKE '${cleanRegion}%'`
         });
 
         if (zoneRes.data && zoneRes.data.length > 0) {
           const zoneId = zoneRes.data[0].ncode;
-          condition += ` AND nofficeid IN (
+          const zoneFilterStr = `nofficeid IN (
             SELECT ncode FROM mstoffice 
             WHERE nzone = ${zoneId} 
             OR nunder IN (SELECT ncode FROM mstoffice WHERE nzone = ${zoneId})
           )`;
+          condition += ` AND view_c.${zoneFilterStr}`;
+          innerCondition += ` AND ${zoneFilterStr}`;
         }
       }
 
@@ -61,90 +68,218 @@ export async function POST(req: NextRequest) {
           });
           if (pRes.data && pRes.data.length > 0) {
             const partyIds = pRes.data.map((p: any) => p.ncode).join(',');
-            condition += ` AND npartyprofile IN (${partyIds})`;
+            condition += ` AND view_c.npartyprofile IN (${partyIds})`;
+            innerCondition += ` AND npartyprofile IN (${partyIds})`;
           }
         }
       }
 
-      // Add metric specific conditions
+      if (callType && callType !== 'All' && callType !== '') {
+        if (callType.includes(',')) {
+          const types = callType.split(',').map((t: string) => `'${t.trim().replace(/'/g, "''")}'`).join(',');
+          condition += ` AND view_c.ncalltype IN (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${types}))`;
+          innerCondition += ` AND ncalltype IN (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${types}))`;
+        } else {
+          condition += ` AND view_c.ncalltype = (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${callType.replace(/'/g, "''")}')`;
+          innerCondition += ` AND ncalltype = (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${callType.replace(/'/g, "''")}')`;
+        }
+      }
+
       switch (type) {
         case 'solved_calls':
         case 'total_solved':
-          // Include tech-solved (bfastclose) as solved as well
-          condition += ` AND (callsolved = '1' OR callsolved = 'True' OR callstatus = 'Solved' OR CAST(Status AS NVARCHAR(MAX)) = 'Closed' OR EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = callsntrnno AND (tc2.bfastclose = 1)))`;
+          condition += ` AND (view_c.callsolved = '1' OR view_c.callsolved = 'True' OR view_c.callstatus = 'Solved' OR CAST(view_c.Status AS NVARCHAR(MAX)) = 'Closed' OR EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = view_c.callsntrnno AND (tc2.bfastclose = 1)))`;
           break;
         case 'cancelled_calls':
-          condition += ` AND ISNULL(callstatus,'') = 'Cancel'`;
+          condition += ` AND ISNULL(view_c.callstatus,'') = 'Cancel'`;
           break;
         case 'transferred_calls':
-          condition += ` AND (ISNULL(ncancelreason, 0) = 2 OR (vtransfercallno IS NOT NULL AND vtransfercallno <> ''))`;
+          condition += ` AND (ISNULL(view_c.ncancelreason, 0) = 2 OR (view_c.vtransfercallno IS NOT NULL AND view_c.vtransfercallno <> ''))`;
           break;
         case 'open_calls':
-          // Open if not solved and not tech-solved
-          condition += ` AND (callsolved = '0' OR callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(callstatus,'') != 'Cancel'`;
+          condition += ` AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = view_c.callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
           break;
         case 'age_2':
-          condition += ` AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) <= 2 AND (callsolved = '0' OR callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(callstatus,'') != 'Cancel'`;
+          condition += ` AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) <= 2 AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = view_c.callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
           break;
         case 'age_3':
-          condition += ` AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) > 2 AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) <= 7 AND (callsolved = '0' OR callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(callstatus,'') != 'Cancel'`;
+          condition += ` AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) > 2 AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) <= 7 AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = view_c.callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
           break;
         case 'age_7':
-          condition += ` AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) > 7 AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) <= 15 AND (callsolved = '0' OR callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(callstatus,'') != 'Cancel'`;
+          condition += ` AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) > 7 AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) <= 15 AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = view_c.callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
           break;
         case 'age_15':
-          condition += ` AND DATEDIFF(day, ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)), ${agingDate}) > 15 AND (callsolved = '0' OR callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(callstatus,'') != 'Cancel'`;
+          condition += ` AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) > 15 AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = view_c.callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
           break;
         case 'part_pending':
-          condition += ` AND (vsolveremarks LIKE '%PART%' OR vcomplaint LIKE '%PART%')`;
+          condition += ` AND (view_c.vsolveremarks LIKE '%PART%' OR view_c.vcomplaint LIKE '%PART%')`;
           break;
         case 'discrepancy':
-          // Identify calls handled by more than one branch
-          condition += ` AND callsntrnno IN (
+          let discrepancyCondition = `1=1`;
+          if (startDate) discrepancyCondition += ` AND dtrndate >= '${startDate}'`;
+          if (endDate) discrepancyCondition += ` AND dtrndate <= '${endDate} 23:59:59'`;
+          if (callType && callType !== 'All' && callType !== '') {
+            if (callType.includes(',')) {
+              const types = callType.split(',').map((t: string) => `'${t.trim().replace(/'/g, "''")}'`).join(',');
+              discrepancyCondition += ` AND ncalltype IN (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${types}))`;
+            } else {
+              discrepancyCondition += ` AND ncalltype = (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${callType.replace(/'/g, "''")}')`;
+            }
+          }
+          condition += ` AND view_c.callsntrnno IN (
             SELECT callsntrnno 
-            FROM view_c
-            WHERE callsntrnno IS NOT NULL AND callsntrnno <> '' AND ISNULL(ncancelreason, 0) <> 2
-            ${startDate ? ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) >= '${startDate}'` : ''}
-            ${endDate ? ` AND ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) <= '${endDate} 23:59:59'` : ''}
-            GROUP BY callsntrnno
-            HAVING COUNT(DISTINCT nofficeid) > 1
+            FROM (
+              SELECT 
+                tc.ntrnno as callsntrnno,
+                tc.dtrndate as callsdtrndate,
+                tc.nofficeid as nofficeid,
+                tc.ncancelreason as ncancelreason,
+                tc.ncalltype as ncalltype
+              FROM (SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY CASE WHEN ISNULL(vtrnno, '') = '' THEN CAST(ncode AS VARCHAR(50)) ELSE vtrnno END ORDER BY ISNULL(editedon, addedon) DESC, ncode DESC) as rn FROM trhcalls (NOLOCK) WHERE ${innerCondition}) s WHERE s.rn = 1) tc
+            ) inner_vc
+            WHERE inner_vc.callsntrnno IS NOT NULL AND inner_vc.callsntrnno <> '' AND ISNULL(inner_vc.ncancelreason, 0) <> 2
+            GROUP BY inner_vc.callsntrnno
+            HAVING COUNT(DISTINCT inner_vc.nofficeid) > 1
           )`;
           break;
       }
 
-      sql = `WITH view_c AS (
-               SELECT 
-                 tc.ntrnno as callsntrnno,
-                 tc.dtrndate as callsdtrndate,
-                 tc.vlocation as vlocation,
-                 mstitems.vname as itemname,
-                 tc.vserialno as callsvserialno,
-                 u.vname as serviceman,
-                 tc.vcomplaint as vcomplaint,
-                 tc.callStatus as Status,
-                 case when tc.bsolved=1 then 'Solved' else case when tc.ncancelreason Is not null and tc.ncancelreason <> 0 then 'Cancel' else case when (tc.bsolved=0 or tc.bsolved is null) and (tc.ncancelreason IS null or tc.ncancelreason = 0) then 'Open' end end end as callstatus,
-                 tc.bsolved as callsolved,
-                 tc.ncancelreason as ncancelreason,
-                 tc.vtransfercallno as vtransfercallno,
-                 tc.nofficeid as nofficeid,
-                 tc.npartyprofile as npartyprofile,
-                 tc.vsolveremarks as vsolveremarks
-               FROM (SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY vtrnno ORDER BY ISNULL(editedon, addedon) DESC, ncode DESC) as rn FROM trhcalls (NOLOCK)) s WHERE s.rn = 1) tc
-               LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode
-               LEFT JOIN mstitems (NOLOCK) ON tc.nitem = mstitems.ncode
-             )
-             SELECT TOP 500 
-                callsntrnno as [Ref No], 
-                CONVERT(VARCHAR, callsdtrndate, 105) as [Date],
-                vlocation as [Location],
-                itemname as [Product],
-                callsvserialno as [Serial],
-                serviceman as [Engineer],
-                vcomplaint as [Complaint],
-                Status as [Status]
-             FROM view_c
-             WHERE ${condition}
-             ORDER BY ISNULL(TRY_CAST(callsdtrndate AS DATETIME), TRY_CONVERT(DATETIME, LEFT(CAST(callsdtrndate AS NVARCHAR(50)), 10), 104)) DESC`;
+      const innerSubquery = `(SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY CASE WHEN ISNULL(vtrnno, '') = '' THEN CAST(ncode AS VARCHAR(50)) ELSE vtrnno END ORDER BY ISNULL(editedon, addedon) DESC, ncode DESC) as rn FROM trhcalls (NOLOCK) WHERE ${innerCondition}) s WHERE s.rn = 1)`;
+
+      if (type === 'transferred_calls') {
+        // Flatten the query entirely to avoid evaluating the subquery for non-matching rows
+        let condition = "tc.ntrnno IS NOT NULL AND tc.ntrnno <> ''";
+        condition += " AND (ISNULL(tc.ncancelreason, 0) = 2 OR (tc.vtransfercallno IS NOT NULL AND tc.vtransfercallno <> ''))";
+        if (startDate) condition += ` AND tc.dtrndate >= '${startDate}'`;
+        if (endDate) condition += ` AND tc.dtrndate <= '${endDate} 23:59:59'`;
+
+        if (officeId && officeId !== 'All') {
+          condition += ` AND tc.nofficeid IN (SELECT ncode FROM mstoffice WHERE ncode = ${officeId} OR nunder = ${officeId})`;
+        }
+
+        if (region && region !== 'AI' && (!officeId || officeId === 'All')) {
+          const cleanRegion = region.trim().replace(/\s+ZONE$/i, '').trim();
+          const zoneRes = await postQuery({
+            fields: "ncode",
+            tableName: "mstzones",
+            condition: `vname LIKE '${cleanRegion}%'`
+          });
+
+          if (zoneRes.data && zoneRes.data.length > 0) {
+            const zoneId = zoneRes.data[0].ncode;
+            condition += ` AND tc.nofficeid IN (
+              SELECT ncode FROM mstoffice 
+              WHERE nzone = ${zoneId} 
+              OR nunder IN (SELECT ncode FROM mstoffice WHERE nzone = ${zoneId})
+            )`;
+          }
+        }
+
+        if (account && account !== 'All India') {
+          const accountNames = account.split(',').map((a: string) => a.trim()).filter((a: string) => a.length > 0);
+          if (accountNames.length > 0) {
+            const conditionString = accountNames.map((a: string) => `vname = '${a.replace(/'/g, "''")}'`).join(' OR ');
+            const pRes = await postQuery({
+              fields: "ncode",
+              tableName: "mstpartyprofile",
+              condition: conditionString
+            });
+            if (pRes.data && pRes.data.length > 0) {
+              const partyIds = pRes.data.map((p: any) => p.ncode).join(',');
+              condition += ` AND tc.npartyprofile IN (${partyIds})`;
+            }
+          }
+        }
+
+        if (callType && callType !== 'All' && callType !== '') {
+          if (callType.includes(',')) {
+            const types = callType.split(',').map((t: string) => `'${t.trim().replace(/'/g, "''")}'`).join(',');
+            condition += ` AND tc.ncalltype IN (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${types}))`;
+          } else {
+            condition += ` AND tc.ncalltype = (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${callType.replace(/'/g, "''")}')`;
+          }
+        }
+
+        sql = `SELECT TOP 500 
+                  CASE 
+                    WHEN o.nunder NOT IN (605, 606, 607, 608, 612, 1, 0) AND o.nunder IS NOT NULL THEN bo.vcompanyname + ' - ' + o.vcompanyname 
+                    ELSE o.vcompanyname 
+                  END as [Branch], 
+                  CASE 
+                    WHEN ISNULL(tc.vtransfercallno, '') <> '' THEN
+                      COALESCE(
+                        (SELECT TOP 1 
+                           CASE 
+                             WHEN dest_o.nunder NOT IN (605, 606, 607, 608, 612, 1, 0) AND dest_o.nunder IS NOT NULL THEN dest_bo.vcompanyname + ' - ' + dest_o.vcompanyname 
+                             ELSE dest_o.vcompanyname 
+                           END
+                         FROM trhcalls dest_tc (NOLOCK)
+                         JOIN mstoffice dest_o (NOLOCK) ON dest_tc.nofficeid = dest_o.ncode
+                         LEFT JOIN mstoffice dest_bo (NOLOCK) ON dest_o.nunder = dest_bo.ncode
+                         WHERE dest_tc.vtrnno = tc.vtransfercallno),
+                        CASE 
+                          WHEN transferoffice.nunder NOT IN (605, 606, 607, 608, 612, 1, 0) AND transferoffice.nunder IS NOT NULL THEN trans_bo.vcompanyname + ' - ' + transferoffice.vcompanyname 
+                          ELSE transferoffice.vcompanyname 
+                        END,
+                        '—'
+                      )
+                    ELSE 
+                      COALESCE(
+                        CASE 
+                          WHEN transferoffice.nunder NOT IN (605, 606, 607, 608, 612, 1, 0) AND transferoffice.nunder IS NOT NULL THEN trans_bo.vcompanyname + ' - ' + transferoffice.vcompanyname 
+                          ELSE transferoffice.vcompanyname 
+                        END,
+                        '—'
+                      )
+                  END as [Franchisee],
+                  COALESCE(NULLIF(tc.vtrnno, ''), tc.vtransfercallno, '—') as [vtrnno], 
+                  COALESCE(NULLIF(cty.vname, ''), tc.vlocation, '—') + 
+                    CASE WHEN ISNULL(p.vinstpostalcode, '') <> '' THEN ' - ' + p.vinstpostalcode ELSE '' END as [City - Pincode],
+                  tc.callStatus as [Status]
+               FROM ${innerSubquery} tc
+               JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode
+               LEFT JOIN mstoffice bo (NOLOCK) ON o.nunder = bo.ncode
+               LEFT JOIN mstoffice transferoffice (NOLOCK) ON tc.ntransfertooffice = transferoffice.ncode
+               LEFT JOIN mstoffice trans_bo (NOLOCK) ON transferoffice.nunder = trans_bo.ncode
+               LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode
+               LEFT JOIN mstcity cty (NOLOCK) ON COALESCE(NULLIF(p.ncity, ''), o.ncity) = cty.ncode
+               WHERE ${condition}
+               ORDER BY tc.dtrndate DESC`;
+      } else {
+        sql = `SELECT TOP 500 
+                  view_c.callsntrnno as [Ref No], 
+                  CONVERT(VARCHAR, view_c.callsdtrndate, 105) as [Date],
+                  view_c.vlocation as [Location],
+                  view_c.itemname as [Product],
+                  view_c.callsvserialno as [Serial],
+                  view_c.serviceman as [Engineer],
+                  view_c.vcomplaint as [Complaint],
+                  view_c.Status as [Status]
+               FROM (
+                 SELECT 
+                   tc.ntrnno as callsntrnno,
+                   tc.dtrndate as callsdtrndate,
+                   tc.vlocation as vlocation,
+                   mstitems.vname as itemname,
+                   tc.vserialno as callsvserialno,
+                   u.vname as serviceman,
+                   tc.vcomplaint as vcomplaint,
+                   tc.callStatus as Status,
+                   CASE WHEN tc.bsolved=1 then 'Solved' else case when tc.ncancelreason Is not null and tc.ncancelreason <> 0 then 'Cancel' else case when (tc.bsolved=0 or tc.bsolved is null) and (tc.ncancelreason IS null or tc.ncancelreason = 0) then 'Open' end end end as callstatus,
+                   tc.bsolved as callsolved,
+                   tc.ncancelreason as ncancelreason,
+                   tc.vtransfercallno as vtransfercallno,
+                   tc.nofficeid as nofficeid,
+                   tc.npartyprofile as npartyprofile,
+                   tc.vsolveremarks as vsolveremarks,
+                   tc.ncalltype as ncalltype
+                 FROM ${innerSubquery} tc
+                 LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode
+                 LEFT JOIN mstitems (NOLOCK) ON tc.nitem = mstitems.ncode
+               ) view_c
+               WHERE ${condition}
+               ORDER BY view_c.callsdtrndate DESC`;
+      }
     }
 
     const res = await postQuery({

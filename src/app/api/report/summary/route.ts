@@ -25,8 +25,8 @@ export async function GET(req: NextRequest) {
     const agingAsOf = searchParams.get('agingAsOf'); // explicit aging reference date
 
     // Build WHERE conditions for trhcalls (c)
-    // vtrnno IS NOT NULL = only real transactions
-    let baseCondition = "c.vtrnno IS NOT NULL AND c.vtrnno <> ''";
+    // vtrnno IS NOT NULL = only real transactions, but also include transferred calls which might have empty vtrnno but valid vtransfercallno or ncancelreason = 2
+    let baseCondition = "((c.vtrnno IS NOT NULL AND c.vtrnno <> '') OR (c.ncancelreason = 2 OR (c.vtransfercallno IS NOT NULL AND c.vtransfercallno <> '')))";
 
     if (officeId && officeId !== 'All') {
       if (officeId.includes(',')) {
@@ -65,7 +65,11 @@ export async function GET(req: NextRequest) {
         return `'${endDate} 23:59:59'`;
       }
       return 'GETDATE()';
-    })();    // Collapsed and highly optimized single-level group by query
+    })();
+
+    const subqueryCondition = startDate ? `WHERE dtrndate >= '${startDate}'` : "";
+
+    // Collapsed and highly optimized single-level group by query
     const rawSql = `
       SELECT
         CASE WHEN GROUPING(c.npartyprofile) = 1 THEN 'BRANCH_ENG' ELSE 'DATA' END as row_type,
@@ -108,11 +112,12 @@ export async function GET(req: NextRequest) {
         SELECT *
         FROM (
           SELECT *,
-                 ROW_NUMBER() OVER (
-                   PARTITION BY vtrnno 
-                   ORDER BY ISNULL(editedon, addedon) DESC, ncode DESC
-                 ) as rn
+                  ROW_NUMBER() OVER (
+                    PARTITION BY CASE WHEN ISNULL(vtrnno, '') = '' THEN CAST(ncode AS VARCHAR(50)) ELSE vtrnno END
+                    ORDER BY ISNULL(editedon, addedon) DESC, ncode DESC
+                  ) as rn
           FROM trhcalls (NOLOCK)
+          ${subqueryCondition}
         ) s
         WHERE s.rn = 1
       ) c

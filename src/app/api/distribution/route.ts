@@ -140,6 +140,72 @@ const stateBounds: Record<string, { minLat: number; maxLat: number; minLng: numb
   'GOA': { minLat: 14.8, maxLat: 15.9, minLng: 73.5, maxLng: 74.5 }
 };
 
+const VALID_INDIAN_STATES = new Set([
+  'ANDHRA PRADESH', 'ARUNACHAL PRADESH', 'ASSAM', 'BIHAR', 'CHHATTISGARH', 'GOA', 'GUJARAT', 'HARYANA', 
+  'HIMACHAL PRADESH', 'JHARKHAND', 'KARNATAKA', 'KERALA', 'MADHYA PRADESH', 'MAHARASHTRA', 'MANIPUR', 
+  'MEGHALAYA', 'MIZORAM', 'NAGALAND', 'ODISHA', 'PUNJAB', 'RAJASTHAN', 'SIKKIM', 'TAMIL NADU', 'TELANGANA', 
+  'TRIPURA', 'UTTAR PRADESH', 'UTTARAKHAND', 'WEST BENGAL', 'ANDAMAN AND NICOBAR ISLANDS', 'CHANDIGARH', 
+  'DADRA AND NAGAR HAVELI AND DAMAN AND DIU', 'LAKSHADWEEP', 'DELHI', 'PUDUCHERRY', 'JAMMU & KASHMIR', 
+  'JAMMU AND KASHMIR', 'LADAKH'
+]);
+
+const STATE_NAME_CORRECTIONS: Record<string, string> = {
+  'TAMILNADU': 'TAMIL NADU',
+  'WESTBENGAL': 'WEST BENGAL',
+  'MADHYAPRADESH': 'MADHYA PRADESH',
+  'ANDHRAPRADESH': 'ANDHRA PRADESH',
+  'UTTARPRADESH': 'UTTAR PRADESH',
+  'UTTARAKHAND': 'UTTARAKHAND',
+  'CHATTISGARH': 'CHHATTISGARH',
+  'ODISHA': 'ODISHA',
+  'ORISSA': 'ODISHA',
+  'DELHI': 'DELHI',
+  'NEW DELHI': 'DELHI',
+  'PONDICHERRY': 'PUDUCHERRY',
+  'PUDUCHERRY': 'PUDUCHERRY',
+  'JAMMU': 'JAMMU & KASHMIR',
+  'KASHMIR': 'JAMMU & KASHMIR',
+  'JAMMU AND KASHMIR': 'JAMMU & KASHMIR',
+  'JAMMU & KASHMIR': 'JAMMU & KASHMIR',
+  'DADRA & NAGAR HAVELI': 'DADRA AND NAGAR HAVELI AND DAMAN AND DIU',
+  'DAMAN & DIU': 'DADRA AND NAGAR HAVELI AND DAMAN AND DIU',
+  'DAMAN AND DIU': 'DADRA AND NAGAR HAVELI AND DAMAN AND DIU'
+};
+
+function isValidState(s: string): boolean {
+  if (!s) return false;
+  const normalized = s.toUpperCase().trim();
+  if (normalized === 'NA' || normalized === 'N/A' || normalized === 'UNKNOWN' || normalized === 'Z CITY' || normalized === 'Z-CITY' || normalized === '') return false;
+  
+  let corrected = normalized;
+  if (STATE_NAME_CORRECTIONS[normalized]) {
+    corrected = STATE_NAME_CORRECTIONS[normalized];
+  } else {
+    const spaceLess = normalized.replace(/\s+/g, '');
+    if (STATE_NAME_CORRECTIONS[spaceLess]) {
+      corrected = STATE_NAME_CORRECTIONS[spaceLess];
+    }
+  }
+
+  return VALID_INDIAN_STATES.has(corrected);
+}
+
+function isValidCity(c: string): boolean {
+  if (!c) return false;
+  const normalized = c.toUpperCase().trim();
+  if (normalized === 'NA' || normalized === 'N/A' || normalized === 'UNKNOWN' || normalized === 'Z CITY' || normalized === 'Z-CITY' || normalized === 'TEST' || normalized === 'DUMMY' || normalized === '') return false;
+  if (normalized.startsWith('Z ') || normalized.startsWith('Z-') || normalized === 'Z' || normalized.includes('Z_')) return false;
+  return true;
+}
+
+function isValidOfficeName(name: string): boolean {
+  if (!name) return false;
+  const normalized = name.toUpperCase().trim();
+  if (normalized === 'NA' || normalized === 'N/A' || normalized === 'UNKNOWN' || normalized === 'TEST' || normalized === 'DUMMY' || normalized === '') return false;
+  if (normalized.startsWith('Z ') || normalized.startsWith('Z-') || normalized === 'Z' || normalized.includes('Z_') || normalized.includes('Z CITY') || normalized.includes('Z BRANCH') || normalized.includes('Z FRANCHISEE')) return false;
+  return true;
+}
+
 function getGeographicDetails(pincode: string, dbLatLong?: string, dbCity?: string, dbState?: string) {
   const pin = String(pincode || '').trim();
   
@@ -152,19 +218,69 @@ function getGeographicDetails(pincode: string, dbLatLong?: string, dbCity?: stri
 
   // Lookup in our pincode map
   const mapped = (pincodeMapData as Record<string, any>)[pin];
-  if (mapped) {
-    state = mapped.s || '';
-    city = mapped.d || '';
-    isPincodeMapped = true;
-    if (mapped.lat && mapped.lng) {
-      const parsedLat = parseFloat(mapped.lat);
-      const parsedLng = parseFloat(mapped.lng);
-      // Enforce strict India boundaries
-      if (parsedLat >= 8.0 && parsedLat <= 38.0 && parsedLng >= 68.0 && parsedLng <= 98.0) {
-        lat = parsedLat;
-        lng = parsedLng;
-        hasCoords = true;
+  
+  let mappedState = mapped?.s || '';
+  let mappedCity = mapped?.d || '';
+
+  if (mappedState) {
+    const upState = mappedState.toUpperCase().trim();
+    if (STATE_NAME_CORRECTIONS[upState]) {
+      mappedState = STATE_NAME_CORRECTIONS[upState];
+    } else {
+      const spaceLess = upState.replace(/\s+/g, '');
+      if (STATE_NAME_CORRECTIONS[spaceLess]) {
+        mappedState = STATE_NAME_CORRECTIONS[spaceLess];
       }
+    }
+  }
+
+  const dbStateUpper = (dbState || '').toUpperCase().trim();
+  let resolvedDbState = dbStateUpper;
+  if (STATE_NAME_CORRECTIONS[dbStateUpper]) {
+    resolvedDbState = STATE_NAME_CORRECTIONS[dbStateUpper];
+  } else {
+    const spaceLess = dbStateUpper.replace(/\s+/g, '');
+    if (STATE_NAME_CORRECTIONS[spaceLess]) {
+      resolvedDbState = STATE_NAME_CORRECTIONS[spaceLess];
+    }
+  }
+  const resolvedDbCity = (dbCity || '').toUpperCase().trim();
+
+  // Prioritize valid database values first!
+  if (isValidState(resolvedDbState) && isValidCity(resolvedDbCity)) {
+    state = resolvedDbState;
+    city = resolvedDbCity;
+  } else if (isValidState(mappedState) && isValidCity(mappedCity)) {
+    state = mappedState;
+    city = mappedCity;
+    isPincodeMapped = true;
+  } else {
+    if (isValidState(resolvedDbState)) {
+      state = resolvedDbState;
+    } else if (isValidState(mappedState)) {
+      state = mappedState;
+      isPincodeMapped = true;
+    }
+
+    if (isValidCity(resolvedDbCity)) {
+      city = resolvedDbCity;
+    } else if (isValidCity(mappedCity)) {
+      city = mappedCity;
+      isPincodeMapped = true;
+    }
+  }
+
+  if (!isValidState(state)) state = 'UNKNOWN';
+  if (!isValidCity(city)) city = 'UNKNOWN';
+
+  // Coordinate lookup
+  if (mapped && mapped.lat && mapped.lng) {
+    const parsedLat = parseFloat(mapped.lat);
+    const parsedLng = parseFloat(mapped.lng);
+    if (parsedLat >= 8.0 && parsedLat <= 38.0 && parsedLng >= 68.0 && parsedLng <= 98.0) {
+      lat = parsedLat;
+      lng = parsedLng;
+      hasCoords = true;
     }
   }
 
@@ -174,7 +290,6 @@ function getGeographicDetails(pincode: string, dbLatLong?: string, dbCity?: stri
     let parsedLat = parseFloat(parts[0].trim());
     let parsedLng = parseFloat(parts[1].trim());
 
-    // Swapped lat/lng check
     if (parsedLat >= 68.0 && parsedLat <= 98.0 && parsedLng >= 8.0 && parsedLng <= 38.0) {
       const temp = parsedLat;
       parsedLat = parsedLng;
@@ -190,14 +305,9 @@ function getGeographicDetails(pincode: string, dbLatLong?: string, dbCity?: stri
     }
   }
 
-  // Fallbacks for state & city names
-  if (!state) state = dbState || 'UNKNOWN';
-  if (!city) city = dbCity || 'UNKNOWN';
-
   state = state.toUpperCase().trim();
   city = city.toUpperCase().trim();
 
-  // Correct city-to-state mapping mismatches from the database
   if (cityToStateMap[city]) {
     state = cityToStateMap[city];
   }
@@ -209,11 +319,8 @@ function getGeographicDetails(pincode: string, dbLatLong?: string, dbCity?: stri
       const inside = lat >= bounds.minLat && lat <= bounds.maxLat && lng >= bounds.minLng && lng <= bounds.maxLng;
       if (!inside) {
         if (isPincodeMapped) {
-          // Trusted state from pincode map, but coordinates are bad -> clear coordinate so it falls back to center
           hasCoords = false;
         } else {
-          // Database fallback state might be wrong (e.g. branch fallback) while coords are right.
-          // Scan other states to see if coordinate belongs to a different state.
           let foundMatchingState = false;
           let bestState = state;
           let minDistance = Infinity;
@@ -243,7 +350,6 @@ function getGeographicDetails(pincode: string, dbLatLong?: string, dbCity?: stri
         }
       }
     } else {
-      // General India bounds fallback check if state bounds are not defined
       if (!(lat >= 8.0 && lat <= 38.0 && lng >= 68.0 && lng <= 98.0)) {
         hasCoords = false;
       }
@@ -262,7 +368,6 @@ function getGeographicDetails(pincode: string, dbLatLong?: string, dbCity?: stri
       baseCoords = stateCenters[state];
     }
 
-    // Deterministic scatter using pincode hash so pins don't stack directly
     let hash = 0;
     for (let i = 0; i < pin.length; i++) {
       hash = pin.charCodeAt(i) + ((hash << 5) - hash);
@@ -396,8 +501,18 @@ async function getMappedCalls(
     };
   });
 
-  allCallsCache.set(cacheKey, { data: mapped, timestamp: now });
-  return mapped;
+  const filtered = mapped.filter((c: any) => {
+    if (!isValidState(c.state)) return false;
+    if (!isValidCity(c.city)) return false;
+    if (!isValidOfficeName(c.resolved_branch_name)) return false;
+    if (c.franchisee_code && c.franchisee_code !== 'UNASSIGNED') {
+      if (!isValidOfficeName(c.franchisee_name)) return false;
+    }
+    return true;
+  });
+
+  allCallsCache.set(cacheKey, { data: filtered, timestamp: now });
+  return filtered;
 }
 
 export async function GET(req: NextRequest) {
@@ -430,24 +545,10 @@ export async function GET(req: NextRequest) {
     // 3. Consolidated Data and Filter options query route
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
-    const state = searchParams.get('state');
-    const city = searchParams.get('city');
-    const branch = searchParams.get('branch');
-    const franchisee = searchParams.get('franchisee');
-    const technician = searchParams.get('technician');
     const callType = searchParams.get('callType') || 'BREAKDOWN';
     const bypassCache = searchParams.get('refresh') === 'true';
 
-    const criteria = {
-      state,
-      city,
-      branch,
-      franchisee,
-      technician
-    };
-
-    // Query database ONCE for the date range & call type (without SQL-level filtering on branch/franchisee/technician)
-    // so we can compute full cascades in memory.
+    // Query database ONCE for the date range & call type
     const allCalls = await getMappedCalls(startDate, endDate, callType, bypassCache);
 
     // Fetch branches directly from CRM based on user permissions
@@ -476,276 +577,9 @@ export async function GET(req: NextRequest) {
     });
     const dbBranches = branchesDbRes.data || [];
 
-    // A. Compute individual dropdown option lists in memory (cascaded based on active criteria)
-    
-    // States (exclude state filter)
-    const statesFiltered = filterCalls(allCalls, criteria, 'state');
-    const stateCounts: Record<string, { ncode: string; vname: string; call_count: number }> = {};
-    statesFiltered.forEach((c) => {
-      if (!c.state) return;
-      const sName = c.state;
-      if (!stateCounts[sName]) {
-        stateCounts[sName] = { ncode: sName, vname: sName, call_count: 0 };
-      }
-      stateCounts[sName].call_count++;
-    });
-    const states = Object.values(stateCounts).sort((a, b) => a.vname.localeCompare(b.vname));
-
-    // Cities (exclude city filter)
-    const citiesFiltered = filterCalls(allCalls, criteria, 'city');
-    const cityCounts: Record<string, { ncode: string; vname: string; nstate: string; call_count: number }> = {};
-    citiesFiltered.forEach((c) => {
-      if (!c.city) return;
-      const cName = c.city;
-      if (!cityCounts[cName]) {
-        cityCounts[cName] = { ncode: cName, vname: cName, nstate: c.state || '', call_count: 0 };
-      }
-      cityCounts[cName].call_count++;
-    });
-    const cities = Object.values(cityCounts).sort((a, b) => a.vname.localeCompare(b.vname));
-
-    // Branches (exclude branch filter) - Fetch directly from database and map call counts
-    const branchesFiltered = filterCalls(allCalls, criteria, 'branch');
-    const branchCallCounts: Record<string, number> = {};
-    branchesFiltered.forEach((c) => {
-      if (!c.resolved_branch_code) return;
-      const bCode = String(c.resolved_branch_code);
-      branchCallCounts[bCode] = (branchCallCounts[bCode] || 0) + 1;
-    });
-
-    const branches = dbBranches.map((dbB: any) => {
-      const bCode = String(dbB.ncode);
-      return {
-        ncode: bCode,
-        vcompanyname: dbB.vcompanyname,
-        call_count: branchCallCounts[bCode] || 0
-      };
-    }).filter((b: any) => b.call_count > 0);
-
-    // Franchisees (exclude franchisee filter)
-    const franchiseesFiltered = filterCalls(allCalls, criteria, 'franchisee');
-    const franchiseeCounts: Record<string, { ncode: string; vcompanyname: string; nunder: string; call_count: number }> = {};
-    franchiseesFiltered.forEach((c) => {
-      const fCode = String(c.franchisee_code || 'UNASSIGNED');
-      const fName = c.franchisee_name || 'Unallocated';
-      if (!franchiseeCounts[fCode]) {
-        franchiseeCounts[fCode] = { ncode: fCode, vcompanyname: fName, nunder: String(c.office_under || ''), call_count: 0 };
-      }
-      franchiseeCounts[fCode].call_count++;
-    });
-    const franchisees = Object.values(franchiseeCounts).sort((a, b) => a.vcompanyname.localeCompare(b.vcompanyname));
-
-    // Technicians (exclude technician filter)
-    const techniciansFiltered = filterCalls(allCalls, criteria, 'technician');
-    const techCounts: Record<string, { ncode: string; vname: string; nofficeid: string; call_count: number }> = {};
-    techniciansFiltered.forEach((c) => {
-      if (!c.nengineer || c.nengineer === '0' || c.nengineer === 0) return;
-      const tCode = String(c.nengineer);
-      if (!techCounts[tCode]) {
-        techCounts[tCode] = { ncode: tCode, vname: c.technician_name || 'UNKNOWN', nofficeid: String(c.technician_office_id || ''), call_count: 0 };
-      }
-      techCounts[tCode].call_count++;
-    });
-    const technicians = Object.values(techCounts).sort((a, b) => a.vname.localeCompare(b.vname));
-
-    // B. Handle backward compatible/fallback legacy fetch calls if needed
-    if (fetchType) {
-      if (fetchType === 'states') return NextResponse.json(states);
-      if (fetchType === 'cities') return NextResponse.json(cities);
-      if (fetchType === 'branches') return NextResponse.json(branches);
-      if (fetchType === 'franchisees') return NextResponse.json(franchisees);
-      if (fetchType === 'technicians') return NextResponse.json(technicians);
-    }
-
-    // C. Aggregate data metrics and map coordinates (using all filters applied)
-    const filteredCalls = filterCalls(allCalls, criteria);
-
-    const franchiseeMap = new Map();
-    const pincodeMap = new Map();
-
-    let totalCallsCount = 0;
-    let openCallsCount = 0;
-    let closedCallsCount = 0;
-    const activeTechsSet = new Set();
-    const activeFranchiseesSet = new Set();
-
-    filteredCalls.forEach((c: any) => {
-      totalCallsCount++;
-      const isSolved = c.bsolved === true || c.bsolved === 1 || String(c.bsolved).toLowerCase() === 'true';
-      const isTechSolved = c.bfastclose === true || c.bfastclose === 1 || String(c.bfastclose).toLowerCase() === 'true';
-      // Consider tech-solved as closed for metrics
-      if (isSolved || isTechSolved) {
-        closedCallsCount++;
-      } else {
-        openCallsCount++;
-      }
-
-      if (c.nengineer && c.nengineer !== 0 && c.nengineer !== '0') {
-        activeTechsSet.add(c.nengineer);
-      }
-
-      const fCode = c.franchisee_code || 'UNASSIGNED';
-      const fName = c.franchisee_name || 'Unallocated';
-      if (c.franchisee_code) {
-        activeFranchiseesSet.add(c.franchisee_code);
-      }
-
-      // 1. Franchisee aggregate calculations
-      if (!franchiseeMap.has(fCode)) {
-        franchiseeMap.set(fCode, {
-          franchisee_code: fCode,
-          franchisee_name: fName,
-          techs: new Set(),
-          total_calls: 0,
-          open_calls: 0,
-          closed_calls: 0,
-          tech_solved: 0
-        });
-      }
-      const fObj = franchiseeMap.get(fCode);
-      fObj.total_calls++;
-      if (isSolved) {
-        fObj.closed_calls++;
-      } else if (isTechSolved) {
-        // Count tech-solved separately but treat as closed
-        fObj.closed_calls++;
-        fObj.tech_solved++;
-      } else {
-        fObj.open_calls++;
-      }
-      if (c.nengineer && c.nengineer !== 0 && c.nengineer !== '0') {
-        fObj.techs.add(c.nengineer);
-      }
-
-      // 2. Pincode aggregate calculations for Leaflet map
-      const pincode = c.pincode || 'UNKNOWN';
-      const pinKey = `${pincode}-${fCode}`;
-
-      if (!pincodeMap.has(pinKey)) {
-        pincodeMap.set(pinKey, {
-          pincode,
-          lat: c.lat,
-          lng: c.lng,
-          city_name: c.city,
-          state_name: c.state,
-          franchisee_name: fName,
-          franchisee_code: fCode,
-          total_calls: 0,
-          open_calls: 0
-        });
-      }
-      const pinObj = pincodeMap.get(pinKey);
-      pinObj.total_calls++;
-      if (!isSolved) {
-        pinObj.open_calls++;
-      }
-    });
-
-    // Format franchisee breakdown results
-    const detailMap = new Map();
-
-    filteredCalls.forEach((c: any) => {
-      const pincode = c.pincode || 'UNKNOWN';
-      const city = c.city || 'UNKNOWN';
-      const branchName = c.resolved_branch_name || 'Unknown Branch';
-      const franchiseeName = c.franchisee_name || 'Unallocated';
-      const franchiseeCode = c.franchisee_code || 'UNASSIGNED';
-      const vtrnno = c.vtrnno || 'N/A';
-      const isSolved = c.bsolved === true || c.bsolved === 1 || String(c.bsolved).toLowerCase() === 'true';
-      const isTechSolved = c.bfastclose === true || c.bfastclose === 1 || String(c.bfastclose).toLowerCase() === 'true';
-      const isUnallocated = franchiseeCode === 'UNASSIGNED';
-      const statusKey = isUnallocated ? 'UNALLOCATED' : (!isSolved && !isTechSolved ? 'OPEN' : 'CLOSED');
-      const detailKey = `${pincode}||${city}||${branchName}||${franchiseeName}||${vtrnno}||${statusKey}`;
-
-      if (!detailMap.has(detailKey)) {
-        detailMap.set(detailKey, {
-          pincode,
-          city,
-          branch: branchName,
-          franchisee: franchiseeName,
-          franchisee_code: franchiseeCode,
-          vtrnno,
-          status: statusKey === 'UNALLOCATED' ? 'Unallocated' : statusKey === 'OPEN' ? 'Open' : 'Closed',
-          count: 0
-        });
-      }
-      detailMap.get(detailKey).count++;
-    });
-
-    const details = Array.from(detailMap.values());
-
-    const franchiseeSummary = Array.from(franchiseeMap.values()).map((f: any) => {
-      const techCount = f.techs.size;
-      const ratio = techCount > 0 ? parseFloat((f.total_calls / techCount).toFixed(2)) : f.total_calls;
-      return {
-        franchisee_code: f.franchisee_code,
-        franchisee_name: f.franchisee_name,
-        technicians_count: techCount,
-        total_calls: f.total_calls,
-        open_calls: f.open_calls,
-        closed_calls: f.closed_calls,
-        tech_solved: f.tech_solved || 0,
-        ratio
-      };
-    });
-
-    // Sort by ratio DESC by default
-    franchiseeSummary.sort((a, b) => b.ratio - a.ratio);
-
-    // Format pincode summary for heatmap dots
-    const pincodeFinalMap = new Map();
-    pincodeMap.forEach((pin: any) => {
-      if (!pincodeFinalMap.has(pin.pincode)) {
-        pincodeFinalMap.set(pin.pincode, {
-          pincode: pin.pincode,
-          lat: pin.lat,
-          lng: pin.lng,
-          city_name: pin.city_name,
-          state_name: pin.state_name,
-          total_calls: 0,
-          open_calls: 0,
-          franchisees: []
-        });
-      }
-      const pf = pincodeFinalMap.get(pin.pincode);
-      pf.total_calls += pin.total_calls;
-      pf.open_calls += pin.open_calls;
-      pf.franchisees.push({
-        franchisee_name: pin.franchisee_name,
-        franchisee_code: pin.franchisee_code,
-        total_calls: pin.total_calls
-      });
-    });
-
-    // Format final list of pincodes with coordinates
-    const pincodeSummary = Array.from(pincodeFinalMap.values()).map((pin: any) => {
-      return {
-        pincode: pin.pincode,
-        lat: pin.lat,
-        lng: pin.lng,
-        total_calls: pin.total_calls,
-        open_calls: pin.open_calls,
-        franchisees: pin.franchisees
-      };
-    });
-
     return NextResponse.json({
-      metrics: {
-        totalCalls: totalCallsCount,
-        openCalls: openCallsCount,
-        closedCalls: closedCallsCount,
-        franchiseesCount: activeFranchiseesSet.size,
-        activeTechniciansCount: activeTechsSet.size,
-        callToTechnicianRatio: activeTechsSet.size > 0 ? parseFloat((totalCallsCount / activeTechsSet.size).toFixed(2)) : totalCallsCount
-      },
-      franchiseeSummary,
-      pincodeSummary,
-      details,
-      states,
-      cities,
-      branches,
-      franchisees,
-      technicians
+      allCalls,
+      dbBranches
     });
 
   } catch (err: any) {

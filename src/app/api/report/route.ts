@@ -2,6 +2,160 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { postQuery } from '@/lib/db-proxy';
 import { prisma } from '@/lib/prisma';
+import pincodeMapData from '../../report/distribution/pincode_map.json';
+
+const cityToStateMap: Record<string, string> = {
+  'MUMBAI': 'MAHARASHTRA',
+  'PUNE': 'MAHARASHTRA',
+  'AHMEDABAD': 'GUJARAT',
+  'SURAT': 'GUJARAT',
+  'VADODARA': 'GUJARAT',
+  'RAJKOT': 'GUJARAT',
+  'JAIPUR': 'RAJASTHAN',
+  'BENGALURU': 'KARNATAKA',
+  'BANGALORE': 'KARNATAKA',
+  'CHENNAI': 'TAMIL NADU',
+  'HYDERABAD': 'TELANGANA',
+  'KOLKATA': 'WEST BENGAL',
+  'INDORE': 'MADHYA PRADESH',
+  'NAGPUR': 'MAHARASHTRA',
+  'NASHIK': 'MAHARASHTRA',
+  'AURANGABAD': 'MAHARASHTRA',
+  'KOLHAPUR': 'MAHARASHTRA',
+  'SOLAPUR': 'MAHARASHTRA',
+  'THANE': 'MAHARASHTRA',
+  'NAVIMUMBAI': 'MAHARASHTRA',
+  'NAVI MUMBAI': 'MAHARASHTRA',
+  'BHANDARA': 'MAHARASHTRA'
+};
+
+const VALID_INDIAN_STATES = new Set([
+  'ANDHRA PRADESH', 'ARUNACHAL PRADESH', 'ASSAM', 'BIHAR', 'CHHATTISGARH', 'GOA', 'GUJARAT', 'HARYANA', 
+  'HIMACHAL PRADESH', 'JHARKHAND', 'KARNATAKA', 'KERALA', 'MADHYA PRADESH', 'MAHARASHTRA', 'MANIPUR', 
+  'MEGHALAYA', 'MIZORAM', 'NAGALAND', 'ODISHA', 'PUNJAB', 'RAJASTHAN', 'SIKKIM', 'TAMIL NADU', 'TELANGANA', 
+  'TRIPURA', 'UTTAR PRADESH', 'UTTARAKHAND', 'WEST BENGAL', 'ANDAMAN AND NICOBAR ISLANDS', 'CHANDIGARH', 
+  'DADRA AND NAGAR HAVELI AND DAMAN AND DIU', 'LAKSHADWEEP', 'DELHI', 'PUDUCHERRY', 'JAMMU & KASHMIR', 
+  'JAMMU AND KASHMIR', 'LADAKH'
+]);
+
+const STATE_NAME_CORRECTIONS: Record<string, string> = {
+  'TAMILNADU': 'TAMIL NADU',
+  'WESTBENGAL': 'WEST BENGAL',
+  'MADHYAPRADESH': 'MADHYA PRADESH',
+  'ANDHRAPRADESH': 'ANDHRA PRADESH',
+  'UTTARPRADESH': 'UTTAR PRADESH',
+  'UTTARAKHAND': 'UTTARAKHAND',
+  'CHATTISGARH': 'CHHATTISGARH',
+  'ODISHA': 'ODISHA',
+  'ORISSA': 'ODISHA',
+  'DELHI': 'DELHI',
+  'NEW DELHI': 'DELHI',
+  'PONDICHERRY': 'PUDUCHERRY',
+  'PUDUCHERRY': 'PUDUCHERRY',
+  'JAMMU': 'JAMMU & KASHMIR',
+  'KASHMIR': 'JAMMU & KASHMIR',
+  'JAMMU AND KASHMIR': 'JAMMU & KASHMIR',
+  'JAMMU & KASHMIR': 'JAMMU & KASHMIR',
+  'DADRA & NAGAR HAVELI': 'DADRA AND NAGAR HAVELI AND DAMAN AND DIU',
+  'DAMAN & DIU': 'DADRA AND NAGAR HAVELI AND DAMAN AND DIU',
+  'DAMAN AND DIU': 'DADRA AND NAGAR HAVELI AND DAMAN AND DIU'
+};
+
+function isValidState(s: string): boolean {
+  if (!s) return false;
+  const normalized = s.toUpperCase().trim();
+  if (normalized === 'NA' || normalized === 'N/A' || normalized === 'UNKNOWN' || normalized === 'Z CITY' || normalized === 'Z-CITY' || normalized === '') return false;
+  
+  let corrected = normalized;
+  if (STATE_NAME_CORRECTIONS[normalized]) {
+    corrected = STATE_NAME_CORRECTIONS[normalized];
+  } else {
+    const spaceLess = normalized.replace(/\s+/g, '');
+    if (STATE_NAME_CORRECTIONS[spaceLess]) {
+      corrected = STATE_NAME_CORRECTIONS[spaceLess];
+    }
+  }
+
+  return VALID_INDIAN_STATES.has(corrected);
+}
+
+function isValidCity(c: string): boolean {
+  if (!c) return false;
+  const normalized = c.toUpperCase().trim();
+  if (normalized === 'NA' || normalized === 'N/A' || normalized === 'UNKNOWN' || normalized === 'Z CITY' || normalized === 'Z-CITY' || normalized === 'TEST' || normalized === 'DUMMY' || normalized === '') return false;
+  if (normalized.startsWith('Z ') || normalized.startsWith('Z-') || normalized === 'Z' || normalized.includes('Z_')) return false;
+  return true;
+}
+
+function getGeographicDetails(pincode: string, dbCity?: string, dbState?: string) {
+  const pin = String(pincode || '').trim();
+  
+  let state = '';
+  let city = '';
+
+  // Lookup in our pincode map
+  const mapped = (pincodeMapData as Record<string, any>)[pin];
+  
+  let mappedState = mapped?.s || '';
+  let mappedCity = mapped?.d || '';
+
+  if (mappedState) {
+    const upState = mappedState.toUpperCase().trim();
+    if (STATE_NAME_CORRECTIONS[upState]) {
+      mappedState = STATE_NAME_CORRECTIONS[upState];
+    } else {
+      const spaceLess = upState.replace(/\s+/g, '');
+      if (STATE_NAME_CORRECTIONS[spaceLess]) {
+        mappedState = STATE_NAME_CORRECTIONS[spaceLess];
+      }
+    }
+  }
+
+  const dbStateUpper = (dbState || '').toUpperCase().trim();
+  let resolvedDbState = dbStateUpper;
+  if (STATE_NAME_CORRECTIONS[dbStateUpper]) {
+    resolvedDbState = STATE_NAME_CORRECTIONS[dbStateUpper];
+  } else {
+    const spaceLess = dbStateUpper.replace(/\s+/g, '');
+    if (STATE_NAME_CORRECTIONS[spaceLess]) {
+      resolvedDbState = STATE_NAME_CORRECTIONS[spaceLess];
+    }
+  }
+  const resolvedDbCity = (dbCity || '').toUpperCase().trim();
+
+  // Prioritize valid database values first!
+  if (isValidState(resolvedDbState) && isValidCity(resolvedDbCity)) {
+    state = resolvedDbState;
+    city = resolvedDbCity;
+  } else if (isValidState(mappedState) && isValidCity(mappedCity)) {
+    state = mappedState;
+    city = mappedCity;
+  } else {
+    if (isValidState(resolvedDbState)) {
+      state = resolvedDbState;
+    } else if (isValidState(mappedState)) {
+      state = mappedState;
+    }
+
+    if (isValidCity(resolvedDbCity)) {
+      city = resolvedDbCity;
+    } else if (isValidCity(mappedCity)) {
+      city = mappedCity;
+    }
+  }
+
+  if (!isValidState(state)) state = 'UNKNOWN';
+  if (!isValidCity(city)) city = 'UNKNOWN';
+
+  state = state.toUpperCase().trim();
+  city = city.toUpperCase().trim();
+
+  if (cityToStateMap[city]) {
+    state = cityToStateMap[city];
+  }
+
+  return { state, city };
+}
 
 function getExactTrnQuery(search: string): string | null {
   const cleaned = search.trim().replace(/-/g, '');
@@ -24,6 +178,7 @@ export async function GET(req: NextRequest) {
     const account = searchParams.get('account') || '';
     const region = searchParams.get('region') || '';
     const status = searchParams.get('status') || '';
+    const pincode = searchParams.get('pincode') || '';
     const lastSync = searchParams.get('lastSync') || '';
 
     const authHeader = req.headers.get('Authorization');
@@ -50,7 +205,8 @@ export async function GET(req: NextRequest) {
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
 
     // Base condition is on raw table alias 'tc'
-    let condition = "tc.vtrnno IS NOT NULL AND tc.vtrnno <> ''";
+    // Include transferred calls even when vtrnno is empty by treating transfer call no or cancel reason 2 as valid records.
+    let condition = "((tc.vtrnno IS NOT NULL AND tc.vtrnno <> '') OR (tc.ncancelreason = 2 OR (tc.vtransfercallno IS NOT NULL AND tc.vtransfercallno <> '')))";
 
     if (search && search.trim().length > 0) {
       const searchSafe = search.replace(/'/g, "''");
@@ -59,7 +215,7 @@ export async function GET(req: NextRequest) {
         condition += ` AND (tc.vtrnno = '${exactTrn}')`;
       } else {
         // Global search: ignore all filters (dates, status, etc.) to look up the specific record historically
-        condition += ` AND (tc.vtrnno LIKE '%${searchSafe}%' OR tc.vtransfercallno LIKE '%${searchSafe}%' OR p.vname LIKE '%${searchSafe}%' OR mstitems.vname LIKE '%${searchSafe}%' OR tc.vserialno LIKE '%${searchSafe}%')`;
+        condition += ` AND (tc.vtrnno LIKE '%${searchSafe}%' OR tc.vtransfercallno LIKE '%${searchSafe}%' OR p.vname LIKE '%${searchSafe}%' OR mstitems.vname LIKE '%${searchSafe}%' OR tc.vserialno LIKE '%${searchSafe}%' OR p.vinstpostalcode LIKE '%${searchSafe}%')`;
       }
     } else {
       if (officeId && officeId !== 'All') {
@@ -114,6 +270,10 @@ export async function GET(req: NextRequest) {
           condition += " AND (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed')";
         }
       }
+      if (pincode) {
+        const pincodeSafe = pincode.replace(/'/g, "''");
+        condition += ` AND p.vinstpostalcode LIKE '%${pincodeSafe}%'`;
+      }
     }
 
     if (lastSync) {
@@ -128,6 +288,10 @@ export async function GET(req: NextRequest) {
       tc.ntrnno as callsntrnno,
       CONVERT(varchar(30), tc.dtrndate, 126) as callsdtrndate,
       p.vname as PartyName,
+      p.vinstpostalcode as Pincode,
+      cty.vname as dbCity,
+      st.vname as dbState,
+      tc.ntransfertooffice as franchisee_code,
       tc.vlocation as vlocation,
       mstitems.vitemcode as itemcode,
       mstitems.vname as itemname,
@@ -160,23 +324,38 @@ export async function GET(req: NextRequest) {
       cr.vname as cancel_reason
     `;
 
+    let subqueryCondition = "";
+    if (startDate) {
+      if (lastSync) {
+        subqueryCondition = `WHERE dtrndate >= '${startDate}' OR dtrndate >= '${lastSync}' OR dsolvedatetime >= '${lastSync}'`;
+      } else {
+        subqueryCondition = `WHERE dtrndate >= '${startDate}'`;
+      }
+    } else if (lastSync) {
+      subqueryCondition = `WHERE dtrndate >= '${lastSync}' OR dsolvedatetime >= '${lastSync}'`;
+    }
+
     const LATEST_CALLS_SUBQUERY = `(
       SELECT *
       FROM (
         SELECT *,
-               ROW_NUMBER() OVER (
-                 PARTITION BY vtrnno 
-                 ORDER BY ISNULL(editedon, addedon) DESC, ncode DESC
-               ) as rn
+                ROW_NUMBER() OVER (
+                  PARTITION BY CASE WHEN ISNULL(vtrnno, '') = '' THEN CAST(ncode AS VARCHAR(50)) ELSE vtrnno END
+                  ORDER BY ISNULL(editedon, addedon) DESC, ncode DESC
+                ) as rn
         FROM trhcalls (NOLOCK)
+        ${subqueryCondition}
       ) s
       WHERE s.rn = 1
     ) tc`;
+
 
     const tableName = `
       ${LATEST_CALLS_SUBQUERY}
       LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode
       LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode
+      LEFT JOIN mstcity cty (NOLOCK) ON COALESCE(NULLIF(p.ncity, ''), o.ncity) = cty.ncode
+      LEFT JOIN mststate st (NOLOCK) ON cty.nstate = st.ncode
       LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode
       LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode
       LEFT JOIN mstitems (NOLOCK) ON tc.nitem = mstitems.ncode
@@ -193,8 +372,22 @@ export async function GET(req: NextRequest) {
         orderBy: "tc.ncode DESC" // Order by recently edited/added
       });
 
+      const processedData = (res.data || []).map((row: any) => {
+        const geo = getGeographicDetails(row.Pincode, row.dbCity, row.dbState);
+        return {
+          ...row,
+          state: geo.state,
+          city: geo.city,
+          franchisee_name: row.vtransferofficename || 'Unallocated',
+          franchisee_code: row.franchisee_code ? String(row.franchisee_code) : 'UNASSIGNED',
+          resolved_branch: row.officename || 'UNKNOWN',
+          resolved_branch_code: row.nofficeid ? String(row.nofficeid) : 'UNKNOWN',
+          technician_name: row.serviceman || 'UNKNOWN'
+        };
+      });
+
       return NextResponse.json({
-        data: res.data || [],
+        data: processedData,
         isDelta: true
       });
     }
@@ -229,8 +422,22 @@ export async function GET(req: NextRequest) {
     const totalCount = parseInt(countRes.data?.[0]?.total || "0");
     const summary = summaryRes.data?.[0] || { total: 0, transferred: 0, cancelled: 0, solved: 0, open_calls: 0 };
 
+    const processedData = (res.data || []).map((row: any) => {
+      const geo = getGeographicDetails(row.Pincode, row.dbCity, row.dbState);
+      return {
+        ...row,
+        state: geo.state,
+        city: geo.city,
+        franchisee_name: row.vtransferofficename || 'Unallocated',
+        franchisee_code: row.franchisee_code ? String(row.franchisee_code) : 'UNASSIGNED',
+        resolved_branch: row.officename || 'UNKNOWN',
+        resolved_branch_code: row.nofficeid ? String(row.nofficeid) : 'UNKNOWN',
+        technician_name: row.serviceman || 'UNKNOWN'
+      };
+    });
+
     return NextResponse.json({
-      data: res.data || [],
+      data: processedData,
       total: totalCount,
       summary: {
         total: parseInt(summary.total || "0"),
