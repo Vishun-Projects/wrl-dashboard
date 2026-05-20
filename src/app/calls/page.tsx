@@ -62,6 +62,15 @@ export default function CallsPage() {
   const [freezePoint, setFreezePoint] = useState<Date>(() => globalCallsCache?.freezePoint || new Date());
   const activeAbortControllerRef = useRef<AbortController | null>(null);
 
+  const prevFiltersRef = useRef({
+    selectedOfficeId,
+    selectedStatus,
+    portalFilter,
+    activeTab,
+    dateRange,
+    globalSearch
+  });
+
   const router = useRouter();
 
   // Sync state variables to the global cache on every change
@@ -114,16 +123,29 @@ export default function CallsPage() {
 
   // Fetch Logic with Race Condition Prevention (AbortController)
   useEffect(() => {
-    if (!userProfile || !hasFetched) return;
+    if (!userProfile) return;
 
-    const filtersChanged = !globalCallsCache ||
-      globalCallsCache.selectedOfficeId !== selectedOfficeId ||
-      globalCallsCache.selectedStatus !== selectedStatus ||
-      globalCallsCache.portalFilter !== portalFilter ||
-      globalCallsCache.activeTab !== activeTab ||
-      globalCallsCache.dateRange.start.getTime() !== dateRange.start.getTime() ||
-      globalCallsCache.dateRange.end.getTime() !== dateRange.end.getTime() ||
-      globalCallsCache.globalSearch !== globalSearch;
+    if (!hasFetched) {
+      // Keep prevFiltersRef synchronized while we haven't fetched yet
+      prevFiltersRef.current = {
+        selectedOfficeId,
+        selectedStatus,
+        portalFilter,
+        activeTab,
+        dateRange,
+        globalSearch
+      };
+      return;
+    }
+
+    const filtersChanged = 
+      prevFiltersRef.current.selectedOfficeId !== selectedOfficeId ||
+      prevFiltersRef.current.selectedStatus !== selectedStatus ||
+      prevFiltersRef.current.portalFilter !== portalFilter ||
+      prevFiltersRef.current.activeTab !== activeTab ||
+      prevFiltersRef.current.dateRange.start.getTime() !== dateRange.start.getTime() ||
+      prevFiltersRef.current.dateRange.end.getTime() !== dateRange.end.getTime() ||
+      prevFiltersRef.current.globalSearch !== globalSearch;
 
     if (filtersChanged) {
       setPage(1);
@@ -131,6 +153,15 @@ export default function CallsPage() {
       setFreezePoint(now);
       fetchCalls(1, true);
     }
+
+    prevFiltersRef.current = {
+      selectedOfficeId,
+      selectedStatus,
+      portalFilter,
+      activeTab,
+      dateRange,
+      globalSearch
+    };
 
     return () => {
       if (activeAbortControllerRef.current) {
