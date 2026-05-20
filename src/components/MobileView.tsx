@@ -40,14 +40,10 @@ interface MobileViewProps {
   stats: any;
   // High-Performance Props
   onFullReset: () => void;
-  updateInfo: { newCount: number, updatedCount: number } | null;
-  onApplyUpdates: () => void;
   lastSyncTime: string | null;
   isSyncing: boolean;
   syncProgress: any;
-  onCatchUp: () => void;
   onManualSync: () => void;
-  newCallsCount: number;
   onNext?: () => void;
   onPrev?: () => void;
   hasNext?: boolean;
@@ -55,6 +51,8 @@ interface MobileViewProps {
   currentIndex?: number;
   carouselTotalCount?: number;
   onStopSync?: () => void;
+  hasFetched?: boolean;
+  onFetchCalls?: () => void;
 }
 
 export function MobileView({
@@ -63,10 +61,10 @@ export function MobileView({
   onSelectCall, selectedCall, isDrawerOpen, setIsDrawerOpen,
   onFlagUpdate, onPostComment, offices, selectedOfficeId, setSelectedOfficeId,
   userProfile, stats, timePeriod, setTimePeriod,
-  newCallsCount, lastSyncTime, isSyncing, syncProgress, onCatchUp, onManualSync, onFullReset,
-  updateInfo, onApplyUpdates,
+  lastSyncTime, isSyncing, syncProgress, onManualSync, onFullReset,
   onNext, onPrev, hasNext, hasPrev,
-  currentIndex, carouselTotalCount
+  currentIndex, carouselTotalCount, onStopSync,
+  hasFetched, onFetchCalls
 }: MobileViewProps) {
   const router = useRouter();
   const [showFilters, setShowFilters] = useState(false);
@@ -133,15 +131,7 @@ export function MobileView({
         />
       </div>
 
-      {/* Catch-up Banner */}
-      {newCallsCount > 0 && (
-        <button 
-          onClick={onCatchUp}
-          className="w-full bg-[#fef3c7] border-t border-[#fde68a] py-2.5 text-[12px] text-[#92400e] text-center font-medium"
-        >
-          ↑ {newCallsCount} new entries — tap to catch up
-        </button>
-      )}
+
 
       {/* Sync Progress Banner (Mobile) */}
       {syncProgress?.is_running && (
@@ -165,10 +155,36 @@ export function MobileView({
 
       {/* List Area */}
       <main className="flex-1 overflow-y-auto px-4 py-3 pb-24 flex flex-col gap-2.5">
-        {loading && calls.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-3">
+        {!hasFetched ? (
+          <div className="flex flex-col items-center justify-center h-full max-w-xs mx-auto gap-5 text-center mt-12">
+            <div className="w-14 h-14 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center shadow-inner text-slate-800">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="9" y1="9" x2="15" y2="9" /><line x1="9" y1="13" x2="15" y2="13" /><line x1="9" y1="17" x2="11" y2="17" /></svg>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Calls Register</h3>
+              <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                Click below to fetch the latest 100 calls.
+              </p>
+            </div>
+            <button
+              onClick={onFetchCalls}
+              className="w-full py-2.5 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 active:scale-98 transition-all shadow flex items-center justify-center gap-2"
+            >
+              Fetch Latest Calls
+            </button>
+          </div>
+        ) : loading && calls.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full gap-4">
             <div className="w-8 h-8 border-3 border-[#0f172a] border-t-transparent rounded-full animate-spin" />
             <span className="text-[11px] font-medium text-[#94a3b8]">Syncing...</span>
+            {onStopSync && (
+              <button
+                onClick={onStopSync}
+                className="px-2.5 py-1.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded shadow-sm"
+              >
+                Stop Query
+              </button>
+            )}
           </div>
         ) : (
           calls.map(call => (

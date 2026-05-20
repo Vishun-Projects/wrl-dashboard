@@ -56,12 +56,11 @@ export default function CallsPage() {
   const [globalSearch, setGlobalSearch] = useState(globalCallsCache?.globalSearch || '');
 
   // High-Performance States
+  const [hasFetched, setHasFetched] = useState<boolean>(() => !!globalCallsCache?.calls?.length);
   const lastSyncTimeRef = useRef<string>(new Date().toISOString().replace('T', ' ').substring(0, 19));
   const [lastSyncTime, setLastSyncTime] = useState<string>(() => lastSyncTimeRef.current);
   const [freezePoint, setFreezePoint] = useState<Date>(() => globalCallsCache?.freezePoint || new Date());
-  const [newCallsCount, setNewCallsCount] = useState(globalCallsCache?.newCallsCount || 0);
-  const [pendingCalls, setPendingCalls] = useState<any[] | null>(null);
-  const [updateInfo, setUpdateInfo] = useState<{ newCount: number, updatedCount: number } | null>(null);
+  const activeAbortControllerRef = useRef<AbortController | null>(null);
 
   const router = useRouter();
 
@@ -78,10 +77,10 @@ export default function CallsPage() {
       selectedStatus,
       globalSearch,
       freezePoint,
-      newCallsCount,
+      newCallsCount: 0,
       portalFilter
     };
-  }, [calls, totalCount, totalPages, page, activeTab, selectedOfficeId, dateRange, selectedStatus, globalSearch, freezePoint, newCallsCount, portalFilter]);
+  }, [calls, totalCount, totalPages, page, activeTab, selectedOfficeId, dateRange, selectedStatus, globalSearch, freezePoint, portalFilter]);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -115,7 +114,7 @@ export default function CallsPage() {
 
   // Fetch Logic with Race Condition Prevention (AbortController)
   useEffect(() => {
-    if (!userProfile) return;
+    if (!userProfile || !hasFetched) return;
 
     const filtersChanged = !globalCallsCache ||
       globalCallsCache.selectedOfficeId !== selectedOfficeId ||
@@ -125,51 +124,29 @@ export default function CallsPage() {
       globalCallsCache.dateRange.start.getTime() !== dateRange.start.getTime() ||
       globalCallsCache.dateRange.end.getTime() !== dateRange.end.getTime() ||
       globalCallsCache.globalSearch !== globalSearch;
-    
-    const controller = new AbortController();
 
     if (filtersChanged) {
       setPage(1);
       const now = new Date();
       setFreezePoint(now);
-      fetchCalls(1, true, controller.signal);
+      fetchCalls(1, true);
     }
-    
-    // Auto-refresh every 15 seconds using lightweight delta syncing (disabled if searching or backgrounded)
-    const intervalId = setInterval(() => {
-      if (document.hidden) return;
-      if (!globalSearch) {
-        fetchCalls(page, false, undefined, true);
-      }
-    }, 15000);
 
     return () => {
-      controller.abort();
-      clearInterval(intervalId);
+      if (activeAbortControllerRef.current) {
+        activeAbortControllerRef.current.abort();
+      }
     };
-  }, [selectedOfficeId, selectedStatus, portalFilter, activeTab, dateRange, userProfile, globalSearch]);
-
-  const checkNewCalls = async () => {
-    try {
-      const { count } = await supabase
-        .from('calls_cache')
-        .select('id', { count: 'exact', head: true })
-        .eq('office_id', selectedOfficeId)
-        .gt('logged_at', freezePoint.toISOString());
-
-      setNewCallsCount(count || 0);
-    } catch (err) {
-
-    }
-  };
-
-  const handleCatchUp = () => {
-    setFreezePoint(new Date());
-    setNewCallsCount(0);
-    fetchCalls(1);
-  };
+  }, [selectedOfficeId, selectedStatus, portalFilter, activeTab, dateRange, userProfile, globalSearch, hasFetched]);
 
   const handleManualSync = async () => {
+    setHasFetched(true);
+    if (activeAbortControllerRef.current) {
+      activeAbortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    activeAbortControllerRef.current = controller;
+
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -188,8 +165,11 @@ export default function CallsPage() {
       }
 
       const res = await axios.get(finalUrl, { 
-        headers: { 'Authorization': `Bearer ${session?.access_token}` }
+        headers: { 'Authorization': `Bearer ${session?.access_token}` },
+        signal: controller.signal
       });
+
+      if (controller.signal.aborted) return;
 
       const { data: fetchedCalls, total, totalPages: fetchedTotalPages, isDelta } = res.data;
 
@@ -223,18 +203,22 @@ export default function CallsPage() {
       lastSyncTimeRef.current = new Date().toISOString().replace('T', ' ').substring(0, 19);
       setLastSyncTime(lastSyncTimeRef.current);
     } catch (err: any) {
+      if (axios.isCancel(err)) return;
       toast.error(err.response?.data?.error || "Failed to sync data");
     } finally {
       setLoading(false);
+      if (activeAbortControllerRef.current === controller) {
+        activeAbortControllerRef.current = null;
+      }
     }
   };
 
   const handleFullReset = async () => {
+    setHasFetched(true);
     setLoading(true);
     try {
       const now = new Date();
       setFreezePoint(now);
-      setNewCallsCount(0);
       lastSyncTimeRef.current = now.toISOString().replace('T', ' ').substring(0, 19);
       setLastSyncTime(lastSyncTimeRef.current);
       await fetchCalls(1, true);
@@ -246,13 +230,20 @@ export default function CallsPage() {
     }
   };
 
-  const fetchCalls = async (pageToFetch: number = 1, isInitial: boolean = false, signal?: AbortSignal, silent: boolean = false) => {
+  const fetchCalls = async (pageToFetch: number = 1, isInitial: boolean = false) => {
+    setHasFetched(true);
+    if (activeAbortControllerRef.current) {
+      activeAbortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    activeAbortControllerRef.current = controller;
+
     if (isInitial) {
       setLoading(true);
       setCalls([]); 
       setTotalCount(0);
       setPage(1);
-    } else if (!silent) {
+    } else {
       setLoading(true);
     }
     
@@ -268,48 +259,15 @@ export default function CallsPage() {
       
       // Pass absolute date bounds
       finalUrl += `&startDate=${dateRange.start.toISOString().split('T')[0]}&endDate=${dateRange.end.toISOString().split('T')[0]}`;
-      
-      // Pass lastSync if doing background silent synchronization
-      if (silent && lastSyncTimeRef.current) {
-        finalUrl += `&lastSync=${lastSyncTimeRef.current}`;
-      }
 
       const res = await axios.get(finalUrl, { 
         headers: { 'Authorization': `Bearer ${session?.access_token}` },
-        signal
+        signal: controller.signal
       });
 
-      if (signal?.aborted) return;
+      if (controller.signal.aborted) return;
       
-      const { data: fetchedCalls, total, totalPages: fetchedTotalPages, isDelta } = res.data;
-
-      if (silent && isDelta) {
-        if (!fetchedCalls || fetchedCalls.length === 0) return;
-
-        // Background update handling (delta sync)
-        lastSyncTimeRef.current = new Date().toISOString().replace('T', ' ').substring(0, 19);
-        setLastSyncTime(lastSyncTimeRef.current);
-
-        const updatedCalls = [...calls];
-        let newCount = 0;
-
-        fetchedCalls.forEach((nc: any) => {
-          const idx = updatedCalls.findIndex(c => String(c.id) === String(nc.id));
-          if (idx > -1) {
-            updatedCalls[idx] = nc;
-          } else {
-            // New call! Prepend to the list
-            updatedCalls.unshift(nc);
-            newCount++;
-          }
-        });
-
-        if (fetchedCalls.length > 0 && !signal?.aborted) {
-          setPendingCalls(updatedCalls);
-          setUpdateInfo({ newCount, updatedCount: fetchedCalls.length - newCount });
-        }
-        return;
-      }
+      const { data: fetchedCalls, total, totalPages: fetchedTotalPages } = res.data;
 
       // Main update
       setCalls(fetchedCalls); 
@@ -325,17 +283,20 @@ export default function CallsPage() {
       const errorMsg = err.response?.data?.error || "Failed to fetch data";
       toast.error(errorMsg);
 
-      if (isInitial || !silent) setLoading(false);
+      setLoading(false);
+    } finally {
+      if (activeAbortControllerRef.current === controller) {
+        activeAbortControllerRef.current = null;
+      }
     }
   };
 
-
-
-  const handleApplyUpdates = () => {
-    if (pendingCalls) {
-      setCalls(pendingCalls);
-      setPendingCalls(null);
-      setUpdateInfo(null);
+  const handleStopQuery = () => {
+    if (activeAbortControllerRef.current) {
+      activeAbortControllerRef.current.abort();
+      activeAbortControllerRef.current = null;
+      setLoading(false);
+      toast.info("Query stopped by user.");
     }
   };
 
@@ -347,7 +308,7 @@ export default function CallsPage() {
     if (targetCall) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        const res = await axios.get(`/api/calls/${id}?officeId=${targetCall.office_id}&vtrnno=${targetCall.vtrnno}`, {
+        const res = await axios.get(`/api/calls/${id}?officeId=${targetCall.office_id || ''}&vtrnno=${targetCall.vtrnno || ''}`, {
           headers: { 'Authorization': `Bearer ${session?.access_token}` }
         });
         setCalls(prev => prev.map(c => c.id === id ? { ...c, ...res.data } : c));
@@ -427,6 +388,11 @@ export default function CallsPage() {
     }
   };
 
+  const handleFetchInitial = () => {
+    setHasFetched(true);
+    fetchCalls(1, true);
+  };
+
   const selectedCall = calls.find(c => c.id === selectedCallId);
 
   const stats = {
@@ -441,6 +407,8 @@ export default function CallsPage() {
     page,
     totalPages,
     totalCount,
+    hasFetched,
+    onFetchCalls: handleFetchInitial,
     onPageChange: (p: number) => fetchCalls(p),
     activeTab,
     setActiveTab,
@@ -479,16 +447,12 @@ export default function CallsPage() {
       }
     },
     copyToClipboard,
-    updateInfo,
-    onApplyUpdates: handleApplyUpdates,
-    newCallsCount,
-    onCatchUp: handleCatchUp,
     onFullReset: handleFullReset,
     lastSyncTime: lastSyncTime,
     isSyncing: loading,
     syncProgress: 0,
     onManualSync: handleManualSync,
-    onStopSync: () => { },
+    onStopSync: handleStopQuery,
     onNext: handleNextCall,
     onPrev: handlePrevCall,
     hasNext: currentIndex < localFilteredCalls.length - 1,

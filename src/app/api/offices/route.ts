@@ -3,6 +3,11 @@ import { createClient } from '@/lib/supabase/server';
 import { postQuery } from '@/lib/db-proxy';
 import { prisma } from '@/lib/prisma';
 
+// Global cache to optimize mstoffice retrieval and avoid slow remote DB scans
+let cachedAllOffices: any[] | null = null;
+let lastCacheTime = 0;
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
 export async function GET(request: Request) {
   const supabase = await createClient();
   const { data: { user }, error } = await supabase.auth.getUser();
@@ -19,26 +24,34 @@ export async function GET(request: Request) {
       user.id
     );
     const profile = (result as any[])?.[0];
-    const assignedOffices = profile?.office_ids || [];
+    const assignedOffices = (profile?.office_ids || []).map(String);
 
     const isHod = 
       permissions.includes('view_all_offices') || 
       permissions.includes('view_reports') ||
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
 
+    const now = Date.now();
+    if (!cachedAllOffices || now - lastCacheTime > CACHE_TTL) {
+      const officesRes = await postQuery({
+        fields: 'ncode, vcompanyname, nunder',
+        tableName: 'mstoffice',
+        condition: '1=1',
+        orderBy: 'vcompanyname ASC'
+      });
+      if (officesRes && officesRes.data) {
+        cachedAllOffices = officesRes.data;
+        lastCacheTime = now;
+      }
+    }
 
-    
-    const offices = await postQuery({
-      fields: 'ncode, vcompanyname, nunder',
-      tableName: 'mstoffice',
-      condition: isHod ? '1=1' : `ncode IN (${assignedOffices.map((id: string) => `'${id}'`).join(',') || "''"})`,
-      orderBy: 'vcompanyname ASC'
-    });
+    const allOffices = cachedAllOffices || [];
+    const filteredOffices = isHod 
+      ? allOffices 
+      : allOffices.filter((o: any) => assignedOffices.includes(String(o.ncode)));
 
-
-    return NextResponse.json(offices.data);
+    return NextResponse.json(filteredOffices);
   } catch (err: any) {
-
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

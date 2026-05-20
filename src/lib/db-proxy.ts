@@ -25,37 +25,35 @@ export async function getAppState() {
     return cachedState;
 }
 
-async function executePostWithRetry(params: any) {
+async function executePostWithRetry(params: any, signal?: AbortSignal) {
     const { viewState, viewStateGenerator, eventValidation } = await getAppState();
-    
+
     const formData = new URLSearchParams();
     formData.append('__VIEWSTATE', viewState);
     formData.append('__VIEWSTATEGENERATOR', viewStateGenerator);
     if (eventValidation) formData.append('__EVENTVALIDATION', eventValidation);
-    
+
     if (params.rawSql) {
-        let sql = params.rawSql.trim();
-        // SQL Server requires TOP or OFFSET if ORDER BY is used in a subquery.
-        // We only check if the outermost query already starts with SELECT TOP.
-        if (sql.toUpperCase().includes('ORDER BY') && !/^\s*SELECT\s+TOP\b/i.test(sql)) {
-            // Find the first SELECT and ensure it has TOP 100 PERCENT
-            sql = sql.replace(/^(\s*SELECT)\b/i, '$1 TOP 100 PERCENT');
-        }
-        formData.append('txt_Fields', '*');
-        formData.append('txt_TableName', `(${sql}) as t`);
-        formData.append('txt_Condition', '1=1');
-        formData.append('txt_OrderBy', '');
+      let sql = params.rawSql.trim();
+      // SQL Server requires TOP or OFFSET if ORDER BY is used in a subquery.
+      // We only check if the outermost query already starts with SELECT TOP.
+      if (sql.toUpperCase().includes('ORDER BY') && !/^\s*SELECT\s+TOP\b/i.test(sql)) {
+          // Find the first SELECT and ensure it has TOP 100 PERCENT
+          sql = sql.replace(/^(\s*SELECT)\b/i, '$1 TOP 100 PERCENT');
+      }
+      formData.append('txt_Fields', '*');
+      formData.append('txt_TableName', `(${sql}) as t`);
+      formData.append('txt_Condition', '1=1');
+      formData.append('txt_OrderBy', '');
     } else {
-        formData.append('txt_Top', params.top || '');
-        formData.append('txt_Fields', params.fields || '');
-        formData.append('txt_TableName', params.tableName || '');
-        formData.append('txt_Condition', params.condition || '1=1');
-        formData.append('txt_OrderBy', params.orderBy || '');
+      formData.append('txt_Top', params.top || '');
+      formData.append('txt_Fields', params.fields || '');
+      formData.append('txt_TableName', params.tableName || '');
+      formData.append('txt_Condition', params.condition || '1=1');
+      formData.append('txt_OrderBy', params.orderBy || '');
     }
     formData.append('btn_View', 'Execute');
 
-
-    
     let attempts = 0;
     const maxAttempts = 3;
 
@@ -64,6 +62,7 @@ async function executePostWithRetry(params: any) {
         try {
             const res = await axios.post(DB_URL, formData, {
                 timeout: 100000,
+                signal,
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'User-Agent': 'Mozilla/5.0'
@@ -77,7 +76,7 @@ async function executePostWithRetry(params: any) {
                 if (errText.includes("No record found")) {
                     return { $, data: [], columns: [], message: "No record found" };
                 }
-                
+
                 // Deadlock retry logic with exponential backoff
                 if (errText.includes("deadlocked") || errText.includes("chosen as the deadlock victim")) {
                     await new Promise(r => setTimeout(r, attempts * 5000));
@@ -89,8 +88,9 @@ async function executePostWithRetry(params: any) {
 
             return { $ };
         } catch (err: any) {
+            if (axios.isCancel(err)) throw err;
             if (attempts === maxAttempts) throw err;
-            
+
             // Handle 503 or Reset with longer wait
             const isOverloaded = err.message.includes('503') || err.message.includes('ECONNRESET');
             await new Promise(r => setTimeout(r, isOverloaded ? 10000 : 3000));
@@ -106,8 +106,8 @@ export async function postQuery(params: {
     condition?: string;
     orderBy?: string;
     rawSql?: string;
-}) {
-    const result = await executePostWithRetry(params);
+}, signal?: AbortSignal) {
+    const result = await executePostWithRetry(params, signal);
     if ('data' in result) return result; // Return if no records found early exit
 
     const { $ } = result as { $: any };

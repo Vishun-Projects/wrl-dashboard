@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     // vtrnno IS NOT NULL = only real transactions, but also include transferred calls which might have empty vtrnno but valid vtransfercallno or ncancelreason = 2
     let baseCondition = "((c.vtrnno IS NOT NULL AND c.vtrnno <> '') OR (c.ncancelreason = 2 OR (c.vtransfercallno IS NOT NULL AND c.vtransfercallno <> '')))";
 
-    if (officeId && officeId !== 'All') {
+    if (officeId && officeId !== 'All' && officeId !== 'undefined' && officeId !== 'null') {
       if (officeId.includes(',')) {
         baseCondition += ` AND c.nofficeid IN (${officeId})`;
       } else {
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    if (callType && callType !== 'All') {
+    if (callType && callType !== 'All' && callType !== 'undefined' && callType !== 'null') {
       if (callType.includes(',')) {
         const types = callType.split(',').map(t => `'${t.trim().replace(/'/g, "''")}'`).join(',');
         baseCondition += ` AND c.ncalltype IN (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${types}))`;

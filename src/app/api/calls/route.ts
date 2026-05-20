@@ -23,7 +23,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const officeId = searchParams.get('officeId');
   const page = parseInt(searchParams.get('page') || '1');
-  const limit = parseInt(searchParams.get('limit') || '10');
+  const limit = parseInt(searchParams.get('limit') || '100');
   const priority = searchParams.get('priority');
   const statusFilter = searchParams.get('status');
   const startDate = searchParams.get('startDate');
@@ -49,7 +49,20 @@ export async function GET(request: Request) {
       permissions.includes('view_reports') ||
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
 
-    // 2. Build CRM Condition
+    // 2. Build CRM Condition and Subquery Condition to optimize queries
+    let subqueryCondition = "";
+    if (!search || search.trim().length === 0) {
+      if (startDate) {
+        if (lastSync) {
+          subqueryCondition = `WHERE dtrndate >= '${startDate}' OR dtrndate >= '${lastSync}' OR editedon >= '${lastSync}'`;
+        } else {
+          subqueryCondition = `WHERE dtrndate >= '${startDate}'`;
+        }
+      } else if (lastSync) {
+        subqueryCondition = `WHERE dtrndate >= '${lastSync}' OR editedon >= '${lastSync}'`;
+      }
+    }
+
     const LATEST_CALLS_SUBQUERY = `(
       SELECT *
       FROM (
@@ -59,6 +72,7 @@ export async function GET(request: Request) {
                   ORDER BY ISNULL(editedon, addedon) DESC, ncode DESC
                 ) as rn
         FROM trhcalls (NOLOCK)
+        ${subqueryCondition}
       ) s
       WHERE s.rn = 1
     ) tc`;
@@ -202,7 +216,7 @@ export async function GET(request: Request) {
         tableName: `${LATEST_CALLS_SUBQUERY} LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode`,
         condition,
         orderBy: `tc.ncode DESC`
-      });
+      }, request.signal);
 
       if (!crmRes.data || crmRes.data.length === 0) {
         return NextResponse.json({ data: [], isDelta: true });
@@ -287,7 +301,7 @@ export async function GET(request: Request) {
         ? `${LATEST_CALLS_SUBQUERY} LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode`
         : LATEST_CALLS_SUBQUERY,
       condition
-    });
+    }, request.signal);
     const totalCount = parseInt(countRes.data?.[0]?.total || "0");
     const totalPages = Math.ceil(totalCount / limit);
 
@@ -314,9 +328,9 @@ export async function GET(request: Request) {
       fields: `tc.ncode, tc.vtrnno, tc.vtransfercallno, tc.nofficeid, CONVERT(varchar(30), tc.dtrndate, 126) as dtrndate, CONVERT(varchar(30), tc.approvedon, 126) as approvedon, CONVERT(varchar(30), tc.dallocationdatetime, 126) as dallocationdatetime, CONVERT(varchar(30), tc.dsolvedatetime, 126) as dsolvedatetime, p.vname as customer_name, o.vcompanyname as branch_name, tc.vcomplaint, CONVERT(varchar(30), tc.dfastclosedatetime, 126) as dfastclosedatetime, tc.vsolveremarks, tc.vpersoncalling, tc.ncancelreason as ncancelreason_id, cr.vname as ncancelreason, tc.callStatus, tc.bsolved, tc.bfastclose, tc.baccepted, tc.nengineer, tc.vserialno, tc.vlocation, tc.vcclid, tc.vmanualjobno, u.vname as engineer_name, tc.npriority, tc.bapproval, CONVERT(varchar(30), tc.editedon, 126) as editedon, tc.bBMreject, tc.vBMrejectreason, CONVERT(varchar(30), tc.dBMrejectdatetime, 126) as dBMrejectdatetime, (SELECT TOP 1 r.bmajor FROM trdcalls2fault tf (NOLOCK) JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode WHERE tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid ORDER BY CASE WHEN r.bmajor = 'True' THEN 1 ELSE 2 END) as is_major_repair, (SELECT TOP 1 r.vname FROM trdcalls2fault tf (NOLOCK) JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode WHERE tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid ORDER BY CASE WHEN r.bmajor = 'True' THEN 1 ELSE 2 END) as repair_category, (SELECT COUNT(*) FROM trdcalls3parts tp (NOLOCK) WHERE tp.ncalls = tc.ncode AND tp.nofficeid = tc.nofficeid) as part_count`,
       tableName: `${LATEST_CALLS_SUBQUERY} LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode`,
       condition,
-      orderBy: `tc.ncode ${fetchDirection}`,
+      orderBy: `ISNULL(tc.editedon, tc.addedon) ${fetchDirection}, tc.ncode ${fetchDirection}`,
       top: String(topValue)
-    });
+    }, request.signal);
 
     if (!crmRes.data) return NextResponse.json({ data: [], total: totalCount });
 

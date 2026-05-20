@@ -165,6 +165,27 @@ function getExactTrnQuery(search: string): string | null {
   return null;
 }
 
+function filterCallsCSR(calls: any[], criteria: any, exclude?: string) {
+  return calls.filter((c) => {
+    if (exclude !== 'state' && criteria.state && criteria.state !== 'All') {
+      if (c.state !== criteria.state) return false;
+    }
+    if (exclude !== 'city' && criteria.city && criteria.city !== 'All') {
+      if (c.city !== criteria.city) return false;
+    }
+    if (exclude !== 'branch' && criteria.branch && criteria.branch !== 'All') {
+      if (String(c.nofficeid) !== criteria.branch) return false;
+    }
+    if (exclude !== 'franchisee' && criteria.franchisee && criteria.franchisee !== 'All') {
+      if (c.franchisee_code !== criteria.franchisee) return false;
+    }
+    if (exclude !== 'technician' && criteria.technician && criteria.technician !== 'All') {
+      if (String(c.nengineer) !== criteria.technician) return false;
+    }
+    return true;
+  });
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -180,6 +201,13 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get('status') || '';
     const pincode = searchParams.get('pincode') || '';
     const lastSync = searchParams.get('lastSync') || '';
+
+    // Cascading filters
+    const state = searchParams.get('state') || '';
+    const city = searchParams.get('city') || '';
+    const branch = searchParams.get('branch') || '';
+    const franchisee = searchParams.get('franchisee') || '';
+    const technician = searchParams.get('technician') || '';
 
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -206,52 +234,52 @@ export async function GET(req: NextRequest) {
 
     // Base condition is on raw table alias 'tc'
     // Include transferred calls even when vtrnno is empty by treating transfer call no or cancel reason 2 as valid records.
-    let condition = "((tc.vtrnno IS NOT NULL AND tc.vtrnno <> '') OR (tc.ncancelreason = 2 OR (tc.vtransfercallno IS NOT NULL AND tc.vtransfercallno <> '')))";
+    let baseCondition = "((tc.vtrnno IS NOT NULL AND tc.vtrnno <> '') OR (tc.ncancelreason = 2 OR (tc.vtransfercallno IS NOT NULL AND tc.vtransfercallno <> '')))";
 
     if (search && search.trim().length > 0) {
       const searchSafe = search.replace(/'/g, "''");
       const exactTrn = getExactTrnQuery(searchSafe);
       if (exactTrn) {
-        condition += ` AND (tc.vtrnno = '${exactTrn}')`;
+        baseCondition += ` AND (tc.vtrnno = '${exactTrn}')`;
       } else {
         // Global search: ignore all filters (dates, status, etc.) to look up the specific record historically
-        condition += ` AND (tc.vtrnno LIKE '%${searchSafe}%' OR tc.vtransfercallno LIKE '%${searchSafe}%' OR p.vname LIKE '%${searchSafe}%' OR mstitems.vname LIKE '%${searchSafe}%' OR tc.vserialno LIKE '%${searchSafe}%' OR p.vinstpostalcode LIKE '%${searchSafe}%')`;
+        baseCondition += ` AND (tc.vtrnno LIKE '%${searchSafe}%' OR tc.vtransfercallno LIKE '%${searchSafe}%' OR p.vname LIKE '%${searchSafe}%' OR mstitems.vname LIKE '%${searchSafe}%' OR tc.vserialno LIKE '%${searchSafe}%' OR p.vinstpostalcode LIKE '%${searchSafe}%')`;
       }
     } else {
-      if (officeId && officeId !== 'All') {
+      if (officeId && officeId !== 'All' && officeId !== 'undefined' && officeId !== 'null') {
         if (officeId.includes(',')) {
-          condition += ` AND tc.nofficeid IN (${officeId})`;
+          baseCondition += ` AND tc.nofficeid IN (${officeId})`;
         } else {
-          condition += ` AND tc.nofficeid = ${officeId}`;
+          baseCondition += ` AND tc.nofficeid = ${officeId}`;
         }
       } else if (!isHod && assignedOffices.length > 0) {
-        condition += ` AND tc.nofficeid IN (${assignedOffices.join(',')})`;
+        baseCondition += ` AND tc.nofficeid IN (${assignedOffices.join(',')})`;
       }
 
       if (startDate) {
-        condition += ` AND tc.dtrndate >= '${startDate}'`;
+        baseCondition += ` AND tc.dtrndate >= '${startDate}'`;
       }
       if (endDate) {
-        condition += ` AND tc.dtrndate <= '${endDate} 23:59:59'`;
+        baseCondition += ` AND tc.dtrndate <= '${endDate} 23:59:59'`;
       }
 
-      if (account && account !== 'All') {
+      if (account && account !== 'All' && account !== 'undefined' && account !== 'null') {
         const accountNameSafe = account.replace(/'/g, "''");
-        condition += ` AND tc.npartyprofile IN (SELECT ncode FROM mstpartyprofile WHERE vname LIKE '%${accountNameSafe}%')`;
+        baseCondition += ` AND tc.npartyprofile IN (SELECT ncode FROM mstpartyprofile WHERE vname LIKE '%${accountNameSafe}%')`;
       }
 
-      if (callType && callType !== 'All') {
+      if (callType && callType !== 'All' && callType !== 'undefined' && callType !== 'null') {
         if (callType.includes(',')) {
           const types = callType.split(',').map(t => `'${t.trim().replace(/'/g, "''")}'`).join(',');
-          condition += ` AND tc.ncalltype IN (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${types}))`;
+          baseCondition += ` AND tc.ncalltype IN (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${types}))`;
         } else {
-          condition += ` AND tc.ncalltype = (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${callType.replace(/'/g, "''")}')`;
+          baseCondition += ` AND tc.ncalltype = (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${callType.replace(/'/g, "''")}')`;
         }
       }
 
       if (region && region !== 'All') {
         const regionsArray = region.split(',').map(r => `'${r.replace(/'/g, "''")}'`).join(',');
-        condition += ` AND tc.nofficeid IN (
+        baseCondition += ` AND tc.nofficeid IN (
           SELECT o.ncode FROM mstoffice o
           LEFT JOIN mstoffice op ON o.nunder = op.ncode AND o.nunder <> 0
           LEFT JOIN mstzones z ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
@@ -261,26 +289,116 @@ export async function GET(req: NextRequest) {
 
       if (status && status !== 'All') {
         if (status === 'Open Unallocated') {
-          condition += " AND (tc.nengineer = 0 OR tc.nengineer IS NULL OR CAST(tc.nengineer AS NVARCHAR(50)) = '0') AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
+          baseCondition += " AND (tc.nengineer = 0 OR tc.nengineer IS NULL OR CAST(tc.nengineer AS NVARCHAR(50)) = '0') AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
         } else if (status === 'Assigned') {
-          condition += " AND (tc.nengineer > 0 OR (tc.nengineer IS NOT NULL AND CAST(tc.nengineer AS NVARCHAR(50)) <> '0')) AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
+          baseCondition += " AND (tc.nengineer > 0 OR (tc.nengineer IS NOT NULL AND CAST(tc.nengineer AS NVARCHAR(50)) <> '0')) AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
         } else if (status === 'Tech. Solve Call') {
-          condition += " AND (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
+          baseCondition += " AND (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
         } else if (status === 'Closed') {
-          condition += " AND (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed')";
+          baseCondition += " AND (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed')";
         }
       }
       if (pincode) {
         const pincodeSafe = pincode.replace(/'/g, "''");
-        condition += ` AND p.vinstpostalcode LIKE '%${pincodeSafe}%'`;
+        baseCondition += ` AND p.vinstpostalcode LIKE '%${pincodeSafe}%'`;
       }
     }
 
     if (lastSync) {
-      condition += ` AND (
+      baseCondition += ` AND (
         tc.dtrndate >= '${lastSync}'
         OR tc.dsolvedatetime >= '${lastSync}'
       )`;
+    }
+
+    let condition = baseCondition;
+
+    // Helper functions to find pincodes mapped in JSON
+    const getPincodesForState = (stateName: string): string[] => {
+      const normalizedState = stateName.toUpperCase().trim();
+      const pins: string[] = [];
+      for (const [pin, val] of Object.entries(pincodeMapData)) {
+        if (val && typeof val === 'object' && (val as any).s && (val as any).s.toUpperCase().trim() === normalizedState) {
+          pins.push(pin);
+        }
+      }
+      return pins;
+    };
+
+    const getPincodesForCity = (cityName: string): string[] => {
+      const normalizedCity = cityName.toUpperCase().trim();
+      const pins: string[] = [];
+      for (const [pin, val] of Object.entries(pincodeMapData)) {
+        if (val && typeof val === 'object' && (val as any).d && (val as any).d.toUpperCase().trim() === normalizedCity) {
+          pins.push(pin);
+        }
+      }
+      return pins;
+    };
+
+    if (state && state !== 'All') {
+      const stateSafe = state.replace(/'/g, "''");
+      const mappedCities = Object.entries(cityToStateMap)
+        .filter(([_, st]) => st.toUpperCase() === state.toUpperCase())
+        .map(([c]) => c.replace(/'/g, "''"));
+      
+      const statePincodes = getPincodesForState(state);
+      
+      let stateCond = `(st.vname = '${stateSafe}'`;
+      if (mappedCities.length > 0) {
+        stateCond += ` OR cty.vname IN (${mappedCities.map(c => `'${c}'`).join(',')})`;
+      } else {
+        stateCond += `)`;
+      }
+
+      if (statePincodes.length > 0) {
+        const pinsList = statePincodes.map(p => `'${p}'`).join(',');
+        condition += ` AND (
+          ${stateCond}
+          OR (
+            (st.vname IS NULL OR st.vname = '' OR st.vname = 'NA' OR st.vname = 'N/A' OR st.vname = 'UNKNOWN')
+            AND p.vinstpostalcode IN (${pinsList})
+          )
+        )`;
+      } else {
+        condition += ` AND ${stateCond}`;
+      }
+    }
+
+    if (city && city !== 'All') {
+      const citySafe = city.replace(/'/g, "''");
+      const cityPincodes = getPincodesForCity(city);
+      if (cityPincodes.length > 0) {
+        const pinsList = cityPincodes.map(p => `'${p}'`).join(',');
+        condition += ` AND (
+          (cty.vname = '${citySafe}')
+          OR (
+            (cty.vname IS NULL OR cty.vname = '' OR cty.vname = 'NA' OR cty.vname = 'N/A' OR cty.vname = 'UNKNOWN')
+            AND p.vinstpostalcode IN (${pinsList})
+          )
+        )`;
+      } else {
+        condition += ` AND (cty.vname = '${citySafe}')`;
+      }
+    }
+
+    if (branch && branch !== 'All') {
+      const branchSafe = branch.replace(/'/g, "''");
+      condition += ` AND tc.nofficeid = '${branchSafe}'`;
+    }
+
+    if (franchisee && franchisee !== 'All') {
+      const franchiseeSafe = franchisee.replace(/'/g, "''");
+      if (franchiseeSafe === 'UNASSIGNED') {
+        condition += ` AND (tc.ntransfertooffice IS NULL OR tc.ntransfertooffice = 0)`;
+      } else {
+        condition += ` AND tc.ntransfertooffice = '${franchiseeSafe}'`;
+      }
+    }
+
+    if (technician && technician !== 'All') {
+      const technicianSafe = technician.replace(/'/g, "''");
+      condition += ` AND tc.nengineer = '${technicianSafe}'`;
     }
 
     // Direct table join matching the Calls register exactly
@@ -305,6 +423,7 @@ export async function GET(req: NextRequest) {
       CONVERT(varchar(30), tc.dsolvedatetime, 126) as callsolveddate,
       tc.vsolveremarks as vsolveremarks,
       tc.vtrnno as UniqueCallNo,
+      tc.ncode as id,
       tc.vpersoncalling as vpersoncalling,
       p.vinsttel1 as vinsttel1,
       p.vinstaddress as vinstaddress,
@@ -392,32 +511,61 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const topValue = page * limit;
-    const [countRes, res, summaryRes] = await Promise.all([
-      postQuery({
-        fields: "COUNT(*) as total",
-        tableName,
-        condition
-      }),
-      postQuery({
-        fields,
-        tableName,
-        condition,
-        orderBy: "tc.ncode DESC",
-        top: String(topValue)
-      }),
-      postQuery({
+    const offset = (page - 1) * limit;
+    const fetchTotals = searchParams.get('fetchTotals') !== 'false'; // default true
+
+    let countRes: any = { data: [{ total: "0" }] };
+    let summaryRes: any = { data: [{ total: 0, transferred: 0, cancelled: 0, solved: 0, open_calls: 0 }] };
+    let filterOptionsRes: any = { data: [] };
+    let res: any;
+
+    const dataQuery = postQuery({
+      fields,
+      tableName,
+      condition,
+      orderBy: `tc.ncode DESC OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`
+    });
+
+    if (fetchTotals) {
+      const optionsQuery = postQuery({
         fields: `
-          COUNT(*) as total,
-          SUM(CASE WHEN ISNULL(tc.vtransfercallno, '') <> '' OR tc.ncancelreason = 2 THEN 1 ELSE 0 END) as transferred,
-          SUM(CASE WHEN tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 AND tc.ncancelreason <> 2 THEN 1 ELSE 0 END) as cancelled,
-          SUM(CASE WHEN tc.bsolved = 1 OR tc.bfastclose = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed' THEN 1 ELSE 0 END) as solved,
-          SUM(CASE WHEN (tc.bsolved = 0 OR tc.bsolved IS NULL) AND (tc.bfastclose = 0 OR tc.bfastclose IS NULL) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls
+          tc.nofficeid,
+          o.vcompanyname as officename,
+          tc.ntransfertooffice as franchisee_code,
+          transferoffice.vcompanyname as franchisee_name,
+          tc.nengineer,
+          u.vname as technician_name,
+          p.vinstpostalcode as Pincode,
+          cty.vname as dbCity,
+          st.vname as dbState
         `,
         tableName,
-        condition
-      })
-    ]);
+        condition: baseCondition
+      });
+
+      [countRes, res, summaryRes, filterOptionsRes] = await Promise.all([
+        postQuery({
+          fields: "COUNT(*) as total",
+          tableName,
+          condition
+        }),
+        dataQuery,
+        postQuery({
+          fields: `
+            COUNT(*) as total,
+            SUM(CASE WHEN ISNULL(tc.vtransfercallno, '') <> '' OR tc.ncancelreason = 2 THEN 1 ELSE 0 END) as transferred,
+            SUM(CASE WHEN tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 AND tc.ncancelreason <> 2 THEN 1 ELSE 0 END) as cancelled,
+            SUM(CASE WHEN tc.bsolved = 1 OR tc.bfastclose = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed' THEN 1 ELSE 0 END) as solved,
+            SUM(CASE WHEN (tc.bsolved = 0 OR tc.bsolved IS NULL) AND (tc.bfastclose = 0 OR tc.bfastclose IS NULL) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls
+          `,
+          tableName,
+          condition
+        }),
+        optionsQuery
+      ]);
+    } else {
+      res = await dataQuery;
+    }
 
     const totalCount = parseInt(countRes.data?.[0]?.total || "0");
     const summary = summaryRes.data?.[0] || { total: 0, transferred: 0, cancelled: 0, solved: 0, open_calls: 0 };
@@ -436,17 +584,100 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json({
-      data: processedData,
-      total: totalCount,
-      summary: {
+    const responsePayload: any = {
+      data: processedData
+    };
+
+    if (fetchTotals) {
+      responsePayload.total = totalCount;
+      responsePayload.summary = {
         total: parseInt(summary.total || "0"),
         transferred: parseInt(summary.transferred || "0"),
         cancelled: parseInt(summary.cancelled || "0"),
         solved: parseInt(summary.solved || "0"),
         open: parseInt(summary.open_calls || "0")
-      }
-    });
+      };
+
+      // Process options
+      const rawOptions = filterOptionsRes.data || [];
+      const processedOptions = rawOptions.map((row: any) => {
+        const geo = getGeographicDetails(row.Pincode, row.dbCity, row.dbState);
+        return {
+          state: geo.state,
+          city: geo.city,
+          nofficeid: row.nofficeid ? String(row.nofficeid) : 'UNKNOWN',
+          officename: row.officename || 'UNKNOWN',
+          franchisee_code: row.franchisee_code ? String(row.franchisee_code) : 'UNASSIGNED',
+          franchisee_name: row.franchisee_name || 'Unallocated',
+          nengineer: row.nengineer ? String(row.nengineer) : '0',
+          technician_name: row.technician_name || 'UNKNOWN'
+        };
+      });
+
+      const criteria = {
+        state: state || 'All',
+        city: city || 'All',
+        branch: branch || 'All',
+        franchisee: franchisee || 'All',
+        technician: technician || 'All'
+      };
+
+      // 1. States (exclude state filter)
+      const statesFiltered = filterCallsCSR(processedOptions, criteria, 'state');
+      const stateCounts: Record<string, { vname: string; call_count: number }> = {};
+      statesFiltered.forEach((c) => {
+        if (!c.state || c.state === 'UNKNOWN') return;
+        const sName = c.state;
+        stateCounts[sName] = stateCounts[sName] || { vname: sName, call_count: 0 };
+        stateCounts[sName].call_count++;
+      });
+      responsePayload.statesList = Object.values(stateCounts).sort((a, b) => a.vname.localeCompare(b.vname));
+
+      // 2. Cities (exclude city filter)
+      const citiesFiltered = filterCallsCSR(processedOptions, criteria, 'city');
+      const cityCounts: Record<string, { ncode: string; vname: string; nstate: string; call_count: number }> = {};
+      citiesFiltered.forEach((c) => {
+        if (!c.city || c.city === 'UNKNOWN') return;
+        const cName = c.city;
+        cityCounts[cName] = cityCounts[cName] || { ncode: cName, vname: cName, nstate: c.state || '', call_count: 0 };
+        cityCounts[cName].call_count++;
+      });
+      responsePayload.citiesList = Object.values(cityCounts).sort((a, b) => a.vname.localeCompare(b.vname));
+
+      // 3. Branches (exclude branch filter)
+      const branchesFiltered = filterCallsCSR(processedOptions, criteria, 'branch');
+      const branchCounts: Record<string, { ncode: string; vcompanyname: string; call_count: number }> = {};
+      branchesFiltered.forEach((c) => {
+        if (!c.nofficeid || c.nofficeid === 'UNKNOWN') return;
+        const bCode = c.nofficeid;
+        branchCounts[bCode] = branchCounts[bCode] || { ncode: bCode, vcompanyname: c.officename, call_count: 0 };
+        branchCounts[bCode].call_count++;
+      });
+      responsePayload.branchesList = Object.values(branchCounts).sort((a, b) => a.vcompanyname.localeCompare(b.vcompanyname));
+
+      // 4. Franchisees (exclude franchisee filter)
+      const franchiseesFiltered = filterCallsCSR(processedOptions, criteria, 'franchisee');
+      const franchiseeCounts: Record<string, { ncode: string; vcompanyname: string; call_count: number }> = {};
+      franchiseesFiltered.forEach((c) => {
+        const fCode = c.franchisee_code;
+        franchiseeCounts[fCode] = franchiseeCounts[fCode] || { ncode: fCode, vcompanyname: c.franchisee_name, call_count: 0 };
+        franchiseeCounts[fCode].call_count++;
+      });
+      responsePayload.franchiseesList = Object.values(franchiseeCounts).sort((a, b) => a.vcompanyname.localeCompare(b.vcompanyname));
+
+      // 5. Technicians (exclude technician filter)
+      const techniciansFiltered = filterCallsCSR(processedOptions, criteria, 'technician');
+      const techCounts: Record<string, { ncode: string; vname: string; call_count: number }> = {};
+      techniciansFiltered.forEach((c) => {
+        if (!c.nengineer || c.nengineer === '0') return;
+        const tCode = c.nengineer;
+        techCounts[tCode] = techCounts[tCode] || { ncode: tCode, vname: c.technician_name, call_count: 0 };
+        techCounts[tCode].call_count++;
+      });
+      responsePayload.techniciansList = Object.values(techCounts).sort((a, b) => a.vname.localeCompare(b.vname));
+    }
+
+    return NextResponse.json(responsePayload);
 
   } catch (error: any) {
     console.error('Report API Error:', error);
