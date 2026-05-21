@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     if (customQuery) {
       sql = customQuery;
     } else {
-      let condition = "view_c.callsntrnno IS NOT NULL AND view_c.callsntrnno <> ''";
+      let condition = "(view_c.vtrnno IS NOT NULL AND view_c.vtrnno <> '' OR (view_c.vtransfercallno IS NOT NULL AND view_c.vtransfercallno <> ''))";
       if (type !== 'transferred_calls') {
         condition += " AND ISNULL(view_c.ncancelreason, 0) <> 2";
       }
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
       switch (type) {
         case 'solved_calls':
         case 'total_solved':
-          condition += ` AND (view_c.callsolved = '1' OR view_c.callsolved = 'True' OR view_c.callstatus = 'Solved' OR CAST(view_c.Status AS NVARCHAR(MAX)) = 'Closed' OR EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = view_c.callsntrnno AND (tc2.bfastclose = 1)))`;
+          condition += ` AND (view_c.callsolved = '1' OR view_c.callsolved = 'True' OR view_c.callstatus = 'Solved' OR CAST(view_c.Status AS NVARCHAR(MAX)) = 'Closed' OR EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = view_c.vtrnno AND tc2.vtrnno IS NOT NULL AND tc2.vtrnno <> '' AND (tc2.bfastclose = 1)))`;
           break;
         case 'cancelled_calls':
           condition += ` AND ISNULL(view_c.callstatus,'') = 'Cancel'`;
@@ -97,22 +97,22 @@ export async function POST(req: NextRequest) {
           condition += ` AND (ISNULL(view_c.ncancelreason, 0) = 2 OR (view_c.vtransfercallno IS NOT NULL AND view_c.vtransfercallno <> ''))`;
           break;
         case 'open_calls':
-          condition += ` AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = view_c.callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
+          condition += ` AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND (view_c.bfastclose = 0 OR view_c.bfastclose IS NULL) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
           break;
         case 'age_2':
-          condition += ` AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) <= 2 AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = view_c.callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
+          condition += ` AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) <= 2 AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND (view_c.bfastclose = 0 OR view_c.bfastclose IS NULL) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
           break;
         case 'age_3':
-          condition += ` AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) > 2 AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) <= 7 AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = view_c.callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
+          condition += ` AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) > 2 AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) <= 7 AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND (view_c.bfastclose = 0 OR view_c.bfastclose IS NULL) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
           break;
         case 'age_7':
-          condition += ` AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) > 7 AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) <= 15 AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = view_c.callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
+          condition += ` AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) > 7 AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) <= 15 AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND (view_c.bfastclose = 0 OR view_c.bfastclose IS NULL) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
           break;
         case 'age_15':
-          condition += ` AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) > 15 AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND NOT EXISTS (SELECT 1 FROM trhcalls tc2 WHERE tc2.vtrnno = view_c.callsntrnno AND (tc2.bfastclose = 1)) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
+          condition += ` AND DATEDIFF(day, view_c.callsdtrndate, ${agingDate}) > 15 AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND (view_c.bfastclose = 0 OR view_c.bfastclose IS NULL) AND ISNULL(view_c.callstatus,'') != 'Cancel'`;
           break;
         case 'part_pending':
-          condition += ` AND (view_c.vsolveremarks LIKE '%PART%' OR view_c.vcomplaint LIKE '%PART%')`;
+          condition += ` AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND (view_c.bfastclose = 0 OR view_c.bfastclose IS NULL) AND ISNULL(view_c.callstatus,'') != 'Cancel' AND (view_c.vsolveremarks LIKE '%PART%' OR (view_c.vcomplaint LIKE '%PART%' AND (view_c.vcomplaint NOT LIKE 'Cut off, cooling, part problem%' OR EXISTS(SELECT 1 FROM trdcalls1visit v (NOLOCK) WHERE v.ncalls = view_c.call_ncode))))`;
           break;
         case 'discrepancy':
           let discrepancyCondition = `1=1`;
@@ -126,19 +126,22 @@ export async function POST(req: NextRequest) {
               discrepancyCondition += ` AND ncalltype = (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${callType.replace(/'/g, "''")}')`;
             }
           }
-          condition += ` AND view_c.callsntrnno IN (
-            SELECT callsntrnno 
+          condition += ` AND view_c.vtrnno IN (
+            SELECT vtrnno 
             FROM (
               SELECT 
-                tc.ntrnno as callsntrnno,
+                tc.ncode as call_ncode,
+                    tc.vtrnno as vtrnno,
                 tc.dtrndate as callsdtrndate,
+                    p.vname as customername,
+                    p.vname as customername,
                 tc.nofficeid as nofficeid,
                 tc.ncancelreason as ncancelreason,
                 tc.ncalltype as ncalltype
               FROM (SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY CASE WHEN ISNULL(vtrnno, '') = '' THEN CAST(ncode AS VARCHAR(50)) ELSE vtrnno END ORDER BY ISNULL(editedon, addedon) DESC, ncode DESC) as rn FROM trhcalls (NOLOCK) WHERE ${innerCondition}) s WHERE s.rn = 1) tc
             ) inner_vc
-            WHERE inner_vc.callsntrnno IS NOT NULL AND inner_vc.callsntrnno <> '' AND ISNULL(inner_vc.ncancelreason, 0) <> 2
-            GROUP BY inner_vc.callsntrnno
+            WHERE inner_vc.vtrnno IS NOT NULL AND inner_vc.vtrnno <> '' AND ISNULL(inner_vc.ncancelreason, 0) <> 2
+            GROUP BY inner_vc.vtrnno
             HAVING COUNT(DISTINCT inner_vc.nofficeid) > 1
           )`;
           break;
@@ -233,8 +236,7 @@ export async function POST(req: NextRequest) {
                       )
                   END as [Franchisee],
                   COALESCE(NULLIF(tc.vtrnno, ''), tc.vtransfercallno, '—') as [vtrnno], 
-                  COALESCE(NULLIF(cty.vname, ''), tc.vlocation, '—') + 
-                    CASE WHEN ISNULL(p.vinstpostalcode, '') <> '' THEN ' - ' + p.vinstpostalcode ELSE '' END as [City - Pincode],
+                  ISNULL(p.vname, '—') as [Customer Name],
                   tc.callStatus as [Status]
                FROM ${innerSubquery} tc
                JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode
@@ -247,9 +249,9 @@ export async function POST(req: NextRequest) {
                ORDER BY tc.dtrndate DESC`;
       } else {
         sql = `SELECT TOP 500 
-                  view_c.callsntrnno as [Ref No], 
+                  COALESCE(NULLIF(view_c.vtrnno, ''), view_c.vtransfercallno, '—') as [Ref No], 
                   CONVERT(VARCHAR, view_c.callsdtrndate, 105) as [Date],
-                  view_c.vlocation as [Location],
+                  view_c.customername as [Customer Name],
                   view_c.itemname as [Product],
                   view_c.callsvserialno as [Serial],
                   view_c.serviceman as [Engineer],
@@ -257,8 +259,10 @@ export async function POST(req: NextRequest) {
                   view_c.Status as [Status]
                FROM (
                  SELECT 
-                   tc.ntrnno as callsntrnno,
+                   tc.ncode as call_ncode,
+                    tc.vtrnno as vtrnno,
                    tc.dtrndate as callsdtrndate,
+                    p.vname as customername,
                    tc.vlocation as vlocation,
                    mstitems.vname as itemname,
                    tc.vserialno as callsvserialno,
@@ -272,10 +276,11 @@ export async function POST(req: NextRequest) {
                    tc.nofficeid as nofficeid,
                    tc.npartyprofile as npartyprofile,
                    tc.vsolveremarks as vsolveremarks,
-                   tc.ncalltype as ncalltype
+                   tc.ncalltype as ncalltype,
+                   tc.bfastclose as bfastclose
                  FROM ${innerSubquery} tc
                  LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode
-                 LEFT JOIN mstitems (NOLOCK) ON tc.nitem = mstitems.ncode
+                 LEFT JOIN mstitems (NOLOCK) ON tc.nitem = mstitems.ncode\r\n                  LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode
                ) view_c
                WHERE ${condition}
                ORDER BY view_c.callsdtrndate DESC`;

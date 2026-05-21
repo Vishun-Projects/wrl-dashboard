@@ -20,8 +20,12 @@ export async function GET(
 
   try {
     let parentCondition = '';
+    const isNumericId = /^\\d+$/.test(id);
+    
     if (vtrnno && vtrnno.trim() !== '') {
       parentCondition = `(tc.vtrnno = '${vtrnno.replace(/'/g, "''")}' OR tc.vtransfercallno = '${vtrnno.replace(/'/g, "''")}')`;
+    } else if (!isNumericId) {
+      parentCondition = `(tc.vtrnno = '${id.replace(/'/g, "''")}' OR tc.vtransfercallno = '${id.replace(/'/g, "''")}')`;
     } else {
       parentCondition = `tc.ncode = '${id.replace(/'/g, "''")}'`;
     }
@@ -34,7 +38,8 @@ export async function GET(
     const parentRes = await postQuery({
       fields: "tc.ncode, tc.nofficeid, tc.vtrnno, tc.vtransfercallno, tc.vserialno, tc.vmanualjobno, tc.vlocation, tc.vpersoncalling, tc.vcomplaint, tc.vsolveremarks, tc.ncancelreason, cr.vname as ncancelreason_label, tc.callStatus, tc.bsolved, tc.bfastclose, tc.baccepted, tc.nengineer, u.vname as engineer_name, p.vname as customer_name, o.vcompanyname as branch_name, CONVERT(varchar(30), tc.dtrndate, 126) as dtrndate, CONVERT(varchar(30), tc.dallocationdatetime, 126) as dallocationdatetime, CONVERT(varchar(30), tc.dsolvedatetime, 126) as dsolvedatetime, CONVERT(varchar(30), tc.dfastclosedatetime, 126) as dfastclosedatetime, tc.bBMreject, tc.vBMrejectreason, CONVERT(varchar(30), tc.dBMrejectdatetime, 126) as dBMrejectdatetime",
       tableName: "trhcalls tc (NOLOCK) LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode",
-      condition: parentCondition
+      condition: parentCondition,
+      orderBy: "ISNULL(tc.editedon, tc.addedon) DESC, tc.ncode DESC"
     });
 
     const parentData = parentRes.data?.[0];
@@ -46,38 +51,49 @@ export async function GET(
     const realOfficeId = parentData.nofficeid || officeId;
     const realVtrnno = parentData.vtrnno || '';
 
-    // 2. Fetch everything else in parallel using resolved keys
-    const [visitsRes, faultsRes, partsRes, serialsRes, docsRes, historyRes] = await Promise.all([
+    // 1.5 Fetch full history first to get all ncodes for optimal index seeks on child tables
+    const historyRes = await postQuery({
+      fields: "tc.ncode, tc.vtrnno, tc.vtransfercallno, tc.nofficeid, CONVERT(varchar(30), tc.dtrndate, 126) as dtrndate, CONVERT(varchar(30), tc.dallocationdatetime, 126) as dallocationdatetime, CONVERT(varchar(30), tc.dsolvedatetime, 126) as dsolvedatetime, CONVERT(varchar(30), tc.dfastclosedatetime, 126) as dfastclosedatetime, tc.callStatus, tc.bsolved, tc.bfastclose, tc.baccepted, tc.nengineer, u.vname as engineer_name, o.vcompanyname as branch_name, tc.addedby, CONVERT(varchar(30), tc.addedon, 126) as addedon, CONVERT(varchar(30), tc.editedon, 126) as editedon, tc.vcomment, tc.bBMreject, tc.vBMrejectreason, CONVERT(varchar(30), tc.dBMrejectdatetime, 126) as dBMrejectdatetime, cr.vname as cancel_reason_label",
+      tableName: "trhcalls tc (NOLOCK) LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode",
+      condition: realVtrnno ? `tc.vtrnno = '${realVtrnno}' OR tc.vtransfercallno = '${realVtrnno}' OR tc.ncode = '${realId}'` : `tc.ncode = '${realId}'`,
+      orderBy: "ISNULL(tc.editedon, tc.addedon) ASC, tc.ncode ASC"
+    });
+
+    const historyData = historyRes.data || [];
+    const allNcodes = Array.from(new Set(historyData.map((h: any) => h.ncode).filter(Boolean)));
+    const ncodesStr = allNcodes.length > 0 ? allNcodes.join(',') : `'${realId}'`;
+
+    const childCondition = `ncalls IN (${ncodesStr}) AND nofficeid = '${realOfficeId}'`;
+    const childConditionV = `v.ncalls IN (${ncodesStr}) AND v.nofficeid = '${realOfficeId}'`;
+    const childConditionF = `f.ncalls IN (${ncodesStr}) AND f.nofficeid = '${realOfficeId}'`;
+    const childConditionP = `p.ncalls IN (${ncodesStr}) AND p.nofficeid = '${realOfficeId}'`;
+
+    // 2. Fetch everything else in parallel using literal resolved keys
+    const [visitsRes, faultsRes, partsRes, serialsRes, docsRes] = await Promise.all([
       postQuery({ 
         fields: "v.vVisitTrnNo as vtrnno, v.vpersoncontected, CONVERT(varchar(30), v.dvisitdatetime, 126) as dvisitdatetime, v.vvisitremark, v.vcustomerRemarks, v.vPartsReplacedDetails, v.ntimespent, v.nvisitexpense, v.nofficeid, v.vcustomersignPath, v.vengineersignPath", 
         tableName: "trdcalls1visit v (NOLOCK)", 
-        condition: `v.ncalls = '${realId}' AND v.nofficeid = '${realOfficeId}'` 
+        condition: childConditionV 
       }),
       postQuery({
         fields: "f.ncalls1 as visit_id, c.vname as complaint, d.vname as defect, r.vname as repair, f.bsolve as is_solved",
         tableName: "trdcalls2fault f (NOLOCK) LEFT JOIN mstcomplaint c (NOLOCK) ON f.ncomplaint = c.ncode LEFT JOIN mstdefect d (NOLOCK) ON f.ndefect = d.ncode LEFT JOIN mstrepair r (NOLOCK) ON f.nrepair = r.ncode",
-        condition: `f.ncalls = '${realId}' AND f.nofficeid = '${realOfficeId}'`
+        condition: childConditionF
       }),
       postQuery({ 
         fields: "p.ncode as part_id, i.vname as vpartname, i.vitemcode as vpartcode, p.nitem, p.nquantity as nqty, p.nofficeid, p.nrate, p.ndiscountamt, p.ntaxamt, p.bclaimed, p.vremarks as vpartremarks, p.vnewbarcode, p.voldbarcode", 
         tableName: "trdcalls3parts p (NOLOCK) LEFT JOIN mstitems i (NOLOCK) ON p.nitem = i.ncode", 
-        condition: `p.ncalls = '${realId}' AND p.nofficeid = '${realOfficeId}'` 
+        condition: childConditionP 
       }),
       postQuery({
         fields: "ncalls3, nitem, vnewserialno, voldserialno, vserialno, vOld_vnewserialno",
         tableName: "trdcalls3parts1serialno (NOLOCK)",
-        condition: `ncalls = '${realId}' AND nofficeid = '${realOfficeId}'`
+        condition: childCondition
       }),
       postQuery({
         fields: "vnewfilename, vorigionalfilename, vremarks, nofficeid, CONVERT(varchar(30), addedon, 126) as addedon",
         tableName: "trhdoc (NOLOCK)",
-        condition: `ncalls = '${realId}' AND nofficeid = '${realOfficeId}'`
-      }),
-      postQuery({
-        fields: "tc.ncode, tc.vtrnno, tc.vtransfercallno, tc.nofficeid, CONVERT(varchar(30), tc.dtrndate, 126) as dtrndate, CONVERT(varchar(30), tc.dallocationdatetime, 126) as dallocationdatetime, CONVERT(varchar(30), tc.dsolvedatetime, 126) as dsolvedatetime, CONVERT(varchar(30), tc.dfastclosedatetime, 126) as dfastclosedatetime, tc.callStatus, tc.bsolved, tc.bfastclose, tc.baccepted, tc.nengineer, u.vname as engineer_name, o.vcompanyname as branch_name, tc.addedby, CONVERT(varchar(30), tc.addedon, 126) as addedon, CONVERT(varchar(30), tc.editedon, 126) as editedon, tc.vcomment, tc.bBMreject, tc.vBMrejectreason, CONVERT(varchar(30), tc.dBMrejectdatetime, 126) as dBMrejectdatetime, cr.vname as cancel_reason_label",
-        tableName: "trhcalls tc (NOLOCK) LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode",
-        condition: realVtrnno ? `tc.vtrnno = '${realVtrnno}' OR tc.vtransfercallno = '${realVtrnno}' OR tc.ncode = '${realId}'` : `tc.ncode = '${realId}'`,
-        orderBy: "ISNULL(tc.editedon, tc.addedon) ASC, tc.ncode ASC"
+        condition: childCondition
       })
     ]);
 

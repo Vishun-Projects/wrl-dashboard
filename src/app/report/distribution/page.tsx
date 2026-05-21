@@ -94,7 +94,7 @@ export default function CallDistributionPage() {
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [mapReady, setMapReady] = useState(false);
   const [mapLoadError, setMapLoadError] = useState(false);
-  const [showMap, setShowMap] = useState(true);
+  const [showMap, setShowMap] = useState(false);
 
   // Invalidate map size when shown again
   useEffect(() => {
@@ -837,13 +837,13 @@ export default function CallDistributionPage() {
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
             Recalculate
           </button>
-          <button
+          {/* <button
             onClick={() => setShowMap(!showMap)}
             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-xs transition-all text-slate-700 font-semibold shadow-sm active:scale-98"
           >
             <LucideMap size={13} className={showMap ? "text-teal-600" : "text-slate-400"} />
             {showMap ? 'Hide Map' : 'Show Map'}
-          </button>
+          </button> */}
           <Link
             href="/report"
             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-750 text-xs transition-all text-white font-bold shadow-sm hover:shadow active:scale-98 cursor-pointer"

@@ -143,6 +143,9 @@ type RegisterPageCacheEntry = {
   data: any[];
   total: number;
   registerSummary?: { total: number; transferred: number; cancelled: number; solved: number; open: number } | null;
+  summaryData?: any[];
+  accountsData?: any[];
+  globalHeadcount?: number;
 };
 
 function buildRegisterListQueryKey(parts: {
@@ -158,6 +161,7 @@ function buildRegisterListQueryKey(parts: {
   selectedFranchisee: string;
   selectedTechnician: string;
   selectedStatus: string;
+  agingAsOf: string;
 }) {
   return JSON.stringify(parts);
 }
@@ -495,17 +499,6 @@ export default function ReportPage() {
   const drillDownControllerRef = React.useRef<AbortController | null>(null);
   const sentinelRef = React.useRef<HTMLDivElement | null>(null);
 
-  // Auto-sync agingAsOf with dateRange.end if it falls behind
-  useEffect(() => {
-    if (dateRange.end && agingAsOf) {
-      const endD = dateRange.end;
-      const agingD = new Date(agingAsOf);
-      if (agingD < endD) {
-        setAgingAsOf(endD.toISOString().split('T')[0]);
-      }
-    }
-  }, [dateRange.end, agingAsOf]);
-
   // Client-side cascades computation removed in favor of server-side cascades
 
   // Fetch Offices and Call Types
@@ -667,6 +660,7 @@ export default function ReportPage() {
       selectedFranchisee: selectedFranchisee || 'All',
       selectedTechnician: selectedTechnician || 'All',
       selectedStatus: selectedStatus || 'All',
+      agingAsOf: agingAsOf || '',
     });
 
     if (!opts?.skipCache) {
@@ -678,6 +672,9 @@ export default function ReportPage() {
         if (cached.registerSummary !== undefined) {
           setRegisterSummary(cached.registerSummary ?? null);
         }
+        if (cached.summaryData) setSummaryData(cached.summaryData);
+        if (cached.accountsData) setAccountsData(cached.accountsData);
+        if (cached.globalHeadcount !== undefined) setGlobalHeadcount(cached.globalHeadcount);
         if (!opts?.silent) {
           setLoading(false);
           setLoadingPage(null);
@@ -849,6 +846,9 @@ export default function ReportPage() {
           data: regRes.data.data,
           total: regTotal,
           registerSummary: regRes.data.summary || null,
+          summaryData: summRes.data.branchSummary,
+          accountsData: summRes.data.accountSummary,
+          globalHeadcount: summRes.data.globalHeadcount || 0,
         });
 
         globalReportCache = {
@@ -1517,6 +1517,7 @@ export default function ReportPage() {
       if (globalReportCache.selectedFranchisee !== selectedFranchisee) changedFields.push('franchisee');
       if (globalReportCache.selectedTechnician !== selectedTechnician) changedFields.push('technician');
       if (globalReportCache.selectedStatus !== selectedStatus) changedFields.push('status');
+      if (globalReportCache.agingAsOf !== agingAsOf) changedFields.push('agingAsOf');
       if ((globalReportCache.search || '') !== (debouncedSearch || '')) changedFields.push('debouncedSearch');
       if ((globalReportCache.pincodeSearch || '') !== (debouncedPincodeSearch || '')) changedFields.push('debouncedPincode');
     }
@@ -1552,6 +1553,7 @@ export default function ReportPage() {
     selectedFranchisee,
     selectedTechnician,
     selectedStatus,
+    agingAsOf,
     debouncedSearch,
     debouncedPincodeSearch,
   ]);
@@ -1637,7 +1639,7 @@ export default function ReportPage() {
 
         const r = sheet.addRow({
           id: row.UniqueCallNo,
-          ref: row.callsntrnno,
+          ref: row.UniqueCallNo || row.vtransfercallno || '—',
           type: row.calltype,
           date: formatDate(row.callsdtrndate),
           customer: row.PartyName,
@@ -1771,7 +1773,7 @@ export default function ReportPage() {
 
         const r = sheet.addRow({
           id: row.UniqueCallNo,
-          ref: row.callsntrnno,
+          ref: row.UniqueCallNo || row.vtransfercallno || '—',
           type: row.calltype,
           date: formatDate(row.callsdtrndate),
           customer: row.PartyName,
@@ -2677,7 +2679,7 @@ export default function ReportPage() {
                     </td>
                     <td className="px-4 py-2 text-[11px] font-medium text-slate-900 border-r border-slate-50 whitespace-nowrap">
                       <button onClick={() => handleSelectCall(String(row.id), row)} className="text-slate-900 hover:text-slate-700 underline">
-                        {row.callsntrnno}
+                        {row.UniqueCallNo || row.vtransfercallno || '—'}
                       </button>
                     </td>
                     <td className="px-4 py-2 text-[11px] text-slate-500 border-r border-slate-50 whitespace-nowrap">
@@ -2797,7 +2799,7 @@ export default function ReportPage() {
         ) : activeTab === 'summary' ? (
           <div className="flex-1 flex flex-col min-h-0 p-6 space-y-8 bg-slate-50/10">
               {/* Region Summary Table */}
-              <section className="flex-1 flex flex-col min-h-0">
+              <section className="flex-none flex flex-col min-h-0">
                 <h2 className="text-[11px] text-slate-500 mb-2 px-2 ui-label flex-shrink-0">Regional Performance (AI)</h2>
                 <div className="flex-1 bg-white border border-slate-200 rounded-lg shadow-sm overflow-auto custom-scrollbar relative">
                   <table className="w-full text-left border-collapse text-[11px]">

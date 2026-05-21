@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
         SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 2 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 7 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_3,
         SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 7 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_7,
         SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_15,
-        SUM(CASE WHEN c.vsolveremarks LIKE '%PART%' OR c.vcomplaint LIKE '%PART%' THEN 1 ELSE 0 END) as all_part_pending,
+        SUM(CASE WHEN (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) AND (c.vsolveremarks LIKE '%PART%' OR (c.vcomplaint LIKE '%PART%' AND (c.vcomplaint NOT LIKE 'Cut off, cooling, part problem%' OR v_exist.has_visit = 1))) THEN 1 ELSE 0 END) as all_part_pending,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as total_calls,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.bsolved = 1 OR c.bfastclose = 1) THEN 1 ELSE 0 END) as solved_calls,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND c.bfastclose = 1 THEN 1 ELSE 0 END) as tech_solved_calls,
@@ -98,7 +98,7 @@ export async function GET(req: NextRequest) {
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 2 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 7 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_3,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 7 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_7,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_15,
-        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.vsolveremarks LIKE '%PART%' OR c.vcomplaint LIKE '%PART%') THEN 1 ELSE 0 END) as part_pending,
+        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) AND (c.vsolveremarks LIKE '%PART%' OR (c.vcomplaint LIKE '%PART%' AND (c.vcomplaint NOT LIKE 'Cut off, cooling, part problem%' OR v_exist.has_visit = 1))) THEN 1 ELSE 0 END) as part_pending,
         SUM(CASE WHEN dep_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as deployment_total,
         SUM(CASE WHEN dep_ct.ncode IS NOT NULL AND (c.bsolved = 1 OR c.bfastclose = 1) THEN 1 ELSE 0 END) as deployment_done,
         SUM(CASE WHEN ins_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as installation_total,
@@ -131,6 +131,11 @@ export async function GET(req: NextRequest) {
       LEFT JOIN mstoffice op (NOLOCK) ON o.nunder = op.ncode AND o.nunder <> 0
       LEFT JOIN mstzones z (NOLOCK) ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
       LEFT JOIN mstpartyprofile p (NOLOCK) ON c.npartyprofile = p.ncode
+      OUTER APPLY (
+        SELECT TOP 1 1 as has_visit 
+        FROM trdcalls1visit v (NOLOCK) 
+        WHERE v.ncalls = c.ncode
+      ) v_exist
       WHERE ${baseCondition}
       GROUP BY
         ISNULL(UPPER(z.vname), 'OTHER'),
