@@ -61,6 +61,10 @@ const loadLeaflet = () => {
 };
 
 export default function CallDistributionPage() {
+  const [mounted, setMounted] = useState(false);
+  const [initialCheckDone, setInitialCheckDone] = useState(false);
+  const prevFiltersRef = useRef({ startDate: '', endDate: '', selectedCallType: 'BREAKDOWN' });
+
   // Leaflet map refs
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -90,6 +94,14 @@ export default function CallDistributionPage() {
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [mapReady, setMapReady] = useState(false);
   const [mapLoadError, setMapLoadError] = useState(false);
+  const [showMap, setShowMap] = useState(true);
+
+  // Invalidate map size when shown again
+  useEffect(() => {
+    if (showMap && mapInstanceRef.current) {
+      setTimeout(() => mapInstanceRef.current.invalidateSize(), 150);
+    }
+  }, [showMap]);
 
   // Aggregated API Data States
   const [metrics, setMetrics] = useState({
@@ -114,10 +126,10 @@ export default function CallDistributionPage() {
   // Initialize: set default dates and load call types configuration
   useEffect(() => {
     const today = new Date();
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(today.getDate() - 30);
+    const fourteenDaysAgo = new Date();
+    fourteenDaysAgo.setDate(today.getDate() - 14);
 
-    const start = thirtyDaysAgo.toISOString().split('T')[0];
+    const start = fourteenDaysAgo.toISOString().split('T')[0];
     const end = today.toISOString().split('T')[0];
     setStartDate(start);
     setEndDate(end);
@@ -134,6 +146,16 @@ export default function CallDistributionPage() {
       .finally(() => {
         setLoadingMeta(false);
       });
+      
+    try {
+      const cached = localStorage.getItem('distribution_fortnight_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.allCalls) setAllCalls(parsed.allCalls);
+        if (parsed.dbBranches) setDbBranches(parsed.dbBranches);
+      }
+    } catch(e) {}
+    setMounted(true);
   }, []);
 
   // Helper to filter calls on the client
@@ -154,6 +176,9 @@ export default function CallDistributionPage() {
       }
       if (exclude !== 'technician' && criteria.technician && criteria.technician !== 'All') {
         if (String(c.nengineer) !== criteria.technician) return false;
+      }
+      if (exclude !== 'pincodeSearch' && criteria.pincodeSearch && criteria.pincodeSearch.trim() !== '') {
+        if (!c.pincode || !String(c.pincode).toLowerCase().includes(criteria.pincodeSearch.toLowerCase())) return false;
       }
       return true;
     });
@@ -176,6 +201,15 @@ export default function CallDistributionPage() {
 
       if (fetchedCalls) setAllCalls(fetchedCalls);
       if (fetchedBranches) setDbBranches(fetchedBranches);
+
+      if ((fetchedCalls || fetchedBranches) && selectedCallType === 'BREAKDOWN') {
+        try {
+          localStorage.setItem('distribution_fortnight_cache', JSON.stringify({
+            allCalls: fetchedCalls || allCalls,
+            dbBranches: fetchedBranches || dbBranches
+          }));
+        } catch(e) {}
+      }
     } catch (err) {
       toast.error('Error fetching call distribution report');
       console.error(err);
@@ -188,12 +222,31 @@ export default function CallDistributionPage() {
   useEffect(() => {
     if (!startDate || !endDate || loadingMeta) return;
 
-    const timer = setTimeout(() => {
-      fetchDashboardData();
-    }, 350);
+    if (!initialCheckDone) {
+      setInitialCheckDone(true);
+      if (allCalls.length === 0) {
+        fetchDashboardData(true);
+      } else {
+        setLoading(false);
+      }
+      prevFiltersRef.current = { startDate, endDate, selectedCallType };
+      return;
+    }
 
-    return () => clearTimeout(timer);
-  }, [startDate, endDate, selectedCallType, loadingMeta]);
+    const filtersChanged = 
+      prevFiltersRef.current.startDate !== startDate ||
+      prevFiltersRef.current.endDate !== endDate ||
+      prevFiltersRef.current.selectedCallType !== selectedCallType;
+
+    if (filtersChanged) {
+      const timer = setTimeout(() => {
+        fetchDashboardData();
+      }, 350);
+
+      prevFiltersRef.current = { startDate, endDate, selectedCallType };
+      return () => clearTimeout(timer);
+    }
+  }, [startDate, endDate, selectedCallType, loadingMeta, initialCheckDone]);
 
   // CSR Dropdown Cascades Computation
   useEffect(() => {
@@ -211,7 +264,8 @@ export default function CallDistributionPage() {
       city: selectedCity,
       branch: selectedBranch,
       franchisee: selectedFranchisee,
-      technician: selectedTechnician
+      technician: selectedTechnician,
+      pincodeSearch: pincodeSearch
     };
 
     // States (exclude state filter)
@@ -288,7 +342,7 @@ export default function CallDistributionPage() {
     const technicians = Object.values(techCounts).sort((a, b) => a.vname.localeCompare(b.vname));
     setTechniciansList(technicians);
 
-  }, [allCalls, dbBranches, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician]);
+  }, [allCalls, dbBranches, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, pincodeSearch]);
 
   // CSR Dropdown Option Validation & Safe Resets
   useEffect(() => {
@@ -330,7 +384,8 @@ export default function CallDistributionPage() {
       city: selectedCity,
       branch: selectedBranch,
       franchisee: selectedFranchisee,
-      technician: selectedTechnician
+      technician: selectedTechnician,
+      pincodeSearch: pincodeSearch
     };
 
     const filteredCalls = filterCallsCSR(allCalls, criteria);
@@ -477,7 +532,7 @@ export default function CallDistributionPage() {
     });
     setFranchiseeSummary(franchiseeSummary);
     setPincodeSummary(pincodeSummary);
-  }, [allCalls, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician]);
+  }, [allCalls, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, pincodeSearch]);
 
   // Leaflet Map Initialization
   useEffect(() => {
@@ -644,7 +699,7 @@ export default function CallDistributionPage() {
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [pincodeSummary, highlightedFranchisee, selectedPincode, mapReady]);
+  }, [pincodeSummary, highlightedFranchisee, selectedPincode, mapReady, pincodeSearch]);
 
   // Trigger cascades on selections
   const handleStateChange = (stateName: string) => {
@@ -720,6 +775,15 @@ export default function CallDistributionPage() {
     );
   }
 
+  if (!mounted) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-white flex-col gap-3">
+        <div className="w-10 h-10 border-4 border-teal-600 border-t-transparent rounded-full animate-spin" />
+        <p className="text-xs text-slate-500 font-bold tracking-wide animate-pulse">Loading Cached Distribution Data...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-slate-50/30 text-slate-700 overflow-hidden font-sans">
       
@@ -772,6 +836,13 @@ export default function CallDistributionPage() {
           >
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
             Recalculate
+          </button>
+          <button
+            onClick={() => setShowMap(!showMap)}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-xs transition-all text-slate-700 font-semibold shadow-sm active:scale-98"
+          >
+            <LucideMap size={13} className={showMap ? "text-teal-600" : "text-slate-400"} />
+            {showMap ? 'Hide Map' : 'Show Map'}
           </button>
           <Link
             href="/report"
@@ -931,7 +1002,7 @@ export default function CallDistributionPage() {
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
         
         {/* Left Side: Call Distribution Map */}
-        <div className="w-full lg:w-1/2 h-[350px] lg:h-full relative border-r border-slate-200/80 bg-slate-50 flex-shrink-0">
+        <div className={`${showMap ? 'w-full lg:w-1/2 h-[350px] lg:h-full border-r' : 'hidden'} relative border-slate-200/80 bg-slate-50 flex-shrink-0`}>
           <div ref={mapRef} className="w-full h-full z-10" />
 
            {/* Simple overlay when Map is not ready */}

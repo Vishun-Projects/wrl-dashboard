@@ -139,13 +139,106 @@ const clearCallsDB = async () => {
   }
 };
 
+type RegisterPageCacheEntry = {
+  data: any[];
+  total: number;
+  registerSummary?: { total: number; transferred: number; cancelled: number; solved: number; open: number } | null;
+};
+
+function buildRegisterListQueryKey(parts: {
+  officeIdsParam: string;
+  callTypesParam: string;
+  searchForUrl: string;
+  pincodeForUrl: string;
+  startDateStr: string;
+  endDateStr: string;
+  selectedState: string;
+  selectedCity: string;
+  selectedBranch: string;
+  selectedFranchisee: string;
+  selectedTechnician: string;
+  selectedStatus: string;
+}) {
+  return JSON.stringify(parts);
+}
+
+function registerPageCachePut(
+  root: Map<string, Map<number, RegisterPageCacheEntry>>,
+  queryKey: string,
+  page: number,
+  entry: RegisterPageCacheEntry
+) {
+  let inner = root.get(queryKey);
+  if (!inner) {
+    inner = new Map();
+    root.set(queryKey, inner);
+  }
+  inner.set(page, entry);
+}
+
+function registerPageCacheGet(
+  root: Map<string, Map<number, RegisterPageCacheEntry>>,
+  queryKey: string,
+  page: number
+): RegisterPageCacheEntry | undefined {
+  return root.get(queryKey)?.get(page);
+}
+
+/**
+ * Performance logging for `/report`. Filter DevTools console by `[ReportPerf]`.
+ * On in development by default; in production run:
+ * `localStorage.setItem('REPORT_PERF','1'); location.reload()`
+ */
+function reportPerfEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return (
+      process.env.NODE_ENV === 'development' ||
+      window.localStorage?.getItem('REPORT_PERF') === '1'
+    );
+  } catch {
+    return process.env.NODE_ENV === 'development';
+  }
+}
+
+let reportPerfNavLogged = false;
+function reportPerfLogDocumentNavigationOnce() {
+  if (!reportPerfEnabled() || reportPerfNavLogged) return;
+  if (typeof performance === 'undefined') return;
+  const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+  if (!nav || nav.requestStart <= 0) return;
+  reportPerfNavLogged = true;
+  const ttfbMs = nav.responseStart - nav.requestStart;
+  console.log('[ReportPerf] navigation | document TTFB & shell (this page load)', {
+    why: 'TTFB ≈ time from navigation request until first byte of HTML (document). SPA route changes may reuse this entry from the initial document load.',
+    ttfbMs: Number(ttfbMs.toFixed(1)),
+    domInteractiveMs: Number((nav.domInteractive - nav.startTime).toFixed(1)),
+    loadEventEndMs: nav.loadEventEnd > 0 ? Number((nav.loadEventEnd - nav.startTime).toFixed(1)) : null,
+    transferSize: (nav as PerformanceNavigationTiming & { transferSize?: number }).transferSize,
+  });
+}
+
+function reportPerf(
+  phase: string,
+  action: string,
+  opStart: number,
+  extra?: Record<string, unknown>
+) {
+  if (!reportPerfEnabled()) return;
+  const now = performance.now();
+  const sinceOpMs = Number((now - opStart).toFixed(1));
+  console.log(`[ReportPerf] ${phase} | ${action}`, { sinceOpMs, ...extra });
+}
+
 let globalReportCache: GlobalReportCacheType | null = null;
 
 export default function ReportPage() {
+  const [mounted, setMounted] = useState(false);
   const { userProfile } = useUser();
   const supabase = createClient();
   const router = useRouter();
   const pathname = usePathname();
+  const pageSessionStartRef = React.useRef<number>(typeof performance !== 'undefined' ? performance.now() : 0);
 
   const [dbInitialized, setDbInitialized] = useState(!!globalReportCache);
   const [activeTab, setActiveTab] = useState<'register' | 'summary' | 'accounts'>('register');
@@ -154,29 +247,68 @@ export default function ReportPage() {
   const [accountsData, setAccountsData] = useState<any[]>(globalReportCache?.accountsData || []);
   const [globalHeadcount, setGlobalHeadcount] = useState<number>(globalReportCache?.globalHeadcount || 0);
   const [loading, setLoading] = useState(!globalReportCache);
-  const [total, setTotal] = useState(globalReportCache?.total || 0);
+  const [total, setTotal] = useState<number>(globalReportCache?.total || 0);
+
+  useEffect(() => {
+    if (!globalReportCache?.data) {
+      try {
+        const cached = localStorage.getItem('report_fortnight_cache');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed.data) setData(parsed.data);
+          if (parsed.total) setTotal(parsed.total);
+        }
+      } catch(e) {}
+    }
+    setMounted(true);
+  }, []);
   const [page, setPage] = useState(globalReportCache?.page || 1);
   const [limit] = useState(10);
   const [loadingPage, setLoadingPage] = useState<number | null>(null);
-  const prefetchedDataRef = React.useRef<{ page: number, data: any[], total?: number } | null>(null);
+  const registerPagesCacheRef = React.useRef<Map<string, Map<number, RegisterPageCacheEntry>>>(new Map());
+  const lastKnownRegisterTotalRef = React.useRef<number>(globalReportCache?.total || 0);
+  const clearFiltersRef = React.useRef<boolean>(false);
   const [search, setSearch] = useState(globalReportCache?.search || '');
   const [debouncedSearch, setDebouncedSearch] = useState(globalReportCache?.search || '');
   const [pincodeSearch, setPincodeSearch] = useState(globalReportCache?.pincodeSearch || '');
   const [debouncedPincodeSearch, setDebouncedPincodeSearch] = useState(globalReportCache?.pincodeSearch || '');
 
   useEffect(() => {
+    const scheduleT = performance.now();
     const timer = setTimeout(() => {
+      const fireT = performance.now();
+      reportPerf('debounce', 'search → debouncedSearch', fireT, {
+        why: '300ms idle after last keystroke; filter effect compares debouncedSearch to last fetch.',
+        waitMs: Number((fireT - scheduleT).toFixed(1)),
+        len: search.length,
+      });
       setDebouncedSearch(search);
     }, 300);
     return () => clearTimeout(timer);
   }, [search]);
 
   useEffect(() => {
+    const scheduleT = performance.now();
     const timer = setTimeout(() => {
+      const fireT = performance.now();
+      reportPerf('debounce', 'pincode → debouncedPincodeSearch', fireT, {
+        why: 'Same debounce pattern as search.',
+        waitMs: Number((fireT - scheduleT).toFixed(1)),
+        len: pincodeSearch.length,
+      });
       setDebouncedPincodeSearch(pincodeSearch);
     }, 300);
     return () => clearTimeout(timer);
   }, [pincodeSearch]);
+
+  useEffect(() => {
+    reportPerfLogDocumentNavigationOnce();
+    const tMount = performance.now();
+    reportPerf('lifecycle', 'ReportPage mount effect (after paint)', tMount, {
+      why: 'Runs after first paint; msSincePageSessionStart ≈ time from component render start to this effect.',
+      msSincePageSessionStart: Number((tMount - pageSessionStartRef.current).toFixed(1)),
+    });
+  }, []);
 
   const [offices, setOffices] = useState<any[]>([]);
   const [selectedOfficeIds, setSelectedOfficeIds] = useState<string[]>(globalReportCache?.selectedOfficeIds || []);
@@ -185,11 +317,11 @@ export default function ReportPage() {
     if (globalReportCache) return {
       start: new Date(globalReportCache.dateRange.start),
       end: new Date(globalReportCache.dateRange.end),
-      label: globalReportCache.dateRange.label || 'Last 30 Days'
+      label: globalReportCache.dateRange.label || 'Last 14 Days'
     };
     const end = new Date();
-    const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
-    return { start, end, label: 'Last 30 Days' };
+    const start = new Date(end.getTime() - 14 * 24 * 60 * 60 * 1000);
+    return { start, end, label: 'Last 14 Days' };
   });
   const [selectedBranchEngs, setSelectedBranchEngs] = useState<string[]>([]);
   const [showEngPopup, setShowEngPopup] = useState<string | null>(null);
@@ -288,26 +420,6 @@ export default function ReportPage() {
   const [selectedTechnician, setSelectedTechnician] = useState<string>(globalReportCache?.selectedTechnician || 'All');
   const [techniciansList, setTechniciansList] = useState<any[]>([]);
 
-  useEffect(() => {
-    // visibleLimit removed
-  }, [
-    search,
-    pincodeSearch,
-    selectedOfficeIds,
-    dateRange,
-    selectedState,
-    selectedCity,
-    selectedBranch,
-    selectedFranchisee,
-    selectedTechnician,
-    selectedStatus,
-    selectedCallTypes,
-    filterRegion,
-    filterAccount
-  ]);
-
-
-
   // CSR Dropdown change handlers to reset lower levels safely
   const handleStateChange = (val: string) => {
     setSelectedState(val);
@@ -334,6 +446,8 @@ export default function ReportPage() {
     setSelectedFranchisee(val);
     setSelectedTechnician('All');
   };
+
+  // We no longer sync data to localStorage here to avoid overwriting base cache with filtered data.
 
   // Helper to filter calls on the client
   const filterCallsCSR = (calls: any[], criteria: any, exclude?: string) => {
@@ -394,23 +508,19 @@ export default function ReportPage() {
 
   // Client-side cascades computation removed in favor of server-side cascades
 
-  // Save selections to global cache dynamically
-  useEffect(() => {
-    if (globalReportCache) {
-      globalReportCache.selectedState = selectedState;
-      globalReportCache.selectedCity = selectedCity;
-      globalReportCache.selectedBranch = selectedBranch;
-      globalReportCache.selectedFranchisee = selectedFranchisee;
-      globalReportCache.selectedTechnician = selectedTechnician;
-      globalReportCache.selectedStatus = selectedStatus;
-    }
-  }, [selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, selectedStatus]);
-
   // Fetch Offices and Call Types
   useEffect(() => {
     async function fetchOffices() {
+      const o0 = performance.now();
+      reportPerf('resources', 'fetch /api/offices + /api/report/call-types start', o0, {
+        why: 'Dropdown data for office and call-type filters.',
+      });
       try {
         const { data: { session } } = await supabase.auth.getSession();
+        const tAfterSession = performance.now();
+        reportPerf('resources', 'getSession done', o0, {
+          getSessionMs: Number((tAfterSession - o0).toFixed(1)),
+        });
         const headers = { 'Authorization': `Bearer ${session?.access_token}` };
 
         const [officeRes, typesRes] = await Promise.all([
@@ -420,8 +530,13 @@ export default function ReportPage() {
 
         setOffices(officeRes.data || []);
         setCallTypes(typesRes.data || []);
+        reportPerf('resources', 'offices + call-types complete', o0, {
+          officesCount: (officeRes.data || []).length,
+          callTypesCount: (typesRes.data || []).length,
+        });
       } catch (err) {
         console.error('Failed to fetch report resources:', err);
+        reportPerf('resources', 'offices + call-types FAILED', o0, { err: String(err) });
       }
     }
     fetchOffices();
@@ -457,37 +572,126 @@ export default function ReportPage() {
     lastRefreshedDate: Date
   ) => {
     try {
-      const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
-      const callTypesParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
-      const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
-      const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+      const isBaseFilter = 
+        selectedState === 'All' &&
+        selectedCity === 'All' &&
+        selectedBranch === 'All' &&
+        selectedFranchisee === 'All' &&
+        selectedTechnician === 'All' &&
+        search === '' &&
+        pincodeSearch === '' &&
+        selectedStatus === 'All' &&
+        selectedOfficeIds.length === 0 &&
+        selectedCallTypes.length === 0 &&
+        !filterAccount && filterRegion.length === 0;
 
-      await saveCallsToDB(calls);
-      await saveMeta('cacheParams', {
-        startDate: startDateStr,
-        endDate: endDateStr,
-        officeIds: officeIdsParam,
-        callTypes: callTypesParam,
-        lastRefreshed: lastRefreshedDate.toISOString(),
-        total,
-        registerSummary,
-        summaryData,
-        accountsData,
-        globalHeadcount
-      });
+      if (isBaseFilter) {
+        try {
+          localStorage.setItem('report_fortnight_cache', JSON.stringify({
+            data: calls.slice(0, 100),
+            total,
+            summaryData,
+            accountsData,
+            globalHeadcount
+          }));
+        } catch(e) {}
+          
+        const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
+        const callTypesParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
+        const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+        const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+
+        await saveCallsToDB(calls);
+        await saveMeta('cacheParams', {
+          startDate: startDateStr,
+          endDate: endDateStr,
+          officeIds: officeIdsParam,
+          callTypes: callTypesParam,
+          lastRefreshed: lastRefreshedDate.toISOString(),
+          total,
+          registerSummary,
+          summaryData,
+          accountsData,
+          globalHeadcount
+        });
+      }
     } catch (err) {
       console.error('Failed to persist cache to IndexedDB:', err);
     }
   };
 
-  const fetchData = async (p = 1, opts?: { silent?: boolean }) => {
-    // Cancel previous request if it's still running
+  const fetchData = async (
+    p = 1,
+    opts?: {
+      silent?: boolean;
+      skipCache?: boolean;
+      searchOverride?: string;
+      pincodeOverride?: string;
+    }
+  ) => {
+    const opStart = performance.now();
+    const opId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const hadPriorRequest = !!fetchControllerRef.current;
+    reportPerf('fetchData', 'start', opStart, {
+      opId,
+      page: p,
+      opts: opts || {},
+      hadPriorRequest,
+      why: hadPriorRequest
+        ? 'Aborts any in-flight report request (pagination/filter race).'
+        : 'Cold start for this invocation.',
+    });
+
     if (fetchControllerRef.current) {
       fetchControllerRef.current.abort();
     }
 
-    // Reset prefetched data cache on any fresh fetch request
-    prefetchedDataRef.current = null;
+    const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
+    const callTypesParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
+    const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+    const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+
+    const searchForUrl = opts?.searchOverride !== undefined ? opts.searchOverride : debouncedSearch;
+    const pincodeForUrl = opts?.pincodeOverride !== undefined ? opts.pincodeOverride : debouncedPincodeSearch;
+
+    const queryKey = buildRegisterListQueryKey({
+      officeIdsParam,
+      callTypesParam,
+      searchForUrl: searchForUrl || '',
+      pincodeForUrl: pincodeForUrl || '',
+      startDateStr,
+      endDateStr,
+      selectedState: selectedState || 'All',
+      selectedCity: selectedCity || 'All',
+      selectedBranch: selectedBranch || 'All',
+      selectedFranchisee: selectedFranchisee || 'All',
+      selectedTechnician: selectedTechnician || 'All',
+      selectedStatus: selectedStatus || 'All',
+    });
+
+    if (!opts?.skipCache) {
+      const cached = registerPageCacheGet(registerPagesCacheRef.current, queryKey, p);
+      if (cached) {
+        setData(cached.data);
+        setTotal(cached.total);
+        setPage(p);
+        if (cached.registerSummary !== undefined) {
+          setRegisterSummary(cached.registerSummary ?? null);
+        }
+        if (!opts?.silent) {
+          setLoading(false);
+          setLoadingPage(null);
+        }
+        setLastRefreshed(new Date());
+        reportPerf('fetchData', 'session page cache HIT (no network)', opStart, {
+          opId,
+          page: p,
+          rows: cached.data.length,
+          why: 'In-memory Map for this queryKey+page; avoids waiting on SQL/API again.',
+        });
+        return;
+      }
+    }
 
     const controller = new AbortController();
     fetchControllerRef.current = controller;
@@ -498,70 +702,100 @@ export default function ReportPage() {
     } else {
       setLoadingPage(null);
     }
-    const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
-    const callTypesParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
 
-    const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
-    const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+    const appendRegisterFilters = (basePath: string) => {
+      let u = basePath;
+      if (searchForUrl) u += `&search=${encodeURIComponent(searchForUrl)}`;
+      if (pincodeForUrl) u += `&pincode=${encodeURIComponent(pincodeForUrl)}`;
+      if (startDateStr) u += `&startDate=${startDateStr}`;
+      if (endDateStr) u += `&endDate=${endDateStr}`;
+      if (selectedState && selectedState !== 'All') u += `&state=${encodeURIComponent(selectedState)}`;
+      if (selectedCity && selectedCity !== 'All') u += `&city=${encodeURIComponent(selectedCity)}`;
+      if (selectedBranch && selectedBranch !== 'All') u += `&branch=${encodeURIComponent(selectedBranch)}`;
+      if (selectedFranchisee && selectedFranchisee !== 'All') u += `&franchisee=${encodeURIComponent(selectedFranchisee)}`;
+      if (selectedTechnician && selectedTechnician !== 'All') u += `&technician=${encodeURIComponent(selectedTechnician)}`;
+      if (selectedStatus && selectedStatus !== 'All') u += `&status=${encodeURIComponent(selectedStatus)}`;
+      return u;
+    };
 
     try {
+      const tBeforeSession = performance.now();
       const { data: { session } } = await supabase.auth.getSession();
+      const tAfterSession = performance.now();
+      reportPerf('fetchData', 'supabase.getSession done', opStart, {
+        opId,
+        getSessionMs: Number((tAfterSession - tBeforeSession).toFixed(1)),
+        why: 'Auth token for API Authorization header.',
+      });
       const headers = {
-        'Authorization': `Bearer ${session?.access_token}`,
+        Authorization: `Bearer ${session?.access_token}`,
       };
 
-      // Register data URL
-      let url = `/api/report?page=${p}&limit=${limit}&officeId=${officeIdsParam}&callType=${callTypesParam}`;
-      if (search) url += `&search=${encodeURIComponent(search)}`;
-      if (debouncedPincodeSearch) url += `&pincode=${encodeURIComponent(debouncedPincodeSearch)}`;
-      if (startDateStr) url += `&startDate=${startDateStr}`;
-      if (endDateStr) url += `&endDate=${endDateStr}`;
-      
-      // Cascading and status filters
-      if (selectedState && selectedState !== 'All') url += `&state=${encodeURIComponent(selectedState)}`;
-      if (selectedCity && selectedCity !== 'All') url += `&city=${encodeURIComponent(selectedCity)}`;
-      if (selectedBranch && selectedBranch !== 'All') url += `&branch=${encodeURIComponent(selectedBranch)}`;
-      if (selectedFranchisee && selectedFranchisee !== 'All') url += `&franchisee=${encodeURIComponent(selectedFranchisee)}`;
-      if (selectedTechnician && selectedTechnician !== 'All') url += `&technician=${encodeURIComponent(selectedTechnician)}`;
-      if (selectedStatus && selectedStatus !== 'All') url += `&status=${encodeURIComponent(selectedStatus)}`;
+      const prefetchAdjacentPages = (currentPage: number) => {
+        const prefetchSessionStart = performance.now();
+        reportPerf('prefetch', 'adjacent pages scheduled', prefetchSessionStart, {
+          opId,
+          centerPage: currentPage,
+          why: 'Background GET for page±1 with fetchTotals=false to warm session cache.',
+        });
+        const totalSnap = lastKnownRegisterTotalRef.current;
+        const storePrefetched = (
+          pageNum: number,
+          payload: { data?: any[]; total?: number },
+          summary?: { total: number; transferred: number; cancelled: number; solved: number; open: number } | null
+        ) => {
+          const rows = payload.data || [];
+          const tot =
+            payload.total !== undefined && payload.total !== null ? payload.total : totalSnap;
+          registerPageCachePut(registerPagesCacheRef.current, queryKey, pageNum, {
+            data: rows,
+            total: tot,
+            registerSummary: summary,
+          });
+        };
 
-      const prefetchNextPage = (currentPage: number) => {
-        let nextUrl = `/api/report?page=${currentPage + 1}&limit=${limit}&fetchTotals=false&officeId=${officeIdsParam}&callType=${callTypesParam}`;
-        if (search) nextUrl += `&search=${encodeURIComponent(search)}`;
-        if (debouncedPincodeSearch) nextUrl += `&pincode=${encodeURIComponent(debouncedPincodeSearch)}`;
-        if (startDateStr) nextUrl += `&startDate=${startDateStr}`;
-        if (endDateStr) nextUrl += `&endDate=${endDateStr}`;
-        
-        if (selectedState && selectedState !== 'All') nextUrl += `&state=${encodeURIComponent(selectedState)}`;
-        if (selectedCity && selectedCity !== 'All') nextUrl += `&city=${encodeURIComponent(selectedCity)}`;
-        if (selectedBranch && selectedBranch !== 'All') nextUrl += `&branch=${encodeURIComponent(selectedBranch)}`;
-        if (selectedFranchisee && selectedFranchisee !== 'All') nextUrl += `&franchisee=${encodeURIComponent(selectedFranchisee)}`;
-        if (selectedTechnician && selectedTechnician !== 'All') nextUrl += `&technician=${encodeURIComponent(selectedTechnician)}`;
-        if (selectedStatus && selectedStatus !== 'All') nextUrl += `&status=${encodeURIComponent(selectedStatus)}`;
-
-        axios.get(nextUrl, { headers, signal: controller.signal }).then(res => {
-          prefetchedDataRef.current = { page: currentPage + 1, data: res.data.data, total: res.data.total };
-        }).catch(() => {});
-      };
-
-      // Use prefetched data if available
-      const currentPrefetch = prefetchedDataRef.current as { page: number, data: any[], total?: number } | null;
-      if (currentPrefetch && currentPrefetch.page === p && p > 1) {
-        setData(currentPrefetch.data);
-        if (currentPrefetch.total !== undefined) setTotal(currentPrefetch.total);
-        setPage(p);
-        
-        if (!opts?.silent) {
-          setLoading(false);
-          setLoadingPage(null);
+        const maxPage = totalSnap > 0 ? Math.ceil(totalSnap / limit) : 1;
+        const nextPage = currentPage + 1;
+        if (nextPage <= maxPage) {
+          const nextUrl = appendRegisterFilters(
+            `/api/report?page=${nextPage}&limit=${limit}&fetchTotals=false&officeId=${officeIdsParam}&callType=${callTypesParam}`
+          );
+          axios
+            .get(nextUrl, { headers, signal: controller.signal })
+            .then((res) => {
+              storePrefetched(nextPage, res.data);
+              reportPerf('prefetch', `page ${nextPage} response stored`, prefetchSessionStart, {
+                opId,
+                rows: (res.data?.data || []).length,
+                sincePrefetchScheduleMs: Number((performance.now() - prefetchSessionStart).toFixed(1)),
+              });
+            })
+            .catch(() => {});
         }
-        
-        // Removed URL syncing per user request
-        prefetchNextPage(p);
-        return;
-      }
 
-      // Fetch summary only on the first page load or full refresh
+        const prevPage = currentPage - 1;
+        if (prevPage >= 1) {
+          const prevUrl = appendRegisterFilters(
+            `/api/report?page=${prevPage}&limit=${limit}&fetchTotals=false&officeId=${officeIdsParam}&callType=${callTypesParam}`
+          );
+          axios
+            .get(prevUrl, { headers, signal: controller.signal })
+            .then((res) => {
+              storePrefetched(prevPage, res.data);
+              reportPerf('prefetch', `page ${prevPage} response stored`, prefetchSessionStart, {
+                opId,
+                rows: (res.data?.data || []).length,
+                sincePrefetchScheduleMs: Number((performance.now() - prefetchSessionStart).toFixed(1)),
+              });
+            })
+            .catch(() => {});
+        }
+      };
+
+      let url = appendRegisterFilters(
+        `/api/report?page=${p}&limit=${limit}&officeId=${officeIdsParam}&callType=${callTypesParam}`
+      );
+
       const needsSummary = p === 1;
       let summaryUrl = '';
       if (needsSummary) {
@@ -569,28 +803,38 @@ export default function ReportPage() {
         if (startDateStr) summaryUrl += `&startDate=${startDateStr}`;
         if (endDateStr) summaryUrl += `&endDate=${endDateStr}`;
         if (agingAsOf) {
-          const agingStr = agingAsOf.includes(' ') || agingAsOf.includes(':')
-            ? new Date(agingAsOf).toISOString().split('T')[0]
-            : agingAsOf;
+          const agingStr =
+            agingAsOf.includes(' ') || agingAsOf.includes(':')
+              ? new Date(agingAsOf).toISOString().split('T')[0]
+              : agingAsOf;
           summaryUrl += `&agingAsOf=${agingStr}`;
         }
       }
 
       const newDate = new Date();
 
-      // Execute in parallel if summary needed
       if (needsSummary) {
+        const tBeforeParallel = performance.now();
         const [regRes, summRes] = await Promise.all([
           axios.get(url, { headers, signal: controller.signal }),
-          axios.get(summaryUrl, { headers, signal: controller.signal })
+          axios.get(summaryUrl, { headers, signal: controller.signal }),
         ]);
+        const tAfterMainAxios = performance.now();
+        reportPerf('fetchData', 'network: /api/report + /api/report/summary (parallel) complete', opStart, {
+          opId,
+          registerRows: (regRes.data.data || []).length,
+          parallelAxiosMs: Number((tAfterMainAxios - tBeforeParallel).toFixed(1)),
+          why: 'Single await waits for both; wall time ≈ slower of the two SQL-heavy routes.',
+        });
+
+        const regTotal = regRes.data.total ?? 0;
+        lastKnownRegisterTotalRef.current = regTotal;
 
         setData(regRes.data.data);
-        setTotal(regRes.data.total);
+        setTotal(regTotal);
         setPage(p);
         setRegisterSummary(regRes.data.summary || null);
 
-        // Update cascading options lists from server
         if (regRes.data.statesList) setStatesList(regRes.data.statesList);
         if (regRes.data.citiesList) setCitiesList(regRes.data.citiesList);
         if (regRes.data.branchesList) setBranchesList(regRes.data.branchesList);
@@ -601,16 +845,21 @@ export default function ReportPage() {
         setAccountsData(summRes.data.accountSummary);
         setGlobalHeadcount(summRes.data.globalHeadcount || 0);
 
-        // Save to global cache
+        registerPageCachePut(registerPagesCacheRef.current, queryKey, p, {
+          data: regRes.data.data,
+          total: regTotal,
+          registerSummary: regRes.data.summary || null,
+        });
+
         globalReportCache = {
           data: regRes.data.data,
           summaryData: summRes.data.branchSummary,
           accountsData: summRes.data.accountSummary,
           globalHeadcount: summRes.data.globalHeadcount || 0,
-          total: regRes.data.total,
+          total: regTotal,
           page: p,
-          search,
-          pincodeSearch,
+          search: searchForUrl || '',
+          pincodeSearch: pincodeForUrl || '',
           selectedOfficeIds,
           dateRange,
           filterRegion,
@@ -624,72 +873,105 @@ export default function ReportPage() {
           selectedCity,
           selectedBranch,
           selectedFranchisee,
-          selectedTechnician
+          selectedTechnician,
         };
 
-        // Save to IndexedDB
         persistCurrentCache(
           regRes.data.data,
           summRes.data.branchSummary,
           summRes.data.accountSummary,
           summRes.data.globalHeadcount || 0,
-          regRes.data.total,
+          regTotal,
           regRes.data.summary || null,
           newDate
         );
-
-        const totalPages = Math.max(1, Math.ceil(regRes.data.total / limit));
       } else {
-          url += `&fetchTotals=false`;
-          const regRes = await axios.get(url, { headers, signal: controller.signal });
-          const newChunk = regRes.data.data || [];
-          
-          setData(newChunk);
-          if (regRes.data.total !== undefined) {
-            setTotal(regRes.data.total);
-          }
-          setPage(p);
-          if (regRes.data.summary !== undefined) {
-            setRegisterSummary(regRes.data.summary);
-          }
+        url += `&fetchTotals=false`;
+        const tBeforePage = performance.now();
+        const regRes = await axios.get(url, { headers, signal: controller.signal });
+        const tAfterPage = performance.now();
+        reportPerf('fetchData', 'network: /api/report (page>1, fetchTotals=false) complete', opStart, {
+          opId,
+          parallelAxiosMs: Number((tAfterPage - tBeforePage).toFixed(1)),
+          registerRows: (regRes.data.data || []).length,
+          why: 'Lighter query without full totals block; totals reused from lastKnownRegisterTotalRef when API omits total.',
+        });
+        const newChunk = regRes.data.data || [];
+        const apiTotal = regRes.data.total;
+        const effectiveTotal =
+          apiTotal !== undefined && apiTotal !== null ? apiTotal : lastKnownRegisterTotalRef.current;
 
-          // Update global cache for pagination
-          if (globalReportCache) {
-            globalReportCache.data = newChunk;
-            globalReportCache.total = regRes.data.total;
-            globalReportCache.page = p;
-            globalReportCache.registerSummary = regRes.data.summary || null;
-            globalReportCache.lastRefreshed = newDate;
+        if (apiTotal !== undefined && apiTotal !== null) {
+          lastKnownRegisterTotalRef.current = apiTotal;
+        }
 
-            persistCurrentCache(
-              globalReportCache.data,
-              globalReportCache.summaryData,
-              globalReportCache.accountsData,
-              globalReportCache.globalHeadcount,
-              globalReportCache.total,
-              globalReportCache.registerSummary,
-              newDate
-            );
-          }
+        setData(newChunk);
+        if (apiTotal !== undefined && apiTotal !== null) {
+          setTotal(apiTotal);
+        }
+        setPage(p);
+        if (regRes.data.summary !== undefined) {
+          setRegisterSummary(regRes.data.summary);
+        }
+
+        registerPageCachePut(registerPagesCacheRef.current, queryKey, p, {
+          data: newChunk,
+          total: effectiveTotal,
+          registerSummary: regRes.data.summary ?? null,
+        });
+
+        if (globalReportCache) {
+          globalReportCache.data = newChunk;
+          globalReportCache.total = effectiveTotal;
+          globalReportCache.page = p;
+          globalReportCache.registerSummary = regRes.data.summary ?? null;
+          globalReportCache.lastRefreshed = newDate;
+          globalReportCache.search = searchForUrl || '';
+          globalReportCache.pincodeSearch = pincodeForUrl || '';
+
+          persistCurrentCache(
+            globalReportCache.data,
+            globalReportCache.summaryData,
+            globalReportCache.accountsData,
+            globalReportCache.globalHeadcount,
+            globalReportCache.total,
+            globalReportCache.registerSummary,
+            newDate
+          );
+        }
       }
 
-      // Removed URL syncing per user request
-      prefetchNextPage(p);
-
+      prefetchAdjacentPages(p);
     } catch (err: any) {
       if (axios.isCancel(err)) {
-        return; // Silently handle cancellation
+        reportPerf('fetchData', 'aborted (axios cancel)', opStart, {
+          opId,
+          why: 'AbortController: newer fetchData or navigation cancelled this request.',
+        });
+        return;
       }
-      toast.error("Failed to fetch report data");
+      reportPerf('fetchData', 'request failed (error toast)', opStart, {
+        opId,
+        message: err?.message || String(err),
+      });
+      toast.error('Failed to fetch report data');
     } finally {
-      // Only set loading to false if this was the last request
-      if (fetchControllerRef.current === controller) {
+      const isActiveController = fetchControllerRef.current === controller;
+      if (isActiveController) {
         if (!opts?.silent) {
           setLoading(false);
         }
         setLoadingPage(null);
         setLastRefreshed(new Date());
       }
+      reportPerf('fetchData', isActiveController ? 'done (this request owned controller)' : 'done (superseded)', opStart, {
+        opId,
+        isActiveController,
+        silent: !!opts?.silent,
+        why: isActiveController
+          ? 'Spinner cleared; last successful or failed path for this opId.'
+          : 'Another fetchData replaced fetchControllerRef before finally ran.',
+      });
     }
   };
 
@@ -724,12 +1006,19 @@ export default function ReportPage() {
   };
 
   const fetchDelta = async () => {
+    const d0 = performance.now();
     if (!lastRefreshed) {
+      reportPerf('fetchDelta', 'skip delta → fetchData(1)', d0, {
+        why: 'No lastRefreshed timestamp yet; need a full register load before incremental lastSync makes sense.',
+      });
       fetchData(1);
       return;
     }
 
     setLoading(true);
+    reportPerf('fetchDelta', 'start incremental sync', d0, {
+      why: 'GET /api/report with lastSync filter; merges changed rows without full pagination refetch.',
+    });
     const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
     const callTypesParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
 
@@ -737,7 +1026,12 @@ export default function ReportPage() {
     const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
 
     try {
+      const tBeforeSession = performance.now();
       const { data: { session } } = await supabase.auth.getSession();
+      const tAfterSession = performance.now();
+      reportPerf('fetchDelta', 'getSession done', d0, {
+        getSessionMs: Number((tAfterSession - tBeforeSession).toFixed(1)),
+      });
       const headers = { 'Authorization': `Bearer ${session?.access_token}` };
 
       // Subtract 10 minutes to safely avoid clock drift
@@ -745,7 +1039,7 @@ export default function ReportPage() {
       const lastSyncStr = formatSQLDate(safeSyncTime);
 
       let url = `/api/report?officeId=${officeIdsParam}&callType=${callTypesParam}&lastSync=${encodeURIComponent(lastSyncStr)}`;
-      if (search) url += `&search=${encodeURIComponent(search)}`;
+      if (debouncedSearch) url += `&search=${encodeURIComponent(debouncedSearch)}`;
       if (debouncedPincodeSearch) url += `&pincode=${encodeURIComponent(debouncedPincodeSearch)}`;
       if (startDateStr) url += `&startDate=${startDateStr}`;
       if (endDateStr) url += `&endDate=${endDateStr}`;
@@ -757,7 +1051,13 @@ export default function ReportPage() {
       if (selectedTechnician && selectedTechnician !== 'All') url += `&technician=${encodeURIComponent(selectedTechnician)}`;
       if (selectedStatus && selectedStatus !== 'All') url += `&status=${encodeURIComponent(selectedStatus)}`;
 
+      const tBeforeAxios = performance.now();
       const res = await axios.get(url, { headers });
+      const tAfterAxios = performance.now();
+      reportPerf('fetchDelta', 'GET /api/report?lastSync=… response', d0, {
+        axiosMs: Number((tAfterAxios - tBeforeAxios).toFixed(1)),
+        deltaRowCount: (res.data.data || []).length,
+      });
       const newRecords = res.data.data || [];
       const newDate = new Date();
 
@@ -1000,10 +1300,20 @@ export default function ReportPage() {
 
       setLastRefreshed(newDate);
       toast.success(newRecords.length > 0 ? `Synced successfully: ${newRecords.length} call(s) synchronized!` : "Sync completed. No new calls found.");
+      reportPerf('fetchDelta', 'success (toast + state updates scheduled)', d0, {
+        deltaRowCount: newRecords.length,
+        why: 'React setState batch follows; IndexedDB persist may still be in flight.',
+      });
     } catch (err: any) {
+      reportPerf('fetchDelta', 'failed', d0, {
+        message: err.response?.data?.error || err.message || String(err),
+      });
       toast.error("Failed to perform delta sync: " + (err.response?.data?.error || err.message));
     } finally {
       setLoading(false);
+      reportPerf('fetchDelta', 'finally', d0, {
+        why: 'Spinner cleared after delta attempt.',
+      });
     }
   };
 
@@ -1015,6 +1325,8 @@ export default function ReportPage() {
     drillDownControllerRef.current = controller;
 
     setDrillDown(prev => ({ ...prev, isOpen: true, loading: true, type, title, params, data: [], sql: '' }));
+    const d0 = performance.now();
+    reportPerf('drillDown', 'POST /api/report/drilldown start', d0, { type, title });
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
@@ -1030,6 +1342,9 @@ export default function ReportPage() {
         signal: controller.signal
       });
       setDrillDown(prev => ({ ...prev, loading: false, data: res.data.data, sql: res.data.sql }));
+      reportPerf('drillDown', 'POST /api/report/drilldown complete', d0, {
+        rowCount: (res.data.data || []).length,
+      });
     } catch (err: any) {
       if (axios.isCancel(err)) return;
       toast.error('Failed to fetch details');
@@ -1045,6 +1360,8 @@ export default function ReportPage() {
     drillDownControllerRef.current = controller;
 
     setDrillDown(prev => ({ ...prev, loading: true }));
+    const q0 = performance.now();
+    reportPerf('drillDown', 'custom SQL POST start', q0, { why: 'Ad-hoc drilldown from SQL editor.' });
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const res = await axios.post('/api/report/drilldown', {
@@ -1054,6 +1371,7 @@ export default function ReportPage() {
         signal: controller.signal
       });
       setDrillDown(prev => ({ ...prev, loading: false, data: res.data.data, sql: res.data.sql }));
+      reportPerf('drillDown', 'custom SQL POST complete', q0, { rowCount: (res.data.data || []).length });
     } catch (err: any) {
       if (axios.isCancel(err)) return;
       toast.error('Query Error: ' + (err.response?.data?.error || err.message));
@@ -1086,8 +1404,17 @@ export default function ReportPage() {
   // Initialize cache from IndexedDB on mount
   useEffect(() => {
     const initDBAndCache = async () => {
+      const i0 = performance.now();
+      reportPerf('initDB', 'IndexedDB bootstrap start', i0, {
+        why: 'Reads meta + optional cached calls so UI can paint before network; may schedule fetchDelta.',
+      });
       try {
+        const tBeforeMeta = performance.now();
         const cacheParams = await getMeta('cacheParams');
+        reportPerf('initDB', 'getMeta(cacheParams) done', i0, {
+          hasMeta: !!cacheParams,
+          getMetaMs: Number((performance.now() - tBeforeMeta).toFixed(1)),
+        });
         if (cacheParams) {
           const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
           const callTypesParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
@@ -1100,7 +1427,12 @@ export default function ReportPage() {
             cacheParams.officeIds === officeIdsParam &&
             cacheParams.callTypes === callTypesParam
           ) {
+            const tBeforeCalls = performance.now();
             const cachedCalls = await getCallsFromDB();
+            reportPerf('initDB', 'getCallsFromDB done', i0, {
+              rowCount: cachedCalls?.length ?? 0,
+              getCallsMs: Number((performance.now() - tBeforeCalls).toFixed(1)),
+            });
             if (cachedCalls && cachedCalls.length > 0) {
               setData(cachedCalls);
               setSummaryData(cacheParams.summaryData || []);
@@ -1129,23 +1461,37 @@ export default function ReportPage() {
                 registerSummary: cacheParams.registerSummary || null,
                 lastRefreshed: refreshedDate,
                 agingAsOf,
-                selectedStatus
+                selectedStatus,
+                selectedState: 'All',
+                selectedCity: 'All',
+                selectedBranch: 'All',
+                selectedFranchisee: 'All',
+                selectedTechnician: 'All',
               };
+
+              lastKnownRegisterTotalRef.current = cacheParams.total || 0;
 
               // Let the UI render the loaded cache first
               setLoading(false);
 
-              // Perform silent background sync
-              setTimeout(() => {
-                fetchDelta();
-              }, 500);
+              // Perform silent background sync (Disabled per user request to remove all auto fetch)
+              // setTimeout(() => {
+              //   reportPerf('initDB', 'scheduling fetchDelta in 500ms', i0, {
+              //     why: 'Let paint complete then pull server deltas for rows changed since lastRefreshed.',
+              //   });
+              //   fetchDelta();
+              // }, 500);
             }
           }
         }
       } catch (err) {
         console.error('Error initializing cache from IndexedDB:', err);
+        reportPerf('initDB', 'error', i0, { err: String(err) });
       } finally {
         setDbInitialized(true);
+        reportPerf('initDB', 'dbInitialized=true (filter effect can run)', i0, {
+          why: 'Gate removed: auto-fetch-on-filter useEffect waits for this flag.',
+        });
       }
     };
     initDBAndCache();
@@ -1153,23 +1499,46 @@ export default function ReportPage() {
 
   // Automatically fetch data when filters change, but skip the first fetch if the cache is already present and matches the filters
   useEffect(() => {
-    if (!dbInitialized) return;
-    const filtersChanged = !globalReportCache ||
-      globalReportCache.dateRange.start.getTime() !== dateRange.start.getTime() ||
-      globalReportCache.dateRange.end.getTime() !== dateRange.end.getTime() ||
-      JSON.stringify(globalReportCache.selectedOfficeIds) !== JSON.stringify(selectedOfficeIds) ||
-      globalReportCache.filterAccount !== filterAccount ||
-      JSON.stringify(globalReportCache.selectedCallTypes) !== JSON.stringify(selectedCallTypes) ||
-      globalReportCache.selectedState !== selectedState ||
-      globalReportCache.selectedCity !== selectedCity ||
-      globalReportCache.selectedBranch !== selectedBranch ||
-      globalReportCache.selectedFranchisee !== selectedFranchisee ||
-      globalReportCache.selectedTechnician !== selectedTechnician ||
-      globalReportCache.selectedStatus !== selectedStatus;
+    const t0 = performance.now();
+    if (!dbInitialized) {
+      return;
+    }
+    const changedFields: string[] = [];
+    if (!globalReportCache) changedFields.push('no_globalReportCache');
+    else {
+      if (globalReportCache.dateRange.start.getTime() !== dateRange.start.getTime()) changedFields.push('dateRange.start');
+      if (globalReportCache.dateRange.end.getTime() !== dateRange.end.getTime()) changedFields.push('dateRange.end');
+      if (JSON.stringify(globalReportCache.selectedOfficeIds) !== JSON.stringify(selectedOfficeIds)) changedFields.push('offices');
+      if (JSON.stringify(globalReportCache.filterAccount || []) !== JSON.stringify(filterAccount || [])) changedFields.push('filterAccount');
+      if (JSON.stringify(globalReportCache.selectedCallTypes) !== JSON.stringify(selectedCallTypes)) changedFields.push('callTypes');
+      if (globalReportCache.selectedState !== selectedState) changedFields.push('state');
+      if (globalReportCache.selectedCity !== selectedCity) changedFields.push('city');
+      if (globalReportCache.selectedBranch !== selectedBranch) changedFields.push('branch');
+      if (globalReportCache.selectedFranchisee !== selectedFranchisee) changedFields.push('franchisee');
+      if (globalReportCache.selectedTechnician !== selectedTechnician) changedFields.push('technician');
+      if (globalReportCache.selectedStatus !== selectedStatus) changedFields.push('status');
+      if ((globalReportCache.search || '') !== (debouncedSearch || '')) changedFields.push('debouncedSearch');
+      if ((globalReportCache.pincodeSearch || '') !== (debouncedPincodeSearch || '')) changedFields.push('debouncedPincode');
+    }
+    const filtersChanged = changedFields.length > 0;
 
     if (filtersChanged) {
-      // Fetch fresh data for the first page
-      fetchData(1);
+      reportPerf('filterEffect', 'filters changed → clear page cache + setPage(1) + fetchData(1)', t0, {
+        changedFields,
+        why: 'Compared last successful fetch snapshot (globalReportCache) to current UI/debounced state.',
+      });
+      registerPagesCacheRef.current.clear();
+      setPage(1);
+      if (clearFiltersRef.current) {
+        fetchData(1, { skipCache: true });
+        clearFiltersRef.current = false;
+      } else {
+        fetchData(1);
+      }
+    } else {
+      reportPerf('filterEffect', 'no fetch (cache matches UI)', t0, {
+        why: 'globalReportCache aligns with current filters; avoids redundant /api/report.',
+      });
     }
   }, [
     dbInitialized,
@@ -1182,12 +1551,22 @@ export default function ReportPage() {
     selectedBranch,
     selectedFranchisee,
     selectedTechnician,
-    selectedStatus
+    selectedStatus,
+    debouncedSearch,
+    debouncedPincodeSearch,
   ]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    fetchData(1);
+    const t0 = performance.now();
+    reportPerf('searchForm', 'submit (skipCache, raw search+pincode)', t0, {
+      why: 'Bypasses debounce and session cache for explicit search.',
+    });
+    fetchData(1, {
+      searchOverride: search,
+      pincodeOverride: pincodeSearch,
+      skipCache: true,
+    });
   };
 
   const handleExportDetailed = async (format: 'excel' | 'csv' = 'excel') => {
@@ -1590,6 +1969,10 @@ export default function ReportPage() {
   }, [localFilteredData]);
 
 
+  if (!mounted) {
+    return <div className="flex-1 flex flex-col h-full bg-white"></div>;
+  }
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden text-slate-900 bg-white">
       {/* Page Header / Controls */}
@@ -1622,7 +2005,13 @@ export default function ReportPage() {
             </span>
           )}
           <button
-            onClick={() => fetchDelta()}
+            onClick={() => {
+              const t0 = performance.now();
+              reportPerf('ui', 'Sync button → fetchDelta()', t0, {
+                why: 'Incremental lastSync poll; see fetchDelta logs.',
+              });
+              fetchDelta();
+            }}
             disabled={loading}
             className="flex items-center gap-1.5 bg-slate-900 text-white px-3 py-1.5 rounded-md text-xs hover:bg-slate-800 transition-all shadow-sm disabled:opacity-50 ui-label"
             title="Fast delta sync (fetches only new or updated calls since last sync)"
@@ -1633,7 +2022,13 @@ export default function ReportPage() {
             Sync
           </button>
           <button
-            onClick={() => fetchData(1)}
+            onClick={() => {
+              const t0 = performance.now();
+              reportPerf('ui', 'Full Reload → fetchData(1, skipCache)', t0, {
+                why: 'Forces network + summary; ignores session page cache.',
+              });
+              fetchData(1, { skipCache: true });
+            }}
             disabled={loading}
             className="flex items-center gap-1.5 bg-white text-slate-700 px-3 py-1.5 rounded-md text-xs border border-slate-200 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm disabled:opacity-50 ui-label"
             title="Full reload (re-runs all branch and account queries from scratch)"
@@ -1885,6 +2280,8 @@ export default function ReportPage() {
           <div className="flex items-center border-l border-slate-200 pl-4 h-6">
             <DateRangeSelector
               value={dateRange.label}
+              startDate={dateRange.start}
+              endDate={dateRange.end}
               onChange={(range) => {
                 setDateRange(range);
               }}
@@ -1970,7 +2367,10 @@ export default function ReportPage() {
                   className="w-full pl-8 pr-4 py-1.5 bg-slate-50 border-none rounded-md text-[11px] font-medium focus:ring-1 focus:ring-slate-200 transition-all"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && fetchData(1)}
+                  onKeyDown={(e) =>
+                    e.key === 'Enter' &&
+                    fetchData(1, { searchOverride: search, skipCache: true })
+                  }
                 />
               </div>
               <div className="relative flex-1 max-w-[150px]">
@@ -1981,7 +2381,10 @@ export default function ReportPage() {
                   className="w-full pl-8 pr-4 py-1.5 bg-slate-50 border-none rounded-md text-[11px] font-medium focus:ring-1 focus:ring-slate-200 transition-all font-mono"
                   value={pincodeSearch}
                   onChange={(e) => setPincodeSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && fetchData(1)}
+                  onKeyDown={(e) =>
+                    e.key === 'Enter' &&
+                    fetchData(1, { pincodeOverride: pincodeSearch, skipCache: true })
+                  }
                 />
               </div>
             </div>
@@ -2021,10 +2424,10 @@ export default function ReportPage() {
                     onChange={(e) => handleStateChange(e.target.value)}
                     className="bg-transparent border-none p-0 text-[11.5px] text-slate-700 font-bold focus:outline-none focus:ring-0 cursor-pointer w-full select-none appearance-none"
                   >
-                    <option value="All">All States ({statesList.reduce((acc, curr) => acc + curr.call_count, 0)})</option>
+                    <option value="All">All States</option>
                     {statesList.map(s => (
                       <option key={s.vname} value={s.vname}>
-                        {s.vname} ({s.call_count})
+                        {s.vname}
                       </option>
                     ))}
                   </select>
@@ -2053,10 +2456,10 @@ export default function ReportPage() {
                     onChange={(e) => handleCityChange(e.target.value)}
                     className="bg-transparent border-none p-0 text-[11.5px] text-slate-700 font-bold focus:outline-none focus:ring-0 cursor-pointer w-full select-none appearance-none"
                   >
-                    <option value="All">All Cities ({citiesList.reduce((acc, curr) => acc + curr.call_count, 0)})</option>
+                    <option value="All">All Cities</option>
                     {citiesList.map(c => (
                       <option key={c.ncode} value={c.ncode}>
-                        {c.vname} ({c.call_count})
+                        {c.vname}
                       </option>
                     ))}
                   </select>
@@ -2085,10 +2488,10 @@ export default function ReportPage() {
                     onChange={(e) => handleBranchChange(e.target.value)}
                     className="bg-transparent border-none p-0 text-[11.5px] text-slate-700 font-bold focus:outline-none focus:ring-0 cursor-pointer w-full select-none appearance-none"
                   >
-                    <option value="All">All Branches ({branchesList.reduce((acc, curr) => acc + curr.call_count, 0)})</option>
+                    <option value="All">All Branches</option>
                     {branchesList.map(b => (
                       <option key={b.ncode} value={b.ncode}>
-                        {b.vcompanyname} ({b.call_count})
+                        {b.vcompanyname}
                       </option>
                     ))}
                   </select>
@@ -2117,10 +2520,10 @@ export default function ReportPage() {
                     onChange={(e) => handleFranchiseeChange(e.target.value)}
                     className="bg-transparent border-none p-0 text-[11.5px] text-slate-700 font-bold focus:outline-none focus:ring-0 cursor-pointer w-full select-none appearance-none"
                   >
-                    <option value="All">All Franchisees ({franchiseesList.reduce((acc, curr) => acc + curr.call_count, 0)})</option>
+                    <option value="All">All Franchisees</option>
                     {franchiseesList.map(f => (
                       <option key={f.ncode} value={f.ncode}>
-                        {f.vcompanyname} ({f.call_count})
+                        {f.vcompanyname}
                       </option>
                     ))}
                   </select>
@@ -2149,10 +2552,10 @@ export default function ReportPage() {
                     onChange={(e) => setSelectedTechnician(e.target.value)}
                     className="bg-transparent border-none p-0 text-[11.5px] text-slate-700 font-bold focus:outline-none focus:ring-0 cursor-pointer w-full select-none appearance-none"
                   >
-                    <option value="All">All Technicians ({techniciansList.reduce((acc, curr) => acc + curr.call_count, 0)})</option>
+                    <option value="All">All Technicians</option>
                     {techniciansList.map(t => (
                       <option key={t.ncode} value={t.ncode}>
-                        {t.vname} ({t.call_count})
+                        {t.vname}
                       </option>
                     ))}
                   </select>
@@ -2166,6 +2569,7 @@ export default function ReportPage() {
             {/* 6. Clear Filters Button */}
             <button
               onClick={() => {
+                clearFiltersRef.current = true;
                 setSelectedState('All');
                 setSelectedCity('All');
                 setSelectedBranch('All');
@@ -2349,6 +2753,12 @@ export default function ReportPage() {
               <button
                 onClick={() => {
                   const newPage = Math.max(1, page - 1);
+                  const t0 = performance.now();
+                  reportPerf('pagination', 'previous page', t0, {
+                    from: page,
+                    to: newPage,
+                    why: 'Invokes fetchData; may hit session page cache if that page was prefetched or visited.',
+                  });
                   setPage(newPage);
                   fetchData(newPage);
                 }}
@@ -2367,6 +2777,12 @@ export default function ReportPage() {
                 onClick={() => {
                   const totalPages = Math.max(1, Math.ceil(total / limit));
                   const newPage = Math.min(totalPages, page + 1);
+                  const t0 = performance.now();
+                  reportPerf('pagination', 'next page', t0, {
+                    from: page,
+                    to: newPage,
+                    why: 'Invokes fetchData; next page may already be in session cache from prefetch.',
+                  });
                   setPage(newPage);
                   fetchData(newPage);
                 }}
@@ -2379,15 +2795,15 @@ export default function ReportPage() {
           </div>
         </div>
         ) : activeTab === 'summary' ? (
-          <div className="flex-1 overflow-y-auto inner-scrollbar p-6 space-y-8">
+          <div className="flex-1 flex flex-col min-h-0 p-6 space-y-8 bg-slate-50/10">
               {/* Region Summary Table */}
-              <section className="mb-8">
-                <h2 className="text-[11px] text-slate-500 mb-2 px-2 ui-label">Regional Performance (AI)</h2>
-                <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+              <section className="flex-1 flex flex-col min-h-0">
+                <h2 className="text-[11px] text-slate-500 mb-2 px-2 ui-label flex-shrink-0">Regional Performance (AI)</h2>
+                <div className="flex-1 bg-white border border-slate-200 rounded-lg shadow-sm overflow-auto custom-scrollbar relative">
                   <table className="w-full text-left border-collapse text-[11px]">
-                    <thead>
-                      <tr className="bg-[#0070c0] text-white text-[10px] ui-label">
-                        <th className="p-2 border border-slate-300">Region</th>
+                    <thead className="sticky top-0 z-20 bg-[#0070c0] shadow-sm outline outline-1 outline-[#0070c0]">
+                      <tr className="text-white text-[10px] ui-label border-b border-blue-800">
+                        <th className="p-2 border-r border-slate-300/30">Region</th>
                         <th className="p-2 border border-slate-300 text-center">Total calls</th>
                         <th className="p-2 border border-slate-300 text-center">Total solved</th>
                         <th className="p-2 border border-slate-300 text-center text-blue-200">Transferred</th>
@@ -2474,13 +2890,13 @@ export default function ReportPage() {
               </section>
 
               {/* Branch Summary Table */}
-              <section>
-                <h2 className="text-[11px] text-slate-500 mb-2 px-2 ui-label">Branch Wise Performance</h2>
-                <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden overflow-x-auto">
+              <section className="flex-1 flex flex-col min-h-0">
+                <h2 className="text-[11px] text-slate-500 mb-2 px-2 ui-label flex-shrink-0">Branch Wise Performance</h2>
+                <div className="flex-1 bg-white border border-slate-200 rounded-lg shadow-sm overflow-auto custom-scrollbar relative">
                   <table className="w-full text-left border-collapse text-[11px]">
-                    <thead>
-                      <tr className="bg-[#0070c0] text-white text-[10px] ui-label">
-                        <th className="p-2 border border-slate-300 min-w-[200px]">Branches</th>
+                    <thead className="sticky top-0 z-20 bg-[#0070c0] shadow-sm outline outline-1 outline-[#0070c0]">
+                      <tr className="text-white text-[10px] ui-label border-b border-blue-800">
+                        <th className="p-2 border-r border-slate-300/30 min-w-[200px]">Branches</th>
                         <th className="p-2 border border-slate-300 text-center">Total calls</th>
                         <th className="p-2 border border-slate-300 text-center">Total solved</th>
                         <th className="p-2 border border-slate-300 text-center text-blue-200">Transferred</th>
@@ -2606,8 +3022,8 @@ export default function ReportPage() {
                 </div>
               </section>
             </div>
-          ) : (
-            <div className="flex-1 overflow-y-auto inner-scrollbar p-6 space-y-4">
+          ) : activeTab === 'accounts' ? (
+            <div className="flex-1 flex flex-col min-h-0 p-6 space-y-4 bg-slate-50/10">
               {(() => {
                 const filteredAccounts = accountsData.filter(a => {
                   const matchRegion = filterRegion.length === 0 || filterRegion.includes(a.region);
@@ -2616,20 +3032,20 @@ export default function ReportPage() {
                 });
 
                 return (
-                  <>
-                    <div className="flex items-center justify-between px-2 mb-2">
+                  <div className="flex-1 flex flex-col min-h-0">
+                    <div className="flex items-center justify-between px-2 mb-2 flex-shrink-0">
                       <h2 className="text-[11px] text-slate-500 ui-label">Key Account Wise Performance</h2>
                     </div>
-                    <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-x-auto">
+                    <div className="flex-1 bg-white border border-slate-200 rounded-lg shadow-sm overflow-auto custom-scrollbar relative">
                       <table className="w-full text-left border-collapse text-[10px]">
-                        <thead>
+                        <thead className="sticky top-0 z-20 outline outline-1 outline-slate-800 shadow-sm">
                           {/* Category Headers */}
                           <tr className="bg-slate-800 text-white ui-strong">
-                            <th className="p-1.5 border border-slate-600" colSpan={3}>Basics</th>
-                            <th className="p-1.5 border border-slate-600 text-center" colSpan={5}>Calls Summary (Breakdown)</th>
-                            <th className="p-1.5 border border-slate-600 text-center bg-blue-600" colSpan={7}>Breakdown (Aging)</th>
-                            <th className="p-1.5 border border-slate-600 text-center bg-amber-600" colSpan={3}>Deployment</th>
-                            <th className="p-1.5 border border-slate-600 text-center bg-emerald-600" colSpan={2}>Installation</th>
+                            <th className="p-1.5 border-r border-slate-600/50" colSpan={3}>Basics</th>
+                            <th className="p-1.5 border-r border-slate-600/50 text-center" colSpan={5}>Calls Summary (Breakdown)</th>
+                            <th className="p-1.5 border-r border-slate-600/50 text-center bg-blue-600" colSpan={7}>Breakdown (Aging)</th>
+                            <th className="p-1.5 border-r border-slate-600/50 text-center bg-amber-600" colSpan={3}>Deployment</th>
+                            <th className="p-1.5 text-center bg-emerald-600" colSpan={2}>Installation</th>
                           </tr>
                           <tr className="bg-slate-100 text-slate-700 ui-strong">
                             <th className="p-1.5 border border-slate-300">
@@ -2905,11 +3321,11 @@ export default function ReportPage() {
                         </tbody>
                       </table>
                     </div>
-                  </>
+                  </div>
                 );
               })()}
             </div>
-          )}
+          ) : null}
       </div>
 
 

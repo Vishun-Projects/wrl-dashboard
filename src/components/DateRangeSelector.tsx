@@ -11,10 +11,12 @@ export interface DateRange {
 
 interface DateRangeSelectorProps {
   value: string; // The label or a period string
+  startDate?: Date;
+  endDate?: Date;
   onChange: (range: DateRange) => void;
 }
 
-export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {
+export function DateRangeSelector({ value, startDate, endDate, onChange }: DateRangeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -38,6 +40,14 @@ export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {
         const start = new Date();
         start.setDate(end.getDate() - 7);
         return { start: new Date(start.setHours(0, 0, 0, 0)), end, label: 'Last 7 Days' };
+      }
+    },
+    {
+      label: 'Last 14 Days', getValue: () => {
+        const end = new Date();
+        const start = new Date();
+        start.setDate(end.getDate() - 14);
+        return { start: new Date(start.setHours(0, 0, 0, 0)), end, label: 'Last 14 Days' };
       }
     },
     {
@@ -83,7 +93,11 @@ export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const currentLabel = ranges.find(r => r.label === value || (value === '30' && r.label === 'Last 30 Days') || (value === '7' && r.label === 'Last 7 Days'))?.label || 'Select Range';
+  let currentLabel = ranges.find(r => r.label === value || (value === '30' && r.label === 'Last 30 Days') || (value === '14' && r.label === 'Last 14 Days') || (value === '7' && r.label === 'Last 7 Days'))?.label || value || 'Select Range';
+  if (value === 'Custom Range' && startDate && endDate) {
+    const formatDt = (d: Date) => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    currentLabel = `${formatDt(startDate)} - ${formatDt(endDate)}`;
+  }
 
   return (
     <div className="relative" ref={containerRef}>
@@ -122,11 +136,12 @@ export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {
               <input
                 type="date"
                 className="w-full h-8 px-2 bg-white border border-slate-200 rounded text-[11px] outline-none focus:border-slate-400"
+                value={value === 'Custom Range' && startDate ? startDate.toISOString().split('T')[0] : ''}
                 onChange={(e) => {
                   const d = new Date(e.target.value);
                   if (!isNaN(d.getTime())) {
-                    const currentRange = ranges.find(r => r.label === 'All Time')?.getValue() || { start: new Date(), end: new Date() };
-                    onChange({ ...currentRange, start: d, label: 'Custom Range' });
+                    const activeEnd = endDate || new Date();
+                    onChange({ start: d, end: activeEnd, label: 'Custom Range' });
                   }
                 }}
               />
@@ -136,11 +151,16 @@ export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {
               <input
                 type="date"
                 className="w-full h-8 px-2 bg-white border border-slate-200 rounded text-[11px] outline-none focus:border-slate-400"
+                value={value === 'Custom Range' && endDate ? endDate.toISOString().split('T')[0] : ''}
                 onChange={(e) => {
                   const d = new Date(e.target.value);
                   if (!isNaN(d.getTime())) {
-                    const currentRange = ranges.find(r => r.label === 'All Time')?.getValue() || { start: new Date(), end: new Date() };
-                    onChange({ ...currentRange, end: d, label: 'Custom Range' });
+                    const activeStart = startDate || (() => {
+                      const s = new Date();
+                      s.setDate(s.getDate() - 30);
+                      return s;
+                    })();
+                    onChange({ start: activeStart, end: d, label: 'Custom Range' });
                   }
                 }}
               />

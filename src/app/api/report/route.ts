@@ -514,7 +514,6 @@ export async function GET(req: NextRequest) {
     const offset = (page - 1) * limit;
     const fetchTotals = searchParams.get('fetchTotals') !== 'false'; // default true
 
-    let countRes: any = { data: [{ total: "0" }] };
     let summaryRes: any = { data: [{ total: 0, transferred: 0, cancelled: 0, solved: 0, open_calls: 0 }] };
     let filterOptionsRes: any = { data: [] };
     let res: any;
@@ -528,27 +527,34 @@ export async function GET(req: NextRequest) {
 
     if (fetchTotals) {
       const optionsQuery = postQuery({
-        fields: `
-          tc.nofficeid,
-          o.vcompanyname as officename,
-          tc.ntransfertooffice as franchisee_code,
-          transferoffice.vcompanyname as franchisee_name,
-          tc.nengineer,
-          u.vname as technician_name,
-          p.vinstpostalcode as Pincode,
-          cty.vname as dbCity,
-          st.vname as dbState
-        `,
-        tableName,
-        condition: baseCondition
+        rawSql: `
+          SELECT
+            tc.nofficeid,
+            o.vcompanyname as officename,
+            tc.ntransfertooffice as franchisee_code,
+            transferoffice.vcompanyname as franchisee_name,
+            tc.nengineer,
+            u.vname as technician_name,
+            p.vinstpostalcode as Pincode,
+            cty.vname as dbCity,
+            st.vname as dbState,
+            COUNT(*) as call_count
+          FROM ${tableName}
+          WHERE ${baseCondition}
+          GROUP BY
+            tc.nofficeid,
+            o.vcompanyname,
+            tc.ntransfertooffice,
+            transferoffice.vcompanyname,
+            tc.nengineer,
+            u.vname,
+            p.vinstpostalcode,
+            cty.vname,
+            st.vname
+        `
       });
 
-      [countRes, res, summaryRes, filterOptionsRes] = await Promise.all([
-        postQuery({
-          fields: "COUNT(*) as total",
-          tableName,
-          condition
-        }),
+      [res, summaryRes, filterOptionsRes] = await Promise.all([
         dataQuery,
         postQuery({
           fields: `
@@ -567,8 +573,8 @@ export async function GET(req: NextRequest) {
       res = await dataQuery;
     }
 
-    const totalCount = parseInt(countRes.data?.[0]?.total || "0");
     const summary = summaryRes.data?.[0] || { total: 0, transferred: 0, cancelled: 0, solved: 0, open_calls: 0 };
+    const totalCount = parseInt(summary.total || "0");
 
     const processedData = (res.data || []).map((row: any) => {
       const geo = getGeographicDetails(row.Pincode, row.dbCity, row.dbState);
@@ -610,7 +616,8 @@ export async function GET(req: NextRequest) {
           franchisee_code: row.franchisee_code ? String(row.franchisee_code) : 'UNASSIGNED',
           franchisee_name: row.franchisee_name || 'Unallocated',
           nengineer: row.nengineer ? String(row.nengineer) : '0',
-          technician_name: row.technician_name || 'UNKNOWN'
+          technician_name: row.technician_name || 'UNKNOWN',
+          call_count: parseInt(row.call_count || '1')
         };
       });
 
@@ -629,7 +636,7 @@ export async function GET(req: NextRequest) {
         if (!c.state || c.state === 'UNKNOWN') return;
         const sName = c.state;
         stateCounts[sName] = stateCounts[sName] || { vname: sName, call_count: 0 };
-        stateCounts[sName].call_count++;
+        stateCounts[sName].call_count += c.call_count;
       });
       responsePayload.statesList = Object.values(stateCounts).sort((a, b) => a.vname.localeCompare(b.vname));
 
@@ -640,7 +647,7 @@ export async function GET(req: NextRequest) {
         if (!c.city || c.city === 'UNKNOWN') return;
         const cName = c.city;
         cityCounts[cName] = cityCounts[cName] || { ncode: cName, vname: cName, nstate: c.state || '', call_count: 0 };
-        cityCounts[cName].call_count++;
+        cityCounts[cName].call_count += c.call_count;
       });
       responsePayload.citiesList = Object.values(cityCounts).sort((a, b) => a.vname.localeCompare(b.vname));
 
@@ -651,7 +658,7 @@ export async function GET(req: NextRequest) {
         if (!c.nofficeid || c.nofficeid === 'UNKNOWN') return;
         const bCode = c.nofficeid;
         branchCounts[bCode] = branchCounts[bCode] || { ncode: bCode, vcompanyname: c.officename, call_count: 0 };
-        branchCounts[bCode].call_count++;
+        branchCounts[bCode].call_count += c.call_count;
       });
       responsePayload.branchesList = Object.values(branchCounts).sort((a, b) => a.vcompanyname.localeCompare(b.vcompanyname));
 
@@ -661,7 +668,7 @@ export async function GET(req: NextRequest) {
       franchiseesFiltered.forEach((c) => {
         const fCode = c.franchisee_code;
         franchiseeCounts[fCode] = franchiseeCounts[fCode] || { ncode: fCode, vcompanyname: c.franchisee_name, call_count: 0 };
-        franchiseeCounts[fCode].call_count++;
+        franchiseeCounts[fCode].call_count += c.call_count;
       });
       responsePayload.franchiseesList = Object.values(franchiseeCounts).sort((a, b) => a.vcompanyname.localeCompare(b.vcompanyname));
 
@@ -672,7 +679,7 @@ export async function GET(req: NextRequest) {
         if (!c.nengineer || c.nengineer === '0') return;
         const tCode = c.nengineer;
         techCounts[tCode] = techCounts[tCode] || { ncode: tCode, vname: c.technician_name, call_count: 0 };
-        techCounts[tCode].call_count++;
+        techCounts[tCode].call_count += c.call_count;
       });
       responsePayload.techniciansList = Object.values(techCounts).sort((a, b) => a.vname.localeCompare(b.vname));
     }

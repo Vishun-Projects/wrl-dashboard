@@ -1,6 +1,6 @@
 "use client";
 
-import React from 'react';
+import React, { useMemo } from 'react';
 
 type Office = { ncode: number | string; vcompanyname: string; nunder?: number | string };
 
@@ -24,10 +24,60 @@ export default function BranchTree({ offices, selectedIds, setSelectedIds, singl
     return ids;
   };
 
+  const visibleIds = useMemo(() => {
+    if (!search) return null;
+    const ids = new Set<string>();
+    const searchLower = search.toLowerCase();
+    
+    const directMatches = offices.filter(o => 
+      o.vcompanyname.toLowerCase().includes(searchLower) || String(o.ncode).includes(search)
+    );
+
+    const officeMap = new Map();
+    const childrenMap = new Map();
+    offices.forEach(o => {
+      const id = String(o.ncode);
+      officeMap.set(id, o);
+      const parentId = String(o.nunder || '0');
+      if (!childrenMap.has(parentId)) childrenMap.set(parentId, []);
+      childrenMap.get(parentId).push(id);
+    });
+
+    const addAncestors = (id: string) => {
+      const office = officeMap.get(id);
+      if (office && office.nunder && String(office.nunder) !== '0') {
+        const parentId = String(office.nunder);
+        if (!ids.has(parentId)) {
+          ids.add(parentId);
+          addAncestors(parentId);
+        }
+      }
+    };
+
+    const addDescendants = (id: string) => {
+      const children = childrenMap.get(id) || [];
+      children.forEach((childId: string) => {
+        if (!ids.has(childId)) {
+          ids.add(childId);
+          addDescendants(childId);
+        }
+      });
+    };
+
+    directMatches.forEach(o => {
+      const id = String(o.ncode);
+      ids.add(id);
+      addAncestors(id);
+      addDescendants(id);
+    });
+
+    return ids;
+  }, [offices, search]);
+
   const buildTree = (parentId: string | null = '0', level = 0): React.ReactNode[] => {
     return offices
       .filter(o => String(o.nunder || '0') === String(parentId || '0'))
-      .filter(o => !search || o.vcompanyname.toLowerCase().includes(search.toLowerCase()))
+      .filter(o => visibleIds === null || visibleIds.has(String(o.ncode)))
       .map(o => {
         const id = String(o.ncode);
         const isSelected = normalizedSelectedIds.includes(id);

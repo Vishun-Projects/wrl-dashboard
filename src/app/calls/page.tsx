@@ -23,17 +23,39 @@ interface GlobalCallsCacheType {
   freezePoint: Date;
   newCallsCount: number;
   portalFilter: string;
+  lastSyncTime: string;
 }
 
 let globalCallsCache: GlobalCallsCacheType | null = null;
 
 export default function CallsPage() {
+  const [mounted, setMounted] = useState(false);
   const supabase = createClient();
+  
   const [calls, setCalls] = useState<any[]>(globalCallsCache?.calls || []);
-  const [loading, setLoading] = useState(!globalCallsCache);
+  const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(globalCallsCache?.page || 1);
-  const [totalPages, setTotalPages] = useState(globalCallsCache?.totalPages || 1);
-  const [totalCount, setTotalCount] = useState(globalCallsCache?.totalCount || 0);
+  const [totalPages, setTotalPages] = useState<number>(globalCallsCache?.totalPages || 1);
+  const [totalCount, setTotalCount] = useState<number>(globalCallsCache?.totalCount || 0);
+
+  useEffect(() => {
+    if (!globalCallsCache?.calls?.length) {
+      try {
+        const cached = localStorage.getItem('calls_fortnight_cache');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed.calls) setCalls(parsed.calls);
+          if (parsed.totalPages) setTotalPages(parsed.totalPages);
+          if (parsed.totalCount) setTotalCount(parsed.totalCount);
+          if (parsed.lastSyncTime) {
+            lastSyncTimeRef.current = parsed.lastSyncTime;
+            setLastSyncTime(parsed.lastSyncTime);
+          }
+        }
+      } catch(e) {}
+    }
+    setMounted(true);
+  }, []);
   const [activeTab, setActiveTab] = useState<'all' | 'major' | 'minor'>(globalCallsCache?.activeTab || 'all');
   const { userProfile } = useUser();
   const [offices, setOffices] = useState<any[]>([]);
@@ -47,8 +69,8 @@ export default function CallsPage() {
     if (globalCallsCache) return globalCallsCache.dateRange;
     const end = new Date();
     const start = new Date();
-    start.setDate(end.getDate() - 30);
-    return { start, end, label: 'Last 30 Days' };
+    start.setDate(end.getDate() - 14);
+    return { start, end, label: 'Last 14 Days' };
   });
   const [selectedStatus, setSelectedStatus] = useState(globalCallsCache?.selectedStatus || 'All');
   const [portalFilter, setPortalFilter] = useState(globalCallsCache?.portalFilter || 'All');
@@ -56,10 +78,16 @@ export default function CallsPage() {
   const [globalSearch, setGlobalSearch] = useState(globalCallsCache?.globalSearch || '');
 
   // High-Performance States
-  const [hasFetched, setHasFetched] = useState<boolean>(() => !!globalCallsCache?.calls?.length);
-  const lastSyncTimeRef = useRef<string>(new Date().toISOString().replace('T', ' ').substring(0, 19));
+  const [hasFetched, setHasFetched] = useState<boolean>(() => {
+    if (globalCallsCache?.calls?.length) return true;
+    return false; 
+  });
+  const [initialCheckDone, setInitialCheckDone] = useState(false);
+
+  const lastSyncTimeRef = useRef<string>(globalCallsCache?.lastSyncTime || new Date().toISOString().replace('T', ' ').substring(0, 19));
   const [lastSyncTime, setLastSyncTime] = useState<string>(() => lastSyncTimeRef.current);
   const [freezePoint, setFreezePoint] = useState<Date>(() => globalCallsCache?.freezePoint || new Date());
+
   const activeAbortControllerRef = useRef<AbortController | null>(null);
 
   const prevFiltersRef = useRef({
@@ -87,9 +115,10 @@ export default function CallsPage() {
       globalSearch,
       freezePoint,
       newCallsCount: 0,
-      portalFilter
+      portalFilter,
+      lastSyncTime
     };
-  }, [calls, totalCount, totalPages, page, activeTab, selectedOfficeId, dateRange, selectedStatus, globalSearch, freezePoint, portalFilter]);
+  }, [calls, totalCount, totalPages, page, activeTab, selectedOfficeId, dateRange, selectedStatus, globalSearch, freezePoint, portalFilter, lastSyncTime]);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -121,37 +150,34 @@ export default function CallsPage() {
     loadOffices();
   }, [userProfile]);
 
-  // Fetch Logic with Race Condition Prevention (AbortController)
+  // Filter Monitoring (Auto-Fetch ONLY when filters actually change, NOT on mount)
   useEffect(() => {
     if (!userProfile) return;
 
-    if (!hasFetched) {
-      // Keep prevFiltersRef synchronized while we haven't fetched yet
-      prevFiltersRef.current = {
-        selectedOfficeId,
-        selectedStatus,
-        portalFilter,
-        activeTab,
-        dateRange,
-        globalSearch
-      };
-      return;
-    }
+    if (!initialCheckDone) {
+      setInitialCheckDone(true);
+      setHasFetched(true);
+      if (calls.length === 0) {
+        fetchCalls(1, true);
+      } else {
+        setLoading(false); // Stop fake loader
+      }
+    } else {
+      const filtersChanged = 
+        prevFiltersRef.current.selectedOfficeId !== selectedOfficeId ||
+        prevFiltersRef.current.selectedStatus !== selectedStatus ||
+        prevFiltersRef.current.portalFilter !== portalFilter ||
+        prevFiltersRef.current.activeTab !== activeTab ||
+        prevFiltersRef.current.dateRange.start.getTime() !== dateRange.start.getTime() ||
+        prevFiltersRef.current.dateRange.end.getTime() !== dateRange.end.getTime() ||
+        prevFiltersRef.current.globalSearch !== globalSearch;
 
-    const filtersChanged = 
-      prevFiltersRef.current.selectedOfficeId !== selectedOfficeId ||
-      prevFiltersRef.current.selectedStatus !== selectedStatus ||
-      prevFiltersRef.current.portalFilter !== portalFilter ||
-      prevFiltersRef.current.activeTab !== activeTab ||
-      prevFiltersRef.current.dateRange.start.getTime() !== dateRange.start.getTime() ||
-      prevFiltersRef.current.dateRange.end.getTime() !== dateRange.end.getTime() ||
-      prevFiltersRef.current.globalSearch !== globalSearch;
-
-    if (filtersChanged) {
-      setPage(1);
-      const now = new Date();
-      setFreezePoint(now);
-      fetchCalls(1, true);
+      if (filtersChanged) {
+        setPage(1);
+        const now = new Date();
+        setFreezePoint(now);
+        fetchCalls(1, true);
+      }
     }
 
     prevFiltersRef.current = {
@@ -169,6 +195,16 @@ export default function CallsPage() {
       }
     };
   }, [selectedOfficeId, selectedStatus, portalFilter, activeTab, dateRange, userProfile, globalSearch, hasFetched]);
+
+  // Sync cache automatically whenever calls change on the first page, but ONLY if no active filters
+  useEffect(() => {
+    const isBaseFilter = selectedOfficeId === '' && selectedStatus === 'All' && portalFilter === 'All' && globalSearch === '';
+    if (page === 1 && calls.length > 0 && isBaseFilter) {
+      try {
+        localStorage.setItem('calls_fortnight_cache', JSON.stringify({ calls, totalCount, totalPages, lastSyncTime: lastSyncTimeRef.current }));
+      } catch (e) {}
+    }
+  }, [calls, page, totalCount, totalPages, selectedOfficeId, selectedStatus, portalFilter, globalSearch]);
 
   const handleManualSync = async () => {
     setHasFetched(true);
@@ -271,8 +307,7 @@ export default function CallsPage() {
 
     if (isInitial) {
       setLoading(true);
-      setCalls([]); 
-      setTotalCount(0);
+      // We do NOT clear setCalls([]) here anymore so that the localStorage cache remains visible while fetching!
       setPage(1);
     } else {
       setLoading(true);
@@ -461,6 +496,7 @@ export default function CallsPage() {
     setSelectedOfficeId,
     userProfile,
     stats,
+    dateRange,
     timePeriod: dateRange.label,
     setTimePeriod: (period: any) => {
       if (typeof period === 'string') {
@@ -491,6 +527,10 @@ export default function CallsPage() {
     currentIndex,
     carouselTotalCount: localFilteredCalls.length,
   };
+
+  if (!mounted) {
+    return <div className="flex-1 bg-[#f8fafc]"></div>;
+  }
 
   return (
     <>

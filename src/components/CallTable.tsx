@@ -24,7 +24,7 @@ export const CallTable = React.memo(function CallTable({ calls, onFlagUpdate, on
   };
 
   return (
-    <div className="w-full bg-white border border-[#e2e8f0] rounded-xl overflow-hidden shadow-sm">
+    <div className="w-full h-full bg-white border border-[#e2e8f0] rounded-xl overflow-y-auto custom-scrollbar shadow-sm relative">
       <table className="w-full text-left border-collapse table-fixed">
         <colgroup>
           <col style={{ width: '12%' }} />
@@ -35,8 +35,8 @@ export const CallTable = React.memo(function CallTable({ calls, onFlagUpdate, on
           <col style={{ width: '15%' }} />
           <col style={{ width: '10%' }} />
         </colgroup>
-        <thead>
-          <tr className="bg-[#f8fafc] border-b border-[#e2e8f0]">
+        <thead className="sticky top-0 z-20 bg-[#f8fafc] shadow-sm">
+          <tr className="border-b border-[#e2e8f0]">
             <th className="px-5 py-3 text-[11px] text-[#94a3b8] ui-label">Reference</th>
             <th className="px-5 py-3 text-[11px] text-[#94a3b8] ui-label">Logged Date</th>
             <th className="px-5 py-3 text-[11px] text-[#94a3b8] ui-label">Customer</th>

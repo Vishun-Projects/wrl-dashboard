@@ -279,7 +279,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
               <button
                 onClick={() => handleStatusUpdate(pendingAction === 'reject' ? 'escalate' : 'query', reason)}
                 disabled={!reason.trim()}
-                className={`flex-1 py-4 text-sm text-white rounded-2xl shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 ${pendingAction === 'reject' ? 'bg-rose-600 shadow-rose-100' : 'bg-amber-500 shadow-amber-100' } ui-label`}
+                className={`flex-1 py-4 text-sm text-white rounded-2xl shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 ${pendingAction === 'reject' ? 'bg-rose-600 shadow-rose-100' : 'bg-amber-500 shadow-amber-100'} ui-label`}
               >
                 Confirm {pendingAction === 'reject' ? 'Reject' : 'Hold'}
               </button>
@@ -372,16 +372,16 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                 { id: 'parts', label: 'Parts', count: call.parts?.length || 0 },
                 { id: 'images', label: 'Images', count: allImages.length },
                 { id: 'comments', label: 'Comments', count: displayComments.length },
-                { id: 'history', label: 'History', count: call.history?.length || 0 },
+                // { id: 'history', label: 'History', count: call.history?.length || 0 },
               ].map((t: any) => (
                 <button
                   key={t.id}
                   onClick={() => setActiveTab(t.id)}
-                  className={`flex items-center gap-1 px-4 py-3.5 text-[13px] font-medium transition-all border-b-2 -mb-px whitespace-nowrap ${activeTab === t.id ? 'text-slate-900 border-slate-900' : 'text-slate-400 border-transparent hover:text-slate-600' }`}
+                  className={`flex items-center gap-1 px-4 py-3.5 text-[13px] font-medium transition-all border-b-2 -mb-px whitespace-nowrap ${activeTab === t.id ? 'text-slate-900 border-slate-900' : 'text-slate-400 border-transparent hover:text-slate-600'}`}
                 >
                   {t.label}
                   {t.count !== undefined && (
-                    <span className={`text-[10px] rounded-md px-1.5 py-0.5 min-w-[20px] text-center ${activeTab === t.id ? 'bg-slate-100 text-slate-900' : 'bg-slate-50 text-slate-400' } border border-slate-200 ui-label`}>
+                    <span className={`text-[10px] rounded-md px-1.5 py-0.5 min-w-[20px] text-center ${activeTab === t.id ? 'bg-slate-100 text-slate-900' : 'bg-slate-50 text-slate-400'} border border-slate-200 ui-label`}>
                       {t.count}
                     </span>
                   )}
@@ -468,7 +468,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                             </span>
                           )}
                         </div>
-                        
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="space-y-1">
                             <div className="text-[10px] text-slate-400 ui-label">Complaint</div>
@@ -506,7 +506,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                           </div>
                           <div className="text-[16px] text-slate-900 bg-slate-50 px-3 py-1 rounded-lg ui-strong">x{p.nqty || 1}</div>
                         </div>
-                        
+
                         {(p.voldbarcode || p.vnewbarcode) && (
                           <div className="p-4 bg-slate-50/50 grid grid-cols-1 sm:grid-cols-2 gap-4">
                             {p.voldbarcode && (
@@ -602,7 +602,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                           <span className={`absolute -left-[35px] top-1.5 flex items-center justify-center w-6 h-6 rounded-full border ${color} bg-white shadow-sm ring-4 ring-white`}>
                             {icon}
                           </span>
-                          
+
                           {/* Timeline Card */}
                           <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 space-y-2 hover:bg-slate-100/50 transition-colors">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">

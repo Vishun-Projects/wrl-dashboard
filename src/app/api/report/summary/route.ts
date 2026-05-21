@@ -67,12 +67,9 @@ export async function GET(req: NextRequest) {
       return 'GETDATE()';
     })();
 
-    const subqueryCondition = startDate ? `WHERE dtrndate >= '${startDate}'` : "";
-
-    // Collapsed and highly optimized single-level group by query
+    const subqueryCondition = startDate ? `WHERE dtrndate >= '${startDate}'` : "";    // Collapsed and highly optimized single-level group by query
     const rawSql = `
       SELECT
-        CASE WHEN GROUPING(c.npartyprofile) = 1 THEN 'BRANCH_ENG' ELSE 'DATA' END as row_type,
         ISNULL(UPPER(z.vname), 'OTHER') as region,
         ISNULL(o.vcompanyname, '') as branch,
         ISNULL(p.vname, 'UNCLASSIFIED') as account,
@@ -102,12 +99,11 @@ export async function GET(req: NextRequest) {
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 7 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_7,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 15 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_15,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.vsolveremarks LIKE '%PART%' OR c.vcomplaint LIKE '%PART%') THEN 1 ELSE 0 END) as part_pending,
-        COUNT(DISTINCT u.vname) as active_eng_count,
-        STRING_AGG(CAST(u.vname AS VARCHAR(MAX)), ',') as eng_list,
         SUM(CASE WHEN dep_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as deployment_total,
         SUM(CASE WHEN dep_ct.ncode IS NOT NULL AND (c.bsolved = 1 OR c.bfastclose = 1) THEN 1 ELSE 0 END) as deployment_done,
         SUM(CASE WHEN ins_ct.ncode IS NOT NULL THEN 1 ELSE 0 END) as installation_total,
-        SUM(CASE WHEN ins_ct.ncode IS NOT NULL AND (c.bsolved = 1 OR c.bfastclose = 1) THEN 1 ELSE 0 END) as installation_done
+        SUM(CASE WHEN ins_ct.ncode IS NOT NULL AND (c.bsolved = 1 OR c.bfastclose = 1) THEN 1 ELSE 0 END) as installation_done,
+        ISNULL(u.vname, '') as technician_name
       FROM (
         SELECT *
         FROM (
@@ -136,10 +132,15 @@ export async function GET(req: NextRequest) {
       LEFT JOIN mstzones z (NOLOCK) ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
       LEFT JOIN mstpartyprofile p (NOLOCK) ON c.npartyprofile = p.ncode
       WHERE ${baseCondition}
-      GROUP BY GROUPING SETS (
-        (ISNULL(UPPER(z.vname), 'OTHER'), ISNULL(o.vcompanyname, ''), o.ncode, o.nunder, hc.branch_headcount, c.nofficeid, c.npartyprofile, ISNULL(p.vname, 'UNCLASSIFIED')),
-        (ISNULL(UPPER(z.vname), 'OTHER'), ISNULL(o.vcompanyname, ''), o.ncode, o.nunder, hc.branch_headcount, c.nofficeid)
-      )
+      GROUP BY
+        ISNULL(UPPER(z.vname), 'OTHER'),
+        ISNULL(o.vcompanyname, ''),
+        ISNULL(p.vname, 'UNCLASSIFIED'),
+        o.ncode,
+        o.nunder,
+        hc.branch_headcount,
+        c.nofficeid,
+        u.vname
       ORDER BY region ASC
     `;
 
@@ -152,93 +153,87 @@ export async function GET(req: NextRequest) {
     const regionHeadcountMap = new Map();
 
     rawData.forEach((row: any) => {
-      const isBranchEng = row.row_type === 'BRANCH_ENG';
-      const engSet = new Set(row.eng_list ? row.eng_list.split(',').filter(Boolean) : []);
-
-      if (isBranchEng) {
-        if (!branchMap.has(row.officeId)) {
-          branchMap.set(row.officeId, {
-            officeId: row.officeId, parentId: row.parentId, branch: row.branch, region: row.region,
-            total_calls: 0, solved_calls: 0, cancelled_calls: 0, open_calls: 0, transferred_calls: 0,
-            age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
-            all_total: 0, all_solved: 0, all_cancelled: 0, all_open: 0, all_transferred: 0,
-            all_age_2: 0, all_age_3: 0, all_age_7: 0, all_age_15: 0, all_part_pending: 0,
-            all_tech_solved: 0, tech_solved_calls: 0,
-            deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
-            active_eng: 0, population: 0, headcount: Number(row.branch_headcount || 0)
-          });
-          // Update regional headcount total
-          const currentHc = regionHeadcountMap.get(row.region) || 0;
-          regionHeadcountMap.set(row.region, currentHc + Number(row.branch_headcount || 0));
-        }
-        branchMap.get(row.officeId).active_eng = engSet.size;
-      } else {
-        if (!branchMap.has(row.officeId)) {
-          branchMap.set(row.officeId, {
-            officeId: row.officeId, parentId: row.parentId, branch: row.branch, region: row.region,
-            total_calls: 0, solved_calls: 0, cancelled_calls: 0, open_calls: 0, transferred_calls: 0,
-            age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
-            all_total: 0, all_solved: 0, all_cancelled: 0, all_open: 0, all_transferred: 0,
-            all_age_2: 0, all_age_3: 0, all_age_7: 0, all_age_15: 0, all_part_pending: 0,
-            deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
-            active_eng: 0, population: 0, headcount: Number(row.branch_headcount || 0)
-          });
-          // Update regional headcount total (if not already added by BRANCH_ENG row)
-          const currentHc = regionHeadcountMap.get(row.region) || 0;
-          regionHeadcountMap.set(row.region, currentHc + Number(row.branch_headcount || 0));
-        }
-        const b = branchMap.get(row.officeId);
-        b.population += Number(row.population);
-        b.total_calls += Number(row.all_total);
-        b.solved_calls += Number(row.all_solved);
-        b.all_tech_solved += Number(row.all_tech_solved || 0);
-        b.tech_solved_calls += Number(row.tech_solved_calls || 0);
-        b.cancelled_calls += Number(row.all_cancelled);
-        b.transferred_calls += Number(row.all_transferred);
-        b.open_calls += Number(row.all_open);
-        b.age_2 += Number(row.all_age_2);
-        b.age_3 += Number(row.all_age_3);
-        b.age_7 += Number(row.all_age_7);
-        b.age_15 += Number(row.all_age_15);
-        b.part_pending += Number(row.all_part_pending);
-
-        b.deployment_total += Number(row.deployment_total);
-        b.deployment_done += Number(row.deployment_done);
-        b.installation_total += Number(row.installation_total);
-        b.installation_done += Number(row.installation_done);
-
-        const aKey = `${row.region}-${row.account}`;
-        if (!accountMap.has(aKey)) {
-          accountMap.set(aKey, {
-            region: row.region, account: row.account,
-            population: 0, total_calls: 0, total_solved: 0, cancelled_calls: 0, open_calls: 0, transferred_calls: 0,
-            age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
-            deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
-            active_eng: 0, active_eng_names: new Set(), headcount: 0,
-            total_tech_solved: 0
-          });
-        }
-        const a = accountMap.get(aKey);
-        a.population += Number(row.population);
-        a.total_calls += Number(row.total_calls);
-        a.total_solved += Number(row.solved_calls);
-        a.total_tech_solved += Number(row.tech_solved_calls || 0);
-        a.cancelled_calls += Number(row.cancelled_calls);
-        a.transferred_calls += Number(row.transferred_calls);
-        a.open_calls += Number(row.open_calls);
-        a.age_2 += Number(row.age_2);
-        a.age_3 += Number(row.age_3);
-        a.age_7 += Number(row.age_7);
-        a.age_15 += Number(row.age_15);
-        a.part_pending += Number(row.part_pending);
-        a.deployment_total += Number(row.deployment_total);
-        a.deployment_done += Number(row.deployment_done);
-        a.installation_total += Number(row.installation_total);
-        a.installation_done += Number(row.installation_done);
-        
-        // Add names to the set for the account
-        engSet.forEach(name => a.active_eng_names.add(name));
+      if (!branchMap.has(row.officeId)) {
+        branchMap.set(row.officeId, {
+          officeId: row.officeId, parentId: row.parentId, branch: row.branch, region: row.region,
+          total_calls: 0, solved_calls: 0, cancelled_calls: 0, open_calls: 0, transferred_calls: 0,
+          age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
+          all_total: 0, all_solved: 0, all_cancelled: 0, all_open: 0, all_transferred: 0,
+          all_age_2: 0, all_age_3: 0, all_age_7: 0, all_age_15: 0, all_part_pending: 0,
+          all_tech_solved: 0, tech_solved_calls: 0,
+          deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
+          active_eng: 0, population: 0, headcount: Number(row.branch_headcount || 0),
+          active_eng_names: new Set()
+        });
+        // Update regional headcount total
+        const currentHc = regionHeadcountMap.get(row.region) || 0;
+        regionHeadcountMap.set(row.region, currentHc + Number(row.branch_headcount || 0));
       }
+      const b = branchMap.get(row.officeId);
+      b.population += Number(row.population);
+      b.total_calls += Number(row.all_total);
+      b.solved_calls += Number(row.all_solved);
+      b.all_tech_solved += Number(row.all_tech_solved || 0);
+      b.tech_solved_calls += Number(row.tech_solved_calls || 0);
+      b.cancelled_calls += Number(row.all_cancelled);
+      b.transferred_calls += Number(row.all_transferred);
+      b.open_calls += Number(row.all_open);
+      b.age_2 += Number(row.all_age_2);
+      b.age_3 += Number(row.all_age_3);
+      b.age_7 += Number(row.all_age_7);
+      b.age_15 += Number(row.all_age_15);
+      b.part_pending += Number(row.all_part_pending);
+
+      b.deployment_total += Number(row.deployment_total);
+      b.deployment_done += Number(row.deployment_done);
+      b.installation_total += Number(row.installation_total);
+      b.installation_done += Number(row.installation_done);
+
+      if (row.technician_name && row.technician_name.trim() !== '') {
+        b.active_eng_names.add(row.technician_name);
+      }
+
+      const aKey = `${row.region}-${row.account}`;
+      if (!accountMap.has(aKey)) {
+        accountMap.set(aKey, {
+          region: row.region, account: row.account,
+          population: 0, total_calls: 0, total_solved: 0, cancelled_calls: 0, open_calls: 0, transferred_calls: 0,
+          age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
+          deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
+          active_eng: 0, active_eng_names: new Set(), headcount: 0,
+          total_tech_solved: 0
+        });
+      }
+      const a = accountMap.get(aKey);
+      a.population += Number(row.population);
+      a.total_calls += Number(row.total_calls);
+      a.total_solved += Number(row.solved_calls);
+      a.total_tech_solved += Number(row.tech_solved_calls || 0);
+      a.cancelled_calls += Number(row.cancelled_calls);
+      a.transferred_calls += Number(row.transferred_calls);
+      a.open_calls += Number(row.open_calls);
+      a.age_2 += Number(row.age_2);
+      a.age_3 += Number(row.age_3);
+      a.age_7 += Number(row.age_7);
+      a.age_15 += Number(row.age_15);
+      a.part_pending += Number(row.part_pending);
+      a.deployment_total += Number(row.deployment_total);
+      a.deployment_done += Number(row.deployment_done);
+      a.installation_total += Number(row.installation_total);
+      a.installation_done += Number(row.installation_done);
+      
+      if (row.technician_name && row.technician_name.trim() !== '') {
+        a.active_eng_names.add(row.technician_name);
+      }
+    });
+
+    // Finalize branch active counts
+    const branchResults = Array.from(branchMap.values()).map(b => {
+      const { active_eng_names, ...rest } = b;
+      return {
+        ...rest,
+        active_eng: active_eng_names.size
+      };
     });
 
     // Finalize account active counts and assign regional headcount
@@ -254,7 +249,7 @@ export async function GET(req: NextRequest) {
     const globalHeadcount = Array.from(regionHeadcountMap.values()).reduce((sum, val) => sum + val, 0);
 
     return NextResponse.json({
-      branchSummary: Array.from(branchMap.values()),
+      branchSummary: branchResults,
       accountSummary: accountResults,
       globalHeadcount
     });
