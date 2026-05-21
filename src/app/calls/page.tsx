@@ -157,11 +157,7 @@ export default function CallsPage() {
     if (!initialCheckDone) {
       setInitialCheckDone(true);
       setHasFetched(true);
-      if (calls.length === 0) {
-        fetchCalls(1, true);
-      } else {
-        setLoading(false); // Stop fake loader
-      }
+      setLoading(false); // Stop fake loader, do not auto-fetch on mount
     } else {
       const filtersChanged = 
         prevFiltersRef.current.selectedOfficeId !== selectedOfficeId ||
