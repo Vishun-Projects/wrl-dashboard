@@ -46,7 +46,6 @@ export async function GET(request: Request) {
 
     const isHod = 
       permissions.includes('view_all_offices') || 
-      permissions.includes('view_reports') ||
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
 
     // 2. Build CRM Condition and Subquery Condition to optimize queries

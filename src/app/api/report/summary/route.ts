@@ -35,17 +35,12 @@ export async function GET(req: NextRequest) {
 
     const isHod = 
       permissions.includes('view_all_offices') || 
-      permissions.includes('view_reports') ||
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
 
+    let dbSecurityCondition = '';
     if (!isHod && assignedOffices.length > 0) {
-      if (!officeId || officeId === 'All' || officeId === 'undefined' || officeId === 'null') {
-        officeId = assignedOffices.join(',');
-      } else {
-        const requestedIds = officeId.split(',');
-        const validIds = requestedIds.filter(id => assignedOffices.includes(Number(id)));
-        officeId = validIds.length > 0 ? validIds.join(',') : assignedOffices.join(',');
-      }
+      const allowed = assignedOffices.join(',');
+      dbSecurityCondition = ` AND (c.nofficeid IN (${allowed}) OR o.nunder IN (${allowed}))`;
     }
 
     // Build WHERE conditions for trhcalls (c)
@@ -160,7 +155,7 @@ export async function GET(req: NextRequest) {
         FROM trdcalls1visit v (NOLOCK) 
         WHERE v.ncalls = c.ncode
       ) v_exist
-      WHERE ${baseCondition}
+      WHERE ${baseCondition}${dbSecurityCondition}
       GROUP BY
         ISNULL(UPPER(z.vname), 'OTHER'),
         ISNULL(o.vcompanyname, ''),

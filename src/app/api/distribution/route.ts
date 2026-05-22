@@ -561,7 +561,6 @@ export async function GET(req: NextRequest) {
     const assignedOffices = profile?.office_ids || [];
     const isHod = 
       permissions.includes('view_all_offices') || 
-      permissions.includes('view_reports') ||
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
 
     let officeCondition = "nunder IN (605, 606, 607, 608, 612, 1, 0) OR nunder IS NULL";
@@ -578,8 +577,17 @@ export async function GET(req: NextRequest) {
     });
     const dbBranches = branchesDbRes.data || [];
 
+    let finalCalls = allCalls;
+    if (!isHod && assignedOffices.length > 0) {
+      const allowedOfficeIds = new Set(dbBranches.map((b: any) => String(b.ncode)));
+      finalCalls = allCalls.filter((c: any) => 
+        allowedOfficeIds.has(String(c.resolved_branch_code)) || 
+        (c.franchisee_code && allowedOfficeIds.has(String(c.franchisee_code)))
+      );
+    }
+
     return NextResponse.json({
-      allCalls,
+      allCalls: finalCalls,
       dbBranches
     });
 

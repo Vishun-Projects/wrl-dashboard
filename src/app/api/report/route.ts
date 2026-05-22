@@ -229,7 +229,6 @@ export async function GET(req: NextRequest) {
 
     const isHod = 
       permissions.includes('view_all_offices') || 
-      permissions.includes('view_reports') ||
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
 
     // Base condition is on raw table alias 'tc'
@@ -246,15 +245,21 @@ export async function GET(req: NextRequest) {
         baseCondition += ` AND (tc.vtrnno LIKE '%${searchSafe}%' OR tc.vtransfercallno LIKE '%${searchSafe}%' OR p.vname LIKE '%${searchSafe}%' OR mstitems.vname LIKE '%${searchSafe}%' OR tc.vserialno LIKE '%${searchSafe}%' OR p.vinstpostalcode LIKE '%${searchSafe}%')`;
       }
     } else {
+      let dbSecurityCondition = '';
+      if (!isHod && assignedOffices.length > 0) {
+        const allowed = assignedOffices.join(',');
+        dbSecurityCondition = ` AND (tc.nofficeid IN (${allowed}) OR o.nunder IN (${allowed}))`;
+      }
+
       if (officeId && officeId !== 'All' && officeId !== 'undefined' && officeId !== 'null') {
         if (officeId.includes(',')) {
           baseCondition += ` AND tc.nofficeid IN (${officeId})`;
         } else {
           baseCondition += ` AND tc.nofficeid = ${officeId}`;
         }
-      } else if (!isHod && assignedOffices.length > 0) {
-        baseCondition += ` AND tc.nofficeid IN (${assignedOffices.join(',')})`;
       }
+      
+      baseCondition += dbSecurityCondition;
 
       if (startDate) {
         baseCondition += ` AND tc.dtrndate >= '${startDate}'`;

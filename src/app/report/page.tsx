@@ -21,6 +21,7 @@ import { useUser } from '@/components/DashboardLayout';
 import { DateRangeSelector } from '@/components/DateRangeSelector';
 import { CallDetail } from '@/components/CallDetail';
 import { useRouter, usePathname } from 'next/navigation';
+import BranchTree from '@/components/BranchTree';
 
 interface GlobalReportCacheType {
   data: any[];
@@ -2184,82 +2185,13 @@ export default function ReportPage() {
                       </div>
                     </div>
                     <div className="max-h-72 overflow-y-auto p-1 custom-scrollbar">
-                      {officeSearch ? (
-                        offices.filter(o => o.vcompanyname.toLowerCase().includes(officeSearch.toLowerCase())).map(o => {
-                          const isSelected = tempSelectedOfficeIds.includes(String(o.ncode));
-                          return (
-                            <label key={o.ncode} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
-                              <input
-                                type="checkbox"
-                                className="w-3.5 h-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
-                                checked={isSelected}
-                                onChange={(e) => {
-                                  const val = String(o.ncode);
-                                  if (e.target.checked) {
-                                    setTempSelectedOfficeIds(prev => Array.from(new Set([...prev, val])));
-                                  } else {
-                                    setTempSelectedOfficeIds(prev => prev.filter(id => id !== val));
-                                  }
-                                }}
-                              />
-                              <span className={`text-[11px] font-medium ${isSelected ? 'text-slate-900 font-bold' : 'text-slate-600'} group-hover:text-slate-900`}>
-                                {o.vcompanyname}
-                              </span>
-                            </label>
-                          );
-                        })
-                      ) : ((() => {
-                        const buildTree = (parentId: string | null = '0', level = 0): React.ReactNode[] => {
-                          return offices
-                            .filter(o => String(o.nunder || '0') === String(parentId || '0'))
-                            .map(o => {
-                              const isSelected = tempSelectedOfficeIds.includes(String(o.ncode));
-                              return [
-                                <label key={o.ncode} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
-                                  <div style={{ width: `${level * 12}px` }} />
-                                  <input
-                                    type="checkbox"
-                                    className="w-3.5 h-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
-                                    checked={isSelected}
-                                    onChange={(e) => {
-                                      const val = String(o.ncode);
-                                      if (e.target.checked) {
-                                        // Add this and all descendants
-                                        const getAllChildren = (id: string): string[] => {
-                                          const children = offices.filter(c => String(c.nunder) === String(id));
-                                          let ids = [id];
-                                          children.forEach(c => {
-                                            ids = [...ids, ...getAllChildren(String(c.ncode))];
-                                          });
-                                          return ids;
-                                        };
-                                        const allToAdd = getAllChildren(val);
-                                        setTempSelectedOfficeIds(prev => Array.from(new Set([...prev, ...allToAdd])));
-                                      } else {
-                                        // Remove this and all descendants
-                                        const getAllChildren = (id: string): string[] => {
-                                          const children = offices.filter(c => String(c.nunder) === String(id));
-                                          let ids = [id];
-                                          children.forEach(c => {
-                                            ids = [...ids, ...getAllChildren(String(c.ncode))];
-                                          });
-                                          return ids;
-                                        };
-                                        const allToRemove = getAllChildren(val);
-                                        setTempSelectedOfficeIds(prev => prev.filter(id => !allToRemove.includes(id)));
-                                      }
-                                    }}
-                                  />
-                                  <span className={`text-[11px] font-medium ${isSelected ? 'text-slate-900 font-bold' : 'text-slate-600'} group-hover:text-slate-900`}>
-                                    {o.vcompanyname}
-                                  </span>
-                                </label>,
-                                ...buildTree(o.ncode, level + 1)
-                              ];
-                            }).flat();
-                        };
-                        return buildTree('0', 0);
-                      })())}
+                      <BranchTree
+                        offices={offices}
+                        selectedIds={tempSelectedOfficeIds}
+                        setSelectedIds={setTempSelectedOfficeIds}
+                        search={officeSearch}
+                        single={false}
+                      />
                     </div>
                     <div className="p-2 border-t border-slate-100 bg-slate-50 flex justify-end">
                       <button
@@ -2307,51 +2239,31 @@ export default function ReportPage() {
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-slate-400 ui-strong">Total</span>
                 <span className="text-[13px] text-slate-900 ui-label">
-                  {liveStats.total < (registerSummary.total || 0) ? (
-                    <span>{liveStats.total.toLocaleString()}<span className="text-[10px] text-slate-400 font-normal">/{(registerSummary.total || 0).toLocaleString()}</span></span>
-                  ) : (
-                    (registerSummary.total || 0).toLocaleString()
-                  )}
+                  {(registerSummary.total || 0).toLocaleString()}
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-emerald-500 ui-strong">Solved</span>
                 <span className="text-[13px] text-emerald-600 ui-label">
-                  {liveStats.total < (registerSummary.total || 0) ? (
-                    <span>{liveStats.solved.toLocaleString()}<span className="text-[10px] text-emerald-400 font-normal">/{(registerSummary.solved || 0).toLocaleString()}</span></span>
-                  ) : (
-                    (registerSummary.solved || 0).toLocaleString()
-                  )}
+                  {(registerSummary.solved || 0).toLocaleString()}
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-blue-500 ui-strong">Open</span>
                 <span className="text-[13px] text-blue-600 ui-label">
-                  {liveStats.total < (registerSummary.total || 0) ? (
-                    <span>{liveStats.open.toLocaleString()}<span className="text-[10px] text-blue-400 font-normal">/{(registerSummary.open || 0).toLocaleString()}</span></span>
-                  ) : (
-                    (registerSummary.open || 0).toLocaleString()
-                  )}
+                  {(registerSummary.open || 0).toLocaleString()}
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-slate-400 ui-strong">Trf</span>
                 <span className="text-[13px] text-slate-600 ui-label">
-                  {liveStats.total < (registerSummary.total || 0) ? (
-                    <span>{liveStats.transferred.toLocaleString()}<span className="text-[10px] text-slate-400 font-normal">/{(registerSummary.transferred || 0).toLocaleString()}</span></span>
-                  ) : (
-                    (registerSummary.transferred || 0).toLocaleString()
-                  )}
+                  {(registerSummary.transferred || 0).toLocaleString()}
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-rose-500 ui-strong">Can</span>
                 <span className="text-[13px] text-rose-600 ui-label">
-                  {liveStats.total < (registerSummary.total || 0) ? (
-                    <span>{liveStats.cancelled.toLocaleString()}<span className="text-[10px] text-rose-400 font-normal">/{(registerSummary.cancelled || 0).toLocaleString()}</span></span>
-                  ) : (
-                    (registerSummary.cancelled || 0).toLocaleString()
-                  )}
+                  {(registerSummary.cancelled || 0).toLocaleString()}
                 </span>
               </div>
             </div>
@@ -2672,9 +2584,6 @@ export default function ReportPage() {
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan={17} className="px-6 py-20 text-center">
-                      <p className="text-xs font-medium text-slate-400">No matching records found</p>
-                    </td>
                   </tr>
                 )}
               </tbody>
@@ -2689,12 +2598,6 @@ export default function ReportPage() {
               <button
                 onClick={() => {
                   const newPage = Math.max(1, page - 1);
-                  const t0 = performance.now();
-                  reportPerf('pagination', 'previous page', t0, {
-                    from: page,
-                    to: newPage,
-                    why: 'Invokes fetchData; may hit session page cache if that page was prefetched or visited.',
-                  });
                   setPage(newPage);
                   fetchData(newPage);
                 }}
@@ -2703,22 +2606,51 @@ export default function ReportPage() {
               >
                 <ChevronLeft size={16} />
               </button>
-              <span className="text-xs font-medium text-slate-700 mx-2 flex items-center gap-1.5">
-                Page {page} of {Math.max(1, Math.ceil(total / limit))}
-                {loading && (
-                  <span className="inline-block w-3 h-3 border-2 border-slate-600 border-t-transparent rounded-full animate-spin" />
-                )}
-              </span>
+              
+              <div className="flex items-center gap-1 mx-2">
+                {(() => {
+                  const totalPages = Math.max(1, Math.ceil(total / limit));
+                  const pages = [];
+                  const windowSize = 2;
+
+                  pages.push(1);
+                  if (page > windowSize + 2) pages.push('...');
+                  
+                  const start = Math.max(2, page - windowSize);
+                  const end = Math.min(totalPages - 1, page + windowSize);
+                  for (let p = start; p <= end; p++) {
+                    pages.push(p);
+                  }
+                  
+                  if (page < totalPages - (windowSize + 1)) pages.push('...');
+                  if (totalPages > 1) pages.push(totalPages);
+
+                  return pages.map((p, idx) => {
+                    if (p === '...') return <span key={`ellipsis-${idx}`} className="px-1 text-slate-400 text-[12px]">...</span>;
+                    return (
+                      <button
+                        key={p}
+                        onClick={() => {
+                          setPage(p as number);
+                          fetchData(p as number);
+                        }}
+                        className={`w-8 h-8 flex items-center justify-center rounded text-[12px] transition-all font-medium ${page === p ? 'bg-slate-900 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                      >
+                        {p}
+                      </button>
+                    );
+                  });
+                })()}
+              </div>
+
+              {loading && (
+                <span className="inline-block w-3 h-3 border-2 border-slate-600 border-t-transparent rounded-full animate-spin ml-2" />
+              )}
+              
               <button
                 onClick={() => {
                   const totalPages = Math.max(1, Math.ceil(total / limit));
                   const newPage = Math.min(totalPages, page + 1);
-                  const t0 = performance.now();
-                  reportPerf('pagination', 'next page', t0, {
-                    from: page,
-                    to: newPage,
-                    why: 'Invokes fetchData; next page may already be in session cache from prefetch.',
-                  });
                   setPage(newPage);
                   fetchData(newPage);
                 }}

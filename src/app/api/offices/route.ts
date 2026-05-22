@@ -28,7 +28,6 @@ export async function GET(request: Request) {
 
     const isHod = 
       permissions.includes('view_all_offices') || 
-      permissions.includes('view_reports') ||
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
 
     const now = Date.now();

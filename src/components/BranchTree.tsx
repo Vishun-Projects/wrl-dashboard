@@ -74,9 +74,17 @@ export default function BranchTree({ offices, selectedIds, setSelectedIds, singl
     return ids;
   }, [offices, search]);
 
-  const buildTree = (parentId: string | null = '0', level = 0): React.ReactNode[] => {
+  const buildTree = (parentId: string | null, level = 0): React.ReactNode[] => {
     return offices
-      .filter(o => String(o.nunder || '0') === String(parentId || '0'))
+      .filter(o => {
+        // If parentId is explicitly provided (recursive step), match it exactly
+        if (parentId !== null) {
+          return String(o.nunder || '0') === parentId;
+        }
+        // If parentId is null (initial step), find nodes whose parent is NOT in the offices array
+        const pId = String(o.nunder || '0');
+        return pId === '0' || !offices.some(parent => String(parent.ncode) === pId);
+      })
       .filter(o => visibleIds === null || visibleIds.has(String(o.ncode)))
       .map(o => {
         const id = String(o.ncode);
@@ -115,5 +123,5 @@ export default function BranchTree({ offices, selectedIds, setSelectedIds, singl
       }).flat();
   };
 
-  return <div>{buildTree('0', 0)}</div>;
+  return <div>{buildTree(null, 0)}</div>;
 }

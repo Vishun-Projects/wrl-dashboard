@@ -29,7 +29,6 @@ export async function GET(request: Request) {
     const permissions = await (prisma as any).getUserPermissions(user.id);
     const isHod = 
       permissions.includes('view_all_offices') || 
-      permissions.includes('view_reports') ||
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
     const assignedOffices = profile?.office_ids || [];
 
@@ -101,7 +100,6 @@ export async function POST(request: Request) {
     const permissions = await (prisma as any).getUserPermissions(user.id);
     const isHod = 
       permissions.includes('view_all_offices') || 
-      permissions.includes('view_reports') ||
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
     const assignedOffices = profile?.office_ids || [];
 
