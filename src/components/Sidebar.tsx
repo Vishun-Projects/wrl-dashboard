@@ -80,13 +80,13 @@ export function Sidebar({ user }: SidebarProps) {
       name: 'Call Distribution',
       href: '/report/distribution',
       icon: Map,
-      permission: 'view_reports'
+      permission: 'view_calls'
     },
     {
       name: 'MIS Reports',
       href: '/report',
       icon: FileSpreadsheet,
-      permission: 'view_reports'
+      permission: 'view_calls'
     },
     {
       name: 'User Management',

@@ -13,16 +13,40 @@ export async function GET(req: NextRequest) {
     if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const permissions = await (prisma as any).getUserPermissions(user.id);
-    if (!permissions.includes('view_reports')) {
+    if (!permissions.includes('view_reports') && !permissions.includes('view_calls')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const { searchParams } = new URL(req.url);
-    const officeId = searchParams.get('officeId');
+    let officeId = searchParams.get('officeId');
     const callType = searchParams.get('callType');
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
     const agingAsOf = searchParams.get('agingAsOf'); // explicit aging reference date
+
+    // Get user profile for office restrictions
+    const { data: profile } = await supabaseAdmin
+      .from('app_users')
+      .select('office_ids, role')
+      .eq('id', user.id)
+      .single();
+
+    const assignedOffices = profile?.office_ids || [];
+
+    const isHod = 
+      permissions.includes('view_all_offices') || 
+      permissions.includes('view_reports') ||
+      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
+
+    if (!isHod && assignedOffices.length > 0) {
+      if (!officeId || officeId === 'All' || officeId === 'undefined' || officeId === 'null') {
+        officeId = assignedOffices.join(',');
+      } else {
+        const requestedIds = officeId.split(',');
+        const validIds = requestedIds.filter(id => assignedOffices.includes(Number(id)));
+        officeId = validIds.length > 0 ? validIds.join(',') : assignedOffices.join(',');
+      }
+    }
 
     // Build WHERE conditions for trhcalls (c)
     // vtrnno IS NOT NULL = only real transactions, but also include transferred calls which might have empty vtrnno but valid vtransfercallno or ncancelreason = 2

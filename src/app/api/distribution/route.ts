@@ -566,11 +566,12 @@ export async function GET(req: NextRequest) {
 
     let officeCondition = "nunder IN (605, 606, 607, 608, 612, 1, 0) OR nunder IS NULL";
     if (!isHod && assignedOffices.length > 0) {
-      officeCondition = `(${officeCondition}) AND ncode IN (${assignedOffices.map((id: string) => `'${id}'`).join(',')})`;
+      const ids = assignedOffices.map((id: string) => `'${id}'`).join(',');
+      officeCondition = `(ncode IN (${ids}) OR nunder IN (${ids}))`;
     }
 
     const branchesDbRes = await postQuery({
-      fields: 'ncode, vcompanyname',
+      fields: 'ncode, vcompanyname, nunder',
       tableName: 'mstoffice (NOLOCK)',
       condition: officeCondition,
       orderBy: 'vcompanyname ASC'

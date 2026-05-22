@@ -2142,15 +2142,14 @@ export default function ReportPage() {
           </div>
 
           {/* Branch Filter */}
-          {activeTab !== 'register' && (
-            <div className="relative">
-              <button
-                onClick={() => {
-                  if (!showOfficeDropdown) {
-                    setTempSelectedOfficeIds(selectedOfficeIds);
-                  }
-                  setShowOfficeDropdown(!showOfficeDropdown);
-                }}
+          <div className="relative">
+            <button
+              onClick={() => {
+                if (!showOfficeDropdown) {
+                  setTempSelectedOfficeIds(selectedOfficeIds);
+                }
+                setShowOfficeDropdown(!showOfficeDropdown);
+              }}
                 className="min-w-[140px] max-w-[200px] bg-white border border-slate-200 rounded-md px-3 py-1.5 text-xs text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all shadow-sm ui-label"
               >
                 <span className="truncate">
@@ -2277,7 +2276,6 @@ export default function ReportPage() {
                 </>
               )}
             </div>
-          )}
 
           <div className="flex items-center border-l border-slate-200 pl-4 h-6">
             <DateRangeSelector
@@ -2472,71 +2470,7 @@ export default function ReportPage() {
               </div>
             </div>
 
-            {/* 3. Branch Selector */}
-            <div className={`group flex items-center gap-3 px-3 py-1.5 bg-white border rounded-xl shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition-all focus-within:ring-2 focus-within:ring-violet-100 focus-within:border-violet-400 min-w-[200px] max-w-[260px] flex-1 ${
-              selectedBranch !== 'All' 
-                ? 'border-violet-200 bg-violet-50/20' 
-                : 'border-slate-200 hover:border-slate-300'
-            }`}>
-              <div className={`p-1.5 rounded-lg transition-colors ${selectedBranch !== 'All' ? 'bg-violet-100 text-violet-600' : 'bg-slate-50 text-slate-400 group-hover:bg-slate-100 group-hover:text-slate-500'}`}>
-                {/* Building2 Icon */}
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="22" width="18" height="2" /><rect x="4" y="2" width="16" height="20" rx="2" /><line x1="9" y1="22" x2="9" y2="16" /><line x1="15" y1="22" x2="15" y2="16" /><path d="M9 16h6" /><path d="M8 6h.01" /><path d="M16 6h.01" /><path d="M8 10h.01" /><path d="M16 10h.01" /></svg>
-              </div>
-              <div className="flex flex-col flex-1 min-w-0">
-                <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider leading-none mb-0.5 select-none text-[8.5px]">Branch</span>
-                <div className="relative flex items-center pr-3">
-                  <select
-                    value={selectedBranch}
-                    onChange={(e) => handleBranchChange(e.target.value)}
-                    className="bg-transparent border-none p-0 text-[11.5px] text-slate-700 font-bold focus:outline-none focus:ring-0 cursor-pointer w-full select-none appearance-none"
-                  >
-                    <option value="All">All Branches</option>
-                    {branchesList.map(b => (
-                      <option key={b.ncode} value={b.ncode}>
-                        {b.vcompanyname}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 4. Franchisee Selector */}
-            <div className={`group flex items-center gap-3 px-3 py-1.5 bg-white border rounded-xl shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition-all focus-within:ring-2 focus-within:ring-amber-100 focus-within:border-amber-400 min-w-[200px] max-w-[260px] flex-1 ${
-              selectedFranchisee !== 'All' 
-                ? 'border-amber-200 bg-amber-50/20' 
-                : 'border-slate-200 hover:border-slate-300'
-            }`}>
-              <div className={`p-1.5 rounded-lg transition-colors ${selectedFranchisee !== 'All' ? 'bg-amber-100 text-amber-600' : 'bg-slate-50 text-slate-400 group-hover:bg-slate-100 group-hover:text-slate-500'}`}>
-                {/* Users Icon */}
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-              </div>
-              <div className="flex flex-col flex-1 min-w-0">
-                <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider leading-none mb-0.5 select-none text-[8.5px]">Franchisee</span>
-                <div className="relative flex items-center pr-3">
-                  <select
-                    value={selectedFranchisee}
-                    onChange={(e) => handleFranchiseeChange(e.target.value)}
-                    className="bg-transparent border-none p-0 text-[11.5px] text-slate-700 font-bold focus:outline-none focus:ring-0 cursor-pointer w-full select-none appearance-none"
-                  >
-                    <option value="All">All Franchisees</option>
-                    {franchiseesList.map(f => (
-                      <option key={f.ncode} value={f.ncode}>
-                        {f.vcompanyname}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 5. Technician Selector */}
+            {/* 3. Technician Selector */}
             <div className={`group flex items-center gap-3 px-3 py-1.5 bg-white border rounded-xl shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition-all focus-within:ring-2 focus-within:ring-emerald-100 focus-within:border-emerald-400 min-w-[200px] max-w-[260px] flex-1 ${
               selectedTechnician !== 'All' 
                 ? 'border-emerald-200 bg-emerald-50/20' 

@@ -3,19 +3,21 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import axios from 'axios';
-import { 
-  MapPin, 
-  Users, 
-  SlidersHorizontal, 
-  RefreshCw, 
-  ChevronUp, 
-  ChevronDown, 
-  AlertTriangle, 
+import BranchTree from '@/components/BranchTree';
+import {
+  MapPin,
+  Users,
+  SlidersHorizontal,
+  RefreshCw,
+  ChevronUp,
+  ChevronDown,
+  AlertTriangle,
   CheckCircle,
   Calendar,
   Layers,
   Map as LucideMap,
-  FilterX
+  FilterX,
+  Search
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -44,7 +46,7 @@ const loadLeaflet = () => {
       resolve(true);
       return;
     }
-    
+
     console.log("[loadLeaflet] window.L not found. Creating script element for leaflet.js");
     const script = document.createElement('script');
     script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
@@ -75,8 +77,10 @@ export default function CallDistributionPage() {
   const [endDate, setEndDate] = useState('');
   const [selectedState, setSelectedState] = useState('All');
   const [selectedCity, setSelectedCity] = useState('All');
-  const [selectedBranch, setSelectedBranch] = useState('All');
-  const [selectedFranchisee, setSelectedFranchisee] = useState('All');
+  const [selectedOfficeIds, setSelectedOfficeIds] = useState<string[]>([]);
+  const [tempSelectedOfficeIds, setTempSelectedOfficeIds] = useState<string[]>([]);
+  const [showOfficeDropdown, setShowOfficeDropdown] = useState(false);
+  const [officeSearch, setOfficeSearch] = useState('');
   const [selectedTechnician, setSelectedTechnician] = useState('All');
   const [selectedCallType, setSelectedCallType] = useState('BREAKDOWN');
   const [selectedPincode, setSelectedPincode] = useState('All');
@@ -85,8 +89,6 @@ export default function CallDistributionPage() {
   // Dynamic filter lists
   const [statesList, setStatesList] = useState<any[]>([]);
   const [citiesList, setCitiesList] = useState<any[]>([]);
-  const [branchesList, setBranchesList] = useState<any[]>([]);
-  const [franchiseesList, setFranchiseesList] = useState<any[]>([]);
   const [techniciansList, setTechniciansList] = useState<any[]>([]);
   const [callTypesList, setCallTypesList] = useState<any[]>([]);
 
@@ -116,7 +118,7 @@ export default function CallDistributionPage() {
   const [pincodeSummary, setPincodeSummary] = useState<any[]>([]);
   const [allCalls, setAllCalls] = useState<any[]>([]);
   const [dbBranches, setDbBranches] = useState<any[]>([]);
-  
+
   // Loading & Sorting States
   const [loading, setLoading] = useState(true);
   const [sortField, setSortField] = useState('ratio');
@@ -146,7 +148,7 @@ export default function CallDistributionPage() {
       .finally(() => {
         setLoadingMeta(false);
       });
-      
+
     try {
       const cached = localStorage.getItem('distribution_fortnight_cache');
       if (cached) {
@@ -154,7 +156,7 @@ export default function CallDistributionPage() {
         if (parsed.allCalls) setAllCalls(parsed.allCalls);
         if (parsed.dbBranches) setDbBranches(parsed.dbBranches);
       }
-    } catch(e) {}
+    } catch (e) { }
     setMounted(true);
   }, []);
 
@@ -208,7 +210,7 @@ export default function CallDistributionPage() {
             allCalls: fetchedCalls || allCalls,
             dbBranches: fetchedBranches || dbBranches
           }));
-        } catch(e) {}
+        } catch (e) { }
       }
     } catch (err) {
       toast.error('Error fetching call distribution report');
@@ -233,7 +235,7 @@ export default function CallDistributionPage() {
       return;
     }
 
-    const filtersChanged = 
+    const filtersChanged =
       prevFiltersRef.current.startDate !== startDate ||
       prevFiltersRef.current.endDate !== endDate ||
       prevFiltersRef.current.selectedCallType !== selectedCallType;
@@ -253,8 +255,6 @@ export default function CallDistributionPage() {
     if (allCalls.length === 0) {
       setStatesList([]);
       setCitiesList([]);
-      setBranchesList([]);
-      setFranchiseesList([]);
       setTechniciansList([]);
       return;
     }
@@ -262,8 +262,7 @@ export default function CallDistributionPage() {
     const criteria = {
       state: selectedState,
       city: selectedCity,
-      branch: selectedBranch,
-      franchisee: selectedFranchisee,
+      selectedOfficeIds: selectedOfficeIds,
       technician: selectedTechnician,
       pincodeSearch: pincodeSearch
     };
@@ -296,37 +295,7 @@ export default function CallDistributionPage() {
     const cities = Object.values(cityCounts).sort((a, b) => a.vname.localeCompare(b.vname));
     setCitiesList(cities);
 
-    // Branches (exclude branch filter)
-    const branchesFiltered = filterCallsCSR(allCalls, criteria, 'branch');
-    const branchCallCounts: Record<string, number> = {};
-    branchesFiltered.forEach((c) => {
-      if (!c.resolved_branch_code) return;
-      const bCode = String(c.resolved_branch_code);
-      branchCallCounts[bCode] = (branchCallCounts[bCode] || 0) + 1;
-    });
-    const branches = dbBranches.map((dbB: any) => {
-      const bCode = String(dbB.ncode);
-      return {
-        ncode: bCode,
-        vcompanyname: dbB.vcompanyname,
-        call_count: branchCallCounts[bCode] || 0
-      };
-    }).filter((b: any) => b.call_count > 0);
-    setBranchesList(branches);
-
-    // Franchisees (exclude franchisee filter)
-    const franchiseesFiltered = filterCallsCSR(allCalls, criteria, 'franchisee');
-    const franchiseeCounts: Record<string, { ncode: string; vcompanyname: string; nunder: string; call_count: number }> = {};
-    franchiseesFiltered.forEach((c) => {
-      const fCode = String(c.franchisee_code || 'UNASSIGNED');
-      const fName = c.franchisee_name || 'Unallocated';
-      if (!franchiseeCounts[fCode]) {
-        franchiseeCounts[fCode] = { ncode: fCode, vcompanyname: fName, nunder: String(c.office_under || ''), call_count: 0 };
-      }
-      franchiseeCounts[fCode].call_count++;
-    });
-    const franchisees = Object.values(franchiseeCounts).sort((a, b) => a.vcompanyname.localeCompare(b.vcompanyname));
-    setFranchiseesList(franchisees);
+    // Branches and Franchisees lists are now handled by BranchTree with dbBranches
 
     // Technicians (exclude technician filter)
     const techniciansFiltered = filterCallsCSR(allCalls, criteria, 'technician');
@@ -342,7 +311,7 @@ export default function CallDistributionPage() {
     const technicians = Object.values(techCounts).sort((a, b) => a.vname.localeCompare(b.vname));
     setTechniciansList(technicians);
 
-  }, [allCalls, dbBranches, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, pincodeSearch]);
+  }, [allCalls, dbBranches, selectedState, selectedCity, selectedOfficeIds, selectedTechnician, pincodeSearch]);
 
   // CSR Dropdown Option Validation & Safe Resets
   useEffect(() => {
@@ -352,16 +321,11 @@ export default function CallDistributionPage() {
     if (citiesList.length > 0 && selectedCity !== 'All' && !citiesList.some((c: any) => String(c.ncode) === String(selectedCity))) {
       setSelectedCity('All');
     }
-    if (branchesList.length > 0 && selectedBranch !== 'All' && !branchesList.some((b: any) => String(b.ncode) === String(selectedBranch))) {
-      setSelectedBranch('All');
-    }
-    if (franchiseesList.length > 0 && selectedFranchisee !== 'All' && !franchiseesList.some((f: any) => String(f.ncode) === String(selectedFranchisee))) {
-      setSelectedFranchisee('All');
-    }
+
     if (techniciansList.length > 0 && selectedTechnician !== 'All' && !techniciansList.some((t: any) => String(t.ncode) === String(selectedTechnician))) {
       setSelectedTechnician('All');
     }
-  }, [statesList, citiesList, branchesList, franchiseesList, techniciansList]);
+  }, [statesList, citiesList, techniciansList]);
 
   // CSR Metrics & Dashboard Aggregations Computation
   useEffect(() => {
@@ -382,8 +346,7 @@ export default function CallDistributionPage() {
     const criteria = {
       state: selectedState,
       city: selectedCity,
-      branch: selectedBranch,
-      franchisee: selectedFranchisee,
+      selectedOfficeIds: selectedOfficeIds,
       technician: selectedTechnician,
       pincodeSearch: pincodeSearch
     };
@@ -403,7 +366,7 @@ export default function CallDistributionPage() {
       totalCallsCount++;
       const isSolved = c.bsolved === true || c.bsolved === 1 || String(c.bsolved).toLowerCase() === 'true';
       const isTechSolved = c.bfastclose === true || c.bfastclose === 1 || String(c.bfastclose).toLowerCase() === 'true';
-      
+
       if (isSolved || isTechSolved) {
         closedCallsCount++;
       } else {
@@ -532,7 +495,7 @@ export default function CallDistributionPage() {
     });
     setFranchiseeSummary(franchiseeSummary);
     setPincodeSummary(pincodeSummary);
-  }, [allCalls, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, pincodeSearch]);
+  }, [allCalls, selectedState, selectedCity, selectedOfficeIds, selectedTechnician, pincodeSearch]);
 
   // Leaflet Map Initialization
   useEffect(() => {
@@ -710,13 +673,7 @@ export default function CallDistributionPage() {
     setSelectedCity(cityCode);
   };
 
-  const handleBranchChange = (branchId: string) => {
-    setSelectedBranch(branchId);
-  };
 
-  const handleFranchiseeChange = (franId: string) => {
-    setSelectedFranchisee(franId);
-  };
 
   // Sorting Logic for Franchisee Table
   const handleSort = (field: string) => {
@@ -746,8 +703,7 @@ export default function CallDistributionPage() {
     return (
       selectedState !== 'All' ||
       selectedCity !== 'All' ||
-      selectedBranch !== 'All' ||
-      selectedFranchisee !== 'All' ||
+      selectedOfficeIds.length > 0 ||
       selectedTechnician !== 'All' ||
       selectedCallType !== 'BREAKDOWN' ||
       selectedPincode !== 'All' ||
@@ -757,8 +713,7 @@ export default function CallDistributionPage() {
   }, [
     selectedState,
     selectedCity,
-    selectedBranch,
-    selectedFranchisee,
+    selectedOfficeIds,
     selectedTechnician,
     selectedCallType,
     selectedPincode,
@@ -786,7 +741,7 @@ export default function CallDistributionPage() {
 
   return (
     <div className="flex flex-col h-full bg-slate-50/30 text-slate-700 overflow-hidden font-sans">
-      
+
       {/* Header Bar */}
       <header className="px-6 py-4 bg-white border-b border-slate-200/80 flex justify-between items-center flex-shrink-0 shadow-sm z-10">
         <div className="flex items-center gap-3">
@@ -798,15 +753,14 @@ export default function CallDistributionPage() {
             <p className="text-[10px] text-slate-500 font-medium">Are branch calls fairly distributed across franchise technicians?</p>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-3">
           {hasActiveFilters && (
             <button
               onClick={() => {
                 setSelectedState('All');
                 setSelectedCity('All');
-                setSelectedBranch('All');
-                setSelectedFranchisee('All');
+                setSelectedOfficeIds([]);
                 setSelectedTechnician('All');
                 setSelectedCallType('BREAKDOWN');
                 setSelectedPincode('All');
@@ -856,13 +810,13 @@ export default function CallDistributionPage() {
 
       {/* Cascading Filter Bar */}
       <section className="px-6 py-4 bg-slate-50 border-b border-slate-200/80 flex-shrink-0 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-3 items-end">
-        
+
         {/* 1. Date Range Start */}
         <div className="space-y-1.5">
           <label className="text-[9px] uppercase tracking-wider text-slate-500 font-extrabold block">Start Date</label>
           <div className="relative">
-            <input 
-              type="date" 
+            <input
+              type="date"
               value={startDate}
               onChange={e => setStartDate(e.target.value)}
               className="w-full bg-white border border-slate-250 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 shadow-sm"
@@ -874,8 +828,8 @@ export default function CallDistributionPage() {
         <div className="space-y-1.5">
           <label className="text-[9px] uppercase tracking-wider text-slate-500 font-extrabold block">End Date</label>
           <div className="relative">
-            <input 
-              type="date" 
+            <input
+              type="date"
               value={endDate}
               onChange={e => setEndDate(e.target.value)}
               className="w-full bg-white border border-slate-250 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 shadow-sm"
@@ -889,8 +843,8 @@ export default function CallDistributionPage() {
             <label className="text-[9px] uppercase tracking-wider text-slate-500 font-extrabold block">State</label>
             {loading && <span className="w-2.5 h-2.5 border border-teal-655 border-t-transparent rounded-full animate-spin" />}
           </div>
-          <select 
-            value={selectedState} 
+          <select
+            value={selectedState}
             onChange={e => handleStateChange(e.target.value)}
             disabled={loadingMeta || loading}
             className="w-full bg-white border border-slate-250 rounded-lg px-2.5 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 shadow-sm cursor-pointer disabled:opacity-60"
@@ -906,8 +860,8 @@ export default function CallDistributionPage() {
             <label className="text-[9px] uppercase tracking-wider text-slate-500 font-extrabold block">City</label>
             {loading && <span className="w-2.5 h-2.5 border border-teal-655 border-t-transparent rounded-full animate-spin" />}
           </div>
-          <select 
-            value={selectedCity} 
+          <select
+            value={selectedCity}
             onChange={e => handleCityChange(e.target.value)}
             disabled={loadingMeta || loading}
             className="w-full bg-white border border-slate-250 rounded-lg px-2.5 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 shadow-sm cursor-pointer disabled:opacity-60"
@@ -921,8 +875,8 @@ export default function CallDistributionPage() {
         <div className="space-y-1.5">
           <label className="text-[9px] uppercase tracking-wider text-slate-500 font-extrabold block">Pincode Search</label>
           <div className="relative">
-            <input 
-              type="text" 
+            <input
+              type="text"
               placeholder="Search pincode..."
               value={pincodeSearch}
               onChange={e => setPincodeSearch(e.target.value)}
@@ -931,38 +885,72 @@ export default function CallDistributionPage() {
           </div>
         </div>
 
-        {/* 5. Branch Cascading Dropdown */}
-        <div className="space-y-1.5">
-          <div className="flex justify-between items-center">
-            <label className="text-[9px] uppercase tracking-wider text-slate-500 font-extrabold block">Branch</label>
-            {loading && <span className="w-2.5 h-2.5 border border-teal-655 border-t-transparent rounded-full animate-spin" />}
-          </div>
-          <select 
-            value={selectedBranch} 
-            onChange={e => handleBranchChange(e.target.value)}
+        {/* 5. Branch & Franchisee Cascading Dropdown via BranchTree */}
+        <div className="space-y-1.5 relative">
+          <label className="text-[9px] uppercase tracking-wider text-slate-500 font-extrabold block">Branch</label>
+          <button
+            onClick={() => {
+              if (!showOfficeDropdown) {
+                setTempSelectedOfficeIds(selectedOfficeIds);
+              }
+              setShowOfficeDropdown(!showOfficeDropdown);
+            }}
+            className="w-full bg-white border border-slate-250 rounded-lg px-2.5 py-2 text-xs text-slate-800 flex items-center justify-between focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 shadow-sm disabled:opacity-60"
             disabled={loadingMeta || loading}
-            className="w-full bg-white border border-slate-250 rounded-lg px-2.5 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 shadow-sm cursor-pointer disabled:opacity-60"
           >
-            <option value="All">All Branches</option>
-            {branchesList.map(o => <option key={o.ncode} value={o.ncode}>{o.vcompanyname} ({o.call_count || 0})</option>)}
-          </select>
-        </div>
+            <span className="truncate">
+              {selectedOfficeIds.length === 0 ? 'All Branches' : `${selectedOfficeIds.length} Selected`}
+            </span>
+            <ChevronDown size={14} className={`transition-transform duration-200 ${showOfficeDropdown ? 'rotate-180' : ''}`} />
+          </button>
 
-        {/* 6. Franchisee Cascading Dropdown */}
-        <div className="space-y-1.5">
-          <div className="flex justify-between items-center">
-            <label className="text-[9px] uppercase tracking-wider text-slate-500 font-extrabold block">Franchisee (ASP)</label>
-            {loading && <span className="w-2.5 h-2.5 border border-teal-655 border-t-transparent rounded-full animate-spin" />}
-          </div>
-          <select 
-            value={selectedFranchisee} 
-            onChange={e => handleFranchiseeChange(e.target.value)}
-            disabled={loadingMeta || loading}
-            className="w-full bg-white border border-slate-250 rounded-lg px-2.5 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 shadow-sm cursor-pointer disabled:opacity-60"
-          >
-            <option value="All">All Franchisees</option>
-            {franchiseesList.map(o => <option key={o.ncode} value={o.ncode}>{o.vcompanyname} ({o.call_count || 0})</option>)}
-          </select>
+          {showOfficeDropdown && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setShowOfficeDropdown(false)} />
+              <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 shadow-xl rounded-lg z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                  <span className="text-[10px] text-slate-500 font-bold">Select Branches</span>
+                  <button
+                    onClick={() => { setTempSelectedOfficeIds([]); setOfficeSearch(''); }}
+                    className="text-[10px] text-slate-400 hover:text-slate-900 px-2 py-1 rounded hover:bg-white"
+                  >
+                    Clear All
+                  </button>
+                </div>
+                <div className="p-2 border-b border-slate-100">
+                  <div className="relative">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search branches..."
+                      className="w-full pl-7 pr-2 py-1.5 text-[11px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-teal-400"
+                      value={officeSearch}
+                      onChange={(e) => setOfficeSearch(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="max-h-72 overflow-y-auto p-1 custom-scrollbar">
+                  <BranchTree
+                    offices={dbBranches}
+                    selectedIds={tempSelectedOfficeIds}
+                    setSelectedIds={setTempSelectedOfficeIds}
+                    search={officeSearch}
+                  />
+                </div>
+                <div className="p-2 border-t border-slate-100 bg-slate-50 flex justify-end">
+                  <button
+                    onClick={() => {
+                      setSelectedOfficeIds(tempSelectedOfficeIds);
+                      setShowOfficeDropdown(false);
+                    }}
+                    className="bg-slate-900 text-white px-4 py-1 rounded text-[10px] hover:bg-slate-800 transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* 7. Technician Cascading Dropdown */}
@@ -971,8 +959,8 @@ export default function CallDistributionPage() {
             <label className="text-[9px] uppercase tracking-wider text-slate-500 font-extrabold block">Technician</label>
             {loading && <span className="w-2.5 h-2.5 border border-teal-655 border-t-transparent rounded-full animate-spin" />}
           </div>
-          <select 
-            value={selectedTechnician} 
+          <select
+            value={selectedTechnician}
             onChange={e => setSelectedTechnician(e.target.value)}
             disabled={loadingMeta || loading}
             className="w-full bg-white border border-slate-250 rounded-lg px-2.5 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 shadow-sm cursor-pointer disabled:opacity-60"
@@ -985,8 +973,8 @@ export default function CallDistributionPage() {
         {/* 8. Call Type Dropdown */}
         <div className="space-y-1.5">
           <label className="text-[9px] uppercase tracking-wider text-slate-500 font-extrabold block">Call Type</label>
-          <select 
-            value={selectedCallType} 
+          <select
+            value={selectedCallType}
             onChange={e => setSelectedCallType(e.target.value)}
             disabled={loadingMeta}
             className="w-full bg-white border border-slate-250 rounded-lg px-2.5 py-2 text-xs text-teal-655 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 shadow-sm cursor-pointer font-bold disabled:opacity-60"
@@ -1000,12 +988,12 @@ export default function CallDistributionPage() {
 
       {/* Main UI Layout Area */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
-        
+
         {/* Left Side: Call Distribution Map */}
         <div className={`${showMap ? 'w-full lg:w-1/2 h-[350px] lg:h-full border-r' : 'hidden'} relative border-slate-200/80 bg-slate-50 flex-shrink-0`}>
           <div ref={mapRef} className="w-full h-full z-10" />
 
-           {/* Simple overlay when Map is not ready */}
+          {/* Simple overlay when Map is not ready */}
           {!mapReady ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center p-6 bg-slate-50 text-slate-450 gap-3 z-20">
               <div className="w-7 h-7 border-3 border-teal-600 border-t-transparent rounded-full animate-spin" />
@@ -1019,7 +1007,7 @@ export default function CallDistributionPage() {
               </div>
             </div>
           ) : null}
-          
+
           {/* Floating Map Indicators */}
           <div className="absolute bottom-4 left-4 z-[500] p-3 rounded-xl bg-white border border-slate-200/80 backdrop-blur shadow-lg flex flex-col gap-2 pointer-events-none">
             <span className="text-[9px] uppercase tracking-wider text-slate-500 font-extrabold">Capacity Health Index</span>
@@ -1040,15 +1028,15 @@ export default function CallDistributionPage() {
 
         {/* Right Side: KPIs and Tables */}
         <div className="flex-1 flex flex-col overflow-hidden bg-white">
-          
+
           {/* Stat Cards Row */}
           <div className="p-6 grid grid-cols-2 xl:grid-cols-4 gap-4 flex-shrink-0 border-b border-slate-100 bg-slate-50/20">
-            
+
             {/* KPI 1: Total Calls */}
             <div className="p-4 bg-white border border-slate-200/80 rounded-xl relative overflow-hidden shadow-sm hover:shadow transition-all duration-200 group">
               <div className="flex justify-between items-start">
                 <div>
-                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Total Calls</p>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Total Open Calls</p>
                   <h3 className="text-xl font-extrabold text-slate-900 mt-1">{loading ? '...' : metrics.totalCalls}</h3>
                 </div>
                 <span className="p-2 rounded-lg bg-slate-50 border border-slate-100 text-slate-500">
@@ -1104,7 +1092,7 @@ export default function CallDistributionPage() {
 
           {/* Load Balancer Table Section */}
           <div className="flex-1 p-6 overflow-hidden flex flex-col min-h-0">
-            
+
             {/* Section Header */}
             <div className="flex justify-between items-center mb-4 flex-shrink-0">
               <div>
@@ -1124,7 +1112,7 @@ export default function CallDistributionPage() {
 
             {/* Scrollable Table Wrapper */}
             <div className="flex-1 overflow-auto border border-slate-200 rounded-xl bg-white shadow-sm relative custom-scrollbar">
-              
+
               {loading ? (
                 <div className="absolute inset-0 flex items-center justify-center flex-col gap-3.5 bg-white/80 backdrop-blur-[3px] z-30">
                   <div className="w-8 h-8 border-3 border-teal-600 border-t-transparent rounded-full animate-spin" />
@@ -1178,16 +1166,16 @@ export default function CallDistributionPage() {
                       <th className="px-4 py-3.5 w-[120px] text-center">Load Status</th>
                     </tr>
                   </thead>
-                  
+
                   <tbody className="divide-y divide-slate-100">
                     {sortedFranchiseeList.map((fran: any) => {
                       const isHighlighted = highlightedFranchisee === fran.franchisee_code;
-                      
+
                       // Highlight styles depending on workload status
                       let ratioColor = 'text-emerald-600';
                       let statusBadge = 'bg-emerald-50 text-emerald-700 border-emerald-250';
                       let statusLabel = 'Balanced';
-                      
+
                       if (fran.ratio > 15) {
                         ratioColor = 'text-rose-600 font-bold';
                         statusBadge = 'bg-rose-50 text-rose-700 border-rose-250 animate-pulse';
@@ -1199,7 +1187,7 @@ export default function CallDistributionPage() {
                       }
 
                       return (
-                        <tr 
+                        <tr
                           key={fran.franchisee_code}
                           onClick={() => {
                             setHighlightedFranchisee(isHighlighted ? null : fran.franchisee_code);
