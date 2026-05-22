@@ -46,10 +46,15 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  if (user && isLoginPage) {
-    // user is logged in, redirect them to the calls page
+  if (user && (isLoginPage || request.nextUrl.pathname === '/')) {
     const url = request.nextUrl.clone()
-    url.pathname = '/calls'
+    url.pathname = '/report'
+    return NextResponse.redirect(url)
+  }
+
+  if (user && request.nextUrl.pathname === '/calls') {
+    const url = request.nextUrl.clone()
+    url.pathname = '/report'
     return NextResponse.redirect(url)
   }
 

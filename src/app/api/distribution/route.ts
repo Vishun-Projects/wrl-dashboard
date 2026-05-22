@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { postQuery } from '@/lib/db-proxy';
 import { prisma } from '@/lib/prisma';
+import { buildTrhcallsBaseCondition, buildTrhcallsDedupSubquery, buildTrhcallsDeltaSubquery, enrichTrhcallBranchFranchisee, sqlFranchiseeCodeExpr, sqlFranchiseeNameExpr } from '@/lib/trhcalls-query';
 import pincodeMapData from '../../report/distribution/pincode_map.json';
 
 // Server-side in-memory cache to optimize filter changing response times
@@ -414,9 +415,10 @@ async function getMappedCalls(
   startDate: string | null,
   endDate: string | null,
   callType: string | null,
-  bypassCache: boolean = false
+  bypassCache: boolean = false,
+  security: { isHod: boolean; assignedOffices: string[] } = { isHod: true, assignedOffices: [] }
 ) {
-  const cacheKey = `${startDate || 'default'}_${endDate || 'default'}_${callType || 'All'}`;
+  const cacheKey = `${startDate || 'default'}_${endDate || 'default'}_${callType || 'All'}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
   const now = Date.now();
 
   if (!bypassCache && allCallsCache.has(cacheKey)) {
@@ -426,37 +428,39 @@ async function getMappedCalls(
     }
   }
 
-  let whereClause = "tc.ncancelreason IS NULL";
+  const whereClause = buildTrhcallsBaseCondition({
+    startDate,
+    endDate,
+    callType,
+    datesInSubquery: true,
+    isHod: security.isHod,
+    assignedOffices: security.assignedOffices,
+  });
 
-  if (callType && callType !== 'All') {
-    const callTypeSafe = callType.replace(/'/g, "''");
-    whereClause += ` AND tc.ncalltype = (SELECT TOP 1 ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${callTypeSafe}')`;
-  }
-
-  if (startDate && endDate) {
-    const startSafe = startDate.replace(/'/g, "''");
-    const endSafe = endDate.replace(/'/g, "''");
-    whereClause += ` AND tc.dtrndate >= '${startSafe}' AND tc.dtrndate <= '${endSafe} 23:59:59'`;
-  } else {
-    whereClause += ` AND tc.dtrndate >= DATEADD(day, -30, GETDATE())`;
-  }
+  const tableName = `
+    ${buildTrhcallsDedupSubquery({ startDate, endDate })}
+    JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode
+    LEFT JOIN mstoffice bo (NOLOCK) ON o.nunder = bo.ncode
+    LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode
+    LEFT JOIN mstoffice f (NOLOCK) ON u.nofficeid = f.ncode
+    LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode
+    LEFT JOIN mstcity cty (NOLOCK) ON COALESCE(NULLIF(p.ncity, ''), o.ncity) = cty.ncode
+    LEFT JOIN mststate st (NOLOCK) ON cty.nstate = st.ncode
+    LEFT JOIN mstoffice transferoffice (NOLOCK) ON tc.ntransfertooffice = transferoffice.ncode
+  `;
 
   const rawDataRes = await postQuery({
     fields: `
-      tc.ntrnno,
+      tc.vcclid,
+      tc.ncode,
+      tc.ncancelreason,
+      tc.ntransfertooffice,
       p.vinstpostalcode as pincode,
       COALESCE(NULLIF(p.vlatlong, ''), NULLIF(p.mlatlong, '')) as latlong,
-      CASE 
-        WHEN o.nunder NOT IN (605, 606, 607, 608, 612, 1, 0) AND o.nunder IS NOT NULL THEN o.ncode 
-        WHEN f.nunder NOT IN (605, 606, 607, 608, 612, 1, 0) AND f.nunder IS NOT NULL THEN f.ncode
-        ELSE NULL 
-      END as franchisee_code,
-      CASE 
-        WHEN o.nunder NOT IN (605, 606, 607, 608, 612, 1, 0) AND o.nunder IS NOT NULL THEN o.vcompanyname 
-        WHEN f.nunder NOT IN (605, 606, 607, 608, 612, 1, 0) AND f.nunder IS NOT NULL THEN f.vcompanyname
-        ELSE 'Unallocated' 
-      END as franchisee_name,
+      ${sqlFranchiseeCodeExpr()} as franchisee_code,
+      ${sqlFranchiseeNameExpr()} as franchisee_name,
       tc.vtrnno,
+      tc.vserialno as callsvserialno,
       tc.vtransfercallno,
       tc.bsolved,
       tc.bfastclose,
@@ -466,53 +470,97 @@ async function getMappedCalls(
       o.vcompanyname as office_name,
       bo.vcompanyname as branch_office_name,
       u.vname as technician_name,
-      u.nofficeid as technician_office_id,
+      f.vcompanyname as technician_office_name,
+      f.ncode as technician_office_id,
+      transferoffice.vcompanyname as transfer_office_name,
       cty.vname as db_city,
       st.vname as db_state
     `,
-    tableName: `
-      trhcalls tc (NOLOCK)
-      JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode
-      LEFT JOIN mstoffice bo (NOLOCK) ON o.nunder = bo.ncode
-      LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode
-      LEFT JOIN mstoffice f (NOLOCK) ON u.nofficeid = f.ncode
-      LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode
-      LEFT JOIN mstcity cty (NOLOCK) ON COALESCE(NULLIF(p.ncity, ''), o.ncity) = cty.ncode
-      LEFT JOIN mststate st (NOLOCK) ON cty.nstate = st.ncode
-    `,
+    tableName,
     condition: whereClause
   });
 
   const rawCalls = rawDataRes.data || [];
 
-  const mapped = rawCalls.map((c: any) => {
+  const mapped = mapRawDistributionCalls(rawCalls);
+
+  allCallsCache.set(cacheKey, { data: mapped, timestamp: now });
+  return mapped;
+}
+
+function mapRawDistributionCalls(rawCalls: any[]) {
+  return rawCalls.map((c: any) => {
     const geo = getGeographicDetails(c.pincode, c.latlong, c.db_city, c.db_state);
-    const isParentFranchisee = c.office_under && ![605, 606, 607, 608, 612, 1, 0].includes(Number(c.office_under));
-    const resolvedBranchCode = isParentFranchisee ? String(c.office_under) : String(c.nofficeid);
-    const resolvedBranchName = isParentFranchisee ? c.branch_office_name : c.office_name;
-    return {
+    return enrichTrhcallBranchFranchisee({
       ...c,
       state: geo.state,
       city: geo.city,
       lat: geo.lat,
       lng: geo.lng,
-      resolved_branch_code: resolvedBranchCode,
-      resolved_branch_name: resolvedBranchName
-    };
+    });
+  });
+}
+
+async function getMappedCallsDelta(
+  startDate: string | null,
+  endDate: string | null,
+  callType: string | null,
+  lastSync: string,
+  security: { isHod: boolean; assignedOffices: string[] } = { isHod: true, assignedOffices: [] }
+) {
+  const whereClause = buildTrhcallsBaseCondition({
+    startDate,
+    endDate,
+    callType,
+    datesInSubquery: true,
+    isHod: security.isHod,
+    assignedOffices: security.assignedOffices,
   });
 
-  const filtered = mapped.filter((c: any) => {
-    if (!isValidState(c.state)) return false;
-    if (!isValidCity(c.city)) return false;
-    if (!isValidOfficeName(c.resolved_branch_name)) return false;
-    if (c.franchisee_code && c.franchisee_code !== 'UNASSIGNED') {
-      if (!isValidOfficeName(c.franchisee_name)) return false;
-    }
-    return true;
+  const tableName = `
+    ${buildTrhcallsDeltaSubquery(lastSync, startDate, endDate)}
+    JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode
+    LEFT JOIN mstoffice bo (NOLOCK) ON o.nunder = bo.ncode
+    LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode
+    LEFT JOIN mstoffice f (NOLOCK) ON u.nofficeid = f.ncode
+    LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode
+    LEFT JOIN mstcity cty (NOLOCK) ON COALESCE(NULLIF(p.ncity, ''), o.ncity) = cty.ncode
+    LEFT JOIN mststate st (NOLOCK) ON cty.nstate = st.ncode
+    LEFT JOIN mstoffice transferoffice (NOLOCK) ON tc.ntransfertooffice = transferoffice.ncode
+  `;
+
+  const rawDataRes = await postQuery({
+    fields: `
+      tc.vcclid,
+      tc.ncode,
+      tc.ncancelreason,
+      tc.ntransfertooffice,
+      p.vinstpostalcode as pincode,
+      COALESCE(NULLIF(p.vlatlong, ''), NULLIF(p.mlatlong, '')) as latlong,
+      ${sqlFranchiseeCodeExpr()} as franchisee_code,
+      ${sqlFranchiseeNameExpr()} as franchisee_name,
+      tc.vtrnno,
+      tc.vserialno as callsvserialno,
+      tc.vtransfercallno,
+      tc.bsolved,
+      tc.bfastclose,
+      tc.nengineer,
+      tc.nofficeid,
+      o.nunder as office_under,
+      o.vcompanyname as office_name,
+      bo.vcompanyname as branch_office_name,
+      u.vname as technician_name,
+      f.vcompanyname as technician_office_name,
+      f.ncode as technician_office_id,
+      transferoffice.vcompanyname as transfer_office_name,
+      cty.vname as db_city,
+      st.vname as db_state
+    `,
+    tableName,
+    condition: whereClause
   });
 
-  allCallsCache.set(cacheKey, { data: filtered, timestamp: now });
-  return filtered;
+  return mapRawDistributionCalls(rawDataRes.data || []);
 }
 
 export async function GET(req: NextRequest) {
@@ -545,13 +593,10 @@ export async function GET(req: NextRequest) {
     // 3. Consolidated Data and Filter options query route
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
-    const callType = searchParams.get('callType') || 'BREAKDOWN';
+    const callType = searchParams.get('callType') || 'All';
     const bypassCache = searchParams.get('refresh') === 'true';
+    const lastSync = searchParams.get('lastSync');
 
-    // Query database ONCE for the date range & call type
-    const allCalls = await getMappedCalls(startDate, endDate, callType, bypassCache);
-
-    // Fetch branches directly from CRM based on user permissions
     const permissions = await (prisma as any).getUserPermissions(user.id);
     const userProfileResult = await prisma.$queryRawUnsafe(
       'SELECT office_ids, role FROM public.app_users WHERE id = $1 LIMIT 1',
@@ -559,9 +604,39 @@ export async function GET(req: NextRequest) {
     );
     const profile = (userProfileResult as any[])?.[0];
     const assignedOffices = profile?.office_ids || [];
-    const isHod = 
-      permissions.includes('view_all_offices') || 
+    const isHod =
+      permissions.includes('view_all_offices') ||
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
+
+    const security = { isHod, assignedOffices };
+
+    if (lastSync) {
+      const deltaCalls = await getMappedCallsDelta(startDate, endDate, callType, lastSync, security);
+      return NextResponse.json({
+        deltaCalls,
+        isDelta: true,
+      });
+    }
+
+    let allCalls: Awaited<ReturnType<typeof getMappedCalls>> = [];
+    let degraded = false;
+    try {
+      allCalls = await getMappedCalls(startDate, endDate, callType, bypassCache, security);
+    } catch (loadErr: unknown) {
+      const body =
+        typeof (loadErr as { response?: { data?: unknown } })?.response?.data === 'string'
+          ? String((loadErr as { response?: { data?: string } }).response?.data)
+          : '';
+      const isOom =
+        body.includes('OutOfMemoryException') ||
+        body.includes('OutOfMemory') ||
+        String(loadErr).includes('memory');
+      if (!isOom) throw loadErr;
+      degraded = true;
+      console.warn('Distribution full load degraded (CRM OOM); returning empty calls.');
+    }
+
+    // Fetch branches directly from CRM based on user permissions
 
     let officeCondition = "nunder IN (605, 606, 607, 608, 612, 1, 0) OR nunder IS NULL";
     if (!isHod && assignedOffices.length > 0) {
@@ -577,22 +652,33 @@ export async function GET(req: NextRequest) {
     });
     const dbBranches = branchesDbRes.data || [];
 
-    let finalCalls = allCalls;
-    if (!isHod && assignedOffices.length > 0) {
-      const allowedOfficeIds = new Set(dbBranches.map((b: any) => String(b.ncode)));
-      finalCalls = allCalls.filter((c: any) => 
-        allowedOfficeIds.has(String(c.resolved_branch_code)) || 
-        (c.franchisee_code && allowedOfficeIds.has(String(c.franchisee_code)))
-      );
-    }
-
     return NextResponse.json({
-      allCalls: finalCalls,
-      dbBranches
+      allCalls,
+      dbBranches,
+      ...(degraded
+        ? {
+            degraded: true,
+            warning:
+              'CRM could not load all calls for this range. Try Last 7 Days or a shorter custom range.',
+          }
+        : {}),
     });
 
   } catch (err: any) {
     console.error('Call Distribution Error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const responseBody =
+      typeof err?.response?.data === 'string'
+        ? err.response.data
+        : JSON.stringify(err?.response?.data ?? '');
+    const isOom =
+      responseBody.includes('OutOfMemoryException') || responseBody.includes('OutOfMemory');
+    return NextResponse.json(
+      {
+        error: isOom
+          ? 'CRM database ran out of memory for this date range. Try a shorter range (e.g. 7 days).'
+          : err.message || 'Distribution query failed',
+      },
+      { status: isOom ? 503 : 500 }
+    );
   }
 }

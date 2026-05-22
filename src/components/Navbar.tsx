@@ -36,12 +36,6 @@ export function Navbar({ user }: NavbarProps) {
 
   const navigation = [
     {
-      name: 'Calls Dashboard',
-      href: '/calls',
-      icon: LayoutDashboard,
-      permission: 'view_calls'
-    },
-    {
       name: 'MIS Reports',
       href: '/report',
       icon: FileSpreadsheet,
@@ -78,7 +72,7 @@ export function Navbar({ user }: NavbarProps) {
           <div className="flex items-center gap-8">
             <div
               className="flex items-center gap-3 cursor-pointer group"
-              onClick={() => router.push('/calls')}
+              onClick={() => router.push('/report')}
             >
               <div className="w-9 h-9 bg-slate-900 rounded-xl flex items-center justify-center transition-transform group-hover:scale-105 active:scale-95 shadow-lg shadow-slate-200">
                 <img src="/western-head-logo-2025.png" alt="W" className="w-6 h-6 object-contain" />

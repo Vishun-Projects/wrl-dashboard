@@ -13,15 +13,26 @@ import {
   Check, 
   X,
   Search,
-  ArrowLeft,
-  ChevronDown,
-  LayoutDashboard,
   Key
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { useUser } from '@/components/DashboardLayout';
+import { PageShell, PageLoadingState } from '@/components/PageShell';
 import BranchTree from '@/components/BranchTree';
+import {
+  AdminToolbar,
+  AdminStatPill,
+  AdminTableCard,
+  AdminTable,
+  AdminThead,
+  AdminTh,
+  AdminTr,
+  AdminTd,
+  RoleBadge,
+  ChipList,
+  AdminIconButton,
+} from '@/components/admin/AdminUi';
 
 export default function AdminUsersPage() {
   const { userProfile } = useUser();
@@ -87,7 +98,7 @@ export default function AdminUsersPage() {
       // If forbidden, redirect
       if ((err as any).response?.status === 403) {
         // Silently redirect if unauthorized
-        router.push('/calls');
+        router.push('/report');
       }
     } finally {
       setLoading(false);
@@ -186,201 +197,165 @@ export default function AdminUsersPage() {
     u.email?.toLowerCase().includes(search.toLowerCase())
   );
 
-  if (loading) return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-      <div className="flex flex-col items-center gap-4">
-        <div className="w-10 h-10 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
-        <p className="text-sm font-medium text-slate-500">Loading...</p>
-      </div>
-    </div>
-  );
+  const getRoleInfo = (u: any) => {
+    const roleObj = roles.find((r) => r.id === u.role_id);
+    const isHod = roleObj ? roleObj.name.toLowerCase() === 'hod' : u.role === 'hod';
+    const roleName = roleObj?.name || (u.role === 'hod' ? 'HOD' : 'Branch Manager');
+    return { isHod, roleName };
+  };
+
+  if (loading) return <PageLoadingState label="Loading users..." />;
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#f8fafc]">
-      
-      <header className="bg-white border-b border-slate-200 flex-shrink-0">
-        <div className="h-14 px-7 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Users className="text-slate-900" size={18} />
-            </div>
-            <h1 className="text-base font-medium text-slate-900">User Management</h1>
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => {
-                setEditingUser(null);
-                setFormData({ name: '', email: '', password: '', role: 'branch_manager', role_id: '', office_ids: [], visible_statuses: [] });
-                setBranchSearch('');
-                setActiveTab('profile');
-                setShowOnlySelectedBranches(false);
-                setShowAddModal(true);
-              }}
-              className="h-9 px-4 bg-slate-950 text-white rounded-xl font-medium text-[12px] flex items-center gap-2 hover:bg-slate-800 transition-colors"
-            >
-              <UserPlus size={14} />
-              Add User
-            </button>
-          </div>
-        </div>
-      </header>
+    <PageShell
+      title="User Management"
+      subtitle="Manage portal accounts, roles, and branch access"
+      icon={<Users size={16} />}
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
+      toolbar={
+        <AdminToolbar
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Search by name or email..."
+        >
+          <AdminStatPill label="Total" value={users.length} />
+          <AdminStatPill label="Showing" value={filteredUsers.length} />
+        </AdminToolbar>
+      }
+      actions={
+        <button
+          onClick={() => {
+            setEditingUser(null);
+            setFormData({ name: '', email: '', password: '', role: 'branch_manager', role_id: '', office_ids: [], visible_statuses: [] });
+            setBranchSearch('');
+            setActiveTab('profile');
+            setShowOnlySelectedBranches(false);
+            setShowAddModal(true);
+          }}
+          className="flex h-9 items-center gap-2 rounded-md bg-slate-900 px-4 text-xs font-medium text-white transition-colors hover:bg-slate-800 ui-label"
+        >
+          <UserPlus size={14} />
+          Add User
+        </button>
+      }
+    >
+      <div className="flex min-h-0 flex-1 flex-col p-4">
+        <AdminTableCard isEmpty={filteredUsers.length === 0}>
+          <AdminTable>
+            <AdminThead>
+              <tr>
+                <AdminTh className="w-[28%]">User</AdminTh>
+                <AdminTh className="w-[14%]">Role</AdminTh>
+                <AdminTh className="w-[22%]">Visible statuses</AdminTh>
+                <AdminTh className="w-[22%]">Branches</AdminTh>
+                <AdminTh align="right" className="w-[14%]">Actions</AdminTh>
+              </tr>
+            </AdminThead>
+            <tbody>
+              {filteredUsers.map((u) => {
+                const { isHod, roleName } = getRoleInfo(u);
+                const branchLabels =
+                  u.office_ids?.map((id: string) => {
+                    const office = offices.find((o) => String(o.ncode) === id);
+                    return office?.vcompanyname || id;
+                  }) ?? [];
 
-      <main className="flex-1 overflow-y-auto p-7 custom-scrollbar">
-        <div className="max-w-6xl mx-auto space-y-6">
-
-          {/* Controls Bar */}
-          <div className="flex items-center justify-between gap-4">
-             <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <input 
-                placeholder="Search users..."
-                className="w-full h-10 bg-white border border-[#e2e8f0] rounded-xl pl-10 pr-4 text-[13px] outline-none focus:border-slate-400 transition-all shadow-sm"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-            
-            <div className="flex items-center gap-3 bg-white px-3 py-2 border border-[#e2e8f0] rounded-xl shadow-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-[12px] text-slate-400">Total Users:</span>
-                <span className="text-[13px] font-medium text-slate-700">{users.length}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Table Container - Same style as CallTable */}
-          <div className="bg-white border border-[#e2e8f0] rounded-2xl overflow-hidden shadow-sm">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-[#f8fafc] border-b border-[#e2e8f0]">
-                    <tr>
-                  <th className="px-4 py-3 text-[11px] font-medium text-slate-500">User</th>
-                  <th className="px-4 py-3 text-[11px] font-medium text-slate-500">Role</th>
-                  <th className="px-4 py-3 text-[11px] font-medium text-slate-500">Statuses</th>
-                  <th className="px-4 py-3 text-[11px] font-medium text-slate-500">Branches</th>
-                  <th className="px-4 py-3 text-[11px] font-medium text-slate-500 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {filteredUsers.map((u) => (
-                  <tr key={u.id} className="hover:bg-slate-50/50 transition-colors group">
-                    <td className="px-4 py-3">
+                return (
+                  <AdminTr key={u.id}>
+                    <AdminTd>
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-[12px] font-medium text-slate-500 border border-slate-200 overflow-hidden flex-shrink-0">
+                        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-[11px] font-semibold text-slate-500">
                           {u.avatar_url ? (
-                            <img src={u.avatar_url} alt="" className="w-full h-full object-cover" />
+                            <img src={u.avatar_url} alt="" className="h-full w-full object-cover" />
                           ) : (
-                            u.name?.charAt(0)
+                            u.name?.charAt(0)?.toUpperCase()
                           )}
                         </div>
-                        <div>
-                          <div className="text-[13px] font-medium text-slate-700">{u.name}</div>
-                          <div className="text-[11px] text-slate-400">{u.email}</div>
+                        <div className="min-w-0">
+                          <p className="truncate text-[13px] font-medium text-slate-800">{u.name}</p>
+                          <p className="truncate text-[11px] text-slate-400">{u.email}</p>
                         </div>
                       </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      {(() => {
-                        const roleObj = roles.find(r => r.id === u.role_id);
-                        const isHod = roleObj ? roleObj.name.toLowerCase() === 'hod' : u.role === 'hod';
-                        return (
-                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[10px] font-medium ${ isHod ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 'bg-slate-50 text-slate-500 border-slate-200' }`}>
-                            <Shield size={12} />
-                            {roleObj?.name || (u.role === 'hod' ? 'HOD' : 'Manager')}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-6 py-5">
-                      {u.role === 'hod' ? (
-                        <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400 italic">
-                          All Statuses Visible
-                        </div>
+                    </AdminTd>
+                    <AdminTd>
+                      <RoleBadge name={roleName} isHod={isHod} />
+                    </AdminTd>
+                    <AdminTd>
+                      {isHod ? (
+                        <span className="text-[11px] font-medium text-emerald-600">All statuses</span>
                       ) : (
-                        <div className="flex flex-wrap gap-1">
-                          {u.visible_statuses?.length > 0 ? (
-                            u.visible_statuses.map((s: string) => (
-                              <span key={s} className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded text-[9px] font-medium text-indigo-600">
-                                {s}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-[10px] text-slate-300 italic">No restriction (HOD only)</span>
-                          )}
-                        </div>
+                        <ChipList
+                          items={u.visible_statuses ?? []}
+                          maxVisible={2}
+                          emptyLabel="Not configured"
+                          variant="indigo"
+                        />
                       )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {u.role === 'hod' ? (
-                        <div className="flex items-center gap-2 text-[12px] font-medium text-emerald-600">
-                          <Check size={14} /> Full Access
-                        </div>
+                    </AdminTd>
+                    <AdminTd>
+                      {isHod ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+                          <Check size={12} /> Full access
+                        </span>
                       ) : (
-                        <div className="flex flex-wrap gap-1.5 max-w-[240px]">
-                          {u.office_ids?.length > 0 ? (
-                            u.office_ids.map((id: string) => {
-                              const office = offices.find(o => String(o.ncode) === id);
-                              return (
-                                <span key={id} className="px-2 py-0.5 bg-slate-50 border border-slate-100 rounded text-[10px] font-medium text-slate-500">
-                                  {office?.vcompanyname || id}
-                                </span>
-                              );
-                            })
-                          ) : (
-                            <span className="text-[11px] text-slate-300 italic">No access granted</span>
-                          )}
-                        </div>
+                        <ChipList
+                          items={branchLabels}
+                          maxVisible={1}
+                          emptyLabel="No branches"
+                        />
                       )}
-                    </td>
-                    <td className="px-6 py-5">
-                      <div className="flex items-center justify-end gap-2">
-                          <button 
-                            onClick={() => {
-                              setSelectedUserForPassword(u);
-                              setNewPassword('');
-                              setShowPasswordModal(true);
-                            }}
-                            className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center hover:bg-amber-100 hover:text-amber-700 transition-colors text-slate-500"
-                            title="Reset Password"
-                          >
-                            <Key size={13} />
-                          </button>
-                          <button 
-                            onClick={() => {
-                              setEditingUser(u);
-                            setFormData({ 
-                              name: u.name, 
-                              email: u.email, 
-                              password: '', 
-                              role: u.role, 
+                    </AdminTd>
+                    <AdminTd align="right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <AdminIconButton
+                          variant="amber"
+                          title="Reset password"
+                          onClick={() => {
+                            setSelectedUserForPassword(u);
+                            setNewPassword('');
+                            setShowPasswordModal(true);
+                          }}
+                        >
+                          <Key size={13} />
+                        </AdminIconButton>
+                        <AdminIconButton
+                          title="Edit user"
+                          onClick={() => {
+                            setEditingUser(u);
+                            setFormData({
+                              name: u.name,
+                              email: u.email,
+                              password: '',
+                              role: u.role,
                               role_id: u.role_id,
                               office_ids: u.office_ids || [],
-                              visible_statuses: u.visible_statuses || []
+                              visible_statuses: u.visible_statuses || [],
                             });
                             setActiveTab('profile');
                             setShowOnlySelectedBranches(false);
                             setShowAddModal(true);
                           }}
-                          className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center hover:bg-slate-100 hover:text-slate-900 transition-colors text-slate-500"
-                          title="Edit User"
                         >
                           <Pencil size={13} />
-                        </button>
+                        </AdminIconButton>
                         {currentUserInfo?.id !== u.id && (
-                          <button 
+                          <AdminIconButton
+                            variant="danger"
+                            title="Delete user"
                             onClick={() => handleDelete(u.id)}
-                            className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center hover:bg-rose-50 hover:text-rose-600 transition-colors text-slate-500"
-                            title="Delete User"
                           >
                             <Trash2 size={13} />
-                          </button>
+                          </AdminIconButton>
                         )}
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </main>
+                    </AdminTd>
+                  </AdminTr>
+                );
+              })}
+            </tbody>
+          </AdminTable>
+        </AdminTableCard>
+      </div>
 
       {/* Modal - Simplified Sidebar Layout (Shadcn Style) */}
       {showAddModal && (
@@ -645,6 +620,6 @@ export default function AdminUsersPage() {
           </div>
         </div>
       )}
-      </div>
+    </PageShell>
   );
 }

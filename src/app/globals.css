@@ -51,6 +51,19 @@
     @apply bg-slate-50 text-slate-500 border border-slate-200 text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wider inline-flex items-center gap-1.5 shadow-sm;
   }
 
+  .badge-calltype-breakdown {
+    @apply bg-rose-50 text-rose-700 border border-rose-200 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider inline-flex items-center shadow-sm;
+  }
+  .badge-calltype-installation {
+    @apply bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider inline-flex items-center shadow-sm;
+  }
+  .badge-calltype-deployment {
+    @apply bg-indigo-50 text-indigo-700 border border-indigo-200 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider inline-flex items-center shadow-sm;
+  }
+  .badge-calltype-default {
+    @apply bg-slate-50 text-slate-600 border border-slate-200 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider inline-flex items-center shadow-sm;
+  }
+
   /* Accessible Tooltip System */
   .tooltip-trigger {
     @apply relative cursor-help;
@@ -88,6 +101,228 @@
   }
   .ui-label {
     @apply text-[11px] text-slate-500 font-medium;
+  }
+
+  .register-stat-card {
+    @apply rounded-xl border border-slate-200/80 bg-white px-3 py-2 shadow-sm min-w-0;
+  }
+
+  .register-filter-select {
+    @apply h-8 bg-white border border-slate-200 rounded-md px-2.5 text-[11px] font-medium text-slate-700 outline-none cursor-pointer hover:border-slate-300 focus:border-slate-400 focus:ring-1 focus:ring-slate-200 shadow-sm;
+  }
+
+  .register-filter-bar {
+    @apply w-full shrink-0 overflow-visible border-b border-slate-200 bg-white px-4 py-2.5;
+  }
+
+  .register-filter-rows {
+    @apply flex w-full flex-col gap-2;
+  }
+
+  .register-filter-row {
+    @apply flex w-full flex-nowrap items-end gap-2 overflow-visible;
+  }
+
+  .register-filter-group {
+    @apply flex min-w-0 flex-1 flex-col gap-1 rounded-lg border border-slate-100 bg-slate-50/80 px-2 py-1.5;
+  }
+
+  .register-filter-group--search {
+    flex: 1.35 1 0%;
+  }
+
+  .register-filter-group--date {
+    flex: 1 1 0%;
+  }
+
+  .register-filter-group--people {
+    flex: 0.85 1 0%;
+  }
+
+  .register-filter-group-label {
+    @apply text-[9px] font-semibold uppercase tracking-wider text-slate-400 leading-none;
+  }
+
+  .register-filter-group-controls {
+    @apply flex w-full min-w-0 flex-nowrap items-stretch gap-1.5;
+  }
+
+  .register-filter-group-controls > .relative,
+  .register-filter-group-controls > .register-date-field {
+    @apply min-w-0 flex-1;
+  }
+
+  .register-filter-clear-btn {
+    @apply ml-auto inline-flex h-7 shrink-0 items-center gap-1 self-end rounded-md border border-rose-200 bg-rose-50 px-2.5 text-[10px] font-medium text-rose-700 hover:bg-rose-100;
+  }
+
+  .register-filter-row-compact .register-filter-select {
+    @apply h-7 min-w-0 flex-1 max-w-none px-2 text-[10px];
+  }
+
+  .register-filter-row-compact .register-filter-btn {
+    @apply h-7 w-full min-w-0 max-w-none px-2 text-[10px];
+  }
+
+  .register-filter-row-compact .register-search-input {
+    @apply h-7 text-[10px];
+  }
+
+  .register-filter-row-compact .register-search-field {
+    @apply relative min-w-0 flex-[1.6];
+  }
+
+  .register-filter-row-compact .register-date-column-select {
+    @apply min-w-[5.5rem] shrink-0;
+  }
+
+  .register-filter-row-compact .register-pincode-field {
+    @apply relative min-w-[5.5rem] flex-1 max-w-[9rem];
+  }
+
+  .register-filter-row-compact .register-date-field {
+    @apply min-w-0 flex-1;
+  }
+
+  .register-filter-row-compact .register-date-field > div,
+  .register-filter-row-compact .register-date-field button {
+    @apply h-7 w-full min-w-0 px-2 text-[10px];
+  }
+
+  .register-filter-btn {
+    @apply h-8 w-full min-w-0 bg-white border border-slate-200 rounded-md px-2.5 text-[11px] font-medium text-slate-700 flex items-center justify-between gap-1.5 hover:border-slate-300 focus:border-slate-400 shadow-sm;
+  }
+
+  .register-search-input {
+    @apply h-8 w-full pl-8 pr-2.5 bg-white border border-slate-200 rounded-md text-[11px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-200 focus:border-slate-400 shadow-sm;
+  }
+
+  .register-section-label {
+    @apply text-[10px] font-semibold uppercase tracking-wider text-slate-400 shrink-0;
+  }
+
+  .register-stats-bar {
+    display: grid;
+    flex-shrink: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+    border-bottom: 1px solid #e2e8f0;
+    background-color: rgb(248 250 252 / 0.9);
+    padding: 0.625rem 1rem;
+  }
+
+  @media (min-width: 640px) {
+    .register-stats-bar {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  .register-stat-item {
+    display: flex;
+    min-width: 0;
+    min-height: 3.5rem;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.25rem;
+    border-radius: 0.5rem;
+    border: 1px solid rgb(226 232 240 / 0.8);
+    background-color: #fff;
+    padding: 0.625rem 0.875rem;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  }
+
+  .register-stat-item--detailed {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 3.75rem;
+  }
+
+  .register-stat-main {
+    display: flex;
+    flex-shrink: 0;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .register-stat-value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.025em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .register-stat-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+  }
+
+  .register-stat-breakdown {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0.625rem;
+    border-left: 1px solid #f1f5f9;
+    padding-left: 0.75rem;
+  }
+
+  .register-stat-sub {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.125rem;
+    font-size: 10px;
+    line-height: 1.35;
+    color:rgb(171, 18, 198);
+  }
+
+  .register-stat-sub-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: wrap;
+    font-size: 12px;
+    line-height: 1.2;
+  }
+
+  .register-stat-sub-value {
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: #334155;
+    white-space: nowrap;
+  }
+
+  .distribution-stats-bar {
+    @apply flex shrink-0 flex-nowrap gap-2 overflow-x-auto border-b border-slate-200 bg-slate-50/90 px-4 py-2;
+  }
+
+  .distribution-stat-item {
+    @apply flex min-w-[5.5rem] flex-1 flex-col gap-0.5 rounded-md border border-slate-200/80 bg-white px-3 py-1.5 shadow-sm;
+  }
+
+  .distribution-stat-value {
+    @apply text-base font-semibold tabular-nums leading-none tracking-tight;
+  }
+
+  .distribution-stat-label {
+    @apply text-[9px] font-semibold uppercase tracking-wider text-slate-500 whitespace-nowrap;
+  }
+
+  .register-table-wrap {
+    @apply min-h-0 w-full flex-1 overflow-auto bg-white;
+  }
+
+  .register-table {
+    @apply w-max border-collapse text-left;
   }
 }
 

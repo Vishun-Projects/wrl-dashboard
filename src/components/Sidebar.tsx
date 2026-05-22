@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Users,
-  LayoutDashboard,
   FileSpreadsheet,
   Settings,
   LogOut,
@@ -14,7 +13,8 @@ import {
   ShieldCheck,
   User,
   ExternalLink,
-  Map
+  Map,
+  ScanBarcode,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -71,9 +71,9 @@ export function Sidebar({ user }: SidebarProps) {
 
   const navigation = [
     {
-      name: 'Calls Dashboard',
-      href: '/calls',
-      icon: LayoutDashboard,
+      name: 'MIS Reports',
+      href: '/report',
+      icon: FileSpreadsheet,
       permission: 'view_calls'
     },
     {
@@ -83,9 +83,9 @@ export function Sidebar({ user }: SidebarProps) {
       permission: 'view_calls'
     },
     {
-      name: 'MIS Reports',
-      href: '/report',
-      icon: FileSpreadsheet,
+      name: 'Serial Audit',
+      href: '/report/serial-audit',
+      icon: ScanBarcode,
       permission: 'view_calls'
     },
     {
@@ -107,12 +107,12 @@ export function Sidebar({ user }: SidebarProps) {
   );
 
   const sidebarContent = (
-    <div className="flex flex-col h-full bg-white text-slate-600 border-r border-slate-200/80 select-none">
-      {/* Header / Logo */}
-      <div className="h-14 flex items-center justify-between px-4 border-b border-slate-200 flex-shrink-0 relative">
+    <div className="flex h-full flex-col border-r border-slate-200 bg-white text-slate-600 select-none">
+      {/* Header / Logo — h-14 aligns with PageShell header border */}
+      <div className="relative flex h-14 flex-shrink-0 items-center justify-between border-b border-slate-200 px-4">
         <div
           className="flex items-center gap-3 cursor-pointer group overflow-hidden"
-          onClick={() => router.push('/calls')}
+          onClick={() => router.push('/report')}
         >
           <div className="w-8 h-8 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105 active:scale-95 shadow-sm flex-shrink-0">
             <img src="/western-head-logo-2025.png" alt="W" className="w-5 h-5 object-contain" />

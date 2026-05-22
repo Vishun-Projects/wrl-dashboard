@@ -43,9 +43,9 @@ export async function GET(req: NextRequest) {
       dbSecurityCondition = ` AND (c.nofficeid IN (${allowed}) OR o.nunder IN (${allowed}))`;
     }
 
-    // Build WHERE conditions for trhcalls (c)
-    // vtrnno IS NOT NULL = only real transactions, but also include transferred calls which might have empty vtrnno but valid vtransfercallno or ncancelreason = 2
-    let baseCondition = "((c.vtrnno IS NOT NULL AND c.vtrnno <> '') OR (c.ncancelreason = 2 OR (c.vtransfercallno IS NOT NULL AND c.vtransfercallno <> '')))";
+    // Exclude transferred calls from all summary/account MIS aggregates
+    const excludeTransferred = " AND ISNULL(c.vtransfercallno, '') = '' AND ISNULL(c.ncancelreason, 0) <> 2";
+    let baseCondition = `(c.vtrnno IS NOT NULL AND c.vtrnno <> '')${excludeTransferred}`;
 
     if (officeId && officeId !== 'All' && officeId !== 'undefined' && officeId !== 'null') {
       if (officeId.includes(',')) {
@@ -99,7 +99,6 @@ export async function GET(req: NextRequest) {
         COUNT(*) as all_total,
         SUM(CASE WHEN c.bsolved = 1 OR c.bfastclose = 1 THEN 1 ELSE 0 END) as all_solved,
         SUM(CASE WHEN c.ncancelreason IS NOT NULL AND c.ncancelreason <> 0 AND c.ncancelreason <> 2 THEN 1 ELSE 0 END) as all_cancelled,
-        SUM(CASE WHEN ISNULL(c.vtransfercallno, '') <> '' OR c.ncancelreason = 2 THEN 1 ELSE 0 END) as all_transferred,
         SUM(CASE WHEN (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_open,
         SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) <= 2 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_2,
         SUM(CASE WHEN DATEDIFF(day, c.dtrndate, ${agingDate}) > 2 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 7 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as all_age_3,
@@ -111,7 +110,6 @@ export async function GET(req: NextRequest) {
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND c.bfastclose = 1 THEN 1 ELSE 0 END) as tech_solved_calls,
         SUM(CASE WHEN c.bfastclose = 1 THEN 1 ELSE 0 END) as all_tech_solved,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND c.ncancelreason IS NOT NULL AND c.ncancelreason <> 0 AND c.ncancelreason <> 2 THEN 1 ELSE 0 END) as cancelled_calls,
-        SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND (ISNULL(c.vtransfercallno, '') <> '' OR c.ncancelreason = 2) THEN 1 ELSE 0 END) as transferred_calls,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 2 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_2,
         SUM(CASE WHEN bd_ct.ncode IS NOT NULL AND DATEDIFF(day, c.dtrndate, ${agingDate}) > 2 AND DATEDIFF(day, c.dtrndate, ${agingDate}) <= 7 AND (c.bsolved = 0 OR c.bsolved IS NULL) AND (c.bfastclose = 0 OR c.bfastclose IS NULL) AND (c.ncancelreason IS NULL OR c.ncancelreason = 0) THEN 1 ELSE 0 END) as age_3,
@@ -180,9 +178,9 @@ export async function GET(req: NextRequest) {
       if (!branchMap.has(row.officeId)) {
         branchMap.set(row.officeId, {
           officeId: row.officeId, parentId: row.parentId, branch: row.branch, region: row.region,
-          total_calls: 0, solved_calls: 0, cancelled_calls: 0, open_calls: 0, transferred_calls: 0,
+          total_calls: 0, solved_calls: 0, cancelled_calls: 0, open_calls: 0,
           age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
-          all_total: 0, all_solved: 0, all_cancelled: 0, all_open: 0, all_transferred: 0,
+          all_total: 0, all_solved: 0, all_cancelled: 0, all_open: 0,
           all_age_2: 0, all_age_3: 0, all_age_7: 0, all_age_15: 0, all_part_pending: 0,
           all_tech_solved: 0, tech_solved_calls: 0,
           deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
@@ -200,7 +198,6 @@ export async function GET(req: NextRequest) {
       b.all_tech_solved += Number(row.all_tech_solved || 0);
       b.tech_solved_calls += Number(row.tech_solved_calls || 0);
       b.cancelled_calls += Number(row.all_cancelled);
-      b.transferred_calls += Number(row.all_transferred);
       b.open_calls += Number(row.all_open);
       b.age_2 += Number(row.all_age_2);
       b.age_3 += Number(row.all_age_3);
@@ -221,7 +218,7 @@ export async function GET(req: NextRequest) {
       if (!accountMap.has(aKey)) {
         accountMap.set(aKey, {
           region: row.region, account: row.account,
-          population: 0, total_calls: 0, total_solved: 0, cancelled_calls: 0, open_calls: 0, transferred_calls: 0,
+          population: 0, total_calls: 0, total_solved: 0, cancelled_calls: 0, open_calls: 0,
           age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0,
           deployment_total: 0, deployment_done: 0, installation_total: 0, installation_done: 0,
           active_eng: 0, active_eng_names: new Set(), headcount: 0,
@@ -234,7 +231,6 @@ export async function GET(req: NextRequest) {
       a.total_solved += Number(row.solved_calls);
       a.total_tech_solved += Number(row.tech_solved_calls || 0);
       a.cancelled_calls += Number(row.cancelled_calls);
-      a.transferred_calls += Number(row.transferred_calls);
       a.open_calls += Number(row.open_calls);
       a.age_2 += Number(row.age_2);
       a.age_3 += Number(row.age_3);

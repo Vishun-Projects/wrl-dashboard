@@ -1,0 +1,327 @@
+'use client';
+
+import React, { useState } from 'react';
+import { Search } from 'lucide-react';
+
+export function AdminToolbar({
+  search,
+  onSearchChange,
+  searchPlaceholder = 'Search...',
+  children,
+}: {
+  search: string;
+  onSearchChange: (v: string) => void;
+  searchPlaceholder?: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="register-filter-bar">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="register-search-field relative w-full max-w-xs">
+          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            placeholder={searchPlaceholder}
+            className="register-search-input"
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+          />
+        </div>
+        {children ? <div className="flex flex-wrap items-center gap-2">{children}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+export function AdminStatPill({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[11px] shadow-sm">
+      <span className="text-slate-400">{label}</span>
+      <span className="font-semibold text-slate-800">{value}</span>
+    </div>
+  );
+}
+
+export function AdminTableCard({
+  children,
+  empty,
+  isEmpty,
+}: {
+  children: React.ReactNode;
+  empty?: React.ReactNode;
+  isEmpty?: boolean;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      {isEmpty ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-12 text-center">
+          {empty ?? (
+            <>
+              <p className="text-sm font-medium text-slate-600">No records found</p>
+              <p className="text-[11px] text-slate-400">Try adjusting your search.</p>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-auto custom-scrollbar">{children}</div>
+      )}
+    </div>
+  );
+}
+
+export function AdminTable({ children }: { children: React.ReactNode }) {
+  return (
+    <table className="w-full min-w-[720px] border-collapse text-left">
+      {children}
+    </table>
+  );
+}
+
+export function AdminThead({ children }: { children: React.ReactNode }) {
+  return (
+    <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50">
+      {children}
+    </thead>
+  );
+}
+
+export function AdminTh({
+  children,
+  className = '',
+  align = 'left',
+}: {
+  children: React.ReactNode;
+  className?: string;
+  align?: 'left' | 'right' | 'center';
+}) {
+  const alignClass =
+    align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left';
+  return (
+    <th
+      className={`px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 ${alignClass} ${className}`}
+    >
+      {children}
+    </th>
+  );
+}
+
+export function AdminTr({ children }: { children: React.ReactNode }) {
+  return <tr className="border-b border-slate-100 transition-colors hover:bg-slate-50/80">{children}</tr>;
+}
+
+export function AdminTd({
+  children,
+  className = '',
+  align = 'left',
+}: {
+  children: React.ReactNode;
+  className?: string;
+  align?: 'left' | 'right' | 'center';
+}) {
+  const alignClass =
+    align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left';
+  return (
+    <td className={`px-4 py-3 align-middle text-[12px] text-slate-700 ${alignClass} ${className}`}>
+      {children}
+    </td>
+  );
+}
+
+export function RoleBadge({ name, isHod }: { name: string; isHod?: boolean }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold ${
+        isHod
+          ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+          : 'border-slate-200 bg-slate-50 text-slate-600'
+      }`}
+    >
+      {name}
+    </span>
+  );
+}
+
+export function ChipList({
+  items,
+  maxVisible = 2,
+  emptyLabel = '—',
+  variant = 'default',
+}: {
+  items: string[];
+  maxVisible?: number;
+  emptyLabel?: string;
+  variant?: 'default' | 'indigo';
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!items.length) {
+    return <span className="text-[11px] text-slate-400">{emptyLabel}</span>;
+  }
+
+  const chipClass =
+    variant === 'indigo'
+      ? 'border-indigo-100 bg-indigo-50 text-indigo-700'
+      : 'border-slate-200 bg-slate-50 text-slate-600';
+
+  if (expanded || items.length <= maxVisible) {
+    return (
+      <div className="flex max-w-[220px] flex-wrap gap-1">
+        {items.map((item) => (
+          <span
+            key={item}
+            title={item}
+            className={`max-w-[200px] truncate rounded border px-1.5 py-0.5 text-[10px] font-medium ${chipClass}`}
+          >
+            {item}
+          </span>
+        ))}
+        {items.length > maxVisible && (
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            className="text-[10px] font-semibold text-slate-500 hover:text-slate-800"
+          >
+            Less
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const visible = items.slice(0, maxVisible);
+  const rest = items.length - maxVisible;
+
+  return (
+    <div className="flex max-w-[220px] flex-wrap items-center gap-1">
+      {visible.map((item) => (
+        <span
+          key={item}
+          title={item}
+          className={`max-w-[100px] truncate rounded border px-1.5 py-0.5 text-[10px] font-medium ${chipClass}`}
+        >
+          {item}
+        </span>
+      ))}
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+      >
+        +{rest} more
+      </button>
+    </div>
+  );
+}
+
+export function AdminIconButton({
+  onClick,
+  title,
+  children,
+  variant = 'default',
+}: {
+  onClick: () => void;
+  title: string;
+  children: React.ReactNode;
+  variant?: 'default' | 'amber' | 'danger';
+}) {
+  const variantClass =
+    variant === 'amber'
+      ? 'hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700'
+      : variant === 'danger'
+        ? 'hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600'
+        : 'hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className={`flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition-colors ${variantClass}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function SettingsLayout({
+  tabs,
+  activeTab,
+  onTabChange,
+  children,
+}: {
+  tabs: { id: string; label: string; icon: React.ReactNode }[];
+  activeTab: string;
+  onTabChange: (id: string) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col gap-4 p-6">
+      <div className="flex gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onTabChange(tab.id)}
+            className={`flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition-colors ui-label ${
+              activeTab === tab.id
+                ? 'bg-slate-900 text-white'
+                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+            }`}
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+export function SettingsCard({
+  title,
+  description,
+  children,
+  footer,
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 px-6 py-4">
+        <h2 className="text-sm text-slate-900 ui-strong">{title}</h2>
+        {description ? <p className="mt-0.5 text-[11px] text-slate-500">{description}</p> : null}
+      </div>
+      <div className="px-6 py-5">{children}</div>
+      {footer ? (
+        <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/50 px-6 py-3">
+          {footer}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function SettingsField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-[11px] font-medium text-slate-500">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+export function settingsInputClass(disabled = false) {
+  return `h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-[13px] text-slate-900 outline-none transition-colors focus:border-slate-400 focus:ring-1 focus:ring-slate-200 ${
+    disabled ? 'cursor-not-allowed bg-slate-50 text-slate-400' : ''
+  }`;
+}

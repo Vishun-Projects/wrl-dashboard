@@ -1,0 +1,217 @@
+'use client';
+
+import React from 'react';
+import { Search, MapPin, X } from 'lucide-react';
+import { DateRangeSelector } from '@/components/DateRangeSelector';
+import { RegisterMultiSelect } from '@/components/RegisterMultiSelect';
+import { RegisterBranchFranchiseeFilters } from '@/components/RegisterBranchFranchiseeFilters';
+import {
+  REGISTER_PORTAL_OPTIONS,
+  REGISTER_PRIORITY_OPTIONS,
+  REGISTER_STATUS_OPTIONS,
+} from '@/lib/report-filters';
+import { useReportFilters } from '@/contexts/ReportFiltersContext';
+
+type RegisterFilterBarProps = {
+  onSearchEnter?: () => void;
+  onPincodeEnter?: () => void;
+  showClearButton?: boolean;
+  onClear?: () => void;
+};
+
+function FilterGroup({
+  label,
+  children,
+  className = '',
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`register-filter-group ${className}`.trim()}>
+      <span className="register-filter-group-label">{label}</span>
+      <div className="register-filter-group-controls">{children}</div>
+    </div>
+  );
+}
+
+export function RegisterFilterBar({
+  onSearchEnter,
+  onPincodeEnter,
+  showClearButton = true,
+  onClear,
+}: RegisterFilterBarProps) {
+  const {
+    search,
+    setSearch,
+    pincodeSearch,
+    setPincodeSearch,
+    dateRange,
+    setDateRange,
+    dateFilterColumn,
+    setDateFilterColumn,
+    dateFilterColumnOptions,
+    selectedStatus,
+    setSelectedStatus,
+    callTypeOptions,
+    selectedCallTypes,
+    setSelectedCallTypes,
+    priorityFilter,
+    setPriorityFilter,
+    portalFilter,
+    setPortalFilter,
+    stateOptions,
+    selectedState,
+    handleStatesChange,
+    cityOptions,
+    selectedCity,
+    handleCitiesChange,
+    technicianOptions,
+    selectedTechnician,
+    setSelectedTechnician,
+    isAnyFilterActive,
+    clearAllFilters,
+  } = useReportFilters();
+
+  const handleClear = () => {
+    clearAllFilters();
+    onClear?.();
+  };
+
+  return (
+    <div className="register-filter-bar">
+      <div className="register-filter-rows">
+        {/* Row 1: lookup + date window */}
+        <div className="register-filter-row register-filter-row-compact">
+          <FilterGroup label="Search" className="register-filter-group--search">
+            <div className="register-search-field">
+              <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="ID, TRN, call ID, serial..."
+                className="register-search-input"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && onSearchEnter?.()}
+              />
+            </div>
+            <div className="register-pincode-field">
+              <MapPin className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Pincode"
+                className="register-search-input font-mono"
+                value={pincodeSearch}
+                onChange={(e) => setPincodeSearch(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && onPincodeEnter?.()}
+              />
+            </div>
+          </FilterGroup>
+
+          <FilterGroup label="Date range" className="register-filter-group--date">
+            <select
+              className="register-filter-select register-date-column-select"
+              value={dateFilterColumn}
+              onChange={(e) => setDateFilterColumn(e.target.value as typeof dateFilterColumn)}
+              title="Which date column to filter"
+              aria-label="Date column for range filter"
+            >
+              {dateFilterColumnOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <div className="register-date-field">
+              <DateRangeSelector
+                value={dateRange.label}
+                startDate={dateRange.start}
+                endDate={dateRange.end}
+                onChange={(range) => setDateRange(range)}
+              />
+            </div>
+          </FilterGroup>
+
+          {showClearButton && isAnyFilterActive && (
+            <button
+              type="button"
+              onClick={handleClear}
+              className="register-filter-clear-btn"
+              title="Clear all filters"
+            >
+              <X size={13} />
+              Clear all
+            </button>
+          )}
+        </div>
+
+        {/* Row 2: call, location, people */}
+        <div className="register-filter-row register-filter-row-compact">
+          <FilterGroup label="Call">
+            <RegisterMultiSelect
+              label="Status"
+              emptyLabel="All statuses"
+              options={REGISTER_STATUS_OPTIONS}
+              selected={selectedStatus}
+              onChange={setSelectedStatus}
+            />
+            <RegisterMultiSelect
+              label="Type"
+              emptyLabel="All types"
+              options={callTypeOptions}
+              selected={selectedCallTypes}
+              onChange={setSelectedCallTypes}
+            />
+            <RegisterMultiSelect
+              label="Priority"
+              emptyLabel="All priorities"
+              options={REGISTER_PRIORITY_OPTIONS}
+              selected={priorityFilter}
+              onChange={setPriorityFilter}
+            />
+            <RegisterMultiSelect
+              label="Portal"
+              emptyLabel="All actions"
+              options={REGISTER_PORTAL_OPTIONS}
+              selected={portalFilter}
+              onChange={setPortalFilter}
+            />
+          </FilterGroup>
+
+          <FilterGroup label="Location">
+            <RegisterBranchFranchiseeFilters />
+            <RegisterMultiSelect
+              label="State"
+              emptyLabel="All states"
+              options={stateOptions}
+              selected={selectedState}
+              onChange={handleStatesChange}
+              searchable
+            />
+            <RegisterMultiSelect
+              label="City"
+              emptyLabel="All cities"
+              options={cityOptions}
+              selected={selectedCity}
+              onChange={handleCitiesChange}
+              searchable
+            />
+          </FilterGroup>
+
+          <FilterGroup label="People" className="register-filter-group--people">
+            <RegisterMultiSelect
+              label="Technician"
+              emptyLabel="All technicians"
+              options={technicianOptions}
+              selected={selectedTechnician}
+              onChange={setSelectedTechnician}
+              searchable
+              panelClassName="w-64"
+            />
+          </FilterGroup>
+        </div>
+      </div>
+    </div>
+  );
+}
