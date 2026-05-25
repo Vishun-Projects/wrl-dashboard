@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import ExcelJS from 'exceljs';
 import { createClient } from '@/lib/supabase/client';
 import axios from 'axios';
@@ -14,24 +14,24 @@ import {
   FileText,
   AlertCircle,
   X,
+  MoreVertical,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUser } from '@/components/DashboardLayout';
 import { DateRangeSelector } from '@/components/DateRangeSelector';
 import { CallDetail } from '@/components/CallDetail';
 import { useRouter, usePathname } from 'next/navigation';
-import { RegisterFilterBar } from '@/components/RegisterFilterBar';
 import { RegisterBranchFranchiseeFilters } from '@/components/RegisterBranchFranchiseeFilters';
 import { RegisterColumnPicker } from '@/components/RegisterColumnPicker';
+import { RegisterPageFilters } from '@/components/RegisterPageFilters';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 import {
   buildRegisterListQueryKey,
   buildSummaryQueryKey,
   filtersEqual,
-  findBreakdownCallType,
   joinFilterParam,
   migrateStringFilter,
-  resolveCallTypesParam,
+  resolveViewCallTypesParam,
   resolveSummaryOfficeIdsParam,
 } from '@/lib/report-filters';
 import {
@@ -41,7 +41,7 @@ import {
   type RegisterTableColumnKey,
 } from '@/lib/register-table-columns';
 import { getCallTypeBadgeClass } from '@/lib/call-type-badge';
-import { resolveRegisterDateSqlColumn } from '@/lib/trhcalls-query';
+import { MAX_CLIENT_CORPUS_DAYS, resolveRegisterDateSqlColumn } from '@/lib/trhcalls-query';
 import {
   findCallsInIndexedDb,
   findCallsInMemoryCaches,
@@ -55,8 +55,18 @@ import {
   type RegisterViewFilterParts,
 } from '@/lib/report-search';
 import { isAnyFilterActive } from '@/lib/report-filters';
-import { globalReportCache, setGlobalReportCache, distributionDataCache, setDistributionDataCache } from '@/lib/report-data-store';
+import { globalReportCache, setGlobalReportCache, distributionDataCache, setDistributionDataCache, callCorpusStore } from '@/lib/report-data-store';
 import { indexRegisterRowsWithSerial, subscribeRegisterDelta } from '@/lib/report-sync';
+import {
+  buildCorpusCacheKey,
+  deriveRegisterPageFromCorpus,
+  getFilteredCorpusCalls,
+  getCorpusCallsArray,
+  restoreCorpusFromIndexedDB,
+} from '@/lib/report-corpus';
+import { readCorpusMeta } from '@/lib/report-corpus-storage';
+import { deriveSummaryDashboard, diagnoseSummaryDerivation } from '@/lib/report-summary-derive';
+import { ensurePortalAuditCache } from '@/lib/report-portal-cache';
 
 // --- IndexedDB Local Storage Cache Helpers ---
 const openDB = (): Promise<IDBDatabase> => {
@@ -159,6 +169,17 @@ type RegisterPageCacheEntry = {
   globalHeadcount?: number;
 };
 
+function formatRelativeTime(date: Date | null): string {
+  if (!date) return '';
+  const diffSec = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  return date.toLocaleDateString();
+}
+
 function adjustRegisterSummaryBucket(
   summary: RegisterSummary,
   bucket: RegisterSummaryBucket,
@@ -216,13 +237,22 @@ function registerPageCacheGet(
 function reportPerfEnabled(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    return (
-      process.env.NODE_ENV === 'development' ||
-      window.localStorage?.getItem('REPORT_PERF') === '1'
-    );
+    return window.localStorage?.getItem('REPORT_PERF') === '1';
   } catch {
-    return process.env.NODE_ENV === 'development';
+    return false;
   }
+}
+
+function logSummaryDebug(label: string, payload: Record<string, unknown>) {
+  if (process.env.NODE_ENV !== 'development') return;
+  console.info(`[Summary] ${label}`, payload);
+}
+
+function corpusSpanDays(startDateStr: string, endDateStr: string): number {
+  const spanStart = new Date(`${startDateStr}T00:00:00`);
+  const spanEnd = new Date(`${endDateStr}T23:59:59`);
+  if (Number.isNaN(spanStart.getTime()) || Number.isNaN(spanEnd.getTime())) return 0;
+  return Math.floor((spanEnd.getTime() - spanStart.getTime()) / 86400000) + 1;
 }
 
 let reportPerfNavLogged = false;
@@ -305,6 +335,9 @@ export default function ReportPage() {
     runBackgroundSync,
     lastSyncedAt,
     syncInProgress,
+    ensureCorpusLoaded,
+    corpusTick,
+    corpusLoading,
   } = useReportFilters();
 
   const summaryOfficeIdsParam = useMemo(
@@ -325,6 +358,7 @@ export default function ReportPage() {
   const [accountsData, setAccountsData] = useState<any[]>(globalReportCache?.accountsData || []);
   const [globalHeadcount, setGlobalHeadcount] = useState<number>(globalReportCache?.globalHeadcount || 0);
   const [loading, setLoading] = useState(!globalReportCache);
+  const [filterUpdating, setFilterUpdating] = useState(false);
   const [total, setTotal] = useState<number>(globalReportCache?.total || 0);
 
   useEffect(() => {
@@ -346,41 +380,17 @@ export default function ReportPage() {
   const registerPagesCacheRef = React.useRef<Map<string, Map<number, RegisterPageCacheEntry>>>(new Map());
   const lastKnownRegisterTotalRef = React.useRef<number>(globalReportCache?.total || 0);
   const clearFiltersRef = React.useRef<boolean>(false);
-  const [callTypesFilterTouched, setCallTypesFilterTouched] = useState(
-    () => (globalReportCache?.selectedCallTypes?.length ?? 0) > 0
-  );
 
-  const breakdownCallTypeLabel = useMemo(() => findBreakdownCallType(callTypes), [callTypes]);
-
-  const callTypesParam = useMemo(
-    () =>
-      resolveCallTypesParam(selectedCallTypes, {
-        activeTab,
-        callTypesFilterTouched,
-        availableCallTypes: callTypes,
-      }),
-    [selectedCallTypes, activeTab, callTypesFilterTouched, callTypes]
+  const viewCallTypesParam = useMemo(
+    () => resolveViewCallTypesParam(selectedCallTypes),
+    [selectedCallTypes]
   );
 
   const callTypeFilterLabel = useMemo(() => {
-    if (selectedCallTypes.length === 0) {
-      if ((activeTab === 'summary' || activeTab === 'accounts') && !callTypesFilterTouched) {
-        return breakdownCallTypeLabel ?? 'Breakdown';
-      }
-      return 'All Call Types';
-    }
+    if (selectedCallTypes.length === 0) return 'All Call Types';
     if (selectedCallTypes.length === 1) return selectedCallTypes[0];
     return `${selectedCallTypes.length} Types Selected`;
-  }, [selectedCallTypes, activeTab, callTypesFilterTouched, breakdownCallTypeLabel]);
-
-  // Summary / accounts: default to Breakdown until the user changes call-type filter
-  useEffect(() => {
-    if (activeTab !== 'summary' && activeTab !== 'accounts') return;
-    if (callTypesFilterTouched || !breakdownCallTypeLabel) return;
-    if (selectedCallTypes.length > 0) return;
-    setSelectedCallTypes([breakdownCallTypeLabel]);
-  }, [activeTab, breakdownCallTypeLabel, callTypesFilterTouched, selectedCallTypes.length, setSelectedCallTypes]);
-
+  }, [selectedCallTypes]);
   useEffect(() => {
     const scheduleT = performance.now();
     const timer = setTimeout(() => {
@@ -441,6 +451,7 @@ export default function ReportPage() {
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
   const [selectedCall, setSelectedCall] = useState<any | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
 
   const handleFlagUpdate = async (id: string, flag: string) => {
     setData(prev => prev.map(d => (String(d.id) === String(id) ? { ...d, audit_flag: flag } : d)));
@@ -651,57 +662,11 @@ export default function ReportPage() {
     return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-500';
   };
 
-  const registerStatsBar = registerSummary ? (
-    <div className="register-stats-bar">
-      <div className="register-stat-item">
-        <span className="register-stat-value text-slate-900">{(registerSummary.total || 0).toLocaleString()}</span>
-        <span className="register-stat-label">Total calls</span>
-      </div>
-      <div className="register-stat-item register-stat-item--detailed">
-        <div className="register-stat-main">
-          <span className="register-stat-value text-emerald-600">{(registerSummary.solved || 0).toLocaleString()}</span>
-          <span className="register-stat-label">Solved</span>
-        </div>
-        <div className="register-stat-breakdown">
-          <div className="register-stat-sub">
-            <span className="register-stat-sub-label">Tech. Solve Call</span>
-            <span className="register-stat-sub-value">{(registerSummary.techSolved || 0).toLocaleString()}</span>
-          </div>
-          <div className="register-stat-sub">
-            <span className="register-stat-sub-label">Closed</span>
-            <span className="register-stat-sub-value">{(registerSummary.closed || 0).toLocaleString()}</span>
-          </div>
-        </div>
-      </div>
-      <div className="register-stat-item register-stat-item--detailed">
-        <div className="register-stat-main">
-          <span className="register-stat-value text-blue-600">{(registerSummary.open || 0).toLocaleString()}</span>
-          <span className="register-stat-label">Open</span>
-        </div>
-        <div className="register-stat-breakdown">
-          <div className="register-stat-sub">
-            <span className="register-stat-sub-label">Open Unallocated</span>
-            <span className="register-stat-sub-value">{(registerSummary.openUnallocated || 0).toLocaleString()}</span>
-          </div>
-          <div className="register-stat-sub">
-            <span className="register-stat-sub-label">Assigned</span>
-            <span className="register-stat-sub-value">{(registerSummary.assigned || 0).toLocaleString()}</span>
-          </div>
-        </div>
-      </div>
-      <div className="register-stat-item">
-        <span className="register-stat-value text-rose-600">{(registerSummary.cancelled || 0).toLocaleString()}</span>
-        <span className="register-stat-label">Cancelled</span>
-      </div>
-    </div>
-  ) : null;
-
   const fetchControllerRef = React.useRef<AbortController | null>(null);
   const drillDownControllerRef = React.useRef<AbortController | null>(null);
   const sentinelRef = React.useRef<HTMLDivElement | null>(null);
   const lastSummaryQueryKeyRef = React.useRef<string | null>(globalReportCache?.summaryQueryKey ?? null);
   const lastRegisterListQueryKeyRef = React.useRef<string | null>(null);
-  const summaryFetchPromiseRef = React.useRef<Promise<void> | null>(null);
   const dataRef = React.useRef(data);
   const totalRef = React.useRef(total);
   const registerSummaryRef = React.useRef(registerSummary);
@@ -811,7 +776,7 @@ export default function ReportPage() {
           endDate: endDateStr,
           dateFilterColumn,
           officeIds: officeIdsParam,
-          callTypes: callTypesParam,
+          callTypes: viewCallTypesParam,
           lastRefreshed: lastRefreshedDate.toISOString(),
           total,
           registerSummary,
@@ -826,95 +791,392 @@ export default function ReportPage() {
     }
   };
 
-  const fetchSummaryTabData = async (opts?: { force?: boolean }) => {
-    const officeIdsParam = summaryOfficeIdsParam;
-    const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
-    const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+  const getEffectiveViewFilters = useCallback((): RegisterViewFilterParts => {
+    return registerViewFilterRef.current;
+  }, []);
+
+  /** Summary/Accounts rows must include region hierarchy and headcount. */
+  const isApiShapedSummary = (rows: unknown[]): boolean =>
+    rows.length > 0 &&
+    rows.some(
+      (r) =>
+        typeof r === 'object' &&
+        r != null &&
+        'headcount' in r &&
+        (r as { headcount?: unknown }).headcount != null &&
+        'region' in r
+    );
+
+  const buildCurrentSummaryQueryKey = () => {
+    const startDateStr =
+      dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+    const endDateStr =
+      dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
     const agingStr =
       agingAsOf.includes(' ') || agingAsOf.includes(':')
         ? new Date(agingAsOf).toISOString().split('T')[0]
         : agingAsOf;
-    const summaryQueryKey = buildSummaryQueryKey({
-      officeIdsParam,
-      callTypesParam,
+    return buildSummaryQueryKey({
+      officeIdsParam: summaryOfficeIdsParam,
+      callTypesParam: viewCallTypesParam,
       startDateStr,
       endDateStr,
       agingAsOf: agingStr,
     });
-
-    if (!opts?.force && lastSummaryQueryKeyRef.current === summaryQueryKey) {
-      const cachedSummary = globalReportCache?.summaryData?.length ? globalReportCache.summaryData : summaryData;
-      const cachedAccounts = globalReportCache?.accountsData?.length ? globalReportCache.accountsData : accountsData;
-      if (cachedSummary.length > 0) {
-        if (summaryData !== cachedSummary) setSummaryData(cachedSummary);
-        if (accountsData !== cachedAccounts) setAccountsData(cachedAccounts || []);
-        if (globalReportCache?.globalHeadcount !== undefined) {
-          setGlobalHeadcount(globalReportCache.globalHeadcount);
-        }
-        return;
-      }
-    }
-
-    if (summaryFetchPromiseRef.current && !opts?.force) {
-      return summaryFetchPromiseRef.current;
-    }
-
-    const run = (async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const headers = { Authorization: `Bearer ${session?.access_token}` };
-
-        let summaryUrl = `/api/report/summary?officeId=${officeIdsParam}&callType=${callTypesParam}`;
-        if (startDateStr) summaryUrl += `&startDate=${startDateStr}`;
-        if (endDateStr) summaryUrl += `&endDate=${endDateStr}`;
-        if (agingStr) summaryUrl += `&agingAsOf=${agingStr}`;
-
-        const summRes = await axios.get(summaryUrl, { headers });
-        const branchSummary = summRes.data.branchSummary || [];
-        const accountSummary = summRes.data.accountSummary || [];
-        const headcount = summRes.data.globalHeadcount || 0;
-
-        setSummaryData(branchSummary);
-        setAccountsData(accountSummary);
-        setGlobalHeadcount(headcount);
-        lastSummaryQueryKeyRef.current = summaryQueryKey;
-
-        if (globalReportCache) {
-          globalReportCache.summaryData = branchSummary;
-          globalReportCache.accountsData = accountSummary;
-          globalReportCache.globalHeadcount = headcount;
-          globalReportCache.summaryQueryKey = summaryQueryKey;
-        }
-
-        persistCurrentCache(
-          globalReportCache?.data || data,
-          branchSummary,
-          accountSummary,
-          headcount,
-          total,
-          registerSummary,
-          new Date()
-        );
-      } catch (err) {
-        toast.error('Failed to fetch summary data');
-      }
-    })();
-
-    summaryFetchPromiseRef.current = run;
-    try {
-      await run;
-    } finally {
-      if (summaryFetchPromiseRef.current === run) {
-        summaryFetchPromiseRef.current = null;
-      }
-    }
   };
+
+  const hydrateSummaryFromCache = (): boolean => {
+    const summaryQueryKey = buildCurrentSummaryQueryKey();
+    const cachedSummary = globalReportCache?.summaryData?.length
+      ? globalReportCache.summaryData
+      : summaryDataRef.current;
+    const cachedAccounts = globalReportCache?.accountsData?.length
+      ? globalReportCache.accountsData
+      : accountsDataRef.current;
+
+    if (!cachedSummary.length || !isApiShapedSummary(cachedSummary)) {
+      return false;
+    }
+
+    const exactKeyMatch =
+      globalReportCache?.summaryQueryKey === summaryQueryKey ||
+      lastSummaryQueryKeyRef.current === summaryQueryKey;
+    const datesMatch =
+      !!globalReportCache?.dateRange &&
+      globalReportCache.dateRange.start.getTime() === dateRange.start.getTime() &&
+      globalReportCache.dateRange.end.getTime() === dateRange.end.getTime();
+
+    if (!exactKeyMatch && !datesMatch) {
+      return false;
+    }
+
+    if (summaryDataRef.current !== cachedSummary) setSummaryData(cachedSummary);
+    if (accountsDataRef.current !== cachedAccounts) setAccountsData(cachedAccounts || []);
+    if (globalReportCache?.globalHeadcount !== undefined) {
+      setGlobalHeadcount(globalReportCache.globalHeadcount);
+    }
+    if (exactKeyMatch) {
+      lastSummaryQueryKeyRef.current = summaryQueryKey;
+    }
+    return exactKeyMatch;
+  };
+
+  const commitSummaryResult = useCallback(
+    (
+      branchSummary: ReturnType<typeof deriveSummaryDashboard>['branchSummary'],
+      accountSummary: ReturnType<typeof deriveSummaryDashboard>['accountSummary'],
+      headcount: number,
+      startDateStr: string,
+      endDateStr: string,
+      agingStr: string
+    ) => {
+      const summaryQueryKey = buildSummaryQueryKey({
+        officeIdsParam: summaryOfficeIdsParam,
+        callTypesParam: viewCallTypesParam,
+        startDateStr,
+        endDateStr,
+        agingAsOf: agingStr,
+      });
+
+      setSummaryData(branchSummary);
+      setAccountsData(accountSummary);
+      setGlobalHeadcount(headcount);
+      lastSummaryQueryKeyRef.current = summaryQueryKey;
+
+      if (globalReportCache) {
+        globalReportCache.summaryData = branchSummary;
+        globalReportCache.accountsData = accountSummary;
+        globalReportCache.globalHeadcount = headcount;
+        globalReportCache.summaryQueryKey = summaryQueryKey;
+      }
+
+      void persistCurrentCache(
+        globalReportCache?.data || dataRef.current,
+        branchSummary,
+        accountSummary,
+        headcount,
+        totalRef.current,
+        registerSummaryRef.current,
+        callCorpusStore?.lastSyncedAt ? new Date(callCorpusStore.lastSyncedAt) : new Date()
+      );
+    },
+    [
+      summaryOfficeIdsParam,
+      viewCallTypesParam,
+      callCorpusStore?.lastSyncedAt,
+    ]
+  );
+
+  const applySummaryFromCorpus = useCallback((): boolean => {
+    const startDateStr =
+      dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+    const endDateStr =
+      dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+    const agingStr =
+      agingAsOf.includes(' ') || agingAsOf.includes(':')
+        ? new Date(agingAsOf).toISOString().split('T')[0]
+        : agingAsOf;
+    const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr);
+    const spanDays = corpusSpanDays(startDateStr, endDateStr);
+    const deriveOpts = {
+      agingAsOf: agingStr,
+      endDate: endDateStr,
+      officeIdsParam: summaryOfficeIdsParam,
+      callTypesParam: viewCallTypesParam,
+    };
+
+    if (!callCorpusStore?.calls.size || callCorpusStore.cacheKey !== corpusKey) {
+      logSummaryDebug('corpus not ready — summary cannot derive client-side', {
+        reason: !callCorpusStore?.calls.size ? 'empty_or_missing_corpus' : 'cache_key_mismatch',
+        expectedCorpusKey: corpusKey,
+        actualCorpusKey: callCorpusStore?.cacheKey ?? null,
+        corpusCallCount: callCorpusStore?.calls.size ?? 0,
+        dateRange: `${startDateStr} → ${endDateStr}`,
+        spanDays,
+        maxClientCorpusDays: MAX_CLIENT_CORPUS_DAYS,
+        exceedsCorpusLimit: spanDays > MAX_CLIENT_CORPUS_DAYS,
+        officeFilter: summaryOfficeIdsParam,
+        callTypeFilter: viewCallTypesParam,
+        nextStep:
+          spanDays > MAX_CLIENT_CORPUS_DAYS
+            ? 'Will fetch /api/report/summary (full SQL range; client corpus capped at 120 days)'
+            : 'Will retry after corpus load or fall back to /api/report/summary',
+      });
+      return false;
+    }
+
+    const calls = getCorpusCallsArray(callCorpusStore);
+    const diagnostic = diagnoseSummaryDerivation(calls, deriveOpts);
+    const { branchSummary, accountSummary, globalHeadcount: headcount } = deriveSummaryDashboard(
+      calls,
+      deriveOpts
+    );
+
+    logSummaryDebug('derived from corpus', {
+      ...diagnostic,
+      corpusTruncated: callCorpusStore.truncated ?? false,
+      branchRows: branchSummary.length,
+      accountRows: accountSummary.length,
+      globalHeadcount: headcount,
+      emptyReason:
+        branchSummary.length === 0
+          ? diagnostic.afterCallTypeFilter === 0
+            ? diagnostic.afterOfficeFilter === 0
+              ? diagnostic.eligibleCalls === 0
+                ? 'no_eligible_calls_in_corpus'
+                : 'office_filter_excluded_all_calls'
+              : 'call_type_filter_excluded_all_calls'
+            : 'aggregation_produced_no_branch_rows'
+          : null,
+    });
+
+    commitSummaryResult(branchSummary, accountSummary, headcount, startDateStr, endDateStr, agingStr);
+
+    return branchSummary.length > 0 || callCorpusStore.calls.size > 0;
+  }, [
+    dateRange.start,
+    dateRange.end,
+    agingAsOf,
+    summaryOfficeIdsParam,
+    viewCallTypesParam,
+    callCorpusStore,
+    commitSummaryResult,
+  ]);
+
+  const fetchSummaryFromApi = useCallback(async (): Promise<boolean> => {
+    const startDateStr =
+      dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+    const endDateStr =
+      dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+    const agingStr =
+      agingAsOf.includes(' ') || agingAsOf.includes(':')
+        ? new Date(agingAsOf).toISOString().split('T')[0]
+        : agingAsOf;
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const res = await axios.get('/api/report/summary', {
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+        params: {
+          officeId: summaryOfficeIdsParam,
+          callType: viewCallTypesParam,
+          startDate: startDateStr,
+          endDate: endDateStr,
+          agingAsOf: agingStr,
+        },
+      });
+
+      const branchSummary = res.data?.branchSummary ?? [];
+      const accountSummary = res.data?.accountSummary ?? [];
+      const headcount = Number(res.data?.globalHeadcount ?? 0);
+
+      logSummaryDebug('loaded from /api/report/summary', {
+        branchRows: branchSummary.length,
+        accountRows: accountSummary.length,
+        globalHeadcount: headcount,
+        dateRange: `${startDateStr} → ${endDateStr}`,
+        officeFilter: summaryOfficeIdsParam,
+        callTypeFilter: viewCallTypesParam,
+        emptyReason:
+          branchSummary.length === 0
+            ? 'API returned zero branch rows — check office/date filters or DB data'
+            : null,
+      });
+
+      commitSummaryResult(branchSummary, accountSummary, headcount, startDateStr, endDateStr, agingStr);
+      return branchSummary.length > 0 || accountSummary.length > 0;
+    } catch (err: unknown) {
+      const message =
+        axios.isAxiosError(err) && err.response?.data?.error
+          ? String(err.response.data.error)
+          : err instanceof Error
+            ? err.message
+            : 'Summary API failed';
+      logSummaryDebug('API fallback failed', {
+        error: message,
+        dateRange: `${startDateStr} → ${endDateStr}`,
+        officeFilter: summaryOfficeIdsParam,
+        callTypeFilter: viewCallTypesParam,
+      });
+      return false;
+    }
+  }, [
+    dateRange.start,
+    dateRange.end,
+    agingAsOf,
+    summaryOfficeIdsParam,
+    viewCallTypesParam,
+    supabase,
+    commitSummaryResult,
+  ]);
+
+  const applyRegisterFromCorpus = useCallback(
+    (pageNum = 1): boolean => {
+      const startDateStr =
+        dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+      const endDateStr =
+        dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+      const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr);
+      if (!callCorpusStore?.calls.size || callCorpusStore.cacheKey !== corpusKey) {
+        return false;
+      }
+
+      const viewFilters = registerViewFilterRef.current;
+      const derived = deriveRegisterPageFromCorpus(
+        callCorpusStore,
+        corpusKey,
+        viewFilters,
+        pageNum,
+        limit
+      );
+      if (!derived) return false;
+
+      const allFiltered = getFilteredCorpusCalls(viewFilters, callCorpusStore);
+      const summary = summarizeRegisterRows(allFiltered);
+      const queryKey = buildRegisterListQueryKey({
+        officeIdsParam: registerOfficeIdsParam,
+        callTypesParam: viewCallTypesParam,
+        searchForUrl: viewFilters.search || '',
+        pincodeForUrl: viewFilters.pincodeSearch || '',
+        startDateStr,
+        endDateStr,
+        dateFilterColumn,
+        selectedState: viewFilters.selectedState,
+        selectedCity: viewFilters.selectedCity,
+        selectedBranch: viewFilters.selectedBranch,
+        selectedFranchisee: viewFilters.selectedFranchisee,
+        selectedTechnician: viewFilters.selectedTechnician,
+        selectedStatus: viewFilters.selectedStatus,
+        priorityFilter: viewFilters.priorityFilter,
+        portalFilter: viewFilters.portalFilter,
+        agingAsOf: agingAsOf || '',
+      });
+
+      setData(derived.rows);
+      setTotal(derived.total);
+      setPage(pageNum);
+      setRegisterSummary(summary);
+      setLastRefreshed(
+        callCorpusStore.lastSyncedAt ? new Date(callCorpusStore.lastSyncedAt) : new Date()
+      );
+      lastRegisterListQueryKeyRef.current = queryKey;
+      lastKnownRegisterTotalRef.current = derived.total;
+      registerPageCachePut(registerPagesCacheRef.current, queryKey, pageNum, {
+        data: derived.rows,
+        total: derived.total,
+        registerSummary: summary,
+      });
+
+      if (globalReportCache) {
+        setGlobalReportCache({
+          ...globalReportCache,
+          total: derived.total,
+          registerSummary: summary,
+          page: pageNum,
+          search: viewFilters.search || '',
+          pincodeSearch: viewFilters.pincodeSearch || '',
+          selectedCallTypes,
+          selectedState,
+          selectedCity,
+          selectedBranch,
+          selectedFranchisee,
+          selectedTechnician,
+          selectedStatus,
+          priorityFilter,
+          portalFilter,
+          selectedOfficeIds,
+          agingAsOf,
+        });
+      }
+
+      return true;
+    },
+    [
+      dateRange.start,
+      dateRange.end,
+      dateFilterColumn,
+      viewCallTypesParam,
+      agingAsOf,
+      limit,
+      selectedCallTypes,
+      selectedState,
+      selectedCity,
+      selectedBranch,
+      selectedFranchisee,
+      selectedTechnician,
+      selectedStatus,
+      priorityFilter,
+      portalFilter,
+      selectedOfficeIds,
+    ]
+  );
+
+  useEffect(() => {
+    if (!dbInitialized) return;
+    if (debouncedSearch?.trim() || debouncedPincodeSearch?.trim()) return;
+    if (!loading && data.length > 0) return;
+    if (applyRegisterFromCorpus(1)) {
+      setLoading(false);
+      setFilterUpdating(false);
+    }
+  }, [
+    dbInitialized,
+    corpusTick,
+    loading,
+    data.length,
+    debouncedSearch,
+    debouncedPincodeSearch,
+    applyRegisterFromCorpus,
+  ]);
 
   const fetchData = async (
     p = 1,
     opts?: {
       silent?: boolean;
       skipCache?: boolean;
+      forceCorpus?: boolean;
       searchOverride?: string;
       pincodeOverride?: string;
     }
@@ -950,7 +1212,7 @@ export default function ReportPage() {
 
     const queryKey = buildRegisterListQueryKey({
       officeIdsParam,
-      callTypesParam,
+      callTypesParam: viewCallTypesParam,
       searchForUrl: searchForUrl || '',
       pincodeForUrl: pincodeForUrl || '',
       startDateStr,
@@ -1036,6 +1298,88 @@ export default function ReportPage() {
       }
     }
 
+    if (!searchActive) {
+      const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr);
+      const hasCorpus =
+        callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0;
+      if (!hasCorpus || opts?.skipCache || opts?.forceCorpus) {
+        await ensureCorpusLoaded({
+          silent: !!opts?.silent,
+          force: !!(opts?.skipCache || opts?.forceCorpus),
+        });
+      }
+      await ensurePortalAuditCache(supabase);
+      const viewFilters = registerViewFilterRef.current;
+      const corpusDerived = deriveRegisterPageFromCorpus(
+        callCorpusStore,
+        corpusKey,
+        viewFilters,
+        p,
+        limit
+      );
+      if (corpusDerived) {
+        const allFiltered = getFilteredCorpusCalls(viewFilters, callCorpusStore);
+        const summary = p === 1 ? summarizeRegisterRows(allFiltered) : registerSummaryRef.current;
+        setData(corpusDerived.rows);
+        setTotal(corpusDerived.total);
+        setPage(p);
+        if (p === 1 && summary) {
+          setRegisterSummary(summary);
+        }
+        if (!opts?.silent) {
+          setLoading(false);
+          setLoadingPage(null);
+        }
+        setLastRefreshed(
+          callCorpusStore?.lastSyncedAt ? new Date(callCorpusStore.lastSyncedAt) : new Date()
+        );
+        lastRegisterListQueryKeyRef.current = queryKey;
+        lastKnownRegisterTotalRef.current = corpusDerived.total;
+        registerPageCachePut(registerPagesCacheRef.current, queryKey, p, {
+          data: corpusDerived.rows,
+          total: corpusDerived.total,
+          registerSummary: summary ?? undefined,
+        });
+        if (p === 1) {
+          const page2 = deriveRegisterPageFromCorpus(
+            callCorpusStore,
+            corpusKey,
+            viewFilters,
+            2,
+            limit
+          );
+          if (page2) {
+            registerPageCachePut(registerPagesCacheRef.current, queryKey, 2, {
+              data: page2.rows,
+              total: page2.total,
+              registerSummary: summary ?? undefined,
+            });
+          }
+        }
+        reportPerf('fetchData', 'corpus client slice HIT (no network)', opStart, {
+          opId,
+          page: p,
+          rows: corpusDerived.rows.length,
+          total: corpusDerived.total,
+        });
+        return;
+      }
+
+      const spanDays = corpusSpanDays(startDateStr, endDateStr);
+      if (spanDays <= MAX_CLIENT_CORPUS_DAYS) {
+        reportPerf('fetchData', 'corpus-only window — skip /api/report fallback', opStart, {
+          opId,
+          corpusCalls: callCorpusStore?.calls.size ?? 0,
+          why: 'Date range is served from in-memory corpus; paginated SQL register is not used.',
+        });
+        if (!opts?.silent) {
+          setLoading(false);
+          setLoadingPage(null);
+        }
+        return;
+      }
+    }
+
     const controller = new AbortController();
     fetchControllerRef.current = controller;
 
@@ -1113,8 +1457,20 @@ export default function ReportPage() {
         const maxPage = totalSnap > 0 ? Math.ceil(totalSnap / limit) : 1;
         const nextPage = currentPage + 1;
         if (nextPage <= maxPage) {
+          const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr);
+          const fromCorpus = deriveRegisterPageFromCorpus(
+            callCorpusStore,
+            corpusKey,
+            registerViewFilterRef.current,
+            nextPage,
+            limit
+          );
+          if (fromCorpus) {
+            storePrefetched(nextPage, { data: fromCorpus.rows, total: fromCorpus.total });
+            return;
+          }
           const nextUrl = appendRegisterFilters(
-            `/api/report?page=${nextPage}&limit=${limit}&fetchTotals=false&officeId=${officeIdsParam}&callType=${callTypesParam}`
+            `/api/report?page=${nextPage}&limit=${limit}&fetchTotals=false&officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
           );
           axios
             .get(nextUrl, { headers, signal: controller.signal })
@@ -1131,7 +1487,7 @@ export default function ReportPage() {
       };
 
       let url = appendRegisterFilters(
-        `/api/report?page=${p}&limit=${limit}&officeId=${officeIdsParam}&callType=${callTypesParam}`
+        `/api/report?page=${p}&limit=${limit}&officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
       );
 
       const newDate = new Date();
@@ -1212,8 +1568,6 @@ export default function ReportPage() {
         );
 
         lastRegisterListQueryKeyRef.current = queryKey;
-
-        fetchSummaryTabData({ force: !!opts?.skipCache });
       } else {
         url += `&fetchTotals=false`;
         const tBeforePage = performance.now();
@@ -1547,7 +1901,7 @@ export default function ReportPage() {
       const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
       const res = await axios.post('/api/report/drilldown', {
         type,
-        callType: params.callType || callTypesParam,
+        callType: params.callType || viewCallTypesParam,
         ...params,
         startDate: startDateStr,
         endDate: endDateStr
@@ -1629,25 +1983,87 @@ export default function ReportPage() {
           hasMeta: !!cacheParams,
           getMetaMs: Number((performance.now() - tBeforeMeta).toFixed(1)),
         });
+
+        const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+        const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+        const corpusMeta = await readCorpusMeta();
+        const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, selectedCallTypes);
+        if (corpusMeta?.cacheKey === corpusKey && (corpusMeta.callCount ?? 0) > 0) {
+          const tBeforeCorpus = performance.now();
+          const restored = await restoreCorpusFromIndexedDB(corpusKey);
+          reportPerf('initDB', 'corpus IDB restore on reload', i0, {
+            callCount: corpusMeta.callCount,
+            restored: !!restored,
+            restoreMs: Number((performance.now() - tBeforeCorpus).toFixed(1)),
+          });
+          if (restored) {
+            const derived = deriveRegisterPageFromCorpus(
+              restored,
+              corpusKey,
+              {
+                search: '',
+                pincodeSearch: '',
+                selectedState: [],
+                selectedCity: [],
+                selectedBranch: [],
+                selectedFranchisee: [],
+                selectedTechnician: [],
+                selectedCallTypes,
+                selectedOfficeIds,
+                selectedStatus: [],
+                priorityFilter: [],
+                portalFilter: [],
+              },
+              1,
+              10
+            );
+            if (derived) {
+              const allFiltered = getFilteredCorpusCalls(
+                {
+                  search: '',
+                  pincodeSearch: '',
+                  selectedState: [],
+                  selectedCity: [],
+                  selectedBranch: [],
+                  selectedFranchisee: [],
+                  selectedTechnician: [],
+                  selectedCallTypes,
+                  selectedOfficeIds,
+                  selectedStatus: [],
+                  priorityFilter: [],
+                  portalFilter: [],
+                },
+                restored
+              );
+              setData(derived.rows);
+              setTotal(derived.total);
+              setRegisterSummary(summarizeRegisterRows(allFiltered));
+              setLastRefreshed(new Date(restored.lastSyncedAt));
+              lastKnownRegisterTotalRef.current = derived.total;
+            }
+          }
+          setLoading(false);
+          return;
+        }
+
         if (cacheParams) {
           const officeIdsParam = summaryOfficeIdsParam;
-          const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
-          const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
 
           if (
             cacheParams.startDate === startDateStr &&
             cacheParams.endDate === endDateStr &&
             (cacheParams.dateFilterColumn || 'dtrndate') === dateFilterColumn &&
             cacheParams.officeIds === officeIdsParam &&
-            cacheParams.callTypes === callTypesParam
+            cacheParams.callTypes === viewCallTypesParam
           ) {
-            const tBeforeCalls = performance.now();
-            const cachedCalls = await getCallsFromDB();
-            reportPerf('initDB', 'getCallsFromDB done', i0, {
-              rowCount: cachedCalls?.length ?? 0,
-              getCallsMs: Number((performance.now() - tBeforeCalls).toFixed(1)),
-            });
-            if (cachedCalls && cachedCalls.length > 0) {
+            const hydrateFromIdb = async () => {
+              const tBeforeCalls = performance.now();
+              const cachedCalls = await getCallsFromDB();
+              reportPerf('initDB', 'getCallsFromDB done (deferred)', i0, {
+                rowCount: cachedCalls?.length ?? 0,
+                getCallsMs: Number((performance.now() - tBeforeCalls).toFixed(1)),
+              });
+              if (!cachedCalls?.length) return;
               setData(cachedCalls);
               setSummaryData(cacheParams.summaryData || []);
               setAccountsData(cacheParams.accountsData || []);
@@ -1696,7 +2112,7 @@ export default function ReportPage() {
                     : agingAsOf;
                 lastSummaryQueryKeyRef.current = buildSummaryQueryKey({
                   officeIdsParam,
-                  callTypesParam,
+                  callTypesParam: viewCallTypesParam,
                   startDateStr,
                   endDateStr,
                   agingAsOf: agingStr,
@@ -1705,7 +2121,7 @@ export default function ReportPage() {
 
               lastRegisterListQueryKeyRef.current = buildRegisterListQueryKey({
                 officeIdsParam,
-                callTypesParam,
+                callTypesParam: viewCallTypesParam,
                 searchForUrl: '',
                 pincodeForUrl: '',
                 startDateStr,
@@ -1726,15 +2142,10 @@ export default function ReportPage() {
 
               // Let the UI render the loaded cache first
               setLoading(false);
-
-              // Perform silent background sync (Disabled per user request to remove all auto fetch)
-              // setTimeout(() => {
-              //   reportPerf('initDB', 'scheduling fetchDelta in 500ms', i0, {
-              //     why: 'Let paint complete then pull server deltas for rows changed since lastRefreshed.',
-              //   });
-              //   fetchDelta();
-              // }, 500);
-            }
+            };
+            window.setTimeout(() => {
+              void hydrateFromIdb();
+            }, 0);
           }
         }
       } catch (err) {
@@ -1762,6 +2173,10 @@ export default function ReportPage() {
       if (globalReportCache.dateRange.start.getTime() !== dateRange.start.getTime()) changedFields.push('dateRange.start');
       if (globalReportCache.dateRange.end.getTime() !== dateRange.end.getTime()) changedFields.push('dateRange.end');
       if ((globalReportCache.dateFilterColumn || 'dtrndate') !== dateFilterColumn) changedFields.push('dateFilterColumn');
+      if (!filtersEqual(globalReportCache.selectedCallTypes, selectedCallTypes)) changedFields.push('callTypes');
+      if (!filtersEqual(globalReportCache.selectedOfficeIds, selectedOfficeIds)) changedFields.push('officeIds');
+      if (!filtersEqual(migrateStringFilter(globalReportCache.selectedState), selectedState)) changedFields.push('state');
+      if (!filtersEqual(migrateStringFilter(globalReportCache.selectedCity), selectedCity)) changedFields.push('city');
       if (!filtersEqual(migrateStringFilter(globalReportCache.selectedBranch), selectedBranch)) changedFields.push('branch');
       if (!filtersEqual(migrateStringFilter(globalReportCache.selectedFranchisee), selectedFranchisee)) changedFields.push('franchisee');
       if (!filtersEqual(globalReportCache.selectedTechnician, selectedTechnician)) changedFields.push('technician');
@@ -1774,8 +2189,14 @@ export default function ReportPage() {
     }
     const filtersChanged = changedFields.length > 0;
     const searchOrPinActive = !!(debouncedSearch?.trim() || debouncedPincodeSearch?.trim());
+    const corpusScopeChanged = changedFields.some(
+      (f) =>
+        f === 'no_globalReportCache' ||
+        f.startsWith('dateRange') ||
+        f === 'dateFilterColumn'
+    );
     const fetchOpts = {
-      skipCache: true as const,
+      skipCache: corpusScopeChanged || searchOrPinActive,
       searchOverride: debouncedSearch,
       pincodeOverride: debouncedPincodeSearch,
     };
@@ -1790,7 +2211,40 @@ export default function ReportPage() {
       if (clearFiltersRef.current) {
         clearFiltersRef.current = false;
       }
-      fetchData(1, fetchOpts);
+
+      setFilterUpdating(true);
+
+      if (searchOrPinActive) {
+        void fetchData(1, fetchOpts).finally(() => setFilterUpdating(false));
+        return;
+      }
+
+      void (async () => {
+        try {
+          const startDateStr =
+            dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+          const endDateStr =
+            dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+          const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr);
+          const hasCorpus =
+            callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0;
+
+          if (!hasCorpus) {
+            await ensureCorpusLoaded({ silent: false });
+          }
+          await ensurePortalAuditCache(supabase);
+          applyRegisterFromCorpus(1);
+          if (activeTab === 'summary' || activeTab === 'accounts') {
+            applySummaryFromCorpus();
+          }
+          if (corpusSpanDays(startDateStr, endDateStr) > MAX_CLIENT_CORPUS_DAYS) {
+            await fetchData(1, fetchOpts);
+          }
+        } finally {
+          setFilterUpdating(false);
+        }
+      })();
+      return;
     } else if (
       searchOrPinActive &&
       lastRegisterListQueryKeyRef.current === null
@@ -1825,6 +2279,11 @@ export default function ReportPage() {
     agingAsOf,
     debouncedSearch,
     debouncedPincodeSearch,
+    activeTab,
+    applyRegisterFromCorpus,
+    applySummaryFromCorpus,
+    ensureCorpusLoaded,
+    supabase,
   ]);
 
   useEffect(() => {
@@ -1840,7 +2299,7 @@ export default function ReportPage() {
 
     lastRegisterListQueryKeyRef.current = buildRegisterListQueryKey({
       officeIdsParam: registerOfficeIdsParam,
-      callTypesParam,
+      callTypesParam: viewCallTypesParam,
       searchForUrl: '',
       pincodeForUrl: '',
       startDateStr,
@@ -1878,8 +2337,45 @@ export default function ReportPage() {
   useEffect(() => {
     if (!dbInitialized) return;
     if (activeTab !== 'summary' && activeTab !== 'accounts') return;
-    fetchSummaryTabData();
-  }, [dbInitialized, activeTab, callTypesParam, selectedBranch, selectedFranchisee, dateRange, agingAsOf]);
+
+    hydrateSummaryFromCache();
+
+    void (async () => {
+      const startDateStr =
+        dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+      const endDateStr =
+        dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+      const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr);
+      const hasCorpus =
+        callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0;
+
+      if (!hasCorpus) {
+        await ensureCorpusLoaded({ silent: true });
+      }
+      if (applySummaryFromCorpus()) return;
+      await fetchSummaryFromApi();
+    })();
+  }, [
+    dbInitialized,
+    activeTab,
+    viewCallTypesParam,
+    selectedBranch,
+    selectedFranchisee,
+    dateRange.start,
+    dateRange.end,
+    agingAsOf,
+    corpusTick,
+    applySummaryFromCorpus,
+    fetchSummaryFromApi,
+    ensureCorpusLoaded,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      fetchControllerRef.current?.abort();
+      drillDownControllerRef.current?.abort();
+    };
+  }, []);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1906,7 +2402,7 @@ export default function ReportPage() {
           page: 1,
           limit: 100000,
           officeId: summaryOfficeIdsParam,
-          callType: callTypesParam,
+          callType: viewCallTypesParam,
           startDate: dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start,
           endDate: dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end,
           status: joinFilterParam(selectedStatus),
@@ -2076,7 +2572,7 @@ export default function ReportPage() {
           const headers = { 'Authorization': `Bearer ${session?.access_token}` };
           const params = new URLSearchParams({
             officeId: summaryOfficeIdsParam,
-            callType: callTypesParam,
+            callType: viewCallTypesParam,
             startDate: dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start,
             endDate: dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end,
             limit: '20000', // Fetch a large batch for export
@@ -2315,7 +2811,13 @@ export default function ReportPage() {
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as 'register' | 'summary' | 'accounts')}
+                onClick={() => {
+                  const nextTab = tab.id as 'register' | 'summary' | 'accounts';
+                  if (nextTab === 'summary' || nextTab === 'accounts') {
+                    hydrateSummaryFromCache();
+                  }
+                  setActiveTab(nextTab);
+                }}
                 className={`relative flex h-14 items-center px-3 text-xs font-medium transition-all ${activeTab === tab.id ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600' }`}
               >
                 {tab.label}
@@ -2327,11 +2829,26 @@ export default function ReportPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {lastRefreshed && (
-            <span className="text-[10px] text-slate-400 font-medium">
-              Last Refreshed: {lastRefreshed?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            <span
+              className="text-[10px] text-slate-400 font-medium"
+              title={`Last refreshed: ${lastRefreshed.toLocaleString()}`}
+            >
+              {formatRelativeTime(lastRefreshed)}
             </span>
+          )}
+          {filterUpdating && (
+            <span className="text-[10px] font-medium text-blue-600 animate-pulse">
+              Updating filters…
+            </span>
+          )}
+          {(activeTab === 'summary' || activeTab === 'accounts') &&
+            (syncInProgress || corpusLoading || filterUpdating) && (
+            <span
+              className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-400 border-t-transparent"
+              title="Updating summary from corpus"
+            />
           )}
           <button
             onClick={() => {
@@ -2342,48 +2859,64 @@ export default function ReportPage() {
               fetchDelta();
             }}
             disabled={syncInProgress}
-            className="flex items-center gap-1.5 bg-slate-900 text-white px-3 py-1.5 rounded-md text-xs hover:bg-slate-800 transition-all shadow-sm disabled:opacity-50 ui-label"
-            title="Sync now (auto-sync runs every minute)"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 shadow-sm transition-all hover:bg-slate-50 disabled:opacity-50"
+            title="Sync now (manual refresh from server)"
           >
             <div className={`${syncInProgress ? 'animate-spin' : ''}`}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M16 16h5v5" /></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M16 16h5v5" /></svg>
             </div>
-            Sync
-          </button>
-          <button
-            onClick={() => {
-              const t0 = performance.now();
-              reportPerf('ui', 'Full Reload → fetchData(1, skipCache)', t0, {
-                why: 'Forces network + summary; ignores session page cache.',
-              });
-              fetchData(1, { skipCache: true });
-            }}
-            disabled={loading}
-            className="flex items-center gap-1.5 bg-white text-slate-700 px-3 py-1.5 rounded-md text-xs border border-slate-200 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm disabled:opacity-50 ui-label"
-            title="Full reload (re-runs all branch and account queries from scratch)"
-          >
-            <div className={`${loading ? 'animate-spin' : ''}`}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></svg>
-            </div>
-            Full Reload
           </button>
           <button
             onClick={() => handleExport('excel')}
             className="flex items-center gap-2 bg-white text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-slate-50 transition-all shadow-sm"
           >
             <FileSpreadsheet size={14} className="text-emerald-600" />
-            Excel Export
+            Export
           </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setHeaderMenuOpen((open) => !open)}
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm transition-all hover:bg-slate-50"
+              title="More actions"
+            >
+              <MoreVertical size={14} />
+            </button>
+            {headerMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setHeaderMenuOpen(false)} />
+                <div className="absolute right-0 top-full z-50 mt-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHeaderMenuOpen(false);
+                      const t0 = performance.now();
+                      reportPerf('ui', 'Full Reload → fetchData(1, skipCache)', t0, {
+                        why: 'Forces network + summary; ignores session page cache.',
+                      });
+                      fetchData(1, { skipCache: true });
+                    }}
+                    disabled={loading}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Full reload
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Control Bar */}
       {activeTab === 'register' ? (
-        <RegisterFilterBar
+        <RegisterPageFilters
+          summary={registerSummary}
+          loading={loading}
+          loadingLabel="Loading call register…"
           onSearchEnter={() => fetchData(1, { searchOverride: search, skipCache: true })}
           onPincodeEnter={() => fetchData(1, { pincodeOverride: pincodeSearch, skipCache: true })}
-          onClear={() => { clearFiltersRef.current = true; }}
-          showClearButton
+          onClearAll={() => { clearFiltersRef.current = true; }}
         />
       ) : (
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-2">
@@ -2424,7 +2957,6 @@ export default function ReportPage() {
                   <div className="flex justify-end border-t border-slate-100 bg-slate-50 p-2">
                     <button
                       onClick={() => {
-                        setCallTypesFilterTouched(true);
                         setSelectedCallTypes(tempSelectedCallTypes);
                         setShowCallTypeDropdown(false);
                       }}
@@ -2452,11 +2984,9 @@ export default function ReportPage() {
         </div>
       )}
 
-      {registerStatsBar}
-
       {/* Main Area */}
       <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
-        {loading && (
+        {(activeTab === 'register' && (loading || filterUpdating)) && (
           <div className="absolute top-0 left-0 right-0 h-0.5 bg-slate-100 overflow-hidden z-50">
             <div className="h-full bg-slate-900 animate-[loading_1.5s_infinite_linear] w-[30%] rounded-r" />
           </div>
@@ -2493,7 +3023,10 @@ export default function ReportPage() {
 
         {activeTab === 'register' ? (
           <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
-            <div className="flex h-10 flex-shrink-0 items-center justify-end border-b border-slate-200 bg-slate-50 px-4">
+            <div className="register-table-meta">
+              <span className="text-[11px] font-medium text-slate-700">
+                {total.toLocaleString()} {total === 1 ? 'call' : 'calls'}
+              </span>
               <RegisterColumnPicker
                 visibleColumns={visibleRegisterColumns}
                 onChange={setVisibleRegisterColumns}
@@ -2503,9 +3036,12 @@ export default function ReportPage() {
               <table className="register-table">
               <thead className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50">
                 <tr>
-                  <th className="border-r border-slate-100 px-2 py-2.5 text-center text-[11px] font-medium whitespace-nowrap text-slate-500">#</th>
-                  {visibleRegisterColumnDefs.map((col) => (
-                    <th key={col.key} className="border-r border-slate-100 px-3 py-2.5 text-[11px] font-medium whitespace-nowrap text-slate-500">
+                  <th className="register-table-sticky-col register-table-sticky-col-1 border-r border-slate-100 px-2 py-2.5 text-center text-[11px] font-medium whitespace-nowrap text-slate-500">#</th>
+                  {visibleRegisterColumnDefs.map((col, colIdx) => (
+                    <th
+                      key={col.key}
+                      className={`border-r border-slate-100 px-3 py-2.5 text-[11px] font-medium whitespace-nowrap text-slate-500 ${colIdx === 0 ? 'register-table-sticky-col register-table-sticky-col-2' : ''}`}
+                    >
                       {col.label}
                     </th>
                   ))}
@@ -2514,17 +3050,32 @@ export default function ReportPage() {
               <tbody className="divide-y divide-slate-100 bg-white">
                 {displayedData.length > 0 ? displayedData.map((row, idx) => (
                   <tr key={idx} className="transition-colors hover:bg-slate-50/50">
-                    <td className="whitespace-nowrap border-r border-slate-50 px-2 py-2 text-center text-[11px] text-slate-400">
-                      {idx + 1}
+                    <td className="register-table-sticky-col register-table-sticky-col-1 whitespace-nowrap border-r border-slate-50 px-2 py-2 text-center text-[11px] text-slate-400">
+                      {(page - 1) * limit + idx + 1}
                     </td>
-                    {visibleRegisterColumnDefs.map((col) => (
-                      <td key={col.key} className={getRegisterCellClassName(col.key)}>
+                    {visibleRegisterColumnDefs.map((col, colIdx) => (
+                      <td
+                        key={col.key}
+                        className={`${getRegisterCellClassName(col.key)} ${colIdx === 0 ? 'register-table-sticky-col register-table-sticky-col-2' : ''}`}
+                      >
                         {renderRegisterCell(col.key, row)}
                       </td>
                     ))}
                   </tr>
                 )) : (
                   <tr>
+                    <td colSpan={visibleRegisterColumnDefs.length + 1} className="register-table-empty">
+                      <p className="text-sm font-medium text-slate-700">No calls match your filters</p>
+                      {isAnyRegisterFilterActive && (
+                        <button
+                          type="button"
+                          onClick={() => { clearFiltersRef.current = true; clearAllFilters(); }}
+                          className="mt-3 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                          Clear filters
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 )}
               </tbody>

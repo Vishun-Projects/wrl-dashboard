@@ -298,19 +298,31 @@ const TRHCALLS_DEDUP_INNER_COLUMNS = [
   'nengineer',
   'nofficeid',
   'nparty',
+  'npartyprofile',
   'ncalltype',
+  'nitem',
+  'vcomplaint',
+  'callStatus',
+  'vsolveremarks',
 ].join(', ');
 
 export function buildTrhcallsDedupSubquery(opts?: {
   startDate?: string | null;
   endDate?: string | null;
+  /** Default 30 for register/distribution; pass `null` for no fallback (corpus with explicit dates). */
+  fallbackDays?: number | null;
 }): string {
   const dateWhere = buildTrhcallsDateRangeWhere({
     startDate: opts?.startDate,
     endDate: opts?.endDate,
-    fallbackDays: 30,
+    fallbackDays:
+      opts?.fallbackDays === null
+        ? undefined
+        : opts?.fallbackDays !== undefined
+          ? opts.fallbackDays
+          : 30,
   });
-  const subqueryCondition = `WHERE ${dateWhere}`;
+  const subqueryCondition = dateWhere ? `WHERE ${dateWhere}` : '';
 
   return `(
     SELECT *
@@ -325,6 +337,286 @@ export function buildTrhcallsDedupSubquery(opts?: {
     ) s
     WHERE s.rn = 1
   ) tc`;
+}
+
+/** Max rows returned by corpus API before truncated flag. */
+export const CORPUS_MAX_ROWS = 50_000;
+
+const CORPUS_CALL_STATUS_EXPR = `
+  CASE
+    WHEN tc.bsolved = 1 THEN 'Solved'
+    WHEN tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 THEN 'Cancel'
+    ELSE 'Open'
+  END`;
+
+/** Shared lightweight field list for report corpus API. */
+export function buildCorpusFieldsSql(): string {
+  return `
+    tc.vcclid,
+    tc.ncode,
+    tc.ncode AS id,
+    tc.ncancelreason,
+    tc.ntransfertooffice,
+    tc.vtrnno,
+    tc.vtrnno AS UniqueCallNo,
+    tc.vserialno AS callsvserialno,
+    tc.vtransfercallno,
+    tc.bsolved,
+    tc.bfastclose,
+    tc.nengineer,
+    tc.nofficeid,
+    o.ncode AS officeId,
+    o.nunder AS parentId,
+    ISNULL(UPPER(z.vname), 'OTHER') AS region,
+    ISNULL(pprof.vname, 'UNCLASSIFIED') AS account,
+    ISNULL(hc.branch_headcount, 0) AS branch_headcount,
+    CASE WHEN EXISTS (SELECT 1 FROM trdcalls1visit v (NOLOCK) WHERE v.ncalls = tc.ncode) THEN 1 ELSE 0 END AS has_visit,
+    tc.editedon,
+    tc.addedon,
+    p.vinstpostalcode AS pincode,
+    p.vinstpostalcode AS Pincode,
+    p.vname AS PartyName,
+    o.nunder AS office_under,
+    o.vcompanyname AS office_name,
+    bo.vcompanyname AS branch_office_name,
+    u.vname AS serviceman,
+    u.vname AS technician_name,
+    CONVERT(varchar(30), tc.dtrndate, 126) AS callsdtrndate,
+    tc.vcomplaint,
+    mstitems.vname AS itemname,
+    calltype_fs.vdisplayvalue AS calltype,
+    tc.callStatus AS Status,
+    ${CORPUS_CALL_STATUS_EXPR} AS callstatus,
+    tc.bsolved AS callsolved,
+    CONVERT(varchar(30), tc.dsolvedatetime, 126) AS callsolveddate,
+    tc.vsolveremarks,
+    cr.vname AS cancel_reason,
+    (SELECT TOP 1 r.bmajor FROM trdcalls2fault tf (NOLOCK) JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode WHERE tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid ORDER BY CASE WHEN r.bmajor = 'True' THEN 1 ELSE 2 END) AS is_major_repair
+  `;
+}
+
+export function buildCorpusDedupSubquery(opts: {
+  startDate?: string | null;
+  endDate?: string | null;
+  lastSync?: string | null;
+}): string {
+  if (opts.lastSync) {
+    return buildTrhcallsDeltaSubquery(opts.lastSync, opts.startDate, opts.endDate);
+  }
+  return buildTrhcallsDedupSubquery({
+    startDate: opts.startDate,
+    endDate: opts.endDate,
+    fallbackDays: opts.startDate || opts.endDate ? null : 30,
+  });
+}
+
+export function buildCorpusTableName(opts: {
+  startDate?: string | null;
+  endDate?: string | null;
+  lastSync?: string | null;
+}): string {
+  return `
+    ${buildCorpusDedupSubquery(opts)}
+    LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode
+    LEFT JOIN mstpartyprofile pprof (NOLOCK) ON tc.npartyprofile = pprof.ncode
+    LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode
+    LEFT JOIN mstoffice bo (NOLOCK) ON o.nunder = bo.ncode
+    LEFT JOIN mstoffice op (NOLOCK) ON o.nunder = op.ncode AND o.nunder <> 0
+    LEFT JOIN mstzones z (NOLOCK) ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
+    LEFT JOIN (
+      SELECT nofficeid, COUNT(DISTINCT ncode) as branch_headcount
+      FROM mstusers (NOLOCK)
+      WHERE bactive = 'True'
+      GROUP BY nofficeid
+    ) hc ON o.ncode = hc.nofficeid
+    LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode
+    LEFT JOIN mstitems (NOLOCK) ON tc.nitem = mstitems.ncode
+    LEFT JOIN mstfixedselection calltype_fs (NOLOCK) ON tc.ncalltype = calltype_fs.ncode AND calltype_fs.vfieldname = 'ncalltype'
+    LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode
+  `;
+}
+
+/** Valid device serial on raw trhcalls row (no alias). */
+export const SERIAL_AUDIT_VALID_SERIAL_WHERE =
+  "ISNULL(vserialno, '') <> '' AND LTRIM(RTRIM(vserialno)) NOT IN ('0', 'N/A', 'NA', 'NONE', 'NULL', '-', '—')";
+
+/** Exclude transferred calls on raw trhcalls row (no alias). */
+export const SERIAL_AUDIT_TRANSFER_EXCLUDE_WHERE =
+  "ISNULL(vtransfercallno, '') = '' AND ISNULL(CAST(ncancelreason AS INT), 0) <> 2";
+
+export const TRHCALLS_CALL_ID_EXPR =
+  "CASE WHEN ISNULL(vtrnno, '') = '' THEN CAST(ncode AS VARCHAR(50)) ELSE vtrnno END";
+
+const TRHCALLS_DEDUP_PARTITION =
+  "CASE WHEN ISNULL(vtrnno, '') = '' THEN CAST(ncode AS VARCHAR(50)) ELSE vtrnno END";
+
+const TRHCALLS_DEDUP_ORDER = 'ISNULL(editedon, addedon) DESC, ncode DESC';
+
+/** Max calendar days for a single client corpus download (wider ranges use server views per page). */
+export const MAX_CLIENT_CORPUS_DAYS = 120;
+
+function buildSerialAuditBaseWhere(opts?: {
+  callType?: string | null;
+  isHod?: boolean;
+  assignedOffices?: string[];
+  startDate?: string | null;
+  endDate?: string | null;
+}): string {
+  let where = `${SERIAL_AUDIT_VALID_SERIAL_WHERE} AND vtrnno IS NOT NULL AND vtrnno <> '' AND ${SERIAL_AUDIT_TRANSFER_EXCLUDE_WHERE}`;
+  if (opts?.startDate) {
+    where += ` AND dtrndate >= '${opts.startDate.replace(/'/g, "''")}'`;
+  }
+  if (opts?.endDate) {
+    where += ` AND dtrndate <= '${opts.endDate.replace(/'/g, "''")} 23:59:59'`;
+  }
+  const callTypeSubquery = buildCallTypeNcodeInSubquery(opts?.callType);
+  if (callTypeSubquery) {
+    where += ` AND ncalltype IN ${callTypeSubquery}`;
+  }
+  if (!opts?.isHod && opts?.assignedOffices && opts.assignedOffices.length > 0) {
+    const allowed = opts.assignedOffices.join(',');
+    where += ` AND (nofficeid IN (${allowed}) OR nofficeid IN (SELECT ncode FROM mstoffice (NOLOCK) WHERE nunder IN (${allowed})))`;
+  }
+  return where;
+}
+
+/** Repeated serials in a date window — deduped rows with status counts. */
+export function buildSerialAuditWindowListRawSql(opts: {
+  minRepeats?: number;
+  callType?: string | null;
+  isHod?: boolean;
+  assignedOffices?: string[];
+  startDate?: string | null;
+  endDate?: string | null;
+}): string {
+  const minRepeats = Math.max(2, opts.minRepeats ?? 2);
+  const where = buildSerialAuditBaseWhere(opts);
+
+  return `
+    SELECT
+      UPPER(RTRIM(vserialno)) AS serial,
+      COUNT(*) AS complaint_count,
+      SUM(CASE
+        WHEN (bsolved = 1 OR bfastclose = 1) THEN 0
+        WHEN ncancelreason IS NOT NULL AND ncancelreason <> 0 AND ncancelreason <> 2 THEN 0
+        ELSE 1
+      END) AS open_count,
+      SUM(CASE WHEN bsolved = 1 OR bfastclose = 1 THEN 1 ELSE 0 END) AS solved_count,
+      SUM(CASE
+        WHEN ncancelreason IS NOT NULL AND ncancelreason <> 0 AND ncancelreason <> 2 THEN 1
+        ELSE 0
+      END) AS cancelled_count,
+      CONVERT(varchar(30), MAX(dtrndate), 126) AS last_complaint_date
+    FROM (
+      SELECT *,
+        ROW_NUMBER() OVER (
+          PARTITION BY ${TRHCALLS_DEDUP_PARTITION}
+          ORDER BY ${TRHCALLS_DEDUP_ORDER}
+        ) AS rn
+      FROM trhcalls (NOLOCK)
+      WHERE ${where}
+    ) deduped
+    WHERE rn = 1
+    GROUP BY UPPER(RTRIM(vserialno))
+    HAVING COUNT(*) >= ${minRepeats}
+  `;
+}
+
+/** All-time repeated serials — single pass, no joins, no ORDER BY (sort client-side). */
+export function buildSerialAuditListRawSql(opts: {
+  minRepeats?: number;
+  callType?: string | null;
+  isHod?: boolean;
+  assignedOffices?: string[];
+  startDate?: string | null;
+  endDate?: string | null;
+}): string {
+  if (opts.startDate || opts.endDate) {
+    return buildSerialAuditWindowListRawSql(opts);
+  }
+  const minRepeats = Math.max(2, opts.minRepeats ?? 2);
+  const where = buildSerialAuditBaseWhere(opts);
+
+  return `
+    SELECT
+      UPPER(RTRIM(vserialno)) AS serial,
+      COUNT(DISTINCT vtrnno) AS complaint_count,
+      CONVERT(varchar(30), MAX(dtrndate), 126) AS last_complaint_date
+    FROM trhcalls (NOLOCK)
+    WHERE ${where}
+    GROUP BY UPPER(RTRIM(vserialno))
+    HAVING COUNT(DISTINCT vtrnno) >= ${minRepeats}
+  `;
+}
+
+/** All calls for one serial — scoped dedup + minimal joins. */
+export function buildSerialAuditDetailRawSql(
+  serial: string,
+  opts: {
+    callType?: string | null;
+    isHod?: boolean;
+    assignedOffices?: string[];
+    startDate?: string | null;
+    endDate?: string | null;
+  }
+): string {
+  const serialSafe = serial.trim().replace(/'/g, "''").toUpperCase();
+  const where = `${buildSerialAuditBaseWhere(opts)} AND UPPER(LTRIM(RTRIM(vserialno))) = '${serialSafe}'`;
+
+  return `
+    SELECT TOP 100 PERCENT
+      tc.vcclid,
+      tc.ncode AS id,
+      tc.ncode,
+      tc.ncancelreason,
+      tc.vtrnno,
+      tc.vtrnno AS UniqueCallNo,
+      tc.vserialno AS callsvserialno,
+      tc.vtransfercallno,
+      tc.bsolved,
+      tc.bfastclose,
+      tc.nengineer,
+      tc.nofficeid,
+      p.vinstpostalcode AS pincode,
+      p.vname AS PartyName,
+      o.nunder AS office_under,
+      o.vcompanyname AS office_name,
+      bo.vcompanyname AS branch_office_name,
+      u.vname AS serviceman,
+      u.vname AS technician_name,
+      CONVERT(varchar(30), tc.dtrndate, 126) AS callsdtrndate,
+      tc.vcomplaint,
+      mstitems.vname AS itemname,
+      calltype_fs.vdisplayvalue AS calltype,
+      tc.callStatus AS Status,
+      CASE
+        WHEN tc.bsolved = 1 THEN 'Solved'
+        WHEN tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 THEN 'Cancel'
+        ELSE 'Open'
+      END AS callstatus,
+      tc.bsolved AS callsolved,
+      CONVERT(varchar(30), tc.dsolvedatetime, 126) AS callsolveddate,
+      tc.vsolveremarks,
+      cr.vname AS cancel_reason
+    FROM (
+      SELECT *,
+        ROW_NUMBER() OVER (
+          PARTITION BY ${TRHCALLS_DEDUP_PARTITION}
+          ORDER BY ${TRHCALLS_DEDUP_ORDER}
+        ) AS rn
+      FROM trhcalls (NOLOCK)
+      WHERE ${where}
+    ) tc
+    LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode
+    LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode
+    LEFT JOIN mstoffice bo (NOLOCK) ON o.nunder = bo.ncode
+    LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode
+    LEFT JOIN mstitems (NOLOCK) ON tc.nitem = mstitems.ncode
+    LEFT JOIN mstfixedselection calltype_fs (NOLOCK) ON tc.ncalltype = calltype_fs.ncode AND calltype_fs.vfieldname = 'ncalltype'
+    LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode
+    WHERE tc.rn = 1
+    ORDER BY tc.dtrndate DESC
+  `;
 }
 
 /** Exact TRN pattern — e.g. 26C17585 */
@@ -424,19 +716,25 @@ export function sqlRegisterDateColumn(column: RegisterDateFilterColumn, alias = 
   return `${alias}.${column}`;
 }
 
-export function appendCallTypeFilter(condition: string, callType: string | null | undefined): string {
-  if (!callType || callType === 'All') return condition;
+/** All ncodes for the given display labels — one label can map to multiple ncode rows. */
+export function buildCallTypeNcodeInSubquery(callType: string | null | undefined): string | null {
+  if (!callType || callType === 'All' || callType === 'undefined' || callType === 'null') return null;
 
   const types = callType.split(',').map((t) => t.trim()).filter(Boolean);
-  if (types.length === 1) {
-    const safe = types[0].replace(/'/g, "''");
-    return `${condition} AND tc.ncalltype = (SELECT TOP 1 ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${safe}')`;
-  }
-  if (types.length > 1) {
-    const typeList = types.map((t) => `'${t.replace(/'/g, "''")}'`).join(',');
-    return `${condition} AND tc.ncalltype IN (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${typeList}))`;
-  }
-  return condition;
+  if (types.length === 0) return null;
+
+  const typeList = types.map((t) => `'${t.replace(/'/g, "''")}'`).join(',');
+  return `(SELECT ncode FROM mstfixedselection (NOLOCK) WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${typeList}))`;
+}
+
+export function appendCallTypeFilter(
+  condition: string,
+  callType: string | null | undefined,
+  column = 'tc.ncalltype'
+): string {
+  const subquery = buildCallTypeNcodeInSubquery(callType);
+  if (!subquery) return condition;
+  return `${condition} AND ${column} IN ${subquery}`;
 }
 
 export function appendOfficeSecurityFilter(

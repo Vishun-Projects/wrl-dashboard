@@ -9,6 +9,30 @@ import pincodeMapData from '../../report/distribution/pincode_map.json';
 const allCallsCache = new Map<string, { data: any[]; timestamp: number }>();
 const CACHE_TTL = 3 * 60 * 1000; // 3 minutes
 
+const DISTRIBUTION_DETAIL_JOINS = `
+    LEFT JOIN mstitems (NOLOCK) ON tc.nitem = mstitems.ncode
+    LEFT JOIN mstfixedselection calltype_fs (NOLOCK) ON tc.ncalltype = calltype_fs.ncode AND calltype_fs.vfieldname = 'ncalltype'
+    LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode
+`;
+
+const DISTRIBUTION_DETAIL_FIELDS = `
+      CONVERT(varchar(30), tc.dtrndate, 126) as callsdtrndate,
+      p.vname as PartyName,
+      p.vinstpostalcode as Pincode,
+      tc.vcomplaint as vcomplaint,
+      mstitems.vname as itemname,
+      calltype_fs.vdisplayvalue as calltype,
+      tc.callStatus as Status,
+      case when tc.bsolved=1 then 'Solved' else case when tc.ncancelreason Is not null and tc.ncancelreason <> 0 then 'Cancel' else case when (tc.bsolved=0 or tc.bsolved is null) and (tc.ncancelreason IS null or tc.ncancelreason = 0) then 'Open' end end end as callstatus,
+      tc.bsolved as callsolved,
+      CONVERT(varchar(30), tc.dsolvedatetime, 126) as callsolveddate,
+      tc.vsolveremarks as vsolveremarks,
+      cr.vname as cancel_reason,
+      tc.vtrnno as UniqueCallNo,
+      tc.ncode as id,
+      u.vname as serviceman
+`;
+
 const cityToStateMap: Record<string, string> = {
   'MUMBAI': 'MAHARASHTRA',
   'PUNE': 'MAHARASHTRA',
@@ -447,6 +471,7 @@ async function getMappedCalls(
     LEFT JOIN mstcity cty (NOLOCK) ON COALESCE(NULLIF(p.ncity, ''), o.ncity) = cty.ncode
     LEFT JOIN mststate st (NOLOCK) ON cty.nstate = st.ncode
     LEFT JOIN mstoffice transferoffice (NOLOCK) ON tc.ntransfertooffice = transferoffice.ncode
+    ${DISTRIBUTION_DETAIL_JOINS}
   `;
 
   const rawDataRes = await postQuery({
@@ -474,7 +499,8 @@ async function getMappedCalls(
       f.ncode as technician_office_id,
       transferoffice.vcompanyname as transfer_office_name,
       cty.vname as db_city,
-      st.vname as db_state
+      st.vname as db_state,
+      ${DISTRIBUTION_DETAIL_FIELDS}
     `,
     tableName,
     condition: whereClause
@@ -527,6 +553,7 @@ async function getMappedCallsDelta(
     LEFT JOIN mstcity cty (NOLOCK) ON COALESCE(NULLIF(p.ncity, ''), o.ncity) = cty.ncode
     LEFT JOIN mststate st (NOLOCK) ON cty.nstate = st.ncode
     LEFT JOIN mstoffice transferoffice (NOLOCK) ON tc.ntransfertooffice = transferoffice.ncode
+    ${DISTRIBUTION_DETAIL_JOINS}
   `;
 
   const rawDataRes = await postQuery({
@@ -554,7 +581,8 @@ async function getMappedCallsDelta(
       f.ncode as technician_office_id,
       transferoffice.vcompanyname as transfer_office_name,
       cty.vname as db_city,
-      st.vname as db_state
+      st.vname as db_state,
+      ${DISTRIBUTION_DETAIL_FIELDS}
     `,
     tableName,
     condition: whereClause

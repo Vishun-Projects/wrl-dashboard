@@ -15,25 +15,21 @@ import {
   FilterX,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { RegisterFilterBar } from '@/components/RegisterFilterBar';
+import { RegisterPageFilters } from '@/components/RegisterPageFilters';
 import { PageShell, PageLoadingState } from '@/components/PageShell';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
-import { filterCallsCSR } from '@/lib/report-filters';
+import { filterViewCalls } from '@/lib/report-search';
 import { classifyTrhcallRow } from '@/lib/trhcalls-query';
 
 // Helper to inject Leaflet CDN resources dynamically
 const loadLeaflet = () => {
-  console.log("[loadLeaflet] Called. typeof window:", typeof window);
   return new Promise<boolean>((resolve) => {
     if (typeof window === 'undefined') {
-      console.log("[loadLeaflet] window is undefined (SSR). Resolving false.");
       resolve(false);
       return;
     }
 
-    // Dynamically load Leaflet CSS to avoid race conditions or unstyled rendering
     if (!document.getElementById('leaflet-css')) {
-      console.log("[loadLeaflet] Injected leaflet.css link into head");
       const link = document.createElement('link');
       link.id = 'leaflet-css';
       link.rel = 'stylesheet';
@@ -42,22 +38,14 @@ const loadLeaflet = () => {
     }
 
     if ((window as any).L) {
-      console.log("[loadLeaflet] window.L already exists. Resolving true immediately.");
       resolve(true);
       return;
     }
 
-    console.log("[loadLeaflet] window.L not found. Creating script element for leaflet.js");
     const script = document.createElement('script');
     script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.onload = () => {
-      console.log("[loadLeaflet] leaflet.js loaded successfully. L exists:", !(!(window as any).L));
-      resolve(true);
-    };
-    script.onerror = (e) => {
-      console.error("[loadLeaflet] Failed to load Leaflet CDN scripts.", e);
-      resolve(false);
-    };
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
     document.head.appendChild(script);
   });
 };
@@ -71,6 +59,9 @@ export default function CallDistributionPage() {
     selectedFranchisee,
     selectedTechnician,
     selectedCallTypes,
+    selectedStatus,
+    priorityFilter,
+    portalFilter,
     pincodeSearch,
     distributionCalls,
     distributionBranches,
@@ -132,7 +123,36 @@ export default function CallDistributionPage() {
     if (distributionCalls.length > 0) {
       syncCascadeOptionsFromCalls(distributionCalls);
     }
-  }, [distributionCalls, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, pincodeSearch, syncCascadeOptionsFromCalls]);
+  }, [distributionCalls, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, selectedCallTypes, selectedStatus, priorityFilter, portalFilter, pincodeSearch, syncCascadeOptionsFromCalls]);
+
+  const distributionViewFilters = useMemo(
+    () => ({
+      search: '',
+      pincodeSearch,
+      selectedState,
+      selectedCity,
+      selectedBranch,
+      selectedFranchisee,
+      selectedTechnician,
+      selectedCallTypes,
+      selectedOfficeIds: [] as string[],
+      selectedStatus,
+      priorityFilter,
+      portalFilter,
+    }),
+    [
+      pincodeSearch,
+      selectedState,
+      selectedCity,
+      selectedBranch,
+      selectedFranchisee,
+      selectedTechnician,
+      selectedCallTypes,
+      selectedStatus,
+      priorityFilter,
+      portalFilter,
+    ]
+  );
 
   // CSR Metrics & Dashboard Aggregations Computation
   useEffect(() => {
@@ -151,16 +171,7 @@ export default function CallDistributionPage() {
       return;
     }
 
-    const criteria = {
-      state: selectedState,
-      city: selectedCity,
-      selectedBranch,
-      selectedFranchisee,
-      technician: selectedTechnician,
-      pincodeSearch,
-    };
-
-    const filteredCalls = filterCallsCSR(distributionCalls, criteria);
+    const filteredCalls = filterViewCalls(distributionCalls, distributionViewFilters);
 
     const franchiseeMap = new Map();
     const pincodeMap = new Map();
@@ -305,29 +316,23 @@ export default function CallDistributionPage() {
     });
     setFranchiseeSummary(franchiseeSummary);
     setPincodeSummary(pincodeSummary);
-  }, [distributionCalls, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, pincodeSearch]);
+  }, [distributionCalls, distributionViewFilters]);
 
   // Leaflet Map Initialization
   useEffect(() => {
-    console.log("[Leaflet Map Initialization useEffect] Triggered. typeof window:", typeof window, "resourcesLoaded:", resourcesLoaded);
     if (typeof window === 'undefined' || !resourcesLoaded) return;
 
     loadLeaflet().then((success) => {
-      console.log("[Leaflet Map Initialization useEffect] loadLeaflet success:", success);
       if (!success) {
-        console.error("[Leaflet Map Initialization useEffect] Setting mapLoadError to true.");
         setMapLoadError(true);
         return;
       }
       const L = (window as any).L;
-      console.log("[Leaflet Map Initialization useEffect] Checking L and mapRef:", { LExists: !(!L), mapRefExists: !(!mapRef.current) });
       if (!L || !mapRef.current) {
-        console.warn("[Leaflet Map Initialization useEffect] L or mapRef is missing. Exiting initialization.");
         return;
       }
 
       if (!mapInstanceRef.current) {
-        console.log("[Leaflet Map Initialization useEffect] Initializing new map instance...");
         try {
           const map = L.map(mapRef.current, {
             zoomControl: false,
@@ -335,37 +340,29 @@ export default function CallDistributionPage() {
             preferCanvas: true
           }).setView([20.5937, 78.9629], 5);
 
-          // Premium Light Theme CartoDB Tile Layer (Positron)
           L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
             maxZoom: 18
           }).addTo(map);
 
-          // Add Zoom Controls to Top Right
           L.control.zoom({ position: 'topright' }).addTo(map);
 
           mapInstanceRef.current = map;
           markersLayerRef.current = L.layerGroup().addTo(map);
           setMapReady(true);
-          console.log("[Leaflet Map Initialization useEffect] Map instance created successfully.");
 
-          // Force a resize calculation shortly after map mounts to account for flex layout sizing
           setTimeout(() => {
             if (mapInstanceRef.current) {
-              console.log("[Leaflet Map Initialization useEffect] Invalidating size...");
               mapInstanceRef.current.invalidateSize();
             }
           }, 150);
-        } catch (err) {
-          console.error("[Leaflet Map Initialization useEffect] Exception during map initialization:", err);
+        } catch {
+          setMapLoadError(true);
         }
-      } else {
-        console.log("[Leaflet Map Initialization useEffect] Map instance already exists.");
       }
     });
 
     return () => {
       if (mapInstanceRef.current) {
-        console.log("[Leaflet Map Initialization useEffect] Cleanup: removing map instance.");
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
         markersLayerRef.current = null;
@@ -379,13 +376,6 @@ export default function CallDistributionPage() {
     const L = (window as any).L;
     const map = mapInstanceRef.current;
     const layer = markersLayerRef.current;
-    console.log("[Map Markers Re-render] useEffect triggered. State:", {
-      LExists: !(!L),
-      mapExists: !(!map),
-      layerExists: !(!layer),
-      pincodeSummaryLength: pincodeSummary?.length,
-      mapReady
-    });
     if (!L || !map || !layer || !pincodeSummary || !mapReady) return;
 
     const timer = setTimeout(() => {
@@ -509,8 +499,9 @@ export default function CallDistributionPage() {
       icon={<LucideMap size={16} className="text-teal-600" />}
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
       toolbar={
-        <RegisterFilterBar
-          onClear={() => {
+        <RegisterPageFilters
+          loadingLabel="Loading calls for distribution map…"
+          onClearAll={() => {
             setSelectedPincode('All');
             setHighlightedFranchisee(null);
           }}

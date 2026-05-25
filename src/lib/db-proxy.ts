@@ -27,6 +27,7 @@ export async function getAppState() {
 
 async function executePostWithRetry(params: any, signal?: AbortSignal) {
     const { viewState, viewStateGenerator, eventValidation } = await getAppState();
+    const requestTimeout = params.timeoutMs ?? 100000;
 
     const formData = new URLSearchParams();
     formData.append('__VIEWSTATE', viewState);
@@ -61,7 +62,7 @@ async function executePostWithRetry(params: any, signal?: AbortSignal) {
         attempts++;
         try {
             const res = await axios.post(DB_URL, formData, {
-                timeout: 100000,
+                timeout: requestTimeout,
                 signal,
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -87,13 +88,27 @@ async function executePostWithRetry(params: any, signal?: AbortSignal) {
             }
 
             return { $ };
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (axios.isCancel(err)) throw err;
             if (attempts === maxAttempts) throw err;
 
-            // Handle 503 or Reset with longer wait
-            const isOverloaded = err.message.includes('503') || err.message.includes('ECONNRESET');
-            await new Promise(r => setTimeout(r, isOverloaded ? 10000 : 3000));
+            const errCode =
+                (err as { code?: string })?.code ??
+                (err as { cause?: { code?: string } })?.cause?.code;
+            const errMessage = err instanceof Error ? err.message : String(err);
+            const isReset =
+                errCode === 'ECONNRESET' ||
+                errCode === 'ETIMEDOUT' ||
+                errMessage.includes('ECONNRESET') ||
+                errMessage.includes('ETIMEDOUT');
+            const isOverloaded = errMessage.includes('503') || isReset;
+
+            if (isReset) {
+                cachedState = null;
+                lastFetch = 0;
+            }
+
+            await new Promise((r) => setTimeout(r, isOverloaded ? 10000 * attempts : 3000));
         }
     }
     throw new Error("Maximum retry attempts reached");
@@ -106,6 +121,7 @@ export async function postQuery(params: {
     condition?: string;
     orderBy?: string;
     rawSql?: string;
+    timeoutMs?: number;
 }, signal?: AbortSignal) {
     const result = await executePostWithRetry(params, signal);
     if ('data' in result) return result; // Return if no records found early exit

@@ -39,9 +39,22 @@ export interface DistributionDataCache {
   lastSyncedAt: number;
 }
 
+export interface CallCorpusStore {
+  calls: Map<string, Record<string, unknown>>;
+  cacheKey: string;
+  fetchedAt: number;
+  lastSyncedAt: number;
+  status: 'idle' | 'hydrated' | 'refreshing' | 'error';
+  source: 'memory' | 'indexeddb' | 'network';
+  truncated?: boolean;
+  errorMessage?: string;
+}
+
 export let globalReportCache: GlobalReportCacheType | null = null;
 
 export let distributionDataCache: DistributionDataCache | null = null;
+
+export let callCorpusStore: CallCorpusStore | null = null;
 
 export function setGlobalReportCache(cache: GlobalReportCacheType | null) {
   globalReportCache = cache;
@@ -49,4 +62,8 @@ export function setGlobalReportCache(cache: GlobalReportCacheType | null) {
 
 export function setDistributionDataCache(cache: DistributionDataCache | null) {
   distributionDataCache = cache;
+}
+
+export function setCallCorpusStore(store: CallCorpusStore | null) {
+  callCorpusStore = store;
 }

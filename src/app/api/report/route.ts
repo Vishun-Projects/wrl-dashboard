@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { postQuery } from '@/lib/db-proxy';
 import { prisma } from '@/lib/prisma';
 import {
+  appendCallTypeFilter,
   buildTrhcallsLookupCondition,
   buildTrhcallsLookupSubquery,
   enrichTrhcallBranchFranchisee,
@@ -218,6 +219,9 @@ function buildSingleStatusCondition(statusFilter: string): string {
   }
   if (statusFilter === 'Closed') {
     return " AND (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed')";
+  }
+  if (statusFilter === 'Cancelled') {
+    return " AND (tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 AND tc.ncancelreason <> 2)";
   }
   return '';
 }
@@ -435,12 +439,7 @@ export async function GET(req: NextRequest) {
       }
 
       if (callType && callType !== 'All' && callType !== 'undefined' && callType !== 'null') {
-        if (callType.includes(',')) {
-          const types = callType.split(',').map(t => `'${t.trim().replace(/'/g, "''")}'`).join(',');
-          baseCondition += ` AND tc.ncalltype IN (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${types}))`;
-        } else {
-          baseCondition += ` AND tc.ncalltype = (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${callType.replace(/'/g, "''")}')`;
-        }
+        baseCondition = appendCallTypeFilter(baseCondition, callType);
       }
 
       if (region && region !== 'All') {

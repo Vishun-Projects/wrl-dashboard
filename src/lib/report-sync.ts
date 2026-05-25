@@ -2,6 +2,8 @@
 
 export const REPORT_SYNC_INTERVAL_MS = 60_000;
 export const REPORT_SYNC_BUFFER_MS = 30_000;
+/** After hydrate from cache, skip automatic delta sync so reload/tab focus stays instant. */
+export const REPORT_AUTO_SYNC_GRACE_MS = 5 * 60 * 1000;
 
 export function formatSyncTimestamp(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');

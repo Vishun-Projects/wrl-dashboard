@@ -3,8 +3,10 @@ import { distributionDataCache, globalReportCache } from '@/lib/report-data-stor
 import {
   filterCallsCSR,
   isAnyFilterActive,
+  matchesCallTypeFilter,
   type RegisterViewFilterParts,
 } from '@/lib/report-filters';
+import { getPortalAuditCache, matchesPortalFilter } from '@/lib/report-portal-cache';
 import { getCallIdentityKey } from '@/lib/report-sync';
 
 export type { RegisterViewFilterParts };
@@ -104,6 +106,12 @@ export function mapCachedRowToRegisterRow(row: Record<string, unknown>): Record<
           office_name: row.office_name ?? row.officename,
           office_under: row.office_under,
           branch_office_name: row.branch_office_name,
+          officeId: row.officeId ?? row.nofficeid,
+          parentId: row.parentId ?? row.office_under,
+          region: row.region,
+          account: row.account,
+          branch_headcount: row.branch_headcount,
+          has_visit: row.has_visit,
           franchisee_name: row.franchisee_name,
           franchisee_code: row.franchisee_code,
           technician_office_name: row.technician_office_name,
@@ -206,8 +214,7 @@ export function registerRowMatchesViewFilters(
   if (csrMatches.length === 0) return false;
 
   if (parts.selectedCallTypes.length > 0) {
-    const callType = String(row.calltype || '');
-    if (!parts.selectedCallTypes.includes(callType)) return false;
+    if (!matchesCallTypeFilter(row, parts.selectedCallTypes.join(','))) return false;
   }
 
   if (parts.selectedOfficeIds.length > 0) {
@@ -215,7 +222,20 @@ export function registerRowMatchesViewFilters(
     if (!parts.selectedOfficeIds.includes(officeId)) return false;
   }
 
+  if (!matchesStatusFilter(row, parts.selectedStatus)) return false;
+  if (!matchesPriorityFilter(row, parts.priorityFilter)) return false;
+  if (!matchesPortalFilter(row, parts.portalFilter, getPortalAuditCache())) return false;
+
   return true;
+}
+
+/** Filter an in-memory call list using the same rules as the register corpus path. */
+export function filterViewCalls(
+  calls: Record<string, unknown>[],
+  parts: RegisterViewFilterParts
+): Record<string, unknown>[] {
+  if (!isAnyFilterActive(parts)) return calls;
+  return calls.filter((row) => registerRowMatchesViewFilters(row, parts));
 }
 
 export type RegisterSummary = {
@@ -271,6 +291,45 @@ export function classifyRegisterRowStatus(row: Record<string, unknown>): Registe
   if (isTechSolved) return 'techSolved';
   if (isAssigned) return 'assigned';
   return 'openUnallocated';
+}
+
+const STATUS_LABEL_BY_BUCKET: Record<RegisterSummaryBucket, string | null> = {
+  openUnallocated: 'Open Unallocated',
+  assigned: 'Assigned',
+  techSolved: 'Tech. Solve Call',
+  closed: 'Closed',
+  cancelled: 'Cancelled',
+  transferred: null,
+};
+
+function matchesStatusFilter(row: Record<string, unknown>, selectedStatus: string[]): boolean {
+  if (selectedStatus.length === 0) return true;
+  const bucket = classifyRegisterRowStatus(row);
+  if (bucket === 'transferred') return false;
+  const label = STATUS_LABEL_BY_BUCKET[bucket];
+  return label ? selectedStatus.includes(label) : false;
+}
+
+/** True when any linked repair fault is marked major (matches register SQL EXISTS). */
+export function isMajorRepairRow(row: Record<string, unknown>): boolean {
+  const v = row.is_major_repair;
+  if (v == null || v === '') return false;
+  const normalized = String(v).trim().toLowerCase();
+  return normalized === 'true' || normalized === '1' || normalized === 'yes';
+}
+
+export function matchesPriorityFilter(
+  row: Record<string, unknown>,
+  priorityFilter: string[]
+): boolean {
+  if (priorityFilter.length === 0) return true;
+  const isMajor = isMajorRepairRow(row);
+  const wantsMajor = priorityFilter.includes('major');
+  const wantsMinor = priorityFilter.includes('minor');
+  if (wantsMajor && wantsMinor) return true;
+  if (wantsMajor) return isMajor;
+  if (wantsMinor) return !isMajor;
+  return true;
 }
 
 export function emptyRegisterSummary(): RegisterSummary {

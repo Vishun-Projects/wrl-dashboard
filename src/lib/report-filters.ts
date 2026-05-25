@@ -36,7 +36,25 @@ export const REGISTER_STATUS_OPTIONS: RegisterMultiSelectOption[] = [
   { value: 'Assigned', label: 'Assigned' },
   { value: 'Tech. Solve Call', label: 'Tech. Solve Call' },
   { value: 'Closed', label: 'Closed' },
+  { value: 'Cancelled', label: 'Cancelled' },
 ];
+
+export const REGISTER_STATUS_PRESETS = {
+  solved: ['Tech. Solve Call', 'Closed'],
+  open: ['Open Unallocated', 'Assigned'],
+  openUnallocated: ['Open Unallocated'],
+  assigned: ['Assigned'],
+  techSolved: ['Tech. Solve Call'],
+  closed: ['Closed'],
+  cancelled: ['Cancelled'],
+} as const;
+
+export function statusPresetMatches(selected: string[], preset: readonly string[]): boolean {
+  if (selected.length !== preset.length) return false;
+  const sortedSelected = [...selected].sort();
+  const sortedPreset = [...preset].sort();
+  return sortedSelected.every((value, index) => value === sortedPreset[index]);
+}
 
 export const REGISTER_PRIORITY_OPTIONS: RegisterMultiSelectOption[] = [
   { value: 'major', label: 'Major' },
@@ -106,22 +124,39 @@ export function findBreakdownCallType(callTypes: string[]): string | null {
   return callTypes.find((t) => /breakdown/i.test(t)) ?? null;
 }
 
-export function resolveCallTypesParam(
-  selectedCallTypes: string[],
-  opts: {
-    activeTab: 'register' | 'summary' | 'accounts';
-    callTypesFilterTouched: boolean;
-    availableCallTypes: string[];
-  }
-): string {
-  if (selectedCallTypes.length > 0) return selectedCallTypes.join(',');
-  if (
-    (opts.activeTab === 'summary' || opts.activeTab === 'accounts') &&
-    !opts.callTypesFilterTouched
-  ) {
-    return findBreakdownCallType(opts.availableCallTypes) ?? SUMMARY_DEFAULT_CALL_TYPE;
-  }
+/** Network/corpus bulk fetch always loads every call type; view filters apply client-side. */
+export function resolveFetchCallTypesParam(): string {
   return 'All';
+}
+
+/** Call-type filter sent to summary API or server-paginated register fallback. */
+export function resolveViewCallTypesParam(selectedCallTypes: string[]): string {
+  if (selectedCallTypes.length > 0) return selectedCallTypes.join(',');
+  return 'All';
+}
+
+export function parseCallTypesParam(callTypesParam?: string | null): string[] | null {
+  if (!callTypesParam || callTypesParam === 'All' || callTypesParam === 'undefined' || callTypesParam === 'null') {
+    return null;
+  }
+  const types = callTypesParam.split(',').map((s) => s.trim()).filter(Boolean);
+  return types.length > 0 ? types : null;
+}
+
+export function normalizeCallTypeDisplay(value: unknown): string {
+  return String(value ?? '').trim().toUpperCase();
+}
+
+/** Client-side filter — mirrors appendCallTypeFilter (exact display label match). */
+export function matchesCallTypeFilter(
+  row: Record<string, unknown>,
+  callTypesParam?: string | null
+): boolean {
+  const allowed = parseCallTypesParam(callTypesParam);
+  if (!allowed) return true;
+  const callType = normalizeCallTypeDisplay(row.calltype);
+  if (!callType) return false;
+  return allowed.some((t) => normalizeCallTypeDisplay(t) === callType);
 }
 
 export type FilterCallsCriteria = {
@@ -255,6 +290,127 @@ export function defaultDateRange(): ReportDateRange {
   const end = new Date();
   const start = new Date(end.getTime() - 14 * 24 * 60 * 60 * 1000);
   return { start, end, label: 'Last 14 Days' };
+}
+
+export function isDefaultDateRange(range: ReportDateRange): boolean {
+  if (range.label === 'Last 14 Days') return true;
+  const def = defaultDateRange();
+  return (
+    range.start.toDateString() === def.start.toDateString() &&
+    range.end.toDateString() === def.end.toDateString()
+  );
+}
+
+export type ActiveFilterChipDescriptor = {
+  id: string;
+  label: string;
+  removeKey:
+    | 'search'
+    | 'pincodeSearch'
+    | 'dateRange'
+    | 'dateFilterColumn'
+    | 'selectedStatus'
+    | 'selectedCallTypes'
+    | 'priorityFilter'
+    | 'portalFilter'
+    | 'selectedBranch'
+    | 'selectedFranchisee'
+    | 'selectedState'
+    | 'selectedCity'
+    | 'selectedTechnician';
+  removeValue?: string;
+};
+
+export type RegisterActiveFilterInput = RegisterViewFilterParts & {
+  dateRange: ReportDateRange;
+  dateFilterColumn: string;
+  resolveLabel?: (field: ActiveFilterChipDescriptor['removeKey'], value: string) => string;
+};
+
+function chipLabelForValue(
+  field: ActiveFilterChipDescriptor['removeKey'],
+  value: string,
+  resolveLabel?: RegisterActiveFilterInput['resolveLabel']
+): string {
+  if (resolveLabel) return resolveLabel(field, value);
+  if (field === 'priorityFilter') {
+    return value === 'major' ? 'Major' : value === 'minor' ? 'Minor' : value;
+  }
+  if (field === 'portalFilter') {
+    const portal = REGISTER_PORTAL_OPTIONS.find((o) => o.value === value);
+    return portal?.label || value;
+  }
+  return value;
+}
+
+function pushArrayChips(
+  chips: ActiveFilterChipDescriptor[],
+  field: ActiveFilterChipDescriptor['removeKey'],
+  prefix: string,
+  values: string[],
+  resolveLabel?: RegisterActiveFilterInput['resolveLabel']
+) {
+  values.forEach((value) => {
+    chips.push({
+      id: `${field}:${value}`,
+      label: `${prefix}: ${chipLabelForValue(field, value, resolveLabel)}`,
+      removeKey: field,
+      removeValue: value,
+    });
+  });
+}
+
+export function buildActiveFilterChips(input: RegisterActiveFilterInput): ActiveFilterChipDescriptor[] {
+  const chips: ActiveFilterChipDescriptor[] = [];
+  const { resolveLabel } = input;
+
+  if ((input.search || '').trim()) {
+    chips.push({
+      id: 'search',
+      label: `Search: ${input.search!.trim()}`,
+      removeKey: 'search',
+    });
+  }
+
+  if ((input.pincodeSearch || '').trim()) {
+    chips.push({
+      id: 'pincodeSearch',
+      label: `Pincode: ${input.pincodeSearch!.trim()}`,
+      removeKey: 'pincodeSearch',
+    });
+  }
+
+  if (!isDefaultDateRange(input.dateRange)) {
+    chips.push({
+      id: 'dateRange',
+      label: `Date: ${input.dateRange.label}`,
+      removeKey: 'dateRange',
+    });
+  }
+
+  if (input.dateFilterColumn === 'dsolvedatetime') {
+    chips.push({
+      id: 'dateFilterColumn',
+      label: 'Date column: Solved Date',
+      removeKey: 'dateFilterColumn',
+    });
+  }
+
+  pushArrayChips(chips, 'selectedStatus', 'Status', input.selectedStatus, resolveLabel);
+  pushArrayChips(chips, 'selectedCallTypes', 'Type', input.selectedCallTypes, resolveLabel);
+  pushArrayChips(chips, 'priorityFilter', 'Priority', input.priorityFilter, resolveLabel);
+  pushArrayChips(chips, 'portalFilter', 'Portal', input.portalFilter, resolveLabel);
+  pushArrayChips(chips, 'selectedBranch', 'Branch', input.selectedBranch, resolveLabel);
+  pushArrayChips(chips, 'selectedFranchisee', 'Franchisee', input.selectedFranchisee, resolveLabel);
+  pushArrayChips(chips, 'selectedState', 'State', input.selectedState, resolveLabel);
+  pushArrayChips(chips, 'selectedCity', 'City', input.selectedCity, resolveLabel);
+  pushArrayChips(chips, 'selectedTechnician', 'Technician', input.selectedTechnician, resolveLabel);
+
+  return chips;
+}
+
+export function countActiveFilters(input: RegisterActiveFilterInput): number {
+  return buildActiveFilterChips(input).length;
 }
 
 export type RegisterViewFilterParts = {

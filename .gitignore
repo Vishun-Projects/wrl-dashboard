@@ -38,6 +38,9 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+
+# local server corpus cache (large date-window snapshots)
+.cache/
 next-env.d.ts
 
 /src/generated/prisma

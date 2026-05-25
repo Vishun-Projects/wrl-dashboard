@@ -5,7 +5,11 @@ import { RegisterMultiSelect } from '@/components/RegisterMultiSelect';
 import { buildFranchiseeOptions, buildMainBranchOptions } from '@/lib/report-filters';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 
-export function RegisterBranchFranchiseeFilters() {
+type RegisterBranchFranchiseeFiltersProps = {
+  applyMode?: 'instant' | 'confirm';
+};
+
+export function RegisterBranchFranchiseeFilters({ applyMode = 'confirm' }: RegisterBranchFranchiseeFiltersProps) {
   const {
     offices,
     branchesList,
@@ -36,6 +40,7 @@ export function RegisterBranchFranchiseeFilters() {
         onChange={handleBranchesChange}
         searchable
         panelClassName="w-64"
+        applyMode={applyMode}
       />
       <RegisterMultiSelect
         label="Franchisee"
@@ -45,6 +50,7 @@ export function RegisterBranchFranchiseeFilters() {
         onChange={setSelectedFranchisee}
         searchable
         panelClassName="w-64"
+        applyMode={applyMode}
       />
     </>
   );

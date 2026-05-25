@@ -17,6 +17,7 @@ type RegisterMultiSelectProps = {
   searchable?: boolean;
   searchPlaceholder?: string;
   panelClassName?: string;
+  applyMode?: 'instant' | 'confirm';
 };
 
 export function RegisterMultiSelect({
@@ -28,10 +29,13 @@ export function RegisterMultiSelect({
   searchable = false,
   searchPlaceholder = 'Search...',
   panelClassName = 'w-56',
+  applyMode = 'confirm',
 }: RegisterMultiSelectProps) {
   const [open, setOpen] = useState(false);
   const [tempSelected, setTempSelected] = useState<string[]>([]);
   const [search, setSearch] = useState('');
+  const isInstant = applyMode === 'instant';
+  const activeSelected = isInstant ? selected : tempSelected;
 
   const displayLabel = emptyLabel || label;
   const buttonText =
@@ -47,10 +51,26 @@ export function RegisterMultiSelect({
 
   const toggleOpen = () => {
     if (!open) {
-      setTempSelected([...selected]);
+      if (!isInstant) setTempSelected([...selected]);
       setSearch('');
     }
     setOpen(!open);
+  };
+
+  const handleSelectionChange = (next: string[]) => {
+    if (isInstant) {
+      onChange(next);
+    } else {
+      setTempSelected(next);
+    }
+  };
+
+  const handleClear = () => {
+    if (isInstant) {
+      onChange([]);
+    } else {
+      setTempSelected([]);
+    }
   };
 
   return (
@@ -69,7 +89,7 @@ export function RegisterMultiSelect({
               <span className="text-[10px] text-slate-500 ui-label">{label}</span>
               <button
                 type="button"
-                onClick={() => setTempSelected([])}
+                onClick={handleClear}
                 className="text-[10px] text-slate-400 hover:text-slate-900"
               >
                 Clear
@@ -94,7 +114,7 @@ export function RegisterMultiSelect({
                 <p className="px-2 py-3 text-center text-[10px] text-slate-400">No options</p>
               ) : (
                 filteredOptions.map((option) => {
-                  const isSelected = tempSelected.includes(option.value);
+                  const isSelected = activeSelected.includes(option.value);
                   return (
                     <label
                       key={option.value}
@@ -106,9 +126,9 @@ export function RegisterMultiSelect({
                         checked={isSelected}
                         onChange={(e) => {
                           if (e.target.checked) {
-                            setTempSelected((prev) => [...prev, option.value]);
+                            handleSelectionChange([...activeSelected, option.value]);
                           } else {
-                            setTempSelected((prev) => prev.filter((v) => v !== option.value));
+                            handleSelectionChange(activeSelected.filter((v) => v !== option.value));
                           }
                         }}
                       />
@@ -118,18 +138,20 @@ export function RegisterMultiSelect({
                 })
               )}
             </div>
-            <div className="flex justify-end border-t border-slate-100 bg-slate-50 p-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  onChange(tempSelected);
-                  setOpen(false);
-                }}
-                className="rounded bg-slate-900 px-3 py-0.5 text-[10px] text-white"
-              >
-                Done
-              </button>
-            </div>
+            {!isInstant && (
+              <div className="flex justify-end border-t border-slate-100 bg-slate-50 p-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange(tempSelected);
+                    setOpen(false);
+                  }}
+                  className="rounded bg-slate-900 px-3 py-0.5 text-[10px] text-white"
+                >
+                  Done
+                </button>
+              </div>
+            )}
           </div>
         </>
       )}

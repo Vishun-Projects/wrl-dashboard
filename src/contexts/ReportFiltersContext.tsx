@@ -6,10 +6,10 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import {
-  buildDistributionCacheKey,
   buildFranchiseeOptions,
   defaultDateRange,
   filterCallsCSR,
+  findBreakdownCallType,
   isAnyFilterActive,
   migrateStringFilter,
   type ReportDateRange,
@@ -17,22 +17,42 @@ import {
 import {
   REGISTER_DATE_FILTER_OPTIONS,
   resolveRegisterDateSqlColumn,
+  MAX_CLIENT_CORPUS_DAYS,
   type RegisterDateFilterColumn,
 } from '@/lib/trhcalls-query';
 import {
   distributionDataCache,
   globalReportCache,
+  callCorpusStore,
   setDistributionDataCache,
+  setCallCorpusStore,
   type DistributionDataCache,
+  type CallCorpusStore,
 } from '@/lib/report-data-store';
 import {
+  applyCorpusSnapshot,
+  buildCorpusCacheKey,
+  getCorpusCallsArray,
+  mergeCorpusDelta,
+  persistCorpusDeltaToIndexedDB,
+  persistCorpusToIndexedDB,
+  restoreCorpusFromIndexedDB,
+  setCorpusRefreshing,
+  subscribeCorpus,
+  syncDistributionCacheFromCorpus,
+  notifyCorpusRegisterDelta,
+} from '@/lib/report-corpus';
+import { ensurePortalAuditCache } from '@/lib/report-portal-cache';
+
+let cachedReportResources: { offices: unknown[]; callTypes: string[] } | null = null;
+let reportResourcesInflight: Promise<{ offices: unknown[]; callTypes: string[] }> | null = null;
+
+function formatCorpusLastSync(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+}
+import {
   formatSyncTimestamp,
-  mapRegisterRowToDistributionPatch,
-  mergeCallsDelta,
-  notifyRegisterDelta,
-  patchCallsDelta,
   REPORT_SYNC_BUFFER_MS,
-  REPORT_SYNC_INTERVAL_MS,
 } from '@/lib/report-sync';
 
 type ReportFiltersContextValue = {
@@ -97,28 +117,36 @@ type ReportFiltersContextValue = {
   distributionLoading: boolean;
   fetchDistributionData: (force?: boolean) => Promise<void>;
   ensureSharedCallsLoaded: (force?: boolean) => Promise<void>;
+  ensureCorpusLoaded: (opts?: { force?: boolean; silent?: boolean }) => Promise<void>;
   rehydrateDistributionFromCache: () => void;
   runBackgroundSync: (opts?: { showToast?: boolean }) => Promise<void>;
   lastSyncedAt: Date | null;
   syncInProgress: boolean;
+  corpusStatus: CallCorpusStore['status'];
+  corpusLoading: boolean;
+  corpusTick: number;
+  corpusTruncated: boolean;
+  corpusCallCount: number;
   syncCascadeOptionsFromCalls: (calls: any[]) => void;
   resourcesLoaded: boolean;
 };
 
 const ReportFiltersContext = createContext<ReportFiltersContextValue | null>(null);
 
-function routeNeedsDistributionPreload(pathname: string | null): boolean {
+function routeNeedsCorpusPreload(pathname: string | null): boolean {
   if (!pathname) return false;
-  return (
-    pathname.includes('/report/distribution') ||
-    pathname.includes('/report/serial-audit')
-  );
+  return pathname.startsWith('/report');
+}
+
+function routeNeedsDistributionPreload(pathname: string | null): boolean {
+  return routeNeedsCorpusPreload(pathname);
 }
 
 export function ReportFiltersProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
   const pathname = usePathname();
-  const needsDistributionPreload = routeNeedsDistributionPreload(pathname);
+  const needsCorpusPreload = routeNeedsCorpusPreload(pathname);
+  const needsDistributionPreload = needsCorpusPreload;
 
   const [search, setSearch] = useState(globalReportCache?.search || '');
   const [pincodeSearch, setPincodeSearch] = useState(globalReportCache?.pincodeSearch || '');
@@ -171,29 +199,83 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     return null;
   });
   const [syncInProgress, setSyncInProgress] = useState(false);
+  const [corpusTick, setCorpusTick] = useState(0);
   const syncInFlightRef = useRef(false);
-  const sharedLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const corpusLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const corpusAbortRef = useRef<AbortController | null>(null);
+  const corpusGenerationRef = useRef(0);
+  const corpusHydratedAtRef = useRef<number | null>(null);
+  const corpusIdbRestoreInflightRef = useRef<Map<string, Promise<CallCorpusStore | null>>>(new Map());
+  /** Date windows hydrated this session — never re-fetch from network unless force. */
+  const corpusSatisfiedKeysRef = useRef<Set<string>>(new Set());
+  const defaultCallTypesAppliedRef = useRef(
+    (globalReportCache?.selectedCallTypes?.length ?? 0) > 0
+  );
+
+  useEffect(() => subscribeCorpus(() => setCorpusTick((n) => n + 1)), []);
+
+  const corpusSnapshot = callCorpusStore;
+  const corpusStatus = corpusSnapshot?.status ?? 'idle';
+  const corpusTruncated = corpusSnapshot?.truncated ?? false;
+  const corpusCallCount = corpusSnapshot?.calls.size ?? 0;
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const headers = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
-        const [officeRes, typesRes] = await Promise.all([
-          axios.get('/api/offices', { headers }),
-          axios.get('/api/report/call-types', { headers }),
-        ]);
+        if (cachedReportResources) {
+          if (cancelled) return;
+          setOffices(cachedReportResources.offices);
+          setCallTypes(cachedReportResources.callTypes);
+          if (!defaultCallTypesAppliedRef.current && cachedReportResources.callTypes.length > 0) {
+            const breakdown = findBreakdownCallType(cachedReportResources.callTypes);
+            if (breakdown) {
+              setSelectedCallTypes((prev) => (prev.length > 0 ? prev : [breakdown]));
+            }
+            defaultCallTypesAppliedRef.current = true;
+          }
+          return;
+        }
+
+        if (!reportResourcesInflight) {
+          reportResourcesInflight = (async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            const headers = session?.access_token
+              ? { Authorization: `Bearer ${session.access_token}` }
+              : {};
+            const [officeRes, typesRes] = await Promise.all([
+              axios.get('/api/offices', { headers }),
+              axios.get('/api/report/call-types', { headers }),
+            ]);
+            const payload = {
+              offices: officeRes.data || [],
+              callTypes: typesRes.data || [],
+            };
+            cachedReportResources = payload;
+            return payload;
+          })();
+        }
+
+        const payload = await reportResourcesInflight;
         if (cancelled) return;
-        setOffices(officeRes.data || []);
-        setCallTypes(typesRes.data || []);
+        setOffices(payload.offices);
+        setCallTypes(payload.callTypes);
+        if (!defaultCallTypesAppliedRef.current && payload.callTypes.length > 0) {
+          const breakdown = findBreakdownCallType(payload.callTypes);
+          if (breakdown) {
+            setSelectedCallTypes((prev) => (prev.length > 0 ? prev : [breakdown]));
+          }
+          defaultCallTypesAppliedRef.current = true;
+        }
       } catch {
         // offices/call types are optional for some views
       } finally {
         if (!cancelled) setResourcesLoaded(true);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [supabase]);
 
   const handleStatesChange = useCallback((values: string[]) => {
@@ -291,6 +373,33 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       techCounts[tCode].call_count++;
     });
     setTechniciansList(Object.values(techCounts).sort((a, b) => a.vname.localeCompare(b.vname)));
+
+    const branchesFiltered = filterCallsCSR(calls, baseCriteria, 'branch');
+    const branchCounts: Record<string, { ncode: string; vcompanyname: string; call_count: number }> = {};
+    branchesFiltered.forEach((c) => {
+      const bCode = String(c.resolved_branch_code || c.nofficeid || '');
+      if (!bCode || bCode === 'UNKNOWN') return;
+      branchCounts[bCode] = branchCounts[bCode] || {
+        ncode: bCode,
+        vcompanyname: c.officename || c.office_name || bCode,
+        call_count: 0,
+      };
+      branchCounts[bCode].call_count++;
+    });
+    setBranchesList(Object.values(branchCounts).sort((a, b) => a.vcompanyname.localeCompare(b.vcompanyname)));
+
+    const franchiseesFiltered = filterCallsCSR(calls, baseCriteria, 'franchisee');
+    const franchiseeCounts: Record<string, { ncode: string; vcompanyname: string; call_count: number }> = {};
+    franchiseesFiltered.forEach((c) => {
+      const fCode = c.franchisee_code ? String(c.franchisee_code) : 'UNASSIGNED';
+      franchiseeCounts[fCode] = franchiseeCounts[fCode] || {
+        ncode: fCode,
+        vcompanyname: c.franchisee_name || fCode,
+        call_count: 0,
+      };
+      franchiseeCounts[fCode].call_count++;
+    });
+    setFranchiseesList(Object.values(franchiseeCounts).sort((a, b) => a.vcompanyname.localeCompare(b.vcompanyname)));
   }, [pincodeSearch, selectedBranch, selectedCity, selectedFranchisee, selectedState, selectedTechnician]);
 
   const getDateStrings = useCallback(() => {
@@ -305,106 +414,275 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
 
   const getSharedCacheKey = useCallback(() => {
     const { startDateStr, endDateStr } = getDateStrings();
-    return buildDistributionCacheKey(startDateStr, endDateStr, selectedCallTypes);
-  }, [getDateStrings, selectedCallTypes]);
+    return buildCorpusCacheKey(startDateStr, endDateStr);
+  }, [getDateStrings]);
 
-  const applySharedCallsCache = useCallback((cache: DistributionDataCache) => {
-    setDistributionDataCache(cache);
-    setDistributionCalls(cache.allCalls);
-    setDistributionBranches(cache.dbBranches);
-    setLastSyncedAt(new Date(cache.lastSyncedAt));
-    syncCascadeOptionsFromCalls(cache.allCalls);
-  }, [syncCascadeOptionsFromCalls]);
+  const restoreCorpusDeduped = useCallback(async (cacheKey: string): Promise<CallCorpusStore | null> => {
+    const inflight = corpusIdbRestoreInflightRef.current.get(cacheKey);
+    if (inflight) return inflight;
 
-  const ensureSharedCallsLoaded = useCallback(async (force = false) => {
-    const { startDateStr, endDateStr } = getDateStrings();
-    const cacheKey = buildDistributionCacheKey(startDateStr, endDateStr, selectedCallTypes);
-
-    if (!force && distributionDataCache?.cacheKey === cacheKey && distributionDataCache.allCalls.length > 0) {
-      setDistributionCalls(distributionDataCache.allCalls);
-      setDistributionBranches(distributionDataCache.dbBranches);
-      if (distributionDataCache.lastSyncedAt) {
-        setLastSyncedAt(new Date(distributionDataCache.lastSyncedAt));
-      }
-      syncCascadeOptionsFromCalls(distributionDataCache.allCalls);
-      return;
-    }
-
-    if (sharedLoadInFlightRef.current && !force) {
-      return sharedLoadInFlightRef.current;
-    }
-
-    const run = (async () => {
-      setDistributionLoading(true);
-      try {
-        if (force) {
-          setDistributionDataCache(null);
-        }
-        const callTypeParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
-        const { data: { session } } = await supabase.auth.getSession();
-        const headers = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
-        const res = await axios.get('/api/distribution', {
-          headers,
-          params: {
-            startDate: startDateStr,
-            endDate: endDateStr,
-            callType: callTypeParam,
-            refresh: force ? 'true' : 'false',
-          },
-        });
-        const fetchedCalls = res.data?.allCalls || [];
-        const fetchedBranches = res.data?.dbBranches || [];
-        const syncedAt = Date.now();
-        const nextCache: DistributionDataCache = {
-          allCalls: fetchedCalls,
-          dbBranches: fetchedBranches,
-          cacheKey,
-          fetchedAt: syncedAt,
-          lastSyncedAt: syncedAt,
-        };
-        applySharedCallsCache(nextCache);
-        if (res.data?.degraded && res.data?.warning) {
-          toast.warning(res.data.warning);
-        }
-      } catch (err: unknown) {
-        const message =
-          axios.isAxiosError(err) && err.response?.data?.error
-            ? String(err.response.data.error)
-            : err instanceof Error
-              ? err.message
-              : 'Failed to load shared call data';
-        if (needsDistributionPreload) {
-          console.warn('ensureSharedCallsLoaded:', message);
-          toast.error('Could not load call distribution', {
-            description:
-              message.includes('memory') ||
-              message.includes('OutOfMemory') ||
-              String(err).includes('503')
-                ? 'Try a shorter date range (e.g. Last 7 Days).'
-                : message,
-          });
-        }
-      } finally {
-        setDistributionLoading(false);
-      }
-    })();
-
-    sharedLoadInFlightRef.current = run;
+    const promise = restoreCorpusFromIndexedDB(cacheKey);
+    corpusIdbRestoreInflightRef.current.set(cacheKey, promise);
     try {
-      await run;
+      return await promise;
     } finally {
-      if (sharedLoadInFlightRef.current === run) {
-        sharedLoadInFlightRef.current = null;
+      if (corpusIdbRestoreInflightRef.current.get(cacheKey) === promise) {
+        corpusIdbRestoreInflightRef.current.delete(cacheKey);
       }
     }
-  }, [
-    applySharedCallsCache,
-    getDateStrings,
-    needsDistributionPreload,
-    selectedCallTypes,
-    supabase,
-    syncCascadeOptionsFromCalls,
-  ]);
+  }, []);
+
+  const markCorpusSatisfied = useCallback((cacheKey: string) => {
+    corpusSatisfiedKeysRef.current.add(cacheKey);
+  }, []);
+
+  const tryResolveLocalCorpus = useCallback(
+    async (cacheKey: string): Promise<CallCorpusStore | null> => {
+      if (callCorpusStore?.cacheKey === cacheKey && callCorpusStore.calls.size > 0) {
+        return callCorpusStore;
+      }
+      return restoreCorpusDeduped(cacheKey);
+    },
+    [restoreCorpusDeduped]
+  );
+
+  const applyCorpusToUi = useCallback(
+    (store: CallCorpusStore) => {
+      const calls = getCorpusCallsArray(store);
+      syncDistributionCacheFromCorpus(store);
+      setDistributionCalls(calls);
+      if (distributionDataCache?.dbBranches) {
+        setDistributionBranches(distributionDataCache.dbBranches);
+      }
+      setLastSyncedAt(new Date(store.lastSyncedAt));
+      syncCascadeOptionsFromCalls(calls);
+      void ensurePortalAuditCache(supabase);
+      if (store.calls.size > 0) {
+        corpusHydratedAtRef.current = Date.now();
+        markCorpusSatisfied(store.cacheKey);
+      }
+    },
+    [markCorpusSatisfied, syncCascadeOptionsFromCalls, supabase]
+  );
+
+  const ensureCorpusLoaded = useCallback(
+    async (opts?: { force?: boolean; silent?: boolean }) => {
+      const force = !!opts?.force;
+      const { startDateStr, endDateStr } = getDateStrings();
+      const cacheKey = buildCorpusCacheKey(startDateStr, endDateStr);
+      const generation = corpusGenerationRef.current;
+
+      if (force) {
+        corpusSatisfiedKeysRef.current.delete(cacheKey);
+      }
+
+      const applyLocalAndReturn = (store: CallCorpusStore) => {
+        applyCorpusToUi(store);
+        setCorpusRefreshing(false);
+        if (!opts?.silent) {
+          setDistributionLoading(false);
+        }
+      };
+
+      if (!force && corpusSatisfiedKeysRef.current.has(cacheKey)) {
+        const local = await tryResolveLocalCorpus(cacheKey);
+        if (local) {
+          applyLocalAndReturn(local);
+          return;
+        }
+      }
+
+      if (
+        !force &&
+        callCorpusStore?.cacheKey === cacheKey &&
+        callCorpusStore.calls.size > 0 &&
+        callCorpusStore.status !== 'error'
+      ) {
+        applyLocalAndReturn(callCorpusStore);
+        return;
+      }
+
+      if (corpusLoadInFlightRef.current && !force) {
+        await corpusLoadInFlightRef.current;
+        const local = await tryResolveLocalCorpus(cacheKey);
+        if (local) {
+          applyLocalAndReturn(local);
+        }
+        return;
+      }
+
+      const applyNetworkCorpusResponse = (
+        res: {
+          data?: {
+            calls?: Record<string, unknown>[];
+            deltaCalls?: Record<string, unknown>[];
+            isDelta?: boolean;
+            truncated?: boolean;
+            cached?: boolean;
+            stale?: boolean;
+            warning?: string;
+          };
+        },
+        source: CallCorpusStore['source']
+      ) => {
+        if (generation !== corpusGenerationRef.current) return;
+
+        if (res.data?.warning) {
+          toast.warning(String(res.data.warning));
+        }
+
+        if (res.data?.isDelta) {
+          const deltas = (res.data.deltaCalls || []) as Record<string, unknown>[];
+          if (deltas.length > 0) {
+            mergeCorpusDelta(deltas, cacheKey);
+            const store = callCorpusStore;
+            if (store) {
+              syncDistributionCacheFromCorpus(store);
+              applyCorpusToUi(store);
+              void persistCorpusDeltaToIndexedDB(deltas, store);
+            }
+          }
+          return;
+        }
+
+        const fetchedCalls = (res.data?.calls || []) as Record<string, unknown>[];
+        const truncated = !!res.data?.truncated;
+        const store = applyCorpusSnapshot(cacheKey, fetchedCalls, {
+          source: res.data?.cached || res.data?.stale ? 'memory' : source,
+          truncated,
+        });
+        syncDistributionCacheFromCorpus(store);
+        applyCorpusToUi(store);
+        void persistCorpusToIndexedDB(store);
+        markCorpusSatisfied(cacheKey);
+      };
+
+      const fetchCorpusFromNetwork = async (
+        controller: AbortController,
+        networkOpts: { full?: boolean; lastSync?: number }
+      ) => {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const headers = session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : {};
+
+        const params: Record<string, string> = {
+          startDate: startDateStr,
+          endDate: endDateStr,
+          callType: 'All',
+          refresh: force ? 'true' : 'false',
+        };
+
+        if (!networkOpts.full && networkOpts.lastSync) {
+          params.lastSync = formatCorpusLastSync(networkOpts.lastSync);
+        }
+
+        const res = await axios.get('/api/report/corpus', {
+          headers,
+          signal: controller.signal,
+          params,
+        });
+        applyNetworkCorpusResponse(res, 'network');
+      };
+
+      const run = (async () => {
+        if (!force) {
+          const restored = await restoreCorpusDeduped(cacheKey);
+          if (restored && generation === corpusGenerationRef.current) {
+            applyLocalAndReturn(restored);
+            return;
+          }
+        }
+
+        if (!force && corpusSatisfiedKeysRef.current.has(cacheKey)) {
+          const local = await tryResolveLocalCorpus(cacheKey);
+          if (local) {
+            applyLocalAndReturn(local);
+            return;
+          }
+        }
+
+        if (corpusAbortRef.current) {
+          corpusAbortRef.current.abort();
+        }
+        const controller = new AbortController();
+        corpusAbortRef.current = controller;
+
+        const spanStart = new Date(`${startDateStr}T00:00:00`);
+        const spanEnd = new Date(`${endDateStr}T23:59:59`);
+        const spanDays =
+          !Number.isNaN(spanStart.getTime()) && !Number.isNaN(spanEnd.getTime())
+            ? Math.floor((spanEnd.getTime() - spanStart.getTime()) / 86400000) + 1
+            : 0;
+        const hasWarmCorpus =
+          callCorpusStore?.cacheKey === cacheKey && (callCorpusStore?.calls.size ?? 0) > 0;
+
+        if (spanDays > MAX_CLIENT_CORPUS_DAYS && !hasWarmCorpus && !force) {
+          setCorpusRefreshing(false);
+          if (!opts?.silent) {
+            setDistributionLoading(false);
+          }
+          return;
+        }
+
+        if (!opts?.silent) {
+          setDistributionLoading(true);
+        }
+        setCorpusRefreshing(true);
+
+        try {
+          await fetchCorpusFromNetwork(controller, { full: true });
+        } catch (err: unknown) {
+          if (axios.isCancel(err)) return;
+          const message =
+            axios.isAxiosError(err) && err.response?.data?.error
+              ? String(err.response.data.error)
+              : err instanceof Error
+                ? err.message
+                : 'Failed to load report corpus';
+          setCallCorpusStore({
+            calls: callCorpusStore?.cacheKey === cacheKey ? callCorpusStore.calls : new Map(),
+            cacheKey,
+            fetchedAt: callCorpusStore?.fetchedAt ?? Date.now(),
+            lastSyncedAt: callCorpusStore?.lastSyncedAt ?? Date.now(),
+            status: 'error',
+            source: callCorpusStore?.source ?? 'network',
+            errorMessage: message,
+            truncated: callCorpusStore?.truncated,
+          });
+          if (needsCorpusPreload && !callCorpusStore?.calls.size) {
+            toast.error('Could not load report data', { description: message });
+          }
+        } finally {
+          if (generation === corpusGenerationRef.current) {
+            setCorpusRefreshing(false);
+            if (!opts?.silent) {
+              setDistributionLoading(false);
+            }
+          }
+        }
+      })();
+
+      corpusLoadInFlightRef.current = run;
+      try {
+        await run;
+      } finally {
+        if (corpusLoadInFlightRef.current === run) {
+          corpusLoadInFlightRef.current = null;
+        }
+      }
+    },
+    [applyCorpusToUi, getDateStrings, markCorpusSatisfied, needsCorpusPreload, restoreCorpusDeduped, supabase, tryResolveLocalCorpus]
+  );
+
+  const ensureSharedCallsLoaded = useCallback(
+    async (force = false) => {
+      await ensureCorpusLoaded({ force, silent: !needsDistributionPreload });
+    },
+    [ensureCorpusLoaded, needsDistributionPreload]
+  );
 
   const fetchDistributionData = ensureSharedCallsLoaded;
 
@@ -419,14 +697,17 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
 
   const runBackgroundSync = useCallback(async (opts?: { showToast?: boolean }) => {
     if (syncInFlightRef.current) return;
+    if (!opts?.showToast) return;
 
-    const syncAnchor = distributionDataCache?.lastSyncedAt
-      ? new Date(distributionDataCache.lastSyncedAt)
-      : lastSyncedAt ?? globalReportCache?.lastRefreshed ?? null;
+    const syncAnchor = callCorpusStore?.lastSyncedAt
+      ? new Date(callCorpusStore.lastSyncedAt)
+      : distributionDataCache?.lastSyncedAt
+        ? new Date(distributionDataCache.lastSyncedAt)
+        : lastSyncedAt ?? globalReportCache?.lastRefreshed ?? null;
 
     if (!syncAnchor) {
-      if (routeNeedsDistributionPreload(pathname)) {
-        await ensureSharedCallsLoaded();
+      if (routeNeedsCorpusPreload(pathname)) {
+        await ensureCorpusLoaded({ silent: true });
       }
       return;
     }
@@ -435,88 +716,52 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     setSyncInProgress(true);
 
     const { startDateStr, endDateStr } = getDateStrings();
-    const callTypeParam = selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',');
-    const officeIdsParam = selectedOfficeIds.length === 0 ? 'All' : selectedOfficeIds.join(',');
     const lastSyncStr = formatSyncTimestamp(new Date(syncAnchor.getTime() - REPORT_SYNC_BUFFER_MS));
+    const cacheKey = getSharedCacheKey();
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const headers = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
-      const cacheKey = getSharedCacheKey();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const headers = session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {};
 
-      const shouldSyncDistribution =
-        routeNeedsDistributionPreload(pathname) ||
-        (distributionDataCache?.allCalls?.length ?? 0) > 0;
+      const corpusRes = await axios.get('/api/report/corpus', {
+        headers,
+        params: {
+          startDate: startDateStr,
+          endDate: endDateStr,
+          callType: 'All',
+          lastSync: lastSyncStr,
+        },
+      });
 
-      const [distRes, reportRes] = await Promise.all([
-        shouldSyncDistribution
-          ? axios.get('/api/distribution', {
-              headers,
-              params: {
-                startDate: startDateStr,
-                endDate: endDateStr,
-                callType: callTypeParam,
-                lastSync: lastSyncStr,
-              },
-            })
-          : Promise.resolve({ data: { deltaCalls: [] as unknown[] } }),
-        axios.get('/api/report', {
-          headers,
-          params: {
-            officeId: officeIdsParam,
-            callType: callTypeParam,
-            startDate: startDateStr,
-            endDate: endDateStr,
-            lastSync: lastSyncStr,
-          },
-        }),
-      ]);
-
-      const deltaCalls = distRes.data?.deltaCalls || [];
-      const registerDeltas = reportRes.data?.data || [];
+      const deltaCalls = (corpusRes.data?.deltaCalls || []) as Record<string, unknown>[];
       const syncTime = new Date();
-      const existingCalls =
-        distributionDataCache?.cacheKey === cacheKey ? distributionDataCache.allCalls : [];
 
-      let mergedCalls = existingCalls;
       let addedCount = 0;
       let updatedCount = 0;
 
       if (deltaCalls.length > 0) {
-        const distMerge = mergeCallsDelta(mergedCalls, deltaCalls);
-        mergedCalls = distMerge.merged;
-        addedCount += distMerge.addedCount;
-        updatedCount += distMerge.updatedCount;
+        if (!callCorpusStore || callCorpusStore.cacheKey !== cacheKey) {
+          await ensureCorpusLoaded({ silent: true });
+        }
+        const merge = mergeCorpusDelta(deltaCalls, cacheKey);
+        addedCount = merge.addedCount;
+        updatedCount = merge.updatedCount;
+        if (callCorpusStore) {
+          syncDistributionCacheFromCorpus(callCorpusStore);
+          applyCorpusToUi(callCorpusStore);
+          void persistCorpusDeltaToIndexedDB(deltaCalls, callCorpusStore);
+        }
+        notifyCorpusRegisterDelta(deltaCalls, syncTime);
+      } else {
+        notifyCorpusRegisterDelta([], syncTime);
       }
 
-      if (registerDeltas.length > 0 && mergedCalls.length > 0) {
-        const registerPatches = registerDeltas.map((row: Record<string, unknown>) =>
-          mapRegisterRowToDistributionPatch(row)
-        );
-        const registerMerge = patchCallsDelta(mergedCalls, registerPatches);
-        mergedCalls = registerMerge.merged;
-        addedCount += registerMerge.addedCount;
-        updatedCount += registerMerge.updatedCount;
-      } else if (registerDeltas.length > 0 && distributionDataCache?.cacheKey === cacheKey) {
-        const registerPatches = registerDeltas.map((row: Record<string, unknown>) =>
-          mapRegisterRowToDistributionPatch(row)
-        );
-        const registerMerge = patchCallsDelta([], registerPatches);
-        mergedCalls = registerMerge.merged;
-        addedCount += registerMerge.addedCount;
-        updatedCount += registerMerge.updatedCount;
-      }
-
-      const hasDataChanges = deltaCalls.length > 0 || registerDeltas.length > 0;
-
-      if (hasDataChanges && distributionDataCache?.cacheKey === cacheKey) {
-        const nextCache: DistributionDataCache = {
-          ...distributionDataCache,
-          allCalls: mergedCalls,
-          fetchedAt: syncTime.getTime(),
-          lastSyncedAt: syncTime.getTime(),
-        };
-        applySharedCallsCache(nextCache);
+      if (callCorpusStore?.cacheKey === cacheKey) {
+        setLastSyncedAt(syncTime);
       } else if (distributionDataCache?.cacheKey === cacheKey) {
         const nextCache: DistributionDataCache = {
           ...distributionDataCache,
@@ -524,57 +769,88 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         };
         setDistributionDataCache(nextCache);
         setLastSyncedAt(syncTime);
-      }
-
-      if (registerDeltas.length > 0) {
-        notifyRegisterDelta(registerDeltas, syncTime);
       } else {
-        notifyRegisterDelta([], syncTime);
+        setLastSyncedAt(syncTime);
       }
 
-      setLastSyncedAt(syncTime);
-
-      const toastParts: string[] = [];
-      if (addedCount > 0) toastParts.push(`${addedCount} added`);
-      if (updatedCount > 0) toastParts.push(`${updatedCount} updated`);
-      if (toastParts.length === 0) {
-        toast.info('No calls added or updated in the last minute');
-      } else {
-        toast.success(`${toastParts.join(', ')} in the last minute`);
+      if (opts?.showToast) {
+        const toastParts: string[] = [];
+        if (addedCount > 0) toastParts.push(`${addedCount} added`);
+        if (updatedCount > 0) toastParts.push(`${updatedCount} updated`);
+        if (toastParts.length === 0) {
+          toast.info('No calls added or updated in the last minute');
+        } else {
+          toast.success(`${toastParts.join(', ')} in the last minute`);
+        }
       }
-    } catch (err: any) {
-      toast.error('Failed to sync calls: ' + (err.response?.data?.error || err.message));
+    } catch (err: unknown) {
+      if (opts?.showToast) {
+        const message =
+          axios.isAxiosError(err) && err.response?.data?.error
+            ? String(err.response.data.error)
+            : err instanceof Error
+              ? err.message
+              : 'Sync failed';
+        toast.error('Failed to sync calls: ' + message);
+      }
     } finally {
       syncInFlightRef.current = false;
       setSyncInProgress(false);
     }
   }, [
-    applySharedCallsCache,
-    ensureSharedCallsLoaded,
+    applyCorpusToUi,
+    ensureCorpusLoaded,
     getDateStrings,
     getSharedCacheKey,
     lastSyncedAt,
     pathname,
-    selectedCallTypes,
-    selectedOfficeIds,
     supabase,
   ]);
 
   useEffect(() => {
-    if (!resourcesLoaded || !needsDistributionPreload) return;
-    ensureSharedCallsLoaded();
-  }, [resourcesLoaded, needsDistributionPreload, ensureSharedCallsLoaded, dateRange, selectedCallTypes]);
+    corpusGenerationRef.current += 1;
+  }, [dateRange.start, dateRange.end]);
 
   useEffect(() => {
-    if (!resourcesLoaded) return;
-    if (!lastSyncedAt && !distributionDataCache?.lastSyncedAt && !globalReportCache?.lastRefreshed) return;
+    const { startDateStr, endDateStr } = getDateStrings();
+    const cacheKey = buildCorpusCacheKey(startDateStr, endDateStr);
 
-    const timer = window.setInterval(() => {
-      runBackgroundSync();
-    }, REPORT_SYNC_INTERVAL_MS);
+    void (async () => {
+      const local = await tryResolveLocalCorpus(cacheKey);
+      if (local) {
+        applyCorpusToUi(local);
+      }
+    })();
+  }, [dateRange.start, dateRange.end, applyCorpusToUi, getDateStrings, tryResolveLocalCorpus]);
 
-    return () => window.clearInterval(timer);
-  }, [resourcesLoaded, lastSyncedAt, runBackgroundSync]);
+  useEffect(() => {
+    if (!resourcesLoaded || !needsCorpusPreload) return;
+    const { startDateStr, endDateStr } = getDateStrings();
+    const cacheKey = buildCorpusCacheKey(startDateStr, endDateStr);
+    if (corpusSatisfiedKeysRef.current.has(cacheKey)) return;
+    ensureCorpusLoaded({ silent: pathname !== '/report/distribution' });
+  }, [resourcesLoaded, needsCorpusPreload, ensureCorpusLoaded, dateRange.start, dateRange.end, pathname, getDateStrings]);
+
+  useEffect(() => {
+    const calls =
+      distributionCalls.length > 0
+        ? distributionCalls
+        : getCorpusCallsArray(callCorpusStore);
+    if (!calls.length) return;
+    syncCascadeOptionsFromCalls(calls);
+  }, [
+    distributionCalls,
+    corpusTick,
+    selectedState,
+    selectedCity,
+    selectedBranch,
+    selectedFranchisee,
+    selectedTechnician,
+    pincodeSearch,
+    syncCascadeOptionsFromCalls,
+  ]);
+
+  // Automatic delta sync disabled — use the sync button (↻) for manual refresh.
 
   const callTypeOptions = useMemo(
     () => callTypes.map((type) => ({ value: type, label: type })),
@@ -668,10 +944,16 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     distributionLoading,
     fetchDistributionData,
     ensureSharedCallsLoaded,
+    ensureCorpusLoaded,
     rehydrateDistributionFromCache,
     runBackgroundSync,
     lastSyncedAt,
     syncInProgress,
+    corpusStatus,
+    corpusLoading: distributionLoading || corpusStatus === 'refreshing',
+    corpusTick,
+    corpusTruncated,
+    corpusCallCount,
     syncCascadeOptionsFromCalls,
     resourcesLoaded,
   }), [
@@ -712,12 +994,17 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     distributionLoading,
     fetchDistributionData,
     ensureSharedCallsLoaded,
+    ensureCorpusLoaded,
     rehydrateDistributionFromCache,
     runBackgroundSync,
     lastSyncedAt,
     syncInProgress,
+    corpusStatus,
+    corpusTruncated,
+    corpusCallCount,
     syncCascadeOptionsFromCalls,
     resourcesLoaded,
+    corpusTick,
   ]);
 
   return (

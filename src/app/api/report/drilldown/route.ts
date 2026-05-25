@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { postQuery } from '@/lib/db-proxy';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { appendCallTypeFilter } from '@/lib/trhcalls-query';
 
 export async function POST(req: NextRequest) {
   try {
@@ -75,14 +76,8 @@ export async function POST(req: NextRequest) {
       }
 
       if (callType && callType !== 'All' && callType !== '') {
-        if (callType.includes(',')) {
-          const types = callType.split(',').map((t: string) => `'${t.trim().replace(/'/g, "''")}'`).join(',');
-          condition += ` AND view_c.ncalltype IN (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${types}))`;
-          innerCondition += ` AND ncalltype IN (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${types}))`;
-        } else {
-          condition += ` AND view_c.ncalltype = (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${callType.replace(/'/g, "''")}')`;
-          innerCondition += ` AND ncalltype = (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${callType.replace(/'/g, "''")}')`;
-        }
+        condition = appendCallTypeFilter(condition, callType, 'view_c.ncalltype');
+        innerCondition = appendCallTypeFilter(innerCondition, callType, 'ncalltype');
       }
 
       switch (type) {
@@ -119,12 +114,7 @@ export async function POST(req: NextRequest) {
           if (startDate) discrepancyCondition += ` AND dtrndate >= '${startDate}'`;
           if (endDate) discrepancyCondition += ` AND dtrndate <= '${endDate} 23:59:59'`;
           if (callType && callType !== 'All' && callType !== '') {
-            if (callType.includes(',')) {
-              const types = callType.split(',').map((t: string) => `'${t.trim().replace(/'/g, "''")}'`).join(',');
-              discrepancyCondition += ` AND ncalltype IN (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${types}))`;
-            } else {
-              discrepancyCondition += ` AND ncalltype = (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${callType.replace(/'/g, "''")}')`;
-            }
+            discrepancyCondition = appendCallTypeFilter(discrepancyCondition, callType, 'ncalltype');
           }
           condition += ` AND view_c.vtrnno IN (
             SELECT vtrnno 
@@ -195,12 +185,7 @@ export async function POST(req: NextRequest) {
         }
 
         if (callType && callType !== 'All' && callType !== '') {
-          if (callType.includes(',')) {
-            const types = callType.split(',').map((t: string) => `'${t.trim().replace(/'/g, "''")}'`).join(',');
-            condition += ` AND tc.ncalltype IN (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue IN (${types}))`;
-          } else {
-            condition += ` AND tc.ncalltype = (SELECT ncode FROM mstfixedselection WHERE vfieldname = 'ncalltype' AND vdisplayvalue = '${callType.replace(/'/g, "''")}')`;
-          }
+          condition = appendCallTypeFilter(condition, callType);
         }
 
         sql = `SELECT TOP 500 

@@ -5,6 +5,7 @@ import { Search, MapPin, X } from 'lucide-react';
 import { DateRangeSelector } from '@/components/DateRangeSelector';
 import { RegisterMultiSelect } from '@/components/RegisterMultiSelect';
 import { RegisterBranchFranchiseeFilters } from '@/components/RegisterBranchFranchiseeFilters';
+import { RegisterStatusChips } from '@/components/RegisterStatusChips';
 import {
   REGISTER_PORTAL_OPTIONS,
   REGISTER_PRIORITY_OPTIONS,
@@ -13,6 +14,8 @@ import {
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 
 type RegisterFilterBarProps = {
+  layout?: 'inline' | 'drawer-content';
+  applyMode?: 'instant' | 'confirm';
   onSearchEnter?: () => void;
   onPincodeEnter?: () => void;
   showClearButton?: boolean;
@@ -36,7 +39,113 @@ function FilterGroup({
   );
 }
 
+function FilterGroups({
+  applyMode = 'confirm',
+  showStatusChips = false,
+}: {
+  applyMode?: 'instant' | 'confirm';
+  showStatusChips?: boolean;
+}) {
+  const {
+    callTypeOptions,
+    selectedCallTypes,
+    setSelectedCallTypes,
+    selectedStatus,
+    setSelectedStatus,
+    priorityFilter,
+    setPriorityFilter,
+    portalFilter,
+    setPortalFilter,
+    stateOptions,
+    selectedState,
+    handleStatesChange,
+    cityOptions,
+    selectedCity,
+    handleCitiesChange,
+    technicianOptions,
+    selectedTechnician,
+    setSelectedTechnician,
+  } = useReportFilters();
+
+  return (
+    <>
+      <FilterGroup label="Call">
+        {showStatusChips && <RegisterStatusChips />}
+        <RegisterMultiSelect
+          label="Status"
+          emptyLabel="All statuses"
+          options={REGISTER_STATUS_OPTIONS}
+          selected={selectedStatus}
+          onChange={setSelectedStatus}
+          applyMode={applyMode}
+        />
+        <RegisterMultiSelect
+          label="Type"
+          emptyLabel="All types"
+          options={callTypeOptions}
+          selected={selectedCallTypes}
+          onChange={setSelectedCallTypes}
+          applyMode={applyMode}
+        />
+        <RegisterMultiSelect
+          label="Priority"
+          emptyLabel="All priorities"
+          options={REGISTER_PRIORITY_OPTIONS}
+          selected={priorityFilter}
+          onChange={setPriorityFilter}
+          applyMode={applyMode}
+        />
+        <RegisterMultiSelect
+          label="Portal"
+          emptyLabel="All portals"
+          options={REGISTER_PORTAL_OPTIONS}
+          selected={portalFilter}
+          onChange={setPortalFilter}
+          applyMode={applyMode}
+        />
+      </FilterGroup>
+
+      <FilterGroup label="Location">
+        <RegisterBranchFranchiseeFilters applyMode={applyMode} />
+        <RegisterMultiSelect
+          label="State"
+          emptyLabel="All states"
+          options={stateOptions}
+          selected={selectedState}
+          onChange={handleStatesChange}
+          searchable
+          applyMode={applyMode}
+        />
+        <RegisterMultiSelect
+          label="City"
+          emptyLabel="All cities"
+          options={cityOptions}
+          selected={selectedCity}
+          onChange={handleCitiesChange}
+          searchable
+          applyMode={applyMode}
+        />
+      </FilterGroup>
+
+      <FilterGroup label="People" className="register-filter-group--people">
+        <RegisterMultiSelect
+          label="Technician"
+          emptyLabel="All technicians"
+          options={technicianOptions}
+          selected={selectedTechnician}
+          onChange={setSelectedTechnician}
+          searchable
+          panelClassName="w-64"
+          applyMode={applyMode}
+        />
+      </FilterGroup>
+    </>
+  );
+}
+
 export function RegisterFilterBar({
+  layout = 'inline',
+  applyMode = 'confirm',
   onSearchEnter,
   onPincodeEnter,
   showClearButton = true,
@@ -52,24 +161,6 @@ export function RegisterFilterBar({
     dateFilterColumn,
     setDateFilterColumn,
     dateFilterColumnOptions,
-    selectedStatus,
-    setSelectedStatus,
-    callTypeOptions,
-    selectedCallTypes,
-    setSelectedCallTypes,
-    priorityFilter,
-    setPriorityFilter,
-    portalFilter,
-    setPortalFilter,
-    stateOptions,
-    selectedState,
-    handleStatesChange,
-    cityOptions,
-    selectedCity,
-    handleCitiesChange,
-    technicianOptions,
-    selectedTechnician,
-    setSelectedTechnician,
     isAnyFilterActive,
     clearAllFilters,
   } = useReportFilters();
@@ -79,10 +170,19 @@ export function RegisterFilterBar({
     onClear?.();
   };
 
+  if (layout === 'drawer-content') {
+    return (
+      <div className="register-filter-drawer-content">
+        <div className="register-filter-row register-filter-row-compact flex-col items-stretch gap-3">
+          <FilterGroups applyMode={applyMode} showStatusChips />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="register-filter-bar">
       <div className="register-filter-rows">
-        {/* Row 1: lookup + date window */}
         <div className="register-filter-row register-filter-row-compact">
           <FilterGroup label="Search" className="register-filter-group--search">
             <div className="register-search-field">
@@ -146,70 +246,8 @@ export function RegisterFilterBar({
           )}
         </div>
 
-        {/* Row 2: call, location, people */}
         <div className="register-filter-row register-filter-row-compact">
-          <FilterGroup label="Call">
-            <RegisterMultiSelect
-              label="Status"
-              emptyLabel="All statuses"
-              options={REGISTER_STATUS_OPTIONS}
-              selected={selectedStatus}
-              onChange={setSelectedStatus}
-            />
-            <RegisterMultiSelect
-              label="Type"
-              emptyLabel="All types"
-              options={callTypeOptions}
-              selected={selectedCallTypes}
-              onChange={setSelectedCallTypes}
-            />
-            <RegisterMultiSelect
-              label="Priority"
-              emptyLabel="All priorities"
-              options={REGISTER_PRIORITY_OPTIONS}
-              selected={priorityFilter}
-              onChange={setPriorityFilter}
-            />
-            <RegisterMultiSelect
-              label="Portal"
-              emptyLabel="All actions"
-              options={REGISTER_PORTAL_OPTIONS}
-              selected={portalFilter}
-              onChange={setPortalFilter}
-            />
-          </FilterGroup>
-
-          <FilterGroup label="Location">
-            <RegisterBranchFranchiseeFilters />
-            <RegisterMultiSelect
-              label="State"
-              emptyLabel="All states"
-              options={stateOptions}
-              selected={selectedState}
-              onChange={handleStatesChange}
-              searchable
-            />
-            <RegisterMultiSelect
-              label="City"
-              emptyLabel="All cities"
-              options={cityOptions}
-              selected={selectedCity}
-              onChange={handleCitiesChange}
-              searchable
-            />
-          </FilterGroup>
-
-          <FilterGroup label="People" className="register-filter-group--people">
-            <RegisterMultiSelect
-              label="Technician"
-              emptyLabel="All technicians"
-              options={technicianOptions}
-              selected={selectedTechnician}
-              onChange={setSelectedTechnician}
-              searchable
-              panelClassName="w-64"
-            />
-          </FilterGroup>
+          <FilterGroups applyMode={applyMode} />
         </div>
       </div>
     </div>
