@@ -302,6 +302,7 @@ const TRHCALLS_DEDUP_INNER_COLUMNS = [
   'ncalltype',
   'nitem',
   'vcomplaint',
+  'vpersoncalling',
   'callStatus',
   'vsolveremarks',
 ].join(', ');
@@ -311,10 +312,12 @@ export function buildTrhcallsDedupSubquery(opts?: {
   endDate?: string | null;
   /** Default 30 for register/distribution; pass `null` for no fallback (corpus with explicit dates). */
   fallbackDays?: number | null;
+  column?: RegisterDateFilterColumn;
 }): string {
   const dateWhere = buildTrhcallsDateRangeWhere({
     startDate: opts?.startDate,
     endDate: opts?.endDate,
+    column: opts?.column,
     fallbackDays:
       opts?.fallbackDays === null
         ? undefined
@@ -373,14 +376,23 @@ export function buildCorpusFieldsSql(): string {
     CASE WHEN EXISTS (SELECT 1 FROM trdcalls1visit v (NOLOCK) WHERE v.ncalls = tc.ncode) THEN 1 ELSE 0 END AS has_visit,
     tc.editedon,
     tc.addedon,
-    p.vinstpostalcode AS pincode,
     p.vinstpostalcode AS Pincode,
     p.vname AS PartyName,
+    p.vinsttel1 AS vinsttel1,
+    p.vinstaddress AS vinstaddress,
+    tc.vpersoncalling,
+    cty.vname AS dbCity,
+    st.vname AS dbState,
     o.nunder AS office_under,
     o.vcompanyname AS office_name,
     bo.vcompanyname AS branch_office_name,
     u.vname AS serviceman,
     u.vname AS technician_name,
+    f.vcompanyname AS technician_office_name,
+    f.ncode AS technician_office_id,
+    transferoffice.vcompanyname AS transfer_office_name,
+    ${sqlFranchiseeCodeExpr()} AS franchisee_code,
+    ${sqlFranchiseeNameExpr()} AS franchisee_name,
     CONVERT(varchar(30), tc.dtrndate, 126) AS callsdtrndate,
     tc.vcomplaint,
     mstitems.vname AS itemname,
@@ -399,6 +411,7 @@ export function buildCorpusDedupSubquery(opts: {
   startDate?: string | null;
   endDate?: string | null;
   lastSync?: string | null;
+  dateColumn?: RegisterDateFilterColumn;
 }): string {
   if (opts.lastSync) {
     return buildTrhcallsDeltaSubquery(opts.lastSync, opts.startDate, opts.endDate);
@@ -407,6 +420,7 @@ export function buildCorpusDedupSubquery(opts: {
     startDate: opts.startDate,
     endDate: opts.endDate,
     fallbackDays: opts.startDate || opts.endDate ? null : 30,
+    column: opts.dateColumn,
   });
 }
 
@@ -414,6 +428,7 @@ export function buildCorpusTableName(opts: {
   startDate?: string | null;
   endDate?: string | null;
   lastSync?: string | null;
+  dateColumn?: RegisterDateFilterColumn;
 }): string {
   return `
     ${buildCorpusDedupSubquery(opts)}
@@ -430,6 +445,10 @@ export function buildCorpusTableName(opts: {
       GROUP BY nofficeid
     ) hc ON o.ncode = hc.nofficeid
     LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode
+    LEFT JOIN mstoffice f (NOLOCK) ON u.nofficeid = f.ncode
+    LEFT JOIN mstoffice transferoffice (NOLOCK) ON tc.ntransfertooffice = transferoffice.ncode
+    LEFT JOIN mstcity cty (NOLOCK) ON COALESCE(NULLIF(p.ncity, ''), o.ncity) = cty.ncode
+    LEFT JOIN mststate st (NOLOCK) ON cty.nstate = st.ncode
     LEFT JOIN mstitems (NOLOCK) ON tc.nitem = mstitems.ncode
     LEFT JOIN mstfixedselection calltype_fs (NOLOCK) ON tc.ncalltype = calltype_fs.ncode AND calltype_fs.vfieldname = 'ncalltype'
     LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode

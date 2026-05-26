@@ -29,6 +29,7 @@ import {
 } from '@/components/admin/AdminUi';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 import { buildCorpusCacheKey } from '@/lib/report-corpus';
+import { toDateString } from '@/lib/report-filters';
 import { callCorpusStore } from '@/lib/report-data-store';
 import { MAX_CLIENT_CORPUS_DAYS } from '@/lib/trhcalls-query';
 import {
@@ -80,20 +81,11 @@ export default function SerialAuditPage() {
     search,
     resourcesLoaded,
     ensureCorpusLoaded,
+    dateFilterColumn,
   } = useReportFilters();
 
-  const startDateStr = useMemo(
-    () =>
-      dateRange.start instanceof Date
-        ? dateRange.start.toISOString().split('T')[0]
-        : String(dateRange.start),
-    [dateRange.start]
-  );
-  const endDateStr = useMemo(
-    () =>
-      dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : String(dateRange.end),
-    [dateRange.end]
-  );
+  const startDateStr = useMemo(() => toDateString(dateRange.start), [dateRange.start]);
+  const endDateStr = useMemo(() => toDateString(dateRange.end), [dateRange.end]);
   const callTypeParam = useMemo(
     () => (selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',')),
     [selectedCallTypes]
@@ -136,8 +128,8 @@ export default function SerialAuditPage() {
   );
 
   const corpusWindowKey = useMemo(
-    () => buildCorpusCacheKey(startDateStr, endDateStr),
-    [startDateStr, endDateStr]
+    () => buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn),
+    [startDateStr, endDateStr, dateFilterColumn]
   );
 
   const dataKey = useMemo(

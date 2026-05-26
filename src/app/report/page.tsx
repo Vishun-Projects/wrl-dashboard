@@ -54,12 +54,16 @@ import {
   type RegisterSummaryBucket,
   type RegisterViewFilterParts,
 } from '@/lib/report-search';
-import { isAnyFilterActive } from '@/lib/report-filters';
+import { isAnyFilterActive, toDateString } from '@/lib/report-filters';
 import { globalReportCache, setGlobalReportCache, distributionDataCache, setDistributionDataCache, callCorpusStore } from '@/lib/report-data-store';
 import { indexRegisterRowsWithSerial, subscribeRegisterDelta } from '@/lib/report-sync';
 import {
   buildCorpusCacheKey,
+  buildCorpusViewDateFilter,
+  adoptCorpusStoreForScope,
+  corpusStoreCoversFetchScope,
   deriveRegisterPageFromCorpus,
+  filterCorpusCallsByViewDate,
   getFilteredCorpusCalls,
   getCorpusCallsArray,
   restoreCorpusFromIndexedDB,
@@ -229,24 +233,8 @@ function registerPageCacheGet(
   return root.get(queryKey)?.get(page);
 }
 
-/**
- * Performance logging for `/report`. Filter DevTools console by `[ReportPerf]`.
- * On in development by default; in production run:
- * `localStorage.setItem('REPORT_PERF','1'); location.reload()`
- */
-function reportPerfEnabled(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.localStorage?.getItem('REPORT_PERF') === '1';
-  } catch {
-    return false;
-  }
-}
-
-function logSummaryDebug(label: string, payload: Record<string, unknown>) {
-  if (process.env.NODE_ENV !== 'development') return;
-  console.info(`[Summary] ${label}`, payload);
-}
+/** No-op — perf hooks kept so call sites stay stable without console noise. */
+function logSummaryDebug(_label: string, _payload: Record<string, unknown>) {}
 
 function corpusSpanDays(startDateStr: string, endDateStr: string): number {
   const spanStart = new Date(`${startDateStr}T00:00:00`);
@@ -255,34 +243,14 @@ function corpusSpanDays(startDateStr: string, endDateStr: string): number {
   return Math.floor((spanEnd.getTime() - spanStart.getTime()) / 86400000) + 1;
 }
 
-let reportPerfNavLogged = false;
-function reportPerfLogDocumentNavigationOnce() {
-  if (!reportPerfEnabled() || reportPerfNavLogged) return;
-  if (typeof performance === 'undefined') return;
-  const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-  if (!nav || nav.requestStart <= 0) return;
-  reportPerfNavLogged = true;
-  const ttfbMs = nav.responseStart - nav.requestStart;
-  console.log('[ReportPerf] navigation | document TTFB & shell (this page load)', {
-    why: 'TTFB ≈ time from navigation request until first byte of HTML (document). SPA route changes may reuse this entry from the initial document load.',
-    ttfbMs: Number(ttfbMs.toFixed(1)),
-    domInteractiveMs: Number((nav.domInteractive - nav.startTime).toFixed(1)),
-    loadEventEndMs: nav.loadEventEnd > 0 ? Number((nav.loadEventEnd - nav.startTime).toFixed(1)) : null,
-    transferSize: (nav as PerformanceNavigationTiming & { transferSize?: number }).transferSize,
-  });
-}
+function reportPerfLogDocumentNavigationOnce() {}
 
 function reportPerf(
-  phase: string,
-  action: string,
-  opStart: number,
-  extra?: Record<string, unknown>
-) {
-  if (!reportPerfEnabled()) return;
-  const now = performance.now();
-  const sinceOpMs = Number((now - opStart).toFixed(1));
-  console.log(`[ReportPerf] ${phase} | ${action}`, { sinceOpMs, ...extra });
-}
+  _phase: string,
+  _action: string,
+  _opStart: number,
+  _extra?: Record<string, unknown>
+) {}
 
 
 export default function ReportPage() {
@@ -588,7 +556,7 @@ export default function ReportPage() {
           ? row.franchisee_name
           : '—';
       case 'Pincode':
-        return row.Pincode || '—';
+        return row.Pincode ?? row.pincode ?? '—';
       case 'itemname':
         return row.itemname;
       case 'callsvserialno':
@@ -667,6 +635,8 @@ export default function ReportPage() {
   const sentinelRef = React.useRef<HTMLDivElement | null>(null);
   const lastSummaryQueryKeyRef = React.useRef<string | null>(globalReportCache?.summaryQueryKey ?? null);
   const lastRegisterListQueryKeyRef = React.useRef<string | null>(null);
+  const lastAppliedFilterSnapshotRef = React.useRef<string | null>(null);
+  const filterEffectInFlightRef = React.useRef(false);
   const dataRef = React.useRef(data);
   const totalRef = React.useRef(total);
   const registerSummaryRef = React.useRef(registerSummary);
@@ -767,8 +737,8 @@ export default function ReportPage() {
         } catch(e) {}
           
         const officeIdsParam = summaryOfficeIdsParam;
-        const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
-        const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+        const startDateStr = toDateString(dateRange.start);
+        const endDateStr = toDateString(dateRange.end);
 
         await saveCallsToDB(calls);
         await saveMeta('cacheParams', {
@@ -809,9 +779,9 @@ export default function ReportPage() {
 
   const buildCurrentSummaryQueryKey = () => {
     const startDateStr =
-      dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+      toDateString(dateRange.start);
     const endDateStr =
-      dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+      toDateString(dateRange.end);
     const agingStr =
       agingAsOf.includes(' ') || agingAsOf.includes(':')
         ? new Date(agingAsOf).toISOString().split('T')[0]
@@ -909,14 +879,15 @@ export default function ReportPage() {
 
   const applySummaryFromCorpus = useCallback((): boolean => {
     const startDateStr =
-      dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+      toDateString(dateRange.start);
     const endDateStr =
-      dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+      toDateString(dateRange.end);
     const agingStr =
       agingAsOf.includes(' ') || agingAsOf.includes(':')
         ? new Date(agingAsOf).toISOString().split('T')[0]
         : agingAsOf;
-    const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr);
+    const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+    const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
     const spanDays = corpusSpanDays(startDateStr, endDateStr);
     const deriveOpts = {
       agingAsOf: agingStr,
@@ -945,7 +916,7 @@ export default function ReportPage() {
       return false;
     }
 
-    const calls = getCorpusCallsArray(callCorpusStore);
+    const calls = filterCorpusCallsByViewDate(getCorpusCallsArray(callCorpusStore), viewDateFilter);
     const diagnostic = diagnoseSummaryDerivation(calls, deriveOpts);
     const { branchSummary, accountSummary, globalHeadcount: headcount } = deriveSummaryDashboard(
       calls,
@@ -979,15 +950,16 @@ export default function ReportPage() {
     agingAsOf,
     summaryOfficeIdsParam,
     viewCallTypesParam,
+    dateFilterColumn,
     callCorpusStore,
     commitSummaryResult,
   ]);
 
   const fetchSummaryFromApi = useCallback(async (): Promise<boolean> => {
     const startDateStr =
-      dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+      toDateString(dateRange.start);
     const endDateStr =
-      dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+      toDateString(dateRange.end);
     const agingStr =
       agingAsOf.includes(' ') || agingAsOf.includes(':')
         ? new Date(agingAsOf).toISOString().split('T')[0]
@@ -1054,26 +1026,33 @@ export default function ReportPage() {
 
   const applyRegisterFromCorpus = useCallback(
     (pageNum = 1): boolean => {
-      const startDateStr =
-        dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
-      const endDateStr =
-        dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
-      const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr);
-      if (!callCorpusStore?.calls.size || callCorpusStore.cacheKey !== corpusKey) {
+      const startDateStr = toDateString(dateRange.start);
+      const endDateStr = toDateString(dateRange.end);
+      const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+      const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
+
+      let store = callCorpusStore;
+      if (store?.calls.size && store.cacheKey !== corpusKey) {
+        if (corpusStoreCoversFetchScope(store, startDateStr, endDateStr, dateFilterColumn)) {
+          store = adoptCorpusStoreForScope(store, startDateStr, endDateStr, dateFilterColumn);
+        }
+      }
+      if (!store?.calls.size || store.cacheKey !== corpusKey) {
         return false;
       }
 
       const viewFilters = registerViewFilterRef.current;
       const derived = deriveRegisterPageFromCorpus(
-        callCorpusStore,
+        store,
         corpusKey,
         viewFilters,
         pageNum,
-        limit
+        limit,
+        viewDateFilter
       );
       if (!derived) return false;
 
-      const allFiltered = getFilteredCorpusCalls(viewFilters, callCorpusStore);
+      const allFiltered = getFilteredCorpusCalls(viewFilters, store, viewDateFilter);
       const summary = summarizeRegisterRows(allFiltered);
       const queryKey = buildRegisterListQueryKey({
         officeIdsParam: registerOfficeIdsParam,
@@ -1099,7 +1078,7 @@ export default function ReportPage() {
       setPage(pageNum);
       setRegisterSummary(summary);
       setLastRefreshed(
-        callCorpusStore.lastSyncedAt ? new Date(callCorpusStore.lastSyncedAt) : new Date()
+        store.lastSyncedAt ? new Date(store.lastSyncedAt) : new Date()
       );
       lastRegisterListQueryKeyRef.current = queryKey;
       lastKnownRegisterTotalRef.current = derived.total;
@@ -1109,27 +1088,37 @@ export default function ReportPage() {
         registerSummary: summary,
       });
 
-      if (globalReportCache) {
-        setGlobalReportCache({
-          ...globalReportCache,
-          total: derived.total,
-          registerSummary: summary,
-          page: pageNum,
-          search: viewFilters.search || '',
-          pincodeSearch: viewFilters.pincodeSearch || '',
-          selectedCallTypes,
-          selectedState,
-          selectedCity,
-          selectedBranch,
-          selectedFranchisee,
-          selectedTechnician,
-          selectedStatus,
-          priorityFilter,
-          portalFilter,
-          selectedOfficeIds,
-          agingAsOf,
-        });
-      }
+      const refreshedDate = store.lastSyncedAt
+        ? new Date(store.lastSyncedAt)
+        : new Date();
+      setGlobalReportCache({
+        data: derived.rows,
+        summaryData: globalReportCache?.summaryData ?? summaryData,
+        accountsData: globalReportCache?.accountsData ?? accountsData,
+        globalHeadcount: globalReportCache?.globalHeadcount ?? globalHeadcount,
+        total: derived.total,
+        registerSummary: summary,
+        page: pageNum,
+        search: viewFilters.search || '',
+        pincodeSearch: viewFilters.pincodeSearch || '',
+        selectedCallTypes,
+        selectedState,
+        selectedCity,
+        selectedBranch,
+        selectedFranchisee,
+        selectedTechnician,
+        selectedStatus,
+        priorityFilter,
+        portalFilter,
+        selectedOfficeIds,
+        agingAsOf,
+        dateRange,
+        dateFilterColumn,
+        filterRegion,
+        filterAccount,
+        lastRefreshed: refreshedDate,
+        summaryQueryKey: globalReportCache?.summaryQueryKey,
+      });
 
       return true;
     },
@@ -1199,8 +1188,8 @@ export default function ReportPage() {
     }
 
     const officeIdsParam = registerOfficeIdsParam;
-    const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
-    const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+    const startDateStr = toDateString(dateRange.start);
+    const endDateStr = toDateString(dateRange.end);
 
     const searchForUrl = opts?.searchOverride !== undefined ? opts.searchOverride : debouncedSearch;
     const pincodeForUrl = opts?.pincodeOverride !== undefined ? opts.pincodeOverride : debouncedPincodeSearch;
@@ -1299,26 +1288,35 @@ export default function ReportPage() {
     }
 
     if (!searchActive) {
-      const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr);
+      const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+      const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
       const hasCorpus =
-        callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0;
-      if (!hasCorpus || opts?.skipCache || opts?.forceCorpus) {
+        (callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0) ||
+        corpusStoreCoversFetchScope(callCorpusStore, startDateStr, endDateStr, dateFilterColumn);
+      if (!hasCorpus || opts?.forceCorpus) {
         await ensureCorpusLoaded({
           silent: !!opts?.silent,
-          force: !!(opts?.skipCache || opts?.forceCorpus),
+          force: !!opts?.forceCorpus,
         });
       }
       await ensurePortalAuditCache(supabase);
       const viewFilters = registerViewFilterRef.current;
+      let corpusStore = callCorpusStore;
+      if (corpusStore?.calls.size && corpusStore.cacheKey !== corpusKey) {
+        if (corpusStoreCoversFetchScope(corpusStore, startDateStr, endDateStr, dateFilterColumn)) {
+          corpusStore = adoptCorpusStoreForScope(corpusStore, startDateStr, endDateStr, dateFilterColumn);
+        }
+      }
       const corpusDerived = deriveRegisterPageFromCorpus(
-        callCorpusStore,
+        corpusStore,
         corpusKey,
         viewFilters,
         p,
-        limit
+        limit,
+        viewDateFilter
       );
       if (corpusDerived) {
-        const allFiltered = getFilteredCorpusCalls(viewFilters, callCorpusStore);
+        const allFiltered = getFilteredCorpusCalls(viewFilters, corpusStore, viewDateFilter);
         const summary = p === 1 ? summarizeRegisterRows(allFiltered) : registerSummaryRef.current;
         setData(corpusDerived.rows);
         setTotal(corpusDerived.total);
@@ -1331,7 +1329,7 @@ export default function ReportPage() {
           setLoadingPage(null);
         }
         setLastRefreshed(
-          callCorpusStore?.lastSyncedAt ? new Date(callCorpusStore.lastSyncedAt) : new Date()
+          corpusStore?.lastSyncedAt ? new Date(corpusStore.lastSyncedAt) : new Date()
         );
         lastRegisterListQueryKeyRef.current = queryKey;
         lastKnownRegisterTotalRef.current = corpusDerived.total;
@@ -1346,7 +1344,8 @@ export default function ReportPage() {
             corpusKey,
             viewFilters,
             2,
-            limit
+            limit,
+            viewDateFilter
           );
           if (page2) {
             registerPageCachePut(registerPagesCacheRef.current, queryKey, 2, {
@@ -1457,13 +1456,15 @@ export default function ReportPage() {
         const maxPage = totalSnap > 0 ? Math.ceil(totalSnap / limit) : 1;
         const nextPage = currentPage + 1;
         if (nextPage <= maxPage) {
-          const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr);
+          const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+          const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
           const fromCorpus = deriveRegisterPageFromCorpus(
             callCorpusStore,
             corpusKey,
             registerViewFilterRef.current,
             nextPage,
-            limit
+            limit,
+            viewDateFilter
           );
           if (fromCorpus) {
             storePrefetched(nextPage, { data: fromCorpus.rows, total: fromCorpus.total });
@@ -1897,8 +1898,8 @@ export default function ReportPage() {
     reportPerf('drillDown', 'POST /api/report/drilldown start', d0, { type, title });
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
-      const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+      const startDateStr = toDateString(dateRange.start);
+      const endDateStr = toDateString(dateRange.end);
       const res = await axios.post('/api/report/drilldown', {
         type,
         callType: params.callType || viewCallTypesParam,
@@ -1952,8 +1953,8 @@ export default function ReportPage() {
     setShowEngPopup(branch);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
-      const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+      const startDateStr = toDateString(dateRange.start);
+      const endDateStr = toDateString(dateRange.end);
       let url = `/api/report/engineers?branch=${encodeURIComponent(branch)}`;
       if (startDateStr) url += `&startDate=${startDateStr}`;
       if (endDateStr) url += `&endDate=${endDateStr}`;
@@ -1984,10 +1985,10 @@ export default function ReportPage() {
           getMetaMs: Number((performance.now() - tBeforeMeta).toFixed(1)),
         });
 
-        const startDateStr = dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
-        const endDateStr = dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+        const startDateStr = toDateString(dateRange.start);
+        const endDateStr = toDateString(dateRange.end);
         const corpusMeta = await readCorpusMeta();
-        const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, selectedCallTypes);
+        const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
         if (corpusMeta?.cacheKey === corpusKey && (corpusMeta.callCount ?? 0) > 0) {
           const tBeforeCorpus = performance.now();
           const restored = await restoreCorpusFromIndexedDB(corpusKey);
@@ -1997,6 +1998,7 @@ export default function ReportPage() {
             restoreMs: Number((performance.now() - tBeforeCorpus).toFixed(1)),
           });
           if (restored) {
+            const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
             const derived = deriveRegisterPageFromCorpus(
               restored,
               corpusKey,
@@ -2015,7 +2017,8 @@ export default function ReportPage() {
                 portalFilter: [],
               },
               1,
-              10
+              10,
+              viewDateFilter
             );
             if (derived) {
               const allFiltered = getFilteredCorpusCalls(
@@ -2033,13 +2036,77 @@ export default function ReportPage() {
                   priorityFilter: [],
                   portalFilter: [],
                 },
-                restored
+                restored,
+                viewDateFilter
               );
               setData(derived.rows);
               setTotal(derived.total);
               setRegisterSummary(summarizeRegisterRows(allFiltered));
               setLastRefreshed(new Date(restored.lastSyncedAt));
               lastKnownRegisterTotalRef.current = derived.total;
+              lastRegisterListQueryKeyRef.current = buildRegisterListQueryKey({
+                officeIdsParam: registerOfficeIdsParam,
+                callTypesParam: viewCallTypesParam,
+                searchForUrl: '',
+                pincodeForUrl: '',
+                startDateStr,
+                endDateStr,
+                dateFilterColumn,
+                selectedState: [],
+                selectedCity: [],
+                selectedBranch: [],
+                selectedFranchisee: [],
+                selectedTechnician: [],
+                selectedStatus: [],
+                priorityFilter: [],
+                portalFilter: [],
+                agingAsOf: agingAsOf || '',
+              });
+              lastAppliedFilterSnapshotRef.current = JSON.stringify({
+                startDateStr,
+                endDateStr,
+                dateFilterColumn,
+                selectedCallTypes,
+                selectedOfficeIds,
+                selectedState: [],
+                selectedCity: [],
+                selectedBranch: [],
+                selectedFranchisee: [],
+                selectedTechnician: [],
+                selectedStatus: [],
+                priorityFilter: [],
+                portalFilter: [],
+                agingAsOf,
+                debouncedSearch: '',
+                debouncedPincodeSearch: '',
+              });
+              setGlobalReportCache({
+                data: derived.rows,
+                summaryData: [],
+                accountsData: [],
+                globalHeadcount: 0,
+                total: derived.total,
+                page: 1,
+                search: '',
+                pincodeSearch: '',
+                selectedOfficeIds,
+                dateRange,
+                dateFilterColumn,
+                filterRegion,
+                filterAccount,
+                selectedCallTypes,
+                registerSummary: summarizeRegisterRows(allFiltered),
+                lastRefreshed: new Date(restored.lastSyncedAt),
+                agingAsOf,
+                selectedStatus: [],
+                priorityFilter: [],
+                portalFilter: [],
+                selectedState: [],
+                selectedCity: [],
+                selectedBranch: [],
+                selectedFranchisee: [],
+                selectedTechnician: [],
+              });
             }
           }
           setLoading(false);
@@ -2189,25 +2256,58 @@ export default function ReportPage() {
     }
     const filtersChanged = changedFields.length > 0;
     const searchOrPinActive = !!(debouncedSearch?.trim() || debouncedPincodeSearch?.trim());
-    const corpusScopeChanged = changedFields.some(
-      (f) =>
-        f === 'no_globalReportCache' ||
-        f.startsWith('dateRange') ||
-        f === 'dateFilterColumn'
-    );
+    const startDateStr = toDateString(dateRange.start);
+    const endDateStr = toDateString(dateRange.end);
+    const filterSnapshot = JSON.stringify({
+      startDateStr,
+      endDateStr,
+      dateFilterColumn,
+      selectedCallTypes,
+      selectedOfficeIds,
+      selectedState,
+      selectedCity,
+      selectedBranch,
+      selectedFranchisee,
+      selectedTechnician,
+      selectedStatus,
+      priorityFilter,
+      portalFilter,
+      agingAsOf,
+      debouncedSearch: debouncedSearch || '',
+      debouncedPincodeSearch: debouncedPincodeSearch || '',
+    });
+    const prevScopeKey = globalReportCache
+      ? buildCorpusCacheKey(
+          toDateString(globalReportCache.dateRange.start),
+          toDateString(globalReportCache.dateRange.end),
+          globalReportCache.dateFilterColumn || 'dtrndate'
+        )
+      : null;
+    const currentScopeKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+    const corpusFetchScopeChanged =
+      changedFields.includes('no_globalReportCache') ||
+      !prevScopeKey ||
+      prevScopeKey !== currentScopeKey;
     const fetchOpts = {
-      skipCache: corpusScopeChanged || searchOrPinActive,
+      skipCache: corpusFetchScopeChanged || searchOrPinActive,
       searchOverride: debouncedSearch,
       pincodeOverride: debouncedPincodeSearch,
     };
 
     if (filtersChanged) {
+      if (filterSnapshot === lastAppliedFilterSnapshotRef.current || filterEffectInFlightRef.current) {
+        return;
+      }
+      filterEffectInFlightRef.current = true;
+
       reportPerf('filterEffect', 'filters changed → clear page cache + setPage(1) + fetchData(1)', t0, {
         changedFields,
         why: 'Compared last successful fetch snapshot (globalReportCache) to current UI/debounced state.',
       });
       registerPagesCacheRef.current.clear();
-      setPage(1);
+      if (page !== 1) {
+        setPage(1);
+      }
       if (clearFiltersRef.current) {
         clearFiltersRef.current = false;
       }
@@ -2215,22 +2315,23 @@ export default function ReportPage() {
       setFilterUpdating(true);
 
       if (searchOrPinActive) {
-        void fetchData(1, fetchOpts).finally(() => setFilterUpdating(false));
+        void fetchData(1, fetchOpts).finally(() => {
+          filterEffectInFlightRef.current = false;
+          lastAppliedFilterSnapshotRef.current = filterSnapshot;
+          setFilterUpdating(false);
+        });
         return;
       }
 
       void (async () => {
         try {
-          const startDateStr =
-            dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
-          const endDateStr =
-            dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
-          const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr);
+          const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
           const hasCorpus =
-            callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0;
+            (callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0) ||
+            corpusStoreCoversFetchScope(callCorpusStore, startDateStr, endDateStr, dateFilterColumn);
 
           if (!hasCorpus) {
-            await ensureCorpusLoaded({ silent: false });
+            await ensureCorpusLoaded({ silent: false, force: false });
           }
           await ensurePortalAuditCache(supabase);
           applyRegisterFromCorpus(1);
@@ -2240,7 +2341,9 @@ export default function ReportPage() {
           if (corpusSpanDays(startDateStr, endDateStr) > MAX_CLIENT_CORPUS_DAYS) {
             await fetchData(1, fetchOpts);
           }
+          lastAppliedFilterSnapshotRef.current = filterSnapshot;
         } finally {
+          filterEffectInFlightRef.current = false;
           setFilterUpdating(false);
         }
       })();
@@ -2280,6 +2383,7 @@ export default function ReportPage() {
     debouncedSearch,
     debouncedPincodeSearch,
     activeTab,
+    page,
     applyRegisterFromCorpus,
     applySummaryFromCorpus,
     ensureCorpusLoaded,
@@ -2293,9 +2397,9 @@ export default function ReportPage() {
 
     const officeIdsParam = summaryOfficeIdsParam;
     const startDateStr =
-      dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+      toDateString(dateRange.start);
     const endDateStr =
-      dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
+      toDateString(dateRange.end);
 
     lastRegisterListQueryKeyRef.current = buildRegisterListQueryKey({
       officeIdsParam: registerOfficeIdsParam,
@@ -2342,10 +2446,10 @@ export default function ReportPage() {
 
     void (async () => {
       const startDateStr =
-        dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start;
+        toDateString(dateRange.start);
       const endDateStr =
-        dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end;
-      const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr);
+        toDateString(dateRange.end);
+      const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
       const hasCorpus =
         callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0;
 
@@ -2363,6 +2467,7 @@ export default function ReportPage() {
     selectedFranchisee,
     dateRange.start,
     dateRange.end,
+    dateFilterColumn,
     agingAsOf,
     corpusTick,
     applySummaryFromCorpus,
@@ -2403,8 +2508,8 @@ export default function ReportPage() {
           limit: 100000,
           officeId: summaryOfficeIdsParam,
           callType: viewCallTypesParam,
-          startDate: dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start,
-          endDate: dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end,
+          startDate: toDateString(dateRange.start),
+          endDate: toDateString(dateRange.end),
           status: joinFilterParam(selectedStatus),
           priority: joinFilterParam(priorityFilter),
           portalFilter: joinFilterParam(portalFilter),
@@ -2573,8 +2678,8 @@ export default function ReportPage() {
           const params = new URLSearchParams({
             officeId: summaryOfficeIdsParam,
             callType: viewCallTypesParam,
-            startDate: dateRange.start instanceof Date ? dateRange.start.toISOString().split('T')[0] : dateRange.start,
-            endDate: dateRange.end instanceof Date ? dateRange.end.toISOString().split('T')[0] : dateRange.end,
+            startDate: toDateString(dateRange.start),
+            endDate: toDateString(dateRange.end),
             limit: '20000', // Fetch a large batch for export
             page: '1'
           });

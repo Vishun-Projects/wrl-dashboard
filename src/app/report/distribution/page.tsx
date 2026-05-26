@@ -19,6 +19,8 @@ import { RegisterPageFilters } from '@/components/RegisterPageFilters';
 import { PageShell, PageLoadingState } from '@/components/PageShell';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 import { filterViewCalls } from '@/lib/report-search';
+import { buildCorpusViewDateFilter, filterCorpusCallsByViewDate } from '@/lib/report-corpus';
+import { toDateString } from '@/lib/report-filters';
 import { classifyTrhcallRow } from '@/lib/trhcalls-query';
 
 // Helper to inject Leaflet CDN resources dynamically
@@ -53,6 +55,7 @@ const loadLeaflet = () => {
 export default function CallDistributionPage() {
   const {
     dateRange,
+    dateFilterColumn,
     selectedState,
     selectedCity,
     selectedBranch,
@@ -73,6 +76,13 @@ export default function CallDistributionPage() {
   } = useReportFilters();
 
   const [mounted, setMounted] = useState(false);
+
+  const startDateStr = useMemo(() => toDateString(dateRange.start), [dateRange.start]);
+  const endDateStr = useMemo(() => toDateString(dateRange.end), [dateRange.end]);
+  const viewDateFilter = useMemo(
+    () => buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn),
+    [startDateStr, endDateStr, dateFilterColumn]
+  );
 
   // Leaflet map refs
   const mapRef = useRef<HTMLDivElement>(null);
@@ -171,7 +181,8 @@ export default function CallDistributionPage() {
       return;
     }
 
-    const filteredCalls = filterViewCalls(distributionCalls, distributionViewFilters);
+    const dateFilteredCalls = filterCorpusCallsByViewDate(distributionCalls, viewDateFilter);
+    const filteredCalls = filterViewCalls(dateFilteredCalls, distributionViewFilters);
 
     const franchiseeMap = new Map();
     const pincodeMap = new Map();
@@ -316,7 +327,7 @@ export default function CallDistributionPage() {
     });
     setFranchiseeSummary(franchiseeSummary);
     setPincodeSummary(pincodeSummary);
-  }, [distributionCalls, distributionViewFilters]);
+  }, [distributionCalls, distributionViewFilters, viewDateFilter]);
 
   // Leaflet Map Initialization
   useEffect(() => {

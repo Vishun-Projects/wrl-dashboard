@@ -12,6 +12,7 @@ import {
   findBreakdownCallType,
   isAnyFilterActive,
   migrateStringFilter,
+  toDateString,
   type ReportDateRange,
 } from '@/lib/report-filters';
 import {
@@ -31,7 +32,11 @@ import {
 } from '@/lib/report-data-store';
 import {
   applyCorpusSnapshot,
+  adoptCorpusStoreForScope,
   buildCorpusCacheKey,
+  corpusStoreCoversFetchScope,
+  resolveCorpusFetchScope,
+  splitCalendarMonths,
   getCorpusCallsArray,
   mergeCorpusDelta,
   persistCorpusDeltaToIndexedDB,
@@ -155,7 +160,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       return {
         start: new Date(globalReportCache.dateRange.start),
         end: new Date(globalReportCache.dateRange.end),
-        label: globalReportCache.dateRange.label || 'Last 14 Days',
+        label: globalReportCache.dateRange.label || 'This Month',
       };
     }
     return defaultDateRange();
@@ -403,19 +408,15 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   }, [pincodeSearch, selectedBranch, selectedCity, selectedFranchisee, selectedState, selectedTechnician]);
 
   const getDateStrings = useCallback(() => {
-    const startDateStr = dateRange.start instanceof Date
-      ? dateRange.start.toISOString().split('T')[0]
-      : String(dateRange.start);
-    const endDateStr = dateRange.end instanceof Date
-      ? dateRange.end.toISOString().split('T')[0]
-      : String(dateRange.end);
+    const startDateStr = toDateString(dateRange.start);
+    const endDateStr = toDateString(dateRange.end);
     return { startDateStr, endDateStr };
   }, [dateRange.end, dateRange.start]);
 
   const getSharedCacheKey = useCallback(() => {
     const { startDateStr, endDateStr } = getDateStrings();
-    return buildCorpusCacheKey(startDateStr, endDateStr);
-  }, [getDateStrings]);
+    return buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+  }, [getDateStrings, dateFilterColumn]);
 
   const restoreCorpusDeduped = useCallback(async (cacheKey: string): Promise<CallCorpusStore | null> => {
     const inflight = corpusIdbRestoreInflightRef.current.get(cacheKey);
@@ -469,7 +470,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     async (opts?: { force?: boolean; silent?: boolean }) => {
       const force = !!opts?.force;
       const { startDateStr, endDateStr } = getDateStrings();
-      const cacheKey = buildCorpusCacheKey(startDateStr, endDateStr);
+      const fetchScope = resolveCorpusFetchScope(startDateStr, endDateStr, dateFilterColumn);
+      const cacheKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
       const generation = corpusGenerationRef.current;
 
       if (force) {
@@ -490,6 +492,19 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
           applyLocalAndReturn(local);
           return;
         }
+      }
+
+      if (
+        !force &&
+        callCorpusStore?.calls.size &&
+        callCorpusStore.status !== 'error' &&
+        corpusStoreCoversFetchScope(callCorpusStore, startDateStr, endDateStr, dateFilterColumn)
+      ) {
+        applyLocalAndReturn(
+          adoptCorpusStoreForScope(callCorpusStore, startDateStr, endDateStr, dateFilterColumn)
+        );
+        markCorpusSatisfied(cacheKey);
+        return;
       }
 
       if (
@@ -523,7 +538,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
             warning?: string;
           };
         },
-        source: CallCorpusStore['source']
+        source: CallCorpusStore['source'],
+        responseOpts?: { markSatisfied?: boolean }
       ) => {
         if (generation !== corpusGenerationRef.current) return;
 
@@ -542,6 +558,9 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
               void persistCorpusDeltaToIndexedDB(deltas, store);
             }
           }
+          if (responseOpts?.markSatisfied !== false) {
+            markCorpusSatisfied(cacheKey);
+          }
           return;
         }
 
@@ -554,12 +573,17 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         syncDistributionCacheFromCorpus(store);
         applyCorpusToUi(store);
         void persistCorpusToIndexedDB(store);
-        markCorpusSatisfied(cacheKey);
+        if (responseOpts?.markSatisfied !== false) {
+          markCorpusSatisfied(cacheKey);
+        }
       };
 
-      const fetchCorpusFromNetwork = async (
+      const fetchCorpusRange = async (
         controller: AbortController,
-        networkOpts: { full?: boolean; lastSync?: number }
+        rangeStart: string,
+        rangeEnd: string,
+        networkOpts: { full?: boolean; lastSync?: number },
+        responseOpts?: { markSatisfied?: boolean }
       ) => {
         const {
           data: { session },
@@ -569,9 +593,10 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
           : {};
 
         const params: Record<string, string> = {
-          startDate: startDateStr,
-          endDate: endDateStr,
+          startDate: rangeStart,
+          endDate: rangeEnd,
           callType: 'All',
+          dateFilterColumn: fetchScope.dateFilterColumn,
           refresh: force ? 'true' : 'false',
         };
 
@@ -584,7 +609,107 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
           signal: controller.signal,
           params,
         });
-        applyNetworkCorpusResponse(res, 'network');
+
+        const hasLocalCorpus =
+          callCorpusStore?.cacheKey === cacheKey && (callCorpusStore?.calls.size ?? 0) > 0;
+        if (res.data?.isDelta && !hasLocalCorpus) {
+          const fullRes = await axios.get('/api/report/corpus', {
+            headers,
+            signal: controller.signal,
+            params: {
+              startDate: rangeStart,
+              endDate: rangeEnd,
+              callType: 'All',
+              dateFilterColumn: fetchScope.dateFilterColumn,
+              refresh: force ? 'true' : 'false',
+            },
+          });
+          applyNetworkCorpusResponse(fullRes, 'network', responseOpts);
+          return;
+        }
+
+        applyNetworkCorpusResponse(res, 'network', responseOpts);
+      };
+
+      const loadRemainingCorpusMonths = async (
+        remaining: Array<{ start: string; end: string }>,
+        loadGeneration: number,
+        bgCacheKey: string,
+        bypassServerCache: boolean
+      ) => {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const headers = session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : {};
+
+        if (loadGeneration === corpusGenerationRef.current) {
+          setCorpusRefreshing(true);
+        }
+
+        try {
+          for (const month of remaining) {
+            if (loadGeneration !== corpusGenerationRef.current) return;
+            try {
+              const res = await axios.get('/api/report/corpus', {
+                headers,
+                params: {
+                  startDate: month.start,
+                  endDate: month.end,
+                  callType: 'All',
+                  dateFilterColumn: fetchScope.dateFilterColumn,
+                  refresh: bypassServerCache ? 'true' : 'false',
+                },
+              });
+              if (loadGeneration !== corpusGenerationRef.current) return;
+
+              if (res.data?.warning) {
+                toast.warning(String(res.data.warning));
+              }
+
+              const rows = (res.data?.calls || []) as Record<string, unknown>[];
+              if (res.data?.cached) {
+                console.log(`[Corpus] server cache hit for ${month.start}–${month.end}`);
+              }
+
+              if (rows.length > 0) {
+                mergeCorpusDelta(rows, bgCacheKey);
+                const store = callCorpusStore;
+                if (store?.cacheKey === bgCacheKey) {
+                  syncDistributionCacheFromCorpus(store);
+                  applyCorpusToUi(store);
+                  void persistCorpusDeltaToIndexedDB(rows, store);
+                }
+              }
+              await new Promise((r) => setTimeout(r, 600));
+            } catch (monthErr: unknown) {
+              if (axios.isCancel(monthErr)) return;
+              const msg =
+                axios.isAxiosError(monthErr) && monthErr.response?.data?.error
+                  ? String(monthErr.response.data.error)
+                  : monthErr instanceof Error
+                    ? monthErr.message
+                    : 'Month load failed';
+              console.warn(`Background corpus ${month.start} failed:`, msg);
+              toast.warning(`Could not load calls for ${month.start.slice(0, 7)}`, {
+                description: msg,
+              });
+            }
+          }
+
+          if (loadGeneration === corpusGenerationRef.current) {
+            markCorpusSatisfied(bgCacheKey);
+            const store = callCorpusStore;
+            if (store?.cacheKey === bgCacheKey) {
+              void persistCorpusToIndexedDB(store);
+            }
+          }
+        } finally {
+          if (loadGeneration === corpusGenerationRef.current) {
+            setCorpusRefreshing(false);
+          }
+        }
       };
 
       const run = (async () => {
@@ -610,8 +735,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         const controller = new AbortController();
         corpusAbortRef.current = controller;
 
-        const spanStart = new Date(`${startDateStr}T00:00:00`);
-        const spanEnd = new Date(`${endDateStr}T23:59:59`);
+        const spanStart = new Date(`${fetchScope.fetchStartDate}T00:00:00`);
+        const spanEnd = new Date(`${fetchScope.fetchEndDate}T23:59:59`);
         const spanDays =
           !Number.isNaN(spanStart.getTime()) && !Number.isNaN(spanEnd.getTime())
             ? Math.floor((spanEnd.getTime() - spanStart.getTime()) / 86400000) + 1
@@ -633,7 +758,31 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         setCorpusRefreshing(true);
 
         try {
-          await fetchCorpusFromNetwork(controller, { full: true });
+          const months = splitCalendarMonths(fetchScope.fetchStartDate, fetchScope.fetchEndDate);
+          if (months.length <= 1) {
+            await fetchCorpusRange(
+              controller,
+              fetchScope.fetchStartDate,
+              fetchScope.fetchEndDate,
+              { full: true }
+            );
+          } else {
+            const ordered = [...months].reverse();
+            await fetchCorpusRange(
+              controller,
+              ordered[0].start,
+              ordered[0].end,
+              { full: true },
+              { markSatisfied: false }
+            );
+            const remaining = ordered.slice(1);
+            if (remaining.length > 0 && generation === corpusGenerationRef.current) {
+              // Background months reuse server disk cache unless user explicitly refreshed.
+              void loadRemainingCorpusMonths(remaining, generation, cacheKey, force);
+            } else {
+              markCorpusSatisfied(cacheKey);
+            }
+          }
         } catch (err: unknown) {
           if (axios.isCancel(err)) return;
           const message =
@@ -674,7 +823,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         }
       }
     },
-    [applyCorpusToUi, getDateStrings, markCorpusSatisfied, needsCorpusPreload, restoreCorpusDeduped, supabase, tryResolveLocalCorpus]
+    [applyCorpusToUi, dateFilterColumn, getDateStrings, markCorpusSatisfied, needsCorpusPreload, restoreCorpusDeduped, supabase, tryResolveLocalCorpus]
   );
 
   const ensureSharedCallsLoaded = useCallback(
@@ -699,25 +848,37 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     if (syncInFlightRef.current) return;
     if (!opts?.showToast) return;
 
+    const { startDateStr, endDateStr } = getDateStrings();
+    const fetchScope = resolveCorpusFetchScope(startDateStr, endDateStr, dateFilterColumn);
+    const cacheKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+
     const syncAnchor = callCorpusStore?.lastSyncedAt
       ? new Date(callCorpusStore.lastSyncedAt)
       : distributionDataCache?.lastSyncedAt
         ? new Date(distributionDataCache.lastSyncedAt)
         : lastSyncedAt ?? globalReportCache?.lastRefreshed ?? null;
 
-    if (!syncAnchor) {
-      if (routeNeedsCorpusPreload(pathname)) {
-        await ensureCorpusLoaded({ silent: true });
+    const hasWarmCorpus =
+      callCorpusStore?.cacheKey === cacheKey && (callCorpusStore?.calls.size ?? 0) > 0;
+
+    if (!hasWarmCorpus) {
+      await ensureCorpusLoaded({ silent: true, force: false });
+      if (!callCorpusStore || callCorpusStore.cacheKey !== cacheKey || callCorpusStore.calls.size === 0) {
+        if (opts?.showToast) {
+          toast.error('Could not sync — report data is not loaded yet');
+        }
+        return;
       }
+    }
+
+    if (!syncAnchor) {
       return;
     }
 
     syncInFlightRef.current = true;
     setSyncInProgress(true);
 
-    const { startDateStr, endDateStr } = getDateStrings();
     const lastSyncStr = formatSyncTimestamp(new Date(syncAnchor.getTime() - REPORT_SYNC_BUFFER_MS));
-    const cacheKey = getSharedCacheKey();
 
     try {
       const {
@@ -730,9 +891,10 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       const corpusRes = await axios.get('/api/report/corpus', {
         headers,
         params: {
-          startDate: startDateStr,
-          endDate: endDateStr,
+          startDate: fetchScope.fetchStartDate,
+          endDate: fetchScope.fetchEndDate,
           callType: 'All',
+          dateFilterColumn: fetchScope.dateFilterColumn,
           lastSync: lastSyncStr,
         },
       });
@@ -799,6 +961,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     }
   }, [
     applyCorpusToUi,
+    dateFilterColumn,
     ensureCorpusLoaded,
     getDateStrings,
     getSharedCacheKey,
@@ -807,29 +970,29 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     supabase,
   ]);
 
+  const corpusFetchScopeKey = useMemo(() => {
+    const { startDateStr, endDateStr } = getDateStrings();
+    return buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+  }, [getDateStrings, dateFilterColumn]);
+
   useEffect(() => {
     corpusGenerationRef.current += 1;
-  }, [dateRange.start, dateRange.end]);
+  }, [corpusFetchScopeKey]);
 
   useEffect(() => {
-    const { startDateStr, endDateStr } = getDateStrings();
-    const cacheKey = buildCorpusCacheKey(startDateStr, endDateStr);
-
     void (async () => {
-      const local = await tryResolveLocalCorpus(cacheKey);
+      const local = await tryResolveLocalCorpus(corpusFetchScopeKey);
       if (local) {
         applyCorpusToUi(local);
       }
     })();
-  }, [dateRange.start, dateRange.end, applyCorpusToUi, getDateStrings, tryResolveLocalCorpus]);
+  }, [corpusFetchScopeKey, applyCorpusToUi, tryResolveLocalCorpus]);
 
   useEffect(() => {
     if (!resourcesLoaded || !needsCorpusPreload) return;
-    const { startDateStr, endDateStr } = getDateStrings();
-    const cacheKey = buildCorpusCacheKey(startDateStr, endDateStr);
-    if (corpusSatisfiedKeysRef.current.has(cacheKey)) return;
+    if (corpusSatisfiedKeysRef.current.has(corpusFetchScopeKey)) return;
     ensureCorpusLoaded({ silent: pathname !== '/report/distribution' });
-  }, [resourcesLoaded, needsCorpusPreload, ensureCorpusLoaded, dateRange.start, dateRange.end, pathname, getDateStrings]);
+  }, [resourcesLoaded, needsCorpusPreload, ensureCorpusLoaded, corpusFetchScopeKey, pathname]);
 
   useEffect(() => {
     const calls =

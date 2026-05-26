@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { postQuery } from '@/lib/db-proxy';
+import { isCrmOutOfMemoryError, postQuery } from '@/lib/db-proxy';
 import { prisma } from '@/lib/prisma';
 import {
   appendCallTypeFilter,
@@ -11,17 +11,23 @@ import {
   CORPUS_MAX_ROWS,
   enrichTrhcallBranchFranchisee,
   MAX_CLIENT_CORPUS_DAYS,
+  resolveRegisterDateSqlColumn,
+  type RegisterDateFilterColumn,
   TRHCALLS_EXCLUDE_TRANSFERRED,
 } from '@/lib/trhcalls-query';
 import { applyPincodeGeo } from '@/lib/report-geo';
-import { CORPUS_SERVER_CACHE_TTL_MS } from '@/lib/report-corpus';
+import { CORPUS_SERVER_CACHE_TTL_MS, splitCalendarMonths } from '@/lib/report-corpus';
+import { formatLocalDate } from '@/lib/report-filters';
 import { readCorpusDiskCache, writeCorpusDiskCache } from '@/lib/corpus-server-cache';
 
 const CORPUS_CACHE_TTL = CORPUS_SERVER_CACHE_TTL_MS;
 const CORPUS_TIMEOUT_MS = 300000;
-/** Fetch corpus in date slices so CRM DB connections do not reset on wide ranges. */
-const CORPUS_CHUNK_DAYS = 14;
-const CORPUS_CHUNK_TIMEOUT_MS = 120000;
+/** CRM DBQUERY.aspx OOMs when viewstate exceeds ~few thousand wide rows — subdivide adaptively. */
+const CORPUS_SLICE_TIMEOUT_MS = 90000;
+const CORPUS_MAX_SLICE_DAYS = 7;
+const CORPUS_MIN_CHUNK_DAYS = 1;
+const CORPUS_SINGLE_DAY_TOP = '350';
+const CORPUS_CHUNK_FETCH_GAP_MS = 800;
 
 const fullCache = new Map<string, { data: Record<string, unknown>[]; timestamp: number }>();
 const fullInflight = new Map<string, Promise<Record<string, unknown>[]>>();
@@ -57,6 +63,7 @@ function scheduleCorpusRefresh(
   startDate: string | null,
   endDate: string | null,
   callType: string,
+  dateColumn: RegisterDateFilterColumn,
   security: SecurityContext
 ): void {
   if (fullInflight.has(cacheKey)) return;
@@ -67,6 +74,7 @@ function scheduleCorpusRefresh(
     rangeClamp.startDate,
     rangeClamp.endDate,
     callType,
+    dateColumn,
     security
   ).catch((err) => {
     console.warn('Background corpus refresh failed:', err);
@@ -97,7 +105,7 @@ function clampCorpusDateRange(
   const clampedStart = new Date(end);
   clampedStart.setDate(clampedStart.getDate() - (MAX_CLIENT_CORPUS_DAYS - 1));
   return {
-    startDate: clampedStart.toISOString().slice(0, 10),
+    startDate: formatLocalDate(clampedStart),
     endDate,
     clamped: true,
     warning: `Corpus limited to the most recent ${MAX_CLIENT_CORPUS_DAYS} days. Use Serial Audit for full history in wide ranges.`,
@@ -152,6 +160,13 @@ function corpusRowKey(row: Record<string, unknown>): string {
   return id != null ? String(id) : '';
 }
 
+function rangeSpanDays(startDate: string, endDate: string): number {
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+  return Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+}
+
 function splitDateRange(
   startDate: string,
   endDate: string,
@@ -175,8 +190,8 @@ function splitDateRange(
     const chunkEnd = new Date(cursor.getTime() + (chunkDays - 1) * dayMs);
     const effectiveEnd = chunkEnd > end ? end : chunkEnd;
     chunks.push({
-      start: cursor.toISOString().slice(0, 10),
-      end: effectiveEnd.toISOString().slice(0, 10),
+      start: formatLocalDate(cursor),
+      end: formatLocalDate(effectiveEnd),
     });
     cursor = new Date(effectiveEnd.getTime() + dayMs);
   }
@@ -187,64 +202,181 @@ async function fetchCorpusSlice(
   startDate: string | null,
   endDate: string | null,
   callType: string,
+  dateColumn: RegisterDateFilterColumn,
   security: SecurityContext,
-  timeoutMs: number
+  timeoutMs: number,
+  opts?: { top?: string }
 ): Promise<Record<string, unknown>[]> {
   const res = await postQuery({
+    top: opts?.top,
     fields: buildCorpusFieldsSql(),
-    tableName: buildCorpusTableName({ startDate, endDate }),
+    tableName: buildCorpusTableName({ startDate, endDate, dateColumn }),
     condition: buildCorpusCondition(callType, security),
-    orderBy: 'tc.dtrndate DESC',
+    orderBy: dateColumn === 'dsolvedatetime' ? 'tc.dsolvedatetime DESC' : 'tc.dtrndate DESC',
     timeoutMs,
   });
   return mapCorpusRows((res.data || []) as Record<string, unknown>[]);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function mergeRowsIntoMap(
+  merged: Map<string, Record<string, unknown>>,
+  rows: Record<string, unknown>[]
+): void {
+  for (const row of rows) {
+    const key = corpusRowKey(row);
+    if (key) merged.set(key, row);
+  }
+}
+
+type AdaptiveFetchResult = {
+  rows: Record<string, unknown>[];
+  topLimited: boolean;
+};
+
+async function mergeAdaptiveChunks(
+  chunks: Array<{ start: string; end: string }>,
+  callType: string,
+  dateColumn: RegisterDateFilterColumn,
+  security: SecurityContext
+): Promise<AdaptiveFetchResult> {
+  const merged = new Map<string, Record<string, unknown>>();
+  let failed = 0;
+  let topLimited = false;
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    try {
+      const result = await fetchCorpusRangeAdaptive(
+        chunk.start,
+        chunk.end,
+        callType,
+        dateColumn,
+        security
+      );
+      mergeRowsIntoMap(merged, result.rows);
+      if (result.topLimited) topLimited = true;
+      if (i < chunks.length - 1) {
+        await sleep(CORPUS_CHUNK_FETCH_GAP_MS);
+      }
+    } catch (subErr) {
+      failed++;
+      console.warn(
+        `Corpus sub-range ${chunk.start}–${chunk.end} failed:`,
+        subErr instanceof Error ? subErr.message : subErr
+      );
+    }
+  }
+
+  if (merged.size === 0 && failed > 0) {
+    throw new Error(`Corpus load failed (${failed}/${chunks.length} sub-ranges could not be loaded)`);
+  }
+  return { rows: Array.from(merged.values()), topLimited };
+}
+
+/** Fetch in ≤7-day slices; subdivide further on CRM viewstate OOM. */
+async function fetchCorpusRangeAdaptive(
+  startDate: string,
+  endDate: string,
+  callType: string,
+  dateColumn: RegisterDateFilterColumn,
+  security: SecurityContext
+): Promise<AdaptiveFetchResult> {
+  const span = rangeSpanDays(startDate, endDate);
+
+  if (span > CORPUS_MAX_SLICE_DAYS) {
+    const chunks = splitDateRange(startDate, endDate, CORPUS_MAX_SLICE_DAYS);
+    return mergeAdaptiveChunks(chunks, callType, dateColumn, security);
+  }
+
+  try {
+    const rows = await fetchCorpusSlice(
+      startDate,
+      endDate,
+      callType,
+      dateColumn,
+      security,
+      CORPUS_SLICE_TIMEOUT_MS
+    );
+    return { rows, topLimited: false };
+  } catch (err) {
+    if (span <= CORPUS_MIN_CHUNK_DAYS && isCrmOutOfMemoryError(err)) {
+      console.warn(
+        `Corpus day ${startDate} OOM — fetching TOP ${CORPUS_SINGLE_DAY_TOP} rows only`
+      );
+      const rows = await fetchCorpusSlice(
+        startDate,
+        endDate,
+        callType,
+        dateColumn,
+        security,
+        CORPUS_SLICE_TIMEOUT_MS,
+        { top: CORPUS_SINGLE_DAY_TOP }
+      );
+      return { rows, topLimited: true };
+    }
+
+    if (span <= CORPUS_MIN_CHUNK_DAYS) throw err;
+
+    const subChunkDays = Math.max(CORPUS_MIN_CHUNK_DAYS, Math.floor(span / 2));
+    const subChunks = splitDateRange(startDate, endDate, subChunkDays);
+    if (subChunks.length <= 1) throw err;
+
+    const reason = isCrmOutOfMemoryError(err) ? 'CRM viewstate OOM' : err instanceof Error ? err.message : err;
+    console.warn(
+      `Corpus range ${startDate}–${endDate} failed (${reason}); splitting into ${subChunks.length} sub-ranges of ~${subChunkDays}d`
+    );
+
+    return mergeAdaptiveChunks(subChunks, callType, dateColumn, security);
+  }
 }
 
 async function fetchCorpusFullMerged(
   startDate: string | null,
   endDate: string | null,
   callType: string,
+  dateColumn: RegisterDateFilterColumn,
   security: SecurityContext
-): Promise<{ calls: Record<string, unknown>[]; truncated: boolean; partial: boolean }> {
+): Promise<{ calls: Record<string, unknown>[]; truncated: boolean; partial: boolean; topLimited?: boolean }> {
   if (!startDate || !endDate) {
-    const calls = await fetchCorpusSlice(startDate, endDate, callType, security, CORPUS_TIMEOUT_MS);
+    const calls = await fetchCorpusSlice(startDate, endDate, callType, dateColumn, security, CORPUS_TIMEOUT_MS);
     const capped = calls.length > CORPUS_MAX_ROWS ? calls.slice(0, CORPUS_MAX_ROWS) : calls;
     return { calls: capped, truncated: calls.length >= CORPUS_MAX_ROWS, partial: false };
   }
 
-  const chunks = splitDateRange(startDate, endDate, CORPUS_CHUNK_DAYS);
-  if (chunks.length === 1) {
-    const calls = await fetchCorpusSlice(startDate, endDate, callType, security, CORPUS_TIMEOUT_MS);
-    const capped = calls.length > CORPUS_MAX_ROWS ? calls.slice(0, CORPUS_MAX_ROWS) : calls;
-    return { calls: capped, truncated: calls.length >= CORPUS_MAX_ROWS, partial: false };
-  }
-
+  const months = splitCalendarMonths(startDate, endDate);
   const merged = new Map<string, Record<string, unknown>>();
-  let failedChunks = 0;
+  let failedMonths = 0;
+  let topLimited = false;
 
-  for (const chunk of chunks) {
+  for (let i = 0; i < months.length; i++) {
+    const month = months[i];
     try {
-      const rows = await fetchCorpusSlice(
-        chunk.start,
-        chunk.end,
+      const result = await fetchCorpusRangeAdaptive(
+        month.start,
+        month.end,
         callType,
-        security,
-        CORPUS_CHUNK_TIMEOUT_MS
+        dateColumn,
+        security
       );
-      for (const row of rows) {
-        const key = corpusRowKey(row);
-        if (key) merged.set(key, row);
-      }
+      mergeRowsIntoMap(merged, result.rows);
+      if (result.topLimited) topLimited = true;
       if (merged.size >= CORPUS_MAX_ROWS) break;
     } catch (err) {
-      failedChunks++;
-      console.warn(`Corpus chunk ${chunk.start}–${chunk.end} failed:`, err);
+      failedMonths++;
+      console.warn(`Corpus month ${month.start}–${month.end} failed:`, err);
+    }
+    if (i < months.length - 1) {
+      await sleep(CORPUS_CHUNK_FETCH_GAP_MS);
     }
   }
 
-  if (merged.size === 0 && failedChunks > 0) {
+  if (merged.size === 0 && failedMonths > 0) {
     throw new Error(
-      `Corpus load failed (${failedChunks}/${chunks.length} date chunks could not be loaded)`
+      `Corpus load failed (${failedMonths}/${months.length} calendar months could not be loaded)`
     );
   }
 
@@ -256,7 +388,12 @@ async function fetchCorpusFullMerged(
     calls = calls.slice(0, CORPUS_MAX_ROWS);
   }
 
-  return { calls, truncated, partial: failedChunks > 0 };
+  return {
+    calls,
+    truncated,
+    partial: failedMonths > 0 || topLimited,
+    topLimited,
+  };
 }
 
 async function fetchCorpusFull(
@@ -264,8 +401,9 @@ async function fetchCorpusFull(
   startDate: string | null,
   endDate: string | null,
   callType: string,
+  dateColumn: RegisterDateFilterColumn,
   security: SecurityContext
-): Promise<{ calls: Record<string, unknown>[]; truncated: boolean; partial?: boolean }> {
+): Promise<{ calls: Record<string, unknown>[]; truncated: boolean; partial?: boolean; topLimited?: boolean }> {
   const inflight = fullInflight.get(cacheKey);
   if (inflight) {
     const calls = await inflight;
@@ -273,22 +411,27 @@ async function fetchCorpusFull(
   }
 
   const run = (async () => {
-    const { calls, truncated, partial } = await fetchCorpusFullMerged(
+    const { calls, truncated, partial, topLimited } = await fetchCorpusFullMerged(
       startDate,
       endDate,
       callType,
+      dateColumn,
       security
     );
-    return { calls, truncated, partial };
+    return { calls, truncated, partial, topLimited };
   })();
 
   fullInflight.set(cacheKey, run.then((r) => r.calls));
   try {
     const result = await run;
     fullCache.set(cacheKey, { data: result.calls, timestamp: Date.now() });
-    void writeCorpusDiskCache(cacheKey, result.calls).catch((err) => {
-      console.warn('Corpus disk cache write failed:', err);
-    });
+    void writeCorpusDiskCache(cacheKey, result.calls)
+      .then(() => {
+        console.log(`[Corpus] stored ${result.calls.length} rows (${cacheKey})`);
+      })
+      .catch((err) => {
+        console.warn('Corpus disk cache write failed:', err);
+      });
     return result;
   } finally {
     fullInflight.delete(cacheKey);
@@ -300,13 +443,14 @@ async function fetchCorpusDelta(
   endDate: string | null,
   callType: string,
   lastSync: string,
+  dateColumn: RegisterDateFilterColumn,
   security: SecurityContext
 ): Promise<Record<string, unknown>[]> {
   const res = await postQuery({
     fields: buildCorpusFieldsSql(),
-    tableName: buildCorpusTableName({ startDate, endDate, lastSync }),
+    tableName: buildCorpusTableName({ startDate, endDate, lastSync, dateColumn }),
     condition: buildCorpusCondition(callType, security),
-    orderBy: 'tc.dtrndate DESC',
+    orderBy: dateColumn === 'dsolvedatetime' ? 'tc.dsolvedatetime DESC' : 'tc.dtrndate DESC',
     timeoutMs: 120000,
   });
   return mapCorpusRows((res.data || []) as Record<string, unknown>[]);
@@ -347,6 +491,7 @@ export async function GET(req: NextRequest) {
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
     const callType = searchParams.get('callType') || 'All';
+    const dateFilterColumn = resolveRegisterDateSqlColumn(searchParams.get('dateFilterColumn'));
     const lastSync = searchParams.get('lastSync');
     const bypassCache = searchParams.get('refresh') === 'true';
 
@@ -356,6 +501,7 @@ export async function GET(req: NextRequest) {
         endDate,
         callType,
         lastSync,
+        dateFilterColumn,
         security
       );
       return NextResponse.json({
@@ -365,13 +511,16 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const cacheKey = `corpus_${startDate || 'default'}_${endDate || 'default'}_${callType}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
+    const cacheKey = `corpus_${startDate || 'default'}_${endDate || 'default'}_${dateFilterColumn}_${callType}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
     staleCacheKey = cacheKey;
 
     const cached = await resolveCachedCorpus(cacheKey, bypassCache);
     if (cached) {
+      console.log(
+        `[Corpus] cache hit (${cached.source}, ${cached.data.length} rows, age ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`
+      );
       if (cached.stale) {
-        scheduleCorpusRefresh(cacheKey, startDate, endDate, callType, security);
+        scheduleCorpusRefresh(cacheKey, startDate, endDate, callType, dateFilterColumn, security);
       }
       return NextResponse.json({
         calls: cached.data,
@@ -388,11 +537,12 @@ export async function GET(req: NextRequest) {
     const effectiveStart = rangeClamp.startDate;
     const effectiveEnd = rangeClamp.endDate;
 
-    const { calls, truncated, partial } = await fetchCorpusFull(
+    const { calls, truncated, partial, topLimited } = await fetchCorpusFull(
       cacheKey,
       effectiveStart,
       effectiveEnd,
       callType,
+      dateFilterColumn,
       security
     );
 
@@ -403,13 +553,20 @@ export async function GET(req: NextRequest) {
     if (truncated) {
       warnings.push(`Showing first ${CORPUS_MAX_ROWS} calls. Narrow the date range for full data.`);
     }
-    if (partial) {
+    if (topLimited) {
+      warnings.push(
+        'Some busy days hit CRM memory limits and were capped — counts for those days may be incomplete.'
+      );
+    }
+    if (partial && !topLimited) {
       warnings.push('Some date ranges could not be loaded; showing partial data.');
     }
 
     return NextResponse.json({
       calls,
       cached: false,
+      cacheStored: true,
+      rowCount: calls.length,
       scope: 'window',
       truncated,
       ...(warnings.length ? { warning: warnings.join(' ') } : {}),

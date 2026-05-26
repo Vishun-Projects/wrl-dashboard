@@ -3,6 +3,19 @@ import { looksLikeBranchOffice } from '@/lib/trhcalls-query';
 
 export type ReportDateRange = { start: Date; end: Date; label: string };
 
+/** Local calendar date YYYY-MM-DD — avoids UTC shift from toISOString() (e.g. IST May 1 → Apr 30). */
+export function formatLocalDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function toDateString(value: Date | string): string {
+  if (value instanceof Date) return formatLocalDate(value);
+  return String(value);
+}
+
 export function migrateStringFilter(val: unknown): string[] {
   if (Array.isArray(val)) return val;
   if (!val || val === 'All' || val === 'all') return [];
@@ -288,12 +301,12 @@ export function filterCallsCSR(calls: any[], criteria: FilterCallsCriteria, excl
 
 export function defaultDateRange(): ReportDateRange {
   const end = new Date();
-  const start = new Date(end.getTime() - 14 * 24 * 60 * 60 * 1000);
-  return { start, end, label: 'Last 14 Days' };
+  const start = new Date(end.getFullYear(), end.getMonth(), 1);
+  return { start, end, label: 'This Month' };
 }
 
 export function isDefaultDateRange(range: ReportDateRange): boolean {
-  if (range.label === 'Last 14 Days') return true;
+  if (range.label === 'This Month') return true;
   const def = defaultDateRange();
   return (
     range.start.toDateString() === def.start.toDateString() &&
