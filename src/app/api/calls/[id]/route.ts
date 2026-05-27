@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { postQuery } from '@/lib/db-proxy';
 import { createClient } from '@/lib/supabase/server';
 
+function isCrmFlag(value: unknown): boolean {
+  if (value === true || value === 1) return true;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === 'true' || normalized === '1';
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -166,7 +172,7 @@ export async function GET(
         complaint: f.complaint,
         defect: f.defect,
         repair: f.repair,
-        is_solved: f.is_solved === 'True' || f.is_solved === true || f.is_solved === 1
+        is_solved: isCrmFlag(f.is_solved)
       })),
       parts: parts.map((p: any) => ({
         vpartname: p.vpartname,
@@ -198,7 +204,7 @@ export async function GET(
       cancel_reason: parentData.ncancelreason,
       resolved_at: parentData.dfastclosedatetime || parentData.dsolvedatetime || null,
       complaint_label: parentData.vcomplaint,
-      crm_reject: parentData.bBMreject === 'True' || parentData.bBMreject === true || parentData.bBMreject === 1,
+      crm_reject: isCrmFlag(parentData.bBMreject),
       crm_reject_reason: parentData.vBMrejectreason,
       crm_reject_at: parentData.dBMrejectdatetime,
       documents: docs.map((d: any) => ({
@@ -218,9 +224,9 @@ export async function GET(
         dsolvedatetime: h.dsolvedatetime,
         dfastclosedatetime: h.dfastclosedatetime,
         callStatus: h.callStatus,
-        bsolved: h.bsolved === 'True' || h.bsolved === true || h.bsolved === 1,
-        bfastclose: h.bfastclose === 'True' || h.bfastclose === true || h.bfastclose === 1,
-        baccepted: h.baccepted === 'True' || h.baccepted === true || h.baccepted === 1,
+        bsolved: isCrmFlag(h.bsolved),
+        bfastclose: isCrmFlag(h.bfastclose),
+        baccepted: isCrmFlag(h.baccepted),
         nengineer: h.nengineer,
         engineer_name: h.engineer_name,
         branch_name: h.branch_name,
@@ -228,7 +234,7 @@ export async function GET(
         addedon: h.addedon,
         editedon: h.editedon,
         vcomment: h.vcomment,
-        bBMreject: h.bBMreject === 'True' || h.bBMreject === true || h.bBMreject === 1,
+        bBMreject: isCrmFlag(h.bBMreject),
         vBMrejectreason: h.vBMrejectreason,
         dBMrejectdatetime: h.dBMrejectdatetime,
         cancel_reason_label: h.cancel_reason_label

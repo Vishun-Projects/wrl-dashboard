@@ -26,7 +26,8 @@ function toNum(value: unknown): number {
 }
 
 function sumTotals(rows: { qty?: unknown; amount_payable?: unknown; branch_approved?: unknown; ho_approved?: unknown }[]) {
-  return rows.reduce(
+  type Totals = { qty: number; amount_payable: number; branch_approved: number; ho_approved: number };
+  return rows.reduce<Totals>(
     (acc, row) => ({
       qty: acc.qty + toNum(row.qty),
       amount_payable: acc.amount_payable + toNum(row.amount_payable),

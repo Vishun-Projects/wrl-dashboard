@@ -20,6 +20,7 @@ import {
 } from '@/lib/read-model/dates';
 import { updateSyncWatermarks, readHotTableWatermarks } from '@/lib/read-model/lock';
 import { aggregateFactCounts } from '@/lib/read-model/metrics';
+import type { HotRow } from '@/lib/read-model/types';
 import { dedupeCrmRows, processCrmRows, transformCrmRowToHot } from '@/lib/read-model/transform';
 import { isSummaryEligibleCall } from '@/lib/report-summary-derive';
 import { countHotRows, truncateHot, upsertHotRows } from '@/lib/read-model/upsert-hot';
@@ -114,7 +115,7 @@ export async function runInitialBackfill(opts?: { resume?: boolean }): Promise<v
     });
 
     const factChunks = splitDateRangeByDays(yearStart, hotEnd, 14);
-    const allMetricRows: ReturnType<typeof transformCrmRowToHot>[] = [];
+    const allMetricRows: HotRow[] = [];
     for (const chunk of factChunks) {
       console.log(`[sync-worker] Fetching facts chunk ${chunk.start} .. ${chunk.end}`);
       const ytdRows = await fetchCrmRowsForRange(chunk.start, chunk.end);
