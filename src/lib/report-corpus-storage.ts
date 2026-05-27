@@ -5,6 +5,9 @@ const DB_VERSION = 2;
 const CORPUS_META_KEY = 'corpus_meta';
 const SHARED_REGISTER_STORE = 'shared_register';
 
+/** Bump when bulk preload shape/strategy changes — stale IndexedDB entries are ignored. */
+export const SHARED_REGISTER_CACHE_VERSION = 2;
+
 export type CorpusMeta = {
   cacheKey: string;
   fetchedAt: number;
@@ -19,6 +22,7 @@ export type SharedRegisterCache = {
   fetchedAt: number;
   lastSyncedAt: number;
   callCount: number;
+  schemaVersion: number;
 };
 
 function openDB(): Promise<IDBDatabase> {

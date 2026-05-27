@@ -1395,8 +1395,13 @@ export default function ReportPage() {
     if (!loading && data.length > 0) return;
     if (readRegisterFromPostgresClient()) {
       void (async () => {
+        const scopeChanged =
+          !globalReportCache ||
+          toDateString(globalReportCache.dateRange.start) !== toDateString(dateRange.start) ||
+          toDateString(globalReportCache.dateRange.end) !== toDateString(dateRange.end) ||
+          (globalReportCache.dateFilterColumn || 'dtrndate') !== dateFilterColumn;
         if (!getSharedCallsForScope()) {
-          await ensureSharedCallsLoaded(false);
+          await ensureSharedCallsLoaded(scopeChanged);
         }
         if (applyRegisterFromSharedCalls(1)) {
           setLoading(false);
@@ -2622,13 +2627,24 @@ export default function ReportPage() {
     };
 
     if (filtersChanged) {
-      if (filterSnapshot === lastAppliedFilterSnapshotRef.current || filterEffectInFlightRef.current) {
+      const dateScopeChanged =
+        changedFields.includes('dateRange.start') ||
+        changedFields.includes('dateRange.end') ||
+        changedFields.includes('dateFilterColumn');
+      if (filterSnapshot === lastAppliedFilterSnapshotRef.current) {
+        return;
+      }
+      if (filterEffectInFlightRef.current && !dateScopeChanged) {
         return;
       }
       filterEffectInFlightRef.current = true;
 
       reportPerf('filterEffect', 'filters changed → clear page cache + setPage(1) + fetchData(1)', t0, {
         changedFields,
+        dateScopeChanged,
+        corpusFetchScopeChanged,
+        startDateStr,
+        endDateStr,
         why: 'Compared last successful fetch snapshot (globalReportCache) to current UI/debounced state.',
       });
       registerPagesCacheRef.current.clear();
@@ -2654,7 +2670,7 @@ export default function ReportPage() {
         try {
           if (readRegisterFromPostgresClient()) {
             if (!getSharedCallsForScope()) {
-              await ensureSharedCallsLoaded(false);
+              await ensureSharedCallsLoaded(corpusFetchScopeChanged);
             }
             if (applyRegisterFromSharedCalls(1)) {
               lastAppliedFilterSnapshotRef.current = filterSnapshot;

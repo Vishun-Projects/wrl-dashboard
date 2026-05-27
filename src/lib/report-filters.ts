@@ -16,6 +16,20 @@ export function toDateString(value: Date | string): string {
   return String(value);
 }
 
+/** Parse `<input type="date">` value as local calendar midnight (not UTC). */
+export function parseLocalDateString(value: string): Date {
+  const [y, m, d] = value.split('-').map((part) => Number(part));
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+
+export function endOfLocalDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+}
+
+export function startOfLocalDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+}
+
 export function migrateStringFilter(val: unknown): string[] {
   if (Array.isArray(val)) return val;
   if (!val || val === 'All' || val === 'all') return [];

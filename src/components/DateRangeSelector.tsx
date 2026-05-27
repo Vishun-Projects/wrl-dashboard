@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Calendar, ChevronDown, Check } from 'lucide-react';
+import { formatLocalDate, parseLocalDateString, endOfLocalDay, startOfLocalDay } from '@/lib/report-filters';
 
 export interface DateRange {
   start: Date;
@@ -136,11 +137,12 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
               <input
                 type="date"
                 className="w-full h-8 px-2 bg-white border border-slate-200 rounded text-[11px] outline-none focus:border-slate-400"
-                value={value === 'Custom Range' && startDate ? startDate.toISOString().split('T')[0] : ''}
+                value={value === 'Custom Range' && startDate ? formatLocalDate(startDate) : ''}
                 onChange={(e) => {
-                  const d = new Date(e.target.value);
+                  if (!e.target.value) return;
+                  const d = parseLocalDateString(e.target.value);
                   if (!isNaN(d.getTime())) {
-                    const activeEnd = endDate || new Date();
+                    const activeEnd = endDate ? endOfLocalDay(endDate) : endOfLocalDay(new Date());
                     onChange({ start: d, end: activeEnd, label: 'Custom Range' });
                   }
                 }}
@@ -151,16 +153,19 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
               <input
                 type="date"
                 className="w-full h-8 px-2 bg-white border border-slate-200 rounded text-[11px] outline-none focus:border-slate-400"
-                value={value === 'Custom Range' && endDate ? endDate.toISOString().split('T')[0] : ''}
+                value={value === 'Custom Range' && endDate ? formatLocalDate(endDate) : ''}
                 onChange={(e) => {
-                  const d = new Date(e.target.value);
+                  if (!e.target.value) return;
+                  const d = parseLocalDateString(e.target.value);
                   if (!isNaN(d.getTime())) {
-                    const activeStart = startDate || (() => {
-                      const s = new Date();
-                      s.setDate(s.getDate() - 30);
-                      return s;
-                    })();
-                    onChange({ start: activeStart, end: d, label: 'Custom Range' });
+                    const activeStart = startDate
+                      ? startOfLocalDay(startDate)
+                      : (() => {
+                          const s = new Date();
+                          s.setDate(s.getDate() - 30);
+                          return startOfLocalDay(s);
+                        })();
+                    onChange({ start: activeStart, end: endOfLocalDay(d), label: 'Custom Range' });
                   }
                 }}
               />

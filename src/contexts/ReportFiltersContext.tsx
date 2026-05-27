@@ -52,7 +52,7 @@ import { ensurePortalAuditCache } from '@/lib/report-portal-cache';
 import { readCallsFromPostgresClient, readRegisterFromPostgresClient } from '@/lib/read-model/client-flags';
 import { fetchAllRegisterRowsForExport, logRegisterBulk } from '@/lib/register-export-fetch';
 import { createChunkedFetchAuth } from '@/lib/supabase-chunked-fetch';
-import { persistSharedRegisterCache, readSharedRegisterCache } from '@/lib/report-corpus-storage';
+import { persistSharedRegisterCache, readSharedRegisterCache, SHARED_REGISTER_CACHE_VERSION } from '@/lib/report-corpus-storage';
 
 let cachedReportResources: { offices: unknown[]; callTypes: string[] } | null = null;
 let reportResourcesInflight: Promise<{ offices: unknown[]; callTypes: string[] }> | null = null;
@@ -879,13 +879,18 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
           await inflight;
           return;
         }
+      } else {
+        sharedRegisterSatisfiedKeysRef.current.delete(cacheKey);
       }
 
       const run = (async () => {
         if (!force) {
           const idbStart = performance.now();
           const idbCache = await readSharedRegisterCache(cacheKey);
-          if (idbCache?.calls?.length) {
+          if (
+            idbCache?.calls?.length &&
+            idbCache.schemaVersion === SHARED_REGISTER_CACHE_VERSION
+          ) {
             logRegisterBulk('bulk CACHE HIT (IndexedDB)', {
               cacheKey,
               rows: idbCache.callCount,
@@ -930,6 +935,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
             fetchedAt: now,
             lastSyncedAt: now,
             callCount: calls.length,
+            schemaVersion: SHARED_REGISTER_CACHE_VERSION,
           });
           logRegisterBulk('bulk LOAD stored', {
             cacheKey,
@@ -1172,6 +1178,23 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   }, [corpusFetchScopeKey]);
 
   useEffect(() => {
+    if (!readRegisterFromPostgresClient()) return;
+    const cacheKey = getSharedCacheKey();
+    if (distributionDataCache?.cacheKey === cacheKey) return;
+    logRegisterBulk('bulk scope changed — clearing stale in-memory cache', {
+      previousKey: distributionDataCache?.cacheKey ?? null,
+      nextKey: cacheKey,
+    });
+    setDistributionCalls([]);
+    setDistributionDataCache(null);
+    for (const key of [...sharedRegisterSatisfiedKeysRef.current]) {
+      if (key !== cacheKey) {
+        sharedRegisterSatisfiedKeysRef.current.delete(key);
+      }
+    }
+  }, [corpusFetchScopeKey, getSharedCacheKey]);
+
+  useEffect(() => {
     if (readCallsFromPostgresClient()) return;
     void (async () => {
       const local = await tryResolveLocalCorpus(corpusFetchScopeKey);
@@ -1191,10 +1214,11 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     if (!resourcesLoaded || !pathname?.startsWith('/report')) return;
     if (!readRegisterFromPostgresClient()) return;
     const cacheKey = getSharedCacheKey();
-    if (
+    const hasFreshCache =
       distributionDataCache?.cacheKey === cacheKey &&
-      (distributionDataCache.allCalls?.length ?? 0) > 0
-    ) {
+      (distributionDataCache.allCalls?.length ?? 0) > 0 &&
+      sharedRegisterSatisfiedKeysRef.current.has(cacheKey);
+    if (hasFreshCache) {
       return;
     }
     void ensureSharedCallsLoaded(false);
