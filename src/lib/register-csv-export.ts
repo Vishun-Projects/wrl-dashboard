@@ -21,13 +21,13 @@ const CSV_COLUMNS: { key: string; header: string }[] = [
   { key: 'vinstaddress', header: 'Address' },
 ];
 
-function csvEscape(value: unknown): string {
+export function csvEscape(value: unknown): string {
   const s = value == null ? '' : String(value);
   if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
 
-function rowForCsv(row: Record<string, unknown>): Record<string, unknown> {
+export function rowForCsv(row: Record<string, unknown>): Record<string, unknown> {
   const branch = row.officename ?? row.resolved_branch_name ?? row.branch_office_name ?? '';
   const franchisee =
     row.franchisee_name && row.franchisee_name !== 'Unallocated' ? row.franchisee_name : '';
@@ -74,6 +74,65 @@ function rowForCsv(row: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
+function registerCsvLine(row: Record<string, unknown>): string {
+  const mapped = rowForCsv(row);
+  return CSV_COLUMNS.map((col) => csvEscape(mapped[col.key as keyof typeof mapped])).join(',');
+}
+
+/** Build RFC4180-style CSV with CRLF line endings (Excel-friendly). */
+export function buildRegisterCsvContent(rows: Record<string, unknown>[]): string {
+  const lines = [CSV_COLUMNS.map((c) => csvEscape(c.header)).join(',')];
+  for (const row of rows) {
+    lines.push(registerCsvLine(row));
+  }
+  return `${lines.join('\r\n')}\r\n`;
+}
+
+export function createRegisterCsvResponse(
+  rows: Record<string, unknown>[],
+  filename?: string
+): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode('\uFEFF'));
+      controller.enqueue(
+        encoder.encode(`${CSV_COLUMNS.map((c) => csvEscape(c.header)).join(',')}\r\n`)
+      );
+      for (const row of rows) {
+        controller.enqueue(encoder.encode(`${registerCsvLine(row)}\r\n`));
+      }
+      controller.close();
+    },
+  });
+
+  const resolvedName =
+    filename ?? `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${resolvedName}"`,
+      'Cache-Control': 'no-store',
+    },
+  });
+}
+
+/** Trigger a register CSV download in the browser (UTF-8 BOM for Excel). */
+export function downloadRegisterCsvInBrowser(
+  rows: Record<string, unknown>[],
+  filename?: string
+): void {
+  const csv = buildRegisterCsvContent(rows);
+  const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' });
+  const resolvedName =
+    filename ?? `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = resolvedName;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 export type RegisterCsvExportOpts = {
   fields: string;
   tableName: string;
@@ -116,11 +175,7 @@ export async function buildRegisterCsvResponse(opts: RegisterCsvExportOpts): Pro
 
           const processed = await opts.processRows(rawRows);
           for (const raw of processed) {
-            const row = rowForCsv(raw);
-            const line =
-              CSV_COLUMNS.map((col) => csvEscape(row[col.key as keyof typeof row])).join(',') +
-              '\r\n';
-            controller.enqueue(encoder.encode(line));
+            controller.enqueue(encoder.encode(`${registerCsvLine(raw)}\r\n`));
           }
 
           fetched += processed.length;

@@ -75,11 +75,13 @@ import { readRegisterFromPostgresClient, readSummaryFromPostgresClient } from '@
 import { deriveRegisterPageFromCalls, deriveRegisterView } from '@/lib/report-register-view';
 import {
   collectRegisterRowsFromSessionCache,
+  downloadRegisterCsvFromRows,
   downloadRegisterCsvFromServer,
   fetchAllRegisterRowsForExport,
   isRegisterExportAbortError,
   logRegisterBulk,
 } from '@/lib/register-export-fetch';
+import { downloadRegisterExcelFromRows } from '@/lib/register-excel-export';
 import { ensurePortalAuditCache } from '@/lib/report-portal-cache';
 
 // --- IndexedDB Local Storage Cache Helpers ---
@@ -3010,7 +3012,51 @@ export default function ReportPage() {
       };
 
       if (format === 'csv') {
-        await downloadRegisterCsvFromServer({
+        let csvRows: Record<string, unknown>[] | null = null;
+
+        if (readRegisterFromPostgresClient()) {
+          let scope = getSharedCallsForScope();
+          if (!scope?.calls?.length) {
+            await ensureSharedCallsLoaded(false);
+            scope = getSharedCallsForScope();
+          }
+          if (scope?.calls?.length) {
+            const viewDateFilter = buildCorpusViewDateFilter(
+              startDateStr,
+              endDateStr,
+              dateFilterColumn
+            );
+            csvRows = deriveRegisterView(
+              scope.calls,
+              registerViewFilterRef.current,
+              viewDateFilter
+            ).filteredCalls;
+          }
+        }
+
+        if (csvRows?.length) {
+          downloadRegisterCsvFromRows(
+            csvRows,
+            `WRL_Detailed_Breakdown_${new Date().toISOString().split('T')[0]}.csv`
+          );
+          return;
+        }
+
+        if (!readRegisterFromPostgresClient()) {
+          await downloadRegisterCsvFromServer({
+            getAuthHeaders: getRegisterExportAuthHeaders,
+            refreshAuth: refreshRegisterExportAuth,
+            knownTotal: total,
+            signal: controller.signal,
+            onProgress: (fetched, exportTotal) => {
+              setExportProgress({ fetched, total: exportTotal });
+            },
+            query: exportQuery,
+          });
+          return;
+        }
+
+        const fetchedRows = await fetchAllRegisterRowsForExport({
           getAuthHeaders: getRegisterExportAuthHeaders,
           refreshAuth: refreshRegisterExportAuth,
           knownTotal: total,
@@ -3020,112 +3066,85 @@ export default function ReportPage() {
           },
           query: exportQuery,
         });
+        const viewDateFilter = buildCorpusViewDateFilter(
+          startDateStr,
+          endDateStr,
+          dateFilterColumn
+        );
+        csvRows = deriveRegisterView(
+          fetchedRows,
+          registerViewFilterRef.current,
+          viewDateFilter
+        ).filteredCalls;
+        if (!csvRows.length) {
+          alert('No data to export');
+          return;
+        }
+        downloadRegisterCsvFromRows(
+          csvRows,
+          `WRL_Detailed_Breakdown_${new Date().toISOString().split('T')[0]}.csv`
+        );
         return;
       }
 
-      const rawData = await fetchAllRegisterRowsForExport({
-        getAuthHeaders: getRegisterExportAuthHeaders,
-        refreshAuth: refreshRegisterExportAuth,
-        knownTotal: total,
-        signal: controller.signal,
-        onProgress: (fetched, exportTotal) => {
-          setExportProgress({ fetched, total: exportTotal });
-        },
-        query: exportQuery,
-      });
+      let rawData: Record<string, unknown>[] | null = null;
+      if (readRegisterFromPostgresClient()) {
+        let scope = getSharedCallsForScope();
+        if (!scope?.calls?.length) {
+          await ensureSharedCallsLoaded(false);
+          scope = getSharedCallsForScope();
+        }
+        if (scope?.calls?.length) {
+          const viewDateFilter = buildCorpusViewDateFilter(
+            startDateStr,
+            endDateStr,
+            dateFilterColumn
+          );
+          rawData = deriveRegisterView(
+            scope.calls,
+            registerViewFilterRef.current,
+            viewDateFilter
+          ).filteredCalls;
+        }
+      }
+
+      if (!rawData?.length) {
+        rawData = await fetchAllRegisterRowsForExport({
+          getAuthHeaders: getRegisterExportAuthHeaders,
+          refreshAuth: refreshRegisterExportAuth,
+          knownTotal: total,
+          signal: controller.signal,
+          onProgress: (fetched, exportTotal) => {
+            setExportProgress({ fetched, total: exportTotal });
+          },
+          query: exportQuery,
+        });
+        if (readRegisterFromPostgresClient() && rawData.length) {
+          const viewDateFilter = buildCorpusViewDateFilter(
+            startDateStr,
+            endDateStr,
+            dateFilterColumn
+          );
+          rawData = deriveRegisterView(
+            rawData,
+            registerViewFilterRef.current,
+            viewDateFilter
+          ).filteredCalls;
+        }
+      }
 
       if (rawData.length === 0) {
         alert("No data to export");
         return;
       }
 
-      const workbook = new ExcelJS.Workbook();
-      const sheet = workbook.addWorksheet('Detailed Breakdown');
-      const fileName = `WRL_Detailed_Breakdown_${new Date().toISOString().split('T')[0]}.xlsx`;
-
-      sheet.columns = [
-        { header: 'ID', key: 'id', width: 15 },
-        { header: 'Call Centre ID', key: 'vcclid', width: 15 },
-        { header: 'Call Type', key: 'type', width: 15 },
-        { header: 'Date', key: 'date', width: 12 },
-        { header: 'Customer', key: 'customer', width: 30 },
-        { header: 'Branch', key: 'branch', width: 20 },
-        { header: 'Franchisee', key: 'franchisee', width: 20 },
-        { header: 'Pincode', key: 'pincode', width: 12 },
-        { header: 'Product', key: 'product', width: 20 },
-        { header: 'Serial', key: 'serial', width: 15 },
-        { header: 'Technician', key: 'tech', width: 20 },
-        { header: 'Complaint', key: 'complaint', width: 40 },
-        { header: 'Status', key: 'status', width: 12 },
-        { header: 'Solved Date', key: 'solvedDate', width: 12 },
-        { header: 'Remarks', key: 'remarks', width: 30 },
-        { header: 'Contact Person', key: 'contact', width: 20 },
-        { header: 'Phone', key: 'phone', width: 15 },
-        { header: 'Address', key: 'address', width: 40 },
-      ];
-
-      sheet.getRow(1).eachCell((cell) => {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } };
-        cell.font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 10 };
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+      await downloadRegisterExcelFromRows(rawData, {
+        filename: `WRL_Detailed_Breakdown_${new Date().toISOString().split('T')[0]}.xlsx`,
+        sheetName: 'Detailed Breakdown',
+        onProgress: (processed, exportTotal) => {
+          setExportProgress({ fetched: processed, total: exportTotal });
+        },
       });
-
-      rawData.forEach((row: any) => {
-        const isCancelled = isRegisterRowCancelled(row);
-        const isSolved =
-          !isCancelled &&
-          (row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True' || row.callsolved === '1');
-        const isAssigned =
-          !isCancelled &&
-          !isSolved &&
-          (row.Status === 'Assigned' || row.callstatus === 'Assigned');
-        const statusText = isCancelled
-          ? 'Cancelled'
-          : row.Status === 'UNKNOWN'
-            ? 'PENDING'
-            : (row.Status || row.callstatus || 'OPEN');
-
-        const r = sheet.addRow({
-          id: row.UniqueCallNo,
-          vcclid: row.vcclid ?? '—',
-          type: row.calltype,
-          date: formatDate(row.callsdtrndate),
-          customer: row.PartyName,
-          branch: row.officename ?? row.resolved_branch_name ?? '—',
-          franchisee:
-            row.franchisee_name && row.franchisee_name !== 'Unallocated' ? row.franchisee_name : '—',
-          pincode: row.Pincode || '—',
-          product: row.itemname,
-          serial: row.callsvserialno,
-          tech: row.serviceman,
-          complaint: row.vcomplaint,
-          status: statusText,
-          solvedDate: isSolved ? formatDate(row.callsolveddate) : '—',
-          remarks: row.vsolveremarks || row.cancel_reason || '—',
-          contact: row.vpersoncalling,
-          phone: row.vinsttel1,
-          address: row.vinstaddress
-        });
-
-        if (isSolved) {
-          r.getCell('status').font = { color: { argb: 'FF10B981' }, bold: true };
-        } else if (isAssigned) {
-          r.getCell('status').font = { color: { argb: 'FFF59E0B' }, bold: true };
-        } else {
-          r.getCell('status').font = { color: { argb: 'FFEF4444' }, bold: true };
-        }
-      });
-
-      const buffer = await workbook.xlsx.writeBuffer();
-      const mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-
-      const blob = new Blob([buffer], { type: mimeType });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = fileName;
-      link.click();
-      URL.revokeObjectURL(link.href);
 
     } catch (err) {
       if (isRegisterExportAbortError(err)) return;
@@ -3171,42 +3190,58 @@ export default function ReportPage() {
     };
 
     if (activeTab === 'register') {
-      sheet.columns = [
-        { header: 'ID', key: 'id', width: 15 },
-        { header: 'Call Centre ID', key: 'vcclid', width: 15 },
-        { header: 'Call Type', key: 'type', width: 15 },
-        { header: 'Date', key: 'date', width: 12 },
-        { header: 'Customer', key: 'customer', width: 30 },
-        { header: 'Branch', key: 'branch', width: 20 },
-        { header: 'Franchisee', key: 'franchisee', width: 20 },
-        { header: 'Pincode', key: 'pincode', width: 12 },
-        { header: 'Product', key: 'product', width: 20 },
-        { header: 'Serial', key: 'serial', width: 15 },
-        { header: 'Technician', key: 'tech', width: 20 },
-        { header: 'Complaint', key: 'complaint', width: 40 },
-        { header: 'Status', key: 'status', width: 12 },
-        { header: 'Solved Date', key: 'solvedDate', width: 12 },
-        { header: 'Remarks', key: 'remarks', width: 30 },
-        { header: 'Contact Person', key: 'contact', width: 20 },
-        { header: 'Phone', key: 'phone', width: 15 },
-        { header: 'Address', key: 'address', width: 40 },
-      ];
+      cancelRegisterExport();
+      const controller = new AbortController();
+      exportAbortRef.current = controller;
+      setExportingDetailed(true);
+      setExportProgress(null);
 
-      applyHeaderStyle(sheet.getRow(1));
+      try {
+        const startDateStr = toDateString(dateRange.start);
+        const endDateStr = toDateString(dateRange.end);
+        const queryKey = buildCurrentRegisterQueryKey();
+        const exportQuery = {
+          officeId: summaryOfficeIdsParam,
+          callType: viewCallTypesParam,
+          startDate: startDateStr,
+          endDate: endDateStr,
+          dateFilterColumn,
+          search: debouncedSearch || undefined,
+          pincode: debouncedPincodeSearch || undefined,
+          state: joinFilterParam(selectedState),
+          city: joinFilterParam(selectedCity),
+          branch: joinFilterParam(selectedBranch),
+          franchisee: joinFilterParam(selectedFranchisee),
+          technician: joinFilterParam(selectedTechnician),
+          status: joinFilterParam(selectedStatus),
+          priority: joinFilterParam(priorityFilter),
+          portalFilter: joinFilterParam(portalFilter),
+        };
 
-      let exportData: Record<string, unknown>[] = data;
-      const needsFullFetch = total > limit || data.length < total;
-      if (needsFullFetch) {
-        cancelRegisterExport();
-        const controller = new AbortController();
-        exportAbortRef.current = controller;
-        setExportingDetailed(true);
-        setExportProgress(null);
-        try {
-          const startDateStr = toDateString(dateRange.start);
-          const endDateStr = toDateString(dateRange.end);
-          const queryKey = buildCurrentRegisterQueryKey();
+        let exportData: Record<string, unknown>[] = data;
+        const needsFullFetch = total > limit || data.length < total;
 
+        if (readRegisterFromPostgresClient()) {
+          let scope = getSharedCallsForScope();
+          if (!scope?.calls?.length) {
+            await ensureSharedCallsLoaded(false);
+            scope = getSharedCallsForScope();
+          }
+          if (scope?.calls?.length) {
+            const viewDateFilter = buildCorpusViewDateFilter(
+              startDateStr,
+              endDateStr,
+              dateFilterColumn
+            );
+            exportData = deriveRegisterView(
+              scope.calls,
+              registerViewFilterRef.current,
+              viewDateFilter
+            ).filteredCalls;
+          }
+        }
+
+        if (needsFullFetch && exportData.length < total) {
           const cachedAllPages = collectRegisterRowsFromSessionCache(
             registerPagesCacheRef.current,
             queryKey,
@@ -3216,134 +3251,95 @@ export default function ReportPage() {
           if (cachedAllPages?.length) {
             exportData = cachedAllPages;
           }
+        }
 
-          if (!readRegisterFromPostgresClient() && exportData.length < total) {
-            const spanDays = corpusSpanDays(startDateStr, endDateStr);
-            if (spanDays <= MAX_CLIENT_CORPUS_DAYS) {
-              const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
-              if (callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0) {
-                const viewDateFilter = buildCorpusViewDateFilter(
-                  startDateStr,
-                  endDateStr,
-                  dateFilterColumn
-                );
-                exportData = getFilteredCorpusCalls(
-                  registerViewFilterRef.current,
-                  callCorpusStore,
-                  viewDateFilter
-                );
-              }
-            }
-          }
-
-            if (exportData.length < total) {
-              const exportQuery = {
-                officeId: summaryOfficeIdsParam,
-                callType: viewCallTypesParam,
-                startDate: startDateStr,
-                endDate: endDateStr,
-                dateFilterColumn,
-                search: debouncedSearch || undefined,
-                pincode: debouncedPincodeSearch || undefined,
-                state: joinFilterParam(selectedState),
-                city: joinFilterParam(selectedCity),
-                branch: joinFilterParam(selectedBranch),
-                franchisee: joinFilterParam(selectedFranchisee),
-                technician: joinFilterParam(selectedTechnician),
-                status: joinFilterParam(selectedStatus),
-                priority: joinFilterParam(priorityFilter),
-                portalFilter: joinFilterParam(portalFilter),
-              };
-
-              toast.info(
-                `Register shows ${limit} rows per page — exporting all ${total.toLocaleString()} matching rows as CSV…`
+        if (needsFullFetch && !readRegisterFromPostgresClient() && exportData.length < total) {
+          const spanDays = corpusSpanDays(startDateStr, endDateStr);
+          if (spanDays <= MAX_CLIENT_CORPUS_DAYS) {
+            const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+            if (callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0) {
+              const viewDateFilter = buildCorpusViewDateFilter(
+                startDateStr,
+                endDateStr,
+                dateFilterColumn
               );
-              await supabase.auth.refreshSession();
-              await downloadRegisterCsvFromServer({
-                getAuthHeaders: getRegisterExportAuthHeaders,
-                refreshAuth: refreshRegisterExportAuth,
-                knownTotal: total,
-                signal: controller.signal,
-                onProgress: (fetched, exportTotal) => {
-                  setExportProgress({ fetched, total: exportTotal });
-                },
-                query: exportQuery,
-              });
-              return;
+              exportData = getFilteredCorpusCalls(
+                registerViewFilterRef.current,
+                callCorpusStore,
+                viewDateFilter
+              );
             }
-        } catch (err) {
-          if (isRegisterExportAbortError(err)) return;
-          console.error('Full register export fetch failed:', err);
-          const message =
-            axios.isAxiosError(err) && err.response?.data?.error
-              ? String(err.response.data.error)
-              : err instanceof Error
-                ? err.message
-                : 'Export failed';
-          alert(`Failed to export register: ${message}`);
-          return;
-        } finally {
-          if (exportAbortRef.current === controller) {
-            exportAbortRef.current = null;
           }
-          setExportingDetailed(false);
-          setExportProgress(null);
         }
-      }
 
-      if (!exportData.length) {
-        alert('No data to export');
-        return;
-      }
+        if (needsFullFetch && exportData.length < total) {
+          toast.info(
+            `Register shows ${limit} rows per page — fetching all ${total.toLocaleString()} matching rows for Excel…`
+          );
+          await supabase.auth.refreshSession();
+          exportData = await fetchAllRegisterRowsForExport({
+            getAuthHeaders: getRegisterExportAuthHeaders,
+            refreshAuth: refreshRegisterExportAuth,
+            knownTotal: total,
+            signal: controller.signal,
+            onProgress: (fetched, exportTotal) => {
+              setExportProgress({ fetched, total: exportTotal });
+            },
+            query: exportQuery,
+          });
 
-      exportData.forEach((row: any) => {
-        const isCancelled = isRegisterRowCancelled(row);
-        const isSolved =
-          !isCancelled &&
-          (row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True' || row.callsolved === '1');
-        const isAssigned =
-          !isCancelled &&
-          !isSolved &&
-          (row.Status === 'Assigned' || row.callstatus === 'Assigned');
-        const statusText = isCancelled
-          ? 'Cancelled'
-          : row.Status === 'UNKNOWN'
-            ? 'PENDING'
-            : (row.Status || row.callstatus || 'OPEN');
+          if (readRegisterFromPostgresClient() && exportData.length) {
+            const viewDateFilter = buildCorpusViewDateFilter(
+              startDateStr,
+              endDateStr,
+              dateFilterColumn
+            );
+            exportData = deriveRegisterView(
+              exportData,
+              registerViewFilterRef.current,
+              viewDateFilter
+            ).filteredCalls;
+          }
+        }
 
-        const r = sheet.addRow({
-          id: row.UniqueCallNo,
-          vcclid: row.vcclid ?? '—',
-          type: row.calltype,
-          date: formatDate(row.callsdtrndate),
-          customer: row.PartyName,
-          branch: row.officename ?? row.resolved_branch_name ?? '—',
-          franchisee:
-            row.franchisee_name && row.franchisee_name !== 'Unallocated' ? row.franchisee_name : '—',
-          pincode: row.Pincode || '—',
-          product: row.itemname,
-          serial: row.callsvserialno,
-          tech: row.serviceman,
-          complaint: row.vcomplaint,
-          status: statusText,
-          solvedDate: isSolved ? formatDate(row.callsolveddate) : '—',
-          remarks: row.vsolveremarks || row.cancel_reason || '—',
-          contact: row.vpersoncalling,
-          phone: row.vinsttel1,
-          address: row.vinstaddress
+        if (!exportData.length) {
+          alert('No data to export');
+          return;
+        }
+
+        if (format === 'csv') {
+          downloadRegisterCsvFromRows(
+            exportData,
+            `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`
+          );
+          return;
+        }
+
+        await downloadRegisterExcelFromRows(exportData, {
+          filename: `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.xlsx`,
+          sheetName: 'Call Register',
+          onProgress: (processed, exportTotal) => {
+            setExportProgress({ fetched: processed, total: exportTotal });
+          },
         });
-
-        // Style status cell
-        const statusCell = r.getCell('status');
-        statusCell.font = {
-          bold: true,
-          color: { argb: isCancelled ? 'FFDC2626' : isSolved ? 'FF059669' : isAssigned ? 'FF1D4ED8' : 'FF64748B' },
-        };
-        if (isSolved || isAssigned) {
-          statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isSolved ? 'FFF8FAFC' : 'FFE8F0FE' } };
+      } catch (err) {
+        if (isRegisterExportAbortError(err)) return;
+        console.error('Register export failed:', err);
+        const message =
+          axios.isAxiosError(err) && err.response?.data?.error
+            ? String(err.response.data.error)
+            : err instanceof Error
+              ? err.message
+              : 'Export failed';
+        alert(`Failed to export register: ${message}`);
+      } finally {
+        if (exportAbortRef.current === controller) {
+          exportAbortRef.current = null;
         }
-      });
-
+        setExportingDetailed(false);
+        setExportProgress(null);
+      }
+      return;
     } else if (activeTab === 'summary') {
       const regions = Array.from(new Set(summaryData.map(b => b.region))).sort();
       const topLevelBranches = summaryData.filter(b => b.parentId === 0 || !summaryData.find(p => p.officeId === b.parentId));
@@ -3464,12 +3460,10 @@ export default function ReportPage() {
 
     let buffer;
     let mimeType;
-    if (format === 'csv') {
-      buffer = await workbook.csv.writeBuffer();
-      mimeType = 'text/csv;charset=utf-8;';
-    } else {
-      buffer = await workbook.xlsx.writeBuffer();
-      mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    buffer = await workbook.xlsx.writeBuffer();
+    mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    if (!fileName.endsWith('.xlsx')) {
+      fileName = fileName.replace(/\.csv$/i, '.xlsx');
     }
 
     const blob = new Blob([buffer], { type: mimeType });
@@ -3602,7 +3596,7 @@ export default function ReportPage() {
                 ? exportProgress && exportProgress.total > 0
                   ? `Exporting ${exportProgress.fetched.toLocaleString()} / ${exportProgress.total.toLocaleString()} — click to cancel`
                   : 'Export in progress — click to cancel'
-                : 'Export filtered register to Excel'
+                : 'Export filtered register to Excel (.xlsx)'
             }
           >
             <FileSpreadsheet size={14} className={exportingDetailed ? 'animate-pulse text-amber-600' : 'text-emerald-600'} />
@@ -3610,7 +3604,7 @@ export default function ReportPage() {
               ? exportProgress && exportProgress.total > 0
                 ? `Exporting ${Math.min(100, Math.round((exportProgress.fetched / exportProgress.total) * 100))}%`
                 : 'Exporting…'
-              : 'Export'}
+              : 'Export Excel'}
           </button>
           <div className="relative">
             <button

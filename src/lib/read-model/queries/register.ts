@@ -415,6 +415,8 @@ export async function queryRegisterFromPostgres(params: RegisterPostgresParams) 
 
 const REGISTER_BULK_MAX_ROWS = 100_000;
 
+export { REGISTER_BULK_MAX_ROWS };
+
 /** One-shot preload for client-side register/distribution filtering (no OFFSET pagination). */
 export async function queryRegisterBulkFromPostgres(
   params: Pick<
@@ -470,6 +472,27 @@ export async function queryRegisterBulkFromPostgres(
     readSource: 'postgres' as const,
     bulk: true,
   };
+}
+
+/** All matching register rows for CSV export (server-side fallback). */
+export async function queryRegisterExportFromPostgres(
+  params: RegisterPostgresParams
+): Promise<Record<string, unknown>[]> {
+  const { sql: whereSql, values } = buildWhere(params);
+
+  const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+    `
+    SELECT h.*
+    FROM calls_latest_hot h
+    WHERE ${whereSql}
+    ORDER BY h.logged_at DESC, h.ncode DESC
+    LIMIT $${values.length + 1}
+    `,
+    ...values,
+    REGISTER_BULK_MAX_ROWS
+  );
+
+  return rows.map(hotRowToRegisterRow) as Record<string, unknown>[];
 }
 
 function aggregateDistinct(

@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { postQuery } from '@/lib/db-proxy';
 import { prisma } from '@/lib/prisma';
-import { buildRegisterCsvResponse } from '@/lib/register-csv-export';
+import { buildRegisterCsvResponse, createRegisterCsvResponse } from '@/lib/register-csv-export';
 import { resolveHotWindowCoverage } from '@/lib/read-model/hot-window';
 import { readRegisterFromPostgres } from '@/lib/read-model/flags';
-import { queryRegisterBulkFromPostgres, queryRegisterFromPostgres } from '@/lib/read-model/queries/register';
+import {
+  queryRegisterBulkFromPostgres,
+  queryRegisterExportFromPostgres,
+  queryRegisterFromPostgres,
+  REGISTER_BULK_MAX_ROWS,
+} from '@/lib/read-model/queries/register';
 import {
   appendCallTypeFilter,
   buildTrhcallsLookupCondition,
@@ -416,6 +421,35 @@ export async function GET(req: NextRequest) {
             isHod,
           });
           return NextResponse.json(payload);
+        }
+
+        if (searchParams.get('export') === 'csv') {
+          const rows = await queryRegisterExportFromPostgres({
+            page: 1,
+            limit: REGISTER_BULK_MAX_ROWS,
+            search,
+            officeId,
+            callType: callType ?? null,
+            startDate,
+            endDate,
+            status,
+            account,
+            region,
+            pincode,
+            priority,
+            portalFilter,
+            state,
+            city,
+            branch,
+            franchisee,
+            technician,
+            fetchTotals: false,
+            fetchFilterOptions: false,
+            assignedOffices,
+            visibleStatuses,
+            isHod,
+          });
+          return createRegisterCsvResponse(rows);
         }
 
         const payload = await queryRegisterFromPostgres({

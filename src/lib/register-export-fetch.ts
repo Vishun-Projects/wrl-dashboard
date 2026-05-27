@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { isWithinHotWindow } from '@/lib/read-model/hot-window';
 import { readRegisterFromPostgresClient } from '@/lib/read-model/client-flags';
+import { downloadRegisterCsvInBrowser } from '@/lib/register-csv-export';
 
 export function isRegisterExportAbortError(err: unknown): boolean {
   if (axios.isCancel(err)) return true;
@@ -120,6 +121,14 @@ export function collectRegisterRowsFromSessionCache(
   return rows.length >= total ? rows.slice(0, total) : null;
 }
 
+/** Download register rows as a proper CSV file in the browser. */
+export function downloadRegisterCsvFromRows(
+  rows: Record<string, unknown>[],
+  filename?: string
+): void {
+  downloadRegisterCsvInBrowser(rows, filename);
+}
+
 /** One server request: streams CSV using keyset pagination (no slow OFFSET in browser). */
 export async function downloadRegisterCsvFromServer(opts: {
   getAuthHeaders: () => Promise<Record<string, string>>;
@@ -161,7 +170,22 @@ export async function downloadRegisterCsvFromServer(opts: {
 
   opts.onProgress?.(total > 0 ? total : 1, total > 0 ? total : 1);
 
-  const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
+  const contentType = String(res.headers['content-type'] ?? '');
+  const blobData = res.data as Blob;
+  const rawText = await blobData.text();
+  const trimmed = rawText.trimStart();
+  if (contentType.includes('application/json') || trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    let message = 'Server returned JSON instead of CSV';
+    try {
+      const parsed = JSON.parse(trimmed) as { error?: string };
+      if (parsed.error) message = parsed.error;
+    } catch {
+      /* keep default message */
+    }
+    throw new Error(message);
+  }
+
+  const blob = new Blob(['\uFEFF', rawText], { type: 'text/csv;charset=utf-8;' });
   const filename = `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
@@ -210,6 +234,9 @@ async function fetchRegisterBulkForCache(opts: {
   }
 
   const rows = (res.data?.data ?? []) as Record<string, unknown>[];
+  if (!Array.isArray(rows)) {
+    throw new Error('Invalid register bulk response from server');
+  }
   opts.onProgress?.(rows.length, rows.length);
   registerLog('bulk preload DONE (network)', {
     rows: rows.length,
