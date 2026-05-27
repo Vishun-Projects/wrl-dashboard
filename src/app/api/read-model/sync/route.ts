@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { prisma } from '@/lib/prisma';
-import { runIncrementalSync } from '@/lib/read-model/incremental';
+import { runIncrementalSync, isPostgresLockError } from '@/lib/read-model/incremental';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
 
 export async function POST() {
@@ -33,6 +33,16 @@ export async function POST() {
     return NextResponse.json({ ...result, syncMeta });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Incremental sync failed';
+    if (isPostgresLockError(err)) {
+      return NextResponse.json(
+        {
+          error: 'Sync is already running — please wait a minute and try again',
+          skipped: true,
+          reason: message,
+        },
+        { status: 409 }
+      );
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

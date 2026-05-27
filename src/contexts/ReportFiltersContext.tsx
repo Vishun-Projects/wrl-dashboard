@@ -1000,44 +1000,20 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       syncInFlightRef.current = true;
       setSyncInProgress(true);
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        const headers = session?.access_token
-          ? { Authorization: `Bearer ${session.access_token}` }
-          : {};
-
-        const res = await axios.post('/api/read-model/sync', {}, { headers });
+        logRegisterBulk('UI refresh — reloading report cache from Postgres (not CRM sync)');
+        await ensureSharedCallsLoaded(true);
         const syncTime = new Date();
-        const upserted = Number(res.data?.rowsUpserted ?? 0);
-        const deleted = Number(res.data?.rowsDeleted ?? 0);
-        const skipped = !!res.data?.skipped;
-        const coalesced = !!res.data?.coalesced;
-
         setLastSyncedAt(syncTime);
         notifyCorpusRegisterDelta([], syncTime);
 
         if (opts?.showToast) {
-          if (skipped && !coalesced) {
-            toast.info(res.data?.reason ?? 'Sync skipped — no changes');
-          } else if (!coalesced && upserted === 0 && deleted === 0) {
-            toast.info('No calls added or updated since last sync');
-          } else {
-            const parts: string[] = [];
-            if (upserted > 0) parts.push(`${upserted} upserted`);
-            if (deleted > 0) parts.push(`${deleted} removed`);
-            toast.success(`Database synced — ${parts.join(', ')}`);
-          }
+          toast.success('Report data refreshed from database');
         }
       } catch (err: unknown) {
         if (opts?.showToast) {
           const message =
-            axios.isAxiosError(err) && err.response?.data?.error
-              ? String(err.response.data.error)
-              : err instanceof Error
-                ? err.message
-                : 'Sync failed';
-          toast.error('Failed to sync database: ' + message);
+            err instanceof Error ? err.message : 'Refresh failed';
+          toast.error('Failed to refresh report data: ' + message);
         }
       } finally {
         syncInFlightRef.current = false;
@@ -1161,6 +1137,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     applyCorpusToUi,
     dateFilterColumn,
     ensureCorpusLoaded,
+    ensureSharedCallsLoaded,
     getDateStrings,
     getSharedCacheKey,
     lastSyncedAt,

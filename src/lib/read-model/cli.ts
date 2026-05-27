@@ -6,6 +6,7 @@ import { runNightlyReconcile } from '@/lib/read-model/nightly';
 import { runRetentionJobs } from '@/lib/read-model/retention';
 
 loadEnv();
+process.env.USE_DIRECT_DATABASE = 'true';
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
 

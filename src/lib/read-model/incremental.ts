@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import type pg from 'pg';
-import { withClient, withTransaction } from '@/lib/read-model/db';
+import { withClient } from '@/lib/read-model/db';
 import {
   completeIngestBatch,
   finishSyncRunLog,
@@ -44,6 +44,7 @@ import type { HotRow } from '@/lib/read-model/types';
 const ENTITY = 'calls_latest_hot';
 const OVERLAP_MS = 2 * 60 * 1000;
 const MIN_HOT_FOR_INCREMENTAL = Math.floor(HOT_TARGET_ROWS * 0.95);
+const SYNC_TX_LOCK_TIMEOUT_MS = Number(process.env.PG_SYNC_LOCK_TIMEOUT_MS ?? 120_000);
 
 function maxWatermarks(rows: Record<string, unknown>[]): {
   lastEditedon: Date | null;
@@ -98,6 +99,11 @@ async function skipIncrementalReason(client: pg.PoolClient): Promise<string | nu
   return null;
 }
 
+export function isPostgresLockError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /lock timeout|deadlock detected|could not obtain lock/i.test(message);
+}
+
 export type IncrementalSyncResult = {
   ok: boolean;
   skipped?: boolean;
@@ -147,24 +153,11 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
       return { kind: 'skip' as const, reason: skipReason };
     }
 
-    const acquired = await tryAcquireSyncLock(client);
-    if (!acquired) {
+    if (await isSyncRunning(client)) {
       return { kind: 'wait' as const };
     }
 
-    const state = await getSyncState(client);
-    const watermarkBase = state?.last_editedon ?? new Date(0);
-    const watermarkStart = new Date(watermarkBase.getTime() - OVERLAP_MS);
-    const batch = await startIngestBatch(client, ENTITY, watermarkStart);
-    const logId = await startSyncRunLog(client, ENTITY, batch.batchId);
-
-    return {
-      kind: 'run' as const,
-      state,
-      watermarkStart,
-      batchId: batch.batchId,
-      logId,
-    };
+    return { kind: 'proceed' as const };
   });
 
   if (prep.kind === 'wait') {
@@ -188,111 +181,132 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
     return { ok: true, skipped: true, reason: prep.reason, rowsUpserted: 0, rowsDeleted: 0 };
   }
 
-  const startedAt = new Date();
-  const { state, watermarkStart, batchId, logId } = prep;
-  let rowsUpserted = 0;
-  let rowsDeleted = 0;
+  return withClient(async (client) => {
+    const acquired = await tryAcquireSyncLock(client);
+    if (!acquired) {
+      console.log('[sync-worker] Incremental coalesced — lock taken before run started');
+      return await coalescedSyncResult();
+    }
 
-  try {
-    console.log(`[sync-worker] Incremental fetch from ${watermarkStart.toISOString()}`);
-    const rawRows = await fetchCrmIncrementalRows(watermarkStart, (rows) => {
-      console.log(`[sync-worker] CRM returned ${rows} changed rows`);
-    });
+    const startedAt = new Date();
+    const state = await getSyncState(client);
+    const watermarkBase = state?.last_editedon ?? new Date(0);
+    const watermarkStart = new Date(watermarkBase.getTime() - OVERLAP_MS);
+    const batch = await startIngestBatch(client, ENTITY, watermarkStart);
+    const logId = await startSyncRunLog(client, ENTITY, batch.batchId);
 
-    const deduped = dedupeCrmRows(rawRows);
-    const trns = deduped
-      .map((row) => String(row.vtrnno ?? row.UniqueCallNo ?? '').trim())
-      .filter(Boolean);
+    let rowsUpserted = 0;
+    let rowsDeleted = 0;
 
-    await withTransaction(async (client) => {
-      const existingHot = await fetchHotRowsByTrn(client, trns);
-      const existingByTrn = new Map(existingHot.map((row) => [row.vtrnno, row]));
-
-      const upsertRows: HotRow[] = [];
-      const deleteTrns: string[] = [];
-
-      for (const row of deduped) {
-        const trn = String(row.vtrnno ?? row.UniqueCallNo ?? '').trim();
-        if (!trn) continue;
-        if (isHotEligibleRow(row)) {
-          const hot = transformCrmRowToHot(row);
-          if (hot) upsertRows.push(hot);
-          else if (existingByTrn.has(trn)) deleteTrns.push(trn);
-        } else if (existingByTrn.has(trn)) {
-          deleteTrns.push(trn);
-        }
-      }
-
-      const upserted = await upsertHotRows(client, upsertRows);
-      const deleted = await deleteHotRowsByTrn(client, deleteTrns);
-      rowsUpserted = upserted;
-      rowsDeleted = deleted;
-
-      const oldFactRows: HotRow[] = [];
-      const newFactRows: HotRow[] = [];
-      for (const row of upsertRows) {
-        const old = existingByTrn.get(row.vtrnno);
-        if (old) oldFactRows.push(old);
-        newFactRows.push(row);
-      }
-      for (const trn of deleteTrns) {
-        const old = existingByTrn.get(trn);
-        if (old) oldFactRows.push(old);
-      }
-      await applyFactChanges(client, oldFactRows, newFactRows);
-
-      const watermarks = maxWatermarks(deduped);
-      const nextEdited =
-        watermarks.lastEditedon && state?.last_editedon && watermarks.lastEditedon < state.last_editedon
-          ? state.last_editedon
-          : watermarks.lastEditedon ?? state?.last_editedon ?? null;
-      const nextAdded =
-        watermarks.lastAddedon && state?.last_addedon && watermarks.lastAddedon < state.last_addedon
-          ? state.last_addedon
-          : watermarks.lastAddedon ?? state?.last_addedon ?? null;
-
-      if (deduped.length > 0) {
-        await updateSyncWatermarks(client, nextEdited, nextAdded, upserted);
-      } else {
-        await updateSyncWatermarks(client, state?.last_editedon ?? null, state?.last_addedon ?? null, 0);
-      }
-
-      const checksum = createHash('sha256')
-        .update(
-          upsertRows
-            .map((r) => r.vtrnno)
-            .sort()
-            .join(',')
-        )
-        .digest('hex');
-
-      await completeIngestBatch(client, batchId, nextEdited, upserted, 'completed', checksum);
-      await finishSyncRunLog(client, logId, 'completed', {
-        startedAt,
-        rowsUpserted: upserted,
-        rowsDeleted: deleted,
+    try {
+      console.log(`[sync-worker] Incremental fetch from ${watermarkStart.toISOString()}`);
+      const rawRows = await fetchCrmIncrementalRows(watermarkStart, (rows) => {
+        console.log(`[sync-worker] CRM returned ${rows} changed rows`);
       });
 
-      console.log(
-        `[sync-worker] Incremental complete — upserted ${upserted}, deleted ${deleted}, watermark ${nextEdited?.toISOString() ?? 'unchanged'}`
-      );
-    });
+      const deduped = dedupeCrmRows(rawRows);
+      const trns = deduped
+        .map((row) => String(row.vtrnno ?? row.UniqueCallNo ?? '').trim())
+        .filter(Boolean);
 
-    return {
-      ok: true,
-      rowsUpserted,
-      rowsDeleted,
-      crmRowsFetched: deduped.length,
-    };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await withClient(async (client) => {
-      await completeIngestBatch(client, batchId, null, 0, 'failed');
-      await finishSyncRunLog(client, logId, 'failed', { startedAt, errorMessage: message });
+      await client.query('BEGIN');
+      try {
+        await client.query(`SET LOCAL lock_timeout = '${SYNC_TX_LOCK_TIMEOUT_MS}'`);
+
+        const existingHot = await fetchHotRowsByTrn(client, trns);
+        const existingByTrn = new Map(existingHot.map((row) => [row.vtrnno, row]));
+
+        const upsertRows: HotRow[] = [];
+        const deleteTrns: string[] = [];
+
+        for (const row of deduped) {
+          const trn = String(row.vtrnno ?? row.UniqueCallNo ?? '').trim();
+          if (!trn) continue;
+          if (isHotEligibleRow(row)) {
+            const hot = transformCrmRowToHot(row);
+            if (hot) upsertRows.push(hot);
+            else if (existingByTrn.has(trn)) deleteTrns.push(trn);
+          } else if (existingByTrn.has(trn)) {
+            deleteTrns.push(trn);
+          }
+        }
+
+        rowsUpserted = await upsertHotRows(client, upsertRows);
+        rowsDeleted = await deleteHotRowsByTrn(client, deleteTrns);
+
+        const oldFactRows: HotRow[] = [];
+        const newFactRows: HotRow[] = [];
+        for (const row of upsertRows) {
+          const old = existingByTrn.get(row.vtrnno);
+          if (old) oldFactRows.push(old);
+          newFactRows.push(row);
+        }
+        for (const trn of deleteTrns) {
+          const old = existingByTrn.get(trn);
+          if (old) oldFactRows.push(old);
+        }
+        await applyFactChanges(client, oldFactRows, newFactRows);
+
+        const watermarks = maxWatermarks(deduped);
+        const nextEdited =
+          watermarks.lastEditedon && state?.last_editedon && watermarks.lastEditedon < state.last_editedon
+            ? state.last_editedon
+            : watermarks.lastEditedon ?? state?.last_editedon ?? null;
+        const nextAdded =
+          watermarks.lastAddedon && state?.last_addedon && watermarks.lastAddedon < state.last_addedon
+            ? state.last_addedon
+            : watermarks.lastAddedon ?? state?.last_addedon ?? null;
+
+        if (deduped.length > 0) {
+          await updateSyncWatermarks(client, nextEdited, nextAdded, rowsUpserted);
+        } else {
+          await updateSyncWatermarks(client, state?.last_editedon ?? null, state?.last_addedon ?? null, 0);
+        }
+
+        const checksum = createHash('sha256')
+          .update(
+            upsertRows
+              .map((r) => r.vtrnno)
+              .sort()
+              .join(',')
+          )
+          .digest('hex');
+
+        await completeIngestBatch(client, batch.batchId, nextEdited, rowsUpserted, 'completed', checksum);
+        await finishSyncRunLog(client, logId, 'completed', {
+          startedAt,
+          rowsUpserted,
+          rowsDeleted,
+        });
+
+        await client.query('COMMIT');
+
+        console.log(
+          `[sync-worker] Incremental complete — upserted ${rowsUpserted}, deleted ${rowsDeleted}, watermark ${nextEdited?.toISOString() ?? 'unchanged'}`
+        );
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      }
+
+      return {
+        ok: true,
+        rowsUpserted,
+        rowsDeleted,
+        crmRowsFetched: deduped.length,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      try {
+        await completeIngestBatch(client, batch.batchId, null, 0, 'failed');
+        await finishSyncRunLog(client, logId, 'failed', { startedAt, errorMessage: message });
+      } catch (cleanupErr) {
+        console.error('[sync-worker] Failed to record sync failure:', cleanupErr);
+      }
       await markSyncError(client, message);
-    });
-    throw err;
-  }
+      throw err;
+    }
+  });
 }
 
 /** Process-only path for tests without lock (not exported for production). */

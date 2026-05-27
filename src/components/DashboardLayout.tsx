@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useLayoutEffect, useCallback, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import axios from 'axios';
 import { Sidebar } from './Sidebar';
@@ -37,48 +37,51 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [userProfile, setUserProfile] = useState<any>(null);
-  const [loadingProfile, setLoadingProfile] = useState(true);
-  const [showMainContent, setShowMainContent] = useState(false);
-  const hasDeferredInitialContent = useRef(false);
+  const [loadingProfile, setLoadingProfile] = useState(pathname !== '/login');
+  const authLoadedRef = useRef(false);
 
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
+    setLoadingProfile(true);
     try {
-      const res = await axios.get('/api/auth/me');
+      const res = await axios.get('/api/auth/me', { withCredentials: true });
       setUserProfile(res.data);
-    } catch (err) {
+      authLoadedRef.current = true;
+    } catch {
+      setUserProfile(null);
+      authLoadedRef.current = false;
       if (pathname !== '/login') {
-        router.push('/login');
+        router.replace('/login');
       }
     } finally {
       setLoadingProfile(false);
     }
-  };
+  }, [pathname, router]);
 
-  useEffect(() => {
-    fetchProfile();
-  }, []);
-
-  // On first dashboard paint, show sidebar before mounting heavy route content.
   useLayoutEffect(() => {
-    if (pathname === '/login') return;
-    if (hasDeferredInitialContent.current) {
-      setShowMainContent(true);
+    if (pathname === '/login') {
+      setUserProfile(null);
+      authLoadedRef.current = false;
+      setLoadingProfile(false);
       return;
     }
-    hasDeferredInitialContent.current = true;
-    const frame = requestAnimationFrame(() => setShowMainContent(true));
-    return () => cancelAnimationFrame(frame);
-  }, [pathname]);
+    if (authLoadedRef.current && userProfile) {
+      setLoadingProfile(false);
+      return;
+    }
+    void fetchProfile();
+  }, [pathname, fetchProfile, userProfile]);
 
   if (pathname === '/login') {
     return <>{children}</>;
   }
 
+  const authReady = !loadingProfile && !!userProfile;
+
   return (
     <UserContext.Provider value={{ userProfile, loadingProfile, refreshProfile: fetchProfile }}>
       <div className="flex flex-col md:flex-row h-screen overflow-hidden w-screen bg-slate-50 text-slate-700 font-sans">
         <Sidebar user={userProfile} />
-        {showMainContent ? (
+        {authReady ? (
           <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
             {children}
           </div>

@@ -463,13 +463,11 @@ export async function queryRegisterBulkFromPostgres(
   );
 
   const mapped = rows.map(hotRowToRegisterRow) as Record<string, unknown>[];
-  const syncMeta = await getSyncMeta();
 
   return {
     data: mapped,
     total: mapped.length,
     readSource: 'postgres' as const,
-    syncMeta,
     bulk: true,
   };
 }

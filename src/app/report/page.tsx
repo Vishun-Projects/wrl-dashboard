@@ -1015,10 +1015,16 @@ export default function ReportPage() {
     }
 
     const calls = filterCorpusCallsByViewDate(getCorpusCallsArray(callCorpusStore), viewDateFilter);
-    const diagnostic = diagnoseSummaryDerivation(calls, deriveOpts);
+    const viewFilters = registerViewFilterRef.current;
+    const { filteredCalls } = deriveRegisterView(calls, viewFilters, viewDateFilter);
+    const diagnostic = diagnoseSummaryDerivation(filteredCalls, deriveOpts);
     const { branchSummary, accountSummary, globalHeadcount: headcount } = deriveSummaryDashboard(
-      calls,
-      deriveOpts
+      filteredCalls,
+      {
+        ...deriveOpts,
+        officeIdsParam: 'All',
+        callTypesParam: 'All',
+      }
     );
 
     logSummaryDebug('derived from corpus', {
@@ -1404,6 +1410,7 @@ export default function ReportPage() {
           await ensureSharedCallsLoaded(scopeChanged);
         }
         if (applyRegisterFromSharedCalls(1)) {
+          applySummaryFromSharedCalls();
           setLoading(false);
           setFilterUpdating(false);
           return;
@@ -1429,6 +1436,42 @@ export default function ReportPage() {
     getSharedCallsForScope,
     distributionCalls,
   ]);
+
+  const applySummaryFromSharedCalls = useCallback((): boolean => {
+    if (!readRegisterFromPostgresClient()) return false;
+    const scope = getSharedCallsForScope();
+    if (!scope) return false;
+
+    const { calls, startDateStr, endDateStr } = scope;
+    const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
+    const viewFilters = registerViewFilterRef.current;
+    const agingStr =
+      agingAsOf.includes(' ') || agingAsOf.includes(':')
+        ? new Date(agingAsOf).toISOString().split('T')[0]
+        : agingAsOf;
+
+    const { filteredCalls } = deriveRegisterView(calls, viewFilters, viewDateFilter);
+    const { branchSummary, accountSummary, globalHeadcount: headcount } = deriveSummaryDashboard(
+      filteredCalls,
+      {
+        agingAsOf: agingStr,
+        endDate: endDateStr,
+        officeIdsParam: 'All',
+        callTypesParam: 'All',
+      }
+    );
+
+    logSummaryDebug('derived from shared Postgres bulk cache', {
+      bulkRows: calls.length,
+      filteredRows: filteredCalls.length,
+      branchRows: branchSummary.length,
+      accountRows: accountSummary.length,
+      globalHeadcount: headcount,
+    });
+
+    commitSummaryResult(branchSummary, accountSummary, headcount, startDateStr, endDateStr, agingStr);
+    return branchSummary.length > 0 || filteredCalls.length > 0;
+  }, [getSharedCallsForScope, dateFilterColumn, agingAsOf, commitSummaryResult]);
 
   const fetchData = async (
     p = 1,
@@ -2673,10 +2716,12 @@ export default function ReportPage() {
               await ensureSharedCallsLoaded(corpusFetchScopeChanged);
             }
             if (applyRegisterFromSharedCalls(1)) {
+              applySummaryFromSharedCalls();
               lastAppliedFilterSnapshotRef.current = filterSnapshot;
               return;
             }
             await fetchData(1, fetchOpts);
+            applySummaryFromSharedCalls();
             lastAppliedFilterSnapshotRef.current = filterSnapshot;
             return;
           }
@@ -2691,9 +2736,7 @@ export default function ReportPage() {
           }
           await ensurePortalAuditCache(supabase);
           applyRegisterFromCorpus(1);
-          if (activeTab === 'summary' || activeTab === 'accounts') {
-            applySummaryFromCorpus();
-          }
+          applySummaryFromCorpus();
           if (corpusSpanDays(startDateStr, endDateStr) > MAX_CLIENT_CORPUS_DAYS) {
             await fetchData(1, fetchOpts);
           }
@@ -2743,6 +2786,7 @@ export default function ReportPage() {
     applyRegisterFromCorpus,
     applyRegisterFromSharedCalls,
     applySummaryFromCorpus,
+    applySummaryFromSharedCalls,
     ensureCorpusLoaded,
     ensureSharedCallsLoaded,
     getSharedCallsForScope,
@@ -2809,7 +2853,12 @@ export default function ReportPage() {
       const endDateStr =
         toDateString(dateRange.end);
 
-      if (readSummaryFromPostgresClient()) {
+      if (readRegisterFromPostgresClient()) {
+        if (applySummaryFromSharedCalls()) return;
+        if (!getSharedCallsForScope()) {
+          await ensureSharedCallsLoaded(false);
+        }
+        if (applySummaryFromSharedCalls()) return;
         await fetchSummaryFromApi();
         return;
       }
@@ -2830,14 +2879,26 @@ export default function ReportPage() {
     viewCallTypesParam,
     selectedBranch,
     selectedFranchisee,
+    selectedState,
+    selectedCity,
+    selectedTechnician,
+    selectedStatus,
+    priorityFilter,
+    portalFilter,
+    debouncedSearch,
+    debouncedPincodeSearch,
     dateRange.start,
     dateRange.end,
     dateFilterColumn,
     agingAsOf,
     corpusTick,
+    distributionCalls,
     applySummaryFromCorpus,
+    applySummaryFromSharedCalls,
     fetchSummaryFromApi,
     ensureCorpusLoaded,
+    ensureSharedCallsLoaded,
+    getSharedCallsForScope,
   ]);
 
   useEffect(() => {
@@ -3519,7 +3580,7 @@ export default function ReportPage() {
             }}
             disabled={syncInProgress}
             className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 shadow-sm transition-all hover:bg-slate-50 disabled:opacity-50"
-            title="Sync now (manual refresh from server)"
+            title="Refresh report data from database (CRM sync runs via background worker)"
           >
             <div className={`${syncInProgress ? 'animate-spin' : ''}`}>
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M16 16h5v5" /></svg>
