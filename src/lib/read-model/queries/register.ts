@@ -413,6 +413,67 @@ export async function queryRegisterFromPostgres(params: RegisterPostgresParams) 
   return response;
 }
 
+const REGISTER_BULK_MAX_ROWS = 100_000;
+
+/** One-shot preload for client-side register/distribution filtering (no OFFSET pagination). */
+export async function queryRegisterBulkFromPostgres(
+  params: Pick<
+    RegisterPostgresParams,
+    | 'officeId'
+    | 'callType'
+    | 'startDate'
+    | 'endDate'
+    | 'assignedOffices'
+    | 'visibleStatuses'
+    | 'isHod'
+  >
+) {
+  const bulkParams: RegisterPostgresParams = {
+    page: 1,
+    limit: REGISTER_BULK_MAX_ROWS,
+    search: '',
+    account: '',
+    region: '',
+    status: '',
+    pincode: '',
+    priority: '',
+    portalFilter: '',
+    state: '',
+    city: '',
+    branch: '',
+    franchisee: '',
+    technician: '',
+    fetchTotals: false,
+    fetchFilterOptions: false,
+    ...params,
+  };
+
+  const { sql: whereSql, values } = buildWhere(bulkParams);
+
+  const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+    `
+    SELECT h.*
+    FROM calls_latest_hot h
+    WHERE ${whereSql}
+    ORDER BY h.logged_at DESC, h.ncode DESC
+    LIMIT $${values.length + 1}
+    `,
+    ...values,
+    REGISTER_BULK_MAX_ROWS
+  );
+
+  const mapped = rows.map(hotRowToRegisterRow) as Record<string, unknown>[];
+  const syncMeta = await getSyncMeta();
+
+  return {
+    data: mapped,
+    total: mapped.length,
+    readSource: 'postgres' as const,
+    syncMeta,
+    bulk: true,
+  };
+}
+
 function aggregateDistinct(
   rows: Record<string, unknown>[],
   codeKey: string,

@@ -16,6 +16,21 @@ export const REGISTER_EXPORT_BATCH_CRM = 1000;
 /** Larger batches when the API serves from Postgres hot table. */
 export const REGISTER_EXPORT_BATCH_POSTGRES = 2000;
 
+const REGISTER_LOG_PREFIX = '[WRL Register]';
+
+function registerLog(message: string, extra?: Record<string, unknown>) {
+  if (typeof console === 'undefined') return;
+  if (extra) {
+    console.log(REGISTER_LOG_PREFIX, message, extra);
+  } else {
+    console.log(REGISTER_LOG_PREFIX, message);
+  }
+}
+
+export function logRegisterBulk(message: string, extra?: Record<string, unknown>) {
+  registerLog(message, extra);
+}
+
 export type RegisterExportQuery = {
   officeId: string;
   callType: string;
@@ -155,6 +170,54 @@ export async function downloadRegisterCsvFromServer(opts: {
   URL.revokeObjectURL(link.href);
 }
 
+async function fetchRegisterBulkForCache(opts: {
+  getAuthHeaders: () => Promise<Record<string, string>>;
+  refreshAuth?: () => Promise<void>;
+  query: RegisterExportQuery;
+  signal?: AbortSignal;
+  onProgress?: (fetched: number, total: number) => void;
+}): Promise<Record<string, unknown>[]> {
+  const t0 = performance.now();
+  registerLog('bulk preload START (single API request)', {
+    startDate: opts.query.startDate,
+    endDate: opts.query.endDate,
+    callType: opts.query.callType,
+  });
+
+  const params = buildRegisterExportParams(opts.query, 1, 1, false);
+  params.set('export', 'bulk');
+  const url = `/api/report?${params.toString()}`;
+
+  const attempt = async () => {
+    const headers = await opts.getAuthHeaders();
+    return axios.get(url, { headers, signal: opts.signal });
+  };
+
+  if (opts.refreshAuth) await opts.refreshAuth();
+  let res;
+  try {
+    res = await attempt();
+  } catch (err) {
+    if (!axios.isAxiosError(err) || err.response?.status !== 401 || !opts.refreshAuth) {
+      registerLog('bulk preload FAILED', {
+        ms: Number((performance.now() - t0).toFixed(1)),
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+    await opts.refreshAuth();
+    res = await attempt();
+  }
+
+  const rows = (res.data?.data ?? []) as Record<string, unknown>[];
+  opts.onProgress?.(rows.length, rows.length);
+  registerLog('bulk preload DONE (network)', {
+    rows: rows.length,
+    ms: Number((performance.now() - t0).toFixed(1)),
+  });
+  return rows;
+}
+
 async function fetchRegisterExportPage(
   query: RegisterExportQuery,
   page: number,
@@ -193,7 +256,17 @@ export async function fetchAllRegisterRowsForExport(opts: {
   signal?: AbortSignal;
   onProgress?: (fetched: number, total: number) => void;
 }): Promise<Record<string, unknown>[]> {
+  if (readRegisterFromPostgresClient() && isWithinHotWindow(opts.query.startDate, opts.query.endDate)) {
+    return fetchRegisterBulkForCache(opts);
+  }
+
   const batchSize = resolveRegisterExportBatchSize(opts.query.startDate, opts.query.endDate);
+  const t0 = performance.now();
+  registerLog('paginated preload START', {
+    batchSize,
+    startDate: opts.query.startDate,
+    endDate: opts.query.endDate,
+  });
   const allRows: Record<string, unknown>[] = [];
   let total = Math.max(0, opts.knownTotal ?? 0);
   let page = 1;
@@ -208,6 +281,7 @@ export async function fetchAllRegisterRowsForExport(opts: {
     if (page === 1 || page % 10 === 0) {
       await opts.refreshAuth?.();
     }
+    const pageStart = performance.now();
     const res = await fetchRegisterExportPage(
       opts.query,
       page,
@@ -228,6 +302,12 @@ export async function fetchAllRegisterRowsForExport(opts: {
 
     allRows.push(...rows);
     opts.onProgress?.(allRows.length, total);
+    registerLog(`paginated preload page ${page}`, {
+      pageRows: rows.length,
+      fetched: allRows.length,
+      total: total || 'unknown',
+      pageMs: Number((performance.now() - pageStart).toFixed(1)),
+    });
 
     const lastNcode = Number(rows[rows.length - 1]?.id ?? rows[rows.length - 1]?.ncode);
     if (Number.isFinite(lastNcode) && lastNcode > 0) {
@@ -239,5 +319,10 @@ export async function fetchAllRegisterRowsForExport(opts: {
     page += 1;
   }
 
+  registerLog('paginated preload DONE (network)', {
+    rows: allRows.length,
+    pages: page,
+    ms: Number((performance.now() - t0).toFixed(1)),
+  });
   return allRows;
 }

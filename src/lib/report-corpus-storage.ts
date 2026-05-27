@@ -1,8 +1,9 @@
 /** IndexedDB persistence for the unified call corpus (meta-first restore). */
 
 const DB_NAME = 'wrl_reports_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const CORPUS_META_KEY = 'corpus_meta';
+const SHARED_REGISTER_STORE = 'shared_register';
 
 export type CorpusMeta = {
   cacheKey: string;
@@ -10,6 +11,14 @@ export type CorpusMeta = {
   lastSyncedAt: number;
   callCount: number;
   truncated?: boolean;
+};
+
+export type SharedRegisterCache = {
+  cacheKey: string;
+  calls: Record<string, unknown>[];
+  fetchedAt: number;
+  lastSyncedAt: number;
+  callCount: number;
 };
 
 function openDB(): Promise<IDBDatabase> {
@@ -26,6 +35,9 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains('meta')) {
         db.createObjectStore('meta');
+      }
+      if (!db.objectStoreNames.contains(SHARED_REGISTER_STORE)) {
+        db.createObjectStore(SHARED_REGISTER_STORE, { keyPath: 'cacheKey' });
       }
     };
     request.onsuccess = (e) => resolve((e.target as IDBOpenDBRequest).result);
@@ -120,5 +132,36 @@ export async function patchCorpusCallsInDB(
     });
   } catch (err) {
     console.error('Corpus IndexedDB patch error:', err);
+  }
+}
+
+export async function readSharedRegisterCache(
+  cacheKey: string
+): Promise<SharedRegisterCache | null> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(SHARED_REGISTER_STORE, 'readonly');
+    const request = tx.objectStore(SHARED_REGISTER_STORE).get(cacheKey);
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve((request.result as SharedRegisterCache) ?? null);
+      request.onerror = () => reject(request.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function persistSharedRegisterCache(cache: SharedRegisterCache): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    const db = await openDB();
+    const tx = db.transaction(SHARED_REGISTER_STORE, 'readwrite');
+    tx.objectStore(SHARED_REGISTER_STORE).put(cache);
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.error('Shared register IndexedDB persist error:', err);
   }
 }

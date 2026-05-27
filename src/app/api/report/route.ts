@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { buildRegisterCsvResponse } from '@/lib/register-csv-export';
 import { resolveHotWindowCoverage } from '@/lib/read-model/hot-window';
 import { readRegisterFromPostgres } from '@/lib/read-model/flags';
-import { queryRegisterFromPostgres } from '@/lib/read-model/queries/register';
+import { queryRegisterBulkFromPostgres, queryRegisterFromPostgres } from '@/lib/read-model/queries/register';
 import {
   appendCallTypeFilter,
   buildTrhcallsLookupCondition,
@@ -405,6 +405,19 @@ export async function GET(req: NextRequest) {
     if (readRegisterFromPostgres() && !lastSync) {
       const coverage = resolveHotWindowCoverage(startDate, endDate);
       if (coverage.mode === 'postgres') {
+        if (searchParams.get('export') === 'bulk') {
+          const payload = await queryRegisterBulkFromPostgres({
+            officeId,
+            callType: callType ?? null,
+            startDate,
+            endDate,
+            assignedOffices,
+            visibleStatuses,
+            isHod,
+          });
+          return NextResponse.json(payload);
+        }
+
         const payload = await queryRegisterFromPostgres({
           page,
           limit,

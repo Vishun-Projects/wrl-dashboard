@@ -78,6 +78,7 @@ import {
   downloadRegisterCsvFromServer,
   fetchAllRegisterRowsForExport,
   isRegisterExportAbortError,
+  logRegisterBulk,
 } from '@/lib/register-export-fetch';
 import { ensurePortalAuditCache } from '@/lib/report-portal-cache';
 
@@ -252,14 +253,30 @@ function corpusSpanDays(startDateStr: string, endDateStr: string): number {
   return Math.floor((spanEnd.getTime() - spanStart.getTime()) / 86400000) + 1;
 }
 
-function reportPerfLogDocumentNavigationOnce() {}
+function reportPerfLogDocumentNavigationOnce() {
+  if (typeof performance === 'undefined' || typeof console === 'undefined') return;
+  const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+  if (!nav) return;
+  console.log('[WRL Report Perf] navigation', {
+    type: nav.type,
+    domContentLoadedMs: Number((nav.domContentLoadedEventEnd - nav.startTime).toFixed(1)),
+    loadMs: Number((nav.loadEventEnd - nav.startTime).toFixed(1)),
+  });
+}
 
 function reportPerf(
-  _phase: string,
-  _action: string,
-  _opStart: number,
-  _extra?: Record<string, unknown>
-) {}
+  phase: string,
+  action: string,
+  opStart: number,
+  extra?: Record<string, unknown>
+) {
+  if (typeof console === 'undefined') return;
+  const elapsedMs = Number((performance.now() - opStart).toFixed(1));
+  console.log(`[WRL Report Perf] ${phase} · ${action}`, {
+    elapsedMs,
+    ...extra,
+  });
+}
 
 
 export default function ReportPage() {
@@ -1243,10 +1260,21 @@ export default function ReportPage() {
   const applyRegisterFromSharedCalls = useCallback(
     (pageNum = 1): boolean => {
       if (!readRegisterFromPostgresClient()) return false;
+      const applyStart = performance.now();
       const scope = getSharedCallsForScope();
-      if (!scope) return false;
+      if (!scope) {
+        logRegisterBulk('register view MISS (no shared bulk cache)', {
+          page: pageNum,
+          cacheKey: buildCorpusCacheKey(
+            toDateString(dateRange.start),
+            toDateString(dateRange.end),
+            dateFilterColumn
+          ),
+        });
+        return false;
+      }
 
-      const { calls, startDateStr, endDateStr } = scope;
+      const { calls, startDateStr, endDateStr, corpusKey } = scope;
       const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
       const viewFilters = registerViewFilterRef.current;
       const derived = deriveRegisterPageFromCalls(
@@ -1323,6 +1351,15 @@ export default function ReportPage() {
         filterAccount,
         lastRefreshed: refreshedDate,
         summaryQueryKey: globalReportCache?.summaryQueryKey,
+      });
+
+      logRegisterBulk('register view CACHE HIT (client filter)', {
+        page: pageNum,
+        rows: derived.rows.length,
+        total: derived.total,
+        bulkRows: calls.length,
+        cacheKey: corpusKey,
+        applyMs: Number((performance.now() - applyStart).toFixed(1)),
       });
 
       return true;

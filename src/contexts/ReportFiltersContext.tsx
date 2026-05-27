@@ -50,8 +50,9 @@ import {
 } from '@/lib/report-corpus';
 import { ensurePortalAuditCache } from '@/lib/report-portal-cache';
 import { readCallsFromPostgresClient, readRegisterFromPostgresClient } from '@/lib/read-model/client-flags';
-import { fetchAllRegisterRowsForExport } from '@/lib/register-export-fetch';
+import { fetchAllRegisterRowsForExport, logRegisterBulk } from '@/lib/register-export-fetch';
 import { createChunkedFetchAuth } from '@/lib/supabase-chunked-fetch';
+import { persistSharedRegisterCache, readSharedRegisterCache } from '@/lib/report-corpus-storage';
 
 let cachedReportResources: { offices: unknown[]; callTypes: string[] } | null = null;
 let reportResourcesInflight: Promise<{ offices: unknown[]; callTypes: string[] }> | null = null;
@@ -212,6 +213,9 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   const [corpusTick, setCorpusTick] = useState(0);
   const syncInFlightRef = useRef(false);
   const corpusLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const sharedRegisterLoadInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
+  /** Date windows bulk-loaded for Postgres register/distribution this session. */
+  const sharedRegisterSatisfiedKeysRef = useRef<Set<string>>(new Set());
   const corpusAbortRef = useRef<AbortController | null>(null);
   const corpusGenerationRef = useRef(0);
   const corpusHydratedAtRef = useRef<number | null>(null);
@@ -833,47 +837,131 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   );
 
   const fetchDistributionFromRegister = useCallback(
-    async (_force = false, silent = false) => {
-      if (!silent) setDistributionLoading(true);
-      try {
-        const { startDateStr, endDateStr } = getDateStrings();
-        const auth = createChunkedFetchAuth(supabase);
-        await auth.refreshAuth();
-        const calls = await fetchAllRegisterRowsForExport({
-          getAuthHeaders: auth.getAuthHeaders,
-          refreshAuth: auth.refreshAuth,
-          query: {
-            officeId: 'All',
-            callType: joinFilterParam(selectedCallTypes) || 'All',
-            startDate: startDateStr,
-            endDate: endDateStr,
-            dateFilterColumn,
-          },
-        });
+    async (force = false, silent = false) => {
+      const cacheKey = getSharedCacheKey();
+
+      const applySharedCalls = (calls: Record<string, unknown>[], fetchedAt: number) => {
         const branches = distributionDataCache?.dbBranches || [];
         setDistributionCalls(calls);
         setDistributionBranches(branches);
-        setLastSyncedAt(new Date());
-        const now = Date.now();
+        setLastSyncedAt(new Date(fetchedAt));
         setDistributionDataCache({
           allCalls: calls,
           dbBranches: branches,
-          lastSyncedAt: now,
-          fetchedAt: now,
-          cacheKey: getSharedCacheKey(),
+          lastSyncedAt: fetchedAt,
+          fetchedAt,
+          cacheKey,
         });
         syncCascadeOptionsFromCalls(calls);
-        await ensurePortalAuditCache(supabase);
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'Distribution load failed';
-        if (!silent) {
-          toast.error('Could not load distribution data', { description: message });
+        sharedRegisterSatisfiedKeysRef.current.add(cacheKey);
+      };
+
+      if (!force) {
+        if (
+          sharedRegisterSatisfiedKeysRef.current.has(cacheKey) &&
+          distributionDataCache?.cacheKey === cacheKey &&
+          (distributionDataCache.allCalls?.length ?? 0) > 0
+        ) {
+          logRegisterBulk('bulk CACHE HIT (memory)', {
+            cacheKey,
+            rows: distributionDataCache.allCalls.length,
+            ageMs: Date.now() - (distributionDataCache.fetchedAt ?? 0),
+          });
+          if (distributionCalls.length === 0) {
+            setDistributionCalls(distributionDataCache.allCalls);
+          }
+          return;
         }
+
+        const inflight = sharedRegisterLoadInFlightRef.current.get(cacheKey);
+        if (inflight) {
+          logRegisterBulk('bulk WAIT (in-flight dedupe)', { cacheKey });
+          await inflight;
+          return;
+        }
+      }
+
+      const run = (async () => {
+        if (!force) {
+          const idbStart = performance.now();
+          const idbCache = await readSharedRegisterCache(cacheKey);
+          if (idbCache?.calls?.length) {
+            logRegisterBulk('bulk CACHE HIT (IndexedDB)', {
+              cacheKey,
+              rows: idbCache.callCount,
+              restoreMs: Number((performance.now() - idbStart).toFixed(1)),
+              ageMs: Date.now() - idbCache.fetchedAt,
+            });
+            applySharedCalls(idbCache.calls, idbCache.lastSyncedAt);
+            await ensurePortalAuditCache(supabase);
+            return;
+          }
+        }
+
+        if (!silent) setDistributionLoading(true);
+        const networkStart = performance.now();
+        logRegisterBulk('bulk LOAD (network)', { cacheKey, force });
+
+        try {
+          const { startDateStr, endDateStr } = getDateStrings();
+          const auth = createChunkedFetchAuth(supabase);
+          await auth.refreshAuth();
+          const calls = await fetchAllRegisterRowsForExport({
+            getAuthHeaders: auth.getAuthHeaders,
+            refreshAuth: auth.refreshAuth,
+            query: {
+              officeId: 'All',
+              callType: 'All',
+              startDate: startDateStr,
+              endDate: endDateStr,
+              dateFilterColumn,
+            },
+            onProgress: (fetched, total) => {
+              if (fetched === total || fetched % 5000 === 0) {
+                logRegisterBulk('bulk LOAD progress', { fetched, total });
+              }
+            },
+          });
+          const now = Date.now();
+          applySharedCalls(calls, now);
+          void persistSharedRegisterCache({
+            cacheKey,
+            calls,
+            fetchedAt: now,
+            lastSyncedAt: now,
+            callCount: calls.length,
+          });
+          logRegisterBulk('bulk LOAD stored', {
+            cacheKey,
+            rows: calls.length,
+            networkMs: Number((performance.now() - networkStart).toFixed(1)),
+          });
+          await ensurePortalAuditCache(supabase);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Distribution load failed';
+          logRegisterBulk('bulk LOAD failed', {
+            cacheKey,
+            networkMs: Number((performance.now() - networkStart).toFixed(1)),
+            error: message,
+          });
+          if (!silent) {
+            toast.error('Could not load distribution data', { description: message });
+          }
+        } finally {
+          if (!silent) setDistributionLoading(false);
+        }
+      })();
+
+      sharedRegisterLoadInFlightRef.current.set(cacheKey, run);
+      try {
+        await run;
       } finally {
-        if (!silent) setDistributionLoading(false);
+        if (sharedRegisterLoadInFlightRef.current.get(cacheKey) === run) {
+          sharedRegisterLoadInFlightRef.current.delete(cacheKey);
+        }
       }
     },
-    [dateFilterColumn, getDateStrings, getSharedCacheKey, selectedCallTypes, supabase, syncCascadeOptionsFromCalls]
+    [dateFilterColumn, getDateStrings, getSharedCacheKey, distributionCalls.length, supabase, syncCascadeOptionsFromCalls]
   );
 
   const ensureSharedCallsLoaded = useCallback(
