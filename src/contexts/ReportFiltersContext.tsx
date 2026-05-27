@@ -1100,7 +1100,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   }, [resourcesLoaded, needsCorpusPreload, ensureCorpusLoaded, corpusFetchScopeKey, pathname]);
 
   useEffect(() => {
-    if (!resourcesLoaded || pathname !== '/report/distribution') return;
+    if (!resourcesLoaded || !pathname?.startsWith('/report')) return;
     if (!readRegisterFromPostgresClient()) return;
     const cacheKey = getSharedCacheKey();
     if (

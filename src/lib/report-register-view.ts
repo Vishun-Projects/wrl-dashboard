@@ -1,6 +1,7 @@
 import type { RegisterViewFilterParts } from '@/lib/report-filters';
 import type { CorpusViewDateFilter } from '@/lib/report-corpus';
-import { filterCorpusCallsByViewDate } from '@/lib/report-corpus';
+import { filterCorpusCallsByViewDate, registerRowDateValue } from '@/lib/report-corpus';
+import type { RegisterDateFilterColumn } from '@/lib/trhcalls-query';
 import {
   classifyRegisterRowStatus,
   filterViewCalls,
@@ -18,6 +19,35 @@ export function deriveRegisterView(
   const filteredCalls = filterViewCalls(dateFiltered, filterParts);
   const summary = summarizeRegisterRows(filteredCalls);
   return { filteredCalls, summary };
+}
+
+function sortRegisterCalls(
+  rows: Record<string, unknown>[],
+  dateFilterColumn: RegisterDateFilterColumn
+): Record<string, unknown>[] {
+  return [...rows].sort((a, b) => {
+    const dateA = new Date(String(registerRowDateValue(a, dateFilterColumn) ?? 0)).getTime();
+    const dateB = new Date(String(registerRowDateValue(b, dateFilterColumn) ?? 0)).getTime();
+    if (dateB !== dateA) return dateB - dateA;
+    return Number(b.ncode ?? b.id ?? 0) - Number(a.ncode ?? a.id ?? 0);
+  });
+}
+
+/** Paginate in-memory register rows (Postgres bulk cache or CRM corpus). */
+export function deriveRegisterPageFromCalls(
+  calls: Record<string, unknown>[],
+  filterParts: RegisterViewFilterParts,
+  page: number,
+  pageLimit: number,
+  viewDateFilter: CorpusViewDateFilter
+): { rows: Record<string, unknown>[]; total: number } {
+  const { filteredCalls } = deriveRegisterView(calls, filterParts, viewDateFilter);
+  const sorted = sortRegisterCalls(filteredCalls, viewDateFilter.dateFilterColumn);
+  const start = (page - 1) * pageLimit;
+  return {
+    rows: sorted.slice(start, start + pageLimit),
+    total: sorted.length,
+  };
 }
 
 export function isRegisterRowOpenBucket(bucket: RegisterSummaryBucket): boolean {

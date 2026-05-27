@@ -425,6 +425,7 @@ export async function GET(req: NextRequest) {
           franchisee,
           technician,
           fetchTotals: searchParams.get('fetchTotals') !== 'false',
+          fetchFilterOptions: searchParams.get('fetchFilterOptions') !== 'false',
           assignedOffices,
           visibleStatuses,
           isHod,

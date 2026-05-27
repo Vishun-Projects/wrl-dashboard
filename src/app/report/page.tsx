@@ -72,6 +72,7 @@ import {
 import { readCorpusMeta } from '@/lib/report-corpus-storage';
 import { deriveSummaryDashboard, diagnoseSummaryDerivation } from '@/lib/report-summary-derive';
 import { readRegisterFromPostgresClient, readSummaryFromPostgresClient } from '@/lib/read-model/client-flags';
+import { deriveRegisterPageFromCalls, deriveRegisterView } from '@/lib/report-register-view';
 import {
   collectRegisterRowsFromSessionCache,
   downloadRegisterCsvFromServer,
@@ -314,6 +315,8 @@ export default function ReportPage() {
     ensureCorpusLoaded,
     corpusTick,
     corpusLoading,
+    distributionCalls,
+    ensureSharedCallsLoaded,
   } = useReportFilters();
 
   const summaryOfficeIdsParam = useMemo(
@@ -1221,12 +1224,150 @@ export default function ReportPage() {
     ]
   );
 
+  const getSharedCallsForScope = useCallback(() => {
+    if (!readRegisterFromPostgresClient()) return null;
+    const startDateStr = toDateString(dateRange.start);
+    const endDateStr = toDateString(dateRange.end);
+    const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+    if (distributionDataCache?.cacheKey !== corpusKey) return null;
+    const calls =
+      (distributionDataCache.allCalls?.length ?? 0) > 0
+        ? distributionDataCache.allCalls
+        : distributionCalls.length > 0
+          ? distributionCalls
+          : null;
+    if (!calls?.length) return null;
+    return { calls, corpusKey, startDateStr, endDateStr };
+  }, [dateRange.start, dateRange.end, dateFilterColumn, distributionCalls]);
+
+  const applyRegisterFromSharedCalls = useCallback(
+    (pageNum = 1): boolean => {
+      if (!readRegisterFromPostgresClient()) return false;
+      const scope = getSharedCallsForScope();
+      if (!scope) return false;
+
+      const { calls, startDateStr, endDateStr } = scope;
+      const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
+      const viewFilters = registerViewFilterRef.current;
+      const derived = deriveRegisterPageFromCalls(
+        calls,
+        viewFilters,
+        pageNum,
+        limit,
+        viewDateFilter
+      );
+      const { summary } = deriveRegisterView(calls, viewFilters, viewDateFilter);
+      const queryKey = buildRegisterListQueryKey({
+        officeIdsParam: registerOfficeIdsParam,
+        callTypesParam: viewCallTypesParam,
+        searchForUrl: viewFilters.search || '',
+        pincodeForUrl: viewFilters.pincodeSearch || '',
+        startDateStr,
+        endDateStr,
+        dateFilterColumn,
+        selectedState: viewFilters.selectedState,
+        selectedCity: viewFilters.selectedCity,
+        selectedBranch: viewFilters.selectedBranch,
+        selectedFranchisee: viewFilters.selectedFranchisee,
+        selectedTechnician: viewFilters.selectedTechnician,
+        selectedStatus: viewFilters.selectedStatus,
+        priorityFilter: viewFilters.priorityFilter,
+        portalFilter: viewFilters.portalFilter,
+        agingAsOf: agingAsOf || '',
+      });
+
+      setData(derived.rows);
+      setTotal(derived.total);
+      setPage(pageNum);
+      setRegisterSummary(summary);
+      setLastRefreshed(
+        distributionDataCache?.lastSyncedAt
+          ? new Date(distributionDataCache.lastSyncedAt)
+          : new Date()
+      );
+      lastRegisterListQueryKeyRef.current = queryKey;
+      lastKnownRegisterTotalRef.current = derived.total;
+      registerPageCachePut(registerPagesCacheRef.current, queryKey, pageNum, {
+        data: derived.rows,
+        total: derived.total,
+        registerSummary: summary,
+      });
+
+      const refreshedDate = distributionDataCache?.lastSyncedAt
+        ? new Date(distributionDataCache.lastSyncedAt)
+        : new Date();
+      setGlobalReportCache({
+        data: derived.rows,
+        summaryData: globalReportCache?.summaryData ?? summaryData,
+        accountsData: globalReportCache?.accountsData ?? accountsData,
+        globalHeadcount: globalReportCache?.globalHeadcount ?? globalHeadcount,
+        total: derived.total,
+        registerSummary: summary,
+        page: pageNum,
+        search: viewFilters.search || '',
+        pincodeSearch: viewFilters.pincodeSearch || '',
+        selectedCallTypes,
+        selectedState,
+        selectedCity,
+        selectedBranch,
+        selectedFranchisee,
+        selectedTechnician,
+        selectedStatus,
+        priorityFilter,
+        portalFilter,
+        selectedOfficeIds,
+        agingAsOf,
+        dateRange,
+        dateFilterColumn,
+        filterRegion,
+        filterAccount,
+        lastRefreshed: refreshedDate,
+        summaryQueryKey: globalReportCache?.summaryQueryKey,
+      });
+
+      return true;
+    },
+    [
+      getSharedCallsForScope,
+      dateFilterColumn,
+      viewCallTypesParam,
+      agingAsOf,
+      limit,
+      selectedCallTypes,
+      selectedState,
+      selectedCity,
+      selectedBranch,
+      selectedFranchisee,
+      selectedTechnician,
+      selectedStatus,
+      priorityFilter,
+      portalFilter,
+      selectedOfficeIds,
+      dateRange,
+      filterRegion,
+      filterAccount,
+      summaryData,
+      accountsData,
+      globalHeadcount,
+    ]
+  );
+
   useEffect(() => {
     if (!dbInitialized) return;
     if (debouncedSearch?.trim() || debouncedPincodeSearch?.trim()) return;
     if (!loading && data.length > 0) return;
     if (readRegisterFromPostgresClient()) {
-      void fetchData(1, { silent: false });
+      void (async () => {
+        if (!getSharedCallsForScope()) {
+          await ensureSharedCallsLoaded(false);
+        }
+        if (applyRegisterFromSharedCalls(1)) {
+          setLoading(false);
+          setFilterUpdating(false);
+          return;
+        }
+        await fetchData(1, { silent: false });
+      })();
       return;
     }
     if (applyRegisterFromCorpus(1)) {
@@ -1241,6 +1382,10 @@ export default function ReportPage() {
     debouncedSearch,
     debouncedPincodeSearch,
     applyRegisterFromCorpus,
+    applyRegisterFromSharedCalls,
+    ensureSharedCallsLoaded,
+    getSharedCallsForScope,
+    distributionCalls,
   ]);
 
   const fetchData = async (
@@ -1366,6 +1511,51 @@ export default function ReportPage() {
           rows: cached.data.length,
           why: 'In-memory Map for this queryKey+page; avoids waiting on SQL/API again.',
         });
+        return;
+      }
+    }
+
+    if (!searchActive && readRegisterFromPostgresClient()) {
+      if (!getSharedCallsForScope()) {
+        await ensureSharedCallsLoaded(false);
+      }
+      if (applyRegisterFromSharedCalls(p)) {
+        if (!opts?.silent) {
+          setLoading(false);
+          setLoadingPage(null);
+        }
+        reportPerf('fetchData', 'postgres shared calls client slice HIT (no network)', opStart, {
+          opId,
+          page: p,
+          why: 'Filtered/paginated from bulk register preload; skips /api/report.',
+        });
+        if (p === 1) {
+          const scope = getSharedCallsForScope();
+          if (scope) {
+            const viewDateFilter = buildCorpusViewDateFilter(
+              scope.startDateStr,
+              scope.endDateStr,
+              dateFilterColumn
+            );
+            const page2 = deriveRegisterPageFromCalls(
+              scope.calls,
+              registerViewFilterRef.current,
+              2,
+              limit,
+              viewDateFilter
+            );
+            const { summary } = deriveRegisterView(
+              scope.calls,
+              registerViewFilterRef.current,
+              viewDateFilter
+            );
+            registerPageCachePut(registerPagesCacheRef.current, queryKey, 2, {
+              data: page2.rows,
+              total: page2.total,
+              registerSummary: summary,
+            });
+          }
+        }
         return;
       }
     }
@@ -1497,6 +1687,7 @@ export default function ReportPage() {
       if (statusParam) u += `&status=${encodeURIComponent(statusParam)}`;
       if (priorityParam) u += `&priority=${encodeURIComponent(priorityParam)}`;
       if (portalParam) u += `&portalFilter=${encodeURIComponent(portalParam)}`;
+      u += '&fetchFilterOptions=false';
       return u;
     };
 
@@ -1552,6 +1743,20 @@ export default function ReportPage() {
           if (fromCorpus) {
             storePrefetched(nextPage, { data: fromCorpus.rows, total: fromCorpus.total });
             return;
+          }
+          if (readRegisterFromPostgresClient()) {
+            const scope = getSharedCallsForScope();
+            if (scope) {
+              const fromShared = deriveRegisterPageFromCalls(
+                scope.calls,
+                registerViewFilterRef.current,
+                nextPage,
+                limit,
+                viewDateFilter
+              );
+              storePrefetched(nextPage, { data: fromShared.rows, total: fromShared.total });
+              return;
+            }
           }
           const nextUrl = appendRegisterFilters(
             `/api/report?page=${nextPage}&limit=${limit}&fetchTotals=false&officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
@@ -2411,6 +2616,13 @@ export default function ReportPage() {
       void (async () => {
         try {
           if (readRegisterFromPostgresClient()) {
+            if (!getSharedCallsForScope()) {
+              await ensureSharedCallsLoaded(false);
+            }
+            if (applyRegisterFromSharedCalls(1)) {
+              lastAppliedFilterSnapshotRef.current = filterSnapshot;
+              return;
+            }
             await fetchData(1, fetchOpts);
             lastAppliedFilterSnapshotRef.current = filterSnapshot;
             return;
@@ -2476,8 +2688,11 @@ export default function ReportPage() {
     activeTab,
     page,
     applyRegisterFromCorpus,
+    applyRegisterFromSharedCalls,
     applySummaryFromCorpus,
     ensureCorpusLoaded,
+    ensureSharedCallsLoaded,
+    getSharedCallsForScope,
     supabase,
   ]);
 

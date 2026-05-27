@@ -32,6 +32,7 @@ export type RegisterPostgresParams = {
   franchisee: string;
   technician: string;
   fetchTotals: boolean;
+  fetchFilterOptions?: boolean;
   assignedOffices: string[];
   visibleStatuses: string[];
   isHod: boolean;
@@ -339,6 +340,7 @@ export async function queryRegisterFromPostgres(params: RegisterPostgresParams) 
       closed: summary.closed,
     };
 
+    if (params.fetchFilterOptions !== false) {
     const filterRows = await prisma.$queryRawUnsafe<
       Array<{
         nofficeid: number;
@@ -405,6 +407,7 @@ export async function queryRegisterFromPostgres(params: RegisterPostgresParams) 
       'franchisee_name'
     ).map((row) => ({ ncode: row.ncode, vcompanyname: row.vname, call_count: row.call_count }));
     response.techniciansList = aggregateDistinct(processedOptions, 'nengineer', 'technician_name');
+    }
   }
 
   return response;
