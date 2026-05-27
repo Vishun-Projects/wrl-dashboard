@@ -266,21 +266,23 @@ export default function ReadModelSyncPage() {
               <p className="font-medium text-slate-800">What to do next</p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li>
-                  Run <code className="rounded bg-white px-1">npm run sync-worker:backfill</code> locally (or on
-                  Railway/Fly) until hot rows reach ~139k.
+                  Run <code className="rounded bg-white px-1">npm run sync-worker:backfill</code> once until hot
+                  rows reach ~139k (Admin → Sync shows Ready).
                 </li>
                 <li>
-                  <strong>Local dev:</strong>{' '}
+                  <strong>Keep production Postgres fresh:</strong> leave this running on your PC while you work —{' '}
                   <code className="rounded bg-white px-1">
                     SYNC_WORKER_ENABLED=true npm run sync-worker:daemon
                   </code>
+                  <span className="block mt-1 text-slate-500">
+                    Uses <code className="rounded bg-white px-1">DATABASE_URL</code> from{' '}
+                    <code className="rounded bg-white px-1">.env.local</code> (same Supabase as Vercel). Syncs
+                    every ~3 minutes. Stop with Ctrl+C when done for the day.
+                  </span>
                 </li>
                 <li>
-                  <strong>Vercel production:</strong> set{' '}
-                  <code className="rounded bg-white px-1">SYNC_WORKER_ENABLED=true</code> and{' '}
-                  <code className="rounded bg-white px-1">CRON_SECRET</code> in project env. Deploy —{' '}
-                  <code className="rounded bg-white px-1">vercel.json</code> runs incremental sync every 3 minutes
-                  (same as the daemon, one run per cron tick).
+                  Vercel serves the app only — it does not run the sync loop on Hobby. Use Admin → Sync for a
+                  one-off manual run if the daemon is stopped.
                 </li>
                 <li>Register/summary/distribution pages read from Postgres once backfill completes.</li>
               </ul>
