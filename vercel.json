@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/read-model/cron/incremental",
+      "schedule": "*/3 * * * *"
+    },
+    {
+      "path": "/api/read-model/cron/nightly",
+      "schedule": "30 20 * * *"
+    },
+    {
+      "path": "/api/read-model/cron/retention",
+      "schedule": "30 21 * * *"
+    }
+  ]
+}

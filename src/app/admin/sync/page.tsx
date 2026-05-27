@@ -265,8 +265,23 @@ export default function ReadModelSyncPage() {
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
               <p className="font-medium text-slate-800">What to do next</p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
-                <li>Keep `npm run sync-worker:backfill` running until hot rows reach ~139k and status is ok.</li>
-                <li>Then run `SYNC_WORKER_ENABLED=true npm run sync-worker:daemon` for incremental sync.</li>
+                <li>
+                  Run <code className="rounded bg-white px-1">npm run sync-worker:backfill</code> locally (or on
+                  Railway/Fly) until hot rows reach ~139k.
+                </li>
+                <li>
+                  <strong>Local dev:</strong>{' '}
+                  <code className="rounded bg-white px-1">
+                    SYNC_WORKER_ENABLED=true npm run sync-worker:daemon
+                  </code>
+                </li>
+                <li>
+                  <strong>Vercel production:</strong> set{' '}
+                  <code className="rounded bg-white px-1">SYNC_WORKER_ENABLED=true</code> and{' '}
+                  <code className="rounded bg-white px-1">CRON_SECRET</code> in project env. Deploy —{' '}
+                  <code className="rounded bg-white px-1">vercel.json</code> runs incremental sync every 3 minutes
+                  (same as the daemon, one run per cron tick).
+                </li>
                 <li>Register/summary/distribution pages read from Postgres once backfill completes.</li>
               </ul>
             </div>
