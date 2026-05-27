@@ -199,10 +199,16 @@ export function buildMainBranchOptions(
 
   branchesList.forEach((branch) => {
     const value = String(branch.ncode);
-    options.set(value, { value, label: branch.vcompanyname });
+    const label =
+      branch.vcompanyname ||
+      (branch as { vname?: string }).vname ||
+      value;
+    options.set(value, { value, label });
   });
 
-  return Array.from(options.values()).sort((a, b) => a.label.localeCompare(b.label));
+  return Array.from(options.values()).sort((a, b) =>
+    (a.label || a.value).localeCompare(b.label || b.value)
+  );
 }
 
 export function buildFranchiseeOptions(
@@ -225,10 +231,16 @@ export function buildFranchiseeOptions(
 
   franchiseesList.forEach((franchisee) => {
     const value = String(franchisee.ncode);
-    options.set(value, { value, label: franchisee.vcompanyname });
+    const label =
+      franchisee.vcompanyname ||
+      (franchisee as { vname?: string }).vname ||
+      value;
+    options.set(value, { value, label });
   });
 
-  return Array.from(options.values()).sort((a, b) => a.label.localeCompare(b.label));
+  return Array.from(options.values()).sort((a, b) =>
+    (a.label || a.value).localeCompare(b.label || b.value)
+  );
 }
 
 export function resolveSummaryOfficeIdsParam(
@@ -456,4 +468,39 @@ export function isAnyFilterActive(parts: RegisterViewFilterParts): boolean {
     parts.priorityFilter.length > 0 ||
     parts.portalFilter.length > 0
   );
+}
+
+export type RegisterViewFilterContextInput = {
+  search?: string;
+  pincodeSearch?: string;
+  selectedState: string[];
+  selectedCity: string[];
+  selectedBranch: string[];
+  selectedFranchisee: string[];
+  selectedTechnician: string[];
+  selectedCallTypes: string[];
+  selectedOfficeIds: string[];
+  selectedStatus: string[];
+  priorityFilter: string[];
+  portalFilter: string[];
+};
+
+/** Build register view filters from shared report filter context state. */
+export function buildRegisterViewFiltersFromContext(
+  input: RegisterViewFilterContextInput
+): RegisterViewFilterParts {
+  return {
+    search: input.search ?? '',
+    pincodeSearch: input.pincodeSearch ?? '',
+    selectedState: input.selectedState,
+    selectedCity: input.selectedCity,
+    selectedBranch: input.selectedBranch,
+    selectedFranchisee: input.selectedFranchisee,
+    selectedTechnician: input.selectedTechnician,
+    selectedCallTypes: input.selectedCallTypes,
+    selectedOfficeIds: input.selectedOfficeIds,
+    selectedStatus: input.selectedStatus,
+    priorityFilter: input.priorityFilter,
+    portalFilter: input.portalFilter,
+  };
 }

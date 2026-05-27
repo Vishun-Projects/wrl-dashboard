@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { postQuery } from '@/lib/db-proxy';
 import { prisma } from '@/lib/prisma';
+import { readDimsFromPostgres } from '@/lib/read-model/flags';
+import { queryOfficesFromPostgres } from '@/lib/read-model/queries/dims';
 
 // Global cache to optimize mstoffice retrieval and avoid slow remote DB scans
 let cachedAllOffices: any[] | null = null;
@@ -29,6 +31,11 @@ export async function GET(request: Request) {
     const isHod = 
       permissions.includes('view_all_offices') || 
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
+
+    if (readDimsFromPostgres()) {
+      const offices = await queryOfficesFromPostgres(assignedOffices, isHod);
+      return NextResponse.json(offices);
+    }
 
     const now = Date.now();
     if (!cachedAllOffices || now - lastCacheTime > CACHE_TTL) {

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { postQuery } from '@/lib/db-proxy';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { readDimsFromPostgres } from '@/lib/read-model/flags';
+import { queryEngineersFromPostgres } from '@/lib/read-model/queries/dims';
 
 export async function GET(req: NextRequest) {
   try {
@@ -17,6 +19,11 @@ export async function GET(req: NextRequest) {
     const endDate = searchParams.get('endDate');
 
     if (!branch) return NextResponse.json({ error: 'Branch is required' }, { status: 400 });
+
+    if (readDimsFromPostgres()) {
+      const engineers = await queryEngineersFromPostgres(branch);
+      return NextResponse.json(engineers);
+    }
 
     const branchSafe = branch.replace(/'/g, "''");
     let condition = `o.vcompanyname = '${branchSafe}' AND u.vname IS NOT NULL AND u.vname <> ''`;

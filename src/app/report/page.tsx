@@ -49,6 +49,7 @@ import {
   registerRowMatchesViewFilters,
   summarizeRegisterRows,
   classifyRegisterRowStatus,
+  isRegisterRowCancelled,
   normalizeRegisterSummary,
   type RegisterSummary,
   type RegisterSummaryBucket,
@@ -70,6 +71,13 @@ import {
 } from '@/lib/report-corpus';
 import { readCorpusMeta } from '@/lib/report-corpus-storage';
 import { deriveSummaryDashboard, diagnoseSummaryDerivation } from '@/lib/report-summary-derive';
+import { readRegisterFromPostgresClient, readSummaryFromPostgresClient } from '@/lib/read-model/client-flags';
+import {
+  collectRegisterRowsFromSessionCache,
+  downloadRegisterCsvFromServer,
+  fetchAllRegisterRowsForExport,
+  isRegisterExportAbortError,
+} from '@/lib/register-export-fetch';
 import { ensurePortalAuditCache } from '@/lib/report-portal-cache';
 
 // --- IndexedDB Local Storage Cache Helpers ---
@@ -410,12 +418,76 @@ export default function ReportPage() {
   const [tempSelectedCallTypes, setTempSelectedCallTypes] = useState<string[]>([]);
   const [showCallTypeDropdown, setShowCallTypeDropdown] = useState(false);
   const [exportingDetailed, setExportingDetailed] = useState(false);
+  const [exportProgress, setExportProgress] = useState<{ fetched: number; total: number } | null>(
+    null
+  );
+  const exportAbortRef = React.useRef<AbortController | null>(null);
   const [agingAsOf, setAgingAsOf] = useState<string>(() => {
     if (globalReportCache && typeof globalReportCache.agingAsOf === 'string' && globalReportCache.agingAsOf.includes('-') && !globalReportCache.agingAsOf.includes(':')) {
       return globalReportCache.agingAsOf;
     }
     return new Date().toISOString().split('T')[0];
   });
+
+  const cancelRegisterExport = useCallback(() => {
+    exportAbortRef.current?.abort();
+    exportAbortRef.current = null;
+    setExportingDetailed(false);
+    setExportProgress(null);
+  }, []);
+
+  const registerExportScopeKey = useMemo(
+    () =>
+      buildRegisterListQueryKey({
+        officeIdsParam: summaryOfficeIdsParam,
+        callTypesParam: viewCallTypesParam,
+        searchForUrl: debouncedSearch || '',
+        pincodeForUrl: debouncedPincodeSearch || '',
+        startDateStr: toDateString(dateRange.start),
+        endDateStr: toDateString(dateRange.end),
+        dateFilterColumn,
+        selectedState,
+        selectedCity,
+        selectedBranch,
+        selectedFranchisee,
+        selectedTechnician,
+        selectedStatus,
+        priorityFilter,
+        portalFilter,
+        agingAsOf: agingAsOf || '',
+      }),
+    [
+      summaryOfficeIdsParam,
+      viewCallTypesParam,
+      debouncedSearch,
+      debouncedPincodeSearch,
+      dateRange.start,
+      dateRange.end,
+      dateFilterColumn,
+      selectedState,
+      selectedCity,
+      selectedBranch,
+      selectedFranchisee,
+      selectedTechnician,
+      selectedStatus,
+      priorityFilter,
+      portalFilter,
+      agingAsOf,
+    ]
+  );
+
+  const prevRegisterExportScopeKeyRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      prevRegisterExportScopeKeyRef.current !== null &&
+      prevRegisterExportScopeKeyRef.current !== registerExportScopeKey
+    ) {
+      cancelRegisterExport();
+    }
+    prevRegisterExportScopeKeyRef.current = registerExportScopeKey;
+  }, [registerExportScopeKey, cancelRegisterExport]);
+
+  useEffect(() => () => cancelRegisterExport(), [cancelRegisterExport]);
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
   const [selectedCall, setSelectedCall] = useState<any | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -567,15 +639,21 @@ export default function ReportPage() {
         return row.vcomplaint;
       case 'Status':
         return (() => {
-          const isSolved = row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True';
-          const isRejected = isSolved && (row.bmreject === 'Yes' || String(row.rejectionstatus) === '1' || String(row.rejectionstatus) === '2');
-          const isCancelled = row.callstatus === 'Cancel' || row.Status === 'Cancel';
-          const isTechSolved = (row.bfastclose === 'True' || row.bfastclose === '1') && !isSolved && !isCancelled;
-          const isAssigned = (row.nengineer && String(row.nengineer) !== '0') && !isSolved && !isCancelled && !isTechSolved;
+          const isCancelled = isRegisterRowCancelled(row);
+          const isSolved =
+            !isCancelled &&
+            (row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True');
+          const isRejected =
+            isSolved &&
+            (row.bmreject === 'Yes' || String(row.rejectionstatus) === '1' || String(row.rejectionstatus) === '2');
+          const isTechSolved =
+            (row.bfastclose === 'True' || row.bfastclose === '1') && !isSolved && !isCancelled;
+          const isAssigned =
+            (row.nengineer && String(row.nengineer) !== '0') && !isSolved && !isCancelled && !isTechSolved;
 
           if (isRejected) return <span className="badge-cancelled">Closed - Rejected</span>;
-          if (isSolved) return <span className="badge-solved">Solved</span>;
           if (isCancelled) return <span className="badge-cancelled">Cancelled</span>;
+          if (isSolved) return <span className="badge-solved">Solved</span>;
           if (isTechSolved) return <span className="badge-assigned">Tech. Solved</span>;
           if (isAssigned) return <span className="badge-assigned">Assigned</span>;
           return <span className="badge-open">Open</span>;
@@ -1026,6 +1104,7 @@ export default function ReportPage() {
 
   const applyRegisterFromCorpus = useCallback(
     (pageNum = 1): boolean => {
+      if (readRegisterFromPostgresClient()) return false;
       const startDateStr = toDateString(dateRange.start);
       const endDateStr = toDateString(dateRange.end);
       const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
@@ -1146,6 +1225,10 @@ export default function ReportPage() {
     if (!dbInitialized) return;
     if (debouncedSearch?.trim() || debouncedPincodeSearch?.trim()) return;
     if (!loading && data.length > 0) return;
+    if (readRegisterFromPostgresClient()) {
+      void fetchData(1, { silent: false });
+      return;
+    }
     if (applyRegisterFromCorpus(1)) {
       setLoading(false);
       setFilterUpdating(false);
@@ -1287,7 +1370,7 @@ export default function ReportPage() {
       }
     }
 
-    if (!searchActive) {
+    if (!searchActive && !readRegisterFromPostgresClient()) {
       const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
       const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
       const hasCorpus =
@@ -1678,19 +1761,19 @@ export default function ReportPage() {
     return `${yyyy}-${MM}-${dd} ${hh}:${mm}:${ss}`;
   };
 
-  const isSolved = (rec: any) => {
-    const statusStr = String(rec.Status || rec.callstatus || '').toLowerCase();
-    return String(rec.callsolved).toLowerCase() === 'true' || String(rec.callsolved) === '1' || statusStr === 'closed' || statusStr === 'solved';
-  };
-
   const isTransferred = (rec: any) => {
     return (rec.vtransfercallno && String(rec.vtransfercallno).trim() !== '') || String(rec.ncancelreason) === '2';
   };
 
+  const isSolved = (rec: any) => {
+    if (isRegisterRowCancelled(rec) || isTransferred(rec)) return false;
+    const statusStr = String(rec.Status || rec.callstatus || '').toLowerCase();
+    return String(rec.callsolved).toLowerCase() === 'true' || String(rec.callsolved) === '1' || statusStr === 'closed' || statusStr === 'solved';
+  };
+
   const isCancelled = (rec: any) => {
     if (isTransferred(rec)) return false;
-    const statusStr = String(rec.Status || rec.callstatus || '').toLowerCase();
-    return statusStr === 'cancel' || (rec.cancel_reason && String(rec.cancel_reason).trim() !== '');
+    return isRegisterRowCancelled(rec);
   };
 
   const isOpen = (rec: any) => {
@@ -1987,41 +2070,22 @@ export default function ReportPage() {
 
         const startDateStr = toDateString(dateRange.start);
         const endDateStr = toDateString(dateRange.end);
-        const corpusMeta = await readCorpusMeta();
-        const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
-        if (corpusMeta?.cacheKey === corpusKey && (corpusMeta.callCount ?? 0) > 0) {
-          const tBeforeCorpus = performance.now();
-          const restored = await restoreCorpusFromIndexedDB(corpusKey);
-          reportPerf('initDB', 'corpus IDB restore on reload', i0, {
-            callCount: corpusMeta.callCount,
-            restored: !!restored,
-            restoreMs: Number((performance.now() - tBeforeCorpus).toFixed(1)),
-          });
-          if (restored) {
-            const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
-            const derived = deriveRegisterPageFromCorpus(
-              restored,
-              corpusKey,
-              {
-                search: '',
-                pincodeSearch: '',
-                selectedState: [],
-                selectedCity: [],
-                selectedBranch: [],
-                selectedFranchisee: [],
-                selectedTechnician: [],
-                selectedCallTypes,
-                selectedOfficeIds,
-                selectedStatus: [],
-                priorityFilter: [],
-                portalFilter: [],
-              },
-              1,
-              10,
-              viewDateFilter
-            );
-            if (derived) {
-              const allFiltered = getFilteredCorpusCalls(
+        if (!readRegisterFromPostgresClient()) {
+          const corpusMeta = await readCorpusMeta();
+          const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+          if (corpusMeta?.cacheKey === corpusKey && (corpusMeta.callCount ?? 0) > 0) {
+            const tBeforeCorpus = performance.now();
+            const restored = await restoreCorpusFromIndexedDB(corpusKey);
+            reportPerf('initDB', 'corpus IDB restore on reload', i0, {
+              callCount: corpusMeta.callCount,
+              restored: !!restored,
+              restoreMs: Number((performance.now() - tBeforeCorpus).toFixed(1)),
+            });
+            if (restored) {
+              const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
+              const derived = deriveRegisterPageFromCorpus(
+                restored,
+                corpusKey,
                 {
                   search: '',
                   pincodeSearch: '',
@@ -2036,84 +2100,104 @@ export default function ReportPage() {
                   priorityFilter: [],
                   portalFilter: [],
                 },
-                restored,
+                1,
+                10,
                 viewDateFilter
               );
-              setData(derived.rows);
-              setTotal(derived.total);
-              setRegisterSummary(summarizeRegisterRows(allFiltered));
-              setLastRefreshed(new Date(restored.lastSyncedAt));
-              lastKnownRegisterTotalRef.current = derived.total;
-              lastRegisterListQueryKeyRef.current = buildRegisterListQueryKey({
-                officeIdsParam: registerOfficeIdsParam,
-                callTypesParam: viewCallTypesParam,
-                searchForUrl: '',
-                pincodeForUrl: '',
-                startDateStr,
-                endDateStr,
-                dateFilterColumn,
-                selectedState: [],
-                selectedCity: [],
-                selectedBranch: [],
-                selectedFranchisee: [],
-                selectedTechnician: [],
-                selectedStatus: [],
-                priorityFilter: [],
-                portalFilter: [],
-                agingAsOf: agingAsOf || '',
-              });
-              lastAppliedFilterSnapshotRef.current = JSON.stringify({
-                startDateStr,
-                endDateStr,
-                dateFilterColumn,
-                selectedCallTypes,
-                selectedOfficeIds,
-                selectedState: [],
-                selectedCity: [],
-                selectedBranch: [],
-                selectedFranchisee: [],
-                selectedTechnician: [],
-                selectedStatus: [],
-                priorityFilter: [],
-                portalFilter: [],
-                agingAsOf,
-                debouncedSearch: '',
-                debouncedPincodeSearch: '',
-              });
-              setGlobalReportCache({
-                data: derived.rows,
-                summaryData: [],
-                accountsData: [],
-                globalHeadcount: 0,
-                total: derived.total,
-                page: 1,
-                search: '',
-                pincodeSearch: '',
-                selectedOfficeIds,
-                dateRange,
-                dateFilterColumn,
-                filterRegion,
-                filterAccount,
-                selectedCallTypes,
-                registerSummary: summarizeRegisterRows(allFiltered),
-                lastRefreshed: new Date(restored.lastSyncedAt),
-                agingAsOf,
-                selectedStatus: [],
-                priorityFilter: [],
-                portalFilter: [],
-                selectedState: [],
-                selectedCity: [],
-                selectedBranch: [],
-                selectedFranchisee: [],
-                selectedTechnician: [],
-              });
+              if (derived) {
+                const allFiltered = getFilteredCorpusCalls(
+                  {
+                    search: '',
+                    pincodeSearch: '',
+                    selectedState: [],
+                    selectedCity: [],
+                    selectedBranch: [],
+                    selectedFranchisee: [],
+                    selectedTechnician: [],
+                    selectedCallTypes,
+                    selectedOfficeIds,
+                    selectedStatus: [],
+                    priorityFilter: [],
+                    portalFilter: [],
+                  },
+                  restored,
+                  viewDateFilter
+                );
+                setData(derived.rows);
+                setTotal(derived.total);
+                setRegisterSummary(summarizeRegisterRows(allFiltered));
+                setLastRefreshed(new Date(restored.lastSyncedAt));
+                lastKnownRegisterTotalRef.current = derived.total;
+                lastRegisterListQueryKeyRef.current = buildRegisterListQueryKey({
+                  officeIdsParam: registerOfficeIdsParam,
+                  callTypesParam: viewCallTypesParam,
+                  searchForUrl: '',
+                  pincodeForUrl: '',
+                  startDateStr,
+                  endDateStr,
+                  dateFilterColumn,
+                  selectedState: [],
+                  selectedCity: [],
+                  selectedBranch: [],
+                  selectedFranchisee: [],
+                  selectedTechnician: [],
+                  selectedStatus: [],
+                  priorityFilter: [],
+                  portalFilter: [],
+                  agingAsOf: agingAsOf || '',
+                });
+                lastAppliedFilterSnapshotRef.current = JSON.stringify({
+                  startDateStr,
+                  endDateStr,
+                  dateFilterColumn,
+                  selectedCallTypes,
+                  selectedOfficeIds,
+                  selectedState: [],
+                  selectedCity: [],
+                  selectedBranch: [],
+                  selectedFranchisee: [],
+                  selectedTechnician: [],
+                  selectedStatus: [],
+                  priorityFilter: [],
+                  portalFilter: [],
+                  agingAsOf,
+                  debouncedSearch: '',
+                  debouncedPincodeSearch: '',
+                });
+                setGlobalReportCache({
+                  data: derived.rows,
+                  summaryData: [],
+                  accountsData: [],
+                  globalHeadcount: 0,
+                  total: derived.total,
+                  page: 1,
+                  search: '',
+                  pincodeSearch: '',
+                  selectedOfficeIds,
+                  dateRange,
+                  dateFilterColumn,
+                  filterRegion,
+                  filterAccount,
+                  selectedCallTypes,
+                  registerSummary: summarizeRegisterRows(allFiltered),
+                  lastRefreshed: new Date(restored.lastSyncedAt),
+                  agingAsOf,
+                  selectedStatus: [],
+                  priorityFilter: [],
+                  portalFilter: [],
+                  selectedState: [],
+                  selectedCity: [],
+                  selectedBranch: [],
+                  selectedFranchisee: [],
+                  selectedTechnician: [],
+                });
+              }
             }
+            setLoading(false);
+            return;
           }
-          setLoading(false);
-          return;
-        }
 
-        if (cacheParams) {
+          if (cacheParams) {
           const officeIdsParam = summaryOfficeIdsParam;
 
           if (
@@ -2214,6 +2298,7 @@ export default function ReportPage() {
               void hydrateFromIdb();
             }, 0);
           }
+        }
         }
       } catch (err) {
         console.error('Error initializing cache from IndexedDB:', err);
@@ -2325,6 +2410,12 @@ export default function ReportPage() {
 
       void (async () => {
         try {
+          if (readRegisterFromPostgresClient()) {
+            await fetchData(1, fetchOpts);
+            lastAppliedFilterSnapshotRef.current = filterSnapshot;
+            return;
+          }
+
           const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
           const hasCorpus =
             (callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0) ||
@@ -2449,6 +2540,12 @@ export default function ReportPage() {
         toDateString(dateRange.start);
       const endDateStr =
         toDateString(dateRange.end);
+
+      if (readSummaryFromPostgresClient()) {
+        await fetchSummaryFromApi();
+        return;
+      }
+
       const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
       const hasCorpus =
         callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0;
@@ -2495,33 +2592,119 @@ export default function ReportPage() {
     });
   };
 
-  const handleExportDetailed = async (format: 'excel' | 'csv' = 'excel') => {
-    setExportingDetailed(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const headers = { 'Authorization': `Bearer ${session?.access_token}` };
+  const getRegisterExportAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) throw new Error('Unauthorized');
+    return { Authorization: `Bearer ${token}` };
+  }, [supabase]);
 
-      const res = await axios.get('/api/report', {
-        headers,
-        params: {
-          page: 1,
-          limit: 100000,
-          officeId: summaryOfficeIdsParam,
-          callType: viewCallTypesParam,
-          startDate: toDateString(dateRange.start),
-          endDate: toDateString(dateRange.end),
-          status: joinFilterParam(selectedStatus),
-          priority: joinFilterParam(priorityFilter),
-          portalFilter: joinFilterParam(portalFilter),
-          pincode: debouncedPincodeSearch || undefined,
-          ...(activeTab === 'accounts' ? {
-            account: filterAccount,
-            region: filterRegion.length ? filterRegion.join(',') : undefined
-          } : {})
-        }
+  const refreshRegisterExportAuth = useCallback(async (): Promise<void> => {
+    const { data, error } = await supabase.auth.refreshSession();
+    if (error || !data.session?.access_token) {
+      throw new Error('Unauthorized');
+    }
+  }, [supabase]);
+
+  const buildCurrentRegisterQueryKey = useCallback(() => {
+    const startDateStr = toDateString(dateRange.start);
+    const endDateStr = toDateString(dateRange.end);
+    return buildRegisterListQueryKey({
+      officeIdsParam: registerOfficeIdsParam,
+      callTypesParam: viewCallTypesParam,
+      searchForUrl: debouncedSearch || '',
+      pincodeForUrl: debouncedPincodeSearch || '',
+      startDateStr,
+      endDateStr,
+      dateFilterColumn,
+      selectedState,
+      selectedCity,
+      selectedBranch,
+      selectedFranchisee,
+      selectedTechnician,
+      selectedStatus,
+      priorityFilter,
+      portalFilter,
+      agingAsOf: agingAsOf || '',
+    });
+  }, [
+    dateRange.start,
+    dateRange.end,
+    dateFilterColumn,
+    debouncedSearch,
+    debouncedPincodeSearch,
+    selectedState,
+    selectedCity,
+    selectedBranch,
+    selectedFranchisee,
+    selectedTechnician,
+    selectedStatus,
+    priorityFilter,
+    portalFilter,
+    agingAsOf,
+    viewCallTypesParam,
+  ]);
+
+  const handleExportDetailed = async (format: 'excel' | 'csv' = 'excel') => {
+    cancelRegisterExport();
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+    setExportingDetailed(true);
+    setExportProgress(null);
+    try {
+      await supabase.auth.refreshSession();
+      const startDateStr = toDateString(dateRange.start);
+      const endDateStr = toDateString(dateRange.end);
+      const exportQuery = {
+        officeId: summaryOfficeIdsParam,
+        callType: viewCallTypesParam,
+        startDate: startDateStr,
+        endDate: endDateStr,
+        dateFilterColumn,
+        search: debouncedSearch || undefined,
+        pincode: debouncedPincodeSearch || undefined,
+        state: joinFilterParam(selectedState),
+        city: joinFilterParam(selectedCity),
+        branch: joinFilterParam(selectedBranch),
+        franchisee: joinFilterParam(selectedFranchisee),
+        technician: joinFilterParam(selectedTechnician),
+        status: joinFilterParam(selectedStatus),
+        priority: joinFilterParam(priorityFilter),
+        portalFilter: joinFilterParam(portalFilter),
+        account: activeTab === 'accounts' ? joinFilterParam(filterAccount) : undefined,
+        region:
+          activeTab === 'accounts' && filterRegion.length
+            ? filterRegion.join(',')
+            : undefined,
+      };
+
+      if (format === 'csv') {
+        await downloadRegisterCsvFromServer({
+          getAuthHeaders: getRegisterExportAuthHeaders,
+          refreshAuth: refreshRegisterExportAuth,
+          knownTotal: total,
+          signal: controller.signal,
+          onProgress: (fetched, exportTotal) => {
+            setExportProgress({ fetched, total: exportTotal });
+          },
+          query: exportQuery,
+        });
+        return;
+      }
+
+      const rawData = await fetchAllRegisterRowsForExport({
+        getAuthHeaders: getRegisterExportAuthHeaders,
+        refreshAuth: refreshRegisterExportAuth,
+        knownTotal: total,
+        signal: controller.signal,
+        onProgress: (fetched, exportTotal) => {
+          setExportProgress({ fetched, total: exportTotal });
+        },
+        query: exportQuery,
       });
 
-      const rawData = res.data?.data || [];
       if (rawData.length === 0) {
         alert("No data to export");
         return;
@@ -2529,7 +2712,7 @@ export default function ReportPage() {
 
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet('Detailed Breakdown');
-      const fileName = `WRL_Detailed_Breakdown_${new Date().toISOString().split('T')[0]}.${format === 'csv' ? 'csv' : 'xlsx'}`;
+      const fileName = `WRL_Detailed_Breakdown_${new Date().toISOString().split('T')[0]}.xlsx`;
 
       sheet.columns = [
         { header: 'ID', key: 'id', width: 15 },
@@ -2560,9 +2743,19 @@ export default function ReportPage() {
       });
 
       rawData.forEach((row: any) => {
-        const isSolved = row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True';
-        const isAssigned = row.Status === 'Assigned' || row.callstatus === 'Assigned';
-        const statusText = row.Status === 'UNKNOWN' ? 'PENDING' : (row.Status || row.callstatus || 'OPEN');
+        const isCancelled = isRegisterRowCancelled(row);
+        const isSolved =
+          !isCancelled &&
+          (row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True' || row.callsolved === '1');
+        const isAssigned =
+          !isCancelled &&
+          !isSolved &&
+          (row.Status === 'Assigned' || row.callstatus === 'Assigned');
+        const statusText = isCancelled
+          ? 'Cancelled'
+          : row.Status === 'UNKNOWN'
+            ? 'PENDING'
+            : (row.Status || row.callstatus || 'OPEN');
 
         const r = sheet.addRow({
           id: row.UniqueCallNo,
@@ -2595,15 +2788,8 @@ export default function ReportPage() {
         }
       });
 
-      let buffer;
-      let mimeType;
-      if (format === 'csv') {
-        buffer = await workbook.csv.writeBuffer();
-        mimeType = 'text/csv;charset=utf-8;';
-      } else {
-        buffer = await workbook.xlsx.writeBuffer();
-        mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      }
+      const buffer = await workbook.xlsx.writeBuffer();
+      const mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
       const blob = new Blob([buffer], { type: mimeType });
       const link = document.createElement('a');
@@ -2613,10 +2799,21 @@ export default function ReportPage() {
       URL.revokeObjectURL(link.href);
 
     } catch (err) {
+      if (isRegisterExportAbortError(err)) return;
       console.error("Failed to export detailed breakdown:", err);
-      alert("Failed to export detailed breakdown");
+      const message =
+        axios.isAxiosError(err) && err.response?.data?.error
+          ? String(err.response.data.error)
+          : err instanceof Error
+            ? err.message
+            : 'Export failed';
+      alert(`Failed to export detailed breakdown: ${message}`);
     } finally {
+      if (exportAbortRef.current === controller) {
+        exportAbortRef.current = null;
+      }
       setExportingDetailed(false);
+      setExportProgress(null);
     }
   };
 
@@ -2668,38 +2865,122 @@ export default function ReportPage() {
 
       applyHeaderStyle(sheet.getRow(1));
 
-      let exportData = data;
-      // For Call Register, if there's more than one page, fetch everything for export
-      if (activeTab === 'register' && total > limit) {
+      let exportData: Record<string, unknown>[] = data;
+      const needsFullFetch = total > limit || data.length < total;
+      if (needsFullFetch) {
+        cancelRegisterExport();
+        const controller = new AbortController();
+        exportAbortRef.current = controller;
         setExportingDetailed(true);
+        setExportProgress(null);
         try {
-          const { data: { session } } = await supabase.auth.getSession();
-          const headers = { 'Authorization': `Bearer ${session?.access_token}` };
-          const params = new URLSearchParams({
-            officeId: summaryOfficeIdsParam,
-            callType: viewCallTypesParam,
-            startDate: toDateString(dateRange.start),
-            endDate: toDateString(dateRange.end),
-            limit: '20000', // Fetch a large batch for export
-            page: '1'
-          });
-          if (search) params.append('search', search);
-          if (debouncedPincodeSearch) params.append('pincode', debouncedPincodeSearch);
+          const startDateStr = toDateString(dateRange.start);
+          const endDateStr = toDateString(dateRange.end);
+          const queryKey = buildCurrentRegisterQueryKey();
 
-          const res = await axios.get(`/api/report?${params}`, { headers });
-          exportData = res.data.data || [];
+          const cachedAllPages = collectRegisterRowsFromSessionCache(
+            registerPagesCacheRef.current,
+            queryKey,
+            total,
+            limit
+          );
+          if (cachedAllPages?.length) {
+            exportData = cachedAllPages;
+          }
+
+          if (!readRegisterFromPostgresClient() && exportData.length < total) {
+            const spanDays = corpusSpanDays(startDateStr, endDateStr);
+            if (spanDays <= MAX_CLIENT_CORPUS_DAYS) {
+              const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+              if (callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0) {
+                const viewDateFilter = buildCorpusViewDateFilter(
+                  startDateStr,
+                  endDateStr,
+                  dateFilterColumn
+                );
+                exportData = getFilteredCorpusCalls(
+                  registerViewFilterRef.current,
+                  callCorpusStore,
+                  viewDateFilter
+                );
+              }
+            }
+          }
+
+            if (exportData.length < total) {
+              const exportQuery = {
+                officeId: summaryOfficeIdsParam,
+                callType: viewCallTypesParam,
+                startDate: startDateStr,
+                endDate: endDateStr,
+                dateFilterColumn,
+                search: debouncedSearch || undefined,
+                pincode: debouncedPincodeSearch || undefined,
+                state: joinFilterParam(selectedState),
+                city: joinFilterParam(selectedCity),
+                branch: joinFilterParam(selectedBranch),
+                franchisee: joinFilterParam(selectedFranchisee),
+                technician: joinFilterParam(selectedTechnician),
+                status: joinFilterParam(selectedStatus),
+                priority: joinFilterParam(priorityFilter),
+                portalFilter: joinFilterParam(portalFilter),
+              };
+
+              toast.info(
+                `Register shows ${limit} rows per page — exporting all ${total.toLocaleString()} matching rows as CSV…`
+              );
+              await supabase.auth.refreshSession();
+              await downloadRegisterCsvFromServer({
+                getAuthHeaders: getRegisterExportAuthHeaders,
+                refreshAuth: refreshRegisterExportAuth,
+                knownTotal: total,
+                signal: controller.signal,
+                onProgress: (fetched, exportTotal) => {
+                  setExportProgress({ fetched, total: exportTotal });
+                },
+                query: exportQuery,
+              });
+              return;
+            }
         } catch (err) {
-          console.error("Full data fetch failed:", err);
-          // Fallback to current page data
+          if (isRegisterExportAbortError(err)) return;
+          console.error('Full register export fetch failed:', err);
+          const message =
+            axios.isAxiosError(err) && err.response?.data?.error
+              ? String(err.response.data.error)
+              : err instanceof Error
+                ? err.message
+                : 'Export failed';
+          alert(`Failed to export register: ${message}`);
+          return;
         } finally {
+          if (exportAbortRef.current === controller) {
+            exportAbortRef.current = null;
+          }
           setExportingDetailed(false);
+          setExportProgress(null);
         }
       }
 
-      exportData.forEach(row => {
-        const isSolved = row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True';
-        const isAssigned = row.Status === 'Assigned' || row.callstatus === 'Assigned';
-        const statusText = row.Status === 'UNKNOWN' ? 'PENDING' : (row.Status || row.callstatus || 'OPEN');
+      if (!exportData.length) {
+        alert('No data to export');
+        return;
+      }
+
+      exportData.forEach((row: any) => {
+        const isCancelled = isRegisterRowCancelled(row);
+        const isSolved =
+          !isCancelled &&
+          (row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True' || row.callsolved === '1');
+        const isAssigned =
+          !isCancelled &&
+          !isSolved &&
+          (row.Status === 'Assigned' || row.callstatus === 'Assigned');
+        const statusText = isCancelled
+          ? 'Cancelled'
+          : row.Status === 'UNKNOWN'
+            ? 'PENDING'
+            : (row.Status || row.callstatus || 'OPEN');
 
         const r = sheet.addRow({
           id: row.UniqueCallNo,
@@ -2725,7 +3006,10 @@ export default function ReportPage() {
 
         // Style status cell
         const statusCell = r.getCell('status');
-        statusCell.font = { bold: true, color: { argb: isSolved ? 'FF059669' : isAssigned ? 'FF1D4ED8' : 'FF64748B' } };
+        statusCell.font = {
+          bold: true,
+          color: { argb: isCancelled ? 'FFDC2626' : isSolved ? 'FF059669' : isAssigned ? 'FF1D4ED8' : 'FF64748B' },
+        };
         if (isSolved || isAssigned) {
           statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isSolved ? 'FFF8FAFC' : 'FFE8F0FE' } };
         }
@@ -2887,11 +3171,13 @@ export default function ReportPage() {
       if (isTransferred) return;
 
       total++;
-      const isSolved = row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True';
-      const isCancelled = row.callstatus === 'Cancel' || row.Status === 'Cancel';
+      const isCancelled = isRegisterRowCancelled(row);
+      const isSolved =
+        !isCancelled &&
+        (row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True' || row.callsolved === '1');
 
-      if (isSolved) solved++;
-      else if (isCancelled) cancelled++;
+      if (isCancelled) cancelled++;
+      else if (isSolved) solved++;
       else open++;
     });
 
@@ -2972,11 +3258,30 @@ export default function ReportPage() {
             </div>
           </button>
           <button
-            onClick={() => handleExport('excel')}
-            className="flex items-center gap-2 bg-white text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-slate-50 transition-all shadow-sm"
+            onClick={() => {
+              if (exportingDetailed) {
+                cancelRegisterExport();
+                toast.info('Export cancelled');
+                return;
+              }
+              void handleExport('excel');
+            }}
+            disabled={false}
+            className="flex items-center gap-2 bg-white text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
+            title={
+              exportingDetailed
+                ? exportProgress && exportProgress.total > 0
+                  ? `Exporting ${exportProgress.fetched.toLocaleString()} / ${exportProgress.total.toLocaleString()} — click to cancel`
+                  : 'Export in progress — click to cancel'
+                : 'Export filtered register to Excel'
+            }
           >
-            <FileSpreadsheet size={14} className="text-emerald-600" />
-            Export
+            <FileSpreadsheet size={14} className={exportingDetailed ? 'animate-pulse text-amber-600' : 'text-emerald-600'} />
+            {exportingDetailed
+              ? exportProgress && exportProgress.total > 0
+                ? `Exporting ${Math.min(100, Math.round((exportProgress.fetched / exportProgress.total) * 100))}%`
+                : 'Exporting…'
+              : 'Export'}
           </button>
           <div className="relative">
             <button
@@ -3012,6 +3317,29 @@ export default function ReportPage() {
           </div>
         </div>
       </div>
+
+      {exportingDetailed && (
+        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-950">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-600 border-t-transparent" />
+            <span className="font-medium">
+              {exportProgress && exportProgress.total > 0
+                ? `Exporting ${exportProgress.fetched.toLocaleString()} / ${exportProgress.total.toLocaleString()} rows (${Math.min(100, Math.round((exportProgress.fetched / exportProgress.total) * 100))}%)`
+                : 'Preparing export…'}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              cancelRegisterExport();
+              toast.info('Export cancelled');
+            }}
+            className="shrink-0 rounded-md border border-amber-300 bg-white px-2 py-1 text-[11px] font-medium hover:bg-amber-100"
+          >
+            Cancel export
+          </button>
+        </div>
+      )}
 
       {/* Control Bar */}
       {activeTab === 'register' ? (

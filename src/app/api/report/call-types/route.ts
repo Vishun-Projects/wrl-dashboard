@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { postQuery } from '@/lib/db-proxy';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { readDimsFromPostgres } from '@/lib/read-model/flags';
+import { queryCallTypesFromPostgres } from '@/lib/read-model/queries/dims';
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,7 +13,11 @@ export async function GET(req: NextRequest) {
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
     if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Fetch unique call types directly from mstfixedselection for efficiency, filtering to only active types with call records
+    if (readDimsFromPostgres()) {
+      const types = await queryCallTypesFromPostgres();
+      return NextResponse.json(types);
+    }
+
     const res = await postQuery({
       fields: "DISTINCT fs.vdisplayvalue as callType",
       tableName: "mstfixedselection fs (NOLOCK)",

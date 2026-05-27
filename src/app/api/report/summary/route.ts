@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { postQuery } from '@/lib/db-proxy';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { prisma } from '@/lib/prisma';
+import { readSummaryFromPostgres } from '@/lib/read-model/flags';
+import {
+  parseCallTypes,
+  parseCsvFilter,
+  querySummaryDashboard,
+} from '@/lib/read-model/queries/summary';
+import { getSyncMeta } from '@/lib/read-model/sync-meta';
+import { postQuery } from '@/lib/db-proxy';
 import {
   appendCallTypeFilter,
   appendOfficeSecurityFilter,
@@ -39,10 +46,24 @@ export async function GET(req: NextRequest) {
       .eq('id', user.id)
       .single();
 
-    const assignedOffices = profile?.office_ids || [];
+    const assignedOffices = (profile?.office_ids || []).map(String);
     const isHod =
       permissions.includes('view_all_offices') ||
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
+
+    if (readSummaryFromPostgres()) {
+      const result = await querySummaryDashboard({
+        startDate,
+        endDate,
+        agingAsOf: agingAsOf || undefined,
+        officeIds: parseCsvFilter(officeId),
+        callTypes: parseCallTypes(callType),
+        assignedOffices,
+        isHod,
+      });
+      const syncMeta = await getSyncMeta();
+      return NextResponse.json({ ...result, syncMeta, readSource: 'postgres' });
+    }
 
     let condition = `(tc.vtrnno IS NOT NULL AND tc.vtrnno <> '')${TRHCALLS_EXCLUDE_TRANSFERRED}`;
     condition = appendCallTypeFilter(condition, callType);

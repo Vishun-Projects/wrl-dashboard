@@ -15,6 +15,7 @@ import {
   ExternalLink,
   Map,
   ScanBarcode,
+  Receipt,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -82,8 +83,15 @@ export function Sidebar({ user }: SidebarProps) {
       icon: Map,
       permission: 'view_calls'
     },
+    
     {
-      name: 'Serial Audit',
+      name: 'ARCP Claims',
+      href: '/report/arcp-claims',
+      icon: Receipt,
+      permission: 'view_calls'
+    },
+    {
+      name: 'Serial Wise History',
       href: '/report/serial-audit',
       icon: ScanBarcode,
       permission: 'view_calls'

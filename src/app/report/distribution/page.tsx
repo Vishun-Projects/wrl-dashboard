@@ -16,12 +16,18 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { RegisterPageFilters } from '@/components/RegisterPageFilters';
+import { RegisterStatsBar } from '@/components/RegisterStatsBar';
 import { PageShell, PageLoadingState } from '@/components/PageShell';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
-import { filterViewCalls } from '@/lib/report-search';
-import { buildCorpusViewDateFilter, filterCorpusCallsByViewDate } from '@/lib/report-corpus';
-import { toDateString } from '@/lib/report-filters';
-import { classifyTrhcallRow } from '@/lib/trhcalls-query';
+import { buildCorpusViewDateFilter } from '@/lib/report-corpus';
+import { buildRegisterViewFiltersFromContext, toDateString } from '@/lib/report-filters';
+import {
+  classifyRegisterRowStatus,
+  deriveRegisterView,
+  isRegisterRowOpenBucket,
+  isRegisterRowSolvedBucket,
+} from '@/lib/report-register-view';
+import type { RegisterSummary } from '@/lib/report-search';
 
 // Helper to inject Leaflet CDN resources dynamically
 const loadLeaflet = () => {
@@ -62,12 +68,12 @@ export default function CallDistributionPage() {
     selectedFranchisee,
     selectedTechnician,
     selectedCallTypes,
+    selectedOfficeIds,
     selectedStatus,
     priorityFilter,
     portalFilter,
     pincodeSearch,
     distributionCalls,
-    distributionBranches,
     distributionLoading,
     fetchDistributionData,
     rehydrateDistributionFromCache,
@@ -104,14 +110,11 @@ export default function CallDistributionPage() {
   }, [showMap]);
 
   // Aggregated API Data States
-  const [metrics, setMetrics] = useState({
-    totalCalls: 0,
-    openCalls: 0,
-    solvedCalls: 0,
-    cancelledCalls: 0,
+  const [registerSummary, setRegisterSummary] = useState<RegisterSummary | null>(null);
+  const [distributionMetrics, setDistributionMetrics] = useState({
     franchiseesCount: 0,
     activeTechniciansCount: 0,
-    callToTechnicianRatio: 0
+    callToTechnicianRatio: 0,
   });
   const [franchiseeSummary, setFranchiseeSummary] = useState<any[]>([]);
   const [pincodeSummary, setPincodeSummary] = useState<any[]>([]);
@@ -136,20 +139,20 @@ export default function CallDistributionPage() {
   }, [distributionCalls, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, selectedCallTypes, selectedStatus, priorityFilter, portalFilter, pincodeSearch, syncCascadeOptionsFromCalls]);
 
   const distributionViewFilters = useMemo(
-    () => ({
-      search: '',
-      pincodeSearch,
-      selectedState,
-      selectedCity,
-      selectedBranch,
-      selectedFranchisee,
-      selectedTechnician,
-      selectedCallTypes,
-      selectedOfficeIds: [] as string[],
-      selectedStatus,
-      priorityFilter,
-      portalFilter,
-    }),
+    () =>
+      buildRegisterViewFiltersFromContext({
+        pincodeSearch,
+        selectedState,
+        selectedCity,
+        selectedBranch,
+        selectedFranchisee,
+        selectedTechnician,
+        selectedCallTypes,
+        selectedOfficeIds,
+        selectedStatus,
+        priorityFilter,
+        portalFilter,
+      }),
     [
       pincodeSearch,
       selectedState,
@@ -158,6 +161,7 @@ export default function CallDistributionPage() {
       selectedFranchisee,
       selectedTechnician,
       selectedCallTypes,
+      selectedOfficeIds,
       selectedStatus,
       priorityFilter,
       portalFilter,
@@ -167,81 +171,71 @@ export default function CallDistributionPage() {
   // CSR Metrics & Dashboard Aggregations Computation
   useEffect(() => {
     if (distributionCalls.length === 0) {
-      setMetrics({
-        totalCalls: 0,
-        openCalls: 0,
-        solvedCalls: 0,
-        cancelledCalls: 0,
+      setRegisterSummary(null);
+      setDistributionMetrics({
         franchiseesCount: 0,
         activeTechniciansCount: 0,
-        callToTechnicianRatio: 0
+        callToTechnicianRatio: 0,
       });
       setFranchiseeSummary([]);
       setPincodeSummary([]);
       return;
     }
 
-    const dateFilteredCalls = filterCorpusCallsByViewDate(distributionCalls, viewDateFilter);
-    const filteredCalls = filterViewCalls(dateFilteredCalls, distributionViewFilters);
+    const { filteredCalls, summary } = deriveRegisterView(
+      distributionCalls,
+      distributionViewFilters,
+      viewDateFilter
+    );
+    setRegisterSummary(summary);
 
     const franchiseeMap = new Map();
     const pincodeMap = new Map();
+    const activeTechsSet = new Set<string | number>();
+    const activeFranchiseesSet = new Set<string>();
 
-    let totalCallsCount = 0;
-    let openCallsCount = 0;
-    let solvedCallsCount = 0;
-    let cancelledCallsCount = 0;
-    const activeTechsSet = new Set();
-    const activeFranchiseesSet = new Set();
-
-    filteredCalls.forEach((c: any) => {
-      totalCallsCount++;
-      const bucket = classifyTrhcallRow(c);
-
-      if (bucket === 'cancelled') cancelledCallsCount++;
-      else if (bucket === 'solved') solvedCallsCount++;
-      else openCallsCount++;
+    filteredCalls.forEach((c: Record<string, unknown>) => {
+      const bucket = classifyRegisterRowStatus(c);
+      if (bucket === 'transferred') return;
 
       if (c.nengineer && c.nengineer !== 0 && c.nengineer !== '0') {
-        activeTechsSet.add(c.nengineer);
+        activeTechsSet.add(c.nengineer as string | number);
       }
 
-      const fCode = c.franchisee_code || 'UNASSIGNED';
-      const fName = c.franchisee_name || 'Unallocated';
+      const fCode = String(c.franchisee_code || 'UNASSIGNED');
+      const fName = String(c.franchisee_name || 'Unallocated');
       if (c.franchisee_code) {
-        activeFranchiseesSet.add(c.franchisee_code);
+        activeFranchiseesSet.add(String(c.franchisee_code));
       }
 
-      // Franchisee aggregate
       if (!franchiseeMap.has(fCode)) {
         franchiseeMap.set(fCode, {
           franchisee_code: fCode,
           franchisee_name: fName,
-          techs: new Set(),
+          techs: new Set<string | number>(),
           total_calls: 0,
           open_calls: 0,
           closed_calls: 0,
-          tech_solved: 0
+          tech_solved: 0,
         });
       }
       const fObj = franchiseeMap.get(fCode);
       fObj.total_calls++;
       if (bucket === 'cancelled') {
         fObj.closed_calls++;
-      } else if (bucket === 'solved') {
+      } else if (isRegisterRowSolvedBucket(bucket)) {
         fObj.closed_calls++;
-        if (String(c.bfastclose).toLowerCase() === 'true' || c.bfastclose === 1 || c.bfastclose === '1') {
+        if (bucket === 'techSolved') {
           fObj.tech_solved++;
         }
-      } else {
+      } else if (isRegisterRowOpenBucket(bucket)) {
         fObj.open_calls++;
       }
       if (c.nengineer && c.nengineer !== 0 && c.nengineer !== '0') {
-        fObj.techs.add(c.nengineer);
+        fObj.techs.add(c.nengineer as string | number);
       }
 
-      // Pincode aggregate
-      const pincode = c.pincode || 'UNKNOWN';
+      const pincode = String(c.pincode || 'UNKNOWN');
       const pinKey = `${pincode}-${fCode}`;
 
       if (!pincodeMap.has(pinKey)) {
@@ -254,19 +248,19 @@ export default function CallDistributionPage() {
           franchisee_name: fName,
           franchisee_code: fCode,
           total_calls: 0,
-          open_calls: 0
+          open_calls: 0,
         });
       }
       const pinObj = pincodeMap.get(pinKey);
       pinObj.total_calls++;
-      if (bucket === 'open') {
+      if (isRegisterRowOpenBucket(bucket)) {
         pinObj.open_calls++;
       }
     });
 
     const franchiseeSummary = Array.from(franchiseeMap.values()).map((f: any) => {
       const techCount = f.techs.size;
-      const ratio = techCount > 0 ? parseFloat((f.total_calls / techCount).toFixed(2)) : f.total_calls;
+      const ratio = techCount > 0 ? parseFloat((f.open_calls / techCount).toFixed(2)) : f.open_calls;
       return {
         franchisee_code: f.franchisee_code,
         franchisee_name: f.franchisee_name,
@@ -316,14 +310,13 @@ export default function CallDistributionPage() {
       };
     });
 
-    setMetrics({
-      totalCalls: totalCallsCount,
-      openCalls: openCallsCount,
-      solvedCalls: solvedCallsCount,
-      cancelledCalls: cancelledCallsCount,
+    setDistributionMetrics({
       franchiseesCount: activeFranchiseesSet.size,
       activeTechniciansCount: activeTechsSet.size,
-      callToTechnicianRatio: activeTechsSet.size > 0 ? parseFloat((openCallsCount / activeTechsSet.size).toFixed(2)) : openCallsCount
+      callToTechnicianRatio:
+        activeTechsSet.size > 0
+          ? parseFloat((summary.open / activeTechsSet.size).toFixed(2))
+          : summary.open,
     });
     setFranchiseeSummary(franchiseeSummary);
     setPincodeSummary(pincodeSummary);
@@ -589,41 +582,22 @@ export default function CallDistributionPage() {
         {/* Right Side: KPIs and Tables */}
         <div className="flex-1 flex flex-col overflow-hidden bg-white">
 
-          {/* Stat summary — single compact row */}
+          {/* Stat summary — MIS Register counts + distribution-specific metrics */}
+          <div className="border-b border-slate-200 px-3 py-2">
+            <RegisterStatsBar summary={registerSummary} />
+          </div>
           <div className="distribution-stats-bar custom-scrollbar">
             <div className="distribution-stat-item">
-              <span className="distribution-stat-value text-slate-900">
-                {distributionLoading ? '…' : metrics.totalCalls.toLocaleString()}
-              </span>
-              <span className="distribution-stat-label">Total calls</span>
-            </div>
-            <div className="distribution-stat-item">
-              <span className="distribution-stat-value text-emerald-600">
-                {distributionLoading ? '…' : metrics.solvedCalls.toLocaleString()}
-              </span>
-              <span className="distribution-stat-label">Solved</span>
-            </div>
-            <div className="distribution-stat-item">
-              <span className="distribution-stat-value text-blue-600">
-                {distributionLoading ? '…' : metrics.openCalls.toLocaleString()}
-              </span>
-              <span className="distribution-stat-label">Open</span>
-            </div>
-            <div className="distribution-stat-item">
-              <span className="distribution-stat-value text-rose-600">
-                {distributionLoading ? '…' : metrics.cancelledCalls.toLocaleString()}
-              </span>
-              <span className="distribution-stat-label">Cancelled</span>
-            </div>
-            <div className="distribution-stat-item">
               <span className="distribution-stat-value text-teal-700">
-                {distributionLoading ? '…' : `${metrics.franchiseesCount} / ${metrics.activeTechniciansCount}`}
+                {distributionLoading
+                  ? '…'
+                  : `${distributionMetrics.franchiseesCount} / ${distributionMetrics.activeTechniciansCount}`}
               </span>
               <span className="distribution-stat-label">ASPs / Techs</span>
             </div>
             <div className="distribution-stat-item">
               <span className="distribution-stat-value text-slate-900">
-                {distributionLoading ? '…' : `${metrics.callToTechnicianRatio}x`}
+                {distributionLoading ? '…' : `${distributionMetrics.callToTechnicianRatio}x`}
               </span>
               <span className="distribution-stat-label">Calls / tech</span>
             </div>

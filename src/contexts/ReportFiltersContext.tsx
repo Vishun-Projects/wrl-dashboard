@@ -12,6 +12,7 @@ import {
   findBreakdownCallType,
   isAnyFilterActive,
   migrateStringFilter,
+  joinFilterParam,
   toDateString,
   type ReportDateRange,
 } from '@/lib/report-filters';
@@ -48,6 +49,9 @@ import {
   notifyCorpusRegisterDelta,
 } from '@/lib/report-corpus';
 import { ensurePortalAuditCache } from '@/lib/report-portal-cache';
+import { readCallsFromPostgresClient, readRegisterFromPostgresClient } from '@/lib/read-model/client-flags';
+import { fetchAllRegisterRowsForExport } from '@/lib/register-export-fetch';
+import { createChunkedFetchAuth } from '@/lib/supabase-chunked-fetch';
 
 let cachedReportResources: { offices: unknown[]; callTypes: string[] } | null = null;
 let reportResourcesInflight: Promise<{ offices: unknown[]; callTypes: string[] }> | null = null;
@@ -140,6 +144,7 @@ const ReportFiltersContext = createContext<ReportFiltersContextValue | null>(nul
 
 function routeNeedsCorpusPreload(pathname: string | null): boolean {
   if (!pathname) return false;
+  if (readCallsFromPostgresClient()) return false;
   return pathname.startsWith('/report');
 }
 
@@ -468,6 +473,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
 
   const ensureCorpusLoaded = useCallback(
     async (opts?: { force?: boolean; silent?: boolean }) => {
+      if (readCallsFromPostgresClient()) return;
       const force = !!opts?.force;
       const { startDateStr, endDateStr } = getDateStrings();
       const fetchScope = resolveCorpusFetchScope(startDateStr, endDateStr, dateFilterColumn);
@@ -826,11 +832,59 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     [applyCorpusToUi, dateFilterColumn, getDateStrings, markCorpusSatisfied, needsCorpusPreload, restoreCorpusDeduped, supabase, tryResolveLocalCorpus]
   );
 
+  const fetchDistributionFromRegister = useCallback(
+    async (_force = false, silent = false) => {
+      if (!silent) setDistributionLoading(true);
+      try {
+        const { startDateStr, endDateStr } = getDateStrings();
+        const auth = createChunkedFetchAuth(supabase);
+        await auth.refreshAuth();
+        const calls = await fetchAllRegisterRowsForExport({
+          getAuthHeaders: auth.getAuthHeaders,
+          refreshAuth: auth.refreshAuth,
+          query: {
+            officeId: 'All',
+            callType: joinFilterParam(selectedCallTypes) || 'All',
+            startDate: startDateStr,
+            endDate: endDateStr,
+            dateFilterColumn,
+          },
+        });
+        const branches = distributionDataCache?.dbBranches || [];
+        setDistributionCalls(calls);
+        setDistributionBranches(branches);
+        setLastSyncedAt(new Date());
+        const now = Date.now();
+        setDistributionDataCache({
+          allCalls: calls,
+          dbBranches: branches,
+          lastSyncedAt: now,
+          fetchedAt: now,
+          cacheKey: getSharedCacheKey(),
+        });
+        syncCascadeOptionsFromCalls(calls);
+        await ensurePortalAuditCache(supabase);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Distribution load failed';
+        if (!silent) {
+          toast.error('Could not load distribution data', { description: message });
+        }
+      } finally {
+        if (!silent) setDistributionLoading(false);
+      }
+    },
+    [dateFilterColumn, getDateStrings, getSharedCacheKey, selectedCallTypes, supabase, syncCascadeOptionsFromCalls]
+  );
+
   const ensureSharedCallsLoaded = useCallback(
     async (force = false) => {
+      if (readRegisterFromPostgresClient()) {
+        await fetchDistributionFromRegister(force, !needsDistributionPreload);
+        return;
+      }
       await ensureCorpusLoaded({ force, silent: !needsDistributionPreload });
     },
-    [ensureCorpusLoaded, needsDistributionPreload]
+    [ensureCorpusLoaded, fetchDistributionFromRegister, needsDistributionPreload]
   );
 
   const fetchDistributionData = ensureSharedCallsLoaded;
@@ -847,6 +901,56 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   const runBackgroundSync = useCallback(async (opts?: { showToast?: boolean }) => {
     if (syncInFlightRef.current) return;
     if (!opts?.showToast) return;
+
+    if (readCallsFromPostgresClient()) {
+      syncInFlightRef.current = true;
+      setSyncInProgress(true);
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const headers = session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : {};
+
+        const res = await axios.post('/api/read-model/sync', {}, { headers });
+        const syncTime = new Date();
+        const upserted = Number(res.data?.rowsUpserted ?? 0);
+        const deleted = Number(res.data?.rowsDeleted ?? 0);
+        const skipped = !!res.data?.skipped;
+        const coalesced = !!res.data?.coalesced;
+
+        setLastSyncedAt(syncTime);
+        notifyCorpusRegisterDelta([], syncTime);
+
+        if (opts?.showToast) {
+          if (skipped && !coalesced) {
+            toast.info(res.data?.reason ?? 'Sync skipped — no changes');
+          } else if (!coalesced && upserted === 0 && deleted === 0) {
+            toast.info('No calls added or updated since last sync');
+          } else {
+            const parts: string[] = [];
+            if (upserted > 0) parts.push(`${upserted} upserted`);
+            if (deleted > 0) parts.push(`${deleted} removed`);
+            toast.success(`Database synced — ${parts.join(', ')}`);
+          }
+        }
+      } catch (err: unknown) {
+        if (opts?.showToast) {
+          const message =
+            axios.isAxiosError(err) && err.response?.data?.error
+              ? String(err.response.data.error)
+              : err instanceof Error
+                ? err.message
+                : 'Sync failed';
+          toast.error('Failed to sync database: ' + message);
+        }
+      } finally {
+        syncInFlightRef.current = false;
+        setSyncInProgress(false);
+      }
+      return;
+    }
 
     const { startDateStr, endDateStr } = getDateStrings();
     const fetchScope = resolveCorpusFetchScope(startDateStr, endDateStr, dateFilterColumn);
@@ -980,6 +1084,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   }, [corpusFetchScopeKey]);
 
   useEffect(() => {
+    if (readCallsFromPostgresClient()) return;
     void (async () => {
       const local = await tryResolveLocalCorpus(corpusFetchScopeKey);
       if (local) {
@@ -993,6 +1098,25 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     if (corpusSatisfiedKeysRef.current.has(corpusFetchScopeKey)) return;
     ensureCorpusLoaded({ silent: pathname !== '/report/distribution' });
   }, [resourcesLoaded, needsCorpusPreload, ensureCorpusLoaded, corpusFetchScopeKey, pathname]);
+
+  useEffect(() => {
+    if (!resourcesLoaded || pathname !== '/report/distribution') return;
+    if (!readRegisterFromPostgresClient()) return;
+    const cacheKey = getSharedCacheKey();
+    if (
+      distributionDataCache?.cacheKey === cacheKey &&
+      (distributionDataCache.allCalls?.length ?? 0) > 0
+    ) {
+      return;
+    }
+    void ensureSharedCallsLoaded(false);
+  }, [
+    resourcesLoaded,
+    pathname,
+    corpusFetchScopeKey,
+    ensureSharedCallsLoaded,
+    getSharedCacheKey,
+  ]);
 
   useEffect(() => {
     const calls =

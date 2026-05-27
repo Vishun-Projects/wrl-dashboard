@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { postQuery } from '@/lib/db-proxy';
 import { prisma } from '@/lib/prisma';
+import { buildRegisterCsvResponse } from '@/lib/register-csv-export';
+import { resolveHotWindowCoverage } from '@/lib/read-model/hot-window';
+import { readRegisterFromPostgres } from '@/lib/read-model/flags';
+import { queryRegisterFromPostgres } from '@/lib/read-model/queries/register';
 import {
   appendCallTypeFilter,
   buildTrhcallsLookupCondition,
@@ -352,6 +356,8 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '50');
+    /** CRM viewstate OOMs on large OFFSET/FETCH windows — cap page size on the SQL Server path. */
+    const CRM_MAX_PAGE_SIZE = 1000;
     const search = searchParams.get('search') || '';
     const officeId = searchParams.get('officeId') || 'All';
     const callType = searchParams.get('callType');
@@ -395,6 +401,38 @@ export async function GET(req: NextRequest) {
     const isHod = 
       permissions.includes('view_all_offices') || 
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
+
+    if (readRegisterFromPostgres() && !lastSync) {
+      const coverage = resolveHotWindowCoverage(startDate, endDate);
+      if (coverage.mode === 'postgres') {
+        const payload = await queryRegisterFromPostgres({
+          page,
+          limit,
+          search,
+          officeId,
+          callType: callType ?? null,
+          startDate,
+          endDate,
+          status,
+          account,
+          region,
+          pincode,
+          priority,
+          portalFilter,
+          state,
+          city,
+          branch,
+          franchisee,
+          technician,
+          fetchTotals: searchParams.get('fetchTotals') !== 'false',
+          assignedOffices,
+          visibleStatuses,
+          isHod,
+        });
+        return NextResponse.json(payload);
+      }
+      // hybrid or fully outside hot window → CRM path below
+    }
 
     // Base condition is on raw table alias 'tc' — exclude transferred calls from all counts and listings
     const excludeTransferred = " AND ISNULL(tc.vtransfercallno, '') = '' AND ISNULL(tc.ncancelreason, 0) <> 2";
@@ -610,7 +648,7 @@ export async function GET(req: NextRequest) {
       transferoffice.vcompanyname as transfer_office_name,
       tc.vcomplaint as vcomplaint,
       tc.callStatus as Status,
-      case when tc.bsolved=1 then 'Solved' else case when tc.ncancelreason Is not null and tc.ncancelreason <> 0 then 'Cancel' else case when (tc.bsolved=0 or tc.bsolved is null) and (tc.ncancelreason IS null or tc.ncancelreason = 0) then 'Open' end end end as callstatus,
+      case when tc.ncancelreason Is not null and tc.ncancelreason <> 0 and tc.ncancelreason <> 2 then 'Cancel' when tc.bsolved=1 then 'Solved' else case when (tc.bsolved=0 or tc.bsolved is null) and (tc.ncancelreason IS null or tc.ncancelreason = 0) then 'Open' end end as callstatus,
       tc.bsolved as callsolved,
       priority_fs.vdisplayvalue as Priority,
       CONVERT(varchar(30), tc.dsolvedatetime, 126) as callsolveddate,
@@ -712,8 +750,43 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const offset = (page - 1) * limit;
+    if (searchParams.get('export') === 'csv') {
+      return buildRegisterCsvResponse({
+        fields,
+        tableName,
+        condition,
+        batchSize: Math.min(Math.max(parseInt(searchParams.get('batchSize') || '1000', 10) || 1000, 1), 1000),
+        knownTotal: parseInt(searchParams.get('knownTotal') || '0', 10) || 0,
+        processRows: async (rows) =>
+          mergeAuditEnrichment(
+            rows.map((row: Record<string, unknown>) => {
+              const geo = getGeographicDetails(
+                String(row.Pincode ?? ''),
+                String(row.dbCity ?? ''),
+                String(row.dbState ?? '')
+              );
+              return enrichTrhcallBranchFranchisee({
+                ...row,
+                state: geo.state,
+                city: geo.city,
+                technician_name: row.serviceman || 'UNKNOWN',
+              });
+            })
+          ),
+      });
+    }
+
+    const notCancelledSql =
+      '(tc.ncancelreason IS NULL OR tc.ncancelreason = 0 OR tc.ncancelreason = 2)';
+
     const fetchTotals = searchParams.get('fetchTotals') !== 'false'; // default true
+    const fetchFilterOptions = searchParams.get('fetchFilterOptions') !== 'false';
+    const effectiveLimit = Math.min(Math.max(limit, 1), CRM_MAX_PAGE_SIZE);
+    const cursorRaw = searchParams.get('cursorNcode');
+    const cursorNcode = cursorRaw ? parseInt(cursorRaw, 10) : NaN;
+    const useKeysetCursor = Number.isFinite(cursorNcode) && cursorNcode > 0;
+    const dataCondition = useKeysetCursor ? `${condition} AND tc.ncode < ${cursorNcode}` : condition;
+    const offset = useKeysetCursor ? 0 : (page - 1) * effectiveLimit;
 
     let summaryRes: any = {
       data: [{
@@ -733,13 +806,29 @@ export async function GET(req: NextRequest) {
     const dataQuery = postQuery({
       fields,
       tableName,
-      condition,
-      orderBy: `tc.ncode DESC OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`
+      condition: dataCondition,
+      orderBy: `tc.ncode DESC OFFSET ${offset} ROWS FETCH NEXT ${effectiveLimit} ROWS ONLY`
     });
 
     if (fetchTotals) {
-      const optionsQuery = postQuery({
-        rawSql: `
+      const summaryQuery = postQuery({
+        fields: `
+            COUNT(*) as total,
+            SUM(CASE WHEN tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 AND tc.ncancelreason <> 2 THEN 1 ELSE 0 END) as cancelled,
+            SUM(CASE WHEN ${notCancelledSql} AND (tc.bsolved = 1 OR tc.bfastclose = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed') THEN 1 ELSE 0 END) as solved,
+            SUM(CASE WHEN (tc.bsolved = 0 OR tc.bsolved IS NULL) AND (tc.bfastclose = 0 OR tc.bfastclose IS NULL) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls,
+            SUM(CASE WHEN (tc.nengineer = 0 OR tc.nengineer IS NULL OR CAST(tc.nengineer AS NVARCHAR(50)) = '0') AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_unallocated,
+            SUM(CASE WHEN (tc.nengineer > 0 OR (tc.nengineer IS NOT NULL AND CAST(tc.nengineer AS NVARCHAR(50)) <> '0')) AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as assigned,
+            SUM(CASE WHEN (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as tech_solved,
+            SUM(CASE WHEN ${notCancelledSql} AND (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed') THEN 1 ELSE 0 END) as closed
+          `,
+        tableName,
+        condition,
+      });
+
+      if (fetchFilterOptions) {
+        const optionsQuery = postQuery({
+          rawSql: `
           SELECT
             tc.nofficeid,
             o.vcompanyname as office_name,
@@ -767,27 +856,17 @@ export async function GET(req: NextRequest) {
             p.vinstpostalcode,
             cty.vname,
             st.vname
-        `
-      });
+        `,
+        });
 
-      [res, summaryRes, filterOptionsRes] = await Promise.all([
-        dataQuery,
-        postQuery({
-          fields: `
-            COUNT(*) as total,
-            SUM(CASE WHEN tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 AND tc.ncancelreason <> 2 THEN 1 ELSE 0 END) as cancelled,
-            SUM(CASE WHEN tc.bsolved = 1 OR tc.bfastclose = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed' THEN 1 ELSE 0 END) as solved,
-            SUM(CASE WHEN (tc.bsolved = 0 OR tc.bsolved IS NULL) AND (tc.bfastclose = 0 OR tc.bfastclose IS NULL) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls,
-            SUM(CASE WHEN (tc.nengineer = 0 OR tc.nengineer IS NULL OR CAST(tc.nengineer AS NVARCHAR(50)) = '0') AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_unallocated,
-            SUM(CASE WHEN (tc.nengineer > 0 OR (tc.nengineer IS NOT NULL AND CAST(tc.nengineer AS NVARCHAR(50)) <> '0')) AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as assigned,
-            SUM(CASE WHEN (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as tech_solved,
-            SUM(CASE WHEN (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed') THEN 1 ELSE 0 END) as closed
-          `,
-          tableName,
-          condition
-        }),
-        optionsQuery
-      ]);
+        [res, summaryRes, filterOptionsRes] = await Promise.all([
+          dataQuery,
+          summaryQuery,
+          optionsQuery,
+        ]);
+      } else {
+        [res, summaryRes] = await Promise.all([dataQuery, summaryQuery]);
+      }
     } else {
       res = await dataQuery;
     }
@@ -833,6 +912,7 @@ export async function GET(req: NextRequest) {
         closed: parseInt(summary.closed || "0"),
       };
 
+      if (fetchFilterOptions) {
       // Process options
       const rawOptions = filterOptionsRes.data || [];
       const processedOptions = rawOptions.map((row: any) => {
@@ -913,6 +993,7 @@ export async function GET(req: NextRequest) {
         techCounts[tCode].call_count += c.call_count;
       });
       responsePayload.techniciansList = Object.values(techCounts).sort((a, b) => a.vname.localeCompare(b.vname));
+      }
     }
 
     return NextResponse.json(responsePayload);

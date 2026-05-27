@@ -266,15 +266,31 @@ export function isRegisterRowTransferred(row: Record<string, unknown>): boolean 
   );
 }
 
+export function isRegisterRowCancelled(row: Record<string, unknown>): boolean {
+  if (isRegisterRowTransferred(row)) return false;
+  if (row.callstatus === 'Cancel' || row.Status === 'Cancel') return true;
+  const statusText = String(row.Status ?? row.callStatus ?? '').toLowerCase();
+  if (statusText.includes('cancel')) return true;
+  const reason = row.ncancelreason ?? row.ncancelReason;
+  if (reason != null && reason !== '') {
+    const normalized = String(reason).trim();
+    if (normalized !== '0' && normalized !== '2') return true;
+  }
+  const cancelReason = row.cancel_reason;
+  if (cancelReason != null && String(cancelReason).trim() !== '') return true;
+  return false;
+}
+
 export function classifyRegisterRowStatus(row: Record<string, unknown>): RegisterSummaryBucket {
   if (isRegisterRowTransferred(row)) return 'transferred';
 
+  const isCancelled = isRegisterRowCancelled(row);
   const isClosed =
-    row.Status === 'Closed' ||
-    row.callstatus === 'Solved' ||
-    String(row.callsolved).toLowerCase() === 'true' ||
-    String(row.callsolved) === '1';
-  const isCancelled = row.callstatus === 'Cancel' || row.Status === 'Cancel';
+    !isCancelled &&
+    (row.Status === 'Closed' ||
+      row.callstatus === 'Solved' ||
+      String(row.callsolved).toLowerCase() === 'true' ||
+      String(row.callsolved) === '1');
   const isTechSolved =
     (row.bfastclose === 'True' ||
       row.bfastclose === '1' ||
@@ -288,8 +304,8 @@ export function classifyRegisterRowStatus(row: Record<string, unknown>): Registe
     !isCancelled &&
     !isTechSolved;
 
-  if (isClosed) return 'closed';
   if (isCancelled) return 'cancelled';
+  if (isClosed) return 'closed';
   if (isTechSolved) return 'techSolved';
   if (isAssigned) return 'assigned';
   return 'openUnallocated';

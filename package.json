@@ -6,7 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:apply-read-model": "node scripts/apply-read-model-schema.mjs",
+    "sync-worker": "npx tsx src/lib/read-model/cli.ts",
+    "sync-worker:backfill": "npx tsx src/lib/read-model/cli.ts backfill",
+    "sync-worker:incremental": "npx tsx src/lib/read-model/cli.ts incremental",
+    "sync-worker:dims": "npx tsx src/lib/read-model/cli.ts dims",
+    "sync-worker:nightly": "npx tsx src/lib/read-model/cli.ts nightly",
+    "sync-worker:daemon": "npx tsx src/lib/read-model/cli.ts daemon"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
@@ -19,6 +26,8 @@
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
     "exceljs": "^4.4.0",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "lucide-react": "^1.14.0",
     "next": "16.2.6",
     "next-themes": "^0.4.6",

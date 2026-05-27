@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { postQuery } from '@/lib/db-proxy';
 import { prisma } from '@/lib/prisma';
+import { readDistributionFromPostgres, readDimsFromPostgres } from '@/lib/read-model/flags';
+import { resolveHotWindowCoverage } from '@/lib/read-model/hot-window';
+import {
+  queryCallTypesFromPostgres,
+  queryOfficesFromPostgres,
+} from '@/lib/read-model/queries/dims';
+import { queryDistributionFromPostgres } from '@/lib/read-model/queries/distribution';
 import { buildTrhcallsBaseCondition, buildTrhcallsDedupSubquery, buildTrhcallsDeltaSubquery, enrichTrhcallBranchFranchisee, sqlFranchiseeCodeExpr, sqlFranchiseeNameExpr } from '@/lib/trhcalls-query';
 import pincodeMapData from '../../report/distribution/pincode_map.json';
 
@@ -606,6 +613,14 @@ export async function GET(req: NextRequest) {
 
     // 2. Metadata loading route (optimized to only query call types)
     if (isMeta) {
+      if (readDimsFromPostgres()) {
+        const callTypes = await queryCallTypesFromPostgres();
+        return NextResponse.json({
+          callTypes: callTypes.map((value) => ({ vdisplayvalue: value })),
+          readSource: 'postgres',
+        });
+      }
+
       const callTypesRes = await postQuery({
         fields: 'DISTINCT ncode, vdisplayvalue',
         tableName: 'mstfixedselection (NOLOCK)',
@@ -637,6 +652,34 @@ export async function GET(req: NextRequest) {
       ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
 
     const security = { isHod, assignedOffices };
+
+    if (readDistributionFromPostgres() && !lastSync) {
+      const coverage = resolveHotWindowCoverage(startDate, endDate);
+      if (coverage.mode === 'postgres') {
+        const officeIds =
+          !isHod && assignedOffices.length > 0 ? assignedOffices.map(String) : undefined;
+        const { calls, syncMeta } = await queryDistributionFromPostgres({
+          startDate,
+          endDate,
+          officeIds,
+          callTypes:
+            callType && callType !== 'All'
+              ? callType.split(',').map((t) => t.trim()).filter(Boolean)
+              : undefined,
+          assignedOffices,
+          isHod,
+        });
+
+        const dbBranches = await queryOfficesFromPostgres(assignedOffices.map(String), isHod);
+        return NextResponse.json({
+          allCalls: calls,
+          dbBranches,
+          syncMeta,
+          readSource: 'postgres',
+        });
+      }
+      // hybrid or outside hot window → CRM path below
+    }
 
     if (lastSync) {
       const deltaCalls = await getMappedCallsDelta(startDate, endDate, callType, lastSync, security);

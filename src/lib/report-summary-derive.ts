@@ -150,7 +150,7 @@ function isOpen(row: Record<string, unknown>): boolean {
   return !isSolved(row) && !isCancelled(row);
 }
 
-function isPartPending(row: Record<string, unknown>): boolean {
+export function isPartPending(row: Record<string, unknown>): boolean {
   if (!isOpen(row)) return false;
   const remarks = String(row.vsolveremarks ?? '').toUpperCase();
   const complaint = String(row.vcomplaint ?? '').toUpperCase();

@@ -37,6 +37,15 @@ function crmOutOfMemoryFromBody(body: string | undefined): boolean {
   return !!body?.includes('OutOfMemoryException');
 }
 
+function crmSqlTimeoutMessage(body: string | undefined, message: string): boolean {
+  const haystack = `${body ?? ''}\n${message}`.toLowerCase();
+  return (
+    haystack.includes('timeout expired') ||
+    haystack.includes('timeout period elapsed') ||
+    haystack.includes('etimedout')
+  );
+}
+
 function describeQuery(params: QueryParams): string {
   if (params.rawSql) {
     const sql = params.rawSql.replace(/\s+/g, ' ').trim();
@@ -155,6 +164,15 @@ async function executePostWithRetry(params: QueryParams, signal?: AbortSignal) {
           continue;
         }
 
+        if (crmSqlTimeoutMessage(errText, errText)) {
+          logCrmTiming('POST failed (SQL timeout — no retry)', postMs, {
+            attempt: `${attempts}/${maxAttempts}`,
+            query: queryDesc,
+            error: errText.slice(0, 200),
+          });
+          throw new Error(errText);
+        }
+
         logCrmTiming('POST round-trip (CRM error)', postMs, {
           attempt: `${attempts}/${maxAttempts}`,
           query: queryDesc,
@@ -184,6 +202,16 @@ async function executePostWithRetry(params: QueryParams, signal?: AbortSignal) {
             : JSON.stringify(axiosErr.response.data).slice(0, 400)
           : undefined;
 
+      const errMessage = err instanceof Error ? err.message : String(err);
+      if (crmSqlTimeoutMessage(httpBody, errMessage)) {
+        logCrmTiming('POST failed (SQL timeout — no retry)', postMs, {
+          attempt: `${attempts}/${maxAttempts}`,
+          query: queryDesc,
+          error: errMessage.slice(0, 200),
+        });
+        throw err;
+      }
+
       if (crmOutOfMemoryFromBody(httpBody)) {
         logCrmTiming('POST failed (CRM viewstate OOM — no retry)', postMs, {
           attempt: `${attempts}/${maxAttempts}`,
@@ -211,7 +239,6 @@ async function executePostWithRetry(params: QueryParams, signal?: AbortSignal) {
       const errCode =
         (err as { code?: string })?.code ??
         (err as { cause?: { code?: string } })?.cause?.code;
-      const errMessage = err instanceof Error ? err.message : String(err);
       const isReset =
         errCode === 'ECONNRESET' ||
         errCode === 'ETIMEDOUT' ||

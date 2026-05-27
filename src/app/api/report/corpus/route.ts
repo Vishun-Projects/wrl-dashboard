@@ -19,6 +19,7 @@ import { applyPincodeGeo } from '@/lib/report-geo';
 import { CORPUS_SERVER_CACHE_TTL_MS, splitCalendarMonths } from '@/lib/report-corpus';
 import { formatLocalDate } from '@/lib/report-filters';
 import { readCorpusDiskCache, writeCorpusDiskCache } from '@/lib/corpus-server-cache';
+import { readCallsFromPostgres } from '@/lib/read-model/flags';
 
 const CORPUS_CACHE_TTL = CORPUS_SERVER_CACHE_TTL_MS;
 const CORPUS_TIMEOUT_MS = 300000;
@@ -457,6 +458,16 @@ async function fetchCorpusDelta(
 }
 
 export async function GET(req: NextRequest) {
+  if (readCallsFromPostgres()) {
+    return NextResponse.json(
+      {
+        error: 'Corpus API disabled — report reads use Postgres. Use /api/report or /api/distribution.',
+        readSource: 'postgres',
+      },
+      { status: 410 }
+    );
+  }
+
   let staleCacheKey: string | null = null;
 
   try {
