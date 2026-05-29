@@ -106,6 +106,15 @@ export async function runArcpIncrementalSync(): Promise<ArcpIncrementalResult> {
     return { ok: true, skipped: true, reason: prep.reason, rowsUpserted: 0 };
   }
 
+  if (prep.kind === 'wait') {
+    return {
+      ok: false,
+      skipped: true,
+      reason: 'ARCP sync still running after wait',
+      rowsUpserted: 0,
+    };
+  }
+
   const watermarkStart = prep.watermarkStart;
 
   console.log(`[arcp-sync] Incremental fetch from ${watermarkStart.toISOString()}`);
