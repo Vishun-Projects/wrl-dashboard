@@ -56,6 +56,9 @@ async function main(): Promise<void> {
     case 'arcp-incremental':
       await runArcpIncrementalSync();
       break;
+    case 'arcp-nightly':
+      await runArcpIncrementalSync();
+      break;
     case 'daemon':
       await runDaemon();
       break;
@@ -71,8 +74,9 @@ Commands:
   arcp-reset        Truncate arcp_lines_hot + reset sync_state (fresh start)
   arcp-backfill     Initial ARCP lines backfill (ARCP_BACKFILL_START_DATE or YEARS)
   arcp-incremental  Single ARCP incremental sync run
+  arcp-nightly      ARCP incremental only (for Task Scheduler / cron)
   dims              Refresh dimension tables only
-  nightly           Nightly reconcile (hot refresh + fact rebuild + dims)
+  nightly           Calls nightly + ARCP incremental when SYNC_ARCP_ENABLED=true
   retention         Purge old sync logs and ingest batches
   daemon            Loop calls + ARCP incremental (optional; app auto-sync is default)
 

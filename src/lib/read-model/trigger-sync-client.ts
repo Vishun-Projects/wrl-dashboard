@@ -15,7 +15,8 @@ export type IncrementalSyncApiResult = {
 
 const SYNC_POST_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_READ_MODEL_SYNC_TIMEOUT_MS ?? 600_000);
 const STATUS_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_READ_MODEL_STATUS_TIMEOUT_MS ?? 90_000);
-const SYNC_POLL_MS = 2000;
+const SYNC_POLL_MS = 5000;
+const STALE_WAIT_HINT_MS = 30_000;
 const SYNC_WAIT_MAX_MS = Number(process.env.NEXT_PUBLIC_READ_MODEL_SYNC_WAIT_MS ?? 600_000);
 
 function sleep(ms: number): Promise<void> {
@@ -41,10 +42,16 @@ export async function fetchReadModelStatus(
 /** Wait until daemon/API is not holding sync_state.is_running (avoids connection pile-up). */
 export async function waitForReadModelSyncIdle(
   accessToken: string | undefined,
-  maxMs = SYNC_WAIT_MAX_MS
+  maxMs = SYNC_WAIT_MAX_MS,
+  onWaiting?: (elapsedMs: number) => void
 ): Promise<boolean> {
-  const deadline = Date.now() + maxMs;
+  const started = Date.now();
+  const deadline = started + maxMs;
   while (Date.now() < deadline) {
+    const elapsedMs = Date.now() - started;
+    if (onWaiting && elapsedMs >= STALE_WAIT_HINT_MS) {
+      onWaiting(elapsedMs);
+    }
     const progress = await fetchReadModelStatus(accessToken);
     if (!isCallsHotSyncRunning(progress)) return true;
     await sleep(SYNC_POLL_MS);

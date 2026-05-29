@@ -1030,7 +1030,14 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
           if (opts?.showToast && toastId != null) {
             toast.loading('Waiting for background sync to finish…', { id: toastId });
           }
-          const idle = await waitForReadModelSyncIdle(token);
+          const idle = await waitForReadModelSyncIdle(token, undefined, (elapsedMs) => {
+            if (opts?.showToast && toastId != null && elapsedMs >= 30_000) {
+              toast.loading(
+                'Still waiting — checking sync lock (stale locks clear after ~5 min)…',
+                { id: toastId }
+              );
+            }
+          });
           if (!idle) {
             throw new Error(
               'Sync is still running after 10 minutes. Wait for auto-sync to finish, then try again.'

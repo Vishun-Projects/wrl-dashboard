@@ -12,7 +12,7 @@ import { arcpBackfillStartDate } from '@/lib/read-model/arcp/dates';
 import { fetchArcpRowsForRange } from '@/lib/read-model/arcp/crm-fetch';
 import { ARCP_ENTITY, updateArcpSyncWatermarks } from '@/lib/read-model/arcp/lock';
 import { maxArcpWatermarks, processArcpRows } from '@/lib/read-model/arcp/transform';
-import { invalidateArcpPostgresCoverageCache } from '@/lib/read-model/arcp/coverage-server';
+import { invalidateArcpPostgresCoverageCache } from '@/lib/read-model/arcp/coverage-query';
 import { countArcpRows, truncateArcpLines, upsertArcpRows } from '@/lib/read-model/arcp/upsert';
 
 async function arcpBackfillResumeFrom(client: import('pg').PoolClient): Promise<string | null> {

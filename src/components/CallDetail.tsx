@@ -313,7 +313,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
               <div className="text-[12px] text-slate-400 font-medium">
                 {call.vtrnno || call.vtransfercallno} · {call.status_label || 'Service Call'}
               </div>
-              <div className="flex items-center bg-slate-900 text-white rounded-full px-2 py-0.5 border border-slate-800 shadow-lg">
+              {/* <div className="flex items-center bg-slate-900 text-white rounded-full px-2 py-0.5 border border-slate-800 shadow-lg">
                 <button
                   onClick={onPrev}
                   disabled={!hasPrev}
@@ -331,7 +331,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                 >
                   <ArrowRight size={12} />
                 </button>
-              </div>
+              </div> */}
             </div>
             <h1 className="text-[20px] lg:text-[22px] text-slate-900 leading-tight ui-strong">
               {call.customer_name}

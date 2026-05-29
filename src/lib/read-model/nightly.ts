@@ -28,6 +28,7 @@ import {
   truncateCurrentYearFacts,
   upsertFactRows,
 } from '@/lib/read-model/upsert-facts';
+import { runArcpIncrementalSync } from '@/lib/read-model/arcp/incremental';
 
 const ENTITY = 'calls_latest_hot';
 
@@ -112,4 +113,22 @@ export async function runNightlyReconcile(): Promise<void> {
       throw err;
     }
   });
+
+  if (process.env.SYNC_ARCP_ENABLED === 'true') {
+    try {
+      const arcp = await runArcpIncrementalSync();
+      if (arcp.skipped) {
+        console.log(`[arcp-sync] Nightly incremental skipped — ${arcp.reason ?? 'no changes'}`);
+      } else {
+        console.log(
+          `[arcp-sync] Nightly incremental complete — upserted ${arcp.rowsUpserted}, CRM rows ${arcp.crmRowsFetched ?? 0}`
+        );
+      }
+    } catch (err) {
+      console.error(
+        '[arcp-sync] Nightly incremental failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
 }

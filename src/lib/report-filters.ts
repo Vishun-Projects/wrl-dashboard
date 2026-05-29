@@ -58,6 +58,48 @@ export function matchesFilterSelection(value: string, selected: string[] | strin
   return value === selected;
 }
 
+/** Display name for register grid — prefer roster label for nengineer over stale serviceman text. */
+export function resolveTechnicianDisplayName(
+  row: Record<string, unknown>,
+  roster?: Array<{ value: string; label: string }>
+): string {
+  const id = String(row.nengineer ?? '').trim();
+  if (id && id !== '0' && roster?.length) {
+    const match = roster.find((o) => String(o.value) === id);
+    if (match?.label?.trim()) return match.label.trim();
+  }
+  const fromRow = String(row.serviceman ?? row.technician_name ?? '').trim();
+  return fromRow || '—';
+}
+
+/** Match technician toolbar filter by engineer id and exact display name. */
+export function rowMatchesTechnicianFilter(
+  row: Record<string, unknown>,
+  selected: string[] | string | undefined,
+  roster?: Array<{ value: string; label: string }>
+): boolean {
+  const list = Array.isArray(selected)
+    ? selected
+    : selected && selected !== 'All'
+      ? [String(selected)]
+      : [];
+  if (list.length === 0) return true;
+
+  const engineerId = String(row.nengineer ?? '').trim();
+  const rowName = String(row.serviceman ?? row.technician_name ?? '')
+    .trim()
+    .toUpperCase();
+
+  return list.some((sel) => {
+    const key = String(sel).trim();
+    if (!key) return false;
+    if (engineerId && engineerId !== '0' && engineerId === key) return true;
+    const rosterLabel = roster?.find((o) => String(o.value) === key)?.label?.trim().toUpperCase();
+    const cmp = (rosterLabel || key).toUpperCase();
+    return rowName.length > 0 && cmp.length > 0 && rowName === cmp;
+  });
+}
+
 export const REGISTER_STATUS_OPTIONS: RegisterMultiSelectOption[] = [
   { value: 'Open Unallocated', label: 'Open Unallocated' },
   { value: 'Assigned', label: 'Assigned' },
@@ -106,6 +148,26 @@ export function buildSummaryQueryKey(parts: {
   return JSON.stringify(parts);
 }
 
+export const REGISTER_PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+
+export type RegisterPageSize = (typeof REGISTER_PAGE_SIZE_OPTIONS)[number];
+
+export function normalizeRegisterPageSize(value: number): RegisterPageSize {
+  return (REGISTER_PAGE_SIZE_OPTIONS as readonly number[]).includes(value)
+    ? (value as RegisterPageSize)
+    : 10;
+}
+
+export function readStoredRegisterPageSize(): RegisterPageSize {
+  if (typeof window === 'undefined') return 10;
+  try {
+    const stored = parseInt(localStorage.getItem('report_register_page_size') ?? '', 10);
+    return normalizeRegisterPageSize(stored);
+  } catch {
+    return 10;
+  }
+}
+
 export function buildRegisterListQueryKey(parts: {
   officeIdsParam: string;
   callTypesParam: string;
@@ -123,9 +185,11 @@ export function buildRegisterListQueryKey(parts: {
   priorityFilter: string[];
   portalFilter: string[];
   agingAsOf: string;
+  pageLimit: number;
 }) {
   return JSON.stringify({
     ...parts,
+    pageLimit: normalizeRegisterPageSize(parts.pageLimit),
     selectedState: serializeFilterKey(parts.selectedState),
     selectedCity: serializeFilterKey(parts.selectedCity),
     selectedBranch: serializeFilterKey(parts.selectedBranch),
@@ -192,6 +256,8 @@ export type FilterCallsCriteria = {
   branch?: string[] | string;
   franchisee?: string[] | string;
   technician?: string[] | string;
+  /** Optional ncode → name map for technician filter/display consistency */
+  technicianRoster?: Array<{ value: string; label: string }>;
   selectedOfficeIds?: string[];
   selectedBranch?: string[];
   selectedFranchisee?: string[];
@@ -299,10 +365,12 @@ export function filterCallsCSR(calls: any[], criteria: FilterCallsCriteria, excl
         : undefined;
       const cFranCode = c.franchisee_code ? String(c.franchisee_code) : 'UNASSIGNED';
       const officeId = String(c.nofficeid || '');
+      const techOfficeId = String(c.technician_office_id ?? '');
       if (franchiseeSelection && franchiseeSelection.length > 0) {
         const matchesFranchisee =
           franchiseeSelection.includes(cFranCode) ||
-          franchiseeSelection.includes(officeId);
+          franchiseeSelection.includes(officeId) ||
+          (techOfficeId !== '' && franchiseeSelection.includes(techOfficeId));
         if (!matchesFranchisee) return false;
       } else if (
         !matchesFilterSelection(cFranCode, criteria.franchisee) &&
@@ -312,7 +380,10 @@ export function filterCallsCSR(calls: any[], criteria: FilterCallsCriteria, excl
       }
     }
 
-    if (exclude !== 'technician' && !matchesFilterSelection(String(c.nengineer || ''), criteria.technician)) {
+    if (
+      exclude !== 'technician' &&
+      !rowMatchesTechnicianFilter(c, criteria.technician, criteria.technicianRoster)
+    ) {
       return false;
     }
 
@@ -460,6 +531,7 @@ export type RegisterViewFilterParts = {
   selectedBranch: string[];
   selectedFranchisee: string[];
   selectedTechnician: string[];
+  technicianRoster?: Array<{ value: string; label: string }>;
   selectedCallTypes: string[];
   selectedOfficeIds: string[];
   selectedStatus: string[];

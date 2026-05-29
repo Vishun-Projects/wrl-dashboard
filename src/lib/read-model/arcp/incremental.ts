@@ -18,6 +18,7 @@ import {
   updateArcpSyncWatermarks,
 } from '@/lib/read-model/arcp/lock';
 import { dedupeArcpRows, maxArcpWatermarks, processArcpRows } from '@/lib/read-model/arcp/transform';
+import { invalidateArcpPostgresCoverageCache } from '@/lib/read-model/arcp/coverage-query';
 import { countArcpRows, upsertArcpRows } from '@/lib/read-model/arcp/upsert';
 import { SYNC_WATERMARK_GUARD } from '@/lib/read-model/lock';
 
@@ -36,21 +37,43 @@ function arcpSyncEnabled(): boolean {
   return process.env.SYNC_ARCP_ENABLED === 'true';
 }
 
-async function skipReason(client: import('pg').PoolClient): Promise<string | null> {
-  if (!arcpSyncEnabled()) return 'SYNC_ARCP_ENABLED is not true';
+function parseSyncWatermark(value: unknown): Date | null {
+  if (value == null) return null;
+  const d = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+type ArcpIncrementalPrep =
+  | { kind: 'skip'; reason: string }
+  | { kind: 'wait' }
+  | { kind: 'proceed'; watermarkStart: Date };
+
+async function prepareArcpIncremental(client: import('pg').PoolClient): Promise<ArcpIncrementalPrep> {
   const state = await getArcpSyncState(client);
   if (state?.status === 'pending_backfill' || state?.status === 'backfilling') {
-    return `sync_state.status=${state.status}`;
+    return { kind: 'skip', reason: `sync_state.status=${state.status}` };
   }
   const rowCount = await countArcpRows(client);
-  if (rowCount === 0) return 'arcp_lines_hot is empty';
-  const watermark = state?.last_editedon;
-  if (!watermark || watermark < SYNC_WATERMARK_GUARD) {
-    const bootstrapped = await bootstrapArcpWatermarksFromHot(client);
-    if (bootstrapped) return null;
-    return `watermark not set (${watermark?.toISOString() ?? 'null'})`;
+  if (rowCount === 0) return { kind: 'skip', reason: 'arcp_lines_hot is empty' };
+
+  let edited = parseSyncWatermark(state?.last_editedon);
+  if (!edited || edited < SYNC_WATERMARK_GUARD) {
+    const boot = await bootstrapArcpWatermarksFromHot(client);
+    if (!boot) {
+      return {
+        kind: 'skip',
+        reason: `watermark not set (${edited?.toISOString() ?? 'null'})`,
+      };
+    }
+    edited = boot.lastEditedon;
   }
-  return null;
+
+  if (await isArcpSyncRunning(client)) return { kind: 'wait' };
+
+  return {
+    kind: 'proceed',
+    watermarkStart: new Date(edited.getTime() - OVERLAP_MS),
+  };
 }
 
 export async function runArcpIncrementalSync(): Promise<ArcpIncrementalResult> {
@@ -58,12 +81,9 @@ export async function runArcpIncrementalSync(): Promise<ArcpIncrementalResult> {
     return { ok: true, skipped: true, reason: 'SYNC_ARCP_ENABLED is not true', rowsUpserted: 0 };
   }
 
-  const prep = await withClient(async (client) => {
+  let prep = await withClient(async (client) => {
     await import('@/lib/read-model/arcp/lock').then((m) => m.releaseStaleArcpSyncLock(client));
-    const reason = await skipReason(client);
-    if (reason) return { kind: 'skip' as const, reason };
-    if (await isArcpSyncRunning(client)) return { kind: 'wait' as const };
-    return { kind: 'proceed' as const };
+    return prepareArcpIncremental(client);
   });
 
   if (prep.kind === 'wait') {
@@ -78,16 +98,15 @@ export async function runArcpIncrementalSync(): Promise<ArcpIncrementalResult> {
         rowsUpserted: 0,
       };
     }
-  } else if (prep.kind === 'skip') {
+    prep = await withClient((client) => prepareArcpIncremental(client));
+  }
+
+  if (prep.kind === 'skip') {
     console.log(`[arcp-sync] Incremental skipped — ${prep.reason}`);
     return { ok: true, skipped: true, reason: prep.reason, rowsUpserted: 0 };
   }
 
-  const watermarkStart = await withClient(async (client) => {
-    const state = await getArcpSyncState(client);
-    const base = state?.last_editedon ?? new Date(0);
-    return new Date(base.getTime() - OVERLAP_MS);
-  });
+  const watermarkStart = prep.watermarkStart;
 
   console.log(`[arcp-sync] Incremental fetch from ${watermarkStart.toISOString()}`);
   const rawRows = await fetchArcpIncrementalRows(watermarkStart, (n) => {
@@ -154,6 +173,9 @@ export async function runArcpIncrementalSync(): Promise<ArcpIncrementalResult> {
         });
 
         await client.query('COMMIT');
+        if (rowsUpserted > 0) {
+          invalidateArcpPostgresCoverageCache();
+        }
         console.log(`[arcp-sync] Incremental complete — upserted ${rowsUpserted}`);
         return { ok: true, rowsUpserted, crmRowsFetched: deduped.length };
       } catch (err) {

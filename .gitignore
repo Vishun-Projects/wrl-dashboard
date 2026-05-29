@@ -41,6 +41,9 @@ yarn-error.log*
 
 # local server corpus cache (large date-window snapshots)
 .cache/
+
+# scheduled sync logs
+/logs/
 next-env.d.ts
 
 /src/generated/prisma

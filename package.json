@@ -17,6 +17,7 @@
     "sync-worker:arcp-reset": "npx tsx src/lib/read-model/cli.ts arcp-reset",
     "sync-worker:arcp-backfill": "npx tsx src/lib/read-model/cli.ts arcp-backfill",
     "sync-worker:arcp-incremental": "npx tsx src/lib/read-model/cli.ts arcp-incremental",
+    "sync-worker:arcp-nightly": "npx tsx src/lib/read-model/cli.ts arcp-nightly",
     "arcp-trends-html": "npx tsx scripts/generate-arcp-trends-html.ts"
   },
   "dependencies": {

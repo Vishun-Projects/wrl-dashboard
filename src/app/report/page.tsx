@@ -27,6 +27,10 @@ import { RegisterPageFilters } from '@/components/RegisterPageFilters';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 import {
   buildRegisterListQueryKey,
+  normalizeRegisterPageSize,
+  readStoredRegisterPageSize,
+  resolveTechnicianDisplayName,
+  REGISTER_PAGE_SIZE_OPTIONS,
   buildSummaryQueryKey,
   filtersEqual,
   joinFilterParam,
@@ -319,6 +323,7 @@ export default function ReportPage() {
     setSelectedTechnician,
     setStatesList,
     setCitiesList,
+    techniciansList,
     setTechniciansList,
     setBranchesList,
     setFranchiseesList,
@@ -373,7 +378,16 @@ export default function ReportPage() {
     setMounted(true);
   }, []);
   const [page, setPage] = useState(globalReportCache?.page || 1);
-  const [limit] = useState(10);
+  const [limit, setLimit] = useState(readStoredRegisterPageSize);
+
+  const technicianRoster = useMemo(
+    () =>
+      techniciansList.map((t: { ncode: string; vname: string }) => ({
+        value: String(t.ncode),
+        label: String(t.vname || t.ncode),
+      })),
+    [techniciansList]
+  );
   const [loadingPage, setLoadingPage] = useState<number | null>(null);
   const registerPagesCacheRef = React.useRef<Map<string, Map<number, RegisterPageCacheEntry>>>(new Map());
   const lastKnownRegisterTotalRef = React.useRef<number>(globalReportCache?.total || 0);
@@ -477,6 +491,7 @@ export default function ReportPage() {
         priorityFilter,
         portalFilter,
         agingAsOf: agingAsOf || '',
+        pageLimit: limit,
       }),
     [
       summaryOfficeIdsParam,
@@ -495,6 +510,7 @@ export default function ReportPage() {
       priorityFilter,
       portalFilter,
       agingAsOf,
+      limit,
     ]
   );
 
@@ -656,7 +672,7 @@ export default function ReportPage() {
       case 'callsvserialno':
         return row.callsvserialno;
       case 'serviceman':
-        return row.serviceman;
+        return resolveTechnicianDisplayName(row, technicianRoster);
       case 'vcomplaint':
         return row.vcomplaint;
       case 'Status':
@@ -757,6 +773,7 @@ export default function ReportPage() {
     selectedBranch,
     selectedFranchisee,
     selectedTechnician,
+    technicianRoster,
     selectedCallTypes,
     selectedOfficeIds,
     selectedStatus,
@@ -771,6 +788,7 @@ export default function ReportPage() {
     selectedBranch,
     selectedFranchisee,
     selectedTechnician,
+    technicianRoster,
     selectedCallTypes,
     selectedOfficeIds,
     selectedStatus,
@@ -1131,7 +1149,7 @@ export default function ReportPage() {
   ]);
 
   const applyRegisterFromCorpus = useCallback(
-    (pageNum = 1): boolean => {
+    (pageNum = 1, pageLimit = limit): boolean => {
       if (readRegisterFromPostgresClient()) return false;
       const startDateStr = toDateString(dateRange.start);
       const endDateStr = toDateString(dateRange.end);
@@ -1154,7 +1172,7 @@ export default function ReportPage() {
         corpusKey,
         viewFilters,
         pageNum,
-        limit,
+        pageLimit,
         viewDateFilter
       );
       if (!derived) return false;
@@ -1178,6 +1196,7 @@ export default function ReportPage() {
         priorityFilter: viewFilters.priorityFilter,
         portalFilter: viewFilters.portalFilter,
         agingAsOf: agingAsOf || '',
+        pageLimit,
       });
 
       setData(derived.rows);
@@ -1266,7 +1285,7 @@ export default function ReportPage() {
   }, [dateRange.start, dateRange.end, dateFilterColumn, distributionCalls]);
 
   const applyRegisterFromSharedCalls = useCallback(
-    (pageNum = 1): boolean => {
+    (pageNum = 1, pageLimit = limit): boolean => {
       if (!readRegisterFromPostgresClient()) return false;
       const applyStart = performance.now();
       const scope = getSharedCallsForScope();
@@ -1289,7 +1308,7 @@ export default function ReportPage() {
         calls,
         viewFilters,
         pageNum,
-        limit,
+        pageLimit,
         viewDateFilter
       );
       const { summary } = deriveRegisterView(calls, viewFilters, viewDateFilter);
@@ -1310,6 +1329,7 @@ export default function ReportPage() {
         priorityFilter: viewFilters.priorityFilter,
         portalFilter: viewFilters.portalFilter,
         agingAsOf: agingAsOf || '',
+        pageLimit,
       });
 
       setData(derived.rows);
@@ -1483,8 +1503,10 @@ export default function ReportPage() {
       forceCorpus?: boolean;
       searchOverride?: string;
       pincodeOverride?: string;
+      pageLimit?: number;
     }
   ) => {
+    const pageSize = opts?.pageLimit ?? limit;
     const opStart = performance.now();
     const opId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const hadPriorRequest = !!fetchControllerRef.current;
@@ -1531,6 +1553,7 @@ export default function ReportPage() {
       priorityFilter,
       portalFilter,
       agingAsOf: agingAsOf || '',
+      pageLimit: pageSize,
     });
 
     if (p === 1 && searchForUrl?.trim() && isIdentifierLookupSearch(searchForUrl) && !pincodeForUrl) {
@@ -1606,7 +1629,7 @@ export default function ReportPage() {
       if (!getSharedCallsForScope()) {
         await ensureSharedCallsLoaded(false);
       }
-      if (applyRegisterFromSharedCalls(p)) {
+      if (applyRegisterFromSharedCalls(p, pageSize)) {
         if (!opts?.silent) {
           setLoading(false);
           setLoadingPage(null);
@@ -1614,6 +1637,7 @@ export default function ReportPage() {
         reportPerf('fetchData', 'postgres shared calls client slice HIT (no network)', opStart, {
           opId,
           page: p,
+          rows: pageSize,
           why: 'Filtered/paginated from bulk register preload; skips /api/report.',
         });
         if (p === 1) {
@@ -1628,7 +1652,7 @@ export default function ReportPage() {
               scope.calls,
               registerViewFilterRef.current,
               2,
-              limit,
+              pageSize,
               viewDateFilter
             );
             const { summary } = deriveRegisterView(
@@ -1672,7 +1696,7 @@ export default function ReportPage() {
         corpusKey,
         viewFilters,
         p,
-        limit,
+        pageSize,
         viewDateFilter
       );
       if (corpusDerived) {
@@ -1704,7 +1728,7 @@ export default function ReportPage() {
             corpusKey,
             viewFilters,
             2,
-            limit,
+            pageSize,
             viewDateFilter
           );
           if (page2) {
@@ -1814,7 +1838,7 @@ export default function ReportPage() {
           });
         };
 
-        const maxPage = totalSnap > 0 ? Math.ceil(totalSnap / limit) : 1;
+        const maxPage = totalSnap > 0 ? Math.ceil(totalSnap / pageSize) : 1;
         const nextPage = currentPage + 1;
         if (nextPage <= maxPage) {
           const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
@@ -1824,7 +1848,7 @@ export default function ReportPage() {
             corpusKey,
             registerViewFilterRef.current,
             nextPage,
-            limit,
+            pageSize,
             viewDateFilter
           );
           if (fromCorpus) {
@@ -1838,7 +1862,7 @@ export default function ReportPage() {
                 scope.calls,
                 registerViewFilterRef.current,
                 nextPage,
-                limit,
+                pageSize,
                 viewDateFilter
               );
               storePrefetched(nextPage, { data: fromShared.rows, total: fromShared.total });
@@ -1846,7 +1870,7 @@ export default function ReportPage() {
             }
           }
           const nextUrl = appendRegisterFilters(
-            `/api/report?page=${nextPage}&limit=${limit}&fetchTotals=false&officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
+            `/api/report?page=${nextPage}&limit=${pageSize}&fetchTotals=false&officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
           );
           axios
             .get(nextUrl, { headers, signal: controller.signal })
@@ -1863,7 +1887,7 @@ export default function ReportPage() {
       };
 
       let url = appendRegisterFilters(
-        `/api/report?page=${p}&limit=${limit}&officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
+        `/api/report?page=${p}&limit=${pageSize}&officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
       );
 
       const newDate = new Date();
@@ -2041,6 +2065,33 @@ export default function ReportPage() {
       });
     }
   };
+
+  const handleRegisterPageSizeChange = useCallback(
+    (nextRaw: number) => {
+      const next = normalizeRegisterPageSize(nextRaw);
+      if (next === limit) return;
+      setLimit(next);
+      try {
+        localStorage.setItem('report_register_page_size', String(next));
+      } catch {
+        /* ignore */
+      }
+      registerPagesCacheRef.current.clear();
+      setPage(1);
+      if (applyRegisterFromSharedCalls(1, next)) {
+        setLoading(false);
+        setLoadingPage(null);
+        return;
+      }
+      if (applyRegisterFromCorpus(1, next)) {
+        setLoading(false);
+        setLoadingPage(null);
+        return;
+      }
+      void fetchData(1, { pageLimit: next });
+    },
+    [limit, applyRegisterFromSharedCalls, applyRegisterFromCorpus]
+  );
 
   const formatSQLDate = (date: Date) => {
     const pad = (num: number) => String(num).padStart(2, '0');
@@ -2437,6 +2488,7 @@ export default function ReportPage() {
                   priorityFilter: [],
                   portalFilter: [],
                   agingAsOf: agingAsOf || '',
+                  pageLimit: limit,
                 });
                 lastAppliedFilterSnapshotRef.current = JSON.stringify({
                   startDateStr,
@@ -2579,6 +2631,7 @@ export default function ReportPage() {
                 priorityFilter: [],
                 portalFilter: [],
                 agingAsOf: agingAsOf || '',
+                pageLimit: limit,
               });
 
               lastKnownRegisterTotalRef.current = cacheParams.total || 0;
@@ -2823,6 +2876,7 @@ export default function ReportPage() {
       priorityFilter,
       portalFilter,
       agingAsOf: agingAsOf || '',
+      pageLimit: limit,
     });
   }, [
     dbInitialized,
@@ -2959,6 +3013,7 @@ export default function ReportPage() {
       priorityFilter,
       portalFilter,
       agingAsOf: agingAsOf || '',
+      pageLimit: limit,
     });
   }, [
     dateRange.start,
@@ -2976,6 +3031,7 @@ export default function ReportPage() {
     portalFilter,
     agingAsOf,
     viewCallTypesParam,
+    limit,
   ]);
 
   const handleExportDetailed = async (format: 'excel' | 'csv' = 'excel') => {
@@ -3841,8 +3897,24 @@ export default function ReportPage() {
           <div className="flex h-11 flex-shrink-0 items-center justify-between border-t border-slate-200 bg-slate-50 px-4">
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
               <span className="font-medium text-slate-700">
-                {data.length > 0 ? (page - 1) * limit + 1 : 0}–{Math.min(page * limit, total)} of {total.toLocaleString()}
+                {total > 0 ? (page - 1) * limit + 1 : 0}–{Math.min(page * limit, total)} of {total.toLocaleString()}
               </span>
+              <label className="flex items-center gap-1.5">
+                <span className="text-slate-500">Rows</span>
+                <select
+                  value={limit}
+                  onChange={(e) => handleRegisterPageSizeChange(Number(e.target.value))}
+                  disabled={loading && data.length === 0}
+                  className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700 shadow-sm hover:border-slate-300 focus:border-slate-400 focus:outline-none disabled:opacity-50"
+                  aria-label="Rows per page"
+                >
+                  {REGISTER_PAGE_SIZE_OPTIONS.map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
             <div className="flex items-center gap-2">
               <button

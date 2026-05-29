@@ -211,6 +211,7 @@ export function registerRowMatchesViewFilters(
     selectedFranchisee: parts.selectedFranchisee,
     selectedOfficeIds: parts.selectedOfficeIds,
     technician: parts.selectedTechnician,
+    technicianRoster: parts.technicianRoster,
     pincodeSearch: parts.pincodeSearch || '',
   });
   if (csrMatches.length === 0) return false;

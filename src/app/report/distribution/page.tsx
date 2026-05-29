@@ -7,19 +7,44 @@ import {
   Users,
   SlidersHorizontal,
   RefreshCw,
-  ChevronUp,
-  ChevronDown,
   AlertTriangle,
-  CheckCircle,
   Map as LucideMap,
   FilterX,
 } from 'lucide-react';
+import axios from 'axios';
 import { toast } from 'sonner';
+import {
+  DistributionActiveFilters,
+  type DistributionFilterChip,
+} from '@/components/DistributionActiveFilters';
+import {
+  DistributionIssueBadge,
+  DistributionLoadBadge,
+  DistributionTablePanel,
+} from '@/components/DistributionTablePanel';
 import { RegisterPageFilters } from '@/components/RegisterPageFilters';
 import { RegisterStatsBar } from '@/components/RegisterStatsBar';
 import { PageShell, PageLoadingState } from '@/components/PageShell';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
-import { buildCorpusViewDateFilter } from '@/lib/report-corpus';
+import { createClient } from '@/lib/supabase/client';
+import { buildCorpusViewDateFilter, filterCorpusCallsByViewDate } from '@/lib/report-corpus';
+import { loadEngineerRosterForBranch, getCachedEngineerRoster } from '@/lib/distribution-engineer-roster-cache';
+import {
+  buildAuditScopeFilterParts,
+  buildIdleAssigneeKpis,
+  buildIdleAssigneeRows,
+  buildRosterFranchiseesFromOffices,
+  idleRowFranchiseeLinkCode,
+  idleRowMatchesFranchisee,
+  isUnallocatedFranchiseeCode,
+  normalizeOfficeCode,
+  rowMatchesAuditScope,
+  IDLE_ISSUE_LABELS,
+  scopeRosterTechniciansToFilters,
+  type IdleAssigneeIssue,
+  type IdleAssigneeRow,
+  type RosterTechnician,
+} from '@/lib/distribution-idle-assignees';
 import { buildRegisterViewFiltersFromContext, toDateString } from '@/lib/report-filters';
 import {
   classifyRegisterRowStatus,
@@ -79,7 +104,10 @@ export default function CallDistributionPage() {
     rehydrateDistributionFromCache,
     syncCascadeOptionsFromCalls,
     resourcesLoaded,
+    offices,
   } = useReportFilters();
+
+  const supabase = useMemo(() => createClient(), []);
 
   const [mounted, setMounted] = useState(false);
 
@@ -118,6 +146,17 @@ export default function CallDistributionPage() {
   });
   const [franchiseeSummary, setFranchiseeSummary] = useState<any[]>([]);
   const [pincodeSummary, setPincodeSummary] = useState<any[]>([]);
+  const [periodFilteredCalls, setPeriodFilteredCalls] = useState<Record<string, unknown>[]>([]);
+
+  // Idle assignees
+  const [rosterTechnicians, setRosterTechnicians] = useState<RosterTechnician[]>([]);
+  const [idleRosterLoading, setIdleRosterLoading] = useState(false);
+  const [idleSortField, setIdleSortField] = useState<keyof IdleAssigneeRow | 'issue'>('issue');
+  const [idleSortAsc, setIdleSortAsc] = useState(true);
+  const [idleIssueFilter, setIdleIssueFilter] = useState<IdleAssigneeIssue | null>(
+    'assigned_no_completions'
+  );
+  const [highlightedIdleKey, setHighlightedIdleKey] = useState<string | null>(null);
 
   // Loading & Sorting States
   const [sortField, setSortField] = useState('ratio');
@@ -179,6 +218,7 @@ export default function CallDistributionPage() {
       });
       setFranchiseeSummary([]);
       setPincodeSummary([]);
+      setPeriodFilteredCalls([]);
       return;
     }
 
@@ -188,6 +228,7 @@ export default function CallDistributionPage() {
       viewDateFilter
     );
     setRegisterSummary(summary);
+    setPeriodFilteredCalls(filteredCalls);
 
     const franchiseeMap = new Map();
     const pincodeMap = new Map();
@@ -322,6 +363,133 @@ export default function CallDistributionPage() {
     setPincodeSummary(pincodeSummary);
   }, [distributionCalls, distributionViewFilters, viewDateFilter]);
 
+  const auditScopeFilterParts = useMemo(
+    () => buildAuditScopeFilterParts(distributionViewFilters),
+    [distributionViewFilters]
+  );
+
+  const auditScopeCalls = useMemo(() => {
+    if (distributionCalls.length === 0) return [];
+    const dateFiltered = filterCorpusCallsByViewDate(distributionCalls, viewDateFilter);
+    return dateFiltered.filter((row) => rowMatchesAuditScope(row, auditScopeFilterParts));
+  }, [distributionCalls, viewDateFilter, auditScopeFilterParts]);
+
+  const rosterBranchId = selectedBranch.length > 0 ? selectedBranch[0] : null;
+
+  useEffect(() => {
+    if (!rosterBranchId) {
+      setRosterTechnicians([]);
+      return;
+    }
+
+    const cached = getCachedEngineerRoster(rosterBranchId);
+    if (cached) {
+      setRosterTechnicians(cached);
+      return;
+    }
+
+    let cancelled = false;
+    setIdleRosterLoading(true);
+    loadEngineerRosterForBranch(rosterBranchId, async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const url = `/api/report/engineers?branchId=${encodeURIComponent(rosterBranchId)}&roster=1`;
+      const res = await axios.get<RosterTechnician[]>(url, {
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      });
+      return (res.data || []).map((e) => ({
+        ncode: String(e.ncode),
+        vname: String(e.vname || e.ncode),
+        nofficeid: e.nofficeid != null ? String(e.nofficeid) : undefined,
+      }));
+    })
+      .then((roster) => {
+        if (!cancelled) setRosterTechnicians(roster);
+      })
+      .catch(() => {
+        if (!cancelled) setRosterTechnicians([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIdleRosterLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rosterBranchId, supabase]);
+
+  const scopedRosterTechnicians = useMemo(
+    () =>
+      scopeRosterTechniciansToFilters(
+        rosterBranchId ? rosterTechnicians : [],
+        selectedFranchisee
+      ),
+    [rosterTechnicians, rosterBranchId, selectedFranchisee]
+  );
+
+  const rosterFranchisees = useMemo(
+    () => buildRosterFranchiseesFromOffices(offices, selectedBranch, selectedFranchisee),
+    [offices, selectedBranch, selectedFranchisee]
+  );
+
+  const idleAssigneeRows = useMemo(
+    () =>
+      buildIdleAssigneeRows({
+        auditScopeCalls,
+        rosterTechnicians: scopedRosterTechnicians,
+        rosterFranchisees,
+        offices,
+      }).filter((row) => row.assigneeType === 'technician'),
+    [auditScopeCalls, scopedRosterTechnicians, rosterFranchisees, offices]
+  );
+
+  useEffect(() => {
+    setIdleIssueFilter('assigned_no_completions');
+    setHighlightedIdleKey(null);
+    setHighlightedFranchisee(null);
+  }, [
+    startDateStr,
+    endDateStr,
+    dateFilterColumn,
+    selectedBranch,
+    selectedFranchisee,
+    selectedState,
+    selectedCity,
+  ]);
+
+  const franchiseeColumns = useMemo(
+    () => [
+      { key: 'franchisee_name', label: 'Franchisee', width: '38%', sortable: true },
+      { key: 'technicians_count', label: 'Techs', width: '4rem', align: 'center' as const, sortable: true },
+      { key: 'total_calls', label: 'Total', width: '4rem', align: 'center' as const, sortable: true },
+      { key: 'open_calls', label: 'Open', width: '4rem', align: 'center' as const, sortable: true },
+      { key: 'ratio', label: 'Ratio', width: '4.5rem', align: 'center' as const, sortable: true },
+      { key: 'status', label: 'Status', width: '6.5rem', align: 'center' as const, sortable: false },
+    ],
+    []
+  );
+
+  const idleColumns = useMemo(
+    () => [
+      { key: 'name', label: 'Technician', width: '32%', sortable: true },
+      { key: 'branchName', label: 'Branch', width: '22%', sortable: true },
+      { key: 'issue', label: 'Status', width: '7.5rem', sortable: true },
+      { key: 'assignedCalls', label: 'Assigned', width: '5rem', align: 'center' as const, sortable: true },
+      { key: 'totalCalls', label: 'Total', width: '4.5rem', align: 'center' as const, sortable: true },
+    ],
+    []
+  );
+
+  const idleTableLoading =
+    idleRosterLoading && scopedRosterTechnicians.length === 0 && rosterBranchId != null;
+
+  const idleAssigneeKpis = useMemo(
+    () => buildIdleAssigneeKpis(idleAssigneeRows),
+    [idleAssigneeRows]
+  );
+
+  const idleRowKey = (row: IdleAssigneeRow) =>
+    `${row.assigneeType}:${row.code}:${row.issue}`;
+
   // Leaflet Map Initialization
   useEffect(() => {
     if (typeof window === 'undefined' || !resourcesLoaded) return;
@@ -396,7 +564,10 @@ export default function CallDistributionPage() {
         if (pincodeSearch && !pin.pincode.toLowerCase().includes(pincodeSearch.toLowerCase())) return false;
         if (selectedPincode !== 'All' && pin.pincode !== selectedPincode) return false;
         if (highlightedFranchisee) {
-          return pin.franchisees.some((f: any) => f.franchisee_code === highlightedFranchisee);
+          return pin.franchisees.some(
+            (f: { franchisee_code: string }) =>
+              normalizeOfficeCode(f.franchisee_code) === highlightedFranchisee
+          );
         }
         return true;
       });
@@ -478,19 +649,181 @@ export default function CallDistributionPage() {
     }
   };
 
-  const sortedFranchiseeList = useMemo(() => {
-    const s = [...franchiseeSummary];
-    s.sort((a, b) => {
-      let valA = a[sortField];
-      let valB = b[sortField];
-      if (typeof valA === 'string') {
-        return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+  type FranchiseeRow = {
+    franchisee_code: string;
+    franchisee_name: string;
+    technicians_count: number;
+    total_calls: number;
+    open_calls: number;
+    ratio: number;
+  };
+
+  const compareFranchiseeRows = (a: FranchiseeRow, b: FranchiseeRow) => {
+    let valA: string | number = a[sortField as keyof FranchiseeRow] as string | number;
+    let valB: string | number = b[sortField as keyof FranchiseeRow] as string | number;
+    if (typeof valA === 'string') {
+      return sortAsc ? valA.localeCompare(String(valB)) : String(valB).localeCompare(valA);
+    }
+    return sortAsc ? Number(valA) - Number(valB) : Number(valB) - Number(valA);
+  };
+
+  const displayedFranchiseeList = useMemo(() => {
+    const sorted = [...franchiseeSummary].sort(compareFranchiseeRows);
+    if (!highlightedFranchisee) return sorted;
+
+    const linked: FranchiseeRow[] = [];
+    const rest: FranchiseeRow[] = [];
+    for (const fran of sorted) {
+      if (
+        !isUnallocatedFranchiseeCode(fran.franchisee_code) &&
+        normalizeOfficeCode(fran.franchisee_code) === highlightedFranchisee
+      ) {
+        linked.push(fran);
+      } else {
+        rest.push(fran);
       }
-      return sortAsc ? valA - valB : valB - valA;
+    }
+    return [...linked, ...rest];
+  }, [franchiseeSummary, sortField, sortAsc, highlightedFranchisee]);
+
+  const handleIdleSort = (field: keyof IdleAssigneeRow | 'issue') => {
+    if (idleSortField === field) {
+      setIdleSortAsc(!idleSortAsc);
+    } else {
+      setIdleSortField(field);
+      setIdleSortAsc(field === 'name');
+    }
+  };
+
+  const idleSortValue = (row: IdleAssigneeRow): string | number => {
+    if (idleSortField === 'issue') return row.issue;
+    if (idleSortField === 'assignedCalls' || idleSortField === 'totalCalls') {
+      return row[idleSortField];
+    }
+    return String(row[idleSortField] ?? '');
+  };
+
+  const sortedIdleAssigneeRows = useMemo(() => {
+    const s = [...idleAssigneeRows];
+    s.sort((a, b) => {
+      const valA = idleSortValue(a);
+      const valB = idleSortValue(b);
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        return idleSortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      }
+      return idleSortAsc ? Number(valA) - Number(valB) : Number(valB) - Number(valA);
     });
     return s;
-  }, [franchiseeSummary, sortField, sortAsc]);
+  }, [idleAssigneeRows, idleSortField, idleSortAsc]);
 
+  const idleRowsByIssue = useMemo(() => {
+    if (!idleIssueFilter) return sortedIdleAssigneeRows;
+    return sortedIdleAssigneeRows.filter((row) => row.issue === idleIssueFilter);
+  }, [sortedIdleAssigneeRows, idleIssueFilter]);
+
+  const idleRowLinkPriority = (row: IdleAssigneeRow): number => {
+    if (highlightedIdleKey && idleRowKey(row) === highlightedIdleKey) return 0;
+    if (highlightedFranchisee && idleRowMatchesFranchisee(row, highlightedFranchisee)) return 1;
+    return 2;
+  };
+
+  const displayedIdleAssigneeRows = useMemo(() => {
+    const rows = idleRowsByIssue;
+    const linkActive = highlightedFranchisee != null || highlightedIdleKey != null;
+    if (!linkActive) return rows;
+
+    return [...rows]
+      .map((row, index) => ({ row, index }))
+      .sort((a, b) => {
+        const pa = idleRowLinkPriority(a.row);
+        const pb = idleRowLinkPriority(b.row);
+        if (pa !== pb) return pa - pb;
+        return a.index - b.index;
+      })
+      .map(({ row }) => row);
+  }, [idleRowsByIssue, highlightedFranchisee, highlightedIdleKey]);
+
+  const linkedIdleCount = useMemo(() => {
+    if (!highlightedFranchisee) return 0;
+    return idleRowsByIssue.filter((row) =>
+      idleRowMatchesFranchisee(row, highlightedFranchisee)
+    ).length;
+  }, [idleRowsByIssue, highlightedFranchisee]);
+
+  const linkedFranchiseeName = useMemo(() => {
+    if (!highlightedFranchisee) return null;
+    const match = franchiseeSummary.find(
+      (f: { franchisee_code: string; franchisee_name: string }) =>
+        normalizeOfficeCode(f.franchisee_code) === highlightedFranchisee
+    );
+    return match?.franchisee_name ?? highlightedFranchisee;
+  }, [franchiseeSummary, highlightedFranchisee]);
+
+  const focusedIdleRow = useMemo(() => {
+    if (!highlightedIdleKey) return null;
+    return idleAssigneeRows.find((row) => idleRowKey(row) === highlightedIdleKey) ?? null;
+  }, [highlightedIdleKey, idleAssigneeRows]);
+
+  const tableLinkActive = highlightedFranchisee != null || highlightedIdleKey != null;
+
+  const clearTableLink = () => {
+    setHighlightedFranchisee(null);
+    setHighlightedIdleKey(null);
+  };
+
+  const distributionFilterChips = useMemo((): DistributionFilterChip[] => {
+    const chips: DistributionFilterChip[] = [];
+    if (idleIssueFilter) {
+      chips.push({
+        id: 'idle-issue',
+        label: 'Idle list',
+        detail: IDLE_ISSUE_LABELS[idleIssueFilter],
+        tone: 'amber',
+        onClear: () => setIdleIssueFilter(null),
+      });
+    }
+    if (highlightedFranchisee) {
+      chips.push({
+        id: 'table-franchisee',
+        label: 'Linked ASP',
+        detail: linkedFranchiseeName ?? highlightedFranchisee,
+        tone: 'teal',
+        onClear: clearTableLink,
+      });
+    }
+    if (highlightedIdleKey && focusedIdleRow) {
+      chips.push({
+        id: 'table-assignee',
+        label: 'Focused row',
+        detail: focusedIdleRow.name,
+        tone: 'violet',
+        onClear: () => setHighlightedIdleKey(null),
+      });
+    }
+    return chips;
+  }, [
+    idleIssueFilter,
+    highlightedFranchisee,
+    highlightedIdleKey,
+    linkedFranchiseeName,
+    focusedIdleRow,
+  ]);
+
+  const handleFranchiseeRowClick = (franchiseeCode: string) => {
+    const norm = normalizeOfficeCode(franchiseeCode);
+    if (!norm) return;
+    setHighlightedFranchisee((prev) => (prev === norm ? null : norm));
+    setHighlightedIdleKey(null);
+  };
+
+  const handleIdleRowClick = (row: IdleAssigneeRow) => {
+    const key = idleRowKey(row);
+    setHighlightedIdleKey((prev) => (prev === key ? null : key));
+    const linkCode = idleRowFranchiseeLinkCode(row);
+    if (linkCode) {
+      setHighlightedFranchisee(linkCode);
+    }
+  };
 
   if (!resourcesLoaded || !mounted) {
     return <PageLoadingState label="Loading Call Distribution..." />;
@@ -499,7 +832,7 @@ export default function CallDistributionPage() {
   return (
     <PageShell
       title="Call Distribution Audit"
-      subtitle="Are branch calls fairly distributed across franchise technicians?"
+      subtitle="Find technicians with assigned backlog but no completions, or no calls in the period"
       icon={<LucideMap size={16} className="text-teal-600" />}
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
       toolbar={
@@ -507,7 +840,7 @@ export default function CallDistributionPage() {
           loadingLabel="Loading calls for distribution map…"
           onClearAll={() => {
             setSelectedPincode('All');
-            setHighlightedFranchisee(null);
+            clearTableLink();
           }}
         />
       }
@@ -580,13 +913,13 @@ export default function CallDistributionPage() {
         </div>
 
         {/* Right Side: KPIs and Tables */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-white">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
 
           {/* Stat summary — MIS Register counts + distribution-specific metrics */}
-          <div className="border-b border-slate-200 px-3 py-2">
+          <div className="shrink-0 border-b border-slate-200 px-3 py-2">
             <RegisterStatsBar summary={registerSummary} />
           </div>
-          <div className="distribution-stats-bar custom-scrollbar">
+          <div className="distribution-stats-bar custom-scrollbar shrink-0">
             <div className="distribution-stat-item">
               <span className="distribution-stat-value text-teal-700">
                 {distributionLoading
@@ -601,138 +934,219 @@ export default function CallDistributionPage() {
               </span>
               <span className="distribution-stat-label">Calls / tech</span>
             </div>
-          </div>
-
-          {/* Load Balancer Table Section */}
-          <div className="flex-1 p-6 overflow-hidden flex flex-col min-h-0">
-
-            {/* Section Header */}
-            <div className="flex justify-between items-center mb-4 flex-shrink-0">
-              <div>
-                <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">Franchisee Capacity & Allocation Matrix</h3>
-                <p className="text-[10px] text-slate-500">Sorted by load ratio. Franchisees at the top require immediate call re-allocation.</p>
-              </div>
-              <span className="text-[10px] text-slate-650 font-bold bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
-                Count: {franchiseeSummary.length}
+            <button
+              type="button"
+              title="Show assignees with assigned calls but no completions in period"
+              className={`distribution-stat-item distribution-stat-item--warn distribution-stat-item--clickable ${
+                idleIssueFilter === 'assigned_no_completions' ? 'distribution-stat-item--active' : ''
+              }`}
+              onClick={() =>
+                setIdleIssueFilter((prev) =>
+                  prev === 'assigned_no_completions' ? null : 'assigned_no_completions'
+                )
+              }
+            >
+              <span className="distribution-stat-value text-amber-700">
+                {distributionLoading ? '…' : idleAssigneeKpis.assignedNoCompletions}
               </span>
-            </div>
+              <span className="distribution-stat-label">Assigned, no work</span>
+            </button>
+            <button
+              type="button"
+              title="Show roster members with zero calls in period"
+              className={`distribution-stat-item distribution-stat-item--muted distribution-stat-item--clickable ${
+                idleIssueFilter === 'zero_allocations' ? 'distribution-stat-item--active' : ''
+              }`}
+              onClick={() =>
+                setIdleIssueFilter((prev) =>
+                  prev === 'zero_allocations' ? null : 'zero_allocations'
+                )
+              }
+            >
+              <span className="distribution-stat-value text-slate-600">
+                {idleTableLoading ? '…' : idleAssigneeKpis.zeroAllocations}
+              </span>
+              <span className="distribution-stat-label">Zero allocations</span>
+            </button>
+          </div>
+          {/* {!rosterBranchId && (
+            <p className="distribution-idle-hint border-b border-slate-200 bg-slate-50/90 px-4 py-1.5 text-[10px] text-slate-500">
+              Select a branch to list roster members with zero allocations (one roster load per branch, cached).
+            </p>
+          )} */}
 
-            {/* Scrollable Table Wrapper */}
-            <div className="flex-1 overflow-auto border border-slate-200 rounded-xl bg-white shadow-sm relative custom-scrollbar">
+          <DistributionActiveFilters
+            chips={distributionFilterChips}
+            tableLinkActive={tableLinkActive}
+            onClearTableLink={clearTableLink}
+          />
+          {highlightedFranchisee && linkedIdleCount === 0 && !distributionLoading ? (
+            <p className="shrink-0 border-b border-amber-100 bg-amber-50/80 px-4 py-1.5 text-[10px] text-amber-800">
+              Linked ASP has no rows in the idle list for &quot;{idleIssueFilter ? IDLE_ISSUE_LABELS[idleIssueFilter] : 'all statuses'}&quot; — try clearing the idle status pill or pick another ASP.
+            </p>
+          ) : null}
 
-              {distributionLoading ? (
-                <div className="absolute inset-0 flex items-center justify-center flex-col gap-3.5 bg-white/80 backdrop-blur-[3px] z-30">
-                  <div className="w-8 h-8 border-3 border-teal-600 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-xs text-slate-550 font-bold tracking-wide animate-pulse">Analyzing capacity logs...</p>
-                </div>
-              ) : franchiseeSummary.length === 0 ? (
-                <div className="absolute inset-0 flex items-center justify-center flex-col gap-2">
-                  <CheckCircle size={24} className="text-teal-600" />
-                  <p className="text-xs text-slate-500 font-semibold">No active call backlog found for filters.</p>
-                </div>
-              ) : (
-                <table className="w-full text-left border-collapse text-xs select-none">
-                  <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 text-slate-550 font-extrabold z-20">
-                    <tr>
-                      <th onClick={() => handleSort('franchisee_name')} className="px-4 py-3.5 cursor-pointer hover:text-slate-900 transition-colors">
-                        <div className="flex items-center gap-1">
-                          Franchisee Name
-                          {sortField === 'franchisee_name' && (sortAsc ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
-                        </div>
-                      </th>
-                      <th onClick={() => handleSort('technicians_count')} className="px-4 py-3.5 text-center cursor-pointer hover:text-slate-900 transition-colors">
-                        <div className="flex items-center justify-center gap-1">
-                          Technicians
-                          {sortField === 'technicians_count' && (sortAsc ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
-                        </div>
-                      </th>
-                      <th onClick={() => handleSort('total_calls')} className="px-4 py-3.5 text-center cursor-pointer hover:text-slate-900 transition-colors">
-                        <div className="flex items-center justify-center gap-1">
-                          Total Calls
-                          {sortField === 'total_calls' && (sortAsc ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
-                        </div>
-                      </th>
-                      <th onClick={() => handleSort('open_calls')} className="px-4 py-3.5 text-center cursor-pointer hover:text-slate-900 transition-colors">
-                        <div className="flex items-center justify-center gap-1">
-                          Open Calls
-                          {sortField === 'open_calls' && (sortAsc ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
-                        </div>
-                      </th>
-                      {/* <th onClick={() => handleSort('tech_solved')} className="px-4 py-3.5 text-center cursor-pointer hover:text-slate-900 transition-colors">
-                        <div className="flex items-center justify-center gap-1">
-                          Tech Solved
-                          {sortField === 'tech_solved' && (sortAsc ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
-                        </div>
-                      </th> */}
-                      <th onClick={() => handleSort('ratio')} className="px-4 py-3.5 text-center cursor-pointer hover:text-slate-900 transition-colors">
-                        <div className="flex items-center justify-center gap-1">
-                          Ratio (Calls/Tech)
-                          {sortField === 'ratio' && (sortAsc ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
-                        </div>
-                      </th>
-                      <th className="px-4 py-3.5 w-[120px] text-center">Load Status</th>
-                    </tr>
-                  </thead>
+          {/* Capacity + idle assignees — side by side */}
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3 md:p-4">
+            <div className="distribution-tables-split min-h-0 flex-1">
+              <DistributionTablePanel
+                title="Franchisee capacity"
+                // subtitle="Load ratio — highest rows need re-allocation"
+                subtitle=""
+                count={franchiseeSummary.length}
+                countNote={
+                  highlightedFranchisee
+                    ? `· linked`
+                    : undefined
+                }
+                loading={distributionLoading}
+                loadingMessage="Analyzing capacity…"
+                emptyMessage="No franchisee backlog for current filters."
+                isEmpty={!distributionLoading && franchiseeSummary.length === 0}
+                sortField={sortField}
+                sortAsc={sortAsc}
+                onSort={handleSort}
+                columns={franchiseeColumns}
+                footerHint="Click ASP to move it to the top and link idle rows · Unallocated is not linkable"
+              >
+                {displayedFranchiseeList.map((fran, rowIndex) => {
+                  const isUnallocated = isUnallocatedFranchiseeCode(fran.franchisee_code);
+                  const franCode = normalizeOfficeCode(fran.franchisee_code);
+                  const isLinked =
+                    !isUnallocated &&
+                    highlightedFranchisee != null &&
+                    franCode === highlightedFranchisee;
+                  const prev = displayedFranchiseeList[rowIndex - 1];
+                  const showSectionBelow =
+                    highlightedFranchisee != null &&
+                    !isLinked &&
+                    prev != null &&
+                    !isUnallocatedFranchiseeCode(prev.franchisee_code) &&
+                    normalizeOfficeCode(prev.franchisee_code) === highlightedFranchisee;
+                  const ratioColor =
+                    fran.ratio > 15
+                      ? 'text-rose-600 font-bold'
+                      : fran.ratio > 7
+                        ? 'text-amber-600 font-semibold'
+                        : 'text-emerald-600';
 
-                  <tbody className="divide-y divide-slate-100">
-                    {sortedFranchiseeList.map((fran: any) => {
-                      const isHighlighted = highlightedFranchisee === fran.franchisee_code;
-
-                      // Highlight styles depending on workload status
-                      let ratioColor = 'text-emerald-600';
-                      let statusBadge = 'bg-emerald-50 text-emerald-700 border-emerald-250';
-                      let statusLabel = 'Balanced';
-
-                      if (fran.ratio > 15) {
-                        ratioColor = 'text-rose-600 font-bold';
-                        statusBadge = 'bg-rose-50 text-rose-700 border-rose-250 animate-pulse';
-                        statusLabel = 'Critical Skew';
-                      } else if (fran.ratio > 7) {
-                        ratioColor = 'text-amber-600 font-semibold';
-                        statusBadge = 'bg-amber-50 text-amber-700 border-amber-250';
-                        statusLabel = 'Overallocated';
+                  return (
+                    <tr
+                      key={fran.franchisee_code}
+                      title={`${fran.franchisee_name} · ${fran.open_calls} open calls`}
+                      onClick={
+                        isUnallocated
+                          ? undefined
+                          : () => handleFranchiseeRowClick(fran.franchisee_code)
                       }
+                      className={`${
+                        isUnallocated
+                          ? 'distribution-data-table__row--unallocated'
+                          : 'distribution-data-table__row--clickable'
+                      } ${isLinked ? 'distribution-data-table__row--active' : ''}${
+                        showSectionBelow ? ' distribution-data-table__row--below-linked' : ''
+                      }`}
+                    >
+                      <td className="max-w-[11rem] truncate font-bold text-slate-800">
+                        {fran.franchisee_name}
+                      </td>
+                      <td className="text-center font-semibold text-slate-600 tabular-nums">
+                        {fran.technicians_count}
+                      </td>
+                      <td className="text-center text-slate-600 tabular-nums">{fran.total_calls}</td>
+                      <td className="text-center font-bold text-amber-600 tabular-nums">{fran.open_calls}</td>
+                      <td className={`text-center font-extrabold tabular-nums ${ratioColor}`}>{fran.ratio}x</td>
+                      <td className="text-center">
+                        <DistributionLoadBadge ratio={fran.ratio} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </DistributionTablePanel>
 
-                      return (
-                        <tr
-                          key={fran.franchisee_code}
-                          onClick={() => {
-                            setHighlightedFranchisee(isHighlighted ? null : fran.franchisee_code);
-                          }}
-                          className={`hover:bg-slate-50/80 cursor-pointer transition-all duration-150 ${isHighlighted ? 'bg-teal-50/70 border-l-2 border-l-teal-600' : ''}`}
+              <DistributionTablePanel
+                panelClassName="distribution-table-panel--idle"
+                title="Idle technicians"
+                // subtitle="Technicians only — use KPI pills for status; row click links to ASP"
+                subtitle=""
+                count={displayedIdleAssigneeRows.length}
+                countNote={
+                  highlightedFranchisee && linkedIdleCount > 0
+                    ? `· ${linkedIdleCount} linked`
+                    : highlightedFranchisee
+                      ? '· 0 linked'
+                      : undefined
+                }
+                loading={idleTableLoading}
+                loadingMessage="Loading branch technician roster…"
+                emptyMessage={
+                  idleIssueFilter === 'assigned_no_completions'
+                    ? 'No assignees with assigned-only backlog in this scope.'
+                    : 'No idle assignees for this scope.'
+                }
+                isEmpty={!idleTableLoading && displayedIdleAssigneeRows.length === 0}
+                sortField={idleSortField}
+                sortAsc={idleSortAsc}
+                onSort={(field) => handleIdleSort(field as keyof IdleAssigneeRow | 'issue')}
+                columns={idleColumns}
+                tableMinWidth="36rem"
+                footerHint="Linked rows move to the top · KPI pills filter status only"
+              >
+                {displayedIdleAssigneeRows.map((row, rowIndex) => {
+                  const rowKey = idleRowKey(row);
+                  const isFocused = highlightedIdleKey === rowKey;
+                  const matchesAsp =
+                    highlightedFranchisee != null &&
+                    idleRowMatchesFranchisee(row, highlightedFranchisee);
+                  const isLinked = isFocused || matchesAsp;
+                  const priority = idleRowLinkPriority(row);
+                  const prevPriority =
+                    rowIndex > 0
+                      ? idleRowLinkPriority(displayedIdleAssigneeRows[rowIndex - 1])
+                      : -1;
+                  const showSectionBelow =
+                    (highlightedFranchisee != null || highlightedIdleKey != null) &&
+                    prevPriority < 2 &&
+                    priority === 2;
+                  return (
+                  <tr
+                    key={rowKey}
+                    title={`${row.name} · ${row.issue === 'assigned_no_completions' ? 'Assigned, no work' : 'Zero allocations'}${row.franchiseeName ? ` · ASP: ${row.franchiseeName}` : ''}`}
+                    onClick={() => handleIdleRowClick(row)}
+                    className={`distribution-data-table__row--clickable ${
+                      isLinked ? 'distribution-data-table__row--active ' : ''
+                    }${showSectionBelow ? ' distribution-data-table__row--below-linked' : ''}${
+                      row.issue === 'assigned_no_completions'
+                        ? 'distribution-data-table__row--idle-warn'
+                        : 'distribution-data-table__row--idle-muted'
+                    }`}
+                  >
+                    <td className="distribution-data-table__cell-name">
+                      <span className="block truncate font-bold text-slate-800" title={row.name}>
+                        {row.name}
+                      </span>
+                      {row.franchiseeName ? (
+                        <span
+                          className="block truncate text-[9px] font-medium text-slate-400"
+                          title={`ASP: ${row.franchiseeName}`}
                         >
-                          <td className="px-4 py-3.5 font-bold text-slate-800 max-w-[200px] truncate">
-                            {fran.franchisee_name}
-                          </td>
-                          <td className="px-4 py-3.5 text-center text-slate-600 font-semibold">
-                            {fran.technicians_count}
-                          </td>
-                          <td className="px-4 py-3.5 text-center text-slate-600">
-                            {fran.total_calls}
-                          </td>
-                          <td className="px-4 py-3.5 text-center font-bold text-amber-600">
-                            {fran.open_calls}
-                          </td>
-                          {/* <td className="px-4 py-3.5 text-center text-slate-600">
-                            {fran.tech_solved || 0}
-                          </td> */}
-                          <td className={`px-4 py-3.5 text-center font-extrabold ${ratioColor}`}>
-                            {fran.ratio}x
-                          </td>
-                          <td className="px-4 py-3.5 text-center">
-                            <span className={`px-2 py-0.5 rounded-full text-[9px] border font-bold ${statusBadge}`}>
-                              {statusLabel}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-
+                          ASP: {row.franchiseeName}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="truncate text-slate-700" title={row.branchName || 'Branch unknown'}>
+                      {row.branchName || '—'}
+                    </td>
+                    <td>
+                      <DistributionIssueBadge issue={row.issue} />
+                    </td>
+                    <td className="text-center font-bold tabular-nums text-amber-600">{row.assignedCalls}</td>
+                    <td className="text-center tabular-nums text-slate-600">{row.totalCalls}</td>
+                  </tr>
+                  );
+                })}
+              </DistributionTablePanel>
             </div>
-
           </div>
 
         </div>

@@ -1,6 +1,9 @@
 import { prisma } from '@/lib/prisma';
 import { HOT_TARGET_ROWS } from '@/lib/read-model/constants';
+import { releaseStaleArcpSyncLock } from '@/lib/read-model/arcp/lock';
 import { getArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-server';
+import { withClient } from '@/lib/read-model/db';
+import { releaseStaleSyncLock } from '@/lib/read-model/lock';
 import type { ArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-shared';
 import {
   readDimsFromPostgres,
@@ -107,6 +110,12 @@ export async function getHotRowCount(): Promise<number> {
 }
 
 export async function getReadModelProgress(): Promise<ReadModelProgress> {
+  /** Clear crashed-worker flags so status polls are not stuck on is_running forever. */
+  await withClient(async (client) => {
+    await releaseStaleSyncLock(client);
+    await releaseStaleArcpSyncLock(client);
+  });
+
   const [hotCount, factGrains, dims, syncStates, runs, batches, arcp] = await Promise.all([
     getHotRowCount(),
     prisma.$queryRawUnsafe<Array<{ count: number }>>(
@@ -158,7 +167,9 @@ export async function getReadModelProgress(): Promise<ReadModelProgress> {
   ]);
 
   const hotState = syncStates.find((s) => s.entity === 'calls_latest_hot');
-  const isRunning = syncStates.some((s) => s.is_running);
+  const arcpState = syncStates.find((s) => s.entity === 'arcp_lines_hot');
+  const callsRunning = hotState?.is_running === true;
+  const arcpRunning = arcpState?.is_running === true;
   const hotStatus = hotState?.status ?? 'unknown';
 
   let phase: ReadModelProgress['phase'] = 'pending_backfill';
@@ -167,19 +178,22 @@ export async function getReadModelProgress(): Promise<ReadModelProgress> {
   if (hotStatus === 'error') {
     phase = 'error';
     message = 'Sync worker reported an error. Check recent runs below.';
-  } else if (isRunning && hotStatus === 'ok' && hotCount >= HOT_TARGET_ROWS * 0.95) {
+  } else if (callsRunning && hotStatus === 'ok' && hotCount >= HOT_TARGET_ROWS * 0.95) {
     phase = 'syncing';
-    message = 'Incremental sync in progress (daemon or manual sync).';
+    message = 'Call register incremental sync in progress.';
+  } else if (arcpRunning && !callsRunning) {
+    phase = 'syncing';
+    message = 'ARCP sync in progress — call register can still load from Postgres.';
   } else if (hotStatus === 'ok' && hotCount >= HOT_TARGET_ROWS * 0.95) {
     phase = 'ready';
     message = 'Backfill complete. Start incremental sync daemon when ready.';
-  } else if (isRunning || hotCount > 0) {
+  } else if (callsRunning || arcpRunning || hotCount > 0) {
     phase = 'backfilling';
     message = 'Initial backfill in progress. This can take several hours via CRM.';
   } else if (hotStatus === 'pending_backfill') {
     phase = 'pending_backfill';
     message = 'Run npm run sync-worker:backfill if not already started.';
-  } else if (isRunning) {
+  } else if (callsRunning || arcpRunning) {
     phase = 'syncing';
     message = 'Sync worker is running.';
   }
