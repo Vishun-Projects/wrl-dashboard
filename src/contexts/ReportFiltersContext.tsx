@@ -54,13 +54,6 @@ import {
   readCallsFromPostgresClient,
   readRegisterFromPostgresClient,
 } from '@/lib/read-model/client-flags';
-import {
-  fetchReadModelStatus,
-  formatIncrementalSyncToast,
-  isCallsHotSyncRunning,
-  postIncrementalSyncFromUi,
-  waitForReadModelSyncIdle,
-} from '@/lib/read-model/trigger-sync-client';
 import { fetchAllRegisterRowsForExport, logRegisterBulk } from '@/lib/register-export-fetch';
 import { sanitizeUserFacingMessage } from '@/lib/user-facing-errors';
 import { createChunkedFetchAuth } from '@/lib/supabase-chunked-fetch';
@@ -1060,80 +1053,21 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       setSyncInProgress(true);
       let toastId: string | number | undefined;
       if (opts?.showToast) {
-        toastId = toast.loading('Syncing...');
+        toastId = toast.loading('Refreshing report…');
       }
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        const token = session?.access_token;
-        logRegisterBulk(opts?.showToast ? 'UI refresh' : 'Auto refresh');
-
-        let progress = await fetchReadModelStatus(token);
-        if (isCallsHotSyncRunning(progress)) {
-          if (opts?.showToast && toastId != null) {
-            toast.loading('Waiting for update to finish…', { id: toastId });
-          }
-          const idle = await waitForReadModelSyncIdle(token, undefined, (elapsedMs) => {
-            if (opts?.showToast && toastId != null && elapsedMs >= 30_000) {
-              toast.loading(
-                'Still waiting — checking sync lock (stale locks clear after ~5 min)…',
-                { id: toastId }
-              );
-            }
-          });
-          if (!idle) {
-            throw new Error(
-              'Update is still running after 10 minutes. Wait a moment, then try again.'
-            );
-          }
-        }
-
-        let syncResult: Awaited<ReturnType<typeof postIncrementalSyncFromUi>>;
-        try {
-          syncResult = await postIncrementalSyncFromUi(token);
-        } catch (err: unknown) {
-          if (axios.isAxiosError(err) && err.response?.status === 409) {
-            const idle = await waitForReadModelSyncIdle(token);
-            if (!idle) {
-              throw new Error(
-                (err.response.data as { error?: string })?.error ?? 'Sync already running'
-              );
-            }
-            syncResult = {
-              ok: true,
-              coalesced: true,
-              rowsUpserted: 0,
-              rowsDeleted: 0,
-            };
-          } else if (axios.isAxiosError(err) && err.response?.status === 503) {
-            throw new Error(
-              sanitizeUserFacingMessage(
-                (err.response.data as { error?: string })?.error ??
-                  'Background refresh is temporarily unavailable'
-              )
-            );
-          } else {
-            throw err;
-          }
-        }
-
+        logRegisterBulk('UI refresh from read model (no live ingest)');
         if (opts?.showToast && toastId != null) {
-          toast.loading('Reloading report…', { id: toastId });
+          toast.loading('Loading latest calls…', { id: toastId });
         }
         await ensureSharedCallsLoaded(true);
-        const syncTime = syncResult.syncMeta?.lastSyncedAt
-          ? new Date(syncResult.syncMeta.lastSyncedAt)
-          : new Date();
+        const syncTime = new Date();
         setLastSyncedAt(syncTime);
         notifyCorpusRegisterDelta([], syncTime);
 
         if (opts?.showToast) {
-          const { kind, message } = formatIncrementalSyncToast(syncResult);
           if (toastId != null) toast.dismiss(toastId);
-          if (kind === 'success') toast.success(message);
-          else if (kind === 'error') toast.error(message);
-          else toast.info(message);
+          toast.success('Report refreshed');
         } else if (toastId != null) {
           toast.dismiss(toastId);
         }

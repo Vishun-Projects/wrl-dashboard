@@ -47,11 +47,13 @@ export function readCallsFromPostgresClient(): boolean {
   );
 }
 
-/** Background CRM→Postgres sync while the report app is open (default on, 3 min). */
+/**
+ * Browser must not run CRM ingest when the UI reads from Postgres — that runs on the sync worker.
+ * (Calling CRM from Vercel can hit viewstate OOM; the refresh button reloads from Supabase only.)
+ */
 export function postgresAutoSyncEnabled(): boolean {
-  return (
-    readCallsFromPostgresClient() && process.env.NEXT_PUBLIC_AUTO_SYNC_ENABLED !== 'false'
-  );
+  if (readCallsFromPostgresClient()) return false;
+  return process.env.NEXT_PUBLIC_AUTO_SYNC_ENABLED !== 'false';
 }
 
 export function postgresAutoSyncIntervalMs(): number {

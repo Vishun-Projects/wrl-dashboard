@@ -191,7 +191,7 @@ async function fetchRegisterBulkForCache(opts: {
   onProgress?: (fetched: number, total: number) => void;
 }): Promise<Record<string, unknown>[]> {
   const t0 = performance.now();
-  registerLog('bulk preload START (single API request)', {
+  logRegisterBulk('bulk preload START (single API request)', {
     startDate: opts.query.startDate,
     endDate: opts.query.endDate,
     callType: opts.query.callType,
@@ -212,7 +212,7 @@ async function fetchRegisterBulkForCache(opts: {
     res = await attempt();
   } catch (err) {
     if (!axios.isAxiosError(err) || err.response?.status !== 401 || !opts.refreshAuth) {
-      registerLog('bulk preload FAILED', {
+      logRegisterBulk('bulk preload FAILED', {
         ms: Number((performance.now() - t0).toFixed(1)),
         error: err instanceof Error ? err.message : String(err),
       });
@@ -227,7 +227,7 @@ async function fetchRegisterBulkForCache(opts: {
     throw new Error('Invalid register bulk response from server');
   }
   opts.onProgress?.(rows.length, rows.length);
-  registerLog('bulk preload DONE (network)', {
+  logRegisterBulk('bulk preload DONE (network)', {
     rows: rows.length,
     ms: Number((performance.now() - t0).toFixed(1)),
   });
@@ -278,7 +278,7 @@ export async function fetchAllRegisterRowsForExport(opts: {
 
   const batchSize = resolveRegisterExportBatchSize(opts.query.startDate, opts.query.endDate);
   const t0 = performance.now();
-  registerLog('paginated preload START', {
+  logRegisterBulk('paginated preload START', {
     batchSize,
     startDate: opts.query.startDate,
     endDate: opts.query.endDate,
@@ -318,7 +318,7 @@ export async function fetchAllRegisterRowsForExport(opts: {
 
     allRows.push(...rows);
     opts.onProgress?.(allRows.length, total);
-    registerLog(`paginated preload page ${page}`, {
+    logRegisterBulk(`paginated preload page ${page}`, {
       pageRows: rows.length,
       fetched: allRows.length,
       total: total || 'unknown',
@@ -335,7 +335,7 @@ export async function fetchAllRegisterRowsForExport(opts: {
     page += 1;
   }
 
-  registerLog('paginated preload DONE (network)', {
+  logRegisterBulk('paginated preload DONE (network)', {
     rows: allRows.length,
     pages: page,
     ms: Number((performance.now() - t0).toFixed(1)),

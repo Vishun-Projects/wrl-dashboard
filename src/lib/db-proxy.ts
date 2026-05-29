@@ -257,7 +257,7 @@ async function executePostWithRetry(params: QueryParams, signal?: AbortSignal) {
           httpStatus,
         });
         const oomErr = new Error(
-          'CRM viewstate OOM: result grid too large — use a smaller date range'
+          'Date range too large — use a smaller date range'
         ) as CrmQueryError;
         oomErr.crmOutOfMemory = true;
         throw oomErr;
