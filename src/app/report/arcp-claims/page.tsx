@@ -39,6 +39,7 @@ import { runPool } from '@/lib/run-pool';
 import { readArcpFromPostgresClient } from '@/lib/read-model/client-flags';
 import type { ArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-shared';
 import { fetchReadModelStatus } from '@/lib/read-model/trigger-sync-client';
+import { sanitizeUserFacingMessage } from '@/lib/user-facing-errors';
 import {
   downloadArcpClaimsCsv,
   downloadArcpClaimsDetailCsv,
@@ -95,27 +96,16 @@ function appliedFiltersKey(filters: AppliedArcpFilters): string {
 function buildArcpPlanMessage(
   plan: ArcpLoadPlan,
   dateFilterColumn: ArcpDateFilterColumn,
-  usePostgres?: boolean,
+  _usePostgres?: boolean,
   scopedFilters?: boolean
 ): string {
   const eta = formatArcpDurationMs(plan.estimateMs);
 
-  if (usePostgres) {
-    if (plan.crmChunkCount > 0 && plan.crmChunkCount < plan.chunkCount) {
-      return `Loading ${plan.chunkCount} period(s) (est. ${eta}) — Postgres first; ${plan.crmChunkCount} period(s) may use live CRM if not in database yet.`;
+  if (plan.chunkCount <= 1) {
+    if (scopedFilters) {
+      return `Loading ${plan.spanDays}-day tally for selected branch/franchisee (est. ${eta}).`;
     }
-    if (plan.crmChunkCount > 0 && plan.chunkCount <= 1) {
-      return `Loading ${plan.spanDays}-day tally — Postgres first, then live CRM if needed (est. ${eta}).`;
-    }
-    if (plan.chunkCount <= 1) {
-      if (scopedFilters) {
-        return `Loading ${plan.spanDays}-day tally for selected branch/franchisee from database (est. ${eta}).`;
-      }
-      return `Loading ${plan.spanDays}-day tally from database (est. ${eta}).`;
-    }
-    return `Loading ${plan.chunkCount} period(s) from database (est. ${eta}).`;
-  } else if (plan.chunkCount <= 1) {
-    return `Loading ${plan.spanDays}-day tally from CRM (est. ${eta}).`;
+    return `Loading ${plan.spanDays}-day tally (est. ${eta}).`;
   }
 
   const basis =
@@ -129,16 +119,16 @@ function buildArcpPlanMessage(
     const parallelNote =
       resolveArcpLoadConcurrency({ dateFilterColumn }) > 1
         ? ` (up to ${resolveArcpLoadConcurrency({ dateFilterColumn })} in parallel)`
-        : ' (one CRM request at a time — avoids SQL timeouts)';
+        : '';
     return `${plan.spanDays}-day range on ${basis} loads in ${plan.chunkCount} weekly period(s)${parallelNote}. Est. ${eta}.`;
   }
 
-  return `${plan.spanDays}-day range on ${basis} loads in ${plan.chunkCount} monthly periods. Est. ${eta}.`;
+  return `Loading ${plan.chunkCount} period(s) on ${basis} (est. ${eta}).`;
 }
 
 function buildArcpDetailPlanMessage(plan: ArcpLoadPlan, dateFilterColumn: ArcpDateFilterColumn): string {
   if (plan.chunkCount <= 1) {
-    return `Fetching line-level detail for ${plan.spanDays} days from CRM.`;
+    return `Fetching line-level detail for ${plan.spanDays} days.`;
   }
 
   const basis =
@@ -146,7 +136,7 @@ function buildArcpDetailPlanMessage(plan: ArcpLoadPlan, dateFilterColumn: ArcpDa
     'Call Date';
   const eta = formatArcpDurationMs(plan.estimateMs);
 
-  return `${plan.spanDays}-day detail on ${basis} is exported in ${plan.chunkCount} periods (est. ${eta}). Each period is fetched separately from CRM.`;
+  return `${plan.spanDays}-day detail on ${basis} exports in ${plan.chunkCount} periods (est. ${eta}).`;
 }
 
 function toLoadStatus(
@@ -597,12 +587,7 @@ export default function ArcpClaimsPage() {
                 dataSource: usedCrmFallback ? 'crm_fallback' : 'postgres',
               }
             );
-            if (usedCrmFallback && !isStale()) {
-              toast.info(
-                'Loaded from CRM (not in database for this filter).',
-                { duration: 7000 }
-              );
-            }
+            /* no toast when supplemental periods were merged — avoid exposing data source */
           } catch (singleErr: unknown) {
             if (axios.isCancel(singleErr) || (singleErr instanceof DOMException && singleErr.name === 'AbortError')) {
               return;
@@ -610,12 +595,13 @@ export default function ArcpClaimsPage() {
             if (isChunkedFetchAuthError(singleErr)) {
               throw singleErr;
             }
-            const message =
+            const message = sanitizeUserFacingMessage(
               axios.isAxiosError(singleErr) && singleErr.response?.data?.error
                 ? String(singleErr.response.data.error)
                 : singleErr instanceof Error
                   ? singleErr.message
-                  : 'Failed to load ARCP claims';
+                  : 'Failed to load ARCP claims'
+            );
             throw new Error(message);
           }
         } else {
@@ -702,18 +688,11 @@ export default function ArcpClaimsPage() {
           }
         );
 
-        if (usedCrmFallback && !isStale()) {
-          toast.info(
-            'Some periods loaded from CRM (not in database for this filter).',
-            { duration: 7000 }
-          );
-        }
-
         if (failedChunks > 0 && !isStale()) {
           const partialMessage =
             rawAggregates.length > 0
               ? `Loaded partial tally — ${failedChunks} of ${chunks.length} period(s) timed out. Narrow filters or retry.`
-              : 'Failed to load ARCP claims — CRM timed out on all periods in this range.';
+              : 'Failed to load ARCP claims — all periods timed out for this range.';
           if (rawAggregates.length === 0) {
             throw new Error(partialMessage);
           }
@@ -726,12 +705,13 @@ export default function ArcpClaimsPage() {
         if (axios.isCancel(err) || (err instanceof DOMException && err.name === 'AbortError')) {
           return;
         }
-        const message =
+        const message = sanitizeUserFacingMessage(
           axios.isAxiosError(err) && err.response?.data?.error
             ? String(err.response.data.error)
             : err instanceof Error
               ? err.message
-              : 'Failed to load ARCP claims';
+              : 'Failed to load ARCP claims'
+        );
         setLoadError(message);
         toast.error(message);
       } finally {
@@ -872,8 +852,11 @@ export default function ArcpClaimsPage() {
       setPdfFileName(fileName);
       setPdfViewerOpen(true);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to generate PDF';
-      toast.error(message);
+      toast.error(
+        sanitizeUserFacingMessage(
+          err instanceof Error ? err.message : 'Failed to generate PDF'
+        )
+      );
     } finally {
       setExportingPdf(false);
     }
@@ -944,9 +927,7 @@ export default function ArcpClaimsPage() {
         if (data.error) throw new Error(data.error);
         const rows = mergeArcpDetailRows(data.rows ?? []);
         if (rows.length === 0) throw new Error('No detail rows to export');
-        if (data.meta?.source === 'crm_fallback') {
-          toast.info('Detail loaded from CRM (not in database for this filter).', { duration: 5000 });
-        }
+        /* no source toast on detail export */
         const fileName = `ARCP_Claims_Detail_${appliedFilters.startDateStr}_${appliedFilters.endDateStr}.csv`;
         downloadArcpClaimsDetailCsv(rows, fileName);
         toast.success(`Exported ${rows.length.toLocaleString('en-IN')} detail rows`);
@@ -1028,13 +1009,15 @@ export default function ArcpClaimsPage() {
         toast.success(`Detail CSV exported (${rows.length.toLocaleString('en-IN')} rows)`);
       }
     } catch (err: unknown) {
-      const message =
-        axios.isAxiosError(err) && err.response?.data?.error
-          ? String(err.response.data.error)
-          : err instanceof Error
-            ? err.message
-            : 'Failed to export detail CSV';
-      toast.error(message);
+      toast.error(
+        sanitizeUserFacingMessage(
+          axios.isAxiosError(err) && err.response?.data?.error
+            ? String(err.response.data.error)
+            : err instanceof Error
+              ? err.message
+              : 'Failed to export detail CSV'
+        )
+      );
     } finally {
       setExportingDetail(false);
       setDetailExportStatus(null);

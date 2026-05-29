@@ -203,19 +203,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'CRM query returned too much data. Narrow the date range or add branch/franchisee filters.',
+            'Query returned too much data. Narrow the date range or add branch/franchisee filters.',
         },
         { status: 507 }
       );
     }
     if (isCrmSqlTimeoutError(err)) {
-      const message = err instanceof Error ? err.message : '';
       return NextResponse.json(
         {
           error:
-            message.includes('CRM timed out loading ARCP tally for')
-              ? message
-              : 'CRM query timed out while loading part of the date range. Please retry — heavy periods are split automatically.',
+            'Request timed out while loading part of the date range. Please retry — heavy periods are split automatically.',
         },
         { status: 504 }
       );

@@ -704,7 +704,7 @@ export async function GET(req: NextRequest) {
         String(loadErr).includes('memory');
       if (!isOom) throw loadErr;
       degraded = true;
-      console.warn('Distribution full load degraded (CRM OOM); returning empty calls.');
+      /* degraded load — return partial empty set */
     }
 
     // Fetch branches directly from CRM based on user permissions
@@ -730,7 +730,7 @@ export async function GET(req: NextRequest) {
         ? {
             degraded: true,
             warning:
-              'CRM could not load all calls for this range. Try Last 7 Days or a shorter custom range.',
+              'Could not load all calls for this range. Try Last 7 Days or a shorter custom range.',
           }
         : {}),
     });
@@ -746,7 +746,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         error: isOom
-          ? 'CRM database ran out of memory for this date range. Try a shorter range (e.g. 7 days).'
+          ? 'Server ran out of memory for this date range. Try a shorter range (e.g. 7 days).'
           : err.message || 'Distribution query failed',
       },
       { status: isOom ? 503 : 500 }

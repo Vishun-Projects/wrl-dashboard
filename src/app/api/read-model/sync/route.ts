@@ -26,7 +26,7 @@ export async function POST() {
 
   if (process.env.SYNC_WORKER_ENABLED !== 'true') {
     return NextResponse.json(
-      { error: 'SYNC_WORKER_ENABLED is not true — incremental sync is disabled' },
+      { error: 'Background refresh is temporarily unavailable' },
       { status: 503 }
     );
   }

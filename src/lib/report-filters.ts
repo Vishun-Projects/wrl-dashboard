@@ -148,6 +148,9 @@ export function buildSummaryQueryKey(parts: {
   return JSON.stringify(parts);
 }
 
+/** Idle time before search / pincode toolbar filters apply (register, distribution, etc.). */
+export const REPORT_FILTER_SEARCH_DEBOUNCE_MS = 3000;
+
 export const REGISTER_PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 
 export type RegisterPageSize = (typeof REGISTER_PAGE_SIZE_OPTIONS)[number];

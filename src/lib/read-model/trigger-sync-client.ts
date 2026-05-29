@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { sanitizeUserFacingMessage } from '@/lib/user-facing-errors';
 import type { ReadModelProgress, SyncMeta } from '@/lib/read-model/sync-meta';
 
 export type IncrementalSyncApiResult = {
@@ -76,32 +77,30 @@ export function formatIncrementalSyncToast(result: IncrementalSyncApiResult): {
   message: string;
 } {
   if (result.error) {
-    return { kind: 'error', message: result.error };
+    return { kind: 'error', message: sanitizeUserFacingMessage(result.error) };
   }
   if (result.skipped && result.reason) {
-    return { kind: 'info', message: `Sync skipped: ${result.reason}` };
+    return { kind: 'info', message: 'Refresh skipped — try again in a moment' };
   }
   const upserted = result.rowsUpserted ?? 0;
   const deleted = result.rowsDeleted ?? 0;
-  const fetched = result.crmRowsFetched ?? 0;
   if (upserted > 0 || deleted > 0) {
     const parts: string[] = [];
-    if (fetched > 0) parts.push(`${fetched} from CRM`);
-    if (upserted > 0) parts.push(`${upserted} updated in database`);
+    if (upserted > 0) parts.push(`${upserted} updated`);
     if (deleted > 0) parts.push(`${deleted} removed`);
     return {
       kind: 'success',
-      message: `Synced ${parts.join(', ')} — report reloaded`,
+      message: `Report refreshed (${parts.join(', ')})`,
     };
   }
   if (result.coalesced) {
     return {
       kind: 'info',
-      message: 'Background sync finished — report reloaded from database',
+      message: 'Report refreshed',
     };
   }
   return {
     kind: 'info',
-    message: 'No new CRM changes — report reloaded from database',
+    message: 'Report is up to date',
   };
 }

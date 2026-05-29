@@ -26,11 +26,13 @@ export function RegisterPageFilters({
   onPincodeEnter,
   summary,
   loading = false,
-  loadingLabel = 'Loading calls…',
+  loadingLabel,
 }: RegisterPageFiltersProps) {
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
-  const { distributionLoading } = useReportFilters();
-  const isFetching = loading || distributionLoading;
+  const { distributionLoading, isSearchDebouncing } = useReportFilters();
+  const isFetching = loading || distributionLoading || isSearchDebouncing;
+  const fetchLabel =
+    loadingLabel ?? (isSearchDebouncing ? 'Waiting for search…' : 'Loading calls…');
 
   return (
     <>
@@ -40,7 +42,7 @@ export function RegisterPageFilters({
         onPincodeEnter={onPincodeEnter}
       />
       <RegisterActiveFilterChips onClearAll={onClearAll} />
-      <ReportFetchingBar active={isFetching} label={loadingLabel} />
+      <ReportFetchingBar active={isFetching} label={fetchLabel} />
       {summary !== undefined && <RegisterStatsBar summary={summary} />}
       <RegisterFilterDrawer
         open={filterDrawerOpen}

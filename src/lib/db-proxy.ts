@@ -85,11 +85,11 @@ function describeQuery(params: QueryParams): string {
 }
 
 function logCrmTiming(
-  event: string,
-  elapsedMs: number,
-  detail: Record<string, unknown>
+  _event: string,
+  _elapsedMs: number,
+  _detail: Record<string, unknown>
 ): void {
-  console.log(`[WRL CRM] ${event} ${elapsedMs}ms`, detail);
+  /* no-op */
 }
 
 async function fetchAppStateOnce(): Promise<{

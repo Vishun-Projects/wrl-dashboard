@@ -77,8 +77,8 @@ function scheduleCorpusRefresh(
     callType,
     dateColumn,
     security
-  ).catch((err) => {
-    console.warn('Background corpus refresh failed:', err);
+  ).catch(() => {
+    /* background refresh failed — stale cache may still be served */
   });
 }
 
@@ -265,10 +265,7 @@ async function mergeAdaptiveChunks(
       }
     } catch (subErr) {
       failed++;
-      console.warn(
-        `Corpus sub-range ${chunk.start}–${chunk.end} failed:`,
-        subErr instanceof Error ? subErr.message : subErr
-      );
+      /* sub-range failed — continue with partial data */
     }
   }
 
@@ -305,9 +302,7 @@ async function fetchCorpusRangeAdaptive(
     return { rows, topLimited: false };
   } catch (err) {
     if (span <= CORPUS_MIN_CHUNK_DAYS && isCrmOutOfMemoryError(err)) {
-      console.warn(
-        `Corpus day ${startDate} OOM — fetching TOP ${CORPUS_SINGLE_DAY_TOP} rows only`
-      );
+      /* day OOM — fetch capped row count */
       const rows = await fetchCorpusSlice(
         startDate,
         endDate,
@@ -325,11 +320,6 @@ async function fetchCorpusRangeAdaptive(
     const subChunkDays = Math.max(CORPUS_MIN_CHUNK_DAYS, Math.floor(span / 2));
     const subChunks = splitDateRange(startDate, endDate, subChunkDays);
     if (subChunks.length <= 1) throw err;
-
-    const reason = isCrmOutOfMemoryError(err) ? 'CRM viewstate OOM' : err instanceof Error ? err.message : err;
-    console.warn(
-      `Corpus range ${startDate}–${endDate} failed (${reason}); splitting into ${subChunks.length} sub-ranges of ~${subChunkDays}d`
-    );
 
     return mergeAdaptiveChunks(subChunks, callType, dateColumn, security);
   }
@@ -368,7 +358,7 @@ async function fetchCorpusFullMerged(
       if (merged.size >= CORPUS_MAX_ROWS) break;
     } catch (err) {
       failedMonths++;
-      console.warn(`Corpus month ${month.start}–${month.end} failed:`, err);
+      /* month slice failed — continue with partial data */
     }
     if (i < months.length - 1) {
       await sleep(CORPUS_CHUNK_FETCH_GAP_MS);
@@ -426,13 +416,9 @@ async function fetchCorpusFull(
   try {
     const result = await run;
     fullCache.set(cacheKey, { data: result.calls, timestamp: Date.now() });
-    void writeCorpusDiskCache(cacheKey, result.calls)
-      .then(() => {
-        console.log(`[Corpus] stored ${result.calls.length} rows (${cacheKey})`);
-      })
-      .catch((err) => {
-        console.warn('Corpus disk cache write failed:', err);
-      });
+    void writeCorpusDiskCache(cacheKey, result.calls).catch(() => {
+      /* disk cache optional */
+    });
     return result;
   } finally {
     fullInflight.delete(cacheKey);
@@ -461,7 +447,7 @@ export async function GET(req: NextRequest) {
   if (readCallsFromPostgres()) {
     return NextResponse.json(
       {
-        error: 'Corpus API disabled — report reads use Postgres. Use /api/report or /api/distribution.',
+        error: 'This endpoint is not available for your report configuration.',
         readSource: 'postgres',
       },
       { status: 410 }
@@ -527,9 +513,6 @@ export async function GET(req: NextRequest) {
 
     const cached = await resolveCachedCorpus(cacheKey, bypassCache);
     if (cached) {
-      console.log(
-        `[Corpus] cache hit (${cached.source}, ${cached.data.length} rows, age ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`
-      );
       if (cached.stale) {
         scheduleCorpusRefresh(cacheKey, startDate, endDate, callType, dateFilterColumn, security);
       }
@@ -566,7 +549,7 @@ export async function GET(req: NextRequest) {
     }
     if (topLimited) {
       warnings.push(
-        'Some busy days hit CRM memory limits and were capped — counts for those days may be incomplete.'
+        'Some busy days hit memory limits and were capped — counts for those days may be incomplete.'
       );
     }
     if (partial && !topLimited) {

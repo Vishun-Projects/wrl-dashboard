@@ -77,6 +77,7 @@ import {
 import { readCorpusMeta } from '@/lib/report-corpus-storage';
 import { deriveSummaryDashboard, diagnoseSummaryDerivation } from '@/lib/report-summary-derive';
 import { readRegisterFromPostgresClient, readSummaryFromPostgresClient } from '@/lib/read-model/client-flags';
+import { sanitizeUserFacingMessage } from '@/lib/user-facing-errors';
 import { deriveRegisterPageFromCalls, deriveRegisterView } from '@/lib/report-register-view';
 import {
   collectRegisterRowsFromSessionCache,
@@ -261,28 +262,16 @@ function corpusSpanDays(startDateStr: string, endDateStr: string): number {
 }
 
 function reportPerfLogDocumentNavigationOnce() {
-  if (typeof performance === 'undefined' || typeof console === 'undefined') return;
-  const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-  if (!nav) return;
-  console.log('[WRL Report Perf] navigation', {
-    type: nav.type,
-    domContentLoadedMs: Number((nav.domContentLoadedEventEnd - nav.startTime).toFixed(1)),
-    loadMs: Number((nav.loadEventEnd - nav.startTime).toFixed(1)),
-  });
+  /* no-op */
 }
 
 function reportPerf(
-  phase: string,
-  action: string,
-  opStart: number,
-  extra?: Record<string, unknown>
+  _phase: string,
+  _action: string,
+  _opStart: number,
+  _extra?: Record<string, unknown>
 ) {
-  if (typeof console === 'undefined') return;
-  const elapsedMs = Number((performance.now() - opStart).toFixed(1));
-  console.log(`[WRL Report Perf] ${phase} · ${action}`, {
-    elapsedMs,
-    ...extra,
-  });
+  /* no-op */
 }
 
 
@@ -299,6 +288,8 @@ export default function ReportPage() {
     setSearch,
     pincodeSearch,
     setPincodeSearch,
+    debouncedSearch,
+    debouncedPincodeSearch,
     dateRange,
     setDateRange,
     dateFilterColumn,
@@ -350,8 +341,6 @@ export default function ReportPage() {
   );
   const registerOfficeIdsParam = 'All';
 
-  const [debouncedSearch, setDebouncedSearch] = useState(globalReportCache?.search || '');
-  const [debouncedPincodeSearch, setDebouncedPincodeSearch] = useState(globalReportCache?.pincodeSearch || '');
   const [dbInitialized, setDbInitialized] = useState(!!globalReportCache);
   const [activeTab, setActiveTab] = useState<'register' | 'summary' | 'accounts'>('register');
   const [visibleRegisterColumns, setVisibleRegisterColumns] = useState<RegisterTableColumnKey[]>(() =>
@@ -404,34 +393,6 @@ export default function ReportPage() {
     if (selectedCallTypes.length === 1) return selectedCallTypes[0];
     return `${selectedCallTypes.length} Types Selected`;
   }, [selectedCallTypes]);
-  useEffect(() => {
-    const scheduleT = performance.now();
-    const timer = setTimeout(() => {
-      const fireT = performance.now();
-      reportPerf('debounce', 'search → debouncedSearch', fireT, {
-        why: '300ms idle after last keystroke; filter effect compares debouncedSearch to last fetch.',
-        waitMs: Number((fireT - scheduleT).toFixed(1)),
-        len: search.length,
-      });
-      setDebouncedSearch(search);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [search]);
-
-  useEffect(() => {
-    const scheduleT = performance.now();
-    const timer = setTimeout(() => {
-      const fireT = performance.now();
-      reportPerf('debounce', 'pincode → debouncedPincodeSearch', fireT, {
-        why: 'Same debounce pattern as search.',
-        waitMs: Number((fireT - scheduleT).toFixed(1)),
-        len: pincodeSearch.length,
-      });
-      setDebouncedPincodeSearch(pincodeSearch);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [pincodeSearch]);
-
   useEffect(() => {
     reportPerfLogDocumentNavigationOnce();
     const tMount = performance.now();
@@ -592,7 +553,11 @@ export default function ReportPage() {
         ...res.data
       });
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to load call details');
+      toast.error(
+        sanitizeUserFacingMessage(
+          String(err.response?.data?.error || 'Failed to load call details')
+        )
+      );
     }
   };
 
@@ -2370,7 +2335,10 @@ export default function ReportPage() {
       reportPerf('drillDown', 'custom SQL POST complete', q0, { rowCount: (res.data.data || []).length });
     } catch (err: any) {
       if (axios.isCancel(err)) return;
-      toast.error('Query Error: ' + (err.response?.data?.error || err.message));
+      toast.error(
+        'Query error: ' +
+          sanitizeUserFacingMessage(String(err.response?.data?.error || err.message))
+      );
       setDrillDown(prev => ({ ...prev, loading: false }));
     }
   };
@@ -3618,7 +3586,7 @@ export default function ReportPage() {
             (syncInProgress || corpusLoading || filterUpdating) && (
             <span
               className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-400 border-t-transparent"
-              title="Updating summary from corpus"
+              title="Updating summary…"
             />
           )}
           <button
@@ -3631,7 +3599,7 @@ export default function ReportPage() {
             }}
             disabled={syncInProgress}
             className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 shadow-sm transition-all hover:bg-slate-50 disabled:opacity-50"
-            title="Refresh report data from database (CRM sync runs via background worker)"
+            title="Refresh report data"
           >
             <div className={`${syncInProgress ? 'animate-spin' : ''}`}>
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M16 16h5v5" /></svg>

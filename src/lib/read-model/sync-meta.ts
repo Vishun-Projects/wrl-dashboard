@@ -189,7 +189,7 @@ export async function getReadModelProgress(): Promise<ReadModelProgress> {
     message = 'Backfill complete. Start incremental sync daemon when ready.';
   } else if (callsRunning || arcpRunning || hotCount > 0) {
     phase = 'backfilling';
-    message = 'Initial backfill in progress. This can take several hours via CRM.';
+    message = 'Initial data load in progress. This can take several hours.';
   } else if (hotStatus === 'pending_backfill') {
     phase = 'pending_backfill';
     message = 'Run npm run sync-worker:backfill if not already started.';

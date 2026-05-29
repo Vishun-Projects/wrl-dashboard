@@ -13,7 +13,7 @@ export function FlaggingDisclaimer() {
         <h4 className="text-[14px] text-[#92400e] ui-strong">Administrative Data Governance</h4>
         <p className="text-[12px] text-[#b45309] leading-relaxed mt-1">
           Modifying user roles and branch assignments directly impacts audit integrity and data visibility across the Fast-Close Portal. 
-          Changes made here are logged and will restrict user access to historical CRM records immediately. 
+          Changes made here are logged and will restrict user access to historical records immediately. 
           Please verify email addresses before provisioning new accounts to prevent duplicate profiles.
         </p>
       </div>

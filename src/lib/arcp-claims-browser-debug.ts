@@ -73,7 +73,7 @@ export function logArcpFiltersApplied(
   console.log('branch', filters.branchParam || '(all)');
   console.log('franchisee', filters.franchiseeParam || '(all)');
   console.log('callType', filters.callTypeParam || '(all)');
-  console.log('dataSource', readArcpFromPostgresClient() ? 'postgres' : 'crm');
+  console.log('dataSource', readArcpFromPostgresClient() ? 'cached' : 'live');
   console.groupEnd();
 }
 
@@ -109,15 +109,13 @@ export function logArcpLoadResult(
   console.log('request', {
     dataSource:
       meta.dataSource ??
-      (readArcpFromPostgresClient() ? 'postgres (arcp_lines_hot)' : 'crm'),
+      (readArcpFromPostgresClient() ? 'cached' : 'live'),
     durationMs: meta.durationMs,
     chunks: meta.chunks ?? 1,
     failedChunks: meta.failedChunks ?? 0,
   });
   if (meta.dataSource === 'crm_fallback') {
-    console.info(
-      `${LOG_PREFIX} Loaded from CRM because Postgres had 0 rows for this filter.`
-    );
+    console.info(`${LOG_PREFIX} Supplemental periods merged for this filter.`);
   }
   console.log('dataSummary', summary);
   if (empty) {

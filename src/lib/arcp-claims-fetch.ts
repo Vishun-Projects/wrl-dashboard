@@ -73,9 +73,7 @@ async function fetchArcpAggregateChunkSharded(
       );
     }
     const doubled = shardCount * 2;
-    console.log(
-      `[ARCP Claims] ${chunk.start} ncode shard ${shardIndex}/${shardCount} failed — splitting to ${doubled} shards`
-    );
+    /* retry with more shards */
     const left = await fetchArcpAggregateChunkSharded(opts, chunk, timeoutMs, shardIndex, doubled);
     const right = await fetchArcpAggregateChunkSharded(
       opts,
@@ -93,9 +91,7 @@ async function fetchArcpAggregateDenseWindow(
   chunk: { start: string; end: string },
   timeoutMs: number
 ): Promise<ArcpClaimsAggregateRow[]> {
-  console.log(
-    `[ARCP Claims] CRM retry on ${chunk.start}..${chunk.end} — ${ARCP_NCODE_SHARD_INITIAL} ncode shards (no skip)`
-  );
+  /* dense-window shard retry */
   const merged: ArcpClaimsAggregateRow[] = [];
   for (let i = 0; i < ARCP_NCODE_SHARD_INITIAL; i++) {
     merged.push(
@@ -130,9 +126,7 @@ async function fetchArcpAggregateChunkResilient(
       return fetchArcpAggregateDenseWindow(opts, chunk, timeoutMs);
     }
 
-    console.log(
-      `[ARCP Claims] CRM error on ${chunk.start}..${chunk.end} — retrying as ${subChunks.length} smaller windows`
-    );
+    /* split window and retry */
 
     const merged: ArcpClaimsAggregateRow[] = [];
     for (const sub of subChunks) {

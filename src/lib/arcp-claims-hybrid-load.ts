@@ -170,11 +170,7 @@ async function loadArcpAggregatesCoverageAware(
   const source: ArcpDataSource =
     usedPostgres && usedCrm ? 'crm_fallback' : usedCrm ? 'crm_fallback' : 'postgres';
 
-  if (usedCrm) {
-    console.log(
-      `[ARCP] aggregates: mixed load — Postgres${usedPostgres ? ' yes' : ' no'}, CRM gap segment(s) for ${startDate}..${endDate} (${dateColumn})`
-    );
-  }
+  /* mixed load path — no client logging */
 
   const grandTotals = await loadArcpGrandTotalsCoverageAware(opts);
   return { aggregates, source, grandTotals };
@@ -275,7 +271,7 @@ export async function loadArcpClaimsAggregatesHybrid(
       (err as Error & { statusCode?: number }).statusCode = 503;
       throw err;
     }
-    console.log(`[ARCP] aggregates: Postgres not ready (rows=${readiness.rowCount}) — CRM`);
+    /* cache miss — live load */
     const [aggregates, grandTotals] = await Promise.all([
       fetchArcpClaimsAggregatesFromCrm(opts, CRM_QUERY_TIMEOUT_MS),
       fetchArcpClaimsGrandTotals({ ...opts, crmUiFast: true }, CRM_QUERY_TIMEOUT_MS),

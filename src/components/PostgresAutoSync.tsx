@@ -61,7 +61,7 @@ export function PostgresAutoSync() {
         if (axios.isAxiosError(err) && err.response?.status === 503) {
           return;
         }
-        console.warn('[PostgresAutoSync] sync failed:', err);
+        /* silent background refresh failure */
       }
     } finally {
       inFlightRef.current = false;

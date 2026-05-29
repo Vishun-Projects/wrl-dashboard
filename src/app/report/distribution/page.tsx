@@ -98,6 +98,7 @@ export default function CallDistributionPage() {
     priorityFilter,
     portalFilter,
     pincodeSearch,
+    debouncedPincodeSearch,
     distributionCalls,
     distributionLoading,
     fetchDistributionData,
@@ -175,12 +176,12 @@ export default function CallDistributionPage() {
     if (distributionCalls.length > 0) {
       syncCascadeOptionsFromCalls(distributionCalls);
     }
-  }, [distributionCalls, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, selectedCallTypes, selectedStatus, priorityFilter, portalFilter, pincodeSearch, syncCascadeOptionsFromCalls]);
+  }, [distributionCalls, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, selectedCallTypes, selectedStatus, priorityFilter, portalFilter, debouncedPincodeSearch, syncCascadeOptionsFromCalls]);
 
   const distributionViewFilters = useMemo(
     () =>
       buildRegisterViewFiltersFromContext({
-        pincodeSearch,
+        pincodeSearch: debouncedPincodeSearch,
         selectedState,
         selectedCity,
         selectedBranch,
@@ -193,7 +194,7 @@ export default function CallDistributionPage() {
         portalFilter,
       }),
     [
-      pincodeSearch,
+      debouncedPincodeSearch,
       selectedState,
       selectedCity,
       selectedBranch,
@@ -561,7 +562,12 @@ export default function CallDistributionPage() {
 
       // Filter points based on highlighted Franchisee, selected Pincode, or Pincode Search
       const filteredPoints = pincodeSummary.filter(pin => {
-        if (pincodeSearch && !pin.pincode.toLowerCase().includes(pincodeSearch.toLowerCase())) return false;
+        if (
+          debouncedPincodeSearch &&
+          !pin.pincode.toLowerCase().includes(debouncedPincodeSearch.toLowerCase())
+        ) {
+          return false;
+        }
         if (selectedPincode !== 'All' && pin.pincode !== selectedPincode) return false;
         if (highlightedFranchisee) {
           return pin.franchisees.some(
@@ -637,7 +643,7 @@ export default function CallDistributionPage() {
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [pincodeSummary, highlightedFranchisee, selectedPincode, mapReady, pincodeSearch]);
+  }, [pincodeSummary, highlightedFranchisee, selectedPincode, mapReady, debouncedPincodeSearch]);
 
   // Sorting Logic for Franchisee Table
   const handleSort = (field: string) => {
@@ -832,7 +838,7 @@ export default function CallDistributionPage() {
   return (
     <PageShell
       title="Call Distribution Audit"
-      subtitle="Find technicians with assigned backlog but no completions, or no calls in the period"
+      subtitle=""
       icon={<LucideMap size={16} className="text-teal-600" />}
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
       toolbar={
@@ -949,7 +955,7 @@ export default function CallDistributionPage() {
               <span className="distribution-stat-value text-amber-700">
                 {distributionLoading ? '…' : idleAssigneeKpis.assignedNoCompletions}
               </span>
-              <span className="distribution-stat-label">Assigned, no work</span>
+              <span className="distribution-stat-label">Idle Technicians</span>
             </button>
             <button
               type="button"
@@ -1007,7 +1013,7 @@ export default function CallDistributionPage() {
                 sortAsc={sortAsc}
                 onSort={handleSort}
                 columns={franchiseeColumns}
-                footerHint="Click ASP to move it to the top and link idle rows · Unallocated is not linkable"
+                footerHint=""
               >
                 {displayedFranchiseeList.map((fran, rowIndex) => {
                   const isUnallocated = isUnallocatedFranchiseeCode(fran.franchisee_code);
@@ -1066,7 +1072,7 @@ export default function CallDistributionPage() {
 
               <DistributionTablePanel
                 panelClassName="distribution-table-panel--idle"
-                title="Idle technicians"
+                title="Assigned technicians with zero activity in selected period"
                 // subtitle="Technicians only — use KPI pills for status; row click links to ASP"
                 subtitle=""
                 count={displayedIdleAssigneeRows.length}
@@ -1090,7 +1096,7 @@ export default function CallDistributionPage() {
                 onSort={(field) => handleIdleSort(field as keyof IdleAssigneeRow | 'issue')}
                 columns={idleColumns}
                 tableMinWidth="36rem"
-                footerHint="Linked rows move to the top · KPI pills filter status only"
+                footerHint=""
               >
                 {displayedIdleAssigneeRows.map((row, rowIndex) => {
                   const rowKey = idleRowKey(row);

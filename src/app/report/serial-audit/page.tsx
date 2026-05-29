@@ -29,6 +29,7 @@ import {
 } from '@/components/admin/AdminUi';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 import { buildCorpusCacheKey } from '@/lib/report-corpus';
+import { sanitizeUserFacingMessage } from '@/lib/user-facing-errors';
 import { toDateString } from '@/lib/report-filters';
 import { callCorpusStore } from '@/lib/report-data-store';
 import { MAX_CLIENT_CORPUS_DAYS } from '@/lib/trhcalls-query';
@@ -270,12 +271,13 @@ export default function SerialAuditPage() {
           lastPaintedKeyRef.current = dataKey;
           serialAuditBackgroundCache.set(dataKey, { rows: apiRows, windowCalls: emptyWindowCalls });
         } catch (err: unknown) {
-          const message =
+          const message = sanitizeUserFacingMessage(
             axios.isAxiosError(err) && err.response?.data?.error
               ? String(err.response.data.error)
               : err instanceof Error
                 ? err.message
-                : 'Failed to load serial audit data';
+                : 'Failed to load serial audit data'
+          );
           setLoadError(message);
           toast.error(message);
         } finally {
@@ -357,12 +359,13 @@ export default function SerialAuditPage() {
           setWindowCallsBySerial((prev) => new Map(prev).set(serial, details));
         }
       } catch (err: unknown) {
-        const message =
+        const message = sanitizeUserFacingMessage(
           axios.isAxiosError(err) && err.response?.data?.error
             ? String(err.response.data.error)
             : err instanceof Error
               ? err.message
-              : 'Failed to load call details';
+              : 'Failed to load call details'
+        );
         toast.error(message);
       } finally {
         setDetailLoading(null);
@@ -543,7 +546,7 @@ export default function SerialAuditPage() {
       {loading && listRows.length === 0 ? (
         <ReportLoadingPanel
           label="Finding repeated serial numbers"
-          sublabel="Running a focused SQL scan for your date range (no full corpus download)."
+          sublabel="Running a focused scan for your date range."
         />
       ) : loadError && listRows.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-rose-200 bg-rose-50/50 p-12 text-center">

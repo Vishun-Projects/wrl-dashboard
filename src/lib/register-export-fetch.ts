@@ -17,19 +17,8 @@ export const REGISTER_EXPORT_BATCH_CRM = 1000;
 /** Larger batches when the API serves from Postgres hot table. */
 export const REGISTER_EXPORT_BATCH_POSTGRES = 2000;
 
-const REGISTER_LOG_PREFIX = '[WRL Register]';
-
-function registerLog(message: string, extra?: Record<string, unknown>) {
-  if (typeof console === 'undefined') return;
-  if (extra) {
-    console.log(REGISTER_LOG_PREFIX, message, extra);
-  } else {
-    console.log(REGISTER_LOG_PREFIX, message);
-  }
-}
-
-export function logRegisterBulk(message: string, extra?: Record<string, unknown>) {
-  registerLog(message, extra);
+export function logRegisterBulk(_message: string, _extra?: Record<string, unknown>) {
+  /* no-op — avoid leaking load paths in the browser console */
 }
 
 export type RegisterExportQuery = {

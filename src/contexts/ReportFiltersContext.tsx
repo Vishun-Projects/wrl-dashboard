@@ -13,6 +13,7 @@ import {
   isAnyFilterActive,
   migrateStringFilter,
   joinFilterParam,
+  REPORT_FILTER_SEARCH_DEBOUNCE_MS,
   toDateString,
   type ReportDateRange,
 } from '@/lib/report-filters';
@@ -61,6 +62,7 @@ import {
   waitForReadModelSyncIdle,
 } from '@/lib/read-model/trigger-sync-client';
 import { fetchAllRegisterRowsForExport, logRegisterBulk } from '@/lib/register-export-fetch';
+import { sanitizeUserFacingMessage } from '@/lib/user-facing-errors';
 import { createChunkedFetchAuth } from '@/lib/supabase-chunked-fetch';
 import { persistSharedRegisterCache, readSharedRegisterCache, SHARED_REGISTER_CACHE_VERSION } from '@/lib/report-corpus-storage';
 
@@ -78,8 +80,15 @@ import {
 type ReportFiltersContextValue = {
   search: string;
   setSearch: (v: string) => void;
+  /** Applied after {@link REPORT_FILTER_SEARCH_DEBOUNCE_MS} idle; drives fetches and heavy filters. */
+  debouncedSearch: string;
   pincodeSearch: string;
   setPincodeSearch: (v: string) => void;
+  debouncedPincodeSearch: string;
+  /** True while typed search/pincode has not yet been debounced. */
+  isSearchDebouncing: boolean;
+  /** Apply current search / pincode immediately (e.g. Enter key). */
+  flushSearchDebounce: () => void;
   dateRange: ReportDateRange;
   setDateRange: (v: ReportDateRange) => void;
   dateFilterColumn: RegisterDateFilterColumn;
@@ -171,6 +180,40 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
 
   const [search, setSearch] = useState(globalReportCache?.search || '');
   const [pincodeSearch, setPincodeSearch] = useState(globalReportCache?.pincodeSearch || '');
+  const [debouncedSearch, setDebouncedSearch] = useState(globalReportCache?.search || '');
+  const [debouncedPincodeSearch, setDebouncedPincodeSearch] = useState(
+    globalReportCache?.pincodeSearch || ''
+  );
+
+  useEffect(() => {
+    if (!search.trim()) {
+      setDebouncedSearch('');
+      return;
+    }
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, REPORT_FILTER_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    if (!pincodeSearch.trim()) {
+      setDebouncedPincodeSearch('');
+      return;
+    }
+    const timer = setTimeout(() => {
+      setDebouncedPincodeSearch(pincodeSearch);
+    }, REPORT_FILTER_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [pincodeSearch]);
+
+  const flushSearchDebounce = useCallback(() => {
+    setDebouncedSearch(search);
+    setDebouncedPincodeSearch(pincodeSearch);
+  }, [search, pincodeSearch]);
+
+  const isSearchDebouncing =
+    search !== debouncedSearch || pincodeSearch !== debouncedPincodeSearch;
   const [dateRange, setDateRange] = useState<ReportDateRange>(() => {
     if (globalReportCache) {
       return {
@@ -346,6 +389,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     setSelectedTechnician([]);
     setSearch('');
     setPincodeSearch('');
+    setDebouncedSearch('');
+    setDebouncedPincodeSearch('');
     setSelectedCallTypes([]);
     setSelectedOfficeIds([]);
     setSelectedStatus([]);
@@ -564,7 +609,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         if (generation !== corpusGenerationRef.current) return;
 
         if (res.data?.warning) {
-          toast.warning(String(res.data.warning));
+          toast.warning(sanitizeUserFacingMessage(String(res.data.warning)));
         }
 
         if (res.data?.isDelta) {
@@ -685,12 +730,12 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
               if (loadGeneration !== corpusGenerationRef.current) return;
 
               if (res.data?.warning) {
-                toast.warning(String(res.data.warning));
+                toast.warning(sanitizeUserFacingMessage(String(res.data.warning)));
               }
 
               const rows = (res.data?.calls || []) as Record<string, unknown>[];
               if (res.data?.cached) {
-                console.log(`[Corpus] server cache hit for ${month.start}–${month.end}`);
+                /* server cache hit */
               }
 
               if (rows.length > 0) {
@@ -705,13 +750,13 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
               await new Promise((r) => setTimeout(r, 600));
             } catch (monthErr: unknown) {
               if (axios.isCancel(monthErr)) return;
-              const msg =
+              const msg = sanitizeUserFacingMessage(
                 axios.isAxiosError(monthErr) && monthErr.response?.data?.error
                   ? String(monthErr.response.data.error)
                   : monthErr instanceof Error
                     ? monthErr.message
-                    : 'Month load failed';
-              console.warn(`Background corpus ${month.start} failed:`, msg);
+                    : 'Month load failed'
+              );
               toast.warning(`Could not load calls for ${month.start.slice(0, 7)}`, {
                 description: msg,
               });
@@ -810,7 +855,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
               ? String(err.response.data.error)
               : err instanceof Error
                 ? err.message
-                : 'Failed to load report corpus';
+                : 'Failed to load report data';
+          const userMessage = sanitizeUserFacingMessage(message);
           setCallCorpusStore({
             calls: callCorpusStore?.cacheKey === cacheKey ? callCorpusStore.calls : new Map(),
             cacheKey,
@@ -818,11 +864,11 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
             lastSyncedAt: callCorpusStore?.lastSyncedAt ?? Date.now(),
             status: 'error',
             source: callCorpusStore?.source ?? 'network',
-            errorMessage: message,
+            errorMessage: userMessage,
             truncated: callCorpusStore?.truncated,
           });
           if (needsCorpusPreload && !callCorpusStore?.calls.size) {
-            toast.error('Could not load report data', { description: message });
+            toast.error('Could not load report data', { description: userMessage });
           }
         } finally {
           if (generation === corpusGenerationRef.current) {
@@ -961,7 +1007,9 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
             error: message,
           });
           if (!silent) {
-            toast.error('Could not load distribution data', { description: message });
+            toast.error('Could not load distribution data', {
+              description: sanitizeUserFacingMessage(message),
+            });
           }
         } finally {
           if (!silent) setDistributionLoading(false);
@@ -1012,23 +1060,19 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       setSyncInProgress(true);
       let toastId: string | number | undefined;
       if (opts?.showToast) {
-        toastId = toast.loading('Syncing from CRM into database…');
+        toastId = toast.loading('Syncing...');
       }
       try {
         const {
           data: { session },
         } = await supabase.auth.getSession();
         const token = session?.access_token;
-        logRegisterBulk(
-          opts?.showToast
-            ? 'UI sync — wait for idle, CRM incremental ingest, Postgres reload'
-            : 'Auto sync — CRM incremental ingest, Postgres reload'
-        );
+        logRegisterBulk(opts?.showToast ? 'UI refresh' : 'Auto refresh');
 
         let progress = await fetchReadModelStatus(token);
         if (isCallsHotSyncRunning(progress)) {
           if (opts?.showToast && toastId != null) {
-            toast.loading('Waiting for background sync to finish…', { id: toastId });
+            toast.loading('Waiting for update to finish…', { id: toastId });
           }
           const idle = await waitForReadModelSyncIdle(token, undefined, (elapsedMs) => {
             if (opts?.showToast && toastId != null && elapsedMs >= 30_000) {
@@ -1040,7 +1084,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
           });
           if (!idle) {
             throw new Error(
-              'Sync is still running after 10 minutes. Wait for auto-sync to finish, then try again.'
+              'Update is still running after 10 minutes. Wait a moment, then try again.'
             );
           }
         }
@@ -1064,8 +1108,10 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
             };
           } else if (axios.isAxiosError(err) && err.response?.status === 503) {
             throw new Error(
-              (err.response.data as { error?: string })?.error ??
-                'Sync worker is disabled (SYNC_WORKER_ENABLED)'
+              sanitizeUserFacingMessage(
+                (err.response.data as { error?: string })?.error ??
+                  'Background refresh is temporarily unavailable'
+              )
             );
           } else {
             throw err;
@@ -1073,7 +1119,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         }
 
         if (opts?.showToast && toastId != null) {
-          toast.loading('Reloading report from database…', { id: toastId });
+          toast.loading('Reloading report…', { id: toastId });
         }
         await ensureSharedCallsLoaded(true);
         const syncTime = syncResult.syncMeta?.lastSyncedAt
@@ -1094,13 +1140,13 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       } catch (err: unknown) {
         if (toastId != null) toast.dismiss(toastId);
         if (opts?.showToast) {
-          const message =
+          const rawMessage =
             axios.isAxiosError(err) && err.response?.data?.error
               ? String(err.response.data.error)
               : err instanceof Error
                 ? err.message
                 : 'Refresh failed';
-          toast.error('Failed to sync report data: ' + message);
+          toast.error('Failed to refresh report: ' + sanitizeUserFacingMessage(rawMessage));
         }
       } finally {
         syncInFlightRef.current = false;
@@ -1128,7 +1174,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       await ensureCorpusLoaded({ silent: true, force: false });
       if (!callCorpusStore || callCorpusStore.cacheKey !== cacheKey || callCorpusStore.calls.size === 0) {
         if (opts?.showToast) {
-          toast.error('Could not sync — report data is not loaded yet');
+          toast.error('Could not refresh — report data is not loaded yet');
         }
         return;
       }
@@ -1216,7 +1262,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
             : err instanceof Error
               ? err.message
               : 'Sync failed';
-        toast.error('Failed to sync calls: ' + message);
+        toast.error('Failed to refresh calls: ' + sanitizeUserFacingMessage(message));
       }
     } finally {
       syncInFlightRef.current = false;
@@ -1335,8 +1381,12 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   const value = useMemo<ReportFiltersContextValue>(() => ({
     search,
     setSearch,
+    debouncedSearch,
     pincodeSearch,
     setPincodeSearch,
+    debouncedPincodeSearch,
+    isSearchDebouncing,
+    flushSearchDebounce,
     dateRange,
     setDateRange,
     dateFilterColumn,
@@ -1421,7 +1471,11 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     resourcesLoaded,
   }), [
     search,
+    debouncedSearch,
     pincodeSearch,
+    debouncedPincodeSearch,
+    isSearchDebouncing,
+    flushSearchDebounce,
     dateRange,
     dateFilterColumn,
     selectedOfficeIds,
