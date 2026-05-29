@@ -31,6 +31,7 @@ import {
   readStoredRegisterPageSize,
   resolveTechnicianDisplayName,
   REGISTER_PAGE_SIZE_OPTIONS,
+  type RegisterPageSize,
   buildSummaryQueryKey,
   filtersEqual,
   joinFilterParam,
@@ -1149,7 +1150,7 @@ export default function ReportPage() {
   ]);
 
   const applyRegisterFromCorpus = useCallback(
-    (pageNum = 1, pageLimit = limit): boolean => {
+    (pageNum = 1, pageLimit: RegisterPageSize = limit): boolean => {
       if (readRegisterFromPostgresClient()) return false;
       const startDateStr = toDateString(dateRange.start);
       const endDateStr = toDateString(dateRange.end);
@@ -1285,7 +1286,7 @@ export default function ReportPage() {
   }, [dateRange.start, dateRange.end, dateFilterColumn, distributionCalls]);
 
   const applyRegisterFromSharedCalls = useCallback(
-    (pageNum = 1, pageLimit = limit): boolean => {
+    (pageNum = 1, pageLimit: RegisterPageSize = limit): boolean => {
       if (!readRegisterFromPostgresClient()) return false;
       const applyStart = performance.now();
       const scope = getSharedCallsForScope();
@@ -1503,10 +1504,10 @@ export default function ReportPage() {
       forceCorpus?: boolean;
       searchOverride?: string;
       pincodeOverride?: string;
-      pageLimit?: number;
+      pageLimit?: RegisterPageSize;
     }
   ) => {
-    const pageSize = opts?.pageLimit ?? limit;
+    const pageSize: RegisterPageSize = opts?.pageLimit ?? limit;
     const opStart = performance.now();
     const opId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const hadPriorRequest = !!fetchControllerRef.current;
