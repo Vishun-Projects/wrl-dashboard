@@ -97,6 +97,58 @@ export function subtractFactCounts(target: FactCounts, delta: FactCounts): void 
   target.installation_done -= delta.installation_done;
 }
 
+function factCountsHasDelta(counts: FactCounts): boolean {
+  return (
+    counts.total !== 0 ||
+    counts.solved !== 0 ||
+    counts.cancelled !== 0 ||
+    counts.open_count !== 0 ||
+    counts.tech_solved !== 0 ||
+    counts.deployment_total !== 0 ||
+    counts.deployment_done !== 0 ||
+    counts.installation_total !== 0 ||
+    counts.installation_done !== 0
+  );
+}
+
+/** Net metric deltas after subtracting old hot rows and adding new (incremental sync). */
+export function buildNetFactDeltas(
+  oldRows: HotRow[],
+  newRows: HotRow[]
+): Array<{ key: FactKey; delta: FactCounts }> {
+  const yearStart = currentYearStart();
+  const map = new Map<string, FactKey & FactCounts>();
+
+  for (const row of oldRows) {
+    const key = factKeyFromHotRow(row);
+    if (key.fact_date < yearStart) continue;
+    const serialized = serializeFactKey(key);
+    const entry = map.get(serialized) ?? { ...key, ...emptyFactCounts() };
+    subtractFactCounts(entry, factCountsFromHotRow(row));
+    map.set(serialized, entry);
+  }
+
+  for (const row of newRows) {
+    const key = factKeyFromHotRow(row);
+    if (key.fact_date < yearStart) continue;
+    const serialized = serializeFactKey(key);
+    const entry = map.get(serialized) ?? { ...key, ...emptyFactCounts() };
+    addFactCounts(entry, factCountsFromHotRow(row));
+    map.set(serialized, entry);
+  }
+
+  const out: Array<{ key: FactKey; delta: FactCounts }> = [];
+  for (const entry of map.values()) {
+    const { fact_date, office_id, call_type, account, region, ...counts } = entry;
+    if (!factCountsHasDelta(counts)) continue;
+    out.push({
+      key: { fact_date, office_id, call_type, account, region },
+      delta: counts,
+    });
+  }
+  return out;
+}
+
 export function aggregateFactCounts(rows: HotRow[]): Map<string, FactKey & FactCounts> {
   const yearStart = currentYearStart();
   const map = new Map<string, FactKey & FactCounts>();

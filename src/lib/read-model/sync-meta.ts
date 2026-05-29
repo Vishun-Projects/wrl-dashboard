@@ -1,12 +1,16 @@
 import { prisma } from '@/lib/prisma';
+import { HOT_TARGET_ROWS } from '@/lib/read-model/constants';
+import { getArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-server';
+import type { ArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-shared';
 import {
   readDimsFromPostgres,
+  readArcpFromPostgres,
   readDistributionFromPostgres,
   readRegisterFromPostgres,
   readSummaryFromPostgres,
 } from '@/lib/read-model/flags';
 
-export const HOT_TARGET_ROWS = 139_509;
+export { HOT_TARGET_ROWS };
 
 export type SyncMeta = {
   lastSyncedAt: string | null;
@@ -63,9 +67,11 @@ export type ReadModelProgress = {
     register: string;
     distribution: string;
     dims: string;
+    arcp: string;
   };
   phase: 'pending_backfill' | 'backfilling' | 'ready' | 'error' | 'syncing';
   message: string;
+  arcp: ArcpPostgresCoverage | null;
 };
 
 export async function getSyncMeta(): Promise<SyncMeta> {
@@ -101,7 +107,7 @@ export async function getHotRowCount(): Promise<number> {
 }
 
 export async function getReadModelProgress(): Promise<ReadModelProgress> {
-  const [hotCount, factGrains, dims, syncStates, runs, batches] = await Promise.all([
+  const [hotCount, factGrains, dims, syncStates, runs, batches, arcp] = await Promise.all([
     getHotRowCount(),
     prisma.$queryRawUnsafe<Array<{ count: number }>>(
       `SELECT count(*)::int AS count FROM call_metrics_daily`
@@ -148,6 +154,7 @@ export async function getReadModelProgress(): Promise<ReadModelProgress> {
         created_at: Date;
       }>
     >(`SELECT * FROM raw_ingest_batches ORDER BY created_at DESC LIMIT 10`),
+    getArcpPostgresCoverage().catch(() => null),
   ]);
 
   const hotState = syncStates.find((s) => s.entity === 'calls_latest_hot');
@@ -160,6 +167,9 @@ export async function getReadModelProgress(): Promise<ReadModelProgress> {
   if (hotStatus === 'error') {
     phase = 'error';
     message = 'Sync worker reported an error. Check recent runs below.';
+  } else if (isRunning && hotStatus === 'ok' && hotCount >= HOT_TARGET_ROWS * 0.95) {
+    phase = 'syncing';
+    message = 'Incremental sync in progress (daemon or manual sync).';
   } else if (hotStatus === 'ok' && hotCount >= HOT_TARGET_ROWS * 0.95) {
     phase = 'ready';
     message = 'Backfill complete. Start incremental sync daemon when ready.';
@@ -225,8 +235,10 @@ export async function getReadModelProgress(): Promise<ReadModelProgress> {
       register: readRegisterFromPostgres() ? 'postgres' : 'crm',
       distribution: readDistributionFromPostgres() ? 'postgres' : 'crm',
       dims: readDimsFromPostgres() ? 'postgres' : 'crm',
+      arcp: readArcpFromPostgres() ? 'postgres' : 'crm',
     },
     phase,
     message,
+    arcp,
   };
 }

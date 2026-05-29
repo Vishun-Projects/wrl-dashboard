@@ -18,6 +18,8 @@ READ_REGISTER_FROM=postgres
 READ_SUMMARY_FROM=postgres
 READ_DISTRIBUTION_FROM=postgres
 READ_DIMS_FROM=postgres
+READ_ARCP_FROM=postgres
+SYNC_ARCP_ENABLED=true
 ```
 
 API routes check flag at top; if `postgres`, never call `postQuery()` for that flow.
@@ -208,6 +210,7 @@ flowchart LR
 | Summary | Postgres only |
 | Key Account MIS | Postgres only |
 | Distribution | Postgres only |
+| ARCP Claims | Postgres only (after Step 6) |
 | Call detail | CRM only |
 | Serial audit | CRM only |
 

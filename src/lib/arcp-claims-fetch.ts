@@ -1,25 +1,37 @@
-import { isCrmOutOfMemoryError, postQuery } from '@/lib/db-proxy';
+import { isCrmOutOfMemoryError, isCrmSqlTimeoutError, postQuery } from '@/lib/db-proxy';
 import {
   arcpDateSpanDays,
   buildArcpClaimsDetailSql,
+  buildArcpClaimsGrandTotalSql,
   buildArcpClaimsRawSql,
   mergeArcpAggregateRows,
   parseArcpAggregateRows,
   parseArcpDetailRows,
+  parseArcpGrandTotals,
   planArcpSummaryDateChunks,
+  isArcpApproveDateColumn,
+  resolveArcpDateFilterColumn,
+  resolveArcpLoadConcurrency,
   splitArcpDateRange,
   type ArcpClaimsAggregateRow,
   type ArcpClaimsDetailRow,
   type ArcpClaimsQueryOpts,
+  type ArcpGrandTotals,
 } from '@/lib/arcp-claims-query';
+import { runPool } from '@/lib/run-pool';
 
-export function isCrmSqlTimeoutError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return (
-    message.includes('Timeout expired') ||
-    message.includes('timeout period elapsed') ||
-    message.includes('ETIMEDOUT')
-  );
+export { isCrmSqlTimeoutError } from '@/lib/db-proxy';
+
+/** Report CRM fallback only — never used by read-model backfill. */
+function crmUiOpts(opts: ArcpClaimsQueryOpts): ArcpClaimsQueryOpts {
+  return { ...opts, crmUiFast: true };
+}
+
+const ARCP_NCODE_SHARD_MAX = Number(process.env.ARCP_OOM_SHARD_COUNT ?? 32) || 32;
+const ARCP_NCODE_SHARD_INITIAL = Number(process.env.ARCP_OOM_SHARD_INITIAL ?? 8) || 8;
+
+function isRetryableCrmLoadError(err: unknown): boolean {
+  return isCrmSqlTimeoutError(err) || isCrmOutOfMemoryError(err);
 }
 
 async function fetchArcpAggregateChunk(
@@ -29,7 +41,7 @@ async function fetchArcpAggregateChunk(
 ): Promise<ArcpClaimsAggregateRow[]> {
   const res = await postQuery({
     rawSql: buildArcpClaimsRawSql({
-      ...opts,
+      ...crmUiOpts(opts),
       startDate: chunk.start,
       endDate: chunk.end,
     }),
@@ -38,7 +50,62 @@ async function fetchArcpAggregateChunk(
   return parseArcpAggregateRows((res.data || []) as Record<string, unknown>[]);
 }
 
-/** On CRM timeout, automatically split the window into smaller slices and retry. */
+async function fetchArcpAggregateChunkSharded(
+  opts: ArcpClaimsQueryOpts,
+  chunk: { start: string; end: string },
+  timeoutMs: number,
+  shardIndex: number,
+  shardCount: number
+): Promise<ArcpClaimsAggregateRow[]> {
+  try {
+    return await fetchArcpAggregateChunk(
+      { ...opts, ncodeShard: { index: shardIndex, count: shardCount } },
+      chunk,
+      timeoutMs
+    );
+  } catch (err) {
+    if (!isRetryableCrmLoadError(err)) throw err;
+    if (shardCount >= ARCP_NCODE_SHARD_MAX) {
+      throw new Error(
+        `[ARCP Claims] CRM failed on ${chunk.start}..${chunk.end} after ${shardCount} ncode shards: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    }
+    const doubled = shardCount * 2;
+    console.log(
+      `[ARCP Claims] ${chunk.start} ncode shard ${shardIndex}/${shardCount} failed — splitting to ${doubled} shards`
+    );
+    const left = await fetchArcpAggregateChunkSharded(opts, chunk, timeoutMs, shardIndex, doubled);
+    const right = await fetchArcpAggregateChunkSharded(
+      opts,
+      chunk,
+      timeoutMs,
+      shardIndex + shardCount,
+      doubled
+    );
+    return mergeArcpAggregateRows([...left, ...right]);
+  }
+}
+
+async function fetchArcpAggregateDenseWindow(
+  opts: ArcpClaimsQueryOpts,
+  chunk: { start: string; end: string },
+  timeoutMs: number
+): Promise<ArcpClaimsAggregateRow[]> {
+  console.log(
+    `[ARCP Claims] CRM retry on ${chunk.start}..${chunk.end} — ${ARCP_NCODE_SHARD_INITIAL} ncode shards (no skip)`
+  );
+  const merged: ArcpClaimsAggregateRow[] = [];
+  for (let i = 0; i < ARCP_NCODE_SHARD_INITIAL; i++) {
+    merged.push(
+      ...(await fetchArcpAggregateChunkSharded(opts, chunk, timeoutMs, i, ARCP_NCODE_SHARD_INITIAL))
+    );
+  }
+  return mergeArcpAggregateRows(merged);
+}
+
+/** On CRM timeout/OOM, split the window into smaller slices and retry (never skip a day). */
 async function fetchArcpAggregateChunkResilient(
   opts: ArcpClaimsQueryOpts,
   chunk: { start: string; end: string },
@@ -47,21 +114,24 @@ async function fetchArcpAggregateChunkResilient(
   try {
     return await fetchArcpAggregateChunk(opts, chunk, timeoutMs);
   } catch (err) {
-    if (!isCrmSqlTimeoutError(err)) throw err;
+    if (!isRetryableCrmLoadError(err)) throw err;
 
     const span = arcpDateSpanDays(chunk.start, chunk.end);
     if (span == null || span <= 1) {
-      throw new Error(
-        `CRM timed out loading ARCP tally for ${chunk.start} to ${chunk.end}. Add a branch or franchisee filter, or retry.`
-      );
+      return fetchArcpAggregateDenseWindow(opts, chunk, timeoutMs);
     }
 
-    const nextStep = span > 7 ? 3 : 1;
+    const isApprove = isArcpApproveDateColumn(
+      resolveArcpDateFilterColumn(opts.dateFilterColumn)
+    );
+    const nextStep = isApprove ? 1 : span > 14 ? 7 : span > 7 ? 3 : 1;
     const subChunks = splitArcpDateRange(chunk.start, chunk.end, nextStep);
-    if (subChunks.length <= 1) throw err;
+    if (subChunks.length <= 1) {
+      return fetchArcpAggregateDenseWindow(opts, chunk, timeoutMs);
+    }
 
     console.log(
-      `[ARCP Claims] timeout on ${chunk.start}..${chunk.end} — retrying as ${subChunks.length} smaller windows`
+      `[ARCP Claims] CRM error on ${chunk.start}..${chunk.end} — retrying as ${subChunks.length} smaller windows`
     );
 
     const merged: ArcpClaimsAggregateRow[] = [];
@@ -79,13 +149,74 @@ async function fetchArcpDetailChunk(
 ): Promise<ArcpClaimsDetailRow[]> {
   const res = await postQuery({
     rawSql: buildArcpClaimsDetailSql({
-      ...opts,
+      ...crmUiOpts(opts),
       startDate: chunk.start,
       endDate: chunk.end,
     }),
     timeoutMs,
   });
   return parseArcpDetailRows((res.data || []) as Record<string, unknown>[]);
+}
+
+async function fetchArcpDetailChunkSharded(
+  opts: ArcpClaimsQueryOpts,
+  chunk: { start: string; end: string },
+  timeoutMs: number,
+  shardIndex: number,
+  shardCount: number
+): Promise<ArcpClaimsDetailRow[]> {
+  try {
+    return await fetchArcpDetailChunk(
+      { ...opts, ncodeShard: { index: shardIndex, count: shardCount } },
+      chunk,
+      timeoutMs
+    );
+  } catch (err) {
+    if (!isRetryableCrmLoadError(err)) throw err;
+    if (shardCount >= ARCP_NCODE_SHARD_MAX) {
+      throw new Error(
+        `[ARCP Claims] CRM detail failed on ${chunk.start}..${chunk.end} after ${shardCount} ncode shards: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    }
+    const doubled = shardCount * 2;
+    const left = await fetchArcpDetailChunkSharded(opts, chunk, timeoutMs, shardIndex, doubled);
+    const right = await fetchArcpDetailChunkSharded(
+      opts,
+      chunk,
+      timeoutMs,
+      shardIndex + shardCount,
+      doubled
+    );
+    const byUcn = new Map<string, ArcpClaimsDetailRow>();
+    for (const row of [...left, ...right]) {
+      const key = row.vucnno || `${row.calls2fault_code}:${row.franchisee_code}`;
+      if (!byUcn.has(key)) byUcn.set(key, row);
+    }
+    return Array.from(byUcn.values());
+  }
+}
+
+async function fetchArcpDetailDenseWindow(
+  opts: ArcpClaimsQueryOpts,
+  chunk: { start: string; end: string },
+  timeoutMs: number
+): Promise<ArcpClaimsDetailRow[]> {
+  const byUcn = new Map<string, ArcpClaimsDetailRow>();
+  for (let i = 0; i < ARCP_NCODE_SHARD_INITIAL; i++) {
+    for (const row of await fetchArcpDetailChunkSharded(
+      opts,
+      chunk,
+      timeoutMs,
+      i,
+      ARCP_NCODE_SHARD_INITIAL
+    )) {
+      const key = row.vucnno || `${row.calls2fault_code}:${row.franchisee_code}`;
+      if (!byUcn.has(key)) byUcn.set(key, row);
+    }
+  }
+  return Array.from(byUcn.values());
 }
 
 async function fetchArcpDetailChunkResilient(
@@ -96,14 +227,18 @@ async function fetchArcpDetailChunkResilient(
   try {
     return await fetchArcpDetailChunk(opts, chunk, timeoutMs);
   } catch (err) {
-    if (!isCrmSqlTimeoutError(err)) throw err;
+    if (!isRetryableCrmLoadError(err)) throw err;
 
     const span = arcpDateSpanDays(chunk.start, chunk.end);
-    if (span == null || span <= 3) throw err;
+    if (span == null || span <= 1) {
+      return fetchArcpDetailDenseWindow(opts, chunk, timeoutMs);
+    }
 
     const nextStep = span > 14 ? 7 : span > 7 ? 3 : 1;
     const subChunks = splitArcpDateRange(chunk.start, chunk.end, nextStep);
-    if (subChunks.length <= 1) throw err;
+    if (subChunks.length <= 1) {
+      return fetchArcpDetailDenseWindow(opts, chunk, timeoutMs);
+    }
 
     const byUcn = new Map<string, ArcpClaimsDetailRow>();
     for (const sub of subChunks) {
@@ -116,17 +251,30 @@ async function fetchArcpDetailChunkResilient(
   }
 }
 
+export async function fetchArcpClaimsGrandTotals(
+  opts: ArcpClaimsQueryOpts,
+  timeoutMs: number
+): Promise<ArcpGrandTotals> {
+  const res = await postQuery({
+    rawSql: buildArcpClaimsGrandTotalSql(crmUiOpts(opts)),
+    timeoutMs,
+  });
+  const row = ((res.data || []) as Record<string, unknown>[])[0] ?? {};
+  return parseArcpGrandTotals(row);
+}
+
 export async function fetchArcpClaimsAggregates(
   opts: ArcpClaimsQueryOpts,
   timeoutMs: number
 ): Promise<ArcpClaimsAggregateRow[]> {
-  const chunks = planArcpSummaryDateChunks(opts);
-  const merged: ArcpClaimsAggregateRow[] = [];
+  const chunks = planArcpSummaryDateChunks(crmUiOpts(opts));
+  const concurrency = chunks.length > 1 ? resolveArcpLoadConcurrency(crmUiOpts(opts)) : 1;
 
-  for (const chunk of chunks) {
-    merged.push(...(await fetchArcpAggregateChunkResilient(opts, chunk, timeoutMs)));
-  }
+  const chunkResults = await runPool(chunks, concurrency, (chunk) =>
+    fetchArcpAggregateChunkResilient(opts, chunk, timeoutMs)
+  );
 
+  const merged = chunkResults.flat();
   return chunks.length <= 1 ? merged : mergeArcpAggregateRows(merged);
 }
 
@@ -134,11 +282,16 @@ export async function fetchArcpClaimsDetailRows(
   opts: ArcpClaimsQueryOpts,
   timeoutMs: number
 ): Promise<ArcpClaimsDetailRow[]> {
-  const chunks = planArcpSummaryDateChunks(opts);
+  const chunks = planArcpSummaryDateChunks(crmUiOpts(opts));
+  const concurrency = chunks.length > 1 ? resolveArcpLoadConcurrency(crmUiOpts(opts)) : 1;
   const byUcn = new Map<string, ArcpClaimsDetailRow>();
 
-  for (const chunk of chunks) {
-    for (const row of await fetchArcpDetailChunkResilient(opts, chunk, timeoutMs)) {
+  const chunkRowLists = await runPool(chunks, concurrency, (chunk) =>
+    fetchArcpDetailChunkResilient(opts, chunk, timeoutMs)
+  );
+
+  for (const rows of chunkRowLists) {
+    for (const row of rows) {
       const key = row.vucnno || `${row.calls2fault_code}:${row.franchisee_code}`;
       if (!byUcn.has(key)) byUcn.set(key, row);
     }

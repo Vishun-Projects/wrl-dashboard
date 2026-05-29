@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-import { loadEnv, closePool } from '@/lib/read-model/db';
+import '@/lib/read-model/bootstrap-env';
+import { closePool } from '@/lib/read-model/db';
+import { runArcpBackfill } from '@/lib/read-model/arcp/backfill';
+import { resetArcpReadModel } from '@/lib/read-model/arcp/reset';
+import { runArcpIncrementalSync } from '@/lib/read-model/arcp/incremental';
 import { runInitialBackfill, runDimsRefresh } from '@/lib/read-model/backfill';
 import { runIncrementalSync } from '@/lib/read-model/incremental';
 import { runNightlyReconcile } from '@/lib/read-model/nightly';
 import { runRetentionJobs } from '@/lib/read-model/retention';
-
-loadEnv();
-process.env.USE_DIRECT_DATABASE = 'true';
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
 
@@ -15,6 +16,9 @@ async function runDaemon(): Promise<void> {
   for (;;) {
     try {
       await runIncrementalSync();
+      if (process.env.SYNC_ARCP_ENABLED === 'true') {
+        await runArcpIncrementalSync();
+      }
     } catch (err) {
       console.error('[sync-worker] Incremental failed:', err instanceof Error ? err.message : err);
     }
@@ -41,6 +45,17 @@ async function main(): Promise<void> {
     case 'retention':
       await runRetentionJobs();
       break;
+    case 'arcp-reset':
+      await resetArcpReadModel();
+      break;
+    case 'arcp-backfill':
+      await runArcpBackfill({
+        forceReset: process.env.ARCP_BACKFILL_FORCE_RESET === 'true',
+      });
+      break;
+    case 'arcp-incremental':
+      await runArcpIncrementalSync();
+      break;
     case 'daemon':
       await runDaemon();
       break;
@@ -51,17 +66,28 @@ Read model sync worker
 Usage: npx tsx src/lib/read-model/cli.ts <command>
 
 Commands:
-  backfill     Initial backfill (dims + hot 90d + open-old + YTD facts)
-  incremental  Single incremental sync run
-  dims         Refresh dimension tables only
-  nightly      Nightly reconcile (hot refresh + fact rebuild + dims)
-  retention    Purge old sync logs and ingest batches
-  daemon       Loop incremental sync every SYNC_INTERVAL_MS (default 3 min)
+  backfill          Initial backfill (dims + hot 90d + open-old + YTD facts)
+  incremental       Single calls incremental sync run
+  arcp-reset        Truncate arcp_lines_hot + reset sync_state (fresh start)
+  arcp-backfill     Initial ARCP lines backfill (ARCP_BACKFILL_START_DATE or YEARS)
+  arcp-incremental  Single ARCP incremental sync run
+  dims              Refresh dimension tables only
+  nightly           Nightly reconcile (hot refresh + fact rebuild + dims)
+  retention         Purge old sync logs and ingest batches
+  daemon            Loop calls + ARCP incremental (optional; app auto-sync is default)
+
+Live sync: PostgresAutoSync in the app (see docs/sync.md). Use daemon only if you need
+sync while no browser is open.
 
 Environment:
   DATABASE_URL           Supabase Postgres (direct :5432 recommended)
   SYNC_WORKER_ENABLED    Must be "true" for incremental/nightly/daemon
+  SYNC_ARCP_ENABLED      Run ARCP incremental in daemon / API sync
   SYNC_INTERVAL_MS       Daemon interval (default 180000)
+  SYNC_STALE_LOCK_MS     Clear stuck is_running after this (default 300000 = 5 min)
+  ARCP_BACKFILL_START_DATE   First day to load (e.g. 2025-01-01; skips earlier years)
+  ARCP_BACKFILL_YEARS        Fallback window if START_DATE unset (default 1)
+  ARCP_BACKFILL_FORCE_RESET  Truncate existing rows (prefer: npm run sync-worker:arcp-reset)
 `);
       process.exitCode = command === 'help' ? 0 : 1;
   }

@@ -8,9 +8,9 @@ Companion to [`read-model-phase1-architecture.md`](./read-model-phase1-architect
 
 | Environment | Postgres tier | App hosting | Sync worker | CRM access |
 |-------------|---------------|---------------|-------------|------------|
-| **Local dev** | Supabase Free or local Docker Postgres | `npm run dev` | Run manually / cron locally | `db-proxy` |
-| **Staging** | Supabase Pro (recommended) or Free with reduced data | Vercel preview | Railway/Fly staging service | `db-proxy` |
-| **Production** | **Supabase Pro (8 GB)** — required before cutover | Vercel | Railway/Fly/Render dedicated | Sync worker + call detail + serial audit only |
+| **Local dev** | Supabase Free or local Docker Postgres | `npm run dev` | App-open auto-sync (see [sync.md](./sync.md)) | `db-proxy` |
+| **Staging** | Supabase Pro (recommended) or Free with reduced data | Vercel preview | App-open auto-sync | `db-proxy` |
+| **Production** | **Supabase Pro (8 GB)** — required before cutover | Vercel | App-open auto-sync | Sync API + call detail + serial audit only |
 
 **Hard gate:** Do **not** cut over production user traffic to Postgres on Supabase Free.
 
@@ -54,11 +54,9 @@ Companion to [`read-model-phase1-architecture.md`](./read-model-phase1-architect
 
 ```mermaid
 flowchart TB
-  subgraph vercel [Vercel]
+  subgraph vercel [Vercel or local dev]
     NextApp["Next.js App plus API routes"]
-  end
-  subgraph workerHost [Railway Fly or Render]
-    SyncWorker["Sync worker cron"]
+    AutoSync["PostgresAutoSync in browser"]
   end
   subgraph supabase [Supabase]
     PG["Postgres read model"]
@@ -69,32 +67,27 @@ flowchart TB
     DBQuery["DBQUERY.aspx"]
   end
   User --> NextApp
+  User --> AutoSync
+  AutoSync -->|"POST /api/read-model/sync every 3 min"| NextApp
   NextApp --> PG
   NextApp --> Auth
   NextApp --> Flags
-  SyncWorker --> DBQuery
-  SyncWorker --> PG
+  NextApp -->|"incremental ingest"| DBQuery
   NextApp -->|"call detail serial audit only"| DBQuery
 ```
 
 ### Vercel (frontend + API)
 
-- Serves Next.js UI and thin read API routes  
-- **Must not** run initial backfill or 2–5 min cron sync (timeout limits)  
+- Serves Next.js UI and read API routes  
+- **Incremental sync** while users are logged in (`PostgresAutoSync` → `POST /api/read-model/sync`)  
+- **Must not** run initial backfill on serverless (timeout limits) — use terminal backfill  
 - Reads Postgres via `DATABASE_URL`  
 
-### Sync worker (NOT Vercel)
+### Terminal backfill (one-time)
 
-- Long-running initial backfill (hours)  
-- Incremental sync every 2–5 minutes  
-- Nightly reconcile  
-- Requires: `DATABASE_URL`, network access to CRM `db-proxy` URL  
-
-**Suggested setup:**
-
-- Railway: Node service + cron trigger, or worker + `node-cron`  
-- Fly.io: machine with scheduled jobs  
-- Render: background worker  
+- Long-running initial backfill (hours): `npm run sync-worker:backfill`, `npm run sync-worker:arcp-backfill`  
+- Optional maintenance: `nightly`, `dims`, `retention` via `npx tsx src/lib/read-model/cli.ts`  
+- See [sync.md](./sync.md)  
 
 ### CRM HTML proxy
 
@@ -122,9 +115,15 @@ SUPABASE_SERVICE_ROLE_KEY=...          # server only
 ```bash
 DATABASE_URL=postgresql://...          # direct connection preferred for bulk upsert
 SYNC_WORKER_ENABLED=true
-SYNC_INTERVAL_MINUTES=3
+SYNC_INTERVAL_MS=180000
+SYNC_STALE_LOCK_MS=300000
+PG_POOL_MAX=8
+PG_CONNECT_TIMEOUT_MS=60000
+PG_STATEMENT_TIMEOUT_MS=120000
 CRM_DBQUERY_URL=...                    # if externalized from db-proxy
 ```
+
+Browser auto-sync and manual UI Sync share the same API lock — concurrent runs coalesce. Optional `sync-worker:daemon` only if you need sync with no browser open (not typical).
 
 ---
 

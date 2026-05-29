@@ -2,15 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { prisma } from '@/lib/prisma';
 import {
-  fetchArcpClaimsAggregates,
   isCrmOutOfMemoryError,
   isCrmSqlTimeoutError,
 } from '@/lib/arcp-claims-fetch';
+import { loadArcpClaimsAggregates } from '@/lib/arcp-claims-load';
+import type { ArcpGrandTotals } from '@/lib/arcp-claims-query';
 import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims-query';
 import { buildArcpClaimsTableModel } from '@/lib/arcp-claims-table';
 
 const CACHE_TTL = 15 * 60 * 1000;
-const QUERY_TIMEOUT_MS = 180000;
+const AGG_CACHE_TTL = Number(process.env.ARCP_AGG_CACHE_TTL_MS ?? 60 * 60 * 1000) || 60 * 60 * 1000;
+
+type AggCacheEntry = {
+  aggregates: Awaited<ReturnType<typeof loadArcpClaimsAggregates>>['aggregates'];
+  grandTotals: ArcpGrandTotals;
+  source: string;
+  timestamp: number;
+};
+
+const aggCache = new Map<string, AggCacheEntry>();
+const aggInflight = new Map<string, Promise<AggCacheEntry>>();
 
 type CacheEntry = {
   payload: ReturnType<typeof buildArcpClaimsTableModel> & {
@@ -101,6 +112,8 @@ export async function GET(req: NextRequest) {
       isHod,
       assignedOffices,
     });
+    /** Bump when tally merge / grand-total logic changes — avoids stale inflated aggregates. */
+    const aggKey = `v2|${cacheKey}|agg`;
 
     const queryOpts = {
       startDate,
@@ -114,8 +127,39 @@ export async function GET(req: NextRequest) {
     };
 
     if (aggregatesOnly) {
-      const aggregates = await fetchArcpClaimsAggregates(queryOpts, QUERY_TIMEOUT_MS);
-      return NextResponse.json({ aggregates });
+      const now = Date.now();
+      if (!refresh) {
+        const hit = aggCache.get(aggKey);
+        if (hit && now - hit.timestamp < AGG_CACHE_TTL) {
+          return NextResponse.json({
+            aggregates: hit.aggregates,
+            meta: { source: hit.source, grandTotals: hit.grandTotals, cached: true },
+          });
+        }
+      }
+
+      let aggRun = aggInflight.get(aggKey);
+      if (!aggRun) {
+        aggRun = (async () => {
+          const { aggregates, source, grandTotals } = await loadArcpClaimsAggregates(queryOpts);
+          const entry: AggCacheEntry = {
+            aggregates,
+            grandTotals,
+            source,
+            timestamp: Date.now(),
+          };
+          aggCache.set(aggKey, entry);
+          return entry;
+        })();
+        aggInflight.set(aggKey, aggRun);
+      }
+
+      try {
+        const { aggregates, source, grandTotals } = await aggRun;
+        return NextResponse.json({ aggregates, meta: { source, grandTotals } });
+      } finally {
+        aggInflight.delete(aggKey);
+      }
     }
 
     const now = Date.now();
@@ -129,7 +173,7 @@ export async function GET(req: NextRequest) {
     let run = inflight.get(cacheKey);
     if (!run) {
       run = (async () => {
-        const aggregates = await fetchArcpClaimsAggregates(queryOpts, QUERY_TIMEOUT_MS);
+        const { aggregates, source, grandTotals } = await loadArcpClaimsAggregates(queryOpts);
         const model = buildArcpClaimsTableModel(aggregates);
 
         return {
@@ -138,6 +182,7 @@ export async function GET(req: NextRequest) {
             startDate,
             endDate,
             dateFilterColumn,
+            source,
           },
         };
       })();
@@ -176,6 +221,7 @@ export async function GET(req: NextRequest) {
       );
     }
     const message = err instanceof Error ? err.message : 'Failed to load ARCP claims';
-    return NextResponse.json({ error: message }, { status: 500 });
+    const statusCode = (err as Error & { statusCode?: number }).statusCode;
+    return NextResponse.json({ error: message }, { status: statusCode ?? 500 });
   }
 }

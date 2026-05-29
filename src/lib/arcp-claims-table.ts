@@ -39,6 +39,10 @@ export type ArcpClaimsTableModel = {
 
 export type BuildArcpClaimsTableModelOptions = {
   includeTravel?: boolean;
+  /** Resolve numeric ncalltype codes (e.g. "35" → "BREAKDOWN"). */
+  callTypeLabelsByCode?: Record<string, string>;
+  /** Resolve numeric nitemcategory codes when label column is bare digits. */
+  itemCategoryLabelsByCode?: Record<string, string>;
 };
 
 export type ArcpMonthlyBreakdownRow = {
@@ -156,29 +160,61 @@ function buildSubRowLabel(row: ArcpClaimsAggregateRow): { subLabel: string; sort
   return { subLabel, sortKey };
 }
 
+function resolveDisplayLabel(
+  label: string,
+  code: string,
+  lookup?: Record<string, string>
+): string {
+  const trimmed = label.trim();
+  if (trimmed && !isBareNumericLabel(trimmed)) return trimmed;
+  const fromCode = lookup?.[code.trim()];
+  if (fromCode && !isBareNumericLabel(fromCode)) return fromCode;
+  return trimmed || code.trim();
+}
+
 function buildSectionHeader(
   callTypeLabel: string,
   itemCategoryLabel: string,
-  itemCategoryCode: string
+  itemCategoryCode: string,
+  lookups?: {
+    callTypeLabelsByCode?: Record<string, string>;
+    itemCategoryLabelsByCode?: Record<string, string>;
+  }
 ): string | null {
-  const callType = callTypeLabel.trim();
+  const callTypeCode = callTypeLabel.trim();
   let itemCategory = itemCategoryLabel.trim();
+  const itemCode = itemCategoryCode.trim();
   if (!itemCategory || isBareNumericLabel(itemCategory)) {
-    itemCategory = itemCategoryCode.trim();
+    itemCategory = itemCode;
   }
   if (!itemCategory) return null;
 
-  const callTypeDisplay =
-    callType && !isBareNumericLabel(callType) ? callType : callType ? `Type ${callType}` : '';
-  const categoryDisplay = isBareNumericLabel(itemCategory)
-    ? `Category ${itemCategory}`
-    : itemCategory;
+  let callTypeDisplay = resolveDisplayLabel(
+    callTypeLabel,
+    callTypeCode,
+    lookups?.callTypeLabelsByCode
+  );
+  let categoryDisplay = resolveDisplayLabel(
+    itemCategoryLabel,
+    itemCode,
+    lookups?.itemCategoryLabelsByCode
+  );
 
+  if (isBareNumericLabel(callTypeDisplay)) {
+    callTypeDisplay = callTypeCode ? `Type ${callTypeCode}` : '';
+  }
+  if (isBareNumericLabel(categoryDisplay)) {
+    categoryDisplay = itemCode ? `Category ${itemCode}` : '';
+  }
+  if (!categoryDisplay) return null;
   if (!callTypeDisplay) return categoryDisplay;
   return `${callTypeDisplay} – ${categoryDisplay}`;
 }
 
-function bucketAggregates(rows: ArcpClaimsAggregateRow[]) {
+function bucketAggregates(
+  rows: ArcpClaimsAggregateRow[],
+  lookups?: BuildArcpClaimsTableModelOptions
+) {
   const serviceBuckets = new Map<string, ServiceSection>();
 
   let travelTotals = {
@@ -212,8 +248,18 @@ function bucketAggregates(rows: ArcpClaimsAggregateRow[]) {
       continue;
     }
 
-    const callTypeLabel = String(row.call_type_label || row.ncalltype || '');
-    const itemCategoryLabel = String(row.item_category_label || row.nitemcategory || '');
+    const callTypeCode = String(row.ncalltype ?? '');
+    const itemCategoryCode = String(row.nitemcategory ?? '');
+    const callTypeLabel = resolveDisplayLabel(
+      String(row.call_type_label || ''),
+      callTypeCode,
+      lookups?.callTypeLabelsByCode
+    );
+    const itemCategoryLabel = resolveDisplayLabel(
+      String(row.item_category_label || ''),
+      itemCategoryCode,
+      lookups?.itemCategoryLabelsByCode
+    );
     const sectionKey = `${String(row.ncalltype ?? '')}|${String(row.nitemcategory ?? '')}`;
     const { subLabel, sortKey } = buildSubRowLabel(row);
 
@@ -221,7 +267,7 @@ function bucketAggregates(rows: ArcpClaimsAggregateRow[]) {
       serviceBuckets.set(sectionKey, {
         callTypeLabel,
         itemCategoryLabel,
-        itemCategoryCode: String(row.nitemcategory ?? ''),
+        itemCategoryCode,
         cells: new Map(),
       });
     }
@@ -269,7 +315,7 @@ export function buildArcpClaimsTableModel(
   options: BuildArcpClaimsTableModelOptions = {}
 ): ArcpClaimsTableModel {
   const includeTravel = options.includeTravel !== false;
-  const { serviceBuckets, travelTotals } = bucketAggregates(aggregates);
+  const { serviceBuckets, travelTotals } = bucketAggregates(aggregates, options);
   const rows: ArcpTableRow[] = [];
   const totals: ArcpClaimsTotals = {
     qty: 0,
@@ -300,7 +346,11 @@ export function buildArcpClaimsTableModel(
     const header = buildSectionHeader(
       section.callTypeLabel,
       section.itemCategoryLabel,
-      section.itemCategoryCode
+      section.itemCategoryCode,
+      {
+        callTypeLabelsByCode: options.callTypeLabelsByCode,
+        itemCategoryLabelsByCode: options.itemCategoryLabelsByCode,
+      }
     );
     if (!header) continue;
 
@@ -333,6 +383,7 @@ export function buildArcpClaimsTableModel(
       hoApproved: travelTotals.hoApproved,
     });
 
+    totals.qty += travelTotals.qty;
     totals.amountPayable += travelTotals.amountPayable;
     totals.branchApproved += travelTotals.branchApproved;
     totals.hoApproved += travelTotals.hoApproved;
@@ -413,6 +464,12 @@ export function buildArcpClaimsMonthlyBreakdown(
 
 export function formatArcpAmount(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value) || value === 0) return '';
+  return value.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+/** Summary bar — show 0 instead of blank so totals are visible. */
+export function formatArcpAmountSummary(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—';
   return value.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 

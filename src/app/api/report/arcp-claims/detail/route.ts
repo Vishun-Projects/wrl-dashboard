@@ -2,13 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { prisma } from '@/lib/prisma';
 import {
-  fetchArcpClaimsDetailRows,
   isCrmOutOfMemoryError,
   isCrmSqlTimeoutError,
 } from '@/lib/arcp-claims-fetch';
+import { loadArcpClaimsDetailRows } from '@/lib/arcp-claims-detail-load';
 import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims-query';
-
-const QUERY_TIMEOUT_MS = 180000;
 
 export async function GET(req: NextRequest) {
   try {
@@ -52,19 +50,16 @@ export async function GET(req: NextRequest) {
         profile?.role || ''
       );
 
-    const rows = await fetchArcpClaimsDetailRows(
-      {
-        startDate,
-        endDate,
-        dateFilterColumn,
-        branch,
-        franchisee,
-        callType,
-        isHod,
-        assignedOffices,
-      },
-      QUERY_TIMEOUT_MS
-    );
+    const { rows, source } = await loadArcpClaimsDetailRows({
+      startDate,
+      endDate,
+      dateFilterColumn,
+      branch,
+      franchisee,
+      callType,
+      isHod,
+      assignedOffices,
+    });
 
     return NextResponse.json({
       rows,
@@ -73,6 +68,7 @@ export async function GET(req: NextRequest) {
         endDate,
         dateFilterColumn,
         rowCount: rows.length,
+        source,
       },
     });
   } catch (err: unknown) {
@@ -99,6 +95,7 @@ export async function GET(req: NextRequest) {
       );
     }
     const message = err instanceof Error ? err.message : 'Failed to load ARCP claim detail';
-    return NextResponse.json({ error: message }, { status: 500 });
+    const statusCode = (err as Error & { statusCode?: number }).statusCode;
+    return NextResponse.json({ error: message }, { status: statusCode ?? 500 });
   }
 }

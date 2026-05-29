@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { prisma } from '@/lib/prisma';
+import { runArcpIncrementalSync } from '@/lib/read-model/arcp/incremental';
 import { runIncrementalSync, isPostgresLockError } from '@/lib/read-model/incremental';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
+
+/** Large CRM deltas can take several minutes (hot upsert + metric batches). */
+export const maxDuration = 300;
 
 export async function POST() {
   const supabase = await createClient();
@@ -29,8 +33,12 @@ export async function POST() {
 
   try {
     const result = await runIncrementalSync();
+    let arcpResult: Awaited<ReturnType<typeof runArcpIncrementalSync>> | undefined;
+    if (process.env.SYNC_ARCP_ENABLED === 'true') {
+      arcpResult = await runArcpIncrementalSync();
+    }
     const syncMeta = await getSyncMeta();
-    return NextResponse.json({ ...result, syncMeta });
+    return NextResponse.json({ ...result, arcp: arcpResult, syncMeta });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Incremental sync failed';
     if (isPostgresLockError(err)) {

@@ -49,7 +49,17 @@ import {
   notifyCorpusRegisterDelta,
 } from '@/lib/report-corpus';
 import { ensurePortalAuditCache } from '@/lib/report-portal-cache';
-import { readCallsFromPostgresClient, readRegisterFromPostgresClient } from '@/lib/read-model/client-flags';
+import {
+  readCallsFromPostgresClient,
+  readRegisterFromPostgresClient,
+} from '@/lib/read-model/client-flags';
+import {
+  fetchReadModelStatus,
+  formatIncrementalSyncToast,
+  isCallsHotSyncRunning,
+  postIncrementalSyncFromUi,
+  waitForReadModelSyncIdle,
+} from '@/lib/read-model/trigger-sync-client';
 import { fetchAllRegisterRowsForExport, logRegisterBulk } from '@/lib/register-export-fetch';
 import { createChunkedFetchAuth } from '@/lib/supabase-chunked-fetch';
 import { persistSharedRegisterCache, readSharedRegisterCache, SHARED_REGISTER_CACHE_VERSION } from '@/lib/report-corpus-storage';
@@ -994,26 +1004,96 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
 
   const runBackgroundSync = useCallback(async (opts?: { showToast?: boolean }) => {
     if (syncInFlightRef.current) return;
-    if (!opts?.showToast) return;
 
     if (readCallsFromPostgresClient()) {
+      if (!opts?.showToast) return;
+
       syncInFlightRef.current = true;
       setSyncInProgress(true);
+      let toastId: string | number | undefined;
+      if (opts?.showToast) {
+        toastId = toast.loading('Syncing from CRM into database…');
+      }
       try {
-        logRegisterBulk('UI refresh — reloading report cache from Postgres (not CRM sync)');
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        logRegisterBulk(
+          opts?.showToast
+            ? 'UI sync — wait for idle, CRM incremental ingest, Postgres reload'
+            : 'Auto sync — CRM incremental ingest, Postgres reload'
+        );
+
+        let progress = await fetchReadModelStatus(token);
+        if (isCallsHotSyncRunning(progress)) {
+          if (opts?.showToast && toastId != null) {
+            toast.loading('Waiting for background sync to finish…', { id: toastId });
+          }
+          const idle = await waitForReadModelSyncIdle(token);
+          if (!idle) {
+            throw new Error(
+              'Sync is still running after 10 minutes. Wait for auto-sync to finish, then try again.'
+            );
+          }
+        }
+
+        let syncResult: Awaited<ReturnType<typeof postIncrementalSyncFromUi>>;
+        try {
+          syncResult = await postIncrementalSyncFromUi(token);
+        } catch (err: unknown) {
+          if (axios.isAxiosError(err) && err.response?.status === 409) {
+            const idle = await waitForReadModelSyncIdle(token);
+            if (!idle) {
+              throw new Error(
+                (err.response.data as { error?: string })?.error ?? 'Sync already running'
+              );
+            }
+            syncResult = {
+              ok: true,
+              coalesced: true,
+              rowsUpserted: 0,
+              rowsDeleted: 0,
+            };
+          } else if (axios.isAxiosError(err) && err.response?.status === 503) {
+            throw new Error(
+              (err.response.data as { error?: string })?.error ??
+                'Sync worker is disabled (SYNC_WORKER_ENABLED)'
+            );
+          } else {
+            throw err;
+          }
+        }
+
+        if (opts?.showToast && toastId != null) {
+          toast.loading('Reloading report from database…', { id: toastId });
+        }
         await ensureSharedCallsLoaded(true);
-        const syncTime = new Date();
+        const syncTime = syncResult.syncMeta?.lastSyncedAt
+          ? new Date(syncResult.syncMeta.lastSyncedAt)
+          : new Date();
         setLastSyncedAt(syncTime);
         notifyCorpusRegisterDelta([], syncTime);
 
         if (opts?.showToast) {
-          toast.success('Report data refreshed from database');
+          const { kind, message } = formatIncrementalSyncToast(syncResult);
+          if (toastId != null) toast.dismiss(toastId);
+          if (kind === 'success') toast.success(message);
+          else if (kind === 'error') toast.error(message);
+          else toast.info(message);
+        } else if (toastId != null) {
+          toast.dismiss(toastId);
         }
       } catch (err: unknown) {
+        if (toastId != null) toast.dismiss(toastId);
         if (opts?.showToast) {
           const message =
-            err instanceof Error ? err.message : 'Refresh failed';
-          toast.error('Failed to refresh report data: ' + message);
+            axios.isAxiosError(err) && err.response?.data?.error
+              ? String(err.response.data.error)
+              : err instanceof Error
+                ? err.message
+                : 'Refresh failed';
+          toast.error('Failed to sync report data: ' + message);
         }
       } finally {
         syncInFlightRef.current = false;
@@ -1021,6 +1101,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       }
       return;
     }
+
+    if (!opts?.showToast) return;
 
     const { startDateStr, endDateStr } = getDateStrings();
     const fetchScope = resolveCorpusFetchScope(startDateStr, endDateStr, dateFilterColumn);
@@ -1225,8 +1307,6 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     pincodeSearch,
     syncCascadeOptionsFromCalls,
   ]);
-
-  // Automatic delta sync disabled — use the sync button (↻) for manual refresh.
 
   const callTypeOptions = useMemo(
     () => callTypes.map((type) => ({ value: type, label: type })),

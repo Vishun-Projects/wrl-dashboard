@@ -34,10 +34,28 @@ export function readDimsFromPostgresClient(): boolean {
   return readClientSource(process.env.NEXT_PUBLIC_READ_DIMS_FROM) === 'postgres';
 }
 
+export function readArcpFromPostgresClient(): boolean {
+  return readClientSource(process.env.NEXT_PUBLIC_READ_ARCP_FROM) === 'postgres';
+}
+
 export function readCallsFromPostgresClient(): boolean {
   return (
     readSummaryFromPostgresClient() ||
     readRegisterFromPostgresClient() ||
-    readDistributionFromPostgresClient()
+    readDistributionFromPostgresClient() ||
+    readArcpFromPostgresClient()
   );
+}
+
+/** Background CRM→Postgres sync while the report app is open (default on, 3 min). */
+export function postgresAutoSyncEnabled(): boolean {
+  return (
+    readCallsFromPostgresClient() && process.env.NEXT_PUBLIC_AUTO_SYNC_ENABLED !== 'false'
+  );
+}
+
+export function postgresAutoSyncIntervalMs(): number {
+  const configured = Number(process.env.NEXT_PUBLIC_AUTO_SYNC_INTERVAL_MS);
+  if (Number.isFinite(configured) && configured >= 60_000) return configured;
+  return 3 * 60 * 1000;
 }

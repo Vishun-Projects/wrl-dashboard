@@ -1,0 +1,2 @@
+# Optional — only needed for scripts/sync_worker.py env loading
+python-dotenv>=1.0.0

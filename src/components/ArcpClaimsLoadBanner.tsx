@@ -106,8 +106,7 @@ export function ArcpClaimsLoadBanner({
                 >
                   <span className="font-medium text-slate-800">{status.percent}% complete</span>
                   <span>
-                    Period {Math.min(status.done + (status.done < status.total ? 1 : 0), status.total)}{' '}
-                    of {status.total}
+                    {status.done} of {status.total} period{status.total === 1 ? '' : 's'} complete
                   </span>
                   {status.currentRange ? <span>({status.currentRange})</span> : null}
                   {isDetailExport && status.rowsLoaded != null ? (
@@ -150,8 +149,7 @@ export function ArcpClaimsLoadBanner({
                   {runningTotals.branchApproved > 0
                     ? ` · ${formatArcpCrore(runningTotals.branchApproved)} branch approved`
                     : ''}
-                  . Progress is by time period, not ₹ — January–February usually holds a large share of
-                  annual approvals, so do not extrapolate from the period counter.
+                  .
                 </p>
               ) : null}
             </div>

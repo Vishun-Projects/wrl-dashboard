@@ -48,7 +48,19 @@ export function resolveAppDatabaseUrl(raw?: string): string {
 export function appDatabasePoolMax(): number {
   const configured = Number(process.env.PG_POOL_MAX);
   if (Number.isFinite(configured) && configured > 0) return configured;
-  return 3;
+  return 8;
+}
+
+export function appDatabaseConnectTimeoutMs(): number {
+  const configured = Number(process.env.PG_CONNECT_TIMEOUT_MS);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+  return 60_000;
+}
+
+export function appDatabaseStatementTimeoutMs(): number {
+  const configured = Number(process.env.PG_STATEMENT_TIMEOUT_MS);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+  return 120_000;
 }
 
 export function loadEnv(): void {
@@ -69,8 +81,12 @@ export function getPool(): pg.Pool {
       allowExitOnIdle: true,
     });
     pool.on('connect', (client) => {
-      void client.query(`SET statement_timeout = '${Number(process.env.PG_STATEMENT_TIMEOUT_MS ?? 25000)}'`);
-      void client.query(`SET lock_timeout = '${Number(process.env.PG_LOCK_TIMEOUT_MS ?? 5000)}'`);
+      const statementMs = Number(process.env.SYNC_PG_STATEMENT_TIMEOUT_MS ?? 600_000);
+      const lockMs = Number(process.env.SYNC_PG_LOCK_TIMEOUT_MS ?? 10_000);
+      void (async () => {
+        await client.query(`SET statement_timeout = '${statementMs}'`);
+        await client.query(`SET lock_timeout = '${lockMs}'`);
+      })();
     });
   }
   return pool;

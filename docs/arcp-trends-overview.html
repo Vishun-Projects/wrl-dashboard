@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ARCP Monthly Trends — Call / BM / HO</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --card: #1a2332;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --call: #38bdf8;
+      --bm: #a78bfa;
+      --ho: #34d399;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px 28px 48px;
+    }
+    h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 6px; }
+    .sub { color: var(--muted); font-size: 0.9rem; margin-bottom: 24px; max-width: 900px; line-height: 1.5; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 10px;
+      padding: 14px 16px;
+      border: 1px solid #2a3548;
+    }
+    .card h3 { margin: 0 0 8px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+    .card .val { font-size: 1.15rem; font-weight: 600; }
+    .card .range { font-size: 0.8rem; color: var(--muted); margin-top: 6px; }
+    .panel {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      border: 1px solid #2a3548;
+    }
+    .panel h2 { margin: 0 0 4px; font-size: 1.05rem; }
+    .panel p { margin: 0 0 16px; color: var(--muted); font-size: 0.85rem; }
+    .chart-wrap { position: relative; height: 340px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    th, td {
+      padding: 8px 10px;
+      text-align: right;
+      border-bottom: 1px solid #2a3548;
+    }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-weight: 500; }
+    .legend { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 12px; font-size: 0.85rem; }
+    .legend span::before {
+      content: "";
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .legend .call::before { background: var(--call); }
+    .legend .bm::before { background: var(--bm); }
+    .legend .ho::before { background: var(--ho); }
+  </style>
+</head>
+<body>
+  <h1>ARCP monthly trends</h1>
+  <p class="sub" id="meta"></p>
+
+  <div class="cards" id="summary-cards"></div>
+
+  <div class="panel">
+    <h2>Amount payable (₹) by calendar month</h2>
+    <p>Which month lines fall into depends on date basis —Call Date vs BM vs HO approval are different row sets.</p>
+    <div class="legend">
+      <span class="call">Call Date</span>
+      <span class="bm">BM Call Approved</span>
+      <span class="ho">HO Call Approved</span>
+    </div>
+    <div class="chart-wrap"><canvas id="chartPayable"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>Branch approved (₹)</h2>
+    <div class="chart-wrap"><canvas id="chartBranch"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>HO approved (₹)</h2>
+    <div class="chart-wrap"><canvas id="chartHo"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>Line count (included ARCP rows)</h2>
+    <div class="chart-wrap"><canvas id="chartLines"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>Monthly overview table (amount payable, ₹ lakh)</h2>
+    <div style="overflow-x: auto">
+      <table id="data-table">
+        <thead>
+          <tr>
+            <th>Month</th>
+            <th>Call Date</th>
+            <th>BM Approved</th>
+            <th>HO Approved</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const META = {"generatedAt":"2026-05-28T10:31:33.945Z","dataSource":"Western CRM (live aggregates)","rowCount":321335,"backfillStart":"2025-01-01","globalMin":"2026-02","globalMax":"2026-04","bundles":[{"label":"Call Date","key":"callDate","minMonth":"2026-02","maxMonth":"2026-04","totalAmount":55838179.5,"totalBranch":28093360.120000005,"totalHo":28093360.120000005,"totalLines":131974},{"label":"BM Call Approved","key":"bmApproved","minMonth":"2026-04","maxMonth":"2026-04","totalAmount":19683479.25,"totalBranch":16351849.420000002,"totalHo":16351849.420000002,"totalLines":51166},{"label":"HO Call Approved","key":"hoApproved","minMonth":"2026-02","maxMonth":"2026-04","totalAmount":53782806.550000004,"totalBranch":47632437.72,"totalHo":47627967.12,"totalLines":138195}]};
+    const CHART = {"labels":["2026-02","2026-03","2026-04"],"callDate":{"amountPayable":[14782624.399999999,20411006.9,20644548.2],"branchApproved":[11664084.850000003,11322117.77,5107157.5],"hoApproved":[11664084.850000003,11322117.77,5107157.5],"lineCount":[35317,48759,47898]},"bmApproved":{"amountPayable":[null,null,19683479.25],"branchApproved":[null,null,16351849.420000002],"hoApproved":[null,null,16351849.420000002],"lineCount":[null,null,51166]},"hoApproved":{"amountPayable":[19972144.3,14122242.4,19688419.85],"branchApproved":[18606675.35,12669407.349999998,16356355.02],"hoApproved":[18606710.35,12669407.349999998,16351849.42],"lineCount":[51521,35500,51174]}};
+
+    const fmtLakh = (n) => {
+      if (n == null || !Number.isFinite(n)) return '—';
+      return (n / 100000).toLocaleString('en-IN', { maximumFractionDigits: 2 }) + ' L';
+    };
+    const fmtInr = (n) => {
+      if (n == null || !Number.isFinite(n)) return '—';
+      return '₹' + Math.round(n).toLocaleString('en-IN');
+    };
+
+    document.getElementById('meta').textContent =
+      'Generated ' + META.generatedAt + ' · source: ' + META.dataSource +
+      ' · ' + META.rowCount.toLocaleString('en-IN') + ' claim lines (summed monthly)' +
+      ' · range ' + META.globalMin + ' → ' + META.globalMax +
+      ' · Postgres backfill from ' + META.backfillStart + ' (reference only)';
+
+    const cardEl = document.getElementById('summary-cards');
+    for (const b of META.bundles) {
+      const div = document.createElement('div');
+      div.className = 'card';
+      div.innerHTML =
+        '<h3>' + b.label + '</h3>' +
+        '<div class="val">' + fmtLakh(b.totalAmount) + ' payable</div>' +
+        '<div class="range">' + (b.minMonth || '—') + ' → ' + (b.maxMonth || '—') +
+        '<br>' + b.totalLines.toLocaleString('en-IN') + ' lines</div>';
+      cardEl.appendChild(div);
+    }
+
+    const colors = {
+      callDate: { border: '#38bdf8', bg: 'rgba(56,189,248,0.12)' },
+      bmApproved: { border: '#a78bfa', bg: 'rgba(167,139,250,0.12)' },
+      hoApproved: { border: '#34d399', bg: 'rgba(52,211,153,0.12)' },
+    };
+
+    function makeChart(canvasId, metric) {
+      const ctx = document.getElementById(canvasId);
+      return new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: CHART.labels,
+          datasets: [
+            {
+              label: 'Call Date',
+              data: CHART.callDate[metric],
+              borderColor: colors.callDate.border,
+              backgroundColor: colors.callDate.bg,
+              tension: 0.25,
+              spanGaps: false,
+              pointRadius: 3,
+            },
+            {
+              label: 'BM Approved',
+              data: CHART.bmApproved[metric],
+              borderColor: colors.bmApproved.border,
+              backgroundColor: colors.bmApproved.bg,
+              tension: 0.25,
+              spanGaps: false,
+              pointRadius: 3,
+            },
+            {
+              label: 'HO Approved',
+              data: CHART.hoApproved[metric],
+              borderColor: colors.hoApproved.border,
+              backgroundColor: colors.hoApproved.bg,
+              tension: 0.25,
+              spanGaps: false,
+              pointRadius: 3,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => {
+                  const v = ctx.raw;
+                  if (metric === 'lineCount') return ctx.dataset.label + ': ' + (v ?? '—');
+                  return ctx.dataset.label + ': ' + fmtInr(v);
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              ticks: { color: '#8b9cb3', maxRotation: 45 },
+              grid: { color: '#2a3548' },
+            },
+            y: {
+              ticks: {
+                color: '#8b9cb3',
+                callback: (v) => metric === 'lineCount' ? v : fmtLakh(v),
+              },
+              grid: { color: '#2a3548' },
+            },
+          },
+        },
+      });
+    }
+
+    makeChart('chartPayable', 'amountPayable');
+    makeChart('chartBranch', 'branchApproved');
+    makeChart('chartHo', 'hoApproved');
+    makeChart('chartLines', 'lineCount');
+
+    const tbody = document.querySelector('#data-table tbody');
+    for (let i = 0; i < CHART.labels.length; i++) {
+      const tr = document.createElement('tr');
+      const c = CHART.callDate.amountPayable[i];
+      const b = CHART.bmApproved.amountPayable[i];
+      const h = CHART.hoApproved.amountPayable[i];
+      if (c == null && b == null && h == null) continue;
+      tr.innerHTML =
+        '<td>' + CHART.labels[i] + '</td>' +
+        '<td>' + fmtLakh(c) + '</td>' +
+        '<td>' + fmtLakh(b) + '</td>' +
+        '<td>' + fmtLakh(h) + '</td>';
+      tbody.appendChild(tr);
+    }
+  </script>
+</body>
+</html>

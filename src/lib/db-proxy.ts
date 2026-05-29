@@ -3,12 +3,19 @@ import * as cheerio from 'cheerio';
 
 const DB_URL = 'https://westerncrm.com/wrl/OTHERS/DBQUERY.aspx';
 
+const SESSION_CACHE_MS = Number(process.env.CRM_SESSION_CACHE_MS ?? 30_000) || 30_000;
+
 let cachedState: {
   viewState: string;
   viewStateGenerator: string;
   eventValidation: string;
 } | null = null;
 let lastFetch = 0;
+let sessionInflight: Promise<{
+  viewState: string;
+  viewStateGenerator: string;
+  eventValidation: string;
+}> | null = null;
 
 type QueryParams = {
   top?: string;
@@ -46,6 +53,19 @@ function crmSqlTimeoutMessage(body: string | undefined, message: string): boolea
   );
 }
 
+/** Axios client timeout or CRM SQL timeout text in the response body. */
+export function isCrmSqlTimeoutError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  if (crmSqlTimeoutMessage(undefined, message)) return true;
+  if (message.includes('timeout of') && message.includes('exceeded')) return true;
+  if (axios.isAxiosError(err)) {
+    const body =
+      typeof err.response?.data === 'string' ? err.response.data : undefined;
+    return crmSqlTimeoutMessage(body, message);
+  }
+  return false;
+}
+
 function describeQuery(params: QueryParams): string {
   if (params.rawSql) {
     const sql = params.rawSql.replace(/\s+/g, ' ').trim();
@@ -72,14 +92,13 @@ function logCrmTiming(
   console.log(`[WRL CRM] ${event} ${elapsedMs}ms`, detail);
 }
 
-export async function getAppState() {
-  const now = Date.now();
-  if (cachedState && now - lastFetch < 5000) {
-    return cachedState;
-  }
-
+async function fetchAppStateOnce(): Promise<{
+  viewState: string;
+  viewStateGenerator: string;
+  eventValidation: string;
+}> {
   const sessionStart = Date.now();
-  const res = await axios.get(DB_URL);
+  const res = await axios.get(DB_URL, { timeout: 90_000 });
   const sessionMs = Date.now() - sessionStart;
   logCrmTiming('GET session (viewstate)', sessionMs, {
     status: res.status,
@@ -87,13 +106,32 @@ export async function getAppState() {
   });
 
   const $ = cheerio.load(res.data);
-  cachedState = {
+  return {
     viewState: ($('#__VIEWSTATE').val() as string) || '',
     viewStateGenerator: ($('#__VIEWSTATEGENERATOR').val() as string) || '',
     eventValidation: ($('#__EVENTVALIDATION').val() as string) || '',
   };
-  lastFetch = now;
-  return cachedState;
+}
+
+export async function getAppState() {
+  const now = Date.now();
+  if (cachedState && now - lastFetch < SESSION_CACHE_MS) {
+    return cachedState;
+  }
+
+  if (!sessionInflight) {
+    sessionInflight = fetchAppStateOnce()
+      .then((state) => {
+        cachedState = state;
+        lastFetch = Date.now();
+        return state;
+      })
+      .finally(() => {
+        sessionInflight = null;
+      });
+  }
+
+  return sessionInflight;
 }
 
 async function executePostWithRetry(params: QueryParams, signal?: AbortSignal) {

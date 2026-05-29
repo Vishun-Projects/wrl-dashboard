@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useLayoutEffect, useCallback, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import axios from 'axios';
+import { PostgresAutoSync } from './PostgresAutoSync';
 import { Sidebar } from './Sidebar';
 
 function MainContentPlaceholder() {
@@ -42,19 +43,34 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   const fetchProfile = useCallback(async () => {
     setLoadingProfile(true);
-    try {
-      const res = await axios.get('/api/auth/me', { withCredentials: true });
-      setUserProfile(res.data);
-      authLoadedRef.current = true;
-    } catch {
-      setUserProfile(null);
-      authLoadedRef.current = false;
-      if (pathname !== '/login') {
-        router.replace('/login');
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await axios.get('/api/auth/me', { withCredentials: true });
+        setUserProfile(res.data);
+        authLoadedRef.current = true;
+        setLoadingProfile(false);
+        return;
+      } catch (err: unknown) {
+        const unauthorized =
+          axios.isAxiosError(err) &&
+          (err.response?.status === 401 || err.response?.status === 403);
+        if (unauthorized) {
+          setUserProfile(null);
+          authLoadedRef.current = false;
+          if (pathname !== '/login') {
+            router.replace('/login');
+          }
+          setLoadingProfile(false);
+          return;
+        }
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 1500));
+          continue;
+        }
+        // Network / 5xx: keep last profile — do not treat as logout
       }
-    } finally {
-      setLoadingProfile(false);
     }
+    setLoadingProfile(false);
   }, [pathname, router]);
 
   useLayoutEffect(() => {
@@ -79,6 +95,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <UserContext.Provider value={{ userProfile, loadingProfile, refreshProfile: fetchProfile }}>
+      {authReady ? <PostgresAutoSync /> : null}
       <div className="flex flex-col md:flex-row h-screen overflow-hidden w-screen bg-slate-50 text-slate-700 font-sans">
         <Sidebar user={userProfile} />
         {authReady ? (

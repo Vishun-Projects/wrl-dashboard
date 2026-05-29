@@ -13,7 +13,11 @@
     "sync-worker:incremental": "npx tsx src/lib/read-model/cli.ts incremental",
     "sync-worker:dims": "npx tsx src/lib/read-model/cli.ts dims",
     "sync-worker:nightly": "npx tsx src/lib/read-model/cli.ts nightly",
-    "sync-worker:daemon": "npx tsx src/lib/read-model/cli.ts daemon"
+    "sync-worker:daemon": "npx tsx src/lib/read-model/cli.ts daemon",
+    "sync-worker:arcp-reset": "npx tsx src/lib/read-model/cli.ts arcp-reset",
+    "sync-worker:arcp-backfill": "npx tsx src/lib/read-model/cli.ts arcp-backfill",
+    "sync-worker:arcp-incremental": "npx tsx src/lib/read-model/cli.ts arcp-incremental",
+    "arcp-trends-html": "npx tsx scripts/generate-arcp-trends-html.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",

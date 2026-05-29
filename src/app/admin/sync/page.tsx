@@ -181,6 +181,7 @@ export default function ReadModelSyncPage() {
                 <AdminStatPill label="Register" value={progress.appFlags.register} />
                 <AdminStatPill label="Distribution" value={progress.appFlags.distribution} />
                 <AdminStatPill label="Dims" value={progress.appFlags.dims} />
+                <AdminStatPill label="ARCP" value={progress.appFlags.arcp} />
               </div>
               <p className="mt-3 text-xs text-slate-500">
                 Updated {formatWhen(progress.generatedAt)} · auto-refreshes every 10s
@@ -270,19 +271,14 @@ export default function ReadModelSyncPage() {
                   rows reach ~139k (Admin → Sync shows Ready).
                 </li>
                 <li>
-                  <strong>Keep production Postgres fresh:</strong> leave this running on your PC while you work —{' '}
-                  <code className="rounded bg-white px-1">
-                    SYNC_WORKER_ENABLED=true npm run sync-worker:daemon
-                  </code>
-                  <span className="block mt-1 text-slate-500">
-                    Uses <code className="rounded bg-white px-1">DATABASE_URL</code> from{' '}
-                    <code className="rounded bg-white px-1">.env.local</code> (same Supabase as Vercel). Syncs
-                    every ~3 minutes. Stop with Ctrl+C when done for the day.
-                  </span>
+                  <strong>Live sync:</strong> while anyone is logged into the app (local or Vercel), Postgres
+                  auto-sync runs every ~3 minutes via{' '}
+                  <code className="rounded bg-white px-1">POST /api/read-model/sync</code>. No cron or
+                  background worker required.
                 </li>
                 <li>
-                  Vercel serves the app only — it does not run the sync loop on Hobby. Use Admin → Sync for a
-                  one-off manual run if the daemon is stopped.
+                  Set <code className="rounded bg-white px-1">NEXT_PUBLIC_AUTO_SYNC_ENABLED=false</code> to
+                  disable browser auto-sync. Report pages still have a manual Sync button.
                 </li>
                 <li>Register/summary/distribution pages read from Postgres once backfill completes.</li>
               </ul>

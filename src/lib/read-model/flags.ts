@@ -24,10 +24,15 @@ export function readDimsFromPostgres(): boolean {
   return readSource('READ_DIMS_FROM') === 'postgres';
 }
 
+export function readArcpFromPostgres(): boolean {
+  return readSource('READ_ARCP_FROM') === 'postgres';
+}
+
 export function readCallsFromPostgres(): boolean {
   return (
     readSummaryFromPostgres() ||
     readRegisterFromPostgres() ||
-    readDistributionFromPostgres()
+    readDistributionFromPostgres() ||
+    readArcpFromPostgres()
   );
 }

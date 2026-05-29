@@ -144,13 +144,20 @@ export async function deleteHotRowsByTrn(
 
 export async function fetchHotRowsByTrn(
   client: pg.PoolClient,
-  vtrnnos: string[]
+  vtrnnos: string[],
+  chunkSize = 2000
 ): Promise<HotRow[]> {
   if (vtrnnos.length === 0) return [];
-  const result = await client.query(`SELECT * FROM calls_latest_hot WHERE vtrnno = ANY($1::text[])`, [
-    vtrnnos,
-  ]);
-  return result.rows as HotRow[];
+  const rows: HotRow[] = [];
+  for (let i = 0; i < vtrnnos.length; i += chunkSize) {
+    const chunk = vtrnnos.slice(i, i + chunkSize);
+    const result = await client.query(
+      `SELECT * FROM calls_latest_hot WHERE vtrnno = ANY($1::text[])`,
+      [chunk]
+    );
+    rows.push(...(result.rows as HotRow[]));
+  }
+  return rows;
 }
 
 export async function countHotRows(client: pg.PoolClient): Promise<number> {

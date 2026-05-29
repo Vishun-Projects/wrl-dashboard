@@ -1,5 +1,4 @@
 import { createHash } from 'crypto';
-import type pg from 'pg';
 import { withClient } from '@/lib/read-model/db';
 import {
   completeIngestBatch,
@@ -19,26 +18,22 @@ import {
   pollUntilSyncReleased,
   isSyncRunning,
 } from '@/lib/read-model/lock';
-import {
-  factCountsFromHotRow,
-  factKeyFromHotRow,
-  serializeFactKey,
-} from '@/lib/read-model/metrics';
-import { applyFactDelta } from '@/lib/read-model/upsert-facts';
+import { buildNetFactDeltas, serializeFactKey } from '@/lib/read-model/metrics';
+import { applyNetFactDeltas } from '@/lib/read-model/upsert-facts';
 import {
   dedupeCrmRows,
   isHotEligibleRow,
   processCrmRows,
   transformCrmRowToHot,
 } from '@/lib/read-model/transform';
-import { parseCrmDate, currentYearStart } from '@/lib/read-model/dates';
+import { parseCrmDate } from '@/lib/read-model/dates';
 import {
   countHotRows,
   deleteHotRowsByTrn,
   fetchHotRowsByTrn,
   upsertHotRows,
 } from '@/lib/read-model/upsert-hot';
-import { HOT_TARGET_ROWS } from '@/lib/read-model/sync-meta';
+import { HOT_TARGET_ROWS } from '@/lib/read-model/constants';
 import type { HotRow } from '@/lib/read-model/types';
 
 const ENTITY = 'calls_latest_hot';
@@ -63,25 +58,7 @@ function maxWatermarks(rows: Record<string, unknown>[]): {
   return { lastEditedon, lastAddedon };
 }
 
-async function applyFactChanges(
-  client: pg.PoolClient,
-  oldRows: HotRow[],
-  newRows: HotRow[]
-): Promise<void> {
-  const yearStart = currentYearStart();
-  for (const row of oldRows) {
-    const key = factKeyFromHotRow(row);
-    if (key.fact_date < yearStart) continue;
-    await applyFactDelta(client, key, factCountsFromHotRow(row), 'subtract');
-  }
-  for (const row of newRows) {
-    const key = factKeyFromHotRow(row);
-    if (key.fact_date < yearStart) continue;
-    await applyFactDelta(client, key, factCountsFromHotRow(row), 'add');
-  }
-}
-
-async function skipIncrementalReason(client: pg.PoolClient): Promise<string | null> {
+async function skipIncrementalReason(client: import('pg').PoolClient): Promise<string | null> {
   const state = await getSyncState(client);
   if (state?.status === 'pending_backfill' || state?.status === 'backfilling') {
     return `sync_state.status=${state.status}`;
@@ -181,6 +158,19 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
     return { ok: true, skipped: true, reason: prep.reason, rowsUpserted: 0, rowsDeleted: 0 };
   }
 
+  const watermarkStart = await withClient(async (client) => {
+    const state = await getSyncState(client);
+    const watermarkBase = state?.last_editedon ?? new Date(0);
+    return new Date(watermarkBase.getTime() - OVERLAP_MS);
+  });
+
+  console.log(`[sync-worker] Incremental fetch from ${watermarkStart.toISOString()}`);
+  const rawRows = await fetchCrmIncrementalRows(watermarkStart, (rows) => {
+    console.log(`[sync-worker] CRM returned ${rows} changed rows`);
+  });
+
+  const deduped = dedupeCrmRows(rawRows);
+
   return withClient(async (client) => {
     const acquired = await tryAcquireSyncLock(client);
     if (!acquired) {
@@ -190,8 +180,6 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
 
     const startedAt = new Date();
     const state = await getSyncState(client);
-    const watermarkBase = state?.last_editedon ?? new Date(0);
-    const watermarkStart = new Date(watermarkBase.getTime() - OVERLAP_MS);
     const batch = await startIngestBatch(client, ENTITY, watermarkStart);
     const logId = await startSyncRunLog(client, ENTITY, batch.batchId);
 
@@ -199,22 +187,21 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
     let rowsDeleted = 0;
 
     try {
-      console.log(`[sync-worker] Incremental fetch from ${watermarkStart.toISOString()}`);
-      const rawRows = await fetchCrmIncrementalRows(watermarkStart, (rows) => {
-        console.log(`[sync-worker] CRM returned ${rows} changed rows`);
-      });
-
-      const deduped = dedupeCrmRows(rawRows);
       const trns = deduped
         .map((row) => String(row.vtrnno ?? row.UniqueCallNo ?? '').trim())
         .filter(Boolean);
+      console.log(`[sync-worker] Deduped to ${deduped.length} TRNs — writing to Postgres`);
 
       await client.query('BEGIN');
       try {
         await client.query(`SET LOCAL lock_timeout = '${SYNC_TX_LOCK_TIMEOUT_MS}'`);
+        await client.query(
+          `SET LOCAL statement_timeout = '${Number(process.env.SYNC_PG_STATEMENT_TIMEOUT_MS ?? 600_000)}'`
+        );
 
         const existingHot = await fetchHotRowsByTrn(client, trns);
         const existingByTrn = new Map(existingHot.map((row) => [row.vtrnno, row]));
+        console.log(`[sync-worker] Matched ${existingHot.length} existing hot rows — transforming`);
 
         const upsertRows: HotRow[] = [];
         const deleteTrns: string[] = [];
@@ -231,6 +218,9 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
           }
         }
 
+        console.log(
+          `[sync-worker] Upserting ${upsertRows.length} hot rows, deleting ${deleteTrns.length}`
+        );
         rowsUpserted = await upsertHotRows(client, upsertRows);
         rowsDeleted = await deleteHotRowsByTrn(client, deleteTrns);
 
@@ -245,7 +235,13 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
           const old = existingByTrn.get(trn);
           if (old) oldFactRows.push(old);
         }
-        await applyFactChanges(client, oldFactRows, newFactRows);
+
+        const netFacts = buildNetFactDeltas(oldFactRows, newFactRows);
+        console.log(
+          `[sync-worker] Applying ${netFacts.length} aggregated metric deltas (${oldFactRows.length} old, ${newFactRows.length} new)`
+        );
+        const factsApplied = await applyNetFactDeltas(client, netFacts);
+        console.log(`[sync-worker] Metric deltas applied: ${factsApplied} keys`);
 
         const watermarks = maxWatermarks(deduped);
         const nextEdited =

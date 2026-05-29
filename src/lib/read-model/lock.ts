@@ -2,9 +2,12 @@ import type pg from 'pg';
 import type { SyncStateRow } from '@/lib/read-model/types';
 
 const ENTITY = 'calls_latest_hot';
-const STALE_LOCK_MS = 30 * 60 * 1000;
+/** How long is_running may stay true before a crashed worker's lock is cleared (default 5 min). */
+export const STALE_LOCK_MS = Number(process.env.SYNC_STALE_LOCK_MS ?? 5 * 60 * 1000);
 const SYNC_WAIT_POLL_MS = 2000;
-const SYNC_WAIT_TIMEOUT_MS = STALE_LOCK_MS + 5 * 60 * 1000;
+/** Max wait when another sync holds the lock (stale threshold + 5 min buffer). */
+export const SYNC_WAIT_TIMEOUT_MS =
+  Number(process.env.SYNC_WAIT_TIMEOUT_MS) || STALE_LOCK_MS + 5 * 60 * 1000;
 export const SYNC_WATERMARK_GUARD = new Date('2020-01-01T00:00:00.000Z');
 
 function sleep(ms: number): Promise<void> {

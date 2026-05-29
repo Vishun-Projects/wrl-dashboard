@@ -22,14 +22,23 @@ import { useReportFilters } from '@/contexts/ReportFiltersContext';
 import {
   ARCP_DATE_FILTER_OPTIONS,
   estimateArcpLoadPlan,
+  resolveArcpClientLoadPlan,
+  shouldUseClientSideArcpChunks,
+  resolveArcpLoadConcurrency,
   estimateArcpDetailLoadPlan,
   mergeArcpAggregateRows,
   mergeArcpDetailRows,
+  isArcpApproveDateColumn,
   type ArcpClaimsAggregateRow,
   type ArcpDateFilterColumn,
   type ArcpClaimsDetailRow,
   type ArcpLoadPlan,
+  type ArcpGrandTotals,
 } from '@/lib/arcp-claims-query';
+import { runPool } from '@/lib/run-pool';
+import { readArcpFromPostgresClient } from '@/lib/read-model/client-flags';
+import type { ArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-shared';
+import { fetchReadModelStatus } from '@/lib/read-model/trigger-sync-client';
 import {
   downloadArcpClaimsCsv,
   downloadArcpClaimsDetailCsv,
@@ -41,6 +50,7 @@ import {
 import {
   buildArcpClaimsMonthlyBreakdown,
   buildArcpClaimsTableModel,
+  formatArcpAmountSummary,
 } from '@/lib/arcp-claims-table';
 import {
   buildFranchiseeOptions,
@@ -53,6 +63,11 @@ import {
   isChunkedFetchAuthError,
 } from '@/lib/supabase-chunked-fetch';
 import { toast } from 'sonner';
+import {
+  logArcpFiltersApplied,
+  logArcpLoadResult,
+  logArcpTableModel,
+} from '@/lib/arcp-claims-browser-debug';
 
 type AppliedArcpFilters = {
   startDateStr: string;
@@ -77,20 +92,48 @@ function appliedFiltersKey(filters: AppliedArcpFilters): string {
   });
 }
 
-function buildArcpPlanMessage(plan: ArcpLoadPlan, dateFilterColumn: ArcpDateFilterColumn): string {
-  if (plan.chunkCount <= 1) {
-    return `Loading ${plan.spanDays}-day tally from CRM.`;
+function buildArcpPlanMessage(
+  plan: ArcpLoadPlan,
+  dateFilterColumn: ArcpDateFilterColumn,
+  usePostgres?: boolean,
+  scopedFilters?: boolean
+): string {
+  const eta = formatArcpDurationMs(plan.estimateMs);
+
+  if (usePostgres) {
+    if (plan.crmChunkCount > 0 && plan.crmChunkCount < plan.chunkCount) {
+      return `Loading ${plan.chunkCount} period(s) (est. ${eta}) — Postgres first; ${plan.crmChunkCount} period(s) may use live CRM if not in database yet.`;
+    }
+    if (plan.crmChunkCount > 0 && plan.chunkCount <= 1) {
+      return `Loading ${plan.spanDays}-day tally — Postgres first, then live CRM if needed (est. ${eta}).`;
+    }
+    if (plan.chunkCount <= 1) {
+      if (scopedFilters) {
+        return `Loading ${plan.spanDays}-day tally for selected branch/franchisee from database (est. ${eta}).`;
+      }
+      return `Loading ${plan.spanDays}-day tally from database (est. ${eta}).`;
+    }
+    return `Loading ${plan.chunkCount} period(s) from database (est. ${eta}).`;
+  } else if (plan.chunkCount <= 1) {
+    return `Loading ${plan.spanDays}-day tally from CRM (est. ${eta}).`;
   }
 
   const basis =
     ARCP_DATE_FILTER_OPTIONS.find((option) => option.value === dateFilterColumn)?.label ??
     'Call Date';
 
-  if (dateFilterColumn === 'approve') {
-    return `${plan.spanDays}-day range on ${basis} loads in ${plan.chunkCount} weekly periods to stay within CRM time limits. The table updates as each period completes.`;
+  if (
+    dateFilterColumn === 'bm_approved_at' ||
+    dateFilterColumn === 'ho_approved_at'
+  ) {
+    const parallelNote =
+      resolveArcpLoadConcurrency({ dateFilterColumn }) > 1
+        ? ` (up to ${resolveArcpLoadConcurrency({ dateFilterColumn })} in parallel)`
+        : ' (one CRM request at a time — avoids SQL timeouts)';
+    return `${plan.spanDays}-day range on ${basis} loads in ${plan.chunkCount} weekly period(s)${parallelNote}. Est. ${eta}.`;
   }
 
-  return `${plan.spanDays}-day range on ${basis} loads in ${plan.chunkCount} monthly periods. The table updates as each period completes.`;
+  return `${plan.spanDays}-day range on ${basis} loads in ${plan.chunkCount} monthly periods. Est. ${eta}.`;
 }
 
 function buildArcpDetailPlanMessage(plan: ArcpLoadPlan, dateFilterColumn: ArcpDateFilterColumn): string {
@@ -111,20 +154,32 @@ function toLoadStatus(
   dateFilterColumn: ArcpDateFilterColumn,
   done: number,
   etaMs: number,
-  options?: { planMessage?: string; rowsLoaded?: number }
+  options?: { planMessage?: string; rowsLoaded?: number; scopedFilters?: boolean }
 ): ArcpLoadStatus {
   const total = plan.chunkCount;
   const percent = total > 0 ? Math.round((done / total) * 100) : 0;
-  const nextChunk = plan.chunks[done];
+  const concurrency = resolveArcpLoadConcurrency({ dateFilterColumn });
+  const inFlight = done < total && total > 1;
 
   return {
     done,
     total,
     percent,
-    currentRange: nextChunk ? `${nextChunk.start} → ${nextChunk.end}` : null,
+    currentRange: inFlight
+      ? concurrency > 1
+        ? `up to ${concurrency} periods in parallel`
+        : 'loading next weekly period'
+      : null,
     etaRemainingLabel: done < total ? formatArcpDurationMs(etaMs) : null,
     etaFinishLabel: done < total ? formatArcpFinishTime(Date.now() + etaMs) : null,
-    planMessage: options?.planMessage ?? buildArcpPlanMessage(plan, dateFilterColumn),
+    planMessage:
+      options?.planMessage ??
+      buildArcpPlanMessage(
+        plan,
+        dateFilterColumn,
+        readArcpFromPostgresClient(),
+        options?.scopedFilters
+      ),
     rowsLoaded: options?.rowsLoaded,
   };
 }
@@ -149,6 +204,7 @@ export default function ArcpClaimsPage() {
   const [arcpDateFilterColumn, setArcpDateFilterColumn] =
     useState<ArcpDateFilterColumn>('dcalllogdatetime');
   const [rawAggregateRows, setRawAggregateRows] = useState<ArcpClaimsAggregateRow[] | null>(null);
+  const [arcpGrandTotals, setArcpGrandTotals] = useState<ArcpGrandTotals | null>(null);
   const [includeTravelReimbursement, setIncludeTravelReimbursement] = useState(true);
   const [tableView, setTableView] = useState<'summary' | 'monthly' | 'both'>('both');
   const [loading, setLoading] = useState(false);
@@ -161,8 +217,35 @@ export default function ArcpClaimsPage() {
   const [loadStatus, setLoadStatus] = useState<ArcpLoadStatus | null>(null);
   const [detailExportStatus, setDetailExportStatus] = useState<ArcpLoadStatus | null>(null);
   const [appliedFilters, setAppliedFilters] = useState<AppliedArcpFilters | null>(null);
+  const [arcpCoverage, setArcpCoverage] = useState<ArcpPostgresCoverage | null>(null);
   const loadAbortRef = useRef<AbortController | null>(null);
   const loadGenerationRef = useRef(0);
+
+  const loadEstimateHints = useMemo(
+    () => ({
+      usePostgres: readArcpFromPostgresClient(),
+      coverage: arcpCoverage,
+    }),
+    [arcpCoverage]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const progress = await fetchReadModelStatus(session?.access_token);
+        if (!cancelled) setArcpCoverage(progress.arcp ?? null);
+      } catch {
+        /* status optional for estimates */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
 
   const startDateStr = useMemo(() => toDateString(dateRange.start), [dateRange.start]);
   const endDateStr = useMemo(() => toDateString(dateRange.end), [dateRange.end]);
@@ -249,17 +332,109 @@ export default function ArcpClaimsPage() {
     [rawAggregateRows]
   );
 
+  const summaryTotals = useMemo(() => {
+    if (arcpGrandTotals) {
+      return {
+        serviceLineCount: arcpGrandTotals.serviceLineCount,
+        travelLineCount: arcpGrandTotals.travelLineCount,
+        amountPayable: arcpGrandTotals.amountPayable,
+        branchApproved: arcpGrandTotals.branchApproved,
+        hoApproved: arcpGrandTotals.hoApproved,
+      };
+    }
+    let serviceLineCount = 0;
+    let travelLineCount = 0;
+    let amountPayable = 0;
+    let branchApproved = 0;
+    let hoApproved = 0;
+    for (const row of mergedAggregateRows) {
+      const qty = Number(row.qty) || 0;
+      if (Number(row.is_travel) === 1) {
+        travelLineCount += qty;
+      } else {
+        serviceLineCount += qty;
+      }
+      amountPayable += Number(row.amount_payable) || 0;
+      branchApproved += Number(row.branch_approved) || 0;
+      hoApproved += Number(row.ho_approved) || 0;
+    }
+    return {
+      serviceLineCount,
+      travelLineCount,
+      amountPayable,
+      branchApproved,
+      hoApproved,
+    };
+  }, [arcpGrandTotals, mergedAggregateRows]);
+
+  const arcpLabelLookups = useMemo(() => {
+    const callTypeLabelsByCode: Record<string, string> = {};
+    for (const option of callTypeOptions) {
+      if (option.value && option.label) {
+        callTypeLabelsByCode[String(option.value)] = option.label;
+      }
+    }
+    return { callTypeLabelsByCode };
+  }, [callTypeOptions]);
+
   const displayModel = useMemo(() => {
     if (mergedAggregateRows.length === 0) return null;
-    return buildArcpClaimsTableModel(mergedAggregateRows, {
+    const model = buildArcpClaimsTableModel(mergedAggregateRows, {
       includeTravel: includeTravelReimbursement,
+      ...arcpLabelLookups,
     });
-  }, [mergedAggregateRows, includeTravelReimbursement]);
+    if (arcpGrandTotals && includeTravelReimbursement) {
+      return {
+        ...model,
+        totals: {
+          qty: arcpGrandTotals.serviceLineCount + arcpGrandTotals.travelLineCount,
+          amountPayable: arcpGrandTotals.amountPayable,
+          branchApproved: arcpGrandTotals.branchApproved,
+          hoApproved: arcpGrandTotals.hoApproved,
+        },
+      };
+    }
+    return model;
+  }, [
+    mergedAggregateRows,
+    includeTravelReimbursement,
+    arcpLabelLookups,
+    arcpGrandTotals,
+  ]);
+
+  useEffect(() => {
+    if (!appliedFilters || !displayModel) return;
+    logArcpTableModel(
+      {
+        startDateStr: appliedFilters.startDateStr,
+        endDateStr: appliedFilters.endDateStr,
+        arcpDateFilterColumn: appliedFilters.arcpDateFilterColumn,
+        branchParam: appliedFilters.branchParam,
+        franchiseeParam: appliedFilters.franchiseeParam,
+        callTypeParam: appliedFilters.callTypeParam,
+      },
+      displayModel
+    );
+  }, [appliedFilters, displayModel]);
+
+  useEffect(() => {
+    if (loading || !appliedFilters || mergedAggregateRows.length === 0) return;
+    const { serviceLineCount, amountPayable, branchApproved, hoApproved } = summaryTotals;
+    if (serviceLineCount > 0 && amountPayable === 0 && branchApproved === 0 && hoApproved === 0) {
+      toast.warning(
+        'Rows loaded but Amount Payable / Branch / HO are all zero for this date basis. Try a wider range or Call Date filter.',
+        { duration: 8000 }
+      );
+    }
+  }, [loading, appliedFilters, mergedAggregateRows.length, summaryTotals]);
 
   const fullModel = useMemo(() => {
     if (mergedAggregateRows.length === 0) return null;
-    return buildArcpClaimsTableModel(mergedAggregateRows, { includeTravel: true });
-  }, [mergedAggregateRows]);
+    return buildArcpClaimsTableModel(mergedAggregateRows, {
+      includeTravel: true,
+      ...arcpLabelLookups,
+    });
+  }, [mergedAggregateRows, arcpLabelLookups]);
 
   const monthlyBreakdown = useMemo(() => {
     if (!rawAggregateRows || rawAggregateRows.length === 0) return null;
@@ -268,17 +443,28 @@ export default function ArcpClaimsPage() {
     });
   }, [rawAggregateRows, includeTravelReimbursement]);
 
+  const draftQueryOpts = useMemo(
+    () => ({
+      startDate: startDateStr,
+      endDate: endDateStr,
+      dateFilterColumn: arcpDateFilterColumn,
+      callType: callTypeParam,
+      branch: branchParam || undefined,
+      franchisee: franchiseeParam || undefined,
+    }),
+    [
+      startDateStr,
+      endDateStr,
+      arcpDateFilterColumn,
+      callTypeParam,
+      branchParam,
+      franchiseeParam,
+    ]
+  );
+
   const draftLoadPlan = useMemo(
-    () =>
-      estimateArcpLoadPlan({
-        startDate: startDateStr,
-        endDate: endDateStr,
-        dateFilterColumn: arcpDateFilterColumn,
-        callType: callTypeParam,
-        branch: branchParam || undefined,
-        franchisee: franchiseeParam || undefined,
-      }),
-    [startDateStr, endDateStr, arcpDateFilterColumn, callTypeParam, branchParam, franchiseeParam]
+    () => resolveArcpClientLoadPlan(draftQueryOpts, loadEstimateHints),
+    [draftQueryOpts, loadEstimateHints]
   );
 
   const draftLoadPreview = useMemo((): ArcpLoadStatus | null => {
@@ -297,6 +483,19 @@ export default function ArcpClaimsPage() {
       setLoadError(null);
 
       const isStale = () => generation !== loadGenerationRef.current || signal?.aborted;
+      const loadStartedAt = Date.now();
+
+      logArcpFiltersApplied(
+        {
+          startDateStr: filters.startDateStr,
+          endDateStr: filters.endDateStr,
+          arcpDateFilterColumn: filters.arcpDateFilterColumn,
+          branchParam: filters.branchParam,
+          franchiseeParam: filters.franchiseeParam,
+          callTypeParam: filters.callTypeParam,
+        },
+        refresh ? 'refresh' : 'apply'
+      );
 
       const queryOpts = {
         startDate: filters.startDateStr,
@@ -306,57 +505,140 @@ export default function ArcpClaimsPage() {
         branch: filters.branchParam || undefined,
         franchisee: filters.franchiseeParam || undefined,
       };
-      const loadPlan = estimateArcpLoadPlan(queryOpts);
+      const loadPlan = resolveArcpClientLoadPlan(queryOpts, loadEstimateHints);
+      const useClientChunks = shouldUseClientSideArcpChunks(queryOpts, loadEstimateHints);
+      const scopedFilters = Boolean(filters.branchParam || filters.franchiseeParam);
       const chunks = loadPlan.chunks;
       const chunkTimings: number[] = [];
 
       if (!isStale()) {
-        setLoadStatus(toLoadStatus(loadPlan, filters.arcpDateFilterColumn, 0, loadPlan.estimateMs));
+        setLoadStatus(
+          toLoadStatus(loadPlan, filters.arcpDateFilterColumn, 0, loadPlan.estimateMs, {
+            scopedFilters,
+          })
+        );
       }
 
+      const fetchAggregateChunk = async (
+        chunk: { start: string; end: string },
+        chunkIndex: number,
+        refreshFirstChunk: boolean
+      ) => {
+        const chunkTimeoutMs = useClientChunks
+          ? filters.arcpDateFilterColumn === 'bm_approved_at' ||
+            filters.arcpDateFilterColumn === 'ho_approved_at'
+            ? 120_000
+            : 300_000
+          : loadPlan.crmChunkCount > 0
+            ? Math.max(loadPlan.estimateMs + 60_000, 300_000)
+            : Math.max(loadPlan.estimateMs + 30_000, 90_000);
+
+        return chunkedAuth.getWithAuthRetry<{
+          aggregates?: ArcpClaimsAggregateRow[];
+          meta?: { source?: string; grandTotals?: ArcpGrandTotals };
+          error?: string;
+        }>(
+          '/api/report/arcp-claims',
+          {
+            timeout: chunkTimeoutMs,
+            signal,
+            params: {
+              startDate: chunk.start,
+              endDate: chunk.end,
+              dateFilterColumn: filters.arcpDateFilterColumn,
+              callType: filters.callTypeParam,
+              aggregatesOnly: 'true',
+              ...(filters.branchParam ? { branch: filters.branchParam } : {}),
+              ...(filters.franchiseeParam ? { franchisee: filters.franchiseeParam } : {}),
+              ...(refreshFirstChunk ? { refresh: 'true' } : {}),
+            },
+          },
+          { chunkIndex }
+        );
+      };
+
       try {
-        await chunkedAuth.refreshAuth();
-
-        let rawAggregates: ArcpClaimsAggregateRow[] = [];
+        const partialAggregates: (ArcpClaimsAggregateRow[] | undefined)[] = new Array(chunks.length);
         let failedChunks = 0;
+        let completedChunks = 0;
+        let usedCrmFallback = false;
 
-        for (let i = 0; i < chunks.length; i++) {
+        if (!useClientChunks) {
+          try {
+            const data = await fetchAggregateChunk(chunks[0], 0, refresh);
+            if (isStale()) return;
+            if (data.error) throw new Error(data.error);
+            if (data.meta?.source === 'crm_fallback') usedCrmFallback = true;
+            const rawAggregates = mergeArcpAggregateRows(data.aggregates ?? []);
+            if (!isStale()) {
+              setRawAggregateRows(rawAggregates);
+              if (data.meta?.grandTotals) setArcpGrandTotals(data.meta.grandTotals);
+              setLoadStatus(
+                toLoadStatus(loadPlan, filters.arcpDateFilterColumn, 1, 0, {
+                  scopedFilters,
+                  rowsLoaded: rawAggregates.reduce((s, r) => s + Number(r.qty ?? 0), 0),
+                })
+              );
+            }
+            logArcpLoadResult(
+              {
+                startDateStr: filters.startDateStr,
+                endDateStr: filters.endDateStr,
+                arcpDateFilterColumn: filters.arcpDateFilterColumn,
+                branchParam: filters.branchParam,
+                franchiseeParam: filters.franchiseeParam,
+                callTypeParam: filters.callTypeParam,
+              },
+              rawAggregates,
+              {
+                durationMs: Date.now() - loadStartedAt,
+                chunks: 1,
+                failedChunks: 0,
+                dataSource: usedCrmFallback ? 'crm_fallback' : 'postgres',
+              }
+            );
+            if (usedCrmFallback && !isStale()) {
+              toast.info(
+                'Loaded from CRM (not in database for this filter).',
+                { duration: 7000 }
+              );
+            }
+          } catch (singleErr: unknown) {
+            if (axios.isCancel(singleErr) || (singleErr instanceof DOMException && singleErr.name === 'AbortError')) {
+              return;
+            }
+            if (isChunkedFetchAuthError(singleErr)) {
+              throw singleErr;
+            }
+            const message =
+              axios.isAxiosError(singleErr) && singleErr.response?.data?.error
+                ? String(singleErr.response.data.error)
+                : singleErr instanceof Error
+                  ? singleErr.message
+                  : 'Failed to load ARCP claims';
+            throw new Error(message);
+          }
+        } else {
+        await runPool(chunks, resolveArcpLoadConcurrency(queryOpts), async (chunk, i) => {
           if (isStale()) return;
 
-          const chunk = chunks[i];
           const chunkStartedAt = Date.now();
 
           try {
-            const data = await chunkedAuth.getWithAuthRetry<{
-              aggregates?: ArcpClaimsAggregateRow[];
-              error?: string;
-            }>(
-              '/api/report/arcp-claims',
-              {
-                timeout: 300000,
-                signal,
-                params: {
-                  startDate: chunk.start,
-                  endDate: chunk.end,
-                  dateFilterColumn: filters.arcpDateFilterColumn,
-                  callType: filters.callTypeParam,
-                  aggregatesOnly: 'true',
-                  ...(filters.branchParam ? { branch: filters.branchParam } : {}),
-                  ...(filters.franchiseeParam ? { franchisee: filters.franchiseeParam } : {}),
-                  ...(refresh && i === 0 ? { refresh: 'true' } : {}),
-                },
-              },
-              { chunkIndex: i }
-            );
+            const data = await fetchAggregateChunk(chunk, i, refresh && i === 0);
 
             if (isStale()) return;
             if (data.error) throw new Error(data.error);
 
-            const chunkRows = data.aggregates ?? [];
-            rawAggregates = [...rawAggregates, ...chunkRows];
+            if (data.meta?.source === 'crm_fallback') usedCrmFallback = true;
 
+            partialAggregates[i] = data.aggregates ?? [];
             if (!isStale()) {
-              setRawAggregateRows([...rawAggregates]);
+              setRawAggregateRows(
+                mergeArcpAggregateRows(
+                  partialAggregates.filter((r): r is ArcpClaimsAggregateRow[] => r != null).flat()
+                )
+              );
             }
           } catch (chunkErr: unknown) {
             if (axios.isCancel(chunkErr) || (chunkErr instanceof DOMException && chunkErr.name === 'AbortError')) {
@@ -369,13 +651,62 @@ export default function ArcpClaimsPage() {
           }
 
           chunkTimings.push(Math.max(Date.now() - chunkStartedAt, 1));
-          const done = i + 1;
-          const avgMs = chunkTimings.reduce((sum, ms) => sum + ms, 0) / chunkTimings.length;
-          const etaMs = avgMs * Math.max(chunks.length - done, 0);
+          completedChunks += 1;
+          const done = completedChunks;
+          const elapsedMs = Date.now() - loadStartedAt;
+          const etaMs =
+            done > 0
+              ? (elapsedMs / done) * Math.max(chunks.length - done, 0)
+              : loadPlan.estimateMs;
 
           if (!isStale()) {
-            setLoadStatus(toLoadStatus(loadPlan, filters.arcpDateFilterColumn, done, etaMs));
+            setLoadStatus(toLoadStatus(loadPlan, filters.arcpDateFilterColumn, done, etaMs, {
+              scopedFilters,
+            }));
           }
+        });
+
+        const rawAggregates = mergeArcpAggregateRows(
+          partialAggregates.filter((r): r is ArcpClaimsAggregateRow[] => r != null).flat()
+        );
+
+        if (!isStale()) {
+          setRawAggregateRows(rawAggregates);
+          try {
+            const gtRes = await fetchAggregateChunk(
+              { start: filters.startDateStr, end: filters.endDateStr },
+              -1,
+              false
+            );
+            if (gtRes.meta?.grandTotals) setArcpGrandTotals(gtRes.meta.grandTotals);
+          } catch {
+            /* summary grand totals are optional if tally rows loaded */
+          }
+        }
+
+        logArcpLoadResult(
+          {
+            startDateStr: filters.startDateStr,
+            endDateStr: filters.endDateStr,
+            arcpDateFilterColumn: filters.arcpDateFilterColumn,
+            branchParam: filters.branchParam,
+            franchiseeParam: filters.franchiseeParam,
+            callTypeParam: filters.callTypeParam,
+          },
+          rawAggregates,
+          {
+            durationMs: Date.now() - loadStartedAt,
+            chunks: chunks.length,
+            failedChunks,
+            dataSource: usedCrmFallback ? 'crm_fallback' : 'postgres',
+          }
+        );
+
+        if (usedCrmFallback && !isStale()) {
+          toast.info(
+            'Some periods loaded from CRM (not in database for this filter).',
+            { duration: 7000 }
+          );
         }
 
         if (failedChunks > 0 && !isStale()) {
@@ -388,6 +719,7 @@ export default function ArcpClaimsPage() {
           }
           setLoadError(partialMessage);
           toast.warning(partialMessage);
+        }
         }
       } catch (err: unknown) {
         if (isStale()) return;
@@ -409,7 +741,7 @@ export default function ArcpClaimsPage() {
         }
       }
     },
-    [chunkedAuth]
+    [chunkedAuth, loadEstimateHints]
   );
 
   const runLoad = useCallback(
@@ -446,8 +778,13 @@ export default function ArcpClaimsPage() {
 
     setAppliedFilters(nextFilters);
     setRawAggregateRows(null);
+    setArcpGrandTotals(null);
 
-    if (draftLoadPlan.isLongLoad) {
+    if (readArcpFromPostgresClient()) {
+      toast.info(buildArcpPlanMessage(draftLoadPlan, arcpDateFilterColumn, true), {
+        duration: 7000,
+      });
+    } else if (draftLoadPlan.isLongLoad) {
       toast.info(
         `Loading ${draftLoadPlan.spanDays} days in ${draftLoadPlan.chunkCount} periods (${formatArcpDurationMs(draftLoadPlan.estimateMs)}). Progress updates below.`,
         { duration: 7000 }
@@ -556,7 +893,7 @@ export default function ArcpClaimsPage() {
       branch: appliedFilters.branchParam || undefined,
       franchisee: appliedFilters.franchiseeParam || undefined,
     };
-    const exportPlan = estimateArcpDetailLoadPlan(queryOpts);
+    const exportPlan = estimateArcpDetailLoadPlan(queryOpts, loadEstimateHints);
     const chunks = exportPlan.chunks;
     const detailPlanMessage = buildArcpDetailPlanMessage(
       exportPlan,
@@ -579,14 +916,44 @@ export default function ArcpClaimsPage() {
     );
 
     const chunkTimings: number[] = [];
-    const rowMap = new Map<string, ArcpClaimsDetailRow>();
+    const partialDetailRows: (ArcpClaimsDetailRow[] | undefined)[] = new Array(chunks.length);
     let failedChunks = 0;
+    let completedChunks = 0;
+    const exportStartedAt = Date.now();
 
     try {
-      await chunkedAuth.refreshAuth();
+      if (readArcpFromPostgresClient()) {
+        const data = await chunkedAuth.getWithAuthRetry<{
+          rows?: ArcpClaimsDetailRow[];
+          meta?: { source?: string };
+          error?: string;
+        }>('/api/report/arcp-claims/detail', {
+          timeout: Math.max(exportPlan.estimateMs + 60_000, 300_000),
+          params: {
+            startDate: appliedFilters.startDateStr,
+            endDate: appliedFilters.endDateStr,
+            dateFilterColumn: appliedFilters.arcpDateFilterColumn,
+            callType: appliedFilters.callTypeParam,
+            ...(appliedFilters.branchParam ? { branch: appliedFilters.branchParam } : {}),
+            ...(appliedFilters.franchiseeParam
+              ? { franchisee: appliedFilters.franchiseeParam }
+              : {}),
+          },
+        });
 
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
+        if (data.error) throw new Error(data.error);
+        const rows = mergeArcpDetailRows(data.rows ?? []);
+        if (rows.length === 0) throw new Error('No detail rows to export');
+        if (data.meta?.source === 'crm_fallback') {
+          toast.info('Detail loaded from CRM (not in database for this filter).', { duration: 5000 });
+        }
+        const fileName = `ARCP_Claims_Detail_${appliedFilters.startDateStr}_${appliedFilters.endDateStr}.csv`;
+        downloadArcpClaimsDetailCsv(rows, fileName);
+        toast.success(`Exported ${rows.length.toLocaleString('en-IN')} detail rows`);
+        return;
+      }
+
+      await runPool(chunks, resolveArcpLoadConcurrency(queryOpts), async (chunk, i) => {
         const chunkStartedAt = Date.now();
 
         try {
@@ -613,10 +980,7 @@ export default function ArcpClaimsPage() {
 
           if (data.error) throw new Error(data.error);
 
-          for (const row of data.rows ?? []) {
-            const key = row.vucnno || `${row.calls2fault_code}:${row.franchisee_code}`;
-            if (!rowMap.has(key)) rowMap.set(key, row);
-          }
+          partialDetailRows[i] = data.rows ?? [];
         } catch (chunkErr: unknown) {
           if (isChunkedFetchAuthError(chunkErr)) {
             throw chunkErr;
@@ -628,19 +992,27 @@ export default function ArcpClaimsPage() {
         }
 
         chunkTimings.push(Math.max(Date.now() - chunkStartedAt, 1));
-        const done = i + 1;
-        const avgMs = chunkTimings.reduce((sum, ms) => sum + ms, 0) / chunkTimings.length;
-        const etaMs = avgMs * Math.max(chunks.length - done, 0);
+        completedChunks += 1;
+        const done = completedChunks;
+        const elapsedMs = Date.now() - exportStartedAt;
+        const etaMs =
+          done > 0
+            ? (elapsedMs / done) * Math.max(chunks.length - done, 0)
+            : exportPlan.estimateMs;
 
         setDetailExportStatus(
           toLoadStatus(exportPlan, appliedFilters.arcpDateFilterColumn, done, etaMs, {
             planMessage: detailPlanMessage,
-            rowsLoaded: rowMap.size,
+            rowsLoaded: mergeArcpDetailRows(
+              partialDetailRows.filter((r): r is ArcpClaimsDetailRow[] => r != null).flat()
+            ).length,
           })
         );
-      }
+      });
 
-      const rows = mergeArcpDetailRows(Array.from(rowMap.values()));
+      const rows = mergeArcpDetailRows(
+        partialDetailRows.filter((r): r is ArcpClaimsDetailRow[] => r != null).flat()
+      );
       if (rows.length === 0) {
         throw new Error('No detail rows to export');
       }
@@ -791,6 +1163,47 @@ export default function ArcpClaimsPage() {
         </div>
       ) : null}
 
+      {appliedFilters &&
+      isArcpApproveDateColumn(appliedFilters.arcpDateFilterColumn) &&
+      !loading ? (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-950">
+          <strong>{dateBasisLabel}</strong> only includes lines whose{' '}
+          {appliedFilters.arcpDateFilterColumn === 'bm_approved_at'
+            ? 'BM approval date'
+            : 'HO approval date'}{' '}
+          falls in this range — not when the call was logged or solved. Amount Payable, Branch
+          Approved, and HO Approved still apply to those lines, but the row set is usually smaller
+          than Call Date for the same calendar range.
+        </div>
+      ) : null}
+
+      {appliedFilters && mergedAggregateRows.length > 0 && !loading ? (
+        <div className="mb-3 flex flex-wrap gap-4 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700">
+          <span>
+            <span className="font-semibold text-slate-500">Service lines:</span>{' '}
+            {summaryTotals.serviceLineCount.toLocaleString('en-IN')}
+            {summaryTotals.travelLineCount > 0 ? (
+              <span className="text-slate-500">
+                {' '}
+                (+{summaryTotals.travelLineCount.toLocaleString('en-IN')} travel)
+              </span>
+            ) : null}
+          </span>
+          <span>
+            <span className="font-semibold text-slate-500">Amount Payable:</span>{' '}
+            {formatArcpAmountSummary(summaryTotals.amountPayable)}
+          </span>
+          <span>
+            <span className="font-semibold text-slate-500">Branch Approved:</span>{' '}
+            {formatArcpAmountSummary(summaryTotals.branchApproved)}
+          </span>
+          <span>
+            <span className="font-semibold text-slate-500">HO Approved:</span>{' '}
+            {formatArcpAmountSummary(summaryTotals.hoApproved)}
+          </span>
+        </div>
+      ) : null}
+
       {loading && loadStatus ? (
         <ArcpClaimsLoadBanner status={loadStatus} runningTotals={displayModel?.totals ?? null} />
       ) : null}
@@ -865,6 +1278,10 @@ export default function ArcpClaimsPage() {
                 <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                   Monthly breakdown
                 </h3>
+                <p className="mb-2 text-[10px] text-slate-400">
+                  Each month uses the active date filter (HO approval month when HO Call Approved is
+                  selected).
+                </p>
                 <ArcpClaimsMonthlyTable model={monthlyBreakdown} loading={loading} />
               </section>
             ) : null}
