@@ -48,6 +48,7 @@ import {
 import {
   aggregateComplaintsBySerial,
   buildCallsBySerialMap,
+  computeRepeatInvolvementAnalysis,
   deriveSerialAuditRowsForView,
   filterSerialAuditCallsForView,
   serialAuditRowHasCallsInWindow,
@@ -57,6 +58,7 @@ import {
   mapRowToSerialAuditCallDetail,
   MIN_REPEAT_COMPLAINTS,
   normalizeSerial,
+  serialRowMatchKey,
   sortSerialAuditCallDetails,
   summarizeSerialAudit,
   type SerialAuditCallDetail,
@@ -64,6 +66,7 @@ import {
 } from '@/lib/serial-complaint-audit';
 import type { ExtraActiveFilterChip } from '@/lib/report-filters';
 import { SerialAuditCallsDetailTable } from '@/components/SerialAuditCallsDetailTable';
+import { SerialAuditAnalysisPanel } from '@/components/SerialAuditAnalysisPanel';
 import { toast } from 'sonner';
 
 const DEFAULT_RISK_THRESHOLD = 3;
@@ -191,8 +194,13 @@ export default function SerialAuditPage() {
   const [detailLoading, setDetailLoading] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [analysisCallsBySerial, setAnalysisCallsBySerial] = useState<
+    Map<string, SerialAuditCallDetail[]>
+  >(new Map());
+  const [analysisPrefetching, setAnalysisPrefetching] = useState(false);
   const loadInFlightRef = useRef<Promise<void> | null>(null);
   const lastPaintedKeyRef = useRef<string | null>(null);
+  const analysisFetchKeyRef = useRef<string | null>(null);
   const defaultRepairsAppliedRef = useRef(false);
   const serialPrefsRestoredRef = useRef(false);
 
@@ -610,6 +618,8 @@ export default function SerialAuditPage() {
       return;
     }
     lastPaintedKeyRef.current = null;
+    analysisFetchKeyRef.current = null;
+    setAnalysisCallsBySerial(new Map());
     setListRows([]);
     setWindowCallsBySerial(new Map());
     setAllTimeCallsBySerial(new Map());
@@ -735,6 +745,111 @@ export default function SerialAuditPage() {
     () => listRows.filter((r) => r.cancelledCount > 0).length,
     [listRows]
   );
+
+  const flaggedRowsForAnalysis = useMemo(
+    () => allSerialRows.filter((row) => row.riskFlag && !row.isUnknownSerial),
+    [allSerialRows]
+  );
+
+  const analysisCallsSource = useMemo(() => {
+    const corpusReady =
+      flaggedRowsForAnalysis.length > 0 &&
+      flaggedRowsForAnalysis.every(
+        (row) => (windowCallsBySerial.get(serialRowMatchKey(row))?.length ?? 0) > 0
+      );
+    return corpusReady ? windowCallsBySerial : analysisCallsBySerial;
+  }, [analysisCallsBySerial, flaggedRowsForAnalysis, windowCallsBySerial]);
+
+  const repeatInvolvement = useMemo(
+    () =>
+      computeRepeatInvolvementAnalysis(
+        flaggedRowsForAnalysis,
+        analysisCallsSource,
+        includeCancelled
+      ),
+    [analysisCallsSource, flaggedRowsForAnalysis, includeCancelled]
+  );
+
+  useEffect(() => {
+    if (loading) return;
+
+    if (flaggedRowsForAnalysis.length === 0) {
+      setAnalysisPrefetching(false);
+      return;
+    }
+
+    const fetchKey = `${dataKey}:${flaggedRowsForAnalysis.length}`;
+    const corpusReady = flaggedRowsForAnalysis.every(
+      (row) => (windowCallsBySerial.get(serialRowMatchKey(row))?.length ?? 0) > 0
+    );
+    if (corpusReady) {
+      analysisFetchKeyRef.current = fetchKey;
+      setAnalysisPrefetching(false);
+      return;
+    }
+
+    if (analysisFetchKeyRef.current === fetchKey) return;
+
+    analysisFetchKeyRef.current = fetchKey;
+    setAnalysisPrefetching(true);
+
+    void (async () => {
+      const requestKey = fetchKey;
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const headers = session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : {};
+        const res = await axios.post(
+          '/api/report/serial-audit/involvement',
+          {
+            startDate: startDateStr,
+            endDate: endDateStr,
+            callType: callTypeParam,
+            // All calls on flagged serials — repair filter only affects main list, not involvement rows.
+            repair: 'All',
+            serials: flaggedRowsForAnalysis.map((row) => row.serial),
+          },
+          {
+            headers: {
+              ...headers,
+              'Content-Type': 'application/json',
+            },
+            timeout: 300000,
+          }
+        );
+        if (analysisFetchKeyRef.current !== requestKey) return;
+        const rawCalls = (res.data?.calls || []) as Record<string, unknown>[];
+        setAnalysisCallsBySerial(buildCallsBySerialMap(rawCalls));
+      } catch (err: unknown) {
+        if (analysisFetchKeyRef.current !== requestKey) return;
+        analysisFetchKeyRef.current = null;
+        const message = sanitizeUserFacingMessage(
+          axios.isAxiosError(err) && err.response?.data?.error
+            ? String(err.response.data.error)
+            : err instanceof Error
+              ? err.message
+              : 'Failed to load repeat involvement analysis'
+        );
+        toast.error(message);
+      } finally {
+        if (analysisFetchKeyRef.current === requestKey) {
+          setAnalysisPrefetching(false);
+        }
+      }
+    })();
+  }, [
+    dataKey,
+    endDateStr,
+    flaggedRowsForAnalysis,
+    loading,
+    startDateStr,
+    callTypeParam,
+    supabase,
+    windowCallsBySerial,
+  ]);
 
   const toggleExpand = (serial: string) => {
     setExpandedSerial((prev) => {
@@ -863,10 +978,17 @@ export default function SerialAuditPage() {
       </AdminToolbar>
 
       {loading && listRows.length === 0 ? (
-        <ReportLoadingPanel
-          label="Finding repeated serial numbers"
-          sublabel="Running a focused scan for your date range."
-        />
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_440px] lg:items-stretch">
+          <ReportLoadingPanel
+            label="Finding repeated serial numbers"
+            sublabel="Running a focused scan for your date range."
+          />
+          <SerialAuditAnalysisPanel
+            analysis={repeatInvolvement}
+            dateRangeLabel={dateRangeLabel}
+            loading
+          />
+        </div>
       ) : loadError && listRows.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-rose-200 bg-rose-50/50 p-12 text-center">
           <AlertTriangle className="h-8 w-8 text-rose-500" />
@@ -890,82 +1012,91 @@ export default function SerialAuditPage() {
           </p>
         </div>
       ) : (
-        <AdminTableCard
-          isEmpty={displayedRows.length === 0}
-          empty={
-            <>
-              <p className="text-sm font-medium text-slate-600">No serials match filters</p>
-              <p className="text-[11px] text-slate-400">
-                Lower &quot;Min repeats&quot; or clear &quot;Flagged only&quot;.
-              </p>
-            </>
-          }
-        >
-          <AdminTable>
-            <AdminThead>
-              <tr>
-                <AdminTh className="w-8">
-                  <span className="sr-only">Expand</span>
-                </AdminTh>
-                <AdminTh>Serial</AdminTh>
-                <AdminTh align="right">Complaints</AdminTh>
-                <AdminTh align="right">Open</AdminTh>
-                <AdminTh align="right">Solved</AdminTh>
-                {includeCancelled ? <AdminTh align="right">Cancelled</AdminTh> : null}
-                <AdminTh>Branches</AdminTh>
-                <AdminTh>Customers</AdminTh>
-                <AdminTh>Last date</AdminTh>
-              </tr>
-            </AdminThead>
-            <tbody>
-              {pagedRows.map((row) => (
-                <SerialAuditTableRow
-                  key={row.serial}
-                  row={row}
-                  windowCalls={windowCallsBySerial.get(row.serial) ?? []}
-                  allTimeCalls={allTimeCallsBySerial.get(row.serial) ?? []}
-                  showAllTime={showAllTimeFor.has(row.serial)}
-                  onShowAllTimeChange={(enabled) => handleShowAllTimeChange(row.serial, enabled)}
-                  dateRangeLabel={dateRangeLabel}
-                  detailLoading={detailLoading === `window:${row.serial}` || detailLoading === `allTime:${row.serial}`}
-                  expanded={expandedSerial === row.serial}
-                  includeCancelled={includeCancelled}
-                  onToggle={() => toggleExpand(row.serial)}
-                />
-              ))}
-            </tbody>
-          </AdminTable>
-          {displayedRows.length > SERIAL_PAGE_SIZE ? (
-            <div className="flex flex-shrink-0 items-center justify-between border-t border-slate-200 bg-slate-50 px-3 py-2">
-              <span className="text-[11px] text-slate-500">
-                {(page - 1) * SERIAL_PAGE_SIZE + 1}–
-                {Math.min(page * SERIAL_PAGE_SIZE, displayedRows.length)} of{' '}
-                {displayedRows.length.toLocaleString()} serials
-              </span>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="rounded border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <span className="min-w-[4rem] text-center text-[11px] font-medium text-slate-700">
-                  {page} / {totalPages}
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_440px] lg:items-stretch">
+          <AdminTableCard
+            isEmpty={displayedRows.length === 0}
+            empty={
+              <>
+                <p className="text-sm font-medium text-slate-600">No serials match filters</p>
+                <p className="text-[11px] text-slate-400">
+                  Lower &quot;Min repeats&quot; or clear &quot;Flagged only&quot;.
+                </p>
+              </>
+            }
+          >
+            <AdminTable>
+              <AdminThead>
+                <tr>
+                  <AdminTh className="w-8">
+                    <span className="sr-only">Expand</span>
+                  </AdminTh>
+                  <AdminTh>Serial</AdminTh>
+                  <AdminTh align="right">Complaints</AdminTh>
+                  <AdminTh align="right">Open</AdminTh>
+                  <AdminTh align="right">Solved</AdminTh>
+                  {includeCancelled ? <AdminTh align="right">Cancelled</AdminTh> : null}
+                  <AdminTh>Branches</AdminTh>
+                  <AdminTh>Customers</AdminTh>
+                  <AdminTh>Last date</AdminTh>
+                </tr>
+              </AdminThead>
+              <tbody>
+                {pagedRows.map((row) => (
+                  <SerialAuditTableRow
+                    key={row.serial}
+                    row={row}
+                    windowCalls={windowCallsBySerial.get(row.serial) ?? []}
+                    allTimeCalls={allTimeCallsBySerial.get(row.serial) ?? []}
+                    showAllTime={showAllTimeFor.has(row.serial)}
+                    onShowAllTimeChange={(enabled) => handleShowAllTimeChange(row.serial, enabled)}
+                    dateRangeLabel={dateRangeLabel}
+                    detailLoading={detailLoading === `window:${row.serial}` || detailLoading === `allTime:${row.serial}`}
+                    expanded={expandedSerial === row.serial}
+                    includeCancelled={includeCancelled}
+                    onToggle={() => toggleExpand(row.serial)}
+                  />
+                ))}
+              </tbody>
+            </AdminTable>
+            {displayedRows.length > SERIAL_PAGE_SIZE ? (
+              <div className="flex flex-shrink-0 items-center justify-between border-t border-slate-200 bg-slate-50 px-3 py-2">
+                <span className="text-[11px] text-slate-500">
+                  {(page - 1) * SERIAL_PAGE_SIZE + 1}–
+                  {Math.min(page * SERIAL_PAGE_SIZE, displayedRows.length)} of{' '}
+                  {displayedRows.length.toLocaleString()} serials
                 </span>
-                <button
-                  type="button"
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  className="rounded border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    className="rounded border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <span className="min-w-[4rem] text-center text-[11px] font-medium text-slate-700">
+                    {page} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    className="rounded border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-            </div>
-          ) : null}
-        </AdminTableCard>
+            ) : null}
+          </AdminTableCard>
+
+          <SerialAuditAnalysisPanel
+            analysis={repeatInvolvement}
+            dateRangeLabel={dateRangeLabel}
+            loading={loading}
+            prefetching={analysisPrefetching}
+          />
+        </div>
       )}
     </PageShell>
   );

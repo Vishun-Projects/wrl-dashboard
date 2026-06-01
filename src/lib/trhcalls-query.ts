@@ -743,10 +743,7 @@ export function buildSerialAuditListRawSql(
 }
 
 /** All calls for one serial — scoped dedup + minimal joins. */
-export function buildSerialAuditDetailRawSql(serial: string, opts: SerialAuditSqlOpts): string {
-  const serialSafe = serial.trim().replace(/'/g, "''").toUpperCase();
-  const where = `${buildSerialAuditBaseWhere(opts)} AND ${SERIAL_AUDIT_SERIAL_KEY_EXPR} = '${serialSafe}'`;
-
+function buildSerialAuditDetailQuery(where: string): string {
   return `
     SELECT TOP 100 PERCENT
       tc.vcclid,
@@ -802,6 +799,33 @@ export function buildSerialAuditDetailRawSql(serial: string, opts: SerialAuditSq
     WHERE tc.rn = 1
     ORDER BY tc.dtrndate DESC
   `;
+}
+
+export function buildSerialAuditDetailRawSql(serial: string, opts: SerialAuditSqlOpts): string {
+  const serialSafe = serial.trim().replace(/'/g, "''").toUpperCase();
+  const where = `${buildSerialAuditBaseWhere(opts)} AND ${SERIAL_AUDIT_SERIAL_KEY_EXPR} = '${serialSafe}'`;
+  return buildSerialAuditDetailQuery(where);
+}
+
+const MAX_SERIAL_AUDIT_BATCH_SERIALS = 80;
+
+export { MAX_SERIAL_AUDIT_BATCH_SERIALS };
+
+/** Window calls for multiple flagged serials — one query. */
+export function buildSerialAuditBatchDetailRawSql(
+  serials: string[],
+  opts: SerialAuditSqlOpts
+): string {
+  const safeSerials = serials
+    .map((s) => s.trim().replace(/'/g, "''").toUpperCase())
+    .filter(Boolean)
+    .slice(0, MAX_SERIAL_AUDIT_BATCH_SERIALS);
+  if (safeSerials.length === 0) {
+    return `SELECT TOP 0 tc.ncode AS id FROM trhcalls tc (NOLOCK) WHERE 1 = 0`;
+  }
+  const inList = safeSerials.map((s) => `'${s}'`).join(',');
+  const where = `${buildSerialAuditBaseWhere(opts)} AND ${SERIAL_AUDIT_SERIAL_KEY_EXPR} IN (${inList})`;
+  return buildSerialAuditDetailQuery(where);
 }
 
 /** Exact TRN pattern — e.g. 26C17585 */

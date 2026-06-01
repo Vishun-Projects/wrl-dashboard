@@ -139,6 +139,22 @@ const REPAIR_NAME_TO_COUNT_KEY: Record<string, keyof SerialAuditRepairCounts> = 
   [normalizeRepairName('Gas Charging Done')]: 'gasCharging',
 };
 
+/** Parse semicolon-separated repair_done on a single call row. */
+export function parseRepairCountsFromRepairDone(repairDone: string): SerialAuditRepairCounts {
+  const counts = { ...EMPTY_SERIAL_AUDIT_REPAIR_COUNTS };
+  const raw = repairDone.trim();
+  if (!raw || raw === '—' || raw === '-') return counts;
+  const seen = new Set<string>();
+  for (const part of raw.split(';')) {
+    const key = normalizeRepairName(part);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const field = REPAIR_NAME_TO_COUNT_KEY[key];
+    if (field) counts[field]++;
+  }
+  return counts;
+}
+
 /** Count visit repair types from semicolon-separated repair_done on call rows. */
 export function countRepairsFromCallRows(
   rows: Record<string, unknown>[]
@@ -644,5 +660,187 @@ export function summarizeSerialAudit(rows: SerialAuditRow[], riskThreshold = 3) 
     flaggedCount: flagged.length,
     withCancelledCount: withCancelled.length,
     maxComplaints,
+  };
+}
+
+export type RepeatInvolvementEntry = {
+  technician: string;
+  franchisee: string;
+  repeatCalls: number;
+  serialCount: number;
+  motor: number;
+  compressor: number;
+  gasCharging: number;
+};
+
+export const SERIAL_AUDIT_INVOLVEMENT_PAGE_SIZES = [5, 10, 25, 50] as const;
+export type SerialAuditInvolvementPageSize = (typeof SERIAL_AUDIT_INVOLVEMENT_PAGE_SIZES)[number];
+
+export type SerialAuditRepeatInvolvement = {
+  entries: RepeatInvolvementEntry[];
+  repeatCallCount: number;
+  serialsInScope: number;
+  serialsWithDetails: number;
+  detailsPending: boolean;
+};
+
+const EMPTY_PARTY = new Set(['', '—', '-', 'UNALLOCATED', 'N/A', 'NA']);
+
+function normalizeInvolvementParty(name: string): string | null {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  if (EMPTY_PARTY.has(trimmed.toUpperCase())) return null;
+  return trimmed;
+}
+
+function bumpPairInvolvement(
+  map: Map<
+    string,
+    {
+      technician: string;
+      franchisee: string;
+      repeatCalls: number;
+      serials: Set<string>;
+      motor: number;
+      compressor: number;
+      gasCharging: number;
+    }
+  >,
+  technician: string,
+  franchisee: string,
+  serialKey: string,
+  call: SerialAuditCallDetail
+) {
+  const key = `${technician}\u001f${franchisee}`;
+  const repairs = parseRepairCountsFromRepairDone(call.repairDone);
+  const existing = map.get(key);
+  if (existing) {
+    existing.repeatCalls += 1;
+    existing.serials.add(serialKey);
+    existing.motor += repairs.motorReplaced;
+    existing.compressor += repairs.compressorReplaced;
+    existing.gasCharging += repairs.gasCharging;
+    return;
+  }
+  map.set(key, {
+    technician,
+    franchisee,
+    repeatCalls: 1,
+    serials: new Set([serialKey]),
+    motor: repairs.motorReplaced,
+    compressor: repairs.compressorReplaced,
+    gasCharging: repairs.gasCharging,
+  });
+}
+
+function pairInvolvementEntriesFromMap(
+  map: Map<
+    string,
+    {
+      technician: string;
+      franchisee: string;
+      repeatCalls: number;
+      serials: Set<string>;
+      motor: number;
+      compressor: number;
+      gasCharging: number;
+    }
+  >
+): RepeatInvolvementEntry[] {
+  return [...map.values()]
+    .map((stats) => ({
+      technician: stats.technician,
+      franchisee: stats.franchisee,
+      repeatCalls: stats.repeatCalls,
+      serialCount: stats.serials.size,
+      motor: stats.motor,
+      compressor: stats.compressor,
+      gasCharging: stats.gasCharging,
+    }))
+    .sort(
+      (a, b) =>
+        b.serialCount - a.serialCount ||
+        b.repeatCalls - a.repeatCalls ||
+        b.compressor - a.compressor
+    );
+}
+
+function callCountsForRepeatInvolvement(
+  calls: SerialAuditCallDetail[],
+  includeCancelled: boolean,
+  serialComplaintCount?: number
+): SerialAuditCallDetail[] {
+  const viewCalls = filterSerialAuditCallsForView(calls, includeCancelled);
+  if (viewCalls.length === 0) return [];
+
+  const qualifiesForRepeat =
+    (serialComplaintCount ?? viewCalls.length) >= MIN_REPEAT_COMPLAINTS;
+  if (!qualifiesForRepeat) return [];
+
+  const repeatedKeys = getRepeatedComplaintKeys(viewCalls, {
+    excludeCancelled: !includeCancelled,
+  });
+
+  if (repeatedKeys.size > 0) {
+    return viewCalls.filter((call) => {
+      const key = normalizeComplaintKey(call.complaint);
+      if (!key || key === '—' || key === '-') return false;
+      return repeatedKeys.has(key);
+    });
+  }
+
+  return viewCalls;
+}
+
+/** Rank technician + franchisee pairs by involvement in repeat-complaint calls. */
+export function computeRepeatInvolvementAnalysis(
+  serials: SerialAuditRow[],
+  windowCallsBySerial: Map<string, SerialAuditCallDetail[]>,
+  includeCancelled: boolean
+): SerialAuditRepeatInvolvement {
+  const pairs = new Map<
+    string,
+    {
+      technician: string;
+      franchisee: string;
+      repeatCalls: number;
+      serials: Set<string>;
+      motor: number;
+      compressor: number;
+      gasCharging: number;
+    }
+  >();
+  let repeatCallCount = 0;
+  let serialsWithDetails = 0;
+
+  const inScope = serials.filter((row) => !row.isUnknownSerial);
+
+  for (const row of inScope) {
+    const serialKey = serialRowMatchKey(row);
+    const rawCalls = windowCallsBySerial.get(serialKey);
+    if (!rawCalls?.length) continue;
+    serialsWithDetails += 1;
+
+    const involvedCalls = callCountsForRepeatInvolvement(
+      rawCalls,
+      includeCancelled,
+      effectiveComplaintCountForView(row, includeCancelled)
+    );
+    repeatCallCount += involvedCalls.length;
+
+    for (const call of involvedCalls) {
+      const technician = normalizeInvolvementParty(call.technician) ?? '—';
+      const franchisee = normalizeInvolvementParty(call.franchisee) ?? '—';
+      if (technician === '—' && franchisee === '—') continue;
+      bumpPairInvolvement(pairs, technician, franchisee, serialKey, call);
+    }
+  }
+
+  return {
+    entries: pairInvolvementEntriesFromMap(pairs),
+    repeatCallCount,
+    serialsInScope: inScope.length,
+    serialsWithDetails,
+    detailsPending: serialsWithDetails < inScope.length,
   };
 }

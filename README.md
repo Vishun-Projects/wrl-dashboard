@@ -1,38 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# WRL Portal
 
-## Getting Started
+Internal web portal for **Western Refrigeration Pvt. Ltd.** to view service-call reports, run audits, and manage portal access.
 
-First, run the development server:
+Sign in with your assigned email and password. After login you land on your usual report page (or the first page your role allows).
+
+---
+
+## What you can do
+
+### Reports
+
+| Page | Purpose |
+|------|---------|
+| **MIS Reports** | Search and browse the call register — summary counts, detailed rows, accounts view. Filter by date, branch, franchisee, call type, and status. Export to CSV or Excel. Click a TRN to open call details in a dialog. |
+| **Call Distribution** | See how calls are spread across branches and franchisees — map view, idle assignees, and distribution KPIs. |
+| **ARCP Claims** | Review ARCP claims in a register view with detail export. |
+| **Serial Wise History** | Find serial numbers with repeat complaints. Expand a row to see call history, repeat flags, and repair context in the selected date range. |
+| **Location Audit** | Check whether technician visit locations match customer install addresses — pincode and GPS comparison with flagged mismatches. |
+
+Report filters and column choices are remembered per user. A small banner can show when your last saved view was restored.
+
+### Administration
+
+| Page | Purpose |
+|------|---------|
+| **User Management** | Create and edit portal users (admins). |
+| **Roles & Access** | Define roles and choose which report pages each role can open. |
+
+### Profile
+
+Update your name, avatar, and password. Reset saved report defaults if you want filters back to the role baseline.
+
+---
+
+## Access
+
+- Each user has a **role** (for example branch manager or HOD) and optional **office scope**.
+- **Page access** is controlled per role — you only see menu items and routes you are allowed to use.
+- Admins manage users and roles from the Administration section.
+
+---
+
+## For developers
+
+This app is built with **Next.js** and **Supabase** (authentication and app user profiles).
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Production build:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+npm start
+```
 
-## Learn More
+Environment variables and database setup for portal users are documented in [`docs/SUPABASE_SETUP.md`](docs/SUPABASE_SETUP.md). Additional internal docs live under `docs/` for the team maintaining the project.
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Project name
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-# wrl-dashboard
-# wrl-dashboard
+The repository folder is `fast-close-app`; the product name shown in the UI is **WRL Portal** (also referred to as WRL Dashboard on the login screen).
