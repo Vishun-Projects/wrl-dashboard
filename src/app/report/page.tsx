@@ -339,7 +339,12 @@ export default function ReportPage() {
     applyFilters,
     getAppliedFiltersSnapshot,
     hasPendingFilterChanges,
+    reportPreferences,
+    prefsReady,
+    schedulePatchReportPreferences,
   } = useReportFilters();
+
+  const registerPrefsRestoredRef = React.useRef(false);
 
   const summaryOfficeIdsParam = useMemo(
     () =>
@@ -597,8 +602,28 @@ export default function ReportPage() {
   );
 
   useEffect(() => {
+    if (!prefsReady || registerPrefsRestoredRef.current) return;
+    registerPrefsRestoredRef.current = true;
+    const reg = reportPreferences?.register;
+    if (reg?.activeTab) setActiveTab(reg.activeTab);
+    if (reg?.visibleColumns?.length) setVisibleRegisterColumns(reg.visibleColumns);
+    if (reg?.pageSize) setLimit(normalizeRegisterPageSize(reg.pageSize));
+  }, [prefsReady, reportPreferences]);
+
+  useEffect(() => {
+    if (!prefsReady || !registerPrefsRestoredRef.current) return;
+    schedulePatchReportPreferences({
+      register: { activeTab },
+    });
+  }, [activeTab, prefsReady, schedulePatchReportPreferences]);
+
+  useEffect(() => {
     saveVisibleRegisterColumns(visibleRegisterColumns);
-  }, [visibleRegisterColumns]);
+    if (!prefsReady || !registerPrefsRestoredRef.current) return;
+    schedulePatchReportPreferences({
+      register: { visibleColumns: visibleRegisterColumns },
+    });
+  }, [visibleRegisterColumns, prefsReady, schedulePatchReportPreferences]);
 
   const visibleRegisterColumnDefs = React.useMemo(
     () => REGISTER_TABLE_COLUMNS.filter((col) => visibleRegisterColumns.includes(col.key)),
@@ -2050,6 +2075,9 @@ export default function ReportPage() {
         localStorage.setItem('report_register_page_size', String(next));
       } catch {
         /* ignore */
+      }
+      if (registerPrefsRestoredRef.current) {
+        schedulePatchReportPreferences({ register: { pageSize: next } });
       }
       registerPagesCacheRef.current.clear();
       setPage(1);

@@ -1,6 +1,22 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { createClient } from '@/lib/supabase/server';
+import {
+  groupPermissionsForRolesUi,
+  PAGE_PERMISSION_SEED,
+} from '@/lib/auth/page-access';
+
+async function ensurePagePermissionsExist(): Promise<void> {
+  for (const seed of PAGE_PERMISSION_SEED) {
+    await prisma.$queryRawUnsafe(
+      `INSERT INTO public.app_permissions (id, name, description)
+       SELECT gen_random_uuid(), $1, $2
+       WHERE NOT EXISTS (SELECT 1 FROM public.app_permissions WHERE name = $1)`,
+      seed.name,
+      seed.description
+    );
+  }
+}
 
 export async function GET() {
   const supabase = await createClient();
@@ -14,6 +30,8 @@ export async function GET() {
   }
 
   try {
+    await ensurePagePermissionsExist();
+
     const roles = await prisma.$queryRawUnsafe(`
       SELECT r.*, 
              COALESCE(json_agg(p.name) FILTER (WHERE p.name IS NOT NULL), '[]') as permissions
@@ -24,9 +42,12 @@ export async function GET() {
       ORDER BY r.name ASC
     `);
 
-    const allPermissions = await prisma.$queryRawUnsafe('SELECT * FROM public.app_permissions ORDER BY name ASC');
+    const allPermissions = await prisma.$queryRawUnsafe(
+      'SELECT * FROM public.app_permissions ORDER BY name ASC'
+    );
+    const permissionGroups = groupPermissionsForRolesUi(allPermissions as any[]);
 
-    return NextResponse.json({ roles, allPermissions });
+    return NextResponse.json({ roles, allPermissions, permissionGroups });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

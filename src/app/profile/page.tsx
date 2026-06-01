@@ -10,6 +10,7 @@ import {
   Save,
   Loader2,
   AlertCircle,
+  RotateCcw,
 } from 'lucide-react';
 import { useUser } from '@/components/DashboardLayout';
 import { PageShell, PageLoadingState } from '@/components/PageShell';
@@ -32,6 +33,7 @@ function ProfileContent() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [resettingReports, setResettingReports] = useState(false);
 
   const supabase = createClient();
   const searchParams = useSearchParams();
@@ -72,6 +74,18 @@ function ProfileContent() {
       toast.error(err.response?.data?.error || 'Password change failed');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleResetReportDefaults() {
+    try {
+      setResettingReports(true);
+      await axios.patch('/api/profile/report-preferences', { reset: true }, { withCredentials: true });
+      toast.success('Report defaults reset. Open a report page to see role defaults.');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Reset failed');
+    } finally {
+      setResettingReports(false);
     }
   }
 
@@ -193,6 +207,23 @@ function ProfileContent() {
               </div>
             </SettingsCard>
           </form>
+        )}
+
+        {activeTab === 'general' && (
+          <SettingsCard
+            title="Report workspace"
+            description="Clears saved filters, columns, and last report. Role defaults apply next time you open MIS or Distribution."
+          >
+            <button
+              type="button"
+              disabled={resettingReports}
+              onClick={() => void handleResetReportDefaults()}
+              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50 ui-label"
+            >
+              {resettingReports ? <Loader2 className="animate-spin" size={14} /> : <RotateCcw size={14} />}
+              Reset my report defaults
+            </button>
+          </SettingsCard>
         )}
 
         {activeTab === 'settings' && (

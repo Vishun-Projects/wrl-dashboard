@@ -72,7 +72,10 @@ export const REGISTER_EXPORT_COLUMNS: { key: string; header: string }[] = [
 
 export const REGISTER_COLUMNS_STORAGE_KEY = 'mis_register_visible_columns';
 
-export function loadVisibleRegisterColumns(): RegisterTableColumnKey[] {
+export function loadVisibleRegisterColumns(
+  serverColumns?: RegisterTableColumnKey[]
+): RegisterTableColumnKey[] {
+  if (serverColumns?.length) return [...serverColumns];
   if (typeof window === 'undefined') return [...REGISTER_TABLE_COLUMN_KEYS];
   try {
     const saved = localStorage.getItem(REGISTER_COLUMNS_STORAGE_KEY);

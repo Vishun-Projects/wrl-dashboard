@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ShieldCheck,
   Plus,
@@ -11,6 +11,8 @@ import {
   Shield,
   Key,
   Lock,
+  LayoutGrid,
+  Settings2,
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -28,11 +30,72 @@ import {
   ChipList,
   AdminIconButton,
 } from '@/components/admin/AdminUi';
+import {
+  pageLabelsForPermissions,
+  type PageAccessDefinition,
+} from '@/lib/auth/page-access';
+
+type PermissionRow = { id: string; name: string; description?: string | null };
+type PagePermissionRow = PermissionRow & { definition: PageAccessDefinition };
+
+type PermissionGroups = {
+  pages: PagePermissionRow[];
+  other: PermissionRow[];
+};
+
+function PermissionToggle({
+  selected,
+  onToggle,
+  title,
+  description,
+  subtitle,
+}: {
+  selected: boolean;
+  onToggle: () => void;
+  title: string;
+  description?: string | null;
+  subtitle?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`flex items-start gap-2.5 rounded-lg border p-3 text-left transition-colors ${
+        selected
+          ? 'border-slate-900 bg-slate-900 text-white'
+          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+      }`}
+    >
+      <div
+        className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded ${
+          selected ? 'bg-white/20' : 'bg-slate-100 text-slate-400'
+        }`}
+      >
+        {selected ? <Check size={12} /> : <Lock size={10} />}
+      </div>
+      <div className="min-w-0">
+        <p className={`text-[11px] font-semibold ${selected ? 'text-white' : 'text-slate-800'}`}>
+          {title}
+        </p>
+        {subtitle ? (
+          <p className={`mt-0.5 text-[9px] uppercase tracking-wide ${selected ? 'text-white/60' : 'text-slate-400'}`}>
+            {subtitle}
+          </p>
+        ) : null}
+        {description ? (
+          <p className={`mt-0.5 text-[10px] ${selected ? 'text-white/70' : 'text-slate-400'}`}>
+            {description}
+          </p>
+        ) : null}
+      </div>
+    </button>
+  );
+}
 
 export default function RolesPage() {
   const router = useRouter();
   const [roles, setRoles] = useState<any[]>([]);
-  const [allPermissions, setAllPermissions] = useState<any[]>([]);
+  const [permissionGroups, setPermissionGroups] = useState<PermissionGroups>({ pages: [], other: [] });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -44,6 +107,21 @@ export default function RolesPage() {
     permissionIds: [] as string[],
   });
 
+  const allPermissions = useMemo(
+    () => [...permissionGroups.pages, ...permissionGroups.other],
+    [permissionGroups]
+  );
+
+  const reportPages = useMemo(
+    () => permissionGroups.pages.filter((p) => p.definition.group === 'Reports'),
+    [permissionGroups.pages]
+  );
+
+  const adminPages = useMemo(
+    () => permissionGroups.pages.filter((p) => p.definition.group === 'Administration'),
+    [permissionGroups.pages]
+  );
+
   useEffect(() => {
     init();
   }, []);
@@ -52,7 +130,9 @@ export default function RolesPage() {
     try {
       const rolesRes = await axios.get('/api/admin/roles');
       setRoles(rolesRes.data.roles);
-      setAllPermissions(rolesRes.data.allPermissions);
+      setPermissionGroups(
+        rolesRes.data.permissionGroups ?? { pages: [], other: rolesRes.data.allPermissions ?? [] }
+      );
     } catch {
       toast.error('Failed to load access control data');
       router.push('/report');
@@ -123,13 +203,13 @@ export default function RolesPage() {
   return (
     <PageShell
       title="Roles & Access Control"
-      subtitle="Define roles and assign system permissions"
+      subtitle="Assign page access per role — control which reports and admin screens users can open"
       icon={<ShieldCheck size={16} />}
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
       toolbar={
         <AdminToolbar search={search} onSearchChange={setSearch} searchPlaceholder="Search roles...">
           <AdminStatPill label="Roles" value={roles.length} />
-          <AdminStatPill label="Permissions" value={allPermissions.length} />
+          <AdminStatPill label="Pages" value={permissionGroups.pages.length} />
         </AdminToolbar>
       }
       actions={
@@ -152,15 +232,14 @@ export default function RolesPage() {
             <AdminThead>
               <tr>
                 <AdminTh className="w-[22%]">Role</AdminTh>
-                <AdminTh className="w-[30%]">Description</AdminTh>
-                <AdminTh className="w-[38%]">Permissions</AdminTh>
+                <AdminTh className="w-[28%]">Description</AdminTh>
+                <AdminTh className="w-[40%]">Page access</AdminTh>
                 <AdminTh align="right" className="w-[10%]">Actions</AdminTh>
               </tr>
             </AdminThead>
             <tbody>
               {filteredRoles.map((role) => {
-                const permissionLabels =
-                  role.permissions?.map((p: string) => p.replace(/_/g, ' ')) ?? [];
+                const pageLabels = pageLabelsForPermissions(role.permissions ?? []);
 
                 return (
                   <AdminTr key={role.id}>
@@ -179,9 +258,9 @@ export default function RolesPage() {
                     </AdminTd>
                     <AdminTd>
                       <ChipList
-                        items={permissionLabels}
-                        maxVisible={3}
-                        emptyLabel="No permissions"
+                        items={pageLabels}
+                        maxVisible={4}
+                        emptyLabel="No pages assigned"
                         variant="indigo"
                       />
                     </AdminTd>
@@ -224,7 +303,7 @@ export default function RolesPage() {
                     <h2 className="text-xs text-slate-900 ui-label">
                       {editingRole ? 'Edit Role' : 'Create Role'}
                     </h2>
-                    <p className="text-[10px] text-slate-500">Access control configuration</p>
+                    <p className="text-[10px] text-slate-500">Choose which pages this role can open</p>
                   </div>
                 </div>
                 <button
@@ -262,45 +341,85 @@ export default function RolesPage() {
 
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-medium text-slate-500">Permissions</label>
-                    <span className="text-[10px] text-slate-400">{formData.permissionIds.length} selected</span>
+                    <div className="flex items-center gap-2 text-[11px] font-medium text-slate-500">
+                      <LayoutGrid size={13} />
+                      Report pages
+                    </div>
+                    <span className="text-[10px] text-slate-400">
+                      {formData.permissionIds.filter((id) =>
+                        reportPages.some((p) => p.id === id)
+                      ).length}{' '}
+                      / {reportPages.length}
+                    </span>
                   </div>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {allPermissions.map((p) => {
-                      const isSelected = formData.permissionIds.includes(p.id);
-                      return (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => togglePermission(p.id)}
-                          className={`flex items-start gap-2.5 rounded-lg border p-3 text-left transition-colors ${
-                            isSelected
-                              ? 'border-slate-900 bg-slate-900 text-white'
-                              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                          }`}
-                        >
-                          <div
-                            className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded ${
-                              isSelected ? 'bg-white/20' : 'bg-slate-100 text-slate-400'
-                            }`}
-                          >
-                            {isSelected ? <Check size={12} /> : <Lock size={10} />}
-                          </div>
-                          <div className="min-w-0">
-                            <p className={`text-[11px] font-semibold ${isSelected ? 'text-white' : 'text-slate-800'}`}>
-                              {p.name.replace(/_/g, ' ')}
-                            </p>
-                            {p.description ? (
-                              <p className={`mt-0.5 text-[10px] ${isSelected ? 'text-white/70' : 'text-slate-400'}`}>
-                                {p.description}
-                              </p>
-                            ) : null}
-                          </div>
-                        </button>
-                      );
-                    })}
+                    {reportPages.map((p) => (
+                      <PermissionToggle
+                        key={p.id}
+                        selected={formData.permissionIds.includes(p.id)}
+                        onToggle={() => togglePermission(p.id)}
+                        title={p.definition.label}
+                        subtitle={p.definition.path}
+                        description={p.definition.description}
+                      />
+                    ))}
                   </div>
                 </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-[11px] font-medium text-slate-500">
+                      <Settings2 size={13} />
+                      Administration
+                    </div>
+                    <span className="text-[10px] text-slate-400">
+                      {formData.permissionIds.filter((id) =>
+                        adminPages.some((p) => p.id === id)
+                      ).length}{' '}
+                      / {adminPages.length}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {adminPages.map((p) => (
+                      <PermissionToggle
+                        key={p.id}
+                        selected={formData.permissionIds.includes(p.id)}
+                        onToggle={() => togglePermission(p.id)}
+                        title={p.definition.label}
+                        subtitle={p.definition.path}
+                        description={p.definition.description}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {permissionGroups.other.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-medium text-slate-500">Other permissions</label>
+                      <span className="text-[10px] text-slate-400">
+                        {formData.permissionIds.filter((id) =>
+                          permissionGroups.other.some((p) => p.id === id)
+                        ).length}{' '}
+                        selected
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {permissionGroups.other.map((p) => (
+                        <PermissionToggle
+                          key={p.id}
+                          selected={formData.permissionIds.includes(p.id)}
+                          onToggle={() => togglePermission(p.id)}
+                          title={p.name.replace(/_/g, ' ')}
+                          description={p.description}
+                        />
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      Legacy grants like view calls still unlock all report pages until you switch to page-wise permissions above.
+                    </p>
+                  </div>
+                ) : null}
               </div>
 
               <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-5 py-3">

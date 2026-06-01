@@ -111,6 +111,8 @@ export default function CallDistributionPage() {
     resourcesLoaded,
     offices,
     appliedFilters,
+    appliedRevision,
+    prefsReady,
   } = useReportFilters();
 
   const supabase = useMemo(() => createClient(), []);
@@ -184,6 +186,11 @@ export default function CallDistributionPage() {
   useEffect(() => {
     rehydrateDistributionFromCache();
   }, [rehydrateDistributionFromCache]);
+
+  useEffect(() => {
+    if (!prefsReady || !resourcesLoaded || !appliedFilters) return;
+    void fetchDistributionData(true);
+  }, [prefsReady, resourcesLoaded, appliedFilters, appliedRevision, fetchDistributionData]);
 
   useEffect(() => {
     if (distributionCalls.length > 0) {

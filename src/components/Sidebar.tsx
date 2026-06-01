@@ -19,7 +19,10 @@ import {
   MapPin,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
+import axios from 'axios';
 import { createClient } from '@/lib/supabase/client';
+import { resolveLandingPath } from '@/lib/user-report-preferences';
+import { ALL_PAGE_ACCESS, hasPagePermission } from '@/lib/auth/page-access';
 
 interface SidebarProps {
   user: {
@@ -39,6 +42,7 @@ export function Sidebar({ user }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [homePath, setHomePath] = useState('/report');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Persistence in localStorage
@@ -48,6 +52,21 @@ export function Sidebar({ user }: SidebarProps) {
       setIsCollapsed(saved === 'true');
     }
   }, []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void axios
+      .get('/api/profile/report-preferences', { withCredentials: true })
+      .then((res) => {
+        setHomePath(
+          resolveLandingPath(
+            res.data.preferences,
+            res.data.permissions ?? user.permissions ?? ['view_calls']
+          )
+        );
+      })
+      .catch(() => {});
+  }, [user?.id, user?.permissions]);
 
   // Close profile dropdown when clicking outside
   useEffect(() => {
@@ -71,54 +90,29 @@ export function Sidebar({ user }: SidebarProps) {
     router.push('/login');
   };
 
-  const navigation = [
-    {
-      name: 'MIS Reports',
-      href: '/report',
-      icon: FileSpreadsheet,
-      permission: 'view_calls'
-    },
-    {
-      name: 'Call Distribution',
-      href: '/report/distribution',
-      icon: Map,
-      permission: 'view_calls'
-    },
-    
-    {
-      name: 'ARCP Claims',
-      href: '/report/arcp-claims',
-      icon: Receipt,
-      permission: 'view_calls'
-    },
-    {
-      name: 'Serial Wise History',
-      href: '/report/serial-audit',
-      icon: ScanBarcode,
-      permission: 'view_calls'
-    },
-    // {
-    //   name: 'Location Audit',
-    //   href: '/report/location-audit',
-    //   icon: MapPin,
-    //   permission: 'view_calls'
-    // },
-    {
-      name: 'User Management',
-      href: '/admin/users',
-      icon: Users,
-      permission: 'manage_users'
-    },
-    {
-      name: 'Roles & Access',
-      href: '/admin/roles',
-      icon: ShieldCheck,
-      permission: 'manage_roles'
-    },
-  ];
+  const navigation = ALL_PAGE_ACCESS.map((page) => ({
+    name: page.label,
+    href: page.path,
+    exactPath: page.exactPath ?? false,
+    icon:
+      page.path === '/report'
+        ? FileSpreadsheet
+        : page.path === '/report/distribution'
+          ? Map
+          : page.path === '/report/arcp-claims'
+            ? Receipt
+            : page.path === '/report/serial-audit'
+              ? ScanBarcode
+              : page.path === '/report/location-audit'
+                ? MapPin
+                : page.path === '/admin/users'
+                  ? Users
+                  : ShieldCheck,
+    permission: page.permission,
+  }));
 
-  const filteredNavigation = navigation.filter(item =>
-    !item.permission || user?.permissions?.includes(item.permission)
+  const filteredNavigation = navigation.filter((item) =>
+    hasPagePermission(user?.permissions ?? [], item.permission)
   );
 
   const sidebarContent = (
@@ -127,7 +121,7 @@ export function Sidebar({ user }: SidebarProps) {
       <div className="relative flex h-14 flex-shrink-0 items-center justify-between border-b border-slate-200 px-4">
         <div
           className="flex items-center gap-3 cursor-pointer group overflow-hidden"
-          onClick={() => router.push('/report')}
+          onClick={() => router.push(homePath)}
         >
           <div className="w-8 h-8 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105 active:scale-95 shadow-sm flex-shrink-0">
             <img src="/western-head-logo-2025.png" alt="W" className="w-5 h-5 object-contain" />
@@ -151,7 +145,9 @@ export function Sidebar({ user }: SidebarProps) {
       {/* Navigation links */}
       <div className="flex-1 py-4 px-3 space-y-1.5 custom-scrollbar">
         {filteredNavigation.map((item) => {
-          const isActive = pathname === item.href;
+          const isActive = item.exactPath
+            ? pathname === item.href
+            : pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <button
               key={item.name}

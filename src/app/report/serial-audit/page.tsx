@@ -89,6 +89,10 @@ export default function SerialAuditPage() {
     getAppliedFiltersSnapshot,
     resourcesLoaded,
     ensureCorpusLoaded,
+    reportPreferences,
+    prefsReady,
+    schedulePatchReportPreferences,
+    appliedRevision,
   } = useReportFilters();
 
   const startDateStr = useMemo(
@@ -190,6 +194,21 @@ export default function SerialAuditPage() {
   const loadInFlightRef = useRef<Promise<void> | null>(null);
   const lastPaintedKeyRef = useRef<string | null>(null);
   const defaultRepairsAppliedRef = useRef(false);
+  const serialPrefsRestoredRef = useRef(false);
+
+  useEffect(() => {
+    if (!prefsReady || serialPrefsRestoredRef.current) return;
+    serialPrefsRestoredRef.current = true;
+    const sa = reportPreferences?.serialAudit;
+    if (!sa) return;
+    if (sa.appliedRepairs?.length) {
+      setDraftRepairs(sa.appliedRepairs);
+      setAppliedRepairs(sa.appliedRepairs);
+    }
+    if (typeof sa.minCount === 'number') setMinCount(sa.minCount);
+    if (sa.onlyFlagged) setOnlyFlagged(true);
+    if (sa.includeCancelled) setIncludeCancelled(true);
+  }, [prefsReady, reportPreferences]);
 
   useEffect(() => {
     setMounted(true);
@@ -471,15 +490,48 @@ export default function SerialAuditPage() {
   );
 
   useEffect(() => {
-    if (!resourcesLoaded || !appliedFilters) return;
+    if (!resourcesLoaded || !appliedFilters || !prefsReady) return;
     if (repairPickerItems.length === 0) return;
     if (defaultRepairsAppliedRef.current) return;
     defaultRepairsAppliedRef.current = true;
+
+    const saved = reportPreferences?.serialAudit?.appliedRepairs;
+    if (saved?.length) {
+      void loadWindowData({ force: true, repairs: saved });
+      return;
+    }
+
     const defaults = defaultSerialAuditRepairFilterValues(repairPickerItems);
     setDraftRepairs(defaults);
     setAppliedRepairs(defaults);
     void loadWindowData({ force: true, repairs: defaults });
-  }, [appliedFilters, loadWindowData, repairPickerItems, resourcesLoaded]);
+  }, [
+    appliedFilters,
+    loadWindowData,
+    prefsReady,
+    repairPickerItems,
+    reportPreferences,
+    resourcesLoaded,
+  ]);
+
+  useEffect(() => {
+    if (!prefsReady || !defaultRepairsAppliedRef.current) return;
+    schedulePatchReportPreferences({
+      serialAudit: {
+        appliedRepairs,
+        minCount,
+        onlyFlagged,
+        includeCancelled,
+      },
+    });
+  }, [
+    appliedRepairs,
+    minCount,
+    onlyFlagged,
+    includeCancelled,
+    prefsReady,
+    schedulePatchReportPreferences,
+  ]);
 
   const loadSerialDetails = useCallback(
     async (serial: string, scope: 'window' | 'allTime') => {

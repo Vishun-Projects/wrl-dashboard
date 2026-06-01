@@ -7,6 +7,7 @@ import { RegisterActiveFilterChips } from '@/components/RegisterActiveFilterChip
 import { RegisterStatsBar } from '@/components/RegisterStatsBar';
 import { ReportFetchingBar } from '@/components/ReportLoadingFeedback';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
+import { RestoredViewBanner } from '@/components/RestoredViewBanner';
 import type { RegisterSummary } from '@/lib/report-search';
 import type { ExtraActiveFilterChip } from '@/lib/report-filters';
 
@@ -77,6 +78,7 @@ export function RegisterPageFilters({
         applyLabel={applyLabel}
         extraFilterCount={extraFilterCount}
       />
+      <RestoredViewBanner />
       <RegisterActiveFilterChips
         onClearAll={onClearAll}
         onFilterRemoved={onApply ? () => onApply() : undefined}

@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { prisma } from '@/lib/prisma';
+import { hasAnyReportPageAccess, hasPagePermission } from '@/lib/auth/page-access';
 
 export const HOD_ROLES = [
   'super_admin',
@@ -27,9 +28,17 @@ export function isHodUser(
 }
 
 /** Resolves HOD flag and office scope for report APIs (register, corpus, serial audit, location audit). */
-export async function resolveReportSecurity(userId: string): Promise<ReportSecurity> {
+export async function resolveReportSecurity(
+  userId: string,
+  opts?: { pagePermission?: string }
+): Promise<ReportSecurity> {
   const permissions = await prisma.getUserPermissions(userId);
-  if (!permissions.includes('view_reports') && !permissions.includes('view_calls')) {
+
+  if (opts?.pagePermission) {
+    if (!hasPagePermission(permissions, opts.pagePermission)) {
+      return { isHod: false, assignedOffices: [], forbidden: true };
+    }
+  } else if (!hasAnyReportPageAccess(permissions)) {
     return { isHod: false, assignedOffices: [], forbidden: true };
   }
 

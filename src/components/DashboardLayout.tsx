@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useLayoutEffect, useCallbac
 import { useRouter, usePathname } from 'next/navigation';
 import axios from 'axios';
 import { Sidebar } from './Sidebar';
+import { PageAccessGuard } from './PageAccessGuard';
 
 function MainContentPlaceholder() {
   return (
@@ -98,7 +99,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         <Sidebar user={userProfile} />
         {authReady ? (
           <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
-            {children}
+            <PageAccessGuard>{children}</PageAccessGuard>
           </div>
         ) : (
           <MainContentPlaceholder />

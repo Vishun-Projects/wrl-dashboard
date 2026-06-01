@@ -7,6 +7,7 @@ import {
 } from '@/lib/arcp-claims-fetch';
 import { loadArcpClaimsDetailRows } from '@/lib/arcp-claims-detail-load';
 import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims-query';
+import { hasPagePermission } from '@/lib/auth/page-access';
 
 export async function GET(req: NextRequest) {
   try {
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
     }
 
     const permissions = await (prisma as any).getUserPermissions(user.id);
-    if (!permissions.includes('view_reports') && !permissions.includes('view_calls')) {
+    if (!hasPagePermission(permissions, 'page_arcp_claims')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

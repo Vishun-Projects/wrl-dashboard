@@ -9,6 +9,7 @@ import { loadArcpClaimsAggregates } from '@/lib/arcp-claims-load';
 import type { ArcpGrandTotals } from '@/lib/arcp-claims-query';
 import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims-query';
 import { buildArcpClaimsTableModel } from '@/lib/arcp-claims-table';
+import { hasPagePermission } from '@/lib/auth/page-access';
 
 const CACHE_TTL = 15 * 60 * 1000;
 const AGG_CACHE_TTL = Number(process.env.ARCP_AGG_CACHE_TTL_MS ?? 60 * 60 * 1000) || 60 * 60 * 1000;
@@ -75,7 +76,7 @@ export async function GET(req: NextRequest) {
     }
 
     const permissions = await (prisma as any).getUserPermissions(user.id);
-    if (!permissions.includes('view_reports') && !permissions.includes('view_calls')) {
+    if (!hasPagePermission(permissions, 'page_arcp_claims')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

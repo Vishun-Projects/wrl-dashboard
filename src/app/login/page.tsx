@@ -1,8 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import axios from 'axios';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
+import { resolveLandingPath } from '@/lib/user-report-preferences';
+import { defaultReportLandingPath } from '@/lib/auth/page-access';
 
 export default function LoginPage() {
   const supabase = createClient();
@@ -24,7 +27,18 @@ export default function LoginPage() {
       });
 
       if (error) throw error;
-      router.replace('/report');
+      try {
+        const res = await axios.get('/api/profile/report-preferences', {
+          withCredentials: true,
+        });
+        const path = resolveLandingPath(
+          res.data.preferences,
+          res.data.permissions ?? ['view_calls']
+        );
+        router.replace(path);
+      } catch {
+        router.replace(defaultReportLandingPath(['view_calls']));
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to sign in');
     } finally {

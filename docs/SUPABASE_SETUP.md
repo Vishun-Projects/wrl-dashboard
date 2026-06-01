@@ -56,6 +56,26 @@ CREATE POLICY "HOD can manage all profiles" ON app_users FOR ALL USING (
   EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role = 'hod')
 );
 
+-- Report preferences (per-user filter/workspace memory)
+ALTER TABLE public.app_users
+  ADD COLUMN IF NOT EXISTS report_preferences JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- Page-wise access permissions (assign in Roles & Access)
+INSERT INTO public.app_permissions (id, name, description)
+SELECT gen_random_uuid(), v.name, v.description
+FROM (VALUES
+  ('page_mis_reports', 'Access MIS Reports register, summary, and accounts'),
+  ('page_call_distribution', 'Access Call Distribution map and KPIs'),
+  ('page_arcp_claims', 'Access ARCP Claims register'),
+  ('page_serial_audit', 'Access Serial Wise History audit'),
+  ('page_location_audit', 'Access Location Audit')
+) AS v(name, description)
+WHERE NOT EXISTS (SELECT 1 FROM public.app_permissions p WHERE p.name = v.name);
+
+CREATE POLICY "Users can update own report preferences" ON app_users FOR UPDATE
+  USING (id = auth.uid())
+  WITH CHECK (id = auth.uid());
+
 -- Policies for call_flags
 CREATE POLICY "Users can see flags for their branches" ON call_flags FOR SELECT USING (
   EXISTS (
