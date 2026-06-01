@@ -146,7 +146,13 @@ async function executePostWithRetry(params: QueryParams, signal?: AbortSignal) {
 
   if (params.rawSql) {
     let sql = params.rawSql.trim();
-    if (sql.toUpperCase().includes('ORDER BY') && !/^\s*SELECT\s+TOP\b/i.test(sql)) {
+    const sqlUpper = sql.toUpperCase();
+    const hasOffsetFetch = sqlUpper.includes('OFFSET') || sqlUpper.includes('FETCH NEXT');
+    if (
+      sqlUpper.includes('ORDER BY') &&
+      !/^\s*SELECT\s+TOP\b/i.test(sql) &&
+      !hasOffsetFetch
+    ) {
       sql = sql.replace(/^(\s*SELECT)\b/i, '$1 TOP 100 PERCENT');
     }
     formData.append('txt_Fields', '*');

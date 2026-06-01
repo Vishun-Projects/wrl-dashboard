@@ -6,16 +6,23 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import {
+  buildDraftFilterSnapshot,
   buildFranchiseeOptions,
+  type DraftFilterOverrides,
   defaultDateRange,
   filterCallsCSR,
+  filterSnapshotsEqual,
   findBreakdownCallType,
   isAnyFilterActive,
   migrateStringFilter,
   joinFilterParam,
+  reportFilterSnapshotFromCache,
+  snapshotAfterRemovingActiveFilterChip,
   REPORT_FILTER_SEARCH_DEBOUNCE_MS,
   toDateString,
+  type ActiveFilterChipDescriptor,
   type ReportDateRange,
+  type ReportFilterSnapshot,
 } from '@/lib/report-filters';
 import {
   REGISTER_DATE_FILTER_OPTIONS,
@@ -151,6 +158,21 @@ type ReportFiltersContextValue = {
   corpusCallCount: number;
   syncCascadeOptionsFromCalls: (calls: any[]) => void;
   resourcesLoaded: boolean;
+  /** Committed filters used for queries and bulk loads; null until first Apply (or cache restore). */
+  appliedFilters: ReportFilterSnapshot | null;
+  /** Bumps when {@link applyFilters} runs — use as a fetch effect dependency. */
+  appliedRevision: number;
+  /** Commits draft → applied synchronously (ref) and React state; returns the new snapshot. */
+  applyFilters: (overrides?: DraftFilterOverrides) => ReportFilterSnapshot;
+  /** Commits a full snapshot to draft + applied (e.g. active filter chip ×). */
+  applyFilterSnapshot: (snapshot: ReportFilterSnapshot) => void;
+  /** Remove one applied chip and commit immediately. */
+  removeActiveFilterChip: (chip: ActiveFilterChipDescriptor) => void;
+  /** Latest applied snapshot (sync — safe to use immediately after {@link applyFilters}). */
+  getAppliedFiltersSnapshot: () => ReportFilterSnapshot | null;
+  hasPendingFilterChanges: boolean;
+  getAppliedDateStrings: () => { startDateStr: string; endDateStr: string } | null;
+  getAppliedDateFilterColumn: () => RegisterDateFilterColumn | null;
 };
 
 const ReportFiltersContext = createContext<ReportFiltersContextValue | null>(null);
@@ -272,6 +294,153 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     (globalReportCache?.selectedCallTypes?.length ?? 0) > 0
   );
 
+  const [appliedFilters, setAppliedFilters] = useState<ReportFilterSnapshot | null>(() =>
+    globalReportCache ? reportFilterSnapshotFromCache(globalReportCache) : null
+  );
+  const [appliedRevision, setAppliedRevision] = useState(() =>
+    globalReportCache ? 1 : 0
+  );
+  const appliedFiltersRef = useRef(appliedFilters);
+  appliedFiltersRef.current = appliedFilters;
+
+  const draftStateRef = useRef({
+    search,
+    pincodeSearch,
+    dateRange,
+    dateFilterColumn,
+    selectedOfficeIds,
+    selectedCallTypes,
+    selectedStatus,
+    priorityFilter,
+    portalFilter,
+    selectedState,
+    selectedCity,
+    selectedBranch,
+    selectedFranchisee,
+    selectedTechnician,
+  });
+  draftStateRef.current = {
+    search,
+    pincodeSearch,
+    dateRange,
+    dateFilterColumn,
+    selectedOfficeIds,
+    selectedCallTypes,
+    selectedStatus,
+    priorityFilter,
+    portalFilter,
+    selectedState,
+    selectedCity,
+    selectedBranch,
+    selectedFranchisee,
+    selectedTechnician,
+  };
+
+  const applyFilterSnapshot = useCallback((snapshot: ReportFilterSnapshot) => {
+    setSearch(snapshot.search);
+    setPincodeSearch(snapshot.pincodeSearch);
+    setDebouncedSearch(snapshot.search);
+    setDebouncedPincodeSearch(snapshot.pincodeSearch);
+    setDateRange(snapshot.dateRange);
+    setDateFilterColumn(snapshot.dateFilterColumn);
+    setSelectedOfficeIds([...snapshot.selectedOfficeIds]);
+    setSelectedCallTypes([...snapshot.selectedCallTypes]);
+    setSelectedStatus([...snapshot.selectedStatus]);
+    setPriorityFilter([...snapshot.priorityFilter]);
+    setPortalFilter([...snapshot.portalFilter]);
+    setSelectedState([...snapshot.selectedState]);
+    setSelectedCity([...snapshot.selectedCity]);
+    setSelectedBranch([...snapshot.selectedBranch]);
+    setSelectedFranchisee([...snapshot.selectedFranchisee]);
+    setSelectedTechnician([...snapshot.selectedTechnician]);
+    appliedFiltersRef.current = snapshot;
+    setAppliedFilters(snapshot);
+    setAppliedRevision((r) => r + 1);
+  }, []);
+
+  const applyFilters = useCallback((overrides?: DraftFilterOverrides): ReportFilterSnapshot => {
+    const input = { ...draftStateRef.current, ...overrides };
+    // #region agent log
+    fetch('http://127.0.0.1:7531/ingest/804729da-b15e-49eb-8ace-fd937e48699c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8f6fef'},body:JSON.stringify({sessionId:'8f6fef',location:'ReportFiltersContext.tsx:applyFilters',message:'applyFilters input',data:{runId:'post-fix',refCallTypes:[...draftStateRef.current.selectedCallTypes],overrideCallTypes:overrides?.selectedCallTypes,priorityFilter:[...input.priorityFilter],selectedCallTypes:[...input.selectedCallTypes]},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    const snapshot = buildDraftFilterSnapshot(input);
+    // #region agent log
+    fetch('http://127.0.0.1:7531/ingest/804729da-b15e-49eb-8ace-fd937e48699c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8f6fef'},body:JSON.stringify({sessionId:'8f6fef',location:'ReportFiltersContext.tsx:applyFilters:exit',message:'applyFilters snapshot built',data:{runId:'post-fix',snapshotPriority:[...snapshot.priorityFilter],snapshotCallTypes:[...snapshot.selectedCallTypes]},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    applyFilterSnapshot(snapshot);
+    return snapshot;
+  }, [applyFilterSnapshot]);
+
+  const removeActiveFilterChip = useCallback(
+    (chip: ActiveFilterChipDescriptor) => {
+      const applied = appliedFiltersRef.current;
+      if (!applied) return;
+      const next = snapshotAfterRemovingActiveFilterChip(applied, chip);
+      // #region agent log
+      fetch('http://127.0.0.1:7531/ingest/804729da-b15e-49eb-8ace-fd937e48699c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8f6fef'},body:JSON.stringify({sessionId:'8f6fef',location:'ReportFiltersContext.tsx:removeActiveFilterChip',message:'chip remove',data:{chipKey:chip.removeKey,chipValue:chip.removeValue,beforePriority:[...applied.priorityFilter],afterPriority:[...next.priorityFilter]},timestamp:Date.now(),hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      applyFilterSnapshot(next);
+    },
+    [applyFilterSnapshot]
+  );
+
+  const draftSnapshot = useMemo(
+    () =>
+      buildDraftFilterSnapshot({
+        search,
+        pincodeSearch,
+        dateRange,
+        dateFilterColumn,
+        selectedOfficeIds,
+        selectedCallTypes,
+        selectedStatus,
+        priorityFilter,
+        portalFilter,
+        selectedState,
+        selectedCity,
+        selectedBranch,
+        selectedFranchisee,
+        selectedTechnician,
+      }),
+    [
+      search,
+      pincodeSearch,
+      dateRange,
+      dateFilterColumn,
+      selectedOfficeIds,
+      selectedCallTypes,
+      selectedStatus,
+      priorityFilter,
+      portalFilter,
+      selectedState,
+      selectedCity,
+      selectedBranch,
+      selectedFranchisee,
+      selectedTechnician,
+    ]
+  );
+
+  const hasPendingFilterChanges =
+    isSearchDebouncing || !filterSnapshotsEqual(draftSnapshot, appliedFilters);
+
+  const getAppliedFiltersSnapshot = useCallback(
+    (): ReportFilterSnapshot | null => appliedFiltersRef.current,
+    []
+  );
+
+  const getAppliedDateStrings = useCallback((): { startDateStr: string; endDateStr: string } | null => {
+    const applied = appliedFiltersRef.current;
+    if (!applied) return null;
+    return {
+      startDateStr: toDateString(applied.dateRange.start),
+      endDateStr: toDateString(applied.dateRange.end),
+    };
+  }, []);
+
+  const getAppliedDateFilterColumn = useCallback((): RegisterDateFilterColumn | null => {
+    return appliedFiltersRef.current?.dateFilterColumn ?? null;
+  }, []);
+
   useEffect(() => subscribeCorpus(() => setCorpusTick((n) => n + 1)), []);
 
   const corpusSnapshot = callCorpusStore;
@@ -284,15 +453,17 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     (async () => {
       try {
         if (cachedReportResources) {
-          if (cancelled) return;
-          setOffices(cachedReportResources.offices);
-          setCallTypes(cachedReportResources.callTypes);
-          if (!defaultCallTypesAppliedRef.current && cachedReportResources.callTypes.length > 0) {
-            const breakdown = findBreakdownCallType(cachedReportResources.callTypes);
-            if (breakdown) {
-              setSelectedCallTypes((prev) => (prev.length > 0 ? prev : [breakdown]));
+          if (!cancelled) {
+            setOffices(cachedReportResources.offices);
+            setCallTypes(cachedReportResources.callTypes);
+            if (!defaultCallTypesAppliedRef.current && cachedReportResources.callTypes.length > 0) {
+              const breakdown = findBreakdownCallType(cachedReportResources.callTypes);
+              if (breakdown) {
+                setSelectedCallTypes((prev) => (prev.length > 0 ? prev : [breakdown]));
+              }
+              defaultCallTypesAppliedRef.current = true;
             }
-            defaultCallTypesAppliedRef.current = true;
+            setResourcesLoaded(true);
           }
           return;
         }
@@ -465,15 +636,26 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   }, [pincodeSearch, selectedBranch, selectedCity, selectedFranchisee, selectedState, selectedTechnician]);
 
   const getDateStrings = useCallback(() => {
-    const startDateStr = toDateString(dateRange.start);
-    const endDateStr = toDateString(dateRange.end);
-    return { startDateStr, endDateStr };
+    const applied = appliedFiltersRef.current;
+    if (applied) {
+      return {
+        startDateStr: toDateString(applied.dateRange.start),
+        endDateStr: toDateString(applied.dateRange.end),
+      };
+    }
+    return {
+      startDateStr: toDateString(dateRange.start),
+      endDateStr: toDateString(dateRange.end),
+    };
   }, [dateRange.end, dateRange.start]);
 
   const getSharedCacheKey = useCallback(() => {
-    const { startDateStr, endDateStr } = getDateStrings();
-    return buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
-  }, [getDateStrings, dateFilterColumn]);
+    const applied = appliedFiltersRef.current;
+    if (!applied) return null;
+    const startDateStr = toDateString(applied.dateRange.start);
+    const endDateStr = toDateString(applied.dateRange.end);
+    return buildCorpusCacheKey(startDateStr, endDateStr, applied.dateFilterColumn);
+  }, []);
 
   const restoreCorpusDeduped = useCallback(async (cacheKey: string): Promise<CallCorpusStore | null> => {
     const inflight = corpusIdbRestoreInflightRef.current.get(cacheKey);
@@ -526,10 +708,14 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   const ensureCorpusLoaded = useCallback(
     async (opts?: { force?: boolean; silent?: boolean }) => {
       if (readCallsFromPostgresClient()) return;
+      const applied = appliedFiltersRef.current;
+      if (!applied) return;
       const force = !!opts?.force;
-      const { startDateStr, endDateStr } = getDateStrings();
-      const fetchScope = resolveCorpusFetchScope(startDateStr, endDateStr, dateFilterColumn);
-      const cacheKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+      const startDateStr = toDateString(applied.dateRange.start);
+      const endDateStr = toDateString(applied.dateRange.end);
+      const appliedDateColumn = applied.dateFilterColumn;
+      const fetchScope = resolveCorpusFetchScope(startDateStr, endDateStr, appliedDateColumn);
+      const cacheKey = buildCorpusCacheKey(startDateStr, endDateStr, appliedDateColumn);
       const generation = corpusGenerationRef.current;
 
       if (force) {
@@ -556,10 +742,10 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         !force &&
         callCorpusStore?.calls.size &&
         callCorpusStore.status !== 'error' &&
-        corpusStoreCoversFetchScope(callCorpusStore, startDateStr, endDateStr, dateFilterColumn)
+        corpusStoreCoversFetchScope(callCorpusStore, startDateStr, endDateStr, appliedDateColumn)
       ) {
         applyLocalAndReturn(
-          adoptCorpusStoreForScope(callCorpusStore, startDateStr, endDateStr, dateFilterColumn)
+          adoptCorpusStoreForScope(callCorpusStore, startDateStr, endDateStr, appliedDateColumn)
         );
         markCorpusSatisfied(cacheKey);
         return;
@@ -882,12 +1068,13 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         }
       }
     },
-    [applyCorpusToUi, dateFilterColumn, getDateStrings, markCorpusSatisfied, needsCorpusPreload, restoreCorpusDeduped, supabase, tryResolveLocalCorpus]
+    [applyCorpusToUi, markCorpusSatisfied, needsCorpusPreload, restoreCorpusDeduped, supabase, tryResolveLocalCorpus]
   );
 
   const fetchDistributionFromRegister = useCallback(
     async (force = false, silent = false) => {
       const cacheKey = getSharedCacheKey();
+      if (!cacheKey) return;
 
       const applySharedCalls = (calls: Record<string, unknown>[], fetchedAt: number) => {
         const branches = distributionDataCache?.dbBranches || [];
@@ -932,6 +1119,14 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         sharedRegisterSatisfiedKeysRef.current.delete(cacheKey);
       }
 
+      let resolveInflight!: () => void;
+      let rejectInflight!: (reason?: unknown) => void;
+      const inflightGate = new Promise<void>((resolve, reject) => {
+        resolveInflight = resolve;
+        rejectInflight = reject;
+      });
+      sharedRegisterLoadInFlightRef.current.set(cacheKey, inflightGate);
+
       const run = (async () => {
         if (!force) {
           const idbStart = performance.now();
@@ -957,7 +1152,10 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         logRegisterBulk('bulk LOAD (network)', { cacheKey, force });
 
         try {
-          const { startDateStr, endDateStr } = getDateStrings();
+          const applied = appliedFiltersRef.current;
+          if (!applied) return;
+          const startDateStr = toDateString(applied.dateRange.start);
+          const endDateStr = toDateString(applied.dateRange.end);
           const auth = createChunkedFetchAuth(supabase);
           await auth.refreshAuth();
           const calls = await fetchAllRegisterRowsForExport({
@@ -968,7 +1166,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
               callType: 'All',
               startDate: startDateStr,
               endDate: endDateStr,
-              dateFilterColumn,
+              dateFilterColumn: applied.dateFilterColumn,
             },
             onProgress: (fetched, total) => {
               if (fetched === total || fetched % 5000 === 0) {
@@ -1009,16 +1207,19 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         }
       })();
 
-      sharedRegisterLoadInFlightRef.current.set(cacheKey, run);
       try {
         await run;
+        resolveInflight();
+      } catch (err) {
+        rejectInflight(err);
+        throw err;
       } finally {
-        if (sharedRegisterLoadInFlightRef.current.get(cacheKey) === run) {
+        if (sharedRegisterLoadInFlightRef.current.get(cacheKey) === inflightGate) {
           sharedRegisterLoadInFlightRef.current.delete(cacheKey);
         }
       }
     },
-    [dateFilterColumn, getDateStrings, getSharedCacheKey, distributionCalls.length, supabase, syncCascadeOptionsFromCalls]
+    [getSharedCacheKey, distributionCalls.length, supabase, syncCascadeOptionsFromCalls]
   );
 
   const ensureSharedCallsLoaded = useCallback(
@@ -1091,9 +1292,13 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
 
     if (!opts?.showToast) return;
 
-    const { startDateStr, endDateStr } = getDateStrings();
-    const fetchScope = resolveCorpusFetchScope(startDateStr, endDateStr, dateFilterColumn);
-    const cacheKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+    const applied = appliedFiltersRef.current;
+    if (!applied) return;
+    const startDateStr = toDateString(applied.dateRange.start);
+    const endDateStr = toDateString(applied.dateRange.end);
+    const appliedDateColumn = applied.dateFilterColumn;
+    const fetchScope = resolveCorpusFetchScope(startDateStr, endDateStr, appliedDateColumn);
+    const cacheKey = buildCorpusCacheKey(startDateStr, endDateStr, appliedDateColumn);
 
     const syncAnchor = callCorpusStore?.lastSyncedAt
       ? new Date(callCorpusStore.lastSyncedAt)
@@ -1204,10 +1409,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     }
   }, [
     applyCorpusToUi,
-    dateFilterColumn,
     ensureCorpusLoaded,
     ensureSharedCallsLoaded,
-    getDateStrings,
     getSharedCacheKey,
     lastSyncedAt,
     pathname,
@@ -1215,17 +1418,21 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   ]);
 
   const corpusFetchScopeKey = useMemo(() => {
-    const { startDateStr, endDateStr } = getDateStrings();
-    return buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
-  }, [getDateStrings, dateFilterColumn]);
+    if (!appliedFilters) return null;
+    const startDateStr = toDateString(appliedFilters.dateRange.start);
+    const endDateStr = toDateString(appliedFilters.dateRange.end);
+    return buildCorpusCacheKey(startDateStr, endDateStr, appliedFilters.dateFilterColumn);
+  }, [appliedFilters]);
 
   useEffect(() => {
+    if (!corpusFetchScopeKey) return;
     corpusGenerationRef.current += 1;
   }, [corpusFetchScopeKey]);
 
   useEffect(() => {
     if (!readRegisterFromPostgresClient()) return;
-    const cacheKey = getSharedCacheKey();
+    if (!corpusFetchScopeKey) return;
+    const cacheKey = corpusFetchScopeKey;
     if (distributionDataCache?.cacheKey === cacheKey) return;
     logRegisterBulk('bulk scope changed — clearing stale in-memory cache', {
       previousKey: distributionDataCache?.cacheKey ?? null,
@@ -1238,10 +1445,11 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         sharedRegisterSatisfiedKeysRef.current.delete(key);
       }
     }
-  }, [corpusFetchScopeKey, getSharedCacheKey]);
+  }, [corpusFetchScopeKey]);
 
   useEffect(() => {
     if (readCallsFromPostgresClient()) return;
+    if (!corpusFetchScopeKey) return;
     void (async () => {
       const local = await tryResolveLocalCorpus(corpusFetchScopeKey);
       if (local) {
@@ -1249,32 +1457,6 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       }
     })();
   }, [corpusFetchScopeKey, applyCorpusToUi, tryResolveLocalCorpus]);
-
-  useEffect(() => {
-    if (!resourcesLoaded || !needsCorpusPreload) return;
-    if (corpusSatisfiedKeysRef.current.has(corpusFetchScopeKey)) return;
-    ensureCorpusLoaded({ silent: pathname !== '/report/distribution' });
-  }, [resourcesLoaded, needsCorpusPreload, ensureCorpusLoaded, corpusFetchScopeKey, pathname]);
-
-  useEffect(() => {
-    if (!resourcesLoaded || !pathname?.startsWith('/report')) return;
-    if (!readRegisterFromPostgresClient()) return;
-    const cacheKey = getSharedCacheKey();
-    const hasFreshCache =
-      distributionDataCache?.cacheKey === cacheKey &&
-      (distributionDataCache.allCalls?.length ?? 0) > 0 &&
-      sharedRegisterSatisfiedKeysRef.current.has(cacheKey);
-    if (hasFreshCache) {
-      return;
-    }
-    void ensureSharedCallsLoaded(false);
-  }, [
-    resourcesLoaded,
-    pathname,
-    corpusFetchScopeKey,
-    ensureSharedCallsLoaded,
-    getSharedCacheKey,
-  ]);
 
   useEffect(() => {
     const calls =
@@ -1403,6 +1585,15 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     corpusCallCount,
     syncCascadeOptionsFromCalls,
     resourcesLoaded,
+    appliedFilters,
+    appliedRevision,
+    applyFilters,
+    applyFilterSnapshot,
+    removeActiveFilterChip,
+    getAppliedFiltersSnapshot,
+    hasPendingFilterChanges,
+    getAppliedDateStrings,
+    getAppliedDateFilterColumn,
   }), [
     search,
     debouncedSearch,
@@ -1456,6 +1647,15 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     syncCascadeOptionsFromCalls,
     resourcesLoaded,
     corpusTick,
+    appliedFilters,
+    appliedRevision,
+    applyFilters,
+    applyFilterSnapshot,
+    removeActiveFilterChip,
+    getAppliedFiltersSnapshot,
+    hasPendingFilterChanges,
+    getAppliedDateStrings,
+    getAppliedDateFilterColumn,
   ]);
 
   return (

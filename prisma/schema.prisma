@@ -9,34 +9,6 @@ datasource db {
   provider = "postgresql"
 }
 
-model CallsCache {
-  id            String   @id
-  vtrnno        String
-  customer_name String
-  engineer_name String
-  branch_name   String
-  office_id     String
-  status_label  String
-  is_major      Boolean
-  visit_count   Int
-  part_count    Int
-  logged_at     DateTime
-  started_at    DateTime?
-  resolved_at   DateTime?
-  synced_at     DateTime @default(now())
-  serial_number String?
-  manual_job_no String?
-  vcomplaint    String?
-  vlocation     String?
-  audit_flag    String?
-  solve_remarks String?
-  cancel_reason String?
-  approved_at   DateTime?
-  updated_at    DateTime @default(now())
-
-  @@map("calls_cache")
-}
-
 model CallComment {
   id          Int      @id @default(autoincrement())
   call_id     String

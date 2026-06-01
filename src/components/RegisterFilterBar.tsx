@@ -1,6 +1,7 @@
 'use client';
 
-import React from 'react';
+import React, { useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { Search, MapPin, X } from 'lucide-react';
 import { DateRangeSelector } from '@/components/DateRangeSelector';
 import { RegisterMultiSelect } from '@/components/RegisterMultiSelect';
@@ -10,7 +11,17 @@ import {
   REGISTER_PORTAL_OPTIONS,
   REGISTER_PRIORITY_OPTIONS,
   REGISTER_STATUS_OPTIONS,
+  type DraftFilterOverrides,
 } from '@/lib/report-filters';
+
+type FilterArrayField = keyof Pick<
+  DraftFilterOverrides,
+  | 'selectedStatus'
+  | 'selectedCallTypes'
+  | 'priorityFilter'
+  | 'portalFilter'
+  | 'selectedTechnician'
+>;
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 
 type RegisterFilterBarProps = {
@@ -42,11 +53,15 @@ function FilterGroup({
 function FilterGroups({
   applyMode = 'confirm',
   showStatusChips = false,
+  commitOnChange = false,
 }: {
   applyMode?: 'instant' | 'confirm';
   showStatusChips?: boolean;
+  /** In drawer: sync applied filters on each change so chips/removal work before Apply. */
+  commitOnChange?: boolean;
 }) {
   const {
+    applyFilters,
     callTypeOptions,
     selectedCallTypes,
     setSelectedCallTypes,
@@ -67,16 +82,51 @@ function FilterGroups({
     setSelectedTechnician,
   } = useReportFilters();
 
+  const wrapCommit = useCallback(
+    (setter: (values: string[]) => void, field: FilterArrayField) => {
+      if (!commitOnChange) return setter;
+      return (values: string[]) => {
+        // #region agent log
+        fetch('http://127.0.0.1:7531/ingest/804729da-b15e-49eb-8ace-fd937e48699c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8f6fef'},body:JSON.stringify({sessionId:'8f6fef',location:'RegisterFilterBar.tsx:wrapCommit',message:'wrapCommit before flush',data:{runId:'post-fix',field,nextValues:values},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        flushSync(() => setter(values));
+        const snap = applyFilters({ [field]: values } as DraftFilterOverrides);
+        // #region agent log
+        fetch('http://127.0.0.1:7531/ingest/804729da-b15e-49eb-8ace-fd937e48699c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8f6fef'},body:JSON.stringify({sessionId:'8f6fef',location:'RegisterFilterBar.tsx:wrapCommit:after',message:'wrapCommit after applyFilters',data:{runId:'post-fix',field,requestedValues:values,snapshotCallTypes:[...snap.selectedCallTypes],snapshotPriority:[...snap.priorityFilter]},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+      };
+    },
+    [commitOnChange, applyFilters]
+  );
+
+  const onStatusChange = wrapCommit(setSelectedStatus, 'selectedStatus');
+  const onCallTypesChange = wrapCommit(setSelectedCallTypes, 'selectedCallTypes');
+  const onPriorityChange = wrapCommit(setPriorityFilter, 'priorityFilter');
+  const onPortalChange = wrapCommit(setPortalFilter, 'portalFilter');
+  const onStateChange = commitOnChange
+    ? (values: string[]) => {
+        flushSync(() => handleStatesChange(values));
+        applyFilters();
+      }
+    : handleStatesChange;
+  const onCityChange = commitOnChange
+    ? (values: string[]) => {
+        flushSync(() => handleCitiesChange(values));
+        applyFilters();
+      }
+    : handleCitiesChange;
+  const onTechnicianChange = wrapCommit(setSelectedTechnician, 'selectedTechnician');
+
   return (
     <>
       <FilterGroup label="Call">
-        {showStatusChips && <RegisterStatusChips />}
+        {showStatusChips && <RegisterStatusChips commitOnChange={commitOnChange} />}
         <RegisterMultiSelect
           label="Status"
           emptyLabel="All statuses"
           options={REGISTER_STATUS_OPTIONS}
           selected={selectedStatus}
-          onChange={setSelectedStatus}
+          onChange={onStatusChange}
           applyMode={applyMode}
         />
         <RegisterMultiSelect
@@ -84,7 +134,7 @@ function FilterGroups({
           emptyLabel="All types"
           options={callTypeOptions}
           selected={selectedCallTypes}
-          onChange={setSelectedCallTypes}
+          onChange={onCallTypesChange}
           applyMode={applyMode}
         />
         <RegisterMultiSelect
@@ -92,7 +142,7 @@ function FilterGroups({
           emptyLabel="All priorities"
           options={REGISTER_PRIORITY_OPTIONS}
           selected={priorityFilter}
-          onChange={setPriorityFilter}
+          onChange={onPriorityChange}
           applyMode={applyMode}
         />
         <RegisterMultiSelect
@@ -100,19 +150,19 @@ function FilterGroups({
           emptyLabel="All portals"
           options={REGISTER_PORTAL_OPTIONS}
           selected={portalFilter}
-          onChange={setPortalFilter}
+          onChange={onPortalChange}
           applyMode={applyMode}
         />
       </FilterGroup>
 
       <FilterGroup label="Location">
-        <RegisterBranchFranchiseeFilters applyMode={applyMode} />
+        <RegisterBranchFranchiseeFilters applyMode={applyMode} commitOnChange={commitOnChange} />
         <RegisterMultiSelect
           label="State"
           emptyLabel="All states"
           options={stateOptions}
           selected={selectedState}
-          onChange={handleStatesChange}
+          onChange={onStateChange}
           searchable
           applyMode={applyMode}
         />
@@ -121,7 +171,7 @@ function FilterGroups({
           emptyLabel="All cities"
           options={cityOptions}
           selected={selectedCity}
-          onChange={handleCitiesChange}
+          onChange={onCityChange}
           searchable
           applyMode={applyMode}
         />
@@ -133,7 +183,7 @@ function FilterGroups({
           emptyLabel="All technicians"
           options={technicianOptions}
           selected={selectedTechnician}
-          onChange={setSelectedTechnician}
+          onChange={onTechnicianChange}
           searchable
           panelClassName="w-64"
           applyMode={applyMode}
@@ -174,7 +224,7 @@ export function RegisterFilterBar({
     return (
       <div className="register-filter-drawer-content">
         <div className="register-filter-row register-filter-row-compact flex-col items-stretch gap-3">
-          <FilterGroups applyMode={applyMode} showStatusChips />
+          <FilterGroups applyMode={applyMode} showStatusChips commitOnChange />
         </div>
       </div>
     );

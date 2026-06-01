@@ -48,6 +48,28 @@ export const REGISTER_TABLE_COLUMNS: RegisterTableColumnDef[] = [
 
 export const REGISTER_TABLE_COLUMN_KEYS = REGISTER_TABLE_COLUMNS.map((c) => c.key);
 
+/** CSV / Excel export columns (subset + display fields). */
+export const REGISTER_EXPORT_COLUMNS: { key: string; header: string }[] = [
+  { key: 'UniqueCallNo', header: 'ID' },
+  { key: 'vcclid', header: 'Call Centre ID' },
+  { key: 'calltype', header: 'Call Type' },
+  { key: 'callsdtrndate', header: 'Date' },
+  { key: 'PartyName', header: 'Customer' },
+  { key: 'officename', header: 'Branch' },
+  { key: 'franchisee_name', header: 'Franchisee' },
+  { key: 'Pincode', header: 'Pincode' },
+  { key: 'itemname', header: 'Product' },
+  { key: 'callsvserialno', header: 'Serial' },
+  { key: 'serviceman', header: 'Technician' },
+  { key: 'vcomplaint', header: 'Complaint' },
+  { key: 'display_status', header: 'Status' },
+  { key: 'solvedDate', header: 'Solved Date' },
+  { key: 'remarks', header: 'Remarks' },
+  { key: 'vpersoncalling', header: 'Contact Person' },
+  { key: 'vinsttel1', header: 'Phone' },
+  { key: 'vinstaddress', header: 'Address' },
+];
+
 export const REGISTER_COLUMNS_STORAGE_KEY = 'mis_register_visible_columns';
 
 export function loadVisibleRegisterColumns(): RegisterTableColumnKey[] {

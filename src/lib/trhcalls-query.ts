@@ -3,6 +3,8 @@
  * Source table: trhcalls (deduplicated by vtrnno, latest row wins).
  */
 
+import { parseRepairQueryParam } from '@/lib/serial-audit-repair-options';
+
 export const TRHCALLS_EXCLUDE_TRANSFERRED =
   " AND ISNULL(tc.vtransfercallno, '') = '' AND ISNULL(CAST(tc.ncancelreason AS INT), 0) <> 2";
 
@@ -302,6 +304,7 @@ const TRHCALLS_DEDUP_INNER_COLUMNS = [
   'ncalltype',
   'nitem',
   'vcomplaint',
+  'ncomplaint',
   'vpersoncalling',
   'callStatus',
   'vsolveremarks',
@@ -474,111 +477,269 @@ const TRHCALLS_DEDUP_ORDER = 'ISNULL(editedon, addedon) DESC, ncode DESC';
 /** Max calendar days for a single client corpus download (wider ranges use server views per page). */
 export const MAX_CLIENT_CORPUS_DAYS = 120;
 
-function buildSerialAuditBaseWhere(opts?: {
+export type SerialAuditSqlOpts = {
   callType?: string | null;
+  /** Comma-separated mstrepair ncode values (visit fault repair). */
+  repair?: string | null;
   isHod?: boolean;
   assignedOffices?: string[];
   startDate?: string | null;
   endDate?: string | null;
-}): string {
-  let where = `${SERIAL_AUDIT_VALID_SERIAL_WHERE} AND vtrnno IS NOT NULL AND vtrnno <> '' AND ${SERIAL_AUDIT_TRANSFER_EXCLUDE_WHERE}`;
+};
+
+function buildSerialAuditRepairNcodeInList(
+  repair: string | null | undefined
+): string | null {
+  const ncodes = parseRepairQueryParam(repair);
+  if (!ncodes.length) return null;
+  return ncodes.map((t) => `'${t.replace(/'/g, "''")}'`).join(',');
+}
+
+function prefixSerialAuditWhereForAlias(where: string, alias: string): string {
+  return where
+    .replace(/\bvserialno\b/g, `${alias}.vserialno`)
+    .replace(/\bvtrnno\b/g, `${alias}.vtrnno`)
+    .replace(/\bvtransfercallno\b/g, `${alias}.vtransfercallno`)
+    .replace(/\bncancelreason\b/g, `${alias}.ncancelreason`)
+    .replace(/\bdtrndate\b/g, `${alias}.dtrndate`)
+    .replace(/\bncalltype\b/g, `${alias}.ncalltype`)
+    .replace(/\bnofficeid\b/g, `${alias}.nofficeid`)
+    .replace(/trhcalls\.ncode/g, `${alias}.ncode`)
+    .replace(/trhcalls\.nofficeid/g, `${alias}.nofficeid`);
+}
+
+function buildSerialAuditRepairWhereClauseForAlias(
+  repair: string | null | undefined,
+  alias: string
+): string | null {
+  const ncodeIn = buildSerialAuditRepairNcodeInList(repair);
+  if (!ncodeIn) return null;
+  return `EXISTS (
+    SELECT 1 FROM trdcalls2fault tf (NOLOCK)
+    INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
+    WHERE tf.ncalls = ${alias}.ncode
+      AND tf.nofficeid = ${alias}.nofficeid
+      AND CAST(r.ncode AS VARCHAR(50)) IN (${ncodeIn})
+  )`;
+}
+
+function buildSerialAuditBaseWhere(opts?: SerialAuditSqlOpts, tableAlias = 'trhcalls'): string {
+  const alias = tableAlias;
+  let where = prefixSerialAuditWhereForAlias(
+    `${SERIAL_AUDIT_VALID_SERIAL_WHERE} AND vtrnno IS NOT NULL AND vtrnno <> '' AND ${SERIAL_AUDIT_TRANSFER_EXCLUDE_WHERE}`,
+    alias
+  );
   if (opts?.startDate) {
-    where += ` AND dtrndate >= '${opts.startDate.replace(/'/g, "''")}'`;
+    where += ` AND ${alias}.dtrndate >= '${opts.startDate.replace(/'/g, "''")}'`;
   }
   if (opts?.endDate) {
-    where += ` AND dtrndate <= '${opts.endDate.replace(/'/g, "''")} 23:59:59'`;
+    where += ` AND ${alias}.dtrndate <= '${opts.endDate.replace(/'/g, "''")} 23:59:59'`;
   }
   const callTypeSubquery = buildCallTypeNcodeInSubquery(opts?.callType);
   if (callTypeSubquery) {
-    where += ` AND ncalltype IN ${callTypeSubquery}`;
+    where += ` AND ${alias}.ncalltype IN ${callTypeSubquery}`;
+  }
+  const repairWhere = buildSerialAuditRepairWhereClauseForAlias(opts?.repair, alias);
+  if (repairWhere) {
+    where += ` AND ${repairWhere}`;
   }
   if (!opts?.isHod && opts?.assignedOffices && opts.assignedOffices.length > 0) {
     const allowed = opts.assignedOffices.join(',');
-    where += ` AND (nofficeid IN (${allowed}) OR nofficeid IN (SELECT ncode FROM mstoffice (NOLOCK) WHERE nunder IN (${allowed})))`;
+    where += ` AND (${alias}.nofficeid IN (${allowed}) OR ${alias}.nofficeid IN (SELECT ncode FROM mstoffice (NOLOCK) WHERE nunder IN (${allowed})))`;
   }
   return where;
 }
 
-/** Repeated serials in a date window — deduped rows with status counts. */
-export function buildSerialAuditWindowListRawSql(opts: {
-  minRepeats?: number;
-  callType?: string | null;
-  isHod?: boolean;
-  assignedOffices?: string[];
+/** Visit-level repair counts per serial (motor / compressor / gas charging). */
+function buildSerialAuditRepairBySerialSelect(): string {
+  return `
+    SUM(CASE WHEN LTRIM(RTRIM(r.vname)) = 'Motor Replaced' THEN 1 ELSE 0 END) AS motor_replaced_count,
+    SUM(CASE WHEN LTRIM(RTRIM(r.vname)) = 'Compressor Replaced' THEN 1 ELSE 0 END) AS compressor_replaced_count,
+    SUM(CASE WHEN LTRIM(RTRIM(r.vname)) = 'Gas Charging Done' THEN 1 ELSE 0 END) AS gas_charging_count`;
+}
+
+export function buildSerialAuditRepairCountsBySerialSql(opts?: SerialAuditSqlOpts): string {
+  const tcWhere = buildSerialAuditBaseWhere({ ...opts, repair: null }, 'tc');
+  return `
+    SELECT
+      UPPER(RTRIM(tc.vserialno)) AS serial,
+      ${buildSerialAuditRepairBySerialSelect()}
+    FROM trdcalls2fault tf (NOLOCK)
+    INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
+    INNER JOIN trhcalls tc (NOLOCK) ON tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid
+    WHERE ${tcWhere}
+      AND LTRIM(RTRIM(r.vname)) IN ('Motor Replaced', 'Compressor Replaced', 'Gas Charging Done')
+    GROUP BY UPPER(RTRIM(tc.vserialno))
+  `;
+}
+
+/** Active repair types from mstrepair (visit work done). */
+export function buildMstRepairMasterListSql(): string {
+  return `
+    SELECT
+      CAST(ncode AS VARCHAR(50)) AS ncode,
+      LTRIM(RTRIM(vname)) AS vname
+    FROM mstrepair (NOLOCK)
+    WHERE LTRIM(RTRIM(ISNULL(vname, ''))) <> ''
+      AND ISNULL(bactive, 'True') IN ('True', 'true', '1', '')
+  `;
+}
+
+/** Call ncodes that have selected repairs on a visit fault row in the date window. */
+export function buildSerialAuditCallIdsWithRepairSql(opts: {
+  repair: string;
   startDate?: string | null;
   endDate?: string | null;
+  isHod?: boolean;
+  assignedOffices?: string[];
 }): string {
+  const ncodeIn = buildSerialAuditRepairNcodeInList(opts.repair);
+  let where = `${SERIAL_AUDIT_VALID_SERIAL_WHERE} AND vtrnno IS NOT NULL AND vtrnno <> '' AND ${SERIAL_AUDIT_TRANSFER_EXCLUDE_WHERE}`;
+  if (opts.startDate) {
+    where += ` AND tc.dtrndate >= '${opts.startDate.replace(/'/g, "''")}'`;
+  }
+  if (opts.endDate) {
+    where += ` AND tc.dtrndate <= '${opts.endDate.replace(/'/g, "''")} 23:59:59'`;
+  }
+  if (!opts.isHod && opts.assignedOffices && opts.assignedOffices.length > 0) {
+    const allowed = opts.assignedOffices.join(',');
+    where += ` AND (tc.nofficeid IN (${allowed}) OR tc.nofficeid IN (SELECT ncode FROM mstoffice (NOLOCK) WHERE nunder IN (${allowed})))`;
+  }
+  return `
+    SELECT DISTINCT CAST(tf.ncalls AS VARCHAR(50)) AS call_ncode
+    FROM trdcalls2fault tf (NOLOCK)
+    INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
+    INNER JOIN trhcalls tc (NOLOCK) ON tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid
+    WHERE ${where}
+      AND CAST(r.ncode AS VARCHAR(50)) IN (${ncodeIn})
+  `;
+}
+
+const SERIAL_AUDIT_REPAIR_DONE_EXPR = `(
+  SELECT STUFF((
+    SELECT DISTINCT '; ' + LTRIM(RTRIM(r.vname))
+    FROM trdcalls2fault tf (NOLOCK)
+    INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
+    WHERE tf.ncalls = tc.ncode
+      AND tf.nofficeid = tc.nofficeid
+      AND LTRIM(RTRIM(ISNULL(r.vname, ''))) <> ''
+    FOR XML PATH(''), TYPE
+  ).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
+)`;
+
+/** Repeated serials in a date window — deduped rows with status counts.
+ *  Nested subqueries only (db-proxy wraps as SELECT * FROM (...) t — CTE/WITH is invalid). */
+export function buildSerialAuditWindowListRawSql(
+  opts: SerialAuditSqlOpts & { minRepeats?: number }
+): string {
   const minRepeats = Math.max(2, opts.minRepeats ?? 2);
   const where = buildSerialAuditBaseWhere(opts);
 
+  const tcWhere = buildSerialAuditBaseWhere({ ...opts, repair: null }, 'tc');
+
   return `
     SELECT
-      UPPER(RTRIM(vserialno)) AS serial,
-      COUNT(*) AS complaint_count,
-      SUM(CASE
-        WHEN (bsolved = 1 OR bfastclose = 1) THEN 0
-        WHEN ncancelreason IS NOT NULL AND ncancelreason <> 0 AND ncancelreason <> 2 THEN 0
-        ELSE 1
-      END) AS open_count,
-      SUM(CASE WHEN bsolved = 1 OR bfastclose = 1 THEN 1 ELSE 0 END) AS solved_count,
-      SUM(CASE
-        WHEN ncancelreason IS NOT NULL AND ncancelreason <> 0 AND ncancelreason <> 2 THEN 1
-        ELSE 0
-      END) AS cancelled_count,
-      CONVERT(varchar(30), MAX(dtrndate), 126) AS last_complaint_date
+      a.serial,
+      a.complaint_count,
+      a.open_count,
+      a.solved_count,
+      a.cancelled_count,
+      a.last_complaint_date,
+      ISNULL(r.motor_replaced_count, 0) AS motor_replaced_count,
+      ISNULL(r.compressor_replaced_count, 0) AS compressor_replaced_count,
+      ISNULL(r.gas_charging_count, 0) AS gas_charging_count
     FROM (
-      SELECT *,
-        ROW_NUMBER() OVER (
-          PARTITION BY ${TRHCALLS_DEDUP_PARTITION}
-          ORDER BY ${TRHCALLS_DEDUP_ORDER}
-        ) AS rn
-      FROM trhcalls (NOLOCK)
-      WHERE ${where}
-    ) deduped
-    WHERE rn = 1
-    GROUP BY UPPER(RTRIM(vserialno))
-    HAVING COUNT(*) >= ${minRepeats}
+      SELECT
+        UPPER(RTRIM(vserialno)) AS serial,
+        COUNT(*) AS complaint_count,
+        SUM(CASE
+          WHEN (bsolved = 1 OR bfastclose = 1) THEN 0
+          WHEN ncancelreason IS NOT NULL AND ncancelreason <> 0 AND ncancelreason <> 2 THEN 0
+          ELSE 1
+        END) AS open_count,
+        SUM(CASE WHEN bsolved = 1 OR bfastclose = 1 THEN 1 ELSE 0 END) AS solved_count,
+        SUM(CASE
+          WHEN ncancelreason IS NOT NULL AND ncancelreason <> 0 AND ncancelreason <> 2 THEN 1
+          ELSE 0
+        END) AS cancelled_count,
+        CONVERT(varchar(30), MAX(dtrndate), 126) AS last_complaint_date
+      FROM (
+        SELECT *,
+          ROW_NUMBER() OVER (
+            PARTITION BY ${TRHCALLS_DEDUP_PARTITION}
+            ORDER BY ${TRHCALLS_DEDUP_ORDER}
+          ) AS rn
+        FROM trhcalls (NOLOCK)
+        WHERE ${where}
+      ) deduped
+      WHERE rn = 1
+      GROUP BY UPPER(RTRIM(vserialno))
+      HAVING COUNT(*) >= ${minRepeats}
+    ) a
+    LEFT JOIN (
+      SELECT
+        UPPER(RTRIM(tc.vserialno)) AS serial,
+        ${buildSerialAuditRepairBySerialSelect()}
+      FROM trdcalls2fault tf (NOLOCK)
+      INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
+      INNER JOIN trhcalls tc (NOLOCK) ON tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid
+      WHERE ${tcWhere}
+        AND LTRIM(RTRIM(r.vname)) IN ('Motor Replaced', 'Compressor Replaced', 'Gas Charging Done')
+      GROUP BY UPPER(RTRIM(tc.vserialno))
+    ) r ON r.serial = a.serial
   `;
 }
 
 /** All-time repeated serials — single pass, no joins, no ORDER BY (sort client-side). */
-export function buildSerialAuditListRawSql(opts: {
-  minRepeats?: number;
-  callType?: string | null;
-  isHod?: boolean;
-  assignedOffices?: string[];
-  startDate?: string | null;
-  endDate?: string | null;
-}): string {
+export function buildSerialAuditListRawSql(
+  opts: SerialAuditSqlOpts & { minRepeats?: number }
+): string {
   if (opts.startDate || opts.endDate) {
     return buildSerialAuditWindowListRawSql(opts);
   }
   const minRepeats = Math.max(2, opts.minRepeats ?? 2);
   const where = buildSerialAuditBaseWhere(opts);
 
+  const activeTrnExpr = `CASE
+      WHEN ncancelreason IS NOT NULL AND ncancelreason <> 0 AND ncancelreason <> 2 THEN NULL
+      ELSE vtrnno
+    END`;
+  const tcWhere = buildSerialAuditBaseWhere({ ...opts, repair: null }, 'tc');
+
   return `
     SELECT
-      UPPER(RTRIM(vserialno)) AS serial,
-      COUNT(DISTINCT vtrnno) AS complaint_count,
-      CONVERT(varchar(30), MAX(dtrndate), 126) AS last_complaint_date
-    FROM trhcalls (NOLOCK)
-    WHERE ${where}
-    GROUP BY UPPER(RTRIM(vserialno))
-    HAVING COUNT(DISTINCT vtrnno) >= ${minRepeats}
+      a.serial,
+      a.complaint_count,
+      a.last_complaint_date,
+      ISNULL(r.motor_replaced_count, 0) AS motor_replaced_count,
+      ISNULL(r.compressor_replaced_count, 0) AS compressor_replaced_count,
+      ISNULL(r.gas_charging_count, 0) AS gas_charging_count
+    FROM (
+      SELECT
+        UPPER(RTRIM(vserialno)) AS serial,
+        COUNT(DISTINCT ${activeTrnExpr}) AS complaint_count,
+        CONVERT(varchar(30), MAX(dtrndate), 126) AS last_complaint_date
+      FROM trhcalls (NOLOCK)
+      WHERE ${where}
+      GROUP BY UPPER(RTRIM(vserialno))
+      HAVING COUNT(DISTINCT ${activeTrnExpr}) >= ${minRepeats}
+    ) a
+    LEFT JOIN (
+      SELECT
+        UPPER(RTRIM(tc.vserialno)) AS serial,
+        ${buildSerialAuditRepairBySerialSelect()}
+      FROM trdcalls2fault tf (NOLOCK)
+      INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
+      INNER JOIN trhcalls tc (NOLOCK) ON tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid
+      WHERE ${tcWhere}
+        AND LTRIM(RTRIM(r.vname)) IN ('Motor Replaced', 'Compressor Replaced', 'Gas Charging Done')
+      GROUP BY UPPER(RTRIM(tc.vserialno))
+    ) r ON r.serial = a.serial
   `;
 }
 
 /** All calls for one serial — scoped dedup + minimal joins. */
-export function buildSerialAuditDetailRawSql(
-  serial: string,
-  opts: {
-    callType?: string | null;
-    isHod?: boolean;
-    assignedOffices?: string[];
-    startDate?: string | null;
-    endDate?: string | null;
-  }
-): string {
+export function buildSerialAuditDetailRawSql(serial: string, opts: SerialAuditSqlOpts): string {
   const serialSafe = serial.trim().replace(/'/g, "''").toUpperCase();
   const where = `${buildSerialAuditBaseWhere(opts)} AND UPPER(LTRIM(RTRIM(vserialno))) = '${serialSafe}'`;
 
@@ -605,6 +766,7 @@ export function buildSerialAuditDetailRawSql(
       u.vname AS technician_name,
       CONVERT(varchar(30), tc.dtrndate, 126) AS callsdtrndate,
       tc.vcomplaint,
+      ${SERIAL_AUDIT_REPAIR_DONE_EXPR} AS repair_done,
       mstitems.vname AS itemname,
       calltype_fs.vdisplayvalue AS calltype,
       tc.callStatus AS Status,
@@ -756,15 +918,9 @@ export function appendCallTypeFilter(
   return `${condition} AND ${column} IN ${subquery}`;
 }
 
-export function appendOfficeSecurityFilter(
-  condition: string,
-  isHod: boolean,
-  assignedOffices: string[]
-): string {
-  if (isHod || assignedOffices.length === 0) return condition;
-  const allowed = assignedOffices.join(',');
-  return `${condition} AND (tc.nofficeid IN (${allowed}) OR o.nunder IN (${allowed}))`;
-}
+import { appendOfficeSecurityFilter } from '@/lib/trhcalls/office-security';
+
+export { appendOfficeSecurityFilter } from '@/lib/trhcalls/office-security';
 
 export function buildTrhcallsBaseCondition(opts: {
   startDate?: string | null;

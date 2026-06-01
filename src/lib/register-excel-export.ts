@@ -95,7 +95,7 @@ function mapRegisterRow(row: Record<string, unknown>) {
 }
 
 /** Guard against accidentally passing an API payload `{ data: [...] }`. */
-export function normalizeRegisterExportRows(input: unknown): Record<string, unknown>[] {
+function normalizeRegisterExportRows(input: unknown): Record<string, unknown>[] {
   if (Array.isArray(input)) {
     return input.filter((row) => row && typeof row === 'object') as Record<string, unknown>[];
   }
@@ -108,13 +108,13 @@ export function normalizeRegisterExportRows(input: unknown): Record<string, unkn
   return [];
 }
 
-export type RegisterExcelExportOptions = {
+type RegisterExcelExportOptions = {
   filename?: string;
   sheetName?: string;
   onProgress?: (processed: number, total: number) => void;
 };
 
-export async function buildRegisterExcelWorkbook(
+async function buildRegisterExcelWorkbook(
   rawRows: Record<string, unknown>[],
   opts?: Pick<RegisterExcelExportOptions, 'sheetName' | 'onProgress'>
 ): Promise<ExcelJS.Workbook> {

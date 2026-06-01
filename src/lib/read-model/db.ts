@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 
 let pool: pg.Pool | null = null;
+let appPool: pg.Pool | null = null;
 
 export function resolveDirectDatabaseUrl(raw?: string): string {
   const connectionString = raw ?? process.env.DATABASE_URL;
@@ -63,10 +64,49 @@ export function appDatabaseStatementTimeoutMs(): number {
   return 120_000;
 }
 
+/** Full-month register bulk preload can scan 50k+ hot rows — allow longer than paginated API queries. */
+export function appDatabaseBulkStatementTimeoutMs(): number {
+  const configured = Number(process.env.PG_BULK_STATEMENT_TIMEOUT_MS);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+  return 300_000;
+}
+
 export function loadEnv(): void {
   const root = path.join(process.cwd());
   dotenv.config({ path: path.join(root, '.env.local') });
   dotenv.config({ path: path.join(root, '.env') });
+}
+
+/** Pooled Supabase URL for Next.js API routes (port 6543). */
+export function getAppPool(): pg.Pool {
+  if (!appPool) {
+    loadEnv();
+    appPool = new pg.Pool({
+      connectionString: resolveAppDatabaseUrl(),
+      ssl: { rejectUnauthorized: false },
+      max: appDatabasePoolMax(),
+      idleTimeoutMillis: 20_000,
+      connectionTimeoutMillis: appDatabaseConnectTimeoutMs(),
+      allowExitOnIdle: true,
+    });
+  }
+  return appPool;
+}
+
+export async function withAppClient<T>(
+  fn: (client: pg.PoolClient) => Promise<T>,
+  opts?: { statementTimeoutMs?: number }
+): Promise<T> {
+  const client = await getAppPool().connect();
+  try {
+    const statementMs = opts?.statementTimeoutMs ?? appDatabaseStatementTimeoutMs();
+    const lockMs = Number(process.env.PG_LOCK_TIMEOUT_MS ?? 15_000);
+    await client.query(`SET statement_timeout = '${statementMs}'`);
+    await client.query(`SET lock_timeout = '${lockMs}'`);
+    return await fn(client);
+  } finally {
+    client.release();
+  }
 }
 
 export function getPool(): pg.Pool {
@@ -80,14 +120,7 @@ export function getPool(): pg.Pool {
       connectionTimeoutMillis: 30_000,
       allowExitOnIdle: true,
     });
-    pool.on('connect', (client) => {
-      const statementMs = Number(process.env.SYNC_PG_STATEMENT_TIMEOUT_MS ?? 600_000);
-      const lockMs = Number(process.env.SYNC_PG_LOCK_TIMEOUT_MS ?? 10_000);
-      void (async () => {
-        await client.query(`SET statement_timeout = '${statementMs}'`);
-        await client.query(`SET lock_timeout = '${lockMs}'`);
-      })();
-    });
+    /* Session timeouts are set per checkout in withClient / sync queries — avoid racing on connect. */
   }
   return pool;
 }
@@ -95,6 +128,10 @@ export function getPool(): pg.Pool {
 export async function withClient<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
   const client = await getPool().connect();
   try {
+    const statementMs = Number(process.env.SYNC_PG_STATEMENT_TIMEOUT_MS ?? 600_000);
+    const lockMs = Number(process.env.SYNC_PG_LOCK_TIMEOUT_MS ?? 10_000);
+    await client.query(`SET statement_timeout = '${statementMs}'`);
+    await client.query(`SET lock_timeout = '${lockMs}'`);
     return await fn(client);
   } finally {
     client.release();

@@ -267,7 +267,7 @@ export async function loadArcpClaimsAggregatesHybrid(
   const readiness = await getArcpReadiness();
   if (!readiness.ready || readiness.rowCount === 0) {
     if (!arcpCrmFallbackOnEmptyEnabled()) {
-      const err = new Error(readiness.reason ?? 'ARCP Postgres read model is not ready');
+      const err = new Error(readiness.reason ?? 'ARCP claims data is not ready yet');
       (err as Error & { statusCode?: number }).statusCode = 503;
       throw err;
     }
@@ -293,7 +293,7 @@ export async function loadArcpClaimsDetailRowsHybrid(
   const readiness = await getArcpReadiness();
   if (!readiness.ready || readiness.rowCount === 0) {
     if (!arcpCrmFallbackOnEmptyEnabled()) {
-      const err = new Error(readiness.reason ?? 'ARCP Postgres read model is not ready');
+      const err = new Error(readiness.reason ?? 'ARCP claims data is not ready yet');
       (err as Error & { statusCode?: number }).statusCode = 503;
       throw err;
     }

@@ -26,7 +26,7 @@ import {
   processCrmRows,
   transformCrmRowToHot,
 } from '@/lib/read-model/transform';
-import { parseCrmDate } from '@/lib/read-model/dates';
+import { maxCrmWatermarks, parseCrmDate } from '@/lib/read-model/dates';
 import {
   countHotRows,
   deleteHotRowsByTrn,
@@ -40,23 +40,6 @@ const ENTITY = 'calls_latest_hot';
 const OVERLAP_MS = 2 * 60 * 1000;
 const MIN_HOT_FOR_INCREMENTAL = Math.floor(HOT_TARGET_ROWS * 0.95);
 const SYNC_TX_LOCK_TIMEOUT_MS = Number(process.env.PG_SYNC_LOCK_TIMEOUT_MS ?? 120_000);
-
-function maxWatermarks(rows: Record<string, unknown>[]): {
-  lastEditedon: Date | null;
-  lastAddedon: Date | null;
-} {
-  let lastEditedon: Date | null = null;
-  let lastAddedon: Date | null = null;
-
-  for (const row of rows) {
-    const edited = parseCrmDate(row.editedon ?? row.addedon);
-    const added = parseCrmDate(row.addedon);
-    if (edited && (!lastEditedon || edited > lastEditedon)) lastEditedon = edited;
-    if (added && (!lastAddedon || added > lastAddedon)) lastAddedon = added;
-  }
-
-  return { lastEditedon, lastAddedon };
-}
 
 async function skipIncrementalReason(client: import('pg').PoolClient): Promise<string | null> {
   const state = await getSyncState(client);
@@ -243,7 +226,7 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
         const factsApplied = await applyNetFactDeltas(client, netFacts);
         console.log(`[sync-worker] Metric deltas applied: ${factsApplied} keys`);
 
-        const watermarks = maxWatermarks(deduped);
+        const watermarks = maxCrmWatermarks(deduped);
         const nextEdited =
           watermarks.lastEditedon && state?.last_editedon && watermarks.lastEditedon < state.last_editedon
             ? state.last_editedon

@@ -33,7 +33,7 @@ API routes check flag at top; if `postgres`, never call `postQuery()` for that f
 - [ ] YTD `call_metrics_daily` populated
 - [ ] Incremental sync running; lag < 5 minutes
 - [ ] Supabase **Pro** enabled for production (see [infra gate](./read-model-infra-gate.md))
-- [ ] [`sync-proxy/[table]`](../src/app/api/sync-proxy/[table]/route.ts) auth-gated or disabled for prod
+- [x] [`sync-proxy/[table]`](../src/app/api/sync-proxy/[table]/route.ts) — requires `SYNC_PROXY_SECRET` bearer or admin JWT (`manage_users`); set `SYNC_PROXY_CORS_ORIGIN` in prod
 - [ ] [`drilldown` customQuery](../src/app/api/report/drilldown/route.ts) removed before prod
 
 ---
@@ -136,7 +136,7 @@ flowchart LR
 
 | File | Change |
 |------|--------|
-| [`src/app/api/distribution/route.ts`](../src/app/api/distribution/route.ts) | Replace `postQuery` with Postgres SELECT |
+| ~~`src/app/api/distribution/route.ts`~~ | **Removed** — distribution uses corpus bulk via `ReportFiltersContext` |
 | [`src/contexts/ReportFiltersContext.tsx`](../src/contexts/ReportFiltersContext.tsx) | Remove distribution hydration from corpus when on postgres |
 | [`src/app/report/distribution/page.tsx`](../src/app/report/distribution/page.tsx) | Cap pins at 2,000; show sync timestamp |
 
@@ -183,8 +183,7 @@ flowchart LR
 | Corpus client store | [`src/lib/report-corpus.ts`](../src/lib/report-corpus.ts), IndexedDB storage |
 | Corpus preload | [`src/contexts/ReportFiltersContext.tsx`](../src/contexts/ReportFiltersContext.tsx) — corpus fetch loops |
 | Global corpus store | [`src/lib/report-data-store.ts`](../src/lib/report-data-store.ts) — `callCorpusStore` for reporting |
-| Legacy cache table usage | [`src/app/api/admin/clear-cache/route.ts`](../src/app/api/admin/clear-cache/route.ts) — `calls_cache` TRUNCATE |
-| Disabled sync stub message | [`src/app/api/sync/route.ts`](../src/app/api/sync/route.ts) — replace with worker health endpoint |
+| ~~Legacy cache / sync stubs~~ | **Removed** (`clear-cache`, `/api/sync/*`); `calls_cache` Prisma model dropped |
 
 **Keep (Phase 1 exceptions):**
 

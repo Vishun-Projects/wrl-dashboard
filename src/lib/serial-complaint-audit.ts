@@ -10,8 +10,41 @@ import {
   getCallIdentityKey,
   getIndexedRegisterRowsWithSerial,
 } from '@/lib/report-sync';
+import {
+  EMPTY_SERIAL_AUDIT_REPAIR_COUNTS,
+  mapRepairCountsFromApiRow,
+  type SerialAuditRepairCounts,
+} from '@/lib/serial-audit-repair-options';
 /** Minimum calls on same serial to count as a repeat offender. */
 export const MIN_REPEAT_COMPLAINTS = 2;
+
+/** Non-cancelled call count for list display when cancelled are excluded. */
+export function activeComplaintCount(row: SerialAuditRow): number {
+  return Math.max(0, row.complaintCount - row.cancelledCount);
+}
+
+/** Adjust serial rows for the include-cancelled view toggle (no refetch). */
+export function deriveSerialAuditRowsForView(
+  rows: SerialAuditRow[],
+  includeCancelled: boolean,
+  minRepeats: number = MIN_REPEAT_COMPLAINTS
+): SerialAuditRow[] {
+  if (includeCancelled) return rows;
+  return rows
+    .map((row) => ({
+      ...row,
+      complaintCount: activeComplaintCount(row),
+    }))
+    .filter((row) => row.complaintCount >= minRepeats);
+}
+
+export function filterSerialAuditCallsForView(
+  calls: SerialAuditCallDetail[],
+  includeCancelled: boolean
+): SerialAuditCallDetail[] {
+  if (includeCancelled) return calls;
+  return calls.filter((c) => c.statusTone !== 'cancelled');
+}
 
 export type SerialAuditCallDetail = {
   callId: string;
@@ -25,6 +58,7 @@ export type SerialAuditCallDetail = {
   pincode: string;
   product: string;
   complaint: string;
+  repairDone: string;
   statusLabel: string;
   statusTone: 'open' | 'assigned' | 'techSolved' | 'closed' | 'cancelled' | 'transferred';
   technician: string;
@@ -32,12 +66,15 @@ export type SerialAuditCallDetail = {
   remarks: string;
 };
 
+export type { SerialAuditRepairCounts };
+
 export type SerialAuditRow = {
   serial: string;
   complaintCount: number;
   openCount: number;
   solvedCount: number;
   cancelledCount: number;
+  repairCounts: SerialAuditRepairCounts;
   uniqueTrns: string[];
   uniqueCustomers: string[];
   uniqueBranches: string[];
@@ -56,6 +93,36 @@ export function normalizeSerial(raw: unknown): string | null {
   const upper = s.toUpperCase();
   if (INVALID_SERIALS.has(upper)) return null;
   return upper;
+}
+
+function normalizeRepairName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+const REPAIR_NAME_TO_COUNT_KEY: Record<string, keyof SerialAuditRepairCounts> = {
+  [normalizeRepairName('Motor Replaced')]: 'motorReplaced',
+  [normalizeRepairName('Compressor Replaced')]: 'compressorReplaced',
+  [normalizeRepairName('Gas Charging Done')]: 'gasCharging',
+};
+
+/** Count visit repair types from semicolon-separated repair_done on call rows. */
+export function countRepairsFromCallRows(
+  rows: Record<string, unknown>[]
+): SerialAuditRepairCounts {
+  const counts = { ...EMPTY_SERIAL_AUDIT_REPAIR_COUNTS };
+  for (const row of rows) {
+    const raw = String(row.repair_done ?? '').trim();
+    if (!raw || raw === '—' || raw === '-') continue;
+    const seen = new Set<string>();
+    for (const part of raw.split(';')) {
+      const key = normalizeRepairName(part);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const field = REPAIR_NAME_TO_COUNT_KEY[key];
+      if (field) counts[field]++;
+    }
+  }
+  return counts;
 }
 
 function rowStatusBucket(row: Record<string, unknown>): 'open' | 'solved' | 'cancelled' {
@@ -81,8 +148,23 @@ function mergeRegisterRows(
   return mapCachedRowToRegisterRow(merged);
 }
 
-function normalizeComplaintKey(complaint: string): string {
+export function normalizeComplaintKey(complaint: string): string {
   return complaint.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function complaintLabelFromRow(row: Record<string, unknown>): string {
+  return String(row.vcomplaint ?? row.complaint ?? '').trim();
+}
+
+export function filterCallsByRepairCallIds(
+  calls: Record<string, unknown>[],
+  callIdsWithRepair: Set<string> | null
+): Record<string, unknown>[] {
+  if (!callIdsWithRepair || callIdsWithRepair.size === 0) return calls;
+  return calls.filter((row) => {
+    const id = String(row.ncode ?? row.id ?? '').trim();
+    return id && callIdsWithRepair.has(id);
+  });
 }
 
 export function getRepeatedComplaintKeys(
@@ -201,6 +283,7 @@ export function mapRowToSerialAuditCallDetail(row: Record<string, unknown>): Ser
     pincode: String(row.Pincode ?? row.pincode ?? '—'),
     product: String(row.itemname ?? row.vitemname ?? '—'),
     complaint: String(row.vcomplaint ?? row.complaint ?? '—'),
+    repairDone: String(row.repair_done ?? '—'),
     statusLabel: label,
     statusTone: tone,
     technician: String(row.serviceman ?? row.technician_name ?? '—'),
@@ -281,7 +364,6 @@ export function mapApiListItemToSerialAuditRow(
   const open = Number(item.open_count) || 0;
   const solved = Number(item.solved_count) || 0;
   const cancelled = Number(item.cancelled_count) || 0;
-  const active = Math.max(0, count - cancelled);
   const lastDate = item.last_complaint_date
     ? String(item.last_complaint_date).slice(0, 10)
     : null;
@@ -293,12 +375,13 @@ export function mapApiListItemToSerialAuditRow(
     openCount: open,
     solvedCount: solved,
     cancelledCount: cancelled,
+    repairCounts: mapRepairCountsFromApiRow(item as Record<string, unknown>),
     uniqueTrns: [],
     uniqueCustomers: [],
     uniqueBranches: [],
     lastComplaintDate: lastDate,
     sampleTrns: [],
-    riskFlag: active >= riskThreshold,
+    riskFlag: count >= riskThreshold,
   };
 }
 
@@ -314,6 +397,7 @@ export function mapListItemToSerialAuditRow(item: SerialAuditListItem): SerialAu
     openCount: 0,
     solvedCount: 0,
     cancelledCount: 0,
+    repairCounts: { ...EMPTY_SERIAL_AUDIT_REPAIR_COUNTS },
     uniqueTrns: [],
     uniqueCustomers: [],
     uniqueBranches: [],
@@ -346,14 +430,16 @@ export function filterSerialAuditCalls(
 
 export function getWindowCallsForSerialAudit(
   filterParts: RegisterViewFilterParts,
-  corpusWindowKey: string
+  corpusWindowKey: string,
+  callIdsWithRepair: Set<string> | null = null
 ): Record<string, unknown>[] {
   if (!callCorpusStore || callCorpusStore.cacheKey !== corpusWindowKey) {
     return [];
   }
-  return getCorpusCallsArray(callCorpusStore).filter((row) =>
+  const filtered = getCorpusCallsArray(callCorpusStore).filter((row) =>
     registerRowMatchesViewFilters(row, filterParts)
   );
+  return filterCallsByRepairCallIds(filtered, callIdsWithRepair);
 }
 
 export function getAllCallsForAudit(
@@ -432,12 +518,12 @@ export function aggregateComplaintsBySerial(
       bySerial.set(serialKey, acc);
     }
 
-    acc.complaintCount++;
     acc.rows.push(row);
+    acc.complaintCount++;
     const bucket = rowStatusBucket(row);
-    if (bucket === 'open') acc.openCount++;
-    else if (bucket === 'solved') acc.solvedCount++;
-    else acc.cancelledCount++;
+    if (bucket === 'cancelled') acc.cancelledCount++;
+    else if (bucket === 'open') acc.openCount++;
+    else acc.solvedCount++;
 
     const trn = getTrn(row);
     if (trn) acc.trns.add(trn);
@@ -462,6 +548,7 @@ export function aggregateComplaintsBySerial(
       openCount: acc.openCount,
       solvedCount: acc.solvedCount,
       cancelledCount: acc.cancelledCount,
+      repairCounts: countRepairsFromCallRows(acc.rows),
       uniqueTrns,
       uniqueCustomers: Array.from(acc.customers),
       uniqueBranches: Array.from(acc.branches),
@@ -514,10 +601,12 @@ export function filterSerialAuditRows(
 export function summarizeSerialAudit(rows: SerialAuditRow[], riskThreshold = 3) {
   const known = rows.filter((r) => !r.isUnknownSerial && r.complaintCount >= MIN_REPEAT_COMPLAINTS);
   const flagged = known.filter((r) => r.riskFlag);
+  const withCancelled = known.filter((r) => r.cancelledCount > 0);
   const maxComplaints = known.reduce((m, r) => Math.max(m, r.complaintCount), 0);
   return {
     totalSerials: known.length,
     flaggedCount: flagged.length,
+    withCancelledCount: withCancelled.length,
     maxComplaints,
   };
 }

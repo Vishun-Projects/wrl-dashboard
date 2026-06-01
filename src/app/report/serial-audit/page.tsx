@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { RegisterPageFilters } from '@/components/RegisterPageFilters';
+import { RegisterMultiSelect } from '@/components/RegisterMultiSelect';
 import { ReportLoadingPanel } from '@/components/ReportLoadingFeedback';
 import { PageShell } from '@/components/PageShell';
 import {
@@ -30,12 +31,25 @@ import {
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 import { buildCorpusCacheKey } from '@/lib/report-corpus';
 import { sanitizeUserFacingMessage } from '@/lib/user-facing-errors';
-import { toDateString } from '@/lib/report-filters';
+import { appliedFilterPartsFromSnapshot, toDateString } from '@/lib/report-filters';
 import { callCorpusStore } from '@/lib/report-data-store';
 import { MAX_CLIENT_CORPUS_DAYS } from '@/lib/trhcalls-query';
 import {
+  defaultSerialAuditRepairFilterValues,
+  mergeRepairCountsIntoRows,
+  REPAIR_CHIP_COLLAPSE_AT,
+  repairLabelForValue,
+  repairMasterToPicker,
+  serializeRepairFilterParam,
+  type RepairMasterItem,
+  type RepairPickerItem,
+  type SerialAuditRepairCounts,
+} from '@/lib/serial-audit-repair-options';
+import {
   aggregateComplaintsBySerial,
   buildCallsBySerialMap,
+  deriveSerialAuditRowsForView,
+  filterSerialAuditCallsForView,
   filterSerialAuditRows,
   getWindowCallsForSerialAudit,
   mapApiListItemToSerialAuditRow,
@@ -46,6 +60,7 @@ import {
   type SerialAuditCallDetail,
   type SerialAuditRow,
 } from '@/lib/serial-complaint-audit';
+import type { ExtraActiveFilterChip } from '@/lib/report-filters';
 import { SerialAuditCallsDetailTable } from '@/components/SerialAuditCallsDetailTable';
 import { toast } from 'sonner';
 
@@ -65,63 +80,76 @@ function dateRangeSpanDays(start: Date, end: Date): number {
   return Math.floor((endUtc - startUtc) / 86400000) + 1;
 }
 
+
 export default function SerialAuditPage() {
   const {
-    dateRange,
-    selectedCallTypes,
-    selectedState,
-    selectedCity,
-    selectedBranch,
-    selectedFranchisee,
-    selectedTechnician,
-    selectedOfficeIds,
-    selectedStatus,
-    priorityFilter,
-    portalFilter,
-    pincodeSearch,
-    search,
+    appliedFilters,
+    getAppliedFiltersSnapshot,
     resourcesLoaded,
     ensureCorpusLoaded,
-    dateFilterColumn,
   } = useReportFilters();
 
-  const startDateStr = useMemo(() => toDateString(dateRange.start), [dateRange.start]);
-  const endDateStr = useMemo(() => toDateString(dateRange.end), [dateRange.end]);
+  const startDateStr = useMemo(
+    () =>
+      appliedFilters
+        ? toDateString(appliedFilters.dateRange.start)
+        : '',
+    [appliedFilters]
+  );
+  const endDateStr = useMemo(
+    () =>
+      appliedFilters ? toDateString(appliedFilters.dateRange.end) : '',
+    [appliedFilters]
+  );
   const callTypeParam = useMemo(
-    () => (selectedCallTypes.length === 0 ? 'All' : selectedCallTypes.join(',')),
-    [selectedCallTypes]
+    () =>
+      !appliedFilters || appliedFilters.selectedCallTypes.length === 0
+        ? 'All'
+        : appliedFilters.selectedCallTypes.join(','),
+    [appliedFilters]
   );
 
-  const filterParts = useMemo(
-    () => ({
-      search,
-      pincodeSearch,
-      selectedState,
-      selectedCity,
-      selectedBranch,
-      selectedFranchisee,
-      selectedTechnician,
-      selectedCallTypes,
-      selectedOfficeIds,
-      selectedStatus,
-      priorityFilter,
-      portalFilter,
-    }),
-    [
-      search,
-      pincodeSearch,
-      selectedState,
-      selectedCity,
-      selectedBranch,
-      selectedFranchisee,
-      selectedTechnician,
-      selectedCallTypes,
-      selectedOfficeIds,
-      selectedStatus,
-      priorityFilter,
-      portalFilter,
-    ]
+  const [draftRepairs, setDraftRepairs] = useState<string[]>([]);
+  const [appliedRepairs, setAppliedRepairs] = useState<string[]>([]);
+  const [repairMaster, setRepairMaster] = useState<RepairMasterItem[]>([]);
+  const [repairOptionsLoading, setRepairOptionsLoading] = useState(false);
+
+  const repairPickerItems = useMemo(
+    () => repairMasterToPicker(repairMaster),
+    [repairMaster]
   );
+  const repairOptions = useMemo(
+    () => repairPickerItems.map((item) => ({ value: item.value, label: item.vname })),
+    [repairPickerItems]
+  );
+  const repairLabelByValue = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of repairPickerItems) map.set(item.value, item.vname);
+    return map;
+  }, [repairPickerItems]);
+
+  const filterParts = useMemo(
+    () =>
+      appliedFilters
+        ? appliedFilterPartsFromSnapshot(appliedFilters)
+        : {
+            search: '',
+            pincodeSearch: '',
+            selectedState: [],
+            selectedCity: [],
+            selectedBranch: [],
+            selectedFranchisee: [],
+            selectedTechnician: [],
+            selectedCallTypes: [],
+            selectedOfficeIds: [],
+            selectedStatus: [],
+            priorityFilter: [],
+            portalFilter: [],
+          },
+    [appliedFilters]
+  );
+
+  const dateFilterColumn = appliedFilters?.dateFilterColumn ?? 'dtrndate';
 
   const dateRangeLabel = useMemo(
     () => `${startDateStr} → ${endDateStr}`,
@@ -134,8 +162,8 @@ export default function SerialAuditPage() {
   );
 
   const dataKey = useMemo(
-    () => JSON.stringify({ corpusWindowKey, filterParts }),
-    [corpusWindowKey, filterParts]
+    () => JSON.stringify({ corpusWindowKey, filterParts, appliedRepairs }),
+    [corpusWindowKey, filterParts, appliedRepairs]
   );
 
   const supabase = createClient();
@@ -143,6 +171,7 @@ export default function SerialAuditPage() {
   const [serialSearch, setSerialSearch] = useState('');
   const [minCount, setMinCount] = useState(MIN_REPEAT_COMPLAINTS);
   const [onlyFlagged, setOnlyFlagged] = useState(false);
+  const [includeCancelled, setIncludeCancelled] = useState(false);
   const [expandedSerial, setExpandedSerial] = useState<string | null>(null);
   const [listRows, setListRows] = useState<SerialAuditRow[]>([]);
   const [windowCallsBySerial, setWindowCallsBySerial] = useState<Map<string, SerialAuditCallDetail[]>>(
@@ -158,10 +187,96 @@ export default function SerialAuditPage() {
   const [page, setPage] = useState(1);
   const loadInFlightRef = useRef<Promise<void> | null>(null);
   const lastPaintedKeyRef = useRef<string | null>(null);
+  const defaultRepairsAppliedRef = useRef(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const loadRepairMaster = useCallback(async () => {
+    setRepairOptionsLoading(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const headers = session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {};
+      const res = await axios.get('/api/report/serial-audit/repairs', {
+        headers,
+        timeout: 60000,
+      });
+      const items = (res.data?.repairs || []) as RepairPickerItem[];
+      setRepairMaster(items.map((i) => ({ ncode: i.value, vname: i.vname })));
+    } catch (err: unknown) {
+      const message = sanitizeUserFacingMessage(
+        axios.isAxiosError(err) && err.response?.data?.error
+          ? String(err.response.data.error)
+          : err instanceof Error
+            ? err.message
+            : 'Failed to load repair types'
+      );
+      toast.error(message);
+    } finally {
+      setRepairOptionsLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    if (!mounted || !resourcesLoaded) return;
+    void loadRepairMaster();
+  }, [mounted, resourcesLoaded, loadRepairMaster]);
+
+  const fetchRepairCountsBySerial = useCallback(
+    async (
+      start: string,
+      end: string,
+      callType: string
+    ): Promise<Map<string, SerialAuditRepairCounts>> => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const headers = session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {};
+      const res = await axios.get('/api/report/serial-audit/repair-counts', {
+        headers,
+        timeout: 120000,
+        params: { startDate: start, endDate: end, callType },
+      });
+      const bySerial = (res.data?.bySerial || {}) as Record<string, SerialAuditRepairCounts>;
+      const map = new Map<string, SerialAuditRepairCounts>();
+      for (const [serial, counts] of Object.entries(bySerial)) {
+        map.set(serial.trim().toUpperCase(), counts);
+      }
+      return map;
+    },
+    [supabase]
+  );
+
+  const fetchCallIdsWithRepair = useCallback(
+    async (repairNcodes: string[], start: string, end: string): Promise<Set<string>> => {
+      if (!repairNcodes.length) return new Set();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const headers = session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {};
+      const res = await axios.get('/api/report/serial-audit/repair-call-ids', {
+        headers,
+        timeout: 120000,
+        params: {
+          repair: serializeRepairFilterParam(repairNcodes),
+          startDate: start,
+          endDate: end,
+        },
+      });
+      const ids = (res.data?.callIds || []) as string[];
+      return new Set(ids);
+    },
+    [supabase]
+  );
 
   const applyCachedSnapshot = useCallback(
     (cached: { rows: SerialAuditRow[]; windowCalls: Map<string, SerialAuditCallDetail[]> }) => {
@@ -173,34 +288,46 @@ export default function SerialAuditPage() {
     [dataKey]
   );
 
-  const paintFromCorpus = useCallback((): SerialAuditRow[] => {
-    const calls = getWindowCallsForSerialAudit(filterParts, corpusWindowKey);
-    const rows = aggregateComplaintsBySerial(calls, DEFAULT_RISK_THRESHOLD, MIN_REPEAT_COMPLAINTS);
-    const windowCalls = buildCallsBySerialMap(calls);
-    setListRows(rows);
-    setWindowCallsBySerial(windowCalls);
-    setAllTimeCallsBySerial(new Map());
-    setShowAllTimeFor(new Set());
-    setLoadError(null);
-    lastPaintedKeyRef.current = dataKey;
-    serialAuditBackgroundCache.set(dataKey, { rows, windowCalls });
-    return rows;
-  }, [corpusWindowKey, dataKey, filterParts]);
-
   const loadWindowData = useCallback(
-    async (opts?: { force?: boolean; refresh?: boolean }) => {
-      const existingInflight = serialAuditBackgroundInflight.get(dataKey);
+    async (opts?: { force?: boolean; refresh?: boolean; repairs?: string[] }) => {
+      const snap = getAppliedFiltersSnapshot();
+      if (!snap) return;
+
+      const loadStartDateStr = toDateString(snap.dateRange.start);
+      const loadEndDateStr = toDateString(snap.dateRange.end);
+      const loadDateFilterColumn = snap.dateFilterColumn;
+      const loadCorpusWindowKey = buildCorpusCacheKey(
+        loadStartDateStr,
+        loadEndDateStr,
+        loadDateFilterColumn
+      );
+      const loadFilterParts = appliedFilterPartsFromSnapshot(snap);
+      const loadRepairs = opts?.repairs ?? appliedRepairs;
+      const loadDataKey = JSON.stringify({
+        corpusWindowKey: loadCorpusWindowKey,
+        filterParts: loadFilterParts,
+        appliedRepairs: loadRepairs,
+      });
+      const loadCallTypeParam =
+        snap.selectedCallTypes.length === 0 ? 'All' : snap.selectedCallTypes.join(',');
+      const loadRepairParam = serializeRepairFilterParam(loadRepairs);
+
+      const existingInflight = serialAuditBackgroundInflight.get(loadDataKey);
       if (existingInflight && !opts?.force && !opts?.refresh) {
         await existingInflight;
-        const cached = serialAuditBackgroundCache.get(dataKey);
-        if (cached) applyCachedSnapshot(cached);
+        const cached = serialAuditBackgroundCache.get(loadDataKey);
+        if (cached) {
+          applyCachedSnapshot(cached);
+          lastPaintedKeyRef.current = loadDataKey;
+        }
         return;
       }
 
-      if (!opts?.refresh && !opts?.force && lastPaintedKeyRef.current === dataKey) {
-        const cached = serialAuditBackgroundCache.get(dataKey);
+      if (!opts?.refresh && !opts?.force && lastPaintedKeyRef.current === loadDataKey) {
+        const cached = serialAuditBackgroundCache.get(loadDataKey);
         if (cached) {
           applyCachedSnapshot(cached);
+          lastPaintedKeyRef.current = loadDataKey;
           return;
         }
       }
@@ -208,7 +335,7 @@ export default function SerialAuditPage() {
       const run = (async () => {
         if (opts?.refresh) {
           lastPaintedKeyRef.current = null;
-          serialAuditBackgroundCache.delete(dataKey);
+          serialAuditBackgroundCache.delete(loadDataKey);
         }
 
         setLoadError(null);
@@ -216,21 +343,11 @@ export default function SerialAuditPage() {
         setLoading(true);
 
         try {
-          const spanDays = dateRangeSpanDays(
-            dateRange.start instanceof Date ? dateRange.start : new Date(startDateStr),
-            dateRange.end instanceof Date ? dateRange.end : new Date(endDateStr)
-          );
+          const spanDays = dateRangeSpanDays(snap.dateRange.start, snap.dateRange.end);
           const corpusReady =
             spanDays <= MAX_CLIENT_CORPUS_DAYS &&
-            callCorpusStore?.cacheKey === corpusWindowKey &&
+            callCorpusStore?.cacheKey === loadCorpusWindowKey &&
             (callCorpusStore?.calls.size ?? 0) > 0;
-
-          if (corpusReady) {
-            paintFromCorpus();
-            return;
-          }
-
-          void ensureCorpusLoaded({ silent: true });
 
           const {
             data: { session },
@@ -239,13 +356,52 @@ export default function SerialAuditPage() {
             ? { Authorization: `Bearer ${session.access_token}` }
             : {};
 
+          if (corpusReady) {
+            const callIdsWithRepair =
+              loadRepairs.length > 0
+                ? await fetchCallIdsWithRepair(
+                    loadRepairs,
+                    loadStartDateStr,
+                    loadEndDateStr
+                  )
+                : null;
+            const calls = getWindowCallsForSerialAudit(
+              loadFilterParts,
+              loadCorpusWindowKey,
+              callIdsWithRepair
+            );
+            let rows = aggregateComplaintsBySerial(
+              calls,
+              DEFAULT_RISK_THRESHOLD,
+              MIN_REPEAT_COMPLAINTS
+            );
+            const repairCountMap = await fetchRepairCountsBySerial(
+              loadStartDateStr,
+              loadEndDateStr,
+              loadCallTypeParam
+            );
+            rows = mergeRepairCountsIntoRows(rows, repairCountMap);
+            const windowCalls = buildCallsBySerialMap(calls);
+            setListRows(rows);
+            setWindowCallsBySerial(windowCalls);
+            setAllTimeCallsBySerial(new Map());
+            setShowAllTimeFor(new Set());
+            setLoadError(null);
+            lastPaintedKeyRef.current = loadDataKey;
+            serialAuditBackgroundCache.set(loadDataKey, { rows, windowCalls });
+            return;
+          }
+
+          void ensureCorpusLoaded({ silent: true });
+
           const res = await axios.get('/api/report/serial-audit', {
             headers,
             timeout: 300000,
             params: {
-              startDate: startDateStr,
-              endDate: endDateStr,
-              callType: callTypeParam,
+              startDate: loadStartDateStr,
+              endDate: loadEndDateStr,
+              callType: loadCallTypeParam,
+              repair: loadRepairParam,
               minRepeats: MIN_REPEAT_COMPLAINTS,
               ...(opts?.refresh ? { refresh: 'true' } : {}),
             },
@@ -268,8 +424,11 @@ export default function SerialAuditPage() {
           setWindowCallsBySerial(emptyWindowCalls);
           setAllTimeCallsBySerial(new Map());
           setShowAllTimeFor(new Set());
-          lastPaintedKeyRef.current = dataKey;
-          serialAuditBackgroundCache.set(dataKey, { rows: apiRows, windowCalls: emptyWindowCalls });
+          lastPaintedKeyRef.current = loadDataKey;
+          serialAuditBackgroundCache.set(loadDataKey, {
+            rows: apiRows,
+            windowCalls: emptyWindowCalls,
+          });
         } catch (err: unknown) {
           const message = sanitizeUserFacingMessage(
             axios.isAxiosError(err) && err.response?.data?.error
@@ -285,31 +444,38 @@ export default function SerialAuditPage() {
         }
       })();
 
-      serialAuditBackgroundInflight.set(dataKey, run);
+      serialAuditBackgroundInflight.set(loadDataKey, run);
       loadInFlightRef.current = run;
       try {
         await run;
       } finally {
-        serialAuditBackgroundInflight.delete(dataKey);
+        serialAuditBackgroundInflight.delete(loadDataKey);
         if (loadInFlightRef.current === run) {
           loadInFlightRef.current = null;
         }
       }
     },
     [
+      appliedRepairs,
       applyCachedSnapshot,
-      callTypeParam,
-      corpusWindowKey,
-      dataKey,
-      dateRange.end,
-      dateRange.start,
-      endDateStr,
       ensureCorpusLoaded,
-      paintFromCorpus,
-      startDateStr,
+      fetchCallIdsWithRepair,
+      fetchRepairCountsBySerial,
+      getAppliedFiltersSnapshot,
       supabase,
     ]
   );
+
+  useEffect(() => {
+    if (!resourcesLoaded || !appliedFilters) return;
+    if (repairPickerItems.length === 0) return;
+    if (defaultRepairsAppliedRef.current) return;
+    defaultRepairsAppliedRef.current = true;
+    const defaults = defaultSerialAuditRepairFilterValues(repairPickerItems);
+    setDraftRepairs(defaults);
+    setAppliedRepairs(defaults);
+    void loadWindowData({ force: true, repairs: defaults });
+  }, [appliedFilters, loadWindowData, repairPickerItems, resourcesLoaded]);
 
   const loadSerialDetails = useCallback(
     async (serial: string, scope: 'window' | 'allTime') => {
@@ -337,6 +503,7 @@ export default function SerialAuditPage() {
           : {};
         const params: Record<string, string> = {
           callType: callTypeParam,
+          repair: serializeRepairFilterParam(appliedRepairs),
           serial,
         };
         if (scope === 'window') {
@@ -371,7 +538,7 @@ export default function SerialAuditPage() {
         setDetailLoading(null);
       }
     },
-    [callTypeParam, endDateStr, startDateStr, supabase]
+    [appliedRepairs, callTypeParam, endDateStr, startDateStr, supabase]
   );
 
   useEffect(() => {
@@ -390,11 +557,6 @@ export default function SerialAuditPage() {
   }, [applyCachedSnapshot, dataKey, resourcesLoaded]);
 
   useEffect(() => {
-    if (!resourcesLoaded) return;
-    void loadWindowData();
-  }, [resourcesLoaded, dataKey, loadWindowData]);
-
-  useEffect(() => {
     if (!expandedSerial) return;
     if (showAllTimeFor.has(expandedSerial)) return;
     const windowCalls = windowCallsBySerial.get(expandedSerial);
@@ -402,7 +564,10 @@ export default function SerialAuditPage() {
     void loadSerialDetails(expandedSerial, 'window');
   }, [expandedSerial, loadSerialDetails, showAllTimeFor, windowCallsBySerial]);
 
-  const allSerialRows = useMemo(() => listRows, [listRows]);
+  const allSerialRows = useMemo(
+    () => deriveSerialAuditRowsForView(listRows, includeCancelled, MIN_REPEAT_COMPLAINTS),
+    [listRows, includeCancelled]
+  );
 
   const displayedRows = useMemo(
     () =>
@@ -419,7 +584,70 @@ export default function SerialAuditPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [serialSearch, minCount, onlyFlagged, filterParts]);
+  }, [serialSearch, minCount, onlyFlagged, includeCancelled, filterParts, appliedRepairs]);
+
+  const handleApplyFilters = useCallback(() => {
+    setAppliedRepairs(draftRepairs);
+    void loadWindowData({ force: true, repairs: draftRepairs });
+  }, [draftRepairs, loadWindowData]);
+
+  const handleClearAllFilters = useCallback(() => {
+    setDraftRepairs([]);
+    setAppliedRepairs([]);
+  }, []);
+
+  const extraActiveChips = useMemo((): ExtraActiveFilterChip[] => {
+    if (appliedRepairs.length === 0) return [];
+    if (appliedRepairs.length > REPAIR_CHIP_COLLAPSE_AT) {
+      return [
+        {
+          id: 'repair:summary',
+          label: `Repair: ${appliedRepairs.length} selected`,
+          onRemove: () => {
+            setDraftRepairs([]);
+            setAppliedRepairs([]);
+          },
+        },
+      ];
+    }
+    return appliedRepairs.map((value) => ({
+      id: `repair:${value}`,
+      label: `Repair: ${repairLabelForValue(value, repairLabelByValue)}`,
+      onRemove: () => {
+        const next = appliedRepairs.filter((v) => v !== value);
+        setDraftRepairs(next);
+        setAppliedRepairs(next);
+      },
+    }));
+  }, [appliedRepairs, repairLabelByValue]);
+
+  const extraFilterCount =
+    appliedRepairs.length > REPAIR_CHIP_COLLAPSE_AT ? 1 : appliedRepairs.length;
+
+  const repairDrawerExtra = (
+    <div className="register-filter-group register-filter-group--stacked mt-2">
+      <span className="register-filter-group-label">Repair done</span>
+      <div className="register-filter-group-controls">
+        <RegisterMultiSelect
+          label="Repair"
+          emptyLabel={
+            repairOptionsLoading ? 'Loading repair types…' : 'All repair types'
+          }
+          options={repairOptions}
+          selected={draftRepairs}
+          onChange={setDraftRepairs}
+          searchable
+          showSelectAll
+          selectAllLabel="All repair types"
+          panelClassName="w-80"
+          searchPlaceholder="Search repair type…"
+        />
+      </div>
+      <p className="register-filter-drawer-hint">
+        Filters calls with visit work from CRM repair master (motor, compressor, gas charging).
+      </p>
+    </div>
+  );
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -433,6 +661,10 @@ export default function SerialAuditPage() {
   const summary = useMemo(
     () => summarizeSerialAudit(allSerialRows, DEFAULT_RISK_THRESHOLD),
     [allSerialRows]
+  );
+  const summaryWithCancelled = useMemo(
+    () => listRows.filter((r) => r.cancelledCount > 0).length,
+    [listRows]
   );
 
   const toggleExpand = (serial: string) => {
@@ -477,7 +709,7 @@ export default function SerialAuditPage() {
   return (
     <PageShell
       title="Serial Audit"
-      subtitle="Repeat complaints in the selected date range — expand for call details"
+      subtitle="Repeat service visits in the selected date range — expand for call details"
       icon={<ScanBarcode className="h-4 w-4" />}
       actions={
         <div className="flex items-center gap-2">
@@ -503,6 +735,11 @@ export default function SerialAuditPage() {
         <RegisterPageFilters
           loading={loading && listRows.length === 0}
           loadingLabel="Loading repeated serial numbers…"
+          onApply={handleApplyFilters}
+          onClearAll={handleClearAllFilters}
+          drawerExtra={repairDrawerExtra}
+          extraActiveChips={extraActiveChips}
+          extraFilterCount={extraFilterCount}
         />
       }
       bodyClassName="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden bg-slate-50 p-4"
@@ -510,6 +747,10 @@ export default function SerialAuditPage() {
       <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
         <AdminStatPill label="Repeated serials" value={loading ? '…' : summary.totalSerials} />
         <AdminStatPill label="Flagged (≥3)" value={loading ? '…' : summary.flaggedCount} />
+        <AdminStatPill
+          label="With cancelled"
+          value={loading ? '…' : summaryWithCancelled}
+        />
         <AdminStatPill label="Max complaints" value={loading ? '…' : summary.maxComplaints} />
       </div>
 
@@ -539,7 +780,16 @@ export default function SerialAuditPage() {
             onChange={(e) => setOnlyFlagged(e.target.checked)}
             className="rounded border-slate-300"
           />
-          Flagged only
+          Flagged (Repeat-Complaints) only
+        </label>
+        <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600">
+          <input
+            type="checkbox"
+            checked={includeCancelled}
+            onChange={(e) => setIncludeCancelled(e.target.checked)}
+            className="rounded border-slate-300"
+          />
+          Include cancelled
         </label>
       </AdminToolbar>
 
@@ -566,7 +816,8 @@ export default function SerialAuditPage() {
           <AlertTriangle className="h-8 w-8 text-amber-500" />
           <p className="text-sm font-medium text-slate-700">No repeat serials found</p>
           <p className="max-w-md text-[11px] text-slate-500">
-            No device serial has {MIN_REPEAT_COMPLAINTS} or more calls in the selected date range.
+            No device serial has {MIN_REPEAT_COMPLAINTS} or more
+            {includeCancelled ? ' calls (including cancelled)' : ' non-cancelled calls'} in the selected date range.
           </p>
         </div>
       ) : (
@@ -591,7 +842,7 @@ export default function SerialAuditPage() {
                 <AdminTh align="right">Complaints</AdminTh>
                 <AdminTh align="right">Open</AdminTh>
                 <AdminTh align="right">Solved</AdminTh>
-                <AdminTh align="right">Cancelled</AdminTh>
+                {includeCancelled ? <AdminTh align="right">Cancelled</AdminTh> : null}
                 <AdminTh>Branches</AdminTh>
                 <AdminTh>Customers</AdminTh>
                 <AdminTh>Last date</AdminTh>
@@ -609,6 +860,7 @@ export default function SerialAuditPage() {
                   dateRangeLabel={dateRangeLabel}
                   detailLoading={detailLoading === `window:${row.serial}` || detailLoading === `allTime:${row.serial}`}
                   expanded={expandedSerial === row.serial}
+                  includeCancelled={includeCancelled}
                   onToggle={() => toggleExpand(row.serial)}
                 />
               ))}
@@ -650,6 +902,39 @@ export default function SerialAuditPage() {
   );
 }
 
+function SerialRepairCountBadges({
+  counts,
+}: {
+  counts: SerialAuditRepairCounts;
+}) {
+  const items = [
+    { key: 'motor', label: 'Motor', value: counts.motorReplaced, className: 'bg-violet-100 text-violet-800' },
+    {
+      key: 'compressor',
+      label: 'Compressor',
+      value: counts.compressorReplaced,
+      className: 'border border-rose-300/80 bg-[#ffaeae] text-black font-bold',
+    },
+    { key: 'gas', label: 'Gas', value: counts.gasCharging, className: 'bg-teal-100 text-teal-800' },
+  ].filter((item) => item.value > 0);
+
+  if (items.length === 0) return null;
+
+  return (
+    <span className="inline-flex flex-wrap gap-1">
+      {items.map((item) => (
+        <span
+          key={item.key}
+          title={`${item.label}: ${item.value}`}
+          className={`rounded px-1 py-0.5 text-[14px] font-medium tabular-nums ${item.className}`}
+        >
+          {item.label} {item.value}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function SerialAuditTableRow({
   row,
   windowCalls,
@@ -659,6 +944,7 @@ function SerialAuditTableRow({
   dateRangeLabel,
   detailLoading,
   expanded,
+  includeCancelled,
   onToggle,
 }: {
   row: SerialAuditRow;
@@ -669,11 +955,16 @@ function SerialAuditTableRow({
   dateRangeLabel: string;
   detailLoading: boolean;
   expanded: boolean;
+  includeCancelled: boolean;
   onToggle: () => void;
 }) {
   const flagged = row.riskFlag;
   const rowBg = flagged ? 'bg-amber-50/80 hover:bg-amber-50' : '';
-  const displayCalls = showAllTime ? allTimeCalls : windowCalls;
+  const rawCalls = showAllTime ? allTimeCalls : windowCalls;
+  const displayCalls = useMemo(
+    () => filterSerialAuditCallsForView(rawCalls, includeCancelled),
+    [rawCalls, includeCancelled]
+  );
   const allTimeLoading = showAllTime && detailLoading && allTimeCalls.length === 0;
   const windowLoading = !showAllTime && detailLoading && windowCalls.length === 0;
 
@@ -695,14 +986,17 @@ function SerialAuditTableRow({
           </button>
         </AdminTd>
         <AdminTd className={`font-mono text-[11px] ${rowBg}`}>
-          <span className={flagged ? 'font-semibold text-amber-900' : 'text-slate-800'}>
-            {row.serial}
-          </span>
-          {flagged ? (
-            <span className="ml-2 rounded bg-amber-200 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-amber-900">
-              Flagged
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={flagged ? 'font-semibold text-amber-900' : 'text-slate-800'}>
+              {row.serial} ~
             </span>
-          ) : null}
+            <SerialRepairCountBadges counts={row.repairCounts} />
+            {/* {flagged ? (
+              <span className="rounded bg-amber-200 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-amber-900">
+                Flagged (Repeat-Complaints)
+              </span>
+            ) : null} */}
+          </div>
         </AdminTd>
         <AdminTd align="right" className={`font-semibold tabular-nums ${rowBg}`}>
           {row.complaintCount}
@@ -713,9 +1007,11 @@ function SerialAuditTableRow({
         <AdminTd align="right" className={`tabular-nums text-emerald-700 ${rowBg}`}>
           {row.solvedCount}
         </AdminTd>
-        <AdminTd align="right" className={`tabular-nums text-rose-600 ${rowBg}`}>
-          {row.cancelledCount}
-        </AdminTd>
+        {includeCancelled ? (
+          <AdminTd align="right" className={`tabular-nums text-rose-700 ${rowBg}`}>
+            {row.cancelledCount}
+          </AdminTd>
+        ) : null}
         <AdminTd className={`max-w-[140px] truncate text-[11px] ${rowBg}`}>
           {row.uniqueBranches.length > 0
             ? row.uniqueBranches.slice(0, 2).join(', ') +
@@ -734,7 +1030,7 @@ function SerialAuditTableRow({
       </AdminTr>
       {expanded ? (
         <tr className="border-b border-slate-100 bg-slate-50/80">
-          <td colSpan={9} className="px-3 py-3">
+          <td colSpan={includeCancelled ? 9 : 8} className="px-3 py-3">
             {displayCalls.length === 0 && !allTimeLoading && !windowLoading ? (
               <p className="py-4 text-center text-[11px] text-slate-500">
                 No calls for this serial in the selected date range.

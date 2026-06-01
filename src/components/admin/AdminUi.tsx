@@ -105,8 +105,25 @@ export function AdminTh({
   );
 }
 
-export function AdminTr({ children }: { children: React.ReactNode }) {
-  return <tr className="border-b border-slate-100 transition-colors hover:bg-slate-50/80">{children}</tr>;
+export function AdminTr({
+  children,
+  className = '',
+  onClick,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <tr
+      className={`border-b border-slate-100 transition-colors hover:bg-slate-50/80 ${
+        onClick ? 'cursor-pointer' : ''
+      } ${className}`}
+      onClick={onClick}
+    >
+      {children}
+    </tr>
+  );
 }
 
 export function AdminTd({

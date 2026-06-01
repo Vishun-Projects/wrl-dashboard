@@ -45,7 +45,11 @@ import {
   type IdleAssigneeRow,
   type RosterTechnician,
 } from '@/lib/distribution-idle-assignees';
-import { buildRegisterViewFiltersFromContext, toDateString } from '@/lib/report-filters';
+import {
+  appliedFilterPartsFromSnapshot,
+  buildRegisterViewFiltersFromContext,
+  toDateString,
+} from '@/lib/report-filters';
 import {
   classifyRegisterRowStatus,
   deriveRegisterView,
@@ -106,17 +110,26 @@ export default function CallDistributionPage() {
     syncCascadeOptionsFromCalls,
     resourcesLoaded,
     offices,
+    appliedFilters,
   } = useReportFilters();
 
   const supabase = useMemo(() => createClient(), []);
 
   const [mounted, setMounted] = useState(false);
 
-  const startDateStr = useMemo(() => toDateString(dateRange.start), [dateRange.start]);
-  const endDateStr = useMemo(() => toDateString(dateRange.end), [dateRange.end]);
+  const applied = appliedFilters;
+  const startDateStr = useMemo(
+    () => (applied ? toDateString(applied.dateRange.start) : toDateString(dateRange.start)),
+    [applied, dateRange.start]
+  );
+  const endDateStr = useMemo(
+    () => (applied ? toDateString(applied.dateRange.end) : toDateString(dateRange.end)),
+    [applied, dateRange.end]
+  );
+  const appliedDateColumn = applied?.dateFilterColumn ?? dateFilterColumn;
   const viewDateFilter = useMemo(
-    () => buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn),
-    [startDateStr, endDateStr, dateFilterColumn]
+    () => buildCorpusViewDateFilter(startDateStr, endDateStr, appliedDateColumn),
+    [startDateStr, endDateStr, appliedDateColumn]
   );
 
   // Leaflet map refs
@@ -178,35 +191,24 @@ export default function CallDistributionPage() {
     }
   }, [distributionCalls, selectedState, selectedCity, selectedBranch, selectedFranchisee, selectedTechnician, selectedCallTypes, selectedStatus, priorityFilter, portalFilter, debouncedPincodeSearch, syncCascadeOptionsFromCalls]);
 
-  const distributionViewFilters = useMemo(
-    () =>
-      buildRegisterViewFiltersFromContext({
-        pincodeSearch: debouncedPincodeSearch,
-        selectedState,
-        selectedCity,
-        selectedBranch,
-        selectedFranchisee,
-        selectedTechnician,
-        selectedCallTypes,
-        selectedOfficeIds,
-        selectedStatus,
-        priorityFilter,
-        portalFilter,
-      }),
-    [
-      debouncedPincodeSearch,
-      selectedState,
-      selectedCity,
-      selectedBranch,
-      selectedFranchisee,
-      selectedTechnician,
-      selectedCallTypes,
-      selectedOfficeIds,
-      selectedStatus,
-      priorityFilter,
-      portalFilter,
-    ]
-  );
+  const distributionViewFilters = useMemo(() => {
+    if (!appliedFilters) {
+      return buildRegisterViewFiltersFromContext({
+        pincodeSearch: '',
+        selectedState: [],
+        selectedCity: [],
+        selectedBranch: [],
+        selectedFranchisee: [],
+        selectedTechnician: [],
+        selectedCallTypes: [],
+        selectedOfficeIds: [],
+        selectedStatus: [],
+        priorityFilter: [],
+        portalFilter: [],
+      });
+    }
+    return appliedFilterPartsFromSnapshot(appliedFilters);
+  }, [appliedFilters]);
 
   // CSR Metrics & Dashboard Aggregations Computation
   useEffect(() => {
@@ -375,7 +377,10 @@ export default function CallDistributionPage() {
     return dateFiltered.filter((row) => rowMatchesAuditScope(row, auditScopeFilterParts));
   }, [distributionCalls, viewDateFilter, auditScopeFilterParts]);
 
-  const rosterBranchId = selectedBranch.length > 0 ? selectedBranch[0] : null;
+  const rosterBranchId =
+    appliedFilters && appliedFilters.selectedBranch.length > 0
+      ? appliedFilters.selectedBranch[0]
+      : null;
 
   useEffect(() => {
     if (!rosterBranchId) {
@@ -428,8 +433,13 @@ export default function CallDistributionPage() {
   );
 
   const rosterFranchisees = useMemo(
-    () => buildRosterFranchiseesFromOffices(offices, selectedBranch, selectedFranchisee),
-    [offices, selectedBranch, selectedFranchisee]
+    () =>
+      buildRosterFranchiseesFromOffices(
+        offices,
+        appliedFilters?.selectedBranch ?? [],
+        appliedFilters?.selectedFranchisee ?? []
+      ),
+    [offices, appliedFilters]
   );
 
   const idleAssigneeRows = useMemo(
@@ -843,7 +853,9 @@ export default function CallDistributionPage() {
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
       toolbar={
         <RegisterPageFilters
+          loading={distributionLoading}
           loadingLabel="Loading calls for distribution map…"
+          onApply={() => void fetchDistributionData(true)}
           onClearAll={() => {
             setSelectedPincode('All');
             clearTableLink();
@@ -867,7 +879,7 @@ export default function CallDistributionPage() {
             className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-50 disabled:opacity-50 ui-label"
           >
             <RefreshCw size={13} className={distributionLoading ? 'animate-spin' : ''} />
-            Recalculate
+            Refresh
           </button>
           <Link
             href="/report"

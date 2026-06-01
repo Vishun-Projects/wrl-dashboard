@@ -6,16 +6,11 @@ import {
   isRegisterRowTransferred,
   type RegisterSummaryBucket,
 } from '@/lib/report-search';
+import { parseLatLngFromRow } from '@/lib/geo/parse-latlong';
 import { enrichTrhcallBranchFranchisee } from '@/lib/trhcalls-query';
 import type { HotRow, StatusBucket } from '@/lib/read-model/types';
 import { parseCrmDate } from '@/lib/read-model/dates';
-
-function toBigInt(value: unknown): number | null {
-  if (value == null || value === '') return null;
-  const n = Number(String(value).trim());
-  if (Number.isNaN(n)) return null;
-  return Math.trunc(n);
-}
+import { toBigInt } from '@/lib/read-model/coerce';
 
 const STATUS_LABEL_BY_BUCKET: Record<Exclude<RegisterSummaryBucket, 'transferred'>, string> = {
   openUnallocated: 'Open Unallocated',
@@ -44,24 +39,6 @@ export function mapRegisterBucketToStatusBucket(
     default:
       return null;
   }
-}
-
-function parseLatLngFromRow(row: Record<string, unknown>): { lat: number | null; lng: number | null } {
-  const latlong = String(row.latlong ?? '').trim();
-  if (!latlong.includes(',')) return { lat: null, lng: null };
-  const parts = latlong.split(',');
-  let lat = parseFloat(parts[0]?.trim() ?? '');
-  let lng = parseFloat(parts[1]?.trim() ?? '');
-  if (Number.isNaN(lat) || Number.isNaN(lng)) return { lat: null, lng: null };
-  if (lat >= 68 && lat <= 98 && lng >= 8 && lng <= 38) {
-    const temp = lat;
-    lat = lng;
-    lng = temp;
-  }
-  if (lat >= 8 && lat <= 38 && lng >= 68 && lng <= 98) {
-    return { lat, lng };
-  }
-  return { lat: null, lng: null };
 }
 
 function normalizeGeoText(value: unknown): string | null {
@@ -111,8 +88,8 @@ export function transformCrmRowToHot(row: Record<string, unknown>): HotRow | nul
     state: enriched.dbState ?? enriched.state,
   });
   const parsedCoords = parseLatLngFromRow(row);
-  const lat = geo.lat != null ? Number(geo.lat) : parsedCoords.lat;
-  const lng = geo.lng != null ? Number(geo.lng) : parsedCoords.lng;
+  const lat = geo.lat != null ? Number(geo.lat) : parsedCoords?.lat ?? null;
+  const lng = geo.lng != null ? Number(geo.lng) : parsedCoords?.lng ?? null;
 
   const registerBucket = classifyRegisterRowStatus(enriched);
   const statusBucket = mapRegisterBucketToStatusBucket(registerBucket);

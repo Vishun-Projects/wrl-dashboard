@@ -1,0 +1,53 @@
+* f1013f59b547fdaa75c8110096f123683c74ec01|2026-05-29 13:46:35|VV|vishun.orv@gmail.com|removed crm mentionings|HEAD -> main, origin/main
+* 1ca8fee21730ebdda8bd82c7f0c505d7c69495ea|2026-05-29 13:42:23|VV|vishun.orv@gmail.com|removed crm mentionings|
+* d1c0fffddaf26f18ca4f73192ede6967313ddb43|2026-05-29 12:29:06|VV|vishun.orv@gmail.com|updated calls distribution for idle technicians|
+* 7408f2706798e688b5089f7824651b8708f0bafc|2026-05-29 12:27:46|VV|vishun.orv@gmail.com|updated calls distribution for idle technicians|
+* 2ae99cac91c7240d943d1f992e34fadbed229ab2|2026-05-29 12:23:55|VV|vishun.orv@gmail.com|updated calls distribution for idle technicians|
+* c7845588cc07938bdf9384fc19b8851c180ef6d5|2026-05-29 09:52:51|VV|vishun.orv@gmail.com|updated arcp claims data from jan 2025 till 28 may 26|
+* 25031f01b9c08ea5b8bea8c1ef333af87fa69b8f|2026-05-27 16:32:47|VV|vishun.orv@gmail.com|excel bug resolved|
+* 2cc06f4a943f669054726b76df34cee90d635178|2026-05-27 15:46:58|VV|vishun.orv@gmail.com|phir wohi dukh|
+* 36e28ae9e31d7e94c789f215aed4c15f8175b408|2026-05-27 15:32:33|VV|vishun.orv@gmail.com|date range error|
+* 4c6f9ed514b8b0c23257d1fa7bfd81b4e056b50b|2026-05-27 15:16:55|VV|vishun.orv@gmail.com|trying to resolve speed|
+* 8744e6ffe0016a4fcf9d7cfb87857e904bb0a16c|2026-05-27 15:07:19|VV|vishun.orv@gmail.com|trying to resolve speed|
+* 35ef162c962307d7d589fea238519a1f5ab37de1|2026-05-27 14:57:39|VV|vishun.orv@gmail.com|removed vercel cron|
+* bdd640cdfaece8d5e8c9b87224d76664324644ea|2026-05-27 14:51:23|VV|vishun.orv@gmail.com|updated for cron jobs|
+* 52e5f374b5c259979679bbb169258e90f4880296|2026-05-27 14:36:15|VV|vishun.orv@gmail.com|updated the mis reports page, added arcp claims and serial wise history page|
+* 18fe6c4a30032656773a6baf6c0a290dba7b35b3|2026-05-27 14:24:07|VV|vishun.orv@gmail.com|updated the mis reports page, added arcp claims and serial wise history page|
+* cb4e2b461bb430e113ec141ff2d506602c1b9a94|2026-05-26 10:46:30|VV|vishun.orv@gmail.com|implementing new dbs and calls|
+* c006a81c1777252014b80aa21567ead5ea151199|2026-05-25 15:03:50|VV|vishun.orv@gmail.com|Add report corpus caching, register filter UI, and serial audit APIs.|
+* 6ea3e2b7fd648a0b0e6b77217b3ec1b590baf015|2026-05-25 14:59:45|VV|vishun.orv@gmail.com|first commit|
+* 9c4b6ae2be1ef5120cafd12683a3019f7c6a8816|2026-05-22 16:50:46|VV|vishun.orv@gmail.com|let's check ui|
+* 6c102541f447f148c9689407b53a8cda82f2eba8|2026-05-22 11:22:04|VV|vishun.orv@gmail.com|updated for branch manager to see proper view|
+* 1f6803e2408fbd4cff531b9d29b00b0c8903f8f1|2026-05-22 10:56:23|VV|vishun.orv@gmail.com|updating sidebar|
+| * 4a2187c1b5f7ae65ea1a2302dadc12629ca2a79e|2026-05-22 10:31:49|VV|vishun.orv@gmail.com|shayad use ho?|tried-for-server-cache
+|/  
+* c3eda74154cc5410b04b3273932fdf00f985ba8d|2026-05-21 13:50:33|VV|vishun.orv@gmail.com|ab mai karunga saaf aur thik|
+* d40212f342fe4f95e2771268f93c0c41a1456615|2026-05-21 11:04:28|VV|vishun.orv@gmail.com|worked on performance added local storage and reload technique|
+* d97ed8378be79028d74c95592e5d33d5e55d35bf|2026-05-21 11:01:09|VV|vishun.orv@gmail.com|worked on performance added local storage and reload technique|
+* 76f3b4bb5640a23a8c41e453330600b7c5303a15|2026-05-20 15:24:41|VV|vishun.orv@gmail.com|updated the calls|
+* c6d3ee4334b4ed9229053d0d515cab9a4e92863d|2026-05-20 15:23:44|VV|vishun.orv@gmail.com|updated the calls|
+* 92607c1faa33664485e558ce0a01c6d141baa5a0|2026-05-20 15:18:05|VV|vishun.orv@gmail.com|updated the /calls page for fetchings|
+* 9eec4064fbec298d8b3254692e4fce9903f0e172|2026-05-20 12:49:57|VV|vishun.orv@gmail.com|updated mis report to localstorage index the calls|
+* f3cc8d3bce32ab0a32bca169db4a335c1c09880f|2026-05-20 09:12:52|VV|vishun.orv@gmail.com|removed tech solved column from summary dashboard and key account mis|
+* 930341a410835212ea8903d943a9deb49276ba79|2026-05-19 16:55:22|VV|vishun.orv@gmail.com|clean up scratch files and apply client-side performance optimizations to resolve vercel type errors|
+* ec2a79501894482d4730dffab6f3584282ae73f4|2026-05-19 16:46:53|VV|vishun.orv@gmail.com|added new page and worked on ensuring correct data is shown|
+* 2ae9e25d05de7753803e6573770181528eea7d9c|2026-05-18 16:39:20|VV|vishun.orv@gmail.com|deploying on vercel|
+* bb9a610e15932a9ff658b12ab39be1a4eb56923f|2026-05-18 16:36:38|VV|vishun.orv@gmail.com|deploying on vercel|
+* aac337f1fa367f084cacc84691e864f46bbca6b8|2026-05-18 15:59:15|VV|vishun.orv@gmail.com|removed js scripts|
+* e2665fe766102c9fc5c6ed5e972a3d204b7eb5ab|2026-05-18 15:58:49|VV|vishun.orv@gmail.com|updated for performance|
+* f67ed4e257eb34e6b48137dab1343ab74cd4875a|2026-05-18 10:51:31|VV|vishun.orv@gmail.com|updated layout and filterings and added profile setting and rbac page|
+* e6c225697d8cd6a76cf163cc0fb40cc10d146257|2026-05-16 11:15:47|VV|vishun.orv@gmail.com|added middlewares and securities|
+* 3c404205d7bd8169747041c7883c6f3134b1fb04|2026-05-15 15:36:07|VV|vishun.orv@gmail.com|updated branch search to have typeset also updated summary dashboard to show all counts not just breakdown|
+* 4f51d38bfa268e640a0114acfef02bf4aca22405|2026-05-15 15:13:13|VV|vishun.orv@gmail.com|now reports are verified for key mis and summary dashboard|
+* e9ff2ef2b1ac71c604e444ab8bacd7cf2c675a55|2026-05-15 14:03:05|VV|vishun.orv@gmail.com|testing for reports discrepencies|
+* 49660ff1d3fc86dc387643212c97eada29b3ee20|2026-05-15 12:26:12|VV|vishun.orv@gmail.com|excel export done|
+* 44466b294a2321f6dd9ad30eb460309e779eb2ef|2026-05-15 12:25:58|VV|vishun.orv@gmail.com|excel export done|
+* 8fc04859f267b96da9da0c88421f6238c02166df|2026-05-15 11:44:26|VV|vishun.orv@gmail.com|reports page refresh once done|
+* 22582d1efd9347f6e0a22c5eb6b1e406a881be29|2026-05-15 11:39:32|VV|vishun.orv@gmail.com|reports page made|
+* 180743afb9f10fb83d5c60565ae571698e2780f9|2026-05-15 11:37:30|VV|vishun.orv@gmail.com|reports page made|
+* b461347699494a1d73c7da635222244c2aa5b853|2026-05-15 11:35:46|VV|vishun.orv@gmail.com|reports page made|
+* 3bd5580d7b3a03be863deb000dc1a833d453ae65|2026-05-14 16:06:22|VV|vishun.orv@gmail.com|resolved mobile issue and visits tab|
+* e76f752fd658dd284f7935d314805fb8db9b0ad9|2026-05-14 16:06:16|VV|vishun.orv@gmail.com|resolved mobile issue and visits tab|
+* 896eb7523cf94bd22b0a1a64746c1d9db661a124|2026-05-14 15:16:23|VV|vishun.orv@gmail.com|working something|
+* e7c5e1f68bb4eba9905c64f07490bcf7f4a97097|2026-05-14 15:14:58|VV|vishun.orv@gmail.com|first commit|
+* 24457c79d4a2e42909bbd85305fe97a20fca405b|2026-05-12 11:30:24|VV|vishun.orv@gmail.com|Initial commit from Create Next App|

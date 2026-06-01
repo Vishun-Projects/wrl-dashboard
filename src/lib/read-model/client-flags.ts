@@ -24,14 +24,10 @@ export function readRegisterFromPostgresClient(): boolean {
   );
 }
 
-export function readDistributionFromPostgresClient(): boolean {
+function readDistributionFromPostgresClient(): boolean {
   return (
     readClientSource(process.env.NEXT_PUBLIC_READ_DISTRIBUTION_FROM) === 'postgres'
   );
-}
-
-export function readDimsFromPostgresClient(): boolean {
-  return readClientSource(process.env.NEXT_PUBLIC_READ_DIMS_FROM) === 'postgres';
 }
 
 export function readArcpFromPostgresClient(): boolean {
@@ -54,10 +50,4 @@ export function readCallsFromPostgresClient(): boolean {
 export function postgresAutoSyncEnabled(): boolean {
   if (readCallsFromPostgresClient()) return false;
   return process.env.NEXT_PUBLIC_AUTO_SYNC_ENABLED !== 'false';
-}
-
-export function postgresAutoSyncIntervalMs(): number {
-  const configured = Number(process.env.NEXT_PUBLIC_AUTO_SYNC_INTERVAL_MS);
-  if (Number.isFinite(configured) && configured >= 60_000) return configured;
-  return 3 * 60 * 1000;
 }

@@ -16,6 +16,7 @@ import {
   Map,
   ScanBarcode,
   Receipt,
+  MapPin,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -96,6 +97,12 @@ export function Sidebar({ user }: SidebarProps) {
       icon: ScanBarcode,
       permission: 'view_calls'
     },
+    // {
+    //   name: 'Location Audit',
+    //   href: '/report/location-audit',
+    //   icon: MapPin,
+    //   permission: 'view_calls'
+    // },
     {
       name: 'User Management',
       href: '/admin/users',

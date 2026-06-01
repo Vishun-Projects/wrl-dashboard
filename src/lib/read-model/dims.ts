@@ -6,12 +6,7 @@ import {
   looksLikeBranchOffice,
 } from '@/lib/read-model/crm-fetch';
 
-function toBigInt(value: unknown): number | null {
-  if (value == null || value === '') return null;
-  const n = Number(String(value).trim());
-  if (Number.isNaN(n)) return null;
-  return Math.trunc(n);
-}
+import { toBigInt } from '@/lib/read-model/coerce';
 
 async function batchInsert(
   client: pg.PoolClient,

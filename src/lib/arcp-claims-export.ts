@@ -1,16 +1,9 @@
 import type { ArcpClaimsDetailRow } from '@/lib/arcp-claims-query';
 import type { ArcpClaimsTableModel } from '@/lib/arcp-claims-table';
-
-function escapeCsvField(value: string | number | null | undefined): string {
-  const text = value == null ? '' : String(value);
-  if (/[",\n\r]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`;
-  }
-  return text;
-}
+import { escapeCsvCell } from '@/lib/csv-utils';
 
 function csvRow(cells: (string | number | null | undefined)[]): string {
-  return cells.map(escapeCsvField).join(',');
+  return cells.map(escapeCsvCell).join(',');
 }
 
 function downloadCsv(csv: string, fileName: string): void {

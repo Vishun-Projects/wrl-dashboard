@@ -27,8 +27,10 @@ function crmUiOpts(opts: ArcpClaimsQueryOpts): ArcpClaimsQueryOpts {
   return { ...opts, crmUiFast: true };
 }
 
-const ARCP_NCODE_SHARD_MAX = Number(process.env.ARCP_OOM_SHARD_COUNT ?? 32) || 32;
-const ARCP_NCODE_SHARD_INITIAL = Number(process.env.ARCP_OOM_SHARD_INITIAL ?? 8) || 8;
+import {
+  ARCP_NCODE_SHARD_INITIAL,
+  ARCP_NCODE_SHARD_MAX,
+} from '@/lib/read-model/arcp/constants';
 
 function isRetryableCrmLoadError(err: unknown): boolean {
   return isCrmSqlTimeoutError(err) || isCrmOutOfMemoryError(err);

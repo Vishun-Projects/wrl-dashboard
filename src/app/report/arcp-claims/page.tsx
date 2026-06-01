@@ -1059,14 +1059,14 @@ export default function ArcpClaimsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <RegisterBranchFranchiseeFilters applyMode="instant" />
+          <RegisterBranchFranchiseeFilters applyMode="confirm" />
           <RegisterMultiSelect
             label="Call Type"
             emptyLabel="All Call Types"
             options={callTypeOptions}
             selected={selectedCallTypes}
             onChange={setSelectedCallTypes}
-            applyMode="instant"
+            applyMode="confirm"
           />
           <button
             type="button"
@@ -1079,7 +1079,7 @@ export default function ArcpClaimsPage() {
             }`}
           >
             <Filter className="h-3.5 w-3.5" />
-            Apply Filter
+            Apply filters
           </button>
           <button
             type="button"

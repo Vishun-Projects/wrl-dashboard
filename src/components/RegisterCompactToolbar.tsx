@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { Search, MapPin, SlidersHorizontal } from 'lucide-react';
+import { Filter, Search, MapPin, SlidersHorizontal } from 'lucide-react';
 import { DateRangeSelector } from '@/components/DateRangeSelector';
 import {
   buildFranchiseeOptions,
@@ -14,14 +14,23 @@ type RegisterCompactToolbarProps = {
   onOpenFilters: () => void;
   onSearchEnter?: () => void;
   onPincodeEnter?: () => void;
+  onApply?: () => void;
+  applyDisabled?: boolean;
+  applyLabel?: string;
+  extraFilterCount?: number;
 };
 
 export function RegisterCompactToolbar({
   onOpenFilters,
   onSearchEnter,
   onPincodeEnter,
+  onApply,
+  applyDisabled = false,
+  applyLabel = 'Apply filters',
+  extraFilterCount = 0,
 }: RegisterCompactToolbarProps) {
   const {
+    hasPendingFilterChanges,
     search,
     setSearch,
     pincodeSearch,
@@ -137,8 +146,28 @@ export function RegisterCompactToolbar({
       <button type="button" onClick={onOpenFilters} className="register-compact-toolbar-filters-btn">
         <SlidersHorizontal size={14} />
         <span>Filters</span>
-        {filterCount > 0 && <span className="register-compact-toolbar-filters-badge">{filterCount}</span>}
+        {filterCount + extraFilterCount > 0 && (
+          <span className="register-compact-toolbar-filters-badge">
+            {filterCount + extraFilterCount}
+          </span>
+        )}
       </button>
+
+      {onApply && (
+        <button
+          type="button"
+          onClick={onApply}
+          disabled={applyDisabled}
+          className={`register-compact-toolbar-apply-btn inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium shadow-sm disabled:opacity-50 ${
+            hasPendingFilterChanges
+              ? 'border border-slate-800 bg-slate-900 text-white hover:bg-slate-800'
+              : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          <Filter className="h-3.5 w-3.5" />
+          {applyLabel}
+        </button>
+      )}
     </div>
   );
 }

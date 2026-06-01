@@ -452,7 +452,7 @@ export async function queryRegisterBulkFromPostgres(
 
   const { sql: whereSql, values } = buildWhere(bulkParams);
 
-  const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+  const rows = await prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(
     `
     SELECT h.*
     FROM calls_latest_hot h

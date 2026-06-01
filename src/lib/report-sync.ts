@@ -20,88 +20,6 @@ export function getCallIdentityKey(rec: Record<string, unknown>): string {
   return '';
 }
 
-export function mergeCallsDelta<T extends Record<string, unknown>>(
-  existing: T[],
-  deltas: T[],
-  keyFn: (rec: T) => string = getCallIdentityKey as (rec: T) => string
-): { merged: T[]; addedCount: number; updatedCount: number } {
-  const map = new Map<string, T>();
-  existing.forEach((row) => {
-    const key = keyFn(row);
-    if (key) map.set(key, row);
-  });
-
-  let addedCount = 0;
-  let updatedCount = 0;
-  deltas.forEach((row) => {
-    const key = keyFn(row);
-    if (!key) return;
-    if (map.has(key)) updatedCount++;
-    else addedCount++;
-    map.set(key, row);
-  });
-
-  return { merged: Array.from(map.values()), addedCount, updatedCount };
-}
-
-/** Merge partial patches into existing rows (keeps fields not present in the patch). */
-export function patchCallsDelta<T extends Record<string, unknown>>(
-  existing: T[],
-  patches: T[],
-  keyFn: (rec: T) => string = getCallIdentityKey as (rec: T) => string
-): { merged: T[]; addedCount: number; updatedCount: number } {
-  const map = new Map<string, T>();
-  existing.forEach((row) => {
-    const key = keyFn(row);
-    if (key) map.set(key, row);
-  });
-
-  let addedCount = 0;
-  let updatedCount = 0;
-  patches.forEach((patch) => {
-    const key = keyFn(patch);
-    if (!key) return;
-    if (map.has(key)) {
-      map.set(key, { ...map.get(key)!, ...patch });
-      updatedCount++;
-    } else {
-      map.set(key, patch);
-      addedCount++;
-    }
-  });
-
-  return { merged: Array.from(map.values()), addedCount, updatedCount };
-}
-
-export function mapRegisterRowToDistributionPatch(row: Record<string, unknown>): Record<string, unknown> {
-  const bsolved = row.callsolved ?? row.bsolved;
-  return {
-    vtrnno: row.UniqueCallNo ?? row.vtrnno,
-    vcclid: row.vcclid,
-    ncode: row.id ?? row.ncode,
-    bsolved,
-    bfastclose: row.bfastclose,
-    ncancelreason: row.ncancelreason,
-    nengineer: row.nengineer,
-    nofficeid: row.nofficeid,
-    state: row.state,
-    city: row.city,
-    pincode: row.Pincode ?? row.pincode,
-    technician_name: row.serviceman ?? row.technician_name,
-    franchisee_code: row.franchisee_code,
-    franchisee_name: row.franchisee_name,
-    vtransfercallno: row.vtransfercallno,
-    callsvserialno: row.callsvserialno ?? row.vserialno,
-    PartyName: row.PartyName ?? row.party_name,
-    itemname: row.itemname,
-    vcomplaint: row.vcomplaint,
-    office_name: row.office_name ?? row.officename,
-    branch_office_name: row.branch_office_name,
-    callsdtrndate: row.callsdtrndate,
-    calltype: row.calltype,
-  };
-}
-
 /** Rows loaded via register fetch/sync that include serial — used by Serial Audit without extra API calls. */
 const registerRowsWithSerialIndex = new Map<string, Record<string, unknown>>();
 
@@ -114,10 +32,6 @@ export function indexRegisterRowsWithSerial(rows: Record<string, unknown>[]) {
 
 export function getIndexedRegisterRowsWithSerial(): Record<string, unknown>[] {
   return Array.from(registerRowsWithSerialIndex.values());
-}
-
-export function clearRegisterRowsWithSerialIndex() {
-  registerRowsWithSerialIndex.clear();
 }
 
 export type RegisterDeltaListener = (records: unknown[], syncTime: Date) => void;

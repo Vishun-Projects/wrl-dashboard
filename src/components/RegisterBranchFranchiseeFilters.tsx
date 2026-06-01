@@ -1,16 +1,26 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
+import { flushSync } from 'react-dom';
 import { RegisterMultiSelect } from '@/components/RegisterMultiSelect';
-import { buildFranchiseeOptions, buildMainBranchOptions } from '@/lib/report-filters';
+import {
+  buildFranchiseeOptions,
+  buildMainBranchOptions,
+  type DraftFilterOverrides,
+} from '@/lib/report-filters';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 
 type RegisterBranchFranchiseeFiltersProps = {
   applyMode?: 'instant' | 'confirm';
+  commitOnChange?: boolean;
 };
 
-export function RegisterBranchFranchiseeFilters({ applyMode = 'confirm' }: RegisterBranchFranchiseeFiltersProps) {
+export function RegisterBranchFranchiseeFilters({
+  applyMode = 'confirm',
+  commitOnChange = false,
+}: RegisterBranchFranchiseeFiltersProps) {
   const {
+    applyFilters,
     offices,
     branchesList,
     franchiseesList,
@@ -19,6 +29,25 @@ export function RegisterBranchFranchiseeFilters({ applyMode = 'confirm' }: Regis
     selectedFranchisee,
     setSelectedFranchisee,
   } = useReportFilters();
+
+  const wrapCommit = useCallback(
+    (setter: (values: string[]) => void, field: keyof Pick<DraftFilterOverrides, 'selectedFranchisee'>) => {
+      if (!commitOnChange) return setter;
+      return (values: string[]) => {
+        flushSync(() => setter(values));
+        applyFilters({ [field]: values } as DraftFilterOverrides);
+      };
+    },
+    [commitOnChange, applyFilters]
+  );
+
+  const onBranchChange = commitOnChange
+    ? (values: string[]) => {
+        flushSync(() => handleBranchesChange(values));
+        applyFilters();
+      }
+    : handleBranchesChange;
+  const onFranchiseeChange = wrapCommit(setSelectedFranchisee, 'selectedFranchisee');
 
   const branchOptions = useMemo(
     () => buildMainBranchOptions(offices, branchesList),
@@ -37,7 +66,7 @@ export function RegisterBranchFranchiseeFilters({ applyMode = 'confirm' }: Regis
         emptyLabel="All Branches"
         options={branchOptions}
         selected={selectedBranch}
-        onChange={handleBranchesChange}
+        onChange={onBranchChange}
         searchable
         panelClassName="w-64"
         applyMode={applyMode}
@@ -47,7 +76,7 @@ export function RegisterBranchFranchiseeFilters({ applyMode = 'confirm' }: Regis
         emptyLabel="All Franchisees"
         options={franchiseeOptions}
         selected={selectedFranchisee}
-        onChange={setSelectedFranchisee}
+        onChange={onFranchiseeChange}
         searchable
         panelClassName="w-64"
         applyMode={applyMode}

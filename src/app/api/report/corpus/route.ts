@@ -9,17 +9,17 @@ import {
   buildCorpusFieldsSql,
   buildCorpusTableName,
   CORPUS_MAX_ROWS,
-  enrichTrhcallBranchFranchisee,
   MAX_CLIENT_CORPUS_DAYS,
   resolveRegisterDateSqlColumn,
   type RegisterDateFilterColumn,
   TRHCALLS_EXCLUDE_TRANSFERRED,
 } from '@/lib/trhcalls-query';
-import { applyPincodeGeo } from '@/lib/report-geo';
+import { enrichCallRowForReport } from '@/lib/report-geo';
 import { CORPUS_SERVER_CACHE_TTL_MS, splitCalendarMonths } from '@/lib/report-corpus';
 import { formatLocalDate } from '@/lib/report-filters';
 import { readCorpusDiskCache, writeCorpusDiskCache } from '@/lib/corpus-server-cache';
 import { readCallsFromPostgres } from '@/lib/read-model/flags';
+import { resolveReportSecurity } from '@/lib/auth/report-security';
 
 const CORPUS_CACHE_TTL = CORPUS_SERVER_CACHE_TTL_MS;
 const CORPUS_TIMEOUT_MS = 300000;
@@ -82,7 +82,7 @@ function scheduleCorpusRefresh(
   });
 }
 
-type SecurityContext = { isHod: boolean; assignedOffices: string[] };
+type SecurityContext = { isHod: boolean; assignedOffices: string[]; forbidden?: boolean };
 
 function clampCorpusDateRange(
   startDate: string | null,
@@ -113,27 +113,6 @@ function clampCorpusDateRange(
   };
 }
 
-async function resolveSecurity(userId: string): Promise<SecurityContext & { forbidden?: boolean }> {
-  const permissions = await (prisma as any).getUserPermissions(userId);
-  if (!permissions.includes('view_reports') && !permissions.includes('view_calls')) {
-    return { isHod: false, assignedOffices: [], forbidden: true };
-  }
-
-  const userProfileResult = await prisma.$queryRawUnsafe(
-    'SELECT office_ids, role FROM public.app_users WHERE id = $1 LIMIT 1',
-    userId
-  );
-  const profile = (userProfileResult as { office_ids?: string[]; role?: string }[])?.[0];
-  const assignedOffices = profile?.office_ids || [];
-  const isHod =
-    permissions.includes('view_all_offices') ||
-    ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(
-      profile?.role || ''
-    );
-
-  return { isHod, assignedOffices };
-}
-
 function buildCorpusCondition(
   callType: string | null,
   security: SecurityContext
@@ -145,13 +124,7 @@ function buildCorpusCondition(
 }
 
 function mapCorpusRows(rawRows: Record<string, unknown>[]): Record<string, unknown>[] {
-  return rawRows.map((row) =>
-    enrichTrhcallBranchFranchisee({
-      ...applyPincodeGeo(row),
-      franchisee_code: row.franchisee_code ?? 'UNASSIGNED',
-      franchisee_name: row.franchisee_name ?? 'Unallocated',
-    })
-  );
+  return rawRows.map((row) => enrichCallRowForReport(row));
 }
 
 function corpusRowKey(row: Record<string, unknown>): string {
@@ -479,7 +452,7 @@ export async function GET(req: NextRequest) {
       userId = user.id;
     }
 
-    const security = await resolveSecurity(userId);
+    const security = await resolveReportSecurity(userId);
     if (security.forbidden) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }

@@ -124,7 +124,7 @@ export default function ReadModelSyncPage() {
   return (
     <PageShell
       title="Read Model Sync"
-      subtitle="Postgres backfill and sync worker progress"
+      subtitle="Cached data backfill and sync progress"
       actions={
         <button
           type="button"
@@ -267,20 +267,18 @@ export default function ReadModelSyncPage() {
               <p className="font-medium text-slate-800">What to do next</p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li>
-                  Run <code className="rounded bg-white px-1">npm run sync-worker:backfill</code> once until hot
-                  rows reach ~139k (Admin → Sync shows Ready).
+                  Run the one-time backfill on the server until hot rows reach the target (~139k). This page
+                  shows <strong>Ready</strong> when complete.
                 </li>
                 <li>
-                  <strong>Live sync:</strong> while anyone is logged into the app (local or Vercel), Postgres
-                  auto-sync runs every ~3 minutes via{' '}
-                  <code className="rounded bg-white px-1">POST /api/read-model/sync</code>. No cron or
-                  background worker required.
+                  <strong>Ongoing updates:</strong> keep the sync worker daemon running on the server (see{' '}
+                  <code className="rounded bg-white px-1">docs/sync.md</code>). Reports read from the local
+                  cache once backfill finishes.
                 </li>
                 <li>
-                  Set <code className="rounded bg-white px-1">NEXT_PUBLIC_AUTO_SYNC_ENABLED=false</code> to
-                  disable browser auto-sync. Report pages still have a manual Sync button.
+                  Use the <strong>Refresh</strong> button on report pages to pull the latest cached data after
+                  sync runs.
                 </li>
-                <li>Register/summary/distribution pages read from Postgres once backfill completes.</li>
               </ul>
             </div>
           </>

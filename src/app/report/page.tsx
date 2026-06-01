@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import axios from 'axios';
 import {
   Download,
+  Filter,
   Search,
   ChevronLeft,
   ChevronRight,
@@ -333,11 +334,21 @@ export default function ReportPage() {
     corpusLoading,
     distributionCalls,
     ensureSharedCallsLoaded,
+    appliedFilters,
+    appliedRevision,
+    applyFilters,
+    getAppliedFiltersSnapshot,
+    hasPendingFilterChanges,
   } = useReportFilters();
 
   const summaryOfficeIdsParam = useMemo(
-    () => resolveSummaryOfficeIdsParam(offices, selectedBranch, selectedFranchisee),
-    [offices, selectedBranch, selectedFranchisee]
+    () =>
+      resolveSummaryOfficeIdsParam(
+        offices,
+        appliedFilters?.selectedBranch ?? selectedBranch,
+        appliedFilters?.selectedFranchisee ?? selectedFranchisee
+      ),
+    [offices, appliedFilters, selectedBranch, selectedFranchisee]
   );
   const registerOfficeIdsParam = 'All';
 
@@ -1046,10 +1057,16 @@ export default function ReportPage() {
   ]);
 
   const fetchSummaryFromApi = useCallback(async (): Promise<boolean> => {
-    const startDateStr =
-      toDateString(dateRange.start);
-    const endDateStr =
-      toDateString(dateRange.end);
+    const applied = appliedFilters;
+    if (!applied) return false;
+    const startDateStr = toDateString(applied.dateRange.start);
+    const endDateStr = toDateString(applied.dateRange.end);
+    const summaryOfficeIds = resolveSummaryOfficeIdsParam(
+      offices,
+      applied.selectedBranch,
+      applied.selectedFranchisee
+    );
+    const callTypesParam = resolveViewCallTypesParam(applied.selectedCallTypes);
     const agingStr =
       agingAsOf.includes(' ') || agingAsOf.includes(':')
         ? new Date(agingAsOf).toISOString().split('T')[0]
@@ -1062,8 +1079,8 @@ export default function ReportPage() {
       const res = await axios.get('/api/report/summary', {
         headers: { Authorization: `Bearer ${session?.access_token}` },
         params: {
-          officeId: summaryOfficeIdsParam,
-          callType: viewCallTypesParam,
+          officeId: summaryOfficeIds,
+          callType: callTypesParam,
           startDate: startDateStr,
           endDate: endDateStr,
           agingAsOf: agingStr,
@@ -1079,8 +1096,8 @@ export default function ReportPage() {
         accountRows: accountSummary.length,
         globalHeadcount: headcount,
         dateRange: `${startDateStr} → ${endDateStr}`,
-        officeFilter: summaryOfficeIdsParam,
-        callTypeFilter: viewCallTypesParam,
+        officeFilter: summaryOfficeIds,
+        callTypeFilter: callTypesParam,
         emptyReason:
           branchSummary.length === 0
             ? 'API returned zero branch rows — check office/date filters or DB data'
@@ -1099,20 +1116,12 @@ export default function ReportPage() {
       logSummaryDebug('API fallback failed', {
         error: message,
         dateRange: `${startDateStr} → ${endDateStr}`,
-        officeFilter: summaryOfficeIdsParam,
-        callTypeFilter: viewCallTypesParam,
+        officeFilter: summaryOfficeIds,
+        callTypeFilter: callTypesParam,
       });
       return false;
     }
-  }, [
-    dateRange.start,
-    dateRange.end,
-    agingAsOf,
-    summaryOfficeIdsParam,
-    viewCallTypesParam,
-    supabase,
-    commitSummaryResult,
-  ]);
+  }, [appliedFilters, agingAsOf, offices, supabase, commitSummaryResult]);
 
   const applyRegisterFromCorpus = useCallback(
     (pageNum = 1, pageLimit: RegisterPageSize = limit): boolean => {
@@ -2627,93 +2636,58 @@ export default function ReportPage() {
     initDBAndCache();
   }, []);
 
-  // Automatically fetch data when filters change, but skip the first fetch if the cache is already present and matches the filters
-  useEffect(() => {
-    const t0 = performance.now();
-    if (!dbInitialized) {
-      return;
-    }
-    const changedFields: string[] = [];
-    if (!globalReportCache) changedFields.push('no_globalReportCache');
-    else {
-      if (globalReportCache.dateRange.start.getTime() !== dateRange.start.getTime()) changedFields.push('dateRange.start');
-      if (globalReportCache.dateRange.end.getTime() !== dateRange.end.getTime()) changedFields.push('dateRange.end');
-      if ((globalReportCache.dateFilterColumn || 'dtrndate') !== dateFilterColumn) changedFields.push('dateFilterColumn');
-      if (!filtersEqual(globalReportCache.selectedCallTypes, selectedCallTypes)) changedFields.push('callTypes');
-      if (!filtersEqual(globalReportCache.selectedOfficeIds, selectedOfficeIds)) changedFields.push('officeIds');
-      if (!filtersEqual(migrateStringFilter(globalReportCache.selectedState), selectedState)) changedFields.push('state');
-      if (!filtersEqual(migrateStringFilter(globalReportCache.selectedCity), selectedCity)) changedFields.push('city');
-      if (!filtersEqual(migrateStringFilter(globalReportCache.selectedBranch), selectedBranch)) changedFields.push('branch');
-      if (!filtersEqual(migrateStringFilter(globalReportCache.selectedFranchisee), selectedFranchisee)) changedFields.push('franchisee');
-      if (!filtersEqual(globalReportCache.selectedTechnician, selectedTechnician)) changedFields.push('technician');
-      if (!filtersEqual(globalReportCache.selectedStatus, selectedStatus)) changedFields.push('status');
-      if (!filtersEqual(globalReportCache.priorityFilter, priorityFilter)) changedFields.push('priorityFilter');
-      if (!filtersEqual(globalReportCache.portalFilter, portalFilter)) changedFields.push('portalFilter');
-      if (globalReportCache.agingAsOf !== agingAsOf) changedFields.push('agingAsOf');
-      if ((globalReportCache.search || '') !== (debouncedSearch || '')) changedFields.push('debouncedSearch');
-      if ((globalReportCache.pincodeSearch || '') !== (debouncedPincodeSearch || '')) changedFields.push('debouncedPincode');
-    }
-    const filtersChanged = changedFields.length > 0;
-    const searchOrPinActive = !!(debouncedSearch?.trim() || debouncedPincodeSearch?.trim());
-    const startDateStr = toDateString(dateRange.start);
-    const endDateStr = toDateString(dateRange.end);
-    const filterSnapshot = JSON.stringify({
-      startDateStr,
-      endDateStr,
-      dateFilterColumn,
-      selectedCallTypes,
-      selectedOfficeIds,
-      selectedState,
-      selectedCity,
-      selectedBranch,
-      selectedFranchisee,
-      selectedTechnician,
-      selectedStatus,
-      priorityFilter,
-      portalFilter,
-      agingAsOf,
-      debouncedSearch: debouncedSearch || '',
-      debouncedPincodeSearch: debouncedPincodeSearch || '',
-    });
-    const prevScopeKey = globalReportCache
-      ? buildCorpusCacheKey(
-          toDateString(globalReportCache.dateRange.start),
-          toDateString(globalReportCache.dateRange.end),
-          globalReportCache.dateFilterColumn || 'dtrndate'
-        )
-      : null;
-    const currentScopeKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
-    const corpusFetchScopeChanged =
-      changedFields.includes('no_globalReportCache') ||
-      !prevScopeKey ||
-      prevScopeKey !== currentScopeKey;
-    const fetchOpts = {
-      skipCache: corpusFetchScopeChanged || searchOrPinActive,
-      searchOverride: debouncedSearch,
-      pincodeOverride: debouncedPincodeSearch,
-    };
+  const runRegisterFilterLoad = useCallback(
+    async (opts?: { force?: boolean }) => {
+      if (!dbInitialized || activeTab !== 'register') return;
 
-    if (filtersChanged) {
-      const dateScopeChanged =
-        changedFields.includes('dateRange.start') ||
-        changedFields.includes('dateRange.end') ||
-        changedFields.includes('dateFilterColumn');
-      if (filterSnapshot === lastAppliedFilterSnapshotRef.current) {
-        return;
-      }
-      if (filterEffectInFlightRef.current && !dateScopeChanged) {
-        return;
-      }
-      filterEffectInFlightRef.current = true;
-
-      reportPerf('filterEffect', 'filters changed → clear page cache + setPage(1) + fetchData(1)', t0, {
-        changedFields,
-        dateScopeChanged,
-        corpusFetchScopeChanged,
+      const applied = getAppliedFiltersSnapshot();
+      if (!applied) return;
+      const startDateStr = toDateString(applied.dateRange.start);
+      const endDateStr = toDateString(applied.dateRange.end);
+      const appliedDateColumn = applied.dateFilterColumn;
+      const searchOrPinActive = !!(applied.search?.trim() || applied.pincodeSearch?.trim());
+      const filterSnapshot = JSON.stringify({
         startDateStr,
         endDateStr,
-        why: 'Compared last successful fetch snapshot (globalReportCache) to current UI/debounced state.',
+        dateFilterColumn: appliedDateColumn,
+        selectedCallTypes: applied.selectedCallTypes,
+        selectedOfficeIds: applied.selectedOfficeIds,
+        selectedState: applied.selectedState,
+        selectedCity: applied.selectedCity,
+        selectedBranch: applied.selectedBranch,
+        selectedFranchisee: applied.selectedFranchisee,
+        selectedTechnician: applied.selectedTechnician,
+        selectedStatus: applied.selectedStatus,
+        priorityFilter: applied.priorityFilter,
+        portalFilter: applied.portalFilter,
+        agingAsOf,
+        debouncedSearch: applied.search || '',
+        debouncedPincodeSearch: applied.pincodeSearch || '',
       });
+
+      if (!opts?.force && filterSnapshot === lastAppliedFilterSnapshotRef.current) {
+        return;
+      }
+      if (filterEffectInFlightRef.current) {
+        return;
+      }
+
+      const prevScopeKey = globalReportCache
+        ? buildCorpusCacheKey(
+            toDateString(globalReportCache.dateRange.start),
+            toDateString(globalReportCache.dateRange.end),
+            globalReportCache.dateFilterColumn || 'dtrndate'
+          )
+        : null;
+      const currentScopeKey = buildCorpusCacheKey(startDateStr, endDateStr, appliedDateColumn);
+      const corpusFetchScopeChanged = !prevScopeKey || prevScopeKey !== currentScopeKey;
+      const fetchOpts = {
+        skipCache: !!opts?.force || corpusFetchScopeChanged || searchOrPinActive,
+        searchOverride: applied.search,
+        pincodeOverride: applied.pincodeSearch,
+      };
+
+      filterEffectInFlightRef.current = true;
       registerPagesCacheRef.current.clear();
       if (page !== 1) {
         setPage(1);
@@ -2721,101 +2695,77 @@ export default function ReportPage() {
       if (clearFiltersRef.current) {
         clearFiltersRef.current = false;
       }
-
       setFilterUpdating(true);
 
       if (searchOrPinActive) {
-        void fetchData(1, fetchOpts).finally(() => {
-          filterEffectInFlightRef.current = false;
-          lastAppliedFilterSnapshotRef.current = filterSnapshot;
-          setFilterUpdating(false);
-        });
-        return;
-      }
-
-      void (async () => {
         try {
-          if (readRegisterFromPostgresClient()) {
-            if (!getSharedCallsForScope()) {
-              await ensureSharedCallsLoaded(corpusFetchScopeChanged);
-            }
-            if (applyRegisterFromSharedCalls(1)) {
-              applySummaryFromSharedCalls();
-              lastAppliedFilterSnapshotRef.current = filterSnapshot;
-              return;
-            }
-            await fetchData(1, fetchOpts);
-            applySummaryFromSharedCalls();
-            lastAppliedFilterSnapshotRef.current = filterSnapshot;
-            return;
-          }
-
-          const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
-          const hasCorpus =
-            (callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0) ||
-            corpusStoreCoversFetchScope(callCorpusStore, startDateStr, endDateStr, dateFilterColumn);
-
-          if (!hasCorpus) {
-            await ensureCorpusLoaded({ silent: false, force: false });
-          }
-          await ensurePortalAuditCache(supabase);
-          applyRegisterFromCorpus(1);
-          applySummaryFromCorpus();
-          if (corpusSpanDays(startDateStr, endDateStr) > MAX_CLIENT_CORPUS_DAYS) {
-            await fetchData(1, fetchOpts);
-          }
+          await fetchData(1, fetchOpts);
           lastAppliedFilterSnapshotRef.current = filterSnapshot;
         } finally {
           filterEffectInFlightRef.current = false;
           setFilterUpdating(false);
         }
-      })();
-      return;
-    } else if (
-      searchOrPinActive &&
-      lastRegisterListQueryKeyRef.current === null
-    ) {
-      reportPerf('filterEffect', 'search active but never fetched → fetchData(1, skipCache)', t0, {
-        search: debouncedSearch,
-        pincode: debouncedPincodeSearch,
-        why: 'globalReportCache.search matched UI but no successful register fetch recorded for this query.',
-      });
-      registerPagesCacheRef.current.clear();
-      setPage(1);
-      fetchData(1, fetchOpts);
-    } else {
-      reportPerf('filterEffect', 'no fetch (cache matches UI)', t0, {
-        why: 'globalReportCache aligns with current filters; avoids redundant /api/report.',
-      });
-    }
-  }, [
-    dbInitialized,
-    dateRange,
-    dateFilterColumn,
-    filterAccount,
-    selectedCallTypes,
-    selectedState,
-    selectedCity,
-    selectedBranch,
-    selectedFranchisee,
-    selectedTechnician,
-    selectedStatus,
-    priorityFilter,
-    portalFilter,
-    agingAsOf,
-    debouncedSearch,
-    debouncedPincodeSearch,
-    activeTab,
-    page,
-    applyRegisterFromCorpus,
-    applyRegisterFromSharedCalls,
-    applySummaryFromCorpus,
-    applySummaryFromSharedCalls,
-    ensureCorpusLoaded,
-    ensureSharedCallsLoaded,
-    getSharedCallsForScope,
-    supabase,
-  ]);
+        return;
+      }
+
+      try {
+        if (readRegisterFromPostgresClient()) {
+          if (!getSharedCallsForScope()) {
+            await ensureSharedCallsLoaded(corpusFetchScopeChanged);
+          }
+          if (applyRegisterFromSharedCalls(1)) {
+            applySummaryFromSharedCalls();
+            lastAppliedFilterSnapshotRef.current = filterSnapshot;
+            return;
+          }
+          await fetchData(1, fetchOpts);
+          applySummaryFromSharedCalls();
+          lastAppliedFilterSnapshotRef.current = filterSnapshot;
+          return;
+        }
+
+        const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, appliedDateColumn);
+        const hasCorpus =
+          (callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0) ||
+          corpusStoreCoversFetchScope(callCorpusStore, startDateStr, endDateStr, appliedDateColumn);
+
+        if (!hasCorpus) {
+          await ensureCorpusLoaded({ silent: false, force: !!opts?.force });
+        }
+        await ensurePortalAuditCache(supabase);
+        applyRegisterFromCorpus(1);
+        applySummaryFromCorpus();
+        if (corpusSpanDays(startDateStr, endDateStr) > MAX_CLIENT_CORPUS_DAYS) {
+          await fetchData(1, fetchOpts);
+        }
+        lastAppliedFilterSnapshotRef.current = filterSnapshot;
+      } finally {
+        filterEffectInFlightRef.current = false;
+        setFilterUpdating(false);
+      }
+    },
+    [
+      dbInitialized,
+      activeTab,
+      getAppliedFiltersSnapshot,
+      agingAsOf,
+      page,
+      fetchData,
+      ensureSharedCallsLoaded,
+      getSharedCallsForScope,
+      applyRegisterFromSharedCalls,
+      applySummaryFromSharedCalls,
+      ensureCorpusLoaded,
+      applyRegisterFromCorpus,
+      applySummaryFromCorpus,
+      supabase,
+    ]
+  );
+
+  useEffect(() => {
+    if (!dbInitialized || activeTab !== 'register' || !appliedFilters) return;
+    void runRegisterFilterLoad();
+  }, [dbInitialized, appliedRevision, activeTab, appliedFilters, runRegisterFilterLoad]);
 
   useEffect(() => {
     if (!dbInitialized || lastRegisterListQueryKeyRef.current) return;
@@ -2869,62 +2819,51 @@ export default function ReportPage() {
   useEffect(() => {
     if (!dbInitialized) return;
     if (activeTab !== 'summary' && activeTab !== 'accounts') return;
+    hydrateSummaryFromCache();
+  }, [dbInitialized, activeTab]);
 
+  const runSummaryFilterLoad = useCallback(async () => {
+    const applied = getAppliedFiltersSnapshot();
+    if (!applied) return;
     hydrateSummaryFromCache();
 
-    void (async () => {
-      const startDateStr =
-        toDateString(dateRange.start);
-      const endDateStr =
-        toDateString(dateRange.end);
+    const startDateStr = toDateString(applied.dateRange.start);
+    const endDateStr = toDateString(applied.dateRange.end);
+    const appliedDateColumn = applied.dateFilterColumn;
 
-      if (readRegisterFromPostgresClient()) {
-        if (applySummaryFromSharedCalls()) return;
-        if (!getSharedCallsForScope()) {
-          await ensureSharedCallsLoaded(false);
-        }
-        if (applySummaryFromSharedCalls()) return;
-        await fetchSummaryFromApi();
-        return;
+    if (readRegisterFromPostgresClient()) {
+      if (applySummaryFromSharedCalls()) return;
+      if (!getSharedCallsForScope()) {
+        await ensureSharedCallsLoaded(false);
       }
-
-      const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
-      const hasCorpus =
-        callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0;
-
-      if (!hasCorpus) {
-        await ensureCorpusLoaded({ silent: true });
-      }
-      if (applySummaryFromCorpus()) return;
+      if (applySummaryFromSharedCalls()) return;
       await fetchSummaryFromApi();
-    })();
+      return;
+    }
+
+    const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, appliedDateColumn);
+    const hasCorpus =
+      callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0;
+
+    if (!hasCorpus) {
+      await ensureCorpusLoaded({ silent: true });
+    }
+    if (applySummaryFromCorpus()) return;
+    await fetchSummaryFromApi();
   }, [
-    dbInitialized,
-    activeTab,
-    viewCallTypesParam,
-    selectedBranch,
-    selectedFranchisee,
-    selectedState,
-    selectedCity,
-    selectedTechnician,
-    selectedStatus,
-    priorityFilter,
-    portalFilter,
-    debouncedSearch,
-    debouncedPincodeSearch,
-    dateRange.start,
-    dateRange.end,
-    dateFilterColumn,
-    agingAsOf,
-    corpusTick,
-    distributionCalls,
+    getAppliedFiltersSnapshot,
     applySummaryFromCorpus,
     applySummaryFromSharedCalls,
-    fetchSummaryFromApi,
     ensureCorpusLoaded,
     ensureSharedCallsLoaded,
+    fetchSummaryFromApi,
     getSharedCallsForScope,
   ]);
+
+  const handleApplySummaryFilters = useCallback(() => {
+    applyFilters();
+    void runSummaryFilterLoad();
+  }, [applyFilters, runSummaryFilterLoad]);
 
   useEffect(() => {
     return () => {
@@ -3693,11 +3632,14 @@ export default function ReportPage() {
       {activeTab === 'register' ? (
         <RegisterPageFilters
           summary={registerSummary}
-          loading={loading}
+          loading={loading || filterUpdating}
           loadingLabel="Loading call register…"
-          onSearchEnter={() => fetchData(1, { searchOverride: search, skipCache: true })}
-          onPincodeEnter={() => fetchData(1, { pincodeOverride: pincodeSearch, skipCache: true })}
-          onClearAll={() => { clearFiltersRef.current = true; }}
+          onApply={() => void runRegisterFilterLoad({ force: true })}
+          onSearchEnter={() => void runRegisterFilterLoad({ force: true })}
+          onPincodeEnter={() => void runRegisterFilterLoad({ force: true })}
+          onClearAll={() => {
+            clearFiltersRef.current = true;
+          }}
         />
       ) : (
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-2">
@@ -3750,7 +3692,7 @@ export default function ReportPage() {
               </>
             )}
           </div>
-          <RegisterBranchFranchiseeFilters />
+          <RegisterBranchFranchiseeFilters applyMode="confirm" />
           <DateRangeSelector value={dateRange.label} startDate={dateRange.start} endDate={dateRange.end} onChange={(range) => setDateRange(range)} />
           <div className="flex items-center gap-2">
             <span className="text-[10px] whitespace-nowrap text-amber-600 ui-label">Aging As Of</span>
@@ -3762,6 +3704,18 @@ export default function ReportPage() {
               onChange={(e) => setAgingAsOf(e.target.value)}
             />
           </div>
+          <button
+            type="button"
+            onClick={handleApplySummaryFilters}
+            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium shadow-sm ${
+              hasPendingFilterChanges
+                ? 'border border-slate-800 bg-slate-900 text-white hover:bg-slate-800'
+                : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            <Filter className="h-3.5 w-3.5" />
+            Apply filters
+          </button>
         </div>
       )}
 

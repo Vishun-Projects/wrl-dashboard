@@ -121,6 +121,7 @@ export function SerialAuditCallsDetailTable({
                 <th>Pincode</th>
                 <th>Product</th>
                 <th>Complaint</th>
+                <th>Repair done</th>
                 <th>Status</th>
                 <th>Technician</th>
                 <th>Solved</th>
@@ -178,6 +179,9 @@ export function SerialAuditCallsDetailTable({
                         ) : null}
                         <span>{call.complaint}</span>
                       </div>
+                    </td>
+                    <td className="max-w-[180px]" title={call.repairDone}>
+                      {call.repairDone}
                     </td>
                     <td>
                       <span className={STATUS_BADGE[call.statusTone]}>{call.statusLabel}</span>

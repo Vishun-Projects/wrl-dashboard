@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { prisma } from '@/lib/prisma';
+import { resolveBearerReportSecurity } from '@/lib/auth/resolve-bearer-security';
+import { toUserFacingError } from '@/lib/user-facing-errors';
 import { readSummaryFromPostgres } from '@/lib/read-model/flags';
 import {
   parseCallTypes,
@@ -21,17 +21,9 @@ import { deriveSummaryDashboard } from '@/lib/report-summary-derive';
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) return NextResponse.json({ error: 'No authorization header' }, { status: 401 });
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
-    if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const permissions = await (prisma as any).getUserPermissions(user.id);
-    if (!permissions.includes('view_reports') && !permissions.includes('view_calls')) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
+    const auth = await resolveBearerReportSecurity(req.headers.get('Authorization'));
+    if (!auth.ok) return auth.response;
+    const { security } = auth;
 
     const { searchParams } = new URL(req.url);
     const officeId = searchParams.get('officeId');
@@ -40,16 +32,8 @@ export async function GET(req: NextRequest) {
     const endDate = searchParams.get('endDate');
     const agingAsOf = searchParams.get('agingAsOf');
 
-    const { data: profile } = await supabaseAdmin
-      .from('app_users')
-      .select('office_ids, role')
-      .eq('id', user.id)
-      .single();
-
-    const assignedOffices = (profile?.office_ids || []).map(String);
-    const isHod =
-      permissions.includes('view_all_offices') ||
-      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
+    const assignedOffices = security.assignedOffices.map(String);
+    const isHod = security.isHod;
 
     if (readSummaryFromPostgres()) {
       const result = await querySummaryDashboard({
@@ -100,8 +84,8 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json(result);
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Report Summary Error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: toUserFacingError(err) }, { status: 500 });
   }
 }

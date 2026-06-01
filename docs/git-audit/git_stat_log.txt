@@ -1,0 +1,970 @@
+HASH: f1013f59b547fdaa75c8110096f123683c74ec01 | DATE: 2026-05-29 | MSG: removed crm mentionings
+ src/components/PostgresAutoSync.tsx   | 87 ++---------------------------------
+ src/contexts/ReportFiltersContext.tsx | 76 ++----------------------------
+ src/lib/db-proxy.ts                   |  2 +-
+ src/lib/read-model/client-flags.ts    | 10 ++--
+ src/lib/register-export-fetch.ts      | 12 ++---
+ src/lib/user-facing-errors.ts         |  3 ++
+ 6 files changed, 26 insertions(+), 164 deletions(-)
+
+HASH: 1ca8fee21730ebdda8bd82c7f0c505d7c69495ea | DATE: 2026-05-29 | MSG: removed crm mentionings
+ src/app/api/distribution/route.ts              |   6 +-
+ src/app/api/read-model/sync/route.ts           |   2 +-
+ src/app/api/report/arcp-claims/detail/route.ts |   7 +-
+ src/app/api/report/arcp-claims/route.ts        |   7 +-
+ src/app/api/report/corpus/route.ts             |  37 +++------
+ src/app/report/arcp-claims/page.tsx            |  83 ++++++++------------
+ src/app/report/distribution/page.tsx           |  26 ++++---
+ src/app/report/page.tsx                        |  72 +++++------------
+ src/app/report/serial-audit/page.tsx           |  13 ++--
+ src/components/FlaggingDisclaimer.tsx          |   2 +-
+ src/components/PostgresAutoSync.tsx            |   2 +-
+ src/components/RegisterPageFilters.tsx         |  10 ++-
+ src/contexts/ReportFiltersContext.tsx          | 104 +++++++++++++++++++------
+ src/lib/arcp-claims-browser-debug.ts           |   8 +-
+ src/lib/arcp-claims-fetch.ts                   |  12 +--
+ src/lib/arcp-claims-hybrid-load.ts             |   8 +-
+ src/lib/db-proxy.ts                            |   8 +-
+ src/lib/read-model/sync-meta.ts                |   2 +-
+ src/lib/read-model/trigger-sync-client.ts      |  15 ++--
+ src/lib/register-export-fetch.ts               |  15 +---
+ src/lib/report-filters.ts                      |   3 +
+ src/lib/user-facing-errors.ts                  |  32 ++++++++
+ 22 files changed, 239 insertions(+), 235 deletions(-)
+
+HASH: d1c0fffddaf26f18ca4f73192ede6967313ddb43 | DATE: 2026-05-29 | MSG: updated calls distribution for idle technicians
+ src/lib/read-model/arcp/incremental.ts | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+HASH: 7408f2706798e688b5089f7824651b8708f0bafc | DATE: 2026-05-29 | MSG: updated calls distribution for idle technicians
+ src/app/report/page.tsx | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+HASH: 2ae99cac91c7240d943d1f992e34fadbed229ab2 | DATE: 2026-05-29 | MSG: updated calls distribution for idle technicians
+ .gitignore                                    |   3 +
+ docs/sync.md                                  |  32 +-
+ package.json                                  |   1 +
+ scripts/arcp-nightly.ps1                      |  27 +
+ src/app/api/report/engineers/route.ts         | 138 ++++-
+ src/app/globals.css                           | 213 ++++++++
+ src/app/report/distribution/page.tsx          | 704 ++++++++++++++++++++------
+ src/app/report/page.tsx                       | 104 +++-
+ src/components/CallDetail.tsx                 |   4 +-
+ src/components/DistributionActiveFilters.tsx  |  68 +++
+ src/components/DistributionTablePanel.tsx     | 157 ++++++
+ src/contexts/ReportFiltersContext.tsx         |   9 +-
+ src/lib/distribution-engineer-roster-cache.ts |  40 ++
+ src/lib/distribution-idle-assignees.ts        | 448 ++++++++++++++++
+ src/lib/read-model/arcp/backfill.ts           |   2 +-
+ src/lib/read-model/arcp/coverage-query.ts     |  63 +++
+ src/lib/read-model/arcp/coverage-server.ts    |  65 +--
+ src/lib/read-model/arcp/incremental.ts        |  64 ++-
+ src/lib/read-model/cli.ts                     |   6 +-
+ src/lib/read-model/nightly.ts                 |  19 +
+ src/lib/read-model/queries/dims.ts            |  67 ++-
+ src/lib/read-model/sync-meta.ts               |  24 +-
+ src/lib/read-model/trigger-sync-client.ts     |  13 +-
+ src/lib/report-filters.ts                     |  76 ++-
+ src/lib/report-search.ts                      |   1 +
+ 25 files changed, 2061 insertions(+), 287 deletions(-)
+
+HASH: c7845588cc07938bdf9384fc19b8851c180ef6d5 | DATE: 2026-05-29 | MSG: updated arcp claims data from jan 2025 till 28 may 26
+ docs/arcp-trends-overview.html                     | 256 +++++++++
+ docs/read-model-cutover-checklist.md               |   3 +
+ docs/read-model-infra-gate.md                      |  45 +-
+ .../07-seed-sync-state.sql                         |   1 +
+ .../read-model-phase1-schema/08-arcp_lines_hot.sql |  53 ++
+ .../09-arcp_bm_ho_approve_columns.sql              |  20 +
+ docs/sync.md                                       |  41 ++
+ package.json                                       |   6 +-
+ requirements-sync.txt                              |   2 +
+ scripts/apply-read-model-schema.mjs                |  32 ++
+ scripts/check-sync-status.ts                       |  37 ++
+ scripts/generate-arcp-trends-html.ts               | 591 ++++++++++++++++++++
+ scripts/sync_worker.py                             | 106 ++++
+ scripts/verify-arcp-postgres-tally.ts              |  57 ++
+ src/app/admin/sync/page.tsx                        |  18 +-
+ src/app/api/read-model/cron/incremental/route.ts   |  26 -
+ src/app/api/read-model/cron/nightly/route.ts       |  26 -
+ src/app/api/read-model/cron/retention/route.ts     |  24 -
+ src/app/api/read-model/sync/route.ts               |  10 +-
+ src/app/api/report/arcp-claims/detail/route.ts     |  31 +-
+ src/app/api/report/arcp-claims/route.ts            |  58 +-
+ src/app/report/arcp-claims/page.tsx                | 569 ++++++++++++++++---
+ src/components/ArcpClaimsLoadBanner.tsx            |   6 +-
+ src/components/DashboardLayout.tsx                 |  39 +-
+ src/components/PostgresAutoSync.tsx                |  93 ++++
+ src/contexts/ReportFiltersContext.tsx              |  98 +++-
+ src/lib/arcp-claims-browser-debug.ts               | 161 ++++++
+ src/lib/arcp-claims-crm-labels.ts                  | 162 ++++++
+ src/lib/arcp-claims-detail-load.ts                 |   4 +
+ src/lib/arcp-claims-fetch.ts                       | 211 ++++++-
+ src/lib/arcp-claims-hybrid-load.ts                 | 309 +++++++++++
+ src/lib/arcp-claims-load.ts                        |   4 +
+ src/lib/arcp-claims-postgres.ts                    | 356 ++++++++++++
+ src/lib/arcp-claims-query.ts                       | 609 +++++++++++++++------
+ src/lib/arcp-claims-table.ts                       |  85 ++-
+ src/lib/db-proxy.ts                                |  58 +-
+ src/lib/prisma.ts                                  |  23 +-
+ src/lib/read-model/arcp/backfill.ts                | 187 +++++++
+ src/lib/read-model/arcp/coverage-server.ts         |  63 +++
+ src/lib/read-model/arcp/coverage-shared.ts         | 128 +++++
+ src/lib/read-model/arcp/crm-fetch.ts               | 286 ++++++++++
+ src/lib/read-model/arcp/dates.ts                   |  93 ++++
+ src/lib/read-model/arcp/incremental.ts             | 175 ++++++
+ src/lib/read-model/arcp/lock.ts                    | 144 +++++
+ src/lib/read-model/arcp/readiness.ts               |  47 ++
+ src/lib/read-model/arcp/reset.ts                   |  26 +
+ src/lib/read-model/arcp/transform.ts               | 136 +++++
+ src/lib/read-model/arcp/types.ts                   |  30 +
+ src/lib/read-model/arcp/upsert.ts                  | 116 ++++
+ src/lib/read-model/bootstrap-env.ts                |   8 +
+ src/lib/read-model/cli.ts                          |  46 +-
+ src/lib/read-model/client-flags.ts                 |  20 +-
+ src/lib/read-model/constants.ts                    |   2 +
+ src/lib/read-model/cron-auth.ts                    |  29 -
+ src/lib/read-model/db.ts                           |  22 +-
+ src/lib/read-model/flags.ts                        |   7 +-
+ src/lib/read-model/incremental.ts                  |  70 ++-
+ src/lib/read-model/lock.ts                         |   7 +-
+ src/lib/read-model/metrics.ts                      |  52 ++
+ src/lib/read-model/sync-meta.ts                    |  16 +-
+ src/lib/read-model/trigger-sync-client.ts          | 100 ++++
+ src/lib/read-model/upsert-facts.ts                 |  80 +++
+ src/lib/read-model/upsert-hot.ts                   |  17 +-
+ src/lib/run-pool.ts                                |  22 +
+ src/lib/supabase-chunked-fetch.ts                  |  36 +-
+ src/lib/supabase-session.ts                        |  53 ++
+ src/lib/supabaseAdmin.ts                           |  38 +-
+ 67 files changed, 5715 insertions(+), 571 deletions(-)
+
+HASH: 25031f01b9c08ea5b8bea8c1ef333af87fa69b8f | DATE: 2026-05-27 | MSG: excel bug resolved
+ src/app/api/report/route.ts            |  38 ++-
+ src/app/report/page.tsx                | 510 ++++++++++++++++-----------------
+ src/lib/read-model/queries/register.ts |  23 ++
+ src/lib/register-csv-export.ts         |  69 ++++-
+ src/lib/register-excel-export.ts       | 199 +++++++++++++
+ src/lib/register-export-fetch.ts       |  29 +-
+ 6 files changed, 600 insertions(+), 268 deletions(-)
+
+HASH: 2cc06f4a943f669054726b76df34cee90d635178 | DATE: 2026-05-27 | MSG: phir wohi dukh
+ src/app/api/read-model/sync/route.ts   |  12 +-
+ src/app/report/page.tsx                |  77 +++++++++--
+ src/components/DashboardLayout.tsx     |  47 ++++---
+ src/contexts/ReportFiltersContext.tsx  |  35 +----
+ src/lib/auth.ts                        |  59 ++++++--
+ src/lib/prisma.ts                      |  65 +++++----
+ src/lib/read-model/cli.ts              |   1 +
+ src/lib/read-model/db.ts               |  38 ++++-
+ src/lib/read-model/incremental.ts      | 246 +++++++++++++++++----------------
+ src/lib/read-model/queries/register.ts |   2 -
+ 10 files changed, 361 insertions(+), 221 deletions(-)
+
+HASH: 36e28ae9e31d7e94c789f215aed4c15f8175b408 | DATE: 2026-05-27 | MSG: date range error
+ src/app/report/page.tsx               | 22 +++++++++++++++++++---
+ src/components/DateRangeSelector.tsx  | 27 ++++++++++++++++-----------
+ src/contexts/ReportFiltersContext.tsx | 34 +++++++++++++++++++++++++++++-----
+ src/lib/report-corpus-storage.ts      |  4 ++++
+ src/lib/report-filters.ts             | 14 ++++++++++++++
+ 5 files changed, 82 insertions(+), 19 deletions(-)
+
+HASH: 4c6f9ed514b8b0c23257d1fa7bfd81b4e056b50b | DATE: 2026-05-27 | MSG: trying to resolve speed
+ src/app/api/report/route.ts            |  15 +++-
+ src/app/report/page.tsx                |  53 ++++++++++--
+ src/contexts/ReportFiltersContext.tsx  | 148 ++++++++++++++++++++++++++-------
+ src/lib/read-model/queries/register.ts |  61 ++++++++++++++
+ src/lib/register-export-fetch.ts       |  85 +++++++++++++++++++
+ src/lib/report-corpus-storage.ts       |  45 +++++++++-
+ 6 files changed, 367 insertions(+), 40 deletions(-)
+
+HASH: 8744e6ffe0016a4fcf9d7cfb87857e904bb0a16c | DATE: 2026-05-27 | MSG: trying to resolve speed
+ src/app/api/report/route.ts            |   1 +
+ src/app/report/page.tsx                | 217 ++++++++++++++++++++++++++++++++-
+ src/contexts/ReportFiltersContext.tsx  |   2 +-
+ src/lib/read-model/queries/register.ts |   3 +
+ src/lib/report-register-view.ts        |  32 ++++-
+ 5 files changed, 252 insertions(+), 3 deletions(-)
+
+HASH: 35ef162c962307d7d589fea238519a1f5ab37de1 | DATE: 2026-05-27 | MSG: removed vercel cron
+ src/app/admin/sync/page.tsx | 18 ++++++++++--------
+ vercel.json                 | 16 ----------------
+ 2 files changed, 10 insertions(+), 24 deletions(-)
+
+HASH: bdd640cdfaece8d5e8c9b87224d76664324644ea | DATE: 2026-05-27 | MSG: updated for cron jobs
+ src/app/admin/sync/page.tsx                      | 19 ++++++++++++++--
+ src/app/api/read-model/cron/incremental/route.ts | 26 +++++++++++++++++++++
+ src/app/api/read-model/cron/nightly/route.ts     | 26 +++++++++++++++++++++
+ src/app/api/read-model/cron/retention/route.ts   | 24 ++++++++++++++++++++
+ src/lib/read-model/cron-auth.ts                  | 29 ++++++++++++++++++++++++
+ vercel.json                                      | 16 +++++++++++++
+ 6 files changed, 138 insertions(+), 2 deletions(-)
+
+HASH: 52e5f374b5c259979679bbb169258e90f4880296 | DATE: 2026-05-27 | MSG: updated the mis reports page, added arcp claims and serial wise history page
+ scripts/apply-read-model-schema.mjs | 151 ------------------------------------
+ scripts/check-read-model-locks.mjs  |  44 -----------
+ scripts/check-read-model-status.mjs |  32 --------
+ scripts/count-major-minor.mjs       |  35 ---------
+ scripts/verify-arcp-tally.ts        |   3 +-
+ src/app/api/calls/[id]/route.ts     |  18 +++--
+ src/lib/read-model/backfill.ts      |   3 +-
+ 7 files changed, 16 insertions(+), 270 deletions(-)
+
+HASH: 18fe6c4a30032656773a6baf6c0a290dba7b35b3 | DATE: 2026-05-27 | MSG: updated the mis reports page, added arcp claims and serial wise history page
+ docs/read-model-cutover-checklist.md               | 238 ++++++
+ docs/read-model-infra-gate.md                      | 202 +++++
+ docs/read-model-phase1-architecture.md             | 391 +++++++++
+ docs/read-model-phase1-schema.sql                  | 246 ++++++
+ docs/read-model-phase1-schema/01-extensions.sql    |   2 +
+ docs/read-model-phase1-schema/02-enums.sql         |  30 +
+ .../03-calls_latest_hot.sql                        |  67 ++
+ .../04-call_metrics_daily.sql                      |  35 +
+ docs/read-model-phase1-schema/05-dimensions.sql    |  34 +
+ docs/read-model-phase1-schema/06-sync-meta.sql     |  51 ++
+ .../07-seed-sync-state.sql                         |   8 +
+ docs/read-model-sync-worker-spec.md                | 320 ++++++++
+ package-lock.json                                  | 236 ++++++
+ package.json                                       |  11 +-
+ scripts/apply-read-model-schema.mjs                | 151 ++++
+ scripts/check-read-model-locks.mjs                 |  44 +
+ scripts/check-read-model-status.mjs                |  32 +
+ scripts/diagnose-arcp-approve-dates.ts             |  74 ++
+ scripts/sample-arcp-dates.ts                       |  24 +
+ scripts/verify-arcp-tally.ts                       |  83 ++
+ src/app/admin/sync/page.tsx                        | 278 +++++++
+ src/app/api/distribution/route.ts                  |  43 +
+ src/app/api/offices/route.ts                       |   7 +
+ src/app/api/read-model/status/route.ts             |  26 +
+ src/app/api/read-model/sync/route.ts               |  38 +
+ src/app/api/report/arcp-claims/detail/route.ts     | 104 +++
+ src/app/api/report/arcp-claims/route.ts            | 181 +++++
+ src/app/api/report/call-types/route.ts             |   8 +-
+ src/app/api/report/corpus/route.ts                 |  11 +
+ src/app/api/report/engineers/route.ts              |   7 +
+ src/app/api/report/route.ts                        | 133 +++-
+ src/app/api/report/summary/route.ts                |  25 +-
+ src/app/report/arcp-claims/page.tsx                | 883 +++++++++++++++++++++
+ src/app/report/distribution/page.tsx               | 166 ++--
+ src/app/report/page.tsx                            | 704 +++++++++++-----
+ src/components/ArcpClaimsLoadBanner.tsx            | 163 ++++
+ src/components/ArcpClaimsMonthlyTable.tsx          |  72 ++
+ src/components/ArcpClaimsPdfViewer.tsx             |  79 ++
+ src/components/ArcpClaimsTable.tsx                 | 161 ++++
+ src/components/Sidebar.tsx                         |  10 +-
+ src/contexts/ReportFiltersContext.tsx              | 126 ++-
+ src/lib/arcp-claims-export.ts                      | 164 ++++
+ src/lib/arcp-claims-fetch.ts                       | 150 ++++
+ src/lib/arcp-claims-pdf.ts                         | 489 ++++++++++++
+ src/lib/arcp-claims-query.ts                       | 804 +++++++++++++++++++
+ src/lib/arcp-claims-table.ts                       | 427 ++++++++++
+ src/lib/db-proxy.ts                                |  29 +-
+ src/lib/prisma.ts                                  |  49 +-
+ src/lib/read-model/backfill.ts                     | 192 +++++
+ src/lib/read-model/batches.ts                      | 111 +++
+ src/lib/read-model/cli.ts                          |  78 ++
+ src/lib/read-model/client-flags.ts                 |  43 +
+ src/lib/read-model/crm-fetch.ts                    | 181 +++++
+ src/lib/read-model/dates.ts                        |  59 ++
+ src/lib/read-model/db.ts                           |  71 ++
+ src/lib/read-model/dims.ts                         | 122 +++
+ src/lib/read-model/flags.ts                        |  33 +
+ src/lib/read-model/hot-window.ts                   |  82 ++
+ src/lib/read-model/incremental.ts                  | 303 +++++++
+ src/lib/read-model/lock.ts                         | 178 +++++
+ src/lib/read-model/metrics.ts                      | 126 +++
+ src/lib/read-model/nightly.ts                      | 115 +++
+ src/lib/read-model/queries/dims.ts                 |  54 ++
+ src/lib/read-model/queries/distribution.ts         | 133 ++++
+ src/lib/read-model/queries/register.ts             | 428 ++++++++++
+ src/lib/read-model/queries/summary.ts              | 347 ++++++++
+ src/lib/read-model/retention.ts                    |  15 +
+ src/lib/read-model/sync-meta.ts                    | 232 ++++++
+ src/lib/read-model/transform.ts                    | 226 ++++++
+ src/lib/read-model/types.ts                        |  79 ++
+ src/lib/read-model/upsert-facts.ts                 | 176 ++++
+ src/lib/read-model/upsert-hot.ts                   | 163 ++++
+ src/lib/register-csv-export.ts                     | 150 ++++
+ src/lib/register-export-fetch.ts                   | 243 ++++++
+ src/lib/report-filters.ts                          |  55 +-
+ src/lib/report-register-view.ts                    |  31 +
+ src/lib/report-search.ts                           |  28 +-
+ src/lib/report-summary-derive.ts                   |   2 +-
+ src/lib/supabase-chunked-fetch.ts                  |  68 ++
+ 79 files changed, 11387 insertions(+), 353 deletions(-)
+
+HASH: cb4e2b461bb430e113ec141ff2d506602c1b9a94 | DATE: 2026-05-26 | MSG: implementing new dbs and calls
+ src/app/api/report/corpus/route.ts    | 253 ++++++++++++++++----
+ src/app/report/distribution/page.tsx  |  15 +-
+ src/app/report/page.tsx               | 373 +++++++++++++++++++-----------
+ src/app/report/serial-audit/page.tsx  |  20 +-
+ src/contexts/ReportFiltersContext.tsx | 239 ++++++++++++++++---
+ src/lib/db-proxy.ts                   | 421 +++++++++++++++++++++++-----------
+ src/lib/report-corpus.ts              | 247 ++++++++++++++++++--
+ src/lib/report-filters.ts             |  19 +-
+ src/lib/report-search.ts              |  66 +++---
+ src/lib/trhcalls-query.ts             |  21 +-
+ 10 files changed, 1245 insertions(+), 429 deletions(-)
+
+HASH: c006a81c1777252014b80aa21567ead5ea151199 | DATE: 2026-05-25 | MSG: Add report corpus caching, register filter UI, and serial audit APIs.
+ .gitignore                                         |   3 +
+ scripts/count-major-minor.mjs                      |  35 +
+ src/app/api/distribution/route.ts                  |  32 +-
+ src/app/api/report/corpus/route.ts                 | 435 +++++++++
+ src/app/api/report/drilldown/route.ts              |  25 +-
+ src/app/api/report/route.ts                        |  11 +-
+ src/app/api/report/serial-audit/route.ts           | 229 +++++
+ src/app/api/report/summary/route.ts                | 267 +-----
+ src/app/globals.css                                | 269 +++++-
+ src/app/report/distribution/page.tsx               |  97 +-
+ src/app/report/page.tsx                            | 997 ++++++++++++++++-----
+ src/app/report/serial-audit/page.tsx               | 602 ++++++++++---
+ src/components/RegisterActiveFilterChips.tsx       | 168 ++++
+ src/components/RegisterBranchFranchiseeFilters.tsx |   8 +-
+ src/components/RegisterCompactToolbar.tsx          | 144 +++
+ src/components/RegisterFilterBar.tsx               | 200 +++--
+ src/components/RegisterFilterDrawer.tsx            | 111 +++
+ src/components/RegisterMultiSelect.tsx             |  56 +-
+ src/components/RegisterPageFilters.tsx             |  52 ++
+ src/components/RegisterStatsBar.tsx                | 175 ++++
+ src/components/RegisterStatusChips.tsx             |  67 ++
+ src/components/ReportLoadingFeedback.tsx           |  80 ++
+ src/components/SerialAuditCallsDetailTable.tsx     | 201 +++++
+ src/contexts/ReportFiltersContext.tsx              | 715 ++++++++++-----
+ src/lib/corpus-server-cache.ts                     |  58 ++
+ src/lib/db-proxy.ts                                |  26 +-
+ src/lib/report-corpus-storage.ts                   | 124 +++
+ src/lib/report-corpus.ts                           | 237 +++++
+ src/lib/report-data-store.ts                       |  17 +
+ src/lib/report-filters.ts                          | 184 +++-
+ src/lib/report-geo.ts                              |  25 +
+ src/lib/report-portal-cache.ts                     |  92 ++
+ src/lib/report-search.ts                           |  63 +-
+ src/lib/report-summary-derive.ts                   | 412 +++++++++
+ src/lib/report-sync.ts                             |   2 +
+ src/lib/serial-complaint-audit.ts                  | 348 ++++++-
+ src/lib/trhcalls-query.ts                          | 324 ++++++-
+ 37 files changed, 5883 insertions(+), 1008 deletions(-)
+
+HASH: 6ea3e2b7fd648a0b0e6b77217b3ec1b590baf015 | DATE: 2026-05-25 | MSG: first commit
+ README.md | 1 +
+ 1 file changed, 1 insertion(+)
+
+HASH: 9c4b6ae2be1ef5120cafd12683a3019f7c6a8816 | DATE: 2026-05-22 | MSG: let's check ui
+ .vscode/settings.json                              |   11 +
+ src/app/admin/page.tsx                             |    2 +-
+ src/app/admin/roles/page.tsx                       |  310 +--
+ src/app/admin/users/page.tsx                       |  319 ++-
+ src/app/api/calls/route.ts                         |  424 ----
+ src/app/api/distribution/route.ts                  |  234 ++-
+ src/app/api/report/route.ts                        |  491 +++--
+ src/app/api/report/summary/route.ts                |   16 +-
+ src/app/calls/page.tsx                             |  557 -----
+ src/app/globals.css                                |  235 +++
+ src/app/login/page.tsx                             |    2 +-
+ src/app/profile/page.tsx                           |  388 ++--
+ src/app/report/distribution/page.tsx               |  710 ++-----
+ src/app/report/layout.tsx                          |    5 +
+ src/app/report/page.tsx                            | 2126 ++++++++++----------
+ src/app/report/serial-audit/page.tsx               |  372 ++++
+ src/components/CallCard.tsx                        |  110 -
+ src/components/CallTable.tsx                       |  220 --
+ src/components/DashboardLayout.tsx                 |   38 +-
+ src/components/DesktopView.tsx                     |  507 -----
+ src/components/MobileView.tsx                      |  330 ---
+ src/components/Navbar.tsx                          |    8 +-
+ src/components/PageShell.tsx                       |   70 +
+ src/components/RegisterBranchFranchiseeFilters.tsx |   51 +
+ src/components/RegisterColumnPicker.tsx            |  121 ++
+ src/components/RegisterFilterBar.tsx               |  217 ++
+ src/components/RegisterMultiSelect.tsx             |  138 ++
+ src/components/Sidebar.tsx                         |   24 +-
+ src/components/admin/AdminUi.tsx                   |  327 +++
+ src/contexts/ReportFiltersContext.tsx              |  736 +++++++
+ src/lib/call-type-badge.ts                         |   14 +
+ src/lib/register-table-columns.ts                  |   71 +
+ src/lib/report-data-store.ts                       |   52 +
+ src/lib/report-filters.ts                          |  290 +++
+ src/lib/report-search.ts                           |  331 +++
+ src/lib/report-sync.ts                             |  135 ++
+ src/lib/serial-complaint-audit.ts                  |  215 ++
+ src/lib/supabase/middleware.ts                     |   11 +-
+ src/lib/trhcalls-query.ts                          |  514 +++++
+ 39 files changed, 6118 insertions(+), 4614 deletions(-)
+
+HASH: 6c102541f447f148c9689407b53a8cda82f2eba8 | DATE: 2026-05-22 | MSG: updated for branch manager to see proper view
+ src/app/api/calls/route.ts          |   1 -
+ src/app/api/comments/route.ts       |   2 -
+ src/app/api/distribution/route.ts   |  12 ++-
+ src/app/api/offices/route.ts        |   1 -
+ src/app/api/report/route.ts         |  11 ++-
+ src/app/api/report/summary/route.ts |  13 +--
+ src/app/report/page.tsx             | 176 +++++++++++-------------------------
+ src/components/BranchTree.tsx       |  14 ++-
+ 8 files changed, 87 insertions(+), 143 deletions(-)
+
+HASH: 1f6803e2408fbd4cff531b9d29b00b0c8903f8f1 | DATE: 2026-05-22 | MSG: updating sidebar
+ src/app/api/distribution/route.ts    |   5 +-
+ src/app/api/offices/route.ts         |   2 +-
+ src/app/api/report/summary/route.ts  |  28 +++-
+ src/app/report/distribution/page.tsx | 260 +++++++++++++++++------------------
+ src/app/report/page.tsx              |  84 ++---------
+ src/components/Sidebar.tsx           |   4 +-
+ 6 files changed, 165 insertions(+), 218 deletions(-)
+
+HASH: 4a2187c1b5f7ae65ea1a2302dadc12629ca2a79e | DATE: 2026-05-22 | MSG: shayad use ho?
+ scratch-test.js                       |   12 +
+ src/app/api/calls/route.ts            |  344 ++-----
+ src/app/api/distribution/route.ts     |   72 +-
+ src/app/api/offices/route.ts          |   59 +-
+ src/app/api/report/drilldown/route.ts |    8 +-
+ src/app/api/report/route.ts           |  532 +++-------
+ src/app/api/report/summary/route.ts   |  313 +++---
+ src/app/calls/page.tsx                |  455 ++++++---
+ src/app/layout.tsx                    |   13 +-
+ src/app/report/distribution/page.tsx  |   18 +-
+ src/app/report/page.tsx               | 1705 ++++++++++++++-------------------
+ src/components/CallTable.tsx          |   32 +-
+ src/components/DesktopView.tsx        |   14 +-
+ src/lib/call-queries.ts               |   36 +
+ src/lib/db-proxy.ts                   |   27 +-
+ src/lib/global-cache.ts               |  384 ++++++++
+ test-query.js                         |   97 ++
+ test-query.ts                         |    1 +
+ test-shared-data.js                   |  134 +++
+ 19 files changed, 2165 insertions(+), 2091 deletions(-)
+
+HASH: c3eda74154cc5410b04b3273932fdf00f985ba8d | DATE: 2026-05-21 | MSG: ab mai karunga saaf aur thik
+ fix-drilldown.js                      | 15 ++++++++++++
+ src/app/api/calls/[id]/route.ts       | 44 +++++++++++++++++++++++-----------
+ src/app/api/report/drilldown/route.ts | 45 +++++++++++++++++++----------------
+ src/app/api/report/summary/route.ts   |  9 +++++--
+ src/app/report/distribution/page.tsx  |  6 ++---
+ src/app/report/page.tsx               | 32 +++++++++++++------------
+ 6 files changed, 97 insertions(+), 54 deletions(-)
+
+HASH: d40212f342fe4f95e2771268f93c0c41a1456615 | DATE: 2026-05-21 | MSG: worked on performance added local storage and reload technique
+ src/app/calls/page.tsx | 6 +-----
+ 1 file changed, 1 insertion(+), 5 deletions(-)
+
+HASH: d97ed8378be79028d74c95592e5d33d5e55d35bf | DATE: 2026-05-21 | MSG: worked on performance added local storage and reload technique
+ src/app/api/report/route.ts          |  61 +--
+ src/app/api/report/summary/route.ts  | 185 ++++----
+ src/app/calls/page.tsx               | 118 +++--
+ src/app/report/distribution/page.tsx |  99 +++-
+ src/app/report/page.tsx              | 872 ++++++++++++++++++++++++++---------
+ src/components/BranchTree.tsx        |  54 ++-
+ src/components/CallDetail.tsx        |  14 +-
+ src/components/CallTable.tsx         |   6 +-
+ src/components/DateRangeSelector.tsx |  32 +-
+ src/components/DesktopView.tsx       | 147 +++---
+ src/lib/db-proxy.ts                  |  32 +-
+ 11 files changed, 1115 insertions(+), 505 deletions(-)
+
+HASH: 76f3b4bb5640a23a8c41e453330600b7c5303a15 | DATE: 2026-05-20 | MSG: updated the calls
+ docs/db-sync-tool.html | 2227 ------------------------------------------------
+ 1 file changed, 2227 deletions(-)
+
+HASH: c6d3ee4334b4ed9229053d0d515cab9a4e92863d | DATE: 2026-05-20 | MSG: updated the calls
+ src/app/calls/page.tsx | 49 ++++++++++++++++++++++++++++++++++++++++---------
+ 1 file changed, 40 insertions(+), 9 deletions(-)
+
+HASH: 92607c1faa33664485e558ce0a01c6d141baa5a0 | DATE: 2026-05-20 | MSG: updated the /calls page for fetchings
+ src/app/api/calls/[id]/route.ts     |  68 ++--
+ src/app/api/calls/route.ts          |  26 +-
+ src/app/api/offices/route.ts        |  39 ++-
+ src/app/api/report/route.ts         | 331 +++++++++++++++---
+ src/app/api/report/summary/route.ts |   4 +-
+ src/app/calls/page.tsx              | 150 +++-----
+ src/app/report/page.tsx             | 672 +++++++++++++++---------------------
+ src/components/DesktopView.tsx      |  90 +++--
+ src/components/MobileView.tsx       |  52 ++-
+ src/lib/db-proxy.ts                 |  50 +--
+ 10 files changed, 816 insertions(+), 666 deletions(-)
+
+HASH: 9eec4064fbec298d8b3254692e4fce9903f0e172 | DATE: 2026-05-20 | MSG: updated mis report to localstorage index the calls
+ docs/Manisha Sundar Pawar.pdf           |   Bin 0 -> 175420 bytes
+ docs/WesternCRM_Schema_Blueprint.sql    | 56284 ++++++++++++++++++
+ docs/db-sync-tool.html                  |  2227 +
+ docs/mstcity_backup.json                | 94012 ++++++++++++++++++++++++++++++
+ src/app/api/calls/route.ts              |    22 +-
+ src/app/api/distribution/route.ts       |   452 +-
+ src/app/api/report/drilldown/route.ts   |   261 +-
+ src/app/api/report/route.ts             |   223 +-
+ src/app/api/report/summary/route.ts     |    19 +-
+ src/app/api/sync-proxy/[table]/route.ts |   114 +
+ src/app/api/sync-proxy/sizes/route.ts   |   139 +
+ src/app/report/distribution/page.tsx    |   522 +-
+ src/app/report/page.tsx                 |  1393 +-
+ 13 files changed, 154940 insertions(+), 728 deletions(-)
+
+HASH: f3cc8d3bce32ab0a32bca169db4a335c1c09880f | DATE: 2026-05-20 | MSG: removed tech solved column from summary dashboard and key account mis
+ src/app/report/page.tsx | 12 +-----------
+ 1 file changed, 1 insertion(+), 11 deletions(-)
+
+HASH: 930341a410835212ea8903d943a9deb49276ba79 | DATE: 2026-05-19 | MSG: clean up scratch files and apply client-side performance optimizations to resolve vercel type errors
+ scratch_count_check.js                           |  94 ------------
+ scratch_get_users.ts                             |  12 --
+ scratch_query.js                                 |   1 -
+ src/app/report/distribution/analyze_csv.js       | 179 ---------------------
+ src/app/report/distribution/check_pincode_map.js | 123 ---------------
+ src/app/report/distribution/inspect.js           |  89 -----------
+ src/app/report/distribution/inspect.ts           |  48 ------
+ src/app/report/distribution/page.tsx             | 188 +++++++++++++----------
+ test_counts.ts                                   |  25 ---
+ 9 files changed, 107 insertions(+), 652 deletions(-)
+
+HASH: ec2a79501894482d4730dffab6f3584282ae73f4 | DATE: 2026-05-19 | MSG: added new page and worked on ensuring correct data is shown
+ docs/PincodMatrix.csv                            | 165628 ++++++++++++++++++++
+ package-lock.json                                |    543 +-
+ package.json                                     |      2 +
+ scratch_get_users.ts                             |     12 +
+ scratch_query.js                                 |      1 +
+ src/app/api/distribution/route.ts                |    755 +
+ src/app/api/report/drilldown/route.ts            |     14 +-
+ src/app/api/report/route.ts                      |      6 +-
+ src/app/api/report/summary/route.ts              |     37 +-
+ src/app/globals.css                              |      2 +
+ src/app/report/distribution/analyze_csv.js       |    179 +
+ src/app/report/distribution/check_pincode_map.js |    123 +
+ src/app/report/distribution/inspect.js           |     89 +
+ src/app/report/distribution/inspect.ts           |     48 +
+ src/app/report/distribution/page.tsx             |    892 +
+ src/app/report/distribution/pincode_map.json     |      1 +
+ src/app/report/page.tsx                          |     45 +-
+ src/components/Sidebar.tsx                       |     11 +-
+ src/lib/db-proxy.ts                              |      5 +-
+ src/lib/supabase/middleware.ts                   |      3 +-
+ 20 files changed, 168345 insertions(+), 51 deletions(-)
+
+HASH: 2ae9e25d05de7753803e6573770181528eea7d9c | DATE: 2026-05-18 | MSG: deploying on vercel
+ src/app/api/temp-check/route.ts | 3 ---
+ 1 file changed, 3 deletions(-)
+
+HASH: bb9a610e15932a9ff658b12ab39be1a4eb56923f | DATE: 2026-05-18 | MSG: deploying on vercel
+ src/app/profile/page.tsx         | 14 +++++++++++++-
+ src/app/report/test_raw.ts       | 40 ----------------------------------------
+ src/app/report/test_raw_month.ts | 40 ----------------------------------------
+ 3 files changed, 13 insertions(+), 81 deletions(-)
+
+HASH: aac337f1fa367f084cacc84691e864f46bbca6b8 | DATE: 2026-05-18 | MSG: removed js scripts
+ scratch/add-avatar-column.js      |  35 ---------
+ scratch/add_avatar_column.js      |  19 -----
+ scratch/check_constraint.js       |  24 ------
+ scratch/check_rls.js              |  51 -------------
+ scratch/check_storage_policies.js |  44 -----------
+ scratch/db_test.js                |  95 ------------------------
+ scratch/drop_constraint.js        |  19 -----
+ scratch/fix_rls.js                |  71 ------------------
+ scratch/inspect_mssql.js          |  38 ----------
+ scratch/inspect_mssql.ts          |  51 -------------
+ scratch/inspect_schema.ts         |  23 ------
+ scratch/inspect_uv.ts             |  24 ------
+ scratch/inspect_view_def.ts       |  18 -----
+ scratch/migrate_roles.sql         |  61 ---------------
+ scratch/run_migration.ts          |  30 --------
+ scratch/setup_storage.js          |  62 ----------------
+ scratch/test_db_queries.ts        |  89 ----------------------
+ scratch/view_def.sql              | 151 --------------------------------------
+ scripts/replace-typography.js     |  99 -------------------------
+ 19 files changed, 1004 deletions(-)
+
+HASH: e2665fe766102c9fc5c6ed5e972a3d204b7eb5ab | DATE: 2026-05-18 | MSG: updated for performance
+ public/test_count.json                 |   1 +
+ scratch/db_test.js                     |  95 ++++++
+ scratch/inspect_uv.ts                  |  36 +--
+ scratch/inspect_view_def.ts            |  18 ++
+ scratch/view_def.sql                   | 151 +++++++++
+ scratch_count_check.js                 |  94 ++++++
+ scripts/replace-typography.js          |  99 ++++++
+ src/app/admin/page.tsx                 |   2 +-
+ src/app/admin/roles/page.tsx           |  56 ++--
+ src/app/admin/users/page.tsx           | 156 ++++------
+ src/app/api/calls/[id]/route.ts        |  33 +-
+ src/app/api/calls/route.ts             | 108 ++++++-
+ src/app/api/comments/route.ts          |  20 +-
+ src/app/api/report/call-types/route.ts |   8 +-
+ src/app/api/report/drilldown/route.ts  |  69 +++--
+ src/app/api/report/engineers/route.ts  |  10 +-
+ src/app/api/report/route.ts            | 131 ++++++--
+ src/app/api/report/summary/route.ts    | 161 ++++------
+ src/app/api/temp-check/route.ts        |   3 +
+ src/app/calls/page.tsx                 |  29 +-
+ src/app/globals.css                    |  14 +
+ src/app/login/page.tsx                 |  12 +-
+ src/app/profile/page.tsx               | 114 ++++---
+ src/app/report/page.tsx                | 548 +++++++++++++++++++++------------
+ src/app/report/test_raw.ts             |  40 +++
+ src/app/report/test_raw_month.ts       |  40 +++
+ src/components/BranchTree.tsx          |  69 +++++
+ src/components/CallCard.tsx            |   8 +-
+ src/components/CallDetail.tsx          | 199 +++++++++---
+ src/components/CallTable.tsx           |  55 ++--
+ src/components/DateRangePicker.tsx     |   6 +-
+ src/components/DateRangeSelector.tsx   | 108 ++++---
+ src/components/DesktopView.tsx         | 128 ++++++--
+ src/components/FlaggingDisclaimer.tsx  |   2 +-
+ src/components/MobileView.tsx          |  26 +-
+ src/components/Navbar.tsx              |  28 +-
+ src/components/Sidebar.tsx             |  41 +--
+ src/components/SummaryBar.tsx          |  16 +-
+ test-dates.ts                          |  27 --
+ test-dates2.ts                         |  15 -
+ test-dates3.ts                         |  13 -
+ test-dates4.ts                         |  14 -
+ test_counts.ts                         |  25 ++
+ 43 files changed, 1939 insertions(+), 889 deletions(-)
+
+HASH: f67ed4e257eb34e6b48137dab1343ab74cd4875a | DATE: 2026-05-18 | MSG: updated layout and filterings and added profile setting and rbac page
+ prisma/schema.prisma                      |   1 +
+ scratch/add-avatar-column.js              |  35 ++
+ scratch/add_avatar_column.js              |  19 +
+ scratch/check_constraint.js               |  24 ++
+ scratch/check_rls.js                      |  51 +++
+ scratch/check_storage_policies.js         |  44 +++
+ scratch/drop_constraint.js                |  19 +
+ scratch/fix_rls.js                        |  71 ++++
+ scratch/inspect_mssql.js                  |  38 ++
+ scratch/inspect_mssql.ts                  |  51 +++
+ scratch/inspect_schema.ts                 |  23 ++
+ scratch/inspect_uv.ts                     |  34 ++
+ scratch/migrate_roles.sql                 |  61 ++++
+ scratch/run_migration.ts                  |  30 ++
+ scratch/setup_storage.js                  |  62 ++++
+ scratch/test_db_queries.ts                |  89 +++++
+ src/app/admin/roles/page.tsx              | 293 +++++++++++++++
+ src/app/admin/users/page.tsx              |  85 ++---
+ src/app/api/admin/roles/route.ts          | 133 +++++++
+ src/app/api/admin/users/password/route.ts |   8 +-
+ src/app/api/admin/users/route.ts          |  43 +--
+ src/app/api/auth/me/route.ts              |  14 +
+ src/app/api/calls/route.ts                | 161 +++++++--
+ src/app/api/comments/route.ts             |  13 +-
+ src/app/api/debug-columns/route.ts        |  16 -
+ src/app/api/offices/route.ts              |  25 +-
+ src/app/api/profile/password/route.ts     |  30 ++
+ src/app/api/profile/route.ts              |  44 +++
+ src/app/api/report/route.ts               | 127 +++++--
+ src/app/api/report/summary/route.ts       |  32 +-
+ src/app/calls/page.tsx                    | 259 +++++++++++---
+ src/app/globals.css                       |  23 +-
+ src/app/layout.tsx                        |   7 +-
+ src/app/profile/page.tsx                  | 318 +++++++++++++++++
+ src/app/report/page.tsx                   | 572 +++++++++++++++++++++++-------
+ src/components/CallDetail.tsx             |  53 ++-
+ src/components/CallTable.tsx              |  87 +++--
+ src/components/DashboardLayout.tsx        |  61 ++++
+ src/components/DesktopView.tsx            | 184 +++++-----
+ src/components/MobileView.tsx             |  11 +-
+ src/components/Navbar.tsx                 | 221 ++++++++++++
+ src/components/Sidebar.tsx                | 278 +++++++++++++++
+ src/lib/auth.ts                           |  21 +-
+ src/lib/prisma.ts                         |  15 +
+ 44 files changed, 3271 insertions(+), 515 deletions(-)
+
+HASH: e6c225697d8cd6a76cf163cc0fb40cc10d146257 | DATE: 2026-05-16 | MSG: added middlewares and securities
+ package-lock.json                                 |   26 +
+ package.json                                      |    1 +
+ public/WRL_Detailed_Breakdown_2026-05-15 (1).xlsx |  Bin 41482 -> 0 bytes
+ public/WRL_Detailed_Breakdown_2026-05-15.xlsx     |  Bin 195506 -> 0 bytes
+ public/WRL_MIS_Report_2026-05-15 (1).xls          | 1035 ---------------------
+ public/WRL_MIS_Report_2026-05-15 (1).xlsx         |  Bin 7128 -> 250294 bytes
+ public/WRL_MIS_Report_2026-05-15 (2).xls          |   70 --
+ public/WRL_MIS_Report_2026-05-15 (3).xls          |  199 ----
+ public/WRL_MIS_Report_2026-05-15 (4).xls          |  447 ---------
+ public/WRL_MIS_Report_2026-05-15 (5).xls          |  447 ---------
+ public/WRL_MIS_Report_2026-05-15.csv              |  Bin 7014 -> 0 bytes
+ public/WRL_MIS_Report_2026-05-15.xls              |  199 ----
+ public/WRL_MIS_Report_2026-05-15.xlsx             |  Bin 9345 -> 321291 bytes
+ public/~$WRL_MIS_Report_2026-05-15 (1).xlsx       |  Bin 165 -> 0 bytes
+ src/app/admin/users/page.tsx                      |    3 +-
+ src/app/api/admin/users/password/route.ts         |   16 +-
+ src/app/api/admin/users/route.ts                  |   46 +-
+ src/app/api/calls/[id]/route.ts                   |   17 +-
+ src/app/api/calls/route.ts                        |   22 +-
+ src/app/api/comments/route.ts                     |   22 +-
+ src/app/api/flags/route.ts                        |   12 +-
+ src/app/api/offices/route.ts                      |   12 +-
+ src/app/api/report/drilldown/route.ts             |   16 +-
+ src/app/api/report/route.ts                       |   19 +-
+ src/app/api/report/summary/route.ts               |   55 +-
+ src/app/calls/page.tsx                            |    3 +-
+ src/app/login/page.tsx                            |    3 +-
+ src/app/report/page.tsx                           |  519 ++++++-----
+ src/components/DesktopView.tsx                    |    3 +-
+ src/lib/auth.ts                                   |   11 +-
+ src/lib/supabase.ts                               |    6 -
+ src/lib/supabase/client.ts                        |    8 +
+ src/lib/supabase/middleware.ts                    |   69 ++
+ src/lib/supabase/server.ts                        |   29 +
+ src/middleware.ts                                 |   19 +
+ 35 files changed, 629 insertions(+), 2705 deletions(-)
+
+HASH: 3c404205d7bd8169747041c7883c6f3134b1fb04 | DATE: 2026-05-15 | MSG: updated branch search to have typeset also updated summary dashboard to show all counts not just breakdown
+ src/app/api/report/route.ts         |  11 +++-
+ src/app/api/report/summary/route.ts |  61 ++++++++++++++----
+ src/app/report/page.tsx             | 121 ++++++++++++++++++++++++++++++++++--
+ 3 files changed, 177 insertions(+), 16 deletions(-)
+
+HASH: 4f51d38bfa268e640a0114acfef02bf4aca22405 | DATE: 2026-05-15 | MSG: now reports are verified for key mis and summary dashboard
+ public/WRL_Detailed_Breakdown_2026-05-15 (1).xlsx | Bin 0 -> 41482 bytes
+ public/WRL_Detailed_Breakdown_2026-05-15.xlsx     | Bin 0 -> 195506 bytes
+ public/WRL_MIS_Report_2026-05-15 (1).xlsx         | Bin 0 -> 7128 bytes
+ public/WRL_MIS_Report_2026-05-15.csv              | Bin 0 -> 7014 bytes
+ public/~$WRL_MIS_Report_2026-05-15 (1).xlsx       | Bin 0 -> 165 bytes
+ scratch/check_dupes.js                            |  53 -----
+ scratch/debug_summary.js                          |   7 -
+ scratch/get_april_stats.js                        |  48 ----
+ scratch/get_summary.js                            |  39 ----
+ scratch/test_date_format.js                       |  26 ---
+ src/app/api/report/route.ts                       |  17 ++
+ src/app/api/report/summary/route.ts               | 118 +++++-----
+ src/app/report/page.tsx                           | 266 +++++++++++++++-------
+ test-dates.ts                                     |  27 +++
+ test-dates2.ts                                    |  15 ++
+ test-dates3.ts                                    |  13 ++
+ test-dates4.ts                                    |  14 ++
+ 17 files changed, 334 insertions(+), 309 deletions(-)
+
+HASH: e9ff2ef2b1ac71c604e444ab8bacd7cf2c675a55 | DATE: 2026-05-15 | MSG: testing for reports discrepencies
+ scratch/check_dupes.js                 |  53 +++++
+ scratch/debug_summary.js               |   7 +
+ scratch/get_april_stats.js             |  48 +++++
+ scratch/get_summary.js                 |  39 ++++
+ scratch/test_date_format.js            |  26 +++
+ src/app/api/debug-columns/route.ts     |  16 ++
+ src/app/api/report/call-types/route.ts |  29 +++
+ src/app/api/report/drilldown/route.ts  | 117 +++++++++++
+ src/app/api/report/route.ts            |   9 +-
+ src/app/api/report/summary/route.ts    | 114 +++++-----
+ src/app/report/page.tsx                | 368 +++++++++++++++++++++++++++------
+ src/lib/db-proxy.ts                    |  26 ++-
+ 12 files changed, 733 insertions(+), 119 deletions(-)
+
+HASH: 49660ff1d3fc86dc387643212c97eada29b3ee20 | DATE: 2026-05-15 | MSG: excel export done
+ scratch/check_mapping.ts | 18 -----------------
+ scratch/debug_mapping.js | 52 ------------------------------------------------
+ 2 files changed, 70 deletions(-)
+
+HASH: 44466b294a2321f6dd9ad30eb460309e779eb2ef | DATE: 2026-05-15 | MSG: excel export done
+ package-lock.json                        |  977 +++++++++++++++++++++++++++-
+ package.json                             |    1 +
+ public/WRL_MIS_Report_2026-05-15 (1).xls | 1035 ++++++++++++++++++++++++++++++
+ public/WRL_MIS_Report_2026-05-15 (2).xls |   70 ++
+ public/WRL_MIS_Report_2026-05-15 (3).xls |  199 ++++++
+ public/WRL_MIS_Report_2026-05-15 (4).xls |  447 +++++++++++++
+ public/WRL_MIS_Report_2026-05-15 (5).xls |  447 +++++++++++++
+ public/WRL_MIS_Report_2026-05-15.xls     |  199 ++++++
+ public/WRL_MIS_Report_2026-05-15.xlsx    |  Bin 0 -> 9345 bytes
+ scratch/check_mapping.ts                 |   18 +
+ scratch/debug_mapping.js                 |   52 ++
+ src/app/api/report/summary/route.ts      |    3 +-
+ src/app/report/page.tsx                  |  438 ++++++++++---
+ 13 files changed, 3784 insertions(+), 102 deletions(-)
+
+HASH: 8fc04859f267b96da9da0c88421f6238c02166df | DATE: 2026-05-15 | MSG: reports page refresh once done
+ src/app/report/page.tsx | 11 ++++-------
+ 1 file changed, 4 insertions(+), 7 deletions(-)
+
+HASH: 22582d1efd9347f6e0a22c5eb6b1e406a881be29 | DATE: 2026-05-15 | MSG: reports page made
+ src/app/api/report/route.ts | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+HASH: 180743afb9f10fb83d5c60565ae571698e2780f9 | DATE: 2026-05-15 | MSG: reports page made
+ scratch/check_aa.js               | 14 --------------
+ scratch/check_hierarchy.js        | 15 ---------------
+ scratch/check_hierarchy.ts        | 15 ---------------
+ scratch/check_indore.js           | 14 --------------
+ scratch/check_lucknow.js          | 14 --------------
+ scratch/check_zones.js            | 14 --------------
+ scratch/find_serial_col.ts        | 18 ------------------
+ scratch/find_statuses.js          | 13 -------------
+ scratch/find_statuses.ts          | 16 ----------------
+ scratch/find_tables.ts            | 16 ----------------
+ scratch/inspect_calltypes.ts      | 15 ---------------
+ scratch/inspect_db.ts             | 23 -----------------------
+ scratch/inspect_party_profile.ts  | 16 ----------------
+ scratch/inspect_partyprofile.ts   | 16 ----------------
+ scratch/inspect_serialno.ts       | 20 --------------------
+ scratch/inspect_serialno_party.ts | 15 ---------------
+ scratch/inspect_view.ts           | 20 --------------------
+ scratch/inspect_view_all.ts       | 17 -----------------
+ tsconfig.json                     |  2 +-
+ 19 files changed, 1 insertion(+), 292 deletions(-)
+
+HASH: b461347699494a1d73c7da635222244c2aa5b853 | DATE: 2026-05-15 | MSG: reports page made
+ docs/CRM_TableList.xlsb               |   Bin 0 -> 509003 bytes
+ docs/WesternCRM Schema Architect.txt  | 56284 ++++++++++++++++++++++++++++++++
+ scratch/check_aa.js                   |    14 +
+ scratch/check_hierarchy.js            |    15 +
+ scratch/check_hierarchy.ts            |    15 +
+ scratch/check_indore.js               |    14 +
+ scratch/check_lucknow.js              |    14 +
+ scratch/check_zones.js                |    14 +
+ scratch/find_serial_col.ts            |    18 +
+ scratch/find_statuses.js              |    13 +
+ scratch/find_statuses.ts              |    16 +
+ scratch/find_tables.ts                |    16 +
+ scratch/inspect_calltypes.ts          |    15 +
+ scratch/inspect_db.ts                 |    23 +
+ scratch/inspect_party_profile.ts      |    16 +
+ scratch/inspect_partyprofile.ts       |    16 +
+ scratch/inspect_serialno.ts           |    20 +
+ scratch/inspect_serialno_party.ts     |    15 +
+ scratch/inspect_view.ts               |    20 +
+ scratch/inspect_view_all.ts           |    17 +
+ src/app/api/offices/route.ts          |     2 +-
+ src/app/api/report/engineers/route.ts |    38 +
+ src/app/api/report/route.ts           |    83 +
+ src/app/api/report/summary/route.ts   |   198 +
+ src/app/globals.css                   |     8 +
+ src/app/report/page.tsx               |   933 +
+ src/components/CallDetail.tsx         |     4 +-
+ src/components/DesktopView.tsx        |    11 +-
+ src/components/MobileView.tsx         |    26 +-
+ src/lib/db-proxy.ts                   |     2 -
+ 30 files changed, 57867 insertions(+), 13 deletions(-)
+
+HASH: 3bd5580d7b3a03be863deb000dc1a833d453ae65 | DATE: 2026-05-14 | MSG: resolved mobile issue and visits tab
+ docs/BD & Deployment MIS.xlsx             | Bin 0 -> 17059 bytes
+ docs/CRm Call Dashboard.docx              | Bin 0 -> 17784 bytes
+ src/app/admin/users/page.tsx              | 103 +++++++-
+ src/app/api/admin/users/password/route.ts |  49 ++++
+ src/app/api/calls/[id]/route.ts           |  24 +-
+ src/app/calls/page.tsx                    |   6 +-
+ src/app/layout.tsx                        |   2 +-
+ src/components/CallDetail.tsx             | 381 +++++++++++++++++-------------
+ 8 files changed, 389 insertions(+), 176 deletions(-)
+
+HASH: e76f752fd658dd284f7935d314805fb8db9b0ad9 | DATE: 2026-05-14 | MSG: resolved mobile issue and visits tab
+ src/app/api/calls/[id]/route.ts |  5 ++--
+ src/components/CallDetail.tsx   | 63 ++++++++++++++++++++++++++++++++---------
+ src/components/DesktopView.tsx  |  2 +-
+ src/components/MobileView.tsx   |  2 +-
+ 4 files changed, 54 insertions(+), 18 deletions(-)
+
+HASH: 896eb7523cf94bd22b0a1a64746c1d9db661a124 | DATE: 2026-05-14 | MSG: working something
+ .gitignore                             |   2 +
+ check_major.js                         |  16 --
+ public/western-head-logo-2025.png      | Bin 0 -> 17756 bytes
+ scratch/add_started_at.ts              |  24 --
+ scratch/check_cache.js                 |  26 --
+ scratch/check_cache.ts                 |  31 ---
+ scratch/check_cols.js                  |  20 --
+ scratch/check_count.js                 |  17 --
+ scratch/check_reasons.ts               |  22 --
+ scratch/check_users_schema.ts          |  19 --
+ scratch/diagnose_db.ts                 |  44 ---
+ scratch/find_reasons.ts                |  42 ---
+ scratch/fix_schemas.ts                 |  55 ----
+ scratch/list_tables.ts                 |  26 --
+ scratch/migrate.js                     |  45 ---
+ scratch/migrate_started_at.ts          |  33 ---
+ scratch/purge_cache.js                 |  24 --
+ scratch/setup_cache_table.ts           |  51 ----
+ scratch/test_items.ts                  |  27 --
+ scratch/test_join.ts                   |  18 --
+ scratch/test_join_internal.ts          |  16 --
+ scratch/test_link.js                   |  37 ---
+ scratch/verify_cancel_reason.ts        |  31 ---
+ scratch/verify_linkage.ts              |  36 ---
+ src/app/admin/users/page.tsx           |   4 +-
+ src/app/api/admin/clear-cache/route.ts |   2 +-
+ src/app/api/admin/users/route.ts       |   2 +-
+ src/app/api/debug-parts/route.ts       |  38 ---
+ src/app/login/page.tsx                 |  95 ++++---
+ src/components/CallDetail.tsx          | 489 +++++++++++++++------------------
+ src/components/DesktopView.tsx         |   6 +-
+ src/components/MobileView.tsx          |   8 +-
+ src/lib/supabaseAdmin.ts               |   4 +-
+ ticket_detail_modal.html               | 133 ---------
+ 34 files changed, 281 insertions(+), 1162 deletions(-)
+
+HASH: e7c5e1f68bb4eba9905c64f07490bcf7f4a97097 | DATE: 2026-05-14 | MSG: first commit
+ .gitignore                             |    2 +
+ README.md                              |    1 +
+ check_major.js                         |   16 +
+ docs/BRD_FSD_content.txt               |    1 +
+ docs/SUPABASE_SETUP.md                 |   72 +
+ docs/WRL_BRD_FSD_v1.1.docx             |  Bin 0 -> 38916 bytes
+ docs/sourcecodecallview.txt            | 5631 ++++++++++++++++++++++++++++++++
+ package-lock.json                      | 2010 +++++++++++-
+ package.json                           |   18 +-
+ prisma.config.ts                       |   13 +
+ prisma/schema.prisma                   |  101 +
+ scratch/add_started_at.ts              |   24 +
+ scratch/check_cache.js                 |   26 +
+ scratch/check_cache.ts                 |   31 +
+ scratch/check_cols.js                  |   20 +
+ scratch/check_count.js                 |   17 +
+ scratch/check_reasons.ts               |   22 +
+ scratch/check_users_schema.ts          |   19 +
+ scratch/diagnose_db.ts                 |   44 +
+ scratch/find_reasons.ts                |   42 +
+ scratch/fix_schemas.ts                 |   55 +
+ scratch/list_tables.ts                 |   26 +
+ scratch/migrate.js                     |   45 +
+ scratch/migrate_started_at.ts          |   33 +
+ scratch/purge_cache.js                 |   24 +
+ scratch/setup_cache_table.ts           |   51 +
+ scratch/test_items.ts                  |   27 +
+ scratch/test_join.ts                   |   18 +
+ scratch/test_join_internal.ts          |   16 +
+ scratch/test_link.js                   |   37 +
+ scratch/verify_cancel_reason.ts        |   31 +
+ scratch/verify_linkage.ts              |   36 +
+ src/app/admin/page.tsx                 |   21 +
+ src/app/admin/users/page.tsx           |  601 ++++
+ src/app/api/admin/clear-cache/route.ts |   25 +
+ src/app/api/admin/users/route.ts       |  151 +
+ src/app/api/calls/[id]/route.ts        |  154 +
+ src/app/api/calls/route.ts             |  210 ++
+ src/app/api/comments/route.ts          |  105 +
+ src/app/api/debug-parts/route.ts       |   38 +
+ src/app/api/flags/route.ts             |   48 +
+ src/app/api/offices/route.ts           |   45 +
+ src/app/api/sync/route.ts              |    7 +
+ src/app/api/sync/status/route.ts       |   12 +
+ src/app/api/sync/stop/route.ts         |    7 +
+ src/app/calls/page.tsx                 |  361 ++
+ src/app/globals.css                    |   82 +-
+ src/app/layout.tsx                     |   26 +-
+ src/app/login/page.tsx                 |  103 +
+ src/app/page.tsx                       |   64 +-
+ src/components/CallCard.tsx            |  110 +
+ src/components/CallDetail.tsx          |  588 ++++
+ src/components/CallTable.tsx           |  194 ++
+ src/components/DateRangePicker.tsx     |  130 +
+ src/components/DateRangeSelector.tsx   |  143 +
+ src/components/DesktopView.tsx         |  410 +++
+ src/components/FlaggingDisclaimer.tsx  |   22 +
+ src/components/MobileView.tsx          |  301 ++
+ src/components/SummaryBar.tsx          |   64 +
+ src/components/Tooltip.tsx             |   20 +
+ src/lib/auth.ts                        |   22 +
+ src/lib/db-proxy.ts                    |  131 +
+ src/lib/prisma.ts                      |   33 +
+ src/lib/supabase.ts                    |    6 +
+ src/lib/supabaseAdmin.ts               |   16 +
+ ticket_detail_modal.html               |  133 +
+ 66 files changed, 12752 insertions(+), 140 deletions(-)
+
+HASH: 24457c79d4a2e42909bbd85305fe97a20fca405b | DATE: 2026-05-12 | MSG: Initial commit from Create Next App
+ .gitignore          |   41 +
+ AGENTS.md           |    5 +
+ CLAUDE.md           |    1 +
+ README.md           |   36 +
+ eslint.config.mjs   |   18 +
+ next.config.ts      |    7 +
+ package-lock.json   | 6693 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ package.json        |   26 +
+ postcss.config.mjs  |    7 +
+ public/file.svg     |    1 +
+ public/globe.svg    |    1 +
+ public/next.svg     |    1 +
+ public/vercel.svg   |    1 +
+ public/window.svg   |    1 +
+ src/app/favicon.ico |  Bin 0 -> 25931 bytes
+ src/app/globals.css |   26 +
+ src/app/layout.tsx  |   33 +
+ src/app/page.tsx    |   65 +
+ tsconfig.json       |   34 +
+ 19 files changed, 6997 insertions(+)

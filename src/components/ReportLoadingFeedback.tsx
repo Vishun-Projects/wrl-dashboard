@@ -53,28 +53,3 @@ export function ReportLoadingPanel({
     </div>
   );
 }
-
-type ReportLoadingOverlayProps = {
-  active: boolean;
-  label?: string;
-  children: React.ReactNode;
-};
-
-/** Overlays children with a semi-transparent loading layer. */
-export function ReportLoadingOverlay({
-  active,
-  label = 'Loading…',
-  children,
-}: ReportLoadingOverlayProps) {
-  return (
-    <div className="relative min-h-0 flex-1">
-      {children}
-      {active ? (
-        <div className="report-loading-overlay" role="status" aria-live="polite" aria-busy="true">
-          <div className="report-loading-panel-spinner" />
-          <p className="report-loading-panel-label">{label}</p>
-        </div>
-      ) : null}
-    </div>
-  );
-}

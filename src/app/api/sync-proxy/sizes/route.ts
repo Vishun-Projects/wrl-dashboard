@@ -1,36 +1,23 @@
 import { NextResponse } from 'next/server';
 import { postQuery } from '@/lib/db-proxy';
+import { authorizeSyncProxy } from '@/lib/sync-proxy-auth';
+import {
+  ESSENTIAL_SYNC_TABLES,
+  syncProxyCorsHeaders,
+  syncProxyOptions,
+} from '@/lib/sync-proxy-route';
+import { toUserFacingError } from '@/lib/user-facing-errors';
 import fs from 'fs';
 import path from 'path';
 
-const ESSENTIAL_TABLES = [
-  "trhcalls",
-  "mstoffice",
-  "mstusers",
-  "mstparty",
-  "mstcity",
-  "mststate",
-  "trdcalls2fault",
-  "mstrepair",
-  "trdcalls3parts",
-  "mstcallcancelreasons",
-  "mstfixedselection"
-];
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
-
 export async function OPTIONS() {
-  return new Response(null, {
-    status: 204,
-    headers: corsHeaders,
-  });
+  return syncProxyOptions();
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = await authorizeSyncProxy(request);
+  if (denied) return denied;
+
   let schemaFileTableCount = 0;
   try {
     const schemaPath = path.join(process.cwd(), 'docs', 'WesternCRM Schema Architect.txt');
@@ -39,12 +26,11 @@ export async function GET() {
       const matches = content.match(/CREATE TABLE/g);
       schemaFileTableCount = matches ? matches.length : 0;
     }
-  } catch (err: any) {
-    console.error("Error reading schema text file:", err.message);
+  } catch (err: unknown) {
+    console.error('Error reading schema text file:', err instanceof Error ? err.message : err);
   }
 
   try {
-    // 1. Try querying the SQL Server system catalog for actual table space and row counts
     const catalogQuery = `
       SELECT 
         t.NAME AS TableName,
@@ -68,72 +54,89 @@ export async function GET() {
     try {
       const res = await postQuery({ rawSql: catalogQuery });
       if (res.data && res.data.length > 0) {
-        const formatted = res.data.map((row: any) => {
+        const formatted = (res.data as Record<string, unknown>[]).map((row) => {
           const kb = Number(row.TotalSpaceKB || 0);
           const rows = Number(row.RowCounts || 0);
+          const tableName = String(row.TableName ?? '');
           return {
-            table: row.TableName,
+            table: tableName,
             rows,
             sizeKB: kb,
             sizeMB: Number((kb / 1024).toFixed(2)),
-            isEssential: ESSENTIAL_TABLES.includes(row.TableName.toLowerCase())
+            isEssential: ESSENTIAL_SYNC_TABLES.some(
+              (t) => t === tableName.toLowerCase()
+            ),
           };
         }).sort((a, b) => b.sizeKB - a.sizeKB);
 
         const totalMB = formatted.reduce((sum, item) => sum + item.sizeMB, 0);
-        return NextResponse.json({
-          success: true,
-          source: 'system_catalog',
-          totalTables: formatted.length,
-          totalSizeMB: Number(totalMB.toFixed(2)),
-          schemaFileTableCount,
-          tables: formatted
-        }, { headers: corsHeaders });
+        return NextResponse.json(
+          {
+            success: true,
+            source: 'system_catalog',
+            totalTables: formatted.length,
+            totalSizeMB: Number(totalMB.toFixed(2)),
+            schemaFileTableCount,
+            tables: formatted,
+          },
+          { headers: syncProxyCorsHeaders }
+        );
       }
     } catch (catError) {
-      console.warn("System catalog query failed, falling back to COUNT(1):", catError);
+      console.warn('System catalog query failed, falling back to COUNT(1):', catError);
     }
 
-    // 2. Fallback: Query COUNT(1) for our essential tables if system catalogs are restricted
-    const fallbackResults = [];
+    const fallbackResults: Array<{
+      table: string;
+      rows: number;
+      sizeKB: number;
+      sizeMB: number;
+      isEssential: boolean;
+    }> = [];
     let totalMBEst = 0;
 
-    for (const table of ESSENTIAL_TABLES) {
+    for (const table of ESSENTIAL_SYNC_TABLES) {
       try {
         const res = await postQuery({
-          fields: "COUNT(1) as cnt",
-          tableName: `${table} (NOLOCK)`
+          fields: 'COUNT(1) as cnt',
+          tableName: `${table} (NOLOCK)`,
         });
-        const count = Number(res.data?.[0]?.cnt || 0);
-        // Estimate 0.2 KB per row as a very conservative average
+        const count = Number((res.data as Record<string, unknown>[])?.[0]?.cnt || 0);
         const estKB = count * 0.2;
         const estMB = Number((estKB / 1024).toFixed(2));
         totalMBEst += estMB;
-        
+
         fallbackResults.push({
           table,
           rows: count,
           sizeKB: Math.round(estKB),
           sizeMB: estMB,
-          isEssential: true
+          isEssential: true,
         });
-      } catch (err: any) {
-        console.error(`Fallback failed for table ${table}:`, err.message);
+      } catch (err: unknown) {
+        console.error(
+          `Fallback failed for table ${table}:`,
+          err instanceof Error ? err.message : err
+        );
       }
     }
 
-    return NextResponse.json({
-      success: true,
-      source: 'row_counts_fallback',
-      totalTables: fallbackResults.length,
-      totalSizeMB: Number(totalMBEst.toFixed(2)),
-      schemaFileTableCount,
-      tables: fallbackResults.sort((a, b) => b.rows - a.rows)
-    }, { headers: corsHeaders });
-
-  } catch (error: any) {
-    console.error("Failed to query sizes API:", error);
-    return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
+    return NextResponse.json(
+      {
+        success: true,
+        source: 'row_counts_fallback',
+        totalTables: fallbackResults.length,
+        totalSizeMB: Number(totalMBEst.toFixed(2)),
+        schemaFileTableCount,
+        tables: fallbackResults.sort((a, b) => b.rows - a.rows),
+      },
+      { headers: syncProxyCorsHeaders }
+    );
+  } catch (error: unknown) {
+    console.error('Failed to query sizes API:', error);
+    return NextResponse.json(
+      { error: toUserFacingError(error) },
+      { status: 500, headers: syncProxyCorsHeaders }
+    );
   }
 }
-

@@ -7,9 +7,7 @@ const ADVISORY_KEY = 'read_model_sync_arcp';
 
 export const ARCP_STALE_LOCK_MS = Number(process.env.SYNC_STALE_LOCK_MS ?? 5 * 60 * 1000);
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+import { sleep } from '@/lib/async-utils';
 
 export async function releaseStaleArcpSyncLock(client: pg.PoolClient): Promise<boolean> {
   const result = await client.query(

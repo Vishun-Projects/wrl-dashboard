@@ -11,9 +11,21 @@ type RegisterFilterDrawerProps = {
   open: boolean;
   onClose: () => void;
   onClear?: () => void;
+  onApply?: () => void;
+  applyDisabled?: boolean;
+  drawerExtra?: React.ReactNode;
+  extraFilterCount?: number;
 };
 
-export function RegisterFilterDrawer({ open, onClose, onClear }: RegisterFilterDrawerProps) {
+export function RegisterFilterDrawer({
+  open,
+  onClose,
+  onClear,
+  onApply,
+  applyDisabled = false,
+  drawerExtra,
+  extraFilterCount = 0,
+}: RegisterFilterDrawerProps) {
   const {
     search,
     pincodeSearch,
@@ -31,6 +43,7 @@ export function RegisterFilterDrawer({ open, onClose, onClear }: RegisterFilterD
     clearAllFilters,
     setDateRange,
     setDateFilterColumn,
+    applyFilters,
   } = useReportFilters();
 
   const filterCount = countActiveFilters({
@@ -65,6 +78,7 @@ export function RegisterFilterDrawer({ open, onClose, onClear }: RegisterFilterD
     clearAllFilters();
     setDateRange(defaultDateRange());
     setDateFilterColumn(resolveRegisterDateSqlColumn(undefined));
+    applyFilters();
     onClear?.();
   };
 
@@ -80,12 +94,14 @@ export function RegisterFilterDrawer({ open, onClose, onClear }: RegisterFilterD
         <div className="register-filter-drawer-header">
           <div>
             <h2 className="register-filter-drawer-title">Filters</h2>
-            {filterCount > 0 && (
-              <p className="register-filter-drawer-subtitle">{filterCount} active</p>
+            {filterCount + extraFilterCount > 0 && (
+              <p className="register-filter-drawer-subtitle">
+                {filterCount + extraFilterCount} active
+              </p>
             )}
           </div>
           <div className="register-filter-drawer-header-actions">
-            {filterCount > 0 && (
+            {filterCount + extraFilterCount > 0 && (
               <button type="button" onClick={handleClear} className="register-filter-drawer-clear">
                 Clear all
               </button>
@@ -98,12 +114,23 @@ export function RegisterFilterDrawer({ open, onClose, onClear }: RegisterFilterD
 
         <div className="register-filter-drawer-body custom-scrollbar">
           <RegisterFilterBar layout="drawer-content" applyMode="instant" showClearButton={false} />
+          {drawerExtra}
         </div>
 
-        <div className="register-filter-drawer-footer">
-          <button type="button" onClick={onClose} className="register-filter-drawer-done">
+        <div className="register-filter-drawer-footer register-filter-drawer-footer--actions">
+          <button type="button" onClick={onClose} className="register-filter-drawer-done register-filter-drawer-done--secondary">
             Close
           </button>
+          {onApply && (
+            <button
+              type="button"
+              onClick={onApply}
+              disabled={applyDisabled}
+              className="register-filter-drawer-done register-filter-drawer-done--primary disabled:opacity-50"
+            >
+              Apply filters
+            </button>
+          )}
         </div>
       </aside>
     </div>

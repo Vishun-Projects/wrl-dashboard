@@ -1,5 +1,5 @@
 import { LOCAL_UPCOUNTRY_NCODE_LABELS } from '@/lib/arcp-claims-query';
-import { parseCrmDate } from '@/lib/read-model/dates';
+import { maxCrmWatermarks, parseCrmDate } from '@/lib/read-model/dates';
 import {
   claimMonthFromDate,
   parseArcpDmYDate,
@@ -120,17 +120,5 @@ export function processArcpRows(rows: Record<string, unknown>[]): ArcpHotRow[] {
   return out;
 }
 
-export function maxArcpWatermarks(rows: Record<string, unknown>[]): {
-  lastEditedon: Date | null;
-  lastAddedon: Date | null;
-} {
-  let lastEditedon: Date | null = null;
-  let lastAddedon: Date | null = null;
-  for (const row of rows) {
-    const edited = parseCrmDate(row.editedon ?? row.addedon);
-    const added = parseCrmDate(row.addedon);
-    if (edited && (!lastEditedon || edited > lastEditedon)) lastEditedon = edited;
-    if (added && (!lastAddedon || added > lastAddedon)) lastAddedon = added;
-  }
-  return { lastEditedon, lastAddedon };
-}
+/** @deprecated Use maxCrmWatermarks from @/lib/read-model/dates */
+export const maxArcpWatermarks = maxCrmWatermarks;

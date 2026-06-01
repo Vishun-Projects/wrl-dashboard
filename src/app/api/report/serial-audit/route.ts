@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { postQuery } from '@/lib/db-proxy';
-import { prisma } from '@/lib/prisma';
-import pincodeMapData from '../../../report/distribution/pincode_map.json';
+import { resolveReportSecurity } from '@/lib/auth/report-security';
+import { enrichCallRowForReport } from '@/lib/report-geo';
 import {
   buildSerialAuditDetailRawSql,
   buildSerialAuditListRawSql,
-  enrichTrhcallBranchFranchisee,
 } from '@/lib/trhcalls-query';
 
 const LIST_CACHE_TTL = 30 * 60 * 1000;
@@ -18,28 +17,10 @@ const detailCache = new Map<string, { data: Record<string, unknown>[]; timestamp
 const listInflight = new Map<string, Promise<Record<string, unknown>[]>>();
 const detailInflight = new Map<string, Promise<Record<string, unknown>[]>>();
 
-type PincodeMapEntry = { city?: string; state?: string };
-
-type SecurityContext = { isHod: boolean; assignedOffices: string[] };
-
-function applyPincodeGeo(row: Record<string, unknown>): Record<string, unknown> {
-  const pin = String(row.pincode ?? '').trim();
-  const mapped = (pincodeMapData as Record<string, PincodeMapEntry>)[pin];
-  return {
-    ...row,
-    state: String(mapped?.state ?? '').toUpperCase(),
-    city: String(mapped?.city ?? '').toUpperCase(),
-  };
-}
+type SecurityContext = { isHod: boolean; assignedOffices: string[]; forbidden?: boolean };
 
 function mapDetailRows(rawRows: Record<string, unknown>[]): Record<string, unknown>[] {
-  return rawRows.map((row) =>
-    enrichTrhcallBranchFranchisee({
-      ...applyPincodeGeo(row),
-      franchisee_code: 'UNASSIGNED',
-      franchisee_name: 'Unallocated',
-    })
-  );
+  return rawRows.map((row) => enrichCallRowForReport(row));
 }
 
 function sortSerialList(rows: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -48,50 +29,32 @@ function sortSerialList(rows: Record<string, unknown>[]): Record<string, unknown
   );
 }
 
-async function resolveSecurity(userId: string): Promise<SecurityContext & { forbidden?: boolean }> {
-  const permissions = await (prisma as any).getUserPermissions(userId);
-  if (!permissions.includes('view_reports') && !permissions.includes('view_calls')) {
-    return { isHod: false, assignedOffices: [], forbidden: true };
-  }
-
-  const userProfileResult = await prisma.$queryRawUnsafe(
-    'SELECT office_ids, role FROM public.app_users WHERE id = $1 LIMIT 1',
-    userId
-  );
-  const profile = (userProfileResult as { office_ids?: string[]; role?: string }[])?.[0];
-  const assignedOffices = profile?.office_ids || [];
-  const isHod =
-    permissions.includes('view_all_offices') ||
-    ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(
-      profile?.role || ''
-    );
-
-  return { isHod, assignedOffices };
-}
-
 function buildListCacheKey(
   callType: string,
+  repair: string,
   minRepeats: number,
   startDate: string | null,
   endDate: string | null,
   security: SecurityContext
 ): string {
-  return `list_${startDate || 'all'}_${endDate || 'all'}_${callType}_${minRepeats}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
+  return `list_${startDate || 'all'}_${endDate || 'all'}_${callType}_${repair}_${minRepeats}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
 }
 
 function buildDetailCacheKey(
   serial: string,
   callType: string,
+  repair: string,
   startDate: string | null,
   endDate: string | null,
   security: SecurityContext
 ): string {
-  return `detail_${serial}_${startDate || 'all'}_${endDate || 'all'}_${callType}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
+  return `detail_${serial}_${startDate || 'all'}_${endDate || 'all'}_${callType}_${repair}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
 }
 
 async function fetchRepeatedSerialList(
   cacheKey: string,
   callType: string,
+  repair: string,
   minRepeats: number,
   startDate: string | null,
   endDate: string | null,
@@ -105,6 +68,7 @@ async function fetchRepeatedSerialList(
       rawSql: buildSerialAuditListRawSql({
         minRepeats,
         callType,
+        repair,
         isHod: security.isHod,
         assignedOffices: security.assignedOffices,
         startDate,
@@ -127,6 +91,7 @@ async function fetchSerialDetails(
   cacheKey: string,
   serial: string,
   callType: string,
+  repair: string,
   startDate: string | null,
   endDate: string | null,
   security: SecurityContext
@@ -138,6 +103,7 @@ async function fetchSerialDetails(
     const res = await postQuery({
       rawSql: buildSerialAuditDetailRawSql(serial, {
         callType,
+        repair,
         isHod: security.isHod,
         assignedOffices: security.assignedOffices,
         startDate,
@@ -167,13 +133,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const security = await resolveSecurity(user.id);
+    const security = await resolveReportSecurity(user.id);
     if (security.forbidden) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const { searchParams } = new URL(req.url);
     const callType = searchParams.get('callType') || 'All';
+    const repair =
+      searchParams.get('repair') || searchParams.get('complaint') || 'All';
     const serial = (searchParams.get('serial') || '').trim().toUpperCase();
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
@@ -183,7 +151,7 @@ export async function GET(req: NextRequest) {
     const scope = startDate || endDate ? 'window' : 'all-time';
 
     if (serial) {
-      const cacheKey = buildDetailCacheKey(serial, callType, startDate, endDate, security);
+      const cacheKey = buildDetailCacheKey(serial, callType, repair, startDate, endDate, security);
       if (!bypassCache && detailCache.has(cacheKey)) {
         const cached = detailCache.get(cacheKey)!;
         if (now - cached.timestamp < DETAIL_CACHE_TTL) {
@@ -195,6 +163,7 @@ export async function GET(req: NextRequest) {
         cacheKey,
         serial,
         callType,
+        repair,
         startDate,
         endDate,
         security
@@ -203,7 +172,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ calls, serial, cached: false, scope });
     }
 
-    const cacheKey = buildListCacheKey(callType, minRepeats, startDate, endDate, security);
+    const cacheKey = buildListCacheKey(callType, repair, minRepeats, startDate, endDate, security);
     if (!bypassCache && listCache.has(cacheKey)) {
       const cached = listCache.get(cacheKey)!;
       if (now - cached.timestamp < LIST_CACHE_TTL) {
@@ -214,6 +183,7 @@ export async function GET(req: NextRequest) {
     const serials = await fetchRepeatedSerialList(
       cacheKey,
       callType,
+      repair,
       minRepeats,
       startDate,
       endDate,

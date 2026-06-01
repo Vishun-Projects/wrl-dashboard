@@ -183,16 +183,16 @@ export async function getReadModelProgress(): Promise<ReadModelProgress> {
     message = 'Call register incremental sync in progress.';
   } else if (arcpRunning && !callsRunning) {
     phase = 'syncing';
-    message = 'ARCP sync in progress — call register can still load from Postgres.';
+    message = 'ARCP sync in progress — call register remains available.';
   } else if (hotStatus === 'ok' && hotCount >= HOT_TARGET_ROWS * 0.95) {
     phase = 'ready';
-    message = 'Backfill complete. Start incremental sync daemon when ready.';
+    message = 'Backfill complete. Start the incremental sync service when ready.';
   } else if (callsRunning || arcpRunning || hotCount > 0) {
     phase = 'backfilling';
     message = 'Initial data load in progress. This can take several hours.';
   } else if (hotStatus === 'pending_backfill') {
     phase = 'pending_backfill';
-    message = 'Run npm run sync-worker:backfill if not already started.';
+    message = 'Initial backfill has not started — contact your administrator.';
   } else if (callsRunning || arcpRunning) {
     phase = 'syncing';
     message = 'Sync worker is running.';

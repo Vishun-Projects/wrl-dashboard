@@ -16,6 +16,7 @@ import {
   daysAgoDate,
   splitDateRangeByDays,
   todayLocalDate,
+  maxCrmWatermarks,
   parseCrmDate,
 } from '@/lib/read-model/dates';
 import { updateSyncWatermarks, readHotTableWatermarks } from '@/lib/read-model/lock';
@@ -31,18 +32,6 @@ import {
 
 const ENTITY = 'calls_latest_hot';
 const HOT_CHUNK_DAYS = 7;
-
-function maxWatermarks(rows: Record<string, unknown>[]) {
-  let lastEditedon: Date | null = null;
-  let lastAddedon: Date | null = null;
-  for (const row of rows) {
-    const edited = parseCrmDate(row.editedon ?? row.addedon);
-    const added = parseCrmDate(row.addedon);
-    if (edited && (!lastEditedon || edited > lastEditedon)) lastEditedon = edited;
-    if (added && (!lastAddedon || added > lastAddedon)) lastAddedon = added;
-  }
-  return { lastEditedon, lastAddedon };
-}
 
 async function upsertHotChunk(rows: Record<string, unknown>[], label: string): Promise<number> {
   const hotRows = processCrmRows(dedupeCrmRows(rows));
@@ -134,7 +123,7 @@ export async function runInitialBackfill(opts?: { resume?: boolean }): Promise<v
     console.log(`[sync-worker] Upserted ${factRows.length} fact grains`);
 
     const combined = dedupeCrmRows(allRawRows);
-    let watermarks = maxWatermarks(combined);
+    let watermarks = maxCrmWatermarks(combined);
 
     await withClient(async (client) => {
       if (!watermarks.lastEditedon) {

@@ -18,7 +18,7 @@ export async function getArcpReadiness(): Promise<ArcpReadiness> {
     if (status === 'pending_backfill' && rowCount === 0) {
       return {
         ready: false,
-        reason: 'ARCP backfill has not completed — run npm run sync-worker:arcp-backfill',
+        reason: 'ARCP claims data is still loading — try again later or contact your administrator.',
         rowCount,
         status,
       };
@@ -36,7 +36,7 @@ export async function getArcpReadiness(): Promise<ArcpReadiness> {
     if (rowCount === 0) {
       return {
         ready: false,
-        reason: 'arcp_lines_hot is empty — run npm run sync-worker:arcp-backfill',
+        reason: 'ARCP claims cache is empty — contact your administrator.',
         rowCount,
         status,
       };

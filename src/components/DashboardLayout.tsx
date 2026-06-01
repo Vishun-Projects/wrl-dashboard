@@ -3,7 +3,6 @@
 import React, { createContext, useContext, useState, useLayoutEffect, useCallback, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import axios from 'axios';
-import { PostgresAutoSync } from './PostgresAutoSync';
 import { Sidebar } from './Sidebar';
 
 function MainContentPlaceholder() {
@@ -95,7 +94,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <UserContext.Provider value={{ userProfile, loadingProfile, refreshProfile: fetchProfile }}>
-      {authReady ? <PostgresAutoSync /> : null}
       <div className="flex flex-col md:flex-row h-screen overflow-hidden w-screen bg-slate-50 text-slate-700 font-sans">
         <Sidebar user={userProfile} />
         {authReady ? (

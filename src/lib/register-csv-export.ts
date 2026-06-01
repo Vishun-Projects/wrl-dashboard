@@ -1,33 +1,15 @@
 import { postQuery } from '@/lib/db-proxy';
+import { normalizeCrmCallRow } from '@/lib/call-row/normalize';
+import { escapeCsvCell } from '@/lib/csv-utils';
+import { REGISTER_EXPORT_COLUMNS } from '@/lib/register-table-columns';
 
-const CSV_COLUMNS: { key: string; header: string }[] = [
-  { key: 'UniqueCallNo', header: 'ID' },
-  { key: 'vcclid', header: 'Call Centre ID' },
-  { key: 'calltype', header: 'Call Type' },
-  { key: 'callsdtrndate', header: 'Date' },
-  { key: 'PartyName', header: 'Customer' },
-  { key: 'officename', header: 'Branch' },
-  { key: 'franchisee_name', header: 'Franchisee' },
-  { key: 'Pincode', header: 'Pincode' },
-  { key: 'itemname', header: 'Product' },
-  { key: 'callsvserialno', header: 'Serial' },
-  { key: 'serviceman', header: 'Technician' },
-  { key: 'vcomplaint', header: 'Complaint' },
-  { key: 'display_status', header: 'Status' },
-  { key: 'solvedDate', header: 'Solved Date' },
-  { key: 'remarks', header: 'Remarks' },
-  { key: 'vpersoncalling', header: 'Contact Person' },
-  { key: 'vinsttel1', header: 'Phone' },
-  { key: 'vinstaddress', header: 'Address' },
-];
+const CSV_COLUMNS = REGISTER_EXPORT_COLUMNS;
 
-export function csvEscape(value: unknown): string {
-  const s = value == null ? '' : String(value);
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
+/** @deprecated Use escapeCsvCell from @/lib/csv-utils */
+export const csvEscape = escapeCsvCell;
 
-export function rowForCsv(row: Record<string, unknown>): Record<string, unknown> {
+export function rowForCsv(raw: Record<string, unknown>): Record<string, unknown> {
+  const row = normalizeCrmCallRow(raw);
   const branch = row.officename ?? row.resolved_branch_name ?? row.branch_office_name ?? '';
   const franchisee =
     row.franchisee_name && row.franchisee_name !== 'Unallocated' ? row.franchisee_name : '';

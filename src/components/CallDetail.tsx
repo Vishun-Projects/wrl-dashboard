@@ -87,7 +87,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Synthesize comments from CRM rejection if present
+  // Synthesize comments from branch rejection if present
   const reasonText = call.crm_reject_reason || call.reject_reason || call.vBMrejectreason;
   const displayComments: any[] = [...(call.comments || [])];
   if ((call.crm_reject || call.rejected_at || call.bBMreject) && reasonText) {
@@ -95,7 +95,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
     if (!hasCrmComment) {
       displayComments.unshift({
         author_name: 'Branch Manager',
-        comment: `[CRM REJECTION REMARK] ${reasonText}`,
+        comment: `[Rejection remark] ${reasonText}`,
         created_at: call.crm_reject_at || call.rejected_at || call.dBMrejectdatetime || new Date().toISOString()
       });
     }
@@ -396,7 +396,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                     <div className="bg-rose-50 border border-rose-100 rounded-xl p-4 flex gap-3 text-rose-800">
                       <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
                       <div>
-                        <div className="text-[12px] ui-label">CRM Rejection Remark</div>
+                        <div className="text-[12px] ui-label">Rejection remark</div>
                         <div className="text-[13px] mt-1 ui-label">{reasonText}</div>
                         {(call.crm_reject_at || call.rejected_at || call.dBMrejectdatetime) && (
                           <div className="text-[10px] text-rose-400 font-medium mt-1">

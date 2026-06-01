@@ -1,5 +1,10 @@
 import type { RegisterMultiSelectOption } from '@/components/RegisterMultiSelect';
-import { looksLikeBranchOffice } from '@/lib/trhcalls-query';
+import {
+  looksLikeBranchOffice,
+  resolveRegisterDateSqlColumn,
+  type RegisterDateFilterColumn,
+} from '@/lib/trhcalls-query';
+import type { GlobalReportCacheType } from '@/lib/report-data-store';
 
 export type ReportDateRange = { start: Date; end: Date; label: string };
 
@@ -414,6 +419,13 @@ export function isDefaultDateRange(range: ReportDateRange): boolean {
   );
 }
 
+/** Page-specific chips (e.g. Serial Audit complaint filter) with custom remove handlers. */
+export type ExtraActiveFilterChip = {
+  id: string;
+  label: string;
+  onRemove: () => void;
+};
+
 export type ActiveFilterChipDescriptor = {
   id: string;
   label: string;
@@ -471,6 +483,73 @@ function pushArrayChips(
       removeValue: value,
     });
   });
+}
+
+/** Next applied snapshot after removing one chip (draft + applied stay in sync). */
+export function snapshotAfterRemovingActiveFilterChip(
+  applied: ReportFilterSnapshot,
+  chip: ActiveFilterChipDescriptor
+): ReportFilterSnapshot {
+  switch (chip.removeKey) {
+    case 'search':
+      return buildReportFilterSnapshot({ ...applied, search: '' });
+    case 'pincodeSearch':
+      return buildReportFilterSnapshot({ ...applied, pincodeSearch: '' });
+    case 'dateRange':
+      return buildReportFilterSnapshot({ ...applied, dateRange: defaultDateRange() });
+    case 'dateFilterColumn':
+      return buildReportFilterSnapshot({
+        ...applied,
+        dateFilterColumn: resolveRegisterDateSqlColumn(undefined),
+      });
+    case 'selectedStatus':
+      return buildReportFilterSnapshot({
+        ...applied,
+        selectedStatus: applied.selectedStatus.filter((v) => v !== chip.removeValue),
+      });
+    case 'selectedCallTypes':
+      return buildReportFilterSnapshot({
+        ...applied,
+        selectedCallTypes: applied.selectedCallTypes.filter((v) => v !== chip.removeValue),
+      });
+    case 'priorityFilter':
+      return buildReportFilterSnapshot({
+        ...applied,
+        priorityFilter: applied.priorityFilter.filter((v) => v !== chip.removeValue),
+      });
+    case 'portalFilter':
+      return buildReportFilterSnapshot({
+        ...applied,
+        portalFilter: applied.portalFilter.filter((v) => v !== chip.removeValue),
+      });
+    case 'selectedBranch':
+      return buildReportFilterSnapshot({
+        ...applied,
+        selectedBranch: applied.selectedBranch.filter((v) => v !== chip.removeValue),
+      });
+    case 'selectedFranchisee':
+      return buildReportFilterSnapshot({
+        ...applied,
+        selectedFranchisee: applied.selectedFranchisee.filter((v) => v !== chip.removeValue),
+      });
+    case 'selectedState':
+      return buildReportFilterSnapshot({
+        ...applied,
+        selectedState: applied.selectedState.filter((v) => v !== chip.removeValue),
+      });
+    case 'selectedCity':
+      return buildReportFilterSnapshot({
+        ...applied,
+        selectedCity: applied.selectedCity.filter((v) => v !== chip.removeValue),
+      });
+    case 'selectedTechnician':
+      return buildReportFilterSnapshot({
+        ...applied,
+        selectedTechnician: applied.selectedTechnician.filter((v) => v !== chip.removeValue),
+      });
+    default:
+      return applied;
+  }
 }
 
 export function buildActiveFilterChips(input: RegisterActiveFilterInput): ActiveFilterChipDescriptor[] {
@@ -592,4 +671,155 @@ export function buildRegisterViewFiltersFromContext(
     priorityFilter: input.priorityFilter,
     portalFilter: input.portalFilter,
   };
+}
+
+/** Committed filter state used for queries and corpus bulk loads. */
+export type ReportFilterSnapshot = {
+  search: string;
+  pincodeSearch: string;
+  dateRange: ReportDateRange;
+  dateFilterColumn: RegisterDateFilterColumn;
+  selectedOfficeIds: string[];
+  selectedCallTypes: string[];
+  selectedStatus: string[];
+  priorityFilter: string[];
+  portalFilter: string[];
+  selectedState: string[];
+  selectedCity: string[];
+  selectedBranch: string[];
+  selectedFranchisee: string[];
+  selectedTechnician: string[];
+};
+
+export type ReportFilterSnapshotInput = Omit<ReportFilterSnapshot, 'dateRange'> & {
+  dateRange: ReportDateRange;
+};
+
+export function buildReportFilterSnapshot(input: ReportFilterSnapshotInput): ReportFilterSnapshot {
+  return {
+    search: input.search ?? '',
+    pincodeSearch: input.pincodeSearch ?? '',
+    dateRange: input.dateRange,
+    dateFilterColumn: input.dateFilterColumn,
+    selectedOfficeIds: [...input.selectedOfficeIds],
+    selectedCallTypes: [...input.selectedCallTypes],
+    selectedStatus: [...input.selectedStatus],
+    priorityFilter: [...input.priorityFilter],
+    portalFilter: [...input.portalFilter],
+    selectedState: [...input.selectedState],
+    selectedCity: [...input.selectedCity],
+    selectedBranch: [...input.selectedBranch],
+    selectedFranchisee: [...input.selectedFranchisee],
+    selectedTechnician: [...input.selectedTechnician],
+  };
+}
+
+export function reportFilterSnapshotFromCache(
+  cache: GlobalReportCacheType
+): ReportFilterSnapshot {
+  return buildReportFilterSnapshot({
+    search: cache.search || '',
+    pincodeSearch: cache.pincodeSearch || '',
+    dateRange: {
+      start: new Date(cache.dateRange.start),
+      end: new Date(cache.dateRange.end),
+      label: cache.dateRange.label || 'This Month',
+    },
+    dateFilterColumn: cache.dateFilterColumn ?? 'dtrndate',
+    selectedOfficeIds: cache.selectedOfficeIds || [],
+    selectedCallTypes: cache.selectedCallTypes || [],
+    selectedStatus: migrateStringFilter(cache.selectedStatus),
+    priorityFilter: migrateStringFilter(cache.priorityFilter),
+    portalFilter: migrateStringFilter(cache.portalFilter),
+    selectedState: migrateStringFilter(cache.selectedState),
+    selectedCity: migrateStringFilter(cache.selectedCity),
+    selectedBranch: migrateStringFilter(cache.selectedBranch),
+    selectedFranchisee: migrateStringFilter(cache.selectedFranchisee),
+    selectedTechnician: migrateStringFilter(cache.selectedTechnician),
+  });
+}
+
+export function filterSnapshotKey(snapshot: ReportFilterSnapshot): string {
+  return JSON.stringify({
+    search: snapshot.search,
+    pincodeSearch: snapshot.pincodeSearch,
+    startDateStr: toDateString(snapshot.dateRange.start),
+    endDateStr: toDateString(snapshot.dateRange.end),
+    dateFilterColumn: snapshot.dateFilterColumn,
+    selectedOfficeIds: serializeFilterKey(snapshot.selectedOfficeIds),
+    selectedCallTypes: serializeFilterKey(snapshot.selectedCallTypes),
+    selectedStatus: serializeFilterKey(snapshot.selectedStatus),
+    priorityFilter: serializeFilterKey(snapshot.priorityFilter),
+    portalFilter: serializeFilterKey(snapshot.portalFilter),
+    selectedState: serializeFilterKey(snapshot.selectedState),
+    selectedCity: serializeFilterKey(snapshot.selectedCity),
+    selectedBranch: serializeFilterKey(snapshot.selectedBranch),
+    selectedFranchisee: serializeFilterKey(snapshot.selectedFranchisee),
+    selectedTechnician: serializeFilterKey(snapshot.selectedTechnician),
+  });
+}
+
+export function filterSnapshotsEqual(
+  a: ReportFilterSnapshot | null,
+  b: ReportFilterSnapshot | null
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return filterSnapshotKey(a) === filterSnapshotKey(b);
+}
+
+/** Partial draft fields passed to {@link applyFilters} after flushSync (avoids stale closures). */
+export type DraftFilterOverrides = Partial<{
+  search: string;
+  pincodeSearch: string;
+  dateRange: ReportDateRange;
+  dateFilterColumn: RegisterDateFilterColumn;
+  selectedOfficeIds: string[];
+  selectedCallTypes: string[];
+  selectedStatus: string[];
+  priorityFilter: string[];
+  portalFilter: string[];
+  selectedState: string[];
+  selectedCity: string[];
+  selectedBranch: string[];
+  selectedFranchisee: string[];
+  selectedTechnician: string[];
+}>;
+
+export function buildDraftFilterSnapshot(input: {
+  search: string;
+  pincodeSearch: string;
+  dateRange: ReportDateRange;
+  dateFilterColumn: RegisterDateFilterColumn;
+  selectedOfficeIds: string[];
+  selectedCallTypes: string[];
+  selectedStatus: string[];
+  priorityFilter: string[];
+  portalFilter: string[];
+  selectedState: string[];
+  selectedCity: string[];
+  selectedBranch: string[];
+  selectedFranchisee: string[];
+  selectedTechnician: string[];
+}): ReportFilterSnapshot {
+  return buildReportFilterSnapshot(input);
+}
+
+export function appliedFilterPartsFromSnapshot(
+  snapshot: ReportFilterSnapshot
+): RegisterViewFilterParts {
+  return buildRegisterViewFiltersFromContext({
+    search: snapshot.search,
+    pincodeSearch: snapshot.pincodeSearch,
+    selectedState: snapshot.selectedState,
+    selectedCity: snapshot.selectedCity,
+    selectedBranch: snapshot.selectedBranch,
+    selectedFranchisee: snapshot.selectedFranchisee,
+    selectedTechnician: snapshot.selectedTechnician,
+    selectedCallTypes: snapshot.selectedCallTypes,
+    selectedOfficeIds: snapshot.selectedOfficeIds,
+    selectedStatus: snapshot.selectedStatus,
+    priorityFilter: snapshot.priorityFilter,
+    portalFilter: snapshot.portalFilter,
+  });
 }

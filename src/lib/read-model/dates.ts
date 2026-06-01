@@ -46,6 +46,23 @@ export function splitDateRangeByDays(
   return chunks;
 }
 
+export function maxCrmWatermarks(rows: Record<string, unknown>[]): {
+  lastEditedon: Date | null;
+  lastAddedon: Date | null;
+} {
+  let lastEditedon: Date | null = null;
+  let lastAddedon: Date | null = null;
+
+  for (const row of rows) {
+    const edited = parseCrmDate(row.editedon ?? row.addedon);
+    const added = parseCrmDate(row.addedon);
+    if (edited && (!lastEditedon || edited > lastEditedon)) lastEditedon = edited;
+    if (added && (!lastAddedon || added > lastAddedon)) lastAddedon = added;
+  }
+
+  return { lastEditedon, lastAddedon };
+}
+
 export function parseCrmDate(value: unknown): Date | null {
   if (value == null || value === '') return null;
   const raw = String(value).trim();
