@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import axios from 'axios';
+import { TrnLink } from '@/components/TrnLink';
 import {
   MapPin,
   RefreshCw,
@@ -511,13 +511,12 @@ export default function LocationAuditPage() {
                             onClick={() => setSelectedListRow(row)}
                           >
                             <AdminTd>
-                              <Link
-                                href={`/report?search=${encodeURIComponent(row.vtrnno)}`}
+                              <TrnLink
+                                trn={row.vtrnno}
+                                callId={row.ncode}
+                                officeId={row.officeId}
                                 className="font-medium text-blue-700 hover:underline"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {row.vtrnno}
-                              </Link>
+                              />
                             </AdminTd>
                             <AdminTd className="max-w-[100px] truncate text-[10px]">
                               {row.branchName || '—'}

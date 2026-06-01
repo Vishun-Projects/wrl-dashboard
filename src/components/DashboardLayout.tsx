@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import axios from 'axios';
 import { Sidebar } from './Sidebar';
 import { PageAccessGuard } from './PageAccessGuard';
+import { CallDetailDialogProvider } from './CallDetailDialogProvider';
 
 function MainContentPlaceholder() {
   return (
@@ -95,16 +96,18 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <UserContext.Provider value={{ userProfile, loadingProfile, refreshProfile: fetchProfile }}>
-      <div className="flex flex-col md:flex-row h-screen overflow-hidden w-screen bg-slate-50 text-slate-700 font-sans">
-        <Sidebar user={userProfile} />
-        {authReady ? (
-          <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
-            <PageAccessGuard>{children}</PageAccessGuard>
-          </div>
-        ) : (
-          <MainContentPlaceholder />
-        )}
-      </div>
+      <CallDetailDialogProvider>
+        <div className="flex flex-col md:flex-row h-screen overflow-hidden w-screen bg-slate-50 text-slate-700 font-sans">
+          <Sidebar user={userProfile} />
+          {authReady ? (
+            <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+              <PageAccessGuard>{children}</PageAccessGuard>
+            </div>
+          ) : (
+            <MainContentPlaceholder />
+          )}
+        </div>
+      </CallDetailDialogProvider>
     </UserContext.Provider>
   );
 }

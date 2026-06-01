@@ -3,6 +3,7 @@
 import React, { useMemo } from 'react';
 import Link from 'next/link';
 import { ExternalLink } from 'lucide-react';
+import { TrnLink } from '@/components/TrnLink';
 import type { SerialAuditCallDetail } from '@/lib/serial-complaint-audit';
 import { getRepeatedComplaintKeys } from '@/lib/serial-complaint-audit';
 import { getCallTypeBadgeClass } from '@/lib/call-type-badge';
@@ -139,12 +140,11 @@ export function SerialAuditCallsDetailTable({
                     <td className="text-slate-400">{idx + 1}</td>
                     <td className="font-mono">
                       {call.trn ? (
-                        <Link
-                          href={`/report?search=${encodeURIComponent(call.trn)}`}
+                        <TrnLink
+                          trn={call.trn}
+                          callId={call.callId}
                           className="text-slate-800 underline decoration-slate-300 hover:text-slate-950"
-                        >
-                          {call.trn}
-                        </Link>
+                        />
                       ) : (
                         '—'
                       )}

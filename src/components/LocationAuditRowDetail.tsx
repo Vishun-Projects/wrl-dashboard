@@ -1,8 +1,8 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
 import { ExternalLink, Loader2, X } from 'lucide-react';
+import { TrnLink } from '@/components/TrnLink';
 import { LocationAuditCompareMap } from '@/components/LocationAuditCompareMap';
 import { formatGpsSourceForDisplay } from '@/lib/geo/parse-latlong';
 
@@ -140,12 +140,13 @@ export function LocationAuditRowDetail({
         <div className="min-w-0">
           <p className="text-[12px] font-semibold text-slate-900">
             Call{' '}
-            <Link
-              href={`/report?search=${encodeURIComponent(row.vtrnno)}`}
+            <TrnLink
+              trn={row.vtrnno}
+              callId={row.ncode}
+              officeId={row.officeId}
               className="text-blue-700 hover:underline"
-            >
-              {row.vtrnno}
-            </Link>
+              stopPropagation={false}
+            />
           </p>
           <p className="truncate text-[11px] text-slate-700">{row.partyName}</p>
           <p className="mt-1 text-[10px] text-slate-600">
