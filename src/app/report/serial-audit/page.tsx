@@ -50,11 +50,13 @@ import {
   buildCallsBySerialMap,
   deriveSerialAuditRowsForView,
   filterSerialAuditCallsForView,
+  serialAuditRowHasCallsInWindow,
   filterSerialAuditRows,
   getWindowCallsForSerialAudit,
   mapApiListItemToSerialAuditRow,
   mapRowToSerialAuditCallDetail,
   MIN_REPEAT_COMPLAINTS,
+  normalizeSerial,
   sortSerialAuditCallDetails,
   summarizeSerialAudit,
   type SerialAuditCallDetail,
@@ -407,12 +409,14 @@ export default function SerialAuditPage() {
             },
           });
 
-          const apiRows = ((res.data?.serials || []) as Record<string, unknown>[]).map((item) =>
-            mapApiListItemToSerialAuditRow(
-              item as Parameters<typeof mapApiListItemToSerialAuditRow>[0],
-              DEFAULT_RISK_THRESHOLD
-            )
-          );
+          const apiRows = ((res.data?.serials || []) as Record<string, unknown>[])
+            .filter((item) => Number(item.complaint_count) > 0)
+            .map((item) =>
+              mapApiListItemToSerialAuditRow(
+                item as Parameters<typeof mapApiListItemToSerialAuditRow>[0],
+                DEFAULT_RISK_THRESHOLD
+              )
+            );
           apiRows.sort((a, b) => {
             const dateCmp = (b.lastComplaintDate ?? '').localeCompare(a.lastComplaintDate ?? '');
             if (dateCmp !== 0) return dateCmp;
@@ -493,7 +497,8 @@ export default function SerialAuditPage() {
       }
       if (alreadyLoaded) return;
 
-      setDetailLoading(`${scope}:${serial}`);
+      const serialNorm = normalizeSerial(serial) ?? serial.trim().toUpperCase();
+      setDetailLoading(`${scope}:${serialNorm}`);
       try {
         const {
           data: { session },
@@ -504,7 +509,7 @@ export default function SerialAuditPage() {
         const params: Record<string, string> = {
           callType: callTypeParam,
           repair: serializeRepairFilterParam(appliedRepairs),
-          serial,
+          serial: serialNorm,
         };
         if (scope === 'window') {
           params.startDate = startDateStr;
@@ -521,9 +526,13 @@ export default function SerialAuditPage() {
           'asc'
         );
         if (scope === 'allTime') {
-          setAllTimeCallsBySerial((prev) => new Map(prev).set(serial, details));
+          setAllTimeCallsBySerial((prev) => new Map(prev).set(serialNorm, details));
         } else {
-          setWindowCallsBySerial((prev) => new Map(prev).set(serial, details));
+          setWindowCallsBySerial((prev) => new Map(prev).set(serialNorm, details));
+          if (details.length === 0) {
+            setListRows((prev) => prev.filter((r) => r.serial !== serialNorm));
+            setExpandedSerial((prev) => (prev === serialNorm ? null : prev));
+          }
         }
       } catch (err: unknown) {
         const message = sanitizeUserFacingMessage(
@@ -569,16 +578,24 @@ export default function SerialAuditPage() {
     [listRows, includeCancelled]
   );
 
-  const displayedRows = useMemo(
-    () =>
-      filterSerialAuditRows(allSerialRows, {
-        minCount: onlyFlagged ? DEFAULT_RISK_THRESHOLD : minCount,
-        search: serialSearch,
-        onlyFlagged,
-        hideUnknown: true,
-      }),
-    [allSerialRows, minCount, serialSearch, onlyFlagged]
-  );
+  const displayedRows = useMemo(() => {
+    const filtered = filterSerialAuditRows(allSerialRows, {
+      minCount: onlyFlagged ? DEFAULT_RISK_THRESHOLD : minCount,
+      search: serialSearch,
+      onlyFlagged,
+      hideUnknown: true,
+    });
+    return filtered.filter((row) =>
+      serialAuditRowHasCallsInWindow(row, windowCallsBySerial, includeCancelled)
+    );
+  }, [
+    allSerialRows,
+    minCount,
+    serialSearch,
+    onlyFlagged,
+    windowCallsBySerial,
+    includeCancelled,
+  ]);
 
   const totalPages = Math.max(1, Math.ceil(displayedRows.length / SERIAL_PAGE_SIZE));
 

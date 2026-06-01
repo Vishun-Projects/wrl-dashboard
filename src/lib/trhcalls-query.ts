@@ -466,6 +466,10 @@ export const SERIAL_AUDIT_VALID_SERIAL_WHERE =
 export const SERIAL_AUDIT_TRANSFER_EXCLUDE_WHERE =
   "ISNULL(vtransfercallno, '') = '' AND ISNULL(CAST(ncancelreason AS INT), 0) <> 2";
 
+/** Canonical serial key for list grouping and detail filter (must stay in sync). */
+export const SERIAL_AUDIT_SERIAL_KEY_EXPR = 'UPPER(LTRIM(RTRIM(vserialno)))';
+export const SERIAL_AUDIT_TC_SERIAL_KEY_EXPR = 'UPPER(LTRIM(RTRIM(tc.vserialno)))';
+
 export const TRHCALLS_CALL_ID_EXPR =
   "CASE WHEN ISNULL(vtrnno, '') = '' THEN CAST(ncode AS VARCHAR(50)) ELSE vtrnno END";
 
@@ -562,14 +566,14 @@ export function buildSerialAuditRepairCountsBySerialSql(opts?: SerialAuditSqlOpt
   const tcWhere = buildSerialAuditBaseWhere({ ...opts, repair: null }, 'tc');
   return `
     SELECT
-      UPPER(RTRIM(tc.vserialno)) AS serial,
+      ${SERIAL_AUDIT_TC_SERIAL_KEY_EXPR} AS serial,
       ${buildSerialAuditRepairBySerialSelect()}
     FROM trdcalls2fault tf (NOLOCK)
     INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
     INNER JOIN trhcalls tc (NOLOCK) ON tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid
     WHERE ${tcWhere}
       AND LTRIM(RTRIM(r.vname)) IN ('Motor Replaced', 'Compressor Replaced', 'Gas Charging Done')
-    GROUP BY UPPER(RTRIM(tc.vserialno))
+    GROUP BY ${SERIAL_AUDIT_TC_SERIAL_KEY_EXPR}
   `;
 }
 
@@ -650,7 +654,7 @@ export function buildSerialAuditWindowListRawSql(
       ISNULL(r.gas_charging_count, 0) AS gas_charging_count
     FROM (
       SELECT
-        UPPER(RTRIM(vserialno)) AS serial,
+        ${SERIAL_AUDIT_SERIAL_KEY_EXPR} AS serial,
         COUNT(*) AS complaint_count,
         SUM(CASE
           WHEN (bsolved = 1 OR bfastclose = 1) THEN 0
@@ -673,19 +677,19 @@ export function buildSerialAuditWindowListRawSql(
         WHERE ${where}
       ) deduped
       WHERE rn = 1
-      GROUP BY UPPER(RTRIM(vserialno))
+      GROUP BY ${SERIAL_AUDIT_SERIAL_KEY_EXPR}
       HAVING COUNT(*) >= ${minRepeats}
     ) a
     LEFT JOIN (
       SELECT
-        UPPER(RTRIM(tc.vserialno)) AS serial,
+        ${SERIAL_AUDIT_TC_SERIAL_KEY_EXPR} AS serial,
         ${buildSerialAuditRepairBySerialSelect()}
       FROM trdcalls2fault tf (NOLOCK)
       INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
       INNER JOIN trhcalls tc (NOLOCK) ON tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid
       WHERE ${tcWhere}
         AND LTRIM(RTRIM(r.vname)) IN ('Motor Replaced', 'Compressor Replaced', 'Gas Charging Done')
-      GROUP BY UPPER(RTRIM(tc.vserialno))
+      GROUP BY ${SERIAL_AUDIT_TC_SERIAL_KEY_EXPR}
     ) r ON r.serial = a.serial
   `;
 }
@@ -716,24 +720,24 @@ export function buildSerialAuditListRawSql(
       ISNULL(r.gas_charging_count, 0) AS gas_charging_count
     FROM (
       SELECT
-        UPPER(RTRIM(vserialno)) AS serial,
+        ${SERIAL_AUDIT_SERIAL_KEY_EXPR} AS serial,
         COUNT(DISTINCT ${activeTrnExpr}) AS complaint_count,
         CONVERT(varchar(30), MAX(dtrndate), 126) AS last_complaint_date
       FROM trhcalls (NOLOCK)
       WHERE ${where}
-      GROUP BY UPPER(RTRIM(vserialno))
+      GROUP BY ${SERIAL_AUDIT_SERIAL_KEY_EXPR}
       HAVING COUNT(DISTINCT ${activeTrnExpr}) >= ${minRepeats}
     ) a
     LEFT JOIN (
       SELECT
-        UPPER(RTRIM(tc.vserialno)) AS serial,
+        ${SERIAL_AUDIT_TC_SERIAL_KEY_EXPR} AS serial,
         ${buildSerialAuditRepairBySerialSelect()}
       FROM trdcalls2fault tf (NOLOCK)
       INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
       INNER JOIN trhcalls tc (NOLOCK) ON tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid
       WHERE ${tcWhere}
         AND LTRIM(RTRIM(r.vname)) IN ('Motor Replaced', 'Compressor Replaced', 'Gas Charging Done')
-      GROUP BY UPPER(RTRIM(tc.vserialno))
+      GROUP BY ${SERIAL_AUDIT_TC_SERIAL_KEY_EXPR}
     ) r ON r.serial = a.serial
   `;
 }
@@ -741,7 +745,7 @@ export function buildSerialAuditListRawSql(
 /** All calls for one serial — scoped dedup + minimal joins. */
 export function buildSerialAuditDetailRawSql(serial: string, opts: SerialAuditSqlOpts): string {
   const serialSafe = serial.trim().replace(/'/g, "''").toUpperCase();
-  const where = `${buildSerialAuditBaseWhere(opts)} AND UPPER(LTRIM(RTRIM(vserialno))) = '${serialSafe}'`;
+  const where = `${buildSerialAuditBaseWhere(opts)} AND ${SERIAL_AUDIT_SERIAL_KEY_EXPR} = '${serialSafe}'`;
 
   return `
     SELECT TOP 100 PERCENT

@@ -24,18 +24,41 @@ export function activeComplaintCount(row: SerialAuditRow): number {
 }
 
 /** Adjust serial rows for the include-cancelled view toggle (no refetch). */
+export function effectiveComplaintCountForView(
+  row: SerialAuditRow,
+  includeCancelled: boolean
+): number {
+  return includeCancelled ? row.complaintCount : activeComplaintCount(row);
+}
+
+/** Drop serials with no calls left after the active filter + include-cancelled toggle. */
+export function excludeSerialAuditRowsWithoutFilteredCalls(
+  rows: SerialAuditRow[],
+  includeCancelled: boolean,
+  minRepeats: number = MIN_REPEAT_COMPLAINTS
+): SerialAuditRow[] {
+  return rows
+    .map((row) =>
+      includeCancelled
+        ? row
+        : {
+            ...row,
+            complaintCount: activeComplaintCount(row),
+          }
+    )
+    .filter(
+      (row) =>
+        effectiveComplaintCountForView(row, includeCancelled) > 0 &&
+        row.complaintCount >= minRepeats
+    );
+}
+
 export function deriveSerialAuditRowsForView(
   rows: SerialAuditRow[],
   includeCancelled: boolean,
   minRepeats: number = MIN_REPEAT_COMPLAINTS
 ): SerialAuditRow[] {
-  if (includeCancelled) return rows;
-  return rows
-    .map((row) => ({
-      ...row,
-      complaintCount: activeComplaintCount(row),
-    }))
-    .filter((row) => row.complaintCount >= minRepeats);
+  return excludeSerialAuditRowsWithoutFilteredCalls(rows, includeCancelled, minRepeats);
 }
 
 export function filterSerialAuditCallsForView(
@@ -44,6 +67,17 @@ export function filterSerialAuditCallsForView(
 ): SerialAuditCallDetail[] {
   if (includeCancelled) return calls;
   return calls.filter((c) => c.statusTone !== 'cancelled');
+}
+
+/** False when window calls were loaded for this serial but none remain after view filters. */
+export function serialAuditRowHasCallsInWindow(
+  row: SerialAuditRow,
+  windowCallsBySerial: Map<string, SerialAuditCallDetail[]>,
+  includeCancelled: boolean
+): boolean {
+  if (!windowCallsBySerial.has(row.serial)) return true;
+  const calls = windowCallsBySerial.get(row.serial) ?? [];
+  return filterSerialAuditCallsForView(calls, includeCancelled).length > 0;
 }
 
 export type SerialAuditCallDetail = {
@@ -367,9 +401,10 @@ export function mapApiListItemToSerialAuditRow(
   const lastDate = item.last_complaint_date
     ? String(item.last_complaint_date).slice(0, 10)
     : null;
+  const serialNorm = normalizeSerial(item.serial);
 
   return {
-    serial: String(item.serial),
+    serial: serialNorm ?? String(item.serial).trim().toUpperCase(),
     isUnknownSerial: false,
     complaintCount: count,
     openCount: open,
@@ -581,6 +616,7 @@ export function filterSerialAuditRows(
 
   return rows.filter((row) => {
     if (opts.hideUnknown !== false && row.isUnknownSerial) return false;
+    if (row.complaintCount <= 0) return false;
     if (opts.onlyFlagged && !row.riskFlag) return false;
     if (row.complaintCount < minCount) return false;
     if (search) {
