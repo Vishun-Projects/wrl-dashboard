@@ -86,14 +86,8 @@ function FilterGroups({
     (setter: (values: string[]) => void, field: FilterArrayField) => {
       if (!commitOnChange) return setter;
       return (values: string[]) => {
-        // #region agent log
-        fetch('http://127.0.0.1:7531/ingest/804729da-b15e-49eb-8ace-fd937e48699c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8f6fef'},body:JSON.stringify({sessionId:'8f6fef',location:'RegisterFilterBar.tsx:wrapCommit',message:'wrapCommit before flush',data:{runId:'post-fix',field,nextValues:values},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
         flushSync(() => setter(values));
-        const snap = applyFilters({ [field]: values } as DraftFilterOverrides);
-        // #region agent log
-        fetch('http://127.0.0.1:7531/ingest/804729da-b15e-49eb-8ace-fd937e48699c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8f6fef'},body:JSON.stringify({sessionId:'8f6fef',location:'RegisterFilterBar.tsx:wrapCommit:after',message:'wrapCommit after applyFilters',data:{runId:'post-fix',field,requestedValues:values,snapshotCallTypes:[...snap.selectedCallTypes],snapshotPriority:[...snap.priorityFilter]},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
+        applyFilters({ [field]: values } as DraftFilterOverrides);
       };
     },
     [commitOnChange, applyFilters]

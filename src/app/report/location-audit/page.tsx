@@ -130,9 +130,6 @@ export default function LocationAuditPage() {
   useEffect(() => {
     if (!resourcesLoaded) return;
     if (priorityFilter.length === 0 || !priorityFilter.includes('major')) {
-      // #region agent log
-      fetch('http://127.0.0.1:7531/ingest/804729da-b15e-49eb-8ace-fd937e48699c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8f6fef'},body:JSON.stringify({sessionId:'8f6fef',location:'location-audit/page.tsx:forceMajor',message:'forcing major priority',data:{priorityFilter:[...priorityFilter]},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       setPriorityFilter(['major']);
     }
     if (selectedCallTypes.length === 0) {

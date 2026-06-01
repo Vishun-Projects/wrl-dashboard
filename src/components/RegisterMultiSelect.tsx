@@ -136,16 +136,10 @@ export function RegisterMultiSelect({
     const next = selected.includes(value)
       ? selected.filter((v) => v !== value)
       : [...selected, value];
-    // #region agent log
-    fetch('http://127.0.0.1:7531/ingest/804729da-b15e-49eb-8ace-fd937e48699c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8f6fef'},body:JSON.stringify({sessionId:'8f6fef',location:'RegisterMultiSelect.tsx:toggleValue',message:'toggle',data:{label,value,wasSelected:selected.includes(value),nextValues:next},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     onChange(next);
   };
 
   const handleClear = () => {
-    // #region agent log
-    fetch('http://127.0.0.1:7531/ingest/804729da-b15e-49eb-8ace-fd937e48699c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8f6fef'},body:JSON.stringify({sessionId:'8f6fef',location:'RegisterMultiSelect.tsx:handleClear',message:'clear',data:{label,prevSelected:selected},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     onChange([]);
   };
 

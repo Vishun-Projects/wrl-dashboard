@@ -360,13 +360,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
 
   const applyFilters = useCallback((overrides?: DraftFilterOverrides): ReportFilterSnapshot => {
     const input = { ...draftStateRef.current, ...overrides };
-    // #region agent log
-    fetch('http://127.0.0.1:7531/ingest/804729da-b15e-49eb-8ace-fd937e48699c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8f6fef'},body:JSON.stringify({sessionId:'8f6fef',location:'ReportFiltersContext.tsx:applyFilters',message:'applyFilters input',data:{runId:'post-fix',refCallTypes:[...draftStateRef.current.selectedCallTypes],overrideCallTypes:overrides?.selectedCallTypes,priorityFilter:[...input.priorityFilter],selectedCallTypes:[...input.selectedCallTypes]},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     const snapshot = buildDraftFilterSnapshot(input);
-    // #region agent log
-    fetch('http://127.0.0.1:7531/ingest/804729da-b15e-49eb-8ace-fd937e48699c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8f6fef'},body:JSON.stringify({sessionId:'8f6fef',location:'ReportFiltersContext.tsx:applyFilters:exit',message:'applyFilters snapshot built',data:{runId:'post-fix',snapshotPriority:[...snapshot.priorityFilter],snapshotCallTypes:[...snapshot.selectedCallTypes]},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     applyFilterSnapshot(snapshot);
     return snapshot;
   }, [applyFilterSnapshot]);
@@ -376,9 +370,6 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       const applied = appliedFiltersRef.current;
       if (!applied) return;
       const next = snapshotAfterRemovingActiveFilterChip(applied, chip);
-      // #region agent log
-      fetch('http://127.0.0.1:7531/ingest/804729da-b15e-49eb-8ace-fd937e48699c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8f6fef'},body:JSON.stringify({sessionId:'8f6fef',location:'ReportFiltersContext.tsx:removeActiveFilterChip',message:'chip remove',data:{chipKey:chip.removeKey,chipValue:chip.removeValue,beforePriority:[...applied.priorityFilter],afterPriority:[...next.priorityFilter]},timestamp:Date.now(),hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
       applyFilterSnapshot(next);
     },
     [applyFilterSnapshot]
