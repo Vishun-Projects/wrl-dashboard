@@ -74,14 +74,6 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
         return { start, end, label: 'Last Month' };
       }
     },
-    {
-      label: 'All Time', getValue: () => {
-        const end = new Date();
-        const start = new Date();
-        start.setFullYear(end.getFullYear() - 20); // 20 years for true 'All Time'
-        return { start: new Date(start.setHours(0, 0, 0, 0)), end, label: 'All Time' };
-      }
-    }
   ];
 
   useEffect(() => {

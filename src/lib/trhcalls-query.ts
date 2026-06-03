@@ -694,52 +694,11 @@ export function buildSerialAuditWindowListRawSql(
   `;
 }
 
-/** All-time repeated serials — single pass, no joins, no ORDER BY (sort client-side). */
+/** Repeated serials in the applied date window (startDate and endDate required). */
 export function buildSerialAuditListRawSql(
   opts: SerialAuditSqlOpts & { minRepeats?: number }
 ): string {
-  if (opts.startDate || opts.endDate) {
-    return buildSerialAuditWindowListRawSql(opts);
-  }
-  const minRepeats = Math.max(2, opts.minRepeats ?? 2);
-  const where = buildSerialAuditBaseWhere(opts);
-
-  const activeTrnExpr = `CASE
-      WHEN ncancelreason IS NOT NULL AND ncancelreason <> 0 AND ncancelreason <> 2 THEN NULL
-      ELSE vtrnno
-    END`;
-  const tcWhere = buildSerialAuditBaseWhere({ ...opts, repair: null }, 'tc');
-
-  return `
-    SELECT
-      a.serial,
-      a.complaint_count,
-      a.last_complaint_date,
-      ISNULL(r.motor_replaced_count, 0) AS motor_replaced_count,
-      ISNULL(r.compressor_replaced_count, 0) AS compressor_replaced_count,
-      ISNULL(r.gas_charging_count, 0) AS gas_charging_count
-    FROM (
-      SELECT
-        ${SERIAL_AUDIT_SERIAL_KEY_EXPR} AS serial,
-        COUNT(DISTINCT ${activeTrnExpr}) AS complaint_count,
-        CONVERT(varchar(30), MAX(dtrndate), 126) AS last_complaint_date
-      FROM trhcalls (NOLOCK)
-      WHERE ${where}
-      GROUP BY ${SERIAL_AUDIT_SERIAL_KEY_EXPR}
-      HAVING COUNT(DISTINCT ${activeTrnExpr}) >= ${minRepeats}
-    ) a
-    LEFT JOIN (
-      SELECT
-        ${SERIAL_AUDIT_TC_SERIAL_KEY_EXPR} AS serial,
-        ${buildSerialAuditRepairBySerialSelect()}
-      FROM trdcalls2fault tf (NOLOCK)
-      INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
-      INNER JOIN trhcalls tc (NOLOCK) ON tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid
-      WHERE ${tcWhere}
-        AND LTRIM(RTRIM(r.vname)) IN ('Motor Replaced', 'Compressor Replaced', 'Gas Charging Done')
-      GROUP BY ${SERIAL_AUDIT_TC_SERIAL_KEY_EXPR}
-    ) r ON r.serial = a.serial
-  `;
+  return buildSerialAuditWindowListRawSql(opts);
 }
 
 /** All calls for one serial — scoped dedup + minimal joins. */

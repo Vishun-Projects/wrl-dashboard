@@ -1,9 +1,11 @@
 'use client';
 
 import React from 'react';
+import { flushSync } from 'react-dom';
 import {
   REGISTER_STATUS_PRESETS,
   statusPresetMatches,
+  type DraftFilterOverrides,
 } from '@/lib/report-filters';
 import type { RegisterSummary } from '@/lib/report-search';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
@@ -24,15 +26,20 @@ function statItemClass(active: boolean, detailed = false) {
 }
 
 export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
-  const { selectedStatus, setSelectedStatus } = useReportFilters();
+  const { selectedStatus, setSelectedStatus, applyFilters } = useReportFilters();
 
   if (!summary) return null;
 
+  const commitStatus = (next: string[]) => {
+    flushSync(() => setSelectedStatus(next));
+    applyFilters({ selectedStatus: next } as DraftFilterOverrides);
+  };
+
   const togglePreset = (preset: readonly string[]) => {
     if (statusPresetMatches(selectedStatus, preset)) {
-      setSelectedStatus([]);
+      commitStatus([]);
     } else {
-      setSelectedStatus([...preset]);
+      commitStatus([...preset]);
     }
   };
 
@@ -50,7 +57,7 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
       <button
         type="button"
         className={statItemClass(totalActive)}
-        onClick={() => setSelectedStatus([])}
+        onClick={() => commitStatus([])}
         title="Show all calls"
       >
         <span className="register-stat-value text-slate-900">{(summary.total || 0).toLocaleString()}</span>

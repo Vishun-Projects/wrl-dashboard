@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { postQuery } from '@/lib/db-proxy';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
-import { enrichCallRowForReport } from '@/lib/report-geo';
-import {
-  buildSerialAuditBatchDetailRawSql,
-  MAX_SERIAL_AUDIT_BATCH_SERIALS,
-} from '@/lib/trhcalls-query';
+import { fetchSerialAuditCallsForSerials } from '@/lib/serial-audit-batch-fetch';
 
 const INVOLVEMENT_CACHE_TTL = 15 * 60 * 1000;
 const involvementCache = new Map<
@@ -22,10 +17,6 @@ type InvolvementQuery = {
   endDate: string;
   serials: string[];
 };
-
-function mapDetailRows(rawRows: Record<string, unknown>[]): Record<string, unknown>[] {
-  return rawRows.map((row) => enrichCallRowForReport(row));
-}
 
 function normalizeSerials(raw: string[] | string | null | undefined): string[] {
   if (!raw) return [];
@@ -44,25 +35,14 @@ async function fetchInvolvementCallsBatched(
   query: InvolvementQuery,
   security: { isHod: boolean; assignedOffices: string[] }
 ): Promise<Record<string, unknown>[]> {
-  const sqlOpts = {
+  return fetchSerialAuditCallsForSerials(query.serials, {
     callType: query.callType,
     repair: query.repair,
     isHod: security.isHod,
     assignedOffices: security.assignedOffices,
     startDate: query.startDate,
     endDate: query.endDate,
-  };
-
-  const merged: Record<string, unknown>[] = [];
-  for (let i = 0; i < query.serials.length; i += MAX_SERIAL_AUDIT_BATCH_SERIALS) {
-    const chunk = query.serials.slice(i, i + MAX_SERIAL_AUDIT_BATCH_SERIALS);
-    const res = await postQuery({
-      rawSql: buildSerialAuditBatchDetailRawSql(chunk, sqlOpts),
-      timeoutMs: 180000,
-    });
-    merged.push(...mapDetailRows((res.data || []) as Record<string, unknown>[]));
-  }
-  return merged;
+  });
 }
 
 async function handleInvolvementRequest(query: InvolvementQuery) {

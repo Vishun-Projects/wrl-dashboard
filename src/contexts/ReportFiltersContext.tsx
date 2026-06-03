@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { usePathname } from 'next/navigation';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -762,9 +763,12 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   }, [franchiseesList, offices]);
 
   const clearAllFilters = useCallback(() => {
-    applyFilters({
+    const snapshot = buildDraftFilterSnapshot({
+      ...draftStateRef.current,
       search: '',
       pincodeSearch: '',
+      dateRange: defaultDateRange(),
+      dateFilterColumn: resolveRegisterDateSqlColumn(undefined),
       selectedState: [],
       selectedCity: [],
       selectedBranch: [],
@@ -776,7 +780,10 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       priorityFilter: [],
       portalFilter: [],
     });
-  }, [applyFilters]);
+    flushSync(() => {
+      applyFilterSnapshot(snapshot);
+    });
+  }, [applyFilterSnapshot]);
 
   const syncCascadeOptionsFromCalls = useCallback((calls: any[]) => {
     if (!calls.length) {

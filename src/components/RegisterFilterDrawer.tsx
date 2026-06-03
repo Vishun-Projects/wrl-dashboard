@@ -3,8 +3,7 @@
 import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { RegisterFilterBar } from '@/components/RegisterFilterBar';
-import { countActiveFilters, defaultDateRange } from '@/lib/report-filters';
-import { resolveRegisterDateSqlColumn } from '@/lib/trhcalls-query';
+import { countActiveFilters } from '@/lib/report-filters';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 
 type RegisterFilterDrawerProps = {
@@ -40,10 +39,6 @@ export function RegisterFilterDrawer({
     selectedBranch,
     selectedFranchisee,
     selectedTechnician,
-    clearAllFilters,
-    setDateRange,
-    setDateFilterColumn,
-    applyFilters,
   } = useReportFilters();
 
   const filterCount = countActiveFilters({
@@ -75,10 +70,6 @@ export function RegisterFilterDrawer({
   if (!open) return null;
 
   const handleClear = () => {
-    clearAllFilters();
-    setDateRange(defaultDateRange());
-    setDateFilterColumn(resolveRegisterDateSqlColumn(undefined));
-    applyFilters();
     onClear?.();
   };
 

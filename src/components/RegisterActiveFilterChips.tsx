@@ -33,7 +33,6 @@ export function RegisterActiveFilterChips({
     stateOptions,
     cityOptions,
     technicianOptions,
-    clearAllFilters,
     removeActiveFilterChip,
   } = useReportFilters();
 
@@ -101,9 +100,7 @@ export function RegisterActiveFilterChips({
   };
 
   const handleClearAll = () => {
-    clearAllFilters();
     onClearAll?.();
-    onFilterRemoved?.();
   };
 
   return (

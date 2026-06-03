@@ -150,16 +150,6 @@ const DATE_RANGE_PRESETS: DatePreset[] = [
       return { start, end, label: 'Last Month' };
     },
   },
-  {
-    label: 'All Time',
-    getValue: () => {
-      const end = new Date();
-      const start = new Date();
-      start.setFullYear(end.getFullYear() - 20);
-      start.setHours(0, 0, 0, 0);
-      return { start, end, label: 'All Time' };
-    },
-  },
 ];
 
 function capStrings(values: unknown, max = MAX_ARRAY_LEN): string[] {
@@ -180,6 +170,8 @@ export function resolveRollingDateRange(
   storedStart?: string,
   storedEnd?: string
 ): ReportDateRange {
+  if (label === 'All Time') return defaultDateRange();
+
   const preset = DATE_RANGE_PRESETS.find((p) => p.label === label);
   if (preset) return preset.getValue();
 

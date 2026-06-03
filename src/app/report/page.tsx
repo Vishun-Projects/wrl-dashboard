@@ -61,7 +61,11 @@ import {
   type RegisterSummaryBucket,
   type RegisterViewFilterParts,
 } from '@/lib/report-search';
-import { isAnyFilterActive, toDateString } from '@/lib/report-filters';
+import {
+  appliedFilterPartsFromSnapshot,
+  isAnyFilterActive,
+  toDateString,
+} from '@/lib/report-filters';
 import { globalReportCache, setGlobalReportCache, distributionDataCache, setDistributionDataCache, callCorpusStore } from '@/lib/report-data-store';
 import { indexRegisterRowsWithSerial, subscribeRegisterDelta } from '@/lib/report-sync';
 import {
@@ -1151,22 +1155,28 @@ export default function ReportPage() {
   const applyRegisterFromCorpus = useCallback(
     (pageNum = 1, pageLimit: RegisterPageSize = limit): boolean => {
       if (readRegisterFromPostgresClient()) return false;
-      const startDateStr = toDateString(dateRange.start);
-      const endDateStr = toDateString(dateRange.end);
-      const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
-      const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
+      const applied = getAppliedFiltersSnapshot();
+      const range = applied?.dateRange ?? dateRange;
+      const dateCol = applied?.dateFilterColumn ?? dateFilterColumn;
+      const startDateStr = toDateString(range.start);
+      const endDateStr = toDateString(range.end);
+      const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateCol);
+      const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateCol);
 
       let store = callCorpusStore;
       if (store?.calls.size && store.cacheKey !== corpusKey) {
-        if (corpusStoreCoversFetchScope(store, startDateStr, endDateStr, dateFilterColumn)) {
-          store = adoptCorpusStoreForScope(store, startDateStr, endDateStr, dateFilterColumn);
+        if (corpusStoreCoversFetchScope(store, startDateStr, endDateStr, dateCol)) {
+          store = adoptCorpusStoreForScope(store, startDateStr, endDateStr, dateCol);
         }
       }
       if (!store?.calls.size || store.cacheKey !== corpusKey) {
         return false;
       }
 
-      const viewFilters = registerViewFilterRef.current;
+      const viewFilters = applied
+        ? appliedFilterPartsFromSnapshot(applied)
+        : registerViewFilterRef.current;
+      registerViewFilterRef.current = viewFilters;
       const derived = deriveRegisterPageFromCorpus(
         store,
         corpusKey,
@@ -1186,7 +1196,7 @@ export default function ReportPage() {
         pincodeForUrl: viewFilters.pincodeSearch || '',
         startDateStr,
         endDateStr,
-        dateFilterColumn,
+        dateFilterColumn: dateCol,
         selectedState: viewFilters.selectedState,
         selectedCity: viewFilters.selectedCity,
         selectedBranch: viewFilters.selectedBranch,
@@ -1252,6 +1262,7 @@ export default function ReportPage() {
       dateRange.start,
       dateRange.end,
       dateFilterColumn,
+      getAppliedFiltersSnapshot,
       viewCallTypesParam,
       agingAsOf,
       limit,
@@ -2670,6 +2681,7 @@ export default function ReportPage() {
 
       const applied = getAppliedFiltersSnapshot();
       if (!applied) return;
+      registerViewFilterRef.current = appliedFilterPartsFromSnapshot(applied);
       const startDateStr = toDateString(applied.dateRange.start);
       const endDateStr = toDateString(applied.dateRange.end);
       const appliedDateColumn = applied.dateFilterColumn;
@@ -3665,9 +3677,6 @@ export default function ReportPage() {
           onApply={() => void runRegisterFilterLoad({ force: true })}
           onSearchEnter={() => void runRegisterFilterLoad({ force: true })}
           onPincodeEnter={() => void runRegisterFilterLoad({ force: true })}
-          onClearAll={() => {
-            clearFiltersRef.current = true;
-          }}
         />
       ) : (
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-2">
@@ -3797,6 +3806,10 @@ export default function ReportPage() {
             </div>
             <div className="register-table-wrap inner-scrollbar">
               <table className="register-table">
+              <colgroup>
+                <col className="register-col-num" />
+                <col className="register-col-id" />
+              </colgroup>
               <thead className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50">
                 <tr>
                   <th className="register-table-sticky-col register-table-sticky-col-1 border-r border-slate-100 px-2 py-2.5 text-center text-[11px] font-medium whitespace-nowrap text-slate-500">#</th>
@@ -3812,7 +3825,7 @@ export default function ReportPage() {
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {displayedData.length > 0 ? displayedData.map((row, idx) => (
-                  <tr key={idx} className="transition-colors hover:bg-slate-50/50">
+                  <tr key={idx} className="transition-colors hover:bg-slate-50">
                     <td className="register-table-sticky-col register-table-sticky-col-1 whitespace-nowrap border-r border-slate-50 px-2 py-2 text-center text-[11px] text-slate-400">
                       {(page - 1) * limit + idx + 1}
                     </td>
@@ -3832,7 +3845,10 @@ export default function ReportPage() {
                       {isAnyRegisterFilterActive && (
                         <button
                           type="button"
-                          onClick={() => { clearFiltersRef.current = true; clearAllFilters(); }}
+                          onClick={() => {
+                            clearAllFilters();
+                            void runRegisterFilterLoad({ force: true });
+                          }}
                           className="mt-3 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
                         >
                           Clear filters

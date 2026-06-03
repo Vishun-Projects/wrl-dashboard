@@ -75,7 +75,11 @@ const SERIAL_PAGE_SIZE = 25;
 /** Survives tab navigation — in-flight loads keep running in the background. */
 const serialAuditBackgroundCache = new Map<
   string,
-  { rows: SerialAuditRow[]; windowCalls: Map<string, SerialAuditCallDetail[]> }
+  {
+    rows: SerialAuditRow[];
+    windowCalls: Map<string, SerialAuditCallDetail[]>;
+    analysisCalls: Map<string, SerialAuditCallDetail[]>;
+  }
 >();
 const serialAuditBackgroundInflight = new Map<string, Promise<void>>();
 
@@ -186,10 +190,6 @@ export default function SerialAuditPage() {
   const [windowCallsBySerial, setWindowCallsBySerial] = useState<Map<string, SerialAuditCallDetail[]>>(
     new Map()
   );
-  const [allTimeCallsBySerial, setAllTimeCallsBySerial] = useState<Map<string, SerialAuditCallDetail[]>>(
-    new Map()
-  );
-  const [showAllTimeFor, setShowAllTimeFor] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -197,10 +197,8 @@ export default function SerialAuditPage() {
   const [analysisCallsBySerial, setAnalysisCallsBySerial] = useState<
     Map<string, SerialAuditCallDetail[]>
   >(new Map());
-  const [analysisPrefetching, setAnalysisPrefetching] = useState(false);
   const loadInFlightRef = useRef<Promise<void> | null>(null);
   const lastPaintedKeyRef = useRef<string | null>(null);
-  const analysisFetchKeyRef = useRef<string | null>(null);
   const defaultRepairsAppliedRef = useRef(false);
   const serialPrefsRestoredRef = useRef(false);
 
@@ -308,9 +306,14 @@ export default function SerialAuditPage() {
   );
 
   const applyCachedSnapshot = useCallback(
-    (cached: { rows: SerialAuditRow[]; windowCalls: Map<string, SerialAuditCallDetail[]> }) => {
+    (cached: {
+      rows: SerialAuditRow[];
+      windowCalls: Map<string, SerialAuditCallDetail[]>;
+      analysisCalls: Map<string, SerialAuditCallDetail[]>;
+    }) => {
       setListRows(cached.rows);
       setWindowCallsBySerial(cached.windowCalls);
+      setAnalysisCallsBySerial(cached.analysisCalls);
       setLoadError(null);
       lastPaintedKeyRef.current = dataKey;
     },
@@ -413,11 +416,13 @@ export default function SerialAuditPage() {
             const windowCalls = buildCallsBySerialMap(calls);
             setListRows(rows);
             setWindowCallsBySerial(windowCalls);
-            setAllTimeCallsBySerial(new Map());
-            setShowAllTimeFor(new Set());
             setLoadError(null);
             lastPaintedKeyRef.current = loadDataKey;
-            serialAuditBackgroundCache.set(loadDataKey, { rows, windowCalls });
+            serialAuditBackgroundCache.set(loadDataKey, {
+              rows,
+              windowCalls,
+              analysisCalls: new Map(),
+            });
             return;
           }
 
@@ -432,6 +437,8 @@ export default function SerialAuditPage() {
               callType: loadCallTypeParam,
               repair: loadRepairParam,
               minRepeats: MIN_REPEAT_COMPLAINTS,
+              includeAnalysisCalls: 'true',
+              riskThreshold: DEFAULT_RISK_THRESHOLD,
               ...(opts?.refresh ? { refresh: 'true' } : {}),
             },
           });
@@ -451,14 +458,17 @@ export default function SerialAuditPage() {
           });
 
           const emptyWindowCalls = new Map<string, SerialAuditCallDetail[]>();
+          const analysisCalls = buildCallsBySerialMap(
+            ((res.data?.analysisCalls || []) as Record<string, unknown>[]) ?? []
+          );
           setListRows(apiRows);
           setWindowCallsBySerial(emptyWindowCalls);
-          setAllTimeCallsBySerial(new Map());
-          setShowAllTimeFor(new Set());
+          setAnalysisCallsBySerial(analysisCalls);
           lastPaintedKeyRef.current = loadDataKey;
           serialAuditBackgroundCache.set(loadDataKey, {
             rows: apiRows,
             windowCalls: emptyWindowCalls,
+            analysisCalls,
           });
         } catch (err: unknown) {
           const message = sanitizeUserFacingMessage(
@@ -542,23 +552,16 @@ export default function SerialAuditPage() {
   ]);
 
   const loadSerialDetails = useCallback(
-    async (serial: string, scope: 'window' | 'allTime') => {
+    async (serial: string) => {
       let alreadyLoaded = false;
-      if (scope === 'allTime') {
-        setAllTimeCallsBySerial((prev) => {
-          alreadyLoaded = prev.has(serial) && (prev.get(serial)?.length ?? 0) > 0;
-          return prev;
-        });
-      } else {
-        setWindowCallsBySerial((prev) => {
-          alreadyLoaded = prev.has(serial) && (prev.get(serial)?.length ?? 0) > 0;
-          return prev;
-        });
-      }
+      setWindowCallsBySerial((prev) => {
+        alreadyLoaded = prev.has(serial) && (prev.get(serial)?.length ?? 0) > 0;
+        return prev;
+      });
       if (alreadyLoaded) return;
 
       const serialNorm = normalizeSerial(serial) ?? serial.trim().toUpperCase();
-      setDetailLoading(`${scope}:${serialNorm}`);
+      setDetailLoading(serialNorm);
       try {
         const {
           data: { session },
@@ -566,33 +569,26 @@ export default function SerialAuditPage() {
         const headers = session?.access_token
           ? { Authorization: `Bearer ${session.access_token}` }
           : {};
-        const params: Record<string, string> = {
-          callType: callTypeParam,
-          repair: serializeRepairFilterParam(appliedRepairs),
-          serial: serialNorm,
-        };
-        if (scope === 'window') {
-          params.startDate = startDateStr;
-          params.endDate = endDateStr;
-        }
         const res = await axios.get('/api/report/serial-audit', {
           headers,
           timeout: 120000,
-          params,
+          params: {
+            callType: callTypeParam,
+            repair: serializeRepairFilterParam(appliedRepairs),
+            serial: serialNorm,
+            startDate: startDateStr,
+            endDate: endDateStr,
+          },
         });
         const rawCalls = (res.data?.calls || []) as Record<string, unknown>[];
         const details = sortSerialAuditCallDetails(
           rawCalls.map(mapRowToSerialAuditCallDetail),
           'asc'
         );
-        if (scope === 'allTime') {
-          setAllTimeCallsBySerial((prev) => new Map(prev).set(serialNorm, details));
-        } else {
-          setWindowCallsBySerial((prev) => new Map(prev).set(serialNorm, details));
-          if (details.length === 0) {
-            setListRows((prev) => prev.filter((r) => r.serial !== serialNorm));
-            setExpandedSerial((prev) => (prev === serialNorm ? null : prev));
-          }
+        setWindowCallsBySerial((prev) => new Map(prev).set(serialNorm, details));
+        if (details.length === 0) {
+          setListRows((prev) => prev.filter((r) => r.serial !== serialNorm));
+          setExpandedSerial((prev) => (prev === serialNorm ? null : prev));
         }
       } catch (err: unknown) {
         const message = sanitizeUserFacingMessage(
@@ -618,22 +614,18 @@ export default function SerialAuditPage() {
       return;
     }
     lastPaintedKeyRef.current = null;
-    analysisFetchKeyRef.current = null;
     setAnalysisCallsBySerial(new Map());
     setListRows([]);
     setWindowCallsBySerial(new Map());
-    setAllTimeCallsBySerial(new Map());
-    setShowAllTimeFor(new Set());
     setExpandedSerial(null);
   }, [applyCachedSnapshot, dataKey, resourcesLoaded]);
 
   useEffect(() => {
     if (!expandedSerial) return;
-    if (showAllTimeFor.has(expandedSerial)) return;
     const windowCalls = windowCallsBySerial.get(expandedSerial);
     if (windowCalls?.length) return;
-    void loadSerialDetails(expandedSerial, 'window');
-  }, [expandedSerial, loadSerialDetails, showAllTimeFor, windowCallsBySerial]);
+    void loadSerialDetails(expandedSerial);
+  }, [expandedSerial, loadSerialDetails, windowCallsBySerial]);
 
   const allSerialRows = useMemo(
     () => deriveSerialAuditRowsForView(listRows, includeCancelled, MIN_REPEAT_COMPLAINTS),
@@ -770,115 +762,9 @@ export default function SerialAuditPage() {
     [analysisCallsSource, flaggedRowsForAnalysis, includeCancelled]
   );
 
-  useEffect(() => {
-    if (loading) return;
-
-    if (flaggedRowsForAnalysis.length === 0) {
-      setAnalysisPrefetching(false);
-      return;
-    }
-
-    const fetchKey = `${dataKey}:${flaggedRowsForAnalysis.length}`;
-    const corpusReady = flaggedRowsForAnalysis.every(
-      (row) => (windowCallsBySerial.get(serialRowMatchKey(row))?.length ?? 0) > 0
-    );
-    if (corpusReady) {
-      analysisFetchKeyRef.current = fetchKey;
-      setAnalysisPrefetching(false);
-      return;
-    }
-
-    if (analysisFetchKeyRef.current === fetchKey) return;
-
-    analysisFetchKeyRef.current = fetchKey;
-    setAnalysisPrefetching(true);
-
-    void (async () => {
-      const requestKey = fetchKey;
-      try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        const headers = session?.access_token
-          ? { Authorization: `Bearer ${session.access_token}` }
-          : {};
-        const res = await axios.post(
-          '/api/report/serial-audit/involvement',
-          {
-            startDate: startDateStr,
-            endDate: endDateStr,
-            callType: callTypeParam,
-            // All calls on flagged serials — repair filter only affects main list, not involvement rows.
-            repair: 'All',
-            serials: flaggedRowsForAnalysis.map((row) => row.serial),
-          },
-          {
-            headers: {
-              ...headers,
-              'Content-Type': 'application/json',
-            },
-            timeout: 300000,
-          }
-        );
-        if (analysisFetchKeyRef.current !== requestKey) return;
-        const rawCalls = (res.data?.calls || []) as Record<string, unknown>[];
-        setAnalysisCallsBySerial(buildCallsBySerialMap(rawCalls));
-      } catch (err: unknown) {
-        if (analysisFetchKeyRef.current !== requestKey) return;
-        analysisFetchKeyRef.current = null;
-        const message = sanitizeUserFacingMessage(
-          axios.isAxiosError(err) && err.response?.data?.error
-            ? String(err.response.data.error)
-            : err instanceof Error
-              ? err.message
-              : 'Failed to load repeat involvement analysis'
-        );
-        toast.error(message);
-      } finally {
-        if (analysisFetchKeyRef.current === requestKey) {
-          setAnalysisPrefetching(false);
-        }
-      }
-    })();
-  }, [
-    dataKey,
-    endDateStr,
-    flaggedRowsForAnalysis,
-    loading,
-    startDateStr,
-    callTypeParam,
-    supabase,
-    windowCallsBySerial,
-  ]);
-
   const toggleExpand = (serial: string) => {
-    setExpandedSerial((prev) => {
-      if (prev === serial) {
-        setShowAllTimeFor((s) => {
-          const next = new Set(s);
-          next.delete(serial);
-          return next;
-        });
-        return null;
-      }
-      return serial;
-    });
+    setExpandedSerial((prev) => (prev === serial ? null : serial));
   };
-
-  const handleShowAllTimeChange = useCallback(
-    (serial: string, enabled: boolean) => {
-      setShowAllTimeFor((prev) => {
-        const next = new Set(prev);
-        if (enabled) next.add(serial);
-        else next.delete(serial);
-        return next;
-      });
-      if (enabled && !allTimeCallsBySerial.has(serial)) {
-        void loadSerialDetails(serial, 'allTime');
-      }
-    },
-    [allTimeCallsBySerial, loadSerialDetails]
-  );
 
   if (!mounted || !resourcesLoaded) {
     return (
@@ -1046,11 +932,8 @@ export default function SerialAuditPage() {
                     key={row.serial}
                     row={row}
                     windowCalls={windowCallsBySerial.get(row.serial) ?? []}
-                    allTimeCalls={allTimeCallsBySerial.get(row.serial) ?? []}
-                    showAllTime={showAllTimeFor.has(row.serial)}
-                    onShowAllTimeChange={(enabled) => handleShowAllTimeChange(row.serial, enabled)}
                     dateRangeLabel={dateRangeLabel}
-                    detailLoading={detailLoading === `window:${row.serial}` || detailLoading === `allTime:${row.serial}`}
+                    detailLoading={detailLoading === row.serial}
                     expanded={expandedSerial === row.serial}
                     includeCancelled={includeCancelled}
                     onToggle={() => toggleExpand(row.serial)}
@@ -1094,7 +977,6 @@ export default function SerialAuditPage() {
             analysis={repeatInvolvement}
             dateRangeLabel={dateRangeLabel}
             loading={loading}
-            prefetching={analysisPrefetching}
           />
         </div>
       )}
@@ -1138,9 +1020,6 @@ function SerialRepairCountBadges({
 function SerialAuditTableRow({
   row,
   windowCalls,
-  allTimeCalls,
-  showAllTime,
-  onShowAllTimeChange,
   dateRangeLabel,
   detailLoading,
   expanded,
@@ -1149,9 +1028,6 @@ function SerialAuditTableRow({
 }: {
   row: SerialAuditRow;
   windowCalls: SerialAuditCallDetail[];
-  allTimeCalls: SerialAuditCallDetail[];
-  showAllTime: boolean;
-  onShowAllTimeChange: (enabled: boolean) => void;
   dateRangeLabel: string;
   detailLoading: boolean;
   expanded: boolean;
@@ -1160,13 +1036,11 @@ function SerialAuditTableRow({
 }) {
   const flagged = row.riskFlag;
   const rowBg = flagged ? 'bg-amber-50/80 hover:bg-amber-50' : '';
-  const rawCalls = showAllTime ? allTimeCalls : windowCalls;
   const displayCalls = useMemo(
-    () => filterSerialAuditCallsForView(rawCalls, includeCancelled),
-    [rawCalls, includeCancelled]
+    () => filterSerialAuditCallsForView(windowCalls, includeCancelled),
+    [windowCalls, includeCancelled]
   );
-  const allTimeLoading = showAllTime && detailLoading && allTimeCalls.length === 0;
-  const windowLoading = !showAllTime && detailLoading && windowCalls.length === 0;
+  const callsLoading = detailLoading && windowCalls.length === 0;
 
   return (
     <>
@@ -1231,7 +1105,7 @@ function SerialAuditTableRow({
       {expanded ? (
         <tr className="border-b border-slate-100 bg-slate-50/80">
           <td colSpan={includeCancelled ? 9 : 8} className="px-3 py-3">
-            {displayCalls.length === 0 && !allTimeLoading && !windowLoading ? (
+            {displayCalls.length === 0 && !callsLoading ? (
               <p className="py-4 text-center text-[11px] text-slate-500">
                 No calls for this serial in the selected date range.
               </p>
@@ -1239,12 +1113,8 @@ function SerialAuditTableRow({
               <SerialAuditCallsDetailTable
                 calls={displayCalls}
                 serial={row.serial}
-                scope={showAllTime ? 'allTime' : 'window'}
                 dateRangeLabel={dateRangeLabel}
-                showAllTime={showAllTime}
-                onShowAllTimeChange={onShowAllTimeChange}
-                allTimeLoading={allTimeLoading || windowLoading}
-                allTimeCount={allTimeCalls.length > 0 ? allTimeCalls.length : undefined}
+                loading={callsLoading}
               />
             )}
           </td>

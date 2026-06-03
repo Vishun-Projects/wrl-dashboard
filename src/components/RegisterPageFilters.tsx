@@ -47,7 +47,7 @@ export function RegisterPageFilters({
   extraFilterCount = 0,
 }: RegisterPageFiltersProps) {
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
-  const { applyFilters, distributionLoading, resourcesLoaded } = useReportFilters();
+  const { applyFilters, clearAllFilters, distributionLoading, resourcesLoaded } = useReportFilters();
   const isFetching = loading || distributionLoading;
 
   const handleApplyFromToolbar = () => {
@@ -67,6 +67,12 @@ export function RegisterPageFilters({
 
   const fetchLabel = loadingLabel ?? 'Loading…';
 
+  const handleClearAll = () => {
+    clearAllFilters();
+    onClearAll?.();
+    onApply?.();
+  };
+
   return (
     <>
       <RegisterCompactToolbar
@@ -80,7 +86,7 @@ export function RegisterPageFilters({
       />
       <RestoredViewBanner />
       <RegisterActiveFilterChips
-        onClearAll={onClearAll}
+        onClearAll={handleClearAll}
         onFilterRemoved={onApply ? () => onApply() : undefined}
         extraActiveChips={extraActiveChips}
       />
@@ -89,7 +95,7 @@ export function RegisterPageFilters({
       <RegisterFilterDrawer
         open={filterDrawerOpen}
         onClose={() => setFilterDrawerOpen(false)}
-        onClear={onClearAll}
+        onClear={handleClearAll}
         drawerExtra={drawerExtra}
         extraFilterCount={extraFilterCount}
         onApply={

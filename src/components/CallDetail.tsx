@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { X, AlertCircle, Send, Image, ExternalLink, Package, MessageSquare, ArrowRight, Wrench, Copy, CheckCircle, XCircle, Clock, UserCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import { ImagePreviewViewer } from '@/components/ImagePreviewViewer';
 
 interface CallDetailProps {
   call: any;
@@ -63,7 +64,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
 
   const [activeTab, setActiveTab] = useState<'details' | 'visits' | 'faults' | 'parts' | 'comments' | 'images' | 'history'>('details');
   const [note, setNote] = useState('');
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; title?: string } | null>(null);
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
   const [errorType, setErrorType] = useState<'none' | 'hold' | 'reject'>('none');
   const [lastCommentedAt, setLastCommentedAt] = useState(0);
@@ -197,6 +198,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (previewImage) return;
       if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
 
       if (e.shiftKey) {
@@ -208,7 +210,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [note, lastCommentedAt, call]);
+  }, [note, lastCommentedAt, call, previewImage]);
 
   React.useEffect(() => {
     setActiveTab('details');
@@ -288,22 +290,13 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
         </div>
       )}
 
-      {/* Image Preview Overlay */}
-      {previewImage && (
-        <div
-          className="absolute inset-0 z-[210] bg-slate-900/90 flex items-center justify-center p-8 animate-in fade-in duration-200"
-          onClick={() => setPreviewImage(null)}
-        >
-          <button className="absolute top-6 right-6 text-white/50 hover:text-white transition-colors">
-            <X size={32} />
-          </button>
-          <img
-            src={previewImage}
-            className="max-w-full max-h-full object-contain shadow-2xl rounded-lg animate-in zoom-in-95 duration-300"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
+      {previewImage ? (
+        <ImagePreviewViewer
+          src={previewImage.url}
+          title={previewImage.title}
+          onClose={() => setPreviewImage(null)}
+        />
+      ) : null}
 
       {/* Header Area */}
       <div className="px-6 py-4 flex-shrink-0 border-b border-slate-100 bg-white">
@@ -540,7 +533,12 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
               {activeTab === 'images' && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {allImages.map((img, i) => (
-                    <ImageCard key={i} img={img} onPreview={() => setPreviewImage(img.url)} onLoaded={() => handleImageLoad(img.url)} />
+                    <ImageCard
+                      key={i}
+                      img={img}
+                      onPreview={() => setPreviewImage({ url: img.url, title: img.title })}
+                      onLoaded={() => handleImageLoad(img.url)}
+                    />
                   ))}
                 </div>
               )}

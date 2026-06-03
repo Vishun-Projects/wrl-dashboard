@@ -4,6 +4,10 @@ import { postQuery } from '@/lib/db-proxy';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
 import { enrichCallRowForReport } from '@/lib/report-geo';
 import {
+  fetchSerialAuditCallsForSerials,
+  flaggedSerialsFromListRows,
+} from '@/lib/serial-audit-batch-fetch';
+import {
   buildSerialAuditDetailRawSql,
   buildSerialAuditListRawSql,
 } from '@/lib/trhcalls-query';
@@ -147,15 +151,23 @@ export async function GET(req: NextRequest) {
     const endDate = searchParams.get('endDate');
     const bypassCache = searchParams.get('refresh') === 'true';
     const minRepeats = Math.max(2, Number(searchParams.get('minRepeats') || 2) || 2);
+    const includeAnalysisCalls = searchParams.get('includeAnalysisCalls') === 'true';
+    const riskThreshold = Math.max(1, Number(searchParams.get('riskThreshold') || 3) || 3);
     const now = Date.now();
-    const scope = startDate || endDate ? 'window' : 'all-time';
+
+    if (!startDate || !endDate) {
+      return NextResponse.json(
+        { error: 'startDate and endDate are required' },
+        { status: 400 }
+      );
+    }
 
     if (serial) {
       const cacheKey = buildDetailCacheKey(serial, callType, repair, startDate, endDate, security);
       if (!bypassCache && detailCache.has(cacheKey)) {
         const cached = detailCache.get(cacheKey)!;
         if (now - cached.timestamp < DETAIL_CACHE_TTL) {
-          return NextResponse.json({ calls: cached.data, serial, cached: true, scope });
+          return NextResponse.json({ calls: cached.data, serial, cached: true, scope: 'window' });
         }
       }
 
@@ -169,14 +181,14 @@ export async function GET(req: NextRequest) {
         security
       );
       detailCache.set(cacheKey, { data: calls, timestamp: now });
-      return NextResponse.json({ calls, serial, cached: false, scope });
+      return NextResponse.json({ calls, serial, cached: false, scope: 'window' });
     }
 
     const cacheKey = buildListCacheKey(callType, repair, minRepeats, startDate, endDate, security);
     if (!bypassCache && listCache.has(cacheKey)) {
       const cached = listCache.get(cacheKey)!;
       if (now - cached.timestamp < LIST_CACHE_TTL) {
-        return NextResponse.json({ serials: cached.data, cached: true, scope });
+        return NextResponse.json({ serials: cached.data, cached: true, scope: 'window' });
       }
     }
 
@@ -190,7 +202,24 @@ export async function GET(req: NextRequest) {
       security
     );
     listCache.set(cacheKey, { data: serials, timestamp: now });
-    return NextResponse.json({ serials, cached: false, scope });
+
+    let analysisCalls: Record<string, unknown>[] | undefined;
+    if (includeAnalysisCalls && startDate && endDate) {
+      const flaggedSerials = flaggedSerialsFromListRows(serials, riskThreshold);
+      analysisCalls =
+        flaggedSerials.length > 0
+          ? await fetchSerialAuditCallsForSerials(flaggedSerials, {
+              callType,
+              repair: 'All',
+              isHod: security.isHod,
+              assignedOffices: security.assignedOffices,
+              startDate,
+              endDate,
+            })
+          : [];
+    }
+
+    return NextResponse.json({ serials, analysisCalls, cached: false, scope: 'window' });
   } catch (err: unknown) {
     console.error('Serial Audit API Error:', err);
     const message = err instanceof Error ? err.message : 'Serial audit query failed';
