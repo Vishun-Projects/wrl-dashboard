@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { postQuery } from '@/lib/db-proxy';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { postQuery } from '@/lib/db/proxy';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 import { readDimsFromPostgres } from '@/lib/read-model/flags';
 import {
   queryEngineerRowsFromPostgres,

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
-import { getUserInfo } from '@/lib/auth';
+import { getUserInfo } from '@/lib/auth/session';
 import {
   buildRoleDefaultShared,
   emptyUserReportPreferences,
@@ -12,7 +12,7 @@ import {
   sanitizeStoredShared,
   type RestoreFilterContext,
   type UserReportPreferencesV1,
-} from '@/lib/user-report-preferences';
+} from '@/lib/report/preferences';
 
 async function loadPreferences(userId: string): Promise<UserReportPreferencesV1> {
   const rows = await prisma.$queryRawUnsafe<

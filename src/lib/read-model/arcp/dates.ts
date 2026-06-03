@@ -1,5 +1,20 @@
 import { parseCrmDate } from '@/lib/read-model/dates';
 
+/** Calendar-day boundaries for ARCP report filters (India operations). */
+export const ARCP_REPORT_TIMEZONE =
+  process.env.ARCP_REPORT_TIMEZONE?.trim() || 'Asia/Kolkata';
+
+function isTruthyCrmFlag(value: unknown): boolean {
+  const v = String(value ?? '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
+function hasPositiveAmount(value: unknown): boolean {
+  if (value == null || value === '') return false;
+  const n = Number(String(value).replace(/,/g, '').trim());
+  return Number.isFinite(n) && n > 0;
+}
+
 /** Parse BM/HO approve columns (dd/mm/yyyy text, ISO, or CRM datetime strings). */
 export function parseArcpDmYDate(value: unknown): Date | null {
   if (value == null || value === '') return null;
@@ -43,11 +58,33 @@ export function parseArcpDmYDate(value: unknown): Date | null {
 }
 
 export function resolveArcpBmApprovedAt(row: Record<string, unknown>): Date | null {
-  return parseArcpDmYDate(row.dbmapproveddate);
+  const fromBmColumn = parseArcpDmYDate(row.dbmapproveddate);
+  if (fromBmColumn) return fromBmColumn;
+
+  const fromApproval1 =
+    parseCrmDate(row.dapproval1on) ?? parseArcpDmYDate(row.dapproval1on);
+  const bmMarked =
+    isTruthyCrmFlag(row.bapproved) ||
+    hasPositiveAmount(row.nbmapprovedamt) ||
+    hasPositiveAmount(row.napproval1amount);
+  if (fromApproval1 && bmMarked) return fromApproval1;
+
+  return null;
 }
 
 export function resolveArcpHoApprovedAt(row: Record<string, unknown>): Date | null {
-  return parseArcpDmYDate(row.dhoapproveddate);
+  const fromHoColumn = parseArcpDmYDate(row.dhoapproveddate);
+  if (fromHoColumn) return fromHoColumn;
+
+  const fromApproval2 =
+    parseCrmDate(row.dapproval2on) ?? parseArcpDmYDate(row.dapproval2on);
+  const hoMarked =
+    isTruthyCrmFlag(row.bapprovedho) ||
+    hasPositiveAmount(row.nhoapprovedamt) ||
+    hasPositiveAmount(row.napproval2amount);
+  if (fromApproval2 && hoMarked) return fromApproval2;
+
+  return null;
 }
 
 export function claimMonthFromDate(d: Date | null): string | null {
@@ -66,9 +103,38 @@ export function resolveArcpApproveAt(row: Record<string, unknown>): Date | null 
 
 export const ARCP_APPROVE_EFFECTIVE_SQL = 'COALESCE(ho_approved_at, bm_approved_at)';
 
-/** Calendar-day boundaries for ARCP report filters (India operations). */
-export const ARCP_REPORT_TIMEZONE =
-  process.env.ARCP_REPORT_TIMEZONE?.trim() || 'Asia/Kolkata';
+/** Detail CSV / Excel — dd/MM/yyyy HH:mm in report timezone (not ISO Z). */
+export function formatArcpClaimsExportDate(value: unknown): string {
+  if (value == null || value === '') return '';
+  const raw = String(value).trim();
+  if (!raw || raw === '-' || raw === '0') return '';
+  if (/^\d{1,2}[\/-]\d{1,2}[\/-]\d{4}/.test(raw)) return raw;
+
+  const d = value instanceof Date ? value : new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: ARCP_REPORT_TIMEZONE,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d);
+
+  const pick = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? '';
+
+  const day = pick('day');
+  const month = pick('month');
+  const year = pick('year');
+  const hour = pick('hour');
+  const minute = pick('minute');
+  if (!day || !month || !year) return raw;
+  if (hour && minute) return `${day}/${month}/${year} ${hour}:${minute}`;
+  return `${day}/${month}/${year}`;
+}
 
 export function arcpBackfillYears(): number {
   const n = Number(process.env.ARCP_BACKFILL_YEARS ?? 1);

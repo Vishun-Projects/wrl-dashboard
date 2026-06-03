@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/lib/db/prisma';
 
 export async function getUserPermissionsOrEmpty(userId: string): Promise<string[]> {
   return prisma.getUserPermissions(userId);

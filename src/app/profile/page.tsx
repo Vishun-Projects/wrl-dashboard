@@ -12,8 +12,8 @@ import {
   AlertCircle,
   RotateCcw,
 } from 'lucide-react';
-import { useUser } from '@/components/DashboardLayout';
-import { PageShell, PageLoadingState } from '@/components/PageShell';
+import { useUser } from '@/components/layout/DashboardLayout';
+import { PageShell, PageLoadingState } from '@/components/layout/PageShell';
 import {
   SettingsLayout,
   SettingsCard,

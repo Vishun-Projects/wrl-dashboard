@@ -1,6 +1,8 @@
 export type ArcpHotRow = {
   ncode: number;
   vucnno: string | null;
+  /** WRL call id (trdcalls2fault.ncalls) — SAP posts one amount per call. */
+  call_no: string | null;
   calls2fault_code: number | null;
   nofficeid: number;
   office_under: number | null;

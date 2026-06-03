@@ -17,9 +17,9 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { useUser } from '@/components/DashboardLayout';
-import { PageShell, PageLoadingState } from '@/components/PageShell';
-import BranchTree from '@/components/BranchTree';
+import { useUser } from '@/components/layout/DashboardLayout';
+import { PageShell, PageLoadingState } from '@/components/layout/PageShell';
+import BranchTree from '@/components/shared/BranchTree';
 import {
   AdminToolbar,
   AdminStatPill,
@@ -53,18 +53,71 @@ export default function AdminUsersPage() {
   const [newPassword, setNewPassword] = useState('');
   const [updatingPassword, setUpdatingPassword] = useState(false);
   
+  type UserFormErrors = {
+    name?: string;
+    email?: string;
+    password?: string;
+    role_id?: string;
+  };
+
+  function validateUserForm(
+    data: ReturnType<typeof emptyFormData>,
+    isEdit: boolean
+  ): UserFormErrors {
+    const errors: UserFormErrors = {};
+    if (!data.name.trim()) {
+      errors.name = 'Full name is required';
+    }
+    if (!isEdit) {
+      const email = data.email.trim();
+      if (!email) {
+        errors.email = 'Email is required';
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errors.email = 'Enter a valid email address';
+      }
+      if (!data.password) {
+        errors.password = 'Password is required';
+      } else if (data.password.length < 6) {
+        errors.password = 'Password must be at least 6 characters';
+      }
+    }
+    if (!data.role_id?.trim()) {
+      errors.role_id = 'Select a system role';
+    }
+    return errors;
+  }
+
+  const emptyFormData = (rolesList: typeof roles = roles) => {
+    const first = rolesList[0];
+    const roleSlug = first?.name
+      ? String(first.name).toLowerCase().replace(/\s+/g, '_')
+      : 'branch_manager';
+    return {
+      name: '',
+      email: '',
+      password: '',
+      role: roleSlug,
+      role_id: first?.id ?? '',
+      office_ids: [] as string[],
+      visible_statuses: [] as string[],
+    };
+  };
+
   // Form State
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    password: '',
-    role: 'branch_manager',
-    role_id: '',
-    office_ids: [] as string[],
-    visible_statuses: [] as string[]
-  });
+  const [formData, setFormData] = useState(emptyFormData([]));
+  const [showValidation, setShowValidation] = useState(false);
+
+  const formErrors = validateUserForm(formData, !!editingUser);
+  const isFormValid = Object.keys(formErrors).length === 0;
 
   const router = useRouter();
+
+  const inputClass = (hasError: boolean) =>
+    `w-full h-9 bg-white border rounded-md px-3 text-[13px] transition-all focus:outline-none focus:ring-2 ${
+      hasError
+        ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500/20'
+        : 'border-slate-200 focus:ring-indigo-500/20 focus:border-indigo-500'
+    }`;
 
   useEffect(() => {
     fetchInitialData();
@@ -107,6 +160,15 @@ export default function AdminUsersPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setShowValidation(true);
+    const errors = validateUserForm(formData, !!editingUser);
+    if (Object.keys(errors).length > 0) {
+      const needsProfile =
+        errors.name || errors.email || errors.password || errors.role_id;
+      if (needsProfile) setActiveTab('profile');
+      toast.error('Complete all required fields before continuing');
+      return;
+    }
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (editingUser) {
@@ -114,16 +176,29 @@ export default function AdminUsersPage() {
           headers: { 'Authorization': `Bearer ${session?.access_token}` }
         });
       } else {
-        await axios.post('/api/admin/users', formData, {
+        const res = await axios.post('/api/admin/users', formData, {
           headers: { 'Authorization': `Bearer ${session?.access_token}` }
         });
+        if (res.data?.recovered) {
+          toast.success('User profile completed (login already existed)');
+        } else {
+          toast.success('User created successfully');
+        }
+        setShowAddModal(false);
+        setEditingUser(null);
+        setFormData(emptyFormData());
+        setShowValidation(false);
+        setBranchSearch('');
+        fetchInitialData();
+        return;
       }
       setShowAddModal(false);
       setEditingUser(null);
-      setFormData({ name: '', email: '', password: '', role: 'branch_manager', role_id: '', office_ids: [], visible_statuses: [] });
+      setFormData(emptyFormData());
+      setShowValidation(false);
       setBranchSearch('');
       fetchInitialData();
-      toast.success(editingUser ? 'User updated successfully' : 'User created successfully');
+      toast.success('User updated successfully');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Operation failed');
     }
@@ -226,7 +301,8 @@ export default function AdminUsersPage() {
         <button
           onClick={() => {
             setEditingUser(null);
-            setFormData({ name: '', email: '', password: '', role: 'branch_manager', role_id: '', office_ids: [], visible_statuses: [] });
+            setFormData(emptyFormData());
+            setShowValidation(false);
             setBranchSearch('');
             setActiveTab('profile');
             setShowOnlySelectedBranches(false);
@@ -333,6 +409,7 @@ export default function AdminUsersPage() {
                             });
                             setActiveTab('profile');
                             setShowOnlySelectedBranches(false);
+                            setShowValidation(false);
                             setShowAddModal(true);
                           }}
                         >
@@ -387,16 +464,43 @@ export default function AdminUsersPage() {
                 ))}
               </nav>
 
-              <div className="p-4 border-t border-slate-200 bg-white/50">
-                <div className="text-[10px] font-medium text-slate-500 mb-2">Summary</div>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-[11px]">
-                    <span className="text-slate-500">Branches</span>
-                    <span className="font-medium text-slate-700">{formData.office_ids.length}</span>
+              <div className="p-4 border-t border-slate-200 bg-white/50 space-y-3">
+                {!editingUser && (
+                  <div>
+                    <div className="text-[10px] font-medium text-slate-500 mb-2">Required to create</div>
+                    <ul className="space-y-1.5">
+                      {[
+                        { key: 'name', label: 'Full name', ok: !formErrors.name },
+                        { key: 'email', label: 'Email', ok: !formErrors.email },
+                        { key: 'password', label: 'Password (6+ chars)', ok: !formErrors.password },
+                        { key: 'role', label: 'System role', ok: !formErrors.role_id },
+                      ].map((item) => (
+                        <li
+                          key={item.key}
+                          className={`flex items-center gap-2 text-[11px] ${item.ok ? 'text-emerald-600' : 'text-slate-500'}`}
+                        >
+                          {item.ok ? (
+                            <Check size={12} className="flex-shrink-0" />
+                          ) : (
+                            <span className="w-3 h-3 rounded-full border border-slate-300 flex-shrink-0" />
+                          )}
+                          {item.label}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                  <div className="flex justify-between text-[11px]">
-                    <span className="text-slate-500">Statuses</span>
-                    <span className="font-medium text-slate-700">{formData.visible_statuses.length}</span>
+                )}
+                <div>
+                  <div className="text-[10px] font-medium text-slate-500 mb-2">Summary</div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-slate-500">Branches</span>
+                      <span className="font-medium text-slate-700">{formData.office_ids.length}</span>
+                    </div>
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-slate-500">Statuses</span>
+                      <span className="font-medium text-slate-700">{formData.visible_statuses.length}</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -418,45 +522,80 @@ export default function AdminUsersPage() {
               </div>
 
               {/* Form Body */}
-              <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+              <form
+                id="admin-user-form"
+                onSubmit={handleSubmit}
+                noValidate
+                className="flex-1 overflow-y-auto p-6 custom-scrollbar"
+              >
                 {activeTab === 'profile' ? (
                   <div className="max-w-md space-y-5 animate-in fade-in duration-200">
                     <div className="space-y-4">
                       <div className="space-y-1.5">
-                        <label className="text-[12px] font-medium text-slate-700">Full Name</label>
-                        <input 
+                        <label className="text-[12px] font-medium text-slate-700">
+                          Full Name <span className="text-rose-500">*</span>
+                        </label>
+                        <input
                           required
-                          className="w-full h-9 bg-white border border-slate-200 rounded-md px-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                          aria-invalid={showValidation && !!formErrors.name}
+                          className={inputClass(showValidation && !!formErrors.name)}
                           value={formData.name}
-                          onChange={(e) => setFormData({...formData, name: e.target.value})}
+                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                         />
+                        {showValidation && formErrors.name && (
+                          <p className="text-[11px] text-rose-600">{formErrors.name}</p>
+                        )}
                       </div>
-                      
+
                       <div className="space-y-1.5">
-                        <label className="text-[12px] font-medium text-slate-700">Email Address</label>
-                        <input 
-                          required type="email" disabled={!!editingUser}
-                          className="w-full h-9 bg-white border border-slate-200 rounded-md px-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all disabled:bg-slate-50 disabled:text-slate-500"
+                        <label className="text-[12px] font-medium text-slate-700">
+                          Email Address {!editingUser && <span className="text-rose-500">*</span>}
+                        </label>
+                        <input
+                          required
+                          type="email"
+                          disabled={!!editingUser}
+                          aria-invalid={showValidation && !!formErrors.email}
+                          className={`${inputClass(showValidation && !!formErrors.email)} disabled:bg-slate-50 disabled:text-slate-500`}
                           value={formData.email}
-                          onChange={(e) => setFormData({...formData, email: e.target.value})}
+                          onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                         />
+                        {showValidation && formErrors.email && (
+                          <p className="text-[11px] text-rose-600">{formErrors.email}</p>
+                        )}
                       </div>
 
                       {!editingUser && (
                         <div className="space-y-1.5">
-                          <label className="text-[12px] font-medium text-slate-700">Password</label>
-                          <input 
-                            required type="password"
-                            className="w-full h-9 bg-white border border-slate-200 rounded-md px-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                          <label className="text-[12px] font-medium text-slate-700">
+                            Password <span className="text-rose-500">*</span>
+                          </label>
+                          <input
+                            required
+                            type="password"
+                            minLength={6}
+                            aria-invalid={showValidation && !!formErrors.password}
+                            className={inputClass(showValidation && !!formErrors.password)}
                             value={formData.password}
-                            onChange={(e) => setFormData({...formData, password: e.target.value})}
+                            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                           />
+                          {showValidation && formErrors.password ? (
+                            <p className="text-[11px] text-rose-600">{formErrors.password}</p>
+                          ) : (
+                            <p className="text-[11px] text-slate-400">Minimum 6 characters</p>
+                          )}
                         </div>
                       )}
 
                       <div className="space-y-1.5 pt-2">
-                        <label className="text-[12px] font-medium text-slate-700">System Role</label>
-                        <div className="grid grid-cols-2 gap-2">
+                        <label className="text-[12px] font-medium text-slate-700">
+                          System Role <span className="text-rose-500">*</span>
+                        </label>
+                        <div
+                          className={`grid grid-cols-2 gap-2 rounded-lg p-0.5 ${
+                            showValidation && formErrors.role_id ? 'ring-1 ring-rose-300' : ''
+                          }`}
+                        >
                           {roles.map(role => (
                             <button
                               key={role.id}
@@ -471,6 +610,9 @@ export default function AdminUsersPage() {
                             </button>
                           ))}
                         </div>
+                        {showValidation && formErrors.role_id && (
+                          <p className="text-[11px] text-rose-600">{formErrors.role_id}</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -544,19 +686,26 @@ export default function AdminUsersPage() {
 
               {/* Action Footer */}
               <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50/50">
-                <button 
-                  type="button" onClick={() => setShowAddModal(false)}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setShowValidation(false);
+                  }}
                   className="px-4 h-9 text-slate-600 rounded-xl font-medium text-[13px] hover:bg-slate-100 transition-colors"
                 >
                   Cancel
                 </button>
-                <button 
-                  type="button"
-                  onClick={() => {
-                    const form = document.querySelector('form');
-                    if (form) form.requestSubmit();
-                  }}
-                  className="px-6 h-9 bg-slate-950 text-white rounded-xl font-medium text-[13px] hover:bg-slate-800 transition-colors"
+                <button
+                  type="submit"
+                  form="admin-user-form"
+                  disabled={!isFormValid}
+                  title={
+                    !isFormValid
+                      ? 'Fill in all required fields (see checklist on the left)'
+                      : undefined
+                  }
+                  className="px-6 h-9 bg-slate-950 text-white rounded-xl font-medium text-[13px] hover:bg-slate-800 transition-colors disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   {editingUser ? 'Save Changes' : 'Create Account'}
                 </button>

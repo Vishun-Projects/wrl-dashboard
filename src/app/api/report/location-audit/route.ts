@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { toUserFacingError } from '@/lib/user-facing-errors';
+import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { exportLocationAuditCsv } from '@/lib/location-audit';
 import {
   fetchLocationAuditList,
@@ -9,7 +9,7 @@ import {
   parseLocationAuditQueryParams,
   resolveLocationAuditSecurity,
   runLocationAuditExport,
-} from '@/lib/location-audit-handler';
+} from '@/lib/location-audit/server';
 
 export async function GET(req: NextRequest) {
   try {

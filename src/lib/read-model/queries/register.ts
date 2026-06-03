@@ -1,8 +1,9 @@
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { prisma } from '@/lib/prisma';
-import { normalizeExactTrnSearch } from '@/lib/trhcalls-query';
-import { mapCachedRowToRegisterRow } from '@/lib/report-search';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { prisma } from '@/lib/db/prisma';
+import { normalizeExactTrnSearch } from '@/lib/trhcalls/query';
+import { mapCachedRowToRegisterRow } from '@/lib/report/search';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
+import { mergeArcpApproveDatesFromHot } from '@/lib/register/arcp-approve-dates-server';
 
 const STATUS_LABEL_TO_BUCKET: Record<string, string> = {
   'Open Unallocated': 'open_unallocated',
@@ -276,10 +277,9 @@ export async function queryRegisterFromPostgres(params: RegisterPostgresParams) 
     ...listValues
   );
 
-  const mapped = (await mergeAuditEnrichment(rows.map(hotRowToRegisterRow))) as Record<
-    string,
-    unknown
-  >[];
+  const mapped = (await mergeArcpApproveDatesFromHot(
+    (await mergeAuditEnrichment(rows.map(hotRowToRegisterRow))) as Record<string, unknown>[]
+  )) as Record<string, unknown>[];
 
   const syncMeta = await getSyncMeta();
   const response: Record<string, unknown> = {
@@ -464,7 +464,9 @@ export async function queryRegisterBulkFromPostgres(
     REGISTER_BULK_MAX_ROWS
   );
 
-  const mapped = rows.map(hotRowToRegisterRow) as Record<string, unknown>[];
+  const mapped = await mergeArcpApproveDatesFromHot(
+    rows.map(hotRowToRegisterRow) as Record<string, unknown>[]
+  );
 
   return {
     data: mapped,
@@ -492,7 +494,7 @@ export async function queryRegisterExportFromPostgres(
     REGISTER_BULK_MAX_ROWS
   );
 
-  return rows.map(hotRowToRegisterRow) as Record<string, unknown>[];
+  return mergeArcpApproveDatesFromHot(rows.map(hotRowToRegisterRow) as Record<string, unknown>[]);
 }
 
 function aggregateDistinct(

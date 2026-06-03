@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { postQuery } from '@/lib/db-proxy';
+import { postQuery } from '@/lib/db/proxy';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
 import {
   filterRepairMasterForPicker,
   repairMasterToPicker,
   type RepairMasterItem,
   type RepairPickerItem,
-} from '@/lib/serial-audit-repair-options';
-import { buildMstRepairMasterListSql } from '@/lib/trhcalls-query';
+} from '@/lib/serial-audit/repair-options';
+import { buildMstRepairMasterListSql } from '@/lib/trhcalls/query';
 
 const REPAIR_CACHE_TTL = 60 * 60 * 1000;
 const QUERY_TIMEOUT_MS = 60000;

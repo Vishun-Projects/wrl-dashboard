@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 import { resolveReportSecurity, type ReportSecurity } from '@/lib/auth/report-security';
 
 export type BearerAuthResult =

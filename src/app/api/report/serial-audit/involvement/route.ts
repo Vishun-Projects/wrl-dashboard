@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
-import { fetchSerialAuditCallsForSerials } from '@/lib/serial-audit-batch-fetch';
+import {
+  fetchSerialAuditCallsForSerials,
+  MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS,
+} from '@/lib/serial-audit/server/batch-fetch';
+import { resolveSerialAuditSqlOpts } from '@/lib/serial-audit/server/sql-scope';
 
 const INVOLVEMENT_CACHE_TTL = 15 * 60 * 1000;
 const involvementCache = new Map<
@@ -13,6 +17,8 @@ const involvementInflight = new Map<string, Promise<Record<string, unknown>[]>>(
 type InvolvementQuery = {
   callType: string;
   repair: string;
+  branch: string;
+  franchisee: string;
   startDate: string;
   endDate: string;
   serials: string[];
@@ -28,20 +34,27 @@ function buildInvolvementCacheKey(
   query: InvolvementQuery,
   security: { isHod: boolean; assignedOffices: string[] }
 ): string {
-  return `involvement_${query.startDate}_${query.endDate}_${query.callType}_${query.repair}_${query.serials.join('-')}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
+  return `involvement_${query.startDate}_${query.endDate}_${query.callType}_${query.repair}_${query.branch}_${query.franchisee}_${query.serials.join('-')}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
 }
 
 async function fetchInvolvementCallsBatched(
   query: InvolvementQuery,
   security: { isHod: boolean; assignedOffices: string[] }
 ): Promise<Record<string, unknown>[]> {
-  return fetchSerialAuditCallsForSerials(query.serials, {
+  const serials = query.serials.slice(0, MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS);
+  const sqlOpts = await resolveSerialAuditSqlOpts({
     callType: query.callType,
     repair: query.repair,
-    isHod: security.isHod,
-    assignedOffices: security.assignedOffices,
+    branch: query.branch,
+    franchisee: query.franchisee,
     startDate: query.startDate,
     endDate: query.endDate,
+    isHod: security.isHod,
+    assignedOffices: security.assignedOffices,
+  });
+  return fetchSerialAuditCallsForSerials(serials, {
+    ...sqlOpts,
+    involvementRepairs: true,
   });
 }
 
@@ -100,6 +113,8 @@ export async function GET(req: NextRequest) {
     return handleInvolvementRequest({
       callType: searchParams.get('callType') || 'All',
       repair: searchParams.get('repair') || searchParams.get('complaint') || 'All',
+      branch: searchParams.get('branch') || '',
+      franchisee: searchParams.get('franchisee') || '',
       startDate: searchParams.get('startDate') || '',
       endDate: searchParams.get('endDate') || '',
       serials: normalizeSerials(searchParams.get('serials')),
@@ -117,6 +132,8 @@ export async function POST(req: NextRequest) {
     return handleInvolvementRequest({
       callType: String(body.callType || 'All'),
       repair: String(body.repair || body.complaint || 'All'),
+      branch: String(body.branch || ''),
+      franchisee: String(body.franchisee || ''),
       startDate: String(body.startDate || ''),
       endDate: String(body.endDate || ''),
       serials: normalizeSerials(body.serials as string[] | string | undefined),

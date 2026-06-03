@@ -1,10 +1,10 @@
-import { postQuery, isCrmOutOfMemoryError } from '@/lib/db-proxy';
+import { postQuery, isCrmOutOfMemoryError } from '@/lib/db/proxy';
 import {
   buildCorpusFieldsSql,
   buildCorpusTableName,
   looksLikeBranchOffice,
   TRHCALLS_EXCLUDE_TRANSFERRED,
-} from '@/lib/trhcalls-query';
+} from '@/lib/trhcalls/query';
 import { splitDateRangeByDays, formatCrmDateTime } from '@/lib/read-model/dates';
 
 const FETCH_GAP_MS = 800;

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveBearerReportSecurity } from '@/lib/auth/resolve-bearer-security';
-import { toUserFacingError } from '@/lib/user-facing-errors';
+import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { readSummaryFromPostgres } from '@/lib/read-model/flags';
 import {
   parseCallTypes,
@@ -8,7 +8,7 @@ import {
   querySummaryDashboard,
 } from '@/lib/read-model/queries/summary';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
-import { postQuery } from '@/lib/db-proxy';
+import { postQuery } from '@/lib/db/proxy';
 import {
   appendCallTypeFilter,
   appendOfficeSecurityFilter,
@@ -16,8 +16,8 @@ import {
   buildCorpusTableName,
   enrichTrhcallBranchFranchisee,
   TRHCALLS_EXCLUDE_TRANSFERRED,
-} from '@/lib/trhcalls-query';
-import { deriveSummaryDashboard } from '@/lib/report-summary-derive';
+} from '@/lib/trhcalls/query';
+import { deriveSummaryDashboard } from '@/lib/report/summary-derive';
 
 export async function GET(req: NextRequest) {
   try {

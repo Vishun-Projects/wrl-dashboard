@@ -1,15 +1,27 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { flushSync } from 'react-dom';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import {
   buildDraftFilterSnapshot,
   buildFranchiseeOptions,
+  buildRegisterFilterBootstrap,
+  buildReportFilterSnapshot,
   type DraftFilterOverrides,
+  dateRangeFromDeepLinkParams,
   defaultDateRange,
   filterCallsCSR,
   filterSnapshotsEqual,
@@ -17,6 +29,8 @@ import {
   isAnyFilterActive,
   migrateStringFilter,
   joinFilterParam,
+  mergeBranchFilterListEntry,
+  parseRegisterDeepLinkSearchParams,
   reportFilterSnapshotFromCache,
   snapshotAfterRemovingActiveFilterChip,
   REPORT_FILTER_SEARCH_DEBOUNCE_MS,
@@ -24,13 +38,13 @@ import {
   type ActiveFilterChipDescriptor,
   type ReportDateRange,
   type ReportFilterSnapshot,
-} from '@/lib/report-filters';
+} from '@/lib/report/filters';
 import {
   REGISTER_DATE_FILTER_OPTIONS,
   resolveRegisterDateSqlColumn,
   MAX_CLIENT_CORPUS_DAYS,
   type RegisterDateFilterColumn,
-} from '@/lib/trhcalls-query';
+} from '@/lib/trhcalls/query';
 import {
   distributionDataCache,
   globalReportCache,
@@ -39,7 +53,7 @@ import {
   setCallCorpusStore,
   type DistributionDataCache,
   type CallCorpusStore,
-} from '@/lib/report-data-store';
+} from '@/lib/report/data-store';
 import {
   applyCorpusSnapshot,
   adoptCorpusStoreForScope,
@@ -56,16 +70,16 @@ import {
   subscribeCorpus,
   syncDistributionCacheFromCorpus,
   notifyCorpusRegisterDelta,
-} from '@/lib/report-corpus';
-import { ensurePortalAuditCache } from '@/lib/report-portal-cache';
+} from '@/lib/report/corpus';
+import { ensurePortalAuditCache } from '@/lib/report/portal-cache';
 import {
   readCallsFromPostgresClient,
   readRegisterFromPostgresClient,
 } from '@/lib/read-model/client-flags';
-import { fetchAllRegisterRowsForExport, logRegisterBulk } from '@/lib/register-export-fetch';
-import { sanitizeUserFacingMessage } from '@/lib/user-facing-errors';
-import { createChunkedFetchAuth } from '@/lib/supabase-chunked-fetch';
-import { persistSharedRegisterCache, readSharedRegisterCache, SHARED_REGISTER_CACHE_VERSION } from '@/lib/report-corpus-storage';
+import { fetchAllRegisterRowsForExport, logRegisterBulk } from '@/lib/register/export-fetch';
+import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
+import { createChunkedFetchAuth } from '@/lib/supabase/chunked-fetch';
+import { persistSharedRegisterCache, readSharedRegisterCache, SHARED_REGISTER_CACHE_VERSION } from '@/lib/report/corpus-storage';
 import {
   buildRestoredFilterSnapshot,
   buildRoleDefaultShared,
@@ -76,7 +90,7 @@ import {
   storedSharedToSnapshot,
   type RestoreFilterContext,
   type UserReportPreferencesV1,
-} from '@/lib/user-report-preferences';
+} from '@/lib/report/preferences';
 
 let cachedReportResources: { offices: unknown[]; callTypes: string[] } | null = null;
 let reportResourcesInflight: Promise<{ offices: unknown[]; callTypes: string[] }> | null = null;
@@ -87,7 +101,7 @@ function formatCorpusLastSync(ms: number): string {
 import {
   formatSyncTimestamp,
   REPORT_SYNC_BUFFER_MS,
-} from '@/lib/report-sync';
+} from '@/lib/report/sync';
 
 type ReportFiltersContextValue = {
   search: string;
@@ -212,14 +226,30 @@ function routeNeedsDistributionPreload(pathname: string | null): boolean {
 export function ReportFiltersProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
   const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const needsCorpusPreload = routeNeedsCorpusPreload(pathname);
   const needsDistributionPreload = needsCorpusPreload;
 
-  const [search, setSearch] = useState(globalReportCache?.search || '');
-  const [pincodeSearch, setPincodeSearch] = useState(globalReportCache?.pincodeSearch || '');
-  const [debouncedSearch, setDebouncedSearch] = useState(globalReportCache?.search || '');
+  const [registerBootstrap] = useState(() =>
+    buildRegisterFilterBootstrap(
+      globalReportCache ? reportFilterSnapshotFromCache(globalReportCache) : null,
+      null
+    )
+  );
+  const bootstrapSnapshot = registerBootstrap.snapshot;
+
+  const [search, setSearch] = useState(
+    () => bootstrapSnapshot?.search ?? globalReportCache?.search ?? ''
+  );
+  const [pincodeSearch, setPincodeSearch] = useState(
+    () => bootstrapSnapshot?.pincodeSearch ?? globalReportCache?.pincodeSearch ?? ''
+  );
+  const [debouncedSearch, setDebouncedSearch] = useState(
+    () => bootstrapSnapshot?.search ?? globalReportCache?.search ?? ''
+  );
   const [debouncedPincodeSearch, setDebouncedPincodeSearch] = useState(
-    globalReportCache?.pincodeSearch || ''
+    () => bootstrapSnapshot?.pincodeSearch ?? globalReportCache?.pincodeSearch ?? ''
   );
 
   useEffect(() => {
@@ -252,6 +282,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   const isSearchDebouncing =
     search !== debouncedSearch || pincodeSearch !== debouncedPincodeSearch;
   const [dateRange, setDateRange] = useState<ReportDateRange>(() => {
+    if (bootstrapSnapshot?.dateRange) return bootstrapSnapshot.dateRange;
     if (globalReportCache) {
       return {
         start: new Date(globalReportCache.dateRange.start),
@@ -262,22 +293,40 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     return defaultDateRange();
   });
   const [dateFilterColumn, setDateFilterColumn] = useState<RegisterDateFilterColumn>(() =>
-    resolveRegisterDateSqlColumn(globalReportCache?.dateFilterColumn)
+    resolveRegisterDateSqlColumn(
+      bootstrapSnapshot?.dateFilterColumn ?? globalReportCache?.dateFilterColumn
+    )
   );
-  const [selectedOfficeIds, setSelectedOfficeIds] = useState<string[]>(globalReportCache?.selectedOfficeIds || []);
-  const [selectedCallTypes, setSelectedCallTypes] = useState<string[]>(globalReportCache?.selectedCallTypes || []);
-  const [selectedStatus, setSelectedStatus] = useState<string[]>(migrateStringFilter(globalReportCache?.selectedStatus));
-  const [priorityFilter, setPriorityFilter] = useState<string[]>(migrateStringFilter(globalReportCache?.priorityFilter));
-  const [portalFilter, setPortalFilter] = useState<string[]>(migrateStringFilter(globalReportCache?.portalFilter));
-  const [selectedState, setSelectedState] = useState<string[]>(migrateStringFilter(globalReportCache?.selectedState));
-  const [selectedCity, setSelectedCity] = useState<string[]>(migrateStringFilter(globalReportCache?.selectedCity));
-  const [selectedBranch, setSelectedBranch] = useState<string[]>(
-    migrateStringFilter(globalReportCache?.selectedBranch)
+  const [selectedOfficeIds, setSelectedOfficeIds] = useState<string[]>(
+    () => bootstrapSnapshot?.selectedOfficeIds ?? globalReportCache?.selectedOfficeIds ?? []
   );
-  const [selectedFranchisee, setSelectedFranchisee] = useState<string[]>(
-    migrateStringFilter(globalReportCache?.selectedFranchisee)
+  const [selectedCallTypes, setSelectedCallTypes] = useState<string[]>(
+    () => bootstrapSnapshot?.selectedCallTypes ?? globalReportCache?.selectedCallTypes ?? []
   );
-  const [selectedTechnician, setSelectedTechnician] = useState<string[]>(migrateStringFilter(globalReportCache?.selectedTechnician));
+  const [selectedStatus, setSelectedStatus] = useState<string[]>(() =>
+    migrateStringFilter(bootstrapSnapshot?.selectedStatus ?? globalReportCache?.selectedStatus)
+  );
+  const [priorityFilter, setPriorityFilter] = useState<string[]>(() =>
+    migrateStringFilter(bootstrapSnapshot?.priorityFilter ?? globalReportCache?.priorityFilter)
+  );
+  const [portalFilter, setPortalFilter] = useState<string[]>(() =>
+    migrateStringFilter(bootstrapSnapshot?.portalFilter ?? globalReportCache?.portalFilter)
+  );
+  const [selectedState, setSelectedState] = useState<string[]>(() =>
+    migrateStringFilter(bootstrapSnapshot?.selectedState ?? globalReportCache?.selectedState)
+  );
+  const [selectedCity, setSelectedCity] = useState<string[]>(() =>
+    migrateStringFilter(bootstrapSnapshot?.selectedCity ?? globalReportCache?.selectedCity)
+  );
+  const [selectedBranch, setSelectedBranch] = useState<string[]>(() =>
+    migrateStringFilter(bootstrapSnapshot?.selectedBranch ?? globalReportCache?.selectedBranch)
+  );
+  const [selectedFranchisee, setSelectedFranchisee] = useState<string[]>(() =>
+    migrateStringFilter(bootstrapSnapshot?.selectedFranchisee ?? globalReportCache?.selectedFranchisee)
+  );
+  const [selectedTechnician, setSelectedTechnician] = useState<string[]>(() =>
+    migrateStringFilter(bootstrapSnapshot?.selectedTechnician ?? globalReportCache?.selectedTechnician)
+  );
 
   const [offices, setOffices] = useState<any[]>([]);
   const [callTypes, setCallTypes] = useState<string[]>([]);
@@ -313,17 +362,22 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   /** Date windows hydrated this session — never re-fetch from network unless force. */
   const corpusSatisfiedKeysRef = useRef<Set<string>>(new Set());
   const defaultCallTypesAppliedRef = useRef(
-    (globalReportCache?.selectedCallTypes?.length ?? 0) > 0
+    (bootstrapSnapshot?.selectedCallTypes?.length ?? globalReportCache?.selectedCallTypes?.length ?? 0) >
+      0
   );
 
-  const [appliedFilters, setAppliedFilters] = useState<ReportFilterSnapshot | null>(() =>
-    globalReportCache ? reportFilterSnapshotFromCache(globalReportCache) : null
+  const [appliedFilters, setAppliedFilters] = useState<ReportFilterSnapshot | null>(
+    () =>
+      bootstrapSnapshot ??
+      (globalReportCache ? reportFilterSnapshotFromCache(globalReportCache) : null)
   );
   const [appliedRevision, setAppliedRevision] = useState(() =>
-    globalReportCache ? 1 : 0
+    bootstrapSnapshot || globalReportCache ? 1 : 0
   );
   const [reportPreferences, setReportPreferences] = useState<UserReportPreferencesV1 | null>(null);
-  const [prefsReady, setPrefsReady] = useState(() => !!globalReportCache?.data);
+  const [prefsReady, setPrefsReady] = useState(
+    () => registerBootstrap.fromDeepLink || !!globalReportCache?.data || !!bootstrapSnapshot
+  );
   const [restoredFromServer, setRestoredFromServer] = useState(false);
   const [restoredViewSummary, setRestoredViewSummary] = useState('');
   const [restoredBannerDismissed, setRestoredBannerDismissed] = useState(false);
@@ -331,6 +385,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   const appliedFiltersRef = useRef(appliedFilters);
   appliedFiltersRef.current = appliedFilters;
   const prefsRestoreAttemptedRef = useRef(false);
+  const consumedRegisterDeepLinkKeyRef = useRef(registerBootstrap.deepLinkKey);
   const skipSharedSaveRef = useRef(false);
   const sharedSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prefsPatchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -420,6 +475,39 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         });
     }, 1500);
   }, []);
+
+  useLayoutEffect(() => {
+    if (!pathname?.startsWith('/report')) {
+      consumedRegisterDeepLinkKeyRef.current = '';
+      return;
+    }
+
+    const deepLink = parseRegisterDeepLinkSearchParams(searchParams);
+    if (!deepLink) {
+      consumedRegisterDeepLinkKeyRef.current = '';
+      return;
+    }
+
+    const deepLinkKey = searchParams.toString();
+    if (!deepLinkKey || consumedRegisterDeepLinkKeyRef.current === deepLinkKey) return;
+    consumedRegisterDeepLinkKeyRef.current = deepLinkKey;
+
+    const base =
+      appliedFiltersRef.current ?? buildDraftFilterSnapshot(draftStateRef.current);
+    const snapshot = buildReportFilterSnapshot({
+      ...base,
+      search: deepLink.search ?? base.search,
+      pincodeSearch: deepLink.pincode ?? base.pincodeSearch,
+      dateRange: dateRangeFromDeepLinkParams(deepLink, base.dateRange),
+      dateFilterColumn: deepLink.dateFilterColumn ?? base.dateFilterColumn,
+      selectedCallTypes: deepLink.search ? [] : base.selectedCallTypes,
+    });
+
+    skipSharedSaveRef.current = true;
+    applyFilterSnapshot(snapshot);
+    setPrefsReady(true);
+    setRestoredBannerDismissed(true);
+  }, [pathname, searchParams, applyFilterSnapshot]);
 
   const applyFilters = useCallback((overrides?: DraftFilterOverrides): ReportFilterSnapshot => {
     const input = { ...draftStateRef.current, ...overrides };
@@ -627,7 +715,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   useEffect(() => {
     if (!resourcesLoaded || prefsRestoreAttemptedRef.current) return;
 
-    if (appliedFiltersRef.current) {
+    const deepLinkOnLoad = parseRegisterDeepLinkSearchParams(searchParams);
+    if (deepLinkOnLoad || registerBootstrap.fromDeepLink || appliedFiltersRef.current) {
       prefsRestoreAttemptedRef.current = true;
       setPrefsReady(true);
       void axios
@@ -709,6 +798,12 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     applyFilterSnapshot,
     buildRestoreContextFromLoaded,
   ]);
+
+  useEffect(() => {
+    if (!pathname?.startsWith('/report') || !searchParams.toString()) return;
+    if (!consumedRegisterDeepLinkKeyRef.current) return;
+    router.replace(pathname, { scroll: false });
+  }, [pathname, router, searchParams]);
 
   useEffect(() => {
     if (!prefsReady || !pathname?.startsWith('/report')) return;
@@ -831,16 +926,17 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     setTechniciansList(Object.values(techCounts).sort((a, b) => a.vname.localeCompare(b.vname)));
 
     const branchesFiltered = filterCallsCSR(calls, baseCriteria, 'branch');
-    const branchCounts: Record<string, { ncode: string; vcompanyname: string; call_count: number }> = {};
+    const branchCounts: Record<string, { ncode: string; vcompanyname: string; call_count: number }> =
+      {};
     branchesFiltered.forEach((c) => {
       const bCode = String(c.resolved_branch_code || c.nofficeid || '');
       if (!bCode || bCode === 'UNKNOWN') return;
-      branchCounts[bCode] = branchCounts[bCode] || {
-        ncode: bCode,
-        vcompanyname: c.officename || c.office_name || bCode,
-        call_count: 0,
-      };
-      branchCounts[bCode].call_count++;
+      mergeBranchFilterListEntry(
+        branchCounts,
+        String(c.officename || c.office_name || bCode),
+        bCode,
+        1
+      );
     });
     setBranchesList(Object.values(branchCounts).sort((a, b) => a.vcompanyname.localeCompare(b.vcompanyname)));
 

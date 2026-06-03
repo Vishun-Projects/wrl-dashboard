@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { isCrmOutOfMemoryError, postQuery } from '@/lib/db-proxy';
-import { prisma } from '@/lib/prisma';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { isCrmOutOfMemoryError, postQuery } from '@/lib/db/proxy';
+import { prisma } from '@/lib/db/prisma';
 import {
   appendCallTypeFilter,
   appendOfficeSecurityFilter,
@@ -13,11 +13,11 @@ import {
   resolveRegisterDateSqlColumn,
   type RegisterDateFilterColumn,
   TRHCALLS_EXCLUDE_TRANSFERRED,
-} from '@/lib/trhcalls-query';
-import { enrichCallRowForReport } from '@/lib/report-geo';
-import { CORPUS_SERVER_CACHE_TTL_MS, splitCalendarMonths } from '@/lib/report-corpus';
-import { formatLocalDate } from '@/lib/report-filters';
-import { readCorpusDiskCache, writeCorpusDiskCache } from '@/lib/corpus-server-cache';
+} from '@/lib/trhcalls/query';
+import { enrichCallRowForReport } from '@/lib/report/geo';
+import { CORPUS_SERVER_CACHE_TTL_MS, splitCalendarMonths } from '@/lib/report/corpus';
+import { formatLocalDate } from '@/lib/report/filters';
+import { readCorpusDiskCache, writeCorpusDiskCache } from '@/lib/report/server-cache';
 import { readCallsFromPostgres } from '@/lib/read-model/flags';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
 

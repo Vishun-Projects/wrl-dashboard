@@ -4,9 +4,9 @@
  * Usage: npx tsx scripts/verify-arcp-postgres-tally.ts [startDate] [endDate] [branch]
  */
 import '@/lib/read-model/bootstrap-env';
-import { fetchArcpClaimsAggregates } from '@/lib/arcp-claims-fetch';
-import { mergeArcpAggregateRows } from '@/lib/arcp-claims-query';
-import { queryArcpClaimsAggregates } from '@/lib/arcp-claims-postgres';
+import { fetchArcpClaimsAggregates } from '@/lib/arcp-claims/server/fetch';
+import { mergeArcpAggregateRows } from '@/lib/arcp-claims/query';
+import { queryArcpClaimsAggregates } from '@/lib/arcp-claims/server/postgres';
 
 const startDate = process.argv[2] || '2025-01-01';
 const endDate = process.argv[3] || '2025-01-07';

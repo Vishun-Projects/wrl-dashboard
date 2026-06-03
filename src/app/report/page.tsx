@@ -18,13 +18,13 @@ import {
   MoreVertical,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useUser } from '@/components/DashboardLayout';
-import { DateRangeSelector } from '@/components/DateRangeSelector';
-import { CallDetail } from '@/components/CallDetail';
+import { useUser } from '@/components/layout/DashboardLayout';
+import { DateRangeSelector } from '@/components/register/DateRangeSelector';
+import { CallDetail } from '@/components/calls/CallDetail';
 import { useRouter, usePathname } from 'next/navigation';
-import { RegisterBranchFranchiseeFilters } from '@/components/RegisterBranchFranchiseeFilters';
-import { RegisterColumnPicker } from '@/components/RegisterColumnPicker';
-import { RegisterPageFilters } from '@/components/RegisterPageFilters';
+import { RegisterBranchFranchiseeFilters } from '@/components/register/RegisterBranchFranchiseeFilters';
+import { RegisterColumnPicker } from '@/components/register/RegisterColumnPicker';
+import { RegisterPageFilters } from '@/components/register/RegisterPageFilters';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 import {
   buildRegisterListQueryKey,
@@ -39,15 +39,15 @@ import {
   migrateStringFilter,
   resolveViewCallTypesParam,
   resolveSummaryOfficeIdsParam,
-} from '@/lib/report-filters';
+} from '@/lib/report/filters';
 import {
   loadVisibleRegisterColumns,
   REGISTER_TABLE_COLUMNS,
   saveVisibleRegisterColumns,
   type RegisterTableColumnKey,
-} from '@/lib/register-table-columns';
-import { getCallTypeBadgeClass } from '@/lib/call-type-badge';
-import { MAX_CLIENT_CORPUS_DAYS, resolveRegisterDateSqlColumn } from '@/lib/trhcalls-query';
+} from '@/lib/register/table-columns';
+import { getCallTypeBadgeClass } from '@/lib/report/call-type-badge';
+import { MAX_CLIENT_CORPUS_DAYS, resolveRegisterDateSqlColumn } from '@/lib/trhcalls/query';
 import {
   findCallsInIndexedDb,
   findCallsInMemoryCaches,
@@ -60,14 +60,14 @@ import {
   type RegisterSummary,
   type RegisterSummaryBucket,
   type RegisterViewFilterParts,
-} from '@/lib/report-search';
+} from '@/lib/report/search';
 import {
   appliedFilterPartsFromSnapshot,
   isAnyFilterActive,
   toDateString,
-} from '@/lib/report-filters';
-import { globalReportCache, setGlobalReportCache, distributionDataCache, setDistributionDataCache, callCorpusStore } from '@/lib/report-data-store';
-import { indexRegisterRowsWithSerial, subscribeRegisterDelta } from '@/lib/report-sync';
+} from '@/lib/report/filters';
+import { globalReportCache, setGlobalReportCache, distributionDataCache, setDistributionDataCache, callCorpusStore } from '@/lib/report/data-store';
+import { indexRegisterRowsWithSerial, subscribeRegisterDelta } from '@/lib/report/sync';
 import {
   buildCorpusCacheKey,
   buildCorpusViewDateFilter,
@@ -78,12 +78,12 @@ import {
   getFilteredCorpusCalls,
   getCorpusCallsArray,
   restoreCorpusFromIndexedDB,
-} from '@/lib/report-corpus';
-import { readCorpusMeta } from '@/lib/report-corpus-storage';
-import { deriveSummaryDashboard, diagnoseSummaryDerivation } from '@/lib/report-summary-derive';
+} from '@/lib/report/corpus';
+import { openReportsDb, readCorpusMeta } from '@/lib/report/corpus-storage';
+import { deriveSummaryDashboard, diagnoseSummaryDerivation } from '@/lib/report/summary-derive';
 import { readRegisterFromPostgresClient, readSummaryFromPostgresClient } from '@/lib/read-model/client-flags';
-import { sanitizeUserFacingMessage } from '@/lib/user-facing-errors';
-import { deriveRegisterPageFromCalls, deriveRegisterView } from '@/lib/report-register-view';
+import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
+import { deriveRegisterPageFromCalls, deriveRegisterView } from '@/lib/report/register-view';
 import {
   collectRegisterRowsFromSessionCache,
   downloadRegisterCsvFromRows,
@@ -91,35 +91,14 @@ import {
   fetchAllRegisterRowsForExport,
   isRegisterExportAbortError,
   logRegisterBulk,
-} from '@/lib/register-export-fetch';
-import { downloadRegisterExcelFromRows } from '@/lib/register-excel-export';
-import { ensurePortalAuditCache } from '@/lib/report-portal-cache';
+} from '@/lib/register/export-fetch';
+import { downloadRegisterExcelFromRows } from '@/lib/register/excel-export';
+import { ensurePortalAuditCache } from '@/lib/report/portal-cache';
 
-// --- IndexedDB Local Storage Cache Helpers ---
-const openDB = (): Promise<IDBDatabase> => {
-  return new Promise((resolve, reject) => {
-    if (typeof window === 'undefined') {
-      reject('Not in browser');
-      return;
-    }
-    const request = indexedDB.open('wrl_reports_db', 1);
-    request.onupgradeneeded = (e: any) => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains('calls')) {
-        db.createObjectStore('calls', { keyPath: 'UniqueCallNo' });
-      }
-      if (!db.objectStoreNames.contains('meta')) {
-        db.createObjectStore('meta');
-      }
-    };
-    request.onsuccess = (e: any) => resolve(e.target.result);
-    request.onerror = (e: any) => reject(e.target.error);
-  });
-};
-
+// --- IndexedDB Local Storage Cache Helpers (same DB version as report-corpus-storage) ---
 const saveCallsToDB = async (calls: any[]) => {
   try {
-    const db = await openDB();
+    const db = await openReportsDb();
     const tx = db.transaction('calls', 'readwrite');
     const store = tx.objectStore('calls');
     calls.forEach((c) => {
@@ -138,7 +117,7 @@ const saveCallsToDB = async (calls: any[]) => {
 
 const getCallsFromDB = async (): Promise<any[]> => {
   try {
-    const db = await openDB();
+    const db = await openReportsDb();
     const tx = db.transaction('calls', 'readonly');
     const store = tx.objectStore('calls');
     const request = store.getAll();
@@ -154,7 +133,7 @@ const getCallsFromDB = async (): Promise<any[]> => {
 
 const saveMeta = async (key: string, val: any) => {
   try {
-    const db = await openDB();
+    const db = await openReportsDb();
     const tx = db.transaction('meta', 'readwrite');
     tx.objectStore('meta').put(val, key);
   } catch (err) {
@@ -164,7 +143,7 @@ const saveMeta = async (key: string, val: any) => {
 
 const getMeta = async (key: string): Promise<any> => {
   try {
-    const db = await openDB();
+    const db = await openReportsDb();
     const tx = db.transaction('meta', 'readonly');
     const request = tx.objectStore('meta').get(key);
     return new Promise((resolve, reject) => {
@@ -178,7 +157,7 @@ const getMeta = async (key: string): Promise<any> => {
 
 const clearCallsDB = async () => {
   try {
-    const db = await openDB();
+    const db = await openReportsDb();
     const tx = db.transaction(['calls', 'meta'], 'readwrite');
     tx.objectStore('calls').clear();
     tx.objectStore('meta').clear();
@@ -719,6 +698,10 @@ export default function ReportPage() {
         })();
       case 'callsolveddate':
         return formatDate(row.callsolveddate);
+      case 'bm_approved_date':
+        return row.bm_approved_date ? String(row.bm_approved_date) : '—';
+      case 'ho_approved_date':
+        return row.ho_approved_date ? String(row.ho_approved_date) : '—';
       case 'vsolveremarks':
         return (() => {
           const rejectionRemark = row.vcomment || null;
@@ -747,6 +730,9 @@ export default function ReportPage() {
     if (key === 'officename' || key === 'franchisee_name' || key === 'itemname') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-700';
     if (key === 'serviceman' || key === 'vinsttel1') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-900';
     if (key === 'vpersoncalling') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-600';
+    if (key === 'bm_approved_date' || key === 'ho_approved_date') {
+      return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-600';
+    }
     if (key === 'vsolveremarks') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px]';
     if (key === 'vinstaddress') return 'whitespace-nowrap px-3 py-2 text-[11px] text-slate-500';
     return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-500';
@@ -1567,10 +1553,33 @@ export default function ReportPage() {
       pageLimit: pageSize,
     });
 
-    if (p === 1 && searchForUrl?.trim() && isIdentifierLookupSearch(searchForUrl) && !pincodeForUrl) {
+    const localCorpusMatchesAppliedRange =
+      !globalReportCache ||
+      (toDateString(globalReportCache.dateRange.start) === startDateStr &&
+        toDateString(globalReportCache.dateRange.end) === endDateStr);
+
+    if (
+      p === 1 &&
+      searchForUrl?.trim() &&
+      isIdentifierLookupSearch(searchForUrl) &&
+      !pincodeForUrl &&
+      !skipCache &&
+      localCorpusMatchesAppliedRange
+    ) {
       let cachedHits = findCallsInMemoryCaches(searchForUrl);
       if (cachedHits.length === 0) {
         cachedHits = await findCallsInIndexedDb(searchForUrl, getCallsFromDB);
+      }
+
+      const appliedSnap = getAppliedFiltersSnapshot();
+      if (cachedHits.length > 0 && appliedSnap) {
+        const viewDate = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
+        const { filteredCalls } = deriveRegisterView(
+          cachedHits,
+          appliedFilterPartsFromSnapshot(appliedSnap),
+          viewDate
+        );
+        cachedHits = filteredCalls;
       }
 
       if (cachedHits.length > 0) {
@@ -1788,11 +1797,9 @@ export default function ReportPage() {
       let u = basePath;
       if (searchForUrl) u += `&search=${encodeURIComponent(searchForUrl)}`;
       if (pincodeForUrl) u += `&pincode=${encodeURIComponent(pincodeForUrl)}`;
-      if (!searchActive) {
-        if (startDateStr) u += `&startDate=${startDateStr}`;
-        if (endDateStr) u += `&endDate=${endDateStr}`;
-        u += `&dateFilterColumn=${encodeURIComponent(dateFilterColumn)}`;
-      }
+      if (startDateStr) u += `&startDate=${startDateStr}`;
+      if (endDateStr) u += `&endDate=${endDateStr}`;
+      u += `&dateFilterColumn=${encodeURIComponent(dateFilterColumn)}`;
       const stateParam = joinFilterParam(selectedState);
       const cityParam = joinFilterParam(selectedCity);
       const technicianParam = joinFilterParam(selectedTechnician);

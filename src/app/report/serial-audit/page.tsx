@@ -14,10 +14,10 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { RegisterPageFilters } from '@/components/RegisterPageFilters';
-import { RegisterMultiSelect } from '@/components/RegisterMultiSelect';
-import { ReportLoadingPanel } from '@/components/ReportLoadingFeedback';
-import { PageShell } from '@/components/PageShell';
+import { RegisterPageFilters } from '@/components/register/RegisterPageFilters';
+import { RegisterMultiSelect } from '@/components/register/RegisterMultiSelect';
+import { ReportLoadingPanel } from '@/components/report/ReportLoadingFeedback';
+import { PageShell } from '@/components/layout/PageShell';
 import {
   AdminStatPill,
   AdminTable,
@@ -29,11 +29,16 @@ import {
   AdminTr,
 } from '@/components/admin/AdminUi';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
-import { buildCorpusCacheKey } from '@/lib/report-corpus';
-import { sanitizeUserFacingMessage } from '@/lib/user-facing-errors';
-import { appliedFilterPartsFromSnapshot, toDateString } from '@/lib/report-filters';
-import { callCorpusStore } from '@/lib/report-data-store';
-import { MAX_CLIENT_CORPUS_DAYS } from '@/lib/trhcalls-query';
+import { buildCorpusCacheKey } from '@/lib/report/corpus';
+import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
+import {
+  appliedFilterPartsFromSnapshot,
+  buildSerialAuditApiScopeParams,
+  toDateString,
+  type RegisterDeepLinkParams,
+} from '@/lib/report/filters';
+import { callCorpusStore } from '@/lib/report/data-store';
+import { MAX_CLIENT_CORPUS_DAYS } from '@/lib/trhcalls/query';
 import {
   defaultSerialAuditRepairFilterValues,
   mergeRepairCountsIntoRows,
@@ -44,14 +49,21 @@ import {
   type RepairMasterItem,
   type RepairPickerItem,
   type SerialAuditRepairCounts,
-} from '@/lib/serial-audit-repair-options';
+} from '@/lib/serial-audit/repair-options';
 import {
   aggregateComplaintsBySerial,
   buildCallsBySerialMap,
+  buildInvolvementPairKey,
   computeRepeatInvolvementAnalysis,
+  countRepairsFromCallRows,
+  getSerialAuditDisplayCalls,
+  type RepeatInvolvementEntry,
   deriveSerialAuditRowsForView,
-  filterSerialAuditCallsForView,
+  resolveSerialAuditWindowCalls,
+  serialAuditCallsLoadedForKey,
+  serialAuditMetaFromCalls,
   serialAuditRowHasCallsInWindow,
+  summarizeSerialAuditCalls,
   filterSerialAuditRows,
   getWindowCallsForSerialAudit,
   mapApiListItemToSerialAuditRow,
@@ -63,10 +75,11 @@ import {
   summarizeSerialAudit,
   type SerialAuditCallDetail,
   type SerialAuditRow,
-} from '@/lib/serial-complaint-audit';
-import type { ExtraActiveFilterChip } from '@/lib/report-filters';
-import { SerialAuditCallsDetailTable } from '@/components/SerialAuditCallsDetailTable';
-import { SerialAuditAnalysisPanel } from '@/components/SerialAuditAnalysisPanel';
+} from '@/lib/serial-audit/complaint-audit';
+import type { ExtraActiveFilterChip } from '@/lib/report/filters';
+import { MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS } from '@/lib/serial-audit/server/batch-fetch';
+import { SerialAuditCallsDetailTable } from '@/components/serial-audit/SerialAuditCallsDetailTable';
+import { SerialAuditAnalysisPanel } from '@/components/serial-audit/SerialAuditAnalysisPanel';
 import { toast } from 'sonner';
 
 const DEFAULT_RISK_THRESHOLD = 3;
@@ -82,6 +95,7 @@ const serialAuditBackgroundCache = new Map<
   }
 >();
 const serialAuditBackgroundInflight = new Map<string, Promise<void>>();
+const serialAuditAnalysisInflight = new Map<string, Promise<void>>();
 
 function dateRangeSpanDays(start: Date, end: Date): number {
   const startUtc = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
@@ -169,6 +183,16 @@ export default function SerialAuditPage() {
     [startDateStr, endDateStr]
   );
 
+  const registerLinkContext = useMemo((): Omit<RegisterDeepLinkParams, 'search'> | undefined => {
+    if (!startDateStr || !endDateStr) return undefined;
+    return {
+      startDate: startDateStr,
+      endDate: endDateStr,
+      dateFilterColumn,
+      dateRangeLabel: appliedFilters?.dateRange.label,
+    };
+  }, [appliedFilters?.dateRange.label, dateFilterColumn, endDateStr, startDateStr]);
+
   const corpusWindowKey = useMemo(
     () => buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn),
     [startDateStr, endDateStr, dateFilterColumn]
@@ -197,6 +221,9 @@ export default function SerialAuditPage() {
   const [analysisCallsBySerial, setAnalysisCallsBySerial] = useState<
     Map<string, SerialAuditCallDetail[]>
   >(new Map());
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [selectedInvolvementPair, setSelectedInvolvementPair] =
+    useState<RepeatInvolvementEntry | null>(null);
   const loadInFlightRef = useRef<Promise<void> | null>(null);
   const lastPaintedKeyRef = useRef<string | null>(null);
   const defaultRepairsAppliedRef = useRef(false);
@@ -256,9 +283,9 @@ export default function SerialAuditPage() {
 
   const fetchRepairCountsBySerial = useCallback(
     async (
-      start: string,
-      end: string,
-      callType: string
+      snap: NonNullable<ReturnType<typeof getAppliedFiltersSnapshot>>,
+      callType: string,
+      repairs: string[]
     ): Promise<Map<string, SerialAuditRepairCounts>> => {
       const {
         data: { session },
@@ -266,10 +293,18 @@ export default function SerialAuditPage() {
       const headers = session?.access_token
         ? { Authorization: `Bearer ${session.access_token}` }
         : {};
+      const scopeParams = buildSerialAuditApiScopeParams({
+        startDate: toDateString(snap.dateRange.start),
+        endDate: toDateString(snap.dateRange.end),
+        callType,
+        repair: serializeRepairFilterParam(repairs),
+        selectedBranch: snap.selectedBranch,
+        selectedFranchisee: snap.selectedFranchisee,
+      });
       const res = await axios.get('/api/report/serial-audit/repair-counts', {
         headers,
         timeout: 120000,
-        params: { startDate: start, endDate: end, callType },
+        params: scopeParams,
       });
       const bySerial = (res.data?.bySerial || {}) as Record<string, SerialAuditRepairCounts>;
       const map = new Map<string, SerialAuditRepairCounts>();
@@ -278,7 +313,7 @@ export default function SerialAuditPage() {
       }
       return map;
     },
-    [supabase]
+    [getAppliedFiltersSnapshot, supabase]
   );
 
   const fetchCallIdsWithRepair = useCallback(
@@ -320,6 +355,105 @@ export default function SerialAuditPage() {
     [dataKey]
   );
 
+  const loadInvolvementAnalysis = useCallback(
+    async (
+      rows: SerialAuditRow[],
+      scope: {
+        dataKey: string;
+        startDate: string;
+        endDate: string;
+        callType: string;
+        repair: string;
+        branch: string;
+        franchisee: string;
+      }
+    ) => {
+      const flaggedSerials = rows
+        .filter((row) => row.riskFlag && !row.isUnknownSerial)
+        .sort((a, b) => b.complaintCount - a.complaintCount)
+        .slice(0, MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS)
+        .map((row) => row.serial);
+      if (flaggedSerials.length === 0) {
+        setAnalysisCallsBySerial(new Map());
+        return;
+      }
+
+      const inflightKey = `${scope.dataKey}:involvement`;
+      const cached = serialAuditBackgroundCache.get(scope.dataKey);
+      if (cached && cached.analysisCalls.size > 0) {
+        setAnalysisCallsBySerial(cached.analysisCalls);
+        return;
+      }
+
+      const existing = serialAuditAnalysisInflight.get(inflightKey);
+      if (existing) {
+        await existing;
+        return;
+      }
+
+      const run = (async () => {
+        setAnalysisLoading(true);
+        try {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          const headers = session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {};
+          const res = await axios.post(
+            '/api/report/serial-audit/involvement',
+            {
+              serials: flaggedSerials,
+              startDate: scope.startDate,
+              endDate: scope.endDate,
+              callType: scope.callType,
+              repair: scope.repair,
+              branch: scope.branch,
+              franchisee: scope.franchisee,
+            },
+            { headers, timeout: 300000 }
+          );
+          const analysisCalls = buildCallsBySerialMap(
+            ((res.data?.calls || []) as Record<string, unknown>[]) ?? []
+          );
+          for (const serial of flaggedSerials) {
+            const norm = normalizeSerial(serial) ?? serial.trim().toUpperCase();
+            if (!analysisCalls.has(norm)) {
+              analysisCalls.set(norm, []);
+            }
+          }
+          setAnalysisCallsBySerial(analysisCalls);
+          const snapshot = serialAuditBackgroundCache.get(scope.dataKey);
+          if (snapshot) {
+            serialAuditBackgroundCache.set(scope.dataKey, {
+              ...snapshot,
+              analysisCalls,
+            });
+          }
+        } catch (err: unknown) {
+          const message = sanitizeUserFacingMessage(
+            axios.isAxiosError(err) && err.response?.data?.error
+              ? String(err.response.data.error)
+              : err instanceof Error
+                ? err.message
+                : 'Failed to load ASP involvement analysis'
+          );
+          toast.error(message);
+        } finally {
+          setAnalysisLoading(false);
+        }
+      })();
+
+      serialAuditAnalysisInflight.set(inflightKey, run);
+      try {
+        await run;
+      } finally {
+        serialAuditAnalysisInflight.delete(inflightKey);
+      }
+    },
+    [supabase]
+  );
+
   const loadWindowData = useCallback(
     async (opts?: { force?: boolean; refresh?: boolean; repairs?: string[] }) => {
       const snap = getAppliedFiltersSnapshot();
@@ -343,6 +477,36 @@ export default function SerialAuditPage() {
       const loadCallTypeParam =
         snap.selectedCallTypes.length === 0 ? 'All' : snap.selectedCallTypes.join(',');
       const loadRepairParam = serializeRepairFilterParam(loadRepairs);
+      const apiScopeParams = buildSerialAuditApiScopeParams({
+        startDate: loadStartDateStr,
+        endDate: loadEndDateStr,
+        callType: loadCallTypeParam,
+        repair: loadRepairParam,
+        selectedBranch: snap.selectedBranch,
+        selectedFranchisee: snap.selectedFranchisee,
+        minRepeats: MIN_REPEAT_COMPLAINTS,
+        refresh: !!opts?.refresh,
+      });
+      const involvementScope = {
+        startDate: loadStartDateStr,
+        endDate: loadEndDateStr,
+        callType: loadCallTypeParam,
+        repair: loadRepairParam,
+        branch: apiScopeParams.branch ?? '',
+        franchisee: apiScopeParams.franchisee ?? '',
+      };
+
+      const maybePrefetchInvolvement = (rows: SerialAuditRow[], cachedAnalysis: Map<string, SerialAuditCallDetail[]>) => {
+        if (
+          cachedAnalysis.size === 0 &&
+          rows.some((r) => r.riskFlag && !r.isUnknownSerial)
+        ) {
+          void loadInvolvementAnalysis(rows, {
+            dataKey: loadDataKey,
+            ...involvementScope,
+          });
+        }
+      };
 
       const existingInflight = serialAuditBackgroundInflight.get(loadDataKey);
       if (existingInflight && !opts?.force && !opts?.refresh) {
@@ -351,6 +515,7 @@ export default function SerialAuditPage() {
         if (cached) {
           applyCachedSnapshot(cached);
           lastPaintedKeyRef.current = loadDataKey;
+          maybePrefetchInvolvement(cached.rows, cached.analysisCalls);
         }
         return;
       }
@@ -360,6 +525,7 @@ export default function SerialAuditPage() {
         if (cached) {
           applyCachedSnapshot(cached);
           lastPaintedKeyRef.current = loadDataKey;
+          maybePrefetchInvolvement(cached.rows, cached.analysisCalls);
           return;
         }
       }
@@ -408,9 +574,9 @@ export default function SerialAuditPage() {
               MIN_REPEAT_COMPLAINTS
             );
             const repairCountMap = await fetchRepairCountsBySerial(
-              loadStartDateStr,
-              loadEndDateStr,
-              loadCallTypeParam
+              snap,
+              loadCallTypeParam,
+              loadRepairs
             );
             rows = mergeRepairCountsIntoRows(rows, repairCountMap);
             const windowCalls = buildCallsBySerialMap(calls);
@@ -431,16 +597,7 @@ export default function SerialAuditPage() {
           const res = await axios.get('/api/report/serial-audit', {
             headers,
             timeout: 300000,
-            params: {
-              startDate: loadStartDateStr,
-              endDate: loadEndDateStr,
-              callType: loadCallTypeParam,
-              repair: loadRepairParam,
-              minRepeats: MIN_REPEAT_COMPLAINTS,
-              includeAnalysisCalls: 'true',
-              riskThreshold: DEFAULT_RISK_THRESHOLD,
-              ...(opts?.refresh ? { refresh: 'true' } : {}),
-            },
+            params: apiScopeParams,
           });
 
           const apiRows = ((res.data?.serials || []) as Record<string, unknown>[])
@@ -458,17 +615,18 @@ export default function SerialAuditPage() {
           });
 
           const emptyWindowCalls = new Map<string, SerialAuditCallDetail[]>();
-          const analysisCalls = buildCallsBySerialMap(
-            ((res.data?.analysisCalls || []) as Record<string, unknown>[]) ?? []
-          );
           setListRows(apiRows);
           setWindowCallsBySerial(emptyWindowCalls);
-          setAnalysisCallsBySerial(analysisCalls);
+          setAnalysisCallsBySerial(new Map());
           lastPaintedKeyRef.current = loadDataKey;
           serialAuditBackgroundCache.set(loadDataKey, {
             rows: apiRows,
             windowCalls: emptyWindowCalls,
-            analysisCalls,
+            analysisCalls: new Map(),
+          });
+          void loadInvolvementAnalysis(apiRows, {
+            dataKey: loadDataKey,
+            ...involvementScope,
           });
         } catch (err: unknown) {
           const message = sanitizeUserFacingMessage(
@@ -503,6 +661,7 @@ export default function SerialAuditPage() {
       fetchCallIdsWithRepair,
       fetchRepairCountsBySerial,
       getAppliedFiltersSnapshot,
+      loadInvolvementAnalysis,
       supabase,
     ]
   );
@@ -553,14 +712,13 @@ export default function SerialAuditPage() {
 
   const loadSerialDetails = useCallback(
     async (serial: string) => {
+      const serialNorm = normalizeSerial(serial) ?? serial.trim().toUpperCase();
       let alreadyLoaded = false;
       setWindowCallsBySerial((prev) => {
-        alreadyLoaded = prev.has(serial) && (prev.get(serial)?.length ?? 0) > 0;
+        alreadyLoaded = prev.has(serialNorm);
         return prev;
       });
       if (alreadyLoaded) return;
-
-      const serialNorm = normalizeSerial(serial) ?? serial.trim().toUpperCase();
       setDetailLoading(serialNorm);
       try {
         const {
@@ -569,16 +727,26 @@ export default function SerialAuditPage() {
         const headers = session?.access_token
           ? { Authorization: `Bearer ${session.access_token}` }
           : {};
+        const snap = getAppliedFiltersSnapshot();
+        const detailParams = snap
+          ? buildSerialAuditApiScopeParams({
+              startDate: startDateStr,
+              endDate: endDateStr,
+              callType: callTypeParam,
+              repair: serializeRepairFilterParam(appliedRepairs),
+              selectedBranch: snap.selectedBranch,
+              selectedFranchisee: snap.selectedFranchisee,
+            })
+          : {
+              startDate: startDateStr,
+              endDate: endDateStr,
+              callType: callTypeParam,
+              repair: serializeRepairFilterParam(appliedRepairs),
+            };
         const res = await axios.get('/api/report/serial-audit', {
           headers,
           timeout: 120000,
-          params: {
-            callType: callTypeParam,
-            repair: serializeRepairFilterParam(appliedRepairs),
-            serial: serialNorm,
-            startDate: startDateStr,
-            endDate: endDateStr,
-          },
+          params: { ...detailParams, serial: serialNorm },
         });
         const rawCalls = (res.data?.calls || []) as Record<string, unknown>[];
         const details = sortSerialAuditCallDetails(
@@ -603,8 +771,19 @@ export default function SerialAuditPage() {
         setDetailLoading(null);
       }
     },
-    [appliedRepairs, callTypeParam, endDateStr, startDateStr, supabase]
+    [appliedRepairs, callTypeParam, endDateStr, getAppliedFiltersSnapshot, startDateStr, supabase]
   );
+
+  const skipRevisionReloadRef = useRef(true);
+  useEffect(() => {
+    if (!resourcesLoaded || !appliedFilters || !prefsReady) return;
+    if (!defaultRepairsAppliedRef.current) return;
+    if (skipRevisionReloadRef.current) {
+      skipRevisionReloadRef.current = false;
+      return;
+    }
+    void loadWindowData({ force: true });
+  }, [appliedRevision, appliedFilters, loadWindowData, prefsReady, resourcesLoaded]);
 
   useEffect(() => {
     if (!resourcesLoaded) return;
@@ -615,6 +794,7 @@ export default function SerialAuditPage() {
     }
     lastPaintedKeyRef.current = null;
     setAnalysisCallsBySerial(new Map());
+    setSelectedInvolvementPair(null);
     setListRows([]);
     setWindowCallsBySerial(new Map());
     setExpandedSerial(null);
@@ -632,6 +812,25 @@ export default function SerialAuditPage() {
     [listRows, includeCancelled]
   );
 
+  const selectedPairKey = useMemo(
+    () =>
+      selectedInvolvementPair
+        ? buildInvolvementPairKey(
+            selectedInvolvementPair.technician,
+            selectedInvolvementPair.franchisee
+          )
+        : null,
+    [selectedInvolvementPair]
+  );
+
+  const selectedPairSerials = useMemo(
+    () =>
+      selectedInvolvementPair
+        ? new Set(selectedInvolvementPair.serialKeys)
+        : null,
+    [selectedInvolvementPair]
+  );
+
   const displayedRows = useMemo(() => {
     const filtered = filterSerialAuditRows(allSerialRows, {
       minCount: onlyFlagged ? DEFAULT_RISK_THRESHOLD : minCount,
@@ -639,16 +838,24 @@ export default function SerialAuditPage() {
       onlyFlagged,
       hideUnknown: true,
     });
-    return filtered.filter((row) =>
-      serialAuditRowHasCallsInWindow(row, windowCallsBySerial, includeCancelled)
+    const withCalls = filtered.filter((row) =>
+      serialAuditRowHasCallsInWindow(row, windowCallsBySerial, includeCancelled, {
+        analysisCallsBySerial,
+        involvementPair: selectedInvolvementPair,
+      })
     );
+    if (!selectedPairSerials) return withCalls;
+    return withCalls.filter((row) => selectedPairSerials.has(serialRowMatchKey(row)));
   }, [
     allSerialRows,
     minCount,
     serialSearch,
     onlyFlagged,
     windowCallsBySerial,
+    analysisCallsBySerial,
     includeCancelled,
+    selectedPairSerials,
+    selectedInvolvementPair,
   ]);
 
   const totalPages = Math.max(1, Math.ceil(displayedRows.length / SERIAL_PAGE_SIZE));
@@ -656,6 +863,11 @@ export default function SerialAuditPage() {
   useEffect(() => {
     setPage(1);
   }, [serialSearch, minCount, onlyFlagged, includeCancelled, filterParts, appliedRepairs]);
+
+  useEffect(() => {
+    setPage(1);
+    setExpandedSerial(null);
+  }, [selectedInvolvementPair]);
 
   const handleApplyFilters = useCallback(() => {
     setAppliedRepairs(draftRepairs);
@@ -743,23 +955,21 @@ export default function SerialAuditPage() {
     [allSerialRows]
   );
 
-  const analysisCallsSource = useMemo(() => {
-    const corpusReady =
-      flaggedRowsForAnalysis.length > 0 &&
-      flaggedRowsForAnalysis.every(
-        (row) => (windowCallsBySerial.get(serialRowMatchKey(row))?.length ?? 0) > 0
-      );
-    return corpusReady ? windowCallsBySerial : analysisCallsBySerial;
-  }, [analysisCallsBySerial, flaggedRowsForAnalysis, windowCallsBySerial]);
+  const resolveSerialCalls = useCallback(
+    (serialKey: string) =>
+      resolveSerialAuditWindowCalls(serialKey, windowCallsBySerial, analysisCallsBySerial),
+    [windowCallsBySerial, analysisCallsBySerial]
+  );
 
   const repeatInvolvement = useMemo(
     () =>
       computeRepeatInvolvementAnalysis(
         flaggedRowsForAnalysis,
-        analysisCallsSource,
-        includeCancelled
+        windowCallsBySerial,
+        includeCancelled,
+        resolveSerialCalls
       ),
-    [analysisCallsSource, flaggedRowsForAnalysis, includeCancelled]
+    [flaggedRowsForAnalysis, windowCallsBySerial, includeCancelled, resolveSerialCalls]
   );
 
   const toggleExpand = (serial: string) => {
@@ -873,6 +1083,8 @@ export default function SerialAuditPage() {
             analysis={repeatInvolvement}
             dateRangeLabel={dateRangeLabel}
             loading
+            selectedPairKey={selectedPairKey}
+            onPairSelect={setSelectedInvolvementPair}
           />
         </div>
       ) : loadError && listRows.length === 0 ? (
@@ -903,13 +1115,50 @@ export default function SerialAuditPage() {
             isEmpty={displayedRows.length === 0}
             empty={
               <>
-                <p className="text-sm font-medium text-slate-600">No serials match filters</p>
+                <p className="text-sm font-medium text-slate-600">
+                  {selectedInvolvementPair
+                    ? 'No serials for this ASP / technician in the current filters'
+                    : 'No serials match filters'}
+                </p>
                 <p className="text-[11px] text-slate-400">
-                  Lower &quot;Min repeats&quot; or clear &quot;Flagged only&quot;.
+                  {selectedInvolvementPair ? (
+                    <button
+                      type="button"
+                      className="mt-2 font-medium text-amber-800 underline"
+                      onClick={() => setSelectedInvolvementPair(null)}
+                    >
+                      Clear ASP / technician filter
+                    </button>
+                  ) : (
+                    'Lower "Min repeats" or clear "Flagged only".'
+                  )}
                 </p>
               </>
             }
           >
+            {selectedInvolvementPair ? (
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-amber-100 bg-amber-50 px-3 py-2">
+                <p className="text-[11px] text-amber-950">
+                  <span className="font-semibold">{displayedRows.length}</span> serial
+                  {displayedRows.length === 1 ? '' : 's'} for{' '}
+                  <span className="font-semibold">{selectedInvolvementPair.franchisee}</span>
+                  {selectedInvolvementPair.technician !== '—' ? (
+                    <>
+                      {' '}
+                      · <span className="font-semibold">{selectedInvolvementPair.technician}</span>
+                    </>
+                  ) : null}
+                  . Counts in the table match the expanded call list for this ASP / technician.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setSelectedInvolvementPair(null)}
+                  className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-900 hover:bg-amber-100"
+                >
+                  Show all serials
+                </button>
+              </div>
+            ) : null}
             <AdminTable>
               <AdminThead>
                 <tr>
@@ -917,7 +1166,17 @@ export default function SerialAuditPage() {
                     <span className="sr-only">Expand</span>
                   </AdminTh>
                   <AdminTh>Serial</AdminTh>
-                  <AdminTh align="right">Complaints</AdminTh>
+                  <AdminTh align="right">
+                    <span
+                      title={
+                        selectedInvolvementPair
+                          ? 'Calls for selected ASP / technician (same as expanded list)'
+                          : 'Calls on this serial in the selected range'
+                      }
+                    >
+                      {selectedInvolvementPair ? 'Calls' : 'Complaints'}
+                    </span>
+                  </AdminTh>
                   <AdminTh align="right">Open</AdminTh>
                   <AdminTh align="right">Solved</AdminTh>
                   {includeCancelled ? <AdminTh align="right">Cancelled</AdminTh> : null}
@@ -931,8 +1190,15 @@ export default function SerialAuditPage() {
                   <SerialAuditTableRow
                     key={row.serial}
                     row={row}
-                    windowCalls={windowCallsBySerial.get(row.serial) ?? []}
+                    rawCalls={resolveSerialCalls(serialRowMatchKey(row))}
+                    callsLoaded={serialAuditCallsLoadedForKey(
+                      serialRowMatchKey(row),
+                      windowCallsBySerial,
+                      analysisCallsBySerial
+                    )}
+                    selectedInvolvementPair={selectedInvolvementPair}
                     dateRangeLabel={dateRangeLabel}
+                    registerLinkContext={registerLinkContext}
                     detailLoading={detailLoading === row.serial}
                     expanded={expandedSerial === row.serial}
                     includeCancelled={includeCancelled}
@@ -976,7 +1242,10 @@ export default function SerialAuditPage() {
           <SerialAuditAnalysisPanel
             analysis={repeatInvolvement}
             dateRangeLabel={dateRangeLabel}
-            loading={loading}
+            loading={loading && listRows.length === 0}
+            prefetching={analysisLoading}
+            selectedPairKey={selectedPairKey}
+            onPairSelect={setSelectedInvolvementPair}
           />
         </div>
       )}
@@ -1019,16 +1288,22 @@ function SerialRepairCountBadges({
 
 function SerialAuditTableRow({
   row,
-  windowCalls,
+  rawCalls,
+  callsLoaded,
+  selectedInvolvementPair,
   dateRangeLabel,
+  registerLinkContext,
   detailLoading,
   expanded,
   includeCancelled,
   onToggle,
 }: {
   row: SerialAuditRow;
-  windowCalls: SerialAuditCallDetail[];
+  rawCalls: SerialAuditCallDetail[];
+  callsLoaded: boolean;
+  selectedInvolvementPair: RepeatInvolvementEntry | null;
   dateRangeLabel: string;
+  registerLinkContext?: Omit<RegisterDeepLinkParams, 'search'>;
   detailLoading: boolean;
   expanded: boolean;
   includeCancelled: boolean;
@@ -1036,11 +1311,46 @@ function SerialAuditTableRow({
 }) {
   const flagged = row.riskFlag;
   const rowBg = flagged ? 'bg-amber-50/80 hover:bg-amber-50' : '';
+
+  const involvementPair = selectedInvolvementPair
+    ? {
+        technician: selectedInvolvementPair.technician,
+        franchisee: selectedInvolvementPair.franchisee,
+      }
+    : null;
+
   const displayCalls = useMemo(
-    () => filterSerialAuditCallsForView(windowCalls, includeCancelled),
-    [windowCalls, includeCancelled]
+    () => getSerialAuditDisplayCalls(rawCalls, includeCancelled, involvementPair),
+    [rawCalls, includeCancelled, involvementPair]
   );
-  const callsLoading = detailLoading && windowCalls.length === 0;
+
+  const displayCounts = useMemo(
+    () => summarizeSerialAuditCalls(displayCalls),
+    [displayCalls]
+  );
+
+  const displayMeta = useMemo(() => serialAuditMetaFromCalls(displayCalls), [displayCalls]);
+
+  const counts = callsLoaded ? displayCounts : summarizeSerialAuditCalls([]);
+  const showListFallback = !callsLoaded;
+  const complaintCount = showListFallback ? row.complaintCount : counts.complaintCount;
+  const openCount = showListFallback ? row.openCount : counts.openCount;
+  const solvedCount = showListFallback ? row.solvedCount : counts.solvedCount;
+  const cancelledCount = showListFallback ? row.cancelledCount : counts.cancelledCount;
+  const uniqueBranches = showListFallback ? row.uniqueBranches : displayMeta.uniqueBranches;
+  const uniqueCustomers = showListFallback ? row.uniqueCustomers : displayMeta.uniqueCustomers;
+  const lastComplaintDate = showListFallback
+    ? row.lastComplaintDate
+    : displayMeta.lastComplaintDate;
+
+  const repairBadgeCounts = useMemo(() => {
+    if (!callsLoaded) return row.repairCounts;
+    return countRepairsFromCallRows(
+      displayCalls.map((call) => ({ repair_done: call.repairDone }))
+    );
+  }, [callsLoaded, displayCalls, row.repairCounts]);
+
+  const callsLoading = detailLoading && !callsLoaded;
 
   return (
     <>
@@ -1064,7 +1374,7 @@ function SerialAuditTableRow({
             <span className={flagged ? 'font-semibold text-amber-900' : 'text-slate-800'}>
               {row.serial} ~
             </span>
-            <SerialRepairCountBadges counts={row.repairCounts} />
+            <SerialRepairCountBadges counts={repairBadgeCounts} />
             {/* {flagged ? (
               <span className="rounded bg-amber-200 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-amber-900">
                 Flagged (Repeat-Complaints)
@@ -1073,48 +1383,68 @@ function SerialAuditTableRow({
           </div>
         </AdminTd>
         <AdminTd align="right" className={`font-semibold tabular-nums ${rowBg}`}>
-          {row.complaintCount}
+          {callsLoading ? (
+            <span className="text-slate-400">…</span>
+          ) : (
+            complaintCount
+          )}
         </AdminTd>
         <AdminTd align="right" className={`tabular-nums text-blue-700 ${rowBg}`}>
-          {row.openCount}
+          {callsLoading ? <span className="text-slate-400">…</span> : openCount}
         </AdminTd>
         <AdminTd align="right" className={`tabular-nums text-emerald-700 ${rowBg}`}>
-          {row.solvedCount}
+          {callsLoading ? <span className="text-slate-400">…</span> : solvedCount}
         </AdminTd>
         {includeCancelled ? (
           <AdminTd align="right" className={`tabular-nums text-rose-700 ${rowBg}`}>
-            {row.cancelledCount}
+            {callsLoading ? <span className="text-slate-400">…</span> : cancelledCount}
           </AdminTd>
         ) : null}
         <AdminTd className={`max-w-[140px] truncate text-[11px] ${rowBg}`}>
-          {row.uniqueBranches.length > 0
-            ? row.uniqueBranches.slice(0, 2).join(', ') +
-              (row.uniqueBranches.length > 2 ? ` +${row.uniqueBranches.length - 2}` : '')
+          {uniqueBranches.length > 0
+            ? uniqueBranches.slice(0, 2).join(', ') +
+              (uniqueBranches.length > 2 ? ` +${uniqueBranches.length - 2}` : '')
             : '—'}
         </AdminTd>
         <AdminTd className={`max-w-[140px] truncate text-[11px] ${rowBg}`}>
-          {row.uniqueCustomers.length > 0
-            ? row.uniqueCustomers.slice(0, 2).join(', ') +
-              (row.uniqueCustomers.length > 2 ? ` +${row.uniqueCustomers.length - 2}` : '')
+          {uniqueCustomers.length > 0
+            ? uniqueCustomers.slice(0, 2).join(', ') +
+              (uniqueCustomers.length > 2 ? ` +${uniqueCustomers.length - 2}` : '')
             : '—'}
         </AdminTd>
         <AdminTd className={`whitespace-nowrap text-[11px] text-slate-600 ${rowBg}`}>
-          {row.lastComplaintDate ? row.lastComplaintDate.slice(0, 10) : '—'}
+          {lastComplaintDate ? lastComplaintDate.slice(0, 10) : '—'}
         </AdminTd>
       </AdminTr>
       {expanded ? (
         <tr className="border-b border-slate-100 bg-slate-50/80">
-          <td colSpan={includeCancelled ? 9 : 8} className="px-3 py-3">
+          <td colSpan={includeCancelled ? 9 : 8} className="serial-audit-expanded-cell px-3 py-3">
             {displayCalls.length === 0 && !callsLoading ? (
               <p className="py-4 text-center text-[11px] text-slate-500">
-                No calls for this serial in the selected date range.
+                {selectedInvolvementPair
+                  ? `No repeat calls for ${selectedInvolvementPair.franchisee}${
+                      selectedInvolvementPair.technician !== '—'
+                        ? ` · ${selectedInvolvementPair.technician}`
+                        : ''
+                    } on this serial.`
+                  : 'No calls for this serial in the selected date range.'}
               </p>
             ) : (
               <SerialAuditCallsDetailTable
                 calls={displayCalls}
                 serial={row.serial}
                 dateRangeLabel={dateRangeLabel}
+                registerLinkContext={registerLinkContext}
                 loading={callsLoading}
+                scopeHint={
+                  selectedInvolvementPair
+                    ? `Repeat calls for ${selectedInvolvementPair.franchisee}${
+                        selectedInvolvementPair.technician !== '—'
+                          ? ` · ${selectedInvolvementPair.technician}`
+                          : ''
+                      }`
+                    : undefined
+                }
               />
             )}
           </td>

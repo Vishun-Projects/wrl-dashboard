@@ -1,13 +1,60 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
-// Admin operations require service role for auth management
-const supabaseAdmin = createSupabaseClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+function normalizeUuid(value: unknown): string | null {
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s === '' ? null : s;
+}
+
+function isDuplicateEmailMessage(message: string): boolean {
+  return /already been registered|already registered|already exists|duplicate/i.test(message);
+}
+
+async function findAuthUserByEmail(email: string) {
+  const normalized = email.trim().toLowerCase();
+  let page = 1;
+  while (page <= 50) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
+    if (error) throw error;
+    const match = data.users.find((u) => u.email?.toLowerCase() === normalized);
+    if (match) return match;
+    if (data.users.length < 200) break;
+    page += 1;
+  }
+  return null;
+}
+
+async function profileExists(userId: string): Promise<boolean> {
+  const rows = (await prisma.$queryRawUnsafe(
+    'SELECT id FROM public.app_users WHERE id = $1 LIMIT 1',
+    userId
+  )) as { id: string }[];
+  return rows.length > 0;
+}
+
+async function insertAppUser(params: {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  roleId: string | null;
+  officeIds: string[];
+  visibleStatuses: string[];
+}) {
+  await prisma.$queryRawUnsafe(
+    'INSERT INTO public.app_users (id, email, name, role, role_id, office_ids, visible_statuses) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+    params.id,
+    params.email,
+    params.name,
+    params.role,
+    params.roleId,
+    params.officeIds,
+    params.visibleStatuses
+  );
+}
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -43,33 +90,66 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
+  let authUserId: string | null = null;
+  let createdAuthThisRequest = false;
+
   try {
     const body = await request.json();
     const { email, password, name, role, role_id, office_ids, visible_statuses } = body;
+    const roleId = normalizeUuid(role_id);
 
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured. User creation aborted.');
+    if (!email?.trim() || !password || !name?.trim()) {
+      return NextResponse.json({ error: 'Name, email, and password are required.' }, { status: 400 });
+    }
+    if (!roleId) {
+      return NextResponse.json({ error: 'Please select a system role.' }, { status: 400 });
     }
 
-    // 1. Create Auth User
+    const profileParams = {
+      email: email.trim(),
+      name: name.trim(),
+      role,
+      roleId,
+      officeIds: office_ids || [],
+      visibleStatuses: visible_statuses || [],
+    };
+
     const { data: authData, error: createError } = await supabaseAdmin.auth.admin.createUser({
-      email,
+      email: profileParams.email,
       password,
       email_confirm: true,
-      user_metadata: { name }
+      user_metadata: { name: profileParams.name },
     });
 
-    if (createError) throw createError;
+    if (createError) {
+      if (isDuplicateEmailMessage(createError.message)) {
+        const existing = await findAuthUserByEmail(profileParams.email);
+        if (existing && !(await profileExists(existing.id))) {
+          authUserId = existing.id;
+          await insertAppUser({ id: existing.id, ...profileParams });
+          return NextResponse.json({ success: true, id: existing.id, recovered: true });
+        }
+        return NextResponse.json(
+          { error: 'A user with this email address is already registered.' },
+          { status: 409 }
+        );
+      }
+      throw createError;
+    }
 
-    // 2. Create Public Profile via raw SQL
-    await prisma.$queryRawUnsafe(
-      'INSERT INTO public.app_users (id, email, name, role, role_id, office_ids, visible_statuses) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-      authData.user.id, email, name, role, role_id, office_ids || [], visible_statuses || []
-    );
+    authUserId = authData.user.id;
+    createdAuthThisRequest = true;
+
+    await insertAppUser({ id: authData.user.id, ...profileParams });
 
     return NextResponse.json({ success: true, id: authData.user.id });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    if (authUserId && createdAuthThisRequest && !(await profileExists(authUserId))) {
+      await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => {});
+    }
+    const message = err?.message || 'User creation failed';
+    const status = isDuplicateEmailMessage(message) ? 409 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }
 
@@ -89,10 +169,20 @@ export async function PUT(request: Request) {
   try {
     const body = await request.json();
     const { id, name, role, role_id, office_ids, visible_statuses } = body;
+    const roleId = normalizeUuid(role_id);
+
+    if (!roleId) {
+      return NextResponse.json({ error: 'Please select a system role.' }, { status: 400 });
+    }
 
     await prisma.$queryRawUnsafe(
       'UPDATE public.app_users SET name = $1, role = $2, role_id = $3, office_ids = $4, visible_statuses = $5 WHERE id = $6',
-      name, role, role_id, office_ids, visible_statuses || [], id
+      name,
+      role,
+      roleId,
+      office_ids,
+      visible_statuses || [],
+      id
     );
 
     return NextResponse.json({ success: true });
@@ -120,13 +210,10 @@ export async function DELETE(request: Request) {
 
     if (!userId) throw new Error('User ID is required');
 
-    // Prevent self-deletion
     if (userId === adminUser.id) throw new Error('Cannot delete your own account');
 
-    // 1. Delete from Public Profiles
     await prisma.$queryRawUnsafe('DELETE FROM public.app_users WHERE id = $1', userId);
 
-    // 2. Delete from Supabase Auth
     await supabaseAdmin.auth.admin.deleteUser(userId);
 
     return NextResponse.json({ success: true });

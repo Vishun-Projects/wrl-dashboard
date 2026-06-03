@@ -17,7 +17,7 @@ import {
 import axios from 'axios';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
-import { PageShell, PageLoadingState } from '@/components/PageShell';
+import { PageShell, PageLoadingState } from '@/components/layout/PageShell';
 import {
   AdminToolbar,
   AdminStatPill,

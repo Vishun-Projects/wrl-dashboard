@@ -1,4 +1,4 @@
-import { formatLocalDate } from '@/lib/report-filters';
+import { formatLocalDate } from '@/lib/report/filters';
 
 export function formatCrmDateTime(d: Date): string {
   const y = d.getFullYear();

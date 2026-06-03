@@ -1,6 +1,6 @@
-import type { RegisterDateFilterColumn } from '@/lib/trhcalls-query';
+import type { RegisterDateFilterColumn } from '@/lib/trhcalls/query';
 
-import { REPORT_MAX_ROWS } from '@/lib/report-limits';
+import { REPORT_MAX_ROWS } from '@/lib/report/limits';
 
 export const LOCATION_AUDIT_MAX_ROWS = REPORT_MAX_ROWS;
 export const LOCATION_AUDIT_LIST_PAGE_SIZE = 50;

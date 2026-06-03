@@ -1,4 +1,4 @@
-import { normalizeCallTypeDisplay } from '@/lib/report-filters';
+import { normalizeCallTypeDisplay } from '@/lib/report/filters';
 import type { FactCounts, FactKey, HotRow } from '@/lib/read-model/types';
 import { currentYearStart, factDateFromLoggedAt } from '@/lib/read-model/dates';
 

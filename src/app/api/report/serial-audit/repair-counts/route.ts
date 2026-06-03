@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { postQuery } from '@/lib/db-proxy';
+import { postQuery } from '@/lib/db/proxy';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
-import { mapRepairCountsFromApiRow } from '@/lib/serial-audit-repair-options';
-import { buildSerialAuditRepairCountsBySerialSql } from '@/lib/trhcalls-query';
+import { mapRepairCountsFromApiRow } from '@/lib/serial-audit/repair-options';
+import { resolveSerialAuditSqlOpts } from '@/lib/serial-audit/server/sql-scope';
+import { buildSerialAuditRepairCountsBySerialSql } from '@/lib/trhcalls/query';
 
 const QUERY_TIMEOUT_MS = 120000;
 
@@ -24,19 +25,23 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
-    const callType = searchParams.get('callType') || 'All';
-    const repair = searchParams.get('repair') || 'All';
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
+    const sqlOpts = await resolveSerialAuditSqlOpts({
+      callType: searchParams.get('callType') || 'All',
+      repair: searchParams.get('repair') || searchParams.get('complaint') || 'All',
+      branch: searchParams.get('branch') || '',
+      franchisee: searchParams.get('franchisee') || '',
+      startDate,
+      endDate,
+      isHod: security.isHod,
+      assignedOffices: security.assignedOffices,
+    });
 
     const res = await postQuery({
       rawSql: buildSerialAuditRepairCountsBySerialSql({
-        callType,
-        repair: repair === 'All' ? null : repair,
-        startDate,
-        endDate,
-        isHod: security.isHod,
-        assignedOffices: security.assignedOffices,
+        ...sqlOpts,
+        repair: sqlOpts.repair === 'All' ? null : sqlOpts.repair,
       }),
       timeoutMs: QUERY_TIMEOUT_MS,
     });

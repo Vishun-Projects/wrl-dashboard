@@ -1,4 +1,4 @@
-import { postQuery } from '../src/lib/db-proxy';
+import { postQuery } from '../src/lib/db/proxy';
 
 async function main() {
   const rawSql = `

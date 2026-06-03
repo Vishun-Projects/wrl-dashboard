@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { postQuery } from '@/lib/db-proxy';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { appendCallTypeFilter } from '@/lib/trhcalls-query';
+import { postQuery } from '@/lib/db/proxy';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { appendCallTypeFilter } from '@/lib/trhcalls/query';
 
 export async function POST(req: NextRequest) {
   try {

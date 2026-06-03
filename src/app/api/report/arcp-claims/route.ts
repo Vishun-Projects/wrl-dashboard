@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { prisma } from '@/lib/prisma';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { prisma } from '@/lib/db/prisma';
 import {
   isCrmOutOfMemoryError,
   isCrmSqlTimeoutError,
-} from '@/lib/arcp-claims-fetch';
-import { loadArcpClaimsAggregates } from '@/lib/arcp-claims-load';
-import type { ArcpGrandTotals } from '@/lib/arcp-claims-query';
-import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims-query';
-import { buildArcpClaimsTableModel } from '@/lib/arcp-claims-table';
+} from '@/lib/arcp-claims/server/fetch';
+import { loadArcpClaimsAggregates } from '@/lib/arcp-claims/server/load';
+import {
+  deriveArcpGrandTotalsFromAggregates,
+  resolveArcpDateFilterColumn,
+  type ArcpGrandTotals,
+} from '@/lib/arcp-claims/query';
+import { buildArcpClaimsTableModel } from '@/lib/arcp-claims/table';
 import { hasPagePermission } from '@/lib/auth/page-access';
 
 const CACHE_TTL = 15 * 60 * 1000;
@@ -23,6 +26,16 @@ type AggCacheEntry = {
 
 const aggCache = new Map<string, AggCacheEntry>();
 const aggInflight = new Map<string, Promise<AggCacheEntry>>();
+
+/** Bump when tally totals logic changes — invalidates in-memory aggregate cache. */
+const AGG_CACHE_VERSION = 'v8';
+
+export function clearArcpClaimsRouteCaches(): void {
+  aggCache.clear();
+  aggInflight.clear();
+  cache.clear();
+  inflight.clear();
+}
 
 type CacheEntry = {
   payload: ReturnType<typeof buildArcpClaimsTableModel> & {
@@ -113,8 +126,7 @@ export async function GET(req: NextRequest) {
       isHod,
       assignedOffices,
     });
-    /** Bump when tally merge / grand-total logic changes — avoids stale inflated aggregates. */
-    const aggKey = `v2|${cacheKey}|agg`;
+    const aggKey = `${AGG_CACHE_VERSION}|${cacheKey}|agg`;
 
     const queryOpts = {
       startDate,
@@ -132,9 +144,10 @@ export async function GET(req: NextRequest) {
       if (!refresh) {
         const hit = aggCache.get(aggKey);
         if (hit && now - hit.timestamp < AGG_CACHE_TTL) {
+          const grandTotals = deriveArcpGrandTotalsFromAggregates(hit.aggregates);
           return NextResponse.json({
             aggregates: hit.aggregates,
-            meta: { source: hit.source, grandTotals: hit.grandTotals, cached: true },
+            meta: { source: hit.source, grandTotals, cached: true },
           });
         }
       }
@@ -142,7 +155,8 @@ export async function GET(req: NextRequest) {
       let aggRun = aggInflight.get(aggKey);
       if (!aggRun) {
         aggRun = (async () => {
-          const { aggregates, source, grandTotals } = await loadArcpClaimsAggregates(queryOpts);
+          const { aggregates, source } = await loadArcpClaimsAggregates(queryOpts);
+          const grandTotals = deriveArcpGrandTotalsFromAggregates(aggregates);
           const entry: AggCacheEntry = {
             aggregates,
             grandTotals,

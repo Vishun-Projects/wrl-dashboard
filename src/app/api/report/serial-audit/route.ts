@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { postQuery } from '@/lib/db-proxy';
+import { postQuery } from '@/lib/db/proxy';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
-import { enrichCallRowForReport } from '@/lib/report-geo';
+import { enrichCallRowForReport } from '@/lib/report/geo';
 import {
   fetchSerialAuditCallsForSerials,
   flaggedSerialsFromListRows,
-} from '@/lib/serial-audit-batch-fetch';
+} from '@/lib/serial-audit/server/batch-fetch';
+import { resolveSerialAuditSqlOpts } from '@/lib/serial-audit/server/sql-scope';
 import {
   buildSerialAuditDetailRawSql,
   buildSerialAuditListRawSql,
-} from '@/lib/trhcalls-query';
+} from '@/lib/trhcalls/query';
 
 const LIST_CACHE_TTL = 30 * 60 * 1000;
 const DETAIL_CACHE_TTL = 15 * 60 * 1000;
@@ -33,50 +34,70 @@ function sortSerialList(rows: Record<string, unknown>[]): Record<string, unknown
   );
 }
 
+type SerialAuditScopeParams = {
+  callType: string;
+  repair: string;
+  branch: string;
+  franchisee: string;
+  startDate: string | null;
+  endDate: string | null;
+};
+
+function scopeFromSearchParams(searchParams: URLSearchParams): SerialAuditScopeParams {
+  return {
+    callType: searchParams.get('callType') || 'All',
+    repair: searchParams.get('repair') || searchParams.get('complaint') || 'All',
+    branch: searchParams.get('branch') || '',
+    franchisee: searchParams.get('franchisee') || '',
+    startDate: searchParams.get('startDate'),
+    endDate: searchParams.get('endDate'),
+  };
+}
+
+async function sqlOptsFromScope(scope: SerialAuditScopeParams, security: SecurityContext) {
+  return resolveSerialAuditSqlOpts({
+    callType: scope.callType,
+    repair: scope.repair,
+    branch: scope.branch,
+    franchisee: scope.franchisee,
+    startDate: scope.startDate,
+    endDate: scope.endDate,
+    isHod: security.isHod,
+    assignedOffices: security.assignedOffices,
+  });
+}
+
 function buildListCacheKey(
-  callType: string,
-  repair: string,
+  scope: SerialAuditScopeParams,
   minRepeats: number,
-  startDate: string | null,
-  endDate: string | null,
   security: SecurityContext
 ): string {
-  return `list_${startDate || 'all'}_${endDate || 'all'}_${callType}_${repair}_${minRepeats}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
+  return `list_${scope.startDate || 'all'}_${scope.endDate || 'all'}_${scope.callType}_${scope.repair}_${scope.branch}_${scope.franchisee}_${minRepeats}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
 }
 
 function buildDetailCacheKey(
   serial: string,
-  callType: string,
-  repair: string,
-  startDate: string | null,
-  endDate: string | null,
+  scope: SerialAuditScopeParams,
   security: SecurityContext
 ): string {
-  return `detail_${serial}_${startDate || 'all'}_${endDate || 'all'}_${callType}_${repair}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
+  return `detail_${serial}_${scope.startDate || 'all'}_${scope.endDate || 'all'}_${scope.callType}_${scope.repair}_${scope.branch}_${scope.franchisee}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
 }
 
 async function fetchRepeatedSerialList(
   cacheKey: string,
-  callType: string,
-  repair: string,
+  scope: SerialAuditScopeParams,
   minRepeats: number,
-  startDate: string | null,
-  endDate: string | null,
   security: SecurityContext
 ): Promise<Record<string, unknown>[]> {
   const inflight = listInflight.get(cacheKey);
   if (inflight) return inflight;
 
   const run = (async () => {
+    const sqlOpts = await sqlOptsFromScope(scope, security);
     const res = await postQuery({
       rawSql: buildSerialAuditListRawSql({
         minRepeats,
-        callType,
-        repair,
-        isHod: security.isHod,
-        assignedOffices: security.assignedOffices,
-        startDate,
-        endDate,
+        ...sqlOpts,
       }),
       timeoutMs: SERIAL_AUDIT_LIST_TIMEOUT_MS,
     });
@@ -94,25 +115,16 @@ async function fetchRepeatedSerialList(
 async function fetchSerialDetails(
   cacheKey: string,
   serial: string,
-  callType: string,
-  repair: string,
-  startDate: string | null,
-  endDate: string | null,
+  scope: SerialAuditScopeParams,
   security: SecurityContext
 ): Promise<Record<string, unknown>[]> {
   const inflight = detailInflight.get(cacheKey);
   if (inflight) return inflight;
 
   const run = (async () => {
+    const sqlOpts = await sqlOptsFromScope(scope, security);
     const res = await postQuery({
-      rawSql: buildSerialAuditDetailRawSql(serial, {
-        callType,
-        repair,
-        isHod: security.isHod,
-        assignedOffices: security.assignedOffices,
-        startDate,
-        endDate,
-      }),
+      rawSql: buildSerialAuditDetailRawSql(serial, sqlOpts),
       timeoutMs: 120000,
     });
     return mapDetailRows((res.data || []) as Record<string, unknown>[]);
@@ -143,19 +155,15 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
-    const callType = searchParams.get('callType') || 'All';
-    const repair =
-      searchParams.get('repair') || searchParams.get('complaint') || 'All';
+    const scope = scopeFromSearchParams(searchParams);
     const serial = (searchParams.get('serial') || '').trim().toUpperCase();
-    const startDate = searchParams.get('startDate');
-    const endDate = searchParams.get('endDate');
     const bypassCache = searchParams.get('refresh') === 'true';
     const minRepeats = Math.max(2, Number(searchParams.get('minRepeats') || 2) || 2);
     const includeAnalysisCalls = searchParams.get('includeAnalysisCalls') === 'true';
     const riskThreshold = Math.max(1, Number(searchParams.get('riskThreshold') || 3) || 3);
     const now = Date.now();
 
-    if (!startDate || !endDate) {
+    if (!scope.startDate || !scope.endDate) {
       return NextResponse.json(
         { error: 'startDate and endDate are required' },
         { status: 400 }
@@ -163,7 +171,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (serial) {
-      const cacheKey = buildDetailCacheKey(serial, callType, repair, startDate, endDate, security);
+      const cacheKey = buildDetailCacheKey(serial, scope, security);
       if (!bypassCache && detailCache.has(cacheKey)) {
         const cached = detailCache.get(cacheKey)!;
         if (now - cached.timestamp < DETAIL_CACHE_TTL) {
@@ -171,20 +179,12 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      const calls = await fetchSerialDetails(
-        cacheKey,
-        serial,
-        callType,
-        repair,
-        startDate,
-        endDate,
-        security
-      );
+      const calls = await fetchSerialDetails(cacheKey, serial, scope, security);
       detailCache.set(cacheKey, { data: calls, timestamp: now });
       return NextResponse.json({ calls, serial, cached: false, scope: 'window' });
     }
 
-    const cacheKey = buildListCacheKey(callType, repair, minRepeats, startDate, endDate, security);
+    const cacheKey = buildListCacheKey(scope, minRepeats, security);
     if (!bypassCache && listCache.has(cacheKey)) {
       const cached = listCache.get(cacheKey)!;
       if (now - cached.timestamp < LIST_CACHE_TTL) {
@@ -192,34 +192,39 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const serials = await fetchRepeatedSerialList(
-      cacheKey,
-      callType,
-      repair,
-      minRepeats,
-      startDate,
-      endDate,
-      security
-    );
+    const serials = await fetchRepeatedSerialList(cacheKey, scope, minRepeats, security);
     listCache.set(cacheKey, { data: serials, timestamp: now });
 
     let analysisCalls: Record<string, unknown>[] | undefined;
-    if (includeAnalysisCalls && startDate && endDate) {
+    let analysisSerialsRequested: number | undefined;
+    let analysisSerialsFetched: number | undefined;
+    if (includeAnalysisCalls && scope.startDate && scope.endDate) {
+      const flaggedTotal = serials.filter(
+        (row) => Number(row.complaint_count) >= riskThreshold
+      ).length;
       const flaggedSerials = flaggedSerialsFromListRows(serials, riskThreshold);
+      analysisSerialsRequested = flaggedTotal;
+      analysisSerialsFetched = flaggedSerials.length;
+      const sqlOpts = await sqlOptsFromScope(scope, security);
       analysisCalls =
         flaggedSerials.length > 0
           ? await fetchSerialAuditCallsForSerials(flaggedSerials, {
-              callType,
-              repair: 'All',
-              isHod: security.isHod,
-              assignedOffices: security.assignedOffices,
-              startDate,
-              endDate,
+              ...sqlOpts,
+              repair: scope.repair,
+              involvementRepairs: true,
+              queryTimeoutMs: SERIAL_AUDIT_LIST_TIMEOUT_MS,
             })
           : [];
     }
 
-    return NextResponse.json({ serials, analysisCalls, cached: false, scope: 'window' });
+    return NextResponse.json({
+      serials,
+      analysisCalls,
+      analysisSerialsRequested,
+      analysisSerialsFetched,
+      cached: false,
+      scope: 'window',
+    });
   } catch (err: unknown) {
     console.error('Serial Audit API Error:', err);
     const message = err instanceof Error ? err.message : 'Serial audit query failed';

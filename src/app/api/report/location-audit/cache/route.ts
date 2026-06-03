@@ -4,7 +4,7 @@ import {
   clearAddressGeocodeCache,
   getAddressGeocodeCacheCount,
 } from '@/lib/geo/nominatim';
-import { resolveLocationAuditSecurity } from '@/lib/location-audit-handler';
+import { resolveLocationAuditSecurity } from '@/lib/location-audit/server';
 
 export async function GET() {
   try {

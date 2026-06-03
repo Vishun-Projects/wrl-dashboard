@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { createClient } from '@/lib/supabase/client';
 import { RefreshCw, Database, Activity, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
-import { PageShell, PageLoadingState } from '@/components/PageShell';
+import { PageShell, PageLoadingState } from '@/components/layout/PageShell';
 import { AdminStatPill, AdminTable, AdminTableCard, AdminTd, AdminTh, AdminThead, AdminTr } from '@/components/admin/AdminUi';
 import type { ReadModelProgress } from '@/lib/read-model/sync-meta';
 

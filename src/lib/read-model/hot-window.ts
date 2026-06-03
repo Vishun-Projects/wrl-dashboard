@@ -1,5 +1,5 @@
 import { daysAgoDate, todayLocalDate } from '@/lib/read-model/dates';
-import { formatLocalDate } from '@/lib/report-filters';
+import { formatLocalDate } from '@/lib/report/filters';
 
 /** Matches backfill hot window in sync worker (rolling 90 days). */
 export const HOT_WINDOW_DAYS = 90;

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { postQuery } from '@/lib/db-proxy';
-import { prisma } from '@/lib/prisma';
+import { postQuery } from '@/lib/db/proxy';
+import { prisma } from '@/lib/db/prisma';
 import { readDimsFromPostgres } from '@/lib/read-model/flags';
 import { queryOfficesFromPostgres } from '@/lib/read-model/queries/dims';
 

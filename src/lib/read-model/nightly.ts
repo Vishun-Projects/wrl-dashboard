@@ -18,7 +18,7 @@ import {
 import { tryAcquireSyncLock, releaseSyncLock, markSyncError } from '@/lib/read-model/lock';
 import { aggregateFactCounts } from '@/lib/read-model/metrics';
 import { dedupeCrmRows, processCrmRows, transformCrmRowToHot } from '@/lib/read-model/transform';
-import { isSummaryEligibleCall } from '@/lib/report-summary-derive';
+import { isSummaryEligibleCall } from '@/lib/report/summary-derive';
 import {
   countHotRows,
   deleteHotRowsByTrn,

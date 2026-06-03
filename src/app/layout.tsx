@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 };
 
 import { Toaster } from 'sonner';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
 
 export default function RootLayout({
   children,

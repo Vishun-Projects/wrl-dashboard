@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { handleSyncProxyGet, syncProxyOptions } from '@/lib/sync-proxy-route';
-import { toUserFacingError } from '@/lib/user-facing-errors';
+import { handleSyncProxyGet, syncProxyOptions } from '@/lib/sync/proxy-route';
+import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 export async function OPTIONS() {
   return syncProxyOptions();

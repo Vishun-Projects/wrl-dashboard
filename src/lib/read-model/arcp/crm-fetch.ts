@@ -1,4 +1,4 @@
-import { postQuery, isCrmOutOfMemoryError, isCrmSqlTimeoutError } from '@/lib/db-proxy';
+import { postQuery, isCrmOutOfMemoryError, isCrmSqlTimeoutError } from '@/lib/db/proxy';
 import { splitDateRangeByDays } from '@/lib/read-model/dates';
 import { formatCrmDateTime } from '@/lib/read-model/dates';
 
@@ -40,10 +40,13 @@ SELECT
   arcp.ncode,
   arcp.vucnno,
   arcp.ncalls2fault AS calls2fault_code,
+  CAST(tf.ncalls AS VARCHAR(50)) AS call_no,
   arcp.nofficeid,
   o.nunder AS office_under,
   CONVERT(varchar(30), arcp.dcalllogdatetime, 126) AS dcalllogdatetime,
   CONVERT(varchar(30), arcp.dsolveddatetime, 126) AS dsolveddatetime,
+  arcp.bapproved,
+  arcp.bapprovedho,
   arcp.dbmapproveddate,
   arcp.dhoapproveddate,
   CONVERT(varchar(30), arcp.dapproval1on, 126) AS dapproval1on,

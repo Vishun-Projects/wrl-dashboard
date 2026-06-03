@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { prisma } from '@/lib/prisma';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { prisma } from '@/lib/db/prisma';
 import {
   isCrmOutOfMemoryError,
   isCrmSqlTimeoutError,
-} from '@/lib/arcp-claims-fetch';
-import { loadArcpClaimsDetailRows } from '@/lib/arcp-claims-detail-load';
-import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims-query';
+} from '@/lib/arcp-claims/server/fetch';
+import { loadArcpClaimsDetailRows } from '@/lib/arcp-claims/server/detail-load';
+import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims/query';
 import { hasPagePermission } from '@/lib/auth/page-access';
 
 export async function GET(req: NextRequest) {

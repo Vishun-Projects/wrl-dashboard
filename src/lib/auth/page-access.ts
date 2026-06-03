@@ -47,6 +47,13 @@ export const REPORT_PAGE_ACCESS: PageAccessDefinition[] = [
     path: '/report/location-audit',
     group: 'Reports',
   },
+  {
+    permission: 'page_warranty_master',
+    label: 'Warranty Master',
+    description: 'Active machines by customer, group, and warranty period',
+    path: '/report/warranty-master',
+    group: 'Reports',
+  },
 ];
 
 export const ADMIN_PAGE_ACCESS: PageAccessDefinition[] = [

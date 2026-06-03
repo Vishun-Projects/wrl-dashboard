@@ -6,7 +6,7 @@ import {
   startIngestBatch,
   startSyncRunLog,
 } from '@/lib/read-model/batches';
-import { formatLocalDate } from '@/lib/report-filters';
+import { formatLocalDate } from '@/lib/report/filters';
 import { splitDateRangeByDays, todayLocalDate } from '@/lib/read-model/dates';
 import { arcpBackfillStartDate } from '@/lib/read-model/arcp/dates';
 import { fetchArcpRowsForRange } from '@/lib/read-model/arcp/crm-fetch';

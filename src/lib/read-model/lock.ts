@@ -10,7 +10,7 @@ export const SYNC_WAIT_TIMEOUT_MS =
   Number(process.env.SYNC_WAIT_TIMEOUT_MS) || STALE_LOCK_MS + 5 * 60 * 1000;
 export const SYNC_WATERMARK_GUARD = new Date('2020-01-01T00:00:00.000Z');
 
-import { sleep } from '@/lib/async-utils';
+import { sleep } from '@/lib/utils/async';
 
 export async function releaseStaleSyncLock(client: pg.PoolClient): Promise<boolean> {
   const result = await client.query(

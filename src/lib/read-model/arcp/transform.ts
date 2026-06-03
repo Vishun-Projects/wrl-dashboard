@@ -1,4 +1,4 @@
-import { LOCAL_UPCOUNTRY_NCODE_LABELS } from '@/lib/arcp-claims-query';
+import { LOCAL_UPCOUNTRY_NCODE_LABELS } from '@/lib/arcp-claims/query';
 import { maxCrmWatermarks, parseCrmDate } from '@/lib/read-model/dates';
 import {
   claimMonthFromDate,
@@ -76,6 +76,10 @@ export function transformCrmRowToArcpHot(row: Record<string, unknown>): ArcpHotR
   return {
     ncode,
     vucnno: row.vucnno != null ? String(row.vucnno).trim() || null : null,
+    call_no:
+      row.call_no != null && String(row.call_no).trim() && String(row.call_no).trim() !== '0'
+        ? String(row.call_no).trim()
+        : null,
     calls2fault_code:
       row.calls2fault_code != null && Number.isFinite(Number(row.calls2fault_code))
         ? Number(row.calls2fault_code)

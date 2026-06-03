@@ -1,7 +1,8 @@
 import type pg from 'pg';
+import { arcpLinesHotHasCallNo } from '@/lib/read-model/arcp/hot-schema';
 import type { ArcpHotRow } from '@/lib/read-model/arcp/types';
 
-const COLUMNS = [
+const BASE_COLUMNS = [
   'ncode',
   'vucnno',
   'calls2fault_code',
@@ -32,43 +33,48 @@ const COLUMNS = [
   'added_at',
 ] as const;
 
-function rowToValues(row: ArcpHotRow): unknown[] {
-  return [
-    row.ncode,
-    row.vucnno,
-    row.calls2fault_code,
-    row.nofficeid,
-    row.office_under,
-    row.call_at,
-    row.solve_at,
-    row.bm_approved_at,
-    row.ho_approved_at,
-    row.approve_at,
-    row.claim_month_call,
-    row.claim_month_solve,
-    row.claim_month_approve,
-    row.ncalltype,
-    row.nitemcategory,
-    row.nlocalupcountry,
-    row.call_type_label,
-    row.item_category_label,
-    row.local_upcountry_label,
-    row.is_travel,
-    row.is_major,
-    row.rate,
-    row.amount_payable,
-    row.branch_approved,
-    row.ho_approved,
-    row.is_rejected,
-    row.source_editedon,
-    row.added_at,
-  ];
+const CALL_NO_COLUMN = 'call_no' as const;
+
+async function resolveUpsertColumns(): Promise<readonly string[]> {
+  const hasCallNo = await arcpLinesHotHasCallNo();
+  if (!hasCallNo) return BASE_COLUMNS;
+  return ['ncode', 'vucnno', CALL_NO_COLUMN, ...BASE_COLUMNS.slice(2)];
 }
 
-const UPDATE_SET = COLUMNS.filter((c) => c !== 'ncode')
-  .map((c) => `${c} = EXCLUDED.${c}`)
-  .concat('synced_at = now()')
-  .join(', ');
+function rowToValues(row: ArcpHotRow, columns: readonly string[]): unknown[] {
+  const byColumn: Record<string, unknown> = {
+    ncode: row.ncode,
+    vucnno: row.vucnno,
+    call_no: row.call_no,
+    calls2fault_code: row.calls2fault_code,
+    nofficeid: row.nofficeid,
+    office_under: row.office_under,
+    call_at: row.call_at,
+    solve_at: row.solve_at,
+    bm_approved_at: row.bm_approved_at,
+    ho_approved_at: row.ho_approved_at,
+    approve_at: row.approve_at,
+    claim_month_call: row.claim_month_call,
+    claim_month_solve: row.claim_month_solve,
+    claim_month_approve: row.claim_month_approve,
+    ncalltype: row.ncalltype,
+    nitemcategory: row.nitemcategory,
+    nlocalupcountry: row.nlocalupcountry,
+    call_type_label: row.call_type_label,
+    item_category_label: row.item_category_label,
+    local_upcountry_label: row.local_upcountry_label,
+    is_travel: row.is_travel,
+    is_major: row.is_major,
+    rate: row.rate,
+    amount_payable: row.amount_payable,
+    branch_approved: row.branch_approved,
+    ho_approved: row.ho_approved,
+    is_rejected: row.is_rejected,
+    source_editedon: row.source_editedon,
+    added_at: row.added_at,
+  };
+  return columns.map((col) => byColumn[col]);
+}
 
 export async function upsertArcpRows(
   client: pg.PoolClient,
@@ -77,6 +83,13 @@ export async function upsertArcpRows(
 ): Promise<number> {
   if (rows.length === 0) return 0;
 
+  const columns = await resolveUpsertColumns();
+  const updateSet = columns
+    .filter((c) => c !== 'ncode')
+    .map((c) => `${c} = EXCLUDED.${c}`)
+    .concat('synced_at = now()')
+    .join(', ');
+
   let upserted = 0;
   for (let i = 0; i < rows.length; i += batchSize) {
     const batch = rows.slice(i, i + batchSize);
@@ -84,19 +97,19 @@ export async function upsertArcpRows(
     const placeholders: string[] = [];
 
     batch.forEach((row, rowIndex) => {
-      const rowValues = rowToValues(row);
-      const offset = rowIndex * COLUMNS.length;
+      const rowValues = rowToValues(row, columns);
+      const offset = rowIndex * columns.length;
       placeholders.push(
-        `(${COLUMNS.map((_, colIndex) => `$${offset + colIndex + 1}`).join(', ')})`
+        `(${columns.map((_, colIndex) => `$${offset + colIndex + 1}`).join(', ')})`
       );
       values.push(...rowValues);
     });
 
     await client.query(
       `
-      INSERT INTO arcp_lines_hot (${COLUMNS.join(', ')})
+      INSERT INTO arcp_lines_hot (${columns.join(', ')})
       VALUES ${placeholders.join(', ')}
-      ON CONFLICT (ncode) DO UPDATE SET ${UPDATE_SET}
+      ON CONFLICT (ncode) DO UPDATE SET ${updateSet}
       `,
       values
     );

@@ -1,6 +1,6 @@
-import { prisma } from '@/lib/prisma';
-import type { SummaryDashboard } from '@/lib/report-summary-derive';
-import { normalizeCallTypeDisplay } from '@/lib/report-filters';
+import { prisma } from '@/lib/db/prisma';
+import type { SummaryDashboard } from '@/lib/report/summary-derive';
+import { normalizeCallTypeDisplay } from '@/lib/report/filters';
 
 const BREAKDOWN = 'BREAKDOWN';
 

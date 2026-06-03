@@ -1,12 +1,12 @@
-import { postQuery } from '../src/lib/db-proxy';
+import { postQuery } from '../src/lib/db/proxy';
 import {
   buildArcpClaimsGrandTotalSql,
   mergeArcpAggregateRows,
   parseArcpAggregateRows,
   planArcpSummaryDateChunks,
   type ArcpClaimsQueryOpts,
-} from '../src/lib/arcp-claims-query';
-import { buildArcpClaimsRawSql } from '../src/lib/arcp-claims-query';
+} from '../src/lib/arcp-claims/query';
+import { buildArcpClaimsRawSql } from '../src/lib/arcp-claims/query';
 
 const startDate = process.argv[2] || '2025-01-01';
 const endDate = process.argv[3] || '2025-12-31';

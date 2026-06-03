@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/lib/db/prisma';
 import { HOT_TARGET_ROWS } from '@/lib/read-model/constants';
 import { releaseStaleArcpSyncLock } from '@/lib/read-model/arcp/lock';
 import { getArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-server';

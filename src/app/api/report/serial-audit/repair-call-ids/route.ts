@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { postQuery } from '@/lib/db-proxy';
+import { postQuery } from '@/lib/db/proxy';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
-import { serializeRepairFilterParam } from '@/lib/serial-audit-repair-options';
-import { buildSerialAuditCallIdsWithRepairSql } from '@/lib/trhcalls-query';
+import { serializeRepairFilterParam } from '@/lib/serial-audit/repair-options';
+import { buildSerialAuditCallIdsWithRepairSql } from '@/lib/trhcalls/query';
 
 const QUERY_TIMEOUT_MS = 120000;
 

@@ -16,19 +16,19 @@ import { toast } from 'sonner';
 import {
   DistributionActiveFilters,
   type DistributionFilterChip,
-} from '@/components/DistributionActiveFilters';
+} from '@/components/distribution/DistributionActiveFilters';
 import {
   DistributionIssueBadge,
   DistributionLoadBadge,
   DistributionTablePanel,
-} from '@/components/DistributionTablePanel';
-import { RegisterPageFilters } from '@/components/RegisterPageFilters';
-import { RegisterStatsBar } from '@/components/RegisterStatsBar';
-import { PageShell, PageLoadingState } from '@/components/PageShell';
+} from '@/components/distribution/DistributionTablePanel';
+import { RegisterPageFilters } from '@/components/register/RegisterPageFilters';
+import { RegisterStatsBar } from '@/components/register/RegisterStatsBar';
+import { PageShell, PageLoadingState } from '@/components/layout/PageShell';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 import { createClient } from '@/lib/supabase/client';
-import { buildCorpusViewDateFilter, filterCorpusCallsByViewDate } from '@/lib/report-corpus';
-import { loadEngineerRosterForBranch, getCachedEngineerRoster } from '@/lib/distribution-engineer-roster-cache';
+import { buildCorpusViewDateFilter, filterCorpusCallsByViewDate } from '@/lib/report/corpus';
+import { loadEngineerRosterForBranch, getCachedEngineerRoster } from '@/lib/distribution/engineer-roster-cache';
 import {
   buildAuditScopeFilterParts,
   buildIdleAssigneeKpis,
@@ -44,19 +44,19 @@ import {
   type IdleAssigneeIssue,
   type IdleAssigneeRow,
   type RosterTechnician,
-} from '@/lib/distribution-idle-assignees';
+} from '@/lib/distribution/idle-assignees';
 import {
   appliedFilterPartsFromSnapshot,
   buildRegisterViewFiltersFromContext,
   toDateString,
-} from '@/lib/report-filters';
+} from '@/lib/report/filters';
 import {
   classifyRegisterRowStatus,
   deriveRegisterView,
   isRegisterRowOpenBucket,
   isRegisterRowSolvedBucket,
-} from '@/lib/report-register-view';
-import type { RegisterSummary } from '@/lib/report-search';
+} from '@/lib/report/register-view';
+import type { RegisterSummary } from '@/lib/report/search';
 
 // Helper to inject Leaflet CDN resources dynamically
 const loadLeaflet = () => {

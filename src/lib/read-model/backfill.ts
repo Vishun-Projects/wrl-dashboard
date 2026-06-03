@@ -23,7 +23,7 @@ import { updateSyncWatermarks, readHotTableWatermarks } from '@/lib/read-model/l
 import { aggregateFactCounts } from '@/lib/read-model/metrics';
 import type { HotRow } from '@/lib/read-model/types';
 import { dedupeCrmRows, processCrmRows, transformCrmRowToHot } from '@/lib/read-model/transform';
-import { isSummaryEligibleCall } from '@/lib/report-summary-derive';
+import { isSummaryEligibleCall } from '@/lib/report/summary-derive';
 import { countHotRows, truncateHot, upsertHotRows } from '@/lib/read-model/upsert-hot';
 import {
   truncateCurrentYearFacts,

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { postQuery } from '@/lib/db-proxy';
+import { postQuery } from '@/lib/db/proxy';
 import { createClient } from '@/lib/supabase/server';
 
 function isCrmFlag(value: unknown): boolean {

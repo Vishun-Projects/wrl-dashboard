@@ -209,6 +209,25 @@
     @apply h-8 w-full min-w-0 bg-white border border-slate-200 rounded-md px-2.5 text-[11px] font-medium text-slate-700 flex items-center justify-between gap-1.5 hover:border-slate-300 focus:border-slate-400 shadow-sm;
   }
 
+  /* Toolbar / page headers: branch, franchisee, call type on one row (not full-width stack). */
+  .report-toolbar-filters-row {
+    @apply flex w-full flex-nowrap items-center gap-2 overflow-x-auto;
+  }
+
+  /* Hoist branch + franchisee into the same flex row as call type */
+  .report-toolbar-filters-group {
+    display: contents;
+  }
+
+  .report-toolbar-filters-row .register-multi-select-root {
+    @apply relative min-w-[10rem] max-w-[14rem] flex-[1_1_11rem] shrink-0;
+    width: auto !important;
+  }
+
+  .report-toolbar-filters-row .register-filter-btn {
+    @apply w-full max-w-none;
+  }
+
   .register-search-input {
     @apply h-8 w-full pl-8 pr-2.5 bg-white border border-slate-200 rounded-md text-[11px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-200 focus:border-slate-400 shadow-sm;
   }
@@ -824,11 +843,19 @@
   }
 
   .serial-audit-detail-wrap {
-    @apply rounded-lg border border-slate-200 bg-white p-3 shadow-sm;
+    @apply min-w-0 w-full overflow-hidden rounded-lg border border-slate-200 bg-white p-3 shadow-sm;
   }
 
+  /* Single scrollport for wide call-detail grids inside expanded serial rows */
   .serial-audit-detail-scroll {
-    @apply max-h-72 overflow-auto;
+    @apply max-h-72 overflow-x-auto overflow-y-auto;
+  }
+
+  .serial-audit-expanded-cell {
+    width: 100%;
+    max-width: 0;
+    overflow: hidden;
+    vertical-align: top;
   }
 
   .serial-audit-detail-table {
@@ -857,6 +884,45 @@
 
   .serial-audit-detail-row--repeat:hover {
     @apply bg-amber-50;
+  }
+
+  .warranty-master-expanded-cell {
+    width: 100%;
+    max-width: 0;
+    overflow: hidden;
+    vertical-align: top;
+  }
+
+  .warranty-master-detail-wrap {
+    @apply ml-7 min-w-0 w-full overflow-hidden rounded-lg border border-slate-200 bg-white p-3 shadow-sm;
+  }
+
+  .warranty-master-detail-scroll {
+    @apply max-h-72 overflow-x-auto overflow-y-auto;
+  }
+
+  .warranty-master-detail-table {
+    @apply w-full min-w-[320px] border-collapse text-left text-[11px];
+  }
+
+  .warranty-master-detail-table thead {
+    @apply sticky top-0 z-10 bg-slate-100;
+  }
+
+  .warranty-master-detail-table th {
+    @apply border-b border-slate-200 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500;
+  }
+
+  .warranty-master-detail-table td {
+    @apply border-b border-slate-100 px-3 py-2 text-slate-700;
+  }
+
+  .warranty-master-detail-table tbody tr:hover {
+    @apply bg-slate-50/80;
+  }
+
+  .warranty-master-detail-table-foot td {
+    @apply border-t border-slate-200 bg-slate-50/90 py-2.5;
   }
 }
 

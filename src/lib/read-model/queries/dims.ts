@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/lib/db/prisma';
 
 export async function queryOfficesFromPostgres(assignedOffices: string[], isHod: boolean) {
   const rows = await prisma.$queryRawUnsafe<

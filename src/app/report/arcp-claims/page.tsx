@@ -4,19 +4,23 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios';
 import { FileSpreadsheet, RefreshCw, Download, FileText, Filter } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { ArcpClaimsTable } from '@/components/ArcpClaimsTable';
-import { ArcpClaimsMonthlyTable } from '@/components/ArcpClaimsMonthlyTable';
+import { ArcpClaimsTable } from '@/components/arcp-claims/ArcpClaimsTable';
+import {
+  ArcpClaimsSummaryPanel,
+  type ArcpTableViewMode,
+} from '@/components/arcp-claims/ArcpClaimsSummaryPanel';
+import { ArcpClaimsMonthlyTable } from '@/components/arcp-claims/ArcpClaimsMonthlyTable';
 import {
   ArcpClaimsLoadBanner,
   formatArcpDurationMs,
   formatArcpFinishTime,
   type ArcpLoadStatus,
-} from '@/components/ArcpClaimsLoadBanner';
-import { ArcpClaimsPdfViewer } from '@/components/ArcpClaimsPdfViewer';
-import { DateRangeSelector } from '@/components/DateRangeSelector';
-import { RegisterBranchFranchiseeFilters } from '@/components/RegisterBranchFranchiseeFilters';
-import { RegisterMultiSelect } from '@/components/RegisterMultiSelect';
-import { PageShell } from '@/components/PageShell';
+} from '@/components/arcp-claims/ArcpClaimsLoadBanner';
+import { ArcpClaimsPdfViewer } from '@/components/arcp-claims/ArcpClaimsPdfViewer';
+import { DateRangeSelector } from '@/components/register/DateRangeSelector';
+import { RegisterBranchFranchiseeFilters } from '@/components/register/RegisterBranchFranchiseeFilters';
+import { RegisterMultiSelect } from '@/components/register/RegisterMultiSelect';
+import { PageShell } from '@/components/layout/PageShell';
 import { AdminTableCard } from '@/components/admin/AdminUi';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 import {
@@ -26,6 +30,7 @@ import {
   shouldUseClientSideArcpChunks,
   resolveArcpLoadConcurrency,
   estimateArcpDetailLoadPlan,
+  deriveArcpGrandTotalsFromAggregates,
   mergeArcpAggregateRows,
   mergeArcpDetailRows,
   isArcpApproveDateColumn,
@@ -33,42 +38,45 @@ import {
   type ArcpDateFilterColumn,
   type ArcpClaimsDetailRow,
   type ArcpLoadPlan,
-  type ArcpGrandTotals,
-} from '@/lib/arcp-claims-query';
-import { runPool } from '@/lib/run-pool';
+} from '@/lib/arcp-claims/query';
+import { runPool } from '@/lib/utils/run-pool';
 import { readArcpFromPostgresClient } from '@/lib/read-model/client-flags';
 import type { ArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-shared';
 import { fetchReadModelStatus } from '@/lib/read-model/trigger-sync-client';
-import { sanitizeUserFacingMessage } from '@/lib/user-facing-errors';
+import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import {
   downloadArcpClaimsCsv,
   downloadArcpClaimsDetailCsv,
-} from '@/lib/arcp-claims-export';
+} from '@/lib/arcp-claims/export';
 import {
   buildArcpClaimsPdfBlob,
   buildArcpClaimsPdfFileName,
-} from '@/lib/arcp-claims-pdf';
+} from '@/lib/arcp-claims/pdf';
 import {
+  applyArcpTallyDetailLevel,
   buildArcpClaimsMonthlyBreakdown,
   buildArcpClaimsTableModel,
-  formatArcpAmountSummary,
-} from '@/lib/arcp-claims-table';
+  countArcpCategorySections,
+  type ArcpTallyDetailLevel,
+} from '@/lib/arcp-claims/table';
 import {
   buildFranchiseeOptions,
   buildMainBranchOptions,
   joinFilterParam,
   toDateString,
-} from '@/lib/report-filters';
+} from '@/lib/report/filters';
 import {
   createChunkedFetchAuth,
   isChunkedFetchAuthError,
-} from '@/lib/supabase-chunked-fetch';
+} from '@/lib/supabase/chunked-fetch';
 import { toast } from 'sonner';
 import {
   logArcpFiltersApplied,
   logArcpLoadResult,
   logArcpTableModel,
-} from '@/lib/arcp-claims-browser-debug';
+  logArcpUiVsCsvTotals,
+  logArcpDetailExportTotals,
+} from '@/lib/arcp-claims/browser-debug';
 
 type AppliedArcpFilters = {
   startDateStr: string;
@@ -194,9 +202,9 @@ export default function ArcpClaimsPage() {
   const [arcpDateFilterColumn, setArcpDateFilterColumn] =
     useState<ArcpDateFilterColumn>('dcalllogdatetime');
   const [rawAggregateRows, setRawAggregateRows] = useState<ArcpClaimsAggregateRow[] | null>(null);
-  const [arcpGrandTotals, setArcpGrandTotals] = useState<ArcpGrandTotals | null>(null);
   const [includeTravelReimbursement, setIncludeTravelReimbursement] = useState(true);
-  const [tableView, setTableView] = useState<'summary' | 'monthly' | 'both'>('both');
+  const [tableView, setTableView] = useState<ArcpTableViewMode>('both');
+  const [tallyDetailLevel, setTallyDetailLevel] = useState<ArcpTallyDetailLevel>('full');
   const [loading, setLoading] = useState(false);
   const [exportingDetail, setExportingDetail] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -322,41 +330,6 @@ export default function ArcpClaimsPage() {
     [rawAggregateRows]
   );
 
-  const summaryTotals = useMemo(() => {
-    if (arcpGrandTotals) {
-      return {
-        serviceLineCount: arcpGrandTotals.serviceLineCount,
-        travelLineCount: arcpGrandTotals.travelLineCount,
-        amountPayable: arcpGrandTotals.amountPayable,
-        branchApproved: arcpGrandTotals.branchApproved,
-        hoApproved: arcpGrandTotals.hoApproved,
-      };
-    }
-    let serviceLineCount = 0;
-    let travelLineCount = 0;
-    let amountPayable = 0;
-    let branchApproved = 0;
-    let hoApproved = 0;
-    for (const row of mergedAggregateRows) {
-      const qty = Number(row.qty) || 0;
-      if (Number(row.is_travel) === 1) {
-        travelLineCount += qty;
-      } else {
-        serviceLineCount += qty;
-      }
-      amountPayable += Number(row.amount_payable) || 0;
-      branchApproved += Number(row.branch_approved) || 0;
-      hoApproved += Number(row.ho_approved) || 0;
-    }
-    return {
-      serviceLineCount,
-      travelLineCount,
-      amountPayable,
-      branchApproved,
-      hoApproved,
-    };
-  }, [arcpGrandTotals, mergedAggregateRows]);
-
   const arcpLabelLookups = useMemo(() => {
     const callTypeLabelsByCode: Record<string, string> = {};
     for (const option of callTypeOptions) {
@@ -367,30 +340,53 @@ export default function ArcpClaimsPage() {
     return { callTypeLabelsByCode };
   }, [callTypeOptions]);
 
-  const displayModel = useMemo(() => {
+  const tableModel = useMemo(() => {
     if (mergedAggregateRows.length === 0) return null;
-    const model = buildArcpClaimsTableModel(mergedAggregateRows, {
+    return buildArcpClaimsTableModel(mergedAggregateRows, {
       includeTravel: includeTravelReimbursement,
       ...arcpLabelLookups,
     });
-    if (arcpGrandTotals && includeTravelReimbursement) {
+  }, [mergedAggregateRows, includeTravelReimbursement, arcpLabelLookups]);
+
+  const fullModel = useMemo(() => {
+    if (mergedAggregateRows.length === 0) return null;
+    return buildArcpClaimsTableModel(mergedAggregateRows, {
+      includeTravel: true,
+      ...arcpLabelLookups,
+    });
+  }, [mergedAggregateRows, arcpLabelLookups]);
+
+  /** Same totals as Summary CSV export (fullModel), not a separate SQL grand-total query. */
+  const summaryTotals = useMemo(() => {
+    const lineCounts = deriveArcpGrandTotalsFromAggregates(mergedAggregateRows);
+    const exportTotals = fullModel?.totals ?? tableModel?.totals;
+    if (exportTotals) {
       return {
-        ...model,
-        totals: {
-          qty: arcpGrandTotals.serviceLineCount + arcpGrandTotals.travelLineCount,
-          amountPayable: arcpGrandTotals.amountPayable,
-          branchApproved: arcpGrandTotals.branchApproved,
-          hoApproved: arcpGrandTotals.hoApproved,
-        },
+        serviceLineCount: lineCounts.serviceLineCount,
+        travelLineCount: lineCounts.travelLineCount,
+        amountPayable: exportTotals.amountPayable,
+        branchApproved: exportTotals.branchApproved,
+        hoApproved: exportTotals.hoApproved,
       };
     }
-    return model;
-  }, [
-    mergedAggregateRows,
-    includeTravelReimbursement,
-    arcpLabelLookups,
-    arcpGrandTotals,
-  ]);
+    return {
+      serviceLineCount: lineCounts.serviceLineCount,
+      travelLineCount: lineCounts.travelLineCount,
+      amountPayable: lineCounts.amountPayable,
+      branchApproved: lineCounts.branchApproved,
+      hoApproved: lineCounts.hoApproved,
+    };
+  }, [mergedAggregateRows, fullModel, tableModel]);
+
+  const categorySectionCount = useMemo(
+    () => (tableModel ? countArcpCategorySections(tableModel) : 0),
+    [tableModel]
+  );
+
+  const displayModel = useMemo(() => {
+    if (!tableModel) return null;
+    return applyArcpTallyDetailLevel(tableModel, tallyDetailLevel);
+  }, [tableModel, tallyDetailLevel]);
 
   useEffect(() => {
     if (!appliedFilters || !displayModel) return;
@@ -418,20 +414,108 @@ export default function ArcpClaimsPage() {
     }
   }, [loading, appliedFilters, mergedAggregateRows.length, summaryTotals]);
 
-  const fullModel = useMemo(() => {
-    if (mergedAggregateRows.length === 0) return null;
-    return buildArcpClaimsTableModel(mergedAggregateRows, {
-      includeTravel: true,
-      ...arcpLabelLookups,
-    });
-  }, [mergedAggregateRows, arcpLabelLookups]);
-
   const monthlyBreakdown = useMemo(() => {
-    if (!rawAggregateRows || rawAggregateRows.length === 0) return null;
-    return buildArcpClaimsMonthlyBreakdown(rawAggregateRows, {
+    if (mergedAggregateRows.length === 0) return null;
+    return buildArcpClaimsMonthlyBreakdown(mergedAggregateRows, {
       includeTravel: includeTravelReimbursement,
     });
-  }, [rawAggregateRows, includeTravelReimbursement]);
+  }, [mergedAggregateRows, includeTravelReimbursement]);
+
+  useEffect(() => {
+    if (loading || !appliedFilters || mergedAggregateRows.length === 0 || !fullModel) return;
+
+    let mergedAmount = 0;
+    let mergedBranch = 0;
+    let mergedHo = 0;
+    let mergedQty = 0;
+    let mergedTravelBranch = 0;
+    for (const row of mergedAggregateRows) {
+      mergedQty += Number(row.qty) || 0;
+      mergedAmount += Number(row.amount_payable) || 0;
+      mergedBranch += Number(row.branch_approved) || 0;
+      mergedHo += Number(row.ho_approved) || 0;
+      if (Number(row.is_travel) === 1) {
+        mergedTravelBranch += Number(row.branch_approved) || 0;
+      }
+    }
+    let uiTravelBranch = 0;
+    for (const r of fullModel.rows) {
+      if (r.kind === 'travel') uiTravelBranch += r.branchApproved;
+    }
+
+    logArcpUiVsCsvTotals({
+      includeTravelReimbursement,
+      rawAggregateCount: rawAggregateRows?.length ?? 0,
+      mergedAggregateCount: mergedAggregateRows.length,
+      mergedRowsSum: {
+        amountPayable: mergedAmount,
+        branchApproved: mergedBranch,
+        hoApproved: mergedHo,
+        qty: mergedQty,
+      },
+      tableModelFromRows: {
+        amountPayable: tableModel?.totals.amountPayable ?? 0,
+        branchApproved: tableModel?.totals.branchApproved ?? 0,
+        hoApproved: tableModel?.totals.hoApproved ?? 0,
+        qty: tableModel?.totals.qty ?? 0,
+      },
+      tableModelDisplayed: {
+        amountPayable: tableModel?.totals.amountPayable ?? 0,
+        branchApproved: tableModel?.totals.branchApproved ?? 0,
+        hoApproved: tableModel?.totals.hoApproved ?? 0,
+        qty: tableModel?.totals.qty ?? 0,
+      },
+      fullModelCsv: {
+        amountPayable: fullModel.totals.amountPayable,
+        branchApproved: fullModel.totals.branchApproved,
+        hoApproved: fullModel.totals.hoApproved,
+        qty: fullModel.totals.qty,
+      },
+      summaryPanel: {
+        amountPayable: summaryTotals.amountPayable,
+        branchApproved: summaryTotals.branchApproved,
+        hoApproved: summaryTotals.hoApproved,
+      },
+      grandTotalsApi: null,
+      monthlyFromRaw: null,
+      monthlyFromMerged: monthlyBreakdown
+        ? { amountPayable: monthlyBreakdown.totals.amountPayable }
+        : null,
+      totalsOverriddenByGrandTotals: false,
+      uiTravelBranchApproved: uiTravelBranch,
+      mergedTravelBranchApproved: mergedTravelBranch,
+    });
+  }, [
+    loading,
+    appliedFilters,
+    mergedAggregateRows,
+    rawAggregateRows,
+    fullModel,
+    tableModel,
+    summaryTotals,
+    includeTravelReimbursement,
+    monthlyBreakdown,
+  ]);
+
+  const canExportPdf = useMemo(() => {
+    if (!appliedFilters || !tableModel) return false;
+    if (tableView === 'monthly') return (monthlyBreakdown?.rows.length ?? 0) > 0;
+    if (tableView === 'summary') {
+      return (displayModel?.rows.length ?? 0) > 0 || tallyDetailLevel === 'totals';
+    }
+    return (
+      (displayModel?.rows.length ?? 0) > 0 ||
+      tallyDetailLevel === 'totals' ||
+      (monthlyBreakdown?.rows.length ?? 0) > 0
+    );
+  }, [
+    appliedFilters,
+    tableModel,
+    tableView,
+    monthlyBreakdown,
+    displayModel,
+    tallyDetailLevel,
+  ]);
 
   const draftQueryOpts = useMemo(
     () => ({
@@ -511,8 +595,7 @@ export default function ArcpClaimsPage() {
 
       const fetchAggregateChunk = async (
         chunk: { start: string; end: string },
-        chunkIndex: number,
-        refreshFirstChunk: boolean
+        chunkIndex: number
       ) => {
         const chunkTimeoutMs = useClientChunks
           ? filters.arcpDateFilterColumn === 'bm_approved_at' ||
@@ -525,7 +608,7 @@ export default function ArcpClaimsPage() {
 
         return chunkedAuth.getWithAuthRetry<{
           aggregates?: ArcpClaimsAggregateRow[];
-          meta?: { source?: string; grandTotals?: ArcpGrandTotals };
+          meta?: { source?: string; cached?: boolean };
           error?: string;
         }>(
           '/api/report/arcp-claims',
@@ -540,7 +623,7 @@ export default function ArcpClaimsPage() {
               aggregatesOnly: 'true',
               ...(filters.branchParam ? { branch: filters.branchParam } : {}),
               ...(filters.franchiseeParam ? { franchisee: filters.franchiseeParam } : {}),
-              ...(refreshFirstChunk ? { refresh: 'true' } : {}),
+              ...(refresh ? { refresh: 'true' } : {}),
             },
           },
           { chunkIndex }
@@ -555,14 +638,13 @@ export default function ArcpClaimsPage() {
 
         if (!useClientChunks) {
           try {
-            const data = await fetchAggregateChunk(chunks[0], 0, refresh);
+            const data = await fetchAggregateChunk(chunks[0], 0);
             if (isStale()) return;
             if (data.error) throw new Error(data.error);
             if (data.meta?.source === 'crm_fallback') usedCrmFallback = true;
             const rawAggregates = mergeArcpAggregateRows(data.aggregates ?? []);
             if (!isStale()) {
               setRawAggregateRows(rawAggregates);
-              if (data.meta?.grandTotals) setArcpGrandTotals(data.meta.grandTotals);
               setLoadStatus(
                 toLoadStatus(loadPlan, filters.arcpDateFilterColumn, 1, 0, {
                   scopedFilters,
@@ -611,7 +693,7 @@ export default function ArcpClaimsPage() {
           const chunkStartedAt = Date.now();
 
           try {
-            const data = await fetchAggregateChunk(chunk, i, refresh && i === 0);
+            const data = await fetchAggregateChunk(chunk, i);
 
             if (isStale()) return;
             if (data.error) throw new Error(data.error);
@@ -658,16 +740,6 @@ export default function ArcpClaimsPage() {
 
         if (!isStale()) {
           setRawAggregateRows(rawAggregates);
-          try {
-            const gtRes = await fetchAggregateChunk(
-              { start: filters.startDateStr, end: filters.endDateStr },
-              -1,
-              false
-            );
-            if (gtRes.meta?.grandTotals) setArcpGrandTotals(gtRes.meta.grandTotals);
-          } catch {
-            /* summary grand totals are optional if tally rows loaded */
-          }
         }
 
         logArcpLoadResult(
@@ -758,7 +830,6 @@ export default function ArcpClaimsPage() {
 
     setAppliedFilters(nextFilters);
     setRawAggregateRows(null);
-    setArcpGrandTotals(null);
 
     if (readArcpFromPostgresClient()) {
       toast.info(buildArcpPlanMessage(draftLoadPlan, arcpDateFilterColumn, true), {
@@ -771,7 +842,7 @@ export default function ArcpClaimsPage() {
       );
     }
 
-    runLoad(nextFilters, false);
+    runLoad(nextFilters, true);
   }, [
     arcpDateFilterColumn,
     branchParam,
@@ -821,10 +892,15 @@ export default function ArcpClaimsPage() {
   }, [appliedFilters, fullModel]);
 
   const handleViewPdf = useCallback(async () => {
-    if (!appliedFilters || !fullModel || fullModel.rows.length === 0) {
+    if (!appliedFilters || !tableModel || !canExportPdf) {
       toast.error('No data to preview');
       return;
     }
+
+    const tallyForPdf =
+      tableView === 'monthly' ? null : displayModel;
+    const monthlyForPdf =
+      tableView === 'summary' ? null : monthlyBreakdown;
 
     setExportingPdf(true);
     try {
@@ -833,14 +909,22 @@ export default function ArcpClaimsPage() {
         appliedFilters.endDateStr
       );
       const { blob } = await buildArcpClaimsPdfBlob(
-        fullModel,
         {
-          startDate: appliedFilters.startDateStr,
-          endDate: appliedFilters.endDateStr,
-          dateBasisLabel,
-          branchLabel,
-          franchiseeLabel,
-          callTypeLabel,
+          meta: {
+            startDate: appliedFilters.startDateStr,
+            endDate: appliedFilters.endDateStr,
+            dateBasisLabel,
+            branchLabel,
+            franchiseeLabel,
+            callTypeLabel,
+          },
+          view: {
+            tableView,
+            tallyDetailLevel,
+            includeTravelReimbursement,
+          },
+          tallyModel: tallyForPdf,
+          monthlyModel: monthlyForPdf,
         },
         fileName
       );
@@ -860,7 +944,20 @@ export default function ArcpClaimsPage() {
     } finally {
       setExportingPdf(false);
     }
-  }, [appliedFilters, fullModel, dateBasisLabel, branchLabel, franchiseeLabel, callTypeLabel]);
+  }, [
+    appliedFilters,
+    tableModel,
+    canExportPdf,
+    displayModel,
+    monthlyBreakdown,
+    tableView,
+    tallyDetailLevel,
+    includeTravelReimbursement,
+    dateBasisLabel,
+    branchLabel,
+    franchiseeLabel,
+    callTypeLabel,
+  ]);
 
   const handleExportDetailCsv = useCallback(async () => {
     if (!appliedFilters) {
@@ -927,6 +1024,7 @@ export default function ArcpClaimsPage() {
         if (data.error) throw new Error(data.error);
         const rows = mergeArcpDetailRows(data.rows ?? []);
         if (rows.length === 0) throw new Error('No detail rows to export');
+        logArcpDetailExportTotals(rows);
         /* no source toast on detail export */
         const fileName = `ARCP_Claims_Detail_${appliedFilters.startDateStr}_${appliedFilters.endDateStr}.csv`;
         downloadArcpClaimsDetailCsv(rows, fileName);
@@ -998,6 +1096,7 @@ export default function ArcpClaimsPage() {
         throw new Error('No detail rows to export');
       }
 
+      logArcpDetailExportTotals(rows);
       const fileName = `ARCP_Claims_Detail_${appliedFilters.startDateStr}_${appliedFilters.endDateStr}.csv`;
       downloadArcpClaimsDetailCsv(rows, fileName);
 
@@ -1024,9 +1123,13 @@ export default function ArcpClaimsPage() {
     }
   }, [appliedFilters, chunkedAuth]);
 
+  const approveHintColumn = appliedFilters?.arcpDateFilterColumn ?? arcpDateFilterColumn;
+  const showApproveDateHint = isArcpApproveDateColumn(approveHintColumn) && !loading;
+
   const toolbar = (
     <div className="border-b border-slate-200 bg-white px-4 py-3">
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:gap-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
         <div className="flex flex-wrap items-center gap-4">
           <fieldset className="flex flex-wrap items-center gap-3">
             <legend className="sr-only">Date basis</legend>
@@ -1058,8 +1161,8 @@ export default function ArcpClaimsPage() {
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <RegisterBranchFranchiseeFilters applyMode="confirm" />
+        <div className="report-toolbar-filters-row">
+          <RegisterBranchFranchiseeFilters applyMode="confirm" layout="inline" />
           <RegisterMultiSelect
             label="Call Type"
             emptyLabel="All Call Types"
@@ -1067,7 +1170,13 @@ export default function ArcpClaimsPage() {
             selected={selectedCallTypes}
             onChange={setSelectedCallTypes}
             applyMode="confirm"
+            layout="inline"
+            searchable
+            panelClassName="w-64"
           />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={handleApplyFilters}
@@ -1089,6 +1198,7 @@ export default function ArcpClaimsPage() {
                 return;
               }
               runLoad(appliedFilters, true);
+              toast.info('Reloading tally (server cache cleared)', { duration: 3000 });
             }}
             disabled={loading || !resourcesLoaded}
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
@@ -1108,7 +1218,7 @@ export default function ArcpClaimsPage() {
           <button
             type="button"
             onClick={() => void handleViewPdf()}
-            disabled={loading || exportingPdf || !appliedFilters || !fullModel || fullModel.rows.length === 0}
+            disabled={loading || exportingPdf || !canExportPdf}
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-[11px] font-medium text-white shadow-sm hover:bg-slate-800 disabled:opacity-50"
           >
             <FileText className={`h-3.5 w-3.5 ${exportingPdf ? 'animate-pulse' : ''}`} />
@@ -1124,6 +1234,20 @@ export default function ArcpClaimsPage() {
             {exportingDetail ? 'Exporting Detail…' : 'Export Detail CSV'}
           </button>
         </div>
+        </div>
+
+        {showApproveDateHint ? (
+          <aside
+            className="min-w-0 shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-snug text-amber-950 lg:max-w-[min(20rem,36%)] lg:self-center"
+            aria-live="polite"
+          >
+            <strong>{dateBasisLabel}</strong> only includes lines whose{' '}
+            {approveHintColumn === 'bm_approved_at' ? 'BM approval date' : 'HO approval date'} falls
+            in this range — not when the call was logged or solved. Amount Payable, Branch Approved,
+            and HO Approved still apply to those lines, but the row set is usually smaller than Call
+            Date for the same calendar range.
+          </aside>
+        ) : null}
       </div>
     </div>
   );
@@ -1146,45 +1270,17 @@ export default function ArcpClaimsPage() {
         </div>
       ) : null}
 
-      {appliedFilters &&
-      isArcpApproveDateColumn(appliedFilters.arcpDateFilterColumn) &&
-      !loading ? (
-        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-950">
-          <strong>{dateBasisLabel}</strong> only includes lines whose{' '}
-          {appliedFilters.arcpDateFilterColumn === 'bm_approved_at'
-            ? 'BM approval date'
-            : 'HO approval date'}{' '}
-          falls in this range — not when the call was logged or solved. Amount Payable, Branch
-          Approved, and HO Approved still apply to those lines, but the row set is usually smaller
-          than Call Date for the same calendar range.
-        </div>
-      ) : null}
-
       {appliedFilters && mergedAggregateRows.length > 0 && !loading ? (
-        <div className="mb-3 flex flex-wrap gap-4 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700">
-          <span>
-            <span className="font-semibold text-slate-500">Service lines:</span>{' '}
-            {summaryTotals.serviceLineCount.toLocaleString('en-IN')}
-            {summaryTotals.travelLineCount > 0 ? (
-              <span className="text-slate-500">
-                {' '}
-                (+{summaryTotals.travelLineCount.toLocaleString('en-IN')} travel)
-              </span>
-            ) : null}
-          </span>
-          <span>
-            <span className="font-semibold text-slate-500">Amount Payable:</span>{' '}
-            {formatArcpAmountSummary(summaryTotals.amountPayable)}
-          </span>
-          <span>
-            <span className="font-semibold text-slate-500">Branch Approved:</span>{' '}
-            {formatArcpAmountSummary(summaryTotals.branchApproved)}
-          </span>
-          <span>
-            <span className="font-semibold text-slate-500">HO Approved:</span>{' '}
-            {formatArcpAmountSummary(summaryTotals.hoApproved)}
-          </span>
-        </div>
+        <ArcpClaimsSummaryPanel
+          totals={summaryTotals}
+          tableView={tableView}
+          onTableViewChange={setTableView}
+          tallyDetailLevel={tallyDetailLevel}
+          onTallyDetailLevelChange={setTallyDetailLevel}
+          includeTravelReimbursement={includeTravelReimbursement}
+          onIncludeTravelChange={setIncludeTravelReimbursement}
+          categorySectionCount={categorySectionCount}
+        />
       ) : null}
 
       {loading && loadStatus ? (
@@ -1197,43 +1293,6 @@ export default function ArcpClaimsPage() {
 
       {!loading && draftLoadPreview && (!appliedFilters || hasPendingFilterChanges) ? (
         <ArcpClaimsLoadBanner status={draftLoadPreview} variant="preview" />
-      ) : null}
-
-      {appliedFilters && (rawAggregateRows || loading) ? (
-        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
-          <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-slate-700">
-            <input
-              type="checkbox"
-              checked={includeTravelReimbursement}
-              onChange={(event) => setIncludeTravelReimbursement(event.target.checked)}
-              className="h-3.5 w-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
-            />
-            Include travel reimbursement
-          </label>
-          <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 p-0.5 text-[10px]">
-            {(
-              [
-                ['summary', 'Service tally'],
-                ['monthly', 'Monthly'],
-                ['both', 'Both'],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setTableView(value)}
-                className={`rounded px-2 py-1 font-medium transition-colors ${
-                  tableView === value
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <span className="text-[10px] text-slate-400">Client-side only — no extra fetch.</span>
-        </div>
       ) : null}
 
       <AdminTableCard isEmpty={false}>

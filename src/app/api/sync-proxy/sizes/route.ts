@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { postQuery } from '@/lib/db-proxy';
-import { authorizeSyncProxy } from '@/lib/sync-proxy-auth';
+import { postQuery } from '@/lib/db/proxy';
+import { authorizeSyncProxy } from '@/lib/sync/proxy-auth';
 import {
   ESSENTIAL_SYNC_TABLES,
   syncProxyCorsHeaders,
   syncProxyOptions,
-} from '@/lib/sync-proxy-route';
-import { toUserFacingError } from '@/lib/user-facing-errors';
+} from '@/lib/sync/proxy-route';
+import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import fs from 'fs';
 import path from 'path';
 

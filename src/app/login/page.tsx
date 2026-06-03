@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
-import { resolveLandingPath } from '@/lib/user-report-preferences';
+import { resolveLandingPath } from '@/lib/report/preferences';
 import { defaultReportLandingPath } from '@/lib/auth/page-access';
 
 export default function LoginPage() {

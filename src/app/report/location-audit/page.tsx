@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
-import { TrnLink } from '@/components/TrnLink';
+import { TrnLink } from '@/components/calls/TrnLink';
 import {
   MapPin,
   RefreshCw,
@@ -11,8 +11,8 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { RegisterPageFilters } from '@/components/RegisterPageFilters';
-import { PageShell } from '@/components/PageShell';
+import { RegisterPageFilters } from '@/components/register/RegisterPageFilters';
+import { PageShell } from '@/components/layout/PageShell';
 import {
   AdminStatPill,
   AdminTable,
@@ -23,17 +23,17 @@ import {
   AdminTr,
 } from '@/components/admin/AdminUi';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
-import { sanitizeUserFacingMessage } from '@/lib/user-facing-errors';
+import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import {
   SUMMARY_DEFAULT_CALL_TYPE,
   findBreakdownCallType,
   toDateString,
-} from '@/lib/report-filters';
+} from '@/lib/report/filters';
 import {
   LocationAuditMapPlaceholder,
   LocationAuditRowDetail,
   type LocationAuditDetailRow,
-} from '@/components/LocationAuditRowDetail';
+} from '@/components/location-audit/LocationAuditRowDetail';
 import { toast } from 'sonner';
 
 type LocationAuditStatus = 'mismatch' | 'ok' | 'no_gps' | 'no_address';

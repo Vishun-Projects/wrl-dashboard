@@ -1,5 +1,5 @@
 import { formatGpsSourceForDisplay } from '@/lib/geo/parse-latlong';
-import { escapeCsvCell } from '@/lib/csv-utils';
+import { escapeCsvCell } from '@/lib/utils/csv';
 import type { LocationAuditDetailRow } from '@/lib/location-audit/types';
 
 function formatFraudSignal(signal: string | undefined): string {

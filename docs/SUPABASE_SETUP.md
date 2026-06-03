@@ -68,7 +68,8 @@ FROM (VALUES
   ('page_call_distribution', 'Access Call Distribution map and KPIs'),
   ('page_arcp_claims', 'Access ARCP Claims register'),
   ('page_serial_audit', 'Access Serial Wise History audit'),
-  ('page_location_audit', 'Access Location Audit')
+  ('page_location_audit', 'Access Location Audit'),
+  ('page_warranty_master', 'Access Warranty Master dashboard')
 ) AS v(name, description)
 WHERE NOT EXISTS (SELECT 1 FROM public.app_permissions p WHERE p.name = v.name);
 
