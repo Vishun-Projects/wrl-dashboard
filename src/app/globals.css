@@ -228,6 +228,15 @@
     @apply w-full max-w-none;
   }
 
+  .report-toolbar-filters-row .report-toolbar-filters-date,
+  .report-toolbar-filters-row .report-toolbar-filters-aging {
+    @apply shrink-0;
+  }
+
+  .report-toolbar-filters-row .report-toolbar-filters-aging .register-filter-select {
+    @apply min-w-[9rem];
+  }
+
   .register-search-input {
     @apply h-8 w-full pl-8 pr-2.5 bg-white border border-slate-200 rounded-md text-[11px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-200 focus:border-slate-400 shadow-sm;
   }

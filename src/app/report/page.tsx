@@ -23,6 +23,7 @@ import { DateRangeSelector } from '@/components/register/DateRangeSelector';
 import { CallDetail } from '@/components/calls/CallDetail';
 import { useRouter, usePathname } from 'next/navigation';
 import { RegisterBranchFranchiseeFilters } from '@/components/register/RegisterBranchFranchiseeFilters';
+import { RegisterMultiSelect } from '@/components/register/RegisterMultiSelect';
 import { RegisterColumnPicker } from '@/components/register/RegisterColumnPicker';
 import { RegisterPageFilters } from '@/components/register/RegisterPageFilters';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
@@ -307,7 +308,7 @@ export default function ReportPage() {
     franchiseesList,
     clearAllFilters,
     isAnyFilterActive: isAnyRegisterFilterActive,
-    callTypes,
+    callTypeOptions,
     offices,
     runBackgroundSync,
     lastSyncedAt,
@@ -387,11 +388,6 @@ export default function ReportPage() {
     [selectedCallTypes]
   );
 
-  const callTypeFilterLabel = useMemo(() => {
-    if (selectedCallTypes.length === 0) return 'All Call Types';
-    if (selectedCallTypes.length === 1) return selectedCallTypes[0];
-    return `${selectedCallTypes.length} Types Selected`;
-  }, [selectedCallTypes]);
   useEffect(() => {
     reportPerfLogDocumentNavigationOnce();
     const tMount = performance.now();
@@ -412,8 +408,6 @@ export default function ReportPage() {
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
   const [tempFilterRegion, setTempFilterRegion] = useState<string[]>([]);
   const [tempFilterAccount, setTempFilterAccount] = useState<string[]>([]);
-  const [tempSelectedCallTypes, setTempSelectedCallTypes] = useState<string[]>([]);
-  const [showCallTypeDropdown, setShowCallTypeDropdown] = useState(false);
   const [exportingDetailed, setExportingDetailed] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ fetched: number; total: number } | null>(
     null
@@ -3686,63 +3680,32 @@ export default function ReportPage() {
           onPincodeEnter={() => void runRegisterFilterLoad({ force: true })}
         />
       ) : (
-        <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-2">
-          {/* Call Type Filter — summary / accounts tabs */}
-          <div className="relative">
-            <button
-              onClick={() => {
-                if (!showCallTypeDropdown) setTempSelectedCallTypes(selectedCallTypes);
-                setShowCallTypeDropdown(!showCallTypeDropdown);
-              }}
-              className="register-filter-btn max-w-[11rem]"
-            >
-              <span className="truncate">{callTypeFilterLabel}</span>
-              <ChevronDown size={14} className={`transition-transform duration-200 ${showCallTypeDropdown ? 'rotate-180' : ''}`} />
-            </button>
-            {showCallTypeDropdown && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowCallTypeDropdown(false)} />
-                <div className="absolute top-full left-0 z-50 mt-1 w-64 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
-                  <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 p-2">
-                    <span className="text-[10px] text-slate-500 ui-label">Select Call Type</span>
-                    <button onClick={() => setTempSelectedCallTypes([])} className="rounded px-2 py-1 text-[10px] text-slate-400 hover:bg-white hover:text-slate-900 ui-label">Clear All</button>
-                  </div>
-                  <div className="custom-scrollbar max-h-72 overflow-y-auto p-1">
-                    {callTypes.map((type) => {
-                      const isSelected = tempSelectedCallTypes.includes(type);
-                      return (
-                        <label key={type} className="flex cursor-pointer items-center gap-2 rounded px-3 py-2 transition-colors hover:bg-slate-50">
-                          <input type="checkbox" className="h-3.5 w-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-900" checked={isSelected} onChange={(e) => {
-                            if (e.target.checked) setTempSelectedCallTypes((prev) => [...prev, type]);
-                            else setTempSelectedCallTypes((prev) => prev.filter((t) => t !== type));
-                          }} />
-                          <span className={`text-[11px] font-medium ${isSelected ? 'font-bold text-slate-900' : 'text-slate-600'}`}>{type}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  <div className="flex justify-end border-t border-slate-100 bg-slate-50 p-2">
-                    <button
-                      onClick={() => {
-                        setSelectedCallTypes(tempSelectedCallTypes);
-                        setShowCallTypeDropdown(false);
-                      }}
-                      className="rounded bg-slate-900 px-4 py-1 text-[10px] text-white hover:bg-slate-800 ui-label"
-                    >
-                      Done
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
+        <div className="report-toolbar-filters-row border-b border-slate-200 bg-white px-4 py-2">
+          <RegisterMultiSelect
+            label="Call Type"
+            emptyLabel="All Call Types"
+            options={callTypeOptions}
+            selected={selectedCallTypes}
+            onChange={setSelectedCallTypes}
+            applyMode="confirm"
+            layout="inline"
+            searchable
+            panelClassName="w-64"
+          />
+          <RegisterBranchFranchiseeFilters applyMode="confirm" layout="inline" />
+          <div className="report-toolbar-filters-date shrink-0">
+            <DateRangeSelector
+              value={dateRange.label}
+              startDate={dateRange.start}
+              endDate={dateRange.end}
+              onChange={(range) => setDateRange(range)}
+            />
           </div>
-          <RegisterBranchFranchiseeFilters applyMode="confirm" />
-          <DateRangeSelector value={dateRange.label} startDate={dateRange.start} endDate={dateRange.end} onChange={(range) => setDateRange(range)} />
-          <div className="flex items-center gap-2">
+          <div className="report-toolbar-filters-aging flex shrink-0 items-center gap-2">
             <span className="text-[10px] whitespace-nowrap text-amber-600 ui-label">Aging As Of</span>
             <input
               type="date"
-              className="register-filter-select w-auto bg-amber-50/80 text-amber-900"
+              className="register-filter-select h-8 w-auto bg-amber-50/80 text-amber-900"
               value={agingAsOf}
               max={new Date().toISOString().split('T')[0]}
               onChange={(e) => setAgingAsOf(e.target.value)}
@@ -3751,7 +3714,7 @@ export default function ReportPage() {
           <button
             type="button"
             onClick={handleApplySummaryFilters}
-            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium shadow-sm ${
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium shadow-sm ${
               hasPendingFilterChanges
                 ? 'border border-slate-800 bg-slate-900 text-white hover:bg-slate-800'
                 : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
