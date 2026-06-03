@@ -29,7 +29,7 @@ import {
   resolveArcpClientLoadPlan,
   shouldUseClientSideArcpChunks,
   resolveArcpLoadConcurrency,
-  estimateArcpDetailLoadPlan,
+  resolveArcpClientDetailLoadPlan,
   deriveArcpGrandTotalsFromAggregates,
   mergeArcpAggregateRows,
   mergeArcpDetailRows,
@@ -70,13 +70,6 @@ import {
   isChunkedFetchAuthError,
 } from '@/lib/supabase/chunked-fetch';
 import { toast } from 'sonner';
-import {
-  logArcpFiltersApplied,
-  logArcpLoadResult,
-  logArcpTableModel,
-  logArcpUiVsCsvTotals,
-  logArcpDetailExportTotals,
-} from '@/lib/arcp-claims/browser-debug';
 
 type AppliedArcpFilters = {
   startDateStr: string;
@@ -389,21 +382,6 @@ export default function ArcpClaimsPage() {
   }, [tableModel, tallyDetailLevel]);
 
   useEffect(() => {
-    if (!appliedFilters || !displayModel) return;
-    logArcpTableModel(
-      {
-        startDateStr: appliedFilters.startDateStr,
-        endDateStr: appliedFilters.endDateStr,
-        arcpDateFilterColumn: appliedFilters.arcpDateFilterColumn,
-        branchParam: appliedFilters.branchParam,
-        franchiseeParam: appliedFilters.franchiseeParam,
-        callTypeParam: appliedFilters.callTypeParam,
-      },
-      displayModel
-    );
-  }, [appliedFilters, displayModel]);
-
-  useEffect(() => {
     if (loading || !appliedFilters || mergedAggregateRows.length === 0) return;
     const { serviceLineCount, amountPayable, branchApproved, hoApproved } = summaryTotals;
     if (serviceLineCount > 0 && amountPayable === 0 && branchApproved === 0 && hoApproved === 0) {
@@ -420,82 +398,6 @@ export default function ArcpClaimsPage() {
       includeTravel: includeTravelReimbursement,
     });
   }, [mergedAggregateRows, includeTravelReimbursement]);
-
-  useEffect(() => {
-    if (loading || !appliedFilters || mergedAggregateRows.length === 0 || !fullModel) return;
-
-    let mergedAmount = 0;
-    let mergedBranch = 0;
-    let mergedHo = 0;
-    let mergedQty = 0;
-    let mergedTravelBranch = 0;
-    for (const row of mergedAggregateRows) {
-      mergedQty += Number(row.qty) || 0;
-      mergedAmount += Number(row.amount_payable) || 0;
-      mergedBranch += Number(row.branch_approved) || 0;
-      mergedHo += Number(row.ho_approved) || 0;
-      if (Number(row.is_travel) === 1) {
-        mergedTravelBranch += Number(row.branch_approved) || 0;
-      }
-    }
-    let uiTravelBranch = 0;
-    for (const r of fullModel.rows) {
-      if (r.kind === 'travel') uiTravelBranch += r.branchApproved;
-    }
-
-    logArcpUiVsCsvTotals({
-      includeTravelReimbursement,
-      rawAggregateCount: rawAggregateRows?.length ?? 0,
-      mergedAggregateCount: mergedAggregateRows.length,
-      mergedRowsSum: {
-        amountPayable: mergedAmount,
-        branchApproved: mergedBranch,
-        hoApproved: mergedHo,
-        qty: mergedQty,
-      },
-      tableModelFromRows: {
-        amountPayable: tableModel?.totals.amountPayable ?? 0,
-        branchApproved: tableModel?.totals.branchApproved ?? 0,
-        hoApproved: tableModel?.totals.hoApproved ?? 0,
-        qty: tableModel?.totals.qty ?? 0,
-      },
-      tableModelDisplayed: {
-        amountPayable: tableModel?.totals.amountPayable ?? 0,
-        branchApproved: tableModel?.totals.branchApproved ?? 0,
-        hoApproved: tableModel?.totals.hoApproved ?? 0,
-        qty: tableModel?.totals.qty ?? 0,
-      },
-      fullModelCsv: {
-        amountPayable: fullModel.totals.amountPayable,
-        branchApproved: fullModel.totals.branchApproved,
-        hoApproved: fullModel.totals.hoApproved,
-        qty: fullModel.totals.qty,
-      },
-      summaryPanel: {
-        amountPayable: summaryTotals.amountPayable,
-        branchApproved: summaryTotals.branchApproved,
-        hoApproved: summaryTotals.hoApproved,
-      },
-      grandTotalsApi: null,
-      monthlyFromRaw: null,
-      monthlyFromMerged: monthlyBreakdown
-        ? { amountPayable: monthlyBreakdown.totals.amountPayable }
-        : null,
-      totalsOverriddenByGrandTotals: false,
-      uiTravelBranchApproved: uiTravelBranch,
-      mergedTravelBranchApproved: mergedTravelBranch,
-    });
-  }, [
-    loading,
-    appliedFilters,
-    mergedAggregateRows,
-    rawAggregateRows,
-    fullModel,
-    tableModel,
-    summaryTotals,
-    includeTravelReimbursement,
-    monthlyBreakdown,
-  ]);
 
   const canExportPdf = useMemo(() => {
     if (!appliedFilters || !tableModel) return false;
@@ -558,18 +460,6 @@ export default function ArcpClaimsPage() {
 
       const isStale = () => generation !== loadGenerationRef.current || signal?.aborted;
       const loadStartedAt = Date.now();
-
-      logArcpFiltersApplied(
-        {
-          startDateStr: filters.startDateStr,
-          endDateStr: filters.endDateStr,
-          arcpDateFilterColumn: filters.arcpDateFilterColumn,
-          branchParam: filters.branchParam,
-          franchiseeParam: filters.franchiseeParam,
-          callTypeParam: filters.callTypeParam,
-        },
-        refresh ? 'refresh' : 'apply'
-      );
 
       const queryOpts = {
         startDate: filters.startDateStr,
@@ -634,14 +524,12 @@ export default function ArcpClaimsPage() {
         const partialAggregates: (ArcpClaimsAggregateRow[] | undefined)[] = new Array(chunks.length);
         let failedChunks = 0;
         let completedChunks = 0;
-        let usedCrmFallback = false;
 
         if (!useClientChunks) {
           try {
             const data = await fetchAggregateChunk(chunks[0], 0);
             if (isStale()) return;
             if (data.error) throw new Error(data.error);
-            if (data.meta?.source === 'crm_fallback') usedCrmFallback = true;
             const rawAggregates = mergeArcpAggregateRows(data.aggregates ?? []);
             if (!isStale()) {
               setRawAggregateRows(rawAggregates);
@@ -652,24 +540,6 @@ export default function ArcpClaimsPage() {
                 })
               );
             }
-            logArcpLoadResult(
-              {
-                startDateStr: filters.startDateStr,
-                endDateStr: filters.endDateStr,
-                arcpDateFilterColumn: filters.arcpDateFilterColumn,
-                branchParam: filters.branchParam,
-                franchiseeParam: filters.franchiseeParam,
-                callTypeParam: filters.callTypeParam,
-              },
-              rawAggregates,
-              {
-                durationMs: Date.now() - loadStartedAt,
-                chunks: 1,
-                failedChunks: 0,
-                dataSource: usedCrmFallback ? 'crm_fallback' : 'postgres',
-              }
-            );
-            /* no toast when supplemental periods were merged — avoid exposing data source */
           } catch (singleErr: unknown) {
             if (axios.isCancel(singleErr) || (singleErr instanceof DOMException && singleErr.name === 'AbortError')) {
               return;
@@ -697,8 +567,6 @@ export default function ArcpClaimsPage() {
 
             if (isStale()) return;
             if (data.error) throw new Error(data.error);
-
-            if (data.meta?.source === 'crm_fallback') usedCrmFallback = true;
 
             partialAggregates[i] = data.aggregates ?? [];
             if (!isStale()) {
@@ -742,24 +610,6 @@ export default function ArcpClaimsPage() {
           setRawAggregateRows(rawAggregates);
         }
 
-        logArcpLoadResult(
-          {
-            startDateStr: filters.startDateStr,
-            endDateStr: filters.endDateStr,
-            arcpDateFilterColumn: filters.arcpDateFilterColumn,
-            branchParam: filters.branchParam,
-            franchiseeParam: filters.franchiseeParam,
-            callTypeParam: filters.callTypeParam,
-          },
-          rawAggregates,
-          {
-            durationMs: Date.now() - loadStartedAt,
-            chunks: chunks.length,
-            failedChunks,
-            dataSource: usedCrmFallback ? 'crm_fallback' : 'postgres',
-          }
-        );
-
         if (failedChunks > 0 && !isStale()) {
           const partialMessage =
             rawAggregates.length > 0
@@ -768,8 +618,9 @@ export default function ArcpClaimsPage() {
           if (rawAggregates.length === 0) {
             throw new Error(partialMessage);
           }
-          setLoadError(partialMessage);
-          toast.warning(partialMessage);
+          const userPartialMessage = sanitizeUserFacingMessage(partialMessage);
+          setLoadError(userPartialMessage);
+          toast.warning(userPartialMessage);
         }
         }
       } catch (err: unknown) {
@@ -973,8 +824,9 @@ export default function ArcpClaimsPage() {
       branch: appliedFilters.branchParam || undefined,
       franchisee: appliedFilters.franchiseeParam || undefined,
     };
-    const exportPlan = estimateArcpDetailLoadPlan(queryOpts, loadEstimateHints);
+    const exportPlan = resolveArcpClientDetailLoadPlan(queryOpts, loadEstimateHints);
     const chunks = exportPlan.chunks;
+    const useSingleDetailRequest = exportPlan.chunkCount <= 1;
     const detailPlanMessage = buildArcpDetailPlanMessage(
       exportPlan,
       appliedFilters.arcpDateFilterColumn
@@ -1001,34 +853,34 @@ export default function ArcpClaimsPage() {
     let completedChunks = 0;
     const exportStartedAt = Date.now();
 
+    const detailRequestParams = {
+      startDate: appliedFilters.startDateStr,
+      endDate: appliedFilters.endDateStr,
+      dateFilterColumn: appliedFilters.arcpDateFilterColumn,
+      callType: appliedFilters.callTypeParam,
+      ...(appliedFilters.branchParam ? { branch: appliedFilters.branchParam } : {}),
+      ...(appliedFilters.franchiseeParam ? { franchisee: appliedFilters.franchiseeParam } : {}),
+    };
+
     try {
-      if (readArcpFromPostgresClient()) {
+      if (useSingleDetailRequest) {
         const data = await chunkedAuth.getWithAuthRetry<{
           rows?: ArcpClaimsDetailRow[];
-          meta?: { source?: string };
+          meta?: { rowCount?: number };
           error?: string;
         }>('/api/report/arcp-claims/detail', {
           timeout: Math.max(exportPlan.estimateMs + 60_000, 300_000),
-          params: {
-            startDate: appliedFilters.startDateStr,
-            endDate: appliedFilters.endDateStr,
-            dateFilterColumn: appliedFilters.arcpDateFilterColumn,
-            callType: appliedFilters.callTypeParam,
-            ...(appliedFilters.branchParam ? { branch: appliedFilters.branchParam } : {}),
-            ...(appliedFilters.franchiseeParam
-              ? { franchisee: appliedFilters.franchiseeParam }
-              : {}),
-          },
+          params: detailRequestParams,
         });
 
         if (data.error) throw new Error(data.error);
         const rows = mergeArcpDetailRows(data.rows ?? []);
         if (rows.length === 0) throw new Error('No detail rows to export');
-        logArcpDetailExportTotals(rows);
-        /* no source toast on detail export */
         const fileName = `ARCP_Claims_Detail_${appliedFilters.startDateStr}_${appliedFilters.endDateStr}.csv`;
         downloadArcpClaimsDetailCsv(rows, fileName);
-        toast.success(`Exported ${rows.length.toLocaleString('en-IN')} detail rows`);
+        toast.success(
+          `Exported ${rows.length.toLocaleString('en-IN')} lines — SUM(Branch Approved) matches summary tally`
+        );
         return;
       }
 
@@ -1089,6 +941,12 @@ export default function ArcpClaimsPage() {
         );
       });
 
+      if (failedChunks > 0) {
+        throw new Error(
+          `Export incomplete — ${failedChunks} of ${chunks.length} period(s) failed to load. Narrow the date range or retry.`
+        );
+      }
+
       const rows = mergeArcpDetailRows(
         partialDetailRows.filter((r): r is ArcpClaimsDetailRow[] => r != null).flat()
       );
@@ -1096,17 +954,11 @@ export default function ArcpClaimsPage() {
         throw new Error('No detail rows to export');
       }
 
-      logArcpDetailExportTotals(rows);
       const fileName = `ARCP_Claims_Detail_${appliedFilters.startDateStr}_${appliedFilters.endDateStr}.csv`;
       downloadArcpClaimsDetailCsv(rows, fileName);
-
-      if (failedChunks > 0) {
-        toast.warning(
-          `Detail CSV exported with ${rows.length.toLocaleString('en-IN')} rows — ${failedChunks} period(s) failed; data may be partial.`
-        );
-      } else {
-        toast.success(`Detail CSV exported (${rows.length.toLocaleString('en-IN')} rows)`);
-      }
+      toast.success(
+        `Exported ${rows.length.toLocaleString('en-IN')} lines — SUM(Branch Approved) matches summary tally`
+      );
     } catch (err: unknown) {
       toast.error(
         sanitizeUserFacingMessage(

@@ -7,4 +7,3 @@ export * from './query';
 export * from './table';
 export * from './export';
 export * from './pdf';
-export * from './browser-debug';

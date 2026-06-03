@@ -1,4 +1,4 @@
-import type { ArcpClaimsDetailRow } from './query';
+import { applyArcpDetailExportApprovedAmounts, type ArcpClaimsDetailRow } from './query';
 import type { ArcpClaimsTableModel } from './table';
 import { escapeCsvCell } from '@/lib/utils/csv';
 
@@ -79,7 +79,8 @@ export function downloadArcpClaimsCsv(model: ArcpClaimsTableModel, fileName: str
 }
 
 const DETAIL_HEADERS = [
-  'Call No',
+  'ARCP Line Code',
+  'UCN',
   'Calls2Fault Code',
   'Call No',
   'Franchisee Code',
@@ -97,8 +98,8 @@ const DETAIL_HEADERS = [
   'Rate',
   'Distance',
   'Amount Payable',
-  'Branch Approved',
-  'HO Approved',
+  'Branch Approved (tally)',
+  'HO Approved (tally)',
   'Raw Charge Payable',
   'Raw BM Approved',
   'Raw HO Approved',
@@ -111,11 +112,13 @@ const DETAIL_HEADERS = [
 ] as const;
 
 export function buildArcpClaimsDetailCsv(rows: ArcpClaimsDetailRow[]): string {
+  const exportRows = applyArcpDetailExportApprovedAmounts(rows);
   const lines = [csvRow([...DETAIL_HEADERS])];
 
-  for (const row of rows) {
+  for (const row of exportRows) {
     lines.push(
       csvRow([
+        row.ncode,
         row.vucnno,
         row.calls2fault_code,
         row.call_no,

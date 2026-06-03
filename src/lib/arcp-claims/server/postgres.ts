@@ -383,6 +383,7 @@ export async function queryArcpClaimsDetailRows(
 
   const query = `
 SELECT
+  h.ncode,
   h.vucnno,
   ${callNoSelect}
   h.calls2fault_code,
@@ -440,6 +441,7 @@ ORDER BY h.${dateColumn === 'bm_approved_at' ? 'bm_approved_at' : dateColumn ===
       const subKey = `${localLabel || 'Unknown'} - ${row.major_minor || 'Minor'}`;
 
       return {
+        ncode: String(row.ncode ?? ''),
         vucnno: String(row.vucnno ?? ''),
         calls2fault_code: String(row.calls2fault_code ?? ''),
         call_no: hasCallNo ? String(row.call_no ?? '').trim() : '',

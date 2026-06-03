@@ -391,7 +391,7 @@ export default function WarrantyMasterPage() {
           <p className="mb-3 text-xs text-slate-500">
             Choose filters, then <span className="font-medium text-slate-700">Apply</span> (instant,
             no new database query). <span className="font-medium text-slate-700">Refresh</span>{' '}
-            reloads all data from CRM.
+            reloads all machine lines from the server.
           </p>
 
           <div className="flex flex-wrap items-end gap-3">

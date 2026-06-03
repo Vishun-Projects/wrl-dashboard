@@ -6,6 +6,7 @@ import {
   buildArcpClaimsRawSql,
   mergeArcpAggregateRows,
   parseArcpAggregateRows,
+  arcpDetailLineKey,
   parseArcpDetailRows,
   parseArcpGrandTotals,
   planArcpSummaryDateChunks,
@@ -185,12 +186,12 @@ async function fetchArcpDetailChunkSharded(
       shardIndex + shardCount,
       doubled
     );
-    const byUcn = new Map<string, ArcpClaimsDetailRow>();
+    const byLine = new Map<string, ArcpClaimsDetailRow>();
     for (const row of [...left, ...right]) {
-      const key = row.vucnno || `${row.calls2fault_code}:${row.franchisee_code}`;
-      if (!byUcn.has(key)) byUcn.set(key, row);
+      const key = arcpDetailLineKey(row);
+      if (!byLine.has(key)) byLine.set(key, row);
     }
-    return Array.from(byUcn.values());
+    return Array.from(byLine.values());
   }
 }
 
@@ -199,7 +200,7 @@ async function fetchArcpDetailDenseWindow(
   chunk: { start: string; end: string },
   timeoutMs: number
 ): Promise<ArcpClaimsDetailRow[]> {
-  const byUcn = new Map<string, ArcpClaimsDetailRow>();
+  const byLine = new Map<string, ArcpClaimsDetailRow>();
   for (let i = 0; i < ARCP_NCODE_SHARD_INITIAL; i++) {
     for (const row of await fetchArcpDetailChunkSharded(
       opts,
@@ -208,11 +209,11 @@ async function fetchArcpDetailDenseWindow(
       i,
       ARCP_NCODE_SHARD_INITIAL
     )) {
-      const key = row.vucnno || `${row.calls2fault_code}:${row.franchisee_code}`;
-      if (!byUcn.has(key)) byUcn.set(key, row);
+      const key = arcpDetailLineKey(row);
+      if (!byLine.has(key)) byLine.set(key, row);
     }
   }
-  return Array.from(byUcn.values());
+  return Array.from(byLine.values());
 }
 
 async function fetchArcpDetailChunkResilient(
@@ -236,14 +237,14 @@ async function fetchArcpDetailChunkResilient(
       return fetchArcpDetailDenseWindow(opts, chunk, timeoutMs);
     }
 
-    const byUcn = new Map<string, ArcpClaimsDetailRow>();
+    const byLine = new Map<string, ArcpClaimsDetailRow>();
     for (const sub of subChunks) {
       for (const row of await fetchArcpDetailChunkResilient(opts, sub, timeoutMs)) {
-        const key = row.vucnno || `${row.calls2fault_code}:${row.franchisee_code}`;
-        if (!byUcn.has(key)) byUcn.set(key, row);
+        const key = arcpDetailLineKey(row);
+        if (!byLine.has(key)) byLine.set(key, row);
       }
     }
-    return Array.from(byUcn.values());
+    return Array.from(byLine.values());
   }
 }
 
@@ -280,7 +281,7 @@ export async function fetchArcpClaimsDetailRows(
 ): Promise<ArcpClaimsDetailRow[]> {
   const chunks = planArcpSummaryDateChunks(crmUiOpts(opts));
   const concurrency = chunks.length > 1 ? resolveArcpLoadConcurrency(crmUiOpts(opts)) : 1;
-  const byUcn = new Map<string, ArcpClaimsDetailRow>();
+  const byLine = new Map<string, ArcpClaimsDetailRow>();
 
   const chunkRowLists = await runPool(chunks, concurrency, (chunk) =>
     fetchArcpDetailChunkResilient(opts, chunk, timeoutMs)
@@ -288,12 +289,12 @@ export async function fetchArcpClaimsDetailRows(
 
   for (const rows of chunkRowLists) {
     for (const row of rows) {
-      const key = row.vucnno || `${row.calls2fault_code}:${row.franchisee_code}`;
-      if (!byUcn.has(key)) byUcn.set(key, row);
+      const key = arcpDetailLineKey(row);
+      if (!byLine.has(key)) byLine.set(key, row);
     }
   }
 
-  return Array.from(byUcn.values());
+  return Array.from(byLine.values());
 }
 
 export { isCrmOutOfMemoryError };

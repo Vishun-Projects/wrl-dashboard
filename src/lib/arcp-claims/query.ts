@@ -688,6 +688,8 @@ function buildArcpClaimsLineSelectSql(condition: string): string {
 }
 
 export type ArcpClaimsDetailRow = {
+  /** CRM trdcalls10ARCP.ncode — one export row per line (service + travel both kept). */
+  ncode: string;
   vucnno: string;
   calls2fault_code: string;
   call_no: string;
@@ -822,6 +824,7 @@ export function buildArcpClaimsDetailSql(opts: ArcpClaimsQueryOpts): string {
 
   return `
 SELECT
+  deduped.ncode,
   deduped.vucnno,
   deduped.ncalls2fault AS calls2fault_code,
   deduped.call_no,
@@ -1134,33 +1137,113 @@ export function estimateArcpDetailLoadPlan(
   };
 }
 
-/** Same key as tally SQL — vucnno first to match historical detail export totals. */
-export function arcpDetailDedupeKey(row: ArcpClaimsDetailRow): string {
+/** Detail export: one round-trip when tally does (same filters/date range). */
+export function resolveArcpClientDetailLoadPlan(
+  opts: ArcpClaimsQueryOpts,
+  hints?: ArcpLoadEstimateHints
+): ArcpLoadPlan {
+  const plan = estimateArcpDetailLoadPlan(opts, hints);
+  if (shouldUseClientSideArcpChunks(opts, hints)) return plan;
+  const start = opts.startDate ?? '';
+  const end = opts.endDate ?? '';
+  const scoped =
+    Boolean(opts.franchisee?.trim()) ||
+    Boolean(opts.branch?.trim()) ||
+    (opts.callType && opts.callType !== 'All');
+  return {
+    ...plan,
+    chunkCount: 1,
+    isLongLoad: false,
+    estimateMs: scoped ? 8000 : Math.min(plan.estimateMs, 180_000),
+    chunks: [{ start, end }],
+    crmChunkCount: plan.crmChunkCount,
+  };
+}
+
+/** One row per ARCP line — matches tally qty (COUNT DISTINCT ncode). */
+export function arcpDetailLineKey(row: ArcpClaimsDetailRow): string {
+  const code = String(row.ncode ?? '').trim();
+  if (code) return `ncode:${code}`;
+  return [
+    'line',
+    row.vucnno,
+    row.line_type,
+    row.calls2fault_code,
+    row.franchisee_code,
+    row.item_category,
+    row.amount_payable,
+  ].join(':');
+}
+
+/** Claim key — same as tally SQL ARCP_CALL_KEY / winning-line PARTITION BY. */
+export function arcpDetailCallKey(row: ArcpClaimsDetailRow): string {
   const ucn = String(row.vucnno ?? '').trim();
-  if (ucn) return `ucn:${ucn}`;
+  if (ucn) return ucn;
   const callNo = String(row.call_no ?? '').trim();
-  if (callNo && callNo !== '0') return `call:${callNo}`;
+  if (callNo && callNo !== '0') return callNo;
   const fault = String(row.calls2fault_code ?? '').trim();
   const office = String(row.franchisee_code ?? '').trim();
-  if (fault) return `fault:${fault}:${office}`;
+  if (fault) return `${fault}:${office}`;
   return `line:${fault}:${office}`;
 }
 
-function compareArcpDetailRowsForDedupe(a: ArcpClaimsDetailRow, b: ArcpClaimsDetailRow): number {
+/** One row per claim UCN — SAP branch-total scripts only; do not use for detail CSV. */
+export function arcpDetailDedupeKey(row: ArcpClaimsDetailRow): string {
+  const key = arcpDetailCallKey(row);
+  if (key.startsWith('line:')) return key;
+  if (String(row.vucnno ?? '').trim()) return `ucn:${key}`;
+  if (String(row.call_no ?? '').trim() && row.call_no !== '0') return `call:${key}`;
+  return `fault:${key}`;
+}
+
+function compareArcpDetailRowsForWinning(a: ArcpClaimsDetailRow, b: ArcpClaimsDetailRow): number {
+  const aHo = a.ho_approved_date || '';
+  const bHo = b.ho_approved_date || '';
+  if (aHo !== bHo) return bHo.localeCompare(aHo);
   const aBm = a.bm_approved_date || '';
   const bBm = b.bm_approved_date || '';
   if (aBm !== bBm) return bBm.localeCompare(aBm);
-  const aCall = String(a.call_no ?? '').trim();
-  const bCall = String(b.call_no ?? '').trim();
-  if (aCall !== bCall) return bCall.localeCompare(aCall);
-  return String(b.calls2fault_code ?? '').localeCompare(String(a.calls2fault_code ?? ''));
+  return String(b.ncode ?? '').localeCompare(String(a.ncode ?? ''));
 }
 
+/**
+ * Detail CSV: keep every ARCP line, but Branch/HO only on the winning line per claim
+ * (same rule as the on-screen tally). Raw BM/HO columns stay per-line from CRM.
+ */
+export function applyArcpDetailExportApprovedAmounts(
+  rows: ArcpClaimsDetailRow[]
+): ArcpClaimsDetailRow[] {
+  const groups = new Map<string, ArcpClaimsDetailRow[]>();
+  for (const row of rows) {
+    const key = arcpDetailCallKey(row);
+    const list = groups.get(key);
+    if (list) list.push(row);
+    else groups.set(key, [row]);
+  }
+
+  const winningLineKeys = new Set<string>();
+  for (const group of groups.values()) {
+    const winner = [...group].sort(compareArcpDetailRowsForWinning)[0];
+    if (winner) winningLineKeys.add(arcpDetailLineKey(winner));
+  }
+
+  return rows.map((row) => {
+    if (winningLineKeys.has(arcpDetailLineKey(row))) return row;
+    return {
+      ...row,
+      branch_approved: 0,
+      ho_approved: 0,
+      payable_minus_branch: row.amount_payable,
+      payable_minus_ho: row.amount_payable,
+    };
+  });
+}
+
+/** Dedupe chunk/overlap duplicates only — keeps every service + travel line. */
 export function mergeArcpDetailRows(rows: ArcpClaimsDetailRow[]): ArcpClaimsDetailRow[] {
-  const sorted = [...rows].sort(compareArcpDetailRowsForDedupe);
   const map = new Map<string, ArcpClaimsDetailRow>();
-  for (const row of sorted) {
-    const key = arcpDetailDedupeKey(row);
+  for (const row of rows) {
+    const key = arcpDetailLineKey(row);
     if (!map.has(key)) map.set(key, row);
   }
   return Array.from(map.values());
@@ -1287,6 +1370,7 @@ export function parseArcpAggregateRows(raw: Record<string, unknown>[]): ArcpClai
 
 export function parseArcpDetailRows(raw: Record<string, unknown>[]): ArcpClaimsDetailRow[] {
   return raw.map((row) => ({
+    ncode: String(row.ncode ?? ''),
     vucnno: String(row.vucnno ?? ''),
     calls2fault_code: String(row.calls2fault_code ?? ''),
     call_no: String(row.call_no ?? ''),
