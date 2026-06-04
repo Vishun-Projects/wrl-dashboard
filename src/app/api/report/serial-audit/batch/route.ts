@@ -1,21 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
-import {
-  fetchSerialAuditCallsForSerials,
-  MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS,
-} from '@/lib/serial-audit/server/batch-fetch';
+import { fetchSerialAuditCallsForSerials } from '@/lib/serial-audit/server/batch-fetch';
 import { resolveSerialAuditSqlOpts } from '@/lib/serial-audit/server/sql-scope';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
-const INVOLVEMENT_CACHE_TTL = 15 * 60 * 1000;
-const involvementCache = new Map<
-  string,
-  { data: Record<string, unknown>[]; timestamp: number }
->();
-const involvementInflight = new Map<string, Promise<Record<string, unknown>[]>>();
+/** Matches Serial Audit table page size — one batched CRM query per visible page. */
+export const SERIAL_AUDIT_PAGE_BATCH_MAX = 25;
 
-type InvolvementQuery = {
+const BATCH_CACHE_TTL = 10 * 60 * 1000;
+const batchCache = new Map<string, { data: Record<string, unknown>[]; timestamp: number }>();
+const batchInflight = new Map<string, Promise<Record<string, unknown>[]>>();
+
+type BatchQuery = {
   callType: string;
   repair: string;
   branch: string;
@@ -31,18 +28,19 @@ function normalizeSerials(raw: string[] | string | null | undefined): string[] {
   return [...new Set(parts.map((s) => String(s).trim().toUpperCase()).filter(Boolean))];
 }
 
-function buildInvolvementCacheKey(
-  query: InvolvementQuery,
+function buildBatchCacheKey(
+  query: BatchQuery,
   security: { isHod: boolean; assignedOffices: string[] }
 ): string {
-  return `involvement_${query.startDate}_${query.endDate}_${query.callType}_${query.repair}_${query.branch}_${query.franchisee}_${query.serials.join('-')}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
+  const serialPart = [...query.serials].sort().join(',');
+  return `page_batch_${query.startDate}_${query.endDate}_${query.callType}_${query.repair}_${query.branch}_${query.franchisee}_${serialPart}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
 }
 
-async function fetchInvolvementCallsBatched(
-  query: InvolvementQuery,
+async function fetchPageBatchCalls(
+  query: BatchQuery,
   security: { isHod: boolean; assignedOffices: string[] }
 ): Promise<Record<string, unknown>[]> {
-  const serials = query.serials.slice(0, MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS);
+  const serials = query.serials.slice(0, SERIAL_AUDIT_PAGE_BATCH_MAX);
   const sqlOpts = await resolveSerialAuditSqlOpts({
     callType: query.callType,
     repair: query.repair,
@@ -53,13 +51,10 @@ async function fetchInvolvementCallsBatched(
     isHod: security.isHod,
     assignedOffices: security.assignedOffices,
   });
-  return fetchSerialAuditCallsForSerials(serials, {
-    ...sqlOpts,
-    involvementRepairs: true,
-  });
+  return fetchSerialAuditCallsForSerials(serials, sqlOpts);
 }
 
-async function handleInvolvementRequest(query: InvolvementQuery) {
+async function handleBatchRequest(query: BatchQuery) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -82,10 +77,17 @@ async function handleInvolvementRequest(query: InvolvementQuery) {
     return NextResponse.json({ calls: [], serials: [], cached: false });
   }
 
-  const cacheKey = buildInvolvementCacheKey(query, security);
+  if (query.serials.length > SERIAL_AUDIT_PAGE_BATCH_MAX) {
+    return NextResponse.json(
+      { error: `At most ${SERIAL_AUDIT_PAGE_BATCH_MAX} serials per batch request` },
+      { status: 400 }
+    );
+  }
+
+  const cacheKey = buildBatchCacheKey(query, security);
   const now = Date.now();
-  const cached = involvementCache.get(cacheKey);
-  if (cached && now - cached.timestamp < INVOLVEMENT_CACHE_TTL) {
+  const cached = batchCache.get(cacheKey);
+  if (cached && now - cached.timestamp < BATCH_CACHE_TTL) {
     return NextResponse.json({
       calls: cached.data,
       serials: query.serials,
@@ -93,43 +95,25 @@ async function handleInvolvementRequest(query: InvolvementQuery) {
     });
   }
 
-  let inflight = involvementInflight.get(cacheKey);
+  let inflight = batchInflight.get(cacheKey);
   if (!inflight) {
-    inflight = fetchInvolvementCallsBatched(query, security);
-    involvementInflight.set(cacheKey, inflight);
+    inflight = fetchPageBatchCalls(query, security);
+    batchInflight.set(cacheKey, inflight);
   }
 
   try {
     const calls = await inflight;
-    involvementCache.set(cacheKey, { data: calls, timestamp: now });
+    batchCache.set(cacheKey, { data: calls, timestamp: now });
     return NextResponse.json({ calls, serials: query.serials, cached: false });
   } finally {
-    involvementInflight.delete(cacheKey);
-  }
-}
-
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    return handleInvolvementRequest({
-      callType: searchParams.get('callType') || 'All',
-      repair: searchParams.get('repair') || searchParams.get('complaint') || 'All',
-      branch: searchParams.get('branch') || '',
-      franchisee: searchParams.get('franchisee') || '',
-      startDate: searchParams.get('startDate') || '',
-      endDate: searchParams.get('endDate') || '',
-      serials: normalizeSerials(searchParams.get('serials')),
-    });
-  } catch (err: unknown) {
-    console.error('Serial Audit involvement API Error:', err);
-    return NextResponse.json({ error: toUserFacingError(err) }, { status: 500 });
+    batchInflight.delete(cacheKey);
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as Record<string, unknown>;
-    return handleInvolvementRequest({
+    return handleBatchRequest({
       callType: String(body.callType || 'All'),
       repair: String(body.repair || body.complaint || 'All'),
       branch: String(body.branch || ''),
@@ -139,7 +123,7 @@ export async function POST(req: NextRequest) {
       serials: normalizeSerials(body.serials as string[] | string | undefined),
     });
   } catch (err: unknown) {
-    console.error('Serial Audit involvement API Error:', err);
+    console.error('Serial Audit batch API Error:', err);
     return NextResponse.json({ error: toUserFacingError(err) }, { status: 500 });
   }
 }

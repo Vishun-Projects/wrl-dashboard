@@ -30,10 +30,11 @@ import {
 } from '@/components/admin/AdminUi';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 import { buildCorpusCacheKey } from '@/lib/report/corpus';
-import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
+import { sanitizeUserFacingMessage, toUserFacingError } from '@/lib/utils/user-facing-errors';
 import {
   appliedFilterPartsFromSnapshot,
   buildSerialAuditApiScopeParams,
+  buildSerialAuditDetailScopeParams,
   toDateString,
   type RegisterDeepLinkParams,
 } from '@/lib/report/filters';
@@ -207,13 +208,16 @@ export default function SerialAuditPage() {
   const [mounted, setMounted] = useState(false);
   const [serialSearch, setSerialSearch] = useState('');
   const [minCount, setMinCount] = useState(MIN_REPEAT_COMPLAINTS);
-  const [onlyFlagged, setOnlyFlagged] = useState(false);
   const [includeCancelled, setIncludeCancelled] = useState(false);
   const [expandedSerial, setExpandedSerial] = useState<string | null>(null);
   const [listRows, setListRows] = useState<SerialAuditRow[]>([]);
   const [windowCallsBySerial, setWindowCallsBySerial] = useState<Map<string, SerialAuditCallDetail[]>>(
     new Map()
   );
+  const [allTimeCallsBySerial, setAllTimeCallsBySerial] = useState<
+    Map<string, SerialAuditCallDetail[]>
+  >(new Map());
+  const [showAllTimeFor, setShowAllTimeFor] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -222,12 +226,17 @@ export default function SerialAuditPage() {
     Map<string, SerialAuditCallDetail[]>
   >(new Map());
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [showAspBreakdown, setShowAspBreakdown] = useState(false);
   const [selectedInvolvementPair, setSelectedInvolvementPair] =
     useState<RepeatInvolvementEntry | null>(null);
   const loadInFlightRef = useRef<Promise<void> | null>(null);
   const lastPaintedKeyRef = useRef<string | null>(null);
+  const pagePrefetchInflightRef = useRef<string | null>(null);
+  const windowCallsRef = useRef(windowCallsBySerial);
+  windowCallsRef.current = windowCallsBySerial;
   const defaultRepairsAppliedRef = useRef(false);
   const serialPrefsRestoredRef = useRef(false);
+  const involvementTriggeredKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!prefsReady || serialPrefsRestoredRef.current) return;
@@ -239,8 +248,8 @@ export default function SerialAuditPage() {
       setAppliedRepairs(sa.appliedRepairs);
     }
     if (typeof sa.minCount === 'number') setMinCount(sa.minCount);
-    if (sa.onlyFlagged) setOnlyFlagged(true);
     if (sa.includeCancelled) setIncludeCancelled(true);
+    if (sa.showAspBreakdown) setShowAspBreakdown(true);
   }, [prefsReady, reportPreferences]);
 
   useEffect(() => {
@@ -431,14 +440,12 @@ export default function SerialAuditPage() {
             });
           }
         } catch (err: unknown) {
-          const message = sanitizeUserFacingMessage(
+          const message = toUserFacingError(
             axios.isAxiosError(err) && err.response?.data?.error
               ? String(err.response.data.error)
-              : err instanceof Error
-                ? err.message
-                : 'Failed to load ASP involvement analysis'
+              : err
           );
-          toast.error(message);
+          toast.error(message || 'Could not load ASP breakdown');
         } finally {
           setAnalysisLoading(false);
         }
@@ -497,6 +504,7 @@ export default function SerialAuditPage() {
       };
 
       const maybePrefetchInvolvement = (rows: SerialAuditRow[], cachedAnalysis: Map<string, SerialAuditCallDetail[]>) => {
+        if (!showAspBreakdown) return;
         if (
           cachedAnalysis.size === 0 &&
           rows.some((r) => r.riskFlag && !r.isUnknownSerial)
@@ -538,6 +546,8 @@ export default function SerialAuditPage() {
 
         setLoadError(null);
         setExpandedSerial(null);
+        setAllTimeCallsBySerial(new Map());
+        setShowAllTimeFor(new Set());
         setLoading(true);
 
         try {
@@ -624,17 +634,12 @@ export default function SerialAuditPage() {
             windowCalls: emptyWindowCalls,
             analysisCalls: new Map(),
           });
-          void loadInvolvementAnalysis(apiRows, {
-            dataKey: loadDataKey,
-            ...involvementScope,
-          });
+          maybePrefetchInvolvement(apiRows, new Map());
         } catch (err: unknown) {
-          const message = sanitizeUserFacingMessage(
+          const message = toUserFacingError(
             axios.isAxiosError(err) && err.response?.data?.error
               ? String(err.response.data.error)
-              : err instanceof Error
-                ? err.message
-                : 'Failed to load serial audit data'
+              : err
           );
           setLoadError(message);
           toast.error(message);
@@ -662,9 +667,63 @@ export default function SerialAuditPage() {
       fetchRepairCountsBySerial,
       getAppliedFiltersSnapshot,
       loadInvolvementAnalysis,
+      showAspBreakdown,
       supabase,
     ]
   );
+
+  useEffect(() => {
+    if (!showAspBreakdown) {
+      involvementTriggeredKeyRef.current = null;
+      setAnalysisCallsBySerial(new Map());
+      setSelectedInvolvementPair(null);
+      setAnalysisLoading(false);
+      return;
+    }
+    if (loading || listRows.length === 0 || !lastPaintedKeyRef.current) return;
+    if (involvementTriggeredKeyRef.current === dataKey) return;
+
+    const cached = serialAuditBackgroundCache.get(dataKey);
+    if (cached?.analysisCalls.size) {
+      involvementTriggeredKeyRef.current = dataKey;
+      setAnalysisCallsBySerial(cached.analysisCalls);
+      return;
+    }
+    if (!listRows.some((r) => r.riskFlag && !r.isUnknownSerial)) return;
+
+    involvementTriggeredKeyRef.current = dataKey;
+    const snap = getAppliedFiltersSnapshot();
+    if (!snap) return;
+    const apiScopeParams = buildSerialAuditApiScopeParams({
+      startDate: startDateStr,
+      endDate: endDateStr,
+      callType: callTypeParam,
+      repair: serializeRepairFilterParam(appliedRepairs),
+      selectedBranch: snap.selectedBranch,
+      selectedFranchisee: snap.selectedFranchisee,
+      minRepeats: MIN_REPEAT_COMPLAINTS,
+    });
+    void loadInvolvementAnalysis(listRows, {
+      dataKey,
+      startDate: startDateStr,
+      endDate: endDateStr,
+      callType: callTypeParam,
+      repair: serializeRepairFilterParam(appliedRepairs),
+      branch: apiScopeParams.branch ?? '',
+      franchisee: apiScopeParams.franchisee ?? '',
+    });
+  }, [
+    appliedRepairs,
+    callTypeParam,
+    dataKey,
+    endDateStr,
+    getAppliedFiltersSnapshot,
+    listRows,
+    loadInvolvementAnalysis,
+    loading,
+    showAspBreakdown,
+    startDateStr,
+  ]);
 
   useEffect(() => {
     if (!resourcesLoaded || !appliedFilters || !prefsReady) return;
@@ -697,29 +756,39 @@ export default function SerialAuditPage() {
       serialAudit: {
         appliedRepairs,
         minCount,
-        onlyFlagged,
         includeCancelled,
+        showAspBreakdown,
       },
     });
   }, [
     appliedRepairs,
     minCount,
-    onlyFlagged,
     includeCancelled,
+    showAspBreakdown,
     prefsReady,
     schedulePatchReportPreferences,
   ]);
 
   const loadSerialDetails = useCallback(
-    async (serial: string) => {
+    async (serial: string, scope: 'window' | 'allTime', opts?: { force?: boolean }) => {
       const serialNorm = normalizeSerial(serial) ?? serial.trim().toUpperCase();
       let alreadyLoaded = false;
-      setWindowCallsBySerial((prev) => {
-        alreadyLoaded = prev.has(serialNorm);
-        return prev;
-      });
-      if (alreadyLoaded) return;
-      setDetailLoading(serialNorm);
+      if (!opts?.force) {
+        if (scope === 'allTime') {
+          setAllTimeCallsBySerial((prev) => {
+            alreadyLoaded = prev.has(serialNorm) && (prev.get(serialNorm)?.length ?? 0) > 0;
+            return prev;
+          });
+        } else {
+          setWindowCallsBySerial((prev) => {
+            alreadyLoaded = prev.has(serialNorm) && (prev.get(serialNorm)?.length ?? 0) > 0;
+            return prev;
+          });
+        }
+        if (alreadyLoaded) return;
+      }
+
+      setDetailLoading(`${scope}:${serialNorm}`);
       try {
         const {
           data: { session },
@@ -728,35 +797,35 @@ export default function SerialAuditPage() {
           ? { Authorization: `Bearer ${session.access_token}` }
           : {};
         const snap = getAppliedFiltersSnapshot();
-        const detailParams = snap
-          ? buildSerialAuditApiScopeParams({
-              startDate: startDateStr,
-              endDate: endDateStr,
-              callType: callTypeParam,
-              repair: serializeRepairFilterParam(appliedRepairs),
-              selectedBranch: snap.selectedBranch,
-              selectedFranchisee: snap.selectedFranchisee,
-            })
-          : {
-              startDate: startDateStr,
-              endDate: endDateStr,
-              callType: callTypeParam,
-              repair: serializeRepairFilterParam(appliedRepairs),
-            };
+        const params = buildSerialAuditDetailScopeParams({
+          scope,
+          startDate: startDateStr,
+          endDate: endDateStr,
+          callType: callTypeParam,
+          repair: serializeRepairFilterParam(appliedRepairs),
+          selectedBranch: snap?.selectedBranch ?? [],
+          selectedFranchisee: snap?.selectedFranchisee ?? [],
+          serial: serialNorm,
+          refresh: opts?.force,
+        });
         const res = await axios.get('/api/report/serial-audit', {
           headers,
           timeout: 120000,
-          params: { ...detailParams, serial: serialNorm },
+          params,
         });
         const rawCalls = (res.data?.calls || []) as Record<string, unknown>[];
         const details = sortSerialAuditCallDetails(
           rawCalls.map(mapRowToSerialAuditCallDetail),
           'asc'
         );
-        setWindowCallsBySerial((prev) => new Map(prev).set(serialNorm, details));
-        if (details.length === 0) {
-          setListRows((prev) => prev.filter((r) => r.serial !== serialNorm));
-          setExpandedSerial((prev) => (prev === serialNorm ? null : prev));
+        if (scope === 'allTime') {
+          setAllTimeCallsBySerial((prev) => new Map(prev).set(serialNorm, details));
+        } else {
+          setWindowCallsBySerial((prev) => new Map(prev).set(serialNorm, details));
+          if (details.length === 0) {
+            setListRows((prev) => prev.filter((r) => r.serial !== serialNorm));
+            setExpandedSerial((prev) => (prev === serialNorm ? null : prev));
+          }
         }
       } catch (err: unknown) {
         const message = sanitizeUserFacingMessage(
@@ -772,6 +841,89 @@ export default function SerialAuditPage() {
       }
     },
     [appliedRepairs, callTypeParam, endDateStr, getAppliedFiltersSnapshot, startDateStr, supabase]
+  );
+
+  const prefetchPagedWindowCalls = useCallback(
+    async (rows: SerialAuditRow[]) => {
+      if (!startDateStr || !endDateStr || rows.length === 0) return;
+
+      const serialKeys = rows
+        .map((r) => serialRowMatchKey(r))
+        .filter((k) => k !== '__UNKNOWN__');
+      const missing = serialKeys.filter((k) => !windowCallsRef.current.has(k));
+      if (missing.length === 0) return;
+
+      const prefetchKey = `${dataKey}|p${page}|${missing.join(',')}`;
+      if (pagePrefetchInflightRef.current === prefetchKey) return;
+      pagePrefetchInflightRef.current = prefetchKey;
+
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const headers = session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : {};
+        const snap = getAppliedFiltersSnapshot();
+        const scopeParams = snap
+          ? buildSerialAuditApiScopeParams({
+              startDate: startDateStr,
+              endDate: endDateStr,
+              callType: callTypeParam,
+              repair: serializeRepairFilterParam(appliedRepairs),
+              selectedBranch: snap.selectedBranch,
+              selectedFranchisee: snap.selectedFranchisee,
+            })
+          : {
+              startDate: startDateStr,
+              endDate: endDateStr,
+              callType: callTypeParam,
+              repair: serializeRepairFilterParam(appliedRepairs),
+            };
+
+        const res = await axios.post(
+          '/api/report/serial-audit/batch',
+          {
+            serials: missing.slice(0, SERIAL_PAGE_SIZE),
+            startDate: startDateStr,
+            endDate: endDateStr,
+            callType: scopeParams.callType ?? callTypeParam,
+            repair: scopeParams.repair ?? serializeRepairFilterParam(appliedRepairs),
+            branch: scopeParams.branch ?? '',
+            franchisee: scopeParams.franchisee ?? '',
+          },
+          { headers, timeout: 120000 }
+        );
+
+        const batchMap = buildCallsBySerialMap(
+          ((res.data?.calls || []) as Record<string, unknown>[]) ?? []
+        );
+        setWindowCallsBySerial((prev) => {
+          const next = new Map(prev);
+          for (const [key, list] of batchMap) next.set(key, list);
+          for (const key of missing) {
+            if (!next.has(key)) next.set(key, []);
+          }
+          return next;
+        });
+      } catch {
+        // Non-blocking — expand still loads via loadSerialDetails
+      } finally {
+        if (pagePrefetchInflightRef.current === prefetchKey) {
+          pagePrefetchInflightRef.current = null;
+        }
+      }
+    },
+    [
+      appliedRepairs,
+      callTypeParam,
+      dataKey,
+      endDateStr,
+      getAppliedFiltersSnapshot,
+      page,
+      startDateStr,
+      supabase,
+    ]
   );
 
   const skipRevisionReloadRef = useRef(true);
@@ -797,15 +949,18 @@ export default function SerialAuditPage() {
     setSelectedInvolvementPair(null);
     setListRows([]);
     setWindowCallsBySerial(new Map());
+    setAllTimeCallsBySerial(new Map());
+    setShowAllTimeFor(new Set());
     setExpandedSerial(null);
   }, [applyCachedSnapshot, dataKey, resourcesLoaded]);
 
   useEffect(() => {
     if (!expandedSerial) return;
+    if (showAllTimeFor.has(expandedSerial)) return;
     const windowCalls = windowCallsBySerial.get(expandedSerial);
     if (windowCalls?.length) return;
-    void loadSerialDetails(expandedSerial);
-  }, [expandedSerial, loadSerialDetails, windowCallsBySerial]);
+    void loadSerialDetails(expandedSerial, 'window');
+  }, [expandedSerial, loadSerialDetails, showAllTimeFor, windowCallsBySerial]);
 
   const allSerialRows = useMemo(
     () => deriveSerialAuditRowsForView(listRows, includeCancelled, MIN_REPEAT_COMPLAINTS),
@@ -833,9 +988,8 @@ export default function SerialAuditPage() {
 
   const displayedRows = useMemo(() => {
     const filtered = filterSerialAuditRows(allSerialRows, {
-      minCount: onlyFlagged ? DEFAULT_RISK_THRESHOLD : minCount,
+      minCount,
       search: serialSearch,
-      onlyFlagged,
       hideUnknown: true,
     });
     const withCalls = filtered.filter((row) =>
@@ -850,7 +1004,6 @@ export default function SerialAuditPage() {
     allSerialRows,
     minCount,
     serialSearch,
-    onlyFlagged,
     windowCallsBySerial,
     analysisCallsBySerial,
     includeCancelled,
@@ -862,7 +1015,7 @@ export default function SerialAuditPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [serialSearch, minCount, onlyFlagged, includeCancelled, filterParts, appliedRepairs]);
+  }, [serialSearch, minCount, includeCancelled, filterParts, appliedRepairs]);
 
   useEffect(() => {
     setPage(1);
@@ -941,6 +1094,14 @@ export default function SerialAuditPage() {
     return displayedRows.slice(start, start + SERIAL_PAGE_SIZE);
   }, [displayedRows, page]);
 
+  useEffect(() => {
+    if (loading || loadError || displayedRows.length === 0) return;
+    const start = (page - 1) * SERIAL_PAGE_SIZE;
+    const rows = displayedRows.slice(start, start + SERIAL_PAGE_SIZE);
+    if (rows.length === 0) return;
+    void prefetchPagedWindowCalls(rows);
+  }, [loading, loadError, displayedRows, page, prefetchPagedWindowCalls]);
+
   const summary = useMemo(
     () => summarizeSerialAudit(allSerialRows, DEFAULT_RISK_THRESHOLD),
     [allSerialRows]
@@ -961,20 +1122,64 @@ export default function SerialAuditPage() {
     [windowCallsBySerial, analysisCallsBySerial]
   );
 
-  const repeatInvolvement = useMemo(
-    () =>
-      computeRepeatInvolvementAnalysis(
-        flaggedRowsForAnalysis,
-        windowCallsBySerial,
-        includeCancelled,
-        resolveSerialCalls
-      ),
-    [flaggedRowsForAnalysis, windowCallsBySerial, includeCancelled, resolveSerialCalls]
-  );
+  const repeatInvolvement = useMemo(() => {
+    if (!showAspBreakdown) {
+      return {
+        entries: [],
+        repeatCallCount: 0,
+        serialsInScope: 0,
+        serialsWithDetails: 0,
+        detailsPending: false,
+      };
+    }
+    return computeRepeatInvolvementAnalysis(
+      flaggedRowsForAnalysis,
+      windowCallsBySerial,
+      includeCancelled,
+      resolveSerialCalls
+    );
+  }, [
+    showAspBreakdown,
+    flaggedRowsForAnalysis,
+    windowCallsBySerial,
+    analysisCallsBySerial,
+    includeCancelled,
+    resolveSerialCalls,
+  ]);
+
+  const listBodyLayoutClass = showAspBreakdown
+    ? 'grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_440px] lg:items-stretch'
+    : 'min-h-0 flex-1';
 
   const toggleExpand = (serial: string) => {
-    setExpandedSerial((prev) => (prev === serial ? null : serial));
+    setExpandedSerial((prev) => {
+      if (prev === serial) {
+        setShowAllTimeFor((s) => {
+          const next = new Set(s);
+          next.delete(serial);
+          return next;
+        });
+        return null;
+      }
+      return serial;
+    });
   };
+
+  const handleShowAllTimeChange = useCallback(
+    (serial: string, enabled: boolean) => {
+      const serialNorm = normalizeSerial(serial) ?? serial.trim().toUpperCase();
+      setShowAllTimeFor((prev) => {
+        const next = new Set(prev);
+        if (enabled) next.add(serialNorm);
+        else next.delete(serialNorm);
+        return next;
+      });
+      if (enabled) {
+        void loadSerialDetails(serialNorm, 'allTime', { force: true });
+      }
+    },
+    [loadSerialDetails]
+  );
 
   if (!mounted || !resourcesLoaded) {
     return (
@@ -1046,21 +1251,11 @@ export default function SerialAuditPage() {
             min={MIN_REPEAT_COMPLAINTS}
             max={99}
             value={minCount}
-            disabled={onlyFlagged}
             onChange={(e) =>
               setMinCount(Math.max(MIN_REPEAT_COMPLAINTS, Number(e.target.value) || MIN_REPEAT_COMPLAINTS))
             }
             className="w-14 rounded border border-slate-200 px-2 py-1 text-[11px]"
           />
-        </label>
-        <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600">
-          <input
-            type="checkbox"
-            checked={onlyFlagged}
-            onChange={(e) => setOnlyFlagged(e.target.checked)}
-            className="rounded border-slate-300"
-          />
-          Flagged (Repeat-Complaints) only
         </label>
         <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600">
           <input
@@ -1071,21 +1266,35 @@ export default function SerialAuditPage() {
           />
           Include cancelled
         </label>
+        <label
+          className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600"
+          title="Side panel for ASP / technician repeat-call breakdown (extra server query)"
+        >
+          <input
+            type="checkbox"
+            checked={showAspBreakdown}
+            onChange={(e) => setShowAspBreakdown(e.target.checked)}
+            className="rounded border-slate-300"
+          />
+          ASP involvement panel
+        </label>
       </AdminToolbar>
 
       {loading && listRows.length === 0 ? (
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_440px] lg:items-stretch">
+        <div className={listBodyLayoutClass}>
           <ReportLoadingPanel
             label="Finding repeated serial numbers"
             sublabel="Running a focused scan for your date range."
           />
-          <SerialAuditAnalysisPanel
-            analysis={repeatInvolvement}
-            dateRangeLabel={dateRangeLabel}
-            loading
-            selectedPairKey={selectedPairKey}
-            onPairSelect={setSelectedInvolvementPair}
-          />
+          {showAspBreakdown ? (
+            <SerialAuditAnalysisPanel
+              analysis={repeatInvolvement}
+              dateRangeLabel={dateRangeLabel}
+              loading
+              selectedPairKey={selectedPairKey}
+              onPairSelect={setSelectedInvolvementPair}
+            />
+          ) : null}
         </div>
       ) : loadError && listRows.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-rose-200 bg-rose-50/50 p-12 text-center">
@@ -1110,7 +1319,7 @@ export default function SerialAuditPage() {
           </p>
         </div>
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_440px] lg:items-stretch">
+        <div className={listBodyLayoutClass}>
           <AdminTableCard
             isEmpty={displayedRows.length === 0}
             empty={
@@ -1130,7 +1339,7 @@ export default function SerialAuditPage() {
                       Clear ASP / technician filter
                     </button>
                   ) : (
-                    'Lower "Min repeats" or clear "Flagged only".'
+                    'Lower "Min repeats" or clear the serial search.'
                   )}
                 </p>
               </>
@@ -1186,25 +1395,41 @@ export default function SerialAuditPage() {
                 </tr>
               </AdminThead>
               <tbody>
-                {pagedRows.map((row) => (
-                  <SerialAuditTableRow
-                    key={row.serial}
-                    row={row}
-                    rawCalls={resolveSerialCalls(serialRowMatchKey(row))}
-                    callsLoaded={serialAuditCallsLoadedForKey(
-                      serialRowMatchKey(row),
-                      windowCallsBySerial,
-                      analysisCallsBySerial
-                    )}
-                    selectedInvolvementPair={selectedInvolvementPair}
-                    dateRangeLabel={dateRangeLabel}
-                    registerLinkContext={registerLinkContext}
-                    detailLoading={detailLoading === row.serial}
-                    expanded={expandedSerial === row.serial}
-                    includeCancelled={includeCancelled}
-                    onToggle={() => toggleExpand(row.serial)}
-                  />
-                ))}
+                {pagedRows.map((row) => {
+                  const serialKey = serialRowMatchKey(row);
+                  return (
+                    <SerialAuditTableRow
+                      key={row.serial}
+                      row={row}
+                      windowCalls={windowCallsBySerial.get(serialKey) ?? []}
+                      allTimeCalls={allTimeCallsBySerial.get(serialKey) ?? []}
+                      showAllTime={showAllTimeFor.has(serialKey)}
+                      onShowAllTimeChange={(enabled) =>
+                        handleShowAllTimeChange(serialKey, enabled)
+                      }
+                      involvementCalls={
+                        selectedInvolvementPair
+                          ? resolveSerialCalls(serialKey)
+                          : undefined
+                      }
+                      callsLoaded={serialAuditCallsLoadedForKey(
+                        serialKey,
+                        windowCallsBySerial,
+                        analysisCallsBySerial
+                      )}
+                      selectedInvolvementPair={selectedInvolvementPair}
+                      dateRangeLabel={dateRangeLabel}
+                      registerLinkContext={registerLinkContext}
+                      detailLoading={
+                        detailLoading === `window:${serialKey}` ||
+                        detailLoading === `allTime:${serialKey}`
+                      }
+                      expanded={expandedSerial === row.serial}
+                      includeCancelled={includeCancelled}
+                      onToggle={() => toggleExpand(row.serial)}
+                    />
+                  );
+                })}
               </tbody>
             </AdminTable>
             {displayedRows.length > SERIAL_PAGE_SIZE ? (
@@ -1239,14 +1464,16 @@ export default function SerialAuditPage() {
             ) : null}
           </AdminTableCard>
 
-          <SerialAuditAnalysisPanel
-            analysis={repeatInvolvement}
-            dateRangeLabel={dateRangeLabel}
-            loading={loading && listRows.length === 0}
-            prefetching={analysisLoading}
-            selectedPairKey={selectedPairKey}
-            onPairSelect={setSelectedInvolvementPair}
-          />
+          {showAspBreakdown ? (
+            <SerialAuditAnalysisPanel
+              analysis={repeatInvolvement}
+              dateRangeLabel={dateRangeLabel}
+              loading={loading && listRows.length === 0}
+              prefetching={analysisLoading}
+              selectedPairKey={selectedPairKey}
+              onPairSelect={setSelectedInvolvementPair}
+            />
+          ) : null}
         </div>
       )}
     </PageShell>
@@ -1288,7 +1515,11 @@ function SerialRepairCountBadges({
 
 function SerialAuditTableRow({
   row,
-  rawCalls,
+  windowCalls,
+  allTimeCalls,
+  showAllTime,
+  onShowAllTimeChange,
+  involvementCalls,
   callsLoaded,
   selectedInvolvementPair,
   dateRangeLabel,
@@ -1299,7 +1530,11 @@ function SerialAuditTableRow({
   onToggle,
 }: {
   row: SerialAuditRow;
-  rawCalls: SerialAuditCallDetail[];
+  windowCalls: SerialAuditCallDetail[];
+  allTimeCalls: SerialAuditCallDetail[];
+  showAllTime: boolean;
+  onShowAllTimeChange: (enabled: boolean) => void;
+  involvementCalls?: SerialAuditCallDetail[];
   callsLoaded: boolean;
   selectedInvolvementPair: RepeatInvolvementEntry | null;
   dateRangeLabel: string;
@@ -1319,6 +1554,8 @@ function SerialAuditTableRow({
       }
     : null;
 
+  const rawCalls = involvementCalls ?? (showAllTime ? allTimeCalls : windowCalls);
+
   const displayCalls = useMemo(
     () => getSerialAuditDisplayCalls(rawCalls, includeCancelled, involvementPair),
     [rawCalls, includeCancelled, involvementPair]
@@ -1331,8 +1568,12 @@ function SerialAuditTableRow({
 
   const displayMeta = useMemo(() => serialAuditMetaFromCalls(displayCalls), [displayCalls]);
 
-  const counts = callsLoaded ? displayCounts : summarizeSerialAuditCalls([]);
-  const showListFallback = !callsLoaded;
+  const counts = involvementCalls
+    ? displayCounts
+    : callsLoaded
+      ? displayCounts
+      : summarizeSerialAuditCalls([]);
+  const showListFallback = !involvementCalls && !callsLoaded;
   const complaintCount = showListFallback ? row.complaintCount : counts.complaintCount;
   const openCount = showListFallback ? row.openCount : counts.openCount;
   const solvedCount = showListFallback ? row.solvedCount : counts.solvedCount;
@@ -1344,13 +1585,15 @@ function SerialAuditTableRow({
     : displayMeta.lastComplaintDate;
 
   const repairBadgeCounts = useMemo(() => {
-    if (!callsLoaded) return row.repairCounts;
+    if (showListFallback) return row.repairCounts;
     return countRepairsFromCallRows(
       displayCalls.map((call) => ({ repair_done: call.repairDone }))
     );
-  }, [callsLoaded, displayCalls, row.repairCounts]);
+  }, [showListFallback, displayCalls, row.repairCounts]);
 
-  const callsLoading = detailLoading && !callsLoaded;
+  const allTimeLoading = showAllTime && detailLoading && allTimeCalls.length === 0;
+  const windowLoading = !showAllTime && !involvementCalls && detailLoading && windowCalls.length === 0;
+  const callsLoading = involvementCalls ? detailLoading && displayCalls.length === 0 : allTimeLoading || windowLoading;
 
   return (
     <>
@@ -1419,7 +1662,7 @@ function SerialAuditTableRow({
       {expanded ? (
         <tr className="border-b border-slate-100 bg-slate-50/80">
           <td colSpan={includeCancelled ? 9 : 8} className="serial-audit-expanded-cell px-3 py-3">
-            {displayCalls.length === 0 && !callsLoading ? (
+            {displayCalls.length === 0 && !allTimeLoading && !windowLoading && !callsLoading ? (
               <p className="py-4 text-center text-[11px] text-slate-500">
                 {selectedInvolvementPair
                   ? `No repeat calls for ${selectedInvolvementPair.franchisee}${
@@ -1427,15 +1670,26 @@ function SerialAuditTableRow({
                         ? ` · ${selectedInvolvementPair.technician}`
                         : ''
                     } on this serial.`
-                  : 'No calls for this serial in the selected date range.'}
+                  : showAllTime
+                    ? 'No all-time calls found for this serial.'
+                    : 'No calls for this serial in the selected date range.'}
               </p>
             ) : (
               <SerialAuditCallsDetailTable
                 calls={displayCalls}
                 serial={row.serial}
+                scope={showAllTime ? 'allTime' : 'window'}
                 dateRangeLabel={dateRangeLabel}
                 registerLinkContext={registerLinkContext}
-                loading={callsLoading}
+                loading={windowLoading}
+                showAllTime={showAllTime}
+                onShowAllTimeChange={
+                  selectedInvolvementPair ? undefined : onShowAllTimeChange
+                }
+                allTimeLoading={allTimeLoading || windowLoading}
+                allTimeCount={
+                  allTimeCalls.length > 0 ? allTimeCalls.length : undefined
+                }
                 scopeHint={
                   selectedInvolvementPair
                     ? `Repeat calls for ${selectedInvolvementPair.franchisee}${

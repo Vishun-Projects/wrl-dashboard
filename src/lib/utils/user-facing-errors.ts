@@ -5,6 +5,28 @@ export function sanitizeUserFacingMessage(message: string): string {
   if (!message) return message;
   let text = message.trim();
 
+  if (/timeout expired/i.test(text) || /statement timeout/i.test(text)) {
+    return 'The request took too long. Try a shorter date range, or leave ASP breakdown off and retry.';
+  }
+
+  const sqlInner = text.match(/SqlException:\s*([^\n]+)/i)?.[1];
+  if (sqlInner) {
+    return sanitizeUserFacingMessage(sqlInner.trim());
+  }
+
+  if (/System\.Exception|System\.Data\.SqlClient|SqlException/i.test(text)) {
+    return 'Could not load data from the server. Try a shorter date range or retry.';
+  }
+
+  const atStack = text.search(/\s+at\s+System\./i);
+  if (atStack > 0) {
+    text = text.slice(0, atStack).trim();
+  }
+  const atMicrosoft = text.search(/\s+at\s+Microsoft\./i);
+  if (atMicrosoft > 0) {
+    text = text.slice(0, atMicrosoft).trim();
+  }
+
   const replacements: [RegExp, string][] = [
     [/SYNC_WORKER_ENABLED is not true[^\n]*/gi, 'Background refresh is temporarily unavailable'],
     [/CRM database/gi, 'Server'],

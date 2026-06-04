@@ -229,7 +229,7 @@ export function SerialAuditAnalysisPanel({
                 ? 'Click row again to show all serials'
                 : totalEntries > 0
                   ? `${totalEntries.toLocaleString()} pairs · click a row to filter serials`
-                  : 'Flagged repeat-complaint serials'}
+                  : 'Top flagged serials — motor / compressor / gas by ASP'}
             </p>
           </div>
         </div>

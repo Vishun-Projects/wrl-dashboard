@@ -189,6 +189,37 @@ export function buildSerialAuditApiScopeParams(input: {
   return params;
 }
 
+/** Per-serial detail fetch — window uses report dates; allTime omits dates but keeps repair/location filters. */
+export function buildSerialAuditDetailScopeParams(input: {
+  scope: 'window' | 'allTime';
+  startDate: string;
+  endDate: string;
+  callType: string;
+  repair: string;
+  selectedBranch: string[];
+  selectedFranchisee: string[];
+  serial: string;
+  refresh?: boolean;
+}): Record<string, string> {
+  const params: Record<string, string> = {
+    callType: input.callType,
+    repair: input.repair,
+    serial: input.serial.trim().toUpperCase(),
+  };
+  const branch = joinFilterParam(input.selectedBranch);
+  const franchisee = joinFilterParam(input.selectedFranchisee);
+  if (branch) params.branch = branch;
+  if (franchisee) params.franchisee = franchisee;
+  if (input.scope === 'window') {
+    params.startDate = input.startDate;
+    params.endDate = input.endDate;
+  } else {
+    params.allTime = 'true';
+  }
+  if (input.refresh) params.refresh = 'true';
+  return params;
+}
+
 export function joinFilterParam(values: string[]): string | undefined {
   if (!values.length) return undefined;
   return values.join(',');

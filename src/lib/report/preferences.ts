@@ -70,8 +70,8 @@ export type StoredSharedFilters = {
 export type SerialAuditPreferences = {
   appliedRepairs?: string[];
   minCount?: number;
-  onlyFlagged?: boolean;
   includeCancelled?: boolean;
+  showAspBreakdown?: boolean;
 };
 
 export type RegisterPreferences = {
@@ -410,8 +410,8 @@ export function sanitizeSerialAuditPrefs(
   return {
     appliedRepairs: capStrings(raw.appliedRepairs, 32),
     minCount,
-    onlyFlagged: raw.onlyFlagged === true ? true : undefined,
     includeCancelled: raw.includeCancelled === true ? true : undefined,
+    showAspBreakdown: raw.showAspBreakdown === true ? true : undefined,
   };
 }
 

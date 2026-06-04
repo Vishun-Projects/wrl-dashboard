@@ -12,6 +12,7 @@ import {
   buildSerialAuditDetailRawSql,
   buildSerialAuditListRawSql,
 } from '@/lib/trhcalls/query';
+import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 const LIST_CACHE_TTL = 30 * 60 * 1000;
 const DETAIL_CACHE_TTL = 15 * 60 * 1000;
@@ -163,25 +164,34 @@ export async function GET(req: NextRequest) {
     const riskThreshold = Math.max(1, Number(searchParams.get('riskThreshold') || 3) || 3);
     const now = Date.now();
 
+    if (serial) {
+      const allTime = searchParams.get('allTime') === 'true';
+      const detailScope = allTime
+        ? ('all-time' as const)
+        : scope.startDate && scope.endDate
+          ? ('window' as const)
+          : ('all-time' as const);
+      const detailScopeParams: SerialAuditScopeParams = allTime
+        ? { ...scope, startDate: null, endDate: null }
+        : scope;
+      const cacheKey = buildDetailCacheKey(serial, detailScopeParams, security);
+      if (!bypassCache && detailCache.has(cacheKey)) {
+        const cached = detailCache.get(cacheKey)!;
+        if (now - cached.timestamp < DETAIL_CACHE_TTL) {
+          return NextResponse.json({ calls: cached.data, serial, cached: true, scope: detailScope });
+        }
+      }
+
+      const calls = await fetchSerialDetails(cacheKey, serial, detailScopeParams, security);
+      detailCache.set(cacheKey, { data: calls, timestamp: now });
+      return NextResponse.json({ calls, serial, cached: false, scope: detailScope });
+    }
+
     if (!scope.startDate || !scope.endDate) {
       return NextResponse.json(
         { error: 'startDate and endDate are required' },
         { status: 400 }
       );
-    }
-
-    if (serial) {
-      const cacheKey = buildDetailCacheKey(serial, scope, security);
-      if (!bypassCache && detailCache.has(cacheKey)) {
-        const cached = detailCache.get(cacheKey)!;
-        if (now - cached.timestamp < DETAIL_CACHE_TTL) {
-          return NextResponse.json({ calls: cached.data, serial, cached: true, scope: 'window' });
-        }
-      }
-
-      const calls = await fetchSerialDetails(cacheKey, serial, scope, security);
-      detailCache.set(cacheKey, { data: calls, timestamp: now });
-      return NextResponse.json({ calls, serial, cached: false, scope: 'window' });
     }
 
     const cacheKey = buildListCacheKey(scope, minRepeats, security);
@@ -227,7 +237,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (err: unknown) {
     console.error('Serial Audit API Error:', err);
-    const message = err instanceof Error ? err.message : 'Serial audit query failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: toUserFacingError(err) }, { status: 500 });
   }
 }
