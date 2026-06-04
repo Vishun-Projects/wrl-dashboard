@@ -20,8 +20,21 @@ import {
   type ArcpGrandTotals,
 } from '../query';
 import { runPool } from '@/lib/utils/run-pool';
+import {
+  buildArcpChunkCacheKey,
+  getOrRunChunkInflight,
+  resolveArcpChunkCache,
+  writeArcpChunkCache,
+  type ArcpChunkLoadMeta,
+} from '@/lib/arcp-claims/server/chunk-cache';
 
 export { isCrmSqlTimeoutError } from '@/lib/db/proxy';
+export type { ArcpChunkLoadMeta } from '@/lib/arcp-claims/server/chunk-cache';
+
+export type ArcpFetchOpts = ArcpClaimsQueryOpts & {
+  /** When true, skip reading chunk cache (still writes on success). */
+  bypassChunkCache?: boolean;
+};
 
 /** Report CRM fallback only — never used by read-model backfill. */
 function crmUiOpts(opts: ArcpClaimsQueryOpts): ArcpClaimsQueryOpts {
@@ -260,41 +273,112 @@ export async function fetchArcpClaimsGrandTotals(
   return parseArcpGrandTotals(row);
 }
 
-export async function fetchArcpClaimsAggregates(
-  opts: ArcpClaimsQueryOpts,
+async function loadAggregateChunkCached(
+  opts: ArcpFetchOpts,
+  chunk: { start: string; end: string },
   timeoutMs: number
-): Promise<ArcpClaimsAggregateRow[]> {
-  const chunks = planArcpSummaryDateChunks(crmUiOpts(opts));
-  const concurrency = chunks.length > 1 ? resolveArcpLoadConcurrency(crmUiOpts(opts)) : 1;
+): Promise<{ rows: ArcpClaimsAggregateRow[]; fromCache: boolean }> {
+  const cacheKey = buildArcpChunkCacheKey(opts, chunk, 'agg');
+  const hit = await resolveArcpChunkCache(cacheKey, 'agg', {
+    bypass: opts.bypassChunkCache,
+  });
+  if (hit && hit.payload.kind === 'agg') {
+    return { rows: hit.payload.rows, fromCache: true };
+  }
+
+  return getOrRunChunkInflight(cacheKey, async () => {
+    const rows = await fetchArcpAggregateChunkResilient(opts, chunk, timeoutMs);
+    await writeArcpChunkCache(cacheKey, 'agg', rows);
+    return { kind: 'agg' as const, rows };
+  }).then((payload) => ({ rows: payload.rows, fromCache: false }));
+}
+
+async function loadDetailChunkCached(
+  opts: ArcpFetchOpts,
+  chunk: { start: string; end: string },
+  timeoutMs: number
+): Promise<{ rows: ArcpClaimsDetailRow[]; fromCache: boolean }> {
+  const cacheKey = buildArcpChunkCacheKey(opts, chunk, 'detail');
+  const hit = await resolveArcpChunkCache(cacheKey, 'detail', {
+    bypass: opts.bypassChunkCache,
+  });
+  if (hit && hit.payload.kind === 'detail') {
+    return { rows: hit.payload.rows, fromCache: true };
+  }
+
+  return getOrRunChunkInflight(cacheKey, async () => {
+    const rows = await fetchArcpDetailChunkResilient(opts, chunk, timeoutMs);
+    await writeArcpChunkCache(cacheKey, 'detail', rows);
+    return { kind: 'detail' as const, rows };
+  }).then((payload) => ({ rows: payload.rows, fromCache: false }));
+}
+
+export async function fetchArcpClaimsAggregates(
+  opts: ArcpFetchOpts,
+  timeoutMs: number
+): Promise<{ aggregates: ArcpClaimsAggregateRow[]; chunkMeta: ArcpChunkLoadMeta }> {
+  const uiOpts = crmUiOpts(opts);
+  const chunks = planArcpSummaryDateChunks(uiOpts);
+  const concurrency = chunks.length > 1 ? resolveArcpLoadConcurrency(uiOpts) : 1;
 
   const chunkResults = await runPool(chunks, concurrency, (chunk) =>
-    fetchArcpAggregateChunkResilient(opts, chunk, timeoutMs)
+    loadAggregateChunkCached(opts, chunk, timeoutMs)
   );
 
-  const merged = chunkResults.flat();
-  return chunks.length <= 1 ? merged : mergeArcpAggregateRows(merged);
+  let cachedChunks = 0;
+  let fetchedChunks = 0;
+  for (const part of chunkResults) {
+    if (part.fromCache) cachedChunks += 1;
+    else fetchedChunks += 1;
+  }
+
+  const merged = chunkResults.map((p) => p.rows).flat();
+  const aggregates = chunks.length <= 1 ? merged : mergeArcpAggregateRows(merged);
+  return {
+    aggregates,
+    chunkMeta: {
+      cachedChunks,
+      fetchedChunks,
+      totalChunks: chunks.length,
+    },
+  };
 }
 
 export async function fetchArcpClaimsDetailRows(
-  opts: ArcpClaimsQueryOpts,
+  opts: ArcpFetchOpts,
   timeoutMs: number
-): Promise<ArcpClaimsDetailRow[]> {
-  const chunks = planArcpSummaryDateChunks(crmUiOpts(opts));
-  const concurrency = chunks.length > 1 ? resolveArcpLoadConcurrency(crmUiOpts(opts)) : 1;
+): Promise<{ rows: ArcpClaimsDetailRow[]; chunkMeta: ArcpChunkLoadMeta }> {
+  const uiOpts = crmUiOpts(opts);
+  const chunks = planArcpSummaryDateChunks(uiOpts);
+  const concurrency = chunks.length > 1 ? resolveArcpLoadConcurrency(uiOpts) : 1;
   const byLine = new Map<string, ArcpClaimsDetailRow>();
 
-  const chunkRowLists = await runPool(chunks, concurrency, (chunk) =>
-    fetchArcpDetailChunkResilient(opts, chunk, timeoutMs)
+  const chunkParts = await runPool(chunks, concurrency, (chunk) =>
+    loadDetailChunkCached(opts, chunk, timeoutMs)
   );
 
-  for (const rows of chunkRowLists) {
+  let cachedChunks = 0;
+  let fetchedChunks = 0;
+  for (const part of chunkParts) {
+    if (part.fromCache) cachedChunks += 1;
+    else fetchedChunks += 1;
+  }
+
+  for (const { rows } of chunkParts) {
     for (const row of rows) {
       const key = arcpDetailLineKey(row);
       if (!byLine.has(key)) byLine.set(key, row);
     }
   }
 
-  return Array.from(byLine.values());
+  return {
+    rows: Array.from(byLine.values()),
+    chunkMeta: {
+      cachedChunks,
+      fetchedChunks,
+      totalChunks: chunks.length,
+    },
+  };
 }
 
 export { isCrmOutOfMemoryError };

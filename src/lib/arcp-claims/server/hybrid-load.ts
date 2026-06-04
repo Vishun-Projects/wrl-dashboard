@@ -7,7 +7,10 @@ import {
   fetchArcpClaimsAggregates,
   fetchArcpClaimsDetailRows,
   fetchArcpClaimsGrandTotals,
+  type ArcpChunkLoadMeta,
+  type ArcpFetchOpts,
 } from './fetch';
+import { emptyArcpChunkMeta, mergeArcpChunkMeta } from './chunk-cache';
 import {
   queryArcpClaimsAggregates,
   queryArcpClaimsDetailRows,
@@ -108,18 +111,24 @@ async function loadArcpGrandTotalsCoverageAware(
 }
 
 async function loadArcpAggregatesCoverageAware(
-  opts: ArcpClaimsQueryOpts
+  opts: ArcpFetchOpts
 ): Promise<{
   aggregates: ArcpClaimsAggregateRow[];
   source: ArcpDataSource;
   grandTotals: ArcpGrandTotals;
+  chunkMeta: ArcpChunkLoadMeta;
 }> {
   const startDate = opts.startDate;
   const endDate = opts.endDate;
   if (!startDate || !endDate) {
     const rows = await queryArcpClaimsAggregates(opts);
     const grandTotals = deriveArcpGrandTotalsFromAggregates(rows);
-    return { aggregates: rows, source: 'postgres', grandTotals };
+    return {
+      aggregates: rows,
+      source: 'postgres',
+      grandTotals,
+      chunkMeta: emptyArcpChunkMeta(0),
+    };
   }
 
   const coverage = await getArcpPostgresCoverage();
@@ -128,12 +137,18 @@ async function loadArcpAggregatesCoverageAware(
   if (postgresCoversFullRange(startDate, endDate, coverage, dateColumn)) {
     const aggregates = await queryArcpClaimsAggregates(opts);
     const grandTotals = deriveArcpGrandTotalsFromAggregates(aggregates);
-    return { aggregates, source: 'postgres', grandTotals };
+    return {
+      aggregates,
+      source: 'postgres',
+      grandTotals,
+      chunkMeta: emptyArcpChunkMeta(0),
+    };
   }
 
   const segments = planArcpCoverageSegments(startDate, endDate, coverage, dateColumn);
 
   const merged: ArcpClaimsAggregateRow[] = [];
+  const chunkMetaParts: ArcpChunkLoadMeta[] = [];
   let usedPostgres = false;
   let usedCrm = false;
 
@@ -161,8 +176,12 @@ async function loadArcpAggregatesCoverageAware(
         endDate: chunk.end,
         crmUiFast: true,
       };
-      const chunkRows = await fetchArcpClaimsAggregatesFromCrm(chunkOpts, CRM_QUERY_TIMEOUT_MS);
+      const { aggregates: chunkRows, chunkMeta } = await fetchArcpClaimsAggregatesFromCrm(
+        chunkOpts,
+        CRM_QUERY_TIMEOUT_MS
+      );
       merged.push(...chunkRows);
+      chunkMetaParts.push(chunkMeta);
     }
     usedCrm = true;
   }
@@ -171,20 +190,27 @@ async function loadArcpAggregatesCoverageAware(
   const source: ArcpDataSource =
     usedPostgres && usedCrm ? 'crm_fallback' : usedCrm ? 'crm_fallback' : 'postgres';
 
-  /* mixed load path — no client logging */
-
   const grandTotals = deriveArcpGrandTotalsFromAggregates(aggregates);
-  return { aggregates, source, grandTotals };
+  return {
+    aggregates,
+    source,
+    grandTotals,
+    chunkMeta: mergeArcpChunkMeta(chunkMetaParts),
+  };
 }
 
 async function loadArcpDetailCoverageAware(
-  opts: ArcpClaimsQueryOpts
-): Promise<{ rows: ArcpClaimsDetailRow[]; source: ArcpDataSource }> {
+  opts: ArcpFetchOpts
+): Promise<{
+  rows: ArcpClaimsDetailRow[];
+  source: ArcpDataSource;
+  chunkMeta: ArcpChunkLoadMeta;
+}> {
   const startDate = opts.startDate;
   const endDate = opts.endDate;
   if (!startDate || !endDate) {
     const rows = await queryArcpClaimsDetailRows(opts);
-    return { rows, source: 'postgres' };
+    return { rows, source: 'postgres', chunkMeta: emptyArcpChunkMeta(0) };
   }
 
   const coverage = await getArcpPostgresCoverage();
@@ -192,11 +218,12 @@ async function loadArcpDetailCoverageAware(
   const segments = planArcpCoverageSegments(startDate, endDate, coverage, dateColumn);
 
   const merged: ArcpClaimsDetailRow[] = [];
+  const chunkMetaParts: ArcpChunkLoadMeta[] = [];
   let usedPostgres = false;
   let usedCrm = false;
 
   for (const segment of segments) {
-    const segOpts: ArcpClaimsQueryOpts = {
+    const segOpts: ArcpFetchOpts = {
       ...opts,
       startDate: segment.start,
       endDate: segment.end,
@@ -212,11 +239,12 @@ async function loadArcpDetailCoverageAware(
 
     const crmChunks = planArcpSummaryDateChunks(segOpts);
     for (const chunk of crmChunks) {
-      const chunkRows = await fetchArcpClaimsDetailRowsFromCrm(
+      const { rows: chunkRows, chunkMeta } = await fetchArcpClaimsDetailRowsFromCrm(
         { ...segOpts, startDate: chunk.start, endDate: chunk.end },
         CRM_QUERY_TIMEOUT_MS
       );
       merged.push(...chunkRows);
+      chunkMetaParts.push(chunkMeta);
     }
     usedCrm = true;
   }
@@ -224,48 +252,60 @@ async function loadArcpDetailCoverageAware(
   const mergedRows = mergeArcpDetailRows(merged);
   const source: ArcpDataSource =
     usedPostgres && usedCrm ? 'crm_fallback' : usedCrm ? 'crm_fallback' : 'postgres';
+  const chunkMeta = mergeArcpChunkMeta(chunkMetaParts);
 
-  if (mergedRows.length === 0) return { rows: mergedRows, source };
+  if (mergedRows.length === 0) return { rows: mergedRows, source, chunkMeta };
 
   const lookups = await loadArcpCrmLabelLookups();
-  return { rows: enrichArcpDetailRows(mergedRows, lookups), source };
+  return { rows: enrichArcpDetailRows(mergedRows, lookups), source, chunkMeta };
 }
 
 async function fetchArcpClaimsAggregatesFromCrm(
-  opts: ArcpClaimsQueryOpts,
+  opts: ArcpFetchOpts,
   timeoutMs: number
-) {
-  const [lookups, rows] = await Promise.all([
+): Promise<{ aggregates: ArcpClaimsAggregateRow[]; chunkMeta: ArcpChunkLoadMeta }> {
+  const [lookups, result] = await Promise.all([
     loadArcpCrmLabelLookups(),
     fetchArcpClaimsAggregates(opts, timeoutMs),
   ]);
-  return enrichArcpAggregateLabels(rows, lookups);
+  return {
+    aggregates: enrichArcpAggregateLabels(result.aggregates, lookups),
+    chunkMeta: result.chunkMeta,
+  };
 }
 
 async function fetchArcpClaimsDetailRowsFromCrm(
-  opts: ArcpClaimsQueryOpts,
+  opts: ArcpFetchOpts,
   timeoutMs: number
-) {
-  const [lookups, rows] = await Promise.all([
+): Promise<{ rows: ArcpClaimsDetailRow[]; chunkMeta: ArcpChunkLoadMeta }> {
+  const [lookups, result] = await Promise.all([
     loadArcpCrmLabelLookups(),
     fetchArcpClaimsDetailRows(opts, timeoutMs),
   ]);
-  return enrichArcpDetailRows(rows, lookups);
+  return {
+    rows: enrichArcpDetailRows(result.rows, lookups),
+    chunkMeta: result.chunkMeta,
+  };
 }
 
 export async function loadArcpClaimsAggregatesHybrid(
-  opts: ArcpClaimsQueryOpts
+  opts: ArcpFetchOpts
 ): Promise<{
   aggregates: ArcpClaimsAggregateRow[];
   source: ArcpDataSource;
   grandTotals: ArcpGrandTotals;
+  chunkMeta: ArcpChunkLoadMeta;
 }> {
   if (!readArcpFromPostgres()) {
-    const aggregates = await fetchArcpClaimsAggregatesFromCrm(opts, CRM_QUERY_TIMEOUT_MS);
+    const { aggregates, chunkMeta } = await fetchArcpClaimsAggregatesFromCrm(
+      opts,
+      CRM_QUERY_TIMEOUT_MS
+    );
     return {
       aggregates,
       source: 'crm',
       grandTotals: deriveArcpGrandTotalsFromAggregates(aggregates),
+      chunkMeta,
     };
   }
 
@@ -276,12 +316,15 @@ export async function loadArcpClaimsAggregatesHybrid(
       (err as Error & { statusCode?: number }).statusCode = 503;
       throw err;
     }
-    /* cache miss — live load */
-    const aggregates = await fetchArcpClaimsAggregatesFromCrm(opts, CRM_QUERY_TIMEOUT_MS);
+    const { aggregates, chunkMeta } = await fetchArcpClaimsAggregatesFromCrm(
+      opts,
+      CRM_QUERY_TIMEOUT_MS
+    );
     return {
       aggregates,
       source: 'crm_fallback',
       grandTotals: deriveArcpGrandTotalsFromAggregates(aggregates),
+      chunkMeta,
     };
   }
 
@@ -289,11 +332,15 @@ export async function loadArcpClaimsAggregatesHybrid(
 }
 
 export async function loadArcpClaimsDetailRowsHybrid(
-  opts: ArcpClaimsQueryOpts
-): Promise<{ rows: ArcpClaimsDetailRow[]; source: ArcpDataSource }> {
+  opts: ArcpFetchOpts
+): Promise<{
+  rows: ArcpClaimsDetailRow[];
+  source: ArcpDataSource;
+  chunkMeta: ArcpChunkLoadMeta;
+}> {
   if (!readArcpFromPostgres()) {
-    const rows = await fetchArcpClaimsDetailRowsFromCrm(opts, CRM_QUERY_TIMEOUT_MS);
-    return { rows, source: 'crm' };
+    const { rows, chunkMeta } = await fetchArcpClaimsDetailRowsFromCrm(opts, CRM_QUERY_TIMEOUT_MS);
+    return { rows, source: 'crm', chunkMeta };
   }
 
   const readiness = await getArcpReadiness();
@@ -303,8 +350,8 @@ export async function loadArcpClaimsDetailRowsHybrid(
       (err as Error & { statusCode?: number }).statusCode = 503;
       throw err;
     }
-    const rows = await fetchArcpClaimsDetailRowsFromCrm(opts, CRM_QUERY_TIMEOUT_MS);
-    return { rows, source: 'crm_fallback' };
+    const { rows, chunkMeta } = await fetchArcpClaimsDetailRowsFromCrm(opts, CRM_QUERY_TIMEOUT_MS);
+    return { rows, source: 'crm_fallback', chunkMeta };
   }
 
   return loadArcpDetailCoverageAware(opts);

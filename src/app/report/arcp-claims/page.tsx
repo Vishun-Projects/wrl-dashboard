@@ -501,7 +501,13 @@ export default function ArcpClaimsPage() {
 
         return chunkedAuth.getWithAuthRetry<{
           aggregates?: ArcpClaimsAggregateRow[];
-          meta?: { source?: string; cached?: boolean };
+          meta?: {
+            source?: string;
+            cached?: boolean;
+            cachedChunks?: number;
+            fetchedChunks?: number;
+            totalChunks?: number;
+          };
           error?: string;
         }>(
           '/api/report/arcp-claims',
@@ -527,12 +533,14 @@ export default function ArcpClaimsPage() {
         const partialAggregates: (ArcpClaimsAggregateRow[] | undefined)[] = new Array(chunks.length);
         let failedChunks = 0;
         let completedChunks = 0;
+        let serverCachedChunks = 0;
 
         if (!useClientChunks) {
           try {
             const data = await fetchAggregateChunk(chunks[0], 0);
             if (isStale()) return;
             if (data.error) throw new Error(data.error);
+            serverCachedChunks += data.meta?.cachedChunks ?? 0;
             const rawAggregates = mergeArcpAggregateRows(data.aggregates ?? []);
             if (!isStale()) {
               setRawAggregateRows(rawAggregates);
@@ -571,6 +579,7 @@ export default function ArcpClaimsPage() {
             if (isStale()) return;
             if (data.error) throw new Error(data.error);
 
+            serverCachedChunks += data.meta?.cachedChunks ?? 0;
             partialAggregates[i] = data.aggregates ?? [];
           } catch (chunkErr: unknown) {
             if (axios.isCancel(chunkErr) || (chunkErr instanceof DOMException && chunkErr.name === 'AbortError')) {
@@ -612,6 +621,12 @@ export default function ArcpClaimsPage() {
 
         if (!isStale()) {
           setRawAggregateRows(rawAggregates);
+        }
+
+        if (!isStale() && serverCachedChunks > 0) {
+          toast.info(
+            `Resumed ${serverCachedChunks.toLocaleString('en-IN')} of ${chunks.length} period(s) from server cache`
+          );
         }
 
         if (failedChunks > 0 && !isStale()) {
@@ -855,6 +870,7 @@ export default function ArcpClaimsPage() {
     const partialDetailRows: (ArcpClaimsDetailRow[] | undefined)[] = new Array(chunks.length);
     let failedChunks = 0;
     let completedChunks = 0;
+    let serverCachedChunks = 0;
     const exportStartedAt = Date.now();
 
     const detailRequestParams = {
@@ -870,7 +886,7 @@ export default function ArcpClaimsPage() {
       if (useSingleDetailRequest) {
         const data = await chunkedAuth.getWithAuthRetry<{
           rows?: ArcpClaimsDetailRow[];
-          meta?: { rowCount?: number };
+          meta?: { rowCount?: number; cachedChunks?: number };
           error?: string;
         }>('/api/report/arcp-claims/detail', {
           timeout: Math.max(exportPlan.estimateMs + 60_000, 300_000),
@@ -878,12 +894,15 @@ export default function ArcpClaimsPage() {
         });
 
         if (data.error) throw new Error(data.error);
+        serverCachedChunks = data.meta?.cachedChunks ?? 0;
         const rows = mergeArcpDetailRows(data.rows ?? []);
         if (rows.length === 0) throw new Error('No detail rows to export');
         const fileName = `ARCP_Claims_Detail_${appliedFilters.startDateStr}_${appliedFilters.endDateStr}.csv`;
         downloadArcpClaimsDetailCsv(rows, fileName);
+        const cacheNote =
+          serverCachedChunks > 0 ? ` (${serverCachedChunks} period(s) from server cache)` : '';
         toast.success(
-          `Exported ${rows.length.toLocaleString('en-IN')} lines — SUM(Raw BM Approved) is per-line from CRM`
+          `Exported ${rows.length.toLocaleString('en-IN')} lines${cacheNote} — SUM(Raw BM Approved) is per-line from CRM`
         );
         return;
       }
@@ -894,6 +913,7 @@ export default function ArcpClaimsPage() {
         try {
           const data = await chunkedAuth.getWithAuthRetry<{
             rows?: ArcpClaimsDetailRow[];
+            meta?: { cachedChunks?: number };
             error?: string;
           }>(
             '/api/report/arcp-claims/detail',
@@ -915,6 +935,7 @@ export default function ArcpClaimsPage() {
 
           if (data.error) throw new Error(data.error);
 
+          serverCachedChunks += data.meta?.cachedChunks ?? 0;
           partialDetailRows[i] = data.rows ?? [];
         } catch (chunkErr: unknown) {
           if (isChunkedFetchAuthError(chunkErr)) {
@@ -960,8 +981,12 @@ export default function ArcpClaimsPage() {
 
       const fileName = `ARCP_Claims_Detail_${appliedFilters.startDateStr}_${appliedFilters.endDateStr}.csv`;
       downloadArcpClaimsDetailCsv(rows, fileName);
+      const cacheNote =
+        serverCachedChunks > 0
+          ? ` (${serverCachedChunks.toLocaleString('en-IN')} of ${chunks.length} period(s) from server cache)`
+          : '';
       toast.success(
-        `Exported ${rows.length.toLocaleString('en-IN')} lines — SUM(Raw BM Approved) is per-line from CRM`
+        `Exported ${rows.length.toLocaleString('en-IN')} lines${cacheNote} — SUM(Raw BM Approved) is per-line from CRM`
       );
     } catch (err: unknown) {
       toast.error(
@@ -1054,7 +1079,9 @@ export default function ArcpClaimsPage() {
                 return;
               }
               runLoad(appliedFilters, true);
-              toast.info('Reloading tally (server cache cleared)', { duration: 3000 });
+              toast.info('Retrying tally — completed periods load from server cache', {
+                duration: 3000,
+              });
             }}
             disabled={loading || !resourcesLoaded}
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"

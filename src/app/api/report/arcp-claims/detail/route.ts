@@ -8,8 +8,51 @@ import {
 import { loadArcpClaimsDetailRows } from '@/lib/arcp-claims/server/detail-load';
 import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims/query';
 import { hasPagePermission } from '@/lib/auth/page-access';
+import { buildArcpChunkCacheKey } from '@/lib/arcp-claims/server/chunk-cache';
 
 export const maxDuration = 300;
+
+const DETAIL_ROUTE_CACHE_TTL =
+  Number(process.env.ARCP_AGG_CACHE_TTL_MS ?? 60 * 60 * 1000) || 60 * 60 * 1000;
+
+type DetailCacheEntry = {
+  rows: Awaited<ReturnType<typeof loadArcpClaimsDetailRows>>['rows'];
+  source: string;
+  chunkMeta: Awaited<ReturnType<typeof loadArcpClaimsDetailRows>>['chunkMeta'];
+  timestamp: number;
+};
+
+const detailCache = new Map<string, DetailCacheEntry>();
+const detailInflight = new Map<string, Promise<DetailCacheEntry>>();
+
+function buildDetailRouteKey(params: {
+  startDate: string | null;
+  endDate: string | null;
+  dateFilterColumn: string;
+  branch: string | null;
+  franchisee: string | null;
+  callType: string | null;
+  isHod: boolean;
+  assignedOffices: string[];
+}): string {
+  return buildArcpChunkCacheKey(
+    {
+      startDate: params.startDate,
+      endDate: params.endDate,
+      dateFilterColumn: params.dateFilterColumn,
+      branch: params.branch,
+      franchisee: params.franchisee,
+      callType: params.callType,
+      isHod: params.isHod,
+      assignedOffices: params.assignedOffices,
+    },
+    {
+      start: params.startDate || 'all',
+      end: params.endDate || 'all',
+    },
+    'detail'
+  );
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -39,6 +82,8 @@ export async function GET(req: NextRequest) {
     const branch = searchParams.get('branch');
     const franchisee = searchParams.get('franchisee');
     const callType = searchParams.get('callType');
+    const refresh = searchParams.get('refresh') === 'true';
+    const forceRefresh = searchParams.get('force') === 'true';
 
     const { data: profile } = await supabaseAdmin
       .from('app_users')
@@ -53,7 +98,7 @@ export async function GET(req: NextRequest) {
         profile?.role || ''
       );
 
-    const { rows, source } = await loadArcpClaimsDetailRows({
+    const routeKey = buildDetailRouteKey({
       startDate,
       endDate,
       dateFilterColumn,
@@ -64,16 +109,71 @@ export async function GET(req: NextRequest) {
       assignedOffices,
     });
 
-    return NextResponse.json({
-      rows,
-      meta: {
-        startDate,
-        endDate,
-        dateFilterColumn,
-        rowCount: rows.length,
-        source,
-      },
-    });
+    const now = Date.now();
+    if (!refresh) {
+      const hit = detailCache.get(routeKey);
+      if (hit && now - hit.timestamp < DETAIL_ROUTE_CACHE_TTL) {
+        return NextResponse.json({
+          rows: hit.rows,
+          meta: {
+            startDate,
+            endDate,
+            dateFilterColumn,
+            rowCount: hit.rows.length,
+            source: hit.source,
+            cachedChunks: hit.chunkMeta.cachedChunks,
+            fetchedChunks: hit.chunkMeta.fetchedChunks,
+            totalChunks: hit.chunkMeta.totalChunks,
+            cached: true,
+          },
+        });
+      }
+    }
+
+    let run = detailInflight.get(routeKey);
+    if (!run) {
+      run = (async () => {
+        const { rows, source, chunkMeta } = await loadArcpClaimsDetailRows({
+          startDate,
+          endDate,
+          dateFilterColumn,
+          branch,
+          franchisee,
+          callType,
+          isHod,
+          assignedOffices,
+          bypassChunkCache: forceRefresh,
+        });
+        return {
+          rows,
+          source,
+          chunkMeta,
+          timestamp: Date.now(),
+        };
+      })();
+      detailInflight.set(routeKey, run);
+    }
+
+    try {
+      const entry = await run;
+      detailCache.set(routeKey, entry);
+      return NextResponse.json({
+        rows: entry.rows,
+        meta: {
+          startDate,
+          endDate,
+          dateFilterColumn,
+          rowCount: entry.rows.length,
+          source: entry.source,
+          cachedChunks: entry.chunkMeta.cachedChunks,
+          fetchedChunks: entry.chunkMeta.fetchedChunks,
+          totalChunks: entry.chunkMeta.totalChunks,
+          cached: entry.chunkMeta.cachedChunks > 0,
+        },
+      });
+    } finally {
+      detailInflight.delete(routeKey);
+    }
   } catch (err: unknown) {
     console.error('[ARCP Claims Detail] fetch error:', err);
     if (isCrmOutOfMemoryError(err)) {

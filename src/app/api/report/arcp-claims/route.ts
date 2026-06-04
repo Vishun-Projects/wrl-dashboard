@@ -7,6 +7,12 @@ import {
 } from '@/lib/arcp-claims/server/fetch';
 import { loadArcpClaimsAggregates } from '@/lib/arcp-claims/server/load';
 import {
+  ARCP_CHUNK_CACHE_VERSION,
+  clearArcpChunkCaches,
+  clearArcpChunkDiskCache,
+  type ArcpChunkLoadMeta,
+} from '@/lib/arcp-claims/server/chunk-cache';
+import {
   deriveArcpGrandTotalsFromAggregates,
   resolveArcpDateFilterColumn,
   type ArcpGrandTotals,
@@ -24,19 +30,22 @@ type AggCacheEntry = {
   grandTotals: ArcpGrandTotals;
   source: string;
   timestamp: number;
+  chunkMeta: ArcpChunkLoadMeta;
 };
 
 const aggCache = new Map<string, AggCacheEntry>();
 const aggInflight = new Map<string, Promise<AggCacheEntry>>();
 
 /** Bump when tally totals logic changes — invalidates in-memory aggregate cache. */
-const AGG_CACHE_VERSION = 'v9';
+const AGG_CACHE_VERSION = ARCP_CHUNK_CACHE_VERSION;
 
 export function clearArcpClaimsRouteCaches(): void {
   aggCache.clear();
   aggInflight.clear();
   cache.clear();
   inflight.clear();
+  clearArcpChunkCaches();
+  void clearArcpChunkDiskCache();
 }
 
 type CacheEntry = {
@@ -103,6 +112,8 @@ export async function GET(req: NextRequest) {
     const franchisee = searchParams.get('franchisee');
     const callType = searchParams.get('callType');
     const refresh = searchParams.get('refresh') === 'true';
+    /** Hard bypass of per-period chunk cache (CRM refetch every period). */
+    const forceRefresh = searchParams.get('force') === 'true';
     const aggregatesOnly = searchParams.get('aggregatesOnly') === 'true';
 
     const { data: profile } = await supabaseAdmin
@@ -139,6 +150,7 @@ export async function GET(req: NextRequest) {
       callType,
       isHod,
       assignedOffices,
+      bypassChunkCache: forceRefresh,
     };
 
     if (aggregatesOnly) {
@@ -157,13 +169,14 @@ export async function GET(req: NextRequest) {
       let aggRun = aggInflight.get(aggKey);
       if (!aggRun) {
         aggRun = (async () => {
-          const { aggregates, source } = await loadArcpClaimsAggregates(queryOpts);
+          const { aggregates, source, chunkMeta } = await loadArcpClaimsAggregates(queryOpts);
           const grandTotals = deriveArcpGrandTotalsFromAggregates(aggregates);
           const entry: AggCacheEntry = {
             aggregates,
             grandTotals,
             source,
             timestamp: Date.now(),
+            chunkMeta,
           };
           aggCache.set(aggKey, entry);
           return entry;
@@ -172,8 +185,18 @@ export async function GET(req: NextRequest) {
       }
 
       try {
-        const { aggregates, source, grandTotals } = await aggRun;
-        return NextResponse.json({ aggregates, meta: { source, grandTotals } });
+        const { aggregates, source, grandTotals, chunkMeta } = await aggRun;
+        return NextResponse.json({
+          aggregates,
+          meta: {
+            source,
+            grandTotals,
+            cachedChunks: chunkMeta.cachedChunks,
+            fetchedChunks: chunkMeta.fetchedChunks,
+            totalChunks: chunkMeta.totalChunks,
+            cached: chunkMeta.cachedChunks > 0,
+          },
+        });
       } finally {
         aggInflight.delete(aggKey);
       }
@@ -190,7 +213,7 @@ export async function GET(req: NextRequest) {
     let run = inflight.get(cacheKey);
     if (!run) {
       run = (async () => {
-        const { aggregates, source, grandTotals } = await loadArcpClaimsAggregates(queryOpts);
+        const { aggregates, source } = await loadArcpClaimsAggregates(queryOpts);
         const model = buildArcpClaimsTableModel(aggregates);
 
         return {
