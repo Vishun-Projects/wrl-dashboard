@@ -12,6 +12,7 @@
     "sync-worker": "npx tsx src/lib/read-model/cli.ts",
     "sync-worker:backfill": "npx tsx src/lib/read-model/cli.ts backfill",
     "sync-worker:incremental": "npx tsx src/lib/read-model/cli.ts incremental",
+    "sync-worker:backfill-bm-approval": "npx tsx src/lib/read-model/cli.ts backfill-bm-approval",
     "sync-worker:dims": "npx tsx src/lib/read-model/cli.ts dims",
     "sync-worker:nightly": "npx tsx src/lib/read-model/cli.ts nightly",
     "sync-worker:daemon": "npx tsx src/lib/read-model/cli.ts daemon",

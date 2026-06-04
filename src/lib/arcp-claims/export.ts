@@ -1,3 +1,4 @@
+import { resolveArcpItemCategoryDisplay } from './labels';
 import type { ArcpClaimsDetailRow } from './query';
 import type { ArcpClaimsTableModel } from './table';
 import { escapeCsvCell } from '@/lib/utils/csv';
@@ -79,28 +80,20 @@ export function downloadArcpClaimsCsv(model: ArcpClaimsTableModel, fileName: str
 }
 
 const DETAIL_HEADERS = [
-  'ARCP Line Code',
-  'UCN',
-  'Calls2Fault Code',
-  'Call No',
-  'Franchisee Code',
+  'Serial No',
   'Branch',
   'Franchisee',
   'Call Date',
   'Solve Date',
   'BM Approved Date',
-  'HO Approved Date',
   'Call Type',
   'Item Category',
   'Local/Upcountry',
   'Major/Minor',
   'Line Type',
-  'Rate',
   'Distance',
-  'Amount Payable',
-  'Raw Charge Payable',
-  'Raw BM Approved',
-  'Raw HO Approved',
+  'Charge Payable',
+  'BM Approved',
   'Summary Section',
   'Summary Sub-Row',
 ] as const;
@@ -111,28 +104,20 @@ export function buildArcpClaimsDetailCsv(rows: ArcpClaimsDetailRow[]): string {
   for (const row of rows) {
     lines.push(
       csvRow([
-        row.ncode,
         row.vucnno,
-        row.calls2fault_code,
-        row.call_no,
-        row.franchisee_code,
         row.branch_name,
         row.franchisee_name,
         row.call_date,
         row.solve_date,
         row.bm_approved_date,
-        row.ho_approved_date,
         row.call_type,
-        row.item_category,
+        resolveArcpItemCategoryDisplay(row.item_category),
         row.local_upcountry,
         row.major_minor,
         row.line_type,
-        row.rate,
         row.distance,
-        row.amount_payable,
         row.raw_nchargespayable,
         row.raw_nbmapprovedamt,
-        row.raw_nhoapprovedamt,
         row.summary_section,
         row.summary_sub_row,
       ])

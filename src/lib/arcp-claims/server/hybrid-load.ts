@@ -221,11 +221,14 @@ async function loadArcpDetailCoverageAware(
     usedCrm = true;
   }
 
-  const rows = mergeArcpDetailRows(merged);
+  const mergedRows = mergeArcpDetailRows(merged);
   const source: ArcpDataSource =
     usedPostgres && usedCrm ? 'crm_fallback' : usedCrm ? 'crm_fallback' : 'postgres';
 
-  return { rows, source };
+  if (mergedRows.length === 0) return { rows: mergedRows, source };
+
+  const lookups = await loadArcpCrmLabelLookups();
+  return { rows: enrichArcpDetailRows(mergedRows, lookups), source };
 }
 
 async function fetchArcpClaimsAggregatesFromCrm(

@@ -3,6 +3,7 @@ import {
   resolveArcpBmApprovedAt,
   resolveArcpHoApprovedAt,
 } from '@/lib/read-model/arcp/dates';
+import { resolveTrhcallsBmApprovedAt } from '@/lib/trhcalls/bm-approval';
 
 /** CRM: latest ARCP line per call for BM/HO approve resolution. */
 export const REGISTER_ARCP_PICK_OUTER_APPLY = `
@@ -47,7 +48,7 @@ export const REGISTER_ARCP_PICK_FIELDS_SQL = `
 export function enrichRegisterRowArcpApproveDates(
   row: Record<string, unknown>
 ): Record<string, unknown> {
-  const bm = resolveArcpBmApprovedAt(row);
+  const bm = resolveTrhcallsBmApprovedAt(row) ?? resolveArcpBmApprovedAt(row);
   const ho = resolveArcpHoApprovedAt(row);
   return {
     ...row,

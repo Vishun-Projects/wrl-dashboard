@@ -301,6 +301,7 @@ const TRHCALLS_DEDUP_INNER_COLUMNS = [
   'vtransfercallno',
   'bsolved',
   'bfastclose',
+  'bapproval',
   'nengineer',
   'nofficeid',
   'nparty',

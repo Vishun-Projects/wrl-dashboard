@@ -10,6 +10,7 @@ import { parseLatLngFromRow } from '@/lib/geo/parse-latlong';
 import { enrichTrhcallBranchFranchisee } from '@/lib/trhcalls/query';
 import type { HotRow, StatusBucket } from '@/lib/read-model/types';
 import { parseCrmDate } from '@/lib/read-model/dates';
+import { isTruthyCrmRowFlag, resolveTrhcallsBmApprovedAt } from '@/lib/trhcalls/bm-approval';
 import { toBigInt } from '@/lib/read-model/coerce';
 
 const STATUS_LABEL_BY_BUCKET: Record<Exclude<RegisterSummaryBucket, 'transferred'>, string> = {
@@ -109,6 +110,8 @@ export function transformCrmRowToHot(row: Record<string, unknown>): HotRow | nul
   const nengineer = nengineerRaw > 0 ? nengineerRaw : null;
   const editedAt = parseCrmDate(enriched.editedon);
   const addedAt = parseCrmDate(enriched.addedon);
+  const bapproval = isTruthyCrmRowFlag(enriched.bapproval);
+  const bmApprovedAt = resolveTrhcallsBmApprovedAt(enriched);
 
   return {
     ncode,
@@ -155,6 +158,8 @@ export function transformCrmRowToHot(row: Record<string, unknown>): HotRow | nul
         : enriched.bsolved == null
           ? null
           : false,
+    bapproval: enriched.bapproval == null ? null : bapproval,
+    bm_approved_at: bmApprovedAt,
     bfastclose:
       enriched.bfastclose === true ||
       enriched.bfastclose === 1 ||

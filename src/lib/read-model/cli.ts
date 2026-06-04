@@ -8,6 +8,7 @@ import { runInitialBackfill, runDimsRefresh } from '@/lib/read-model/backfill';
 import { runIncrementalSync } from '@/lib/read-model/incremental';
 import { runNightlyReconcile } from '@/lib/read-model/nightly';
 import { runRetentionJobs } from '@/lib/read-model/retention';
+import { runBackfillCallsHotBmApproval } from '@/lib/read-model/backfill-bm-approval';
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
 
@@ -36,6 +37,13 @@ async function main(): Promise<void> {
     case 'incremental':
       await runIncrementalSync();
       break;
+    case 'backfill-bm-approval': {
+      const result = await runBackfillCallsHotBmApproval({
+        onlyMissing: process.env.BM_BACKFILL_ALL !== 'true',
+      });
+      console.log('[backfill-bm] Done:', result);
+      break;
+    }
     case 'dims':
       await runDimsRefresh();
       break;
@@ -71,6 +79,7 @@ Usage: npx tsx src/lib/read-model/cli.ts <command>
 Commands:
   backfill          Initial backfill (dims + hot 90d + open-old + YTD facts)
   incremental       Single calls incremental sync run
+  backfill-bm-approval  Fill calls_latest_hot.bapproval / bm_approved_at from CRM (no truncate)
   arcp-reset        Truncate arcp_lines_hot + reset sync_state (fresh start)
   arcp-backfill     Initial ARCP lines backfill (ARCP_BACKFILL_START_DATE or YEARS)
   arcp-incremental  Single ARCP incremental sync run

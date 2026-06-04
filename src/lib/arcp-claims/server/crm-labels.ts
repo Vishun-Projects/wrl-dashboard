@@ -1,4 +1,9 @@
+import { postQuery } from '@/lib/db/proxy';
 import { withClient } from '@/lib/read-model/db';
+import {
+  isBareNumericArcpLabel,
+  resolveArcpItemCategoryDisplay,
+} from '@/lib/arcp-claims/labels';
 import {
   LOCAL_UPCOUNTRY_NCODE_LABELS,
   type ArcpClaimsAggregateRow,
@@ -10,56 +15,62 @@ export type ArcpCrmLabelLookups = {
   itemCategoryLabelsByCode: Record<string, string>;
 };
 
-function isBareNumericLabel(value: string): boolean {
-  return /^\d+$/.test(value.trim());
-}
-
 function resolveLabel(
   label: string,
   code: string,
   lookup?: Record<string, string>
 ): string {
   const trimmed = label.trim();
-  if (trimmed && !isBareNumericLabel(trimmed)) return trimmed;
+  if (trimmed && !isBareNumericArcpLabel(trimmed)) return trimmed;
   const fromCode = lookup?.[code.trim()];
-  if (fromCode && !isBareNumericLabel(fromCode)) return fromCode;
+  if (fromCode && !isBareNumericArcpLabel(fromCode)) return fromCode;
   return trimmed || code.trim();
 }
 
+async function loadItemCategoryLabelsFromCrm(): Promise<Record<string, string>> {
+  const sql = `
+SELECT
+  CAST(ic.ncode AS VARCHAR(50)) AS code,
+  COALESCE(
+    NULLIF(LTRIM(RTRIM(ic.vname)), ''),
+    NULLIF(LTRIM(RTRIM(ic.vshortname)), '')
+  ) AS item_category_label
+FROM mstitemcategory ic (NOLOCK)
+WHERE ic.ncode IS NOT NULL
+  AND LTRIM(RTRIM(CAST(ic.ncode AS VARCHAR(50)))) <> ''
+  AND LTRIM(RTRIM(CAST(ic.ncode AS VARCHAR(50)))) <> '0'`;
+
+  const res = await postQuery({ rawSql: sql, timeoutMs: 60_000 });
+  const map: Record<string, string> = {};
+  for (const row of res.data ?? []) {
+    const code = String(row.code ?? '').trim();
+    const label = String(row.item_category_label ?? '').trim();
+    if (!code || !label || isBareNumericArcpLabel(label)) continue;
+    if (!map[code] || label.length > map[code].length) map[code] = label;
+  }
+  return map;
+}
+
 export async function loadArcpCrmLabelLookups(): Promise<ArcpCrmLabelLookups> {
-  return withClient(async (client) => {
-    const [callTypes, itemCategories] = await Promise.all([
-      client.query(`
+  const [callTypeLabelsByCode, itemCategoryLabelsByCode] = await Promise.all([
+    withClient(async (client) => {
+      const callTypes = await client.query(`
         SELECT ncode::text AS code, display_value
         FROM dim_call_types
         WHERE display_value IS NOT NULL AND TRIM(display_value) <> ''
-      `),
-      client.query(`
-        SELECT DISTINCT nitemcategory::text AS code, item_category_label
-        FROM arcp_lines_hot
-        WHERE item_category_label IS NOT NULL AND TRIM(item_category_label) <> ''
-      `),
-    ]);
-
-    const callTypeLabelsByCode: Record<string, string> = {};
-    for (const row of callTypes.rows) {
-      const code = String(row.code ?? '').trim();
-      const label = String(row.display_value ?? '').trim();
-      if (code && label) callTypeLabelsByCode[code] = label;
-    }
-
-    const itemCategoryLabelsByCode: Record<string, string> = {};
-    for (const row of itemCategories.rows) {
-      const code = String(row.code ?? '').trim();
-      const label = String(row.item_category_label ?? '').trim();
-      if (!code || !label || isBareNumericLabel(label)) continue;
-      if (!itemCategoryLabelsByCode[code] || label.length > itemCategoryLabelsByCode[code].length) {
-        itemCategoryLabelsByCode[code] = label;
+      `);
+      const map: Record<string, string> = {};
+      for (const row of callTypes.rows) {
+        const code = String(row.code ?? '').trim();
+        const label = String(row.display_value ?? '').trim();
+        if (code && label) map[code] = label;
       }
-    }
+      return map;
+    }),
+    loadItemCategoryLabelsFromCrm(),
+  ]);
 
-    return { callTypeLabelsByCode, itemCategoryLabelsByCode };
-  });
+  return { callTypeLabelsByCode, itemCategoryLabelsByCode };
 }
 
 export function enrichArcpAggregateLabels(
@@ -133,9 +144,8 @@ export function enrichArcpDetailRows(
     const localCode = row.local_upcountry.trim();
 
     const call_type = resolveLabel(row.call_type, callCode, lookups.callTypeLabelsByCode);
-    const item_category = resolveLabel(
+    const item_category = resolveArcpItemCategoryDisplay(
       row.item_category,
-      itemCode,
       lookups.itemCategoryLabelsByCode
     );
     const local_upcountry =

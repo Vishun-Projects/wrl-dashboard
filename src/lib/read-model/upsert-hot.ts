@@ -39,6 +39,8 @@ const HOT_COLUMNS = [
   'source_editedon',
   'bsolved',
   'bfastclose',
+  'bapproval',
+  'bm_approved_at',
   'ncancelreason',
   'lat',
   'lng',
@@ -83,14 +85,23 @@ function hotRowToValues(row: HotRow): unknown[] {
     row.source_editedon,
     row.bsolved,
     row.bfastclose,
+    row.bapproval,
+    row.bm_approved_at,
     row.ncancelreason,
     row.lat,
     row.lng,
   ];
 }
 
+/** Keep existing BM fields when an incremental row has not repopulated them yet. */
+const PRESERVE_ON_NULL_UPDATE = new Set(['bapproval', 'bm_approved_at']);
+
 const UPDATE_SET = HOT_COLUMNS.filter((c) => c !== 'vtrnno')
-  .map((c) => `${c} = EXCLUDED.${c}`)
+  .map((c) =>
+    PRESERVE_ON_NULL_UPDATE.has(c)
+      ? `${c} = COALESCE(EXCLUDED.${c}, calls_latest_hot.${c})`
+      : `${c} = EXCLUDED.${c}`
+  )
   .concat('synced_at = now()')
   .join(', ');
 
@@ -165,6 +176,7 @@ export async function countHotRows(client: pg.PoolClient): Promise<number> {
   return result.rows[0]?.count ?? 0;
 }
 
+/** Full reload only — never run from BM column migration; wipes calls_latest_hot by design. */
 export async function truncateHot(client: pg.PoolClient): Promise<void> {
   await client.query(`TRUNCATE calls_latest_hot`);
 }
