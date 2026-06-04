@@ -32,9 +32,9 @@ export function arcpReportUsesLiveCrm(): boolean {
   return true;
 }
 
+/** ARCP Claims always reads live Western CRM (trhcalls date basis); Postgres hot table is not used. */
 export function readArcpFromPostgres(): boolean {
-  if (arcpReportUsesLiveCrm()) return false;
-  return readSource('READ_ARCP_FROM') === 'postgres';
+  return false;
 }
 
 export function readCallsFromPostgres(): boolean {

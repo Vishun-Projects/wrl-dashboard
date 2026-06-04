@@ -9,6 +9,8 @@ import { loadArcpClaimsDetailRows } from '@/lib/arcp-claims/server/detail-load';
 import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims/query';
 import { hasPagePermission } from '@/lib/auth/page-access';
 
+export const maxDuration = 300;
+
 export async function GET(req: NextRequest) {
   try {
     const authHeader = req.headers.get('Authorization');

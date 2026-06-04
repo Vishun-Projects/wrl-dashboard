@@ -14,6 +14,8 @@ import {
 import { buildArcpClaimsTableModel } from '@/lib/arcp-claims/table';
 import { hasPagePermission } from '@/lib/auth/page-access';
 
+export const maxDuration = 300;
+
 const CACHE_TTL = 15 * 60 * 1000;
 const AGG_CACHE_TTL = Number(process.env.ARCP_AGG_CACHE_TTL_MS ?? 60 * 60 * 1000) || 60 * 60 * 1000;
 
@@ -28,7 +30,7 @@ const aggCache = new Map<string, AggCacheEntry>();
 const aggInflight = new Map<string, Promise<AggCacheEntry>>();
 
 /** Bump when tally totals logic changes — invalidates in-memory aggregate cache. */
-const AGG_CACHE_VERSION = 'v8';
+const AGG_CACHE_VERSION = 'v9';
 
 export function clearArcpClaimsRouteCaches(): void {
   aggCache.clear();

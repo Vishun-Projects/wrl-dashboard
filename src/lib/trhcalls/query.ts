@@ -270,20 +270,20 @@ export function buildTrhcallsDeltaSubquery(
 export function buildTrhcallsDateRangeWhere(opts: {
   startDate?: string | null;
   endDate?: string | null;
-  column?: RegisterDateFilterColumn;
+  column?: TrhcallsDateColumn;
   fallbackDays?: number;
 }): string {
-  const col = opts.column || 'dtrndate';
-  const parts: string[] = [];
-  if (opts.startDate) {
-    parts.push(`${col} >= '${opts.startDate.replace(/'/g, "''")}'`);
-  } else if (opts.fallbackDays != null) {
-    parts.push(`${col} >= DATEADD(day, -${opts.fallbackDays}, GETDATE())`);
-  }
-  if (opts.endDate) {
-    parts.push(`${col} <= '${opts.endDate.replace(/'/g, "''")} 23:59:59'`);
-  }
-  return parts.join(' AND ');
+  return buildTrhcallsDateRangePredicates({
+    startDate: opts.startDate,
+    endDate: opts.endDate,
+    column: opts.column || 'dtrndate',
+    fallbackDays: opts.fallbackDays,
+  }).join(' AND ');
+}
+
+/** Truthy CRM bit flags stored as NVARCHAR. */
+export function sqlTruthyCrmFlag(column: string): string {
+  return `ISNULL(${column}, '0') IN ('1', 'True', 'true')`;
 }
 
 /** Columns required by distribution map + dedup — avoids SELECT * OOM on DB proxy. */
@@ -946,6 +946,9 @@ export function buildTrhcallsLookupCondition(search: string): string {
 
 export type RegisterDateFilterColumn = 'dtrndate' | 'dsolvedatetime';
 
+/** Raw trhcalls column names used in date-range WHERE (no alias). */
+export type TrhcallsDateColumn = RegisterDateFilterColumn | 'editedon';
+
 export const REGISTER_DATE_FILTER_OPTIONS: { value: RegisterDateFilterColumn; label: string }[] = [
   { value: 'dtrndate', label: 'Call Date' },
   { value: 'dsolvedatetime', label: 'Solved Date' },
@@ -953,6 +956,26 @@ export const REGISTER_DATE_FILTER_OPTIONS: { value: RegisterDateFilterColumn; la
 
 export function resolveRegisterDateSqlColumn(column: string | null | undefined): RegisterDateFilterColumn {
   return column === 'dsolvedatetime' ? 'dsolvedatetime' : 'dtrndate';
+}
+
+/** CRM NVARCHAR date comparisons — `column` may be qualified (e.g. `tc.dtrndate`). */
+export function buildTrhcallsDateRangePredicates(opts: {
+  startDate?: string | null;
+  endDate?: string | null;
+  column: TrhcallsDateColumn | string;
+  fallbackDays?: number;
+}): string[] {
+  const col = opts.column;
+  const parts: string[] = [];
+  if (opts.startDate) {
+    parts.push(`${col} >= '${opts.startDate.replace(/'/g, "''")}'`);
+  } else if (opts.fallbackDays != null) {
+    parts.push(`${col} >= DATEADD(day, -${opts.fallbackDays}, GETDATE())`);
+  }
+  if (opts.endDate) {
+    parts.push(`${col} <= '${opts.endDate.replace(/'/g, "''")} 23:59:59'`);
+  }
+  return parts;
 }
 
 export function sqlRegisterDateColumn(column: RegisterDateFilterColumn, alias = 'tc'): string {

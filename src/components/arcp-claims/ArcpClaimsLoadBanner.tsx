@@ -109,8 +109,8 @@ export function ArcpClaimsLoadBanner({
                     {status.done} of {status.total} period{status.total === 1 ? '' : 's'} complete
                   </span>
                   {status.currentRange ? <span>({status.currentRange})</span> : null}
-                  {isDetailExport && status.rowsLoaded != null ? (
-                    <span>{status.rowsLoaded.toLocaleString('en-IN')} rows loaded</span>
+                  {status.rowsLoaded != null ? (
+                    <span>{status.rowsLoaded.toLocaleString('en-IN')} lines in tally so far</span>
                   ) : null}
                 </div>
               ) : null}
@@ -143,7 +143,10 @@ export function ArcpClaimsLoadBanner({
                 </p>
               ) : null}
 
-              {!isPreview && !isDetailExport && runningTotals && runningTotals.amountPayable > 0 ? (
+              {!isPreview &&
+              !isDetailExport &&
+              runningTotals &&
+              (runningTotals.amountPayable > 0 || runningTotals.branchApproved > 0) ? (
                 <p className="rounded-md bg-slate-50 px-2 py-1.5 text-slate-600">
                   Cumulative tally so far: {formatArcpCrore(runningTotals.amountPayable)} payable
                   {runningTotals.branchApproved > 0

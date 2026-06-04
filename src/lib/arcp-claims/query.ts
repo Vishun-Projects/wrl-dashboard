@@ -6,25 +6,25 @@ import {
 import { formatArcpClaimsExportDate } from '@/lib/read-model/arcp/dates';
 import {
   appendCallTypeFilter,
+  buildTrhcallsDateRangePredicates,
+  sqlTruthyCrmFlag,
 } from '@/lib/trhcalls/query';
 
 export type ArcpDateFilterColumn =
   | 'dcalllogdatetime'
   | 'dsolveddatetime'
-  | 'bm_approved_at'
-  | 'ho_approved_at';
+  | 'bm_approved_at';
 
 export const ARCP_DATE_FILTER_OPTIONS: { value: ArcpDateFilterColumn; label: string }[] = [
   { value: 'dcalllogdatetime', label: 'Call Date' },
   { value: 'dsolveddatetime', label: 'Call Solve Date' },
   { value: 'bm_approved_at', label: 'BM Call Approved' },
-  { value: 'ho_approved_at', label: 'HO Call Approved' },
 ];
 
 export function isArcpApproveDateColumn(
   column: string | null | undefined
-): column is 'bm_approved_at' | 'ho_approved_at' {
-  return column === 'bm_approved_at' || column === 'ho_approved_at';
+): column is 'bm_approved_at' {
+  return column === 'bm_approved_at';
 }
 
 /** Up to ~2 months completes in one CRM query (~4–5s). Wider spans split automatically. */
@@ -34,6 +34,19 @@ export const ARCP_APPROVE_CHUNK_DAYS = Math.max(
   1,
   Number(process.env.ARCP_APPROVE_CHUNK_DAYS ?? 7) || 7
 );
+/** BM/HO with branch or franchisee filter — smaller CRM windows to avoid timeouts. */
+export const ARCP_APPROVE_SCOPED_CHUNK_DAYS = Math.max(
+  1,
+  Number(process.env.ARCP_APPROVE_SCOPED_CHUNK_DAYS ?? 3) || 3
+);
+
+/** Approve-date chunk size from active filters (branch uses all franchisees under nunder). */
+export function resolveArcpApproveChunkDays(opts: ArcpClaimsQueryOpts): number {
+  if (opts.franchisee?.trim() || opts.branch?.trim()) {
+    return ARCP_APPROVE_SCOPED_CHUNK_DAYS;
+  }
+  return ARCP_APPROVE_CHUNK_DAYS;
+}
 /** Parallel CRM requests for call/solve date loads (UI + server). */
 export const ARCP_LOAD_CONCURRENCY = 3;
 /** Approve-date queries are heavy — run one CRM request at a time to avoid 30s SQL timeouts. */
@@ -87,9 +100,11 @@ function escapeSql(value: string): string {
 
 export function resolveArcpDateFilterColumn(column: string | null | undefined): ArcpDateFilterColumn {
   if (column === 'dsolveddatetime') return column;
-  if (column === 'bm_approved_at' || column === 'ho_approved_at') return column;
+  if (column === 'bm_approved_at') return column;
   // Legacy URL param from combined "Call Approve Date" filter
   if (column === 'approve') return 'bm_approved_at';
+  // Removed HO date basis — fall back to call date
+  if (column === 'ho_approved_at') return 'dcalllogdatetime';
   return 'dcalllogdatetime';
 }
 
@@ -104,6 +119,24 @@ function appendCsvInFilter(condition: string, column: string, param: string | nu
   return `${condition} AND ${column} IN (${list})`;
 }
 
+type ArcpTrhcallsScopeOpts = Pick<ArcpClaimsQueryOpts, 'franchisee' | 'branch'>;
+
+/** Scope trhcalls to selected franchisee(s) or all franchisees under branch (o.nunder). */
+function appendTrhcallsOfficeScope(condition: string, opts?: ArcpTrhcallsScopeOpts): string {
+  if (opts?.franchisee) {
+    return appendCsvInFilter(condition, 'CAST(tc.nofficeid AS VARCHAR(50))', opts.franchisee);
+  }
+  if (!opts?.branch) return condition;
+
+  let exists = `EXISTS (
+    SELECT 1
+    FROM mstoffice fo (NOLOCK)
+    WHERE CAST(fo.ncode AS VARCHAR(50)) = CAST(tc.nofficeid AS VARCHAR(50))
+      AND CAST(fo.nofficetype AS VARCHAR(10)) = '3'`;
+  exists = appendCsvInFilter(exists, 'CAST(fo.nunder AS VARCHAR(50))', opts.branch);
+  return `${condition} AND ${exists})`;
+}
+
 function appendArcpOfficeSecurityFilter(
   condition: string,
   isHod: boolean,
@@ -114,55 +147,188 @@ function appendArcpOfficeSecurityFilter(
   return `${condition} AND (arcp.nofficeid IN (${allowed}) OR o.nunder IN (${allowed}))`;
 }
 
+const ARCP_VUCNNO_EXPR = `NULLIF(LTRIM(RTRIM(CAST(arcp.vucnno AS VARCHAR(50)))), '')`;
+
+const TRHCALLS_DT_103 = (column: string) =>
+  `TRY_CONVERT(DATETIME, NULLIF(LTRIM(RTRIM(CAST(${column} AS VARCHAR(30)))), ''), 103)`;
+
+/** Link ARCP line to trhcalls: vucnno = vtrnno, else fault ncalls = tc.ncode. */
+function buildArcpTrhcallsLinkSql(tcAlias = 'tc'): string {
+  const vtrnno = `NULLIF(LTRIM(RTRIM(CAST(${tcAlias}.vtrnno AS VARCHAR(50)))), '')`;
+  return `(
+    (${ARCP_VUCNNO_EXPR} IS NOT NULL AND ${ARCP_VUCNNO_EXPR} = ${vtrnno})
+    OR (
+      ${ARCP_VUCNNO_EXPR} IS NULL
+      AND EXISTS (
+        SELECT 1 FROM trdcalls2fault tf_dt (NOLOCK)
+        WHERE tf_dt.ncode = arcp.ncalls2fault
+          AND CAST(tf_dt.ncalls AS VARCHAR(50)) = CAST(${tcAlias}.ncode AS VARCHAR(50))
+      )
+    )
+  )`;
+}
+
+function buildArcpTrhcallsRowPredicates(
+  dateColumn: ArcpDateFilterColumn,
+  startDate: string | null | undefined,
+  endDate: string | null | undefined,
+  tcAlias = 'tc'
+): string[] {
+  const parts: string[] = [];
+
+  if (dateColumn === 'bm_approved_at') {
+    parts.push(sqlTruthyCrmFlag(`${tcAlias}.bapproval`));
+    parts.push(
+      ...buildTrhcallsDateRangePredicates({
+        startDate,
+        endDate,
+        column: `${tcAlias}.editedon`,
+      })
+    );
+  } else if (dateColumn === 'dsolveddatetime') {
+    parts.push(sqlTruthyCrmFlag(`${tcAlias}.bsolved`));
+    parts.push(
+      ...buildTrhcallsDateRangePredicates({
+        startDate,
+        endDate,
+        column: `${tcAlias}.dsolvedatetime`,
+      })
+    );
+  } else {
+    parts.push(
+      ...buildTrhcallsDateRangePredicates({
+        startDate,
+        endDate,
+        column: `${tcAlias}.dtrndate`,
+      })
+    );
+  }
+
+  return parts;
+}
+
+/** Call/solve/BM: pre-filter trhcalls by date, match ARCP by vucnno = vtrnno. */
+function buildArcpMatchingTrhcallsVtrnnoSubquery(
+  dateColumn: ArcpDateFilterColumn,
+  startDate: string | null | undefined,
+  endDate: string | null | undefined,
+  opts?: ArcpTrhcallsScopeOpts
+): string {
+  const parts = [
+    `NULLIF(LTRIM(RTRIM(CAST(tc.vtrnno AS VARCHAR(50)))), '') IS NOT NULL`,
+    ...buildArcpTrhcallsRowPredicates(dateColumn, startDate, endDate, 'tc'),
+  ];
+  let where = parts.join(' AND ');
+  where = appendTrhcallsOfficeScope(where, opts);
+
+  return `
+    SELECT DISTINCT NULLIF(LTRIM(RTRIM(CAST(tc.vtrnno AS VARCHAR(50)))), '') AS vtrnno
+    FROM trhcalls tc (NOLOCK)
+    WHERE ${where}`.trim();
+}
+
+function buildArcpTrhcallsDateExistsInner(
+  dateColumn: ArcpDateFilterColumn,
+  startDate: string | null | undefined,
+  endDate: string | null | undefined,
+  opts?: ArcpTrhcallsScopeOpts,
+  tcAlias = 'tc'
+): string {
+  const parts = [
+    buildArcpTrhcallsLinkSql(tcAlias),
+    ...buildArcpTrhcallsRowPredicates(dateColumn, startDate, endDate, tcAlias),
+  ];
+  return appendTrhcallsOfficeScope(parts.join(' AND '), opts);
+}
+
 function appendArcpDateFilter(
   condition: string,
   startDate: string | null | undefined,
   endDate: string | null | undefined,
-  dateColumn: ArcpDateFilterColumn
+  dateColumn: ArcpDateFilterColumn,
+  opts?: ArcpTrhcallsScopeOpts
 ): string {
-  let next = condition;
-  const endSuffix = endDate ? ` 23:59:59` : '';
+  const hasDateRange = Boolean(startDate || endDate);
+  if (dateColumn !== 'bm_approved_at' && !hasDateRange) {
+    return condition;
+  }
+
+  const vtrnnoSubquery = buildArcpMatchingTrhcallsVtrnnoSubquery(
+    dateColumn,
+    startDate,
+    endDate,
+    opts
+  );
 
   if (dateColumn === 'bm_approved_at') {
-    next += ` AND ${ARCP_BM_MARKED_EXPR}`;
-    next += ` AND ${ARCP_BM_APPROVE_DT_EXPR} IS NOT NULL`;
-    if (startDate) {
-      const start = escapeSql(startDate);
-      next += ` AND ${ARCP_BM_APPROVE_DT_EXPR} >= '${start}'`;
-    }
-    if (endDate) {
-      const end = escapeSql(endDate);
-      next += ` AND ${ARCP_BM_APPROVE_DT_EXPR} <= '${end}${endSuffix}'`;
-    }
-    return next;
-  }
-
-  if (dateColumn === 'ho_approved_at') {
-    next += ` AND (
-      NULLIF(LTRIM(RTRIM(CAST(arcp.dhoapproveddate AS VARCHAR(30)))), '') IS NOT NULL
-      OR ISNULL(arcp.bapprovedho, '0') IN ('1', 'True', 'true')
-      OR TRY_CAST(NULLIF(LTRIM(RTRIM(REPLACE(REPLACE(CAST(arcp.nhoapprovedamt AS VARCHAR(50)), ',', ''), ' ', ''))), '') AS FLOAT) > 0
+    const vtrnno = `NULLIF(LTRIM(RTRIM(CAST(tc.vtrnno AS VARCHAR(50)))), '')`;
+    const tcWhere = appendTrhcallsOfficeScope(
+      [
+        `${ARCP_VUCNNO_EXPR} IS NOT NULL`,
+        `${ARCP_VUCNNO_EXPR} = ${vtrnno}`,
+        ...buildArcpTrhcallsRowPredicates('bm_approved_at', startDate, endDate, 'tc'),
+      ].join(' AND '),
+      opts
+    );
+    return `${condition} AND EXISTS (
+      SELECT 1
+      FROM trhcalls tc (NOLOCK)
+      WHERE ${tcWhere}
     )`;
-    next += ` AND ${ARCP_HO_APPROVE_DT_EXPR} IS NOT NULL`;
-    if (startDate) {
-      const start = escapeSql(startDate);
-      next += ` AND ${ARCP_HO_APPROVE_DT_EXPR} >= '${start}'`;
-    }
-    if (endDate) {
-      const end = escapeSql(endDate);
-      next += ` AND ${ARCP_HO_APPROVE_DT_EXPR} <= '${end}${endSuffix}'`;
-    }
-    return next;
   }
 
-  const col = dateColumn;
-  if (startDate) {
-    next += ` AND arcp.${col} >= '${escapeSql(startDate)}'`;
+  const fallbackExists = `EXISTS (
+    SELECT 1
+    FROM trdcalls2fault tf_dt (NOLOCK)
+    INNER JOIN trhcalls tc (NOLOCK) ON CAST(tf_dt.ncalls AS VARCHAR(50)) = CAST(tc.ncode AS VARCHAR(50))
+    WHERE tf_dt.ncode = arcp.ncalls2fault
+      AND ${buildArcpTrhcallsDateExistsInner(dateColumn, startDate, endDate, opts, 'tc')}
+  )`;
+
+  return `${condition} AND (
+    (${ARCP_VUCNNO_EXPR} IS NOT NULL AND ${ARCP_VUCNNO_EXPR} IN (${vtrnnoSubquery}))
+    OR (${ARCP_VUCNNO_EXPR} IS NULL AND ${fallbackExists})
+  )`;
+}
+
+function buildArcpTrhcallsDateApply(
+  dateColumn: ArcpDateFilterColumn,
+  startDate: string | null | undefined,
+  endDate: string | null | undefined,
+  opts?: ArcpTrhcallsScopeOpts
+): string {
+  if (dateColumn === 'bm_approved_at') {
+    const vtrnno = `NULLIF(LTRIM(RTRIM(CAST(tc.vtrnno AS VARCHAR(50)))), '')`;
+    const where = appendTrhcallsOfficeScope(
+      [
+        `${ARCP_VUCNNO_EXPR} IS NOT NULL`,
+        `${ARCP_VUCNNO_EXPR} = ${vtrnno}`,
+        ...buildArcpTrhcallsRowPredicates('bm_approved_at', startDate, endDate, 'tc'),
+      ].join(' AND '),
+      opts
+    );
+    return `
+OUTER APPLY (
+  SELECT TOP 1
+    ${TRHCALLS_DT_103('tc.dtrndate')} AS call_dt,
+    ${TRHCALLS_DT_103('tc.dsolvedatetime')} AS solve_dt,
+    ${TRHCALLS_DT_103('tc.editedon')} AS bm_dt
+  FROM trhcalls tc (NOLOCK)
+  WHERE ${where}
+  ORDER BY tc.editedon DESC, CAST(tc.ncode AS VARCHAR(50)) DESC
+) tc_dt`;
   }
-  if (endDate) {
-    next += ` AND arcp.${col} <= '${escapeSql(endDate)}${endSuffix}'`;
-  }
-  return next;
+
+  return `
+OUTER APPLY (
+  SELECT TOP 1
+    ${TRHCALLS_DT_103('tc.dtrndate')} AS call_dt,
+    ${TRHCALLS_DT_103('tc.dsolvedatetime')} AS solve_dt,
+    ${TRHCALLS_DT_103('tc.editedon')} AS bm_dt
+  FROM trhcalls tc (NOLOCK)
+  WHERE ${buildArcpTrhcallsLinkSql('tc')}
+  ORDER BY ISNULL(tc.editedon, tc.addedon) DESC, CAST(tc.ncode AS VARCHAR(50)) DESC
+) tc_dt`;
 }
 
 const MAJOR_MINOR_EXPR = `
@@ -227,42 +393,13 @@ const ARCP_INCLUDED_LINES_FILTER = `
     )
   )`;
 
-/** CRM stores approve timestamps as dd/mm/yyyy text; fallback to stage approval timestamps. */
-const ARCP_APPROVAL1_DT_EXPR = `COALESCE(
-  TRY_CONVERT(DATETIME, NULLIF(LTRIM(RTRIM(CAST(arcp.dapproval1on AS VARCHAR(30)))), ''), 126),
-  TRY_CONVERT(DATETIME, NULLIF(LTRIM(RTRIM(CAST(arcp.dapproval1on AS VARCHAR(30)))), ''), 103)
-)`;
-const ARCP_APPROVAL2_DT_EXPR = `COALESCE(
-  TRY_CONVERT(DATETIME, NULLIF(LTRIM(RTRIM(CAST(arcp.dapproval2on AS VARCHAR(30)))), ''), 126),
-  TRY_CONVERT(DATETIME, NULLIF(LTRIM(RTRIM(CAST(arcp.dapproval2on AS VARCHAR(30)))), ''), 103)
-)`;
-const ARCP_HO_APPROVE_DT_EXPR = `COALESCE(
-  TRY_CONVERT(DATETIME, NULLIF(LTRIM(RTRIM(CAST(arcp.dhoapproveddate AS VARCHAR(30)))), ''), 103),
-  ${ARCP_APPROVAL2_DT_EXPR}
-)`;
-const ARCP_BM_APPROVE_DT_EXPR = `COALESCE(
-  TRY_CONVERT(DATETIME, NULLIF(LTRIM(RTRIM(CAST(arcp.dbmapproveddate AS VARCHAR(30)))), ''), 103),
-  ${ARCP_APPROVAL1_DT_EXPR}
-)`;
-const ARCP_BM_MARKED_EXPR = `(
-  NULLIF(LTRIM(RTRIM(CAST(arcp.dbmapproveddate AS VARCHAR(30)))), '') IS NOT NULL
-  OR ISNULL(arcp.bapproved, '0') IN ('1', 'True', 'true')
-  OR TRY_CAST(NULLIF(LTRIM(RTRIM(REPLACE(REPLACE(CAST(arcp.nbmapprovedamt AS VARCHAR(50)), ',', ''), ' ', ''))), '') AS FLOAT) > 0
-)`;
-const ARCP_EFFECTIVE_APPROVE_DATE_EXPR = `COALESCE(${ARCP_HO_APPROVE_DT_EXPR}, ${ARCP_BM_APPROVE_DT_EXPR})`;
-
 function buildArcpClaimMonthExpr(dateColumn: ArcpDateFilterColumn): string {
-  const parseDt = (column: string) =>
-    `TRY_CONVERT(DATETIME, NULLIF(LTRIM(RTRIM(CAST(arcp.${column} AS VARCHAR(30)))), ''), 103)`;
-
   const dateExpr =
     dateColumn === 'bm_approved_at'
-      ? ARCP_BM_APPROVE_DT_EXPR
-      : dateColumn === 'ho_approved_at'
-        ? ARCP_HO_APPROVE_DT_EXPR
-        : dateColumn === 'dsolveddatetime'
-          ? parseDt('dsolveddatetime')
-          : parseDt('dcalllogdatetime');
+      ? 'tc_dt.bm_dt'
+      : dateColumn === 'dsolveddatetime'
+        ? 'tc_dt.solve_dt'
+        : 'tc_dt.call_dt';
 
   return `ISNULL(FORMAT(${dateExpr}, 'yyyy-MM'), 'unknown')`;
 }
@@ -273,7 +410,7 @@ function buildArcpClaimsFilterParts(opts: ArcpClaimsQueryOpts): {
   const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
   let condition = "arcp.nofficetype = '3'";
 
-  condition = appendArcpDateFilter(condition, opts.startDate, opts.endDate, dateColumn);
+  condition = appendArcpDateFilter(condition, opts.startDate, opts.endDate, dateColumn, opts);
 
   condition = appendCsvInFilter(condition, 'o.nunder', opts.branch);
   condition = appendCsvInFilter(condition, 'arcp.nofficeid', opts.franchisee);
@@ -287,7 +424,8 @@ function buildArcpClaimsFilterParts(opts: ArcpClaimsQueryOpts): {
   return { condition };
 }
 
-function buildArcpClaimsFilterCondition(opts: ArcpClaimsQueryOpts): string {
+/** CRM WHERE clause for trdcalls10ARCP (franchisee type 3), including date/branch filters. */
+export function buildArcpClaimsFilterCondition(opts: ArcpClaimsQueryOpts): string {
   return buildArcpClaimsFilterParts(opts).condition;
 }
 
@@ -350,12 +488,9 @@ OUTER APPLY (
 
 /** Sort key for detail export dedupe — first row per call_key wins (see mergeArcpDetailRows). */
 function buildArcpLineSortTsExpr(dateColumn: ArcpDateFilterColumn): string {
-  if (dateColumn === 'bm_approved_at') return ARCP_BM_APPROVE_DT_EXPR;
-  if (dateColumn === 'ho_approved_at') return ARCP_HO_APPROVE_DT_EXPR;
-  if (dateColumn === 'dsolveddatetime') {
-    return `TRY_CONVERT(DATETIME, NULLIF(LTRIM(RTRIM(CAST(arcp.dsolveddatetime AS VARCHAR(30)))), ''), 103)`;
-  }
-  return `TRY_CONVERT(DATETIME, NULLIF(LTRIM(RTRIM(CAST(arcp.dcalllogdatetime AS VARCHAR(30)))), ''), 103)`;
+  if (dateColumn === 'bm_approved_at') return 'tc_dt.bm_dt';
+  if (dateColumn === 'dsolveddatetime') return 'tc_dt.solve_dt';
+  return 'tc_dt.call_dt';
 }
 
 /** One row per ARCP line — nested subquery (CRM rawSql cannot use WITH / CTE). */
@@ -364,7 +499,8 @@ function buildArcpClaimsLinesSubquery(
   claimMonthExpr: string,
   isTravelExpr: string,
   lightweight = false,
-  dateColumn: ArcpDateFilterColumn = 'dcalllogdatetime'
+  dateColumn: ArcpDateFilterColumn = 'dcalllogdatetime',
+  trhcallsDateApply: string = buildArcpTrhcallsDateApply('dcalllogdatetime', null, null)
 ): string {
   const sortTsExpr = buildArcpLineSortTsExpr(dateColumn);
   const callTypeLabelExpr = lightweight
@@ -391,15 +527,26 @@ function buildArcpClaimsLinesSubquery(
     ? ''
     : `${ARCP_CALL_TYPE_LABEL_APPLY}${ARCP_ITEM_CATEGORY_LABEL_APPLY}${ARCP_LOCAL_UPCOUNTRY_LABEL_APPLY}`;
 
-  return `
-  SELECT
-    arcp.ncode,
-    ${claimMonthExpr} AS claim_month,
+  const sumAllApproved = arcpTallySumsApprovedOnAllFilteredLines(dateColumn);
+  const groupByClause = sumAllApproved
+    ? 'arcp.ncode'
+    : `arcp.ncode,
+    ${claimMonthExpr},
     arcp.ncalltype,
     arcp.nitemcategory,
     arcp.nlocalupcountry,
-    ${isTravelExpr} AS is_travel,
-    ${MAJOR_MINOR_EXPR} AS major_minor,
+    ${isTravelExpr},
+    ${MAJOR_MINOR_EXPR}`;
+
+  return `
+  SELECT
+    arcp.ncode,
+    ${sumAllApproved ? `MAX(${claimMonthExpr})` : claimMonthExpr} AS claim_month,
+    ${sumAllApproved ? 'MAX(arcp.ncalltype)' : 'arcp.ncalltype'} AS ncalltype,
+    ${sumAllApproved ? 'MAX(arcp.nitemcategory)' : 'arcp.nitemcategory'} AS nitemcategory,
+    ${sumAllApproved ? 'MAX(arcp.nlocalupcountry)' : 'arcp.nlocalupcountry'} AS nlocalupcountry,
+    ${sumAllApproved ? `MAX(${isTravelExpr})` : isTravelExpr} AS is_travel,
+    ${sumAllApproved ? `MAX(${MAJOR_MINOR_EXPR})` : MAJOR_MINOR_EXPR} AS major_minor,
     ${callTypeLabelExpr} AS call_type_label,
     ${itemCategoryLabelExpr} AS item_category_label,
     ${localUpcountryLabelExpr} AS local_upcountry_label,
@@ -413,23 +560,26 @@ function buildArcpClaimsLinesSubquery(
   ${ARCP_OFFICE_JOIN}
   LEFT JOIN trdcalls2fault tf (NOLOCK) ON arcp.ncalls2fault = tf.ncode
   ${ARCP_MAJOR_APPLY}
+  ${trhcallsDateApply}
   ${labelApplies}
   WHERE ${condition}
     ${ARCP_NOT_REJECTED}
     ${ARCP_INCLUDED_LINES_FILTER_EXISTS}
   GROUP BY
-    arcp.ncode,
-    ${claimMonthExpr},
-    arcp.ncalltype,
-    arcp.nitemcategory,
-    arcp.nlocalupcountry,
-    ${isTravelExpr},
-    ${MAJOR_MINOR_EXPR}
+    ${groupByClause}
   `.trim();
 }
 
 function useCrmUiLightweightSql(opts: ArcpClaimsQueryOpts): boolean {
   return Boolean(opts.crmUiFast && ARCP_CRM_UI_LIGHTWEIGHT);
+}
+
+/**
+ * BM Call Approved: date comes from trhcalls (bapproval + editedon) → vucnno = vtrnno.
+ * Sum branch/HO on every matching ARCP line (live CRM verification ~₹26,230 for FR152 Apr 2026).
+ */
+function arcpTallySumsApprovedOnAllFilteredLines(dateColumn: ArcpDateFilterColumn): boolean {
+  return dateColumn === 'bm_approved_at';
 }
 
 /** One row per call — same winner as detail CSV (mergeArcpDetailRows / export sort order). */
@@ -462,8 +612,15 @@ WHERE ranked.rn = 1
 `.trim();
 }
 
-/** Qty and amount payable from every line; branch/HO come from winning-lines union below. */
-function buildArcpClaimsLineBucketSubquery(linesSubquery: string): string {
+/** Qty and amount payable from every line; branch/HO from all lines (BM) or winning-lines union. */
+function buildArcpClaimsLineBucketSubquery(
+  linesSubquery: string,
+  sumApprovedOnAllLines = false
+): string {
+  const branchExpr = sumApprovedOnAllLines
+    ? 'SUM(al.branch_approved)'
+    : 'CAST(0 AS FLOAT)';
+  const hoExpr = sumApprovedOnAllLines ? 'SUM(al.ho_approved)' : 'CAST(0 AS FLOAT)';
   return `
 SELECT
   al.claim_month,
@@ -477,8 +634,8 @@ SELECT
   al.major_minor,
   COUNT(DISTINCT al.ncode) AS line_qty,
   SUM(al.amount_payable) AS amount_payable,
-  CAST(0 AS FLOAT) AS branch_approved,
-  CAST(0 AS FLOAT) AS ho_approved,
+  ${branchExpr} AS branch_approved,
+  ${hoExpr} AS ho_approved,
   AVG(NULLIF(al.rate_val, 0)) AS rate_val
 FROM (
 ${linesSubquery}
@@ -500,14 +657,56 @@ function buildArcpClaimsSummarySql(opts: ArcpClaimsQueryOpts): string {
   const claimMonthExpr = buildArcpClaimMonthExpr(dateColumn);
   const isTravelExpr =
     "CASE WHEN ISNULL(arcp.ntraveltype, '') <> '' AND arcp.ntraveltype <> '0' THEN 1 ELSE 0 END";
+  const trhcallsDateApply = buildArcpTrhcallsDateApply(
+    dateColumn,
+    opts.startDate,
+    opts.endDate,
+    opts
+  );
+  const sumAllApproved = arcpTallySumsApprovedOnAllFilteredLines(dateColumn);
   const linesSubquery = buildArcpClaimsLinesSubquery(
     condition,
     claimMonthExpr,
     isTravelExpr,
-    useCrmUiLightweightSql(opts),
-    dateColumn
+    useCrmUiLightweightSql(opts) || sumAllApproved,
+    dateColumn,
+    trhcallsDateApply
   );
-  const lineBucketSubquery = buildArcpClaimsLineBucketSubquery(linesSubquery);
+  const lineBucketSubquery = buildArcpClaimsLineBucketSubquery(
+    linesSubquery,
+    sumAllApproved
+  );
+
+  if (sumAllApproved) {
+    return `
+SELECT
+  lb.claim_month,
+  lb.ncalltype,
+  MAX(lb.call_type_label) AS call_type_label,
+  lb.nitemcategory,
+  MAX(lb.item_category_label) AS item_category_label,
+  lb.nlocalupcountry,
+  MAX(lb.local_upcountry_label) AS local_upcountry_label,
+  lb.is_travel,
+  lb.major_minor,
+  AVG(NULLIF(lb.rate_val, 0)) AS rate,
+  SUM(lb.line_qty) AS qty,
+  SUM(lb.amount_payable) AS amount_payable,
+  SUM(lb.branch_approved) AS branch_approved,
+  SUM(lb.ho_approved) AS ho_approved
+FROM (
+${lineBucketSubquery}
+) lb
+GROUP BY
+  lb.claim_month,
+  lb.ncalltype,
+  lb.nitemcategory,
+  lb.nlocalupcountry,
+  lb.is_travel,
+  lb.major_minor
+`.trim();
+  }
+
   const winningLinesSubquery = buildArcpClaimsWinningLinesSubquery(linesSubquery);
   return `
 SELECT
@@ -732,14 +931,30 @@ export function buildArcpClaimsGrandTotalSql(opts: ArcpClaimsQueryOpts): string 
   const claimMonthExpr = buildArcpClaimMonthExpr(dateColumn);
   const isTravelExpr =
     "CASE WHEN ISNULL(arcp.ntraveltype, '') <> '' AND arcp.ntraveltype <> '0' THEN 1 ELSE 0 END";
+  const trhcallsDateApply = buildArcpTrhcallsDateApply(
+    dateColumn,
+    opts.startDate,
+    opts.endDate,
+    opts
+  );
+  const sumAllApproved = arcpTallySumsApprovedOnAllFilteredLines(dateColumn);
   const linesSubquery = buildArcpClaimsLinesSubquery(
     condition,
     claimMonthExpr,
     isTravelExpr,
-    useCrmUiLightweightSql(opts),
-    dateColumn
+    useCrmUiLightweightSql(opts) || sumAllApproved,
+    dateColumn,
+    trhcallsDateApply
   );
-  const winningLinesSubquery = buildArcpClaimsWinningLinesSubquery(linesSubquery);
+  const winningLinesSubquery = sumAllApproved
+    ? ''
+    : buildArcpClaimsWinningLinesSubquery(linesSubquery);
+  const approvedFromLines = sumAllApproved
+    ? `(SELECT SUM(al.branch_approved) FROM (\n${linesSubquery}\n  ) al)`
+    : `(SELECT SUM(wl.branch_approved) FROM (\n${winningLinesSubquery}\n  ) wl)`;
+  const hoFromLines = sumAllApproved
+    ? `(SELECT SUM(al.ho_approved) FROM (\n${linesSubquery}\n  ) al)`
+    : `(SELECT SUM(wl.ho_approved) FROM (\n${winningLinesSubquery}\n  ) wl)`;
 
   return `
 SELECT
@@ -752,12 +967,8 @@ ${linesSubquery}
   (SELECT SUM(al.amount_payable) FROM (
 ${linesSubquery}
   ) al) AS amount_payable,
-  (SELECT SUM(wl.branch_approved) FROM (
-${winningLinesSubquery}
-  ) wl) AS branch_approved,
-  (SELECT SUM(wl.ho_approved) FROM (
-${winningLinesSubquery}
-  ) wl) AS ho_approved
+  ${approvedFromLines} AS branch_approved,
+  ${hoFromLines} AS ho_approved
 `.trim();
 }
 
@@ -975,10 +1186,11 @@ export function planArcpSummaryDateChunks(opts: ArcpClaimsQueryOpts): { start: s
 
   const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
   if (isArcpApproveDateColumn(dateColumn)) {
-    if (span <= ARCP_APPROVE_CHUNK_DAYS) {
+    const chunkDays = resolveArcpApproveChunkDays(opts);
+    if (span <= chunkDays) {
       return [{ start: opts.startDate, end: opts.endDate }];
     }
-    return splitArcpDateRange(opts.startDate, opts.endDate, ARCP_APPROVE_CHUNK_DAYS);
+    return splitArcpDateRange(opts.startDate, opts.endDate, chunkDays);
   }
 
   if (span <= ARCP_SUMMARY_SINGLE_QUERY_MAX_DAYS) {
@@ -1045,12 +1257,15 @@ export function estimateArcpLoadPlan(
   const span = arcpDateSpanDays(opts.startDate ?? null, opts.endDate ?? null) ?? 0;
   const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
   const likelyCrm = countLikelyCrmFallbackChunks(chunks, opts, hints);
-  const crmPerChunkMs = isArcpApproveDateColumn(dateColumn) ? 18000 : 12000;
+  const crmPerChunkMs = isArcpApproveDateColumn(dateColumn) ? 28000 : 12000;
   const concurrency = likelyCrm > 1 ? resolveArcpLoadConcurrency(opts) : 1;
   const postgresReady = Boolean(hints?.usePostgres && hints.coverage && hints.coverage.rowCount > 0);
-  const estimateMs = postgresReady
-    ? 3000 + Math.ceil(likelyCrm / concurrency) * crmPerChunkMs
-    : Math.ceil(chunks.length / concurrency) * crmPerChunkMs;
+  const clientChunked = chunks.length > 1;
+  const estimateMs = clientChunked
+    ? Math.ceil(chunks.length / concurrency) * crmPerChunkMs
+    : postgresReady
+      ? 3000 + Math.ceil(likelyCrm / concurrency) * crmPerChunkMs
+      : Math.ceil(chunks.length / concurrency) * crmPerChunkMs;
 
   return {
     spanDays: span,
@@ -1066,22 +1281,23 @@ export function estimateArcpLoadPlan(
 }
 
 /**
- * When arcp_lines_hot has rows, one API call + one Postgres query is enough for any
- * date span (including branch/franchisee filters). Avoids N parallel weekly CRM requests.
+ * Multi-chunk UI loads (weekly BM windows, monthly call/solve) keep each CRM request small.
+ * Date basis uses live trhcalls — do not collapse to one HTTP call when the plan has multiple chunks.
  */
 export function shouldUseClientSideArcpChunks(
   opts: ArcpClaimsQueryOpts,
   hints?: ArcpLoadEstimateHints
 ): boolean {
-  /** One server round-trip until coverage is known — avoids weekly chunk fan-out + tally inflation. */
+  const plan = estimateArcpLoadPlan(opts, hints);
+  if (plan.chunkCount > 1) return true;
+  /** One server round-trip until coverage is known. */
   if (hints?.usePostgres && !hints.coverage) {
     return false;
   }
   if (hints?.usePostgres && hints.coverage && hints.coverage.rowCount > 0) {
     return false;
   }
-  const plan = estimateArcpLoadPlan(opts, hints);
-  return plan.chunkCount > 1;
+  return false;
 }
 
 /** UI load plan: single round-trip when Postgres serves the tally. */
@@ -1117,7 +1333,7 @@ export function estimateArcpDetailLoadPlan(
   const span = arcpDateSpanDays(opts.startDate ?? null, opts.endDate ?? null) ?? 0;
   const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
   const likelyCrm = countLikelyCrmFallbackChunks(chunks, opts, hints);
-  const crmPerChunkMs = isArcpApproveDateColumn(dateColumn) ? 25000 : 15000;
+  const crmPerChunkMs = isArcpApproveDateColumn(dateColumn) ? 28000 : 15000;
   const concurrency = likelyCrm > 1 ? resolveArcpLoadConcurrency(opts) : 1;
   const postgresReady = Boolean(hints?.usePostgres && hints.coverage && hints.coverage.rowCount > 0);
   const estimateMs = postgresReady
@@ -1211,8 +1427,13 @@ function compareArcpDetailRowsForWinning(a: ArcpClaimsDetailRow, b: ArcpClaimsDe
  * (same rule as the on-screen tally). Raw BM/HO columns stay per-line from CRM.
  */
 export function applyArcpDetailExportApprovedAmounts(
-  rows: ArcpClaimsDetailRow[]
+  rows: ArcpClaimsDetailRow[],
+  dateFilterColumn?: ArcpDateFilterColumn | null
 ): ArcpClaimsDetailRow[] {
+  if (arcpTallySumsApprovedOnAllFilteredLines(resolveArcpDateFilterColumn(dateFilterColumn))) {
+    return rows;
+  }
+
   const groups = new Map<string, ArcpClaimsDetailRow[]>();
   for (const row of rows) {
     const key = arcpDetailCallKey(row);

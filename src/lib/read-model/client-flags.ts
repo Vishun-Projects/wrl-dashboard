@@ -30,8 +30,9 @@ function readDistributionFromPostgresClient(): boolean {
   );
 }
 
+/** ARCP Claims UI always plans for live CRM loads (matches server). */
 export function readArcpFromPostgresClient(): boolean {
-  return readClientSource(process.env.NEXT_PUBLIC_READ_ARCP_FROM) === 'postgres';
+  return false;
 }
 
 export function readCallsFromPostgresClient(): boolean {

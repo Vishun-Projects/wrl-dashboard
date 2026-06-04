@@ -113,15 +113,14 @@ function buildArcpPlanMessage(
     ARCP_DATE_FILTER_OPTIONS.find((option) => option.value === dateFilterColumn)?.label ??
     'Call Date';
 
-  if (
-    dateFilterColumn === 'bm_approved_at' ||
-    dateFilterColumn === 'ho_approved_at'
-  ) {
+  if (dateFilterColumn === 'bm_approved_at') {
     const parallelNote =
       resolveArcpLoadConcurrency({ dateFilterColumn }) > 1
         ? ` (up to ${resolveArcpLoadConcurrency({ dateFilterColumn })} in parallel)`
         : '';
-    return `${plan.spanDays}-day range on ${basis} loads in ${plan.chunkCount} weekly period(s)${parallelNote}. Est. ${eta}.`;
+    const periodLabel =
+      plan.chunkCount > 14 ? 'daily' : plan.chunkCount > 4 ? 'short' : 'weekly';
+    return `${plan.spanDays}-day range on ${basis} loads in ${plan.chunkCount} ${periodLabel} period(s)${parallelNote}. Est. ${eta}. Tally updates as each period completes.`;
   }
 
   return `Loading ${plan.chunkCount} period(s) on ${basis} (est. ${eta}).`;
@@ -159,7 +158,9 @@ function toLoadStatus(
     currentRange: inFlight
       ? concurrency > 1
         ? `up to ${concurrency} periods in parallel`
-        : 'loading next weekly period'
+        : total > 14
+          ? 'loading next day'
+          : 'loading next period'
       : null,
     etaRemainingLabel: done < total ? formatArcpDurationMs(etaMs) : null,
     etaFinishLabel: done < total ? formatArcpFinishTime(Date.now() + etaMs) : null,
@@ -487,14 +488,16 @@ export default function ArcpClaimsPage() {
         chunk: { start: string; end: string },
         chunkIndex: number
       ) => {
+        const isBmApprove = filters.arcpDateFilterColumn === 'bm_approved_at';
         const chunkTimeoutMs = useClientChunks
-          ? filters.arcpDateFilterColumn === 'bm_approved_at' ||
-            filters.arcpDateFilterColumn === 'ho_approved_at'
-            ? 120_000
+          ? isBmApprove
+            ? 180_000
             : 300_000
-          : loadPlan.crmChunkCount > 0
-            ? Math.max(loadPlan.estimateMs + 60_000, 300_000)
-            : Math.max(loadPlan.estimateMs + 30_000, 90_000);
+          : isBmApprove
+            ? Math.max(loadPlan.estimateMs + 120_000, 300_000)
+            : loadPlan.crmChunkCount > 0
+              ? Math.max(loadPlan.estimateMs + 60_000, 300_000)
+              : Math.max(loadPlan.estimateMs + 30_000, 120_000);
 
         return chunkedAuth.getWithAuthRetry<{
           aggregates?: ArcpClaimsAggregateRow[];
@@ -569,13 +572,6 @@ export default function ArcpClaimsPage() {
             if (data.error) throw new Error(data.error);
 
             partialAggregates[i] = data.aggregates ?? [];
-            if (!isStale()) {
-              setRawAggregateRows(
-                mergeArcpAggregateRows(
-                  partialAggregates.filter((r): r is ArcpClaimsAggregateRow[] => r != null).flat()
-                )
-              );
-            }
           } catch (chunkErr: unknown) {
             if (axios.isCancel(chunkErr) || (chunkErr instanceof DOMException && chunkErr.name === 'AbortError')) {
               return;
@@ -596,9 +592,17 @@ export default function ArcpClaimsPage() {
               : loadPlan.estimateMs;
 
           if (!isStale()) {
-            setLoadStatus(toLoadStatus(loadPlan, filters.arcpDateFilterColumn, done, etaMs, {
-              scopedFilters,
-            }));
+            const mergedSoFar = mergeArcpAggregateRows(
+              partialAggregates.filter((r): r is ArcpClaimsAggregateRow[] => r != null).flat()
+            );
+            setRawAggregateRows(mergedSoFar);
+            const lineQty = mergedSoFar.reduce((s, r) => s + Number(r.qty ?? 0), 0);
+            setLoadStatus(
+              toLoadStatus(loadPlan, filters.arcpDateFilterColumn, done, etaMs, {
+                scopedFilters,
+                rowsLoaded: lineQty > 0 ? lineQty : undefined,
+              })
+            );
           }
         });
 
@@ -879,7 +883,7 @@ export default function ArcpClaimsPage() {
         const fileName = `ARCP_Claims_Detail_${appliedFilters.startDateStr}_${appliedFilters.endDateStr}.csv`;
         downloadArcpClaimsDetailCsv(rows, fileName);
         toast.success(
-          `Exported ${rows.length.toLocaleString('en-IN')} lines — SUM(Branch Approved) matches summary tally`
+          `Exported ${rows.length.toLocaleString('en-IN')} lines — SUM(Raw BM Approved) is per-line from CRM`
         );
         return;
       }
@@ -957,7 +961,7 @@ export default function ArcpClaimsPage() {
       const fileName = `ARCP_Claims_Detail_${appliedFilters.startDateStr}_${appliedFilters.endDateStr}.csv`;
       downloadArcpClaimsDetailCsv(rows, fileName);
       toast.success(
-        `Exported ${rows.length.toLocaleString('en-IN')} lines — SUM(Branch Approved) matches summary tally`
+        `Exported ${rows.length.toLocaleString('en-IN')} lines — SUM(Raw BM Approved) is per-line from CRM`
       );
     } catch (err: unknown) {
       toast.error(
@@ -1093,11 +1097,12 @@ export default function ArcpClaimsPage() {
             className="min-w-0 shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-snug text-amber-950 lg:max-w-[min(20rem,36%)] lg:self-center"
             aria-live="polite"
           >
-            <strong>{dateBasisLabel}</strong> only includes lines whose{' '}
-            {approveHintColumn === 'bm_approved_at' ? 'BM approval date' : 'HO approval date'} falls
-            in this range — not when the call was logged or solved. Amount Payable, Branch Approved,
-            and HO Approved still apply to those lines, but the row set is usually smaller than Call
-            Date for the same calendar range.
+            <strong>{dateBasisLabel}</strong> uses calls in trhcalls with{' '}
+            <span className="font-medium">bapproval</span> and <span className="font-medium">editedon</span>{' '}
+            in this range, then includes ARCP lines whose call reference (vucnno) matches those
+            calls (vtrnno).
+            Amount Payable, Branch Approved, and HO Approved come from the ARCP lines, not from
+            trhcalls dates on the call log.
           </aside>
         ) : null}
       </div>
@@ -1122,7 +1127,7 @@ export default function ArcpClaimsPage() {
         </div>
       ) : null}
 
-      {appliedFilters && mergedAggregateRows.length > 0 && !loading ? (
+      {appliedFilters && mergedAggregateRows.length > 0 ? (
         <ArcpClaimsSummaryPanel
           totals={summaryTotals}
           tableView={tableView}
@@ -1136,7 +1141,10 @@ export default function ArcpClaimsPage() {
       ) : null}
 
       {loading && loadStatus ? (
-        <ArcpClaimsLoadBanner status={loadStatus} runningTotals={displayModel?.totals ?? null} />
+        <ArcpClaimsLoadBanner
+          status={loadStatus}
+          runningTotals={displayModel?.totals ?? null}
+        />
       ) : null}
 
       {exportingDetail && detailExportStatus ? (
@@ -1164,7 +1172,15 @@ export default function ArcpClaimsPage() {
                     Service tally
                   </h3>
                 ) : null}
-                <ArcpClaimsTable model={displayModel} loading={loading} />
+                <ArcpClaimsTable
+                  model={displayModel}
+                  loading={loading}
+                  loadProgress={
+                    loading && loadStatus && loadStatus.total > 1
+                      ? { done: loadStatus.done, total: loadStatus.total }
+                      : null
+                  }
+                />
               </section>
             ) : null}
             {tableView !== 'summary' ? (
@@ -1173,10 +1189,13 @@ export default function ArcpClaimsPage() {
                   Monthly breakdown
                 </h3>
                 <p className="mb-2 text-[10px] text-slate-400">
-                  Each month uses the active date filter (HO approval month when HO Call Approved is
+                  Each month uses the active date basis (BM approval month when BM Call Approved is
                   selected).
                 </p>
-                <ArcpClaimsMonthlyTable model={monthlyBreakdown} loading={loading} />
+                <ArcpClaimsMonthlyTable
+                  model={monthlyBreakdown}
+                  loading={loading && (monthlyBreakdown?.rows.length ?? 0) === 0}
+                />
               </section>
             ) : null}
           </div>

@@ -34,7 +34,6 @@ function colRef(column: string, alias?: string): string {
 
 function resolveHotSortColumn(dateColumn: ArcpDateFilterColumn, alias = 'h'): string {
   if (dateColumn === 'bm_approved_at') return colRef('bm_approved_at', alias);
-  if (dateColumn === 'ho_approved_at') return colRef('ho_approved_at', alias);
   if (dateColumn === 'dsolveddatetime') return colRef('solve_at', alias);
   return colRef('call_at', alias);
 }
@@ -42,10 +41,6 @@ function resolveHotSortColumn(dateColumn: ArcpDateFilterColumn, alias = 'h'): st
 function resolveDateCols(dateColumn: ArcpDateFilterColumn, alias?: string): DateCols {
   if (dateColumn === 'bm_approved_at') {
     const tsCol = colRef('bm_approved_at', alias);
-    return { tsCol, monthCol: claimMonthExpr(tsCol) };
-  }
-  if (dateColumn === 'ho_approved_at') {
-    const tsCol = colRef('ho_approved_at', alias);
     return { tsCol, monthCol: claimMonthExpr(tsCol) };
   }
   if (dateColumn === 'dsolveddatetime') {
@@ -367,7 +362,6 @@ SELECT
 
 function resolveDetailOrderCol(dateColumn: ArcpDateFilterColumn): string {
   if (dateColumn === 'bm_approved_at') return 'bm_approved_at';
-  if (dateColumn === 'ho_approved_at') return 'ho_approved_at';
   if (dateColumn === 'dsolveddatetime') return 'solve_at';
   return 'call_at';
 }
@@ -413,7 +407,7 @@ FROM arcp_lines_hot h
 LEFT JOIN dim_offices fr ON fr.ncode = h.nofficeid
 LEFT JOIN dim_offices br ON br.ncode = h.office_under
 WHERE ${whereSql}
-ORDER BY h.${dateColumn === 'bm_approved_at' ? 'bm_approved_at' : dateColumn === 'ho_approved_at' ? 'ho_approved_at' : 'call_at'} DESC NULLS LAST, h.ncode DESC
+ORDER BY h.${orderCol} DESC NULLS LAST, h.ncode DESC
 `;
 
   return withClient(async (client) => {

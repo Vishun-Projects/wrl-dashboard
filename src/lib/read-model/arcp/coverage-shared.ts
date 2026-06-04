@@ -13,8 +13,7 @@ export type ArcpPostgresCoverage = {
 export type ArcpCoverageDateColumn =
   | 'dcalllogdatetime'
   | 'dsolveddatetime'
-  | 'bm_approved_at'
-  | 'ho_approved_at';
+  | 'bm_approved_at';
 
 function boundsForColumn(
   coverage: ArcpPostgresCoverage,
@@ -22,7 +21,6 @@ function boundsForColumn(
 ): { min: string | null; max: string | null } {
   if (dateColumn === 'dsolveddatetime') return coverage.solveAt;
   if (dateColumn === 'bm_approved_at') return coverage.bmApprovedAt;
-  if (dateColumn === 'ho_approved_at') return coverage.hoApprovedAt;
   return coverage.callAt;
 }
 
@@ -44,7 +42,7 @@ export type ArcpCoverageSegment = {
 
 /**
  * Split a report date range into Postgres vs live CRM windows using loaded
- * min/max for the active date basis (HO approve filter uses ho_approved_at bounds).
+ * min/max for the active date basis (call / solve / BM on trhcalls when using live CRM).
  */
 export function planArcpCoverageSegments(
   startDate: string,

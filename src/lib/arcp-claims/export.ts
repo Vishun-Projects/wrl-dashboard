@@ -1,4 +1,4 @@
-import { applyArcpDetailExportApprovedAmounts, type ArcpClaimsDetailRow } from './query';
+import type { ArcpClaimsDetailRow } from './query';
 import type { ArcpClaimsTableModel } from './table';
 import { escapeCsvCell } from '@/lib/utils/csv';
 
@@ -98,24 +98,17 @@ const DETAIL_HEADERS = [
   'Rate',
   'Distance',
   'Amount Payable',
-  'Branch Approved (tally)',
-  'HO Approved (tally)',
   'Raw Charge Payable',
   'Raw BM Approved',
   'Raw HO Approved',
-  'Raw Approval1 Amount',
-  'Raw Approval2 Amount',
   'Summary Section',
   'Summary Sub-Row',
-  'Payable Minus Branch',
-  'Payable Minus HO',
 ] as const;
 
 export function buildArcpClaimsDetailCsv(rows: ArcpClaimsDetailRow[]): string {
-  const exportRows = applyArcpDetailExportApprovedAmounts(rows);
   const lines = [csvRow([...DETAIL_HEADERS])];
 
-  for (const row of exportRows) {
+  for (const row of rows) {
     lines.push(
       csvRow([
         row.ncode,
@@ -137,17 +130,11 @@ export function buildArcpClaimsDetailCsv(rows: ArcpClaimsDetailRow[]): string {
         row.rate,
         row.distance,
         row.amount_payable,
-        row.branch_approved,
-        row.ho_approved,
         row.raw_nchargespayable,
         row.raw_nbmapprovedamt,
         row.raw_nhoapprovedamt,
-        row.raw_napproval1amount,
-        row.raw_napproval2amount,
         row.summary_section,
         row.summary_sub_row,
-        row.payable_minus_branch,
-        row.payable_minus_ho,
       ])
     );
   }
