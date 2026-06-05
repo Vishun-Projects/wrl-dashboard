@@ -39,6 +39,11 @@ export const ARCP_APPROVE_SCOPED_CHUNK_DAYS = Math.max(
   1,
   Number(process.env.ARCP_APPROVE_SCOPED_CHUNK_DAYS ?? 3) || 3
 );
+/** Call/solve date with branch or franchisee — weekly CRM windows (avoids one huge timeout). */
+export const ARCP_SCOPED_CALL_CHUNK_DAYS = Math.max(
+  1,
+  Number(process.env.ARCP_SCOPED_CALL_CHUNK_DAYS ?? 7) || 7
+);
 
 /** Approve-date chunk size from active filters (branch uses all franchisees under nunder). */
 export function resolveArcpApproveChunkDays(opts: ArcpClaimsQueryOpts): number {
@@ -46,6 +51,13 @@ export function resolveArcpApproveChunkDays(opts: ArcpClaimsQueryOpts): number {
     return ARCP_APPROVE_SCOPED_CHUNK_DAYS;
   }
   return ARCP_APPROVE_CHUNK_DAYS;
+}
+
+export function resolveArcpCallChunkDays(opts: ArcpClaimsQueryOpts): number {
+  if (opts.franchisee?.trim() || opts.branch?.trim()) {
+    return ARCP_SCOPED_CALL_CHUNK_DAYS;
+  }
+  return ARCP_SUMMARY_SINGLE_QUERY_MAX_DAYS;
 }
 /** Parallel CRM requests for call/solve date loads (UI + server). */
 export const ARCP_LOAD_CONCURRENCY = 3;
@@ -1193,8 +1205,12 @@ export function planArcpSummaryDateChunks(opts: ArcpClaimsQueryOpts): { start: s
     return splitArcpDateRange(opts.startDate, opts.endDate, chunkDays);
   }
 
-  if (span <= ARCP_SUMMARY_SINGLE_QUERY_MAX_DAYS) {
+  const chunkDays = resolveArcpCallChunkDays(opts);
+  if (span <= chunkDays) {
     return [{ start: opts.startDate, end: opts.endDate }];
+  }
+  if (chunkDays < ARCP_SUMMARY_SINGLE_QUERY_MAX_DAYS) {
+    return splitArcpDateRange(opts.startDate, opts.endDate, chunkDays);
   }
 
   return splitArcpDateRangeByMonth(opts.startDate, opts.endDate);

@@ -116,6 +116,17 @@ function buildArcpJobResumeMessage(done: number, total: number, pending: number)
   return `${done}/${total} periods cached on server — fetching ${pending} remaining`;
 }
 
+function buildArcpPartialFailureMessage(
+  failedChunks: number,
+  totalChunks: number,
+  hasRows: boolean
+): string {
+  if (hasRows) {
+    return `Loaded partial tally — ${failedChunks} of ${totalChunks} period(s) timed out. Click Refresh to retry failed periods.`;
+  }
+  return `${failedChunks} of ${totalChunks} period(s) timed out. Click Refresh to retry — completed periods are kept on the server.`;
+}
+
 function buildArcpPlanMessage(
   plan: ArcpLoadPlan,
   dateFilterColumn: ArcpDateFilterColumn,
@@ -596,8 +607,9 @@ export default function ArcpClaimsPage() {
         );
       };
 
+      let failedChunks = jobStart.progress?.failedCount ?? 0;
+
       try {
-        let failedChunks = jobStart.progress?.failedCount ?? 0;
         let chunksToFetch = useClientChunks
           ? chunks.filter(
               (c) => jobChunkStatus.get(`${c.start}|${c.end}`) !== 'done'
@@ -645,14 +657,10 @@ export default function ArcpClaimsPage() {
             if (isChunkedFetchAuthError(singleErr)) {
               throw singleErr;
             }
-            const message = sanitizeUserFacingMessage(
-              axios.isAxiosError(singleErr) && singleErr.response?.data?.error
-                ? String(singleErr.response.data.error)
-                : singleErr instanceof Error
-                  ? singleErr.message
-                  : 'Failed to load ARCP claims'
-            );
-            throw new Error(message);
+            failedChunks += 1;
+            if (!isStale()) {
+              setRawAggregateRows(runningAggregates);
+            }
           }
         } else {
           let completedChunks = cachedAtStart;
@@ -720,16 +728,30 @@ export default function ArcpClaimsPage() {
         }
 
         if (failedChunks > 0 && !isStale()) {
-          const partialMessage =
-            runningAggregates.length > 0
-              ? `Loaded partial tally — ${failedChunks} of ${chunks.length} period(s) timed out. Narrow filters or retry.`
-              : 'Failed to load ARCP claims — all periods timed out for this range.';
-          if (runningAggregates.length === 0) {
-            throw new Error(partialMessage);
-          }
+          const hasRows = runningAggregates.length > 0;
+          const partialMessage = buildArcpPartialFailureMessage(
+            failedChunks,
+            chunks.length,
+            hasRows
+          );
           const userPartialMessage = sanitizeUserFacingMessage(partialMessage);
           setLoadError(userPartialMessage);
           toast.warning(userPartialMessage);
+          setLoadStatus(
+            toLoadStatus(
+              loadPlan,
+              filters.arcpDateFilterColumn,
+              Math.max(chunks.length - failedChunks, 0),
+              0,
+              {
+                scopedFilters,
+                planMessage: userPartialMessage,
+                rowsLoaded: hasRows
+                  ? runningAggregates.reduce((s, r) => s + Number(r.qty ?? 0), 0)
+                  : undefined,
+              }
+            )
+          );
         }
       } catch (err: unknown) {
         if (isStale()) return;
@@ -748,7 +770,9 @@ export default function ArcpClaimsPage() {
       } finally {
         if (!isStale()) {
           setLoading(false);
-          setLoadStatus(null);
+          if (failedChunks === 0) {
+            setLoadStatus(null);
+          }
         }
       }
     },
