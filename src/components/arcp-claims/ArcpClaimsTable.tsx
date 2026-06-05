@@ -3,6 +3,7 @@
 import React from 'react';
 import { AdminTable, AdminTh, AdminThead } from '@/components/admin/AdminUi';
 import {
+  arcpModelHasDisplayableContent,
   formatArcpAmount,
   formatArcpQty,
   formatArcpRate,
@@ -13,7 +14,7 @@ import {
 type ArcpClaimsTableProps = {
   model: ArcpClaimsTableModel | null;
   loading?: boolean;
-  loadProgress?: { done: number; total: number } | null;
+  updating?: boolean;
 };
 
 const cellBorder = 'border border-slate-200 px-3 py-1.5';
@@ -43,19 +44,13 @@ function renderDataCells(row: Extract<ArcpTableRow, { kind: 'data' }>) {
   );
 }
 
-export function ArcpClaimsTable({ model, loading, loadProgress }: ArcpClaimsTableProps) {
-  const showInitialSpinner = loading && (!model || model.rows.length === 0);
+export function ArcpClaimsTable({ model, loading, updating }: ArcpClaimsTableProps) {
+  const hasContent = arcpModelHasDisplayableContent(model);
+  const showInitialSpinner = Boolean(loading) && !hasContent;
 
   if (showInitialSpinner) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-12">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-900" />
-        {loadProgress && loadProgress.total > 1 ? (
-          <p className="text-[11px] text-slate-500">
-            Loading period {loadProgress.done} of {loadProgress.total}…
-          </p>
-        ) : null}
-      </div>
+      <p className="py-10 text-center text-[11px] text-slate-400">Waiting for tally data…</p>
     );
   }
 
@@ -94,22 +89,10 @@ export function ArcpClaimsTable({ model, loading, loadProgress }: ArcpClaimsTabl
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {loading && loadProgress && loadProgress.total > 1 ? (
-        <div className="mb-3 flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-600">
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-slate-900" />
-          <span>
-            Loading tally… period {Math.min(loadProgress.done + 1, loadProgress.total)} of{' '}
-            {loadProgress.total}
-          </span>
-          <div className="ml-auto h-1.5 w-32 overflow-hidden rounded-full bg-slate-100">
-            <div
-              className="h-full rounded-full bg-slate-800 transition-all duration-300"
-              style={{
-                width: `${Math.round((loadProgress.done / loadProgress.total) * 100)}%`,
-              }}
-            />
-          </div>
-        </div>
+      {updating ? (
+        <p className="mb-2 text-[10px] text-slate-400" aria-live="polite">
+          More periods still loading — totals update as each completes.
+        </p>
       ) : null}
       <AdminTable>
       <AdminThead>

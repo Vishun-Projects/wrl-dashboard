@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateArcpClaimsRequest } from '@/lib/arcp-claims/server/route-auth';
 import {
+  getLatestLoadJob,
   getLatestResumableLoadJob,
   getLoadJobById,
   getLoadJobStatus,
@@ -27,16 +28,21 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const kind = (searchParams.get('kind') === 'detail' ? 'detail' : 'agg') as ArcpChunkCacheKind;
+    const progressOnly = searchParams.get('progressOnly') === 'true';
     const jobId = searchParams.get('jobId');
-    const latest = searchParams.get('latest') === 'true';
+    const latestParam = searchParams.get('latest');
+    const latestAny = latestParam === 'any';
+    const latestResumable = latestParam === 'true';
 
     const auth = await authenticateArcpClaimsRequest(req, { kind });
     if (auth instanceof NextResponse) return auth;
 
     let job: ArcpLoadJobView | null = null;
     if (jobId) {
-      job = await getLoadJobById(auth.userId, jobId);
-    } else if (latest) {
+      job = await getLoadJobById(auth.userId, jobId, { skipReconcile: progressOnly });
+    } else if (latestAny) {
+      job = await getLatestLoadJob(auth.userId, kind);
+    } else if (latestResumable) {
       job = await getLatestResumableLoadJob(auth.userId, kind);
     } else {
       job = await getLoadJobStatus(auth.userId, auth.opts, kind);
@@ -62,6 +68,22 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    const progress = jobProgress(job);
+    const resumable =
+      job.status === 'running' || job.pendingCount > 0 || job.failedCount > 0;
+
+    if (progressOnly) {
+      return NextResponse.json({
+        jobId: job.jobId,
+        jobKey: job.jobKey,
+        kind: job.kind,
+        status: job.status,
+        filters: job.filters,
+        progress,
+        resumable,
+      });
+    }
+
     const partialAggregates = await mergeJobAggregatesFromDisk(job);
     const grandTotals = deriveArcpGrandTotalsFromAggregates(partialAggregates);
 
@@ -72,10 +94,10 @@ export async function GET(req: NextRequest) {
       status: job.status,
       chunks: job.chunks,
       filters: job.filters,
-      progress: jobProgress(job),
+      progress,
       partialAggregates,
       grandTotals,
-      resumable: job.status === 'running' || job.pendingCount > 0 || job.failedCount > 0,
+      resumable,
     });
   } catch (err: unknown) {
     console.error('[ARCP Load Status] error:', err);

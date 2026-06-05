@@ -137,7 +137,7 @@ export default function ReadModelSyncPage() {
         </button>
       }
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 md:p-6">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 md:p-6">
         {error ? (
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
             {error}

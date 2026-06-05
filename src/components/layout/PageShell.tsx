@@ -11,7 +11,7 @@ type PageShellProps = {
   toolbar?: React.ReactNode;
   /** Custom header row (tabs, etc.). When set, `title` / `actions` are ignored. */
   header?: React.ReactNode;
-  title?: string;
+  title?: React.ReactNode;
   subtitle?: string;
   icon?: React.ReactNode;
   actions?: React.ReactNode;

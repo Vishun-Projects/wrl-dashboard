@@ -5,6 +5,7 @@ import { ExternalLink, Loader2, X } from 'lucide-react';
 import { TrnLink } from '@/components/calls/TrnLink';
 import { LocationAuditCompareMap } from '@/components/location-audit/LocationAuditCompareMap';
 import { formatGpsSourceForDisplay } from '@/lib/geo/parse-latlong';
+import { auditSemantics, statusSemantics } from '@/lib/ui/semantics';
 
 export type LocationAuditDetailRow = {
   vtrnno: string;
@@ -56,10 +57,10 @@ function googleMapsUrl(lat: number, lng: number) {
 }
 
 function severityStyles(severity: string | undefined) {
-  if (severity === 'flag') return 'text-rose-800 bg-rose-50 border-rose-200';
-  if (severity === 'review') return 'text-amber-900 bg-amber-50 border-amber-200';
-  if (severity === 'incomplete') return 'text-slate-700 bg-slate-50 border-slate-200';
-  return 'text-emerald-800 bg-emerald-50 border-emerald-200';
+  if (severity === 'flag') return auditSemantics.fail;
+  if (severity === 'review') return auditSemantics.review;
+  if (severity === 'incomplete') return statusSemantics.neutralBg;
+  return auditSemantics.pass;
 }
 
 function SignalRow({ label, pass, reason }: { label: string; pass: boolean; reason: string }) {

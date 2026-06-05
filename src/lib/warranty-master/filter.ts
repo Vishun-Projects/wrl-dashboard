@@ -113,7 +113,7 @@ export function buildWarrantyMasterDimsFromFgLines(
 
 export function summarizeWarrantyMasterRows(rows: WarrantyMasterAggregateRow[]): WarrantyMasterSummary {
   const totalMachines = rows.reduce((sum, r) => sum + r.machineCount, 0);
-  const distinctCustomers = new Set(rows.map((r) => r.customerName)).size;
+  const distinctCustomers = new Set(rows.map((r) => r.customerKey)).size;
   const distinctGroups = new Set(rows.map((r) => r.groupName)).size;
   return { totalMachines, distinctCustomers, distinctGroups };
 }

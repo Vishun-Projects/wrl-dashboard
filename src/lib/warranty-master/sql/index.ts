@@ -10,5 +10,6 @@ export { buildWarrantyMasterWhereClause } from './where-clause';
 export {
   buildWarrantyMasterAggregateSql,
   buildWarrantyMasterFgLinesSql,
+  buildWarrantyMasterMetaSql,
   buildWarrantyMasterRowDetailSql,
 } from './queries';

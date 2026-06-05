@@ -101,7 +101,7 @@ export function RegisterCompactToolbar({
         <Search className="register-compact-toolbar-icon" />
         <input
           type="text"
-          placeholder="Search ID, TRN, call ID, serial..."
+          placeholder="Search by ID, customer name, serial, TRN…"
           className="register-compact-toolbar-input"
           value={search}
           onChange={(e) => setSearch(e.target.value)}

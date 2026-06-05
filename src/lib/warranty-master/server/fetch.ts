@@ -11,6 +11,7 @@ import {
 import {
   buildWarrantyMasterAggregateSql,
   buildWarrantyMasterFgLinesSql,
+  buildWarrantyMasterMetaSql,
   buildWarrantyMasterRowDetailSql,
 } from '../sql';
 import { sortWarrantyMasterAggregateRows } from '../sort';
@@ -27,6 +28,19 @@ const QUERY_TIMEOUT_MS = 300_000;
 async function fetchCrmSql(rawSql: string): Promise<Record<string, unknown>[]> {
   const res = await postQuery({ rawSql, timeoutMs: QUERY_TIMEOUT_MS });
   return (res.data || []) as Record<string, unknown>[];
+}
+
+export type WarrantyMasterMeta = {
+  totalMachines: number;
+};
+
+/** Lightweight count for client cache invalidation (monthly refresh). */
+export async function fetchWarrantyMasterMeta(): Promise<WarrantyMasterMeta> {
+  const raw = await fetchCrmSql(buildWarrantyMasterMetaSql());
+  const row = raw[0] ?? {};
+  return {
+    totalMachines: Number(row.totalMachines ?? 0),
+  };
 }
 
 /** Primary load: full FG-line dataset for client-side filtering. */

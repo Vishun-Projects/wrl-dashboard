@@ -5,6 +5,7 @@ import { hasPagePermission } from '@/lib/auth/page-access';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import {
   fetchWarrantyMasterFgLines,
+  fetchWarrantyMasterMeta,
   fetchWarrantyMasterRowDetail,
   fetchWarrantyMasterRows,
   parseWarrantyMasterDetailParams,
@@ -50,9 +51,15 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    if (mode === 'meta') {
+      const meta = await fetchWarrantyMasterMeta();
+      return NextResponse.json(meta);
+    }
+
     if (mode === 'fgLines') {
       const fgLines = await fetchWarrantyMasterFgLines();
-      return NextResponse.json({ fgLines });
+      const meta = await fetchWarrantyMasterMeta();
+      return NextResponse.json({ fgLines, meta });
     }
 
     if (mode === 'detail') {

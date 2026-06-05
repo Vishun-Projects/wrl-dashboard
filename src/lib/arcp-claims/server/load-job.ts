@@ -3,11 +3,13 @@ import { withClient } from '@/lib/read-model/db';
 import type { ArcpFetchOpts } from '@/lib/arcp-claims/server/fetch';
 import {
   ARCP_CHUNK_CACHE_VERSION,
+  arcpChunkCacheFileExists,
   buildArcpChunkCacheKey,
   readArcpChunkRowsFromDisk,
   type ArcpChunkCacheKind,
 } from '@/lib/arcp-claims/server/chunk-cache';
 import {
+  ARCP_MERGE_ACROSS_CHUNKS,
   mergeArcpAggregateRows,
   mergeArcpDetailRows,
   planArcpSummaryDateChunks,
@@ -41,6 +43,16 @@ export type ArcpLoadJobView = {
 };
 
 const JOB_TTL_DAYS = Number(process.env.ARCP_LOAD_JOB_TTL_DAYS ?? 7) || 7;
+
+export type ArcpLoadJobReadOpts = {
+  /** Skip disk reconcile (progress polls, dev single-host). */
+  skipReconcile?: boolean;
+};
+
+/** When true, load-status polls do not reset PG done chunks on transient disk misses. */
+export function arcpSkipDiskReconcile(): boolean {
+  return process.env.ARCP_SKIP_DISK_RECONCILE === 'true';
+}
 
 let cachedSchemaReady: boolean | undefined;
 
@@ -209,6 +221,29 @@ async function reconcileJobChunksWithDisk(
   return updated;
 }
 
+/** Remove chunk rows left over when the load plan changes (e.g. 3-day windows → calendar months). */
+async function pruneOrphanJobChunks(
+  client: import('pg').PoolClient,
+  jobId: string,
+  planned: { start: string; end: string }[]
+): Promise<void> {
+  if (planned.length === 0) return;
+  const starts = planned.map((c) => c.start);
+  const ends = planned.map((c) => c.end);
+  await client.query(
+    `
+    DELETE FROM arcp_claims_load_chunks c
+    WHERE c.job_id = $1::uuid
+      AND NOT EXISTS (
+        SELECT 1
+        FROM unnest($2::date[], $3::date[]) AS p(chunk_start, chunk_end)
+        WHERE c.chunk_start = p.chunk_start AND c.chunk_end = p.chunk_end
+      )
+    `,
+    [jobId, starts, ends]
+  );
+}
+
 async function refreshJobStatus(
   client: import('pg').PoolClient,
   jobId: string,
@@ -327,6 +362,10 @@ export async function startOrResumeLoadJob(
       );
     }
 
+    if (!force) {
+      await pruneOrphanJobChunks(client, jobId, planned);
+    }
+
     const chunks = await reconcileJobChunksWithDisk(client, jobId, kind);
     const status = deriveJobStatus(chunks);
     const counts = summarizeChunks(chunks);
@@ -344,9 +383,22 @@ export async function startOrResumeLoadJob(
   });
 }
 
+async function resolveJobChunks(
+  client: import('pg').PoolClient,
+  jobId: string,
+  kind: ArcpChunkCacheKind,
+  readOpts?: ArcpLoadJobReadOpts
+): Promise<ArcpLoadJobChunk[]> {
+  if (readOpts?.skipReconcile || arcpSkipDiskReconcile()) {
+    return fetchJobChunks(client, jobId);
+  }
+  return reconcileJobChunksWithDisk(client, jobId, kind);
+}
+
 export async function getLoadJobById(
   userId: string,
-  jobId: string
+  jobId: string,
+  readOpts?: ArcpLoadJobReadOpts
 ): Promise<ArcpLoadJobView | null> {
   if (!(await arcpLoadJobsSchemaReady())) return null;
 
@@ -363,7 +415,7 @@ export async function getLoadJobById(
 
     const row = job.rows[0];
     const kind = String(row.kind) as ArcpChunkCacheKind;
-    const chunks = await reconcileJobChunksWithDisk(client, jobId, kind);
+    const chunks = await resolveJobChunks(client, jobId, kind, readOpts);
     const counts = summarizeChunks(chunks);
     const status = deriveJobStatus(chunks);
 
@@ -396,6 +448,43 @@ export async function getLoadJobStatus(
       WHERE user_id = $1::uuid AND job_key = $2 AND kind = $3
       `,
       [userId, jobKey, kind]
+    );
+    if (job.rows.length === 0) return null;
+    const row = job.rows[0];
+    const jobId = String(row.job_id);
+    const jobKind = String(row.kind) as ArcpChunkCacheKind;
+    const chunks = await reconcileJobChunksWithDisk(client, jobId, jobKind);
+    const counts = summarizeChunks(chunks);
+    const status = deriveJobStatus(chunks);
+    return {
+      jobId,
+      jobKey: String(row.job_key),
+      kind: jobKind,
+      status,
+      totalChunks: Number(row.total_chunks ?? chunks.length),
+      chunks,
+      filters: (row.filters ?? {}) as Record<string, unknown>,
+      ...counts,
+    };
+  });
+}
+
+export async function getLatestLoadJob(
+  userId: string,
+  kind: ArcpChunkCacheKind
+): Promise<ArcpLoadJobView | null> {
+  if (!(await arcpLoadJobsSchemaReady())) return null;
+
+  return withClient(async (client) => {
+    const job = await client.query(
+      `
+      SELECT job_id::text AS job_id, job_key, kind, status, filters, total_chunks
+      FROM arcp_claims_load_jobs
+      WHERE user_id = $1::uuid AND kind = $2
+      ORDER BY updated_at DESC
+      LIMIT 1
+      `,
+      [userId, kind]
     );
     if (job.rows.length === 0) return null;
     const row = job.rows[0];
@@ -500,13 +589,14 @@ export async function markChunkFailed(
 export async function mergeJobAggregatesFromDisk(
   job: ArcpLoadJobView
 ): Promise<ArcpClaimsAggregateRow[]> {
-  const parts: ArcpClaimsAggregateRow[][] = [];
-  for (const chunk of job.chunks) {
-    if (chunk.status !== 'done') continue;
-    const rows = await readArcpChunkRowsFromDisk(chunk.cacheKey, 'agg');
-    if (rows && rows.length > 0) parts.push(rows as ArcpClaimsAggregateRow[]);
-  }
-  return mergeArcpAggregateRows(parts.flat());
+  const doneChunks = job.chunks.filter((c) => c.status === 'done');
+  const parts = await Promise.all(
+    doneChunks.map(async (chunk) => {
+      const rows = await readArcpChunkRowsFromDisk(chunk.cacheKey, 'agg');
+      return rows && rows.length > 0 ? (rows as ArcpClaimsAggregateRow[]) : [];
+    })
+  );
+  return mergeArcpAggregateRows(parts.flat(), ARCP_MERGE_ACROSS_CHUNKS);
 }
 
 export async function mergeJobDetailFromDisk(

@@ -233,7 +233,7 @@ export function RegisterFilterBar({
               <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="ID, TRN, call ID, serial..."
+                placeholder="Search by ID, customer name, serial, TRN…"
                 className="register-search-input"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}

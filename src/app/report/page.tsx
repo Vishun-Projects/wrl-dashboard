@@ -17,7 +17,11 @@ import {
   X,
   MoreVertical,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { PageAlert } from '@/components/ui/PageAlert';
+import { HorizontalScrollFade } from '@/components/ui/HorizontalScrollFade';
+import { TruncatedText } from '@/components/ui/TruncatedText';
+import { ReportOrientationBanner } from '@/components/report/ReportOrientationBanner';
+import { feedback } from '@/lib/ui/feedback';
 import { useUser } from '@/components/layout/DashboardLayout';
 import { DateRangeSelector } from '@/components/register/DateRangeSelector';
 import { CallDetail } from '@/components/calls/CallDetail';
@@ -326,7 +330,17 @@ export default function ReportPage() {
     reportPreferences,
     prefsReady,
     schedulePatchReportPreferences,
+    reportBanner,
+    setReportError,
+    clearReportBanner,
+    refreshDelta,
+    clearRefreshDelta,
   } = useReportFilters();
+
+  const [orientationDismissed, setOrientationDismissed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return sessionStorage.getItem('report-orientation-dismissed') === '1';
+  });
 
   const registerPrefsRestoredRef = React.useRef(false);
 
@@ -546,7 +560,7 @@ export default function ReportPage() {
         ...res.data
       });
     } catch (err: any) {
-      toast.error(
+      feedback.actionFailed(
         sanitizeUserFacingMessage(
           String(err.response?.data?.error || 'Failed to load call details')
         )
@@ -648,8 +662,10 @@ export default function ReportPage() {
         return row.Pincode ?? row.pincode ?? '—';
       case 'itemname':
         return row.itemname;
-      case 'callsvserialno':
-        return row.callsvserialno;
+      case 'callsvserialno': {
+        const serial = row.callsvserialno != null ? String(row.callsvserialno) : '';
+        return serial ? <TruncatedText text={serial} className="font-mono" /> : '—';
+      }
       case 'serviceman':
         return resolveTechnicianDisplayName(row, technicianRoster);
       case 'vcomplaint':
@@ -2057,7 +2073,7 @@ export default function ReportPage() {
         opId,
         message: err?.message || String(err),
       });
-      toast.error('Failed to fetch report data');
+      setReportError('Failed to fetch report data');
     } finally {
       const isActiveController = fetchControllerRef.current === controller;
       if (isActiveController) {
@@ -2357,7 +2373,7 @@ export default function ReportPage() {
       });
     } catch (err: any) {
       if (axios.isCancel(err)) return;
-      toast.error('Failed to fetch details');
+      feedback.actionFailed('Failed to fetch details');
       setDrillDown(prev => ({ ...prev, loading: false }));
     }
   };
@@ -2384,7 +2400,7 @@ export default function ReportPage() {
       reportPerf('drillDown', 'custom SQL POST complete', q0, { rowCount: (res.data.data || []).length });
     } catch (err: any) {
       if (axios.isCancel(err)) return;
-      toast.error(
+      feedback.actionFailed(
         'Query error: ' +
           sanitizeUserFacingMessage(String(err.response?.data?.error || err.message))
       );
@@ -2408,7 +2424,7 @@ export default function ReportPage() {
       });
       setSelectedBranchEngs(res.data);
     } catch (err) {
-      toast.error("Failed to fetch engineer names");
+      feedback.actionFailed('Failed to fetch engineer names');
     } finally {
       setFetchingEngs(false);
     }
@@ -3278,9 +3294,6 @@ export default function ReportPage() {
         }
 
         if (needsFullFetch && exportData.length < total) {
-          toast.info(
-            `Register shows ${limit} rows per page — fetching all ${total.toLocaleString()} matching rows for Excel…`
-          );
           await supabase.auth.refreshSession();
           exportData = await fetchAllRegisterRowsForExport({
             getAuthHeaders: getRegisterExportAuthHeaders,
@@ -3589,7 +3602,7 @@ export default function ReportPage() {
             onClick={() => {
               if (exportingDetailed) {
                 cancelRegisterExport();
-                toast.info('Export cancelled');
+                feedback.cancelled('Export cancelled');
                 return;
               }
               void handleExport('excel');
@@ -3646,6 +3659,27 @@ export default function ReportPage() {
         </div>
       </div>
 
+      {reportBanner ? (
+        <PageAlert
+          variant={reportBanner.variant}
+          message={reportBanner.message}
+          onDismiss={clearReportBanner}
+        />
+      ) : null}
+
+      {activeTab === 'register' && !orientationDismissed ? (
+        <ReportOrientationBanner
+          userName={userProfile?.name}
+          added={refreshDelta?.added}
+          updated={refreshDelta?.updated}
+          onDismiss={() => {
+            setOrientationDismissed(true);
+            sessionStorage.setItem('report-orientation-dismissed', '1');
+            clearRefreshDelta();
+          }}
+        />
+      ) : null}
+
       {exportingDetailed && (
         <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-950">
           <div className="flex min-w-0 items-center gap-2">
@@ -3660,7 +3694,7 @@ export default function ReportPage() {
             type="button"
             onClick={() => {
               cancelRegisterExport();
-              toast.info('Export cancelled');
+              feedback.cancelled('Export cancelled');
             }}
             className="shrink-0 rounded-md border border-amber-300 bg-white px-2 py-1 text-[11px] font-medium hover:bg-amber-100"
           >
@@ -3774,7 +3808,10 @@ export default function ReportPage() {
                 onChange={setVisibleRegisterColumns}
               />
             </div>
-            <div className="register-table-wrap inner-scrollbar">
+            <HorizontalScrollFade
+              className="min-h-0 min-w-0 flex-1"
+              scrollClassName="register-table-wrap inner-scrollbar"
+            >
               <table className="register-table">
               <colgroup>
                 <col className="register-col-num" />
@@ -3829,7 +3866,7 @@ export default function ReportPage() {
                 )}
               </tbody>
             </table>
-          </div>
+            </HorizontalScrollFade>
           {/* Pagination Controls */}
           <div className="flex h-11 flex-shrink-0 items-center justify-between border-t border-slate-200 bg-slate-50 px-4">
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">

@@ -21,7 +21,7 @@ import {
   settingsInputClass,
 } from '@/components/admin/AdminUi';
 import axios from 'axios';
-import { toast } from 'sonner';
+import { feedback } from '@/lib/ui/feedback';
 import { createClient } from '@/lib/supabase/client';
 import { useSearchParams } from 'next/navigation';
 
@@ -34,6 +34,7 @@ function ProfileContent() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
   const [resettingReports, setResettingReports] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
 
   const supabase = createClient();
   const searchParams = useSearchParams();
@@ -51,27 +52,34 @@ function ProfileContent() {
     try {
       setSaving(true);
       await axios.patch('/api/profile', { name });
-      toast.success('Profile updated successfully');
+      feedback.actionSuccess('Profile updated successfully');
       fetchProfile();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Update failed');
+      feedback.actionFailed(err.response?.data?.error || 'Update failed');
     } finally {
       setSaving(false);
     }
   }
 
   async function handleChangePassword() {
-    if (newPassword !== confirmPassword) return toast.error('Passwords do not match');
-    if (newPassword.length < 6) return toast.error('Password must be at least 6 characters');
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordError('Password must be at least 6 characters');
+      return;
+    }
+    setPasswordError(null);
 
     try {
       setSaving(true);
       await axios.post('/api/profile/password', { newPassword });
-      toast.success('Password changed successfully');
+      feedback.actionSuccess('Password changed successfully');
       setNewPassword('');
       setConfirmPassword('');
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Password change failed');
+      feedback.actionFailed(err.response?.data?.error || 'Password change failed');
     } finally {
       setSaving(false);
     }
@@ -81,9 +89,9 @@ function ProfileContent() {
     try {
       setResettingReports(true);
       await axios.patch('/api/profile/report-preferences', { reset: true }, { withCredentials: true });
-      toast.success('Report defaults reset. Open a report page to see role defaults.');
+      feedback.actionSuccess('Report defaults reset. Open a report page to see role defaults.');
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Reset failed');
+      feedback.actionFailed(err.response?.data?.error || 'Reset failed');
     } finally {
       setResettingReports(false);
     }
@@ -107,10 +115,10 @@ function ProfileContent() {
       } = supabase.storage.from('profiles').getPublicUrl(filePath);
 
       await axios.patch('/api/profile', { avatar_url: publicUrl });
-      toast.success('Profile image updated');
+      feedback.actionSuccess('Profile image updated');
       fetchProfile();
     } catch (err: any) {
-      toast.error(err.message || 'Upload failed');
+      feedback.actionFailed(err.message || 'Upload failed');
     } finally {
       setUploadingImage(false);
     }
@@ -248,7 +256,10 @@ function ProfileContent() {
                     <input
                       type="password"
                       value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
+                      onChange={(e) => {
+                        setNewPassword(e.target.value);
+                        if (passwordError) setPasswordError(null);
+                      }}
                       placeholder="Min 6 characters"
                       className={settingsInputClass()}
                     />
@@ -257,10 +268,16 @@ function ProfileContent() {
                     <input
                       type="password"
                       value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      onChange={(e) => {
+                        setConfirmPassword(e.target.value);
+                        if (passwordError) setPasswordError(null);
+                      }}
                       className={settingsInputClass()}
                     />
                   </SettingsField>
+                  {passwordError ? (
+                    <p className="text-xs text-red-600">{passwordError}</p>
+                  ) : null}
                 </div>
               </SettingsCard>
             </form>

@@ -58,7 +58,7 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
         type="button"
         className={statItemClass(totalActive)}
         onClick={() => commitStatus([])}
-        title="Show all calls"
+        title="Show all calls in the applied date range and filters"
       >
         <span className="register-stat-value text-slate-900">{(summary.total || 0).toLocaleString()}</span>
         <span className="register-stat-label">Total calls</span>
@@ -68,7 +68,7 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
         type="button"
         className={statItemClass(solvedActive, true)}
         onClick={() => togglePreset(REGISTER_STATUS_PRESETS.solved)}
-        title="Filter solved calls"
+        title="Solved calls — includes Tech. Solve Call and Closed sub-counts"
       >
         <div className="register-stat-main">
           <span className="register-stat-value text-emerald-600">{(summary.solved || 0).toLocaleString()}</span>
@@ -91,7 +91,9 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
               }
             }}
           >
-            <span className="register-stat-sub-label">Tech. Solve Call</span>
+            <span className="register-stat-sub-label" title="Technician solved — fast-close without full closure">
+              Tech. Solve Call
+            </span>
             <span className="register-stat-sub-value">{(summary.techSolved || 0).toLocaleString()}</span>
           </span>
           <span
@@ -110,7 +112,9 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
               }
             }}
           >
-            <span className="register-stat-sub-label">Closed</span>
+            <span className="register-stat-sub-label" title="Fully closed calls (includes rejected closures)">
+              Closed
+            </span>
             <span className="register-stat-sub-value">{(summary.closed || 0).toLocaleString()}</span>
           </span>
         </div>
@@ -120,7 +124,7 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
         type="button"
         className={statItemClass(openActive, true)}
         onClick={() => togglePreset(REGISTER_STATUS_PRESETS.open)}
-        title="Filter open calls"
+        title="Open calls — includes Open Unallocated and Assigned sub-counts"
       >
         <div className="register-stat-main">
           <span className="register-stat-value text-blue-600">{(summary.open || 0).toLocaleString()}</span>
@@ -162,7 +166,9 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
               }
             }}
           >
-            <span className="register-stat-sub-label">Assigned</span>
+            <span className="register-stat-sub-label" title="Open calls with a technician assigned">
+              Assigned
+            </span>
             <span className="register-stat-sub-value">{(summary.assigned || 0).toLocaleString()}</span>
           </span>
         </div>
@@ -172,7 +178,7 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
         type="button"
         className={statItemClass(cancelledActive)}
         onClick={() => togglePreset(REGISTER_STATUS_PRESETS.cancelled)}
-        title="Filter cancelled calls"
+        title="Cancelled calls in the current filter scope"
       >
         <span className="register-stat-value text-rose-600">{(summary.cancelled || 0).toLocaleString()}</span>
         <span className="register-stat-label">Cancelled</span>

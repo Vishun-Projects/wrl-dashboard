@@ -3,6 +3,8 @@
 import React, { useCallback, useMemo } from 'react';
 import { Download, X } from 'lucide-react';
 import { downloadPdfBlob, ARCP_PDF_PAGE_WIDTH_MM } from '@/lib/arcp-claims/pdf';
+import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
+import { ModalPortal } from '@/components/ui/ModalPortal';
 
 const PDF_PAGE_WIDTH_MM = ARCP_PDF_PAGE_WIDTH_MM;
 
@@ -31,14 +33,11 @@ export function ArcpClaimsPdfViewer({ open, pdfUrl, fileName, onClose }: ArcpCla
   const panelWidth = `min(${PDF_PAGE_WIDTH_MM}mm, calc(100vw - 2rem))`;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+    <ModalPortal open={open}>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+      <ModalBackdrop onClick={onClose} />
       <div
-        className="absolute inset-0"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-      <div
-        className="relative z-10 flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl"
+        className="relative z-[1] flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl"
         style={{
           width: panelWidth,
           height: 'calc(100vh - 2rem)',
@@ -75,5 +74,6 @@ export function ArcpClaimsPdfViewer({ open, pdfUrl, fileName, onClose }: ArcpCla
         />
       </div>
     </div>
+    </ModalPortal>
   );
 }

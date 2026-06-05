@@ -13,7 +13,8 @@ import React, {
 import { flushSync } from 'react-dom';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import axios from 'axios';
-import { toast } from 'sonner';
+import { feedback } from '@/lib/ui/feedback';
+import type { PageAlertState } from '@/hooks/usePageAlert';
 import { createClient } from '@/lib/supabase/client';
 import {
   buildDraftFilterSnapshot,
@@ -209,6 +210,14 @@ type ReportFiltersContextValue = {
   patchReportPreferences: (patch: Partial<UserReportPreferencesV1>) => Promise<UserReportPreferencesV1>;
   schedulePatchReportPreferences: (patch: Partial<UserReportPreferencesV1>) => void;
   landingReportPath: string;
+  /** Page-level banner for blocking load / partial-load issues on report shell. */
+  reportBanner: PageAlertState;
+  setReportError: (message: string) => void;
+  setReportWarning: (message: string) => void;
+  clearReportBanner: () => void;
+  /** Last background sync delta (for orientation banner). */
+  refreshDelta: { added: number; updated: number } | null;
+  clearRefreshDelta: () => void;
 };
 
 const ReportFiltersContext = createContext<ReportFiltersContextValue | null>(null);
@@ -349,6 +358,22 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     return null;
   });
   const [syncInProgress, setSyncInProgress] = useState(false);
+  const [reportBanner, setReportBanner] = useState<PageAlertState>(null);
+  const setReportError = useCallback((message: string) => {
+    setReportBanner({ variant: 'error', message });
+  }, []);
+  const setReportWarning = useCallback((message: string) => {
+    setReportBanner({ variant: 'warning', message });
+  }, []);
+  const clearReportBanner = useCallback(() => {
+    setReportBanner(null);
+  }, []);
+  const [refreshDelta, setRefreshDelta] = useState<{ added: number; updated: number } | null>(
+    null
+  );
+  const clearRefreshDelta = useCallback(() => {
+    setRefreshDelta(null);
+  }, []);
   const [corpusTick, setCorpusTick] = useState(0);
   const syncInFlightRef = useRef(false);
   const corpusLoadInFlightRef = useRef<Promise<void> | null>(null);
@@ -1107,7 +1132,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         if (generation !== corpusGenerationRef.current) return;
 
         if (res.data?.warning) {
-          toast.warning(sanitizeUserFacingMessage(String(res.data.warning)));
+          setReportWarning(sanitizeUserFacingMessage(String(res.data.warning)));
         }
 
         if (res.data?.isDelta) {
@@ -1228,7 +1253,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
               if (loadGeneration !== corpusGenerationRef.current) return;
 
               if (res.data?.warning) {
-                toast.warning(sanitizeUserFacingMessage(String(res.data.warning)));
+                setReportWarning(sanitizeUserFacingMessage(String(res.data.warning)));
               }
 
               const rows = (res.data?.calls || []) as Record<string, unknown>[];
@@ -1255,9 +1280,9 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
                     ? monthErr.message
                     : 'Month load failed'
               );
-              toast.warning(`Could not load calls for ${month.start.slice(0, 7)}`, {
-                description: msg,
-              });
+              setReportWarning(
+                `Could not load calls for ${month.start.slice(0, 7)}: ${msg}`
+              );
             }
           }
 
@@ -1366,7 +1391,9 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
             truncated: callCorpusStore?.truncated,
           });
           if (needsCorpusPreload && !callCorpusStore?.calls.size) {
-            toast.error('Could not load report data', { description: userMessage });
+            setReportError(
+              userMessage ? `Could not load report data: ${userMessage}` : 'Could not load report data'
+            );
           }
         } finally {
           if (generation === corpusGenerationRef.current) {
@@ -1387,7 +1414,16 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         }
       }
     },
-    [applyCorpusToUi, markCorpusSatisfied, needsCorpusPreload, restoreCorpusDeduped, supabase, tryResolveLocalCorpus]
+    [
+      applyCorpusToUi,
+      markCorpusSatisfied,
+      needsCorpusPreload,
+      restoreCorpusDeduped,
+      setReportError,
+      setReportWarning,
+      supabase,
+      tryResolveLocalCorpus,
+    ]
   );
 
   const fetchDistributionFromRegister = useCallback(
@@ -1517,9 +1553,12 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
             error: message,
           });
           if (!silent) {
-            toast.error('Could not load distribution data', {
-              description: sanitizeUserFacingMessage(message),
-            });
+            const userMessage = sanitizeUserFacingMessage(message);
+            setReportError(
+              userMessage
+                ? `Could not load distribution data: ${userMessage}`
+                : 'Could not load distribution data'
+            );
           }
         } finally {
           if (!silent) setDistributionLoading(false);
@@ -1538,7 +1577,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         }
       }
     },
-    [getSharedCacheKey, distributionCalls.length, supabase, syncCascadeOptionsFromCalls]
+    [getSharedCacheKey, distributionCalls.length, setReportError, supabase, syncCascadeOptionsFromCalls]
   );
 
   const ensureSharedCallsLoaded = useCallback(
@@ -1573,12 +1612,12 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       setSyncInProgress(true);
       let toastId: string | number | undefined;
       if (opts?.showToast) {
-        toastId = toast.loading('Refreshing report…');
+        toastId = feedback.loading('Refreshing report…');
       }
       try {
         logRegisterBulk('UI refresh from read model (no live ingest)');
         if (opts?.showToast && toastId != null) {
-          toast.loading('Loading latest calls…', { id: toastId });
+          feedback.loadingUpdate(toastId, 'Loading latest calls…');
         }
         await ensureSharedCallsLoaded(true);
         const syncTime = new Date();
@@ -1586,13 +1625,13 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         notifyCorpusRegisterDelta([], syncTime);
 
         if (opts?.showToast) {
-          if (toastId != null) toast.dismiss(toastId);
-          toast.success('Report refreshed');
-        } else if (toastId != null) {
-          toast.dismiss(toastId);
+          feedback.dismiss(toastId);
+          feedback.refreshed();
+        } else {
+          feedback.dismiss(toastId);
         }
       } catch (err: unknown) {
-        if (toastId != null) toast.dismiss(toastId);
+        feedback.dismiss(toastId);
         if (opts?.showToast) {
           const rawMessage =
             axios.isAxiosError(err) && err.response?.data?.error
@@ -1600,7 +1639,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
               : err instanceof Error
                 ? err.message
                 : 'Refresh failed';
-          toast.error('Failed to refresh report: ' + sanitizeUserFacingMessage(rawMessage));
+          feedback.actionFailed('Failed to refresh report: ' + sanitizeUserFacingMessage(rawMessage));
         }
       } finally {
         syncInFlightRef.current = false;
@@ -1632,7 +1671,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       await ensureCorpusLoaded({ silent: true, force: false });
       if (!callCorpusStore || callCorpusStore.cacheKey !== cacheKey || callCorpusStore.calls.size === 0) {
         if (opts?.showToast) {
-          toast.error('Could not refresh — report data is not loaded yet');
+          feedback.actionFailed('Could not refresh — report data is not loaded yet');
         }
         return;
       }
@@ -1702,16 +1741,17 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         setLastSyncedAt(syncTime);
       }
 
-      if (opts?.showToast) {
-        const toastParts: string[] = [];
-        if (addedCount > 0) toastParts.push(`${addedCount} added`);
-        if (updatedCount > 0) toastParts.push(`${updatedCount} updated`);
-        if (toastParts.length === 0) {
-          toast.info('No calls added or updated in the last minute');
-        } else {
-          toast.success(`${toastParts.join(', ')} in the last minute`);
+        if (addedCount > 0 || updatedCount > 0) {
+          setRefreshDelta({ added: addedCount, updated: updatedCount });
         }
-      }
+        if (opts?.showToast) {
+          const toastParts: string[] = [];
+          if (addedCount > 0) toastParts.push(`${addedCount} added`);
+          if (updatedCount > 0) toastParts.push(`${updatedCount} updated`);
+          if (toastParts.length > 0) {
+            feedback.backgroundUpdate(`${toastParts.join(', ')} in the last minute`);
+          }
+        }
     } catch (err: unknown) {
       if (opts?.showToast) {
         const message =
@@ -1720,7 +1760,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
             : err instanceof Error
               ? err.message
               : 'Sync failed';
-        toast.error('Failed to refresh calls: ' + sanitizeUserFacingMessage(message));
+        feedback.actionFailed('Failed to refresh calls: ' + sanitizeUserFacingMessage(message));
       }
     } finally {
       syncInFlightRef.current = false;
@@ -1923,6 +1963,12 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     patchReportPreferences,
     schedulePatchReportPreferences,
     landingReportPath,
+    reportBanner,
+    setReportError,
+    setReportWarning,
+    clearReportBanner,
+    refreshDelta,
+    clearRefreshDelta,
   }), [
     search,
     debouncedSearch,
@@ -1995,6 +2041,12 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     patchReportPreferences,
     schedulePatchReportPreferences,
     landingReportPath,
+    reportBanner,
+    setReportError,
+    setReportWarning,
+    clearReportBanner,
+    refreshDelta,
+    clearRefreshDelta,
   ]);
 
   return (

@@ -1,0 +1,46 @@
+@theme {
+  /* Surfaces (60%) */
+  --color-surface: #ffffff;
+  --color-surface-muted: #f8fafc;
+  --color-border: #e2e8f0;
+
+  /* Chrome / secondary (30%) */
+  --color-primary: #0f172a;
+  --color-primary-soft: #f1f5f9;
+
+  /* Primary actions only (10%) */
+  --color-accent: #3b82f6;
+  --color-accent-hover: #2563eb;
+
+  /* Semantic status — badges/alerts only, never action buttons */
+  --color-success: #059669;
+  --color-success-soft: #ecfdf5;
+  --color-warning: #d97706;
+  --color-warning-soft: #fffbeb;
+  --color-danger: #dc2626;
+  --color-danger-soft: #fef2f2;
+  --color-info: #2563eb;
+  --color-info-soft: #eff6ff;
+
+  /* Legacy aliases */
+  --color-bg-canvas: var(--color-surface);
+  --color-bg-soft: var(--color-surface-muted);
+
+  --font-sans: var(--font-dm-sans), 'Inter', system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), monospace;
+
+  --shadow-premium: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  --shadow-glass: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+
+  /* Type scale */
+  --text-ui-caption: 10px;
+  --text-ui-label: 11px;
+  --text-ui-body: 13px;
+  --text-ui-title: 18px;
+
+  /* Spacing rhythm */
+  --spacing-ui-1: 4px;
+  --spacing-ui-2: 8px;
+  --spacing-ui-3: 12px;
+  --spacing-ui-4: 16px;
+}

@@ -12,7 +12,6 @@ import {
   FilterX,
 } from 'lucide-react';
 import axios from 'axios';
-import { toast } from 'sonner';
 import {
   DistributionActiveFilters,
   type DistributionFilterChip,
@@ -50,6 +49,10 @@ import {
   buildRegisterViewFiltersFromContext,
   toDateString,
 } from '@/lib/report/filters';
+import {
+  distributionOpenCallClasses,
+  distributionRatioLevel,
+} from '@/lib/ui/semantics';
 import {
   classifyRegisterRowStatus,
   deriveRegisterView,
@@ -646,7 +649,6 @@ export default function CallDistributionPage() {
         // Filter table on click
         circle.on('click', () => {
           setSelectedPincode(pin.pincode);
-          toast.info(`Focused on Pincode cluster ${pin.pincode}`);
         });
 
         circle.addTo(layer);
@@ -862,7 +864,6 @@ export default function CallDistributionPage() {
         <RegisterPageFilters
           loading={distributionLoading}
           loadingLabel="Loading calls for distribution map…"
-          onApply={() => void fetchDistributionData(true)}
           onClearAll={() => {
             setSelectedPincode('All');
             clearTableLink();
@@ -1048,13 +1049,8 @@ export default function CallDistributionPage() {
                     prev != null &&
                     !isUnallocatedFranchiseeCode(prev.franchisee_code) &&
                     normalizeOfficeCode(prev.franchisee_code) === highlightedFranchisee;
-                  const ratioColor =
-                    fran.ratio > 15
-                      ? 'text-rose-600 font-bold'
-                      : fran.ratio > 7
-                        ? 'text-amber-600 font-semibold'
-                        : 'text-emerald-600';
-
+                  const ratioLevel = distributionRatioLevel(fran.ratio);
+                  const ratioColor = distributionOpenCallClasses(ratioLevel);
                   return (
                     <tr
                       key={fran.franchisee_code}

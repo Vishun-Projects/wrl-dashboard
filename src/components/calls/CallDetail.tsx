@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { X, AlertCircle, Send, Image, ExternalLink, Package, MessageSquare, ArrowRight, Wrench, Copy, CheckCircle, XCircle, Clock, UserCheck } from 'lucide-react';
-import { toast } from 'sonner';
+import { feedback } from '@/lib/ui/feedback';
 import { ImagePreviewViewer } from '@/components/shared/ImagePreviewViewer';
 
 interface CallDetailProps {
@@ -128,10 +128,6 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
         return;
       }
       setErrorType(flag === 'query' ? 'hold' : 'reject');
-      const toastFn = flag === 'query' ? toast.warning : toast.error;
-      toastFn(`Mandatory: Please explain why you are ${flag === 'query' ? 'holding' : 'rejecting'} this ticket.`, {
-        description: "Type your reason in the Notes box and click again.",
-      });
       return;
     }
 
@@ -148,13 +144,13 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
     onFlagUpdate(call.ncode, flag);
 
     if (flag === 'noted') {
-      toast.success("Success: Ticket Approved and Closed");
+      feedback.actionSuccess('Ticket approved and closed');
       if (onNext) onNext(); else onClose();
     } else if (flag === 'query') {
-      toast.warning("Status Updated: Ticket placed on Hold");
+      feedback.actionSuccess('Ticket placed on hold');
       if (onNext) onNext();
     } else if (flag === 'escalate') {
-      toast.error("Status Updated: Ticket Rejected");
+      feedback.actionSuccess('Ticket rejected');
       if (onNext) onNext();
     }
   };
@@ -229,7 +225,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
     setNote('');
     setLastCommentedAt(Date.now());
     setErrorType('none');
-    toast.success("Comment added to trail");
+    feedback.actionSuccess('Comment added to trail');
     setActiveTab('comments');
   };
 
@@ -674,10 +670,19 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                 <div className="text-[11px] text-slate-400 ui-label">Notes / query</div>
                 <textarea
                   value={note}
-                  onChange={(e) => setNote(e.target.value)}
+                  onChange={(e) => {
+                    setNote(e.target.value);
+                    if (errorType !== 'none') setErrorType('none');
+                  }}
                   placeholder="Add observations..."
                   className="flex-1 w-full bg-white border border-slate-200 rounded-lg p-3 text-[13px] outline-none resize-none focus:border-slate-400"
                 />
+                {errorType !== 'none' ? (
+                  <p className="text-xs text-red-600">
+                    Please explain why you are {errorType === 'hold' ? 'holding' : 'rejecting'} this
+                    ticket in the notes box, then click again.
+                  </p>
+                ) : null}
                 <button
                   onClick={handlePostComment}
                   disabled={!note.trim()}

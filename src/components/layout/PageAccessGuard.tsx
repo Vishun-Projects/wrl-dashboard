@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useUser } from '@/components/layout/DashboardLayout';
 import { canAccessPath, defaultReportLandingPath } from '@/lib/auth/page-access';
-import { toast } from 'sonner';
+import { feedback } from '@/lib/ui/feedback';
 
 type PageAccessGuardProps = {
   children: React.ReactNode;
@@ -22,7 +22,7 @@ export function PageAccessGuard({ children }: PageAccessGuardProps) {
 
     if (canAccessPath(permissions, pathname)) return;
 
-    toast.error('You do not have access to this page.');
+    feedback.accessDenied();
     const fallback =
       pathname.startsWith('/report') || pathname.startsWith('/admin')
         ? defaultReportLandingPath(permissions)

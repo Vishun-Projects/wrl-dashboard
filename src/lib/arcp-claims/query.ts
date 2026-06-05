@@ -66,10 +66,18 @@ export const ARCP_APPROVE_LOAD_CONCURRENCY = 1;
 /** UI CRM fallback: skip label joins in CRM; resolve from Postgres dims after fetch. */
 export const ARCP_CRM_UI_LIGHTWEIGHT = process.env.ARCP_CRM_UI_LIGHTWEIGHT !== 'false';
 
-export function resolveArcpLoadConcurrency(opts: ArcpClaimsQueryOpts): number {
-  return isArcpApproveDateColumn(resolveArcpDateFilterColumn(opts.dateFilterColumn))
-    ? ARCP_APPROVE_LOAD_CONCURRENCY
-    : ARCP_LOAD_CONCURRENCY;
+export function resolveArcpLoadConcurrency(
+  opts: ArcpClaimsQueryOpts,
+  plan?: Pick<ArcpLoadPlan, 'chunkCount' | 'spanDays'>
+): number {
+  if (isArcpApproveDateColumn(resolveArcpDateFilterColumn(opts.dateFilterColumn))) {
+    // Calendar-month BM plan: parallel cache/postgres reads; CRM timeouts auto-split.
+    if (plan && plan.chunkCount <= 12 && plan.spanDays > 7) {
+      return Math.min(ARCP_LOAD_CONCURRENCY, 3);
+    }
+    return ARCP_APPROVE_LOAD_CONCURRENCY;
+  }
+  return ARCP_LOAD_CONCURRENCY;
 }
 /** @deprecated use ARCP_SUMMARY_SINGLE_QUERY_MAX_DAYS */
 export const ARCP_QUERY_CHUNK_DAYS = ARCP_SUMMARY_SINGLE_QUERY_MAX_DAYS;
@@ -1185,7 +1193,7 @@ export function countArcpCalendarMonths(startDate: string, endDate: string): num
   return splitArcpDateRangeByMonth(startDate, endDate).length;
 }
 
-/** Pick query windows: approve date always uses small slices; call/solve uses months when wide. */
+/** Pick query windows: BM approved uses calendar months when wide; call/solve uses months when wide. */
 export function planArcpSummaryDateChunks(opts: ArcpClaimsQueryOpts): { start: string; end: string }[] {
   if (!opts.startDate || !opts.endDate) {
     return [{ start: opts.startDate || '', end: opts.endDate || '' }];
@@ -1201,6 +1209,10 @@ export function planArcpSummaryDateChunks(opts: ArcpClaimsQueryOpts): { start: s
     const chunkDays = resolveArcpApproveChunkDays(opts);
     if (span <= chunkDays) {
       return [{ start: opts.startDate, end: opts.endDate }];
+    }
+    // Wide BM-approved ranges: one calendar month per chunk (resilient fetch splits on CRM timeout).
+    if (span > 7) {
+      return splitArcpDateRangeByMonth(opts.startDate, opts.endDate);
     }
     return splitArcpDateRange(opts.startDate, opts.endDate, chunkDays);
   }
@@ -1498,10 +1510,41 @@ function preferAggregateLabel(current: string, incoming: string): string {
   return right.length > left.length ? right : left;
 }
 
+/** Preserve claim_month when merging rows from different date-range chunks (multi-month loads). */
+export const ARCP_MERGE_ACROSS_CHUNKS = { includeClaimMonth: true } as const;
+
+/** yyyy-MM labels for calendar months touched by a chunk date range. */
+export function claimMonthsForArcpChunk(start: string, end: string): string[] {
+  return splitArcpDateRangeByMonth(start, end).map((chunk) => chunk.start.slice(0, 7));
+}
+
 /**
- * Stable merge key for tally totals across weekly CRM/Postgres chunks.
- * Excludes claim_month so the same service bucket is not duplicated when one chunk
- * returns claim_month "unknown" and another returns "2025-03" (monthly view uses raw rows).
+ * Merge one fetched chunk into running aggregates.
+ * When replaceMonths is true (calendar-month plans), drop prior rows for those months first
+ * so server partialAggregates + client refetch cannot double-count.
+ */
+export function mergeArcpChunkAggregateRows(
+  running: ArcpClaimsAggregateRow[],
+  chunk: { start: string; end: string },
+  chunkRows: ArcpClaimsAggregateRow[],
+  options?: { replaceMonths?: boolean }
+): ArcpClaimsAggregateRow[] {
+  if (chunkRows.length === 0) return running;
+  const monthsToReplace = options?.replaceMonths ? new Set(claimMonthsForArcpChunk(chunk.start, chunk.end)) : null;
+  const base =
+    monthsToReplace && monthsToReplace.size > 0
+      ? running.filter((row) => {
+          const month = String(row.claim_month ?? 'unknown').trim() || 'unknown';
+          return !monthsToReplace.has(month);
+        })
+      : running;
+  return mergeArcpAggregateRows([...base, ...chunkRows], ARCP_MERGE_ACROSS_CHUNKS);
+}
+
+/**
+ * Stable merge key for tally totals across CRM/Postgres chunks.
+ * Excludes claim_month for the service summary so one bucket is not duplicated when
+ * chunks disagree on month label; monthly breakdown keeps month via ARCP_MERGE_ACROSS_CHUNKS.
  */
 function aggregateGroupKey(
   row: ArcpClaimsAggregateRow,

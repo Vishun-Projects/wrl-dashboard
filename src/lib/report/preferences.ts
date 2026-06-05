@@ -15,6 +15,7 @@ import {
   resolveRegisterDateSqlColumn,
   type RegisterDateFilterColumn,
 } from '@/lib/trhcalls/query';
+import type { ArcpDateFilterColumn } from '@/lib/arcp-claims/query';
 import { canAccessPath, defaultReportLandingPath } from '@/lib/auth/page-access';
 
 export const USER_REPORT_PREFS_VERSION = 1 as const;
@@ -80,12 +81,23 @@ export type RegisterPreferences = {
   activeTab?: 'register' | 'summary' | 'accounts';
 };
 
+export type ArcpPreferences = {
+  dateFilterColumn?: ArcpDateFilterColumn;
+};
+
+const VALID_ARCP_DATE_COLUMNS = new Set<ArcpDateFilterColumn>([
+  'dcalllogdatetime',
+  'dsolveddatetime',
+  'bm_approved_at',
+]);
+
 export type UserReportPreferencesV1 = {
   version: typeof USER_REPORT_PREFS_VERSION;
   lastReportPath?: string;
   shared?: StoredSharedFilters;
   serialAudit?: SerialAuditPreferences;
   register?: RegisterPreferences;
+  arcp?: ArcpPreferences;
   updatedAt?: string;
 };
 
@@ -415,6 +427,15 @@ export function sanitizeSerialAuditPrefs(
   };
 }
 
+export function sanitizeArcpPrefs(raw: ArcpPreferences | undefined): ArcpPreferences {
+  if (!raw || typeof raw !== 'object') return {};
+  const dateFilterColumn =
+    raw.dateFilterColumn && VALID_ARCP_DATE_COLUMNS.has(raw.dateFilterColumn)
+      ? raw.dateFilterColumn
+      : undefined;
+  return { dateFilterColumn };
+}
+
 export function sanitizeRegisterPrefs(raw: RegisterPreferences | undefined): RegisterPreferences {
   if (!raw || typeof raw !== 'object') return {};
   const visibleColumns = capStrings(raw.visibleColumns, REGISTER_TABLE_COLUMN_KEYS.length).filter(
@@ -452,6 +473,7 @@ export function parseUserReportPreferences(raw: unknown): UserReportPreferencesV
     shared: obj.shared as StoredSharedFilters | undefined,
     serialAudit: sanitizeSerialAuditPrefs(obj.serialAudit as SerialAuditPreferences | undefined),
     register: sanitizeRegisterPrefs(obj.register as RegisterPreferences | undefined),
+    arcp: sanitizeArcpPrefs(obj.arcp as ArcpPreferences | undefined),
     updatedAt: typeof obj.updatedAt === 'string' ? obj.updatedAt : undefined,
   };
 }
@@ -475,6 +497,8 @@ export function mergeUserReportPreferences(
       patch.register !== undefined
         ? { ...existing.register, ...patch.register }
         : existing.register,
+    arcp:
+      patch.arcp !== undefined ? { ...existing.arcp, ...patch.arcp } : existing.arcp,
     updatedAt: new Date().toISOString(),
   };
 }

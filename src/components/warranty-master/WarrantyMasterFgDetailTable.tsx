@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo } from 'react';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import {
   sortWarrantyMasterFgDetailRows,
   type WarrantyMasterFgDetailRow,
@@ -63,42 +64,46 @@ export function WarrantyMasterFgDetailTable({
         </p>
       </div>
 
-      <div className="warranty-master-detail-scroll custom-scrollbar">
-        <table className="warranty-master-detail-table">
-          <thead>
-            <tr>
-              <th className="w-[70%]">FG model</th>
-              <th className="text-right">Count of M/c</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedRows.map((d, idx) => (
-              <tr key={`${d.fgModel}-${idx}`}>
-                <td className="font-medium text-slate-800">{d.fgModel}</td>
-                <td className="text-right tabular-nums text-slate-700">
-                  {d.machineCount.toLocaleString()}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="warranty-master-detail-table-foot">
-              <td className="font-semibold text-slate-700">Subtotal</td>
-              <td className="text-right tabular-nums font-semibold text-slate-800">
-                {subtotal.toLocaleString()}
-                {subtotal !== parentMachineCount ? (
-                  <span
-                    className="ml-1.5 text-[10px] font-normal text-amber-700"
-                    title="Subtotal differs from parent row count"
-                  >
-                    (parent: {parentMachineCount.toLocaleString()})
-                  </span>
-                ) : null}
+      <table className="warranty-master-detail-table">
+        <colgroup>
+          <col />
+          <col />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>FG model</th>
+            <th className="text-right">Count of M/c</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sortedRows.map((d, idx) => (
+            <tr key={`${d.fgModel}-${idx}`}>
+              <td className="max-w-0 font-medium text-slate-800">
+                <TruncatedText text={d.fgModel} />
+              </td>
+              <td className="text-right tabular-nums text-slate-700">
+                {d.machineCount.toLocaleString()}
               </td>
             </tr>
-          </tfoot>
-        </table>
-      </div>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="warranty-master-detail-table-foot">
+            <td className="font-semibold text-slate-700">Subtotal</td>
+            <td className="text-right tabular-nums font-semibold text-slate-800">
+              {subtotal.toLocaleString()}
+              {subtotal !== parentMachineCount ? (
+                <span
+                  className="ml-1.5 text-[10px] font-normal text-amber-700"
+                  title="Subtotal differs from parent row count"
+                >
+                  (parent: {parentMachineCount.toLocaleString()})
+                </span>
+              ) : null}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }

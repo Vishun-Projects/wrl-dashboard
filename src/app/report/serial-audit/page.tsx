@@ -81,7 +81,9 @@ import type { ExtraActiveFilterChip } from '@/lib/report/filters';
 import { MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS } from '@/lib/serial-audit/server/batch-fetch';
 import { SerialAuditCallsDetailTable } from '@/components/serial-audit/SerialAuditCallsDetailTable';
 import { SerialAuditAnalysisPanel } from '@/components/serial-audit/SerialAuditAnalysisPanel';
-import { toast } from 'sonner';
+import { feedback } from '@/lib/ui/feedback';
+import { SerialRepairLegend } from '@/components/serial-audit/SerialRepairLegend';
+import { repairSemantics } from '@/lib/ui/semantics';
 
 const DEFAULT_RISK_THRESHOLD = 3;
 const SERIAL_PAGE_SIZE = 25;
@@ -279,7 +281,7 @@ export default function SerialAuditPage() {
             ? err.message
             : 'Failed to load repair types'
       );
-      toast.error(message);
+      feedback.actionFailed(message);
     } finally {
       setRepairOptionsLoading(false);
     }
@@ -445,7 +447,7 @@ export default function SerialAuditPage() {
               ? String(err.response.data.error)
               : err
           );
-          toast.error(message || 'Could not load ASP breakdown');
+          feedback.actionFailed(message || 'Could not load ASP breakdown');
         } finally {
           setAnalysisLoading(false);
         }
@@ -642,7 +644,6 @@ export default function SerialAuditPage() {
               : err
           );
           setLoadError(message);
-          toast.error(message);
         } finally {
           setLoading(false);
         }
@@ -835,7 +836,7 @@ export default function SerialAuditPage() {
               ? err.message
               : 'Failed to load call details'
         );
-        toast.error(message);
+        feedback.actionFailed(message);
       } finally {
         setDetailLoading(null);
       }
@@ -1024,8 +1025,7 @@ export default function SerialAuditPage() {
 
   const handleApplyFilters = useCallback(() => {
     setAppliedRepairs(draftRepairs);
-    void loadWindowData({ force: true, repairs: draftRepairs });
-  }, [draftRepairs, loadWindowData]);
+  }, [draftRepairs]);
 
   const handleClearAllFilters = useCallback(() => {
     setDraftRepairs([]);
@@ -1229,7 +1229,9 @@ export default function SerialAuditPage() {
       }
       bodyClassName="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden bg-slate-50 p-4"
     >
-      <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+      <div className="flex shrink-0 flex-col gap-3">
+      <SerialRepairLegend />
+      <div className="flex flex-wrap items-center gap-2">
         <AdminStatPill label="Repeated serials" value={loading ? '…' : summary.totalSerials} />
         <AdminStatPill label="Flagged (≥3)" value={loading ? '…' : summary.flaggedCount} />
         <AdminStatPill
@@ -1279,7 +1281,9 @@ export default function SerialAuditPage() {
           ASP involvement panel
         </label>
       </AdminToolbar>
+      </div>
 
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {loading && listRows.length === 0 ? (
         <div className={listBodyLayoutClass}>
           <ReportLoadingPanel
@@ -1476,6 +1480,7 @@ export default function SerialAuditPage() {
           ) : null}
         </div>
       )}
+      </div>
     </PageShell>
   );
 }
@@ -1486,14 +1491,14 @@ function SerialRepairCountBadges({
   counts: SerialAuditRepairCounts;
 }) {
   const items = [
-    { key: 'motor', label: 'Motor', value: counts.motorReplaced, className: 'bg-violet-100 text-violet-800' },
+    { key: 'motor', label: 'Motor', value: counts.motorReplaced, className: repairSemantics.motor },
     {
       key: 'compressor',
       label: 'Compressor',
       value: counts.compressorReplaced,
-      className: 'border border-rose-300/80 bg-[#ffaeae] text-black font-bold',
+      className: repairSemantics.compressor,
     },
-    { key: 'gas', label: 'Gas', value: counts.gasCharging, className: 'bg-teal-100 text-teal-800' },
+    { key: 'gas', label: 'Gas', value: counts.gasCharging, className: repairSemantics.gas },
   ].filter((item) => item.value > 0);
 
   if (items.length === 0) return null;
@@ -1615,7 +1620,7 @@ function SerialAuditTableRow({
         <AdminTd className={`font-mono text-[11px] ${rowBg}`}>
           <div className="flex flex-wrap items-center gap-1.5">
             <span className={flagged ? 'font-semibold text-amber-900' : 'text-slate-800'}>
-              {row.serial} ~
+              {row.serial}
             </span>
             <SerialRepairCountBadges counts={repairBadgeCounts} />
             {/* {flagged ? (

@@ -16,7 +16,7 @@ import {
   Key
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
+import { feedback } from '@/lib/ui/feedback';
 import { useUser } from '@/components/layout/DashboardLayout';
 import { PageShell, PageLoadingState } from '@/components/layout/PageShell';
 import BranchTree from '@/components/shared/BranchTree';
@@ -33,6 +33,9 @@ import {
   ChipList,
   AdminIconButton,
 } from '@/components/admin/AdminUi';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
+import { ModalPortal } from '@/components/ui/ModalPortal';
 
 export default function AdminUsersPage() {
   const { userProfile } = useUser();
@@ -52,7 +55,9 @@ export default function AdminUsersPage() {
   const [selectedUserForPassword, setSelectedUserForPassword] = useState<any>(null);
   const [newPassword, setNewPassword] = useState('');
   const [updatingPassword, setUpdatingPassword] = useState(false);
-  
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   type UserFormErrors = {
     name?: string;
     email?: string;
@@ -166,7 +171,6 @@ export default function AdminUsersPage() {
       const needsProfile =
         errors.name || errors.email || errors.password || errors.role_id;
       if (needsProfile) setActiveTab('profile');
-      toast.error('Complete all required fields before continuing');
       return;
     }
     try {
@@ -180,9 +184,9 @@ export default function AdminUsersPage() {
           headers: { 'Authorization': `Bearer ${session?.access_token}` }
         });
         if (res.data?.recovered) {
-          toast.success('User profile completed (login already existed)');
+          feedback.actionSuccess('User profile completed (login already existed)');
         } else {
-          toast.success('User created successfully');
+          feedback.actionSuccess('User created successfully');
         }
         setShowAddModal(false);
         setEditingUser(null);
@@ -198,23 +202,27 @@ export default function AdminUsersPage() {
       setShowValidation(false);
       setBranchSearch('');
       fetchInitialData();
-      toast.success('User updated successfully');
+      feedback.actionSuccess('User updated successfully');
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Operation failed');
+      feedback.actionFailed(err.response?.data?.error || 'Operation failed');
     }
   };
 
-  const handleDelete = async (userId: string) => {
-    if (!confirm('Are you sure you want to delete this user?')) return;
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      await axios.delete(`/api/admin/users?id=${userId}`, {
+      await axios.delete(`/api/admin/users?id=${deleteTarget.id}`, {
         headers: { 'Authorization': `Bearer ${session?.access_token}` }
       });
-      toast.success('User deleted successfully');
+      feedback.actionSuccess('User deleted successfully');
+      setDeleteTarget(null);
       fetchInitialData();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Delete failed');
+      feedback.actionFailed(err.response?.data?.error || 'Delete failed');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -231,12 +239,12 @@ export default function AdminUsersPage() {
       }, {
         headers: { 'Authorization': `Bearer ${session?.access_token}` }
       });
-      toast.success('Password updated successfully');
+      feedback.actionSuccess('Password updated successfully');
       setShowPasswordModal(false);
       setNewPassword('');
       setSelectedUserForPassword(null);
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Password update failed');
+      feedback.actionFailed(err.response?.data?.error || 'Password update failed');
     } finally {
       setUpdatingPassword(false);
     }
@@ -419,7 +427,7 @@ export default function AdminUsersPage() {
                           <AdminIconButton
                             variant="danger"
                             title="Delete user"
-                            onClick={() => handleDelete(u.id)}
+                            onClick={() => setDeleteTarget({ id: u.id, name: u.name || u.email })}
                           >
                             <Trash2 size={13} />
                           </AdminIconButton>
@@ -436,8 +444,10 @@ export default function AdminUsersPage() {
 
       {/* Modal - Simplified Sidebar Layout (Shadcn Style) */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-3xl rounded-xl border border-slate-200 flex min-h-[520px] overflow-hidden animate-in zoom-in-95 duration-200">
+        <ModalPortal open={showAddModal}>
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <ModalBackdrop onClick={() => setShowAddModal(false)} />
+          <div className="relative z-[1] flex min-h-[520px] w-full max-w-3xl overflow-hidden rounded-xl border border-slate-200 bg-white animate-in zoom-in-95 duration-200">
             
             {/* Sidebar Navigation */}
             <div className="w-56 bg-slate-50 border-r border-slate-200 flex flex-col">
@@ -713,12 +723,15 @@ export default function AdminUsersPage() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Password Reset Modal */}
       {showPasswordModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-md rounded-xl border border-slate-200 shadow-2xl p-6 animate-in zoom-in-95 duration-200">
+        <ModalPortal open={showPasswordModal}>
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <ModalBackdrop onClick={() => setShowPasswordModal(false)} />
+          <div className="relative z-[1] w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-amber-600">
@@ -768,7 +781,29 @@ export default function AdminUsersPage() {
             </form>
           </div>
         </div>
+        </ModalPortal>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete user?"
+        description={
+          deleteTarget ? (
+            <>
+              Are you sure you want to delete <span className="font-medium">{deleteTarget.name}</span>?
+              This cannot be undone.
+            </>
+          ) : null
+        }
+        confirmLabel="Delete user"
+        cancelLabel="Cancel"
+        variant="danger"
+        loading={deleting}
+        onConfirm={() => void handleDelete()}
+        onCancel={() => {
+          if (!deleting) setDeleteTarget(null);
+        }}
+      />
     </PageShell>
   );
 }

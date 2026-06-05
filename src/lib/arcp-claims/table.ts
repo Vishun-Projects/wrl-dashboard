@@ -182,6 +182,16 @@ function rowHasData(qty: number, amountPayable: number, branchApproved: number, 
   return qty > 0 || amountPayable > 0 || branchApproved > 0 || hoApproved > 0;
 }
 
+export function arcpTotalsHaveData(totals: ArcpClaimsTotals): boolean {
+  return rowHasData(totals.qty, totals.amountPayable, totals.branchApproved, totals.hoApproved);
+}
+
+export function arcpModelHasDisplayableContent(model: ArcpClaimsTableModel | null): boolean {
+  if (!model) return false;
+  if (model.rows.length > 0) return true;
+  return arcpTotalsHaveData(model.totals);
+}
+
 function resolveLocalUpcountryCode(code: string): 'Local' | 'Upcountry' | null {
   const trimmed = code.trim();
   return LOCAL_UPCOUNTRY_NCODE_LABELS[trimmed] ?? null;

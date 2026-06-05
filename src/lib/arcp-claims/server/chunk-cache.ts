@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { mkdir, readFile, writeFile, rename, unlink, rm } from 'fs/promises';
+import { access, mkdir, readFile, writeFile, rename, unlink, rm } from 'fs/promises';
 import path from 'path';
 import type {
   ArcpClaimsAggregateRow,
@@ -72,13 +72,30 @@ type DiskEntry = {
   rows: ArcpClaimsAggregateRow[] | ArcpClaimsDetailRow[];
 };
 
+/** Cheap existence check — used by job reconcile without parsing JSON. */
+export async function arcpChunkCacheFileExists(cacheKey: string): Promise<boolean> {
+  if (!arcpChunkCacheEnabled()) return false;
+  try {
+    await access(cacheFilePath(cacheKey));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Read cached rows from disk only (for job merge / resume). */
 export async function readArcpChunkRowsFromDisk(
   cacheKey: string,
   kind: ArcpChunkCacheKind
 ): Promise<ArcpClaimsAggregateRow[] | ArcpClaimsDetailRow[] | null> {
+  const mem = memCache.get(cacheKey);
+  if (mem && mem.payload.kind === kind) {
+    return mem.payload.rows;
+  }
+
   const disk = await readDiskChunk(cacheKey);
   if (!disk || disk.payload.kind !== kind) return null;
+  memCache.set(cacheKey, disk);
   return disk.payload.rows;
 }
 

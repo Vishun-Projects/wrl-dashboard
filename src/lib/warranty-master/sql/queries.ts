@@ -61,6 +61,22 @@ export function buildWarrantyMasterAggregateSql(params: WarrantyMasterQueryParam
   `;
 }
 
+/** Cheap version check — total machine count for cache invalidation. */
+export function buildWarrantyMasterMetaSql(): string {
+  const where = buildWarrantyMasterWhereClause({});
+  return `
+    SELECT COUNT(*) AS totalMachines
+    FROM (
+      SELECT
+        po.ncode AS ncode,
+        ${WARRANTY_MONTHS_EXPR} AS warrantyMonths
+      ${WARRANTY_MASTER_BASE_FROM}
+      ${where}
+    ) base
+    WHERE warrantyMonths IS NOT NULL
+  `;
+}
+
 /** Full dataset at FG-model granularity — fetch once, filter on the client. */
 export function buildWarrantyMasterFgLinesSql(): string {
   const where = buildWarrantyMasterWhereClause({});

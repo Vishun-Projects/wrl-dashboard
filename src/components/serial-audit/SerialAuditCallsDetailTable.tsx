@@ -7,6 +7,7 @@ import { TrnLink } from '@/components/calls/TrnLink';
 import type { SerialAuditCallDetail } from '@/lib/serial-audit/complaint-audit';
 import { getRepeatedComplaintKeys } from '@/lib/serial-audit/complaint-audit';
 import { getCallTypeBadgeClass } from '@/lib/report/call-type-badge';
+import { HorizontalScrollFade } from '@/components/ui/HorizontalScrollFade';
 import {
   buildRegisterDeepLinkHref,
   type RegisterDeepLinkParams,
@@ -131,7 +132,7 @@ export function SerialAuditCallsDetailTable({
           Loading calls for {serial}…
         </div>
       ) : (
-        <div className="serial-audit-detail-scroll">
+        <HorizontalScrollFade scrollClassName="serial-audit-detail-scroll">
           <table className="serial-audit-detail-table">
             <thead>
               <tr>
@@ -221,7 +222,7 @@ export function SerialAuditCallsDetailTable({
               })}
             </tbody>
           </table>
-        </div>
+        </HorizontalScrollFade>
       )}
     </div>
   );

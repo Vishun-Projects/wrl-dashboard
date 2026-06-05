@@ -15,6 +15,7 @@ import {
   AdminTr,
 } from '@/components/admin/AdminUi';
 import { WarrantyMasterFgDetailTable } from '@/components/warranty-master/WarrantyMasterFgDetailTable';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import {
   aggregateWarrantyMasterFgLines,
   buildWarrantyMasterDimsFromFgLines,
@@ -27,8 +28,15 @@ import {
   type WarrantyMasterClientFilters,
   type WarrantyMasterFgLineRow,
 } from '@/lib/warranty-master';
+import {
+  clearWarrantyMasterCache,
+  readWarrantyMasterCache,
+  writeWarrantyMasterCache,
+} from '@/lib/warranty-master/client-cache';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
-import { toast } from 'sonner';
+import { PageAlert } from '@/components/ui/PageAlert';
+import { feedback } from '@/lib/ui/feedback';
+import { usePageAlert } from '@/hooks/usePageAlert';
 
 const EMPTY_FILTERS: WarrantyMasterClientFilters = {
   selectedCustomer: [],
@@ -70,15 +78,31 @@ function isEmptyDraft(draft: WarrantyMasterClientFilters): boolean {
 
 type ActiveChip = { id: string; label: string; onRemove: () => void };
 
+function formatCacheLabel(cachedAt: string): string {
+  try {
+    const d = new Date(cachedAt);
+    if (Number.isNaN(d.getTime())) return 'cached';
+    return `cached ${d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`;
+  } catch {
+    return 'cached';
+  }
+}
+
 export default function WarrantyMasterPage() {
   const supabase = createClient();
   const [draft, setDraft] = useState<WarrantyMasterClientFilters>(() => cloneFilters(EMPTY_FILTERS));
   const [applied, setApplied] = useState<WarrantyMasterClientFilters>(() => cloneFilters(EMPTY_FILTERS));
-  const [allFgLines, setAllFgLines] = useState<WarrantyMasterFgLineRow[]>([]);
+  const [allFgLines, setAllFgLines] = useState<WarrantyMasterFgLineRow[]>(() => {
+    return readWarrantyMasterCache()?.fgLines ?? [];
+  });
   const [loading, setLoading] = useState(false);
+  const [cacheLabel, setCacheLabel] = useState<string | null>(() => {
+    const cached = readWarrantyMasterCache();
+    return cached ? formatCacheLabel(cached.cachedAt) : null;
+  });
   const [exporting, setExporting] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const { alert: pageAlert, setError: setPageError, clear: clearPageAlert } = usePageAlert();
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const loadGenerationRef = useRef(0);
@@ -110,6 +134,19 @@ export default function WarrantyMasterPage() {
     [displayRows]
   );
 
+  const fetchMeta = useCallback(
+    async (signal?: AbortSignal) => {
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/report/warranty-master?mode=meta', { headers, signal });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(String((errJson as { error?: string }).error ?? res.statusText));
+      }
+      return (await res.json()) as { totalMachines: number };
+    },
+    [getAuthHeaders]
+  );
+
   const fetchAllFgLines = useCallback(
     async (signal?: AbortSignal) => {
       const headers = await getAuthHeaders();
@@ -118,36 +155,64 @@ export default function WarrantyMasterPage() {
         const errJson = await res.json().catch(() => ({}));
         throw new Error(String((errJson as { error?: string }).error ?? res.statusText));
       }
-      const json = (await res.json()) as { fgLines: WarrantyMasterFgLineRow[] };
-      return json.fgLines;
+      const json = (await res.json()) as {
+        fgLines: WarrantyMasterFgLineRow[];
+        meta?: { totalMachines: number };
+      };
+      return json;
     },
     [getAuthHeaders]
   );
 
-  const loadFromDatabase = useCallback(async () => {
-    abortRef.current?.abort();
-    const generation = ++loadGenerationRef.current;
-    const abort = new AbortController();
-    abortRef.current = abort;
-    setExpandedKey(null);
-    setLoading(true);
-    setLoadError(null);
-    const isStale = () => generation !== loadGenerationRef.current;
-    try {
-      const fgLines = await fetchAllFgLines(abort.signal);
-      if (isStale() || abort.signal.aborted) return;
-      setAllFgLines(fgLines);
-    } catch (err: unknown) {
-      if (isStale() || (err instanceof Error && err.name === 'AbortError')) return;
-      const message = sanitizeUserFacingMessage(
-        err instanceof Error ? err.message : 'Failed to load Warranty Master'
-      );
-      setLoadError(message);
-      toast.error(message);
-    } finally {
-      if (!isStale()) setLoading(false);
-    }
-  }, [fetchAllFgLines]);
+  const loadFromDatabase = useCallback(
+    async (options?: { force?: boolean }) => {
+      const force = options?.force === true;
+      abortRef.current?.abort();
+      const generation = ++loadGenerationRef.current;
+      const abort = new AbortController();
+      abortRef.current = abort;
+      setExpandedKey(null);
+      clearPageAlert();
+      const isStale = () => generation !== loadGenerationRef.current;
+
+      const cached = !force ? readWarrantyMasterCache() : null;
+      if (cached) {
+        setAllFgLines(cached.fgLines);
+        setCacheLabel(formatCacheLabel(cached.cachedAt));
+      }
+
+      const needsFullFetch = force || !cached;
+      if (needsFullFetch) setLoading(true);
+
+      try {
+        const meta = await fetchMeta(abort.signal);
+        if (isStale() || abort.signal.aborted) return;
+
+        if (!force && cached && cached.totalMachines === meta.totalMachines) {
+          return;
+        }
+
+        if (!needsFullFetch) setLoading(true);
+
+        const { fgLines, meta: payloadMeta } = await fetchAllFgLines(abort.signal);
+        if (isStale() || abort.signal.aborted) return;
+
+        const totalMachines = payloadMeta?.totalMachines ?? meta.totalMachines;
+        setAllFgLines(fgLines);
+        writeWarrantyMasterCache(totalMachines, fgLines);
+        setCacheLabel(formatCacheLabel(new Date().toISOString()));
+      } catch (err: unknown) {
+        if (isStale() || (err instanceof Error && err.name === 'AbortError')) return;
+        const message = sanitizeUserFacingMessage(
+          err instanceof Error ? err.message : 'Failed to load Warranty Master'
+        );
+        setPageError(message);
+      } finally {
+        if (!isStale()) setLoading(false);
+      }
+    },
+    [fetchAllFgLines, fetchMeta, clearPageAlert, setPageError]
+  );
 
   const applyFilters = useCallback((filters: WarrantyMasterClientFilters) => {
     const snapshot = cloneFilters(filters);
@@ -162,6 +227,11 @@ export default function WarrantyMasterPage() {
       loadGenerationRef.current += 1;
       abortRef.current?.abort();
     };
+  }, [loadFromDatabase]);
+
+  const handleForceRefresh = useCallback(() => {
+    clearWarrantyMasterCache();
+    void loadFromDatabase({ force: true });
   }, [loadFromDatabase]);
 
   const sortDimOptions = (options: { value: string; label: string }[]) =>
@@ -220,9 +290,17 @@ export default function WarrantyMasterPage() {
     []
   );
 
-  const handleApply = () => {
-    applyFilters(draft);
-  };
+  const commitDraft = useCallback(
+    (updater: (prev: WarrantyMasterClientFilters) => WarrantyMasterClientFilters) => {
+      setDraft((prev) => {
+        const next = cloneFilters(updater(prev));
+        setApplied(next);
+        setExpandedKey(null);
+        return next;
+      });
+    },
+    []
+  );
 
   const handleReset = () => {
     setAdvancedOpen(false);
@@ -246,9 +324,9 @@ export default function WarrantyMasterPage() {
       a.download = `warranty-master-${new Date().toISOString().slice(0, 10)}.csv`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success('CSV downloaded');
+      feedback.actionSuccess('CSV downloaded');
     } catch (err: unknown) {
-      toast.error(
+      feedback.actionFailed(
         sanitizeUserFacingMessage(err instanceof Error ? err.message : 'Export failed')
       );
     } finally {
@@ -366,12 +444,15 @@ export default function WarrantyMasterPage() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => void loadFromDatabase()}
+            onClick={() => void handleForceRefresh()}
             disabled={loading}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             Refresh
+            {cacheLabel && !loading ? (
+              <span className="text-[10px] font-normal text-slate-400">({cacheLabel})</span>
+            ) : null}
           </button>
           <button
             type="button"
@@ -389,9 +470,9 @@ export default function WarrantyMasterPage() {
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
         <div className="shrink-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="mb-3 text-xs text-slate-500">
-            Choose filters, then <span className="font-medium text-slate-700">Apply</span> (instant,
-            no new database query). <span className="font-medium text-slate-700">Refresh</span>{' '}
-            reloads all machine lines from the server.
+            Filters apply instantly (client-side). Data is cached for this session and only
+            re-fetched when the total machine count changes — use{' '}
+            <span className="font-medium text-slate-700">Refresh</span> to force a reload.
           </p>
 
           <div className="flex flex-wrap items-end gap-3">
@@ -400,7 +481,7 @@ export default function WarrantyMasterPage() {
               layout="inline"
               options={customerOptions}
               selected={draft.selectedCustomer}
-              onChange={(v) => setDraft((d) => ({ ...d, selectedCustomer: v }))}
+              onChange={(v) => commitDraft((d) => ({ ...d, selectedCustomer: v }))}
               searchable
               searchPlaceholder="Search…"
               panelClassName="w-72"
@@ -410,7 +491,7 @@ export default function WarrantyMasterPage() {
               layout="inline"
               options={groupOptions}
               selected={draft.selectedGroup}
-              onChange={(v) => setDraft((d) => ({ ...d, selectedGroup: v }))}
+              onChange={(v) => commitDraft((d) => ({ ...d, selectedGroup: v }))}
               searchable
               panelClassName="w-56"
             />
@@ -419,7 +500,7 @@ export default function WarrantyMasterPage() {
               layout="inline"
               options={fgModelOptions}
               selected={draft.selectedFgModel}
-              onChange={(v) => setDraft((d) => ({ ...d, selectedFgModel: v }))}
+              onChange={(v) => commitDraft((d) => ({ ...d, selectedFgModel: v }))}
               searchable
               searchPlaceholder="Search…"
               panelClassName="w-56"
@@ -429,7 +510,7 @@ export default function WarrantyMasterPage() {
               layout="inline"
               options={warrantyMonthOptions}
               selected={draft.selectedWarrantyMonths}
-              onChange={(v) => setDraft((d) => ({ ...d, selectedWarrantyMonths: v }))}
+              onChange={(v) => commitDraft((d) => ({ ...d, selectedWarrantyMonths: v }))}
               panelClassName="w-44"
             />
           </div>
@@ -437,7 +518,7 @@ export default function WarrantyMasterPage() {
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => setDraft((d) => ({ ...d, activeOnly: !d.activeOnly }))}
+              onClick={() => commitDraft((d) => ({ ...d, activeOnly: !d.activeOnly }))}
               className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
                 draft.activeOnly
                   ? 'border-slate-900 bg-slate-900 text-white'
@@ -476,7 +557,7 @@ export default function WarrantyMasterPage() {
                     name="warranty-end-from"
                     autoComplete="off"
                     value={draft.warrEndFrom}
-                    onChange={(e) => setDraft((d) => ({ ...d, warrEndFrom: e.target.value }))}
+                    onChange={(e) => commitDraft((d) => ({ ...d, warrEndFrom: e.target.value }))}
                     className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
                   />
                 </label>
@@ -487,16 +568,14 @@ export default function WarrantyMasterPage() {
                     name="warranty-end-to"
                     autoComplete="off"
                     value={draft.warrEndTo}
-                    onChange={(e) => setDraft((d) => ({ ...d, warrEndTo: e.target.value }))}
+                    onChange={(e) => commitDraft((d) => ({ ...d, warrEndTo: e.target.value }))}
                     className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
                   />
                 </label>
                 {(draft.warrEndFrom || draft.warrEndTo) && (
                   <button
                     type="button"
-                    onClick={() =>
-                      setDraft((d) => ({ ...d, warrEndFrom: '', warrEndTo: '' }))
-                    }
+                    onClick={() => commitDraft((d) => ({ ...d, warrEndFrom: '', warrEndTo: '' }))}
                     className="mb-0.5 text-xs text-slate-500 underline hover:text-slate-800"
                   >
                     Clear dates
@@ -507,14 +586,6 @@ export default function WarrantyMasterPage() {
           )}
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={handleApply}
-              disabled={loading}
-              className="rounded-lg bg-slate-950 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-            >
-              Apply
-            </button>
             <button
               type="button"
               onClick={handleReset}
@@ -552,11 +623,13 @@ export default function WarrantyMasterPage() {
           )}
         </div>
 
-        {loadError && (
-          <div className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800">
-            {loadError}
-          </div>
-        )}
+        {pageAlert ? (
+          <PageAlert
+            variant={pageAlert.variant}
+            message={pageAlert.message}
+            onDismiss={clearPageAlert}
+          />
+        ) : null}
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <AdminStatPill label="Total machines" value={summary.totalMachines.toLocaleString()} />
@@ -573,8 +646,18 @@ export default function WarrantyMasterPage() {
             model breakdown.
           </p>
           <div className="flex min-h-0 flex-1 flex-col">
-            <AdminTableCard isEmpty={!loading && displayRows.length === 0}>
-              <AdminTable>
+            <AdminTableCard
+              isEmpty={!loading && displayRows.length === 0}
+              scrollClassName="min-h-0 flex-1 overflow-x-hidden overflow-y-auto custom-scrollbar"
+            >
+              <AdminTable className="warranty-master-table w-full table-fixed border-collapse text-left">
+                <colgroup>
+                  <col className="w-8" />
+                  <col className="w-[34%]" />
+                  <col className="w-[26%]" />
+                  <col className="w-[22%]" />
+                  <col className="w-[18%]" />
+                </colgroup>
                 <AdminThead>
                   <tr>
                     <AdminTh className="w-8">
@@ -617,7 +700,9 @@ export default function WarrantyMasterPage() {
                                   <ChevronRight size={14} />
                                 )}
                               </AdminTd>
-                              <AdminTd>{row.customerName}</AdminTd>
+                              <AdminTd className="max-w-[14rem]">
+                                <TruncatedText text={row.customerName} />
+                              </AdminTd>
                               <AdminTd>{row.groupName}</AdminTd>
                               <AdminTd>{row.warrantyMonths}</AdminTd>
                               <AdminTd className="text-left tabular-nums font-medium">
@@ -626,10 +711,7 @@ export default function WarrantyMasterPage() {
                             </AdminTr>
                             {isExpanded && (
                               <AdminTr className="border-b border-slate-100 bg-slate-50/60">
-                                <td
-                                  colSpan={5}
-                                  className="warranty-master-expanded-cell px-3 py-3"
-                                >
+                                <td colSpan={5} className="warranty-master-expanded-cell">
                                   <WarrantyMasterFgDetailTable
                                     rows={detailRows ?? []}
                                     parentMachineCount={row.machineCount}

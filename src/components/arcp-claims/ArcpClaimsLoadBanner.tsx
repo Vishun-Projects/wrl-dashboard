@@ -12,6 +12,7 @@ export type ArcpLoadStatus = {
   etaFinishLabel: string | null;
   planMessage: string;
   rowsLoaded?: number;
+  failedCount?: number;
 };
 
 export function formatArcpDurationMs(ms: number): string {
@@ -49,6 +50,49 @@ export type ArcpRunningTotals = {
   branchApproved: number;
   hoApproved: number;
 };
+
+type ArcpClaimsInlineProgressProps = {
+  status: ArcpLoadStatus;
+  periodUnit?: string;
+};
+
+/** Compact progress — toolbar and above tables during multi- or single-chunk loads. */
+export function ArcpClaimsInlineProgress({
+  status,
+  periodUnit = 'periods',
+}: ArcpClaimsInlineProgressProps) {
+  const inFlight = status.done < status.total;
+  const barPercent =
+    status.total <= 1 && inFlight ? 8 : Math.max(status.percent, inFlight ? 4 : 0);
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-500"
+      aria-live="polite"
+    >
+      <span className="tabular-nums font-medium text-slate-600">
+        {status.done}/{status.total} {periodUnit}
+        {status.failedCount ? ` (${status.failedCount} timed out)` : ''}
+      </span>
+      <div className="h-1.5 w-20 min-w-[4rem] overflow-hidden rounded-full bg-slate-100">
+        <div
+          className={`h-full rounded-full bg-slate-700 transition-all duration-300 ${
+            status.total <= 1 && inFlight ? 'animate-pulse' : ''
+          }`}
+          style={{ width: `${barPercent}%` }}
+        />
+      </div>
+      {status.rowsLoaded != null && status.rowsLoaded > 0 ? (
+        <span className="text-slate-500">
+          {status.rowsLoaded.toLocaleString('en-IN')} lines in tally
+        </span>
+      ) : null}
+      {inFlight && status.etaRemainingLabel ? (
+        <span className="text-slate-400">{status.etaRemainingLabel}</span>
+      ) : null}
+    </div>
+  );
+}
 
 type ArcpClaimsLoadBannerProps = {
   status: ArcpLoadStatus;

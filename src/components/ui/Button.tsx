@@ -1,0 +1,47 @@
+'use client';
+
+import React from 'react';
+import { cn } from '@/lib/cn';
+
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost';
+export type ButtonSize = 'sm' | 'md';
+
+export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+};
+
+const variantClasses: Record<ButtonVariant, string> = {
+  primary: 'border border-slate-800 bg-slate-900 text-white hover:bg-slate-800 shadow-sm',
+  secondary: 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 shadow-sm',
+  ghost: 'border border-transparent bg-transparent text-slate-600 hover:bg-slate-50',
+};
+
+const sizeClasses: Record<ButtonSize, string> = {
+  sm: 'px-2.5 py-1.5 text-[11px] font-medium rounded-md gap-1.5',
+  md: 'px-3 py-2 text-xs font-medium rounded-lg gap-2',
+};
+
+export function Button({
+  variant = 'secondary',
+  size = 'sm',
+  className,
+  type = 'button',
+  children,
+  ...props
+}: ButtonProps) {
+  return (
+    <button
+      type={type}
+      className={cn(
+        'inline-flex shrink-0 items-center justify-center transition-colors disabled:opacity-50',
+        variantClasses[variant],
+        sizeClasses[size],
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}

@@ -46,10 +46,12 @@ export function AdminTableCard({
   children,
   empty,
   isEmpty,
+  scrollClassName,
 }: {
   children: React.ReactNode;
   empty?: React.ReactNode;
   isEmpty?: boolean;
+  scrollClassName?: string;
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -63,15 +65,32 @@ export function AdminTableCard({
           )}
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto custom-scrollbar">{children}</div>
+        <div
+          className={
+            scrollClassName ??
+            'min-h-0 flex-1 overflow-auto custom-scrollbar'
+          }
+        >
+          {children}
+        </div>
       )}
     </div>
   );
 }
 
-export function AdminTable({ children }: { children: React.ReactNode }) {
+export function AdminTable({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <table className="w-full min-w-[720px] border-collapse text-left">
+    <table
+      className={
+        className ?? 'w-full min-w-[720px] border-collapse text-left'
+      }
+    >
       {children}
     </table>
   );
@@ -98,7 +117,7 @@ export function AdminTh({
     align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left';
   return (
     <th
-      className={`px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 ${alignClass} ${className}`}
+      className={`px-4 py-2.5 text-[10px] font-semibold text-slate-500 ${alignClass} ${className}`}
     >
       {children}
     </th>

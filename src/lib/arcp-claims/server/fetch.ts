@@ -4,6 +4,7 @@ import {
   buildArcpClaimsDetailSql,
   buildArcpClaimsGrandTotalSql,
   buildArcpClaimsRawSql,
+  ARCP_MERGE_ACROSS_CHUNKS,
   mergeArcpAggregateRows,
   parseArcpAggregateRows,
   arcpDetailLineKey,
@@ -376,7 +377,8 @@ export async function fetchArcpClaimsAggregates(
   }
 
   const merged = chunkResults.map((p) => p.rows).flat();
-  const aggregates = chunks.length <= 1 ? merged : mergeArcpAggregateRows(merged);
+  const aggregates =
+    chunks.length <= 1 ? merged : mergeArcpAggregateRows(merged, ARCP_MERGE_ACROSS_CHUNKS);
   return {
     aggregates,
     chunkMeta: {

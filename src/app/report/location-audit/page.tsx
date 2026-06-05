@@ -34,7 +34,9 @@ import {
   LocationAuditRowDetail,
   type LocationAuditDetailRow,
 } from '@/components/location-audit/LocationAuditRowDetail';
-import { toast } from 'sonner';
+import { PageAlert } from '@/components/ui/PageAlert';
+import { feedback } from '@/lib/ui/feedback';
+import { usePageAlert } from '@/hooks/usePageAlert';
 
 type LocationAuditStatus = 'mismatch' | 'ok' | 'no_gps' | 'no_address';
 
@@ -79,6 +81,7 @@ function rowKey(row: { vtrnno: string; ncode: string }) {
 export default function LocationAuditPage() {
   const {
     appliedFilters,
+    applyFilters,
     getAppliedFiltersSnapshot,
     selectedCallTypes,
     setSelectedCallTypes,
@@ -92,7 +95,7 @@ export default function LocationAuditPage() {
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [listLoading, setListLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const { alert: pageAlert, setError: setPageError, clear: clearPageAlert } = usePageAlert();
   const [summary, setSummary] = useState<AuditSummary | null>(null);
   const [byBranch, setByBranch] = useState<ByBranch[]>([]);
   const [branchOpen, setBranchOpen] = useState(false);
@@ -106,6 +109,7 @@ export default function LocationAuditPage() {
   const listAbortRef = useRef<AbortController | null>(null);
   const detailAbortRef = useRef<AbortController | null>(null);
   const detailCacheRef = useRef<Map<string, LocationAuditDetailRow>>(new Map());
+  const auditDefaultsAppliedRef = useRef(false);
 
   const applied = appliedFilters;
   const startDateStr = useMemo(
@@ -128,14 +132,36 @@ export default function LocationAuditPage() {
   }, []);
 
   useEffect(() => {
-    if (!resourcesLoaded) return;
-    if (priorityFilter.length === 0 || !priorityFilter.includes('major')) {
-      setPriorityFilter(['major']);
-    }
-    if (selectedCallTypes.length === 0) {
-      setSelectedCallTypes([SUMMARY_DEFAULT_CALL_TYPE]);
-    }
-  }, [resourcesLoaded, priorityFilter, selectedCallTypes, setPriorityFilter, setSelectedCallTypes]);
+    if (!resourcesLoaded || auditDefaultsAppliedRef.current) return;
+    auditDefaultsAppliedRef.current = true;
+    setPriorityFilter(['major']);
+    setSelectedCallTypes([SUMMARY_DEFAULT_CALL_TYPE]);
+  }, [resourcesLoaded, setPriorityFilter, setSelectedCallTypes]);
+
+  const resetAuditResults = useCallback(() => {
+    summaryAbortRef.current?.abort();
+    listAbortRef.current?.abort();
+    detailAbortRef.current?.abort();
+    detailCacheRef.current.clear();
+    setHasLoadedOnce(false);
+    setSummary(null);
+    setByBranch([]);
+    setRows([]);
+    setAnalyzedInWindow(null);
+    setSelectedListRow(null);
+    setDetailRow(null);
+    setSummaryLoading(false);
+    setListLoading(false);
+    setDetailLoading(false);
+  }, []);
+
+  const handleClearFilters = useCallback(() => {
+    resetAuditResults();
+    applyFilters({
+      priorityFilter: ['major'],
+      selectedCallTypes: [SUMMARY_DEFAULT_CALL_TYPE],
+    });
+  }, [applyFilters, resetAuditResults]);
 
   const buildParams = useCallback(
     (extra?: Record<string, string>) => {
@@ -217,7 +243,7 @@ export default function LocationAuditPage() {
 
     setSummaryLoading(true);
     setListLoading(true);
-    setLoadError(null);
+    clearPageAlert();
 
     try {
       const headers = await getAuthHeaders();
@@ -254,8 +280,7 @@ export default function LocationAuditPage() {
       const message = sanitizeUserFacingMessage(
         err instanceof Error ? err.message : 'Failed to load location audit'
       );
-      setLoadError(message);
-      toast.error(message);
+      setPageError(message);
     } finally {
       setSummaryLoading(false);
       setListLoading(false);
@@ -298,7 +323,7 @@ export default function LocationAuditPage() {
         setDetailRow(json.row);
       } catch (err: unknown) {
         if (err instanceof Error && err.name === 'AbortError') return;
-        toast.error(
+        feedback.actionFailed(
           sanitizeUserFacingMessage(
             err instanceof Error ? err.message : 'Failed to load call detail'
           )
@@ -342,9 +367,9 @@ export default function LocationAuditPage() {
       a.download = `location-audit-${startDateStr}-${endDateStr}.csv`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success('CSV exported');
+      feedback.actionSuccess('CSV exported');
     } catch {
-      toast.error('CSV export failed');
+      feedback.actionFailed('CSV export failed');
     }
   };
 
@@ -374,7 +399,9 @@ export default function LocationAuditPage() {
       toolbar={
         <RegisterPageFilters
           loading={loading}
+          applyLabel="Run audit"
           onApply={() => void runAudit()}
+          onClearAll={handleClearFilters}
         />
       }
       actions={
@@ -401,6 +428,7 @@ export default function LocationAuditPage() {
           )}
         </div>
       }
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
     >
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
         {!hasLoadedOnce && !loading ? (
@@ -410,11 +438,13 @@ export default function LocationAuditPage() {
           </div>
         ) : null}
 
-        {loadError && (
-          <div className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-800">
-            {loadError}
-          </div>
-        )}
+        {pageAlert ? (
+          <PageAlert
+            variant={pageAlert.variant}
+            message={pageAlert.message}
+            onDismiss={clearPageAlert}
+          />
+        ) : null}
 
         {summary && (
           <div className="flex shrink-0 flex-wrap items-center gap-2">

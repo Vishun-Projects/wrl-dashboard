@@ -10,7 +10,12 @@ import {
   type ArcpChunkLoadMeta,
   type ArcpFetchOpts,
 } from './fetch';
-import { emptyArcpChunkMeta, mergeArcpChunkMeta } from './chunk-cache';
+import {
+  buildArcpChunkCacheKey,
+  emptyArcpChunkMeta,
+  mergeArcpChunkMeta,
+  writeArcpChunkCache,
+} from './chunk-cache';
 import {
   queryArcpClaimsAggregates,
   queryArcpClaimsDetailRows,
@@ -18,6 +23,7 @@ import {
 } from './postgres';
 import {
   deriveArcpGrandTotalsFromAggregates,
+  ARCP_MERGE_ACROSS_CHUNKS,
   mergeArcpAggregateRows,
   mergeArcpDetailRows,
   planArcpSummaryDateChunks,
@@ -60,6 +66,28 @@ function emptyGrandTotals(): ArcpGrandTotals {
     branchApproved: 0,
     hoApproved: 0,
   };
+}
+
+async function enrichAggregatesForResponse(
+  rows: ArcpClaimsAggregateRow[]
+): Promise<ArcpClaimsAggregateRow[]> {
+  if (rows.length === 0) return rows;
+  const lookups = await loadArcpCrmLabelLookups();
+  return enrichArcpAggregateLabels(rows, lookups);
+}
+
+async function recordAggChunkForJob(
+  opts: ArcpFetchOpts,
+  rows: ArcpClaimsAggregateRow[]
+): Promise<void> {
+  const startDate = opts.startDate;
+  const endDate = opts.endDate;
+  if (!opts.jobId || !startDate || !endDate) return;
+
+  const cacheKey = buildArcpChunkCacheKey(opts, { start: startDate, end: endDate }, 'agg');
+  await writeArcpChunkCache(cacheKey, 'agg', rows);
+  const { markChunkDone } = await import('./load-job');
+  await markChunkDone(opts.jobId, startDate, endDate);
 }
 
 function addGrandTotals(a: ArcpGrandTotals, b: ArcpGrandTotals): ArcpGrandTotals {
@@ -121,7 +149,7 @@ async function loadArcpAggregatesCoverageAware(
   const startDate = opts.startDate;
   const endDate = opts.endDate;
   if (!startDate || !endDate) {
-    const rows = await queryArcpClaimsAggregates(opts);
+    const rows = await enrichAggregatesForResponse(await queryArcpClaimsAggregates(opts));
     const grandTotals = deriveArcpGrandTotalsFromAggregates(rows);
     return {
       aggregates: rows,
@@ -135,13 +163,14 @@ async function loadArcpAggregatesCoverageAware(
   const dateColumn = toCoverageDateColumn(resolveArcpDateFilterColumn(opts.dateFilterColumn));
 
   if (postgresCoversFullRange(startDate, endDate, coverage, dateColumn)) {
-    const aggregates = await queryArcpClaimsAggregates(opts);
+    const aggregates = await enrichAggregatesForResponse(await queryArcpClaimsAggregates(opts));
+    await recordAggChunkForJob(opts, aggregates);
     const grandTotals = deriveArcpGrandTotalsFromAggregates(aggregates);
     return {
       aggregates,
       source: 'postgres',
       grandTotals,
-      chunkMeta: emptyArcpChunkMeta(0),
+      chunkMeta: { cachedChunks: 0, fetchedChunks: 1, totalChunks: 1 },
     };
   }
 
@@ -160,7 +189,7 @@ async function loadArcpAggregatesCoverageAware(
     };
 
     if (segment.mode === 'postgres') {
-      const pgRows = await queryArcpClaimsAggregates(segOpts);
+      const pgRows = await enrichAggregatesForResponse(await queryArcpClaimsAggregates(segOpts));
       merged.push(...pgRows);
       usedPostgres = true;
       continue;
@@ -186,7 +215,9 @@ async function loadArcpAggregatesCoverageAware(
     usedCrm = true;
   }
 
-  const aggregates = mergeArcpAggregateRows(merged);
+  const aggregates = await enrichAggregatesForResponse(
+    mergeArcpAggregateRows(merged, ARCP_MERGE_ACROSS_CHUNKS)
+  );
   const source: ArcpDataSource =
     usedPostgres && usedCrm ? 'crm_fallback' : usedCrm ? 'crm_fallback' : 'postgres';
 

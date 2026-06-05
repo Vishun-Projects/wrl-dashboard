@@ -3,7 +3,7 @@
 import React, { createContext, useCallback, useContext, useState } from 'react';
 import axios from 'axios';
 import { createClient } from '@/lib/supabase/client';
-import { toast } from 'sonner';
+import { feedback } from '@/lib/ui/feedback';
 import { CallDetail } from '@/components/calls/CallDetail';
 import { useUser } from '@/components/layout/DashboardLayout';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
@@ -92,7 +92,7 @@ export function CallDetailDialogProvider({ children }: { children: React.ReactNo
           axios.isAxiosError(err) && err.response?.data?.error
             ? String(err.response.data.error)
             : 'Failed to load call details';
-        toast.error(sanitizeUserFacingMessage(message));
+        feedback.actionFailed(sanitizeUserFacingMessage(message));
       }
     },
     [supabase]
@@ -167,7 +167,7 @@ export function CallDetailDialogProvider({ children }: { children: React.ReactNo
       {isOpen && selectedCall ? (
         <div className="fixed inset-0 z-[210] flex items-center justify-center p-4">
           <div
-            className="fixed inset-0 bg-slate-900/40 animate-in fade-in duration-200"
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200"
             onClick={closeCallDetail}
           />
           <div className="relative flex h-[min(760px,92vh)] w-full max-w-[900px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow animate-in zoom-in-95 duration-200">

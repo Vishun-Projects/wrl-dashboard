@@ -15,7 +15,7 @@ import {
   Settings2,
 } from 'lucide-react';
 import axios from 'axios';
-import { toast } from 'sonner';
+import { feedback } from '@/lib/ui/feedback';
 import { useRouter } from 'next/navigation';
 import { PageShell, PageLoadingState } from '@/components/layout/PageShell';
 import {
@@ -30,6 +30,9 @@ import {
   ChipList,
   AdminIconButton,
 } from '@/components/admin/AdminUi';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
+import { ModalPortal } from '@/components/ui/ModalPortal';
 import {
   pageLabelsForPermissions,
   type PageAccessDefinition,
@@ -100,6 +103,8 @@ export default function RolesPage() {
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingRole, setEditingRole] = useState<any>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -134,7 +139,7 @@ export default function RolesPage() {
         rolesRes.data.permissionGroups ?? { pages: [], other: rolesRes.data.allPermissions ?? [] }
       );
     } catch {
-      toast.error('Failed to load access control data');
+      feedback.actionFailed('Failed to load access control data');
       router.push('/report');
     } finally {
       setLoading(false);
@@ -155,14 +160,18 @@ export default function RolesPage() {
     setShowModal(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this role? This might affect assigned users.')) return;
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await axios.delete(`/api/admin/roles?id=${id}`);
-      toast.success('Role deleted successfully');
+      await axios.delete(`/api/admin/roles?id=${deleteTarget.id}`);
+      feedback.actionSuccess('Role deleted successfully');
+      setDeleteTarget(null);
       init();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to delete role');
+      feedback.actionFailed(err.response?.data?.error || 'Failed to delete role');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -171,15 +180,15 @@ export default function RolesPage() {
     try {
       if (editingRole) {
         await axios.put('/api/admin/roles', { ...formData, id: editingRole.id });
-        toast.success('Role updated');
+        feedback.actionSuccess('Role updated');
       } else {
         await axios.post('/api/admin/roles', formData);
-        toast.success('Role created');
+        feedback.actionSuccess('Role created');
       }
       setShowModal(false);
       init();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Operation failed');
+      feedback.actionFailed(err.response?.data?.error || 'Operation failed');
     }
   };
 
@@ -272,7 +281,7 @@ export default function RolesPage() {
                         <AdminIconButton
                           variant="danger"
                           title="Delete role"
-                          onClick={() => handleDelete(role.id)}
+                          onClick={() => setDeleteTarget({ id: role.id, name: role.name })}
                         >
                           <Trash2 size={13} />
                         </AdminIconButton>
@@ -287,12 +296,10 @@ export default function RolesPage() {
       </div>
 
       {showModal && (
+        <ModalPortal open={showModal}>
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-          <div
-            className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm"
-            onClick={() => setShowModal(false)}
-          />
-          <div className="relative z-10 w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl animate-in zoom-in-95 duration-200">
+          <ModalBackdrop onClick={() => setShowModal(false)} />
+          <div className="relative z-[1] w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl animate-in zoom-in-95 duration-200">
             <form onSubmit={handleSubmit}>
               <div className="flex h-14 items-center justify-between border-b border-slate-200 px-5">
                 <div className="flex items-center gap-3">
@@ -440,7 +447,29 @@ export default function RolesPage() {
             </form>
           </div>
         </div>
+        </ModalPortal>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete role?"
+        description={
+          deleteTarget ? (
+            <>
+              Delete <span className="font-medium">{deleteTarget.name}</span>? Users assigned to this
+              role may lose access.
+            </>
+          ) : null
+        }
+        confirmLabel="Delete role"
+        cancelLabel="Cancel"
+        variant="danger"
+        loading={deleting}
+        onConfirm={() => void handleDelete()}
+        onCancel={() => {
+          if (!deleting) setDeleteTarget(null);
+        }}
+      />
     </PageShell>
   );
 }

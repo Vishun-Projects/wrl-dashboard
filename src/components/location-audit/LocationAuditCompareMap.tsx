@@ -282,7 +282,7 @@ export function LocationAuditCompareMap({ stored, expected, visit, distanceM, ma
         </div>
       )}
       <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 flex flex-wrap items-end justify-between gap-2">
-        <div className="flex flex-wrap gap-2 rounded-md bg-white/95 px-2 py-1.5 text-[10px] shadow-sm">
+        <div className="flex flex-wrap gap-2 rounded-md border border-slate-200 bg-white/95 px-2.5 py-2 text-[11px] font-medium text-slate-700 shadow-md">
           {expected ? (
             <span className="flex items-center gap-1">
               <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-600" />

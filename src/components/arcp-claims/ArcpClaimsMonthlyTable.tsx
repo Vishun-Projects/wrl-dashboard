@@ -3,6 +3,7 @@
 import React from 'react';
 import { AdminTable, AdminTh, AdminThead } from '@/components/admin/AdminUi';
 import {
+  arcpTotalsHaveData,
   formatArcpAmount,
   formatArcpQty,
   type ArcpMonthlyBreakdownModel,
@@ -11,21 +12,37 @@ import {
 type ArcpClaimsMonthlyTableProps = {
   model: ArcpMonthlyBreakdownModel | null;
   loading?: boolean;
+  updating?: boolean;
 };
 
 const cellBorder = 'border border-slate-200 px-3 py-1.5';
 const numericCell = `${cellBorder} text-right tabular-nums`;
 
-export function ArcpClaimsMonthlyTable({ model, loading }: ArcpClaimsMonthlyTableProps) {
-  if (!model || model.rows.length === 0) {
-    if (loading) return null;
+export function ArcpClaimsMonthlyTable({ model, loading, updating }: ArcpClaimsMonthlyTableProps) {
+  const hasRows = (model?.rows.length ?? 0) > 0;
+  const hasTotals = model ? arcpTotalsHaveData(model.totals) : false;
+
+  if (!hasRows && !hasTotals) {
+    if (loading) {
+      return (
+        <p className="py-8 text-center text-[11px] text-slate-400">Waiting for monthly breakdown…</p>
+      );
+    }
     return (
       <p className="py-6 text-center text-[11px] text-slate-400">No monthly breakdown available.</p>
     );
   }
 
+  if (!model) return null;
+
   return (
-    <AdminTable>
+    <div>
+      {updating ? (
+        <p className="mb-2 text-[10px] text-slate-400" aria-live="polite">
+          Monthly breakdown updates as more periods load.
+        </p>
+      ) : null}
+      <AdminTable>
       <AdminThead>
         <tr className="bg-slate-50">
           <AdminTh className={`${cellBorder} text-[11px] tracking-wide text-slate-600`}>Month</AdminTh>
@@ -68,5 +85,6 @@ export function ArcpClaimsMonthlyTable({ model, loading }: ArcpClaimsMonthlyTabl
         </tr>
       </tbody>
     </AdminTable>
+    </div>
   );
 }
