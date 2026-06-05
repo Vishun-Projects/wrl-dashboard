@@ -171,6 +171,44 @@ async function fetchJobChunks(
   return result.rows.map(rowToChunk);
 }
 
+/** Postgres may say done while disk cache is on another host (e.g. Vercel) — reset to pending. */
+async function reconcileJobChunksWithDisk(
+  client: import('pg').PoolClient,
+  jobId: string,
+  kind: ArcpChunkCacheKind
+): Promise<ArcpLoadJobChunk[]> {
+  const chunks = await fetchJobChunks(client, jobId);
+  const updated: ArcpLoadJobChunk[] = [];
+  let changed = false;
+
+  for (const chunk of chunks) {
+    if (chunk.status !== 'done') {
+      updated.push(chunk);
+      continue;
+    }
+    const disk = await readArcpChunkRowsFromDisk(chunk.cacheKey, kind);
+    if (disk !== null) {
+      updated.push(chunk);
+      continue;
+    }
+    await client.query(
+      `
+      UPDATE arcp_claims_load_chunks
+      SET status = 'pending', error_message = NULL, completed_at = NULL
+      WHERE job_id = $1::uuid AND chunk_start = $2::date AND chunk_end = $3::date
+      `,
+      [jobId, chunk.chunkStart, chunk.chunkEnd]
+    );
+    updated.push({ ...chunk, status: 'pending', errorMessage: null });
+    changed = true;
+  }
+
+  if (changed) {
+    await refreshJobStatus(client, jobId, updated);
+  }
+  return updated;
+}
+
 async function refreshJobStatus(
   client: import('pg').PoolClient,
   jobId: string,
@@ -259,8 +297,10 @@ export async function startOrResumeLoadJob(
         );
         if (prev.rows.length > 0) {
           const prevStatus = String(prev.rows[0].status) as ArcpLoadChunkStatus;
-          if (prevStatus === 'done') status = 'done';
-          else if (prevStatus === 'failed') status = 'failed';
+          if (prevStatus === 'done') {
+            const diskRows = await readArcpChunkRowsFromDisk(cacheKey, kind);
+            status = diskRows !== null ? 'done' : 'pending';
+          } else if (prevStatus === 'failed') status = 'failed';
           else if (status !== 'done') status = prevStatus;
         }
       }
@@ -287,8 +327,8 @@ export async function startOrResumeLoadJob(
       );
     }
 
-    const chunks = await fetchJobChunks(client, jobId);
-    const status = await refreshJobStatus(client, jobId, chunks);
+    const chunks = await reconcileJobChunksWithDisk(client, jobId, kind);
+    const status = deriveJobStatus(chunks);
     const counts = summarizeChunks(chunks);
 
     return {
@@ -322,14 +362,16 @@ export async function getLoadJobById(
     if (job.rows.length === 0) return null;
 
     const row = job.rows[0];
-    const chunks = await fetchJobChunks(client, jobId);
+    const kind = String(row.kind) as ArcpChunkCacheKind;
+    const chunks = await reconcileJobChunksWithDisk(client, jobId, kind);
     const counts = summarizeChunks(chunks);
+    const status = deriveJobStatus(chunks);
 
     return {
       jobId: String(row.job_id),
       jobKey: String(row.job_key),
-      kind: String(row.kind) as ArcpChunkCacheKind,
-      status: String(row.status) as ArcpLoadJobStatus,
+      kind,
+      status,
       totalChunks: Number(row.total_chunks ?? chunks.length),
       chunks,
       filters: (row.filters ?? {}) as Record<string, unknown>,
@@ -357,13 +399,16 @@ export async function getLoadJobStatus(
     );
     if (job.rows.length === 0) return null;
     const row = job.rows[0];
-    const chunks = await fetchJobChunks(client, String(row.job_id));
+    const jobId = String(row.job_id);
+    const jobKind = String(row.kind) as ArcpChunkCacheKind;
+    const chunks = await reconcileJobChunksWithDisk(client, jobId, jobKind);
     const counts = summarizeChunks(chunks);
+    const status = deriveJobStatus(chunks);
     return {
-      jobId: String(row.job_id),
+      jobId,
       jobKey: String(row.job_key),
-      kind: String(row.kind) as ArcpChunkCacheKind,
-      status: String(row.status) as ArcpLoadJobStatus,
+      kind: jobKind,
+      status,
       totalChunks: Number(row.total_chunks ?? chunks.length),
       chunks,
       filters: (row.filters ?? {}) as Record<string, unknown>,
@@ -391,13 +436,16 @@ export async function getLatestResumableLoadJob(
     );
     if (job.rows.length === 0) return null;
     const row = job.rows[0];
-    const chunks = await fetchJobChunks(client, String(row.job_id));
+    const jobId = String(row.job_id);
+    const jobKind = String(row.kind) as ArcpChunkCacheKind;
+    const chunks = await reconcileJobChunksWithDisk(client, jobId, jobKind);
     const counts = summarizeChunks(chunks);
+    const status = deriveJobStatus(chunks);
     return {
-      jobId: String(row.job_id),
+      jobId,
       jobKey: String(row.job_key),
-      kind: String(row.kind) as ArcpChunkCacheKind,
-      status: String(row.status) as ArcpLoadJobStatus,
+      kind: jobKind,
+      status,
       totalChunks: Number(row.total_chunks ?? chunks.length),
       chunks,
       filters: (row.filters ?? {}) as Record<string, unknown>,

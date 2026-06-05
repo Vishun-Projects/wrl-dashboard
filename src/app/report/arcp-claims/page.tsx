@@ -598,13 +598,23 @@ export default function ArcpClaimsPage() {
 
       try {
         let failedChunks = jobStart.progress?.failedCount ?? 0;
-        const chunksToFetch = useClientChunks
+        let chunksToFetch = useClientChunks
           ? chunks.filter(
               (c) => jobChunkStatus.get(`${c.start}|${c.end}`) !== 'done'
             )
           : pendingAtStart > 0 || failedChunks > 0
             ? chunks
             : [];
+
+        if (
+          chunksToFetch.length === 0 &&
+          runningAggregates.length === 0 &&
+          chunks.length > 0
+        ) {
+          chunksToFetch = chunks;
+          cachedAtStart = 0;
+          pendingAtStart = chunks.length;
+        }
 
         if (chunksToFetch.length === 0) {
           if (!isStale()) {
@@ -699,7 +709,7 @@ export default function ArcpClaimsPage() {
           setRawAggregateRows(runningAggregates);
         }
 
-        if (!isStale() && cachedAtStart > 0) {
+        if (!isStale() && cachedAtStart > 0 && runningAggregates.length > 0) {
           toast.info(
             buildArcpJobResumeMessage(
               cachedAtStart,
@@ -849,7 +859,12 @@ export default function ArcpClaimsPage() {
         const done = status.progress?.doneCount ?? 0;
         const total = status.progress?.totalChunks ?? done;
         const pending = status.progress?.pendingCount ?? 0;
-        toast.info(buildArcpJobResumeMessage(done, total, pending), { duration: 6000 });
+        const hasPartial = (status.partialAggregates?.length ?? 0) > 0;
+        if (hasPartial || pending > 0) {
+          toast.info(buildArcpJobResumeMessage(done, total, pending), { duration: 6000 });
+        } else {
+          toast.info('Resuming ARCP load…', { duration: 4000 });
+        }
         runLoad(restored, false);
       } catch {
         /* no resumable job */
