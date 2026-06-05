@@ -72,6 +72,16 @@ type DiskEntry = {
   rows: ArcpClaimsAggregateRow[] | ArcpClaimsDetailRow[];
 };
 
+/** Read cached rows from disk only (for job merge / resume). */
+export async function readArcpChunkRowsFromDisk(
+  cacheKey: string,
+  kind: ArcpChunkCacheKind
+): Promise<ArcpClaimsAggregateRow[] | ArcpClaimsDetailRow[] | null> {
+  const disk = await readDiskChunk(cacheKey);
+  if (!disk || disk.payload.kind !== kind) return null;
+  return disk.payload.rows;
+}
+
 async function readDiskChunk(cacheKey: string): Promise<MemEntry | null> {
   try {
     const raw = await readFile(cacheFilePath(cacheKey), 'utf8');

@@ -34,6 +34,9 @@ export type { ArcpChunkLoadMeta } from '@/lib/arcp-claims/server/chunk-cache';
 export type ArcpFetchOpts = ArcpClaimsQueryOpts & {
   /** When true, skip reading chunk cache (still writes on success). */
   bypassChunkCache?: boolean;
+  /** Postgres load job — chunk status updated on success/failure. */
+  jobId?: string;
+  loadJobKind?: 'agg' | 'detail';
 };
 
 /** Report CRM fallback only — never used by read-model backfill. */
@@ -279,18 +282,38 @@ async function loadAggregateChunkCached(
   timeoutMs: number
 ): Promise<{ rows: ArcpClaimsAggregateRow[]; fromCache: boolean }> {
   const cacheKey = buildArcpChunkCacheKey(opts, chunk, 'agg');
-  const hit = await resolveArcpChunkCache(cacheKey, 'agg', {
-    bypass: opts.bypassChunkCache,
-  });
-  if (hit && hit.payload.kind === 'agg') {
-    return { rows: hit.payload.rows, fromCache: true };
-  }
+  const trackJob = opts.jobId && (!opts.loadJobKind || opts.loadJobKind === 'agg');
 
-  return getOrRunChunkInflight(cacheKey, async () => {
-    const rows = await fetchArcpAggregateChunkResilient(opts, chunk, timeoutMs);
-    await writeArcpChunkCache(cacheKey, 'agg', rows);
-    return { kind: 'agg' as const, rows };
-  }).then((payload) => ({ rows: payload.rows, fromCache: false }));
+  try {
+    const hit = await resolveArcpChunkCache(cacheKey, 'agg', {
+      bypass: opts.bypassChunkCache,
+    });
+    if (hit && hit.payload.kind === 'agg') {
+      if (trackJob) {
+        const { markChunkDone } = await import('@/lib/arcp-claims/server/load-job');
+        await markChunkDone(opts.jobId!, chunk.start, chunk.end);
+      }
+      return { rows: hit.payload.rows, fromCache: true };
+    }
+
+    const payload = await getOrRunChunkInflight(cacheKey, async () => {
+      const rows = await fetchArcpAggregateChunkResilient(opts, chunk, timeoutMs);
+      await writeArcpChunkCache(cacheKey, 'agg', rows);
+      return { kind: 'agg' as const, rows };
+    });
+    if (trackJob) {
+      const { markChunkDone } = await import('@/lib/arcp-claims/server/load-job');
+      await markChunkDone(opts.jobId!, chunk.start, chunk.end);
+    }
+    return { rows: payload.rows, fromCache: false };
+  } catch (err) {
+    if (trackJob) {
+      const { markChunkFailed } = await import('@/lib/arcp-claims/server/load-job');
+      const message = err instanceof Error ? err.message : 'Chunk load failed';
+      await markChunkFailed(opts.jobId!, chunk.start, chunk.end, message);
+    }
+    throw err;
+  }
 }
 
 async function loadDetailChunkCached(
@@ -299,18 +322,38 @@ async function loadDetailChunkCached(
   timeoutMs: number
 ): Promise<{ rows: ArcpClaimsDetailRow[]; fromCache: boolean }> {
   const cacheKey = buildArcpChunkCacheKey(opts, chunk, 'detail');
-  const hit = await resolveArcpChunkCache(cacheKey, 'detail', {
-    bypass: opts.bypassChunkCache,
-  });
-  if (hit && hit.payload.kind === 'detail') {
-    return { rows: hit.payload.rows, fromCache: true };
-  }
+  const trackJob = opts.jobId && (!opts.loadJobKind || opts.loadJobKind === 'detail');
 
-  return getOrRunChunkInflight(cacheKey, async () => {
-    const rows = await fetchArcpDetailChunkResilient(opts, chunk, timeoutMs);
-    await writeArcpChunkCache(cacheKey, 'detail', rows);
-    return { kind: 'detail' as const, rows };
-  }).then((payload) => ({ rows: payload.rows, fromCache: false }));
+  try {
+    const hit = await resolveArcpChunkCache(cacheKey, 'detail', {
+      bypass: opts.bypassChunkCache,
+    });
+    if (hit && hit.payload.kind === 'detail') {
+      if (trackJob) {
+        const { markChunkDone } = await import('@/lib/arcp-claims/server/load-job');
+        await markChunkDone(opts.jobId!, chunk.start, chunk.end);
+      }
+      return { rows: hit.payload.rows, fromCache: true };
+    }
+
+    const payload = await getOrRunChunkInflight(cacheKey, async () => {
+      const rows = await fetchArcpDetailChunkResilient(opts, chunk, timeoutMs);
+      await writeArcpChunkCache(cacheKey, 'detail', rows);
+      return { kind: 'detail' as const, rows };
+    });
+    if (trackJob) {
+      const { markChunkDone } = await import('@/lib/arcp-claims/server/load-job');
+      await markChunkDone(opts.jobId!, chunk.start, chunk.end);
+    }
+    return { rows: payload.rows, fromCache: false };
+  } catch (err) {
+    if (trackJob) {
+      const { markChunkFailed } = await import('@/lib/arcp-claims/server/load-job');
+      const message = err instanceof Error ? err.message : 'Chunk load failed';
+      await markChunkFailed(opts.jobId!, chunk.start, chunk.end, message);
+    }
+    throw err;
+  }
 }
 
 export async function fetchArcpClaimsAggregates(

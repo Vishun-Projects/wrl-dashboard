@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
-import { prisma } from '@/lib/db/prisma';
 import {
   isCrmOutOfMemoryError,
   isCrmSqlTimeoutError,
 } from '@/lib/arcp-claims/server/fetch';
 import { loadArcpClaimsDetailRows } from '@/lib/arcp-claims/server/detail-load';
-import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims/query';
-import { hasPagePermission } from '@/lib/auth/page-access';
 import { buildArcpChunkCacheKey } from '@/lib/arcp-claims/server/chunk-cache';
+import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims/query';
+import { authenticateArcpClaimsRequest } from '@/lib/arcp-claims/server/route-auth';
 
 export const maxDuration = 300;
 
@@ -56,57 +54,38 @@ function buildDetailRouteKey(params: {
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return NextResponse.json({ error: 'No authorization header' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const {
-      data: { user },
-      error: authError,
-    } = await supabaseAdmin.auth.getUser(token);
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const permissions = await (prisma as any).getUserPermissions(user.id);
-    if (!hasPagePermission(permissions, 'page_arcp_claims')) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-
     const { searchParams } = new URL(req.url);
-    const startDate = searchParams.get('startDate');
-    const endDate = searchParams.get('endDate');
-    const dateFilterColumn = resolveArcpDateFilterColumn(searchParams.get('dateFilterColumn'));
-    const branch = searchParams.get('branch');
-    const franchisee = searchParams.get('franchisee');
-    const callType = searchParams.get('callType');
     const refresh = searchParams.get('refresh') === 'true';
     const forceRefresh = searchParams.get('force') === 'true';
+    const jobId = searchParams.get('jobId');
 
-    const { data: profile } = await supabaseAdmin
-      .from('app_users')
-      .select('office_ids, role')
-      .eq('id', user.id)
-      .single();
+    const auth = await authenticateArcpClaimsRequest(req, {
+      bypassChunkCache: forceRefresh,
+      jobId,
+      kind: 'detail',
+    });
+    if (auth instanceof NextResponse) return auth;
 
-    const assignedOffices = (profile?.office_ids || []).map(String);
-    const isHod =
-      permissions.includes('view_all_offices') ||
-      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(
-        profile?.role || ''
-      );
-
-    const routeKey = buildDetailRouteKey({
+    const {
       startDate,
       endDate,
-      dateFilterColumn,
       branch,
       franchisee,
       callType,
       isHod,
       assignedOffices,
+    } = auth.opts;
+    const dateFilterColumn = resolveArcpDateFilterColumn(auth.opts.dateFilterColumn);
+
+    const routeKey = buildDetailRouteKey({
+      startDate: startDate ?? null,
+      endDate: endDate ?? null,
+      dateFilterColumn,
+      branch: branch ?? null,
+      franchisee: franchisee ?? null,
+      callType: callType ?? null,
+      isHod: isHod ?? true,
+      assignedOffices: assignedOffices ?? [],
     });
 
     const now = Date.now();
@@ -134,15 +113,10 @@ export async function GET(req: NextRequest) {
     if (!run) {
       run = (async () => {
         const { rows, source, chunkMeta } = await loadArcpClaimsDetailRows({
-          startDate,
-          endDate,
-          dateFilterColumn,
-          branch,
-          franchisee,
-          callType,
-          isHod,
-          assignedOffices,
+          ...auth.opts,
           bypassChunkCache: forceRefresh,
+          jobId: jobId || undefined,
+          loadJobKind: 'detail',
         });
         return {
           rows,
@@ -169,6 +143,8 @@ export async function GET(req: NextRequest) {
           fetchedChunks: entry.chunkMeta.fetchedChunks,
           totalChunks: entry.chunkMeta.totalChunks,
           cached: entry.chunkMeta.cachedChunks > 0,
+          jobId: jobId || undefined,
+          chunkStatus: entry.chunkMeta.cachedChunks > 0 ? 'cached' : 'fetched',
         },
       });
     } finally {

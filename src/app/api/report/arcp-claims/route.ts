@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
-import { prisma } from '@/lib/db/prisma';
 import {
   isCrmOutOfMemoryError,
   isCrmSqlTimeoutError,
@@ -12,13 +10,14 @@ import {
   clearArcpChunkDiskCache,
   type ArcpChunkLoadMeta,
 } from '@/lib/arcp-claims/server/chunk-cache';
+import { clearArcpLoadJobs } from '@/lib/arcp-claims/server/load-job';
+import { authenticateArcpClaimsRequest } from '@/lib/arcp-claims/server/route-auth';
 import {
   deriveArcpGrandTotalsFromAggregates,
   resolveArcpDateFilterColumn,
   type ArcpGrandTotals,
 } from '@/lib/arcp-claims/query';
 import { buildArcpClaimsTableModel } from '@/lib/arcp-claims/table';
-import { hasPagePermission } from '@/lib/auth/page-access';
 
 export const maxDuration = 300;
 
@@ -39,13 +38,14 @@ const aggInflight = new Map<string, Promise<AggCacheEntry>>();
 /** Bump when tally totals logic changes — invalidates in-memory aggregate cache. */
 const AGG_CACHE_VERSION = ARCP_CHUNK_CACHE_VERSION;
 
-export function clearArcpClaimsRouteCaches(): void {
+export function clearArcpClaimsRouteCaches(userId?: string): void {
   aggCache.clear();
   aggInflight.clear();
   cache.clear();
   inflight.clear();
   clearArcpChunkCaches();
   void clearArcpChunkDiskCache();
+  void clearArcpLoadJobs(userId);
 }
 
 type CacheEntry = {
@@ -85,72 +85,48 @@ function buildCacheKey(params: {
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return NextResponse.json({ error: 'No authorization header' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const {
-      data: { user },
-      error: authError,
-    } = await supabaseAdmin.auth.getUser(token);
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const permissions = await (prisma as any).getUserPermissions(user.id);
-    if (!hasPagePermission(permissions, 'page_arcp_claims')) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-
     const { searchParams } = new URL(req.url);
-    const startDate = searchParams.get('startDate');
-    const endDate = searchParams.get('endDate');
-    const dateFilterColumn = resolveArcpDateFilterColumn(searchParams.get('dateFilterColumn'));
-    const branch = searchParams.get('branch');
-    const franchisee = searchParams.get('franchisee');
-    const callType = searchParams.get('callType');
     const refresh = searchParams.get('refresh') === 'true';
     /** Hard bypass of per-period chunk cache (CRM refetch every period). */
     const forceRefresh = searchParams.get('force') === 'true';
     const aggregatesOnly = searchParams.get('aggregatesOnly') === 'true';
+    const jobId = searchParams.get('jobId');
 
-    const { data: profile } = await supabaseAdmin
-      .from('app_users')
-      .select('office_ids, role')
-      .eq('id', user.id)
-      .single();
+    const auth = await authenticateArcpClaimsRequest(req, {
+      bypassChunkCache: forceRefresh,
+      jobId,
+      kind: 'agg',
+    });
+    if (auth instanceof NextResponse) return auth;
 
-    const assignedOffices = (profile?.office_ids || []).map(String);
-    const isHod =
-      permissions.includes('view_all_offices') ||
-      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(
-        profile?.role || ''
-      );
-
-    const cacheKey = buildCacheKey({
+    const {
       startDate,
       endDate,
-      dateFilterColumn,
       branch,
       franchisee,
       callType,
       isHod,
       assignedOffices,
+    } = auth.opts;
+    const dateFilterColumn = resolveArcpDateFilterColumn(auth.opts.dateFilterColumn);
+
+    const cacheKey = buildCacheKey({
+      startDate: startDate ?? null,
+      endDate: endDate ?? null,
+      dateFilterColumn,
+      branch: branch ?? null,
+      franchisee: franchisee ?? null,
+      callType: callType ?? null,
+      isHod: isHod ?? true,
+      assignedOffices: assignedOffices ?? [],
     });
     const aggKey = `${AGG_CACHE_VERSION}|${cacheKey}|agg`;
 
     const queryOpts = {
-      startDate,
-      endDate,
-      dateFilterColumn,
-      branch,
-      franchisee,
-      callType,
-      isHod,
-      assignedOffices,
+      ...auth.opts,
       bypassChunkCache: forceRefresh,
+      jobId: jobId || undefined,
+      loadJobKind: 'agg' as const,
     };
 
     if (aggregatesOnly) {
@@ -195,6 +171,8 @@ export async function GET(req: NextRequest) {
             fetchedChunks: chunkMeta.fetchedChunks,
             totalChunks: chunkMeta.totalChunks,
             cached: chunkMeta.cachedChunks > 0,
+            jobId: jobId || undefined,
+            chunkStatus: chunkMeta.cachedChunks > 0 ? 'cached' : 'fetched',
           },
         });
       } finally {
@@ -212,22 +190,22 @@ export async function GET(req: NextRequest) {
 
     let run = inflight.get(cacheKey);
     if (!run) {
-      run = (async () => {
+      const newRun = (async () => {
         const { aggregates, source } = await loadArcpClaimsAggregates(queryOpts);
         const model = buildArcpClaimsTableModel(aggregates);
 
         return {
           ...model,
           meta: {
-            startDate,
-            endDate,
+            startDate: startDate ?? null,
+            endDate: endDate ?? null,
             dateFilterColumn,
             source,
           },
         };
       })();
-
-      inflight.set(cacheKey, run);
+      inflight.set(cacheKey, newRun);
+      run = newRun;
     }
 
     try {
