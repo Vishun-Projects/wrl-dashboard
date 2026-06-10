@@ -12,6 +12,28 @@ import { runBackfillCallsHotBmApproval } from '@/lib/read-model/backfill-bm-appr
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
 
+function formatSyncWorkerError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  if (/ENOTFOUND westerncrm\.com/i.test(raw) || /getaddrinfo ENOTFOUND westerncrm/i.test(raw)) {
+    return `${raw} — check internet/VPN; sync reads CRM at westerncrm.com`;
+  }
+  const dbUrl = process.env.DATABASE_URL;
+  if (dbUrl && /ENOTFOUND/i.test(raw)) {
+    try {
+      const host = new URL(dbUrl.replace(/^postgresql:/, 'postgres:')).hostname;
+      if (raw.includes(host)) {
+        return `${raw} — verify DATABASE_URL resolves (${host}:5432 direct for sync worker)`;
+      }
+    } catch {
+      /* ignore malformed URL */
+    }
+  }
+  if (/timeout expired|Timeout expired/i.test(raw)) {
+    return `${raw} — CRM query timed out; worker will retry on next interval after catch-up chunks complete`;
+  }
+  return raw;
+}
+
 async function runDaemon(): Promise<void> {
   console.log(`[sync-worker] Daemon started — incremental every ${INCREMENTAL_INTERVAL_MS / 1000}s`);
   for (;;) {
@@ -21,7 +43,7 @@ async function runDaemon(): Promise<void> {
         await runArcpIncrementalSync();
       }
     } catch (err) {
-      console.error('[sync-worker] Incremental failed:', err instanceof Error ? err.message : err);
+      console.error('[sync-worker] Incremental failed:', formatSyncWorkerError(err));
     }
     await new Promise((resolve) => setTimeout(resolve, INCREMENTAL_INTERVAL_MS));
   }
@@ -108,7 +130,7 @@ Environment:
 
 main()
   .catch((err) => {
-    console.error('[sync-worker] Fatal:', err instanceof Error ? err.message : err);
+    console.error('[sync-worker] Fatal:', formatSyncWorkerError(err));
     process.exitCode = 1;
   })
   .finally(async () => {

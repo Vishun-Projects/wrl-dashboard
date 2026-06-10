@@ -60,6 +60,23 @@ export function PageShell({
   );
 }
 
+/** Scrollable main content below a fixed PageShell header/toolbar. */
+export function PageScrollRegion({
+  children,
+  className = '',
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`flex min-h-0 flex-1 flex-col overflow-y-auto custom-scrollbar ${className}`.trim()}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function PageLoadingState({ label = 'Loading...' }: { label?: string }) {
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center bg-white">

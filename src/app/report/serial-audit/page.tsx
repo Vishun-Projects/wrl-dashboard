@@ -17,7 +17,7 @@ import { createClient } from '@/lib/supabase/client';
 import { RegisterPageFilters } from '@/components/register/RegisterPageFilters';
 import { RegisterMultiSelect } from '@/components/register/RegisterMultiSelect';
 import { ReportLoadingPanel } from '@/components/report/ReportLoadingFeedback';
-import { PageShell } from '@/components/layout/PageShell';
+import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import {
   AdminStatPill,
   AdminTable,
@@ -1148,7 +1148,7 @@ export default function SerialAuditPage() {
   ]);
 
   const listBodyLayoutClass = showAspBreakdown
-    ? 'grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_440px] lg:items-stretch'
+    ? 'grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_440px] lg:items-stretch [&>*]:min-h-0'
     : 'min-h-0 flex-1';
 
   const toggleExpand = (serial: string) => {
@@ -1227,7 +1227,7 @@ export default function SerialAuditPage() {
           extraFilterCount={extraFilterCount}
         />
       }
-      bodyClassName="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden bg-slate-50 p-4"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50 p-4"
     >
       <div className="flex shrink-0 flex-col gap-3">
       <SerialRepairLegend />
@@ -1283,7 +1283,8 @@ export default function SerialAuditPage() {
       </AdminToolbar>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <PageScrollRegion>
+      <div className="flex min-h-0 flex-1 flex-col pt-3">
       {loading && listRows.length === 0 ? (
         <div className={listBodyLayoutClass}>
           <ReportLoadingPanel
@@ -1481,6 +1482,7 @@ export default function SerialAuditPage() {
         </div>
       )}
       </div>
+      </PageScrollRegion>
     </PageShell>
   );
 }

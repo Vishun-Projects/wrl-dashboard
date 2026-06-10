@@ -20,7 +20,7 @@ import { ArcpClaimsPdfViewer } from '@/components/arcp-claims/ArcpClaimsPdfViewe
 import { DateRangeSelector } from '@/components/register/DateRangeSelector';
 import { RegisterBranchFranchiseeFilters } from '@/components/register/RegisterBranchFranchiseeFilters';
 import { RegisterMultiSelect } from '@/components/register/RegisterMultiSelect';
-import { PageShell } from '@/components/layout/PageShell';
+import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import { AdminTableCard } from '@/components/admin/AdminUi';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 import {
@@ -74,10 +74,6 @@ import { PageAlert } from '@/components/ui/PageAlert';
 import { usePageAlert } from '@/hooks/usePageAlert';
 import { feedback } from '@/lib/ui/feedback';
 import { GlossaryTerm } from '@/components/ui/GlossaryTerm';
-import {
-  ArcpRestoreSessionDialog,
-  type ArcpRestoreSessionPayload,
-} from '@/components/arcp-claims/ArcpRestoreSessionDialog';
 import {
   appliedArcpFiltersKey,
   filtersFromLoadJobSnapshot,
@@ -308,8 +304,6 @@ export default function ArcpClaimsPage() {
   const loadGenerationRef = useRef(0);
   const sessionCheckRef = useRef(false);
   const arcpPrefsRestoredRef = useRef(false);
-  const [restorePayload, setRestorePayload] = useState<ArcpRestoreSessionPayload | null>(null);
-  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
 
   const loadEstimateHints = useMemo(
     () => ({
@@ -1122,45 +1116,13 @@ export default function ArcpClaimsPage() {
 
         if (matchesDraft && (status.resumable || hasPartialData)) {
           applyRestoredSession(restored, status.partialAggregates, Boolean(status.resumable));
-          return;
         }
-
-        const progressLabel =
-          status.progress && status.progress.totalChunks > 0
-            ? `${status.progress.doneCount}/${status.progress.totalChunks} periods`
-            : undefined;
-
-        setRestorePayload({
-          filters: restored,
-          status: status.status ?? 'unknown',
-          resumable: Boolean(status.resumable),
-          progressLabel,
-          partialAggregates: status.partialAggregates,
-        });
-        setRestoreDialogOpen(true);
+        /* Stale job with different filters: discard silently (no restore dialog). */
       } catch {
         /* no prior session */
       }
     })();
   }, [resourcesLoaded, chunkedAuth, draftQueryKey, applyRestoredSession]);
-
-  const handleContinueRestoreSession = useCallback(() => {
-    if (!restorePayload) return;
-    applyRestoredSession(
-      restorePayload.filters,
-      restorePayload.partialAggregates,
-      restorePayload.resumable
-    );
-    setRestoreDialogOpen(false);
-    setRestorePayload(null);
-  }, [applyRestoredSession, restorePayload]);
-
-  const handleStartFreshSession = useCallback(() => {
-    setRestoreDialogOpen(false);
-    setRestorePayload(null);
-    setAppliedFilters(null);
-    setRawAggregateRows(null);
-  }, []);
 
   useEffect(() => {
     return () => {
@@ -1589,6 +1551,7 @@ export default function ArcpClaimsPage() {
       toolbar={toolbar}
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50 p-4"
     >
+      <div className="flex shrink-0 flex-col gap-3">
       {pageAlert ? (
         <PageAlert
           variant={pageAlert.variant}
@@ -1619,8 +1582,10 @@ export default function ArcpClaimsPage() {
       {exportingDetail && detailExportStatus ? (
         <ArcpClaimsLoadBanner status={detailExportStatus} variant="detail-export" />
       ) : null}
+      </div>
 
-      <div className="flex min-h-0 flex-1 flex-col">
+      <PageScrollRegion>
+      <div className="flex min-h-0 flex-1 flex-col pt-1">
       <AdminTableCard isEmpty={false}>
         {!appliedFilters && !loading ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 p-12 text-center">
@@ -1665,19 +1630,13 @@ export default function ArcpClaimsPage() {
         )}
       </AdminTableCard>
       </div>
+      </PageScrollRegion>
 
       <ArcpClaimsPdfViewer
         open={pdfViewerOpen}
         pdfUrl={pdfViewerUrl}
         fileName={pdfFileName}
         onClose={closePdfViewer}
-      />
-
-      <ArcpRestoreSessionDialog
-        open={restoreDialogOpen}
-        payload={restorePayload}
-        onContinue={handleContinueRestoreSession}
-        onStartFresh={handleStartFreshSession}
       />
     </PageShell>
   );

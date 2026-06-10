@@ -5,7 +5,8 @@ import {
   looksLikeBranchOffice,
   TRHCALLS_EXCLUDE_TRANSFERRED,
 } from '@/lib/trhcalls/query';
-import { splitDateRangeByDays, formatCrmDateTime } from '@/lib/read-model/dates';
+import { splitDateRangeByDays, formatCrmDateTime, todayLocalDate } from '@/lib/read-model/dates';
+import { formatLocalDate } from '@/lib/report/filters';
 
 const FETCH_GAP_MS = 800;
 const RETRY_DELAYS_MS = [3000, 10000, 30000];
@@ -81,19 +82,47 @@ export async function fetchCrmRowsForRange(
 
 export async function fetchCrmIncrementalRows(
   watermarkStart: Date,
-  onProgress?: (rows: number) => void
+  onProgress?: (info: { chunk: string; rows: number; total: number }) => void
 ): Promise<Record<string, unknown>[]> {
   const watermark = formatCrmDateTime(watermarkStart);
-  const tableName = buildCorpusTableName({ lastSync: watermark });
+  const startDate = formatLocalDate(watermarkStart);
+  const endDate = todayLocalDate();
+  const chunks = splitDateRangeByDays(startDate, endDate, 7);
   const condition = `(tc.vtrnno IS NOT NULL AND tc.vtrnno <> '')${TRHCALLS_EXCLUDE_TRANSFERRED}`;
-  const rows = await fetchCrmChunk({
-    tableName,
-    condition,
-    orderBy: 'ISNULL(tc.editedon, tc.addedon) ASC',
-    timeoutMs: 180000,
-  });
-  onProgress?.(rows.length);
-  return rows;
+  const allRows: Record<string, unknown>[] = [];
+
+  const catchUpDays = Math.max(
+    0,
+    Math.ceil((Date.now() - watermarkStart.getTime()) / (24 * 60 * 60 * 1000))
+  );
+  if (catchUpDays > 1) {
+    console.log(
+      `[sync-worker] CRM catch-up mode: ~${catchUpDays} day(s), ${chunks.length} chunk(s) (${startDate}..${endDate})`
+    );
+  }
+
+  for (const chunk of chunks) {
+    const tableName = buildCorpusTableName({
+      lastSync: watermark,
+      startDate: chunk.start,
+      endDate: chunk.end,
+    });
+    const rows = await fetchCrmChunk({
+      tableName,
+      condition,
+      orderBy: 'ISNULL(tc.editedon, tc.addedon) ASC',
+      timeoutMs: 180000,
+    });
+    allRows.push(...rows);
+    onProgress?.({
+      chunk: `${chunk.start}..${chunk.end}`,
+      rows: rows.length,
+      total: allRows.length,
+    });
+    await sleep(FETCH_GAP_MS);
+  }
+
+  return allRows;
 }
 
 /** Open calls logged more than 90 days ago (~1,801 TRNs). */

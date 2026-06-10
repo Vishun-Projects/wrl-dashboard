@@ -13,8 +13,15 @@ Defaults: every `SYNC_INTERVAL_MS` (180000 ms). Requires:
 ```bash
 SYNC_WORKER_ENABLED=true
 SYNC_ARCP_ENABLED=true   # optional, for ARCP in the same loop
-DATABASE_URL=postgresql://...
+DATABASE_URL=postgresql://...@api.wrl-fsm.cloud:5432/postgres   # direct :5432 (not pooler)
 ```
+
+**Network prerequisites (local daemon):**
+
+- **`westerncrm.com`** must resolve — sync reads CRM via the Western CRM DBQUERY proxy.
+- **`DATABASE_URL` host** must resolve — use direct Postgres `:5432` (bootstrap sets `USE_DIRECT_DATABASE=true`).
+- After downtime, incremental runs in **catch-up mode** (7-day CRM chunks from watermark → today). Logs show `CRM catch-up mode: N day(s), M chunk(s)`. Watermark advances only after a successful write.
+- If catch-up keeps failing (CRM timeout / `ENOTFOUND`), fix network first, then run once: `npm run sync-worker:incremental` before restarting the daemon.
 
 The browser **does not** auto-sync anymore (`PostgresAutoSync` was removed). Use the daemon, nightly jobs, or manual sync below.
 

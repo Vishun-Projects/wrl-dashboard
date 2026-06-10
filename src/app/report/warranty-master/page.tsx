@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { ChevronDown, ChevronRight, ChevronUp, Download, RefreshCw, Shield, X } from 'lucide-react';
-import { PageShell } from '@/components/layout/PageShell';
+import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import { RegisterMultiSelect } from '@/components/register/RegisterMultiSelect';
 import {
   AdminStatPill,
@@ -467,7 +467,7 @@ export default function WarrantyMasterPage() {
       }
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
+      <PageScrollRegion className="gap-3 p-4">
         <div className="shrink-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="mb-3 text-xs text-slate-500">
             Filters apply instantly (client-side). Data is cached for this session and only
@@ -732,7 +732,7 @@ export default function WarrantyMasterPage() {
             </AdminTableCard>
           </div>
         </div>
-      </div>
+      </PageScrollRegion>
     </PageShell>
   );
 }

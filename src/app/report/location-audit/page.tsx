@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { RegisterPageFilters } from '@/components/register/RegisterPageFilters';
-import { PageShell } from '@/components/layout/PageShell';
+import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import {
   AdminStatPill,
   AdminTable,
@@ -430,7 +430,7 @@ export default function LocationAuditPage() {
       }
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
+      <PageScrollRegion className="gap-3 p-4">
         {!hasLoadedOnce && !loading ? (
           <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-[11px] text-slate-600">
             Set filters, then click <strong>Run audit</strong> to load summary and calls. Row
@@ -587,7 +587,7 @@ export default function LocationAuditPage() {
             )}
           </div>
         </div>
-      </div>
+      </PageScrollRegion>
     </PageShell>
   );
 }

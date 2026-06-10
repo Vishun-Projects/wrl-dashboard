@@ -148,8 +148,10 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
   });
 
   console.log(`[sync-worker] Incremental fetch from ${watermarkStart.toISOString()}`);
-  const rawRows = await fetchCrmIncrementalRows(watermarkStart, (rows) => {
-    console.log(`[sync-worker] CRM returned ${rows} changed rows`);
+  const rawRows = await fetchCrmIncrementalRows(watermarkStart, (info) => {
+    console.log(
+      `[sync-worker] CRM chunk ${info.chunk}: ${info.rows} rows (${info.total} cumulative)`
+    );
   });
 
   const deduped = dedupeCrmRows(rawRows);

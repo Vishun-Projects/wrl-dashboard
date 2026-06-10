@@ -269,6 +269,14 @@ export function isRegisterRowTransferred(row: Record<string, unknown>): boolean 
   );
 }
 
+/** CRM / Postgres flags arrive as boolean, 0/1, or 'True'/'False' strings. */
+export function truthyCrmFlag(value: unknown): boolean {
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0 || value == null || value === '') return false;
+  const normalized = String(value).trim().toLowerCase();
+  return normalized === 'true' || normalized === '1' || normalized === 'yes';
+}
+
 export function isRegisterRowCancelled(row: Record<string, unknown>): boolean {
   if (isRegisterRowTransferred(row)) return false;
   if (row.callstatus === 'Cancel' || row.Status === 'Cancel') return true;
@@ -292,15 +300,9 @@ export function classifyRegisterRowStatus(row: Record<string, unknown>): Registe
     !isCancelled &&
     (row.Status === 'Closed' ||
       row.callstatus === 'Solved' ||
-      String(row.callsolved).toLowerCase() === 'true' ||
-      String(row.callsolved) === '1');
-  const isTechSolved =
-    (row.bfastclose === 'True' ||
-      row.bfastclose === '1' ||
-      row.bfastclose === 1 ||
-      row.bfastclose === true) &&
-    !isClosed &&
-    !isCancelled;
+      truthyCrmFlag(row.callsolved) ||
+      truthyCrmFlag(row.bsolved));
+  const isTechSolved = truthyCrmFlag(row.bfastclose) && !isClosed && !isCancelled;
   const isAssigned =
     Boolean(row.nengineer && String(row.nengineer) !== '0') &&
     !isClosed &&

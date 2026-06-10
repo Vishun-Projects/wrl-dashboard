@@ -675,23 +675,17 @@ export default function ReportPage() {
         return row.vcomplaint;
       case 'Status':
         return (() => {
-          const isCancelled = isRegisterRowCancelled(row);
-          const isSolved =
-            !isCancelled &&
-            (row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True');
+          const bucket = classifyRegisterRowStatus(row);
           const isRejected =
-            isSolved &&
-            (row.bmreject === 'Yes' || String(row.rejectionstatus) === '1' || String(row.rejectionstatus) === '2');
-          const isTechSolved =
-            (row.bfastclose === 'True' || row.bfastclose === '1') && !isSolved && !isCancelled;
-          const isAssigned =
-            (row.nengineer && String(row.nengineer) !== '0') && !isSolved && !isCancelled && !isTechSolved;
-
+            bucket === 'closed' &&
+            (row.bmreject === 'Yes' ||
+              String(row.rejectionstatus) === '1' ||
+              String(row.rejectionstatus) === '2');
           if (isRejected) return <span className="badge-cancelled">Closed - Rejected</span>;
-          if (isCancelled) return <span className="badge-cancelled">Cancelled</span>;
-          if (isSolved) return <span className="badge-solved">Solved</span>;
-          if (isTechSolved) return <span className="badge-assigned">Tech. Solved</span>;
-          if (isAssigned) return <span className="badge-assigned">Assigned</span>;
+          if (bucket === 'cancelled') return <span className="badge-cancelled">Cancelled</span>;
+          if (bucket === 'closed') return <span className="badge-solved">Solved</span>;
+          if (bucket === 'techSolved') return <span className="badge-solved">Tech. Solved</span>;
+          if (bucket === 'assigned') return <span className="badge-assigned">Assigned</span>;
           return <span className="badge-open">Open</span>;
         })();
       case 'portal_action':
