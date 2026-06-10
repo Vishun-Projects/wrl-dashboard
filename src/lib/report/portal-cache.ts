@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+const SESSION_CACHE_KEY = 'portal-audit-cache-v1';
 
 export type PortalAuditCache = {
   flagsByCallId: Map<string, string>;
@@ -6,8 +6,51 @@ export type PortalAuditCache = {
   loadedAt: number;
 };
 
+type PortalAuditSessionEntry = {
+  flagsByCallId: Record<string, string>;
+  commentCountsByCallId: Record<string, number>;
+  loadedAt: number;
+  etag?: string;
+};
+
 let portalAuditCache: PortalAuditCache | null = null;
 let portalLoadInflight: Promise<PortalAuditCache> | null = null;
+
+function mapsFromPayload(payload: PortalAuditSessionEntry): PortalAuditCache {
+  return {
+    flagsByCallId: new Map(Object.entries(payload.flagsByCallId)),
+    commentCountsByCallId: new Map(Object.entries(payload.commentCountsByCallId)),
+    loadedAt: payload.loadedAt,
+  };
+}
+
+function readSessionCache(): PortalAuditSessionEntry | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(SESSION_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PortalAuditSessionEntry;
+    if (
+      !parsed.flagsByCallId ||
+      !parsed.commentCountsByCallId ||
+      typeof parsed.loadedAt !== 'number'
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionCache(payload: PortalAuditSessionEntry): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    /* quota exceeded — skip */
+  }
+}
 
 export function getPortalAuditCache(): PortalAuditCache | null {
   return portalAuditCache;
@@ -16,39 +59,59 @@ export function getPortalAuditCache(): PortalAuditCache | null {
 export function clearPortalAuditCache(): void {
   portalAuditCache = null;
   portalLoadInflight = null;
+  if (typeof window !== 'undefined') {
+    try {
+      sessionStorage.removeItem(SESSION_CACHE_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 export async function ensurePortalAuditCache(
-  supabase: SupabaseClient
+  authHeaders?: Record<string, string>
 ): Promise<PortalAuditCache> {
   if (portalAuditCache) return portalAuditCache;
+
+  const sessionEntry = readSessionCache();
+  if (sessionEntry && !authHeaders) {
+    portalAuditCache = mapsFromPayload(sessionEntry);
+  }
+
   if (portalLoadInflight) return portalLoadInflight;
 
   portalLoadInflight = (async () => {
-    const [flagsRes, commentsRes] = await Promise.all([
-      supabase.from('call_flags').select('call_id, flag_type'),
-      supabase.from('call_comments').select('call_id'),
-    ]);
+    const headers: Record<string, string> = { ...authHeaders };
+    const cached = readSessionCache();
+    if (cached?.etag) {
+      headers['If-None-Match'] = cached.etag;
+    }
 
-    const flagsByCallId = new Map<string, string>();
-    for (const row of flagsRes.data || []) {
-      if (row.call_id != null && row.flag_type) {
-        flagsByCallId.set(String(row.call_id), String(row.flag_type));
+    const res = await fetch('/api/report/portal-audit', {
+      headers,
+      credentials: 'include',
+    });
+
+    if (res.status === 304 && cached) {
+      portalAuditCache = mapsFromPayload(cached);
+      return portalAuditCache;
+    }
+
+    if (!res.ok) {
+      if (cached) {
+        portalAuditCache = mapsFromPayload(cached);
+        return portalAuditCache;
       }
+      throw new Error(`Portal audit fetch failed (${res.status})`);
     }
 
-    const commentCountsByCallId = new Map<string, number>();
-    for (const row of commentsRes.data || []) {
-      if (row.call_id == null) continue;
-      const id = String(row.call_id);
-      commentCountsByCallId.set(id, (commentCountsByCallId.get(id) || 0) + 1);
-    }
-
-    portalAuditCache = {
-      flagsByCallId,
-      commentCountsByCallId,
-      loadedAt: Date.now(),
+    const body = (await res.json()) as Omit<PortalAuditSessionEntry, 'etag'>;
+    const entry: PortalAuditSessionEntry = {
+      ...body,
+      etag: res.headers.get('ETag') ?? undefined,
     };
+    writeSessionCache(entry);
+    portalAuditCache = mapsFromPayload(entry);
     return portalAuditCache;
   })();
 

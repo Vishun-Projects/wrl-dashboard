@@ -12,7 +12,7 @@ export function resolveDirectDatabaseUrl(raw?: string): string {
   }
   let url = connectionString.replace(/^["']|["']$/g, '');
   if (url.startsWith('prisma+postgres://')) {
-    throw new Error('DATABASE_URL points at Prisma local dev — set Supabase URL in .env.local');
+    throw new Error('DATABASE_URL points at Prisma local dev — set a Postgres URL in .env.local');
   }
   url = url.replace('?pgbouncer=true', '').replace('&pgbouncer=true', '');
   url = url.replace(':6543/', ':5432/');
@@ -27,7 +27,7 @@ export function resolvePooledDatabaseUrl(raw?: string): string {
   }
   let url = connectionString.replace(/^["']|["']$/g, '');
   if (url.startsWith('prisma+postgres://')) {
-    throw new Error('DATABASE_URL points at Prisma local dev — set Supabase URL in .env.local');
+    throw new Error('DATABASE_URL points at Prisma local dev — set a Postgres URL in .env.local');
   }
   if (url.includes(':5432/')) {
     url = url.replace(':5432/', ':6543/');

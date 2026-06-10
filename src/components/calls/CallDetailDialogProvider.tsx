@@ -7,6 +7,7 @@ import { feedback } from '@/lib/ui/feedback';
 import { CallDetail } from '@/components/calls/CallDetail';
 import { useUser } from '@/components/layout/DashboardLayout';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
+import { clearPortalAuditCache } from '@/lib/report/portal-cache';
 
 export type OpenCallDetailParams = {
   callId?: string;
@@ -117,6 +118,7 @@ export function CallDetailDialogProvider({ children }: { children: React.ReactNo
           },
           { headers: { Authorization: `Bearer ${session?.access_token}` } }
         );
+        clearPortalAuditCache();
       } catch {
         // ignore
       }
@@ -154,6 +156,7 @@ export function CallDetailDialogProvider({ children }: { children: React.ReactNo
           },
           { headers: { Authorization: `Bearer ${session?.access_token}` } }
         );
+        clearPortalAuditCache();
       } catch {
         // ignore
       }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { clearPortalAuditServerCache } from '@/lib/report/portal-audit-server';
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -38,7 +39,11 @@ export async function POST(request: Request) {
       changed_by: user.id
     });
 
+    if (logError) {
+      /* audit log failure is non-fatal */
+    }
 
+    clearPortalAuditServerCache();
 
     return NextResponse.json({ success: true });
   } catch (err: any) {

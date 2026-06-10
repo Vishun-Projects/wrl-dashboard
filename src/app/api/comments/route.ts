@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { prisma } from '@/lib/db/prisma';
+import { clearPortalAuditServerCache } from '@/lib/report/portal-audit-server';
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -22,7 +23,7 @@ export async function GET(request: Request) {
     // Get User Profile for filtering
     const { data: profile } = await supabaseAdmin
       .from('app_users')
-      .select('*')
+      .select('office_ids, role, name')
       .eq('id', user.id)
       .single();
 
@@ -34,7 +35,7 @@ export async function GET(request: Request) {
 
     let query = supabaseAdmin
       .from('call_comments')
-      .select('*')
+      .select('id, call_id, office_id, comment, content, author_id, author_name, created_at')
       .eq('call_id', callId);
 
     // If not HOD, only show comments for their offices
@@ -93,7 +94,7 @@ export async function POST(request: Request) {
     // Get User Profile for filtering
     const { data: profile } = await supabaseAdmin
       .from('app_users')
-      .select('*')
+      .select('office_ids, role, name')
       .eq('id', user.id)
       .single();
 
@@ -117,10 +118,12 @@ export async function POST(request: Request) {
         author_name: author_name || profile?.name || 'User',
         author_id: user.id
       }])
-      .select()
+      .select('id, call_id, office_id, comment, author_id, author_name, created_at')
       .single();
 
     if (error) throw error;
+
+    clearPortalAuditServerCache();
 
     return NextResponse.json(comment);
   } catch (err: any) {

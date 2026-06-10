@@ -1,9 +1,17 @@
-import { supabaseAdmin } from '@/lib/supabase/admin';
 import { prisma } from '@/lib/db/prisma';
 import { normalizeExactTrnSearch } from '@/lib/trhcalls/query';
 import { mapCachedRowToRegisterRow } from '@/lib/report/search';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
 import { mergeArcpApproveDatesFromHot } from '@/lib/register/arcp-approve-dates-server';
+import { mergeAuditEnrichment } from '@/lib/register/audit-enrichment';
+import { buildPortalFilterSqlForHot } from '@/lib/register/portal-filter-sql';
+import {
+  DISTRIBUTION_COMPACT_COLUMNS,
+  REGISTER_BULK_MAX_ROWS,
+  REGISTER_HOT_COLUMNS,
+} from '@/lib/read-model/queries/register-columns';
+
+export { REGISTER_BULK_MAX_ROWS };
 
 const STATUS_LABEL_TO_BUCKET: Record<string, string> = {
   'Open Unallocated': 'open_unallocated',
@@ -86,40 +94,6 @@ function hotRowToRegisterRow(row: Record<string, unknown>): Record<string, unkno
     branch_headcount: row.branch_headcount,
     is_major_repair: row.is_major ? 'True' : 'False',
     ncancelreason: row.ncancelreason,
-  });
-}
-
-async function mergeAuditEnrichment(rows: Record<string, unknown>[]) {
-  if (!rows.length) return rows;
-  const callIds = rows.map((r) => String(r.id ?? r.ncode));
-  const [flagsRes, commentsRes] = await Promise.all([
-    supabaseAdmin.from('call_flags').select('call_id, flag_type').in('call_id', callIds),
-    supabaseAdmin
-      .from('call_comments')
-      .select('call_id, author_name, comment, content, created_at, author_id')
-      .in('call_id', callIds)
-      .order('created_at', { ascending: false }),
-  ]);
-
-  const flags = flagsRes.data || [];
-  const comments = commentsRes.data || [];
-  return rows.map((row) => {
-    const id = String(row.id ?? row.ncode);
-    const callFlag = flags.find((f) => f.call_id === id);
-    const callComments = comments
-      .filter((cm) => cm.call_id === id)
-      .map((cm) => ({
-        author_name: cm.author_name,
-        comment: cm.comment || cm.content,
-        created_at: cm.created_at,
-        author_avatar_url: null,
-      }));
-    return {
-      ...row,
-      audit_flag: callFlag?.flag_type || null,
-      comment_count: callComments.length,
-      comments: callComments,
-    };
   });
 }
 
@@ -257,6 +231,11 @@ function buildWhere(params: RegisterPostgresParams): { sql: string; values: unkn
     }
   }
 
+  const portalSql = buildPortalFilterSqlForHot(params.portalFilter);
+  if (portalSql) {
+    clauses.push(portalSql);
+  }
+
   return { sql: clauses.join(' AND '), values };
 }
 
@@ -267,7 +246,7 @@ export async function queryRegisterFromPostgres(params: RegisterPostgresParams) 
 
   const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
     `
-    SELECT h.*
+    SELECT ${REGISTER_HOT_COLUMNS}
     FROM calls_latest_hot h
     WHERE ${whereSql}
     ORDER BY h.logged_at DESC, h.ncode DESC
@@ -413,10 +392,6 @@ export async function queryRegisterFromPostgres(params: RegisterPostgresParams) 
   return response;
 }
 
-const REGISTER_BULK_MAX_ROWS = 100_000;
-
-export { REGISTER_BULK_MAX_ROWS };
-
 /** One-shot preload for client-side register/distribution filtering (no OFFSET pagination). */
 export async function queryRegisterBulkFromPostgres(
   params: Pick<
@@ -454,7 +429,7 @@ export async function queryRegisterBulkFromPostgres(
 
   const rows = await prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(
     `
-    SELECT h.*
+    SELECT ${REGISTER_HOT_COLUMNS}
     FROM calls_latest_hot h
     WHERE ${whereSql}
     ORDER BY h.logged_at DESC, h.ncode DESC
@@ -484,7 +459,7 @@ export async function queryRegisterExportFromPostgres(
 
   const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
     `
-    SELECT h.*
+    SELECT ${REGISTER_HOT_COLUMNS}
     FROM calls_latest_hot h
     WHERE ${whereSql}
     ORDER BY h.logged_at DESC, h.ncode DESC
@@ -495,6 +470,75 @@ export async function queryRegisterExportFromPostgres(
   );
 
   return mergeArcpApproveDatesFromHot(rows.map(hotRowToRegisterRow) as Record<string, unknown>[]);
+}
+
+/** Compact call rows for distribution idle-assignee / map computations. */
+export async function queryDistributionCompactFromPostgres(
+  params: Pick<
+    RegisterPostgresParams,
+    | 'officeId'
+    | 'callType'
+    | 'startDate'
+    | 'endDate'
+    | 'status'
+    | 'account'
+    | 'region'
+    | 'pincode'
+    | 'priority'
+    | 'portalFilter'
+    | 'state'
+    | 'city'
+    | 'branch'
+    | 'franchisee'
+    | 'technician'
+    | 'assignedOffices'
+    | 'visibleStatuses'
+    | 'isHod'
+  >
+): Promise<Record<string, unknown>[]> {
+  const queryParams: RegisterPostgresParams = {
+    page: 1,
+    limit: REGISTER_BULK_MAX_ROWS,
+    search: '',
+    fetchTotals: false,
+    fetchFilterOptions: false,
+    ...params,
+  };
+  const { sql: whereSql, values } = buildWhere(queryParams);
+
+  const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+    `
+    SELECT ${DISTRIBUTION_COMPACT_COLUMNS}
+    FROM calls_latest_hot h
+    WHERE ${whereSql}
+    ORDER BY h.logged_at DESC, h.ncode DESC
+    LIMIT $${values.length + 1}
+    `,
+    ...values,
+    REGISTER_BULK_MAX_ROWS
+  );
+
+  return rows.map((row) => ({
+    id: row.ncode,
+    ncode: row.ncode,
+    nengineer: row.nengineer ?? 0,
+    franchisee_code: row.franchisee_code,
+    franchisee_name: row.franchisee_name,
+    officename: row.branch_name,
+    branch_office_name: row.branch_name,
+    office_name: row.branch_name,
+    pincode: row.pincode,
+    city: row.city,
+    state: row.state,
+    status_label: row.status_label,
+    status_bucket: row.status_bucket,
+    bsolved: row.bsolved,
+    bfastclose: row.bfastclose,
+    ncancelreason: row.ncancelreason,
+    lat: row.lat,
+    lng: row.lng,
+    callsdtrndate: row.logged_at,
+  }));
 }
 
 function aggregateDistinct(

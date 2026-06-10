@@ -109,8 +109,35 @@ export default function ReadModelSyncPage() {
 
   useEffect(() => {
     void load();
-    const timer = window.setInterval(() => void load(true), 10000);
-    return () => window.clearInterval(timer);
+    let timer: number | null = null;
+
+    const startPolling = () => {
+      if (timer != null) return;
+      timer = window.setInterval(() => void load(true), 10000);
+    };
+
+    const stopPolling = () => {
+      if (timer != null) {
+        window.clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        void load(true);
+        startPolling();
+      }
+    };
+
+    startPolling();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [load]);
 
   if (loading && !progress) {

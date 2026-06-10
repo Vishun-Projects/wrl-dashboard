@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import ExcelJS from 'exceljs';
 import { createClient } from '@/lib/supabase/client';
+import { getBearerAuthHeaders } from '@/lib/supabase/session';
 import axios from 'axios';
 import {
   Download,
@@ -98,7 +99,7 @@ import {
   logRegisterBulk,
 } from '@/lib/register/export-fetch';
 import { downloadRegisterExcelFromRows } from '@/lib/register/excel-export';
-import { ensurePortalAuditCache } from '@/lib/report/portal-cache';
+import { clearPortalAuditCache, ensurePortalAuditCache } from '@/lib/report/portal-cache';
 
 // --- IndexedDB Local Storage Cache Helpers (same DB version as report-corpus-storage) ---
 const saveCallsToDB = async (calls: any[]) => {
@@ -511,6 +512,7 @@ export default function ReportPage() {
         office_id: selectedCall?.nofficeid || undefined,
         vtrnno: selectedCall?.UniqueCallNo || undefined
       }, { headers: { 'Authorization': `Bearer ${session?.access_token}` } });
+      clearPortalAuditCache();
     } catch (err) {
       // ignore
     }
@@ -527,6 +529,7 @@ export default function ReportPage() {
         comment_count: (d.comment_count || 0) + 1,
       } : d)));
       await axios.post('/api/comments', { call_id: id, text, office_id: targetCall?.nofficeid }, { headers: { 'Authorization': `Bearer ${session?.access_token}` } });
+      clearPortalAuditCache();
     } catch (err) {
       // ignore
     }
@@ -1713,7 +1716,7 @@ export default function ReportPage() {
           force: !!opts?.forceCorpus,
         });
       }
-      await ensurePortalAuditCache(supabase);
+      await ensurePortalAuditCache(await getBearerAuthHeaders(supabase));
       const viewFilters = registerViewFilterRef.current;
       let corpusStore = callCorpusStore;
       if (corpusStore?.calls.size && corpusStore.cacheKey !== corpusKey) {
@@ -1894,8 +1897,8 @@ export default function ReportPage() {
                 viewDateFilter
               );
               storePrefetched(nextPage, { data: fromShared.rows, total: fromShared.total });
-              return;
             }
+            return;
           }
           const nextUrl = appendRegisterFilters(
             `/api/report?page=${nextPage}&limit=${pageSize}&fetchTotals=false&officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
@@ -2789,7 +2792,7 @@ export default function ReportPage() {
         if (!hasCorpus) {
           await ensureCorpusLoaded({ silent: false, force: !!opts?.force });
         }
-        await ensurePortalAuditCache(supabase);
+        await ensurePortalAuditCache(await getBearerAuthHeaders(supabase));
         applyRegisterFromCorpus(1);
         applySummaryFromCorpus();
         if (corpusSpanDays(startDateStr, endDateStr) > MAX_CLIENT_CORPUS_DAYS) {

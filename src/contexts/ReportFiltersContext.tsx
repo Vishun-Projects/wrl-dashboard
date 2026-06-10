@@ -73,6 +73,7 @@ import {
   notifyCorpusRegisterDelta,
 } from '@/lib/report/corpus';
 import { ensurePortalAuditCache } from '@/lib/report/portal-cache';
+import { getBearerAuthHeaders } from '@/lib/supabase/session';
 import {
   readCallsFromPostgresClient,
   readRegisterFromPostgresClient,
@@ -1040,7 +1041,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       }
       setLastSyncedAt(new Date(store.lastSyncedAt));
       syncCascadeOptionsFromCalls(calls);
-      void ensurePortalAuditCache(supabase);
+      void getBearerAuthHeaders(supabase).then((headers) => ensurePortalAuditCache(headers));
       if (store.calls.size > 0) {
         corpusHydratedAtRef.current = Date.now();
         markCorpusSatisfied(store.cacheKey);
@@ -1483,7 +1484,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       sharedRegisterLoadInFlightRef.current.set(cacheKey, inflightGate);
 
       const run = (async () => {
-        if (!force) {
+        if (!force && !readRegisterFromPostgresClient()) {
           const idbStart = performance.now();
           const idbCache = await readSharedRegisterCache(cacheKey);
           if (
@@ -1497,7 +1498,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
               ageMs: Date.now() - idbCache.fetchedAt,
             });
             applySharedCalls(idbCache.calls, idbCache.lastSyncedAt);
-            await ensurePortalAuditCache(supabase);
+            await ensurePortalAuditCache(await getBearerAuthHeaders(supabase));
             return;
           }
         }
@@ -1513,6 +1514,30 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
           const endDateStr = toDateString(applied.dateRange.end);
           const auth = createChunkedFetchAuth(supabase);
           await auth.refreshAuth();
+
+          if (readRegisterFromPostgresClient()) {
+            const headers = await auth.getAuthHeaders();
+            const res = await axios.get('/api/report/distribution-summary', {
+              headers,
+              params: {
+                startDate: startDateStr,
+                endDate: endDateStr,
+                officeId: 'All',
+                callType: 'All',
+              },
+            });
+            const calls = (res.data?.calls ?? []) as Record<string, unknown>[];
+            const now = Date.now();
+            applySharedCalls(calls, now);
+            logRegisterBulk('compact LOAD stored', {
+              cacheKey,
+              rows: calls.length,
+              networkMs: Number((performance.now() - networkStart).toFixed(1)),
+            });
+            await ensurePortalAuditCache(await getBearerAuthHeaders(supabase));
+            return;
+          }
+
           const calls = await fetchAllRegisterRowsForExport({
             getAuthHeaders: auth.getAuthHeaders,
             refreshAuth: auth.refreshAuth,
@@ -1531,20 +1556,22 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
           });
           const now = Date.now();
           applySharedCalls(calls, now);
-          void persistSharedRegisterCache({
-            cacheKey,
-            calls,
-            fetchedAt: now,
-            lastSyncedAt: now,
-            callCount: calls.length,
-            schemaVersion: SHARED_REGISTER_CACHE_VERSION,
-          });
+          if (!readRegisterFromPostgresClient()) {
+            void persistSharedRegisterCache({
+              cacheKey,
+              calls,
+              fetchedAt: now,
+              lastSyncedAt: now,
+              callCount: calls.length,
+              schemaVersion: SHARED_REGISTER_CACHE_VERSION,
+            });
+          }
           logRegisterBulk('bulk LOAD stored', {
             cacheKey,
             rows: calls.length,
             networkMs: Number((performance.now() - networkStart).toFixed(1)),
           });
-          await ensurePortalAuditCache(supabase);
+          await ensurePortalAuditCache(await getBearerAuthHeaders(supabase));
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : 'Distribution load failed';
           logRegisterBulk('bulk LOAD failed', {

@@ -33,6 +33,8 @@ import {
   REGISTER_ARCP_PICK_OUTER_APPLY,
 } from '@/lib/register/arcp-approve-dates';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
+import { mergeAuditEnrichment } from '@/lib/register/audit-enrichment';
+import { buildPortalFilterSqlForCrm } from '@/lib/register/portal-filter-sql';
 
 function getExactTrnQuery(search: string): string | null {
   return normalizeExactTrnSearch(search);
@@ -91,93 +93,10 @@ function buildSingleStatusCondition(statusFilter: string): string {
   return '';
 }
 
-async function applyPortalFilter(condition: string, portalFilter: string | null): Promise<string> {
-  if (!portalFilter || portalFilter === 'All') return condition;
-
-  const filters = portalFilter.split(',').map((f) => f.trim()).filter(Boolean);
-  if (filters.length === 0) return condition;
-
-  const subConditions: string[] = [];
-  for (const filter of filters) {
-    let portalCallIds: string[] = [];
-    if (filter === 'verified') {
-      const { data } = await supabaseAdmin.from('call_flags').select('call_id').eq('flag_type', 'noted');
-      portalCallIds = (data || []).map((d) => d.call_id);
-    } else if (filter === 'rejected') {
-      const { data } = await supabaseAdmin.from('call_flags').select('call_id').eq('flag_type', 'escalate');
-      portalCallIds = (data || []).map((d) => d.call_id);
-    } else if (filter === 'hold') {
-      const { data } = await supabaseAdmin.from('call_flags').select('call_id').eq('flag_type', 'query');
-      portalCallIds = (data || []).map((d) => d.call_id);
-    } else if (filter === 'comments') {
-      const { data } = await supabaseAdmin.from('call_comments').select('call_id');
-      portalCallIds = Array.from(new Set((data || []).map((d) => d.call_id)));
-    } else if (filter === 'unseen') {
-      const { data } = await supabaseAdmin.from('call_flags').select('call_id').in('flag_type', ['noted', 'escalate', 'query']);
-      portalCallIds = (data || []).map((d) => d.call_id);
-      const numericIds = portalCallIds.map((id) => parseInt(id)).filter((id) => !isNaN(id));
-      if (numericIds.length > 0) {
-        subConditions.push(`tc.ncode NOT IN (${numericIds.join(',')})`);
-      }
-      continue;
-    }
-
-    const numericIds = portalCallIds.map((id) => parseInt(id)).filter((id) => !isNaN(id));
-    if (numericIds.length > 0) {
-      subConditions.push(`tc.ncode IN (${numericIds.join(',')})`);
-    } else {
-      subConditions.push('1=0');
-    }
-  }
-
-  if (subConditions.length === 0) return condition;
-  return `${condition} AND (${subConditions.join(' OR ')})`;
-}
-
-async function mergeAuditEnrichment(rows: any[]) {
-  if (!rows.length) return rows;
-
-  const callIds = rows.map((r) => String(r.id));
-  const [flagsRes, commentsRes] = await Promise.all([
-    supabaseAdmin.from('call_flags').select('call_id, flag_type').in('call_id', callIds),
-    supabaseAdmin.from('call_comments').select('call_id, author_name, comment, content, created_at, author_id').in('call_id', callIds).order('created_at', { ascending: false }),
-  ]);
-
-  const flags = flagsRes.data || [];
-  const comments = commentsRes.data || [];
-  const authorIds = Array.from(new Set(comments.map((cm: any) => cm.author_id).filter(Boolean)));
-  let authors: any[] = [];
-  if (authorIds.length > 0) {
-    const { data: authorsData } = await supabaseAdmin
-      .from('app_users')
-      .select('id, avatar_url')
-      .in('id', authorIds);
-    authors = authorsData || [];
-  }
-
-  return rows.map((row) => {
-    const id = String(row.id);
-    const callFlag = flags.find((f) => f.call_id === id);
-    const callComments = comments
-      .filter((cm) => cm.call_id === id)
-      .map((cm) => {
-        const author = authors.find((a: any) => a.id === cm.author_id);
-        return {
-          author_name: cm.author_name,
-          comment: cm.comment || cm.content,
-          created_at: cm.created_at,
-          author_avatar_url: author?.avatar_url || null,
-        };
-      });
-
-    return {
-      ...row,
-      audit_flag: callFlag?.flag_type || null,
-      comment_count: callComments.length,
-      comments: callComments,
-      office_id: row.nofficeid ? String(row.nofficeid) : undefined,
-    };
-  });
+function applyPortalFilter(condition: string, portalFilter: string | null): string {
+  const portalSql = buildPortalFilterSqlForCrm(portalFilter || '');
+  if (!portalSql) return condition;
+  return `${condition} AND ${portalSql}`;
 }
 
 function mapCrmRegisterRow(row: Record<string, unknown>): Record<string, unknown> {
@@ -441,7 +360,7 @@ export async function handleRegisterGet(req: NextRequest) {
       baseCondition += ` AND ISNULL(tc.editedon, tc.addedon) >= '${lastSync.replace(/'/g, "''")}'`;
     }
 
-    let condition = await applyPortalFilter(baseCondition, isLookupSearch ? 'All' : portalFilter);
+    let condition = applyPortalFilter(baseCondition, isLookupSearch ? 'All' : portalFilter);
 
     // Helper functions to find pincodes mapped in JSON
     const getPincodesForState = (stateName: string): string[] => {

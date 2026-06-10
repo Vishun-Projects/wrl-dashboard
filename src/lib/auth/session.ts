@@ -48,7 +48,7 @@ export async function getUserInfo() {
 
   const { data: profile, error } = await supabaseAdmin
     .from('app_users')
-    .select('*')
+    .select('id, name, email, role, office_ids, visible_statuses, avatar_url, role_id, report_preferences, created_at')
     .eq('id', user.id)
     .maybeSingle();
 
