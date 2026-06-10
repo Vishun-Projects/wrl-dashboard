@@ -24,6 +24,8 @@ Set for **Production** (and Preview if you use preview URLs):
 | `SUPABASE_SERVICE_ROLE_KEY` | same JWT service_role key as `.env.local` |
 | `DATABASE_URL` | `postgresql://postgres.ddmapuyghfeoyajxbcjh:PASSWORD@api.wrl-fsm.cloud:6543/postgres?pgbouncer=true` |
 
+SSL is auto-disabled for self-hosted hosts (`api.wrl-fsm.cloud`). Supabase cloud pooler hosts still use TLS. Override with `PG_SSL=true` or `PG_SSL=false` if needed.
+
 Also copy from `.env.local`:
 
 - `SYNC_WORKER_ENABLED=true`

@@ -71,6 +71,26 @@ export function appDatabaseBulkStatementTimeoutMs(): number {
   return 300_000;
 }
 
+/** Supabase cloud requires TLS; self-hosted VPS pooler (6543) typically does not. */
+export function resolvePgSsl(connectionString: string): false | { rejectUnauthorized: false } {
+  const override = process.env.PG_SSL?.trim().toLowerCase();
+  if (override === 'false' || override === '0' || override === 'disable') return false;
+  if (override === 'true' || override === '1' || override === 'require') {
+    return { rejectUnauthorized: false };
+  }
+
+  try {
+    const url = new URL(connectionString.replace(/^postgresql:/, 'postgres:'));
+    const host = url.hostname.toLowerCase();
+    if (host.endsWith('.supabase.co') || host.includes('pooler.supabase.com')) {
+      return { rejectUnauthorized: false };
+    }
+  } catch {
+    /* fall through — self-hosted */
+  }
+  return false;
+}
+
 export function loadEnv(): void {
   const root = path.join(process.cwd());
   dotenv.config({ path: path.join(root, '.env.local') });
@@ -81,9 +101,10 @@ export function loadEnv(): void {
 export function getAppPool(): pg.Pool {
   if (!appPool) {
     loadEnv();
+    const connectionString = resolveAppDatabaseUrl();
     appPool = new pg.Pool({
-      connectionString: resolveAppDatabaseUrl(),
-      ssl: { rejectUnauthorized: false },
+      connectionString,
+      ssl: resolvePgSsl(connectionString),
       max: appDatabasePoolMax(),
       idleTimeoutMillis: 20_000,
       connectionTimeoutMillis: appDatabaseConnectTimeoutMs(),
@@ -112,9 +133,10 @@ export async function withAppClient<T>(
 export function getPool(): pg.Pool {
   if (!pool) {
     loadEnv();
+    const connectionString = resolveDirectDatabaseUrl();
     pool = new pg.Pool({
-      connectionString: resolveDirectDatabaseUrl(),
-      ssl: { rejectUnauthorized: false },
+      connectionString,
+      ssl: resolvePgSsl(connectionString),
       max: Number(process.env.SYNC_PG_POOL_MAX ?? 2),
       idleTimeoutMillis: 20_000,
       connectionTimeoutMillis: 30_000,
