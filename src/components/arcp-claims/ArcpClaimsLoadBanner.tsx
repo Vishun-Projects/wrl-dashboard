@@ -64,7 +64,7 @@ export function ArcpClaimsLoadBanner({
 }: ArcpClaimsLoadBannerProps) {
   const isPreview = variant === 'preview';
   const isDetailExport = variant === 'detail-export';
-  const showProgress = status.total > 1;
+  const showProgress = isPreview ? status.total > 1 : status.total >= 1;
   const title = isPreview
     ? 'Large date range selected'
     : isDetailExport

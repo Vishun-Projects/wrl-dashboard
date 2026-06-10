@@ -13,6 +13,7 @@ import {
   planArcpSummaryDateChunks,
   isArcpApproveDateColumn,
   resolveArcpDateFilterColumn,
+  resolveArcpChunkGranularity,
   resolveArcpLoadConcurrency,
   splitArcpDateRange,
   type ArcpClaimsAggregateRow,
@@ -363,7 +364,16 @@ export async function fetchArcpClaimsAggregates(
 ): Promise<{ aggregates: ArcpClaimsAggregateRow[]; chunkMeta: ArcpChunkLoadMeta }> {
   const uiOpts = crmUiOpts(opts);
   const chunks = planArcpSummaryDateChunks(uiOpts);
-  const concurrency = chunks.length > 1 ? resolveArcpLoadConcurrency(uiOpts) : 1;
+  const span = arcpDateSpanDays(uiOpts.startDate ?? null, uiOpts.endDate ?? null) ?? 0;
+  const chunkGranularity = resolveArcpChunkGranularity(span);
+  const concurrency =
+    chunks.length > 1
+      ? resolveArcpLoadConcurrency(uiOpts, {
+          chunkCount: chunks.length,
+          spanDays: span,
+          chunkGranularity,
+        })
+      : 1;
 
   const chunkResults = await runPool(chunks, concurrency, (chunk) =>
     loadAggregateChunkCached(opts, chunk, timeoutMs)
@@ -395,7 +405,16 @@ export async function fetchArcpClaimsDetailRows(
 ): Promise<{ rows: ArcpClaimsDetailRow[]; chunkMeta: ArcpChunkLoadMeta }> {
   const uiOpts = crmUiOpts(opts);
   const chunks = planArcpSummaryDateChunks(uiOpts);
-  const concurrency = chunks.length > 1 ? resolveArcpLoadConcurrency(uiOpts) : 1;
+  const span = arcpDateSpanDays(uiOpts.startDate ?? null, uiOpts.endDate ?? null) ?? 0;
+  const chunkGranularity = resolveArcpChunkGranularity(span);
+  const concurrency =
+    chunks.length > 1
+      ? resolveArcpLoadConcurrency(uiOpts, {
+          chunkCount: chunks.length,
+          spanDays: span,
+          chunkGranularity,
+        })
+      : 1;
   const byLine = new Map<string, ArcpClaimsDetailRow>();
 
   const chunkParts = await runPool(chunks, concurrency, (chunk) =>

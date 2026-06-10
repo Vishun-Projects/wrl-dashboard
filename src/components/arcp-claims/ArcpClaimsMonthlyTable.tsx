@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { Loader2 } from 'lucide-react';
 import { AdminTable, AdminTh, AdminThead } from '@/components/admin/AdminUi';
 import {
   arcpTotalsHaveData,
@@ -25,7 +26,10 @@ export function ArcpClaimsMonthlyTable({ model, loading, updating }: ArcpClaimsM
   if (!hasRows && !hasTotals) {
     if (loading) {
       return (
-        <p className="py-8 text-center text-[11px] text-slate-400">Waiting for monthly breakdown…</p>
+        <div className="flex flex-col items-center justify-center gap-2 py-8" aria-live="polite">
+          <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+          <p className="text-[11px] text-slate-500">Loading monthly breakdown…</p>
+        </div>
       );
     }
     return (

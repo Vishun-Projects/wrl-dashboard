@@ -2,6 +2,10 @@
 
 Migrate from Supabase cloud to self-hosted Supabase on `187.127.145.253` with domain **`api.wrl-fsm.cloud`**.
 
+**Full step-by-step runbook (DOCX):** [`WRL-VPS-Hosting-Runbook.docx`](./WRL-VPS-Hosting-Runbook.docx)  
+If Word blocks the file, open [`WRL-VPS-Hosting-Runbook.md`](./WRL-VPS-Hosting-Runbook.md) or right-click DOCX → Properties → Unblock (Windows).  
+Regenerate: `python scripts/vps-hosting/generate-runbook-docx.py`
+
 ## Prerequisites
 
 - DNS: `api.wrl-fsm.cloud` A record → `187.127.145.253` (done)

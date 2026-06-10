@@ -66,15 +66,45 @@ export const ARCP_APPROVE_LOAD_CONCURRENCY = 1;
 /** UI CRM fallback: skip label joins in CRM; resolve from Postgres dims after fetch. */
 export const ARCP_CRM_UI_LIGHTWEIGHT = process.env.ARCP_CRM_UI_LIGHTWEIGHT !== 'false';
 
+/** ≤31 days → one chunk per day; 32–90 → weekly; >90 → calendar month. */
+export const ARCP_SPAN_DAY_CHUNK_MAX = 31;
+export const ARCP_SPAN_WEEK_CHUNK_MAX = 90;
+export const ARCP_WEEK_CHUNK_DAYS = 7;
+
+export type ArcpChunkGranularity = 'single' | 'day' | 'week' | 'month';
+
+export function resolveArcpChunkGranularity(spanDays: number): ArcpChunkGranularity {
+  if (spanDays <= 1) return 'single';
+  if (spanDays <= ARCP_SPAN_DAY_CHUNK_MAX) return 'day';
+  if (spanDays <= ARCP_SPAN_WEEK_CHUNK_MAX) return 'week';
+  return 'month';
+}
+
+export function arcpChunkPeriodLabel(
+  granularity: ArcpChunkGranularity,
+  plural = true
+): string {
+  switch (granularity) {
+    case 'day':
+      return plural ? 'days' : 'day';
+    case 'week':
+      return plural ? 'weeks' : 'week';
+    case 'month':
+      return plural ? 'months' : 'month';
+    default:
+      return plural ? 'periods' : 'period';
+  }
+}
+
 export function resolveArcpLoadConcurrency(
   opts: ArcpClaimsQueryOpts,
-  plan?: Pick<ArcpLoadPlan, 'chunkCount' | 'spanDays'>
+  plan?: Pick<ArcpLoadPlan, 'chunkCount' | 'spanDays' | 'chunkGranularity'>
 ): number {
+  const granularity = plan?.chunkGranularity;
+  if (granularity === 'day' || granularity === 'week' || granularity === 'month') {
+    return ARCP_LOAD_CONCURRENCY;
+  }
   if (isArcpApproveDateColumn(resolveArcpDateFilterColumn(opts.dateFilterColumn))) {
-    // Calendar-month BM plan: parallel cache/postgres reads; CRM timeouts auto-split.
-    if (plan && plan.chunkCount <= 12 && plan.spanDays > 7) {
-      return Math.min(ARCP_LOAD_CONCURRENCY, 3);
-    }
     return ARCP_APPROVE_LOAD_CONCURRENCY;
   }
   return ARCP_LOAD_CONCURRENCY;
@@ -1193,7 +1223,10 @@ export function countArcpCalendarMonths(startDate: string, endDate: string): num
   return splitArcpDateRangeByMonth(startDate, endDate).length;
 }
 
-/** Pick query windows: BM approved uses calendar months when wide; call/solve uses months when wide. */
+/**
+ * Pick query windows from span only (same for call/solve/BM):
+ * ≤31 days → daily; 32–90 → weekly; >90 → calendar month.
+ */
 export function planArcpSummaryDateChunks(opts: ArcpClaimsQueryOpts): { start: string; end: string }[] {
   if (!opts.startDate || !opts.endDate) {
     return [{ start: opts.startDate || '', end: opts.endDate || '' }];
@@ -1204,33 +1237,23 @@ export function planArcpSummaryDateChunks(opts: ArcpClaimsQueryOpts): { start: s
     return [{ start: opts.startDate, end: opts.endDate }];
   }
 
-  const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
-  if (isArcpApproveDateColumn(dateColumn)) {
-    const chunkDays = resolveArcpApproveChunkDays(opts);
-    if (span <= chunkDays) {
+  const granularity = resolveArcpChunkGranularity(span);
+  switch (granularity) {
+    case 'single':
       return [{ start: opts.startDate, end: opts.endDate }];
-    }
-    // Wide BM-approved ranges: one calendar month per chunk (resilient fetch splits on CRM timeout).
-    if (span > 7) {
+    case 'day':
+      return splitArcpDateRange(opts.startDate, opts.endDate, 1);
+    case 'week':
+      return splitArcpDateRange(opts.startDate, opts.endDate, ARCP_WEEK_CHUNK_DAYS);
+    case 'month':
       return splitArcpDateRangeByMonth(opts.startDate, opts.endDate);
-    }
-    return splitArcpDateRange(opts.startDate, opts.endDate, chunkDays);
   }
-
-  const chunkDays = resolveArcpCallChunkDays(opts);
-  if (span <= chunkDays) {
-    return [{ start: opts.startDate, end: opts.endDate }];
-  }
-  if (chunkDays < ARCP_SUMMARY_SINGLE_QUERY_MAX_DAYS) {
-    return splitArcpDateRange(opts.startDate, opts.endDate, chunkDays);
-  }
-
-  return splitArcpDateRangeByMonth(opts.startDate, opts.endDate);
 }
 
 export type ArcpLoadPlan = {
   spanDays: number;
   chunkCount: number;
+  chunkGranularity: ArcpChunkGranularity;
   isLongLoad: boolean;
   estimateMs: number;
   chunks: { start: string; end: string }[];
@@ -1283,21 +1306,35 @@ export function estimateArcpLoadPlan(
 ): ArcpLoadPlan {
   const chunks = planArcpSummaryDateChunks(opts);
   const span = arcpDateSpanDays(opts.startDate ?? null, opts.endDate ?? null) ?? 0;
+  const chunkGranularity = resolveArcpChunkGranularity(span);
   const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
   const likelyCrm = countLikelyCrmFallbackChunks(chunks, opts, hints);
   const crmPerChunkMs = isArcpApproveDateColumn(dateColumn) ? 28000 : 12000;
-  const concurrency = likelyCrm > 1 ? resolveArcpLoadConcurrency(opts) : 1;
   const postgresReady = Boolean(hints?.usePostgres && hints.coverage && hints.coverage.rowCount > 0);
+  const perChunkMs = postgresReady
+    ? chunkGranularity === 'day'
+      ? 800
+      : chunkGranularity === 'week'
+        ? 2000
+        : chunkGranularity === 'month'
+          ? 5000
+          : 3000
+    : crmPerChunkMs;
+  const concurrency =
+    chunks.length > 1
+      ? resolveArcpLoadConcurrency(opts, { chunkCount: chunks.length, spanDays: span, chunkGranularity })
+      : 1;
   const clientChunked = chunks.length > 1;
   const estimateMs = clientChunked
-    ? Math.ceil(chunks.length / concurrency) * crmPerChunkMs
+    ? Math.ceil(chunks.length / concurrency) * perChunkMs
     : postgresReady
       ? 3000 + Math.ceil(likelyCrm / concurrency) * crmPerChunkMs
-      : Math.ceil(chunks.length / concurrency) * crmPerChunkMs;
+      : Math.ceil(chunks.length / concurrency) * perChunkMs;
 
   return {
     spanDays: span,
     chunkCount: chunks.length,
+    chunkGranularity,
     isLongLoad:
       likelyCrm > 0 ||
       (!postgresReady &&
@@ -1345,6 +1382,7 @@ export function resolveArcpClientLoadPlan(
   return {
     ...plan,
     chunkCount: 1,
+    chunkGranularity: 'single',
     isLongLoad: false,
     estimateMs,
     chunks: [{ start, end }],
@@ -1359,18 +1397,32 @@ export function estimateArcpDetailLoadPlan(
 ): ArcpLoadPlan {
   const chunks = planArcpSummaryDateChunks(opts);
   const span = arcpDateSpanDays(opts.startDate ?? null, opts.endDate ?? null) ?? 0;
+  const chunkGranularity = resolveArcpChunkGranularity(span);
   const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
   const likelyCrm = countLikelyCrmFallbackChunks(chunks, opts, hints);
   const crmPerChunkMs = isArcpApproveDateColumn(dateColumn) ? 28000 : 15000;
-  const concurrency = likelyCrm > 1 ? resolveArcpLoadConcurrency(opts) : 1;
   const postgresReady = Boolean(hints?.usePostgres && hints.coverage && hints.coverage.rowCount > 0);
+  const perChunkMs = postgresReady
+    ? chunkGranularity === 'day'
+      ? 1500
+      : chunkGranularity === 'week'
+        ? 4000
+        : chunkGranularity === 'month'
+          ? 8000
+          : 5000
+    : crmPerChunkMs;
+  const concurrency =
+    chunks.length > 1
+      ? resolveArcpLoadConcurrency(opts, { chunkCount: chunks.length, spanDays: span, chunkGranularity })
+      : 1;
   const estimateMs = postgresReady
     ? 5000 + Math.ceil(likelyCrm / concurrency) * crmPerChunkMs
-    : Math.ceil(chunks.length / concurrency) * crmPerChunkMs;
+    : Math.ceil(chunks.length / concurrency) * perChunkMs;
 
   return {
     spanDays: span,
     chunkCount: chunks.length,
+    chunkGranularity,
     isLongLoad:
       likelyCrm > 0 ||
       (!postgresReady &&
@@ -1397,6 +1449,7 @@ export function resolveArcpClientDetailLoadPlan(
   return {
     ...plan,
     chunkCount: 1,
+    chunkGranularity: 'single',
     isLongLoad: false,
     estimateMs: scoped ? 8000 : Math.min(plan.estimateMs, 180_000),
     chunks: [{ start, end }],

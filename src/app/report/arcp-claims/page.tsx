@@ -30,6 +30,7 @@ import {
   shouldUseClientSideArcpChunks,
   resolveArcpLoadConcurrency,
   resolveArcpClientDetailLoadPlan,
+  arcpChunkPeriodLabel,
   deriveArcpGrandTotalsFromAggregates,
   ARCP_MERGE_ACROSS_CHUNKS,
   mergeArcpAggregateRows,
@@ -126,8 +127,21 @@ type ArcpLoadJobStatusResponse = {
 const ARCP_JOB_POLL_MS = 2500;
 const ARCP_JOB_POLL_MAX_MS = 30_000;
 
-function isArcpCalendarMonthPlan(plan: ArcpLoadPlan): boolean {
-  return plan.chunkCount <= 12 && plan.spanDays > 7;
+function arcpChunkProgressLabel(plan: ArcpLoadPlan): string {
+  return arcpChunkPeriodLabel(plan.chunkGranularity);
+}
+
+function arcpChunkLoadingHint(plan: ArcpLoadPlan): string {
+  switch (plan.chunkGranularity) {
+    case 'day':
+      return 'loading next day';
+    case 'week':
+      return 'loading next week';
+    case 'month':
+      return 'loading next month';
+    default:
+      return 'loading next period';
+  }
 }
 
 function arcpFilterParams(filters: AppliedArcpFilters): Record<string, string> {
@@ -175,22 +189,13 @@ function buildArcpPlanMessage(
   const basis =
     ARCP_DATE_FILTER_OPTIONS.find((option) => option.value === dateFilterColumn)?.label ??
     'Call Date';
+  const periodLabel = arcpChunkPeriodLabel(plan.chunkGranularity, false);
+  const parallelNote =
+    resolveArcpLoadConcurrency({ dateFilterColumn }, plan) > 1
+      ? ` (up to ${resolveArcpLoadConcurrency({ dateFilterColumn }, plan)} in parallel)`
+      : '';
 
-  if (dateFilterColumn === 'bm_approved_at') {
-    const monthPlan = isArcpCalendarMonthPlan(plan);
-    const parallelNote =
-      resolveArcpLoadConcurrency({ dateFilterColumn }, plan) > 1
-        ? ` (up to ${resolveArcpLoadConcurrency({ dateFilterColumn }, plan)} in parallel)`
-        : '';
-    const periodLabel = monthPlan
-      ? 'calendar month'
-      : plan.chunkCount > 14
-        ? '3-day'
-        : 'period';
-    return `${plan.spanDays}-day range on ${basis} loads in ${plan.chunkCount} ${periodLabel}(s)${parallelNote}. Est. ${eta}. Tally updates as each completes.`;
-  }
-
-  return `Loading ${plan.chunkCount} period(s) on ${basis} (est. ${eta}).`;
+  return `${plan.spanDays}-day range on ${basis} loads in ${plan.chunkCount} ${periodLabel}(s)${parallelNote}. Est. ${eta}. Tally updates as each completes.`;
 }
 
 function buildArcpDetailPlanMessage(plan: ArcpLoadPlan, dateFilterColumn: ArcpDateFilterColumn): string {
@@ -202,8 +207,9 @@ function buildArcpDetailPlanMessage(plan: ArcpLoadPlan, dateFilterColumn: ArcpDa
     ARCP_DATE_FILTER_OPTIONS.find((option) => option.value === dateFilterColumn)?.label ??
     'Call Date';
   const eta = formatArcpDurationMs(plan.estimateMs);
+  const periodLabel = arcpChunkPeriodLabel(plan.chunkGranularity, false);
 
-  return `${plan.spanDays}-day detail on ${basis} exports in ${plan.chunkCount} periods (est. ${eta}).`;
+  return `${plan.spanDays}-day detail on ${basis} exports in ${plan.chunkCount} ${periodLabel}(s) (est. ${eta}).`;
 }
 
 function toLoadStatus(
@@ -222,7 +228,6 @@ function toLoadStatus(
   const percent = total > 0 ? Math.round((done / total) * 100) : 0;
   const concurrency = resolveArcpLoadConcurrency({ dateFilterColumn }, plan);
   const inFlight = done < total && total > 1;
-  const monthPlan = isArcpCalendarMonthPlan(plan);
   const failedCount =
     options?.failedCount != null && options.failedCount > 0 && options.failedCount <= total
       ? options.failedCount
@@ -236,11 +241,7 @@ function toLoadStatus(
     currentRange: inFlight
       ? concurrency > 1
         ? `up to ${concurrency} in parallel`
-        : monthPlan
-          ? 'loading next month'
-          : total > 14
-            ? 'loading next window'
-            : 'loading next period'
+        : arcpChunkLoadingHint(plan)
       : null,
     etaRemainingLabel: done < total ? formatArcpDurationMs(etaMs) : null,
     etaFinishLabel: done < total ? formatArcpFinishTime(Date.now() + etaMs) : null,
@@ -638,7 +639,7 @@ export default function ArcpClaimsPage() {
         }
       };
 
-      const monthChunkPlan = isArcpCalendarMonthPlan(loadPlan);
+      const monthChunkPlan = loadPlan.chunkGranularity === 'month';
 
       const mergeChunkAggregates = (
         chunk: { start: string; end: string },
@@ -1314,7 +1315,7 @@ export default function ArcpClaimsPage() {
         : chunks;
       completedChunks = detailCachedAtStart;
 
-      await runPool(detailChunksToFetch, resolveArcpLoadConcurrency(queryOpts), async (chunk) => {
+      await runPool(detailChunksToFetch, resolveArcpLoadConcurrency(queryOpts, exportPlan), async (chunk) => {
         const chunkStartedAt = Date.now();
 
         try {
@@ -1462,24 +1463,26 @@ export default function ArcpClaimsPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-          {loading && loadStatus && loadStatus.total > 1 ? (
+          {loading && loadStatus ? (
             <div
               className="flex items-center gap-2 text-[10px] text-slate-500"
               aria-live="polite"
             >
               <span className="tabular-nums">
                 {loadStatus.done}/{loadStatus.total}{' '}
-                {appliedLoadPlan && isArcpCalendarMonthPlan(appliedLoadPlan) ? 'months' : 'periods'}
+                {appliedLoadPlan ? arcpChunkProgressLabel(appliedLoadPlan) : 'periods'}
                 {loadStatus.failedCount
                   ? ` (${loadStatus.failedCount} timed out)`
                   : ''}
               </span>
-              <div className="h-1 w-16 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full rounded-full bg-slate-700 transition-all duration-300"
-                  style={{ width: `${Math.max(loadStatus.percent, 4)}%` }}
-                />
-              </div>
+              {loadStatus.total > 0 ? (
+                <div className="h-1 w-16 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-slate-700 transition-all duration-300"
+                    style={{ width: `${Math.max(loadStatus.percent, 4)}%` }}
+                  />
+                </div>
+              ) : null}
               {loadStatus.etaRemainingLabel ? (
                 <span className="hidden text-slate-400 md:inline">{loadStatus.etaRemainingLabel}</span>
               ) : null}
@@ -1581,6 +1584,23 @@ export default function ArcpClaimsPage() {
 
       {exportingDetail && detailExportStatus ? (
         <ArcpClaimsLoadBanner status={detailExportStatus} variant="detail-export" />
+      ) : null}
+
+      {loading && loadStatus && !exportingDetail ? (
+        <ArcpClaimsLoadBanner
+          status={loadStatus}
+          runningTotals={
+            summaryTotals.amountPayable > 0 ||
+            summaryTotals.branchApproved > 0 ||
+            summaryTotals.hoApproved > 0
+              ? {
+                  amountPayable: summaryTotals.amountPayable,
+                  branchApproved: summaryTotals.branchApproved,
+                  hoApproved: summaryTotals.hoApproved,
+                }
+              : null
+          }
+        />
       ) : null}
       </div>
 
