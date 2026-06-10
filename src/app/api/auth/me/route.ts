@@ -8,7 +8,9 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     return NextResponse.json(userInfo);
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to load profile';
+    console.error('[api/auth/me]', message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -1,44 +1,55 @@
 import { createClient } from '../supabase/server';
-import { supabaseAdmin } from '../supabase/admin';
+import { withAppClient } from '../read-model/db';
+
+type AppUserRow = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  office_ids: string[];
+  visible_statuses: string[] | null;
+  avatar_url: string | null;
+  role_id: string | null;
+  report_preferences: unknown;
+  created_at: Date | string;
+};
 
 async function fetchPermissionsForRole(roleId: string | null | undefined): Promise<string[]> {
   if (!roleId) return [];
 
-  const { data: rolePerms, error: rpError } = await supabaseAdmin
-    .from('app_role_permissions')
-    .select('permission_id')
-    .eq('role_id', roleId);
-
-  if (rpError || !rolePerms?.length) return [];
-
-  const permissionIds = rolePerms
-    .map((row) => row.permission_id)
-    .filter((id): id is string => id != null);
-
-  if (permissionIds.length === 0) return [];
-
-  const { data: permissions, error: permError } = await supabaseAdmin
-    .from('app_permissions')
-    .select('name')
-    .in('id', permissionIds);
-
-  if (permError || !permissions?.length) return [];
-  return permissions.map((p) => p.name).filter(Boolean);
+  return withAppClient(async (client) => {
+    const res = await client.query<{ name: string }>(
+      `SELECT ap.name
+       FROM public.app_role_permissions arp
+       JOIN public.app_permissions ap ON ap.id = arp.permission_id
+       WHERE arp.role_id = $1`,
+      [roleId]
+    );
+    return res.rows.map((row) => row.name).filter(Boolean);
+  });
 }
 
-/** Permission lookup via Supabase REST — does not use the Postgres pool. */
-export async function getUserPermissions(userId: string): Promise<string[]> {
-  const { data: profile, error } = await supabaseAdmin
-    .from('app_users')
-    .select('role_id')
-    .eq('id', userId)
-    .maybeSingle();
+async function fetchAppUserProfile(userId: string): Promise<AppUserRow | null> {
+  return withAppClient(async (client) => {
+    const res = await client.query<AppUserRow>(
+      `SELECT id, name, email, role, office_ids, visible_statuses, avatar_url, role_id, report_preferences, created_at
+       FROM public.app_users
+       WHERE id = $1
+       LIMIT 1`,
+      [userId]
+    );
+    return res.rows[0] ?? null;
+  });
+}
 
-  if (error || !profile) return [];
+/** Permission lookup via Postgres (works with self-hosted VPS; avoids PostgREST). */
+export async function getUserPermissions(userId: string): Promise<string[]> {
+  const profile = await fetchAppUserProfile(userId);
+  if (!profile?.role_id) return [];
   return fetchPermissionsForRole(profile.role_id);
 }
 
-/** Loads profile + permissions via Supabase REST (no Postgres pool slot). */
+/** Session from Supabase Auth; profile + permissions from Postgres. */
 export async function getUserInfo() {
   const supabase = await createClient();
   const {
@@ -46,13 +57,8 @@ export async function getUserInfo() {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: profile, error } = await supabaseAdmin
-    .from('app_users')
-    .select('id, name, email, role, office_ids, visible_statuses, avatar_url, role_id, report_preferences, created_at')
-    .eq('id', user.id)
-    .maybeSingle();
-
-  if (error || !profile) return null;
+  const profile = await fetchAppUserProfile(user.id);
+  if (!profile) return null;
 
   const permissions = await fetchPermissionsForRole(profile.role_id);
   return { ...profile, permissions };

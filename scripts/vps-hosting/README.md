@@ -57,6 +57,8 @@ bash scripts/vps-hosting/deploy-to-vps.sh migrate
 
 Copy the same values to **Vercel** project env and redeploy.
 
+See **[VERCEL_ENV.md](./VERCEL_ENV.md)** if production shows `exceed_egress_quota` or pages stuck on Loading.
+
 ## Step 4 — Verify
 
 **Git Bash:**
