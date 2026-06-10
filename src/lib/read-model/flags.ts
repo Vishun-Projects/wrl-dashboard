@@ -24,17 +24,17 @@ export function readDimsFromPostgres(): boolean {
   return readSource('READ_DIMS_FROM') === 'postgres';
 }
 
-/** ARCP Claims: live Western CRM by default; set ARCP_USE_LIVE_CRM=false for arcp_lines_hot. */
+/** Override live CRM: ARCP_USE_LIVE_CRM=true forces CRM; false forces arcp_lines_hot. */
 export function arcpReportUsesLiveCrm(): boolean {
   const explicit = process.env.ARCP_USE_LIVE_CRM?.toLowerCase();
   if (explicit === 'true') return true;
   if (explicit === 'false') return false;
-  return true;
+  return readSource('READ_ARCP_FROM') !== 'postgres';
 }
 
-/** ARCP Claims always reads live Western CRM (trhcalls date basis); Postgres hot table is not used. */
+/** ARCP Claims tally/detail from arcp_lines_hot when READ_ARCP_FROM=postgres (VPS). */
 export function readArcpFromPostgres(): boolean {
-  return false;
+  return !arcpReportUsesLiveCrm() && readSource('READ_ARCP_FROM') === 'postgres';
 }
 
 export function readCallsFromPostgres(): boolean {

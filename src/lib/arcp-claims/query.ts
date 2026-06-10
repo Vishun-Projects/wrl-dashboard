@@ -1410,14 +1410,30 @@ export function estimateArcpLoadPlan(
   };
 }
 
+function arcpPostgresCoversReportRange(
+  opts: ArcpClaimsQueryOpts,
+  hints?: ArcpLoadEstimateHints
+): boolean {
+  if (!hints?.usePostgres || !hints.coverage || hints.coverage.rowCount === 0) return false;
+  if (!opts.startDate || !opts.endDate) return false;
+  const dateColumn = resolveArcpDateFilterColumn(
+    opts.dateFilterColumn
+  ) as ArcpCoverageDateColumn;
+  return postgresCoversFullRange(opts.startDate, opts.endDate, hints.coverage, dateColumn);
+}
+
 /**
- * Multi-chunk UI loads (weekly BM windows, monthly call/solve) keep each CRM request small.
- * Date basis uses live trhcalls — do not collapse to one HTTP call when the plan has multiple chunks.
+ * Multi-chunk UI loads keep each live CRM request small.
+ * When arcp_lines_hot fully covers the range, use one Postgres-backed API call instead.
  */
 export function shouldUseClientSideArcpChunks(
   opts: ArcpClaimsQueryOpts,
   hints?: ArcpLoadEstimateHints
 ): boolean {
+  if (arcpPostgresCoversReportRange(opts, hints)) {
+    return false;
+  }
+
   const plan = estimateArcpLoadPlan(opts, hints);
   if (plan.chunkCount > 1) return true;
   /** One server round-trip until coverage is known. */

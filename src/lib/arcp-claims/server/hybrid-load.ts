@@ -197,7 +197,8 @@ async function loadArcpAggregatesCoverageAware(
 
     if (!arcpCrmFallbackOnEmptyEnabled()) continue;
 
-    const crmChunks = planArcpSummaryDateChunks({ ...segOpts, crmUiFast: true });
+    const estimateHints = { usePostgres: true, coverage };
+    const crmChunks = planArcpSummaryDateChunks({ ...segOpts, crmUiFast: true }, estimateHints);
     for (const chunk of crmChunks) {
       const chunkOpts: ArcpClaimsQueryOpts = {
         ...segOpts,
@@ -268,7 +269,8 @@ async function loadArcpDetailCoverageAware(
 
     if (!arcpCrmFallbackOnEmptyEnabled()) continue;
 
-    const crmChunks = planArcpSummaryDateChunks(segOpts);
+    const estimateHints = { usePostgres: true, coverage };
+    const crmChunks = planArcpSummaryDateChunks(segOpts, estimateHints);
     for (const chunk of crmChunks) {
       const { rows: chunkRows, chunkMeta } = await fetchArcpClaimsDetailRowsFromCrm(
         { ...segOpts, startDate: chunk.start, endDate: chunk.end },

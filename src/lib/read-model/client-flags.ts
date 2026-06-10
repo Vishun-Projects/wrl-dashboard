@@ -30,9 +30,19 @@ function readDistributionFromPostgresClient(): boolean {
   );
 }
 
-/** ARCP Claims UI always plans for live CRM loads (matches server). */
+function arcpReportUsesLiveCrmClient(): boolean {
+  const explicit = process.env.NEXT_PUBLIC_ARCP_USE_LIVE_CRM?.toLowerCase();
+  if (explicit === 'true') return true;
+  if (explicit === 'false') return false;
+  return readClientSource(process.env.NEXT_PUBLIC_READ_ARCP_FROM) !== 'postgres';
+}
+
+/** Matches server READ_ARCP_FROM — plans loads against arcp_lines_hot on VPS. */
 export function readArcpFromPostgresClient(): boolean {
-  return false;
+  return (
+    !arcpReportUsesLiveCrmClient() &&
+    readClientSource(process.env.NEXT_PUBLIC_READ_ARCP_FROM) === 'postgres'
+  );
 }
 
 export function readCallsFromPostgresClient(): boolean {
