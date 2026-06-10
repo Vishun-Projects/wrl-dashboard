@@ -18,7 +18,17 @@ export function arcpChunkCacheEnabled(): boolean {
   return process.env.ARCP_CHUNK_CACHE_ENABLED !== 'false';
 }
 
-const CACHE_DIR = path.join(process.cwd(), '.cache', 'arcp-claims', 'chunks');
+const CACHE_DIR = resolveArcpChunkCacheDir();
+
+function resolveArcpChunkCacheDir(): string {
+  if (process.env.ARCP_CHUNK_CACHE_DIR?.trim()) {
+    return process.env.ARCP_CHUNK_CACHE_DIR.trim();
+  }
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return path.join('/tmp', 'arcp-claims', 'chunks');
+  }
+  return path.join(process.cwd(), '.cache', 'arcp-claims', 'chunks');
+}
 
 export type ArcpChunkCacheKind = 'agg' | 'detail';
 
@@ -157,17 +167,21 @@ export async function writeArcpChunkCache(
   const timestamp = Date.now();
   memCache.set(cacheKey, { payload, timestamp, source: 'memory' });
 
-  await mkdir(CACHE_DIR, { recursive: true });
-  const filePath = cacheFilePath(cacheKey);
-  const tempPath = `${filePath}.tmp`;
-  const diskPayload: DiskEntry = { timestamp, kind, rows };
-  await writeFile(tempPath, JSON.stringify(diskPayload), 'utf8');
   try {
-    await unlink(filePath);
-  } catch {
-    // first write
+    await mkdir(CACHE_DIR, { recursive: true });
+    const filePath = cacheFilePath(cacheKey);
+    const tempPath = `${filePath}.tmp`;
+    const diskPayload: DiskEntry = { timestamp, kind, rows };
+    await writeFile(tempPath, JSON.stringify(diskPayload), 'utf8');
+    try {
+      await unlink(filePath);
+    } catch {
+      // first write
+    }
+    await rename(tempPath, filePath);
+  } catch (err) {
+    console.warn('[ARCP] chunk disk cache write skipped:', err);
   }
-  await rename(tempPath, filePath);
 }
 
 export function getOrRunChunkInflight<T extends ChunkCachePayload>(

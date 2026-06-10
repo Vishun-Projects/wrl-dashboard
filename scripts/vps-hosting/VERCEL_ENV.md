@@ -35,7 +35,8 @@ Also copy from `.env.local`:
 - `READ_SUMMARY_FROM=postgres`
 - `READ_DISTRIBUTION_FROM=postgres`
 - `READ_DIMS_FROM=postgres`
-- `READ_ARCP_FROM=postgres`
+- `READ_ARCP_FROM=postgres` — **required** for ARCP; reads `arcp_lines_hot` on VPS instead of live CRM
+- `NEXT_PUBLIC_READ_ARCP_FROM=postgres` (or `NEXT_PUBLIC_READ_CALLS_FROM=postgres`)
 - `NEXT_PUBLIC_READ_*_FROM=postgres` (all matching keys)
 - `PG_POOL_MAX`, `PG_CONNECT_TIMEOUT_MS`, `PG_STATEMENT_TIMEOUT_MS` (optional)
 

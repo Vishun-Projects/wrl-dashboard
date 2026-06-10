@@ -1,5 +1,6 @@
 import { postQuery } from '@/lib/db/proxy';
 import { withClient } from '@/lib/read-model/db';
+import { readArcpFromPostgres } from '@/lib/read-model/flags';
 import {
   isBareNumericArcpLabel,
   resolveArcpItemCategoryDisplay,
@@ -27,6 +28,28 @@ function resolveLabel(
   return trimmed || code.trim();
 }
 
+async function loadItemCategoryLabelsFromPostgres(): Promise<Record<string, string>> {
+  return withClient(async (client) => {
+    const result = await client.query(`
+      SELECT DISTINCT
+        TRIM(nitemcategory::text) AS code,
+        TRIM(item_category_label) AS item_category_label
+      FROM arcp_lines_hot
+      WHERE item_category_label IS NOT NULL
+        AND TRIM(item_category_label) <> ''
+        AND nitemcategory IS NOT NULL
+    `);
+    const map: Record<string, string> = {};
+    for (const row of result.rows) {
+      const code = String(row.code ?? '').trim();
+      const label = String(row.item_category_label ?? '').trim();
+      if (!code || !label || isBareNumericArcpLabel(label)) continue;
+      if (!map[code] || label.length > map[code].length) map[code] = label;
+    }
+    return map;
+  });
+}
+
 async function loadItemCategoryLabelsFromCrm(): Promise<Record<string, string>> {
   const sql = `
 SELECT
@@ -52,6 +75,10 @@ WHERE ic.ncode IS NOT NULL
 }
 
 export async function loadArcpCrmLabelLookups(): Promise<ArcpCrmLabelLookups> {
+  const itemCategoryLoader = readArcpFromPostgres()
+    ? loadItemCategoryLabelsFromPostgres()
+    : loadItemCategoryLabelsFromCrm();
+
   const [callTypeLabelsByCode, itemCategoryLabelsByCode] = await Promise.all([
     withClient(async (client) => {
       const callTypes = await client.query(`
@@ -67,7 +94,7 @@ export async function loadArcpCrmLabelLookups(): Promise<ArcpCrmLabelLookups> {
       }
       return map;
     }),
-    loadItemCategoryLabelsFromCrm(),
+    itemCategoryLoader,
   ]);
 
   return { callTypeLabelsByCode, itemCategoryLabelsByCode };

@@ -620,8 +620,25 @@ export default function ArcpClaimsPage() {
         branch: filters.branchParam || undefined,
         franchisee: filters.franchiseeParam || undefined,
       };
-      const loadPlan = resolveArcpClientLoadPlan(queryOpts, loadEstimateHints);
-      const useClientChunks = shouldUseClientSideArcpChunks(queryOpts, loadEstimateHints);
+
+      let activeHints = loadEstimateHints;
+      if (readArcpFromPostgresClient() && !activeHints.coverage) {
+        try {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          const progress = await fetchReadModelStatus(session?.access_token);
+          if (progress.arcp) {
+            activeHints = { usePostgres: true, coverage: progress.arcp };
+            if (!isStale()) setArcpCoverage(progress.arcp);
+          }
+        } catch {
+          /* server still resolves Postgres vs CRM without client coverage */
+        }
+      }
+
+      const loadPlan = resolveArcpClientLoadPlan(queryOpts, activeHints);
+      const useClientChunks = shouldUseClientSideArcpChunks(queryOpts, activeHints);
       const scopedFilters = Boolean(filters.branchParam || filters.franchiseeParam);
       const chunks = loadPlan.chunks;
       const chunkTimings: number[] = [];
@@ -1009,7 +1026,7 @@ export default function ArcpClaimsPage() {
         }
       }
     },
-    [chunkedAuth, loadEstimateHints]
+    [chunkedAuth, loadEstimateHints, supabase]
   );
 
   const runLoad = useCallback(

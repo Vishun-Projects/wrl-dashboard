@@ -1424,26 +1424,23 @@ function arcpPostgresCoversReportRange(
 
 /**
  * Multi-chunk UI loads keep each live CRM request small.
- * When arcp_lines_hot fully covers the range, use one Postgres-backed API call instead.
+ * Postgres mode: one API call unless we know live CRM gaps need client-side chunks.
  */
 export function shouldUseClientSideArcpChunks(
   opts: ArcpClaimsQueryOpts,
   hints?: ArcpLoadEstimateHints
 ): boolean {
-  if (arcpPostgresCoversReportRange(opts, hints)) {
-    return false;
+  const plan = estimateArcpLoadPlan(opts, hints);
+
+  if (hints?.usePostgres) {
+    // Server resolves Postgres vs CRM from its own coverage — do not fan out blindly.
+    if (!hints.coverage) return false;
+    if (arcpPostgresCoversReportRange(opts, hints)) return false;
+    if (plan.crmChunkCount === 0) return false;
+    return plan.chunkCount > 1;
   }
 
-  const plan = estimateArcpLoadPlan(opts, hints);
-  if (plan.chunkCount > 1) return true;
-  /** One server round-trip until coverage is known. */
-  if (hints?.usePostgres && !hints.coverage) {
-    return false;
-  }
-  if (hints?.usePostgres && hints.coverage && hints.coverage.rowCount > 0) {
-    return false;
-  }
-  return false;
+  return plan.chunkCount > 1;
 }
 
 /** UI load plan: single round-trip when Postgres serves the tally. */

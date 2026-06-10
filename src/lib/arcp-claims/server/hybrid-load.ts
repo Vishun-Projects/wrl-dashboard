@@ -69,9 +69,13 @@ function emptyGrandTotals(): ArcpGrandTotals {
 }
 
 async function enrichAggregatesForResponse(
-  rows: ArcpClaimsAggregateRow[]
+  rows: ArcpClaimsAggregateRow[],
+  options?: { fromPostgres?: boolean }
 ): Promise<ArcpClaimsAggregateRow[]> {
   if (rows.length === 0) return rows;
+  if (options?.fromPostgres || readArcpFromPostgres()) {
+    return rows;
+  }
   const lookups = await loadArcpCrmLabelLookups();
   return enrichArcpAggregateLabels(rows, lookups);
 }
@@ -85,7 +89,11 @@ async function recordAggChunkForJob(
   if (!opts.jobId || !startDate || !endDate) return;
 
   const cacheKey = buildArcpChunkCacheKey(opts, { start: startDate, end: endDate }, 'agg');
-  await writeArcpChunkCache(cacheKey, 'agg', rows);
+  try {
+    await writeArcpChunkCache(cacheKey, 'agg', rows);
+  } catch (err) {
+    console.warn('[ARCP] job chunk cache write skipped:', err);
+  }
   const { markChunkDone } = await import('./load-job');
   await markChunkDone(opts.jobId, startDate, endDate);
 }
@@ -149,7 +157,9 @@ async function loadArcpAggregatesCoverageAware(
   const startDate = opts.startDate;
   const endDate = opts.endDate;
   if (!startDate || !endDate) {
-    const rows = await enrichAggregatesForResponse(await queryArcpClaimsAggregates(opts));
+    const rows = await enrichAggregatesForResponse(await queryArcpClaimsAggregates(opts), {
+      fromPostgres: true,
+    });
     const grandTotals = deriveArcpGrandTotalsFromAggregates(rows);
     return {
       aggregates: rows,
@@ -163,7 +173,9 @@ async function loadArcpAggregatesCoverageAware(
   const dateColumn = toCoverageDateColumn(resolveArcpDateFilterColumn(opts.dateFilterColumn));
 
   if (postgresCoversFullRange(startDate, endDate, coverage, dateColumn)) {
-    const aggregates = await enrichAggregatesForResponse(await queryArcpClaimsAggregates(opts));
+    const aggregates = await enrichAggregatesForResponse(await queryArcpClaimsAggregates(opts), {
+      fromPostgres: true,
+    });
     await recordAggChunkForJob(opts, aggregates);
     const grandTotals = deriveArcpGrandTotalsFromAggregates(aggregates);
     return {
@@ -189,7 +201,9 @@ async function loadArcpAggregatesCoverageAware(
     };
 
     if (segment.mode === 'postgres') {
-      const pgRows = await enrichAggregatesForResponse(await queryArcpClaimsAggregates(segOpts));
+      const pgRows = await enrichAggregatesForResponse(await queryArcpClaimsAggregates(segOpts), {
+        fromPostgres: true,
+      });
       merged.push(...pgRows);
       usedPostgres = true;
       continue;
