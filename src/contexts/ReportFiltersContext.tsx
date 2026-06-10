@@ -1516,20 +1516,25 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
           await auth.refreshAuth();
 
           if (readRegisterFromPostgresClient()) {
-            const headers = await auth.getAuthHeaders();
-            const res = await axios.get('/api/report/distribution-summary', {
-              headers,
-              params: {
-                startDate: startDateStr,
-                endDate: endDateStr,
+            const calls = await fetchAllRegisterRowsForExport({
+              getAuthHeaders: auth.getAuthHeaders,
+              refreshAuth: auth.refreshAuth,
+              query: {
                 officeId: 'All',
                 callType: 'All',
+                startDate: startDateStr,
+                endDate: endDateStr,
+                dateFilterColumn: applied.dateFilterColumn,
+              },
+              onProgress: (fetched, total) => {
+                if (fetched === total || fetched % 5000 === 0) {
+                  logRegisterBulk('bulk LOAD progress', { fetched, total });
+                }
               },
             });
-            const calls = (res.data?.calls ?? []) as Record<string, unknown>[];
             const now = Date.now();
             applySharedCalls(calls, now);
-            logRegisterBulk('compact LOAD stored', {
+            logRegisterBulk('bulk LOAD stored (register hot columns)', {
               cacheKey,
               rows: calls.length,
               networkMs: Number((performance.now() - networkStart).toFixed(1)),

@@ -1430,7 +1430,10 @@ export default function ReportPage() {
   useEffect(() => {
     if (!dbInitialized) return;
     if (debouncedSearch?.trim() || debouncedPincodeSearch?.trim()) return;
-    if (!loading && data.length > 0) return;
+    const registerRowsReady =
+      data.length > 0 &&
+      (!readRegisterFromPostgresClient() || data.some((r) => r.UniqueCallNo || r.vtrnno));
+    if (registerRowsReady) return;
     if (readRegisterFromPostgresClient()) {
       void (async () => {
         const scopeChanged =
