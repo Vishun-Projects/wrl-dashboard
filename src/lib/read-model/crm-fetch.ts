@@ -1,4 +1,4 @@
-import { postQuery, isCrmOutOfMemoryError } from '@/lib/db/proxy';
+import { postQuery, isCrmOutOfMemoryError, isCrmSqlTimeoutError } from '@/lib/db/proxy';
 import {
   buildCorpusFieldsSql,
   buildCorpusTableName,
@@ -11,6 +11,19 @@ import { formatLocalDate } from '@/lib/report/filters';
 const FETCH_GAP_MS = 800;
 const RETRY_DELAYS_MS = [3000, 10000, 30000];
 
+/** Default CRM window for incremental catch-up (was 7 — too heavy after downtime). */
+const SYNC_INCREMENTAL_CHUNK_DAYS = Math.max(
+  1,
+  Number(process.env.SYNC_CRM_INCREMENTAL_CHUNK_DAYS ?? 3) || 3
+);
+/** Wide catch-up spans use even smaller windows. */
+const SYNC_CATCHUP_CHUNK_DAYS = Math.max(
+  1,
+  Number(process.env.SYNC_CRM_CATCHUP_CHUNK_DAYS ?? 2) || 2
+);
+const SYNC_INCREMENTAL_TIMEOUT_MS =
+  Number(process.env.SYNC_CRM_INCREMENTAL_TIMEOUT_MS ?? 180_000) || 180_000;
+
 const SYNC_EXTRA_FIELDS = `
   COALESCE(NULLIF(p.vlatlong, ''), NULLIF(p.mlatlong, '')) AS latlong
 `;
@@ -21,6 +34,24 @@ function buildSyncFieldsSql(): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function rangeSpanDays(startDate: string, endDate: string): number {
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 1;
+  return Math.max(1, Math.floor((end.getTime() - start.getTime()) / 86400000) + 1);
+}
+
+function isRetryableCrmFetchError(err: unknown): boolean {
+  return isCrmOutOfMemoryError(err) || isCrmSqlTimeoutError(err);
+}
+
+function resolveIncrementalChunkDays(catchUpDays: number): number {
+  if (catchUpDays <= 1) return 1;
+  if (catchUpDays > 7) return SYNC_CATCHUP_CHUNK_DAYS;
+  if (catchUpDays > 3) return SYNC_INCREMENTAL_CHUNK_DAYS;
+  return 1;
 }
 
 async function fetchCrmChunk(params: {
@@ -46,6 +77,8 @@ async function fetchCrmChunk(params: {
     } catch (err) {
       lastErr = err;
       if (isCrmOutOfMemoryError(err)) throw err;
+      // Timeouts need smaller date windows — do not retry the same heavy query.
+      if (isCrmSqlTimeoutError(err)) throw err;
       if (attempt >= RETRY_DELAYS_MS.length) break;
       await sleep(RETRY_DELAYS_MS[attempt]);
     }
@@ -53,25 +86,129 @@ async function fetchCrmChunk(params: {
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
+async function fetchCrmRangeChunk(
+  chunk: { start: string; end: string },
+  rangeStart: string,
+  rangeEnd: string,
+  timeoutMs: number
+): Promise<Record<string, unknown>[]> {
+  const tableName =
+    chunk.start === rangeStart && chunk.end === rangeEnd
+      ? buildCorpusTableName({ startDate: rangeStart, endDate: rangeEnd })
+      : buildCorpusTableName({ startDate: chunk.start, endDate: chunk.end });
+  const condition = `(tc.vtrnno IS NOT NULL AND tc.vtrnno <> '')${TRHCALLS_EXCLUDE_TRANSFERRED}`;
+  return fetchCrmChunk({ tableName, condition, timeoutMs });
+}
+
+async function fetchCrmRangeChunkResilient(
+  chunk: { start: string; end: string },
+  rangeStart: string,
+  rangeEnd: string,
+  timeoutMs: number
+): Promise<Record<string, unknown>[]> {
+  const span = rangeSpanDays(chunk.start, chunk.end);
+  try {
+    return await fetchCrmRangeChunk(chunk, rangeStart, rangeEnd, timeoutMs);
+  } catch (err) {
+    if (!isRetryableCrmFetchError(err)) throw err;
+
+    if (span <= 1) {
+      console.warn(
+        `[sync-worker] CRM timeout on single day ${chunk.start} — one delayed retry`
+      );
+      await sleep(5000);
+      return fetchCrmRangeChunk(chunk, rangeStart, rangeEnd, timeoutMs);
+    }
+
+    const nextStep = span <= 3 ? 1 : Math.max(1, Math.ceil(span / 2));
+    const subChunks = splitDateRangeByDays(chunk.start, chunk.end, nextStep);
+    if (subChunks.length <= 1) throw err;
+
+    console.log(
+      `[sync-worker] CRM timeout on ${chunk.start}..${chunk.end} — retrying as ${subChunks.length} smaller window(s) (${nextStep}-day)`
+    );
+
+    const merged: Record<string, unknown>[] = [];
+    for (const sub of subChunks) {
+      merged.push(...(await fetchCrmRangeChunkResilient(sub, rangeStart, rangeEnd, timeoutMs)));
+      await sleep(FETCH_GAP_MS);
+    }
+    return merged;
+  }
+}
+
+async function fetchCrmIncrementalWindowChunk(
+  watermark: string,
+  chunk: { start: string; end: string },
+  timeoutMs: number
+): Promise<Record<string, unknown>[]> {
+  const tableName = buildCorpusTableName({
+    lastSync: watermark,
+    startDate: chunk.start,
+    endDate: chunk.end,
+  });
+  const condition = `(tc.vtrnno IS NOT NULL AND tc.vtrnno <> '')${TRHCALLS_EXCLUDE_TRANSFERRED}`;
+  return fetchCrmChunk({
+    tableName,
+    condition,
+    orderBy: 'ISNULL(tc.editedon, tc.addedon) ASC',
+    timeoutMs,
+  });
+}
+
+async function fetchCrmIncrementalWindowResilient(
+  watermark: string,
+  chunk: { start: string; end: string },
+  timeoutMs: number
+): Promise<Record<string, unknown>[]> {
+  const span = rangeSpanDays(chunk.start, chunk.end);
+  try {
+    return await fetchCrmIncrementalWindowChunk(watermark, chunk, timeoutMs);
+  } catch (err) {
+    if (!isRetryableCrmFetchError(err)) throw err;
+
+    if (span <= 1) {
+      console.warn(
+        `[sync-worker] CRM incremental timeout on ${chunk.start} — one delayed retry`
+      );
+      await sleep(5000);
+      return fetchCrmIncrementalWindowChunk(watermark, chunk, timeoutMs);
+    }
+
+    const nextStep = span <= 3 ? 1 : Math.max(1, Math.ceil(span / 2));
+    const subChunks = splitDateRangeByDays(chunk.start, chunk.end, nextStep);
+    if (subChunks.length <= 1) throw err;
+
+    console.log(
+      `[sync-worker] CRM incremental timeout on ${chunk.start}..${chunk.end} — retrying as ${subChunks.length} smaller window(s) (${nextStep}-day)`
+    );
+
+    const merged: Record<string, unknown>[] = [];
+    for (const sub of subChunks) {
+      merged.push(...(await fetchCrmIncrementalWindowResilient(watermark, sub, timeoutMs)));
+      await sleep(FETCH_GAP_MS);
+    }
+    return merged;
+  }
+}
+
 export async function fetchCrmRowsForRange(
   startDate: string,
   endDate: string,
   onProgress?: (info: { chunk: string; rows: number }) => void
 ): Promise<Record<string, unknown>[]> {
-  const tableName = buildCorpusTableName({ startDate, endDate });
-  const condition = `(tc.vtrnno IS NOT NULL AND tc.vtrnno <> '')${TRHCALLS_EXCLUDE_TRANSFERRED}`;
-  const chunks = splitDateRangeByDays(startDate, endDate, 7);
+  const catchUpDays = rangeSpanDays(startDate, endDate);
+  const chunkDays = resolveIncrementalChunkDays(catchUpDays);
+  const chunks = splitDateRangeByDays(startDate, endDate, chunkDays);
   const allRows: Record<string, unknown>[] = [];
 
   for (const chunk of chunks) {
-    const chunkTable =
-      chunk.start === startDate && chunk.end === endDate
-        ? tableName
-        : buildCorpusTableName({ startDate: chunk.start, endDate: chunk.end });
-    const rows = await fetchCrmChunk({
-      tableName: chunkTable,
-      condition,
-    });
+    const rows = await fetchCrmRangeChunkResilient(
+      chunk,
+      startDate,
+      endDate,
+      SYNC_INCREMENTAL_TIMEOUT_MS
+    );
     allRows.push(...rows);
     onProgress?.({ chunk: `${chunk.start}..${chunk.end}`, rows: rows.length });
     await sleep(FETCH_GAP_MS);
@@ -87,32 +224,26 @@ export async function fetchCrmIncrementalRows(
   const watermark = formatCrmDateTime(watermarkStart);
   const startDate = formatLocalDate(watermarkStart);
   const endDate = todayLocalDate();
-  const chunks = splitDateRangeByDays(startDate, endDate, 7);
-  const condition = `(tc.vtrnno IS NOT NULL AND tc.vtrnno <> '')${TRHCALLS_EXCLUDE_TRANSFERRED}`;
-  const allRows: Record<string, unknown>[] = [];
-
   const catchUpDays = Math.max(
     0,
     Math.ceil((Date.now() - watermarkStart.getTime()) / (24 * 60 * 60 * 1000))
   );
+  const chunkDays = resolveIncrementalChunkDays(Math.max(catchUpDays, 1));
+  const chunks = splitDateRangeByDays(startDate, endDate, chunkDays);
+  const allRows: Record<string, unknown>[] = [];
+
   if (catchUpDays > 1) {
     console.log(
-      `[sync-worker] CRM catch-up mode: ~${catchUpDays} day(s), ${chunks.length} chunk(s) (${startDate}..${endDate})`
+      `[sync-worker] CRM catch-up mode: ~${catchUpDays} day(s), ${chunks.length} chunk(s) (${chunkDays}-day windows, ${startDate}..${endDate})`
     );
   }
 
   for (const chunk of chunks) {
-    const tableName = buildCorpusTableName({
-      lastSync: watermark,
-      startDate: chunk.start,
-      endDate: chunk.end,
-    });
-    const rows = await fetchCrmChunk({
-      tableName,
-      condition,
-      orderBy: 'ISNULL(tc.editedon, tc.addedon) ASC',
-      timeoutMs: 180000,
-    });
+    const rows = await fetchCrmIncrementalWindowResilient(
+      watermark,
+      chunk,
+      SYNC_INCREMENTAL_TIMEOUT_MS
+    );
     allRows.push(...rows);
     onProgress?.({
       chunk: `${chunk.start}..${chunk.end}`,
@@ -173,7 +304,7 @@ export async function fetchCrmOpenOldRows(): Promise<Record<string, unknown>[]> 
     tableName,
     condition: '1=1',
     orderBy: 'tc.dtrndate ASC',
-    timeoutMs: 180000,
+    timeoutMs: SYNC_INCREMENTAL_TIMEOUT_MS,
   });
 }
 

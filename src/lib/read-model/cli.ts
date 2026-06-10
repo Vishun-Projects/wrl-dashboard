@@ -29,7 +29,7 @@ function formatSyncWorkerError(err: unknown): string {
     }
   }
   if (/timeout expired|Timeout expired/i.test(raw)) {
-    return `${raw} — CRM query timed out; worker will retry on next interval after catch-up chunks complete`;
+    return `${raw} — CRM query timed out; worker splits into smaller date windows and retries automatically`;
   }
   return raw;
 }

@@ -107,7 +107,9 @@ export function ArcpClaimsLoadBanner({
                 >
                   <span className="font-medium text-slate-800">{status.percent}% complete</span>
                   <span>
-                    {status.done} of {status.total} period{status.total === 1 ? '' : 's'} complete
+                    {status.done} of {status.total}{' '}
+                    {status.total === 1 ? 'period' : 'periods'} loaded
+                    {status.failedCount ? ` · ${status.failedCount} timed out` : ''}
                   </span>
                   {status.currentRange ? <span>({status.currentRange})</span> : null}
                   {status.rowsLoaded != null ? (

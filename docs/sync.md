@@ -20,8 +20,8 @@ DATABASE_URL=postgresql://...@api.wrl-fsm.cloud:5432/postgres   # direct :5432 (
 
 - **`westerncrm.com`** must resolve — sync reads CRM via the Western CRM DBQUERY proxy.
 - **`DATABASE_URL` host** must resolve — use direct Postgres `:5432` (bootstrap sets `USE_DIRECT_DATABASE=true`).
-- After downtime, incremental runs in **catch-up mode** (7-day CRM chunks from watermark → today). Logs show `CRM catch-up mode: N day(s), M chunk(s)`. Watermark advances only after a successful write.
-- If catch-up keeps failing (CRM timeout / `ENOTFOUND`), fix network first, then run once: `npm run sync-worker:incremental` before restarting the daemon.
+- After downtime, incremental runs in **catch-up mode** (2–3 day CRM windows from watermark → today, auto-splits on timeout). Logs show `CRM catch-up mode: N day(s), M chunk(s)`. Watermark advances only after a successful write.
+- If catch-up keeps failing (CRM timeout / `ENOTFOUND`), fix network first, then run once: `npm run sync-worker:incremental` before restarting the daemon. Tune `SYNC_CRM_CATCHUP_CHUNK_DAYS=1` if timeouts persist.
 
 The browser **does not** auto-sync anymore (`PostgresAutoSync` was removed). Use the daemon, nightly jobs, or manual sync below.
 
@@ -53,6 +53,9 @@ See `package.json` for all `sync-worker:*` commands.
 | `SYNC_WORKER_ENABLED` | Must be `true` for worker commands |
 | `SYNC_ARCP_ENABLED` | ARCP in daemon / nightly / API sync |
 | `SYNC_INTERVAL_MS` | Daemon interval (default 180000) |
+| `SYNC_CRM_INCREMENTAL_CHUNK_DAYS` | CRM window for short catch-up (default 3) |
+| `SYNC_CRM_CATCHUP_CHUNK_DAYS` | CRM window when catch-up > 7 days (default 2) |
+| `SYNC_CRM_INCREMENTAL_TIMEOUT_MS` | HTTP timeout per CRM chunk (default 180000) |
 | `SYNC_STALE_LOCK_MS` | Clear stuck `sync_state.is_running` (default 5 min) |
 | `DATABASE_URL` | Postgres; worker prefers direct `:5432` |
 

@@ -215,26 +215,31 @@ function buildArcpDetailPlanMessage(plan: ArcpLoadPlan, dateFilterColumn: ArcpDa
 function toLoadStatus(
   plan: ArcpLoadPlan,
   dateFilterColumn: ArcpDateFilterColumn,
-  done: number,
+  loadedCount: number,
   etaMs: number,
   options?: {
     planMessage?: string;
     rowsLoaded?: number;
     scopedFilters?: boolean;
     failedCount?: number;
+    processedCount?: number;
   }
 ): ArcpLoadStatus {
   const total = plan.chunkCount;
-  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
-  const concurrency = resolveArcpLoadConcurrency({ dateFilterColumn }, plan);
-  const inFlight = done < total && total > 1;
   const failedCount =
     options?.failedCount != null && options.failedCount > 0 && options.failedCount <= total
       ? options.failedCount
       : undefined;
+  const processed = Math.min(
+    total,
+    options?.processedCount ?? loadedCount + (failedCount ?? 0)
+  );
+  const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
+  const concurrency = resolveArcpLoadConcurrency({ dateFilterColumn }, plan);
+  const inFlight = processed < total && total > 1;
 
   return {
-    done,
+    done: loadedCount,
     total,
     percent,
     failedCount,
@@ -243,8 +248,8 @@ function toLoadStatus(
         ? `up to ${concurrency} in parallel`
         : arcpChunkLoadingHint(plan)
       : null,
-    etaRemainingLabel: done < total ? formatArcpDurationMs(etaMs) : null,
-    etaFinishLabel: done < total ? formatArcpFinishTime(Date.now() + etaMs) : null,
+    etaRemainingLabel: processed < total ? formatArcpDurationMs(etaMs) : null,
+    etaFinishLabel: processed < total ? formatArcpFinishTime(Date.now() + etaMs) : null,
     planMessage:
       options?.planMessage ??
       buildArcpPlanMessage(
@@ -629,8 +634,9 @@ export default function ArcpClaimsPage() {
       let jobPollTimer: ReturnType<typeof setTimeout> | null = null;
       let jobPollInFlight = false;
       let jobPollDelayMs = ARCP_JOB_POLL_MS;
-      let maxDoneSeen = 0;
+      let maxProcessedSeen = 0;
       let pollFailedCount = 0;
+      let loadedChunks = 0;
 
       const applyInitialAggregates = (rows: ArcpClaimsAggregateRow[]) => {
         runningAggregates = rows;
@@ -653,19 +659,26 @@ export default function ArcpClaimsPage() {
       };
 
       const updateLoadProgress = (
-        done: number,
+        loaded: number,
         etaMs: number,
-        extra?: { failedCount?: number }
+        extra?: { failedCount?: number; processedCount?: number }
       ) => {
-        if (isStale() || done < maxDoneSeen) return;
-        maxDoneSeen = done;
+        const failed = extra?.failedCount ?? pollFailedCount;
+        const processed = Math.min(
+          chunks.length,
+          extra?.processedCount ?? loaded + failed
+        );
+        if (isStale() || processed < maxProcessedSeen) return;
+        maxProcessedSeen = processed;
         if (extra?.failedCount != null) pollFailedCount = extra.failedCount;
+        loadedChunks = loaded;
         const lineQty = runningAggregates.reduce((s, r) => s + Number(r.qty ?? 0), 0);
         setLoadStatus(
-          toLoadStatus(loadPlan, filters.arcpDateFilterColumn, done, etaMs, {
+          toLoadStatus(loadPlan, filters.arcpDateFilterColumn, loaded, etaMs, {
             scopedFilters,
             rowsLoaded: lineQty > 0 ? lineQty : undefined,
             failedCount: pollFailedCount > 0 ? pollFailedCount : undefined,
+            processedCount: processed,
           })
         );
       };
@@ -680,14 +693,19 @@ export default function ArcpClaimsPage() {
           if (isStale()) return null;
 
           if (status.progress && status.progress.totalChunks > 0) {
-            const done = status.progress.doneCount;
+            const loaded = status.progress.doneCount;
+            const failed = status.progress.failedCount;
+            const processed = loaded + failed;
             const elapsedMs = Date.now() - loadStartedAt;
             const etaMs =
-              done > cachedAtStart
-                ? (elapsedMs / Math.max(done - cachedAtStart, 1)) *
-                  Math.max(status.progress.totalChunks - done, 0)
+              processed > cachedAtStart
+                ? (elapsedMs / Math.max(processed - cachedAtStart, 1)) *
+                  Math.max(status.progress.totalChunks - processed, 0)
                 : loadPlan.estimateMs;
-            updateLoadProgress(done, etaMs, { failedCount: status.progress.failedCount });
+            updateLoadProgress(loaded, etaMs, {
+              failedCount: failed,
+              processedCount: processed,
+            });
           }
 
           if (!status.resumable) stopJobPoll();
@@ -757,7 +775,8 @@ export default function ArcpClaimsPage() {
         );
 
         if (!isStale()) {
-          maxDoneSeen = cachedAtStart;
+          loadedChunks = cachedAtStart;
+          maxProcessedSeen = cachedAtStart + (jobStart.progress?.failedCount ?? 0);
           pollFailedCount = Math.min(
             jobStart.progress?.failedCount ?? 0,
             chunks.length
@@ -774,6 +793,7 @@ export default function ArcpClaimsPage() {
               rowsLoaded:
                 runningAggregates.reduce((s, r) => s + Number(r.qty ?? 0), 0) || undefined,
               failedCount: pollFailedCount > 0 ? pollFailedCount : undefined,
+              processedCount: maxProcessedSeen,
             })
           );
           startJobPoll();
@@ -893,7 +913,8 @@ export default function ArcpClaimsPage() {
             failedChunks += 1;
           }
         } else {
-          let completedChunks = cachedAtStart;
+          let loadedCount = cachedAtStart;
+          let processedCount = cachedAtStart + failedChunks;
 
           await runPool(
             chunksToFetch,
@@ -904,12 +925,13 @@ export default function ArcpClaimsPage() {
             const chunkStartedAt = Date.now();
 
             try {
-              const data = await fetchAggregateChunk(chunk, completedChunks);
+              const data = await fetchAggregateChunk(chunk, processedCount);
 
               if (isStale()) return;
               if (data.error) throw new Error(data.error);
 
               mergeChunkAggregates(chunk, data.aggregates ?? []);
+              loadedCount += 1;
             } catch (chunkErr: unknown) {
               if (axios.isCancel(chunkErr) || (chunkErr instanceof DOMException && chunkErr.name === 'AbortError')) {
                 return;
@@ -921,17 +943,19 @@ export default function ArcpClaimsPage() {
             }
 
             chunkTimings.push(Math.max(Date.now() - chunkStartedAt, 1));
-            completedChunks += 1;
-            const done = completedChunks;
+            processedCount += 1;
             const elapsedMs = Date.now() - loadStartedAt;
             const etaMs =
-              done > cachedAtStart
-                ? (elapsedMs / (done - cachedAtStart)) *
-                  Math.max(chunks.length - done, 0)
+              processedCount > cachedAtStart
+                ? (elapsedMs / (processedCount - cachedAtStart)) *
+                  Math.max(chunks.length - processedCount, 0)
                 : loadPlan.estimateMs;
 
             if (!isStale()) {
-              updateLoadProgress(done, etaMs, { failedCount: failedChunks });
+              updateLoadProgress(loadedCount, etaMs, {
+                failedCount: failedChunks,
+                processedCount,
+              });
             }
           }
           );
@@ -1470,9 +1494,9 @@ export default function ArcpClaimsPage() {
             >
               <span className="tabular-nums">
                 {loadStatus.done}/{loadStatus.total}{' '}
-                {appliedLoadPlan ? arcpChunkProgressLabel(appliedLoadPlan) : 'periods'}
+                {appliedLoadPlan ? arcpChunkProgressLabel(appliedLoadPlan) : 'periods'} loaded
                 {loadStatus.failedCount
-                  ? ` (${loadStatus.failedCount} timed out)`
+                  ? ` · ${loadStatus.failedCount} timed out`
                   : ''}
               </span>
               {loadStatus.total > 0 ? (

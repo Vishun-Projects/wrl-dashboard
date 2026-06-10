@@ -372,6 +372,7 @@ export async function fetchArcpClaimsAggregates(
           chunkCount: chunks.length,
           spanDays: span,
           chunkGranularity,
+          crmChunkCount: chunks.length,
         })
       : 1;
 
@@ -413,6 +414,7 @@ export async function fetchArcpClaimsDetailRows(
           chunkCount: chunks.length,
           spanDays: span,
           chunkGranularity,
+          crmChunkCount: chunks.length,
         })
       : 1;
   const byLine = new Map<string, ArcpClaimsDetailRow>();

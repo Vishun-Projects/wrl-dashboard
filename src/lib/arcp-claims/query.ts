@@ -1,5 +1,6 @@
 import {
   planArcpCoverageSegments,
+  postgresCoversFullRange,
   type ArcpCoverageDateColumn,
   type ArcpPostgresCoverage,
 } from '@/lib/read-model/arcp/coverage-shared';
@@ -98,16 +99,60 @@ export function arcpChunkPeriodLabel(
 
 export function resolveArcpLoadConcurrency(
   opts: ArcpClaimsQueryOpts,
-  plan?: Pick<ArcpLoadPlan, 'chunkCount' | 'spanDays' | 'chunkGranularity'>
+  plan?: Pick<ArcpLoadPlan, 'chunkCount' | 'spanDays' | 'chunkGranularity'> & {
+    crmChunkCount?: number;
+  }
 ): number {
+  const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
+  if (isArcpApproveDateColumn(dateColumn) && (plan?.crmChunkCount ?? 0) > 0) {
+    return ARCP_APPROVE_LOAD_CONCURRENCY;
+  }
   const granularity = plan?.chunkGranularity;
   if (granularity === 'day' || granularity === 'week' || granularity === 'month') {
     return ARCP_LOAD_CONCURRENCY;
   }
-  if (isArcpApproveDateColumn(resolveArcpDateFilterColumn(opts.dateFilterColumn))) {
+  if (isArcpApproveDateColumn(dateColumn)) {
     return ARCP_APPROVE_LOAD_CONCURRENCY;
   }
   return ARCP_LOAD_CONCURRENCY;
+}
+
+function postgresCoversArcpRange(
+  opts: ArcpClaimsQueryOpts,
+  hints?: ArcpLoadEstimateHints
+): boolean {
+  if (!hints?.usePostgres || !hints.coverage || hints.coverage.rowCount === 0) return false;
+  if (!opts.startDate || !opts.endDate) return false;
+  const dateColumn = resolveArcpDateFilterColumn(
+    opts.dateFilterColumn
+  ) as ArcpCoverageDateColumn;
+  return postgresCoversFullRange(opts.startDate, opts.endDate, hints.coverage, dateColumn);
+}
+
+/** BM + branch/franchisee on live CRM needs wider windows than one day per request. */
+function shouldUseScopedCrmChunkDays(
+  opts: ArcpClaimsQueryOpts,
+  hints?: ArcpLoadEstimateHints
+): boolean {
+  if (!isArcpApproveDateColumn(resolveArcpDateFilterColumn(opts.dateFilterColumn))) {
+    return false;
+  }
+  if (!opts.branch?.trim() && !opts.franchisee?.trim()) return false;
+  return !postgresCoversArcpRange(opts, hints);
+}
+
+/** Label for UI progress when CRM uses coarser windows inside a short span. */
+export function inferArcpPlanGranularity(
+  spanDays: number,
+  chunks: { start: string; end: string }[]
+): ArcpChunkGranularity {
+  if (chunks.length <= 1) return 'single';
+  const resolved = resolveArcpChunkGranularity(spanDays);
+  if (resolved !== 'day' || chunks.length >= spanDays) return resolved;
+  const avgDays = spanDays / chunks.length;
+  if (avgDays <= 1.5) return 'day';
+  if (avgDays <= 8) return 'week';
+  return 'week';
 }
 /** @deprecated use ARCP_SUMMARY_SINGLE_QUERY_MAX_DAYS */
 export const ARCP_QUERY_CHUNK_DAYS = ARCP_SUMMARY_SINGLE_QUERY_MAX_DAYS;
@@ -1224,10 +1269,14 @@ export function countArcpCalendarMonths(startDate: string, endDate: string): num
 }
 
 /**
- * Pick query windows from span only (same for call/solve/BM):
+ * Pick query windows from span (Postgres-served ranges):
  * ≤31 days → daily; 32–90 → weekly; >90 → calendar month.
+ * BM approve + branch/franchisee on live CRM uses 3-day windows to avoid SQL timeouts.
  */
-export function planArcpSummaryDateChunks(opts: ArcpClaimsQueryOpts): { start: string; end: string }[] {
+export function planArcpSummaryDateChunks(
+  opts: ArcpClaimsQueryOpts,
+  hints?: ArcpLoadEstimateHints
+): { start: string; end: string }[] {
   if (!opts.startDate || !opts.endDate) {
     return [{ start: opts.startDate || '', end: opts.endDate || '' }];
   }
@@ -1238,6 +1287,14 @@ export function planArcpSummaryDateChunks(opts: ArcpClaimsQueryOpts): { start: s
   }
 
   const granularity = resolveArcpChunkGranularity(span);
+  if (granularity === 'day' && shouldUseScopedCrmChunkDays(opts, hints)) {
+    return splitArcpDateRange(
+      opts.startDate,
+      opts.endDate,
+      resolveArcpApproveChunkDays(opts)
+    );
+  }
+
   switch (granularity) {
     case 'single':
       return [{ start: opts.startDate, end: opts.endDate }];
@@ -1290,11 +1347,14 @@ function countLikelyCrmFallbackChunks(
   let crmChunks = 0;
   for (const segment of segments) {
     if (segment.mode !== 'crm') continue;
-    crmChunks += planArcpSummaryDateChunks({
-      ...opts,
-      startDate: segment.start,
-      endDate: segment.end,
-    }).length;
+    crmChunks += planArcpSummaryDateChunks(
+      {
+        ...opts,
+        startDate: segment.start,
+        endDate: segment.end,
+      },
+      hints
+    ).length;
   }
   return crmChunks > 0 ? crmChunks : 0;
 }
@@ -1304,9 +1364,9 @@ export function estimateArcpLoadPlan(
   opts: ArcpClaimsQueryOpts,
   hints?: ArcpLoadEstimateHints
 ): ArcpLoadPlan {
-  const chunks = planArcpSummaryDateChunks(opts);
+  const chunks = planArcpSummaryDateChunks(opts, hints);
   const span = arcpDateSpanDays(opts.startDate ?? null, opts.endDate ?? null) ?? 0;
-  const chunkGranularity = resolveArcpChunkGranularity(span);
+  const chunkGranularity = inferArcpPlanGranularity(span, chunks);
   const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
   const likelyCrm = countLikelyCrmFallbackChunks(chunks, opts, hints);
   const crmPerChunkMs = isArcpApproveDateColumn(dateColumn) ? 28000 : 12000;
@@ -1322,7 +1382,12 @@ export function estimateArcpLoadPlan(
     : crmPerChunkMs;
   const concurrency =
     chunks.length > 1
-      ? resolveArcpLoadConcurrency(opts, { chunkCount: chunks.length, spanDays: span, chunkGranularity })
+      ? resolveArcpLoadConcurrency(opts, {
+          chunkCount: chunks.length,
+          spanDays: span,
+          chunkGranularity,
+          crmChunkCount: likelyCrm,
+        })
       : 1;
   const clientChunked = chunks.length > 1;
   const estimateMs = clientChunked
@@ -1395,9 +1460,9 @@ export function estimateArcpDetailLoadPlan(
   opts: ArcpClaimsQueryOpts,
   hints?: ArcpLoadEstimateHints
 ): ArcpLoadPlan {
-  const chunks = planArcpSummaryDateChunks(opts);
+  const chunks = planArcpSummaryDateChunks(opts, hints);
   const span = arcpDateSpanDays(opts.startDate ?? null, opts.endDate ?? null) ?? 0;
-  const chunkGranularity = resolveArcpChunkGranularity(span);
+  const chunkGranularity = inferArcpPlanGranularity(span, chunks);
   const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
   const likelyCrm = countLikelyCrmFallbackChunks(chunks, opts, hints);
   const crmPerChunkMs = isArcpApproveDateColumn(dateColumn) ? 28000 : 15000;
@@ -1413,7 +1478,12 @@ export function estimateArcpDetailLoadPlan(
     : crmPerChunkMs;
   const concurrency =
     chunks.length > 1
-      ? resolveArcpLoadConcurrency(opts, { chunkCount: chunks.length, spanDays: span, chunkGranularity })
+      ? resolveArcpLoadConcurrency(opts, {
+          chunkCount: chunks.length,
+          spanDays: span,
+          chunkGranularity,
+          crmChunkCount: likelyCrm,
+        })
       : 1;
   const estimateMs = postgresReady
     ? 5000 + Math.ceil(likelyCrm / concurrency) * crmPerChunkMs
