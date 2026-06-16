@@ -92,11 +92,18 @@ const nextConfig: NextConfig = {
     'tesseract.js-core',
     'wasm-feature-detect',
   ],
+  /** india-pincode is externalized (loads data via __dirname); Vercel must ship dist + dataset. */
   outputFileTracingIncludes: {
     '/api/report/location-audit': [
+      './node_modules/india-pincode/package.json',
+      './node_modules/india-pincode/dist/index.js',
+      './node_modules/india-pincode/dist/index.mjs',
       './node_modules/india-pincode/data/pincodes.json.gz',
     ],
     '/api/report/location-audit/stream': [
+      './node_modules/india-pincode/package.json',
+      './node_modules/india-pincode/dist/index.js',
+      './node_modules/india-pincode/dist/index.mjs',
       './node_modules/india-pincode/data/pincodes.json.gz',
     ],
     '/api/barcode-scan/read-image': [
