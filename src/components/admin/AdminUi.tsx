@@ -2,6 +2,13 @@
 
 import React, { useState } from 'react';
 import { Search } from 'lucide-react';
+import { motion } from 'motion/react';
+import {
+  fadeSlideIn,
+  instantTransition,
+  motionTransition,
+  usePrefersReducedMotion,
+} from '@/lib/motion/presets';
 
 export function AdminToolbar({
   search,
@@ -53,17 +60,25 @@ export function AdminTableCard({
   isEmpty?: boolean;
   scrollClassName?: string;
 }) {
+  const reducedMotion = usePrefersReducedMotion();
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       {isEmpty ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-12 text-center">
+        <motion.div
+          className="flex flex-1 flex-col items-center justify-center gap-2 p-12 text-center"
+          variants={fadeSlideIn}
+          initial="initial"
+          animate="animate"
+          transition={reducedMotion ? instantTransition() : motionTransition()}
+        >
           {empty ?? (
             <>
               <p className="text-sm font-medium text-slate-600">No records found</p>
               <p className="text-[11px] text-slate-400">Try adjusting your search.</p>
             </>
           )}
-        </div>
+        </motion.div>
       ) : (
         <div
           className={

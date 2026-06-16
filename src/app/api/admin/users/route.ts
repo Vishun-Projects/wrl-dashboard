@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
+import { requireRequestUser } from '@/lib/auth/server-user';
+import { isDevAuthBypass } from '@/lib/auth/verify-jwt';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
 function normalizeUuid(value: unknown): string | null {
@@ -58,9 +60,9 @@ async function insertAppUser(params: {
 
 export async function GET(request: Request) {
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const user = await requireRequestUser(request, supabase);
 
-  if (authError || !user) {
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -79,15 +81,25 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const supabase = await createClient();
-  const { data: { user: adminUser }, error: authError } = await supabase.auth.getUser();
+  const adminUser = await requireRequestUser(request, supabase);
 
-  if (authError || !adminUser) {
+  if (!adminUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const permissions = await (prisma as any).getUserPermissions(adminUser.id);
   if (!permissions.includes('manage_users')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  if (isDevAuthBypass()) {
+    return NextResponse.json(
+      {
+        error:
+          'Creating auth users requires Supabase Admin API over HTTPS. Use Vercel preview or VPN.',
+      },
+      { status: 503 }
+    );
   }
 
   let authUserId: string | null = null;
@@ -155,9 +167,9 @@ export async function POST(request: Request) {
 
 export async function PUT(request: Request) {
   const supabase = await createClient();
-  const { data: { user: adminUser }, error: authError } = await supabase.auth.getUser();
+  const adminUser = await requireRequestUser(request, supabase);
 
-  if (authError || !adminUser) {
+  if (!adminUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -193,9 +205,9 @@ export async function PUT(request: Request) {
 
 export async function DELETE(request: Request) {
   const supabase = await createClient();
-  const { data: { user: adminUser }, error: authError } = await supabase.auth.getUser();
+  const adminUser = await requireRequestUser(request, supabase);
 
-  if (authError || !adminUser) {
+  if (!adminUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -213,6 +225,17 @@ export async function DELETE(request: Request) {
     if (userId === adminUser.id) throw new Error('Cannot delete your own account');
 
     await prisma.$queryRawUnsafe('DELETE FROM public.app_users WHERE id = $1', userId);
+
+    if (isDevAuthBypass()) {
+      return NextResponse.json(
+        {
+          error:
+            'Deleting auth users requires Supabase Admin API over HTTPS. Profile row removed; use Vercel to delete auth user.',
+          profileDeleted: true,
+        },
+        { status: 503 }
+      );
+    }
 
     await supabaseAdmin.auth.admin.deleteUser(userId);
 

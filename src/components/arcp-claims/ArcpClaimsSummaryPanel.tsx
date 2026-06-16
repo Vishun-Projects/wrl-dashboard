@@ -1,9 +1,12 @@
 'use client';
 
 import React from 'react';
+import { AnimatedMetric } from '@/components/motion';
 import {
+  ARCP_TALLY_GROUPING_OPTIONS,
   formatArcpAmountSummary,
   type ArcpTallyDetailLevel,
+  type ArcpTallyGrouping,
 } from '@/lib/arcp-claims/table';
 
 export type ArcpTableViewMode = 'summary' | 'monthly' | 'both';
@@ -20,6 +23,8 @@ type ArcpClaimsSummaryPanelProps = {
   totals: ArcpSummaryTotals;
   tableView: ArcpTableViewMode;
   onTableViewChange: (view: ArcpTableViewMode) => void;
+  tallyGrouping: ArcpTallyGrouping;
+  onTallyGroupingChange: (grouping: ArcpTallyGrouping) => void;
   tallyDetailLevel: ArcpTallyDetailLevel;
   onTallyDetailLevelChange: (level: ArcpTallyDetailLevel) => void;
   includeTravelReimbursement: boolean;
@@ -27,41 +32,49 @@ type ArcpClaimsSummaryPanelProps = {
   categorySectionCount?: number;
 };
 
-function SegmentedControl<T extends string>({
-  label,
+function InlinePills<T extends string>({
   options,
   value,
   onChange,
 }: {
-  label: string;
   options: { value: T; label: string; title?: string }[];
   value: T;
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">{label}</span>
-      <div
-        className="flex flex-wrap items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 p-0.5"
-        role="group"
-        aria-label={label}
-      >
-        {options.map((opt) => (
-          <button
-            key={opt.value}
-            type="button"
-            title={opt.title}
-            onClick={() => onChange(opt.value)}
-            className={`rounded px-2 py-1 text-[10px] font-medium transition-colors ${
-              value === opt.value
-                ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
+    <div className="inline-flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 p-0.5">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          title={opt.title}
+          onClick={() => onChange(opt.value)}
+          className={`whitespace-nowrap rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+            value === opt.value
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ViewControlGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-1.5">
+      <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+        {label}
+      </span>
+      {children}
     </div>
   );
 }
@@ -70,6 +83,8 @@ export function ArcpClaimsSummaryPanel({
   totals,
   tableView,
   onTableViewChange,
+  tallyGrouping,
+  onTallyGroupingChange,
   tallyDetailLevel,
   onTallyDetailLevelChange,
   includeTravelReimbursement,
@@ -78,90 +93,127 @@ export function ArcpClaimsSummaryPanel({
 }: ArcpClaimsSummaryPanelProps) {
   const showTallyControls = tableView === 'summary' || tableView === 'both';
 
+  const detailRollupLabel =
+    tallyGrouping === 'category'
+      ? 'Rollup'
+      : tallyGrouping === 'call_type'
+        ? 'Per type'
+        : 'Per type';
+
   return (
-    <div className="mb-3 space-y-2 rounded-lg border border-slate-200 bg-white p-3">
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-md border border-slate-100 bg-slate-50/80 px-2.5 py-2">
-          <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Service lines</p>
-          <p className="mt-0.5 text-sm font-semibold tabular-nums text-slate-900">
-            {totals.serviceLineCount.toLocaleString('en-IN')}
-          </p>
+    <div className="shrink-0 border-b border-slate-200 bg-white">
+      <div className="register-stats-bar">
+        <div className="register-stat-item">
+          <AnimatedMetric
+            value={totals.serviceLineCount}
+            className="register-stat-value text-slate-900"
+          />
+          <span className="register-stat-label">Service lines</span>
           {totals.travelLineCount > 0 ? (
-            <p className="text-[10px] text-slate-500">
-              +{totals.travelLineCount.toLocaleString('en-IN')} travel
-            </p>
+            <span className="text-[10px] font-medium text-slate-500">
+              +<AnimatedMetric value={totals.travelLineCount} /> travel
+            </span>
           ) : null}
         </div>
-        <div className="rounded-md border border-slate-100 bg-slate-50/80 px-2.5 py-2">
-          <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Amount payable</p>
-          <p className="mt-0.5 text-sm font-semibold tabular-nums text-slate-900">
-            {formatArcpAmountSummary(totals.amountPayable)}
-          </p>
+        <div className="register-stat-item">
+          <AnimatedMetric
+            value={totals.amountPayable}
+            format={formatArcpAmountSummary}
+            snapToInteger={false}
+            className="register-stat-value text-slate-900 tabular-nums"
+          />
+          <span className="register-stat-label">Amount payable</span>
         </div>
-        <div className="rounded-md border border-slate-100 bg-slate-50/80 px-2.5 py-2">
-          <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Branch approved</p>
-          <p className="mt-0.5 text-sm font-semibold tabular-nums text-slate-900">
-            {formatArcpAmountSummary(totals.branchApproved)}
-          </p>
+        <div className="register-stat-item">
+          <AnimatedMetric
+            value={totals.branchApproved}
+            format={formatArcpAmountSummary}
+            snapToInteger={false}
+            className="register-stat-value text-emerald-600 tabular-nums"
+          />
+          <span className="register-stat-label">Branch approved</span>
         </div>
-        <div className="rounded-md border border-slate-100 bg-slate-50/80 px-2.5 py-2">
-          <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">HO approved</p>
-          <p className="mt-0.5 text-sm font-semibold tabular-nums text-slate-900">
-            {formatArcpAmountSummary(totals.hoApproved)}
-          </p>
+        <div className="register-stat-item">
+          <AnimatedMetric
+            value={totals.hoApproved}
+            format={formatArcpAmountSummary}
+            snapToInteger={false}
+            className="register-stat-value text-blue-600 tabular-nums"
+          />
+          <span className="register-stat-label">HO approved</span>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-end gap-4 border-t border-slate-100 pt-2">
-        <label className="inline-flex cursor-pointer items-center gap-2 self-center text-[11px] text-slate-700">
+      <div className="flex items-center gap-3 overflow-x-auto border-t border-slate-100 px-3 py-1.5">
+        <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-[10px] text-slate-600">
           <input
             type="checkbox"
             checked={includeTravelReimbursement}
             onChange={(e) => onIncludeTravelChange(e.target.checked)}
-            className="h-3.5 w-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+            className="h-3 w-3 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
           />
-          Include travel reimbursement
+          Travel
         </label>
 
-        <SegmentedControl<ArcpTableViewMode>
-          label="Report layout"
-          value={tableView}
-          onChange={onTableViewChange}
-          options={[
-            { value: 'summary', label: 'Service tally', title: 'Service lines by category' },
-            { value: 'monthly', label: 'Monthly', title: 'Totals by calendar month' },
-            { value: 'both', label: 'Both', title: 'Tally and monthly together' },
-          ]}
-        />
-
-        {showTallyControls ? (
-          <SegmentedControl<ArcpTallyDetailLevel>
-            label="Tally detail"
-            value={tallyDetailLevel}
-            onChange={onTallyDetailLevelChange}
+        <ViewControlGroup label="Layout">
+          <InlinePills<ArcpTableViewMode>
+            value={tableView}
+            onChange={onTableViewChange}
             options={[
-              {
-                value: 'full',
-                label: 'Full breakdown',
-                title: 'Every category with Local/Upcountry and Major/Minor rows',
-              },
-              {
-                value: 'category',
-                label: 'By category',
-                title: `One total row per service category (${categorySectionCount} categories)`,
-              },
-              {
-                value: 'totals',
-                label: 'Grand total',
-                title: 'Only the bottom total row — no category lines',
-              },
+              { value: 'summary', label: 'Tally', title: 'Service tally table' },
+              { value: 'monthly', label: 'Monthly', title: 'Totals by month' },
+              { value: 'both', label: 'Both', title: 'Tally and monthly' },
             ]}
           />
-        ) : null}
+        </ViewControlGroup>
 
-        <span className="pb-1 text-[10px] text-slate-400">
-          View options apply instantly. View PDF exports exactly what you see here.
-        </span>
+        {showTallyControls ? (
+          <>
+            <ViewControlGroup label="Group by">
+              <InlinePills<ArcpTallyGrouping>
+                value={tallyGrouping}
+                onChange={onTallyGroupingChange}
+                options={ARCP_TALLY_GROUPING_OPTIONS.map((opt) => ({
+                  value: opt.value,
+                  label:
+                    opt.value === 'category'
+                      ? 'Category'
+                      : opt.value === 'call_type'
+                        ? 'Call type'
+                        : 'Type + M/M',
+                  title: opt.title,
+                }))}
+              />
+            </ViewControlGroup>
+
+            <ViewControlGroup label="Rows">
+              <InlinePills<ArcpTallyDetailLevel>
+                value={tallyDetailLevel}
+                onChange={onTallyDetailLevelChange}
+                options={[
+                  {
+                    value: 'full',
+                    label: 'Full',
+                    title: 'Every row for the selected grouping',
+                  },
+                  {
+                    value: 'category',
+                    label: detailRollupLabel,
+                    title:
+                      tallyGrouping === 'category'
+                        ? `One total per category (${categorySectionCount})`
+                        : 'One total per call-type section',
+                  },
+                  {
+                    value: 'totals',
+                    label: 'Total only',
+                    title: 'Grand total row only',
+                  },
+                ]}
+              />
+            </ViewControlGroup>
+          </>
+        ) : null}
       </div>
     </div>
   );

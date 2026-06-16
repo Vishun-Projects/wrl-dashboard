@@ -20,7 +20,9 @@ export const ESSENTIAL_SYNC_TABLES = [
 ] as const;
 
 export const syncProxyCorsHeaders = {
-  'Access-Control-Allow-Origin': process.env.SYNC_PROXY_CORS_ORIGIN ?? '*',
+  'Access-Control-Allow-Origin':
+    process.env.SYNC_PROXY_CORS_ORIGIN ??
+    (process.env.NODE_ENV === 'production' ? '' : '*'),
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };

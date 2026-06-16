@@ -10,6 +10,26 @@
 
 **Do not** call fetch in `onApply` when the page already listens to `appliedRevision`.
 
+## Perceived performance
+
+Respond within **~400ms (Doherty threshold)** on every user action. Use shared primitives from `@/hooks/useRaceSafeLoad`, `@/components/report/ReportLoadingFeedback`, `@/components/ui/ReportLoadBanner`, and `@/components/ui/DataTableLoading`.
+
+| Law | Rule | Anti-pattern |
+|-----|------|--------------|
+| **Doherty (~400ms)** | Immediate feedback: button spinner, progress bar, or optimistic status | Blank screen; disabled UI with no indicator |
+| **Stale-while-revalidate** | `loading` = no data (skeleton); `updating` = keep rows + progress bar/overlay | Clearing table on refetch; full-page block when cache exists |
+| **Feedback hierarchy** | Progress → banner or `ReportFetchingBar`; errors → `PageAlert`; success → `feedback.actionSuccess` | Toasts for in-progress loads |
+| **Race safety** | `useRaceSafeLoad` or `loadGenerationRef` + `AbortController` + `isStale()` | Stale responses overwriting newer filters |
+| **Hick's Law** | Equal-weight stats (see below) | Hero metrics or collapsed sub-stats |
+| **Fitts's Law** | Page shell stays visible; progress inline | Entire page replaced by spinner |
+
+```text
+User action → instant feedback (<400ms)
+  → no visible data? skeleton (loading)
+  → has data? keep data + ReportFetchingBar (updating)
+  → fetch → merge → clear progress, keep data
+```
+
 ## Stats strip policy
 
 The MIS register stats bar (`RegisterStatsBar`) keeps **all metrics equal-weight**:
@@ -55,17 +75,20 @@ All modals must render via `ModalPortal` (portaled to `document.body`) with `Mod
 
 ## ARCP session restore
 
-On every ARCP visit, if a prior load job exists (`load-status?latest=any`), show `ArcpRestoreSessionDialog` before loading data. User chooses **Continue previous session** or **Start fresh**. Never auto-start `runLoad` silently. ARCP date basis is persisted in `report_preferences.arcp.dateFilterColumn`.
+On ARCP visit, if a prior load job exists (`load-status?latest=any`) **and restored filters match the current draft**, the page silently hydrates partial aggregates and resumes the job. If filters differ, the stale job is ignored.
 
 ## Manual regression checklist
 
 1. Stats strip: all numbers visible; Tech Solve + Closed clickable
-2. Register: Status after Customer (new default columns); serial verbatim; scroll fade
-3. Distribution / Serial: single fetch per apply (network tab)
-4. Warranty: instant filters; customer name on every row; expanded FG breakdown full width (no horizontal scroll)
-5. ARCP: restore modal on revisit; Apply gating unchanged; table scrolls inside card
-6. Serial Audit: one register link in expanded detail only
-7. Distribution: no per-row register link; panel tables scroll
-8. Admin delete: custom `ConfirmDialog`, not browser confirm
-9. Register: table scrolls inside pane; pagination below table; horizontal fade when columns overflow
-10. Orientation banner: dismissible per session
+2. Register: Status after Customer (new default columns); serial verbatim; scroll fade; no blank white mount flash
+3. Distribution / Serial: single fetch per apply (network tab); refetch keeps prior table visible with progress bar
+4. Warranty: instant filters; customer name on every row; expanded FG breakdown full width; refresh shows progress bar not full table wipe
+5. ARCP: Apply gating unchanged; preview banner on long ranges; table scrolls inside card; session restore when filters match
+6. Serial Audit: one register link in expanded detail only; filter revision keeps list visible while updating
+7. Distribution: no per-row register link; panel tables scroll; KPIs stay visible during filter refresh
+8. Location Audit: Run audit shows staged progress; CSV export shows in-button progress; stats stay during reload
+9. Admin Users/Roles/Profile: skeleton in content area, not full-page white spinner
+10. Admin delete: custom `ConfirmDialog`, not browser confirm
+11. Register: table scrolls inside pane; pagination below table; horizontal fade when columns overflow
+12. Orientation banner: dismissible per session
+13. Speed: every Apply/Refresh/Run shows feedback within 400ms; no duplicate full-page + in-content spinners

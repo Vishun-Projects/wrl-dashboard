@@ -1,4 +1,6 @@
-import pincodeMapData from '@/app/report/distribution/pincode_map.json';
+import 'server-only';
+
+import { getPincodeMapData } from '@/lib/geo/pincode-map';
 
 export const CITY_TO_STATE_MAP: Record<string, string> = {
   MUMBAI: 'MAHARASHTRA',
@@ -147,7 +149,7 @@ export function getGeographicDetails(
   let state = '';
   let city = '';
 
-  const mapped = (pincodeMapData as Record<string, { s?: string; d?: string }>)[pin];
+  const mapped = getPincodeMapData()[pin];
 
   let mappedState = mapped?.s || '';
   let mappedCity = mapped?.d || '';

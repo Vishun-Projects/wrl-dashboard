@@ -1,8 +1,8 @@
 import 'server-only';
 
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
 import { resolveReportSecurity, type ReportSecurity } from '@/lib/auth/report-security';
+import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
 
 export type BearerAuthResult =
   | { ok: true; userId: string; security: ReportSecurity }
@@ -10,7 +10,8 @@ export type BearerAuthResult =
 
 /** Authenticate report API requests using Authorization: Bearer <supabase jwt>. */
 export async function resolveBearerReportSecurity(
-  authHeader: string | null
+  authHeader: string | null,
+  opts?: { pagePermission?: string }
 ): Promise<BearerAuthResult> {
   if (!authHeader?.startsWith('Bearer ')) {
     return {
@@ -20,18 +21,17 @@ export async function resolveBearerReportSecurity(
   }
 
   const token = authHeader.slice(7).trim();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabaseAdmin.auth.getUser(token);
-  if (authError || !user) {
+  const userId = await resolveUserIdFromAccessToken(token);
+  if (!userId) {
     return {
       ok: false,
       response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
     };
   }
 
-  const security = await resolveReportSecurity(user.id);
+  const security = await resolveReportSecurity(userId, {
+    pagePermission: opts?.pagePermission,
+  });
   if (security.forbidden) {
     return {
       ok: false,
@@ -39,5 +39,5 @@ export async function resolveBearerReportSecurity(
     };
   }
 
-  return { ok: true, userId: user.id, security };
+  return { ok: true, userId, security };
 }

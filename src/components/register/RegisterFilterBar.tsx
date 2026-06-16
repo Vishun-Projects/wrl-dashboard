@@ -54,11 +54,14 @@ function FilterGroups({
   applyMode = 'confirm',
   showStatusChips = false,
   commitOnChange = false,
+  collapseAdvanced = false,
 }: {
   applyMode?: 'instant' | 'confirm';
   showStatusChips?: boolean;
   /** In drawer: sync applied filters on each change so chips/removal work before Apply. */
   commitOnChange?: boolean;
+  /** Hick's Law: hide geography/people filters until expanded. */
+  collapseAdvanced?: boolean;
 }) {
   const {
     applyFilters,
@@ -110,6 +113,46 @@ function FilterGroups({
       }
     : handleCitiesChange;
   const onTechnicianChange = wrapCommit(setSelectedTechnician, 'selectedTechnician');
+  const [showAdvanced, setShowAdvanced] = React.useState(!collapseAdvanced);
+
+  const advancedFilters = (
+    <>
+      <FilterGroup label="Location">
+        <RegisterBranchFranchiseeFilters applyMode={applyMode} commitOnChange={commitOnChange} />
+        <RegisterMultiSelect
+          label="State"
+          emptyLabel="All states"
+          options={stateOptions}
+          selected={selectedState}
+          onChange={onStateChange}
+          searchable
+          applyMode={applyMode}
+        />
+        <RegisterMultiSelect
+          label="City"
+          emptyLabel="All cities"
+          options={cityOptions}
+          selected={selectedCity}
+          onChange={onCityChange}
+          searchable
+          applyMode={applyMode}
+        />
+      </FilterGroup>
+
+      <FilterGroup label="People" className="register-filter-group--people">
+        <RegisterMultiSelect
+          label="Technician"
+          emptyLabel="All technicians"
+          options={technicianOptions}
+          selected={selectedTechnician}
+          onChange={onTechnicianChange}
+          searchable
+          panelClassName="w-64"
+          applyMode={applyMode}
+        />
+      </FilterGroup>
+    </>
+  );
 
   return (
     <>
@@ -149,40 +192,26 @@ function FilterGroups({
         />
       </FilterGroup>
 
-      <FilterGroup label="Location">
-        <RegisterBranchFranchiseeFilters applyMode={applyMode} commitOnChange={commitOnChange} />
-        <RegisterMultiSelect
-          label="State"
-          emptyLabel="All states"
-          options={stateOptions}
-          selected={selectedState}
-          onChange={onStateChange}
-          searchable
-          applyMode={applyMode}
-        />
-        <RegisterMultiSelect
-          label="City"
-          emptyLabel="All cities"
-          options={cityOptions}
-          selected={selectedCity}
-          onChange={onCityChange}
-          searchable
-          applyMode={applyMode}
-        />
-      </FilterGroup>
-
-      <FilterGroup label="People" className="register-filter-group--people">
-        <RegisterMultiSelect
-          label="Technician"
-          emptyLabel="All technicians"
-          options={technicianOptions}
-          selected={selectedTechnician}
-          onChange={onTechnicianChange}
-          searchable
-          panelClassName="w-64"
-          applyMode={applyMode}
-        />
-      </FilterGroup>
+      {collapseAdvanced && !showAdvanced ? (
+        <button
+          type="button"
+          className="text-xs font-medium text-blue-700 hover:text-blue-900"
+          onClick={() => setShowAdvanced(true)}
+        >
+          More filters (location, branch, technician…)
+        </button>
+      ) : (
+        advancedFilters
+      )}
+      {collapseAdvanced && showAdvanced ? (
+        <button
+          type="button"
+          className="text-xs font-medium text-slate-500 hover:text-slate-700"
+          onClick={() => setShowAdvanced(false)}
+        >
+          Fewer filters
+        </button>
+      ) : null}
     </>
   );
 }
@@ -218,7 +247,7 @@ export function RegisterFilterBar({
     return (
       <div className="register-filter-drawer-content">
         <div className="register-filter-row register-filter-row-compact flex-col items-stretch gap-3">
-          <FilterGroups applyMode={applyMode} showStatusChips commitOnChange />
+          <FilterGroups applyMode={applyMode} showStatusChips commitOnChange collapseAdvanced />
         </div>
       </div>
     );

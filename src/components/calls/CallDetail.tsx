@@ -4,6 +4,12 @@ import React, { useState } from 'react';
 import { X, AlertCircle, Send, Image, ExternalLink, Package, MessageSquare, ArrowRight, Wrench, Copy, CheckCircle, XCircle, Clock, UserCheck } from 'lucide-react';
 import { feedback } from '@/lib/ui/feedback';
 import { ImagePreviewViewer } from '@/components/shared/ImagePreviewViewer';
+import { PartBarcodeImages } from '@/components/calls/PartBarcodeImages';
+import {
+  buildCallImages,
+  buildReplacementPartViews,
+  isSerialTrackedReplacementPart,
+} from '@/lib/calls/part-barcode-images';
 
 interface CallDetailProps {
   call: any;
@@ -102,16 +108,9 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
     }
   }
 
-  // 1. Unified Image Collection
-  const allImages: any[] = [];
-  (call.documents || []).forEach((d: any) => {
-    if (d.filename && d.filename.trim()) {
-      allImages.push({
-        url: `https://westerncrm.com/WRL/UploadDocs/${d.office_id}/${d.filename.trim()}`,
-        title: d.remarks || d.original_name
-      });
-    }
-  });
+  const allImages = buildCallImages(call.documents || []);
+  const replacementPartViews = buildReplacementPartViews(call.parts || [], call.documents || []);
+  const regularParts = (call.parts || []).filter((p: any) => !isSerialTrackedReplacementPart(p));
 
   const handleImageLoad = (url: string) => {
     setLoadedImages(prev => new Set(prev).add(url));
@@ -486,40 +485,32 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
               {activeTab === 'parts' && (
                 <div className="space-y-3">
                   {(call.parts || []).length > 0 ? (
-                    call.parts.map((p: any, i: number) => (
-                      <div key={i} className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
-                        <div className="p-4 flex items-center justify-between border-b border-slate-50">
-                          <div className="space-y-1">
-                            <div className="text-[13px] text-slate-900 ui-label">{p.vpartname}</div>
-                            <div className="text-[11px] text-slate-400 font-medium">{p.vpartcode}</div>
+                    <>
+                      {replacementPartViews.length > 0 ? (
+                        <PartBarcodeImages
+                          views={replacementPartViews}
+                          onPreview={(img) => setPreviewImage({ url: img.url, title: img.title })}
+                        />
+                      ) : null}
+
+                      {regularParts.map((p: any, i: number) => (
+                        <div key={i} className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+                          <div className="p-4 flex items-center justify-between border-b border-slate-50">
+                            <div className="space-y-1">
+                              <div className="text-[13px] text-slate-900 ui-label">{p.vpartname}</div>
+                              <div className="text-[11px] text-slate-400 font-medium">{p.vpartcode}</div>
+                            </div>
+                            <div className="text-[16px] text-slate-900 bg-slate-50 px-3 py-1 rounded-lg ui-strong">x{p.nqty || 1}</div>
                           </div>
-                          <div className="text-[16px] text-slate-900 bg-slate-50 px-3 py-1 rounded-lg ui-strong">x{p.nqty || 1}</div>
+
+                          {p.vremarks ? (
+                            <div className="px-4 py-3 border-t border-slate-50 text-[12px] text-slate-500 italic">
+                              Note: {p.vremarks}
+                            </div>
+                          ) : null}
                         </div>
-
-                        {(p.voldbarcode || p.vnewbarcode) && (
-                          <div className="p-4 bg-slate-50/50 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            {p.voldbarcode && (
-                              <div className="space-y-1">
-                                <div className="text-[10px] text-slate-400 ui-label">Old Barcode</div>
-                                <div className="text-[12px] font-mono text-slate-600 bg-white px-2 py-1.5 rounded border border-slate-100">{p.voldbarcode}</div>
-                              </div>
-                            )}
-                            {p.vnewbarcode && (
-                              <div className="space-y-1">
-                                <div className="text-[10px] text-slate-400 ui-label">New Barcode</div>
-                                <div className="text-[12px] font-mono text-slate-600 bg-white px-2 py-1.5 rounded border border-slate-100">{p.vnewbarcode}</div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {p.vremarks && (
-                          <div className="px-4 py-3 border-t border-slate-50 text-[12px] text-slate-500 italic">
-                            Note: {p.vremarks}
-                          </div>
-                        )}
-                      </div>
-                    ))
+                      ))}
+                    </>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-[13px]">No parts recorded</div>
                   )}
@@ -531,7 +522,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                   {allImages.map((img, i) => (
                     <ImageCard
                       key={i}
-                      img={img}
+                      img={{ url: img.url, title: img.title }}
                       onPreview={() => setPreviewImage({ url: img.url, title: img.title })}
                       onLoaded={() => handleImageLoad(img.url)}
                     />

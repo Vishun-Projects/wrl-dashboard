@@ -7,7 +7,6 @@ import { RegisterActiveFilterChips } from '@/components/register/RegisterActiveF
 import { RegisterStatsBar } from '@/components/register/RegisterStatsBar';
 import { ReportFetchingBar } from '@/components/report/ReportLoadingFeedback';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
-import { RestoredViewBanner } from '@/components/report/RestoredViewBanner';
 import type { RegisterSummary } from '@/lib/report/search';
 import type { ExtraActiveFilterChip } from '@/lib/report/filters';
 
@@ -15,15 +14,22 @@ type RegisterPageFiltersProps = {
   onClearAll?: () => void;
   onSearchEnter?: () => void;
   onPincodeEnter?: () => void;
-  /** Runs after context {@link applyFilters}; page should load data for the new applied snapshot. */
+  /** Runs after context {@link applyFilters} from the toolbar Apply / Run button. */
   onApply?: () => void;
+  /** Runs after drawer Apply commits filters. Defaults to {@link onApply}. */
+  onDrawerApply?: () => void;
+  /** Runs when an applied filter chip is removed. Defaults to {@link onApply} when set. */
+  onFilterRemoved?: () => void;
+  /** When false, Clear all does not invoke {@link onApply}. Default true. */
+  reloadOnClearAll?: boolean;
+  onBeforeOpenFilters?: () => void;
   applyDisabled?: boolean;
   applyLabel?: string;
   /** When provided, renders clickable KPI row below chips (Call Register). */
   summary?: RegisterSummary | null;
-  /** Additional loading state (e.g. Call Register table fetch). */
-  loading?: boolean;
-  loadingLabel?: string;
+  /** True when refetching with prior data visible (stale-while-revalidate). */
+  updating?: boolean;
+  updatingLabel?: string;
   /** Rendered below shared filter fields in the drawer (Serial Audit complaint picker). */
   drawerExtra?: React.ReactNode;
   /** Additional chips after shared report filter chips. */
@@ -37,18 +43,21 @@ export function RegisterPageFilters({
   onSearchEnter,
   onPincodeEnter,
   onApply,
+  onDrawerApply,
+  onFilterRemoved,
+  reloadOnClearAll = true,
+  onBeforeOpenFilters,
   applyDisabled = false,
   applyLabel,
   summary,
-  loading = false,
-  loadingLabel,
+  updating = false,
+  updatingLabel,
   drawerExtra,
   extraActiveChips,
   extraFilterCount = 0,
 }: RegisterPageFiltersProps) {
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
-  const { applyFilters, clearAllFilters, distributionLoading, resourcesLoaded } = useReportFilters();
-  const isFetching = loading || distributionLoading;
+  const { applyFilters, clearAllFilters, resourcesLoaded } = useReportFilters();
 
   const handleApplyFromToolbar = () => {
     applyFilters();
@@ -65,18 +74,24 @@ export function RegisterPageFilters({
     onPincodeEnter?.();
   };
 
-  const fetchLabel = loadingLabel ?? 'Loading…';
+  const fetchLabel = updatingLabel ?? 'Updating…';
 
   const handleClearAll = () => {
     clearAllFilters();
     onClearAll?.();
-    onApply?.();
+    if (reloadOnClearAll) onApply?.();
   };
+
+  const handleFilterRemoved = onFilterRemoved ?? (onApply ? () => onApply() : undefined);
+  const handleDrawerApply = onDrawerApply ?? onApply;
 
   return (
     <>
       <RegisterCompactToolbar
-        onOpenFilters={() => setFilterDrawerOpen(true)}
+        onOpenFilters={() => {
+          onBeforeOpenFilters?.();
+          setFilterDrawerOpen(true);
+        }}
         onSearchEnter={onSearchEnter ? handleSearchEnter : undefined}
         onPincodeEnter={onPincodeEnter ? handlePincodeEnter : undefined}
         onApply={onApply ? handleApplyFromToolbar : undefined}
@@ -84,13 +99,12 @@ export function RegisterPageFilters({
         applyLabel={applyLabel}
         extraFilterCount={extraFilterCount}
       />
-      <RestoredViewBanner />
       <RegisterActiveFilterChips
         onClearAll={handleClearAll}
-        onFilterRemoved={onApply ? () => onApply() : undefined}
+        onFilterRemoved={handleFilterRemoved}
         extraActiveChips={extraActiveChips}
       />
-      <ReportFetchingBar active={isFetching} label={fetchLabel} />
+      <ReportFetchingBar active={updating} label={fetchLabel} />
       {summary !== undefined && <RegisterStatsBar summary={summary} />}
       <RegisterFilterDrawer
         open={filterDrawerOpen}
@@ -99,10 +113,10 @@ export function RegisterPageFilters({
         drawerExtra={drawerExtra}
         extraFilterCount={extraFilterCount}
         onApply={
-          onApply
+          handleDrawerApply
             ? () => {
                 applyFilters();
-                onApply();
+                handleDrawerApply();
                 setFilterDrawerOpen(false);
               }
             : undefined

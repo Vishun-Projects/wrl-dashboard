@@ -1,4 +1,4 @@
-import ExcelJS from 'exceljs';
+import type ExcelJS from 'exceljs';
 import { isRegisterRowCancelled } from '@/lib/report/search';
 
 /** Excel worksheet limit minus header row. */
@@ -118,8 +118,9 @@ async function buildRegisterExcelWorkbook(
   rawRows: Record<string, unknown>[],
   opts?: Pick<RegisterExcelExportOptions, 'sheetName' | 'onProgress'>
 ): Promise<ExcelJS.Workbook> {
+  const ExcelJSRuntime = (await import('exceljs')).default;
   const rows = normalizeRegisterExportRows(rawRows);
-  const workbook = new ExcelJS.Workbook();
+  const workbook = new ExcelJSRuntime.Workbook();
   const styleRows = rows.length <= STYLE_ROW_LIMIT;
   const chunkCount = Math.max(1, Math.ceil(rows.length / EXCEL_MAX_DATA_ROWS));
 

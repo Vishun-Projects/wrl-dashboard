@@ -25,7 +25,7 @@ export function todayLocalDate(): string {
   return formatLocalDate(new Date());
 }
 
-/** Split inclusive date range into 7-day chunks (CRM OOM guard). */
+/** Split inclusive date range into N-day chunks (CRM OOM/timeout guard). */
 export function splitDateRangeByDays(
   startDate: string,
   endDate: string,
@@ -44,6 +44,30 @@ export function splitDateRangeByDays(
     cursor.setDate(cursor.getDate() + 1);
   }
   return chunks;
+}
+
+/** Split one calendar day into hour windows for CRM SQL timeout recovery. */
+export function splitDayByHours(
+  date: string,
+  hoursPerChunk = Number(process.env.SYNC_CRM_HOUR_CHUNK_SIZE ?? 6) || 6
+): Array<{ startDateTime: string; endDateTime: string }> {
+  const step = Math.max(1, Math.min(24, hoursPerChunk));
+  const chunks: Array<{ startDateTime: string; endDateTime: string }> = [];
+  for (let hour = 0; hour < 24; hour += step) {
+    const endHour = Math.min(hour + step, 24);
+    const endMinute = endHour >= 24 ? '59:59' : '59:59';
+    const endHourClamped = endHour >= 24 ? 23 : endHour - 1;
+    chunks.push({
+      startDateTime: `${date} ${String(hour).padStart(2, '0')}:00:00`,
+      endDateTime: `${date} ${String(endHourClamped).padStart(2, '0')}:${endMinute}`,
+    });
+  }
+  return chunks;
+}
+
+export function endOfLocalDate(date: string): Date {
+  const d = new Date(`${date}T23:59:59`);
+  return Number.isNaN(d.getTime()) ? new Date() : d;
 }
 
 export function maxCrmWatermarks(rows: Record<string, unknown>[]): {

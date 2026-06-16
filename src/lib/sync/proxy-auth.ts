@@ -1,8 +1,8 @@
 import 'server-only';
 
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
 import { prisma } from '@/lib/db/prisma';
+import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
 
 /**
  * Sync-proxy exposes CRM table reads for db-sync-tool.html.
@@ -27,15 +27,12 @@ export async function authorizeSyncProxy(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const {
-    data: { user },
-    error: authError,
-  } = await supabaseAdmin.auth.getUser(token);
-  if (authError || !user) {
+  const userId = await resolveUserIdFromAccessToken(token);
+  if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const permissions = await prisma.getUserPermissions(user.id);
+  const permissions = await prisma.getUserPermissions(userId);
   if (!permissions.includes('manage_users')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }

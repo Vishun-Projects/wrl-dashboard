@@ -138,3 +138,39 @@ export function fgDetailRowsForAggregate(
 
   return sortWarrantyMasterFgDetailRows(detail);
 }
+
+export type WarrantyMasterFgDetailIndex = Map<string, WarrantyMasterFgLineRow[]>;
+
+/** O(1) bucket lookup for expanded-row FG detail (avoids scanning all lines per row). */
+export function buildWarrantyMasterFgDetailIndex(
+  lines: WarrantyMasterFgLineRow[]
+): WarrantyMasterFgDetailIndex {
+  const index: WarrantyMasterFgDetailIndex = new Map();
+  for (const line of lines) {
+    const key = `${line.customerKey}::${line.groupKey}::${line.warrantyMonths}`;
+    const bucket = index.get(key);
+    if (bucket) bucket.push(line);
+    else index.set(key, [line]);
+  }
+  return index;
+}
+
+export function aggregateRowKey(row: WarrantyMasterAggregateRow): string {
+  return `${row.customerKey || row.customerName}::${row.groupKey || row.groupName}::${row.warrantyMonths}`;
+}
+
+export function fgDetailRowsForAggregateFromIndex(
+  index: WarrantyMasterFgDetailIndex,
+  row: WarrantyMasterAggregateRow,
+  filters: WarrantyMasterClientFilters
+): WarrantyMasterFgDetailRow[] {
+  const lines = index.get(aggregateRowKey(row)) ?? [];
+  const detail = lines
+    .map((line) => ({
+      fgModel: line.fgModel,
+      machineCount: effectiveCount(line, filters),
+    }))
+    .filter((d) => d.machineCount > 0);
+
+  return sortWarrantyMasterFgDetailRows(detail);
+}

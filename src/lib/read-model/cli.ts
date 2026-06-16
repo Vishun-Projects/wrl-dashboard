@@ -29,7 +29,7 @@ function formatSyncWorkerError(err: unknown): string {
     }
   }
   if (/timeout expired|Timeout expired/i.test(raw)) {
-    return `${raw} — CRM query timed out; worker splits into smaller date windows and retries automatically`;
+    return `${raw} — CRM query timed out; worker auto-splits into smaller hour/ncode windows and advances watermark per chunk`;
   }
   return raw;
 }
@@ -115,7 +115,7 @@ Live sync: PostgresAutoSync in the app (see docs/sync.md). Use daemon only if yo
 sync while no browser is open.
 
 Environment:
-  DATABASE_URL           Supabase Postgres (direct :5432 recommended)
+  DATABASE_URL           VPS Postgres (api.wrl-fsm.cloud; CLI uses direct :5432)
   SYNC_WORKER_ENABLED    Must be "true" for incremental/nightly/daemon
   SYNC_ARCP_ENABLED      Run ARCP incremental in daemon / API sync
   SYNC_INTERVAL_MS       Daemon interval (default 180000)

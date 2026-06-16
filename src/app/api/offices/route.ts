@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { requireRequestUser } from '@/lib/auth/server-user';
 import { postQuery } from '@/lib/db/proxy';
 import { prisma } from '@/lib/db/prisma';
 import { readDimsFromPostgres } from '@/lib/read-model/flags';
@@ -12,9 +13,9 @@ const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 export async function GET(request: Request) {
   const supabase = await createClient();
-  const { data: { user }, error } = await supabase.auth.getUser();
+  const user = await requireRequestUser(request, supabase);
 
-  if (error || !user) {
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

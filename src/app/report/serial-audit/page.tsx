@@ -17,6 +17,7 @@ import { createClient } from '@/lib/supabase/client';
 import { RegisterPageFilters } from '@/components/register/RegisterPageFilters';
 import { RegisterMultiSelect } from '@/components/register/RegisterMultiSelect';
 import { ReportLoadingPanel } from '@/components/report/ReportLoadingFeedback';
+import { DataTableLoading } from '@/components/ui/DataTableLoading';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import {
   AdminStatPill,
@@ -78,7 +79,7 @@ import {
   type SerialAuditRow,
 } from '@/lib/serial-audit/complaint-audit';
 import type { ExtraActiveFilterChip } from '@/lib/report/filters';
-import { MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS } from '@/lib/serial-audit/server/batch-fetch';
+import { MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS } from '@/lib/serial-audit/constants';
 import { SerialAuditCallsDetailTable } from '@/components/serial-audit/SerialAuditCallsDetailTable';
 import { SerialAuditAnalysisPanel } from '@/components/serial-audit/SerialAuditAnalysisPanel';
 import { feedback } from '@/lib/ui/feedback';
@@ -113,9 +114,7 @@ export default function SerialAuditPage() {
     getAppliedFiltersSnapshot,
     resourcesLoaded,
     ensureCorpusLoaded,
-    reportPreferences,
     prefsReady,
-    schedulePatchReportPreferences,
     appliedRevision,
   } = useReportFilters();
 
@@ -232,27 +231,13 @@ export default function SerialAuditPage() {
   const [selectedInvolvementPair, setSelectedInvolvementPair] =
     useState<RepeatInvolvementEntry | null>(null);
   const loadInFlightRef = useRef<Promise<void> | null>(null);
+  const loadGenerationRef = useRef(0);
   const lastPaintedKeyRef = useRef<string | null>(null);
   const pagePrefetchInflightRef = useRef<string | null>(null);
   const windowCallsRef = useRef(windowCallsBySerial);
   windowCallsRef.current = windowCallsBySerial;
   const defaultRepairsAppliedRef = useRef(false);
-  const serialPrefsRestoredRef = useRef(false);
   const involvementTriggeredKeyRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!prefsReady || serialPrefsRestoredRef.current) return;
-    serialPrefsRestoredRef.current = true;
-    const sa = reportPreferences?.serialAudit;
-    if (!sa) return;
-    if (sa.appliedRepairs?.length) {
-      setDraftRepairs(sa.appliedRepairs);
-      setAppliedRepairs(sa.appliedRepairs);
-    }
-    if (typeof sa.minCount === 'number') setMinCount(sa.minCount);
-    if (sa.includeCancelled) setIncludeCancelled(true);
-    if (sa.showAspBreakdown) setShowAspBreakdown(true);
-  }, [prefsReady, reportPreferences]);
 
   useEffect(() => {
     setMounted(true);
@@ -541,6 +526,10 @@ export default function SerialAuditPage() {
       }
 
       const run = (async () => {
+        const generation = loadGenerationRef.current + 1;
+        loadGenerationRef.current = generation;
+        const isStale = () => generation !== loadGenerationRef.current;
+
         if (opts?.refresh) {
           lastPaintedKeyRef.current = null;
           serialAuditBackgroundCache.delete(loadDataKey);
@@ -638,6 +627,7 @@ export default function SerialAuditPage() {
           });
           maybePrefetchInvolvement(apiRows, new Map());
         } catch (err: unknown) {
+          if (isStale()) return;
           const message = toUserFacingError(
             axios.isAxiosError(err) && err.response?.data?.error
               ? String(err.response.data.error)
@@ -645,7 +635,7 @@ export default function SerialAuditPage() {
           );
           setLoadError(message);
         } finally {
-          setLoading(false);
+          if (!isStale()) setLoading(false);
         }
       })();
 
@@ -732,12 +722,6 @@ export default function SerialAuditPage() {
     if (defaultRepairsAppliedRef.current) return;
     defaultRepairsAppliedRef.current = true;
 
-    const saved = reportPreferences?.serialAudit?.appliedRepairs;
-    if (saved?.length) {
-      void loadWindowData({ force: true, repairs: saved });
-      return;
-    }
-
     const defaults = defaultSerialAuditRepairFilterValues(repairPickerItems);
     setDraftRepairs(defaults);
     setAppliedRepairs(defaults);
@@ -747,27 +731,7 @@ export default function SerialAuditPage() {
     loadWindowData,
     prefsReady,
     repairPickerItems,
-    reportPreferences,
     resourcesLoaded,
-  ]);
-
-  useEffect(() => {
-    if (!prefsReady || !defaultRepairsAppliedRef.current) return;
-    schedulePatchReportPreferences({
-      serialAudit: {
-        appliedRepairs,
-        minCount,
-        includeCancelled,
-        showAspBreakdown,
-      },
-    });
-  }, [
-    appliedRepairs,
-    minCount,
-    includeCancelled,
-    showAspBreakdown,
-    prefsReady,
-    schedulePatchReportPreferences,
   ]);
 
   const loadSerialDetails = useCallback(
@@ -1184,12 +1148,12 @@ export default function SerialAuditPage() {
   if (!mounted || !resourcesLoaded) {
     return (
       <PageShell title="Serial Audit" icon={<ScanBarcode className="h-4 w-4" />}>
-        <div className="flex flex-1 items-center justify-center p-8">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-900" />
-        </div>
+        <ReportLoadingPanel label="Loading filters…" className="m-4 flex-1" />
       </PageShell>
     );
   }
+
+  const listUpdating = loading && listRows.length > 0;
 
   return (
     <PageShell
@@ -1218,8 +1182,8 @@ export default function SerialAuditPage() {
       }
       toolbar={
         <RegisterPageFilters
-          loading={loading && listRows.length === 0}
-          loadingLabel="Loading repeated serial numbers…"
+          updating={listUpdating}
+          updatingLabel="Updating serial audit…"
           onApply={handleApplyFilters}
           onClearAll={handleClearAllFilters}
           drawerExtra={repairDrawerExtra}
@@ -1232,13 +1196,13 @@ export default function SerialAuditPage() {
       <div className="flex shrink-0 flex-col gap-3">
       <SerialRepairLegend />
       <div className="flex flex-wrap items-center gap-2">
-        <AdminStatPill label="Repeated serials" value={loading ? '…' : summary.totalSerials} />
-        <AdminStatPill label="Flagged (≥3)" value={loading ? '…' : summary.flaggedCount} />
+        <AdminStatPill label="Repeated serials" value={loading && listRows.length === 0 ? '…' : summary.totalSerials} />
+        <AdminStatPill label="Flagged (≥3)" value={loading && listRows.length === 0 ? '…' : summary.flaggedCount} />
         <AdminStatPill
           label="With cancelled"
-          value={loading ? '…' : summaryWithCancelled}
+          value={loading && listRows.length === 0 ? '…' : summaryWithCancelled}
         />
-        <AdminStatPill label="Max complaints" value={loading ? '…' : summary.maxComplaints} />
+        <AdminStatPill label="Max complaints" value={loading && listRows.length === 0 ? '…' : summary.maxComplaints} />
       </div>
 
       <AdminToolbar
@@ -1350,6 +1314,12 @@ export default function SerialAuditPage() {
               </>
             }
           >
+            <DataTableLoading
+              loading={false}
+              updating={listUpdating}
+              hasContent={displayedRows.length > 0}
+              updatingLabel="Refreshing serial list…"
+            >
             {selectedInvolvementPair ? (
               <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-amber-100 bg-amber-50 px-3 py-2">
                 <p className="text-[11px] text-amber-950">
@@ -1467,6 +1437,7 @@ export default function SerialAuditPage() {
                 </div>
               </div>
             ) : null}
+            </DataTableLoading>
           </AdminTableCard>
 
           {showAspBreakdown ? (

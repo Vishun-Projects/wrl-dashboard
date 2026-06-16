@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { fetchAppUserAuthProfile } from '@/lib/auth/app-user-profile';
+import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
 import { postQuery } from '@/lib/db/proxy';
 import { prisma } from '@/lib/db/prisma';
 import { buildRegisterCsvResponse, createRegisterCsvResponse } from './csv-export';
@@ -23,9 +24,9 @@ import {
   resolveRegisterDateSqlColumn,
   sqlRegisterDateColumn,
 } from '@/lib/trhcalls/query';
-import pincodeMapData from '@/app/report/distribution/pincode_map.json';
+import { getPincodeMapData } from '@/lib/geo/pincode-map';
 import { CITY_TO_STATE_MAP, getGeographicDetails } from '@/lib/geo/india-states';
-import { isHodUser } from '@/lib/auth/report-security';
+import { isHodUser, resolveReportSecurity } from '@/lib/auth/report-security';
 import { mergeBranchFilterListEntry } from '@/lib/report/filters';
 import {
   enrichRegisterRowArcpApproveDates,
@@ -179,17 +180,17 @@ export async function handleRegisterGet(req: NextRequest) {
     if (!authHeader) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
-    if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const userId = await resolveUserIdFromAccessToken(token);
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const permissions = await (prisma as any).getUserPermissions(user.id);
+    const security = await resolveReportSecurity(userId, { pagePermission: 'page_mis_reports' });
+    if (security.forbidden || (!security.isHod && security.assignedOffices.length === 0)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
-    // Get user profile for office restrictions
-    const { data: profile } = await supabaseAdmin
-      .from('app_users')
-      .select('office_ids, visible_statuses, role')
-      .eq('id', user.id)
-      .single();
+    const permissions = await (prisma as any).getUserPermissions(userId);
+
+    const profile = await fetchAppUserAuthProfile(userId);
 
     const assignedOffices = profile?.office_ids || [];
     const visibleStatuses = profile?.visible_statuses || [];
@@ -292,7 +293,10 @@ export async function handleRegisterGet(req: NextRequest) {
 
     if (!isLookupSearch) {
       let dbSecurityCondition = '';
-      if (!isHod && assignedOffices.length > 0) {
+      if (!isHod) {
+        if (assignedOffices.length === 0) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
         const allowed = assignedOffices.join(',');
         dbSecurityCondition = ` AND (tc.nofficeid IN (${allowed}) OR o.nunder IN (${allowed}))`;
       }
@@ -366,7 +370,7 @@ export async function handleRegisterGet(req: NextRequest) {
     const getPincodesForState = (stateName: string): string[] => {
       const normalizedState = stateName.toUpperCase().trim();
       const pins: string[] = [];
-      for (const [pin, val] of Object.entries(pincodeMapData)) {
+      for (const [pin, val] of Object.entries(getPincodeMapData())) {
         if (val && typeof val === 'object' && (val as any).s && (val as any).s.toUpperCase().trim() === normalizedState) {
           pins.push(pin);
         }
@@ -377,7 +381,7 @@ export async function handleRegisterGet(req: NextRequest) {
     const getPincodesForCity = (cityName: string): string[] => {
       const normalizedCity = cityName.toUpperCase().trim();
       const pins: string[] = [];
-      for (const [pin, val] of Object.entries(pincodeMapData)) {
+      for (const [pin, val] of Object.entries(getPincodeMapData())) {
         if (val && typeof val === 'object' && (val as any).d && (val as any).d.toUpperCase().trim() === normalizedCity) {
           pins.push(pin);
         }

@@ -56,10 +56,6 @@ CREATE POLICY "HOD can manage all profiles" ON app_users FOR ALL USING (
   EXISTS (SELECT 1 FROM app_users WHERE id = auth.uid() AND role = 'hod')
 );
 
--- Report preferences (per-user filter/workspace memory)
-ALTER TABLE public.app_users
-  ADD COLUMN IF NOT EXISTS report_preferences JSONB NOT NULL DEFAULT '{}'::jsonb;
-
 -- Page-wise access permissions (assign in Roles & Access)
 INSERT INTO public.app_permissions (id, name, description)
 SELECT gen_random_uuid(), v.name, v.description

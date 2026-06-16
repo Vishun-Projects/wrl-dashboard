@@ -38,10 +38,14 @@ function buildOfficeFilter(
   let idx = startIdx;
   const parts: string[] = [];
 
-  if (!params.isHod && params.assignedOffices && params.assignedOffices.length > 0) {
-    parts.push(`${alias}.${officeColumn} = ANY($${idx}::bigint[])`);
-    values.push(params.assignedOffices.map((id) => Number(id)));
-    idx++;
+  if (!params.isHod) {
+    if (!params.assignedOffices || params.assignedOffices.length === 0) {
+      parts.push('FALSE');
+    } else {
+      parts.push(`${alias}.${officeColumn} = ANY($${idx}::bigint[])`);
+      values.push(params.assignedOffices.map((id) => Number(id)));
+      idx++;
+    }
   }
 
   if (params.officeIds && params.officeIds.length > 0) {
@@ -72,7 +76,10 @@ function buildCallTypeFilter(params: SummaryQueryParams, alias: string, startIdx
   };
 }
 
+let normalizeCallTypeFunctionReady = false;
+
 export async function ensureNormalizeCallTypeFunction(): Promise<void> {
+  if (normalizeCallTypeFunctionReady) return;
   await prisma.$executeRawUnsafe(`
     CREATE OR REPLACE FUNCTION normalize_call_type(input text)
     RETURNS text
@@ -82,6 +89,7 @@ export async function ensureNormalizeCallTypeFunction(): Promise<void> {
       SELECT upper(trim(coalesce(input, '')))
     $$
   `);
+  normalizeCallTypeFunctionReady = true;
 }
 
 export async function querySummaryDashboard(params: SummaryQueryParams): Promise<SummaryDashboard> {

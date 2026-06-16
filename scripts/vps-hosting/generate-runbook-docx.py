@@ -146,8 +146,62 @@ ANON_KEY='eyJ...anon-jwt...'
 SERVICE_ROLE_KEY='eyJ...service-role-jwt...'
 CLOUD_DB_PASSWORD='same-as-supabase-db-password'
 CLOUD_POOLER_HOST='aws-1-ap-southeast-1.pooler.supabase.com'
-VPS_HOST='root@YOUR_VPS_IP'""",
+VPS_HOST='root@187.127.145.253'""",
     )
+
+    add_heading(doc, "2.4 Developer access and credentials", 2)
+    add_para(
+        doc,
+        "Share this table with developers who need VPS or Studio access. "
+        "Fill in passphrase and passwords offline — do not commit real values to git. "
+        "Leave the passphrase row blank in the generated doc if you will type it in Word later.",
+    )
+    add_table(
+        doc,
+        ["Item", "Value / where to find it"],
+        [
+            ["VPS SSH", "root@187.127.145.253"],
+            ["VPS hostname", "srv1745879 (Hostinger)"],
+            ["Public API domain", "https://api.wrl-fsm.cloud"],
+            ["Supabase project ref (pooler user)", "ddmapuyghfeoyajxbcjh"],
+            ["SSH key (Windows)", r"%USERPROFILE%\.ssh\id_ed25519"],
+            ["SSH public key", r"%USERPROFILE%\.ssh\id_ed25519.pub"],
+            ["SSH key comment / label", "wrplcrm@gmail.com (or your team email)"],
+            ["SSH key passphrase", "(fill in Word — not stored in repo)"],
+            ["Supabase Studio username", "supabase"],
+            ["Supabase Studio password", "Same as POSTGRES_PASSWORD in .env.vps-setup / DATABASE_URL"],
+            ["Postgres pooler (app / Vercel)", "api.wrl-fsm.cloud:6543 — user postgres.ddmapuyghfeoyajxbcjh"],
+            ["Postgres direct (sync daemon)", "api.wrl-fsm.cloud:5432 — user postgres (internal)"],
+            ["Legacy JWT secret", "Supabase Cloud → Settings → JWT Keys → Legacy JWT Secret"],
+            ["anon / service_role keys", "Supabase Cloud → Settings → API (JWT format, not sb_publishable_*)"],
+        ],
+    )
+    add_para(doc, "Passphrase (for your copy in Word only — delete before sharing externally):", bold=True)
+    add_para(doc, " ")
+    add_para(doc, " ")
+    add_para(doc, " ")
+
+    add_heading(doc, "2.5 SSH key setup (Windows, one-time per developer)", 2)
+    add_para(doc, "Run in Command Prompt or PowerShell. Creates ~/.ssh/id_ed25519 unless you choose another path.")
+    add_code(
+        doc,
+        """ssh-keygen -t ed25519 -C "wrplcrm@gmail.com"
+type %USERPROFILE%\\.ssh\\id_ed25519.pub""",
+    )
+    add_para(doc, "Install the public key on the VPS (from Git Bash on your PC, not from inside the VPS):")
+    add_code(
+        doc,
+        """# Option A — ssh-copy-id (Git Bash)
+ssh-copy-id -i ~/.ssh/id_ed25519.pub root@187.127.145.253
+
+# Option B — manual (paste one line into /root/.ssh/authorized_keys on VPS)
+cat ~/.ssh/id_ed25519.pub | ssh root@187.127.145.253 "mkdir -p .ssh && cat >> .ssh/authorized_keys"
+""",
+    )
+    add_para(doc, "Optional — avoid typing passphrase every tunnel session (Git Bash, current session only):")
+    add_code(doc, "eval $(ssh-agent -s) && ssh-add ~/.ssh/id_ed25519")
+    add_para(doc, "Verify login:")
+    add_code(doc, "ssh root@187.127.145.253")
 
     doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
 
@@ -299,15 +353,133 @@ VPS_HOST='root@YOUR_VPS_IP'""",
 
     doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
 
-    add_heading(doc, "5. Supabase Studio (database UI)", 1)
-    add_para(doc, "Studio is behind Kong on port 8000, not 54323.")
-    add_para(doc, "Terminal 1 — SSH tunnel (keep open):")
-    add_code(doc, "ssh -N -L 8000:127.0.0.1:8000 root@187.127.145.253")
-    add_para(doc, "Browser: http://localhost:8000")
-    add_para(doc, "Login: username supabase, password = POSTGRES_PASSWORD")
+    add_heading(doc, "5. Developer SSH access and Supabase Studio", 1)
+
+    add_heading(doc, "5.1 How Studio is exposed", 2)
+    add_bullets(
+        doc,
+        [
+            "Self-hosted Studio is served through Kong on port 8000 inside the VPS.",
+            "Port 54323 is the default in upstream Supabase docs but is NOT what we use for browser access.",
+            "Public HTTPS: https://api.wrl-fsm.cloud (Kong — needs apikey header for API routes).",
+            "Local Studio UI: SSH tunnel from your PC → localhost:8000 (see below).",
+        ],
+    )
+
+    add_heading(doc, "5.2 Open Studio from Windows (correct way)", 2)
+    add_para(
+        doc,
+        "Run this on your Windows PC in Git Bash or PowerShell. Use -N so SSH only forwards the port "
+        "(no remote shell). Keep this terminal open while using Studio.",
+    )
+    add_code(
+        doc,
+        """# Terminal 1 — tunnel only (Git Bash or PowerShell)
+ssh -N -L 8000:127.0.0.1:8000 root@187.127.145.253
+
+# Browser (same PC)
+http://localhost:8000
+
+# Login
+#   Username: supabase
+#   Password: POSTGRES_PASSWORD (same as in .env.vps-setup / DATABASE_URL)""",
+    )
+    add_para(doc, "Terminal 2 — run deploy/migrate/sync while tunnel stays open in Terminal 1.")
+
+    add_heading(doc, "5.3 Common SSH tunnel mistakes", 2)
+    add_table(
+        doc,
+        ["Mistake", "Symptom", "Fix"],
+        [
+            [
+                "Tunnel from inside the VPS (nested ssh root@187.127.145.253 while already on VPS)",
+                "channel 3: open failed: connect failed: Connection refused",
+                "Exit to your PC prompt (C:\\... or PS C:\\...). Run ssh -N -L from there only.",
+            ],
+            [
+                "Wrong local port (54323 instead of 8000)",
+                "Connection refused on localhost:54323",
+                "Use 8000:127.0.0.1:8000 — Studio is behind Kong on 8000.",
+            ],
+            [
+                "Forgot -N; opened VPS shell and closed window",
+                "Tunnel dies when session ends",
+                "Use ssh -N -L ... in a dedicated terminal; leave it running.",
+            ],
+            [
+                "Kong / stack not running on VPS",
+                "Tunnel OK but browser cannot connect",
+                "On VPS: cd /opt/supabase/docker && docker compose ps && curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000",
+            ],
+            [
+                "PowerShell: first connect asks yes/no; typed nothing",
+                "Host key verification failed",
+                "Type yes once, or use Git Bash where you already accepted the host key.",
+            ],
+            [
+                "Running apt on Windows after disconnect",
+                "apt: command not found",
+                "apt runs on the VPS only. Reconnect: ssh root@187.127.145.253",
+            ],
+        ],
+    )
+
+    add_heading(doc, "5.4 Verify stack on VPS (SSH session)", 2)
+    add_code(
+        doc,
+        """ssh root@187.127.145.253
+cd /opt/supabase/docker
+docker compose ps
+curl -s -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:8000
+# Expect 401 or 404 from Kong — means port 8000 is listening (not connection refused)
+
+# If studio container stopped, restart full stack (not required for normal Studio via Kong):
+docker compose up -d""",
+    )
     add_para(doc, "Create profiles storage bucket in Studio if avatar uploads fail.")
 
-    add_heading(doc, "6. Sync worker (CRM → VPS Postgres)", 1)
+    add_heading(doc, "5.5 Optional — Postgres direct tunnel (psql / debugging)", 2)
+    add_para(doc, "For local psql against VPS Postgres (bypasses pooler). Terminal 1:")
+    add_code(
+        doc,
+        """ssh -N -L 5432:127.0.0.1:5432 root@187.127.145.253
+
+# Terminal 2 — example (password = POSTGRES_PASSWORD)
+psql "postgresql://postgres:PASSWORD@127.0.0.1:5432/postgres"
+""",
+    )
+
+    add_heading(doc, "6. Fresh VPS bootstrap (manual, before deploy script)", 1)
+    add_para(
+        doc,
+        "If the VPS is a new Hostinger/Ubuntu box, these steps were done once before "
+        "bash scripts/vps-hosting/deploy-to-vps.sh setup. The setup script also installs Docker and UFW rules.",
+    )
+    add_code(
+        doc,
+        """# On VPS as root (after ssh root@187.127.145.253)
+apt update && apt upgrade -y
+timedatectl set-timezone Asia/Kolkata
+timedatectl
+
+# Firewall — allow SSH first, then enable
+ufw allow OpenSSH
+ufw enable
+ufw status verbose
+
+# Swap (recommended for 8 GB RAM during pg_restore)
+fallocate -l 4G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+free -h
+df -h""",
+    )
+    add_para(doc, "Then from your PC repo root:")
+    add_code(doc, "bash scripts/vps-hosting/deploy-to-vps.sh setup")
+
+    add_heading(doc, "7. Sync worker (CRM → VPS Postgres)", 1)
     add_para(doc, "Run locally to keep hot tables updated while app is open or headless:")
     add_code(doc, "npm run sync-worker:daemon")
     add_para(doc, "Requires in .env.local:")
@@ -323,7 +495,7 @@ VPS_HOST='root@YOUR_VPS_IP'""",
     add_code(doc, "npm run sync-worker:incremental")
     add_para(doc, "Incremental fetch uses 7-day CRM chunks to avoid timeouts.")
 
-    add_heading(doc, "7. Troubleshooting", 1)
+    add_heading(doc, "8. Troubleshooting", 1)
 
     issues = [
         (
@@ -372,14 +544,24 @@ VPS_HOST='root@YOUR_VPS_IP'""",
             "Chunked fetch + manual incremental run once.",
         ),
         (
-            "exceed_egress_quota in Vercel logs",
-            "Still hitting Supabase cloud.",
-            "Update NEXT_PUBLIC_SUPABASE_URL to VPS; redeploy.",
+            "SSH tunnel: channel 3 connection refused",
+            "Ran ssh -L from inside VPS, or wrong port (54323).",
+            "On Windows PC: ssh -N -L 8000:127.0.0.1:8000 root@187.127.145.253; open localhost:8000.",
+        ),
+        (
+            "SSH: client_loop send disconnect / Connection reset",
+            "Idle tunnel, network drop, or nested SSH session.",
+            "Close all VPS sessions; one clean tunnel from PC with -N; re-run ssh-add if passphrase key.",
+        ),
+        (
+            "SSH: Host key verification failed (PowerShell)",
+            "First connect prompt skipped.",
+            "ssh root@187.127.145.253, type yes; or use Git Bash.",
         ),
     ]
     add_table(doc, ["Symptom", "Cause", "Fix"], list(issues))
 
-    add_heading(doc, "8. Post-migration checklist", 1)
+    add_heading(doc, "9. Post-migration checklist", 1)
     add_numbered(
         doc,
         [
@@ -394,10 +576,19 @@ VPS_HOST='root@YOUR_VPS_IP'""",
         ],
     )
 
-    add_heading(doc, "9. Quick reference — commands", 1)
+    add_heading(doc, "10. Quick reference — commands", 1)
     add_code(
         doc,
-        """# Full first-time setup + migrate
+        """# --- Windows: one-time SSH key ---
+ssh-keygen -t ed25519 -C "wrplcrm@gmail.com"
+type %USERPROFILE%\\.ssh\\id_ed25519.pub
+ssh-copy-id -i %USERPROFILE%\\.ssh\\id_ed25519.pub root@187.127.145.253
+
+# --- Studio (Terminal 1 on PC — keep open) ---
+ssh -N -L 8000:127.0.0.1:8000 root@187.127.145.253
+# Browser: http://localhost:8000  user: supabase  pass: POSTGRES_PASSWORD
+
+# --- Full first-time setup + migrate (Terminal 2, repo root, Git Bash) ---
 bash scripts/vps-hosting/deploy-to-vps.sh all
 
 # Fix Kong / .env only
@@ -406,20 +597,20 @@ bash scripts/vps-hosting/deploy-to-vps.sh repair
 # Re-restore from existing dump
 bash scripts/vps-hosting/deploy-to-vps.sh restore
 
-# Health check
+# Health check (PowerShell)
 curl.exe -s "https://api.wrl-fsm.cloud/auth/v1/health" -H "apikey: YOUR_ANON_KEY"
+
+# VPS: check Docker stack
+ssh root@187.127.145.253 "cd /opt/supabase/docker && docker compose ps"
 
 # Local dev
 npm run dev
 
 # Sync daemon
-npm run sync-worker:daemon
-
-# Studio tunnel
-ssh -N -L 8000:127.0.0.1:8000 root@187.127.145.253""",
+npm run sync-worker:daemon""",
     )
 
-    add_heading(doc, "10. File locations", 1)
+    add_heading(doc, "11. File locations", 1)
     add_table(
         doc,
         ["Path", "Purpose"],

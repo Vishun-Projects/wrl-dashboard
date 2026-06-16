@@ -1,4 +1,4 @@
-import pincodeMapData from '@/app/report/distribution/pincode_map.json';
+import { getPincodeMapData } from '@/lib/geo/pincode-map';
 import { enrichTrhcallBranchFranchisee } from '@/lib/trhcalls/query';
 
 export const UNASSIGNED_FRANCHISEE_CODE = 'UNASSIGNED';
@@ -8,7 +8,7 @@ type PincodeMapEntry = { city?: string; state?: string; d?: string; s?: string; 
 
 export function applyPincodeGeo(row: Record<string, unknown>): Record<string, unknown> {
   const pin = String(row.pincode ?? row.Pincode ?? '').trim();
-  const mapped = (pincodeMapData as unknown as Record<string, PincodeMapEntry>)[pin];
+  const mapped = getPincodeMapData()[pin] as PincodeMapEntry | undefined;
   const state = String(mapped?.state ?? mapped?.s ?? row.state ?? '').toUpperCase();
   const city = String(mapped?.city ?? mapped?.d ?? row.city ?? '').toUpperCase();
   const latRaw = mapped?.lat ?? row.lat;

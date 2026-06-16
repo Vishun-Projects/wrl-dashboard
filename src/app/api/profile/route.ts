@@ -1,18 +1,29 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
+import { requireRequestUser } from '@/lib/auth/server-user';
+import { isAllowedAvatarUrl, profilePatchSchema } from '@/lib/api/schemas/mutations';
 
 export async function PATCH(request: Request) {
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const user = await requireRequestUser(request, supabase);
 
-  if (authError || !user) {
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
     const body = await request.json();
-    const { name, avatar_url } = body;
+    const parsed = profilePatchSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Invalid payload' }, { status: 400 });
+    }
+
+    const { name, avatar_url } = parsed.data;
+
+    if (avatar_url && !isAllowedAvatarUrl(avatar_url)) {
+      return NextResponse.json({ error: 'avatar_url host is not allowed' }, { status: 400 });
+    }
 
     const updates: string[] = [];
     const values: any[] = [];

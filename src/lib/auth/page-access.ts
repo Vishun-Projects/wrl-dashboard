@@ -110,8 +110,24 @@ function pathMatchesPage(path: string, page: PageAccessDefinition): boolean {
 }
 
 /** Whether the user may open this app route. Profile/login always allowed. */
-export function canAccessPath(permissions: string[], path: string): boolean {
+export function canAccessPath(
+  permissions: string[],
+  path: string,
+  options?: { email?: string | null }
+): boolean {
   if (path === '/login' || path.startsWith('/profile')) return true;
+
+  if (path === '/admin' || path === '/admin/') {
+    return permissions.includes('manage_users') || permissions.includes('manage_roles');
+  }
+
+  if (path === '/admin/performance-insights' || path.startsWith('/admin/performance-insights/')) {
+    return false;
+  }
+
+  if (path === '/admin/sync' || path.startsWith('/admin/sync/')) {
+    return permissions.includes('manage_users');
+  }
 
   for (const page of ALL_PAGE_ACCESS) {
     if (pathMatchesPage(path, page)) {
@@ -119,7 +135,7 @@ export function canAccessPath(permissions: string[], path: string): boolean {
     }
   }
 
-  return true;
+  return false;
 }
 
 /** First report page the user can access — for landing redirects. */

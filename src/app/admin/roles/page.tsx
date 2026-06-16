@@ -17,7 +17,8 @@ import {
 import axios from 'axios';
 import { feedback } from '@/lib/ui/feedback';
 import { useRouter } from 'next/navigation';
-import { PageShell, PageLoadingState } from '@/components/layout/PageShell';
+import { PageShell } from '@/components/layout/PageShell';
+import { TableSkeleton } from '@/components/ui/DataTableLoading';
 import {
   AdminToolbar,
   AdminStatPill,
@@ -207,8 +208,6 @@ export default function RolesPage() {
       r.description?.toLowerCase().includes(search.toLowerCase())
   );
 
-  if (loading) return <PageLoadingState label="Securing access..." />;
-
   return (
     <PageShell
       title="Roles & Access Control"
@@ -217,8 +216,8 @@ export default function RolesPage() {
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
       toolbar={
         <AdminToolbar search={search} onSearchChange={setSearch} searchPlaceholder="Search roles...">
-          <AdminStatPill label="Roles" value={roles.length} />
-          <AdminStatPill label="Pages" value={permissionGroups.pages.length} />
+          <AdminStatPill label="Roles" value={loading ? '…' : roles.length} />
+          <AdminStatPill label="Pages" value={loading ? '…' : permissionGroups.pages.length} />
         </AdminToolbar>
       }
       actions={
@@ -236,7 +235,10 @@ export default function RolesPage() {
       }
     >
       <div className="flex min-h-0 flex-1 flex-col p-4">
-        <AdminTableCard isEmpty={filteredRoles.length === 0}>
+        <AdminTableCard isEmpty={!loading && filteredRoles.length === 0}>
+          {loading ? (
+            <TableSkeleton columns={4} rows={6} />
+          ) : (
           <AdminTable>
             <AdminThead>
               <tr>
@@ -292,6 +294,7 @@ export default function RolesPage() {
               })}
             </tbody>
           </AdminTable>
+          )}
         </AdminTableCard>
       </div>
 

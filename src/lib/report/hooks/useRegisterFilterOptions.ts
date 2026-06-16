@@ -1,0 +1,71 @@
+'use client';
+
+import { useCallback, useRef } from 'react';
+import axios from 'axios';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { getBearerAuthHeaders } from '@/lib/supabase/session';
+import { readRegisterFromPostgresClient } from '@/lib/read-model/client-flags';
+import {
+  joinFilterParam,
+  resolveViewCallTypesParam,
+  toDateString,
+  type ReportFilterSnapshot,
+} from '@/lib/report/filters';
+
+export function useRegisterFilterOptions(
+  supabase: SupabaseClient,
+  appliedFilters: ReportFilterSnapshot | null,
+  setters: {
+    setStatesList: (v: any[]) => void;
+    setCitiesList: (v: any[]) => void;
+    setBranchesList: (v: any[]) => void;
+    setFranchiseesList: (v: any[]) => void;
+    setTechniciansList: (v: any[]) => void;
+  }
+) {
+  const loadedRef = useRef(false);
+
+  const loadFilterOptions = useCallback(async () => {
+    if (!readRegisterFromPostgresClient() || !appliedFilters || loadedRef.current) return;
+    loadedRef.current = true;
+
+    try {
+      const headers = await getBearerAuthHeaders(supabase);
+      const res = await axios.get('/api/report/filter-options', {
+        headers,
+        params: {
+          startDate: toDateString(appliedFilters.dateRange.start),
+          endDate: toDateString(appliedFilters.dateRange.end),
+          officeId:
+            appliedFilters.selectedOfficeIds.length > 0
+              ? appliedFilters.selectedOfficeIds.join(',')
+              : 'All',
+          callType: resolveViewCallTypesParam(appliedFilters.selectedCallTypes),
+          status: joinFilterParam(appliedFilters.selectedStatus),
+          pincode: appliedFilters.pincodeSearch || '',
+          priority: joinFilterParam(appliedFilters.priorityFilter) || 'all',
+          portalFilter: joinFilterParam(appliedFilters.portalFilter) || 'All',
+          state: joinFilterParam(appliedFilters.selectedState),
+          city: joinFilterParam(appliedFilters.selectedCity),
+          branch: joinFilterParam(appliedFilters.selectedBranch),
+          franchisee: joinFilterParam(appliedFilters.selectedFranchisee),
+          technician: joinFilterParam(appliedFilters.selectedTechnician),
+        },
+      });
+
+      if (res.data.statesList) setters.setStatesList(res.data.statesList);
+      if (res.data.citiesList) setters.setCitiesList(res.data.citiesList);
+      if (res.data.branchesList) setters.setBranchesList(res.data.branchesList);
+      if (res.data.franchiseesList) setters.setFranchiseesList(res.data.franchiseesList);
+      if (res.data.techniciansList) setters.setTechniciansList(res.data.techniciansList);
+    } catch {
+      loadedRef.current = false;
+    }
+  }, [appliedFilters, setters, supabase]);
+
+  const resetFilterOptionsCache = useCallback(() => {
+    loadedRef.current = false;
+  }, []);
+
+  return { loadFilterOptions, resetFilterOptionsCache };
+}

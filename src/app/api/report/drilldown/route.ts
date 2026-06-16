@@ -1,41 +1,67 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { postQuery } from '@/lib/db/proxy';
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { resolveReportSecurity } from '@/lib/auth/report-security';
+import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
 import { appendCallTypeFilter } from '@/lib/trhcalls/query';
+import { appendOfficeSecurityFilter } from '@/lib/trhcalls/office-security';
+import {
+  assertIsoDate,
+  assertNumericId,
+  escapeSqlLiteral,
+  sqlDateLiteral,
+  sqlDateTimeEndLiteral,
+} from '@/lib/crm/sql-builder';
+import { drilldownBodySchema } from '@/lib/api/schemas/report-query';
 
 export async function POST(req: NextRequest) {
   try {
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) return NextResponse.json({ error: 'No authorization header' }, { status: 401 });
+    if (!authHeader?.startsWith('Bearer ')) {
+      return NextResponse.json({ error: 'Bearer token required' }, { status: 401 });
+    }
 
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
-    if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const token = authHeader.slice(7).trim();
+    const userId = await resolveUserIdFromAccessToken(token);
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const security = await resolveReportSecurity(userId, { pagePermission: 'page_mis_reports' });
+    if (security.forbidden) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    if (!security.isHod && security.assignedOffices.length === 0) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     const body = await req.json();
-    const { type, officeId, account, region, startDate, endDate, customQuery, callType } = body;
+    const parsed = drilldownBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Invalid payload' }, { status: 400 });
+    }
 
-    const agingDate = endDate ? `'${endDate} 23:59:59'` : 'GETDATE()';
+    const { type, officeId, account, region, startDate, endDate, callType, agingAsOf } = parsed.data;
+
+    const safeStart = startDate ? assertIsoDate(startDate, 'startDate') : null;
+    const safeEnd = endDate ? assertIsoDate(endDate, 'endDate') : null;
+    const agingAnchor = agingAsOf || safeEnd;
+    const safeAging = agingAnchor ? assertIsoDate(agingAnchor, 'agingAsOf') : null;
+    const agingDate = safeAging ? sqlDateTimeEndLiteral(safeAging) : 'GETDATE()';
 
     let sql = "";
-
-    if (customQuery) {
-      sql = customQuery;
-    } else {
-      let condition = "(view_c.vtrnno IS NOT NULL AND view_c.vtrnno <> '' OR (view_c.vtransfercallno IS NOT NULL AND view_c.vtransfercallno <> ''))";
+    let condition = "(view_c.vtrnno IS NOT NULL AND view_c.vtrnno <> '' OR (view_c.vtransfercallno IS NOT NULL AND view_c.vtransfercallno <> ''))";
       if (type !== 'transferred_calls') {
         condition += " AND ISNULL(view_c.ncancelreason, 0) <> 2";
       }
-      if (startDate) condition += ` AND view_c.callsdtrndate >= '${startDate}'`;
-      if (endDate) condition += ` AND view_c.callsdtrndate <= '${endDate} 23:59:59'`;
+      if (safeStart) condition += ` AND view_c.callsdtrndate >= ${sqlDateLiteral(safeStart)}`;
+      if (safeEnd) condition += ` AND view_c.callsdtrndate <= ${sqlDateTimeEndLiteral(safeEnd)}`;
 
       let innerCondition = "1=1";
-      if (startDate) innerCondition += ` AND dtrndate >= '${startDate}'`;
-      if (endDate) innerCondition += ` AND dtrndate <= '${endDate} 23:59:59'`;
+      if (safeStart) innerCondition += ` AND dtrndate >= ${sqlDateLiteral(safeStart)}`;
+      if (safeEnd) innerCondition += ` AND dtrndate <= ${sqlDateTimeEndLiteral(safeEnd)}`;
 
       if (officeId && officeId !== 'All') {
-        condition += ` AND view_c.nofficeid IN (SELECT ncode FROM mstoffice WHERE ncode = ${officeId} OR nunder = ${officeId})`;
-        innerCondition += ` AND nofficeid IN (SELECT ncode FROM mstoffice WHERE ncode = ${officeId} OR nunder = ${officeId})`;
+        const officeNum = assertNumericId(officeId, 'officeId');
+        condition += ` AND view_c.nofficeid IN (SELECT ncode FROM mstoffice WHERE ncode = ${officeNum} OR nunder = ${officeNum})`;
+        innerCondition += ` AND nofficeid IN (SELECT ncode FROM mstoffice WHERE ncode = ${officeNum} OR nunder = ${officeNum})`;
       }
 
       if (region && region !== 'AI' && (!officeId || officeId === 'All')) {
@@ -230,7 +256,7 @@ export async function POST(req: NextRequest) {
                LEFT JOIN mstoffice trans_bo (NOLOCK) ON transferoffice.nunder = trans_bo.ncode
                LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode
                LEFT JOIN mstcity cty (NOLOCK) ON COALESCE(NULLIF(p.ncity, ''), o.ncity) = cty.ncode
-               WHERE ${condition}
+               WHERE ${appendOfficeSecurityFilter(condition, security.isHod, security.assignedOffices, { officeCol: 'tc.nofficeid', underCol: 'o.nunder' })}
                ORDER BY tc.dtrndate DESC`;
       } else {
         sql = `SELECT TOP 500 
@@ -267,10 +293,9 @@ export async function POST(req: NextRequest) {
                  LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode
                  LEFT JOIN mstitems (NOLOCK) ON tc.nitem = mstitems.ncode\r\n                  LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode
                ) view_c
-               WHERE ${condition}
+               WHERE ${appendOfficeSecurityFilter(condition, security.isHod, security.assignedOffices, { officeCol: 'view_c.nofficeid' })}
                ORDER BY view_c.callsdtrndate DESC`;
       }
-    }
 
     const res = await postQuery({
       rawSql: sql
@@ -278,7 +303,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       data: res.data || [],
-      sql: sql
     });
 
   } catch (err: any) {

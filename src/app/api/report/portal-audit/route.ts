@@ -1,22 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
 import {
   getPortalAuditPayload,
   portalAuditEtag,
 } from '@/lib/report/portal-audit-server';
+import { resolveRequestUserId } from '@/lib/auth/server-user';
 
 async function authorize(req: NextRequest): Promise<boolean> {
-  const authHeader = req.headers.get('Authorization');
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.slice(7);
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-    return !error && !!user;
-  }
-
   const supabase = await createClient();
-  const { data: { user }, error } = await supabase.auth.getUser();
-  return !error && !!user;
+  const userId = await resolveRequestUserId(req, supabase);
+  return Boolean(userId);
 }
 
 export async function GET(req: NextRequest) {

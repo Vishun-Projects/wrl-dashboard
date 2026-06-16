@@ -1,7 +1,14 @@
 'use client';
 
 import React from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { AlertCircle, AlertTriangle, Info, X } from 'lucide-react';
+import {
+  fadeSlideIn,
+  instantTransition,
+  motionTransition,
+  usePrefersReducedMotion,
+} from '@/lib/motion/presets';
 
 export type PageAlertVariant = 'error' | 'warning' | 'info';
 
@@ -35,24 +42,33 @@ const styles: Record<
 
 export function PageAlert({ variant, message, onDismiss, className = '' }: PageAlertProps) {
   const { box, text, icon: Icon } = styles[variant];
+  const reducedMotion = usePrefersReducedMotion();
 
   return (
-    <div
-      className={`mb-3 flex items-start gap-2 rounded-lg border px-3 py-2 text-[11px] ${box} ${className}`}
-      role="alert"
-    >
-      <Icon className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${text}`} aria-hidden />
-      <p className={`min-w-0 flex-1 leading-snug ${text}`}>{message}</p>
-      {onDismiss ? (
-        <button
-          type="button"
-          onClick={onDismiss}
-          className={`shrink-0 rounded p-0.5 hover:bg-black/5 ${text}`}
-          aria-label="Dismiss"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-      ) : null}
-    </div>
+    <AnimatePresence initial={false}>
+      <motion.div
+        key={message}
+        role="alert"
+        variants={fadeSlideIn}
+        initial="initial"
+        animate="animate"
+        exit="exit"
+        transition={reducedMotion ? instantTransition() : motionTransition()}
+        className={`mb-3 flex items-start gap-2 rounded-lg border px-3 py-2 text-[11px] ${box} ${className}`}
+      >
+        <Icon className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${text}`} aria-hidden />
+        <p className={`min-w-0 flex-1 leading-snug ${text}`}>{message}</p>
+        {onDismiss ? (
+          <button
+            type="button"
+            onClick={onDismiss}
+            className={`shrink-0 rounded p-0.5 hover:bg-black/5 ${text}`}
+            aria-label="Dismiss"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </motion.div>
+    </AnimatePresence>
   );
 }

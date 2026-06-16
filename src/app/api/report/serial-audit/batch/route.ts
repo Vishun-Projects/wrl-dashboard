@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { requireSupabaseUser } from '@/lib/auth/server-user';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
 import { fetchSerialAuditCallsForSerials } from '@/lib/serial-audit/server/batch-fetch';
 import { resolveSerialAuditSqlOpts } from '@/lib/serial-audit/server/sql-scope';
@@ -56,11 +57,8 @@ async function fetchPageBatchCalls(
 
 async function handleBatchRequest(query: BatchQuery) {
   const supabase = await createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-  if (authError || !user) {
+  const user = await requireSupabaseUser(supabase);
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

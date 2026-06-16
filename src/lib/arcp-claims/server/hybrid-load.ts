@@ -46,9 +46,31 @@ const CRM_QUERY_TIMEOUT_MS = Number(process.env.ARCP_CRM_LOAD_TIMEOUT_MS ?? 300_
 
 export type ArcpDataSource = 'postgres' | 'crm' | 'crm_fallback';
 
-/** When true (default), gaps outside Postgres coverage load live from CRM. */
+/** When true, gaps outside Postgres coverage load live from CRM. Off by default in postgres mode. */
 export function arcpCrmFallbackOnEmptyEnabled(): boolean {
+  if (readArcpFromPostgres()) {
+    return process.env.ARCP_CRM_FALLBACK_ON_EMPTY === 'true';
+  }
   return process.env.ARCP_CRM_FALLBACK_ON_EMPTY !== 'false';
+}
+
+async function loadArcpAggregatesPostgresOnly(opts: ArcpFetchOpts): Promise<{
+  aggregates: ArcpClaimsAggregateRow[];
+  source: ArcpDataSource;
+  grandTotals: ArcpGrandTotals;
+  chunkMeta: ArcpChunkLoadMeta;
+}> {
+  const aggregates = await enrichAggregatesForResponse(await queryArcpClaimsAggregates(opts), {
+    fromPostgres: true,
+  });
+  await recordAggChunkForJob(opts, aggregates);
+  const grandTotals = deriveArcpGrandTotalsFromAggregates(aggregates);
+  return {
+    aggregates,
+    source: 'postgres',
+    grandTotals,
+    chunkMeta: { cachedChunks: 0, fetchedChunks: 1, totalChunks: 1 },
+  };
 }
 
 function toCoverageDateColumn(
@@ -118,6 +140,10 @@ async function loadArcpGrandTotalsCoverageAware(
     return queryArcpClaimsGrandTotals(opts);
   }
 
+  if (readArcpFromPostgres()) {
+    return queryArcpClaimsGrandTotals(opts);
+  }
+
   const coverage = await getArcpPostgresCoverage();
   const dateColumn = toCoverageDateColumn(resolveArcpDateFilterColumn(opts.dateFilterColumn));
 
@@ -167,6 +193,10 @@ async function loadArcpAggregatesCoverageAware(
       grandTotals,
       chunkMeta: emptyArcpChunkMeta(0),
     };
+  }
+
+  if (readArcpFromPostgres()) {
+    return loadArcpAggregatesPostgresOnly(opts);
   }
 
   const coverage = await getArcpPostgresCoverage();
@@ -257,6 +287,11 @@ async function loadArcpDetailCoverageAware(
   if (!startDate || !endDate) {
     const rows = await queryArcpClaimsDetailRows(opts);
     return { rows, source: 'postgres', chunkMeta: emptyArcpChunkMeta(0) };
+  }
+
+  if (readArcpFromPostgres()) {
+    const rows = await queryArcpClaimsDetailRows(opts);
+    return { rows, source: 'postgres', chunkMeta: { cachedChunks: 0, fetchedChunks: 1, totalChunks: 1 } };
   }
 
   const coverage = await getArcpPostgresCoverage();

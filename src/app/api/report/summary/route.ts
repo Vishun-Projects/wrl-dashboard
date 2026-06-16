@@ -21,7 +21,9 @@ import { deriveSummaryDashboard } from '@/lib/report/summary-derive';
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await resolveBearerReportSecurity(req.headers.get('Authorization'));
+    const auth = await resolveBearerReportSecurity(req.headers.get('Authorization'), {
+      pagePermission: 'page_mis_reports',
+    });
     if (!auth.ok) return auth.response;
     const { security } = auth;
 

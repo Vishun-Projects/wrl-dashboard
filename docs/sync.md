@@ -20,8 +20,8 @@ DATABASE_URL=postgresql://...@api.wrl-fsm.cloud:5432/postgres   # direct :5432 (
 
 - **`westerncrm.com`** must resolve — sync reads CRM via the Western CRM DBQUERY proxy.
 - **`DATABASE_URL` host** must resolve — use direct Postgres `:5432` (bootstrap sets `USE_DIRECT_DATABASE=true`).
-- After downtime, incremental runs in **catch-up mode** (2–3 day CRM windows from watermark → today, auto-splits on timeout). Logs show `CRM catch-up mode: N day(s), M chunk(s)`. Watermark advances only after a successful write.
-- If catch-up keeps failing (CRM timeout / `ENOTFOUND`), fix network first, then run once: `npm run sync-worker:incremental` before restarting the daemon. Tune `SYNC_CRM_CATCHUP_CHUNK_DAYS=1` if timeouts persist.
+- After downtime, incremental runs in **catch-up mode** (1-day windows, 8 ncode shards/day by default, 1.5s gap between CRM posts). Uses a **lightweight sync query** (no ARCP/visit/repair subqueries per row — report corpus API is unchanged).
+- If catch-up keeps failing (CRM timeout / `ENOTFOUND`), fix network/VPN to `westerncrm.com` first. Tune `SYNC_CRM_CATCHUP_CHUNK_DAYS=1`, `SYNC_CRM_NCODE_SHARD_INITIAL=16` if needed.
 
 The browser **does not** auto-sync anymore (`PostgresAutoSync` was removed). Use the daemon, nightly jobs, or manual sync below.
 
@@ -53,9 +53,14 @@ See `package.json` for all `sync-worker:*` commands.
 | `SYNC_WORKER_ENABLED` | Must be `true` for worker commands |
 | `SYNC_ARCP_ENABLED` | ARCP in daemon / nightly / API sync |
 | `SYNC_INTERVAL_MS` | Daemon interval (default 180000) |
-| `SYNC_CRM_INCREMENTAL_CHUNK_DAYS` | CRM window for short catch-up (default 3) |
-| `SYNC_CRM_CATCHUP_CHUNK_DAYS` | CRM window when catch-up > 7 days (default 2) |
-| `SYNC_CRM_INCREMENTAL_TIMEOUT_MS` | HTTP timeout per CRM chunk (default 180000) |
+| `SYNC_CRM_INCREMENTAL_CHUNK_DAYS` | CRM window for short catch-up (default 1) |
+| `SYNC_CRM_CATCHUP_CHUNK_DAYS` | CRM window when catch-up > 3 days (default 1) |
+| `SYNC_CRM_INCREMENTAL_TIMEOUT_MS` | HTTP timeout per CRM chunk (default 300000) |
+| `SYNC_CRM_HOUR_CHUNK_SIZE` | Hours per sub-window when a day times out (default 6) |
+| `SYNC_CRM_FETCH_GAP_MS` | Pause between CRM POSTs (default 1500) |
+| `SYNC_CRM_NCODE_SHARD_INITIAL` | ncode shards per day (default 8; ARCP uses 16 on a simpler table) |
+| `SYNC_CRM_NCODE_SHARD_MAX` | Max ncode shard splits (default 32) |
+| `SYNC_CRM_SHARD_FIRST` | Shard single-day windows immediately (default true) |
 | `SYNC_STALE_LOCK_MS` | Clear stuck `sync_state.is_running` (default 5 min) |
 | `DATABASE_URL` | Postgres; worker prefers direct `:5432` |
 

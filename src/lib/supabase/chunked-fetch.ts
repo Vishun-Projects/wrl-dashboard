@@ -54,3 +54,20 @@ export { ensureFreshAccessToken };
 export function isChunkedFetchAuthError(err: unknown): boolean {
   return err instanceof Error && err.message.includes('Session expired');
 }
+
+export function isChunkedFetchNetworkError(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) {
+    return err instanceof TypeError && /failed to fetch|network error/i.test(String(err));
+  }
+  return !err.response && Boolean(err.code === 'ERR_NETWORK' || err.message.includes('Network Error'));
+}
+
+/** Aborted chunk/job polls — not user-facing failures. */
+export function isChunkedFetchAbortError(err: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  if (axios.isCancel(err)) return true;
+  if (err instanceof DOMException && err.name === 'AbortError') return true;
+  if (axios.isAxiosError(err) && err.code === 'ERR_CANCELED') return true;
+  if (err instanceof Error && err.name === 'CanceledError') return true;
+  return false;
+}

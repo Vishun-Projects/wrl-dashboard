@@ -1,12 +1,24 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { requireRequestUser } from '@/lib/auth/server-user';
+import { isDevAuthBypass } from '@/lib/auth/verify-jwt';
 
 export async function POST(request: Request) {
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const user = await requireRequestUser(request, supabase);
 
-  if (authError || !user) {
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  if (isDevAuthBypass()) {
+    return NextResponse.json(
+      {
+        error:
+          'Password change requires Supabase Auth over HTTPS. Use Vercel preview, VPN, or change password on production.',
+      },
+      { status: 503 }
+    );
   }
 
   try {

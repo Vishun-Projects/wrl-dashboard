@@ -8,6 +8,8 @@ import {
   RefreshCw,
   Download,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
@@ -26,7 +28,7 @@ import { useReportFilters } from '@/contexts/ReportFiltersContext';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import {
   SUMMARY_DEFAULT_CALL_TYPE,
-  findBreakdownCallType,
+  formatReportScopeSubtitle,
   toDateString,
 } from '@/lib/report/filters';
 import {
@@ -37,6 +39,9 @@ import {
 import { PageAlert } from '@/components/ui/PageAlert';
 import { feedback } from '@/lib/ui/feedback';
 import { usePageAlert } from '@/hooks/usePageAlert';
+import { ReportLoadingPanel } from '@/components/report/ReportLoadingFeedback';
+import { DataTableLoading } from '@/components/ui/DataTableLoading';
+import { Loader2 } from 'lucide-react';
 
 type LocationAuditStatus = 'mismatch' | 'ok' | 'no_gps' | 'no_address';
 
@@ -74,6 +79,8 @@ type AuditSummary = {
 
 type ByBranch = { branch: string; pincodeMismatch: number; total: number };
 
+const LIST_PAGE_SIZE = 15;
+
 function rowKey(row: { vtrnno: string; ncode: string }) {
   return `${row.vtrnno}-${row.ncode}`;
 }
@@ -83,11 +90,8 @@ export default function LocationAuditPage() {
     appliedFilters,
     applyFilters,
     getAppliedFiltersSnapshot,
-    selectedCallTypes,
-    setSelectedCallTypes,
-    priorityFilter,
-    setPriorityFilter,
     resourcesLoaded,
+    prefsReady,
   } = useReportFilters();
 
   const supabase = createClient();
@@ -104,12 +108,16 @@ export default function LocationAuditPage() {
   const [selectedListRow, setSelectedListRow] = useState<AuditListRow | null>(null);
   const [detailRow, setDetailRow] = useState<LocationAuditDetailRow | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [loadStage, setLoadStage] = useState<'idle' | 'summary' | 'list'>('idle');
+  const [listPage, setListPage] = useState(1);
 
   const summaryAbortRef = useRef<AbortController | null>(null);
   const listAbortRef = useRef<AbortController | null>(null);
   const detailAbortRef = useRef<AbortController | null>(null);
+  const auditGenerationRef = useRef(0);
   const detailCacheRef = useRef<Map<string, LocationAuditDetailRow>>(new Map());
-  const auditDefaultsAppliedRef = useRef(false);
+  const auditBootstrapRef = useRef(false);
 
   const applied = appliedFilters;
   const startDateStr = useMemo(
@@ -127,16 +135,27 @@ export default function LocationAuditPage() {
     return SUMMARY_DEFAULT_CALL_TYPE;
   }, [applied]);
 
+  const scopeSubtitle = useMemo(() => {
+    if (!applied) return 'Tech. solved · major · install pincode vs GPS pincode';
+    const rangeLine = formatReportScopeSubtitle(
+      applied.dateRange,
+      applied.selectedBranch.length,
+      applied.selectedFranchisee.length
+    );
+    return `${rangeLine} · major · pincode vs GPS`;
+  }, [applied]);
+
+  const wideScopeLoad = useMemo(
+    () =>
+      applied
+        ? applied.selectedBranch.length === 0 && applied.selectedFranchisee.length === 0
+        : false,
+    [applied]
+  );
+
   useEffect(() => {
     setMounted(true);
   }, []);
-
-  useEffect(() => {
-    if (!resourcesLoaded || auditDefaultsAppliedRef.current) return;
-    auditDefaultsAppliedRef.current = true;
-    setPriorityFilter(['major']);
-    setSelectedCallTypes([SUMMARY_DEFAULT_CALL_TYPE]);
-  }, [resourcesLoaded, setPriorityFilter, setSelectedCallTypes]);
 
   const resetAuditResults = useCallback(() => {
     summaryAbortRef.current?.abort();
@@ -153,6 +172,8 @@ export default function LocationAuditPage() {
     setSummaryLoading(false);
     setListLoading(false);
     setDetailLoading(false);
+    setLoadStage('idle');
+    setListPage(1);
   }, []);
 
   const handleClearFilters = useCallback(() => {
@@ -206,25 +227,6 @@ export default function LocationAuditPage() {
     return { Authorization: `Bearer ${session.access_token}` };
   }, [supabase]);
 
-  const fetchList = useCallback(
-    async (signal?: AbortSignal) => {
-      const headers = await getAuthHeaders();
-      const qs = new URLSearchParams({
-        ...buildParams(),
-        mode: 'list',
-      });
-      const res = await fetch(`/api/report/location-audit?${qs.toString()}`, {
-        headers,
-        signal,
-      });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(String((errJson as { error?: string }).error ?? res.statusText));
-      }
-      return res.json() as Promise<{ rows: AuditListRow[]; total: number }>;
-    },
-    [buildParams, getAuthHeaders]
-  );
 
   const runAudit = useCallback(async () => {
     const snap = getAppliedFiltersSnapshot();
@@ -236,56 +238,74 @@ export default function LocationAuditPage() {
     setDetailRow(null);
     setSelectedListRow(null);
 
-    const summaryAbort = new AbortController();
-    const listAbort = new AbortController();
-    summaryAbortRef.current = summaryAbort;
-    listAbortRef.current = listAbort;
+    const generation = auditGenerationRef.current + 1;
+    auditGenerationRef.current = generation;
+    const isStale = () => generation !== auditGenerationRef.current;
+
+    const abort = new AbortController();
+    summaryAbortRef.current = abort;
+    listAbortRef.current = abort;
 
     setSummaryLoading(true);
     setListLoading(true);
+    setLoadStage('summary');
     clearPageAlert();
 
     try {
       const headers = await getAuthHeaders();
-      const summaryQs = new URLSearchParams({
+      const qs = new URLSearchParams({
         ...buildParams(),
-        mode: 'summary',
+        mode: 'full',
       });
-      const summaryRes = await fetch(`/api/report/location-audit?${summaryQs.toString()}`, {
+      const res = await fetch(`/api/report/location-audit?${qs.toString()}`, {
         headers,
-        signal: summaryAbort.signal,
+        signal: abort.signal,
       });
-      if (!summaryRes.ok) {
-        const errJson = await summaryRes.json().catch(() => ({}));
-        throw new Error(String((errJson as { error?: string }).error ?? summaryRes.statusText));
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(String((errJson as { error?: string }).error ?? res.statusText));
       }
-      const summaryJson = (await summaryRes.json()) as {
+      const data = (await res.json()) as {
         summary: AuditSummary;
         byBranch: ByBranch[];
         analyzedCount?: number;
+        rows: AuditListRow[];
+        total: number;
       };
-      if (summaryAbort.signal.aborted) return;
-      setSummary(summaryJson.summary);
-      setByBranch(summaryJson.byBranch ?? []);
-      setAnalyzedInWindow(summaryJson.analyzedCount ?? null);
+      if (isStale() || abort.signal.aborted) return;
+      setSummary(data.summary);
+      setByBranch(data.byBranch ?? []);
+      setAnalyzedInWindow(data.analyzedCount ?? null);
       setSummaryLoading(false);
       setHasLoadedOnce(true);
-
-      const listData = await fetchList(listAbort.signal);
-      if (listAbort.signal.aborted) return;
-      setRows(listData.rows);
-      setSelectedListRow(listData.rows[0] ?? null);
+      setLoadStage('list');
+      setRows(data.rows ?? []);
+      setListPage(1);
+      setSelectedListRow(data.rows?.[0] ?? null);
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') return;
+      if (isStale()) return;
       const message = sanitizeUserFacingMessage(
         err instanceof Error ? err.message : 'Failed to load location audit'
       );
       setPageError(message);
     } finally {
-      setSummaryLoading(false);
-      setListLoading(false);
+      if (!isStale()) {
+        setSummaryLoading(false);
+        setListLoading(false);
+        setLoadStage('idle');
+      }
     }
-  }, [getAppliedFiltersSnapshot, buildParams, fetchList, getAuthHeaders]);
+  }, [getAppliedFiltersSnapshot, buildParams, getAuthHeaders, clearPageAlert, setPageError]);
+
+  useEffect(() => {
+    if (!resourcesLoaded || !prefsReady || auditBootstrapRef.current) return;
+    auditBootstrapRef.current = true;
+    applyFilters({
+      priorityFilter: ['major'],
+      selectedCallTypes: [SUMMARY_DEFAULT_CALL_TYPE],
+    });
+  }, [resourcesLoaded, prefsReady, applyFilters]);
 
   const loadRowDetail = useCallback(
     async (list: AuditListRow) => {
@@ -352,6 +372,7 @@ export default function LocationAuditPage() {
   }, []);
 
   const handleExportCsv = async () => {
+    setExporting(true);
     try {
       const headers = await getAuthHeaders();
       const res = await axios.get('/api/report/location-audit', {
@@ -370,38 +391,56 @@ export default function LocationAuditPage() {
       feedback.actionSuccess('CSV exported');
     } catch {
       feedback.actionFailed('CSV export failed');
+    } finally {
+      setExporting(false);
     }
   };
 
   const loading = summaryLoading || listLoading;
+  const auditUpdating = loading && hasLoadedOnce;
+  const fetchBarLabel =
+    loadStage === 'summary'
+      ? 'Loading audit summary…'
+      : loadStage === 'list'
+        ? 'Loading mismatch calls…'
+        : auditUpdating
+          ? 'Updating audit…'
+          : 'Loading audit…';
 
-  if (!mounted || !resourcesLoaded) {
+  const listTotalPages = Math.max(1, Math.ceil(rows.length / LIST_PAGE_SIZE));
+  const listPageSafe = Math.min(listPage, listTotalPages);
+  const pagedRows = useMemo(() => {
+    const start = (listPageSafe - 1) * LIST_PAGE_SIZE;
+    return rows.slice(start, start + LIST_PAGE_SIZE);
+  }, [rows, listPageSafe]);
+
+  useEffect(() => {
+    if (listPage > listTotalPages) setListPage(listTotalPages);
+  }, [listPage, listTotalPages]);
+
+  if (!mounted || !resourcesLoaded || !prefsReady) {
     return (
       <PageShell title="Location Audit" icon={<MapPin className="h-4 w-4" />}>
-        <div className="flex flex-1 items-center justify-center p-8">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-900" />
-        </div>
+        <ReportLoadingPanel label="Loading filters…" className="m-4 flex-1" />
       </PageShell>
     );
   }
-
-  const breakdownLabel =
-    findBreakdownCallType(applied?.selectedCallTypes ?? selectedCallTypes) ??
-    SUMMARY_DEFAULT_CALL_TYPE;
 
   const pincodeMismatchCount = summary?.pincodeMismatch ?? 0;
 
   return (
     <PageShell
       title="Location Audit"
-      subtitle={`Tech. solved · ${breakdownLabel} · major · install pincode vs GPS pincode`}
+      subtitle={scopeSubtitle}
       icon={<MapPin className="h-4 w-4" />}
       toolbar={
         <RegisterPageFilters
-          loading={loading}
           applyLabel="Run audit"
           onApply={() => void runAudit()}
+          onDrawerApply={() => resetAuditResults()}
+          onFilterRemoved={resetAuditResults}
           onClearAll={handleClearFilters}
+          reloadOnClearAll={false}
         />
       }
       actions={
@@ -409,11 +448,15 @@ export default function LocationAuditPage() {
           <button
             type="button"
             onClick={() => void handleExportCsv()}
-            disabled={loading || !hasLoadedOnce}
+            disabled={loading || exporting || !hasLoadedOnce}
             className="flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-[10px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
-            <Download className="h-3 w-3" />
-            CSV
+            {exporting ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Download className="h-3 w-3" />
+            )}
+            {exporting ? 'Exporting…' : 'CSV'}
           </button>
           {hasLoadedOnce && (
             <button
@@ -431,10 +474,20 @@ export default function LocationAuditPage() {
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
     >
       <PageScrollRegion className="gap-3 p-4">
+        {!hasLoadedOnce && loading ? (
+          <ReportLoadingPanel
+            label={
+              wideScopeLoad
+                ? 'Running location audit for all branches — this month may take a minute'
+                : 'Running location audit for your scope'
+            }
+          />
+        ) : null}
+
         {!hasLoadedOnce && !loading ? (
           <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-[11px] text-slate-600">
-            Set filters, then click <strong>Run audit</strong> to load summary and calls. Row
-            detail and maps load when you select a call.
+            Default filters are applied — click <strong>Run audit</strong> to load summary and
+            mismatch calls. Row detail and maps load when you select a call.
           </div>
         ) : null}
 
@@ -451,12 +504,12 @@ export default function LocationAuditPage() {
             {analyzedInWindow != null ? (
               <AdminStatPill
                 label="Calls in window"
-                value={summaryLoading ? '…' : String(analyzedInWindow)}
+                value={String(analyzedInWindow)}
               />
             ) : null}
             <AdminStatPill
               label="Pincode mismatches"
-              value={summaryLoading ? '…' : String(pincodeMismatchCount)}
+              value={String(pincodeMismatchCount)}
             />
           </div>
         )}
@@ -507,17 +560,22 @@ export default function LocationAuditPage() {
 
             <div className="flex min-h-0 flex-1 flex-col">
             <AdminTableCard isEmpty={hasLoadedOnce && !listLoading && rows.length === 0}>
+              <DataTableLoading
+                loading={listLoading && rows.length === 0 && hasLoadedOnce}
+                updating={listLoading && rows.length > 0}
+                hasContent={rows.length > 0}
+                loadingLabel={fetchBarLabel}
+                updatingLabel="Refreshing call list…"
+              >
               {!hasLoadedOnce ? (
                 <p className="py-8 text-center text-[11px] text-slate-500">
-                  Apply filters to load calls.
+                  Click <strong>Run audit</strong> to load calls.
                 </p>
-              ) : listLoading && rows.length === 0 ? (
-                <p className="py-8 text-center text-[11px] text-slate-500">Loading calls…</p>
-              ) : rows.length === 0 ? (
+              ) : rows.length === 0 && !listLoading ? (
                 <p className="py-8 text-center text-[11px] text-slate-500">
                   No calls match the current filters.
                 </p>
-              ) : (
+              ) : rows.length === 0 ? null : (
                 <AdminTable>
                     <AdminThead>
                       <tr>
@@ -528,7 +586,7 @@ export default function LocationAuditPage() {
                       </tr>
                     </AdminThead>
                     <tbody>
-                      {rows.map((row) => {
+                      {pagedRows.map((row) => {
                         const key = rowKey(row);
                         const isSelected =
                           selectedListRow != null && rowKey(selectedListRow) === key;
@@ -567,7 +625,40 @@ export default function LocationAuditPage() {
                     </tbody>
                   </AdminTable>
               )}
+              </DataTableLoading>
             </AdminTableCard>
+            {hasLoadedOnce && rows.length > 0 && !listLoading ? (
+              <div className="flex shrink-0 items-center justify-between rounded-b-xl border border-t-0 border-slate-200 bg-white px-3 py-2 shadow-sm">
+                <span className="text-[11px] text-slate-500">
+                  {(listPageSafe - 1) * LIST_PAGE_SIZE + 1}–
+                  {Math.min(listPageSafe * LIST_PAGE_SIZE, rows.length)} of{' '}
+                  {rows.length.toLocaleString('en-IN')} mismatches
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={listPageSafe <= 1}
+                    onClick={() => setListPage((p) => Math.max(1, p - 1))}
+                    className="rounded border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <span className="min-w-[4rem] text-center text-[11px] font-medium text-slate-700">
+                    {listPageSafe} / {listTotalPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={listPageSafe >= listTotalPages}
+                    onClick={() => setListPage((p) => Math.min(listTotalPages, p + 1))}
+                    className="rounded border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                    aria-label="Next page"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ) : null}
             </div>
           </div>
 

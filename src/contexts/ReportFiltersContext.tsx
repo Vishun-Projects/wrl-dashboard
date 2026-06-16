@@ -83,15 +83,10 @@ import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import { createChunkedFetchAuth } from '@/lib/supabase/chunked-fetch';
 import { persistSharedRegisterCache, readSharedRegisterCache, SHARED_REGISTER_CACHE_VERSION } from '@/lib/report/corpus-storage';
 import {
-  buildRestoredFilterSnapshot,
+  buildDefaultFilterSnapshot,
   buildRoleDefaultShared,
-  formatRestoredViewSummary,
-  mergeUserReportPreferences,
-  resolveLandingPath,
-  serializeSharedFilters,
   storedSharedToSnapshot,
   type RestoreFilterContext,
-  type UserReportPreferencesV1,
 } from '@/lib/report/preferences';
 
 let cachedReportResources: { offices: unknown[]; callTypes: string[] } | null = null;
@@ -201,16 +196,8 @@ type ReportFiltersContextValue = {
   hasPendingFilterChanges: boolean;
   getAppliedDateStrings: () => { startDateStr: string; endDateStr: string } | null;
   getAppliedDateFilterColumn: () => RegisterDateFilterColumn | null;
-  reportPreferences: UserReportPreferencesV1 | null;
+  /** True once role defaults (or cache/deep-link restore) are committed. */
   prefsReady: boolean;
-  restoredFromServer: boolean;
-  restoredViewSummary: string;
-  restoredBannerDismissed: boolean;
-  dismissRestoredBanner: () => void;
-  resetReportDefaults: () => Promise<void>;
-  patchReportPreferences: (patch: Partial<UserReportPreferencesV1>) => Promise<UserReportPreferencesV1>;
-  schedulePatchReportPreferences: (patch: Partial<UserReportPreferencesV1>) => void;
-  landingReportPath: string;
   /** Page-level banner for blocking load / partial-load issues on report shell. */
   reportBanner: PageAlertState;
   setReportError: (message: string) => void;
@@ -230,6 +217,7 @@ function routeNeedsCorpusPreload(pathname: string | null): boolean {
 }
 
 function routeNeedsDistributionPreload(pathname: string | null): boolean {
+  if (readRegisterFromPostgresClient()) return false;
   return routeNeedsCorpusPreload(pathname);
 }
 
@@ -400,22 +388,13 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   const [appliedRevision, setAppliedRevision] = useState(() =>
     bootstrapSnapshot || globalReportCache ? 1 : 0
   );
-  const [reportPreferences, setReportPreferences] = useState<UserReportPreferencesV1 | null>(null);
   const [prefsReady, setPrefsReady] = useState(
     () => registerBootstrap.fromDeepLink || !!globalReportCache?.data || !!bootstrapSnapshot
   );
-  const [restoredFromServer, setRestoredFromServer] = useState(false);
-  const [restoredViewSummary, setRestoredViewSummary] = useState('');
-  const [restoredBannerDismissed, setRestoredBannerDismissed] = useState(false);
-  const [landingReportPath, setLandingReportPath] = useState('/report');
   const appliedFiltersRef = useRef(appliedFilters);
   appliedFiltersRef.current = appliedFilters;
   const prefsRestoreAttemptedRef = useRef(false);
   const consumedRegisterDeepLinkKeyRef = useRef(registerBootstrap.deepLinkKey);
-  const skipSharedSaveRef = useRef(false);
-  const sharedSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prefsPatchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastReportPathTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const userRoleRef = useRef<{ role: string; officeIds: string[]; permissions: string[] }>({
     role: 'branch_manager',
     officeIds: [],
@@ -475,31 +454,6 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     appliedFiltersRef.current = snapshot;
     setAppliedFilters(snapshot);
     setAppliedRevision((r) => r + 1);
-
-    if (sharedSaveTimeoutRef.current) clearTimeout(sharedSaveTimeoutRef.current);
-    if (skipSharedSaveRef.current) {
-      skipSharedSaveRef.current = false;
-      return;
-    }
-    sharedSaveTimeoutRef.current = setTimeout(() => {
-      void axios
-        .patch(
-          '/api/profile/report-preferences',
-          { shared: serializeSharedFilters(snapshot) },
-          { withCredentials: true }
-        )
-        .then((res) => {
-          setReportPreferences((prev) =>
-            mergeUserReportPreferences(prev ?? { version: 1 }, {
-              shared: res.data.preferences?.shared,
-              updatedAt: res.data.preferences?.updatedAt,
-            })
-          );
-        })
-        .catch(() => {
-          /* silent — prefs are a convenience layer */
-        });
-    }, 1500);
   }, []);
 
   useLayoutEffect(() => {
@@ -529,10 +483,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       selectedCallTypes: deepLink.search ? [] : base.selectedCallTypes,
     });
 
-    skipSharedSaveRef.current = true;
     applyFilterSnapshot(snapshot);
     setPrefsReady(true);
-    setRestoredBannerDismissed(true);
   }, [pathname, searchParams, applyFilterSnapshot]);
 
   const applyFilters = useCallback((overrides?: DraftFilterOverrides): ReportFilterSnapshot => {
@@ -693,51 +645,6 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     };
   }, [offices, callTypes]);
 
-  const patchReportPreferences = useCallback(
-    async (patch: Partial<UserReportPreferencesV1>): Promise<UserReportPreferencesV1> => {
-      const res = await axios.patch('/api/profile/report-preferences', patch, {
-        withCredentials: true,
-      });
-      const prefs = res.data.preferences as UserReportPreferencesV1;
-      setReportPreferences(prefs);
-      setLandingReportPath(resolveLandingPath(prefs, userRoleRef.current.permissions));
-      return prefs;
-    },
-    []
-  );
-
-  const schedulePatchReportPreferences = useCallback(
-    (patch: Partial<UserReportPreferencesV1>) => {
-      if (prefsPatchTimeoutRef.current) clearTimeout(prefsPatchTimeoutRef.current);
-      prefsPatchTimeoutRef.current = setTimeout(() => {
-        void patchReportPreferences(patch).catch(() => {});
-      }, 1500);
-    },
-    [patchReportPreferences]
-  );
-
-  const dismissRestoredBanner = useCallback(() => {
-    setRestoredBannerDismissed(true);
-  }, []);
-
-  const resetReportDefaults = useCallback(async () => {
-    const res = await axios.patch(
-      '/api/profile/report-preferences',
-      { reset: true },
-      { withCredentials: true }
-    );
-    const prefs = res.data.preferences as UserReportPreferencesV1;
-    setReportPreferences(prefs);
-    setRestoredFromServer(false);
-    setRestoredBannerDismissed(true);
-    const ctx = buildRestoreContextFromLoaded();
-    skipSharedSaveRef.current = true;
-    const snapshot = storedSharedToSnapshot(prefs.shared ?? buildRoleDefaultShared(ctx));
-    applyFilterSnapshot(snapshot);
-    setRestoredViewSummary(formatRestoredViewSummary(snapshot));
-    setLandingReportPath(resolveLandingPath(prefs, userRoleRef.current.permissions));
-  }, [applyFilterSnapshot, buildRestoreContextFromLoaded]);
-
   useEffect(() => {
     if (!resourcesLoaded || prefsRestoreAttemptedRef.current) return;
 
@@ -746,18 +653,13 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       prefsRestoreAttemptedRef.current = true;
       setPrefsReady(true);
       void axios
-        .get('/api/profile/report-preferences', { withCredentials: true })
+        .get('/api/auth/me', { withCredentials: true })
         .then((res) => {
-          const prefs = res.data.preferences as UserReportPreferencesV1;
           userRoleRef.current = {
             role: res.data.role ?? 'branch_manager',
             officeIds: (res.data.office_ids ?? []).map(String),
             permissions: res.data.permissions ?? userRoleRef.current.permissions,
           };
-          setReportPreferences(prefs);
-          setLandingReportPath(
-            resolveLandingPath(prefs, userRoleRef.current.permissions)
-          );
         })
         .catch(() => {});
       return;
@@ -768,21 +670,14 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
 
     void (async () => {
       try {
-        const res = await axios.get('/api/profile/report-preferences', {
-          withCredentials: true,
-        });
+        const res = await axios.get('/api/auth/me', { withCredentials: true });
         if (cancelled) return;
 
-        const prefs = res.data.preferences as UserReportPreferencesV1;
         userRoleRef.current = {
           role: res.data.role ?? 'branch_manager',
           officeIds: (res.data.office_ids ?? []).map(String),
           permissions: res.data.permissions ?? userRoleRef.current.permissions,
         };
-        setReportPreferences(prefs);
-        setLandingReportPath(
-          resolveLandingPath(prefs, userRoleRef.current.permissions)
-        );
 
         const ctx: RestoreFilterContext = {
           role: userRoleRef.current.role,
@@ -796,19 +691,13 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
               : userRoleRef.current.officeIds,
         };
 
-        const { snapshot, fromSavedPrefs } = buildRestoredFilterSnapshot(prefs, ctx);
-        skipSharedSaveRef.current = true;
+        const snapshot = buildDefaultFilterSnapshot(ctx);
         applyFilterSnapshot(snapshot);
-        setRestoredFromServer(fromSavedPrefs);
-        setRestoredViewSummary(formatRestoredViewSummary(snapshot));
       } catch {
         if (cancelled) return;
         const ctx = buildRestoreContextFromLoaded();
         const snapshot = storedSharedToSnapshot(buildRoleDefaultShared(ctx));
-        skipSharedSaveRef.current = true;
         applyFilterSnapshot(snapshot);
-        setRestoredFromServer(false);
-        setRestoredViewSummary(formatRestoredViewSummary(snapshot));
       } finally {
         if (!cancelled) setPrefsReady(true);
       }
@@ -823,6 +712,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     offices,
     applyFilterSnapshot,
     buildRestoreContextFromLoaded,
+    searchParams,
   ]);
 
   useEffect(() => {
@@ -830,22 +720,6 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     if (!consumedRegisterDeepLinkKeyRef.current) return;
     router.replace(pathname, { scroll: false });
   }, [pathname, router, searchParams]);
-
-  useEffect(() => {
-    if (!prefsReady || !pathname?.startsWith('/report')) return;
-    if (lastReportPathTimeoutRef.current) clearTimeout(lastReportPathTimeoutRef.current);
-    lastReportPathTimeoutRef.current = setTimeout(() => {
-      void patchReportPreferences({ lastReportPath: pathname }).catch(() => {});
-    }, 2000);
-  }, [pathname, prefsReady, patchReportPreferences]);
-
-  useEffect(() => {
-    return () => {
-      if (sharedSaveTimeoutRef.current) clearTimeout(sharedSaveTimeoutRef.current);
-      if (prefsPatchTimeoutRef.current) clearTimeout(prefsPatchTimeoutRef.current);
-      if (lastReportPathTimeoutRef.current) clearTimeout(lastReportPathTimeoutRef.current);
-    };
-  }, []);
 
   const handleStatesChange = useCallback((values: string[]) => {
     setSelectedState(values);
@@ -1271,7 +1145,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
                   void persistCorpusDeltaToIndexedDB(rows, store);
                 }
               }
-              await new Promise((r) => setTimeout(r, 600));
+              await new Promise((r) => setTimeout(r, 200));
             } catch (monthErr: unknown) {
               if (axios.isCancel(monthErr)) return;
               const msg = sanitizeUserFacingMessage(
@@ -1615,12 +1489,11 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   const ensureSharedCallsLoaded = useCallback(
     async (force = false) => {
       if (readRegisterFromPostgresClient()) {
-        await fetchDistributionFromRegister(force, !needsDistributionPreload);
         return;
       }
       await ensureCorpusLoaded({ force, silent: !needsDistributionPreload });
     },
-    [ensureCorpusLoaded, fetchDistributionFromRegister, needsDistributionPreload]
+    [ensureCorpusLoaded, needsDistributionPreload]
   );
 
   const fetchDistributionData = ensureSharedCallsLoaded;
@@ -1642,41 +1515,15 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
 
       syncInFlightRef.current = true;
       setSyncInProgress(true);
-      let toastId: string | number | undefined;
-      if (opts?.showToast) {
-        toastId = feedback.loading('Refreshing report…');
-      }
-      try {
-        logRegisterBulk('UI refresh from read model (no live ingest)');
-        if (opts?.showToast && toastId != null) {
-          feedback.loadingUpdate(toastId, 'Loading latest calls…');
-        }
-        await ensureSharedCallsLoaded(true);
-        const syncTime = new Date();
-        setLastSyncedAt(syncTime);
-        notifyCorpusRegisterDelta([], syncTime);
+      const syncTime = new Date();
+      setLastSyncedAt(syncTime);
+      notifyCorpusRegisterDelta([], syncTime);
 
-        if (opts?.showToast) {
-          feedback.dismiss(toastId);
-          feedback.refreshed();
-        } else {
-          feedback.dismiss(toastId);
-        }
-      } catch (err: unknown) {
-        feedback.dismiss(toastId);
-        if (opts?.showToast) {
-          const rawMessage =
-            axios.isAxiosError(err) && err.response?.data?.error
-              ? String(err.response.data.error)
-              : err instanceof Error
-                ? err.message
-                : 'Refresh failed';
-          feedback.actionFailed('Failed to refresh report: ' + sanitizeUserFacingMessage(rawMessage));
-        }
-      } finally {
-        syncInFlightRef.current = false;
-        setSyncInProgress(false);
+      if (opts?.showToast) {
+        feedback.refreshed();
       }
+      syncInFlightRef.current = false;
+      setSyncInProgress(false);
       return;
     }
 
@@ -1985,16 +1832,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     hasPendingFilterChanges,
     getAppliedDateStrings,
     getAppliedDateFilterColumn,
-    reportPreferences,
     prefsReady,
-    restoredFromServer,
-    restoredViewSummary,
-    restoredBannerDismissed,
-    dismissRestoredBanner,
-    resetReportDefaults,
-    patchReportPreferences,
-    schedulePatchReportPreferences,
-    landingReportPath,
     reportBanner,
     setReportError,
     setReportWarning,
@@ -2063,16 +1901,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     hasPendingFilterChanges,
     getAppliedDateStrings,
     getAppliedDateFilterColumn,
-    reportPreferences,
     prefsReady,
-    restoredFromServer,
-    restoredViewSummary,
-    restoredBannerDismissed,
-    dismissRestoredBanner,
-    resetReportDefaults,
-    patchReportPreferences,
-    schedulePatchReportPreferences,
-    landingReportPath,
     reportBanner,
     setReportError,
     setReportWarning,

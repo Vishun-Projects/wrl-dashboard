@@ -39,10 +39,20 @@ export async function ensureFreshAccessToken(supabase: SupabaseClient): Promise<
   const {
     data: { session },
   } = await supabase.auth.getSession();
-  if (accessTokenStillValid(session)) {
-    return session!.access_token!;
+  if (!session?.access_token) {
+    throw new Error('Session expired — please sign in again and retry.');
   }
-  return refreshSessionOnce(supabase);
+  if (process.env.NODE_ENV === 'development') {
+    return session.access_token;
+  }
+  if (accessTokenStillValid(session)) {
+    return session.access_token;
+  }
+  try {
+    return await refreshSessionOnce(supabase);
+  } catch {
+    return session.access_token;
+  }
 }
 
 export async function getBearerAuthHeaders(

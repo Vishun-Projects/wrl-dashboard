@@ -157,6 +157,24 @@ function sfKey(row: Record<string, unknown>): string | null {
   return String(code);
 }
 
+function technicianNameFromCallRow(row: Record<string, unknown>): string {
+  const name = String(
+    row.technician_name ?? row.serviceman ?? row.engineer_name ?? ''
+  ).trim();
+  return name && name !== 'UNKNOWN' ? name : '';
+}
+
+function resolveTechnicianName(
+  code: string,
+  fromCalls: string,
+  rosterByCode: Map<string, RosterTechnician>
+): string {
+  if (fromCalls && fromCalls !== 'UNKNOWN') return fromCalls;
+  const rosterName = String(rosterByCode.get(code)?.vname ?? '').trim();
+  if (rosterName && rosterName !== 'UNKNOWN') return rosterName;
+  return fromCalls || 'UNKNOWN';
+}
+
 function ensureCounts(map: Map<string, AssigneeCounts>, key: string, name: string): AssigneeCounts {
   let entry = map.get(key);
   if (!entry) {
@@ -192,7 +210,7 @@ export function buildAssigneeActivity(calls: Record<string, unknown>[]): {
 
     const techId = techKey(row);
     if (techId) {
-      const techName = String(row.technician_name ?? row.serviceman ?? 'UNKNOWN').trim() || 'UNKNOWN';
+      const techName = technicianNameFromCallRow(row) || 'UNKNOWN';
       const entry = ensureCounts(technicians, techId, techName);
       entry.total++;
       if (bucket === 'assigned') entry.assigned++;
@@ -281,7 +299,7 @@ export function buildTechniciansSeenOnCalls(
   for (const row of calls) {
     const id = techKey(row);
     if (!id) continue;
-    const name = String(row.technician_name ?? row.serviceman ?? id).trim() || id;
+    const name = technicianNameFromCallRow(row) || id;
     const nofficeid =
       row.technician_office_id != null ? String(row.technician_office_id) : undefined;
     map.set(id, { ncode: id, vname: name, nofficeid });
@@ -299,6 +317,10 @@ export function buildIdleAssigneeRows(params: {
   const { auditScopeCalls, rosterTechnicians, rosterFranchisees, offices = [] } = params;
   const { technicians, franchisees } = buildAssigneeActivity(auditScopeCalls);
   const branchByOfficeId = buildBranchByOfficeId(offices);
+  const rosterByCode = new Map<string, RosterTechnician>();
+  for (const tech of rosterTechnicians) {
+    rosterByCode.set(String(tech.ncode), tech);
+  }
   const rows: IdleAssigneeRow[] = [];
   const seen = new Set<string>();
 
@@ -314,7 +336,7 @@ export function buildIdleAssigneeRows(params: {
       pushRow({
         assigneeType: 'technician',
         code,
-        name: counts.name,
+        name: resolveTechnicianName(code, counts.name, rosterByCode),
         branchName: pickDominantBranch(counts.branchCounts),
         issue: 'assigned_no_completions',
         assignedCalls: counts.assigned,

@@ -184,9 +184,10 @@ export async function queryArcpClaimsAggregates(
   const callKey = await arcpHotCallKeyExpr(tableAlias);
 
   const sortCol = resolveHotSortColumn(dateColumn);
+  const sumAllApproved = dateColumn === 'bm_approved_at';
 
-  const query = `
-WITH hot AS (
+  const hotCte = `
+hot AS (
   SELECT
     h.ncode,
     ${monthCol} AS claim_month,
@@ -218,7 +219,39 @@ WITH hot AS (
   LEFT JOIN dim_call_types ct
     ON ct.ncode::text = NULLIF(TRIM(h.ncalltype), '')
   WHERE ${whereSql}
-),
+)`;
+
+  const combinedCte = sumAllApproved
+    ? `
+combined AS (
+  SELECT
+    claim_month,
+    ncalltype,
+    call_type_label,
+    nitemcategory,
+    item_category_label,
+    nlocalupcountry,
+    local_upcountry_label,
+    is_travel,
+    major_minor,
+    COUNT(DISTINCT ncode)::int AS line_qty,
+    SUM(amount_payable) AS amount_payable,
+    SUM(branch_approved) AS branch_approved,
+    SUM(ho_approved) AS ho_approved,
+    AVG(NULLIF(rate, 0)) AS rate_val
+  FROM hot
+  GROUP BY
+    claim_month,
+    ncalltype,
+    call_type_label,
+    nitemcategory,
+    item_category_label,
+    nlocalupcountry,
+    local_upcountry_label,
+    is_travel,
+    major_minor
+)`
+    : `
 winning AS (
   SELECT *
   FROM (
@@ -276,7 +309,10 @@ combined AS (
     ho_approved,
     NULL::float8
   FROM winning
-)
+)`;
+
+  const query = `
+WITH ${hotCte},${combinedCte}
 SELECT
   claim_month,
   ncalltype,
@@ -317,8 +353,27 @@ export async function queryArcpClaimsGrandTotals(
   const sortCol = resolveHotSortColumn(dateColumn);
   const { sql: whereSql, params } = buildArcpWhere(opts, dateColumn, 'h');
   const callKey = await arcpHotCallKeyExpr('h');
+  const sumAllApproved = dateColumn === 'bm_approved_at';
 
-  const query = `
+  const query = sumAllApproved
+    ? `
+WITH hot AS (
+  SELECT
+    h.ncode,
+    h.is_travel,
+    h.amount_payable,
+    h.branch_approved,
+    h.ho_approved
+  FROM arcp_lines_hot h
+  WHERE ${whereSql}
+)
+SELECT
+  (SELECT COUNT(DISTINCT ncode)::int FROM hot) AS line_count,
+  (SELECT COUNT(DISTINCT ncode) FILTER (WHERE is_travel)::int FROM hot) AS travel_line_count,
+  (SELECT COALESCE(SUM(amount_payable), 0)::float8 FROM hot) AS amount_payable,
+  (SELECT COALESCE(SUM(branch_approved), 0)::float8 FROM hot) AS branch_approved,
+  (SELECT COALESCE(SUM(ho_approved), 0)::float8 FROM hot) AS ho_approved`
+    : `
 WITH hot AS (
   SELECT
     h.ncode,
@@ -350,8 +405,7 @@ SELECT
   (SELECT COUNT(DISTINCT ncode) FILTER (WHERE is_travel)::int FROM hot) AS travel_line_count,
   (SELECT COALESCE(SUM(amount_payable), 0)::float8 FROM hot) AS amount_payable,
   (SELECT COALESCE(SUM(branch_approved), 0)::float8 FROM winning) AS branch_approved,
-  (SELECT COALESCE(SUM(ho_approved), 0)::float8 FROM winning) AS ho_approved
-`;
+  (SELECT COALESCE(SUM(ho_approved), 0)::float8 FROM winning) AS ho_approved`;
 
   return withClient(async (client) => {
     const result = await client.query(query, params);

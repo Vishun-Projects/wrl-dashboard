@@ -3,6 +3,7 @@ export {
   parseLocationAuditQueryParams,
   fetchLocationAuditCrmRows,
   fetchLocationAuditSummary,
+  fetchLocationAuditFull,
   fetchLocationAuditList,
   fetchLocationAuditListPage,
   fetchLocationAuditRowDetail,

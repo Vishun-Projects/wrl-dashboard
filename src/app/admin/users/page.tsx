@@ -18,7 +18,8 @@ import {
 import { useRouter } from 'next/navigation';
 import { feedback } from '@/lib/ui/feedback';
 import { useUser } from '@/components/layout/DashboardLayout';
-import { PageShell, PageLoadingState } from '@/components/layout/PageShell';
+import { PageShell } from '@/components/layout/PageShell';
+import { TableSkeleton } from '@/components/ui/DataTableLoading';
 import BranchTree from '@/components/shared/BranchTree';
 import {
   AdminToolbar,
@@ -287,8 +288,6 @@ export default function AdminUsersPage() {
     return { isHod, roleName };
   };
 
-  if (loading) return <PageLoadingState label="Loading users..." />;
-
   return (
     <PageShell
       title="User Management"
@@ -301,8 +300,8 @@ export default function AdminUsersPage() {
           onSearchChange={setSearch}
           searchPlaceholder="Search by name or email..."
         >
-          <AdminStatPill label="Total" value={users.length} />
-          <AdminStatPill label="Showing" value={filteredUsers.length} />
+          <AdminStatPill label="Total" value={loading ? '…' : users.length} />
+          <AdminStatPill label="Showing" value={loading ? '…' : filteredUsers.length} />
         </AdminToolbar>
       }
       actions={
@@ -324,7 +323,10 @@ export default function AdminUsersPage() {
       }
     >
       <div className="flex min-h-0 flex-1 flex-col p-4">
-        <AdminTableCard isEmpty={filteredUsers.length === 0}>
+        <AdminTableCard isEmpty={!loading && filteredUsers.length === 0}>
+          {loading ? (
+            <TableSkeleton columns={5} rows={8} />
+          ) : (
           <AdminTable>
             <AdminThead>
               <tr>
@@ -439,6 +441,7 @@ export default function AdminUsersPage() {
               })}
             </tbody>
           </AdminTable>
+          )}
         </AdminTableCard>
       </div>
 

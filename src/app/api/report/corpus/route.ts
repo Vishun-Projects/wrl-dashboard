@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { resolveRequestUserId } from '@/lib/auth/server-user';
 import { isCrmOutOfMemoryError, postQuery } from '@/lib/db/proxy';
 import { prisma } from '@/lib/db/prisma';
 import {
@@ -430,29 +430,13 @@ export async function GET(req: NextRequest) {
   let staleCacheKey: string | null = null;
 
   try {
-    const authHeader = req.headers.get('Authorization');
-    let userId: string | null = null;
-
-    if (authHeader?.startsWith('Bearer ')) {
-      const token = authHeader.split(' ')[1];
-      const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
-      if (authError || !user) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
-      userId = user.id;
-    } else {
-      const supabase = await createClient();
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
-      if (authError || !user) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
-      userId = user.id;
+    const supabase = await createClient();
+    const userId = await resolveRequestUserId(req, supabase);
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const security = await resolveReportSecurity(userId);
+    const security = await resolveReportSecurity(userId, { pagePermission: 'page_mis_reports' });
     if (security.forbidden) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }

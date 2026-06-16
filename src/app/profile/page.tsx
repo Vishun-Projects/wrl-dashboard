@@ -10,10 +10,10 @@ import {
   Save,
   Loader2,
   AlertCircle,
-  RotateCcw,
 } from 'lucide-react';
 import { useUser } from '@/components/layout/DashboardLayout';
-import { PageShell, PageLoadingState } from '@/components/layout/PageShell';
+import { PageShell } from '@/components/layout/PageShell';
+import { FormSkeleton } from '@/components/ui/DataTableLoading';
 import {
   SettingsLayout,
   SettingsCard,
@@ -33,7 +33,6 @@ function ProfileContent() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
-  const [resettingReports, setResettingReports] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
 
   const supabase = createClient();
@@ -85,21 +84,19 @@ function ProfileContent() {
     }
   }
 
-  async function handleResetReportDefaults() {
-    try {
-      setResettingReports(true);
-      await axios.patch('/api/profile/report-preferences', { reset: true }, { withCredentials: true });
-      feedback.actionSuccess('Report defaults reset. Open a report page to see role defaults.');
-    } catch (err: any) {
-      feedback.actionFailed(err.response?.data?.error || 'Reset failed');
-    } finally {
-      setResettingReports(false);
-    }
-  }
-
   async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      feedback.actionFailed('Please upload a JPEG, PNG, WebP, or GIF image.');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      feedback.actionFailed('Image must be 2 MB or smaller.');
+      return;
+    }
 
     try {
       setUploadingImage(true);
@@ -124,7 +121,17 @@ function ProfileContent() {
     }
   }
 
-  if (loading) return <PageLoadingState label="Loading profile..." />;
+  if (loading) {
+    return (
+      <PageShell
+        title="Profile Settings"
+        icon={<User size={16} />}
+        bodyClassName="min-h-0 flex-1 overflow-y-auto bg-slate-50 custom-scrollbar"
+      >
+        <FormSkeleton fields={5} />
+      </PageShell>
+    );
+  }
 
   const saveButton = (label: string, icon: React.ReactNode, disabled: boolean, onClick?: () => void) => (
     <button
@@ -217,23 +224,6 @@ function ProfileContent() {
           </form>
         )}
 
-        {activeTab === 'general' && (
-          <SettingsCard
-            title="Report workspace"
-            description="Clears saved filters, columns, and last report. Role defaults apply next time you open MIS or Distribution."
-          >
-            <button
-              type="button"
-              disabled={resettingReports}
-              onClick={() => void handleResetReportDefaults()}
-              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50 ui-label"
-            >
-              {resettingReports ? <Loader2 className="animate-spin" size={14} /> : <RotateCcw size={14} />}
-              Reset my report defaults
-            </button>
-          </SettingsCard>
-        )}
-
         {activeTab === 'settings' && (
           <div className="space-y-4">
             <form
@@ -301,7 +291,17 @@ function ProfileContent() {
 
 export default function ProfilePage() {
   return (
-    <React.Suspense fallback={<PageLoadingState label="Loading profile..." />}>
+    <React.Suspense
+      fallback={
+        <PageShell
+          title="Profile Settings"
+          icon={<User size={16} />}
+          bodyClassName="min-h-0 flex-1 overflow-y-auto bg-slate-50 custom-scrollbar"
+        >
+          <FormSkeleton fields={5} />
+        </PageShell>
+      }
+    >
       <ProfileContent />
     </React.Suspense>
   );

@@ -1,14 +1,29 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
 import { prisma } from '@/lib/db/prisma';
+import { fetchAppUserAuthProfile } from '@/lib/auth/app-user-profile';
+import { requireRequestUser } from '@/lib/auth/server-user';
+import { withAppClient } from '@/lib/read-model/db';
 import { clearPortalAuditServerCache } from '@/lib/report/portal-audit-server';
+import { commentPostSchema } from '@/lib/api/schemas/mutations';
+import { hasOfficeScope } from '@/lib/trhcalls/office-security';
+
+type CommentRow = {
+  id: string;
+  call_id: string;
+  office_id: string;
+  comment: string | null;
+  content: string | null;
+  author_id: string | null;
+  author_name: string | null;
+  created_at: string;
+};
 
 export async function GET(request: Request) {
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const user = await requireRequestUser(request, supabase);
 
-  if (authError || !user) {
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -20,114 +35,124 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'callId is required' }, { status: 400 });
     }
 
-    // Get User Profile for filtering
-    const { data: profile } = await supabaseAdmin
-      .from('app_users')
-      .select('office_ids, role, name')
-      .eq('id', user.id)
-      .single();
+    const profile = await fetchAppUserAuthProfile(user.id);
 
     const permissions = await (prisma as any).getUserPermissions(user.id);
-    const isHod = 
-      permissions.includes('view_all_offices') || 
-      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
+    const isHod =
+      permissions.includes('view_all_offices') ||
+      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(
+        profile?.role || ''
+      );
     const assignedOffices = profile?.office_ids || [];
 
-    let query = supabaseAdmin
-      .from('call_comments')
-      .select('id, call_id, office_id, comment, content, author_id, author_name, created_at')
-      .eq('call_id', callId);
-
-    // If not HOD, only show comments for their offices
-    if (!isHod) {
-      query = query.in('office_id', assignedOffices);
+    if (!hasOfficeScope(isHod, assignedOffices)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { data: comments, error } = await query.order('created_at', { ascending: false });
+    const comments = await withAppClient(async (client) => {
+      if (isHod) {
+        const res = await client.query<CommentRow>(
+          `SELECT id, call_id, office_id, comment, content, author_id, author_name, created_at
+           FROM public.call_comments
+           WHERE call_id = $1
+           ORDER BY created_at DESC`,
+          [callId]
+        );
+        return res.rows;
+      }
 
-    if (error) throw error;
+      const res = await client.query<CommentRow>(
+        `SELECT id, call_id, office_id, comment, content, author_id, author_name, created_at
+         FROM public.call_comments
+         WHERE call_id = $1 AND office_id = ANY($2::text[])
+         ORDER BY created_at DESC`,
+        [callId, assignedOffices.map(String)]
+      );
+      return res.rows;
+    });
 
-    const authorIds = Array.from(new Set((comments || []).map((cm: any) => cm.author_id).filter(Boolean)));
-    let authors: any[] = [];
+    const authorIds = Array.from(new Set(comments.map((cm) => cm.author_id).filter(Boolean))) as string[];
+    let authors: { id: string; avatar_url: string | null }[] = [];
     if (authorIds.length > 0) {
-      const { data: authorsData } = await supabaseAdmin
-        .from('app_users')
-        .select('id, avatar_url')
-        .in('id', authorIds);
-      authors = authorsData || [];
+      authors = await withAppClient(async (client) => {
+        const res = await client.query<{ id: string; avatar_url: string | null }>(
+          `SELECT id, avatar_url FROM public.app_users WHERE id = ANY($1::uuid[])`,
+          [authorIds]
+        );
+        return res.rows;
+      });
     }
 
-    const commentsWithAvatars = (comments || []).map((cm: any) => {
-      const author = authors.find((a: any) => a.id === cm.author_id);
+    const commentsWithAvatars = comments.map((cm) => {
+      const author = authors.find((a) => a.id === cm.author_id);
       return {
         ...cm,
-        author_avatar_url: author?.avatar_url || null
+        author_avatar_url: author?.avatar_url || null,
       };
     });
 
     return NextResponse.json(commentsWithAvatars);
-  } catch (err: any) {
-
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to load comments';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const user = await requireRequestUser(request, supabase);
 
-  if (authError || !user) {
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
     const body = await request.json();
-    const callId = body.callId || body.call_id;
-    const content = body.content || body.text;
-    const office_id = body.office_id;
-    const author_name = body.author_name;
-
-    if (!callId || !content || !office_id) {
-      return NextResponse.json({ error: 'callId, content, and office_id are required' }, { status: 400 });
+    const parsed = commentPostSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? 'Invalid payload' },
+        { status: 400 }
+      );
     }
 
-    // Get User Profile for filtering
-    const { data: profile } = await supabaseAdmin
-      .from('app_users')
-      .select('office_ids, role, name')
-      .eq('id', user.id)
-      .single();
+    const callId = parsed.data.callId ?? parsed.data.call_id!;
+    const content = parsed.data.content ?? parsed.data.text!;
+    const office_id = parsed.data.office_id;
+
+    const profile = await fetchAppUserAuthProfile(user.id);
 
     const permissions = await (prisma as any).getUserPermissions(user.id);
-    const isHod = 
-      permissions.includes('view_all_offices') || 
-      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
+    const isHod =
+      permissions.includes('view_all_offices') ||
+      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(
+        profile?.role || ''
+      );
     const assignedOffices = profile?.office_ids || [];
 
-    // If not HOD, check if they have permission for this office
     if (!isHod && !assignedOffices.includes(String(office_id))) {
-      return NextResponse.json({ error: 'Forbidden: You do not have permission to comment for this office' }, { status: 403 });
+      return NextResponse.json(
+        { error: 'Forbidden: You do not have permission to comment for this office' },
+        { status: 403 }
+      );
     }
 
-    const { data: comment, error } = await supabaseAdmin
-      .from('call_comments')
-      .insert([{
-        call_id: String(callId),
-        office_id: String(office_id),
-        comment: content,
-        author_name: author_name || profile?.name || 'User',
-        author_id: user.id
-      }])
-      .select('id, call_id, office_id, comment, author_id, author_name, created_at')
-      .single();
-
-    if (error) throw error;
+    const comment = await withAppClient(async (client) => {
+      const res = await client.query<CommentRow>(
+        `INSERT INTO public.call_comments
+           (call_id, office_id, comment, author_name, author_id)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, call_id, office_id, comment, author_id, author_name, created_at`,
+        [String(callId), String(office_id), content, profile?.name || 'User', user.id]
+      );
+      return res.rows[0];
+    });
 
     clearPortalAuditServerCache();
 
     return NextResponse.json(comment);
-  } catch (err: any) {
-
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to save comment';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

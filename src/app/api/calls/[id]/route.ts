@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { postQuery } from '@/lib/db/proxy';
 import { createClient } from '@/lib/supabase/server';
+import { requireRequestUser } from '@/lib/auth/server-user';
+import { resolveReportSecurity } from '@/lib/auth/report-security';
+import { canAccessOffice } from '@/lib/trhcalls/office-security';
 
 function isCrmFlag(value: unknown): boolean {
   if (value === true || value === 1) return true;
@@ -14,10 +17,15 @@ export async function GET(
 ) {
   const { id } = await params;
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const user = await requireRequestUser(request, supabase);
 
-  if (authError || !user) {
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const security = await resolveReportSecurity(user.id, { pagePermission: 'page_mis_reports' });
+  if (security.forbidden || (!security.isHod && security.assignedOffices.length === 0)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   const { searchParams } = new URL(request.url);
@@ -26,7 +34,7 @@ export async function GET(
 
   try {
     let parentCondition = '';
-    const isNumericId = /^\\d+$/.test(id);
+    const isNumericId = /^\d+$/.test(id);
     
     if (vtrnno && vtrnno.trim() !== '') {
       parentCondition = `(tc.vtrnno = '${vtrnno.replace(/'/g, "''")}' OR tc.vtransfercallno = '${vtrnno.replace(/'/g, "''")}')`;
@@ -51,6 +59,10 @@ export async function GET(
     const parentData = parentRes.data?.[0];
     if (!parentData) {
       return NextResponse.json({ error: 'Call not found' }, { status: 404 });
+    }
+
+    if (!canAccessOffice(security.isHod, security.assignedOffices, parentData.nofficeid)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const realId = parentData.ncode;

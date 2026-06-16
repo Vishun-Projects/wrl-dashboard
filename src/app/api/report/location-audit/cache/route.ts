@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { requireSupabaseUser } from '@/lib/auth/server-user';
 import {
   clearAddressGeocodeCache,
   getAddressGeocodeCacheCount,
@@ -9,9 +10,7 @@ import { resolveLocationAuditSecurity } from '@/lib/location-audit/server';
 export async function GET() {
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await requireSupabaseUser(supabase);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const security = await resolveLocationAuditSecurity(user.id);
@@ -28,9 +27,7 @@ export async function GET() {
 export async function DELETE() {
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await requireSupabaseUser(supabase);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const security = await resolveLocationAuditSecurity(user.id);

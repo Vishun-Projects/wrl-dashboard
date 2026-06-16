@@ -21,6 +21,12 @@ import {
   type ArcpClaimsQueryOpts,
   type ArcpGrandTotals,
 } from '../query';
+import { readArcpFromPostgres } from '@/lib/read-model/flags';
+import {
+  queryArcpClaimsAggregates,
+  queryArcpClaimsDetailRows,
+  queryArcpClaimsGrandTotals,
+} from '@/lib/arcp-claims/server/postgres';
 import { runPool } from '@/lib/utils/run-pool';
 import {
   buildArcpChunkCacheKey,
@@ -270,6 +276,9 @@ export async function fetchArcpClaimsGrandTotals(
   opts: ArcpClaimsQueryOpts,
   timeoutMs: number
 ): Promise<ArcpGrandTotals> {
+  if (readArcpFromPostgres()) {
+    return queryArcpClaimsGrandTotals(opts);
+  }
   const res = await postQuery({
     rawSql: buildArcpClaimsGrandTotalSql(crmUiOpts(opts)),
     timeoutMs,
@@ -299,7 +308,13 @@ async function loadAggregateChunkCached(
     }
 
     const payload = await getOrRunChunkInflight(cacheKey, async () => {
-      const rows = await fetchArcpAggregateChunkResilient(opts, chunk, timeoutMs);
+      const rows = readArcpFromPostgres()
+        ? await queryArcpClaimsAggregates({
+            ...opts,
+            startDate: chunk.start,
+            endDate: chunk.end,
+          })
+        : await fetchArcpAggregateChunkResilient(opts, chunk, timeoutMs);
       await writeArcpChunkCache(cacheKey, 'agg', rows);
       return { kind: 'agg' as const, rows };
     });
@@ -339,7 +354,13 @@ async function loadDetailChunkCached(
     }
 
     const payload = await getOrRunChunkInflight(cacheKey, async () => {
-      const rows = await fetchArcpDetailChunkResilient(opts, chunk, timeoutMs);
+      const rows = readArcpFromPostgres()
+        ? await queryArcpClaimsDetailRows({
+            ...opts,
+            startDate: chunk.start,
+            endDate: chunk.end,
+          })
+        : await fetchArcpDetailChunkResilient(opts, chunk, timeoutMs);
       await writeArcpChunkCache(cacheKey, 'detail', rows);
       return { kind: 'detail' as const, rows };
     });
@@ -362,6 +383,14 @@ export async function fetchArcpClaimsAggregates(
   opts: ArcpFetchOpts,
   timeoutMs: number
 ): Promise<{ aggregates: ArcpClaimsAggregateRow[]; chunkMeta: ArcpChunkLoadMeta }> {
+  if (readArcpFromPostgres()) {
+    const aggregates = await queryArcpClaimsAggregates(opts);
+    return {
+      aggregates,
+      chunkMeta: { cachedChunks: 0, fetchedChunks: 1, totalChunks: 1 },
+    };
+  }
+
   const uiOpts = crmUiOpts(opts);
   const chunks = planArcpSummaryDateChunks(uiOpts);
   const span = arcpDateSpanDays(uiOpts.startDate ?? null, uiOpts.endDate ?? null) ?? 0;
@@ -373,6 +402,7 @@ export async function fetchArcpClaimsAggregates(
           spanDays: span,
           chunkGranularity,
           crmChunkCount: chunks.length,
+          usePostgres: readArcpFromPostgres(),
         })
       : 1;
 
@@ -404,6 +434,14 @@ export async function fetchArcpClaimsDetailRows(
   opts: ArcpFetchOpts,
   timeoutMs: number
 ): Promise<{ rows: ArcpClaimsDetailRow[]; chunkMeta: ArcpChunkLoadMeta }> {
+  if (readArcpFromPostgres()) {
+    const rows = await queryArcpClaimsDetailRows(opts);
+    return {
+      rows,
+      chunkMeta: { cachedChunks: 0, fetchedChunks: 1, totalChunks: 1 },
+    };
+  }
+
   const uiOpts = crmUiOpts(opts);
   const chunks = planArcpSummaryDateChunks(uiOpts);
   const span = arcpDateSpanDays(uiOpts.startDate ?? null, uiOpts.endDate ?? null) ?? 0;
@@ -415,6 +453,7 @@ export async function fetchArcpClaimsDetailRows(
           spanDays: span,
           chunkGranularity,
           crmChunkCount: chunks.length,
+          usePostgres: readArcpFromPostgres(),
         })
       : 1;
   const byLine = new Map<string, ArcpClaimsDetailRow>();

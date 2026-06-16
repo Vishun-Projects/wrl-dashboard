@@ -73,13 +73,32 @@ export async function fetchLocationAuditCrmRows(params: LocationAuditQueryParams
   return fetchCrmSql(buildLocationAuditRawSql(params));
 }
 
-export async function fetchLocationAuditSummary(params: LocationAuditQueryParams) {
+async function analyzeLocationAuditWindow(params: LocationAuditQueryParams) {
   const rawRows = await fetchCrmSql(buildLocationAuditRawSql(params));
   const analyzed = analyzeListTierRows(rawRows);
   const rows = filterLocationAuditListRows(analyzed, { pincodeMismatchOnly: true });
+  return { analyzed, rows };
+}
+
+export async function fetchLocationAuditSummary(params: LocationAuditQueryParams) {
+  const { analyzed, rows } = await analyzeLocationAuditWindow(params);
   const summary = summarizeLocationAuditListRows(rows, LOCATION_AUDIT_MAX_ROWS);
   const byBranch = aggregateByBranch(rows);
   return { summary, byBranch, analyzedCount: analyzed.length };
+}
+
+/** One CRM query — summary stats and mismatch list together (avoids duplicate 15s+ fetches). */
+export async function fetchLocationAuditFull(params: LocationAuditQueryParams) {
+  const { analyzed, rows } = await analyzeLocationAuditWindow(params);
+  const summary = summarizeLocationAuditListRows(rows, LOCATION_AUDIT_MAX_ROWS);
+  const byBranch = aggregateByBranch(rows);
+  return {
+    summary,
+    byBranch,
+    analyzedCount: analyzed.length,
+    rows,
+    total: rows.length,
+  };
 }
 
 /** Full list for the date/filter window (up to {@link LOCATION_AUDIT_MAX_ROWS}), pincode mismatches only. */

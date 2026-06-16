@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CRM Mirror Dashboard v2</title>
+  <style>
+    :root {
+      --bg: #0f1419; --panel: #1a2332; --border: #2d3a4f; --text: #e7ecf3;
+      --muted: #8b9cb3; --accent: #3b82f6; --ok: #22c55e; --warn: #f59e0b;
+      --err: #ef4444; --blocked: #6b7280;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.45; }
+    header {
+      padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
+      display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between;
+      background: var(--panel); position: sticky; top: 0; z-index: 10;
+    }
+    h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+    .sub { color: var(--muted); font-size: 0.85rem; }
+    .legend {
+      background: rgba(59,130,246,0.08); border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.65rem 0.85rem; font-size: 0.8rem; color: var(--muted); margin-bottom: 1rem;
+    }
+    .legend strong { color: var(--text); }
+    .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    button, .tab {
+      border: 1px solid var(--border); background: #243044; color: var(--text);
+      padding: 0.45rem 0.85rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem;
+    }
+    button.primary { background: var(--accent); border-color: #2563eb; }
+    button.danger { background: #7f1d1d; border-color: #991b1b; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    main { padding: 1rem 1.25rem 2rem; max-width: 1400px; margin: 0 auto; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0.85rem 1rem; }
+    .card .label { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .card .value { font-size: 1.35rem; font-weight: 700; margin-top: 0.15rem; }
+    .card .hint { font-size: 0.72rem; color: var(--muted); margin-top: 0.2rem; }
+    .progress-block { margin-bottom: 1rem; }
+    .progress-label { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 0.35rem; }
+    .bar { height: 12px; background: #111827; border-radius: 999px; overflow: hidden; border: 1px solid var(--border); }
+    .bar > span { display: block; height: 100%; background: linear-gradient(90deg, #2563eb, #22c55e); transition: width 0.4s; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+    .tab.active { background: var(--accent); border-color: #2563eb; }
+    .table-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: auto; max-height: 52vh; }
+    table.data { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    table.data th, table.data td { padding: 0.55rem 0.65rem; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+    table.data th { position: sticky; top: 0; background: #1e293b; z-index: 1; }
+    tr:hover td { background: rgba(255,255,255,0.03); }
+    .tbl-link { color: #93c5fd; cursor: pointer; text-decoration: underline; background: none; border: none; padding: 0; font: inherit; }
+    .phase { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600; }
+    .phase-pending { background: rgba(59,130,246,0.15); color: #93c5fd; }
+    .phase-backfilling { background: rgba(245,158,11,0.15); color: var(--warn); }
+    .phase-catching_up { background: rgba(34,197,94,0.15); color: var(--ok); }
+    .phase-verified, .phase-live { background: rgba(16,185,129,0.2); color: #6ee7b7; }
+    .phase-error { background: rgba(239,68,68,0.15); color: var(--err); }
+    .phase-blocked { background: rgba(107,114,128,0.2); color: var(--blocked); }
+    .mini-bar { width: 90px; height: 6px; background: #111827; border-radius: 999px; overflow: hidden; display: inline-block; vertical-align: middle; margin-left: 4px; }
+    .mini-bar > span { display: block; height: 100%; background: var(--accent); }
+    .mini-bar.done > span { background: var(--ok); }
+    .err-text { color: #fca5a5; max-width: 260px; word-break: break-word; font-size: 0.78rem; }
+    .log { margin-top: 1rem; background: #0b1020; border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem; font-family: ui-monospace, monospace; font-size: 0.75rem; max-height: 200px; overflow: auto; white-space: pre-wrap; color: #cbd5e1; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }
+    .status-dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+    .status-dot.off { background: var(--muted); }
+    .search input { width: 100%; max-width: 360px; padding: 0.5rem 0.75rem; border-radius: 8px; border: 1px solid var(--border); background: #111827; color: var(--text); }
+    .toast { position: fixed; bottom: 1rem; right: 1rem; background: #1e293b; border: 1px solid var(--border); padding: 0.75rem 1rem; border-radius: 8px; max-width: 420px; font-size: 0.85rem; display: none; z-index: 100; }
+    .toast.show { display: block; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 50; display: none; align-items: center; justify-content: center; padding: 1rem; }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      width: min(1200px, 100%); max-height: 90vh; display: flex; flex-direction: column; overflow: hidden;
+    }
+    .modal-head { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: start; gap: 1rem; }
+    .modal-head h2 { margin: 0; font-size: 1.1rem; word-break: break-all; }
+    .modal-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.5rem 1rem; padding: 0.75rem 1.25rem; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
+    .modal-meta dt { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; }
+    .modal-meta dd { margin: 0.1rem 0 0; }
+    .modal-body { overflow: auto; flex: 1; padding: 0 0 0.5rem; }
+    .modal-pager { padding: 0.65rem 1.25rem; border-top: 1px solid var(--border); display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .detail-table-wrap { overflow: auto; max-height: 50vh; }
+    .detail-table { font-size: 0.75rem; white-space: nowrap; }
+    .detail-table td { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+    .row-match { color: var(--ok); }
+    .row-mismatch { color: var(--warn); }
+    .pipeline { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+    .pipe-step {
+      flex: 1; min-width: 160px; background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 0.65rem 0.75rem; font-size: 0.78rem;
+    }
+    .pipe-step.done { border-color: rgba(34,197,94,0.4); }
+    .pipe-step.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .pipe-step.waiting { opacity: 0.75; }
+    .pipe-step .num { font-size: 0.7rem; color: var(--muted); }
+    .pipe-step .name { font-weight: 700; font-size: 0.85rem; margin: 0.15rem 0; }
+    .pipe-step .detail { color: var(--muted); line-height: 1.35; }
+    .worker-banner {
+      padding: 0.65rem 0.85rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.85rem;
+      border: 1px solid var(--border); background: rgba(245,158,11,0.08);
+    }
+    .worker-banner.running { background: rgba(34,197,94,0.08); border-color: rgba(34,197,94,0.35); }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>CRM Mirror Dashboard <span style="color:var(--muted);font-size:0.75rem">v2</span></h1>
+      <div class="sub" id="updated">Loading…</div>
+    </div>
+    <div class="actions">
+      <button class="primary" id="btn-resume" onclick="action('resume')">▶ Resume backfill</button>
+      <button onclick="action('repair')">🔧 Repair</button>
+      <button onclick="action('retry_all')">↻ Retry errors</button>
+      <button class="danger" id="btn-stop" onclick="action('stop')">■ Stop</button>
+      <button onclick="refresh()">⟳ Refresh</button>
+    </div>
+  </header>
+  <main>
+    <div class="worker-banner" id="worker-banner"></div>
+    <div class="pipeline" id="pipeline"></div>
+    <div class="legend" id="legend"></div>
+    <div class="cards" id="cards"></div>
+    <div class="progress-block">
+      <div class="progress-label"><span>Tables backfilled</span><strong id="table-pct">0%</strong></div>
+      <div class="bar"><span id="table-bar" style="width:0%"></span></div>
+    </div>
+    <div class="progress-block">
+      <div class="progress-label"><span>Rows in Postgres (estimate)</span><strong id="row-pct">0%</strong></div>
+      <div class="bar"><span id="row-bar" style="width:0%"></span></div>
+    </div>
+    <div class="search"><input id="search" placeholder="Search table name…" oninput="renderTables()" /></div>
+    <div class="tabs" id="tabs"></div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Table</th>
+            <th>Status</th>
+            <th>Progress</th>
+            <th>Rows (mirror / CRM)</th>
+            <th>Size KB</th>
+            <th>Error</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <h3 style="margin-top:1rem;font-size:0.95rem;">Log tail</h3>
+    <div class="log" id="log"></div>
+  </main>
+
+  <div class="modal-backdrop" id="modal" onclick="if(event.target===this) closeModal()">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <h2 id="modal-title">Table</h2>
+          <div class="sub" id="modal-phase"></div>
+        </div>
+        <button onclick="closeModal()">✕ Close</button>
+      </div>
+      <dl class="modal-meta" id="modal-meta"></dl>
+      <div class="modal-body">
+        <div class="detail-table-wrap">
+          <table class="data detail-table">
+            <thead id="detail-head"></thead>
+            <tbody id="detail-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-pager">
+        <button id="btn-prev" onclick="detailPage(-1)">← Prev</button>
+        <span id="pager-info">Page 1</span>
+        <button id="btn-next" onclick="detailPage(1)">Next →</button>
+        <span class="sub" id="detail-loading"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    let data = null;
+    let filter = 'all';
+    let detailTable = null;
+    let detailPageNum = 1;
+    const PAGE_SIZE = 50;
+
+    const TAB_FILTERS = [
+      ['all', 'All'],
+      ['pending', 'Queued (pending)'],
+      ['backfilling', 'Importing'],
+      ['catching_up', 'Backfill done'],
+      ['error', 'Errors'],
+      ['blocked', 'Blocked'],
+    ];
+
+    function fmt(n) {
+      if (n == null || n === '') return '—';
+      return Number(n).toLocaleString();
+    }
+
+    function esc(s) {
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+    }
+
+    function toast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 4000);
+    }
+
+    function setFilter(f) {
+      filter = f;
+      document.querySelectorAll('.tab').forEach(el => el.classList.toggle('active', el.dataset.phase === f));
+      renderTables();
+    }
+
+    function renderWorkerBanner() {
+      const w = data.worker;
+      const el = document.getElementById('worker-banner');
+      el.className = 'worker-banner' + (w.running ? ' running' : '');
+      const dot = w.running
+        ? '<span class="status-dot on"></span>'
+        : '<span class="status-dot off"></span>';
+      el.innerHTML = dot + esc(w.message || (w.running ? 'Worker running' : 'Worker stopped'));
+      document.getElementById('updated').textContent = 'Updated ' + new Date(data.updated_at).toLocaleString();
+      document.getElementById('btn-resume').disabled = w.running;
+      document.getElementById('btn-stop').disabled = !w.running;
+    }
+
+    function renderPipeline() {
+      const steps = data.pipeline || [];
+      document.getElementById('pipeline').innerHTML = steps.map(s => `
+        <div class="pipe-step ${esc(s.status)}">
+          <div class="num">Step ${s.step}</div>
+          <div class="name">${esc(s.name)}</div>
+          <div class="detail"><strong>${esc(s.title)}</strong><br>${esc(s.detail)}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderLegend() {
+      const L = data.phase_legend || {};
+      document.getElementById('legend').innerHTML =
+        '<strong>What the statuses mean:</strong> ' +
+        Object.entries(L).map(([k,v]) => `<strong>${esc(v.label)}</strong> — ${esc(v.help)}`).join(' · ');
+    }
+
+    function renderTabs() {
+      document.getElementById('tabs').innerHTML = TAB_FILTERS.map(([p, label]) => {
+        const count = p === 'all' ? data.tables.length : (data.phases[p] || 0);
+        return `<button class="tab ${p===filter?'active':''}" data-phase="${p}" onclick="setFilter('${p}')">${label} (${count})</button>`;
+      }).join('');
+    }
+
+    function renderCards() {
+      const s = data.summary;
+      document.getElementById('cards').innerHTML = [
+        ['Backfill done', s.backfill_done + ' (catching_up)', 'Same as CLI status'],
+        ['Queued', s.queued + ' (pending)', 'Empty shell — no CRM rows yet'],
+        ['Importing now', s.importing, 'Copy in progress'],
+        ['Errors', s.errors, 'Need retry'],
+        ['Blocked', s.blocked, 'No PK'],
+      ].map(([label, value, hint]) =>
+        `<div class="card"><div class="label">${label}</div><div class="value">${value}</div><div class="hint">${hint}</div></div>`
+      ).join('');
+
+      document.getElementById('table-pct').textContent = s.table_progress_pct + '%';
+      document.getElementById('row-pct').textContent = s.row_progress_pct + '%';
+      document.getElementById('table-bar').style.width = s.table_progress_pct + '%';
+      document.getElementById('row-bar').style.width = s.row_progress_pct + '%';
+    }
+
+    function renderTables() {
+      const q = (document.getElementById('search').value || '').toLowerCase();
+      const rows = data.tables.filter(t => {
+        if (filter !== 'all' && t.phase !== filter) return false;
+        if (q && !t.table_name.includes(q)) return false;
+        return true;
+      });
+
+      document.getElementById('tbody').innerHTML = rows.map(t => {
+        const p = t.progress_pct;
+        const barW = p == null ? 0 : p;
+        const doneCls = t.backfill_complete ? 'done' : '';
+        const err = t.last_error ? `<span class="err-text">${esc(t.last_error.slice(0,100))}</span>` : '';
+        const retry = t.phase === 'error' ? `<button onclick="event.stopPropagation();retryTable('${esc(t.table_name)}')">Retry</button>` : '';
+        const rowCls = t.row_count_match === false ? 'row-mismatch' : (t.backfill_complete ? 'row-match' : '');
+        return `<tr class="${rowCls}">
+          <td><button type="button" class="tbl-link" onclick="openTable('${esc(t.table_name)}')">${esc(t.table_name)}</button>${t.is_running ? ' ⚡' : ''}</td>
+          <td><span class="phase phase-${esc(t.phase.replace(/\\$/g,'_'))}">${esc(t.phase_label)}</span></td>
+          <td>${p == null ? '—' : p + '%'} <span class="mini-bar ${doneCls}"><span style="width:${barW}%"></span></span></td>
+          <td>${fmt(t.mirror_row_count ?? t.rows_loaded)} / ${fmt(t.crm_row_count)}</td>
+          <td>${fmt(t.size_kb)}</td>
+          <td>${err}</td>
+          <td>${retry}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="7">No tables</td></tr>';
+    }
+
+    function renderLog() {
+      document.getElementById('log').textContent = (data.log_tail || []).join('\\n') || '(no log yet)';
+    }
+
+    function render() {
+      renderWorkerBanner();
+      renderPipeline();
+      renderLegend();
+      renderTabs();
+      renderCards();
+      renderTables();
+      renderLog();
+    }
+
+    async function refresh() {
+      try {
+        const res = await fetch('/api/status');
+        data = await res.json();
+        render();
+      } catch (e) {
+        document.getElementById('updated').textContent = 'Error: ' + e.message;
+      }
+    }
+
+    async function action(name) {
+      try {
+        const res = await fetch('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: name }) });
+        const out = await res.json();
+        toast(out.error || out.message || JSON.stringify(out));
+        refresh();
+      } catch (e) { toast('Failed: ' + e.message); }
+    }
+
+    async function retryTable(table) {
+      await fetch('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'retry_table', table }) });
+      toast('Reset ' + table + ' to pending');
+      refresh();
+    }
+
+    function closeModal() {
+      document.getElementById('modal').classList.remove('open');
+      detailTable = null;
+    }
+
+    async function openTable(name) {
+      detailTable = name;
+      detailPageNum = 1;
+      document.getElementById('modal').classList.add('open');
+      document.getElementById('modal-title').textContent = name;
+      await loadDetail();
+    }
+
+    async function detailPage(delta) {
+      detailPageNum = Math.max(1, detailPageNum + delta);
+      await loadDetail();
+    }
+
+    async function loadDetail() {
+      if (!detailTable) return;
+      document.getElementById('detail-loading').textContent = 'Loading…';
+      try {
+        const res = await fetch(`/api/table/${encodeURIComponent(detailTable)}?page=${detailPageNum}&limit=${PAGE_SIZE}`);
+        const d = await res.json();
+        if (!d.ok) { toast(d.error || 'Failed to load'); return; }
+
+        document.getElementById('modal-phase').textContent = d.phase_label + ' — ' + d.phase_help;
+        document.getElementById('modal-meta').innerHTML = [
+          ['Status', d.phase_label],
+          ['PK column', d.pk_column || '—'],
+          ['Rows in Postgres', fmt(d.mirror_row_count)],
+          ['CRM expected', fmt(d.crm_row_count)],
+          ['Rows loaded (sync)', fmt(d.rows_loaded)],
+          ['Match', d.row_count_match ? '✓ counts match' : '⚠ mismatch'],
+          ['Backfill started', d.backfill_started_at || '—'],
+          ['Backfill finished', d.backfill_completed_at || '—'],
+          ['Last error', d.last_error ? esc(d.last_error.slice(0,200)) : '—'],
+        ].map(([k,v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('');
+
+        const cols = d.columns || [];
+        document.getElementById('detail-head').innerHTML = '<tr>' + cols.map(c => `<th>${esc(c)}</th>`).join('') + '</tr>';
+        const rows = d.rows || [];
+        document.getElementById('detail-body').innerHTML = rows.length
+          ? rows.map(r => '<tr>' + cols.map(c => `<td title="${esc(r[c])}">${esc(r[c])}</td>`).join('') + '</tr>').join('')
+          : '<tr><td colspan="' + cols.length + '">No rows' + (d.has_mirror_table ? '' : ' — table not created yet') + '</td></tr>';
+
+        const totalPages = Math.max(1, Math.ceil((d.mirror_row_count || 0) / PAGE_SIZE));
+        document.getElementById('pager-info').textContent = `Page ${d.page} of ${totalPages} · ${fmt(d.mirror_row_count)} rows`;
+        document.getElementById('btn-prev').disabled = d.page <= 1;
+        document.getElementById('btn-next').disabled = d.page >= totalPages;
+        document.getElementById('detail-loading').textContent = '';
+      } catch (e) {
+        document.getElementById('detail-loading').textContent = 'Error: ' + e.message;
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>

@@ -9,6 +9,7 @@ import {
   type ActiveFilterChipDescriptor,
   type ExtraActiveFilterChip,
 } from '@/lib/report/filters';
+import { AnimatedChipList } from '@/components/motion';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 
 type RegisterActiveFilterChipsProps = {
@@ -105,30 +106,32 @@ export function RegisterActiveFilterChips({
 
   return (
     <div className="register-filter-chips">
-      {chips.map((chip) => (
-        <button
-          key={chip.id}
-          type="button"
-          className="register-filter-chip"
-          onClick={() => handleRemoveChip(chip)}
-          title={`Remove ${chip.label}`}
-        >
-          <span className="truncate">{chip.label}</span>
-          <X size={12} className="shrink-0" />
-        </button>
-      ))}
-      {extraActiveChips.map((chip) => (
-        <button
-          key={chip.id}
-          type="button"
-          className="register-filter-chip"
-          onClick={() => handleRemoveExtraChip(chip)}
-          title={`Remove ${chip.label}`}
-        >
-          <span className="truncate">{chip.label}</span>
-          <X size={12} className="shrink-0" />
-        </button>
-      ))}
+      <AnimatedChipList>
+        {chips.map((chip) => (
+          <button
+            key={chip.id}
+            type="button"
+            className="register-filter-chip"
+            onClick={() => handleRemoveChip(chip)}
+            title={`Remove ${chip.label}`}
+          >
+            <span className="truncate">{chip.label}</span>
+            <X size={12} className="shrink-0" />
+          </button>
+        ))}
+        {extraActiveChips.map((chip) => (
+          <button
+            key={chip.id}
+            type="button"
+            className="register-filter-chip"
+            onClick={() => handleRemoveExtraChip(chip)}
+            title={`Remove ${chip.label}`}
+          >
+            <span className="truncate">{chip.label}</span>
+            <X size={12} className="shrink-0" />
+          </button>
+        ))}
+      </AnimatedChipList>
       <button type="button" className="register-filter-chip register-filter-chip--clear" onClick={handleClearAll}>
         Clear all
       </button>

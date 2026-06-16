@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Calendar, ChevronDown, Check } from 'lucide-react';
 import { formatLocalDate, parseLocalDateString, endOfLocalDay, startOfLocalDay } from '@/lib/report/filters';
 
@@ -17,9 +18,14 @@ interface DateRangeSelectorProps {
   onChange: (range: DateRange) => void;
 }
 
+const PANEL_WIDTH = 180;
+
 export function DateRangeSelector({ value, startDate, endDate, onChange }: DateRangeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [portalReady, setPortalReady] = useState(false);
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({ visibility: 'hidden' });
+  const rootRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const ranges = [
     {
@@ -77,14 +83,62 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
   ];
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    setPortalReady(true);
   }, []);
+
+  const positionPanel = useCallback(() => {
+    const root = rootRef.current;
+    const panel = panelRef.current;
+    if (!root || !panel) return;
+
+    const trigger = root.getBoundingClientRect();
+    const panelHeight = panel.offsetHeight;
+    const margin = 8;
+    const gap = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    let left = trigger.right - PANEL_WIDTH;
+    if (left + PANEL_WIDTH > vw - margin) {
+      left = Math.max(margin, trigger.right - PANEL_WIDTH);
+    }
+    if (left < margin) left = margin;
+
+    let top = trigger.bottom + gap;
+    if (top + panelHeight > vh - margin) {
+      const above = trigger.top - panelHeight - gap;
+      if (above >= margin) top = above;
+      else top = Math.max(margin, vh - panelHeight - margin);
+    }
+
+    setPanelStyle({
+      position: 'fixed',
+      left,
+      top,
+      width: PANEL_WIDTH,
+      zIndex: 200,
+      visibility: 'visible',
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    positionPanel();
+    const onReflow = () => positionPanel();
+    window.addEventListener('resize', onReflow);
+    window.addEventListener('scroll', onReflow, true);
+    return () => {
+      window.removeEventListener('resize', onReflow);
+      window.removeEventListener('scroll', onReflow, true);
+    };
+  }, [isOpen, positionPanel, value, startDate, endDate]);
+
+  const toggleOpen = () => {
+    if (!isOpen) {
+      setPanelStyle({ visibility: 'hidden' });
+    }
+    setIsOpen(!isOpen);
+  };
 
   let currentLabel = ranges.find(r => r.label === value || (value === '30' && r.label === 'Last 30 Days') || (value === '14' && r.label === 'Last 14 Days') || (value === '7' && r.label === 'Last 7 Days'))?.label || value || 'Select Range';
   if (value === 'Custom Range' && startDate && endDate) {
@@ -92,19 +146,20 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
     currentLabel = `${formatDt(startDate)} - ${formatDt(endDate)}`;
   }
 
-  return (
-    <div className="relative" ref={containerRef}>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="h-8 px-3 bg-white border border-[#e2e8f0] rounded-lg flex items-center gap-2 hover:border-slate-400 transition-all text-[#475569] text-[12px] font-medium min-w-[130px] shadow-sm active:scale-95"
-      >
-        <Calendar size={14} className="text-slate-400" />
-        <span className="flex-1 text-left">{currentLabel}</span>
-        <ChevronDown size={14} className={`text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
-
-      {isOpen && (
-        <div className="absolute top-full right-0 mt-2 w-[180px] bg-white border border-slate-200 shadow-xl rounded-xl z-[150] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+  const panel =
+    isOpen && portalReady ? (
+      <>
+        <div
+          className="fixed inset-0 z-[190]"
+          onClick={() => setIsOpen(false)}
+          aria-hidden
+        />
+        <div
+          ref={panelRef}
+          style={panelStyle}
+          className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl animate-in fade-in zoom-in-95 duration-200"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
           <div className="p-1.5">
             {ranges.map((range) => {
               const isSelected = currentLabel === range.label;
@@ -164,7 +219,21 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
             </div>
           </div>
         </div>
-      )}
+      </>
+    ) : null;
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        type="button"
+        onClick={toggleOpen}
+        className="h-8 px-3 bg-white border border-[#e2e8f0] rounded-lg flex items-center gap-2 hover:border-slate-400 transition-all text-[#475569] text-[12px] font-medium min-w-[130px] shadow-sm active:scale-95"
+      >
+        <Calendar size={14} className="text-slate-400" />
+        <span className="flex-1 text-left">{currentLabel}</span>
+        <ChevronDown size={14} className={`text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      {portalReady && panel ? createPortal(panel, document.body) : null}
     </div>
   );
 }

@@ -22,6 +22,9 @@ export const ARCP_DATE_FILTER_OPTIONS: { value: ArcpDateFilterColumn; label: str
   { value: 'bm_approved_at', label: 'BM Call Approved' },
 ];
 
+/** Default tally date basis for ARCP — BM approval month, not call log date. */
+export const ARCP_DEFAULT_DATE_FILTER_COLUMN: ArcpDateFilterColumn = 'bm_approved_at';
+
 export function isArcpApproveDateColumn(
   column: string | null | undefined
 ): column is 'bm_approved_at' {
@@ -64,6 +67,11 @@ export function resolveArcpCallChunkDays(opts: ArcpClaimsQueryOpts): number {
 export const ARCP_LOAD_CONCURRENCY = 3;
 /** Approve-date queries are heavy — run one CRM request at a time to avoid 30s SQL timeouts. */
 export const ARCP_APPROVE_LOAD_CONCURRENCY = 1;
+/** Postgres-served approve-date chunks can run in parallel without CRM viewstate pressure. */
+export const ARCP_POSTGRES_APPROVE_LOAD_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.ARCP_POSTGRES_APPROVE_LOAD_CONCURRENCY ?? 3) || 3
+);
 /** UI CRM fallback: skip label joins in CRM; resolve from Postgres dims after fetch. */
 export const ARCP_CRM_UI_LIGHTWEIGHT = process.env.ARCP_CRM_UI_LIGHTWEIGHT !== 'false';
 
@@ -101,17 +109,22 @@ export function resolveArcpLoadConcurrency(
   opts: ArcpClaimsQueryOpts,
   plan?: Pick<ArcpLoadPlan, 'chunkCount' | 'spanDays' | 'chunkGranularity'> & {
     crmChunkCount?: number;
+    usePostgres?: boolean;
   }
 ): number {
   const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
-  if (isArcpApproveDateColumn(dateColumn) && (plan?.crmChunkCount ?? 0) > 0) {
+  const isApprove = isArcpApproveDateColumn(dateColumn);
+  if (isApprove && plan?.usePostgres) {
+    return ARCP_POSTGRES_APPROVE_LOAD_CONCURRENCY;
+  }
+  if (isApprove && (plan?.crmChunkCount ?? 0) > 0) {
     return ARCP_APPROVE_LOAD_CONCURRENCY;
   }
   const granularity = plan?.chunkGranularity;
   if (granularity === 'day' || granularity === 'week' || granularity === 'month') {
     return ARCP_LOAD_CONCURRENCY;
   }
-  if (isArcpApproveDateColumn(dateColumn)) {
+  if (isApprove) {
     return ARCP_APPROVE_LOAD_CONCURRENCY;
   }
   return ARCP_LOAD_CONCURRENCY;
@@ -194,13 +207,14 @@ function escapeSql(value: string): string {
 }
 
 export function resolveArcpDateFilterColumn(column: string | null | undefined): ArcpDateFilterColumn {
+  if (column === 'dcalllogdatetime') return column;
   if (column === 'dsolveddatetime') return column;
   if (column === 'bm_approved_at') return column;
   // Legacy URL param from combined "Call Approve Date" filter
   if (column === 'approve') return 'bm_approved_at';
   // Removed HO date basis — fall back to call date
   if (column === 'ho_approved_at') return 'dcalllogdatetime';
-  return 'dcalllogdatetime';
+  return ARCP_DEFAULT_DATE_FILTER_COLUMN;
 }
 
 function appendCsvInFilter(condition: string, column: string, param: string | null | undefined): string {
@@ -1433,14 +1447,35 @@ export function shouldUseClientSideArcpChunks(
   const plan = estimateArcpLoadPlan(opts, hints);
 
   if (hints?.usePostgres) {
-    // Server resolves Postgres vs CRM from its own coverage — do not fan out blindly.
+    // Server reads arcp_lines_hot only — no client-side CRM chunk fan-out.
     if (!hints.coverage) return false;
+    if (hints.coverage.rowCount > 0) return false;
     if (arcpPostgresCoversReportRange(opts, hints)) return false;
     if (plan.crmChunkCount === 0) return false;
     return plan.chunkCount > 1;
   }
 
   return plan.chunkCount > 1;
+}
+
+/**
+ * Load-job chunk windows: one round-trip when Postgres fully covers the filter range;
+ * otherwise same windows as {@link planArcpSummaryDateChunks}.
+ */
+export function planArcpLoadJobChunks(
+  opts: ArcpClaimsQueryOpts,
+  hints?: ArcpLoadEstimateHints
+): { start: string; end: string }[] {
+  if (!opts.startDate || !opts.endDate) {
+    return planArcpSummaryDateChunks(opts, hints);
+  }
+  if (hints?.usePostgres && hints.coverage && hints.coverage.rowCount > 0) {
+    return [{ start: opts.startDate, end: opts.endDate }];
+  }
+  if (arcpPostgresCoversReportRange(opts, hints)) {
+    return [{ start: opts.startDate, end: opts.endDate }];
+  }
+  return planArcpSummaryDateChunks(opts, hints);
 }
 
 /** UI load plan: single round-trip when Postgres serves the tally. */

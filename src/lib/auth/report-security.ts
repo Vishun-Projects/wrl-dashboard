@@ -32,7 +32,28 @@ export async function resolveReportSecurity(
   userId: string,
   opts?: { pagePermission?: string }
 ): Promise<ReportSecurity> {
-  const permissions = await prisma.getUserPermissions(userId);
+  const userProfileResult = await prisma.$queryRawUnsafe<
+    { office_ids?: string[]; role?: string; role_id?: string | null }[]
+  >(
+    `SELECT u.office_ids, u.role, u.role_id
+     FROM public.app_users u
+     WHERE u.id = $1
+     LIMIT 1`,
+    userId
+  );
+  const profile = userProfileResult?.[0];
+
+  let permissions: string[] = [];
+  if (profile?.role_id) {
+    const permissionRows = await prisma.$queryRawUnsafe<{ name: string }[]>(
+      `SELECT ap.name
+       FROM public.app_role_permissions arp
+       JOIN public.app_permissions ap ON ap.id = arp.permission_id
+       WHERE arp.role_id = $1`,
+      profile.role_id
+    );
+    permissions = permissionRows.map((row) => row.name).filter(Boolean);
+  }
 
   if (opts?.pagePermission) {
     if (!hasPagePermission(permissions, opts.pagePermission)) {
@@ -42,10 +63,6 @@ export async function resolveReportSecurity(
     return { isHod: false, assignedOffices: [], forbidden: true };
   }
 
-  const userProfileResult = await prisma.$queryRawUnsafe<
-    { office_ids?: string[]; role?: string }[]
-  >('SELECT office_ids, role FROM public.app_users WHERE id = $1 LIMIT 1', userId);
-  const profile = userProfileResult?.[0];
   const assignedOffices = profile?.office_ids || [];
   const isHod = isHodUser(profile, permissions);
 

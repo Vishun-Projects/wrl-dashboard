@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { requireRequestUser } from '@/lib/auth/server-user';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { exportLocationAuditCsv } from '@/lib/location-audit';
 import {
+  fetchLocationAuditFull,
   fetchLocationAuditList,
   fetchLocationAuditRowDetail,
   fetchLocationAuditSummary,
@@ -14,15 +16,15 @@ import {
 export async function GET(req: NextRequest) {
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await requireRequestUser(req, supabase);
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const security = await resolveLocationAuditSecurity(user.id);
+    const security = await resolveLocationAuditSecurity(user.id, {
+      pagePermission: 'page_location_audit',
+    });
     if (security.forbidden) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
@@ -61,6 +63,28 @@ export async function GET(req: NextRequest) {
         headers: {
           'Content-Type': 'text/csv; charset=utf-8',
           'Content-Disposition': `attachment; filename="location-audit-${params.startDate}-${params.endDate}.csv"`,
+        },
+      });
+    }
+
+    if (mode === 'full') {
+      const { summary, byBranch, analyzedCount, rows, total } =
+        await fetchLocationAuditFull(params);
+      return NextResponse.json({
+        summary,
+        byBranch,
+        analyzedCount,
+        rows,
+        total,
+        meta: {
+          startDate: params.startDate,
+          endDate: params.endDate,
+          callType: params.callType,
+          scope: 'tech_solved_major_breakdown',
+          auditMode: 'pincode_mismatch',
+          analyzedCount,
+          tier: 'full',
+          cap: 2000,
         },
       });
     }

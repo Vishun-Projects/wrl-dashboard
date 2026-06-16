@@ -124,3 +124,50 @@ export function isArcpChunkOutsidePostgresCoverage(
   if (chunk.start > max) return true;
   return false;
 }
+
+const COVERAGE_BASIS_LABEL: Record<ArcpCoverageDateColumn, string> = {
+  dcalllogdatetime: 'Call Date',
+  dsolveddatetime: 'Solve Date',
+  bm_approved_at: 'BM Call Approved',
+};
+
+function formatCoverageDateLabel(ymd: string): string {
+  const [y, m, d] = ymd.slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return ymd.slice(0, 10);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+/** User-facing hint when the mirror has not synced through the selected date basis. */
+export function describeArcpMirrorCoverageGap(
+  startDate: string,
+  endDate: string,
+  coverage: ArcpPostgresCoverage,
+  dateColumn: ArcpCoverageDateColumn
+): string | null {
+  if (startDate > endDate) return null;
+  const basis = COVERAGE_BASIS_LABEL[dateColumn];
+
+  if (coverage.rowCount === 0) {
+    return `No ARCP data in the mirror yet. Run the sync worker to load ${basis} claims.`;
+  }
+
+  const { max } = boundsForColumn(coverage, dateColumn);
+  if (!max) {
+    return `No ${basis} dates in the mirror yet. Sync worker must backfill approval dates before this filter can return rows.`;
+  }
+
+  const covMax = max.slice(0, 10);
+  if (endDate <= covMax) return null;
+
+  const through = formatCoverageDateLabel(covMax);
+  if (startDate > covMax) {
+    return `No ${basis} rows in the mirror for this range. Mirror is current through ${through} — sync is still catching up.`;
+  }
+
+  return `${basis} in the mirror only through ${through}. Later dates in your range are not synced yet.`;
+}

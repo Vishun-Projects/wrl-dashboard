@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
 import { prisma } from '@/lib/db/prisma';
 import { hasPagePermission } from '@/lib/auth/page-access';
+import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import {
   fetchWarrantyMasterFgLines,
@@ -22,15 +22,12 @@ export async function GET(req: NextRequest) {
     }
 
     const token = authHeader.split(' ')[1];
-    const {
-      data: { user },
-      error: authError,
-    } = await supabaseAdmin.auth.getUser(token);
-    if (authError || !user) {
+    const userId = await resolveUserIdFromAccessToken(token);
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const permissions = await (prisma as any).getUserPermissions(user.id);
+    const permissions = await (prisma as any).getUserPermissions(userId);
     if (!hasPagePermission(permissions, 'page_warranty_master')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }

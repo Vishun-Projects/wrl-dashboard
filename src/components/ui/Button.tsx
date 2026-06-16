@@ -1,7 +1,9 @@
 'use client';
 
 import React from 'react';
+import { motion } from 'motion/react';
 import { cn } from '@/lib/cn';
+import { instantTransition, tapScale, tapSpring, usePrefersReducedMotion } from '@/lib/motion/presets';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost';
 export type ButtonSize = 'sm' | 'md';
@@ -30,9 +32,13 @@ export function Button({
   children,
   ...props
 }: ButtonProps) {
+  const reducedMotion = usePrefersReducedMotion();
+
   return (
-    <button
+    <motion.button
       type={type}
+      whileTap={reducedMotion || props.disabled ? undefined : tapScale}
+      transition={reducedMotion ? instantTransition() : tapSpring}
       className={cn(
         'inline-flex shrink-0 items-center justify-center transition-colors disabled:opacity-50',
         variantClasses[variant],
@@ -42,6 +48,6 @@ export function Button({
       {...props}
     >
       {children}
-    </button>
+    </motion.button>
   );
 }

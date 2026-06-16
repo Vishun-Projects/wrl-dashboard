@@ -1,5 +1,6 @@
 import { createClient } from '../supabase/server';
 import { withAppClient } from '../read-model/db';
+import { requireSupabaseUser } from '@/lib/auth/server-user';
 
 type AppUserRow = {
   id: string;
@@ -10,7 +11,6 @@ type AppUserRow = {
   visible_statuses: string[] | null;
   avatar_url: string | null;
   role_id: string | null;
-  report_preferences: unknown;
   created_at: Date | string;
 };
 
@@ -32,7 +32,7 @@ async function fetchPermissionsForRole(roleId: string | null | undefined): Promi
 async function fetchAppUserProfile(userId: string): Promise<AppUserRow | null> {
   return withAppClient(async (client) => {
     const res = await client.query<AppUserRow>(
-      `SELECT id, name, email, role, office_ids, visible_statuses, avatar_url, role_id, report_preferences, created_at
+      `SELECT id, name, email, role, office_ids, visible_statuses, avatar_url, role_id, created_at
        FROM public.app_users
        WHERE id = $1
        LIMIT 1`,
@@ -52,9 +52,8 @@ export async function getUserPermissions(userId: string): Promise<string[]> {
 /** Session from Supabase Auth; profile + permissions from Postgres. */
 export async function getUserInfo() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await requireSupabaseUser(supabase);
+
   if (!user) return null;
 
   const profile = await fetchAppUserProfile(user.id);

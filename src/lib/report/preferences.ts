@@ -1,7 +1,3 @@
-import type { RegisterTableColumnKey } from '@/lib/register/table-columns';
-import {
-  REGISTER_TABLE_COLUMN_KEYS,
-} from '@/lib/register/table-columns';
 import {
   buildReportFilterSnapshot,
   defaultDateRange,
@@ -15,37 +11,6 @@ import {
   resolveRegisterDateSqlColumn,
   type RegisterDateFilterColumn,
 } from '@/lib/trhcalls/query';
-import type { ArcpDateFilterColumn } from '@/lib/arcp-claims/query';
-import { canAccessPath, defaultReportLandingPath } from '@/lib/auth/page-access';
-
-export const USER_REPORT_PREFS_VERSION = 1 as const;
-
-/** Custom ranges wider than this are not saved or restored as the user's usual view. */
-export const MAX_PERSISTED_CUSTOM_RANGE_DAYS = 62;
-
-export function dateRangeSpanDays(start: Date, end: Date): number {
-  const startUtc = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
-  const endUtc = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
-  return Math.floor((endUtc - startUtc) / 86400000) + 1;
-}
-
-/** True for hand-picked custom ranges wider than ~2 months (rolling presets are always allowed). */
-export function isWideCustomDateRange(range: ReportDateRange): boolean {
-  const label = (range.label || '').trim();
-  if (label !== 'Custom Range') return false;
-  return dateRangeSpanDays(range.start, range.end) > MAX_PERSISTED_CUSTOM_RANGE_DAYS;
-}
-
-export function normalizeDateRangeForPreferences(range: ReportDateRange): ReportDateRange {
-  if (isWideCustomDateRange(range)) return defaultDateRange();
-  return range;
-}
-
-function isWideCustomStoredDateRange(stored: StoredReportDateRange | undefined): boolean {
-  if (!stored) return false;
-  const range = resolveRollingDateRange(stored.label, stored.start, stored.end);
-  return isWideCustomDateRange(range);
-}
 
 export type StoredReportDateRange = {
   start: string;
@@ -68,39 +33,6 @@ export type StoredSharedFilters = {
   selectedTechnician?: string[];
 };
 
-export type SerialAuditPreferences = {
-  appliedRepairs?: string[];
-  minCount?: number;
-  includeCancelled?: boolean;
-  showAspBreakdown?: boolean;
-};
-
-export type RegisterPreferences = {
-  visibleColumns?: RegisterTableColumnKey[];
-  pageSize?: number;
-  activeTab?: 'register' | 'summary' | 'accounts';
-};
-
-export type ArcpPreferences = {
-  dateFilterColumn?: ArcpDateFilterColumn;
-};
-
-const VALID_ARCP_DATE_COLUMNS = new Set<ArcpDateFilterColumn>([
-  'dcalllogdatetime',
-  'dsolveddatetime',
-  'bm_approved_at',
-]);
-
-export type UserReportPreferencesV1 = {
-  version: typeof USER_REPORT_PREFS_VERSION;
-  lastReportPath?: string;
-  shared?: StoredSharedFilters;
-  serialAudit?: SerialAuditPreferences;
-  register?: RegisterPreferences;
-  arcp?: ArcpPreferences;
-  updatedAt?: string;
-};
-
 export type RestoreFilterContext = {
   role: string;
   officeIds: string[];
@@ -113,8 +45,6 @@ const MAX_ARRAY_LEN = 64;
 const VALID_PRIORITY = new Set(['major', 'minor']);
 const VALID_PORTAL = new Set(REGISTER_PORTAL_OPTIONS.map((o) => o.value));
 const VALID_STATUS = new Set(REGISTER_STATUS_OPTIONS.map((o) => o.value));
-const VALID_REGISTER_TABS = new Set(['register', 'summary', 'accounts']);
-const VALID_PAGE_SIZES = new Set([25, 50, 100, 200]);
 
 type DatePreset = { label: string; getValue: () => ReportDateRange };
 
@@ -199,11 +129,6 @@ function capStrings(values: unknown, max = MAX_ARRAY_LEN): string[] {
     .slice(0, max);
 }
 
-function intersectStrings(values: string[], allowed: Set<string>): string[] {
-  if (allowed.size === 0) return values;
-  return values.filter((v) => allowed.has(v));
-}
-
 export function resolveRollingDateRange(
   label: string | undefined,
   storedStart?: string,
@@ -233,39 +158,6 @@ export function serializeDateRange(range: ReportDateRange): StoredReportDateRang
   };
 }
 
-export function serializeSharedFilters(snapshot: ReportFilterSnapshot): StoredSharedFilters {
-  return {
-    dateRange: serializeDateRange(normalizeDateRangeForPreferences(snapshot.dateRange)),
-    dateFilterColumn: snapshot.dateFilterColumn,
-    selectedOfficeIds: snapshot.selectedOfficeIds,
-    selectedCallTypes: snapshot.selectedCallTypes,
-    selectedStatus: snapshot.selectedStatus,
-    priorityFilter: snapshot.priorityFilter,
-    portalFilter: snapshot.portalFilter,
-    selectedState: snapshot.selectedState,
-    selectedCity: snapshot.selectedCity,
-    selectedBranch: snapshot.selectedBranch,
-    selectedFranchisee: snapshot.selectedFranchisee,
-    selectedTechnician: snapshot.selectedTechnician,
-  };
-}
-
-function allowedOfficeSet(ctx: RestoreFilterContext): Set<string> {
-  const ids = new Set<string>();
-  for (const id of ctx.visibleOfficeIds) ids.add(String(id));
-  if (ctx.role !== 'hod' && ctx.role !== 'super_admin') {
-    for (const id of ctx.officeIds) ids.add(String(id));
-  }
-  return ids;
-}
-
-function filterOfficeScoped(values: string[], ctx: RestoreFilterContext): string[] {
-  const allowed = allowedOfficeSet(ctx);
-  if (ctx.role === 'hod' || ctx.role === 'super_admin') return capStrings(values);
-  if (allowed.size === 0) return [];
-  return capStrings(values).filter((v) => allowed.has(v));
-}
-
 export function buildRoleDefaultShared(ctx: RestoreFilterContext): StoredSharedFilters {
   const dateRange = serializeDateRange(defaultDateRange());
   const breakdown = findBreakdownCallType(ctx.callTypes);
@@ -291,38 +183,6 @@ export function buildRoleDefaultShared(ctx: RestoreFilterContext): StoredSharedF
   return shared;
 }
 
-export function sanitizeStoredShared(
-  raw: StoredSharedFilters | undefined,
-  ctx: RestoreFilterContext
-): StoredSharedFilters {
-  if (!raw || typeof raw !== 'object') return buildRoleDefaultShared(ctx);
-
-  const callTypeSet = new Set(ctx.callTypes);
-  let dateRange = resolveRollingDateRange(
-    raw.dateRange?.label,
-    raw.dateRange?.start,
-    raw.dateRange?.end
-  );
-  dateRange = normalizeDateRangeForPreferences(dateRange);
-
-  return {
-    dateRange: serializeDateRange(dateRange),
-    dateFilterColumn: resolveRegisterDateSqlColumn(raw.dateFilterColumn),
-    selectedOfficeIds: filterOfficeScoped(raw.selectedOfficeIds ?? [], ctx),
-    selectedCallTypes: capStrings(raw.selectedCallTypes).filter((t) =>
-      callTypeSet.size === 0 ? true : callTypeSet.has(t)
-    ),
-    selectedStatus: capStrings(raw.selectedStatus).filter((s) => VALID_STATUS.has(s)),
-    priorityFilter: capStrings(raw.priorityFilter).filter((p) => VALID_PRIORITY.has(p)),
-    portalFilter: capStrings(raw.portalFilter).filter((p) => VALID_PORTAL.has(p)),
-    selectedState: capStrings(raw.selectedState),
-    selectedCity: capStrings(raw.selectedCity),
-    selectedBranch: filterOfficeScoped(raw.selectedBranch ?? [], ctx),
-    selectedFranchisee: filterOfficeScoped(raw.selectedFranchisee ?? [], ctx),
-    selectedTechnician: capStrings(raw.selectedTechnician),
-  };
-}
-
 export function storedSharedToSnapshot(stored: StoredSharedFilters): ReportFilterSnapshot {
   const dateRange = resolveRollingDateRange(
     stored.dateRange?.label,
@@ -335,174 +195,19 @@ export function storedSharedToSnapshot(stored: StoredSharedFilters): ReportFilte
     pincodeSearch: '',
     dateRange,
     dateFilterColumn: resolveRegisterDateSqlColumn(stored.dateFilterColumn),
-    selectedOfficeIds: stored.selectedOfficeIds ?? [],
-    selectedCallTypes: stored.selectedCallTypes ?? [],
-    selectedStatus: stored.selectedStatus ?? [],
-    priorityFilter: stored.priorityFilter ?? [],
-    portalFilter: stored.portalFilter ?? [],
-    selectedState: stored.selectedState ?? [],
-    selectedCity: stored.selectedCity ?? [],
-    selectedBranch: stored.selectedBranch ?? [],
-    selectedFranchisee: stored.selectedFranchisee ?? [],
-    selectedTechnician: stored.selectedTechnician ?? [],
+    selectedOfficeIds: capStrings(stored.selectedOfficeIds),
+    selectedCallTypes: capStrings(stored.selectedCallTypes),
+    selectedStatus: capStrings(stored.selectedStatus).filter((s) => VALID_STATUS.has(s)),
+    priorityFilter: capStrings(stored.priorityFilter).filter((p) => VALID_PRIORITY.has(p)),
+    portalFilter: capStrings(stored.portalFilter).filter((p) => VALID_PORTAL.has(p)),
+    selectedState: capStrings(stored.selectedState),
+    selectedCity: capStrings(stored.selectedCity),
+    selectedBranch: capStrings(stored.selectedBranch),
+    selectedFranchisee: capStrings(stored.selectedFranchisee),
+    selectedTechnician: capStrings(stored.selectedTechnician),
   });
 }
 
-export function buildRestoredFilterSnapshot(
-  prefs: UserReportPreferencesV1 | null | undefined,
-  ctx: RestoreFilterContext
-): { snapshot: ReportFilterSnapshot; fromSavedPrefs: boolean } {
-  const hasSavedShared =
-    prefs?.shared &&
-    typeof prefs.shared === 'object' &&
-    Object.keys(prefs.shared).length > 0;
-
-  const hadWideCustomDate =
-    hasSavedShared && isWideCustomStoredDateRange(prefs!.shared?.dateRange);
-
-  const stored = hasSavedShared
-    ? sanitizeStoredShared(prefs!.shared, ctx)
-    : buildRoleDefaultShared(ctx);
-
-  return {
-    snapshot: storedSharedToSnapshot(stored),
-    fromSavedPrefs: Boolean(hasSavedShared) && !hadWideCustomDate,
-  };
-}
-
-export function formatRestoredViewSummary(snapshot: ReportFilterSnapshot): string {
-  const parts: string[] = [snapshot.dateRange.label];
-
-  if (snapshot.selectedBranch.length > 0) {
-    parts.push(
-      snapshot.selectedBranch.length === 1
-        ? '1 branch'
-        : `${snapshot.selectedBranch.length} branches`
-    );
-  }
-
-  if (snapshot.selectedStatus.length > 0) {
-    parts.push(
-      snapshot.selectedStatus.length === 1
-        ? '1 status'
-        : `${snapshot.selectedStatus.length} statuses`
-    );
-  }
-
-  if (snapshot.selectedCallTypes.length > 0) {
-    parts.push(
-      snapshot.selectedCallTypes.length === 1
-        ? snapshot.selectedCallTypes[0]
-        : `${snapshot.selectedCallTypes.length} call types`
-    );
-  }
-
-  return parts.join(' · ');
-}
-
-export function resolveLandingPath(
-  prefs: UserReportPreferencesV1 | null | undefined,
-  permissions: string[]
-): string {
-  const fallback = defaultReportLandingPath(permissions);
-  const path = prefs?.lastReportPath;
-  if (!path || !path.startsWith('/report')) return fallback;
-  if (!canAccessPath(permissions, path)) return fallback;
-  return path;
-}
-
-export function sanitizeSerialAuditPrefs(
-  raw: SerialAuditPreferences | undefined
-): SerialAuditPreferences {
-  if (!raw || typeof raw !== 'object') return {};
-  const minCount =
-    typeof raw.minCount === 'number' && raw.minCount >= 1 && raw.minCount <= 99
-      ? Math.floor(raw.minCount)
-      : undefined;
-  return {
-    appliedRepairs: capStrings(raw.appliedRepairs, 32),
-    minCount,
-    includeCancelled: raw.includeCancelled === true ? true : undefined,
-    showAspBreakdown: raw.showAspBreakdown === true ? true : undefined,
-  };
-}
-
-export function sanitizeArcpPrefs(raw: ArcpPreferences | undefined): ArcpPreferences {
-  if (!raw || typeof raw !== 'object') return {};
-  const dateFilterColumn =
-    raw.dateFilterColumn && VALID_ARCP_DATE_COLUMNS.has(raw.dateFilterColumn)
-      ? raw.dateFilterColumn
-      : undefined;
-  return { dateFilterColumn };
-}
-
-export function sanitizeRegisterPrefs(raw: RegisterPreferences | undefined): RegisterPreferences {
-  if (!raw || typeof raw !== 'object') return {};
-  const visibleColumns = capStrings(raw.visibleColumns, REGISTER_TABLE_COLUMN_KEYS.length).filter(
-    (k): k is RegisterTableColumnKey =>
-      REGISTER_TABLE_COLUMN_KEYS.includes(k as RegisterTableColumnKey)
-  );
-  const pageSize =
-    typeof raw.pageSize === 'number' && VALID_PAGE_SIZES.has(raw.pageSize)
-      ? raw.pageSize
-      : undefined;
-  const activeTab =
-    raw.activeTab && VALID_REGISTER_TABS.has(raw.activeTab) ? raw.activeTab : undefined;
-
-  return {
-    visibleColumns: visibleColumns.length > 0 ? visibleColumns : undefined,
-    pageSize,
-    activeTab,
-  };
-}
-
-export function parseUserReportPreferences(raw: unknown): UserReportPreferencesV1 {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { version: USER_REPORT_PREFS_VERSION };
-  }
-
-  const obj = raw as Record<string, unknown>;
-  const lastReportPath =
-    typeof obj.lastReportPath === 'string' && obj.lastReportPath.startsWith('/report')
-      ? obj.lastReportPath
-      : undefined;
-
-  return {
-    version: USER_REPORT_PREFS_VERSION,
-    lastReportPath,
-    shared: obj.shared as StoredSharedFilters | undefined,
-    serialAudit: sanitizeSerialAuditPrefs(obj.serialAudit as SerialAuditPreferences | undefined),
-    register: sanitizeRegisterPrefs(obj.register as RegisterPreferences | undefined),
-    arcp: sanitizeArcpPrefs(obj.arcp as ArcpPreferences | undefined),
-    updatedAt: typeof obj.updatedAt === 'string' ? obj.updatedAt : undefined,
-  };
-}
-
-export function mergeUserReportPreferences(
-  existing: UserReportPreferencesV1,
-  patch: Partial<UserReportPreferencesV1>
-): UserReportPreferencesV1 {
-  return {
-    version: USER_REPORT_PREFS_VERSION,
-    lastReportPath: patch.lastReportPath ?? existing.lastReportPath,
-    shared:
-      patch.shared !== undefined
-        ? { ...existing.shared, ...patch.shared }
-        : existing.shared,
-    serialAudit:
-      patch.serialAudit !== undefined
-        ? { ...existing.serialAudit, ...patch.serialAudit }
-        : existing.serialAudit,
-    register:
-      patch.register !== undefined
-        ? { ...existing.register, ...patch.register }
-        : existing.register,
-    arcp:
-      patch.arcp !== undefined ? { ...existing.arcp, ...patch.arcp } : existing.arcp,
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-export function emptyUserReportPreferences(): UserReportPreferencesV1 {
-  return { version: USER_REPORT_PREFS_VERSION, updatedAt: new Date().toISOString() };
+export function buildDefaultFilterSnapshot(ctx: RestoreFilterContext): ReportFilterSnapshot {
+  return storedSharedToSnapshot(buildRoleDefaultShared(ctx));
 }

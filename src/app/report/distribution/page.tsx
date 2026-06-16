@@ -12,6 +12,7 @@ import {
   FilterX,
 } from 'lucide-react';
 import axios from 'axios';
+import { useDistributionSummary } from '@/lib/report/hooks/useDistributionSummary';
 import {
   DistributionActiveFilters,
   type DistributionFilterChip,
@@ -23,7 +24,8 @@ import {
 } from '@/components/distribution/DistributionTablePanel';
 import { RegisterPageFilters } from '@/components/register/RegisterPageFilters';
 import { RegisterStatsBar } from '@/components/register/RegisterStatsBar';
-import { PageShell, PageLoadingState } from '@/components/layout/PageShell';
+import { PageShell } from '@/components/layout/PageShell';
+import { ReportPageSkeleton } from '@/components/report/ReportLoadingFeedback';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
 import { createClient } from '@/lib/supabase/client';
 import { buildCorpusViewDateFilter, filterCorpusCallsByViewDate } from '@/lib/report/corpus';
@@ -106,10 +108,6 @@ export default function CallDistributionPage() {
     portalFilter,
     pincodeSearch,
     debouncedPincodeSearch,
-    distributionCalls,
-    distributionLoading,
-    fetchDistributionData,
-    rehydrateDistributionFromCache,
     syncCascadeOptionsFromCalls,
     resourcesLoaded,
     offices,
@@ -119,6 +117,12 @@ export default function CallDistributionPage() {
   } = useReportFilters();
 
   const supabase = useMemo(() => createClient(), []);
+  const {
+    calls: distributionCalls,
+    loading: distributionLoading,
+    error: distributionError,
+    refetch: refetchDistribution,
+  } = useDistributionSummary(supabase, appliedFilters, appliedRevision);
 
   const [mounted, setMounted] = useState(false);
 
@@ -185,15 +189,6 @@ export default function CallDistributionPage() {
   useEffect(() => {
     setMounted(true);
   }, []);
-
-  useEffect(() => {
-    rehydrateDistributionFromCache();
-  }, [rehydrateDistributionFromCache]);
-
-  useEffect(() => {
-    if (!prefsReady || !resourcesLoaded || !appliedFilters) return;
-    void fetchDistributionData(true);
-  }, [prefsReady, resourcesLoaded, appliedFilters, appliedRevision, fetchDistributionData]);
 
   useEffect(() => {
     if (distributionCalls.length > 0) {
@@ -851,7 +846,15 @@ export default function CallDistributionPage() {
   };
 
   if (!resourcesLoaded || !mounted) {
-    return <PageLoadingState label="Loading Call Distribution..." />;
+    return (
+      <PageShell
+        title="Call Distribution Audit"
+        icon={<LucideMap size={16} className="text-teal-600" />}
+        bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
+      >
+        <ReportPageSkeleton />
+      </PageShell>
+    );
   }
 
   return (
@@ -862,8 +865,6 @@ export default function CallDistributionPage() {
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
       toolbar={
         <RegisterPageFilters
-          loading={distributionLoading}
-          loadingLabel="Loading calls for distribution map…"
           onClearAll={() => {
             setSelectedPincode('All');
             clearTableLink();
@@ -882,7 +883,7 @@ export default function CallDistributionPage() {
             </button>
           )}
           <button
-            onClick={() => fetchDistributionData(true)}
+            onClick={() => void refetchDistribution()}
             disabled={distributionLoading}
             className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-50 disabled:opacity-50 ui-label"
           >
@@ -948,7 +949,7 @@ export default function CallDistributionPage() {
           <div className="distribution-stats-bar custom-scrollbar shrink-0">
             <div className="distribution-stat-item">
               <span className="distribution-stat-value text-teal-700">
-                {distributionLoading
+                {distributionLoading && distributionCalls.length === 0
                   ? '…'
                   : `${distributionMetrics.franchiseesCount} / ${distributionMetrics.activeTechniciansCount}`}
               </span>
@@ -956,7 +957,9 @@ export default function CallDistributionPage() {
             </div>
             <div className="distribution-stat-item">
               <span className="distribution-stat-value text-slate-900">
-                {distributionLoading ? '…' : `${distributionMetrics.callToTechnicianRatio}x`}
+                {distributionLoading && distributionCalls.length === 0
+                  ? '…'
+                  : `${distributionMetrics.callToTechnicianRatio}x`}
               </span>
               <span className="distribution-stat-label">Calls / tech</span>
             </div>
@@ -973,7 +976,9 @@ export default function CallDistributionPage() {
               }
             >
               <span className="distribution-stat-value text-amber-700">
-                {distributionLoading ? '…' : idleAssigneeKpis.assignedNoCompletions}
+                {distributionLoading && distributionCalls.length === 0
+                  ? '…'
+                  : idleAssigneeKpis.assignedNoCompletions}
               </span>
               <span className="distribution-stat-label">Idle Technicians</span>
             </button>

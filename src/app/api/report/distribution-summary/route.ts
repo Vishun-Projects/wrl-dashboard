@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
-import { prisma } from '@/lib/db/prisma';
+import { fetchAppUserAuthProfile } from '@/lib/auth/app-user-profile';
+import { resolveReportSecurity } from '@/lib/auth/report-security';
+import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
 import { readRegisterFromPostgres } from '@/lib/read-model/flags';
 import { resolveHotWindowCoverage } from '@/lib/read-model/hot-window';
 import { queryDistributionCompactFromPostgres } from '@/lib/read-model/queries/register';
-import { isHodUser } from '@/lib/auth/report-security';
 
 export async function GET(req: NextRequest) {
   try {
@@ -16,11 +16,13 @@ export async function GET(req: NextRequest) {
     if (!authHeader) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const token = authHeader.replace('Bearer ', '');
-    const {
-      data: { user },
-      error: authError,
-    } = await supabaseAdmin.auth.getUser(token);
-    if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const userId = await resolveUserIdFromAccessToken(token);
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const security = await resolveReportSecurity(userId, { pagePermission: 'page_call_distribution' });
+    if (security.forbidden || (!security.isHod && security.assignedOffices.length === 0)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     const { searchParams } = new URL(req.url);
     const startDate = searchParams.get('startDate') || '';
@@ -47,16 +49,11 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const permissions = await (prisma as any).getUserPermissions(user.id);
-    const { data: profile } = await supabaseAdmin
-      .from('app_users')
-      .select('office_ids, visible_statuses, role')
-      .eq('id', user.id)
-      .single();
+    const profile = await fetchAppUserAuthProfile(userId);
 
-    const assignedOffices = profile?.office_ids || [];
+    const assignedOffices = security.assignedOffices;
     const visibleStatuses = profile?.visible_statuses || [];
-    const isHod = isHodUser(profile ?? undefined, permissions);
+    const isHod = security.isHod;
 
     const calls = await queryDistributionCompactFromPostgres({
       officeId,

@@ -668,6 +668,32 @@ export function isDefaultDateRange(range: ReportDateRange): boolean {
   );
 }
 
+/** Subtitle for tier-B report pages — HOD sees all branches; BM sees scoped branch count. */
+export function formatReportScopeSubtitle(
+  dateRange: ReportDateRange,
+  scopedBranchCount: number,
+  scopedFranchiseeCount: number
+): string {
+  const rangeLabel =
+    dateRange.label && dateRange.label !== 'Custom Range'
+      ? dateRange.label
+      : `${toDateString(dateRange.start)} → ${toDateString(dateRange.end)}`;
+  if (scopedFranchiseeCount > 0) {
+    return `${rangeLabel} · ${scopedFranchiseeCount} franchisee${scopedFranchiseeCount > 1 ? 's' : ''}`;
+  }
+  if (scopedBranchCount > 0) {
+    return `${rangeLabel} · your branch${scopedBranchCount > 1 ? 'es' : ''}`;
+  }
+  return `${rangeLabel} · all branches`;
+}
+
+export function isWideOrganizationScope(
+  branchIds: string[],
+  franchiseeIds: string[]
+): boolean {
+  return branchIds.length === 0 && franchiseeIds.length === 0;
+}
+
 /** Page-specific chips (e.g. Serial Audit complaint filter) with custom remove handlers. */
 export type ExtraActiveFilterChip = {
   id: string;

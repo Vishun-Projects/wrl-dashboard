@@ -47,6 +47,8 @@ Also copy from `.env.local`:
 
 **Note:** `READ_*_FROM` and `NEXT_PUBLIC_READ_*_FROM` only control whether reports read from CRM vs Postgres. They do **not** fix `/api/auth/me` 401 — you need the four variables above plus a successful DB restore (`app_users` populated).
 
+**Local dev only:** `SUPABASE_JWT_SECRET` (Legacy JWT Secret) in `.env.local` enables localhost auth when GoTrue HTTPS is blocked. **Do not require it on Vercel** — production uses normal GoTrue `getUser()` / `setSession()` over HTTPS to your VPS.
+
 ## Critical: Redeploy after changing env
 
 `NEXT_PUBLIC_*` variables are **baked in at build time**. Changing env alone is not enough.
@@ -68,3 +70,7 @@ Vercel logs should **no longer** show `exceed_egress_quota`.
 ## Sync on Vercel
 
 Sync **reads** Western CRM (`westerncrm.com`) and **writes** to whatever `DATABASE_URL` is on Vercel → your VPS after cutover. It does not use Supabase cloud.
+
+## CRM full mirror (`old_crm`) — not on Vercel
+
+The raw CRM archive in Postgres database **`old_crm`** is synced by `python scripts/crm_mirror_sync.py` (local PC or VPS cron only). It does **not** use Vercel env vars. See [`docs/crm-mirror-sync.md`](../docs/crm-mirror-sync.md).

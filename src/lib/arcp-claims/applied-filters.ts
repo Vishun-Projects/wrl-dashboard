@@ -1,4 +1,4 @@
-import type { ArcpDateFilterColumn } from './query';
+import { ARCP_DEFAULT_DATE_FILTER_COLUMN, type ArcpDateFilterColumn } from './query';
 
 export type ArcpAppliedFiltersSnapshot = {
   startDateStr: string;
@@ -37,7 +37,8 @@ export function filtersFromLoadJobSnapshot(
   return {
     startDateStr,
     endDateStr,
-    arcpDateFilterColumn: (filters.dateFilterColumn as ArcpDateFilterColumn) ?? 'dcalllogdatetime',
+    arcpDateFilterColumn:
+      (filters.dateFilterColumn as ArcpDateFilterColumn) ?? ARCP_DEFAULT_DATE_FILTER_COLUMN,
     branchParam: branchParam === 'All' ? '' : branchParam,
     franchiseeParam: franchiseeParam === 'All' ? '' : franchiseeParam,
     callTypeParam,

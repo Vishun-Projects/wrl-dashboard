@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { flushSync } from 'react-dom';
+import { AnimatedMetric } from '@/components/motion';
 import {
   REGISTER_STATUS_PRESETS,
   statusPresetMatches,
@@ -60,7 +61,7 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
         onClick={() => commitStatus([])}
         title="Show all calls in the applied date range and filters"
       >
-        <span className="register-stat-value text-slate-900">{(summary.total || 0).toLocaleString()}</span>
+        <AnimatedMetric value={summary.total || 0} className="register-stat-value text-slate-900" />
         <span className="register-stat-label">Total calls</span>
       </button>
 
@@ -71,7 +72,7 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
         title="Solved calls — includes Tech. Solve Call and Closed sub-counts"
       >
         <div className="register-stat-main">
-          <span className="register-stat-value text-emerald-600">{(summary.solved || 0).toLocaleString()}</span>
+          <AnimatedMetric value={summary.solved || 0} className="register-stat-value text-emerald-600" />
           <span className="register-stat-label">Solved</span>
         </div>
         <div className="register-stat-breakdown">
@@ -94,7 +95,7 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
             <span className="register-stat-sub-label" title="Technician solved — fast-close without full closure">
               Tech. Solve Call
             </span>
-            <span className="register-stat-sub-value">{(summary.techSolved || 0).toLocaleString()}</span>
+            <AnimatedMetric value={summary.techSolved || 0} className="register-stat-sub-value" />
           </span>
           <span
             role="button"
@@ -115,7 +116,7 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
             <span className="register-stat-sub-label" title="Fully closed calls (includes rejected closures)">
               Closed
             </span>
-            <span className="register-stat-sub-value">{(summary.closed || 0).toLocaleString()}</span>
+            <AnimatedMetric value={summary.closed || 0} className="register-stat-sub-value" />
           </span>
         </div>
       </button>
@@ -127,7 +128,7 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
         title="Open calls — includes Open Unallocated and Assigned sub-counts"
       >
         <div className="register-stat-main">
-          <span className="register-stat-value text-blue-600">{(summary.open || 0).toLocaleString()}</span>
+          <AnimatedMetric value={summary.open || 0} className="register-stat-value text-blue-600" />
           <span className="register-stat-label">Open</span>
         </div>
         <div className="register-stat-breakdown">
@@ -148,7 +149,7 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
             }}
           >
             <span className="register-stat-sub-label">Open Unallocated</span>
-            <span className="register-stat-sub-value">{(summary.openUnallocated || 0).toLocaleString()}</span>
+            <AnimatedMetric value={summary.openUnallocated || 0} className="register-stat-sub-value" />
           </span>
           <span
             role="button"
@@ -169,7 +170,7 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
             <span className="register-stat-sub-label" title="Open calls with a technician assigned">
               Assigned
             </span>
-            <span className="register-stat-sub-value">{(summary.assigned || 0).toLocaleString()}</span>
+            <AnimatedMetric value={summary.assigned || 0} className="register-stat-sub-value" />
           </span>
         </div>
       </button>
@@ -180,7 +181,7 @@ export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
         onClick={() => togglePreset(REGISTER_STATUS_PRESETS.cancelled)}
         title="Cancelled calls in the current filter scope"
       >
-        <span className="register-stat-value text-rose-600">{(summary.cancelled || 0).toLocaleString()}</span>
+        <AnimatedMetric value={summary.cancelled || 0} className="register-stat-value text-rose-600" />
         <span className="register-stat-label">Cancelled</span>
       </button>
     </div>

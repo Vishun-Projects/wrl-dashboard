@@ -22,18 +22,33 @@ export function portalAuditEtag(payload: PortalAuditPayload): string {
   return `"${createHash('sha256').update(`${payload.version}:${payload.loadedAt}`).digest('hex').slice(0, 16)}"`;
 }
 
-export async function getPortalAuditPayload(): Promise<PortalAuditPayload> {
-  if (serverCache && Date.now() - serverCache.loadedAt < TTL_MS) {
+export async function getPortalAuditPayload(options?: {
+  officeIds?: string[];
+}): Promise<PortalAuditPayload> {
+  if (serverCache && Date.now() - serverCache.loadedAt < TTL_MS && !options?.officeIds?.length) {
     return serverCache;
   }
 
+  const officeIds = options?.officeIds?.filter(Boolean) ?? [];
+  const hasOfficeFilter = officeIds.length > 0;
+
   const [flagsRows, commentCountRows] = await Promise.all([
-    prisma.$queryRawUnsafe<Array<{ call_id: string; flag_type: string }>>(
-      `SELECT call_id, flag_type FROM call_flags`
-    ),
-    prisma.$queryRawUnsafe<Array<{ call_id: string; cnt: number }>>(
-      `SELECT call_id, count(*)::int AS cnt FROM call_comments GROUP BY call_id`
-    ),
+    hasOfficeFilter
+      ? prisma.$queryRawUnsafe<Array<{ call_id: string; flag_type: string }>>(
+          `SELECT call_id, flag_type FROM call_flags WHERE office_id = ANY($1::text[])`,
+          officeIds
+        )
+      : prisma.$queryRawUnsafe<Array<{ call_id: string; flag_type: string }>>(
+          `SELECT call_id, flag_type FROM call_flags`
+        ),
+    hasOfficeFilter
+      ? prisma.$queryRawUnsafe<Array<{ call_id: string; cnt: number }>>(
+          `SELECT call_id, count(*)::int AS cnt FROM call_comments WHERE office_id = ANY($1::text[]) GROUP BY call_id`,
+          officeIds
+        )
+      : prisma.$queryRawUnsafe<Array<{ call_id: string; cnt: number }>>(
+          `SELECT call_id, count(*)::int AS cnt FROM call_comments GROUP BY call_id`
+        ),
   ]);
 
   const flagsByCallId: Record<string, string> = {};
@@ -55,5 +70,14 @@ export async function getPortalAuditPayload(): Promise<PortalAuditPayload> {
     loadedAt: Date.now(),
     version: cacheVersion,
   };
-  return serverCache;
+  if (!hasOfficeFilter) {
+    return serverCache;
+  }
+
+  return {
+    flagsByCallId,
+    commentCountsByCallId,
+    loadedAt: Date.now(),
+    version: cacheVersion,
+  };
 }

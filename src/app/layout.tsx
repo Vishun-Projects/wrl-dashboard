@@ -17,6 +17,8 @@ export const metadata: Metadata = {
   description: "Real-time call review and management portal",
 };
 
+import { SpeedInsights } from '@vercel/speed-insights/next';
+import { Analytics } from '@vercel/analytics/next';
 import { Toaster } from 'sonner';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 
@@ -32,6 +34,8 @@ export default function RootLayout({
           {children}
         </DashboardLayout>
         <Toaster position="bottom-right" richColors closeButton />
+        <SpeedInsights />
+        <Analytics />
       </body>
     </html>
   );

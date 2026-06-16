@@ -17,10 +17,14 @@ export type {
 
 export {
   aggregateWarrantyMasterFgLines,
+  aggregateRowKey,
   buildWarrantyMasterDimsFromFgLines,
+  buildWarrantyMasterFgDetailIndex,
   fgDetailRowsForAggregate,
+  fgDetailRowsForAggregateFromIndex,
   filterWarrantyMasterFgLines,
   summarizeWarrantyMasterRows,
+  type WarrantyMasterFgDetailIndex,
 } from './filter';
 
 export {

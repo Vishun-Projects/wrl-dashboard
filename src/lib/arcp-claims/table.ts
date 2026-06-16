@@ -42,6 +42,34 @@ export type ArcpClaimsTableModel = {
 /** How much service-line detail to show in the tally table. */
 export type ArcpTallyDetailLevel = 'full' | 'category' | 'totals';
 
+/** How service tally sections are grouped. */
+export type ArcpTallyGrouping =
+  | 'category'
+  | 'call_type'
+  | 'call_type_major_minor';
+
+export const ARCP_TALLY_GROUPING_OPTIONS: {
+  value: ArcpTallyGrouping;
+  label: string;
+  title: string;
+}[] = [
+  {
+    value: 'category',
+    label: 'By category',
+    title: 'Call type and product category with Local/Upcountry and Major/Minor rows',
+  },
+  {
+    value: 'call_type',
+    label: 'By call type',
+    title: 'One section per call type with a row per product category',
+  },
+  {
+    value: 'call_type_major_minor',
+    label: 'Call type + Major/Minor',
+    title: 'One section per call type with Major and Minor totals',
+  },
+];
+
 function sumTotalsFromDataRow(row: Extract<ArcpTableRow, { kind: 'data' }>): ArcpClaimsTotals {
   return {
     qty: row.qty,
@@ -127,6 +155,7 @@ export function countArcpCategorySections(model: ArcpClaimsTableModel): number {
 
 export type BuildArcpClaimsTableModelOptions = {
   includeTravel?: boolean;
+  grouping?: ArcpTallyGrouping;
   /** Resolve numeric ncalltype codes (e.g. "35" → "BREAKDOWN"). */
   callTypeLabelsByCode?: Record<string, string>;
   /** Resolve numeric nitemcategory codes when label column is bare digits. */
@@ -158,6 +187,7 @@ type SectionCell = {
 };
 
 type ServiceSection = {
+  callTypeCode: string;
   callTypeLabel: string;
   itemCategoryLabel: string;
   itemCategoryCode: string;
@@ -363,6 +393,7 @@ function bucketAggregates(
 
     if (!serviceBuckets.has(sectionKey)) {
       serviceBuckets.set(sectionKey, {
+        callTypeCode,
         callTypeLabel,
         itemCategoryLabel,
         itemCategoryCode,
@@ -408,26 +439,182 @@ function sortSections(a: ServiceSection, b: ServiceSection) {
   return a.itemCategoryLabel.localeCompare(b.itemCategoryLabel);
 }
 
-export function buildArcpClaimsTableModel(
-  aggregates: ArcpClaimsAggregateRow[],
-  options: BuildArcpClaimsTableModelOptions = {}
-): ArcpClaimsTableModel {
-  const includeTravel = options.includeTravel !== false;
-  const { serviceBuckets, travelTotals } = bucketAggregates(aggregates, options);
-  const rows: ArcpTableRow[] = [];
-  const totals: ArcpClaimsTotals = {
-    qty: 0,
-    amountPayable: 0,
-    branchApproved: 0,
-    hoApproved: 0,
-  };
+type RolledCell = {
+  subLabel: string;
+  sortKey: string;
+  rate: number | null;
+  qty: number;
+  amountPayable: number;
+  branchApproved: number;
+  hoApproved: number;
+};
 
-  const sections = Array.from(serviceBuckets.values())
-    .filter((section) => section.cells.size > 0)
-    .sort(sortSections);
+function mergeRolledCell(target: RolledCell, source: SectionCell) {
+  target.qty += source.qty;
+  target.amountPayable += source.amountPayable;
+  target.branchApproved += source.branchApproved;
+  target.hoApproved += source.hoApproved;
+  if (source.rate != null) {
+    target.rate =
+      target.rate == null ? source.rate : (target.rate + source.rate) / 2;
+  }
+}
+
+function majorMinorBucketFromSortKey(sortKey: string): 'Major' | 'Minor' | 'General' {
+  const mm = sortKey.split('|')[1]?.trim();
+  if (mm === 'Major') return 'Major';
+  if (mm === 'Minor') return 'Minor';
+  return 'General';
+}
+
+function resolveCallTypeHeader(
+  callTypeLabel: string,
+  callTypeCode: string,
+  lookups?: BuildArcpClaimsTableModelOptions
+): string | null {
+  let callTypeDisplay = resolveDisplayLabel(
+    callTypeLabel,
+    callTypeCode,
+    lookups?.callTypeLabelsByCode
+  );
+  if (isBareNumericLabel(callTypeDisplay)) {
+    callTypeDisplay = callTypeCode ? `Type ${callTypeCode}` : '';
+  }
+  return callTypeDisplay || null;
+}
+
+function resolveCategorySubLabel(
+  itemCategoryLabel: string,
+  itemCategoryCode: string,
+  lookups?: BuildArcpClaimsTableModelOptions
+): string | null {
+  let categoryDisplay = resolveDisplayLabel(
+    itemCategoryLabel,
+    itemCategoryCode,
+    lookups?.itemCategoryLabelsByCode
+  );
+  if (isBareNumericLabel(categoryDisplay)) {
+    categoryDisplay = itemCategoryCode ? `Category ${itemCategoryCode}` : '';
+  }
+  return categoryDisplay || null;
+}
+
+function appendDataRows(
+  rows: ArcpTableRow[],
+  totals: ArcpClaimsTotals,
+  dataRows: Extract<ArcpTableRow, { kind: 'data' }>[]
+) {
+  for (const dataRow of dataRows) {
+    rows.push(dataRow);
+    totals.qty += dataRow.qty;
+    totals.amountPayable += dataRow.amountPayable;
+    totals.branchApproved += dataRow.branchApproved;
+    totals.hoApproved += dataRow.hoApproved;
+  }
+}
+
+function buildCallTypeGroupedRows(
+  sections: ServiceSection[],
+  grouping: 'call_type' | 'call_type_major_minor',
+  lookups: BuildArcpClaimsTableModelOptions | undefined,
+  rows: ArcpTableRow[],
+  totals: ArcpClaimsTotals
+) {
+  const byCallType = new Map<
+    string,
+    {
+      callTypeLabel: string;
+      callTypeCode: string;
+      categoryCells: Map<string, RolledCell>;
+      majorMinorCells: Map<string, RolledCell>;
+    }
+  >();
 
   for (const section of sections) {
-    const dataRows = Array.from(section.cells.values())
+    const callTypeKey = section.callTypeCode || section.callTypeLabel;
+    if (!byCallType.has(callTypeKey)) {
+      byCallType.set(callTypeKey, {
+        callTypeLabel: section.callTypeLabel,
+        callTypeCode: section.callTypeCode,
+        categoryCells: new Map(),
+        majorMinorCells: new Map(),
+      });
+    }
+    const bucket = byCallType.get(callTypeKey)!;
+    if (isBareNumericLabel(bucket.callTypeLabel) && !isBareNumericLabel(section.callTypeLabel)) {
+      bucket.callTypeLabel = section.callTypeLabel;
+    }
+
+    if (grouping === 'call_type') {
+      const categoryKey = section.itemCategoryCode || section.itemCategoryLabel;
+      const categoryLabel =
+        resolveCategorySubLabel(
+          section.itemCategoryLabel,
+          section.itemCategoryCode,
+          lookups
+        ) ?? categoryKey;
+      if (!bucket.categoryCells.has(categoryKey)) {
+        bucket.categoryCells.set(categoryKey, {
+          subLabel: categoryLabel,
+          sortKey: categoryKey,
+          rate: null,
+          qty: 0,
+          amountPayable: 0,
+          branchApproved: 0,
+          hoApproved: 0,
+        });
+      }
+      const cell = bucket.categoryCells.get(categoryKey)!;
+      for (const sectionCell of section.cells.values()) {
+        mergeRolledCell(cell, sectionCell);
+      }
+      continue;
+    }
+
+    for (const sectionCell of section.cells.values()) {
+      const bucketKey = majorMinorBucketFromSortKey(sectionCell.sortKey);
+      if (!bucket.majorMinorCells.has(bucketKey)) {
+        bucket.majorMinorCells.set(bucketKey, {
+          subLabel: bucketKey,
+          sortKey: bucketKey,
+          rate: null,
+          qty: 0,
+          amountPayable: 0,
+          branchApproved: 0,
+          hoApproved: 0,
+        });
+      }
+      mergeRolledCell(bucket.majorMinorCells.get(bucketKey)!, sectionCell);
+    }
+  }
+
+  const sortedCallTypes = Array.from(byCallType.values()).sort((a, b) =>
+    a.callTypeLabel.localeCompare(b.callTypeLabel)
+  );
+
+  for (const callTypeBucket of sortedCallTypes) {
+    const header = resolveCallTypeHeader(
+      callTypeBucket.callTypeLabel,
+      callTypeBucket.callTypeCode,
+      lookups
+    );
+    if (!header) continue;
+
+    const rolledCells =
+      grouping === 'call_type'
+        ? Array.from(callTypeBucket.categoryCells.values())
+        : Array.from(callTypeBucket.majorMinorCells.values()).sort((a, b) => {
+            const order = { Major: 0, Minor: 1, General: 2 };
+            return (
+              (order[a.subLabel as keyof typeof order] ?? 9) -
+              (order[b.subLabel as keyof typeof order] ?? 9)
+            );
+          });
+
+    const dataRows = rolledCells
+      .filter((cell) =>
+        rowHasData(cell.qty, cell.amountPayable, cell.branchApproved, cell.hoApproved)
+      )
       .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
       .map(
         (cell): Extract<ArcpTableRow, { kind: 'data' }> => ({
@@ -441,28 +628,67 @@ export function buildArcpClaimsTableModel(
         })
       );
 
-    const header = buildSectionHeader(
-      section.callTypeLabel,
-      section.itemCategoryLabel,
-      section.itemCategoryCode,
-      {
-        callTypeLabelsByCode: options.callTypeLabelsByCode,
-        itemCategoryLabelsByCode: options.itemCategoryLabelsByCode,
-      }
-    );
-    if (!header) continue;
+    if (dataRows.length === 0) continue;
 
-    rows.push({
-      kind: 'section-header',
-      serviceDescription: header,
-    });
+    rows.push({ kind: 'section-header', serviceDescription: header });
+    appendDataRows(rows, totals, dataRows);
+  }
+}
 
-    for (const dataRow of dataRows) {
-      rows.push(dataRow);
-      totals.qty += dataRow.qty;
-      totals.amountPayable += dataRow.amountPayable;
-      totals.branchApproved += dataRow.branchApproved;
-      totals.hoApproved += dataRow.hoApproved;
+export function buildArcpClaimsTableModel(
+  aggregates: ArcpClaimsAggregateRow[],
+  options: BuildArcpClaimsTableModelOptions = {}
+): ArcpClaimsTableModel {
+  const includeTravel = options.includeTravel !== false;
+  const grouping = options.grouping ?? 'category';
+  const { serviceBuckets, travelTotals } = bucketAggregates(aggregates, options);
+  const rows: ArcpTableRow[] = [];
+  const totals: ArcpClaimsTotals = {
+    qty: 0,
+    amountPayable: 0,
+    branchApproved: 0,
+    hoApproved: 0,
+  };
+
+  const sections = Array.from(serviceBuckets.values())
+    .filter((section) => section.cells.size > 0)
+    .sort(sortSections);
+
+  if (grouping === 'call_type' || grouping === 'call_type_major_minor') {
+    buildCallTypeGroupedRows(sections, grouping, options, rows, totals);
+  } else {
+    for (const section of sections) {
+      const dataRows = Array.from(section.cells.values())
+        .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+        .map(
+          (cell): Extract<ArcpTableRow, { kind: 'data' }> => ({
+            kind: 'data',
+            serviceDescriptionSubLabel: cell.subLabel,
+            rate: cell.rate,
+            qty: cell.qty,
+            amountPayable: cell.amountPayable,
+            branchApproved: cell.branchApproved,
+            hoApproved: cell.hoApproved,
+          })
+        );
+
+      const header = buildSectionHeader(
+        section.callTypeLabel,
+        section.itemCategoryLabel,
+        section.itemCategoryCode,
+        {
+          callTypeLabelsByCode: options.callTypeLabelsByCode,
+          itemCategoryLabelsByCode: options.itemCategoryLabelsByCode,
+        }
+      );
+      if (!header) continue;
+
+      rows.push({
+        kind: 'section-header',
+        serviceDescription: header,
+      });
+
+      appendDataRows(rows, totals, dataRows);
     }
   }
 

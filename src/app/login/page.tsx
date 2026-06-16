@@ -1,19 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
-import { createClient } from '@/lib/supabase/client';
-import { useRouter } from 'next/navigation';
-import { resolveLandingPath } from '@/lib/report/preferences';
+import React, { useState } from 'react';
 import { defaultReportLandingPath } from '@/lib/auth/page-access';
 
 export default function LoginPage() {
-  const supabase = createClient();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,27 +15,43 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      const controller = new AbortController();
+      const signInTimeout = setTimeout(() => controller.abort(), 30_000);
+
+      const res = await fetch('/api/auth/sign-in', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        signal: controller.signal,
+        body: JSON.stringify({ email, password }),
       });
 
-      if (error) throw error;
-      try {
-        const res = await axios.get('/api/profile/report-preferences', {
-          withCredentials: true,
-        });
-        const path = resolveLandingPath(
-          res.data.preferences,
-          res.data.permissions ?? ['view_calls']
-        );
-        router.replace(path);
-      } catch {
-        router.replace(defaultReportLandingPath(['view_calls']));
+      clearTimeout(signInTimeout);
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload.error || 'Failed to sign in');
       }
-    } catch (err: any) {
-      setError(err.message || 'Failed to sign in');
-    } finally {
+
+      let landing = defaultReportLandingPath(['view_calls']);
+      try {
+        const meRes = await fetch('/api/auth/me', { credentials: 'include' });
+        if (meRes.ok) {
+          const data = await meRes.json();
+          landing = defaultReportLandingPath(data.permissions ?? ['view_calls']);
+        }
+      } catch {
+        /* use default landing */
+      }
+
+      // Full page load so the new session cookie is included (soft router nav can miss it).
+      window.location.assign(landing);
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setError('Sign-in timed out — check DATABASE_URL / network and retry.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to sign in');
+      }
       setLoading(false);
     }
   };

@@ -6,6 +6,9 @@ import axios from 'axios';
 import { Sidebar } from './Sidebar';
 import { PageAccessGuard } from './PageAccessGuard';
 import { CallDetailDialogProvider } from '@/components/calls/CallDetailDialogProvider';
+import { PerformanceMetricsLogger } from '@/components/performance/PerformanceMetricsLogger';
+import { performanceLogEnabledClient } from '@/lib/performance/log-config';
+import { MotionProvider } from '@/components/motion';
 
 function MainContentPlaceholder() {
   return (
@@ -96,7 +99,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <UserContext.Provider value={{ userProfile, loadingProfile, refreshProfile: fetchProfile }}>
+      <MotionProvider>
       <CallDetailDialogProvider>
+        {performanceLogEnabledClient() ? <PerformanceMetricsLogger /> : null}
         <div className="flex flex-col md:flex-row h-screen overflow-hidden w-screen bg-slate-50 text-slate-700 font-sans">
           <Sidebar user={userProfile} />
           {authReady ? (
@@ -108,6 +113,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           )}
         </div>
       </CallDetailDialogProvider>
+      </MotionProvider>
     </UserContext.Provider>
   );
 }

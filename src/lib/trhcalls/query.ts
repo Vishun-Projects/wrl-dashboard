@@ -237,24 +237,38 @@ export function enrichTrhcallBranchFranchisee<T extends Record<string, unknown>>
   };
 }
 
+export type TrhcallsNcodeShard = { index: number; count: number };
+
 export function buildTrhcallsDeltaSubquery(
   lastSync: string,
   startDate?: string | null,
-  endDate?: string | null
+  endDate?: string | null,
+  opts?: {
+    startDateTime?: string | null;
+    endDateTime?: string | null;
+    ncodeShard?: TrhcallsNcodeShard | null;
+  }
 ): string {
   const lastSyncSafe = lastSync.replace(/'/g, "''");
   let condition = `WHERE ISNULL(editedon, addedon) >= '${lastSyncSafe}'`;
-  if (startDate) {
+  if (opts?.startDateTime) {
+    condition += ` AND dtrndate >= '${opts.startDateTime.replace(/'/g, "''")}'`;
+  } else if (startDate) {
     condition += ` AND dtrndate >= '${startDate.replace(/'/g, "''")}'`;
   }
-  if (endDate) {
+  if (opts?.endDateTime) {
+    condition += ` AND dtrndate <= '${opts.endDateTime.replace(/'/g, "''")}'`;
+  } else if (endDate) {
     condition += ` AND dtrndate <= '${endDate.replace(/'/g, "''")} 23:59:59'`;
+  }
+  if (opts?.ncodeShard && opts.ncodeShard.count > 1) {
+    condition += ` AND (ncode % ${opts.ncodeShard.count}) = ${opts.ncodeShard.index}`;
   }
 
   return `(
     SELECT *
     FROM (
-      SELECT *,
+      SELECT ${TRHCALLS_DEDUP_INNER_COLUMNS},
         ROW_NUMBER() OVER (
           PARTITION BY CASE WHEN ISNULL(vtrnno, '') = '' THEN CAST(ncode AS VARCHAR(50)) ELSE vtrnno END
           ORDER BY ISNULL(editedon, addedon) DESC, ncode DESC
@@ -321,19 +335,44 @@ export function buildTrhcallsDedupSubquery(opts?: {
   /** Default 30 for register/distribution; pass `null` for no fallback (corpus with explicit dates). */
   fallbackDays?: number | null;
   column?: RegisterDateFilterColumn;
+  startDateTime?: string | null;
+  endDateTime?: string | null;
+  ncodeShard?: TrhcallsNcodeShard | null;
 }): string {
-  const dateWhere = buildTrhcallsDateRangeWhere({
-    startDate: opts?.startDate,
-    endDate: opts?.endDate,
-    column: opts?.column,
-    fallbackDays:
-      opts?.fallbackDays === null
-        ? undefined
-        : opts?.fallbackDays !== undefined
-          ? opts.fallbackDays
-          : 30,
-  });
-  const subqueryCondition = dateWhere ? `WHERE ${dateWhere}` : '';
+  let subqueryCondition = '';
+  if (opts?.startDateTime || opts?.endDateTime) {
+    const parts: string[] = [];
+    if (opts.startDateTime) {
+      parts.push(`dtrndate >= '${opts.startDateTime.replace(/'/g, "''")}'`);
+    }
+    if (opts.endDateTime) {
+      parts.push(`dtrndate <= '${opts.endDateTime.replace(/'/g, "''")}'`);
+    }
+    if (opts.ncodeShard && opts.ncodeShard.count > 1) {
+      parts.push(`(ncode % ${opts.ncodeShard.count}) = ${opts.ncodeShard.index}`);
+    }
+    subqueryCondition = parts.length ? `WHERE ${parts.join(' AND ')}` : '';
+  } else {
+    const dateWhere = buildTrhcallsDateRangeWhere({
+      startDate: opts?.startDate,
+      endDate: opts?.endDate,
+      column: opts?.column,
+      fallbackDays:
+        opts?.fallbackDays === null
+          ? undefined
+          : opts?.fallbackDays !== undefined
+            ? opts.fallbackDays
+            : 30,
+    });
+    if (dateWhere) {
+      subqueryCondition = `WHERE ${dateWhere}`;
+      if (opts?.ncodeShard && opts.ncodeShard.count > 1) {
+        subqueryCondition += ` AND (ncode % ${opts.ncodeShard.count}) = ${opts.ncodeShard.index}`;
+      }
+    } else if (opts?.ncodeShard && opts.ncodeShard.count > 1) {
+      subqueryCondition = `WHERE (ncode % ${opts.ncodeShard.count}) = ${opts.ncodeShard.index}`;
+    }
+  }
 
   return `(
     SELECT *
@@ -351,7 +390,7 @@ export function buildTrhcallsDedupSubquery(opts?: {
 }
 
 /** Max rows returned by corpus API before truncated flag. */
-export const CORPUS_MAX_ROWS = 50_000;
+export const CORPUS_MAX_ROWS = 30_000;
 
 const CORPUS_CALL_STATUS_EXPR = `
   CASE
@@ -359,6 +398,98 @@ const CORPUS_CALL_STATUS_EXPR = `
     WHEN tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 THEN 'Cancel'
     ELSE 'Open'
   END`;
+
+/** Shared dimension joins for corpus + read-model sync (no ARCP OUTER APPLY). */
+function buildTrhcallsCorpusJoinsSql(): string {
+  return `
+    LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode
+    LEFT JOIN mstpartyprofile pprof (NOLOCK) ON tc.npartyprofile = pprof.ncode
+    LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode
+    LEFT JOIN mstoffice bo (NOLOCK) ON o.nunder = bo.ncode
+    LEFT JOIN mstoffice op (NOLOCK) ON o.nunder = op.ncode AND o.nunder <> 0
+    LEFT JOIN mstzones z (NOLOCK) ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
+    LEFT JOIN (
+      SELECT nofficeid, COUNT(DISTINCT ncode) as branch_headcount
+      FROM mstusers (NOLOCK)
+      WHERE bactive = 'True'
+      GROUP BY nofficeid
+    ) hc ON o.ncode = hc.nofficeid
+    LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode
+    LEFT JOIN mstoffice f (NOLOCK) ON u.nofficeid = f.ncode
+    LEFT JOIN mstoffice transferoffice (NOLOCK) ON tc.ntransfertooffice = transferoffice.ncode
+    LEFT JOIN mstcity cty (NOLOCK) ON COALESCE(NULLIF(p.ncity, ''), o.ncity) = cty.ncode
+    LEFT JOIN mststate st (NOLOCK) ON cty.nstate = st.ncode
+    LEFT JOIN mstitems (NOLOCK) ON tc.nitem = mstitems.ncode
+    LEFT JOIN mstfixedselection calltype_fs (NOLOCK) ON tc.ncalltype = calltype_fs.ncode AND calltype_fs.vfieldname = 'ncalltype'
+    LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode`;
+}
+
+/** One row per call that has at least one major repair fault (sync-only; avoids per-row scalar subquery). */
+export function buildSyncMajorRepairJoinSql(): string {
+  return `
+    LEFT JOIN (
+      SELECT DISTINCT tf.ncalls, tf.nofficeid
+      FROM trdcalls2fault tf (NOLOCK)
+      INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
+      WHERE r.bmajor = 'True'
+    ) sync_major ON sync_major.ncalls = tc.ncode AND sync_major.nofficeid = tc.nofficeid`;
+}
+
+/** Field list for read-model sync — lightweight; major repair via sync_major join in buildSyncCorpusTableName. */
+export function buildSyncFieldsSql(): string {
+  return `
+    tc.vcclid,
+    tc.ncode,
+    tc.ncode AS id,
+    tc.ncancelreason,
+    tc.ntransfertooffice,
+    tc.vtrnno,
+    tc.vtrnno AS UniqueCallNo,
+    tc.vserialno AS callsvserialno,
+    tc.vtransfercallno,
+    tc.bsolved,
+    tc.bfastclose,
+    tc.bapproval,
+    tc.nengineer,
+    tc.nofficeid,
+    o.ncode AS officeId,
+    o.nunder AS parentId,
+    ISNULL(UPPER(z.vname), 'OTHER') AS region,
+    ISNULL(pprof.vname, 'UNCLASSIFIED') AS account,
+    ISNULL(hc.branch_headcount, 0) AS branch_headcount,
+    0 AS has_visit,
+    tc.editedon,
+    tc.addedon,
+    p.vinstpostalcode AS Pincode,
+    p.vname AS PartyName,
+    p.vinsttel1 AS vinsttel1,
+    p.vinstaddress AS vinstaddress,
+    tc.vpersoncalling,
+    cty.vname AS dbCity,
+    st.vname AS dbState,
+    o.nunder AS office_under,
+    o.vcompanyname AS office_name,
+    bo.vcompanyname AS branch_office_name,
+    u.vname AS serviceman,
+    u.vname AS technician_name,
+    f.vcompanyname AS technician_office_name,
+    f.ncode AS technician_office_id,
+    transferoffice.vcompanyname AS transfer_office_name,
+    ${sqlFranchiseeCodeExpr()} AS franchisee_code,
+    ${sqlFranchiseeNameExpr()} AS franchisee_name,
+    CONVERT(varchar(30), tc.dtrndate, 126) AS callsdtrndate,
+    tc.vcomplaint,
+    mstitems.vname AS itemname,
+    calltype_fs.vdisplayvalue AS calltype,
+    tc.callStatus AS Status,
+    ${CORPUS_CALL_STATUS_EXPR} AS callstatus,
+    tc.bsolved AS callsolved,
+    CONVERT(varchar(30), tc.dsolvedatetime, 126) AS callsolveddate,
+    tc.vsolveremarks,
+    cr.vname AS cancel_reason,
+    CASE WHEN sync_major.ncalls IS NOT NULL THEN 'True' ELSE 'False' END AS is_major_repair
+  `;
+}
 
 /** Shared lightweight field list for report corpus API. */
 export function buildCorpusFieldsSql(): string {
@@ -421,16 +552,42 @@ export function buildCorpusDedupSubquery(opts: {
   endDate?: string | null;
   lastSync?: string | null;
   dateColumn?: RegisterDateFilterColumn;
+  startDateTime?: string | null;
+  endDateTime?: string | null;
+  ncodeShard?: TrhcallsNcodeShard | null;
 }): string {
   if (opts.lastSync) {
-    return buildTrhcallsDeltaSubquery(opts.lastSync, opts.startDate, opts.endDate);
+    return buildTrhcallsDeltaSubquery(opts.lastSync, opts.startDate, opts.endDate, {
+      startDateTime: opts.startDateTime,
+      endDateTime: opts.endDateTime,
+      ncodeShard: opts.ncodeShard,
+    });
   }
   return buildTrhcallsDedupSubquery({
     startDate: opts.startDate,
     endDate: opts.endDate,
     fallbackDays: opts.startDate || opts.endDate ? null : 30,
     column: opts.dateColumn,
+    startDateTime: opts.startDateTime,
+    endDateTime: opts.endDateTime,
+    ncodeShard: opts.ncodeShard,
   });
+}
+
+export function buildSyncCorpusTableName(opts: {
+  startDate?: string | null;
+  endDate?: string | null;
+  lastSync?: string | null;
+  dateColumn?: RegisterDateFilterColumn;
+  startDateTime?: string | null;
+  endDateTime?: string | null;
+  ncodeShard?: TrhcallsNcodeShard | null;
+}): string {
+  return `
+    ${buildCorpusDedupSubquery(opts)}
+    ${buildTrhcallsCorpusJoinsSql()}
+    ${buildSyncMajorRepairJoinSql()}
+  `;
 }
 
 export function buildCorpusTableName(opts: {
@@ -438,29 +595,13 @@ export function buildCorpusTableName(opts: {
   endDate?: string | null;
   lastSync?: string | null;
   dateColumn?: RegisterDateFilterColumn;
+  startDateTime?: string | null;
+  endDateTime?: string | null;
+  ncodeShard?: TrhcallsNcodeShard | null;
 }): string {
   return `
     ${buildCorpusDedupSubquery(opts)}
-    LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode
-    LEFT JOIN mstpartyprofile pprof (NOLOCK) ON tc.npartyprofile = pprof.ncode
-    LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode
-    LEFT JOIN mstoffice bo (NOLOCK) ON o.nunder = bo.ncode
-    LEFT JOIN mstoffice op (NOLOCK) ON o.nunder = op.ncode AND o.nunder <> 0
-    LEFT JOIN mstzones z (NOLOCK) ON (CASE WHEN ISNULL(o.nunder, 0) = 0 THEN o.nzone ELSE op.nzone END) = z.ncode
-    LEFT JOIN (
-      SELECT nofficeid, COUNT(DISTINCT ncode) as branch_headcount
-      FROM mstusers (NOLOCK)
-      WHERE bactive = 'True'
-      GROUP BY nofficeid
-    ) hc ON o.ncode = hc.nofficeid
-    LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode
-    LEFT JOIN mstoffice f (NOLOCK) ON u.nofficeid = f.ncode
-    LEFT JOIN mstoffice transferoffice (NOLOCK) ON tc.ntransfertooffice = transferoffice.ncode
-    LEFT JOIN mstcity cty (NOLOCK) ON COALESCE(NULLIF(p.ncity, ''), o.ncity) = cty.ncode
-    LEFT JOIN mststate st (NOLOCK) ON cty.nstate = st.ncode
-    LEFT JOIN mstitems (NOLOCK) ON tc.nitem = mstitems.ncode
-    LEFT JOIN mstfixedselection calltype_fs (NOLOCK) ON tc.ncalltype = calltype_fs.ncode AND calltype_fs.vfieldname = 'ncalltype'
-    LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode
+    ${buildTrhcallsCorpusJoinsSql()}
     ${REGISTER_ARCP_PICK_OUTER_APPLY}
   `;
 }
@@ -637,7 +778,9 @@ export function buildSerialAuditCallIdsWithRepairSql(opts: {
     where += ` AND (tc.nofficeid IN (${allowed}) OR tc.nofficeid IN (SELECT ncode FROM mstoffice (NOLOCK) WHERE nunder IN (${allowed})))`;
   }
   return `
-    SELECT DISTINCT CAST(tf.ncalls AS VARCHAR(50)) AS call_ncode
+    SELECT DISTINCT
+      CAST(tf.ncalls AS VARCHAR(50)) AS call_ncode,
+      CAST(tf.nofficeid AS VARCHAR(50)) AS call_office_id
     FROM trdcalls2fault tf (NOLOCK)
     INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
     INNER JOIN trhcalls tc (NOLOCK) ON tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid

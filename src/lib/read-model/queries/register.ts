@@ -102,10 +102,14 @@ function buildWhere(params: RegisterPostgresParams): { sql: string; values: unkn
   const values: unknown[] = [];
   let idx = 1;
 
-  if (!params.isHod && params.assignedOffices.length > 0) {
-    clauses.push(`h.nofficeid = ANY($${idx}::bigint[])`);
-    values.push(params.assignedOffices.map(Number));
-    idx++;
+  if (!params.isHod) {
+    if (params.assignedOffices.length === 0) {
+      clauses.push('FALSE');
+    } else {
+      clauses.push(`h.nofficeid = ANY($${idx}::bigint[])`);
+      values.push(params.assignedOffices.map(Number));
+      idx++;
+    }
   }
 
   if (params.officeId && params.officeId !== 'All') {
@@ -239,6 +243,174 @@ function buildWhere(params: RegisterPostgresParams): { sql: string; values: unkn
   return { sql: clauses.join(' AND '), values };
 }
 
+type RegisterTotalsResult = {
+  total: number;
+  summary: {
+    total: number;
+    cancelled: number;
+    solved: number;
+    open: number;
+    openUnallocated: number;
+    assigned: number;
+    techSolved: number;
+    closed: number;
+  };
+};
+
+type RegisterFilterOptionsResult = {
+  statesList: ReturnType<typeof aggregateDistinct>;
+  citiesList: ReturnType<typeof aggregateDistinct>;
+  branchesList: Array<{ ncode: string; vcompanyname: string; call_count: number }>;
+  franchiseesList: Array<{ ncode: string; vcompanyname: string; call_count: number }>;
+  techniciansList: ReturnType<typeof aggregateDistinct>;
+};
+
+/** COUNT + status summary for register filters (deferred from page-1 list query). */
+export async function queryRegisterTotalsFromPostgres(
+  params: Omit<RegisterPostgresParams, 'page' | 'limit' | 'fetchTotals' | 'fetchFilterOptions'>
+): Promise<RegisterTotalsResult> {
+  const fullParams: RegisterPostgresParams = {
+    ...params,
+    page: 1,
+    limit: 1,
+    fetchTotals: false,
+    fetchFilterOptions: false,
+  };
+  const { sql: whereSql, values } = buildWhere(fullParams);
+
+  const summaryRows = await prisma.$queryRawUnsafe<
+    Array<{
+      total: number;
+      cancelled: number;
+      solved: number;
+      open_calls: number;
+      open_unallocated: number;
+      assigned: number;
+      tech_solved: number;
+      closed: number;
+    }>
+  >(
+    `
+    SELECT
+      count(*)::int AS total,
+      count(*) FILTER (WHERE h.status_bucket = 'cancelled')::int AS cancelled,
+      count(*) FILTER (WHERE h.status_bucket IN ('solved', 'tech_solved'))::int AS solved,
+      count(*) FILTER (WHERE h.status_bucket IN ('open_unallocated', 'assigned'))::int AS open_calls,
+      count(*) FILTER (WHERE h.status_bucket = 'open_unallocated')::int AS open_unallocated,
+      count(*) FILTER (WHERE h.status_bucket = 'assigned')::int AS assigned,
+      count(*) FILTER (WHERE h.status_bucket = 'tech_solved')::int AS tech_solved,
+      count(*) FILTER (WHERE h.status_bucket = 'solved')::int AS closed
+    FROM calls_latest_hot h
+    WHERE ${whereSql}
+    `,
+    ...values
+  );
+
+  const summary = summaryRows[0] ?? {
+    total: 0,
+    cancelled: 0,
+    solved: 0,
+    open_calls: 0,
+    open_unallocated: 0,
+    assigned: 0,
+    tech_solved: 0,
+    closed: 0,
+  };
+
+  return {
+    total: summary.total,
+    summary: {
+      total: summary.total,
+      cancelled: summary.cancelled,
+      solved: summary.solved,
+      open: summary.open_calls,
+      openUnallocated: summary.open_unallocated,
+      assigned: summary.assigned,
+      techSolved: summary.tech_solved,
+      closed: summary.closed,
+    },
+  };
+}
+
+/** Cascade dropdown options (lazy-loaded; expensive GROUP BY). */
+export async function queryRegisterFilterOptionsFromPostgres(
+  params: Omit<RegisterPostgresParams, 'page' | 'limit' | 'fetchTotals' | 'fetchFilterOptions'>
+): Promise<RegisterFilterOptionsResult> {
+  const fullParams: RegisterPostgresParams = {
+    ...params,
+    page: 1,
+    limit: 1,
+    fetchTotals: false,
+    fetchFilterOptions: false,
+  };
+  const { sql: whereSql, values } = buildWhere(fullParams);
+
+  const filterRows = await prisma.$queryRawUnsafe<
+    Array<{
+      nofficeid: number;
+      branch_name: string | null;
+      office_under: number | null;
+      franchisee_code: string | null;
+      franchisee_name: string | null;
+      nengineer: number | null;
+      engineer_name: string | null;
+      pincode: string | null;
+      city: string | null;
+      state: string | null;
+      call_count: number;
+    }>
+  >(
+    `
+    SELECT
+      h.nofficeid,
+      h.branch_name,
+      h.office_under,
+      h.franchisee_code,
+      h.franchisee_name,
+      h.nengineer,
+      h.engineer_name,
+      h.pincode,
+      h.city,
+      h.state,
+      count(*)::int AS call_count
+    FROM calls_latest_hot h
+    WHERE ${whereSql}
+    GROUP BY
+      h.nofficeid, h.branch_name, h.office_under, h.franchisee_code,
+      h.franchisee_name, h.nengineer, h.engineer_name, h.pincode, h.city, h.state
+    `,
+    ...values
+  );
+
+  const processedOptions = filterRows.map((row) =>
+    mapCachedRowToRegisterRow({
+      nofficeid: row.nofficeid,
+      office_name: row.branch_name,
+      office_under: row.office_under,
+      franchisee_code: row.franchisee_code,
+      franchisee_name: row.franchisee_name,
+      nengineer: row.nengineer,
+      technician_name: row.engineer_name,
+      Pincode: row.pincode,
+      city: row.city,
+      state: row.state,
+      call_count: row.call_count,
+    })
+  );
+
+  return {
+    statesList: aggregateDistinct(processedOptions, 'state'),
+    citiesList: aggregateDistinct(processedOptions, 'city'),
+    branchesList: aggregateDistinct(processedOptions, 'resolved_branch_code', 'officename').map(
+      (row) => ({ ncode: row.ncode, vcompanyname: row.vname, call_count: row.call_count })
+    ),
+    franchiseesList: aggregateDistinct(processedOptions, 'franchisee_code', 'franchisee_name').map(
+      (row) => ({ ncode: row.ncode, vcompanyname: row.vname, call_count: row.call_count })
+    ),
+    techniciansList: aggregateDistinct(processedOptions, 'nengineer', 'technician_name'),
+  };
+}
+
 export async function queryRegisterFromPostgres(params: RegisterPostgresParams) {
   const { sql: whereSql, values } = buildWhere(params);
   const offset = (params.page - 1) * params.limit;
@@ -268,124 +440,17 @@ export async function queryRegisterFromPostgres(params: RegisterPostgresParams) 
   };
 
   if (params.fetchTotals) {
-    const summaryRows = await prisma.$queryRawUnsafe<
-      Array<{
-        total: number;
-        cancelled: number;
-        solved: number;
-        open_calls: number;
-        open_unallocated: number;
-        assigned: number;
-        tech_solved: number;
-        closed: number;
-      }>
-    >(
-      `
-      SELECT
-        count(*)::int AS total,
-        count(*) FILTER (WHERE h.status_bucket = 'cancelled')::int AS cancelled,
-        count(*) FILTER (WHERE h.status_bucket IN ('solved', 'tech_solved'))::int AS solved,
-        count(*) FILTER (WHERE h.status_bucket IN ('open_unallocated', 'assigned'))::int AS open_calls,
-        count(*) FILTER (WHERE h.status_bucket = 'open_unallocated')::int AS open_unallocated,
-        count(*) FILTER (WHERE h.status_bucket = 'assigned')::int AS assigned,
-        count(*) FILTER (WHERE h.status_bucket = 'tech_solved')::int AS tech_solved,
-        count(*) FILTER (WHERE h.status_bucket = 'solved')::int AS closed
-      FROM calls_latest_hot h
-      WHERE ${whereSql}
-      `,
-      ...values
-    );
-
-    const summary = summaryRows[0] ?? {
-      total: 0,
-      cancelled: 0,
-      solved: 0,
-      open_calls: 0,
-      open_unallocated: 0,
-      assigned: 0,
-      tech_solved: 0,
-      closed: 0,
-    };
-
-    response.total = summary.total;
-    response.summary = {
-      total: summary.total,
-      cancelled: summary.cancelled,
-      solved: summary.solved,
-      open: summary.open_calls,
-      openUnallocated: summary.open_unallocated,
-      assigned: summary.assigned,
-      techSolved: summary.tech_solved,
-      closed: summary.closed,
-    };
+    const totals = await queryRegisterTotalsFromPostgres(params);
+    response.total = totals.total;
+    response.summary = totals.summary;
 
     if (params.fetchFilterOptions !== false) {
-    const filterRows = await prisma.$queryRawUnsafe<
-      Array<{
-        nofficeid: number;
-        branch_name: string | null;
-        office_under: number | null;
-        franchisee_code: string | null;
-        franchisee_name: string | null;
-        nengineer: number | null;
-        engineer_name: string | null;
-        pincode: string | null;
-        city: string | null;
-        state: string | null;
-        call_count: number;
-      }>
-    >(
-      `
-      SELECT
-        h.nofficeid,
-        h.branch_name,
-        h.office_under,
-        h.franchisee_code,
-        h.franchisee_name,
-        h.nengineer,
-        h.engineer_name,
-        h.pincode,
-        h.city,
-        h.state,
-        count(*)::int AS call_count
-      FROM calls_latest_hot h
-      WHERE ${whereSql}
-      GROUP BY
-        h.nofficeid, h.branch_name, h.office_under, h.franchisee_code,
-        h.franchisee_name, h.nengineer, h.engineer_name, h.pincode, h.city, h.state
-      `,
-      ...values
-    );
-
-    const processedOptions = filterRows.map((row) =>
-      mapCachedRowToRegisterRow({
-        nofficeid: row.nofficeid,
-        office_name: row.branch_name,
-        office_under: row.office_under,
-        franchisee_code: row.franchisee_code,
-        franchisee_name: row.franchisee_name,
-        nengineer: row.nengineer,
-        technician_name: row.engineer_name,
-        Pincode: row.pincode,
-        city: row.city,
-        state: row.state,
-        call_count: row.call_count,
-      })
-    );
-
-    response.statesList = aggregateDistinct(processedOptions, 'state');
-    response.citiesList = aggregateDistinct(processedOptions, 'city');
-    response.branchesList = aggregateDistinct(
-      processedOptions,
-      'resolved_branch_code',
-      'officename'
-    ).map((row) => ({ ncode: row.ncode, vcompanyname: row.vname, call_count: row.call_count }));
-    response.franchiseesList = aggregateDistinct(
-      processedOptions,
-      'franchisee_code',
-      'franchisee_name'
-    ).map((row) => ({ ncode: row.ncode, vcompanyname: row.vname, call_count: row.call_count }));
-    response.techniciansList = aggregateDistinct(processedOptions, 'nengineer', 'technician_name');
+      const options = await queryRegisterFilterOptionsFromPostgres(params);
+      response.statesList = options.statesList;
+      response.citiesList = options.citiesList;
+      response.branchesList = options.branchesList;
+      response.franchiseesList = options.franchiseesList;
+      response.techniciansList = options.techniciansList;
     }
   }
 
@@ -522,6 +587,9 @@ export async function queryDistributionCompactFromPostgres(
     id: row.ncode,
     ncode: row.ncode,
     nengineer: row.nengineer ?? 0,
+    serviceman: row.engineer_name,
+    technician_name: row.engineer_name,
+    engineer_name: row.engineer_name,
     franchisee_code: row.franchisee_code,
     franchisee_name: row.franchisee_name,
     officename: row.branch_name,

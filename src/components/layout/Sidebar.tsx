@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import {
   Users,
   FileSpreadsheet,
@@ -18,12 +19,13 @@ import {
   Receipt,
   MapPin,
   Shield,
+  Gauge,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
-import axios from 'axios';
 import { createClient } from '@/lib/supabase/client';
-import { resolveLandingPath } from '@/lib/report/preferences';
+import { defaultReportLandingPath } from '@/lib/auth/page-access';
 import { ALL_PAGE_ACCESS, hasPagePermission } from '@/lib/auth/page-access';
+import { canAccessInsights, PERFORMANCE_INSIGHTS_PATH } from '@/lib/auth/insights-access';
 
 interface SidebarProps {
   user: {
@@ -56,17 +58,7 @@ export function Sidebar({ user }: SidebarProps) {
 
   useEffect(() => {
     if (!user?.id) return;
-    void axios
-      .get('/api/profile/report-preferences', { withCredentials: true })
-      .then((res) => {
-        setHomePath(
-          resolveLandingPath(
-            res.data.preferences,
-            res.data.permissions ?? user.permissions ?? ['view_calls']
-          )
-        );
-      })
-      .catch(() => {});
+    setHomePath(defaultReportLandingPath(user.permissions ?? ['view_calls']));
   }, [user?.id, user?.permissions]);
 
   // Close profile dropdown when clicking outside
@@ -118,6 +110,17 @@ export function Sidebar({ user }: SidebarProps) {
     hasPagePermission(user?.permissions ?? [], item.permission)
   );
 
+  const insightsNavigation = canAccessInsights(user?.email)
+    ? [
+        {
+          name: 'Performance Insights',
+          href: PERFORMANCE_INSIGHTS_PATH,
+          exactPath: true,
+          icon: Gauge,
+        },
+      ]
+    : [];
+
   const sidebarContent = (
     <div className="flex h-full flex-col border-r border-slate-200 bg-white text-slate-600 select-none">
       {/* Header / Logo — h-14 aligns with PageShell header border */}
@@ -127,7 +130,7 @@ export function Sidebar({ user }: SidebarProps) {
           onClick={() => router.push(homePath)}
         >
           <div className="w-8 h-8 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105 active:scale-95 shadow-sm flex-shrink-0">
-            <img src="/western-head-logo-2025.png" alt="W" className="w-5 h-5 object-contain" />
+            <Image src="/western-head-logo-2025.png" alt="W" width={20} height={20} className="object-contain" style={{ height: 'auto' }} />
           </div>
           {!isCollapsed && (
             <div className="flex flex-col justify-center animate-in fade-in slide-in-from-left-2 duration-300">
@@ -147,7 +150,7 @@ export function Sidebar({ user }: SidebarProps) {
 
       {/* Navigation links */}
       <div className="flex-1 py-4 px-3 space-y-1.5 custom-scrollbar">
-        {filteredNavigation.map((item) => {
+        {[...filteredNavigation, ...insightsNavigation].map((item) => {
           const isActive = item.exactPath
             ? pathname === item.href
             : pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -190,7 +193,7 @@ export function Sidebar({ user }: SidebarProps) {
         >
           <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 overflow-hidden flex-shrink-0">
             {user?.avatar_url ? (
-              <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+              <Image src={user.avatar_url} alt="" width={32} height={32} className="h-full w-full object-cover" unoptimized />
             ) : (
               user?.name ? user.name.charAt(0).toUpperCase() : <User size={14} />
             )}
@@ -251,7 +254,7 @@ export function Sidebar({ user }: SidebarProps) {
       <div className="md:hidden w-full h-14 bg-white text-slate-800 border-b border-slate-200 flex items-center justify-between px-4 z-[90] flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center shadow-sm">
-            <img src="/western-head-logo-2025.png" alt="W" className="w-5 h-5 object-contain" />
+            <Image src="/western-head-logo-2025.png" alt="W" width={20} height={20} className="object-contain" style={{ height: 'auto' }} />
           </div>
           <span className="text-xs text-slate-900 ui-label">WRL PORTAL</span>
         </div>

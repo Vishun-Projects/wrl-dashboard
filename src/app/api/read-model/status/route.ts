@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { requireSupabaseUser } from '@/lib/auth/server-user';
 import { prisma } from '@/lib/db/prisma';
 import { getReadModelProgress } from '@/lib/read-model/sync-meta';
 
 export async function GET() {
   const supabase = await createClient();
-  const { data: { user }, error } = await supabase.auth.getUser();
+  const user = await requireSupabaseUser(supabase);
 
-  if (error || !user) {
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

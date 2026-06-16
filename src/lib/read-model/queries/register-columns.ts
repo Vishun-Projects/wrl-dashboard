@@ -43,6 +43,7 @@ export const REGISTER_HOT_COLUMNS = [
 export const DISTRIBUTION_COMPACT_COLUMNS = [
   'h.ncode',
   'h.nengineer',
+  'h.engineer_name',
   'h.franchisee_code',
   'h.franchisee_name',
   'h.branch_name',

@@ -1,4 +1,3 @@
-@import url("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css");
 @import "tailwindcss";
 
 /* Leaflet needs explicit height inside flex/overflow panels (Location Audit, Distribution). */
@@ -235,6 +234,40 @@
 
   .report-toolbar-filters-row .report-toolbar-filters-aging .register-filter-select {
     @apply min-w-[9rem];
+  }
+
+  /* ARCP Claims — single-line filter bar + compact KPI strip */
+  .arcp-claims-toolbar-row {
+    min-height: 2rem;
+  }
+
+  .arcp-date-basis-control {
+    @apply flex h-8 items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 px-0.5;
+  }
+
+  .arcp-claims-kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    background-color: #e2e8f0;
+  }
+
+  @media (min-width: 768px) {
+    .arcp-claims-kpi-strip {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  .arcp-claims-kpi-item {
+    @apply flex flex-col justify-center bg-white px-3 py-1.5;
+  }
+
+  .arcp-claims-kpi-label {
+    @apply text-[9px] font-semibold uppercase tracking-wide text-slate-500;
+  }
+
+  .arcp-claims-kpi-value {
+    @apply text-xs font-semibold leading-tight text-slate-900;
   }
 
   .register-search-input {
@@ -898,6 +931,23 @@
   .warranty-master-table th,
   .warranty-master-table td {
     @apply min-w-0;
+  }
+
+  .warranty-master-stats-bar {
+    @apply sm:grid-cols-2 lg:grid-cols-4;
+  }
+
+  .warranty-master-row {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 2.25rem;
+  }
+
+  .warranty-master-row-expanded {
+    content-visibility: visible;
+  }
+
+  .warranty-master-table tbody tr:nth-child(even of .warranty-master-row) {
+    @apply bg-slate-50/40;
   }
 
   .warranty-master-expanded-cell {

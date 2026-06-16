@@ -12,11 +12,13 @@ import {
   ARCP_MERGE_ACROSS_CHUNKS,
   mergeArcpAggregateRows,
   mergeArcpDetailRows,
-  planArcpSummaryDateChunks,
+  planArcpLoadJobChunks,
   resolveArcpDateFilterColumn,
   type ArcpClaimsAggregateRow,
   type ArcpClaimsDetailRow,
 } from '@/lib/arcp-claims/query';
+import { getArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-query';
+import { readArcpFromPostgres } from '@/lib/read-model/flags';
 
 export type ArcpLoadJobStatus = 'running' | 'partial' | 'complete';
 export type ArcpLoadChunkStatus = 'pending' | 'done' | 'failed';
@@ -129,16 +131,23 @@ async function purgeExpiredLoadJobs(client: import('pg').PoolClient): Promise<vo
   );
 }
 
+/** pg DATE → JS Date is local midnight; toISOString() shifts back a day in IST+. */
+function formatPgDateYmd(value: unknown): string {
+  if (value instanceof Date) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return String(value ?? '').slice(0, 10);
+}
+
 function rowToChunk(row: Record<string, unknown>): ArcpLoadJobChunk {
   const start = row.chunk_start;
   const end = row.chunk_end;
   return {
-    chunkStart:
-      start instanceof Date
-        ? start.toISOString().slice(0, 10)
-        : String(start ?? '').slice(0, 10),
-    chunkEnd:
-      end instanceof Date ? end.toISOString().slice(0, 10) : String(end ?? '').slice(0, 10),
+    chunkStart: formatPgDateYmd(start),
+    chunkEnd: formatPgDateYmd(end),
     cacheKey: String(row.cache_key ?? ''),
     status: String(row.status ?? 'pending') as ArcpLoadChunkStatus,
     errorMessage: row.error_message != null ? String(row.error_message) : null,
@@ -270,7 +279,10 @@ export async function startOrResumeLoadJob(
   if (!(await arcpLoadJobsSchemaReady())) return null;
 
   const jobKey = buildArcpLoadJobKey(opts, kind);
-  const planned = planArcpSummaryDateChunks({ ...opts, crmUiFast: true });
+  const loadHints = readArcpFromPostgres()
+    ? { usePostgres: true as const, coverage: await getArcpPostgresCoverage() }
+    : undefined;
+  const planned = planArcpLoadJobChunks({ ...opts, crmUiFast: true }, loadHints);
   const filters = filtersSnapshot(opts);
 
   return withClient(async (client) => {
@@ -335,8 +347,9 @@ export async function startOrResumeLoadJob(
           if (prevStatus === 'done') {
             const diskRows = await readArcpChunkRowsFromDisk(cacheKey, kind);
             status = diskRows !== null ? 'done' : 'pending';
-          } else if (prevStatus === 'failed') status = 'failed';
-          else if (status !== 'done') status = prevStatus;
+          } else if (prevStatus === 'failed') {
+            status = readArcpFromPostgres() ? 'pending' : 'failed';
+          } else if (status !== 'done') status = prevStatus;
         }
       }
 
@@ -364,6 +377,17 @@ export async function startOrResumeLoadJob(
 
     if (!force) {
       await pruneOrphanJobChunks(client, jobId, planned);
+    }
+
+    if (readArcpFromPostgres() && !force) {
+      await client.query(
+        `
+        UPDATE arcp_claims_load_chunks
+        SET status = 'pending', error_message = NULL, completed_at = NULL
+        WHERE job_id = $1::uuid AND status = 'failed'
+        `,
+        [jobId]
+      );
     }
 
     const chunks = await reconcileJobChunksWithDisk(client, jobId, kind);
