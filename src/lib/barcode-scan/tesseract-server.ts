@@ -1,4 +1,4 @@
-import type { Worker } from 'tesseract.js';
+import { PSM, type Worker } from 'tesseract.js';
 import { resolveTesseractPaths } from './tesseract-paths';
 
 type GlobalOcr = typeof globalThis & {
@@ -12,7 +12,7 @@ const RECYCLE_EVERY = 4;
 let jobCount = 0;
 
 /** PSM modes tuned for sticker/overlay text on field photos. */
-const OCR_PSM_MODES = [11, 6] as const;
+const OCR_PSM_MODES = [PSM.SPARSE_TEXT, PSM.SINGLE_BLOCK] as const;
 
 async function terminateOcrWorker(): Promise<void> {
   if (!g.__barcodeOcrWorker) return;
@@ -56,7 +56,7 @@ export async function ocrBuffer(buffer: Buffer): Promise<string> {
     for (const psm of OCR_PSM_MODES) {
       await worker.setParameters({
         tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
-        tessedit_pageseg_mode: String(psm),
+        tessedit_pageseg_mode: psm,
       });
       const { data } = await worker.recognize(buffer);
       const piece = String(data.text ?? '').trim();

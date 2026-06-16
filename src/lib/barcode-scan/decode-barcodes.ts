@@ -46,8 +46,7 @@ function isDecodeMiss(err: unknown): boolean {
 }
 
 function tryDecode(bitmap: BinaryBitmap): string | null {
-  const reader = new MultiFormatOneDReader();
-  reader.setHints(ONE_D_HINTS);
+  const reader = new MultiFormatOneDReader(ONE_D_HINTS);
   try {
     return reader.decode(bitmap).getText();
   } catch (err) {

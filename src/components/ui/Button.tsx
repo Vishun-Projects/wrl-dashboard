@@ -8,7 +8,7 @@ import { instantTransition, tapScale, tapSpring, usePrefersReducedMotion } from 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost';
 export type ButtonSize = 'sm' | 'md';
 
-export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
+export type ButtonProps = React.ComponentPropsWithoutRef<typeof motion.button> & {
   variant?: ButtonVariant;
   size?: ButtonSize;
 };

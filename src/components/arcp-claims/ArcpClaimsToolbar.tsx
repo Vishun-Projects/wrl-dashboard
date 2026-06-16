@@ -11,6 +11,7 @@ import {
   type ArcpDateFilterColumn,
 } from '@/lib/arcp-claims/query';
 import type { ReportDateRange } from '@/lib/report/filters';
+import type { ArcpLoadStatus } from '@/components/arcp-claims/ArcpClaimsLoadBanner';
 
 const DATE_BASIS_SHORT: Record<ArcpDateFilterColumn, string> = {
   dcalllogdatetime: 'Call',
@@ -30,13 +31,7 @@ type ArcpClaimsToolbarProps = {
   applyDisabled: boolean;
   hasPendingFilterChanges: boolean;
   loading: boolean;
-  loadStatus: {
-    done: number;
-    total: number;
-    percent: number;
-    failedCount?: number;
-    etaRemainingLabel: string | null;
-  } | null;
+  loadStatus: ArcpLoadStatus | null;
   loadProgressLabel: string;
 };
 
