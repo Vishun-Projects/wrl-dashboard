@@ -6,7 +6,9 @@ import { flagPostSchema } from '@/lib/api/schemas/mutations';
 import { canAccessOffice } from '@/lib/trhcalls/office-security';
 
 export async function POST(request: NextRequest) {
-  const auth = await requireBearerUser(request, { pagePermission: 'page_mis_reports' });
+  const auth = await requireBearerUser(request, {
+    rbac: { pageId: 'mis_reports', tabId: 'register' },
+  });
   if (!auth.ok) return auth.response;
   const { userId, security } = auth;
 

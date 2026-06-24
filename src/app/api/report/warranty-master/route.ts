@@ -16,7 +16,7 @@ import {
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await resolveRequestReportSecurity(req, { pagePermission: 'page_warranty_master' });
+    const auth = await resolveRequestReportSecurity(req, { pageId: 'warranty_master' });
     if (!auth.ok) return auth.response;
     const { userId } = auth;
 

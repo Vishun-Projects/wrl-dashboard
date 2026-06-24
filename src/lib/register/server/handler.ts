@@ -181,8 +181,11 @@ export async function handleRegisterGet(req: NextRequest) {
     const userId = await resolveRequestUserId(req, supabase);
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const security = await resolveReportSecurity(userId, { pagePermission: 'page_mis_reports' });
-    if (security.forbidden || (!security.isHod && security.assignedOffices.length === 0)) {
+    const security = await resolveReportSecurity(userId, {
+      pageId: 'mis_reports',
+      tabId: 'register',
+    });
+    if (security.forbidden) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

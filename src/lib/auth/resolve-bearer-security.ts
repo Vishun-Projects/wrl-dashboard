@@ -5,15 +5,16 @@ import { NextResponse } from 'next/server';
 import { resolveReportSecurity, type ReportSecurity } from '@/lib/auth/report-security';
 import { resolveRequestUserId, resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
 import { createClient } from '@/lib/supabase/server';
+import type { RbacApiSpec } from '@/lib/auth/rbac-catalog';
 
 export type BearerAuthResult =
   | { ok: true; userId: string; security: ReportSecurity }
   | { ok: false; response: NextResponse };
 
-/** Authenticate report API requests using Authorization: Bearer <supabase jwt>. */
-export async function resolveBearerReportSecurity(
+/** Authenticate API requests using Bearer token and RBAC spec. */
+export async function resolveBearerRbac(
   authHeader: string | null,
-  opts?: { pagePermission?: string }
+  spec: RbacApiSpec
 ): Promise<BearerAuthResult> {
   if (!authHeader?.startsWith('Bearer ')) {
     return {
@@ -31,9 +32,7 @@ export async function resolveBearerReportSecurity(
     };
   }
 
-  const security = await resolveReportSecurity(userId, {
-    pagePermission: opts?.pagePermission,
-  });
+  const security = await resolveReportSecurity(userId, spec);
   if (security.forbidden) {
     return {
       ok: false,
@@ -44,10 +43,10 @@ export async function resolveBearerReportSecurity(
   return { ok: true, userId, security };
 }
 
-/** Authenticate report API requests via Bearer header or httpOnly session cookies. */
-export async function resolveRequestReportSecurity(
+/** Authenticate API requests via Bearer header or session cookies + RBAC spec. */
+export async function requireRbac(
   req: NextRequest,
-  opts?: { pagePermission?: string }
+  spec: RbacApiSpec
 ): Promise<BearerAuthResult> {
   const supabase = await createClient();
   const userId = await resolveRequestUserId(req, supabase);
@@ -58,9 +57,7 @@ export async function resolveRequestReportSecurity(
     };
   }
 
-  const security = await resolveReportSecurity(userId, {
-    pagePermission: opts?.pagePermission,
-  });
+  const security = await resolveReportSecurity(userId, spec);
   if (security.forbidden) {
     return {
       ok: false,
@@ -69,4 +66,20 @@ export async function resolveRequestReportSecurity(
   }
 
   return { ok: true, userId, security };
+}
+
+/** @deprecated Use requireRbac */
+export async function resolveRequestReportSecurity(
+  req: NextRequest,
+  opts: RbacApiSpec
+): Promise<BearerAuthResult> {
+  return requireRbac(req, opts);
+}
+
+/** @deprecated Use resolveBearerRbac */
+export async function resolveBearerReportSecurity(
+  authHeader: string | null,
+  spec: RbacApiSpec
+): Promise<BearerAuthResult> {
+  return resolveBearerRbac(authHeader, spec);
 }

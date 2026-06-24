@@ -4,6 +4,11 @@ import type ExcelJS from 'exceljs';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { signOutAndGoToLogin } from '@/lib/auth/sign-out-client';
+import {
+  canAccessMisTab,
+  defaultMisTab,
+  visibleTabs,
+} from '@/lib/auth/rbac-catalog';
 import { getBearerAuthHeaders } from '@/lib/supabase/session';
 import axios from 'axios';
 import {
@@ -276,6 +281,35 @@ function reportPerf(
 export default function ReportPageClient() {
   const [mounted, setMounted] = useState(false);
   const { userProfile } = useUser();
+  const userPermissions = (userProfile?.permissions ?? []) as string[];
+  const misAccess = useMemo(
+    () => ({
+      register: canAccessMisTab(userPermissions, 'register'),
+      summary: canAccessMisTab(userPermissions, 'summary'),
+      accounts: canAccessMisTab(userPermissions, 'accounts'),
+    }),
+    [userPermissions]
+  );
+
+  const misTabs = useMemo(
+    () =>
+      visibleTabs(userPermissions, 'mis_reports').map((tab) => ({
+        id: tab.id as 'register' | 'summary' | 'accounts',
+        label: tab.label,
+        allowed: true,
+      })),
+    [userPermissions]
+  );
+
+  useEffect(() => {
+    if (!userProfile?.permissions?.length) return;
+    const nextTab = defaultMisTab(userPermissions);
+    setActiveTab((current) => {
+      if (misTabs.some((tab) => tab.id === current)) return current;
+      return nextTab;
+    });
+  }, [userProfile?.permissions, userPermissions, misTabs]);
+
   const supabase = createClient();
   const router = useRouter();
   const pathname = usePathname();
@@ -1096,11 +1130,8 @@ export default function ReportPageClient() {
         : agingAsOf;
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
       const res = await axios.get('/api/report/summary', {
-        headers: { Authorization: `Bearer ${session?.access_token}` },
+        withCredentials: true,
         params: {
           officeId: summaryOfficeIds,
           callType: callTypesParam,
@@ -1424,6 +1455,7 @@ export default function ReportPageClient() {
 
   useEffect(() => {
     if (!dbInitialized) return;
+    if (!misAccess.register) return;
     if (registerAuthFailedRef.current) return;
     if (debouncedSearch?.trim() || debouncedPincodeSearch?.trim()) return;
     const registerRowsReady =
@@ -1450,6 +1482,7 @@ export default function ReportPageClient() {
     ensureSharedCallsLoaded,
     getSharedCallsForScope,
     distributionCalls,
+    misAccess.register,
   ]);
 
   const applySummaryFromSharedCalls = useCallback((): boolean => {
@@ -2643,7 +2676,7 @@ export default function ReportPageClient() {
 
   const runRegisterFilterLoad = useCallback(
     async (opts?: { force?: boolean }) => {
-      if (!dbInitialized || activeTab !== 'register') return;
+      if (!dbInitialized || activeTab !== 'register' || !misAccess.register) return;
 
       const applied = getAppliedFiltersSnapshot();
       if (!applied) return;
@@ -2756,13 +2789,14 @@ export default function ReportPageClient() {
       applyRegisterFromCorpus,
       applySummaryFromCorpus,
       supabase,
+      misAccess.register,
     ]
   );
 
   useEffect(() => {
-    if (!dbInitialized || activeTab !== 'register' || !appliedFilters) return;
+    if (!dbInitialized || activeTab !== 'register' || !appliedFilters || !misAccess.register) return;
     void runRegisterFilterLoad();
-  }, [dbInitialized, appliedRevision, activeTab, appliedFilters, runRegisterFilterLoad]);
+  }, [dbInitialized, appliedRevision, activeTab, appliedFilters, runRegisterFilterLoad, misAccess.register]);
 
   useEffect(() => {
     if (!dbInitialized || lastRegisterListQueryKeyRef.current) return;
@@ -3273,16 +3307,11 @@ export default function ReportPageClient() {
       <div className="sticky top-0 z-30 flex h-14 flex-shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4">
         <div className="flex items-center gap-6">
           <div className="flex">
-            {[
-              { id: 'register', label: 'Call Register' },
-              { id: 'summary', label: 'Summary Dashboard' },
-              { id: 'accounts', label: 'Key Account MIS' }
-            ].map(tab => (
+            {misTabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => {
-                  const nextTab = tab.id as 'register' | 'summary' | 'accounts';
-                  setActiveTab(nextTab);
+                  setActiveTab(tab.id);
                 }}
                 className={`relative flex h-14 items-center px-3 text-xs font-medium transition-all ${activeTab === tab.id ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600' }`}
               >

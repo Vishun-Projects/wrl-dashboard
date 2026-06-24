@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { defaultReportLandingPath } from '@/lib/auth/page-access';
+import { defaultLandingPath } from '@/lib/auth/rbac-catalog';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -33,15 +33,15 @@ export default function LoginPage() {
         throw new Error(payload.error || 'Failed to sign in');
       }
 
-      let landing = defaultReportLandingPath(['view_calls']);
+      let landing = '/login';
       try {
         const meRes = await fetch('/api/auth/me', { credentials: 'include' });
         if (meRes.ok) {
           const data = await meRes.json();
-          landing = defaultReportLandingPath(data.permissions ?? ['view_calls']);
+          landing = defaultLandingPath(data.permissions ?? []);
         }
       } catch {
-        /* use default landing */
+        /* use login fallback */
       }
 
       // Full page load so the new session cookie is included (soft router nav can miss it).

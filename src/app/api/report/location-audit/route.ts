@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     }
 
     const security = await resolveLocationAuditSecurity(user.id, {
-      pagePermission: 'page_location_audit',
+      pageId: 'location_audit',
     });
     if (security.forbidden) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });

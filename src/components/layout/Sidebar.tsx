@@ -23,8 +23,7 @@ import {
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { defaultReportLandingPath } from '@/lib/auth/page-access';
-import { ALL_PAGE_ACCESS, hasPagePermission } from '@/lib/auth/page-access';
+import { defaultLandingPath, visiblePages } from '@/lib/auth/rbac-catalog';
 import { canAccessInsights, PERFORMANCE_INSIGHTS_PATH } from '@/lib/auth/insights-access';
 
 interface SidebarProps {
@@ -58,7 +57,7 @@ export function Sidebar({ user }: SidebarProps) {
 
   useEffect(() => {
     if (!user?.id) return;
-    setHomePath(defaultReportLandingPath(user.permissions ?? ['view_calls']));
+    setHomePath(defaultLandingPath(user.permissions ?? []));
   }, [user?.id, user?.permissions]);
 
   // Close profile dropdown when clicking outside
@@ -93,32 +92,30 @@ export function Sidebar({ user }: SidebarProps) {
     window.location.assign('/login');
   };
 
-  const navigation = ALL_PAGE_ACCESS.map((page) => ({
+  const pageNav = visiblePages(user?.permissions ?? []);
+  const iconForPath = (path: string) =>
+    path === '/report'
+      ? FileSpreadsheet
+      : path === '/report/distribution'
+        ? Map
+        : path === '/report/arcp-claims'
+          ? Receipt
+          : path === '/report/serial-audit'
+            ? ScanBarcode
+            : path === '/report/location-audit'
+              ? MapPin
+              : path === '/report/warranty-master'
+                ? Shield
+                : path === '/admin/users'
+                  ? Users
+                  : ShieldCheck;
+
+  const filteredNavigation = pageNav.map((page) => ({
     name: page.label,
     href: page.path,
     exactPath: page.exactPath ?? false,
-    icon:
-      page.path === '/report'
-        ? FileSpreadsheet
-        : page.path === '/report/distribution'
-          ? Map
-          : page.path === '/report/arcp-claims'
-            ? Receipt
-            : page.path === '/report/serial-audit'
-              ? ScanBarcode
-              : page.path === '/report/location-audit'
-                ? MapPin
-                : page.path === '/report/warranty-master'
-                  ? Shield
-                  : page.path === '/admin/users'
-                  ? Users
-                  : ShieldCheck,
-    permission: page.permission,
+    icon: iconForPath(page.path),
   }));
-
-  const filteredNavigation = navigation.filter((item) =>
-    hasPagePermission(user?.permissions ?? [], item.permission)
-  );
 
   const insightsNavigation = canAccessInsights(user?.email)
     ? [

@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useUser } from '@/components/layout/DashboardLayout';
-import { canAccessPath, defaultReportLandingPath } from '@/lib/auth/page-access';
+import { canAccessPath, defaultLandingPath } from '@/lib/auth/rbac-catalog';
 import { canAccessInsights, isPerformanceInsightsPath } from '@/lib/auth/insights-access';
 import { feedback } from '@/lib/ui/feedback';
 
@@ -24,7 +24,7 @@ export function PageAccessGuard({ children }: PageAccessGuardProps) {
     if (isPerformanceInsightsPath(pathname)) {
       if (canAccessInsights(userProfile.email)) return;
       feedback.accessDenied();
-      router.replace(defaultReportLandingPath(permissions));
+      router.replace(defaultLandingPath(permissions));
       return;
     }
 
@@ -33,7 +33,7 @@ export function PageAccessGuard({ children }: PageAccessGuardProps) {
     feedback.accessDenied();
     const fallback =
       pathname.startsWith('/report') || pathname.startsWith('/admin')
-        ? defaultReportLandingPath(permissions)
+        ? defaultLandingPath(permissions)
         : '/report';
     router.replace(fallback);
   }, [loadingProfile, userProfile, pathname, router]);

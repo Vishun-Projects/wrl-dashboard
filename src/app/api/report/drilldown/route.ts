@@ -14,13 +14,12 @@ import { drilldownBodySchema } from '@/lib/api/schemas/report-query';
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await resolveRequestReportSecurity(req, { pagePermission: 'page_mis_reports' });
+    const auth = await resolveRequestReportSecurity(req, {
+      pageId: 'mis_reports',
+      tabId: 'register',
+    });
     if (!auth.ok) return auth.response;
-    const { userId, security } = auth;
-
-    if (!security.isHod && security.assignedOffices.length === 0) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
+    const { security } = auth;
 
     const body = await req.json();
     const parsed = drilldownBodySchema.safeParse(body);

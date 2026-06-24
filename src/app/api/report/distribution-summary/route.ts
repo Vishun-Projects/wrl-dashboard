@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Postgres read model required' }, { status: 400 });
     }
 
-    const auth = await resolveRequestReportSecurity(req, { pagePermission: 'page_call_distribution' });
+    const auth = await resolveRequestReportSecurity(req, { pageId: 'call_distribution' });
     if (!auth.ok) return auth.response;
     const { userId, security } = auth;
 

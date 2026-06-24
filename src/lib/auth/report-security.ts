@@ -1,7 +1,12 @@
 import 'server-only';
 
 import { prisma } from '@/lib/db/prisma';
-import { hasAnyReportPageAccess, hasPagePermission } from '@/lib/auth/page-access';
+import {
+  hasAnyReportPageAccess,
+  hasCapability,
+  resolveApiAccess,
+  type RbacApiSpec,
+} from '@/lib/auth/rbac-catalog';
 
 export const HOD_ROLES = [
   'super_admin',
@@ -22,16 +27,15 @@ export function isHodUser(
   permissions: string[]
 ): boolean {
   return (
-    permissions.includes('view_all_offices') ||
+    hasCapability(permissions, 'view_all_offices') ||
     (HOD_ROLES as readonly string[]).includes(profile?.role || '')
   );
 }
 
-/** Resolves HOD flag and office scope for report APIs (register, corpus, serial audit, location audit). */
-export async function resolveReportSecurity(
-  userId: string,
-  opts?: { pagePermission?: string }
-): Promise<ReportSecurity> {
+async function loadUserPermissions(userId: string): Promise<{
+  profile: { office_ids?: string[]; role?: string; role_id?: string | null } | undefined;
+  permissions: string[];
+}> {
   const userProfileResult = await prisma.$queryRawUnsafe<
     { office_ids?: string[]; role?: string; role_id?: string | null }[]
   >(
@@ -55,8 +59,18 @@ export async function resolveReportSecurity(
     permissions = permissionRows.map((row) => row.name).filter(Boolean);
   }
 
-  if (opts?.pagePermission) {
-    if (!hasPagePermission(permissions, opts.pagePermission)) {
+  return { profile, permissions };
+}
+
+/** Resolves HOD flag and office scope for report APIs. */
+export async function resolveReportSecurity(
+  userId: string,
+  spec?: RbacApiSpec | null
+): Promise<ReportSecurity> {
+  const { profile, permissions } = await loadUserPermissions(userId);
+
+  if (spec) {
+    if (!resolveApiAccess(permissions, spec)) {
       return { isHod: false, assignedOffices: [], forbidden: true };
     }
   } else if (!hasAnyReportPageAccess(permissions)) {

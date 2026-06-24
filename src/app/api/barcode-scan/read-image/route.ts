@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const security = await resolveReportSecurity(user.id, { pagePermission: 'page_serial_audit' });
+    const security = await resolveReportSecurity(user.id, { pageId: 'serial_audit' });
     if (security.forbidden) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }

@@ -99,13 +99,11 @@ async function queryEngineersFromCallsCrm(params: {
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await resolveRequestReportSecurity(req, { pagePermission: 'page_mis_reports' });
+    const auth = await resolveRequestReportSecurity(req, {
+      pageId: 'mis_reports',
+      tabId: 'register',
+    });
     if (!auth.ok) return auth.response;
-    const { security } = auth;
-
-    if (!security.isHod && security.assignedOffices.length === 0) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
 
     const { searchParams } = new URL(req.url);
     const branch = searchParams.get('branch');

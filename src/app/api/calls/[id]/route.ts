@@ -23,7 +23,10 @@ export async function GET(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const security = await resolveReportSecurity(user.id, { pagePermission: 'page_mis_reports' });
+  const security = await resolveReportSecurity(user.id, {
+    pageId: 'mis_reports',
+    tabId: 'register',
+  });
   if (security.forbidden || (!security.isHod && security.assignedOffices.length === 0)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }

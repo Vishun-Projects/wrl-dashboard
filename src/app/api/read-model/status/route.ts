@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireSupabaseUser } from '@/lib/auth/server-user';
 import { prisma } from '@/lib/db/prisma';
+import { hasAnyReportPageAccess } from '@/lib/auth/rbac-catalog';
 import { getReadModelProgress } from '@/lib/read-model/sync-meta';
 
 export async function GET() {
@@ -13,7 +14,7 @@ export async function GET() {
   }
 
   const permissions = await (prisma as any).getUserPermissions(user.id);
-  if (!permissions.includes('view_reports') && !permissions.includes('manage_users')) {
+  if (!hasAnyReportPageAccess(permissions) && !permissions.includes('manage_users')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 

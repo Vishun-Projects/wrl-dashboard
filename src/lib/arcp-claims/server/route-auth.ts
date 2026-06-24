@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
-import { hasPagePermission } from '@/lib/auth/page-access';
+import { hasPagePermission, hasCapability } from '@/lib/auth/rbac-catalog';
 import { fetchAppUserAuthProfile } from '@/lib/auth/app-user-profile';
 import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims/query';
 import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
@@ -47,7 +47,7 @@ export async function authenticateArcpClaimsRequest(
 
   const assignedOffices = (profile?.office_ids || []).map(String);
   const isHod =
-    permissions.includes('view_all_offices') ||
+    hasCapability(permissions, 'view_all_offices') ||
     ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(
       profile?.role || ''
     );

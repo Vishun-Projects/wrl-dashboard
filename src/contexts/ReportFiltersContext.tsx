@@ -398,7 +398,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   const userRoleRef = useRef<{ role: string; officeIds: string[]; permissions: string[] }>({
     role: 'branch_manager',
     officeIds: [],
-    permissions: ['view_calls'],
+    permissions: [],
   });
 
   const draftStateRef = useRef({
@@ -590,13 +590,9 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
 
         if (!reportResourcesInflight) {
           reportResourcesInflight = (async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            const headers = session?.access_token
-              ? { Authorization: `Bearer ${session.access_token}` }
-              : {};
             const [officeRes, typesRes] = await Promise.all([
-              axios.get('/api/offices', { headers }),
-              axios.get('/api/report/call-types', { headers }),
+              axios.get('/api/offices', { withCredentials: true }),
+              axios.get('/api/report/call-types', { withCredentials: true }),
             ]);
             const payload = {
               offices: officeRes.data || [],

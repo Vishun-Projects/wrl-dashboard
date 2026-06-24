@@ -43,8 +43,7 @@ export function parseRegisterSearchParams(searchParams: URLSearchParams) {
 
 /** Authenticate and parse Postgres register query params (totals, filter-options, etc.). */
 export async function resolveRegisterPostgresRequest(
-  req: NextRequest,
-  opts?: { pagePermission?: string }
+  req: NextRequest
 ): Promise<RegisterPostgresRequestResult> {
   if (!readRegisterFromPostgres()) {
     return {
@@ -60,9 +59,10 @@ export async function resolveRegisterPostgresRequest(
   }
 
   const security = await resolveReportSecurity(userId, {
-    pagePermission: opts?.pagePermission ?? 'page_mis_reports',
+    pageId: 'mis_reports',
+    tabId: 'register',
   });
-  if (security.forbidden || (!security.isHod && security.assignedOffices.length === 0)) {
+  if (security.forbidden) {
     return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
   }
 

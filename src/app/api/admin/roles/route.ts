@@ -4,11 +4,11 @@ import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser, requireSupabaseUser } from '@/lib/auth/server-user';
 import {
   groupPermissionsForRolesUi,
-  PAGE_PERMISSION_SEED,
+  ALL_PERMISSION_SEED,
 } from '@/lib/auth/page-access';
 
 async function ensurePagePermissionsExist(): Promise<void> {
-  for (const seed of PAGE_PERMISSION_SEED) {
+  for (const seed of ALL_PERMISSION_SEED) {
     await prisma.$queryRawUnsafe(
       `INSERT INTO public.app_permissions (id, name, description)
        SELECT gen_random_uuid(), $1, $2
