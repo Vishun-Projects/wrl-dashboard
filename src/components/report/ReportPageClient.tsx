@@ -7,6 +7,7 @@ import { signOutAndGoToLogin } from '@/lib/auth/sign-out-client';
 import {
   canAccessMisTab,
   defaultMisTab,
+  hasCapability,
   visibleTabs,
 } from '@/lib/auth/rbac-catalog';
 import { getBearerAuthHeaders } from '@/lib/supabase/session';
@@ -309,6 +310,21 @@ export default function ReportPageClient() {
       return nextTab;
     });
   }, [userProfile?.permissions, userPermissions, misTabs]);
+
+  const lacksBranchDataScope = useMemo(() => {
+    if (!userProfile) return false;
+    const perms = userPermissions;
+    if (hasCapability(perms, 'view_all_offices')) return false;
+    const role = String(userProfile.role ?? '');
+    if (
+      ['hod', 'super_admin', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(
+        role
+      )
+    ) {
+      return false;
+    }
+    return (userProfile.office_ids ?? []).length === 0;
+  }, [userProfile, userPermissions]);
 
   const supabase = createClient();
   const router = useRouter();
@@ -3427,6 +3443,13 @@ export default function ReportPageClient() {
           variant={reportBanner.variant}
           message={reportBanner.message}
           onDismiss={clearReportBanner}
+        />
+      ) : null}
+
+      {lacksBranchDataScope && (activeTab === 'summary' || activeTab === 'accounts') ? (
+        <PageAlert
+          variant="warning"
+          message="No branches are assigned to your account. Reports show data only for branches selected in User Management → Permissions & Visibility. Ask an admin to assign branch access, or grant View all offices on your role for national scope."
         />
       ) : null}
 

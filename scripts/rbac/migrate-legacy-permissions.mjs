@@ -3,10 +3,17 @@
  * One-time migration: legacy permissions → canonical RBAC permissions.
  *
  * Usage:
- *   DATABASE_URL=postgres://... node scripts/rbac/migrate-legacy-permissions.mjs
+ *   node scripts/rbac/migrate-legacy-permissions.mjs
  *   node scripts/rbac/migrate-legacy-permissions.mjs --dry-run
  */
+import { config } from 'dotenv';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import pg from 'pg';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+config({ path: join(__dirname, '..', '..', '.env.local') });
+config({ path: join(__dirname, '..', '..', '.env') });
 
 const dryRun = process.argv.includes('--dry-run');
 
@@ -30,6 +37,8 @@ const LEGACY_TO_CANONICAL = {
 
 const ALL_SEED = [
   ...REPORT_PAGE_PERMS.map((name) => ({ name, description: `Page: ${name}` })),
+  { name: 'manage_users', description: 'Create and edit portal users' },
+  { name: 'manage_roles', description: 'Define roles and page permissions' },
   ...MIS_TAB_PERMS.map((name) => ({ name, description: `MIS tab: ${name}` })),
   {
     name: 'view_all_offices',
