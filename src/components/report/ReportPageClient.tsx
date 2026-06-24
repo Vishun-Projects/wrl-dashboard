@@ -3,6 +3,7 @@
 import type ExcelJS from 'exceljs';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { signOutAndGoToLogin } from '@/lib/auth/sign-out-client';
 import { getBearerAuthHeaders } from '@/lib/supabase/session';
 import axios from 'axios';
 import {
@@ -2036,7 +2037,7 @@ export default function ReportPageClient() {
       if (unauthorized) {
         registerAuthFailedRef.current = true;
         fetchControllerRef.current?.abort();
-        window.location.assign('/login');
+        void signOutAndGoToLogin();
         return;
       }
       reportPerf('fetchData', 'request failed (error toast)', opStart, {

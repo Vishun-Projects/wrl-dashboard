@@ -15,11 +15,8 @@ function routeGuards(request: NextRequest, hasUser: boolean): NextResponse | nul
     return NextResponse.redirect(url);
   }
 
-  if (hasUser && (isLoginPage || request.nextUrl.pathname === '/')) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/report';
-    return NextResponse.redirect(url);
-  }
+  // Do not redirect /login → /report here: stale cookies + API 401 caused a reload loop.
+  // Logged-in users on /login are handled client-side after /api/auth/me succeeds.
 
   if (hasUser && request.nextUrl.pathname === '/calls') {
     const url = request.nextUrl.clone();

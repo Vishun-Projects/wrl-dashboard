@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { postQuery } from '@/lib/db/proxy';
-import { resolveReportSecurity } from '@/lib/auth/report-security';
-import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
+import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { appendCallTypeFilter } from '@/lib/trhcalls/query';
 import { appendOfficeSecurityFilter } from '@/lib/trhcalls/office-security';
 import {
@@ -15,19 +14,10 @@ import { drilldownBodySchema } from '@/lib/api/schemas/report-query';
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Bearer token required' }, { status: 401 });
-    }
+    const auth = await resolveRequestReportSecurity(req, { pagePermission: 'page_mis_reports' });
+    if (!auth.ok) return auth.response;
+    const { userId, security } = auth;
 
-    const token = authHeader.slice(7).trim();
-    const userId = await resolveUserIdFromAccessToken(token);
-    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const security = await resolveReportSecurity(userId, { pagePermission: 'page_mis_reports' });
-    if (security.forbidden) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
     if (!security.isHod && security.assignedOffices.length === 0) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }

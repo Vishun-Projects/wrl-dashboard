@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { postQuery } from '@/lib/db/proxy';
 import { readDimsFromPostgres } from '@/lib/read-model/flags';
-import { resolveReportSecurity } from '@/lib/auth/report-security';
-import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
+import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import {
   queryEngineerRowsFromPostgres,
   queryEngineersFromPostgres,
@@ -100,15 +99,11 @@ async function queryEngineersFromCallsCrm(params: {
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) return NextResponse.json({ error: 'No authorization header' }, { status: 401 });
+    const auth = await resolveRequestReportSecurity(req, { pagePermission: 'page_mis_reports' });
+    if (!auth.ok) return auth.response;
+    const { security } = auth;
 
-    const token = authHeader.split(' ')[1];
-    const userId = await resolveUserIdFromAccessToken(token);
-    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const security = await resolveReportSecurity(userId, { pagePermission: 'page_mis_reports' });
-    if (security.forbidden || (!security.isHod && security.assignedOffices.length === 0)) {
+    if (!security.isHod && security.assignedOffices.length === 0) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

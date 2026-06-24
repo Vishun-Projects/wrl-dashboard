@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchAppUserAuthProfile } from '@/lib/auth/app-user-profile';
-import { resolveReportSecurity } from '@/lib/auth/report-security';
-import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
+import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { readRegisterFromPostgres } from '@/lib/read-model/flags';
 import { resolveHotWindowCoverage } from '@/lib/read-model/hot-window';
 import { queryDistributionCompactFromPostgres } from '@/lib/read-model/queries/register';
@@ -12,15 +11,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Postgres read model required' }, { status: 400 });
     }
 
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await resolveRequestReportSecurity(req, { pagePermission: 'page_call_distribution' });
+    if (!auth.ok) return auth.response;
+    const { userId, security } = auth;
 
-    const token = authHeader.replace('Bearer ', '');
-    const userId = await resolveUserIdFromAccessToken(token);
-    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const security = await resolveReportSecurity(userId, { pagePermission: 'page_call_distribution' });
-    if (security.forbidden || (!security.isHod && security.assignedOffices.length === 0)) {
+    if (!security.isHod && security.assignedOffices.length === 0) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

@@ -5,7 +5,8 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { fetchAppUserAuthProfile } from '@/lib/auth/app-user-profile';
 import { isHodUser, resolveReportSecurity } from '@/lib/auth/report-security';
-import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
+import { resolveRequestUserId } from '@/lib/auth/server-user';
+import { createClient } from '@/lib/supabase/server';
 import { readRegisterFromPostgres } from '@/lib/read-model/flags';
 import { resolveHotWindowCoverage } from '@/lib/read-model/hot-window';
 import type { RegisterPostgresParams } from '@/lib/read-model/queries/register';
@@ -52,13 +53,8 @@ export async function resolveRegisterPostgresRequest(
     };
   }
 
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    return { ok: false, response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
-  }
-
-  const token = authHeader.slice(7).trim();
-  const userId = await resolveUserIdFromAccessToken(token);
+  const supabase = await createClient();
+  const userId = await resolveRequestUserId(req, supabase);
   if (!userId) {
     return { ok: false, response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
   }

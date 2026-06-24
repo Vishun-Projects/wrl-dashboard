@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { hasPagePermission } from '@/lib/auth/page-access';
-import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
+import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import {
   fetchWarrantyMasterFgLines,
@@ -16,16 +16,9 @@ import {
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return NextResponse.json({ error: 'No authorization header' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const userId = await resolveUserIdFromAccessToken(token);
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const auth = await resolveRequestReportSecurity(req, { pagePermission: 'page_warranty_master' });
+    if (!auth.ok) return auth.response;
+    const { userId } = auth;
 
     const permissions = await (prisma as any).getUserPermissions(userId);
     if (!hasPagePermission(permissions, 'page_warranty_master')) {

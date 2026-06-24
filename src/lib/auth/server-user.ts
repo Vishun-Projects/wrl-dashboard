@@ -107,17 +107,6 @@ export async function requireRequestUser(
   request: Request,
   supabase: SupabaseClient
 ): Promise<ServerAuthUser | null> {
-  // Dev DB sign-in stores httpOnly cookies; client getSession() is often empty/wrong.
-  if (isDevAuthBypass()) {
-    try {
-      const cookieStore = await cookies();
-      const fromCookies = await resolveSupabaseUserFromCookies(cookieStore.getAll());
-      if (fromCookies) return fromCookies;
-    } catch {
-      /* cookies() unavailable outside request scope */
-    }
-  }
-
   const authHeader = request.headers.get('Authorization');
   if (authHeader?.startsWith('Bearer ')) {
     const bearer = authHeader.slice(7).trim();
@@ -125,6 +114,14 @@ export async function requireRequestUser(
       const userId = await resolveUserIdFromAccessToken(bearer);
       if (userId) return { id: userId };
     }
+  }
+
+  try {
+    const cookieStore = await cookies();
+    const fromCookies = await resolveSupabaseUserFromCookies(cookieStore.getAll());
+    if (fromCookies) return fromCookies;
+  } catch {
+    /* cookies() unavailable outside request scope */
   }
 
   return requireSupabaseUser(supabase);

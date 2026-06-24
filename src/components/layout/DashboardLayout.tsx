@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useLayoutEffect, useCallback, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import axios from 'axios';
+import { signOutAndGoToLogin } from '@/lib/auth/sign-out-client';
 import { Sidebar } from './Sidebar';
 import { PageAccessGuard } from './PageAccessGuard';
 import { CallDetailDialogProvider } from '@/components/calls/CallDetailDialogProvider';
@@ -62,7 +63,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           setUserProfile(null);
           authLoadedRef.current = false;
           if (pathname !== '/login') {
-            router.replace('/login');
+            void signOutAndGoToLogin();
           }
           setLoadingProfile(false);
           return;

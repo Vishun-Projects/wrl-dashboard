@@ -76,6 +76,11 @@ export async function resolveSupabaseUserFromCookies(
   if (!token) return null;
 
   const userId = await verifyLocalAccessToken(token);
-  if (!userId) return null;
-  return { id: userId, email: session?.user?.email };
+  if (userId) return { id: userId, email: session?.user?.email };
+
+  const embedded = session?.user as { id?: string; email?: string } | undefined;
+  if (embedded?.id) {
+    return { id: String(embedded.id), email: embedded.email };
+  }
+  return null;
 }

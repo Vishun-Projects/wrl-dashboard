@@ -14,6 +14,11 @@ type SignInBody = {
   password?: string;
 };
 
+type SessionUser = {
+  id: string;
+  email?: string;
+};
+
 type SessionPayload = {
   access_token: string;
   refresh_token: string;
@@ -74,6 +79,24 @@ function parseProxySession(session: Record<string, unknown>): SessionPayload | n
   };
 }
 
+function shouldPersistSessionWithoutGoTrue(): boolean {
+  if (isDevAuthBypass()) return true;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+  // Self-hosted GoTrue from Vercel may hit bad TLS; write cookies from token response directly.
+  return !url.includes('supabase.co');
+}
+
+function sessionUserFromPayload(user: unknown): SessionUser | undefined {
+  if (user && typeof user === 'object' && user !== null && 'id' in user) {
+    return {
+      id: String((user as { id: string }).id),
+      email:
+        'email' in user ? String((user as { email?: string }).email ?? '') : undefined,
+    };
+  }
+  return undefined;
+}
+
 async function persistSession(sessionPayload: SessionPayload) {
   const cookieStore = await cookies();
   const cookieWriter = {
@@ -89,22 +112,10 @@ async function persistSession(sessionPayload: SessionPayload) {
 
   // setSession() calls GoTrue getUser over HTTPS — fails with UNABLE_TO_VERIFY_LEAF_SIGNATURE
   // when the self-hosted cert is untrusted or the host is blocked on the network.
-  if (isDevAuthBypass()) {
+  if (shouldPersistSessionWithoutGoTrue()) {
     persistSessionCookies(cookieWriter, {
       ...sessionPayload,
-      user:
-        sessionPayload.user &&
-        typeof sessionPayload.user === 'object' &&
-        sessionPayload.user !== null &&
-        'id' in sessionPayload.user
-          ? {
-              id: String((sessionPayload.user as { id: string }).id),
-              email:
-                'email' in sessionPayload.user
-                  ? String((sessionPayload.user as { email?: string }).email ?? '')
-                  : undefined,
-            }
-          : undefined,
+      user: sessionUserFromPayload(sessionPayload.user),
     });
     return;
   }

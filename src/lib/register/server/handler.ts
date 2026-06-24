@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchAppUserAuthProfile } from '@/lib/auth/app-user-profile';
-import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
+import { resolveRequestUserId } from '@/lib/auth/server-user';
+import { createClient } from '@/lib/supabase/server';
 import { postQuery } from '@/lib/db/proxy';
 import { prisma } from '@/lib/db/prisma';
 import { buildRegisterCsvResponse, createRegisterCsvResponse } from './csv-export';
@@ -176,11 +177,8 @@ export async function handleRegisterGet(req: NextRequest) {
     const franchisee = searchParams.get('franchisee') || '';
     const technician = searchParams.get('technician') || '';
 
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const token = authHeader.replace('Bearer ', '');
-    const userId = await resolveUserIdFromAccessToken(token);
+    const supabase = await createClient();
+    const userId = await resolveRequestUserId(req, supabase);
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const security = await resolveReportSecurity(userId, { pagePermission: 'page_mis_reports' });

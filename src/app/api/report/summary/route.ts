@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveBearerReportSecurity } from '@/lib/auth/resolve-bearer-security';
+import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { readSummaryFromPostgres } from '@/lib/read-model/flags';
 import {
@@ -21,7 +21,7 @@ import { deriveSummaryDashboard } from '@/lib/report/summary-derive';
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await resolveBearerReportSecurity(req.headers.get('Authorization'), {
+    const auth = await resolveRequestReportSecurity(req, {
       pagePermission: 'page_mis_reports',
     });
     if (!auth.ok) return auth.response;

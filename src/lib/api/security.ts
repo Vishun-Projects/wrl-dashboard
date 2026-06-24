@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { ZodSchema } from 'zod';
 import {
   resolveBearerReportSecurity,
+  resolveRequestReportSecurity,
   type BearerAuthResult,
 } from '@/lib/auth/resolve-bearer-security';
 
@@ -23,7 +24,7 @@ export async function requireReportApi(
     };
   }
 
-  return resolveBearerReportSecurity(req.headers.get('Authorization'), {
+  return resolveRequestReportSecurity(req, {
     pagePermission: opts?.pagePermission,
   });
 }
