@@ -5,7 +5,7 @@ import {
   clearAddressGeocodeCache,
   getAddressGeocodeCacheCount,
 } from '@/lib/geo/nominatim';
-import { resolveLocationAuditSecurity } from '@/lib/location-audit/server';
+import { resolveReportSecurity } from '@/lib/auth/report-security';
 
 export async function GET() {
   try {
@@ -13,7 +13,7 @@ export async function GET() {
     const user = await requireSupabaseUser(supabase);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const security = await resolveLocationAuditSecurity(user.id);
+    const security = await resolveReportSecurity(user.id, { pageId: 'location_audit' });
     if (security.forbidden) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const count = await getAddressGeocodeCacheCount();
@@ -30,7 +30,7 @@ export async function DELETE() {
     const user = await requireSupabaseUser(supabase);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const security = await resolveLocationAuditSecurity(user.id);
+    const security = await resolveReportSecurity(user.id, { pageId: 'location_audit' });
     if (security.forbidden) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const deleted = await clearAddressGeocodeCache();

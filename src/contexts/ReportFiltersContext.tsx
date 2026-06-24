@@ -14,6 +14,7 @@ import { flushSync } from 'react-dom';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import axios from 'axios';
 import { feedback } from '@/lib/ui/feedback';
+import { seesAllOfficesForUser } from '@/lib/auth/rbac-catalog';
 import type { PageAlertState } from '@/hooks/usePageAlert';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -626,13 +627,12 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   }, [supabase]);
 
   const buildRestoreContextFromLoaded = useCallback((): RestoreFilterContext => {
-    const { role, officeIds } = userRoleRef.current;
-    const visibleOfficeIds =
-      role === 'hod' || role === 'super_admin'
-        ? offices
-            .map((o: { ncode?: string | number }) => String(o.ncode ?? ''))
-            .filter(Boolean)
-        : officeIds;
+    const { role, officeIds, permissions } = userRoleRef.current;
+    const visibleOfficeIds = seesAllOfficesForUser(permissions, role, officeIds)
+      ? offices
+          .map((o: { ncode?: string | number }) => String(o.ncode ?? ''))
+          .filter(Boolean)
+      : officeIds;
     return {
       role,
       officeIds,
@@ -679,12 +679,15 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
           role: userRoleRef.current.role,
           officeIds: userRoleRef.current.officeIds,
           callTypes,
-          visibleOfficeIds:
-            userRoleRef.current.role === 'hod' || userRoleRef.current.role === 'super_admin'
-              ? offices
-                  .map((o: { ncode?: string | number }) => String(o.ncode ?? ''))
-                  .filter(Boolean)
-              : userRoleRef.current.officeIds,
+          visibleOfficeIds: seesAllOfficesForUser(
+            userRoleRef.current.permissions,
+            userRoleRef.current.role,
+            userRoleRef.current.officeIds
+          )
+            ? offices
+                .map((o: { ncode?: string | number }) => String(o.ncode ?? ''))
+                .filter(Boolean)
+            : userRoleRef.current.officeIds,
         };
 
         const snapshot = buildDefaultFilterSnapshot(ctx);

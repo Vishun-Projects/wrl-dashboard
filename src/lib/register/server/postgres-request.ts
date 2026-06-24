@@ -2,8 +2,7 @@ import 'server-only';
 
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db/prisma';
-import { fetchAppUserAuthProfile } from '@/lib/auth/app-user-profile';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { isHodUser, resolveReportSecurity } from '@/lib/auth/report-security';
 import { resolveRequestUserId } from '@/lib/auth/server-user';
 import { createClient } from '@/lib/supabase/server';
@@ -79,10 +78,9 @@ export async function resolveRegisterPostgresRequest(
     };
   }
 
-  const permissions = await (prisma as { getUserPermissions: (id: string) => Promise<string[]> }).getUserPermissions(
-    userId
-  );
-  const profile = await fetchAppUserAuthProfile(userId);
+  const auth = await loadUserAuth(userId);
+  const permissions = auth?.permissions ?? [];
+  const profile = auth?.profile;
 
   const assignedOffices = profile?.office_ids || security.assignedOffices;
   const visibleStatuses = profile?.visible_statuses || [];

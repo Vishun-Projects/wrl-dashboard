@@ -1,18 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserInfo } from '@/lib/auth/session';
-import { canAccessInsights } from '@/lib/auth/insights-access';
+import { canAccessPerformanceInsights } from '@/lib/auth/insights-access';
 import { performanceLogEnabledServer } from '@/lib/performance/log-config';
 import {
   appendPerformanceLogEntries,
   readRecentPerformanceLogEntries,
 } from '@/lib/performance/log-server';
 import type { PerformanceLogBatch, PerformanceLogEntry } from '@/lib/performance/log-types';
-
-function canWritePerformanceLog(email: string | null | undefined): boolean {
-  if (!email) return false;
-  if (process.env.NODE_ENV === 'development') return true;
-  return canAccessInsights(email);
-}
 
 function sanitizeEntry(entry: PerformanceLogEntry, userEmail: string | null): PerformanceLogEntry {
   return {
@@ -33,7 +27,7 @@ export async function POST(req: NextRequest) {
   }
 
   const userInfo = await getUserInfo();
-  if (!userInfo || !canWritePerformanceLog(userInfo.email)) {
+  if (!userInfo || !canAccessPerformanceInsights(userInfo.permissions)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -59,7 +53,7 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   const userInfo = await getUserInfo();
-  if (!userInfo || !canAccessInsights(userInfo.email)) {
+  if (!userInfo || !canAccessPerformanceInsights(userInfo.permissions)) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
@@ -68,10 +62,6 @@ export async function GET(req: NextRequest) {
     500
   );
   const { file, entries } = await readRecentPerformanceLogEntries(limit);
-  return NextResponse.json({
-    enabled: performanceLogEnabledServer(),
-    file,
-    count: entries.length,
-    entries,
-  });
+
+  return NextResponse.json({ file, entries });
 }

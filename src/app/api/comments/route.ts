@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { prisma } from '@/lib/db/prisma';
-import { fetchAppUserAuthProfile } from '@/lib/auth/app-user-profile';
-import { requireRequestUser } from '@/lib/auth/server-user';
 import { withAppClient } from '@/lib/read-model/db';
-import { clearPortalAuditServerCache } from '@/lib/report/portal-audit-server';
 import { commentPostSchema } from '@/lib/api/schemas/mutations';
+import { clearPortalAuditServerCache } from '@/lib/report/portal-audit-server';
+import { requireRbac } from '@/lib/auth/resolve-bearer-security';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { canAccessOffice, seesAllOffices } from '@/lib/trhcalls/office-security';
+import { isHodUser } from '@/lib/auth/report-security';
 
 type CommentRow = {
   id: string;
@@ -20,12 +20,11 @@ type CommentRow = {
 };
 
 export async function GET(request: Request) {
-  const supabase = await createClient();
-  const user = await requireRequestUser(request, supabase);
-
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const auth = await requireRbac(request as import('next/server').NextRequest, {
+    pageId: 'mis_reports',
+    tabId: 'register',
+  });
+  if (!auth.ok) return auth.response;
 
   try {
     const { searchParams } = new URL(request.url);
@@ -35,14 +34,10 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'callId is required' }, { status: 400 });
     }
 
-    const profile = await fetchAppUserAuthProfile(user.id);
-
-    const permissions = await (prisma as any).getUserPermissions(user.id);
-    const isHod =
-      permissions.includes('view_all_offices') ||
-      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(
-        profile?.role || ''
-      );
+    const userAuth = await loadUserAuth(auth.userId);
+    const profile = userAuth?.profile;
+    const permissions = userAuth?.permissions ?? [];
+    const isHod = isHodUser(profile, permissions);
     const assignedOffices = profile?.office_ids || [];
     const seeAll = seesAllOffices(isHod, assignedOffices);
 
@@ -96,12 +91,11 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const user = await requireRequestUser(request, supabase);
-
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const auth = await requireRbac(request as import('next/server').NextRequest, {
+    pageId: 'mis_reports',
+    tabId: 'register',
+  });
+  if (!auth.ok) return auth.response;
 
   try {
     const body = await request.json();
@@ -117,14 +111,10 @@ export async function POST(request: Request) {
     const content = parsed.data.content ?? parsed.data.text!;
     const office_id = parsed.data.office_id;
 
-    const profile = await fetchAppUserAuthProfile(user.id);
-
-    const permissions = await (prisma as any).getUserPermissions(user.id);
-    const isHod =
-      permissions.includes('view_all_offices') ||
-      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(
-        profile?.role || ''
-      );
+    const userAuth = await loadUserAuth(auth.userId);
+    const profile = userAuth?.profile;
+    const permissions = userAuth?.permissions ?? [];
+    const isHod = isHodUser(profile, permissions);
     const assignedOffices = profile?.office_ids || [];
 
     if (!canAccessOffice(isHod, assignedOffices, office_id)) {
@@ -140,7 +130,7 @@ export async function POST(request: Request) {
            (call_id, office_id, comment, author_name, author_id)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id, call_id, office_id, comment, author_id, author_name, created_at`,
-        [String(callId), String(office_id), content, profile?.name || 'User', user.id]
+        [String(callId), String(office_id), content, profile?.name || 'User', auth.userId]
       );
       return res.rows[0];
     });

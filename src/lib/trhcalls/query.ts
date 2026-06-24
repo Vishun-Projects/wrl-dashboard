@@ -1172,7 +1172,7 @@ export function buildTrhcallsBaseCondition(opts: {
       condition += ` AND ${dateCol} <= '${opts.endDate.replace(/'/g, "''")} 23:59:59'`;
     }
   }
-  condition = appendOfficeSecurityFilter(condition, opts.isHod ?? true, opts.assignedOffices ?? []);
+  condition = appendOfficeSecurityFilter(condition, opts.isHod ?? false, opts.assignedOffices ?? []);
   return condition;
 }
 

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
-import { hasPagePermission, hasCapability } from '@/lib/auth/rbac-catalog';
-import { fetchAppUserAuthProfile } from '@/lib/auth/app-user-profile';
+import { hasPagePermission } from '@/lib/auth/rbac-catalog';
 import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims/query';
 import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
+import { isHodUser } from '@/lib/auth/report-security';
 import type { ArcpFetchOpts } from '@/lib/arcp-claims/server/fetch';
 
 export type ArcpClaimsAuthContext = {
@@ -28,9 +29,8 @@ export async function authenticateArcpClaimsRequest(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const permissions = await (prisma as { getUserPermissions: (id: string) => Promise<string[]> }).getUserPermissions(
-    userId
-  );
+  const auth = await loadUserAuth(userId);
+  const permissions = auth?.permissions ?? [];
   if (!hasPagePermission(permissions, 'page_arcp_claims')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
@@ -43,14 +43,9 @@ export async function authenticateArcpClaimsRequest(
   const franchisee = searchParams.get('franchisee');
   const callType = searchParams.get('callType');
 
-  const profile = await fetchAppUserAuthProfile(userId);
-
+  const profile = auth?.profile;
   const assignedOffices = (profile?.office_ids || []).map(String);
-  const isHod =
-    hasCapability(permissions, 'view_all_offices') ||
-    ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(
-      profile?.role || ''
-    );
+  const isHod = isHodUser(profile, permissions);
 
   const jobId = options?.jobId ?? searchParams.get('jobId');
 

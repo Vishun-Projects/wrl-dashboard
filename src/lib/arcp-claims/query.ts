@@ -524,7 +524,7 @@ function buildArcpClaimsFilterParts(opts: ArcpClaimsQueryOpts): {
   condition = appendCsvInFilter(condition, 'o.nunder', opts.branch);
   condition = appendCsvInFilter(condition, 'arcp.nofficeid', opts.franchisee);
   condition = appendCallTypeFilter(condition, opts.callType, 'arcp.ncalltype');
-  condition = appendArcpOfficeSecurityFilter(condition, opts.isHod ?? true, opts.assignedOffices ?? []);
+  condition = appendArcpOfficeSecurityFilter(condition, opts.isHod ?? false, opts.assignedOffices ?? []);
 
   if (opts.ncodeShard && opts.ncodeShard.count > 0) {
     condition += ` AND (arcp.ncode % ${opts.ncodeShard.count}) = ${opts.ncodeShard.index}`;

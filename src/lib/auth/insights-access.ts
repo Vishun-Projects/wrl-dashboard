@@ -1,20 +1,18 @@
-const DEFAULT_ALLOWED_EMAILS = ['vishunvishwakarma90211@gmail.com'];
+import { hasPagePermission } from '@/lib/auth/rbac-catalog';
 
 export const PERFORMANCE_INSIGHTS_PATH = '/admin/performance-insights';
 
-function parseAllowedEmails(): string[] {
-  const raw = process.env.INSIGHTS_ALLOWED_EMAILS?.trim();
-  if (!raw) return DEFAULT_ALLOWED_EMAILS;
-  return raw
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
+export function canAccessPerformanceInsights(permissions: string[]): boolean {
+  return hasPagePermission(permissions, 'page_performance_insights');
 }
 
-export function canAccessInsights(email: string | null | undefined): boolean {
-  if (!email) return false;
-  const normalized = email.trim().toLowerCase();
-  return parseAllowedEmails().includes(normalized);
+/** @deprecated Use canAccessPerformanceInsights(permissions) */
+export function canAccessInsights(
+  email: string | null | undefined,
+  permissions?: string[]
+): boolean {
+  if (permissions?.length && canAccessPerformanceInsights(permissions)) return true;
+  return false;
 }
 
 export function isPerformanceInsightsPath(path: string): boolean {

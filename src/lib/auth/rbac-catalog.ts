@@ -124,6 +124,14 @@ export const RBAC_PAGES: RbacPage[] = [
     description: 'Define roles and page permissions',
     group: 'Administration',
   },
+  {
+    id: 'performance_insights',
+    permission: 'page_performance_insights',
+    path: '/admin/performance-insights',
+    label: 'Performance Insights',
+    description: 'Client performance metrics and diagnostics',
+    group: 'Administration',
+  },
 ];
 
 export const RBAC_CAPABILITIES: RbacCapability[] = [
@@ -162,6 +170,20 @@ function expandPermissions(permissions: string[]): Set<string> {
   }
   return expanded;
 }
+
+/** Expand legacy tab aliases to canonical permission names (for DB rows pre-migration). */
+export function expandPermissionList(permissions: string[]): string[] {
+  return [...expandPermissions(permissions)];
+}
+
+/** Legacy role column values that imply national office scope (prefer view_all_offices). */
+export const LEGACY_HOD_ROLE_NAMES = [
+  'super_admin',
+  'hod',
+  'Super Admin',
+  'Office Administrator',
+  'Account Auditor',
+] as const;
 
 function hasPermission(permissions: string[], name: string): boolean {
   return expandPermissions(permissions).has(name);
@@ -256,10 +278,6 @@ export function canAccessPath(
     return hasPermission(permissions, 'manage_users') || hasPermission(permissions, 'manage_roles');
   }
 
-  if (path === '/admin/performance-insights' || path.startsWith('/admin/performance-insights/')) {
-    return false;
-  }
-
   if (path === '/admin/sync' || path.startsWith('/admin/sync/')) {
     return hasPermission(permissions, 'manage_users');
   }
@@ -302,6 +320,17 @@ export function hasAnyReportPageAccess(permissions: string[]): boolean {
 
 export function hasCapability(permissions: string[], permission: string): boolean {
   return hasPermission(permissions, permission);
+}
+
+/** Client-safe office scope: empty office_ids = all branches; non-empty = restrict. */
+export function seesAllOfficesForUser(
+  permissions: string[],
+  role: string,
+  officeIds: string[]
+): boolean {
+  if (hasCapability(permissions, 'view_all_offices')) return true;
+  if ((LEGACY_HOD_ROLE_NAMES as readonly string[]).includes(role)) return true;
+  return officeIds.length === 0;
 }
 
 export function accessLabelsForPermissions(permissionNames: string[]): string[] {

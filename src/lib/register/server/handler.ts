@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchAppUserAuthProfile } from '@/lib/auth/app-user-profile';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { resolveRequestUserId } from '@/lib/auth/server-user';
 import { createClient } from '@/lib/supabase/server';
 import { postQuery } from '@/lib/db/proxy';
-import { prisma } from '@/lib/db/prisma';
 import { buildRegisterCsvResponse, createRegisterCsvResponse } from './csv-export';
 import { resolveHotWindowCoverage } from '@/lib/read-model/hot-window';
 import { readRegisterFromPostgres } from '@/lib/read-model/flags';
@@ -189,9 +188,9 @@ export async function handleRegisterGet(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const permissions = await (prisma as any).getUserPermissions(userId);
-
-    const profile = await fetchAppUserAuthProfile(userId);
+    const auth = await loadUserAuth(userId);
+    const permissions = auth?.permissions ?? [];
+    const profile = auth?.profile;
 
     const assignedOffices = profile?.office_ids || [];
     const visibleStatuses = profile?.visible_statuses || [];

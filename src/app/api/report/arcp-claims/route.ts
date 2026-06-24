@@ -117,7 +117,7 @@ export async function GET(req: NextRequest) {
       branch: branch ?? null,
       franchisee: franchisee ?? null,
       callType: callType ?? null,
-      isHod: isHod ?? true,
+      isHod: isHod ?? false,
       assignedOffices: assignedOffices ?? [],
     });
     const aggKey = `${AGG_CACHE_VERSION}|${cacheKey}|agg`;

@@ -62,7 +62,7 @@ export function buildArcpChunkCacheKey(
   kind: ArcpChunkCacheKind
 ): string {
   const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
-  const security = (opts.isHod ?? true) ? 'hod' : (opts.assignedOffices ?? []).join('-');
+  const security = (opts.isHod ?? false) ? 'hod' : (opts.assignedOffices ?? []).join('-');
   return [
     ARCP_CHUNK_CACHE_VERSION,
     kind,

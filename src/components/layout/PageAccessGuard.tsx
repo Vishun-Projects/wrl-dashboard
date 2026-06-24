@@ -4,7 +4,6 @@ import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useUser } from '@/components/layout/DashboardLayout';
 import { canAccessPath, defaultLandingPath } from '@/lib/auth/rbac-catalog';
-import { canAccessInsights, isPerformanceInsightsPath } from '@/lib/auth/insights-access';
 import { feedback } from '@/lib/ui/feedback';
 
 type PageAccessGuardProps = {
@@ -20,13 +19,6 @@ export function PageAccessGuard({ children }: PageAccessGuardProps) {
   useEffect(() => {
     if (loadingProfile || !userProfile || !pathname) return;
     const permissions: string[] = userProfile.permissions ?? [];
-
-    if (isPerformanceInsightsPath(pathname)) {
-      if (canAccessInsights(userProfile.email)) return;
-      feedback.accessDenied();
-      router.replace(defaultLandingPath(permissions));
-      return;
-    }
 
     if (canAccessPath(permissions, pathname, { email: userProfile.email })) return;
 

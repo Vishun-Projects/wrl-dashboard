@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getUserInfo } from '@/lib/auth/session';
-import { canAccessInsights } from '@/lib/auth/insights-access';
+import { canAccessPerformanceInsights } from '@/lib/auth/insights-access';
 import { getReadModelProgress } from '@/lib/read-model/sync-meta';
 
 export async function GET() {
   const userInfo = await getUserInfo();
-  if (!userInfo || !canAccessInsights(userInfo.email)) {
+  if (!userInfo || !canAccessPerformanceInsights(userInfo.permissions)) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 

@@ -24,7 +24,6 @@ import {
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { defaultLandingPath, visiblePages } from '@/lib/auth/rbac-catalog';
-import { canAccessInsights, PERFORMANCE_INSIGHTS_PATH } from '@/lib/auth/insights-access';
 
 interface SidebarProps {
   user: {
@@ -108,7 +107,9 @@ export function Sidebar({ user }: SidebarProps) {
                 ? Shield
                 : path === '/admin/users'
                   ? Users
-                  : ShieldCheck;
+                  : path === '/admin/performance-insights'
+                    ? Gauge
+                    : ShieldCheck;
 
   const filteredNavigation = pageNav.map((page) => ({
     name: page.label,
@@ -116,17 +117,6 @@ export function Sidebar({ user }: SidebarProps) {
     exactPath: page.exactPath ?? false,
     icon: iconForPath(page.path),
   }));
-
-  const insightsNavigation = canAccessInsights(user?.email)
-    ? [
-        {
-          name: 'Performance Insights',
-          href: PERFORMANCE_INSIGHTS_PATH,
-          exactPath: true,
-          icon: Gauge,
-        },
-      ]
-    : [];
 
   const sidebarContent = (
     <div className="flex h-full flex-col border-r border-slate-200 bg-white text-slate-600 select-none">
@@ -157,7 +147,7 @@ export function Sidebar({ user }: SidebarProps) {
 
       {/* Navigation links */}
       <div className="flex-1 py-4 px-3 space-y-1.5 custom-scrollbar">
-        {[...filteredNavigation, ...insightsNavigation].map((item) => {
+        {filteredNavigation.map((item) => {
           const isActive = item.exactPath
             ? pathname === item.href
             : pathname === item.href || pathname.startsWith(`${item.href}/`);

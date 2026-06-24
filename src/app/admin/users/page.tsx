@@ -17,6 +17,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { feedback } from '@/lib/ui/feedback';
 import { useUser } from '@/components/layout/DashboardLayout';
+import { seesAllOfficesForUser } from '@/lib/auth/rbac-catalog';
 import { PageShell } from '@/components/layout/PageShell';
 import { TableSkeleton } from '@/components/ui/DataTableLoading';
 import BranchTree from '@/components/shared/BranchTree';
@@ -47,7 +48,6 @@ export default function AdminUsersPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [search, setSearch] = useState('');
-  const [currentUserInfo, setCurrentUserInfo] = useState<any>(null);
   const [branchSearch, setBranchSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'profile' | 'access'>('profile');
   const [showOnlySelectedBranches, setShowOnlySelectedBranches] = useState(false);
@@ -57,6 +57,7 @@ export default function AdminUsersPage() {
   const [updatingPassword, setUpdatingPassword] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [officesLoading, setOfficesLoading] = useState(false);
 
   type UserFormErrors = {
     name?: string;
@@ -125,31 +126,29 @@ export default function AdminUsersPage() {
     }`;
 
   useEffect(() => {
-    fetchInitialData();
-  }, []);
+    if (!userProfile?.id) return;
+    void fetchInitialData();
+  }, [userProfile?.id]);
+
+  async function ensureOfficesLoaded() {
+    if (offices.length > 0 || officesLoading) return;
+    setOfficesLoading(true);
+    try {
+      const res = await axios.get('/api/offices', apiOpts);
+      setOffices(res.data);
+    } catch {
+      feedback.actionFailed('Failed to load branch list');
+    } finally {
+      setOfficesLoading(false);
+    }
+  }
 
   async function fetchInitialData() {
     setLoading(true);
     try {
-      const [usersRes, officesRes, rolesRes, meRes] = await Promise.all([
-        axios.get('/api/admin/users', apiOpts),
-        axios.get('/api/offices', apiOpts),
-        axios.get('/api/admin/roles', apiOpts),
-        axios.get('/api/auth/me', apiOpts),
-      ]);
-
-      if (!meRes.data?.id) { router.push('/login'); return; }
-      setCurrentUserInfo(meRes.data);
-
-
-      
-      // Find current user in the list to check role
-      const currentUser = usersRes.data.find((u: any) => u.id === meRes.data.id);
-
-
-      setUsers(usersRes.data);
-      setOffices(officesRes.data);
-      setRoles(rolesRes.data.roles);
+      const res = await axios.get('/api/admin/bootstrap', apiOpts);
+      setUsers(res.data.users);
+      setRoles(res.data.roles);
     } catch (err) {
       const status = (err as { response?: { status?: number } }).response?.status;
       if (status === 401) {
@@ -273,9 +272,51 @@ export default function AdminUsersPage() {
 
   const getRoleInfo = (u: any) => {
     const roleObj = roles.find((r) => r.id === u.role_id);
-    const isHod = roleObj ? roleObj.name.toLowerCase() === 'hod' : u.role === 'hod';
+    const rolePerms = roleObj?.permissions ?? [];
+    const isNational = seesAllOfficesForUser(rolePerms, u.role ?? '', u.office_ids ?? []);
     const roleName = roleObj?.name || (u.role === 'hod' ? 'HOD' : 'Branch Manager');
-    return { isHod, roleName };
+    return { isHod: isNational, roleName };
+  };
+
+  const branchLabelsForUser = (u: any) => {
+    const ids = u.office_ids ?? [];
+    if (seesAllOfficesForUser([], u.role ?? '', ids)) {
+      return ['All branches'];
+    }
+    if (offices.length === 0) {
+      return ids.length > 0 ? [`${ids.length} branch${ids.length === 1 ? '' : 'es'}`] : ['All branches'];
+    }
+    return ids.map((id: string) => {
+      const office = offices.find((o) => String(o.ncode) === id);
+      return office?.vcompanyname || id;
+    });
+  };
+
+  const openUserModal = (user?: any) => {
+    void ensureOfficesLoaded();
+    if (user) {
+      setEditingUser(user);
+      setFormData({
+        name: user.name,
+        email: user.email,
+        password: '',
+        role: user.role,
+        role_id: user.role_id,
+        office_ids: user.office_ids || [],
+        visible_statuses: user.visible_statuses || [],
+      });
+      setActiveTab('profile');
+      setShowOnlySelectedBranches(false);
+      setShowValidation(false);
+    } else {
+      setEditingUser(null);
+      setFormData(emptyFormData());
+      setShowValidation(false);
+      setBranchSearch('');
+      setActiveTab('profile');
+      setShowOnlySelectedBranches(false);
+    }
+    setShowAddModal(true);
   };
 
   return (
@@ -296,15 +337,7 @@ export default function AdminUsersPage() {
       }
       actions={
         <button
-          onClick={() => {
-            setEditingUser(null);
-            setFormData(emptyFormData());
-            setShowValidation(false);
-            setBranchSearch('');
-            setActiveTab('profile');
-            setShowOnlySelectedBranches(false);
-            setShowAddModal(true);
-          }}
+          onClick={() => openUserModal()}
           className="flex h-9 items-center gap-2 rounded-md bg-slate-900 px-4 text-xs font-medium text-white transition-colors hover:bg-slate-800 ui-label"
         >
           <UserPlus size={14} />
@@ -330,11 +363,7 @@ export default function AdminUsersPage() {
             <tbody>
               {filteredUsers.map((u) => {
                 const { isHod, roleName } = getRoleInfo(u);
-                const branchLabels =
-                  u.office_ids?.map((id: string) => {
-                    const office = offices.find((o) => String(o.ncode) === id);
-                    return office?.vcompanyname || id;
-                  }) ?? [];
+                const branchLabels = branchLabelsForUser(u);
 
                 return (
                   <AdminTr key={u.id}>
@@ -396,26 +425,11 @@ export default function AdminUsersPage() {
                         </AdminIconButton>
                         <AdminIconButton
                           title="Edit user"
-                          onClick={() => {
-                            setEditingUser(u);
-                            setFormData({
-                              name: u.name,
-                              email: u.email,
-                              password: '',
-                              role: u.role,
-                              role_id: u.role_id,
-                              office_ids: u.office_ids || [],
-                              visible_statuses: u.visible_statuses || [],
-                            });
-                            setActiveTab('profile');
-                            setShowOnlySelectedBranches(false);
-                            setShowValidation(false);
-                            setShowAddModal(true);
-                          }}
+                          onClick={() => openUserModal(u)}
                         >
                           <Pencil size={13} />
                         </AdminIconButton>
-                        {currentUserInfo?.id !== u.id && (
+                        {userProfile?.id !== u.id && (
                           <AdminIconButton
                             variant="danger"
                             title="Delete user"

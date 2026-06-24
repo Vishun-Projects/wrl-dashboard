@@ -4,21 +4,22 @@ import {
   getPortalAuditPayload,
   portalAuditEtag,
 } from '@/lib/report/portal-audit-server';
-import { resolveRequestUserId } from '@/lib/auth/server-user';
-
-async function authorize(req: NextRequest): Promise<boolean> {
-  const supabase = await createClient();
-  const userId = await resolveRequestUserId(req, supabase);
-  return Boolean(userId);
-}
+import { requireRbac } from '@/lib/auth/resolve-bearer-security';
+import { seesAllOffices } from '@/lib/trhcalls/office-security';
 
 export async function GET(req: NextRequest) {
   try {
-    if (!(await authorize(req))) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const auth = await requireRbac(req, { pageId: 'mis_reports', tabId: 'register' });
+    if (!auth.ok) return auth.response;
 
-    const payload = await getPortalAuditPayload();
+    const officeIds =
+      seesAllOffices(auth.security.isHod, auth.security.assignedOffices)
+        ? undefined
+        : auth.security.assignedOffices;
+
+    const payload = await getPortalAuditPayload(
+      officeIds?.length ? { officeIds } : undefined
+    );
     const etag = portalAuditEtag(payload);
     const ifNoneMatch = req.headers.get('If-None-Match');
     if (ifNoneMatch === etag) {

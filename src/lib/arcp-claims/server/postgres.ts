@@ -123,7 +123,7 @@ function buildArcpWhere(
     idx += 1;
   }
 
-  const isHod = opts.isHod ?? true;
+  const isHod = opts.isHod ?? false;
   const assigned = opts.assignedOffices ?? [];
   if (!isHod && assigned.length > 0) {
     const ids = assigned.map((o) => Number(o)).filter((n) => Number.isFinite(n));

@@ -93,7 +93,7 @@ export function isArcpLoadJobsMissingRelationError(err: unknown): boolean {
 
 export function buildArcpLoadJobKey(opts: ArcpFetchOpts, kind: ArcpChunkCacheKind): string {
   const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
-  const security = (opts.isHod ?? true) ? 'hod' : (opts.assignedOffices ?? []).join('-');
+  const security = (opts.isHod ?? false) ? 'hod' : (opts.assignedOffices ?? []).join('-');
   const raw = [
     ARCP_CHUNK_CACHE_VERSION,
     kind,
@@ -116,7 +116,7 @@ function filtersSnapshot(opts: ArcpFetchOpts): Record<string, unknown> {
     branch: opts.branch,
     franchisee: opts.franchisee,
     callType: opts.callType,
-    isHod: opts.isHod ?? true,
+    isHod: opts.isHod ?? false,
     assignedOffices: opts.assignedOffices ?? [],
   };
 }

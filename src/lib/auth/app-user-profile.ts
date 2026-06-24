@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { withAppClient } from '@/lib/read-model/db';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
 
 export type AppUserAuthProfile = {
   id: string;
@@ -17,14 +17,6 @@ export type AppUserAuthProfile = {
 export async function fetchAppUserAuthProfile(
   userId: string
 ): Promise<AppUserAuthProfile | null> {
-  return withAppClient(async (client) => {
-    const res = await client.query<AppUserAuthProfile>(
-      `SELECT id, name, email, role, office_ids, visible_statuses, avatar_url, role_id
-       FROM public.app_users
-       WHERE id = $1
-       LIMIT 1`,
-      [userId]
-    );
-    return res.rows[0] ?? null;
-  });
+  const auth = await loadUserAuth(userId);
+  return auth?.profile ?? null;
 }

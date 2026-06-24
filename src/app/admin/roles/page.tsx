@@ -139,7 +139,7 @@ export default function RolesPage() {
 
   const init = async () => {
     try {
-      const rolesRes = await axios.get('/api/admin/roles');
+      const rolesRes = await axios.get('/api/admin/roles', { withCredentials: true });
       setRoles(rolesRes.data.roles);
       setAllPermissions(rolesRes.data.allPermissions ?? []);
       const groups = rolesRes.data.permissionGroups ?? {};

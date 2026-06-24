@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { requireRequestUser } from '@/lib/auth/server-user';
 import { postQuery } from '@/lib/db/proxy';
-import { prisma } from '@/lib/db/prisma';
 import { readDimsFromPostgres } from '@/lib/read-model/flags';
 import { queryOfficesFromPostgres } from '@/lib/read-model/queries/dims';
+import { createClient } from '@/lib/supabase/server';
+import { resolveRequestUserId } from '@/lib/auth/server-user';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
+import { isHodUser } from '@/lib/auth/report-security';
+import { resolveApiAccess } from '@/lib/auth/rbac-catalog';
 
 // Global cache to optimize mstoffice retrieval and avoid slow remote DB scans
 let cachedAllOffices: any[] | null = null;
@@ -13,25 +15,24 @@ const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 export async function GET(request: Request) {
   const supabase = await createClient();
-  const user = await requireRequestUser(request, supabase);
-
-  if (!user) {
+  const userId = await resolveRequestUserId(request, supabase);
+  if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const userAuth = await loadUserAuth(userId);
+  const permissions = userAuth?.permissions ?? [];
+  const canLoadOffices =
+    permissions.includes('manage_users') ||
+    resolveApiAccess(permissions, { pageId: 'mis_reports', shared: true });
+  if (!canLoadOffices) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
   try {
-    const permissions = await (prisma as any).getUserPermissions(user.id);
-
-    const result = await prisma.$queryRawUnsafe(
-      'SELECT office_ids, role FROM public.app_users WHERE id = $1 LIMIT 1',
-      user.id
-    );
-    const profile = (result as any[])?.[0];
+    const profile = userAuth?.profile;
     const assignedOffices = (profile?.office_ids || []).map(String);
-
-    const isHod = 
-      permissions.includes('view_all_offices') || 
-      ['super_admin', 'hod', 'Super Admin', 'Office Administrator', 'Account Auditor'].includes(profile?.role || '');
+    const isHod = isHodUser(profile, permissions);
 
     if (readDimsFromPostgres()) {
       const offices = await queryOfficesFromPostgres(assignedOffices, isHod);

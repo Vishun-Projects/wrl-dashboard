@@ -1,37 +1,33 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
-import { requireRequestUser, requireSupabaseUser } from '@/lib/auth/server-user';
-import {
-  groupPermissionsForRolesUi,
-  ALL_PERMISSION_SEED,
-} from '@/lib/auth/page-access';
+import { requireRequestUser } from '@/lib/auth/server-user';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
+import { groupPermissionsForRolesUi } from '@/lib/auth/page-access';
 
-async function ensurePagePermissionsExist(): Promise<void> {
-  for (const seed of ALL_PERMISSION_SEED) {
-    await prisma.$queryRawUnsafe(
-      `INSERT INTO public.app_permissions (id, name, description)
-       SELECT gen_random_uuid(), $1, $2
-       WHERE NOT EXISTS (SELECT 1 FROM public.app_permissions WHERE name = $1)`,
-      seed.name,
-      seed.description
-    );
-  }
-}
-
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = await createClient();
-  const user = await requireSupabaseUser(supabase);
+  const user = await requireRequestUser(request, supabase);
 
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const permissions = await (prisma as any).getUserPermissions(user.id);
+  const auth = await loadUserAuth(user.id);
+  const permissions = auth?.permissions ?? [];
+
   if (!permissions.includes('manage_roles')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   try {
-    await ensurePagePermissionsExist();
+    const { searchParams } = new URL(request.url);
+    const fields = searchParams.get('fields');
+
+    if (fields === 'minimal') {
+      const roles = await prisma.$queryRawUnsafe(
+        `SELECT id, name FROM public.app_roles ORDER BY name ASC`
+      );
+      return NextResponse.json({ roles });
+    }
 
     const roles = await prisma.$queryRawUnsafe(`
       SELECT r.*, 
@@ -49,33 +45,32 @@ export async function GET() {
     const permissionGroups = groupPermissionsForRolesUi(allPermissions as any[]);
 
     return NextResponse.json({ roles, allPermissions, permissionGroups });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to load roles';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   const supabase = await createClient();
-  const user = await requireSupabaseUser(supabase);
+  const user = await requireRequestUser(request, supabase);
 
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const permissions = await (prisma as any).getUserPermissions(user.id);
-  if (!permissions.includes('manage_roles')) {
+  const auth = await loadUserAuth(user.id);
+  if (!auth?.permissions.includes('manage_roles')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   try {
     const { name, description, permissionIds } = await request.json();
 
-    // 1. Create Role
     const roleResult: any[] = await prisma.$queryRawUnsafe(
       'INSERT INTO public.app_roles (name, description) VALUES ($1, $2) RETURNING id',
       name, description
     );
     const roleId = roleResult[0].id;
 
-    // 2. Add Permissions
     if (permissionIds && permissionIds.length > 0) {
       for (const pId of permissionIds) {
         await prisma.$queryRawUnsafe(
@@ -86,34 +81,33 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ success: true, id: roleId });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Create role failed';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
 export async function PUT(request: Request) {
   const supabase = await createClient();
-  const user = await requireSupabaseUser(supabase);
+  const user = await requireRequestUser(request, supabase);
 
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const permissions = await (prisma as any).getUserPermissions(user.id);
-  if (!permissions.includes('manage_roles')) {
+  const auth = await loadUserAuth(user.id);
+  if (!auth?.permissions.includes('manage_roles')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   try {
     const { id, name, description, permissionIds } = await request.json();
 
-    // 1. Update Role Info
     await prisma.$queryRawUnsafe(
       'UPDATE public.app_roles SET name = $1, description = $2 WHERE id = $3',
       name, description, id
     );
 
-    // 2. Clear and Re-add Permissions
     await prisma.$queryRawUnsafe('DELETE FROM public.app_role_permissions WHERE role_id = $1', id);
-    
+
     if (permissionIds && permissionIds.length > 0) {
       for (const pId of permissionIds) {
         await prisma.$queryRawUnsafe(
@@ -124,19 +118,20 @@ export async function PUT(request: Request) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Update role failed';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
 export async function DELETE(request: Request) {
   const supabase = await createClient();
-  const user = await requireSupabaseUser(supabase);
+  const user = await requireRequestUser(request, supabase);
 
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const permissions = await (prisma as any).getUserPermissions(user.id);
-  if (!permissions.includes('manage_roles')) {
+  const auth = await loadUserAuth(user.id);
+  if (!auth?.permissions.includes('manage_roles')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -149,7 +144,8 @@ export async function DELETE(request: Request) {
     await prisma.$queryRawUnsafe('DELETE FROM public.app_roles WHERE id = $1', id);
 
     return NextResponse.json({ success: true });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Delete role failed';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

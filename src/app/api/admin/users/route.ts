@@ -10,6 +10,9 @@ import {
 import { isDbSignInAvailable } from '@/lib/auth/db-sign-in';
 import { isDevAuthBypass } from '@/lib/auth/verify-jwt';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
+
+const USER_COLUMNS = `id, name, email, role, role_id, office_ids, visible_statuses, avatar_url, created_at`;
 
 function normalizeUuid(value: unknown): string | null {
   if (value == null) return null;
@@ -72,13 +75,22 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const permissions = await (prisma as any).getUserPermissions(user.id);
-  if (!permissions.includes('manage_users')) {
+  const auth = await loadUserAuth(user.id);
+  if (!auth?.permissions.includes('manage_users')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   try {
-    const users = await prisma.$queryRawUnsafe('SELECT * FROM public.app_users ORDER BY created_at DESC');
+    const { searchParams } = new URL(request.url);
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(searchParams.get('limit') || '500', 10) || 500));
+    const offset = (page - 1) * limit;
+
+    const users = await prisma.$queryRawUnsafe(
+      `SELECT ${USER_COLUMNS} FROM public.app_users ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+      limit,
+      offset
+    );
     return NextResponse.json(users);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -93,8 +105,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const permissions = await (prisma as any).getUserPermissions(adminUser.id);
-  if (!permissions.includes('manage_users')) {
+  const auth = await loadUserAuth(adminUser.id);
+  if (!auth?.permissions.includes('manage_users')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -198,8 +210,8 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const permissions = await (prisma as any).getUserPermissions(adminUser.id);
-  if (!permissions.includes('manage_users')) {
+  const auth = await loadUserAuth(adminUser.id);
+  if (!auth?.permissions.includes('manage_users')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -236,8 +248,8 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const permissions = await (prisma as any).getUserPermissions(adminUser.id);
-  if (!permissions.includes('manage_users')) {
+  const auth = await loadUserAuth(adminUser.id);
+  if (!auth?.permissions.includes('manage_users')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
