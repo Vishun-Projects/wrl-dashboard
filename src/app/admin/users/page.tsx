@@ -661,8 +661,8 @@ export default function AdminUsersPage() {
                       </div>
 
                       <p className="text-[10px] text-slate-500">
-                        Optional data scope per user. No branches selected means empty report data, not
-                        an access error. Assign branches to limit which offices this user can see.
+                        Optional data scope per user. No branches selected means access to all
+                        branches. Select specific branches to limit which offices this user can see.
                       </p>
                       <div className="border border-slate-200 rounded-lg overflow-hidden">
                         <div className="p-2 bg-slate-50 border-b border-slate-200">

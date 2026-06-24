@@ -6,7 +6,7 @@ import { requireRequestUser } from '@/lib/auth/server-user';
 import { withAppClient } from '@/lib/read-model/db';
 import { clearPortalAuditServerCache } from '@/lib/report/portal-audit-server';
 import { commentPostSchema } from '@/lib/api/schemas/mutations';
-import { hasOfficeScope } from '@/lib/trhcalls/office-security';
+import { canAccessOffice, seesAllOffices } from '@/lib/trhcalls/office-security';
 
 type CommentRow = {
   id: string;
@@ -44,13 +44,10 @@ export async function GET(request: Request) {
         profile?.role || ''
       );
     const assignedOffices = profile?.office_ids || [];
-
-    if (!hasOfficeScope(isHod, assignedOffices)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
+    const seeAll = seesAllOffices(isHod, assignedOffices);
 
     const comments = await withAppClient(async (client) => {
-      if (isHod) {
+      if (seeAll) {
         const res = await client.query<CommentRow>(
           `SELECT id, call_id, office_id, comment, content, author_id, author_name, created_at
            FROM public.call_comments
@@ -130,7 +127,7 @@ export async function POST(request: Request) {
       );
     const assignedOffices = profile?.office_ids || [];
 
-    if (!isHod && !assignedOffices.includes(String(office_id))) {
+    if (!canAccessOffice(isHod, assignedOffices, office_id)) {
       return NextResponse.json(
         { error: 'Forbidden: You do not have permission to comment for this office' },
         { status: 403 }

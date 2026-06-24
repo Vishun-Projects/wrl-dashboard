@@ -38,14 +38,14 @@ function buildOfficeFilter(
   let idx = startIdx;
   const parts: string[] = [];
 
-  if (!params.isHod) {
-    if (!params.assignedOffices || params.assignedOffices.length === 0) {
-      parts.push('FALSE');
-    } else {
-      parts.push(`${alias}.${officeColumn} = ANY($${idx}::bigint[])`);
-      values.push(params.assignedOffices.map((id) => Number(id)));
-      idx++;
-    }
+  if (
+    !params.isHod &&
+    params.assignedOffices &&
+    params.assignedOffices.length > 0
+  ) {
+    parts.push(`${alias}.${officeColumn} = ANY($${idx}::bigint[])`);
+    values.push(params.assignedOffices.map((id) => Number(id)));
+    idx++;
   }
 
   if (params.officeIds && params.officeIds.length > 0) {

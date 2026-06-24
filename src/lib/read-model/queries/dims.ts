@@ -17,7 +17,7 @@ export async function queryOfficesFromPostgres(assignedOffices: string[], isHod:
     nunder: row.nunder != null ? String(row.nunder) : null,
   }));
 
-  if (isHod) return mapped;
+  if (isHod || assignedOffices.length === 0) return mapped;
   return mapped.filter(
     (o) =>
       assignedOffices.includes(o.ncode) ||

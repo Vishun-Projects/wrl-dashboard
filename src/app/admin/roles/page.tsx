@@ -485,8 +485,8 @@ export default function RolesPage() {
                         ))}
                       </div>
                       <p className="text-[10px] text-slate-400">
-                        Branch assignment is per user in User Management. View all offices ignores
-                        branch limits.
+                        Branch assignment is per user in User Management. No branches selected
+                        means all branches; View all offices is an explicit national-scope grant.
                       </p>
                     </div>
                   ) : null}

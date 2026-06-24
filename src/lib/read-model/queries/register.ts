@@ -102,14 +102,10 @@ function buildWhere(params: RegisterPostgresParams): { sql: string; values: unkn
   const values: unknown[] = [];
   let idx = 1;
 
-  if (!params.isHod) {
-    if (params.assignedOffices.length === 0) {
-      clauses.push('FALSE');
-    } else {
-      clauses.push(`h.nofficeid = ANY($${idx}::bigint[])`);
-      values.push(params.assignedOffices.map(Number));
-      idx++;
-    }
+  if (!params.isHod && params.assignedOffices.length > 0) {
+    clauses.push(`h.nofficeid = ANY($${idx}::bigint[])`);
+    values.push(params.assignedOffices.map(Number));
+    idx++;
   }
 
   if (params.officeId && params.officeId !== 'All') {

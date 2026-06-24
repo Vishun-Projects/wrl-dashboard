@@ -27,7 +27,7 @@ export async function GET(
     pageId: 'mis_reports',
     tabId: 'register',
   });
-  if (security.forbidden || (!security.isHod && security.assignedOffices.length === 0)) {
+  if (security.forbidden) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 

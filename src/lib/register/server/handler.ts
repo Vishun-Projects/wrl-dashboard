@@ -294,10 +294,7 @@ export async function handleRegisterGet(req: NextRequest) {
 
     if (!isLookupSearch) {
       let dbSecurityCondition = '';
-      if (!isHod) {
-        if (assignedOffices.length === 0) {
-          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-        }
+      if (!isHod && assignedOffices.length > 0) {
         const allowed = assignedOffices.join(',');
         dbSecurityCondition = ` AND (tc.nofficeid IN (${allowed}) OR o.nunder IN (${allowed}))`;
       }

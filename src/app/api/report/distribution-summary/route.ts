@@ -15,10 +15,6 @@ export async function GET(req: NextRequest) {
     if (!auth.ok) return auth.response;
     const { userId, security } = auth;
 
-    if (!security.isHod && security.assignedOffices.length === 0) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-
     const { searchParams } = new URL(req.url);
     const startDate = searchParams.get('startDate') || '';
     const endDate = searchParams.get('endDate') || '';

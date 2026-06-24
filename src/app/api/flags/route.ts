@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
   if (!auth.ok) return auth.response;
   const { userId, security } = auth;
 
-  if (security.forbidden || (!security.isHod && security.assignedOffices.length === 0)) {
+  if (security.forbidden) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 

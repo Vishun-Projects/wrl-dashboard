@@ -53,8 +53,9 @@ export async function GET(request: Request) {
     }
 
     const allOffices = cachedAllOffices || [];
-    const filteredOffices = isHod 
-      ? allOffices 
+    const seeAllOffices = isHod || assignedOffices.length === 0;
+    const filteredOffices = seeAllOffices
+      ? allOffices
       : allOffices.filter((o: any) => assignedOffices.includes(String(o.ncode)) || assignedOffices.includes(String(o.nunder)));
 
     return NextResponse.json(filteredOffices);
