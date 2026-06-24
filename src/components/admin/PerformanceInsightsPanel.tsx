@@ -215,7 +215,18 @@ export function PerformanceInsightsPanel() {
   }, [pathname]);
 
   useEffect(() => {
-    void loadServerSnapshot('mount');
+    let cancelled = false;
+    const startLoad = () => {
+      if (!cancelled) void loadServerSnapshot('mount');
+    };
+    // Let the page shell paint before the heavy server snapshot request.
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(startLoad);
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
   }, [loadServerSnapshot]);
 
   const exportPayload: SnapshotPayload = useMemo(

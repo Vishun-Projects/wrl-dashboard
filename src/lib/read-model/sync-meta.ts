@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/db/prisma';
 import { HOT_TARGET_ROWS } from '@/lib/read-model/constants';
 import { releaseStaleArcpSyncLock } from '@/lib/read-model/arcp/lock';
-import { getArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-server';
+import { arcpBackfillStartDate } from '@/lib/read-model/arcp/dates';
 import { withClient } from '@/lib/read-model/db';
 import { releaseStaleSyncLock } from '@/lib/read-model/lock';
 import type { ArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-shared';
@@ -109,62 +109,133 @@ export async function getHotRowCount(): Promise<number> {
   return exact[0]?.count ?? 0;
 }
 
-export async function getReadModelProgress(): Promise<ReadModelProgress> {
-  /** Clear crashed-worker flags so status polls are not stuck on is_running forever. */
-  await withClient(async (client) => {
+const PROGRESS_CACHE_MS = Number(process.env.READ_MODEL_PROGRESS_CACHE_MS ?? 45_000) || 45_000;
+let progressCache: { at: number; data: ReadModelProgress } | null = null;
+
+function arcpDateYmd(value: unknown): string | null {
+  if (value == null) return null;
+  const d = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(d.getTime())) return null;
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+async function loadReadModelProgressUncached(): Promise<ReadModelProgress> {
+  /** One pool checkout — remote DB round-trips dominate on Vercel. */
+  const {
+    hotCount,
+    factGrains,
+    dims,
+    syncStates,
+    runs,
+    batches,
+    arcp,
+  } = await withClient(async (client) => {
     await releaseStaleSyncLock(client);
     await releaseStaleArcpSyncLock(client);
-  });
 
-  const [hotCount, factGrains, dims, syncStates, runs, batches, arcp] = await Promise.all([
-    getHotRowCount(),
-    prisma.$queryRawUnsafe<Array<{ count: number }>>(
+    const hotEst = await client.query<{ count: number }>(
+      `SELECT COALESCE(n_live_tup, 0)::int AS count FROM pg_stat_user_tables WHERE relname = 'calls_latest_hot'`
+    );
+    let hotCount = hotEst.rows[0]?.count ?? 0;
+    if (hotCount <= 0) {
+      const exact = await client.query<{ count: number }>(
+        `SELECT count(*)::int AS count FROM calls_latest_hot`
+      );
+      hotCount = exact.rows[0]?.count ?? 0;
+    }
+
+    const factGrains = await client.query<{ count: number }>(
       `SELECT count(*)::int AS count FROM call_metrics_daily`
-    ),
-    prisma.$queryRawUnsafe<
-      Array<{ offices: number; engineers: number; call_types: number }>
-    >(`
+    );
+    const dims = await client.query<{ offices: number; engineers: number; call_types: number }>(`
       SELECT
         (SELECT count(*)::int FROM dim_offices) AS offices,
         (SELECT count(*)::int FROM dim_engineers) AS engineers,
         (SELECT count(*)::int FROM dim_call_types) AS call_types
-    `),
-    prisma.$queryRawUnsafe<
-      Array<{
-        entity: string;
-        status: string | null;
-        is_running: boolean;
-        last_run_at: Date | null;
-        last_editedon: Date | null;
-        rows_upserted_last: number;
-      }>
-    >(`SELECT * FROM sync_state ORDER BY entity`),
-    prisma.$queryRawUnsafe<
-      Array<{
-        id: number;
-        entity: string;
-        status: string;
-        started_at: Date;
-        finished_at: Date | null;
-        duration_ms: number | null;
-        rows_upserted: number;
-        rows_deleted: number;
-        error_message: string | null;
-      }>
-    >(`SELECT * FROM sync_run_log ORDER BY started_at DESC LIMIT 10`),
-    prisma.$queryRawUnsafe<
-      Array<{
-        batch_id: string;
-        entity: string;
-        status: string;
-        watermark_start: Date | null;
-        watermark_end: Date | null;
+    `);
+    const syncStates = await client.query<{
+      entity: string;
+      status: string | null;
+      is_running: boolean;
+      last_run_at: Date | null;
+      last_editedon: Date | null;
+      rows_upserted_last: number;
+    }>(`SELECT * FROM sync_state ORDER BY entity`);
+    const runs = await client.query<{
+      id: number;
+      entity: string;
+      status: string;
+      started_at: Date;
+      finished_at: Date | null;
+      duration_ms: number | null;
+      rows_upserted: number;
+      rows_deleted: number;
+      error_message: string | null;
+    }>(`SELECT * FROM sync_run_log ORDER BY started_at DESC LIMIT 10`);
+    const batches = await client.query<{
+      batch_id: string;
+      entity: string;
+      status: string;
+      watermark_start: Date | null;
+      watermark_end: Date | null;
+      row_count: number;
+      created_at: Date;
+    }>(`SELECT * FROM raw_ingest_batches ORDER BY created_at DESC LIMIT 10`);
+
+    let arcp: ArcpPostgresCoverage | null = null;
+    try {
+      const arcpState = await client.query<{ status: string | null }>(
+        `SELECT status FROM sync_state WHERE entity = 'arcp_lines_hot' LIMIT 1`
+      );
+      const bounds = await client.query<{
         row_count: number;
-        created_at: Date;
-      }>
-    >(`SELECT * FROM raw_ingest_batches ORDER BY created_at DESC LIMIT 10`),
-    getArcpPostgresCoverage().catch(() => null),
-  ]);
+        min_call: Date | null;
+        max_call: Date | null;
+        min_solve: Date | null;
+        max_solve: Date | null;
+        min_bm: Date | null;
+        max_bm: Date | null;
+        min_ho: Date | null;
+        max_ho: Date | null;
+      }>(`
+        SELECT
+          (SELECT COUNT(*)::int FROM arcp_lines_hot) AS row_count,
+          (SELECT MIN(call_at) FROM arcp_lines_hot WHERE call_at IS NOT NULL) AS min_call,
+          (SELECT MAX(call_at) FROM arcp_lines_hot WHERE call_at IS NOT NULL) AS max_call,
+          (SELECT MIN(solve_at) FROM arcp_lines_hot WHERE solve_at IS NOT NULL) AS min_solve,
+          (SELECT MAX(solve_at) FROM arcp_lines_hot WHERE solve_at IS NOT NULL) AS max_solve,
+          (SELECT MIN(bm_approved_at) FROM arcp_lines_hot WHERE bm_approved_at IS NOT NULL) AS min_bm,
+          (SELECT MAX(bm_approved_at) FROM arcp_lines_hot WHERE bm_approved_at IS NOT NULL) AS max_bm,
+          (SELECT MIN(ho_approved_at) FROM arcp_lines_hot WHERE ho_approved_at IS NOT NULL) AS min_ho,
+          (SELECT MAX(ho_approved_at) FROM arcp_lines_hot WHERE ho_approved_at IS NOT NULL) AS max_ho
+      `);
+      const row = bounds.rows[0] ?? {};
+      arcp = {
+        rowCount: Number(row.row_count ?? 0),
+        status: arcpState.rows[0]?.status ?? null,
+        backfillStart: arcpBackfillStartDate(),
+        callAt: { min: arcpDateYmd(row.min_call), max: arcpDateYmd(row.max_call) },
+        solveAt: { min: arcpDateYmd(row.min_solve), max: arcpDateYmd(row.max_solve) },
+        bmApprovedAt: { min: arcpDateYmd(row.min_bm), max: arcpDateYmd(row.max_bm) },
+        hoApprovedAt: { min: arcpDateYmd(row.min_ho), max: arcpDateYmd(row.max_ho) },
+      };
+    } catch {
+      arcp = null;
+    }
+
+    return {
+      hotCount,
+      factGrains: factGrains.rows,
+      dims: dims.rows,
+      syncStates: syncStates.rows,
+      runs: runs.rows,
+      batches: batches.rows,
+      arcp,
+    };
+  });
 
   const hotState = syncStates.find((s) => s.entity === 'calls_latest_hot');
   const arcpState = syncStates.find((s) => s.entity === 'arcp_lines_hot');
@@ -255,4 +326,17 @@ export async function getReadModelProgress(): Promise<ReadModelProgress> {
     message,
     arcp,
   };
+}
+
+export async function getReadModelProgress(options?: { fresh?: boolean }): Promise<ReadModelProgress> {
+  if (!options?.fresh && progressCache && Date.now() - progressCache.at < PROGRESS_CACHE_MS) {
+    return progressCache.data;
+  }
+  const data = await loadReadModelProgressUncached();
+  progressCache = { at: Date.now(), data };
+  return data;
+}
+
+export function invalidateReadModelProgressCache(): void {
+  progressCache = null;
 }

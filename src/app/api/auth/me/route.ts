@@ -7,7 +7,7 @@ type CachedMe = {
 };
 
 const meCache = new Map<string, CachedMe>();
-const ME_CACHE_TTL_MS = 5_000;
+const ME_CACHE_TTL_MS = 15_000;
 
 export async function GET() {
   try {
@@ -20,7 +20,7 @@ export async function GET() {
     const now = Date.now();
     if (cached && cached.expiresAt > now && cached.payload) {
       return NextResponse.json(cached.payload, {
-        headers: { 'Cache-Control': 'private, max-age=5', 'X-Cache': 'HIT' },
+        headers: { 'Cache-Control': 'private, max-age=15', 'X-Cache': 'HIT' },
       });
     }
 
@@ -35,7 +35,7 @@ export async function GET() {
     });
 
     return NextResponse.json(userInfo, {
-      headers: { 'Cache-Control': 'private, max-age=5', 'X-Cache': 'MISS' },
+      headers: { 'Cache-Control': 'private, max-age=15', 'X-Cache': 'MISS' },
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to load profile';

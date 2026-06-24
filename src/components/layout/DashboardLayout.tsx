@@ -47,7 +47,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const authLoadedRef = useRef(false);
 
   const fetchProfile = useCallback(async () => {
-    setLoadingProfile(true);
+    if (!authLoadedRef.current) {
+      setLoadingProfile(true);
+    }
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const res = await axios.get('/api/auth/me', { withCredentials: true });

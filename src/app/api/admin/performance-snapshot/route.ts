@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getUserInfo } from '@/lib/auth/session';
+import { unstable_cache } from 'next/cache';
+import { getSessionUserId } from '@/lib/auth/session';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { canAccessPerformanceInsights } from '@/lib/auth/insights-access';
 import { getReadModelProgress } from '@/lib/read-model/sync-meta';
 
-const SNAPSHOT_CACHE_TTL_MS = 30_000;
+const SNAPSHOT_CACHE_TTL_MS = 60_000;
 let snapshotCache:
   | {
       expiresAt: number;
@@ -11,16 +13,27 @@ let snapshotCache:
     }
   | null = null;
 
+const getCachedReadModelProgress = unstable_cache(
+  async () => getReadModelProgress(),
+  ['admin-performance-snapshot-progress'],
+  { revalidate: 45 }
+);
+
 export async function GET() {
-  const userInfo = await getUserInfo();
-  if (!userInfo || !canAccessPerformanceInsights(userInfo.permissions)) {
+  const userId = await getSessionUserId();
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const auth = await loadUserAuth(userId);
+  if (!auth || !canAccessPerformanceInsights(auth.permissions)) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
   const now = Date.now();
   if (snapshotCache && snapshotCache.expiresAt > now) {
     return NextResponse.json(snapshotCache.payload, {
-      headers: { 'Cache-Control': 'private, max-age=30', 'X-Cache': 'HIT' },
+      headers: { 'Cache-Control': 'private, max-age=60', 'X-Cache': 'HIT' },
     });
   }
 
@@ -28,7 +41,7 @@ export async function GET() {
   let syncError: string | null = null;
 
   try {
-    syncProgress = await getReadModelProgress();
+    syncProgress = await getCachedReadModelProgress();
   } catch (err: unknown) {
     syncError = err instanceof Error ? err.message : 'Failed to load sync status';
   }
@@ -63,6 +76,6 @@ export async function GET() {
 
   snapshotCache = { payload, expiresAt: now + SNAPSHOT_CACHE_TTL_MS };
   return NextResponse.json(payload, {
-    headers: { 'Cache-Control': 'private, max-age=30', 'X-Cache': 'MISS' },
+    headers: { 'Cache-Control': 'private, max-age=60', 'X-Cache': 'MISS' },
   });
 }
