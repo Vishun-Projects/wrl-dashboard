@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useLayoutEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import axios from 'axios';
 import { signOutAndGoToLogin } from '@/lib/auth/sign-out-client';
@@ -45,8 +45,14 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [loadingProfile, setLoadingProfile] = useState(pathname !== '/login');
   const authLoadedRef = useRef(false);
+  const profileRequestRef = useRef<Promise<void> | null>(null);
 
   const fetchProfile = useCallback(async () => {
+    if (profileRequestRef.current) {
+      return profileRequestRef.current;
+    }
+
+    const run = async () => {
     if (!authLoadedRef.current) {
       setLoadingProfile(true);
     }
@@ -78,9 +84,18 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       }
     }
     setLoadingProfile(false);
+    };
+
+    const req = run().finally(() => {
+      if (profileRequestRef.current === req) {
+        profileRequestRef.current = null;
+      }
+    });
+    profileRequestRef.current = req;
+    return req;
   }, [pathname, router]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (pathname === '/login') {
       setUserProfile(null);
       authLoadedRef.current = false;
@@ -99,6 +114,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   }
 
   const authReady = !loadingProfile && !!userProfile;
+  const allowImmediatePaint = pathname === '/admin/performance-insights';
 
   return (
     <UserContext.Provider value={{ userProfile, loadingProfile, refreshProfile: fetchProfile }}>
@@ -107,7 +123,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         {performanceLogEnabledClient() ? <PerformanceMetricsLogger /> : null}
         <div className="flex flex-col md:flex-row h-screen overflow-hidden w-screen bg-slate-50 text-slate-700 font-sans">
           <Sidebar user={userProfile} />
-          {authReady ? (
+          {authReady || allowImmediatePaint ? (
             <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
               <PageAccessGuard>{children}</PageAccessGuard>
             </div>

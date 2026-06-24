@@ -51,6 +51,11 @@ type SnapshotPayload = {
   };
 };
 
+type DiagnosticsSnapshot = {
+  navigationTiming: Record<string, number | undefined> | null;
+  resourceSummary: ReturnType<typeof readResourceSummary>;
+};
+
 function formatMs(value: number | undefined): string {
   if (value == null || Number.isNaN(value)) return '—';
   return `${Math.round(value)} ms`;
@@ -107,6 +112,34 @@ function readResourceSummary() {
   };
 }
 
+function runWhenIdle(cb: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  let cancelled = false;
+  const run = () => {
+    if (!cancelled) cb();
+  };
+
+  const win = window as Window & {
+    requestIdleCallback?: (callback: () => void, opts?: { timeout: number }) => number;
+    cancelIdleCallback?: (id: number) => void;
+  };
+
+  if (typeof win.requestIdleCallback === 'function') {
+    const id = win.requestIdleCallback(run, { timeout: 1_000 });
+    return () => {
+      cancelled = true;
+      if (typeof win.cancelIdleCallback === 'function') win.cancelIdleCallback(id);
+    };
+  }
+
+  const timeout = window.setTimeout(run, 300);
+  return () => {
+    cancelled = true;
+    window.clearTimeout(timeout);
+  };
+}
+
 export function PerformanceInsightsPanel() {
   const pathname = usePathname();
   const [vitals, setVitals] = useState<VitalEntry[]>([]);
@@ -115,10 +148,13 @@ export function PerformanceInsightsPanel() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsSnapshot | null>(null);
   const vitalsRef = useRef(vitals);
   const longTasksRef = useRef(longTasks);
+  const diagnosticsRef = useRef<DiagnosticsSnapshot | null>(diagnostics);
   vitalsRef.current = vitals;
   longTasksRef.current = longTasks;
+  diagnosticsRef.current = diagnostics;
 
   const vercelProject = process.env.NEXT_PUBLIC_VERCEL_PROJECT_NAME ?? 'wrl-dashboard';
   const vercelDashboard = useMemo(
@@ -133,6 +169,14 @@ export function PerformanceInsightsPanel() {
       ),
     }),
     [vercelProject]
+  );
+
+  const collectDiagnostics = useCallback(
+    (): DiagnosticsSnapshot => ({
+      navigationTiming: readNavigationTiming(),
+      resourceSummary: readResourceSummary(),
+    }),
+    []
   );
 
   const recordVital = useCallback((metric: Metric) => {
@@ -161,21 +205,41 @@ export function PerformanceInsightsPanel() {
   useEffect(() => {
     if (typeof PerformanceObserver === 'undefined') return;
 
+    let teardownIdle: (() => void) | null = null;
+    let observer: PerformanceObserver | null = null;
     try {
-      const observer = new PerformanceObserver((list) => {
-        const entries = list.getEntries().map((entry) => ({
-          duration: Math.round(entry.duration),
-          startTime: Math.round(entry.startTime),
-          name: entry.name,
-        }));
-        setLongTasks((prev) => [...prev, ...entries].slice(-20));
+      teardownIdle = runWhenIdle(() => {
+        observer = new PerformanceObserver((list) => {
+          const entries = list.getEntries().map((entry) => ({
+            duration: Math.round(entry.duration),
+            startTime: Math.round(entry.startTime),
+            name: entry.name,
+          }));
+          setLongTasks((prev) => [...prev, ...entries].slice(-20));
+        });
+        observer.observe({ type: 'longtask', buffered: true });
       });
-      observer.observe({ type: 'longtask', buffered: true });
-      return () => observer.disconnect();
+      return () => {
+        if (teardownIdle) teardownIdle();
+        observer?.disconnect();
+      };
     } catch {
       return undefined;
     }
   }, []);
+
+  useEffect(() => {
+    let cancelIdle: (() => void) | null = null;
+    const raf = requestAnimationFrame(() => {
+      cancelIdle = runWhenIdle(() => {
+        setDiagnostics(collectDiagnostics());
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      if (cancelIdle) cancelIdle();
+    };
+  }, [collectDiagnostics]);
 
   const loadServerSnapshot = useCallback(async (trigger = 'refresh') => {
     setLoading(true);
@@ -183,12 +247,14 @@ export function PerformanceInsightsPanel() {
     try {
       const res = await axios.get('/api/admin/performance-snapshot', { withCredentials: true });
       setServerSnapshot(res.data);
+      const nextDiagnostics = collectDiagnostics();
+      setDiagnostics(nextDiagnostics);
       void logInsightsSnapshot({
         route: pathname ?? '/admin/performance-insights',
         trigger,
         webVitals: vitalsRef.current,
-        navigationTiming: readNavigationTiming(),
-        resourceSummary: readResourceSummary(),
+        navigationTiming: nextDiagnostics.navigationTiming,
+        resourceSummary: nextDiagnostics.resourceSummary,
         longTasks: longTasksRef.current,
         server: res.data,
         serverError: null,
@@ -199,12 +265,14 @@ export function PerformanceInsightsPanel() {
         : 'Failed to load server snapshot';
       setServerError(String(message));
       setServerSnapshot(null);
+      const nextDiagnostics = collectDiagnostics();
+      setDiagnostics(nextDiagnostics);
       void logInsightsSnapshot({
         route: pathname ?? '/admin/performance-insights',
         trigger: `${trigger}:error`,
         webVitals: vitalsRef.current,
-        navigationTiming: readNavigationTiming(),
-        resourceSummary: readResourceSummary(),
+        navigationTiming: nextDiagnostics.navigationTiming,
+        resourceSummary: nextDiagnostics.resourceSummary,
         longTasks: longTasksRef.current,
         server: null,
         serverError: String(message),
@@ -236,14 +304,14 @@ export function PerformanceInsightsPanel() {
       referrer: typeof document !== 'undefined' ? document.referrer : '',
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
       webVitals: vitals,
-      navigationTiming: readNavigationTiming(),
-      resourceSummary: readResourceSummary(),
+      navigationTiming: diagnostics?.navigationTiming ?? null,
+      resourceSummary: diagnostics?.resourceSummary ?? { count: 0, totalTransferSize: 0, slowest: [] },
       longTasks,
       server: serverSnapshot,
       serverError,
       vercelDashboard,
     }),
-    [pathname, vitals, longTasks, serverSnapshot, serverError, vercelDashboard]
+    [pathname, vitals, longTasks, serverSnapshot, serverError, vercelDashboard, diagnostics]
   );
 
   const copyJson = async () => {
@@ -254,16 +322,15 @@ export function PerformanceInsightsPanel() {
       route: pathname ?? '/admin/performance-insights',
       trigger: 'copy_json',
       webVitals: vitalsRef.current,
-      navigationTiming,
-      resourceSummary,
+      navigationTiming: diagnosticsRef.current?.navigationTiming ?? null,
+      resourceSummary: diagnosticsRef.current?.resourceSummary ?? { count: 0, totalTransferSize: 0, slowest: [] },
       longTasks: longTasksRef.current,
       server: serverSnapshot,
       serverError,
     });
   };
-
-  const navigationTiming = readNavigationTiming();
-  const resourceSummary = readResourceSummary();
+  const navigationTiming = diagnostics?.navigationTiming ?? null;
+  const resourceSummary = diagnostics?.resourceSummary ?? { count: 0, totalTransferSize: 0, slowest: [] };
 
   return (
     <div className="space-y-6">
