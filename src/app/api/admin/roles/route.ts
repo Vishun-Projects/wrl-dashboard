@@ -5,6 +5,13 @@ import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { groupPermissionsForRolesUi } from '@/lib/auth/page-access';
 
+const ROLES_CACHE_TTL_MS = 20_000;
+const rolesCache = new Map<string, { expiresAt: number; payload: unknown }>();
+
+function clearRolesCache(): void {
+  rolesCache.clear();
+}
+
 export async function GET(request: Request) {
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
@@ -21,12 +28,24 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const fields = searchParams.get('fields');
+    const now = Date.now();
+    const cacheKey = `${user.id}:${fields ?? 'full'}`;
+    const cached = rolesCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return NextResponse.json(cached.payload, {
+        headers: { 'Cache-Control': 'private, max-age=20', 'X-Cache': 'HIT' },
+      });
+    }
 
     if (fields === 'minimal') {
       const roles = await prisma.$queryRawUnsafe(
         `SELECT id, name FROM public.app_roles ORDER BY name ASC`
       );
-      return NextResponse.json({ roles });
+      const payload = { roles };
+      rolesCache.set(cacheKey, { payload, expiresAt: now + ROLES_CACHE_TTL_MS });
+      return NextResponse.json(payload, {
+        headers: { 'Cache-Control': 'private, max-age=20', 'X-Cache': 'MISS' },
+      });
     }
 
     const roles = await prisma.$queryRawUnsafe(`
@@ -44,7 +63,11 @@ export async function GET(request: Request) {
     );
     const permissionGroups = groupPermissionsForRolesUi(allPermissions as any[]);
 
-    return NextResponse.json({ roles, allPermissions, permissionGroups });
+    const payload = { roles, allPermissions, permissionGroups };
+    rolesCache.set(cacheKey, { payload, expiresAt: now + ROLES_CACHE_TTL_MS });
+    return NextResponse.json(payload, {
+      headers: { 'Cache-Control': 'private, max-age=20', 'X-Cache': 'MISS' },
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to load roles';
     return NextResponse.json({ error: message }, { status: 500 });
@@ -80,6 +103,7 @@ export async function POST(request: Request) {
       }
     }
 
+    clearRolesCache();
     return NextResponse.json({ success: true, id: roleId });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Create role failed';
@@ -117,6 +141,7 @@ export async function PUT(request: Request) {
       }
     }
 
+    clearRolesCache();
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Update role failed';
@@ -143,6 +168,7 @@ export async function DELETE(request: Request) {
 
     await prisma.$queryRawUnsafe('DELETE FROM public.app_roles WHERE id = $1', id);
 
+    clearRolesCache();
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Delete role failed';

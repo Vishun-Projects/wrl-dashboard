@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { 
   Users, 
@@ -58,6 +58,7 @@ export default function AdminUsersPage() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [officesLoading, setOfficesLoading] = useState(false);
+  const bootstrapInflightRef = useRef<Promise<void> | null>(null);
 
   type UserFormErrors = {
     name?: string;
@@ -144,6 +145,11 @@ export default function AdminUsersPage() {
   }
 
   async function fetchInitialData() {
+    if (bootstrapInflightRef.current) {
+      await bootstrapInflightRef.current;
+      return;
+    }
+    const run = (async () => {
     setLoading(true);
     try {
       const res = await axios.get('/api/admin/bootstrap', apiOpts);
@@ -160,6 +166,13 @@ export default function AdminUsersPage() {
       }
     } finally {
       setLoading(false);
+    }
+    })();
+    bootstrapInflightRef.current = run;
+    try {
+      await run;
+    } finally {
+      bootstrapInflightRef.current = null;
     }
   }
 

@@ -3,10 +3,25 @@ import { getUserInfo } from '@/lib/auth/session';
 import { canAccessPerformanceInsights } from '@/lib/auth/insights-access';
 import { getReadModelProgress } from '@/lib/read-model/sync-meta';
 
+const SNAPSHOT_CACHE_TTL_MS = 30_000;
+let snapshotCache:
+  | {
+      expiresAt: number;
+      payload: Record<string, unknown>;
+    }
+  | null = null;
+
 export async function GET() {
   const userInfo = await getUserInfo();
   if (!userInfo || !canAccessPerformanceInsights(userInfo.permissions)) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  const now = Date.now();
+  if (snapshotCache && snapshotCache.expiresAt > now) {
+    return NextResponse.json(snapshotCache.payload, {
+      headers: { 'Cache-Control': 'private, max-age=30', 'X-Cache': 'HIT' },
+    });
   }
 
   let syncProgress: Awaited<ReturnType<typeof getReadModelProgress>> | null = null;
@@ -18,7 +33,7 @@ export async function GET() {
     syncError = err instanceof Error ? err.message : 'Failed to load sync status';
   }
 
-  return NextResponse.json({
+  const payload = {
     capturedAt: new Date().toISOString(),
     environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? 'unknown',
     deployment: {
@@ -44,5 +59,10 @@ export async function GET() {
     },
     sync: syncProgress,
     syncError,
+  } as const;
+
+  snapshotCache = { payload, expiresAt: now + SNAPSHOT_CACHE_TTL_MS };
+  return NextResponse.json(payload, {
+    headers: { 'Cache-Control': 'private, max-age=30', 'X-Cache': 'MISS' },
   });
 }

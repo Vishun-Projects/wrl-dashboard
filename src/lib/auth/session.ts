@@ -10,14 +10,22 @@ export async function getUserPermissions(userId: string): Promise<string[]> {
 
 /** Session from Supabase Auth; profile + permissions from Postgres. */
 export async function getUserInfo() {
+  const userId = await getSessionUserId();
+  if (!userId) return null;
+  return getUserInfoById(userId);
+}
+
+/** Resolve only authenticated user id (no app_users/permissions query). */
+export async function getSessionUserId(): Promise<string | null> {
   const supabase = await createClient();
   const user = await requireSupabaseUser(supabase);
+  return user?.id ?? null;
+}
 
-  if (!user) return null;
-
-  const auth = await loadUserAuth(user.id);
+/** Resolve full app profile + permissions for a known user id. */
+export async function getUserInfoById(userId: string) {
+  const auth = await loadUserAuth(userId);
   if (!auth) return null;
-
   return { ...auth.profile, created_at: auth.created_at, permissions: auth.permissions };
 }
 
