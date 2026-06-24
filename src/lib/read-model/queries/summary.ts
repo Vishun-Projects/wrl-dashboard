@@ -99,9 +99,12 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
   const endDate = params.endDate || new Date().toISOString().slice(0, 10);
   const agingDate = resolveAgingDate(params);
 
-  const officeFilter = buildOfficeFilter(params, 'm', 3);
-  const callTypeFilter = buildCallTypeFilter(params, 'm', officeFilter.nextIdx);
-  const values = [startDate, endDate, ...officeFilter.values, ...callTypeFilter.values];
+  const periodStart = `${startDate}T00:00:00`;
+  const periodEnd = `${endDate}T23:59:59`;
+
+  const officeFilter = buildOfficeFilter(params, 'h', 3, 'nofficeid');
+  const callTypeFilter = buildCallTypeFilter(params, 'h', officeFilter.nextIdx);
+  const values = [periodStart, periodEnd, ...officeFilter.values, ...callTypeFilter.values];
 
   const branchRows = await prisma.$queryRawUnsafe<
     Array<{
@@ -123,33 +126,33 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
   >(
     `
     SELECT
-      m.office_id,
+      h.nofficeid AS office_id,
       d.nunder AS parent_id,
-      COALESCE(d.vcompanyname, 'UNKNOWN') AS branch,
-      m.region,
-      SUM(m.total)::int AS total_calls,
-      SUM(m.solved)::int AS solved_calls,
-      SUM(m.cancelled)::int AS cancelled_calls,
-      SUM(m.open_count)::int AS open_calls,
-      SUM(m.tech_solved)::int AS tech_solved_calls,
-      SUM(m.deployment_total)::int AS deployment_total,
-      SUM(m.deployment_done)::int AS deployment_done,
-      SUM(m.installation_total)::int AS installation_total,
-      SUM(m.installation_done)::int AS installation_done,
+      COALESCE(d.vcompanyname, h.branch_name, 'UNKNOWN') AS branch,
+      h.region,
+      count(*)::int AS total_calls,
+      count(*) FILTER (WHERE h.status_bucket IN ('solved', 'tech_solved'))::int AS solved_calls,
+      count(*) FILTER (WHERE h.status_bucket = 'cancelled')::int AS cancelled_calls,
+      count(*) FILTER (WHERE h.status_bucket IN ('open_unallocated', 'assigned'))::int AS open_calls,
+      count(*) FILTER (WHERE h.status_bucket = 'tech_solved')::int AS tech_solved_calls,
+      count(*) FILTER (WHERE normalize_call_type(h.call_type) = normalize_call_type('DEPLOYMENT'))::int AS deployment_total,
+      count(*) FILTER (
+        WHERE normalize_call_type(h.call_type) = normalize_call_type('DEPLOYMENT')
+          AND h.status_bucket IN ('solved', 'tech_solved')
+      )::int AS deployment_done,
+      count(*) FILTER (WHERE normalize_call_type(h.call_type) = normalize_call_type('INSTALLATION CALL'))::int AS installation_total,
+      count(*) FILTER (
+        WHERE normalize_call_type(h.call_type) = normalize_call_type('INSTALLATION CALL')
+          AND h.status_bucket IN ('solved', 'tech_solved')
+      )::int AS installation_done,
       COALESCE(MAX(h.branch_headcount), 0)::int AS headcount
-    FROM call_metrics_daily m
-    LEFT JOIN dim_offices d ON d.ncode = m.office_id
-    LEFT JOIN LATERAL (
-      SELECT branch_headcount
-      FROM calls_latest_hot h2
-      WHERE h2.nofficeid = m.office_id
-      LIMIT 1
-    ) h ON true
-    WHERE m.fact_date >= $1::date
-      AND m.fact_date <= $2::date
+    FROM calls_latest_hot h
+    LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
+    WHERE h.logged_at >= $1::timestamptz
+      AND h.logged_at <= $2::timestamptz
       ${officeFilter.clause}
       ${callTypeFilter.clause}
-    GROUP BY m.office_id, d.nunder, d.vcompanyname, m.region
+    GROUP BY h.nofficeid, d.nunder, d.vcompanyname, h.branch_name, h.region
     ORDER BY branch ASC
     `,
     ...values
@@ -227,8 +230,8 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
     };
   });
 
-  const accountOfficeFilter = buildOfficeFilter(params, 'm', 4);
-  const accountValues = [startDate, endDate, BREAKDOWN, ...accountOfficeFilter.values];
+  const accountOfficeFilter = buildOfficeFilter(params, 'h', 4, 'nofficeid');
+  const accountValues = [periodStart, periodEnd, BREAKDOWN, ...accountOfficeFilter.values];
 
   const accountRows = await prisma.$queryRawUnsafe<
     Array<{
@@ -247,23 +250,41 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
   >(
     `
     SELECT
-      m.region,
-      m.account,
-      SUM(CASE WHEN normalize_call_type(m.call_type) = normalize_call_type($3) THEN m.total ELSE 0 END)::int AS total_calls,
-      SUM(CASE WHEN normalize_call_type(m.call_type) = normalize_call_type($3) THEN m.solved ELSE 0 END)::int AS total_solved,
-      SUM(CASE WHEN normalize_call_type(m.call_type) = normalize_call_type($3) THEN m.cancelled ELSE 0 END)::int AS cancelled_calls,
-      SUM(CASE WHEN normalize_call_type(m.call_type) = normalize_call_type($3) THEN m.open_count ELSE 0 END)::int AS open_calls,
-      SUM(CASE WHEN normalize_call_type(m.call_type) = normalize_call_type($3) THEN m.tech_solved ELSE 0 END)::int AS total_tech_solved,
-      SUM(m.deployment_total)::int AS deployment_total,
-      SUM(m.deployment_done)::int AS deployment_done,
-      SUM(m.installation_total)::int AS installation_total,
-      SUM(m.installation_done)::int AS installation_done
-    FROM call_metrics_daily m
-    WHERE m.fact_date >= $1::date
-      AND m.fact_date <= $2::date
+      h.region,
+      h.account,
+      count(*) FILTER (WHERE normalize_call_type(h.call_type) = normalize_call_type($3))::int AS total_calls,
+      count(*) FILTER (
+        WHERE normalize_call_type(h.call_type) = normalize_call_type($3)
+          AND h.status_bucket IN ('solved', 'tech_solved')
+      )::int AS total_solved,
+      count(*) FILTER (
+        WHERE normalize_call_type(h.call_type) = normalize_call_type($3)
+          AND h.status_bucket = 'cancelled'
+      )::int AS cancelled_calls,
+      count(*) FILTER (
+        WHERE normalize_call_type(h.call_type) = normalize_call_type($3)
+          AND h.status_bucket IN ('open_unallocated', 'assigned')
+      )::int AS open_calls,
+      count(*) FILTER (
+        WHERE normalize_call_type(h.call_type) = normalize_call_type($3)
+          AND h.status_bucket = 'tech_solved'
+      )::int AS total_tech_solved,
+      count(*) FILTER (WHERE normalize_call_type(h.call_type) = normalize_call_type('DEPLOYMENT'))::int AS deployment_total,
+      count(*) FILTER (
+        WHERE normalize_call_type(h.call_type) = normalize_call_type('DEPLOYMENT')
+          AND h.status_bucket IN ('solved', 'tech_solved')
+      )::int AS deployment_done,
+      count(*) FILTER (WHERE normalize_call_type(h.call_type) = normalize_call_type('INSTALLATION CALL'))::int AS installation_total,
+      count(*) FILTER (
+        WHERE normalize_call_type(h.call_type) = normalize_call_type('INSTALLATION CALL')
+          AND h.status_bucket IN ('solved', 'tech_solved')
+      )::int AS installation_done
+    FROM calls_latest_hot h
+    WHERE h.logged_at >= $1::timestamptz
+      AND h.logged_at <= $2::timestamptz
       ${accountOfficeFilter.clause}
-    GROUP BY m.region, m.account
-    ORDER BY m.account ASC
+    GROUP BY h.region, h.account
+    ORDER BY h.account ASC
     `,
     ...accountValues
   );

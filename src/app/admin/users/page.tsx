@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import axios from 'axios';
 import { 
   Users, 
@@ -40,7 +39,7 @@ import { ModalPortal } from '@/components/ui/ModalPortal';
 
 export default function AdminUsersPage() {
   const { userProfile } = useUser();
-  const supabase = createClient();
+  const apiOpts = { withCredentials: true as const };
   const [users, setUsers] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
   const [offices, setOffices] = useState<any[]>([]);
@@ -132,31 +131,32 @@ export default function AdminUsersPage() {
   async function fetchInitialData() {
     setLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { router.push('/login'); return; }
-
-      setCurrentUserInfo(session.user);
-
-      const [usersRes, officesRes, rolesRes] = await Promise.all([
-        axios.get('/api/admin/users', { headers: { 'Authorization': `Bearer ${session.access_token}` } }),
-        axios.get('/api/offices', { headers: { 'Authorization': `Bearer ${session.access_token}` } }),
-        axios.get('/api/admin/roles')
+      const [usersRes, officesRes, rolesRes, meRes] = await Promise.all([
+        axios.get('/api/admin/users', apiOpts),
+        axios.get('/api/offices', apiOpts),
+        axios.get('/api/admin/roles', apiOpts),
+        axios.get('/api/auth/me', apiOpts),
       ]);
+
+      if (!meRes.data?.id) { router.push('/login'); return; }
+      setCurrentUserInfo(meRes.data);
 
 
       
       // Find current user in the list to check role
-      const currentUser = usersRes.data.find((u: any) => u.id === session.user.id);
+      const currentUser = usersRes.data.find((u: any) => u.id === meRes.data.id);
 
 
       setUsers(usersRes.data);
       setOffices(officesRes.data);
       setRoles(rolesRes.data.roles);
     } catch (err) {
-      // Silently handle fetch errors for production
-      // If forbidden, redirect
-      if ((err as any).response?.status === 403) {
-        // Silently redirect if unauthorized
+      const status = (err as { response?: { status?: number } }).response?.status;
+      if (status === 401) {
+        router.push('/login');
+        return;
+      }
+      if (status === 403) {
         router.push('/report');
       }
     } finally {
@@ -175,15 +175,10 @@ export default function AdminUsersPage() {
       return;
     }
     try {
-      const { data: { session } } = await supabase.auth.getSession();
       if (editingUser) {
-        await axios.put('/api/admin/users', { ...formData, id: editingUser.id }, {
-          headers: { 'Authorization': `Bearer ${session?.access_token}` }
-        });
+        await axios.put('/api/admin/users', { ...formData, id: editingUser.id }, apiOpts);
       } else {
-        const res = await axios.post('/api/admin/users', formData, {
-          headers: { 'Authorization': `Bearer ${session?.access_token}` }
-        });
+        const res = await axios.post('/api/admin/users', formData, apiOpts);
         if (res.data?.recovered) {
           feedback.actionSuccess('User profile completed (login already existed)');
         } else {
@@ -213,10 +208,7 @@ export default function AdminUsersPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      await axios.delete(`/api/admin/users?id=${deleteTarget.id}`, {
-        headers: { 'Authorization': `Bearer ${session?.access_token}` }
-      });
+      await axios.delete(`/api/admin/users?id=${deleteTarget.id}`, apiOpts);
       feedback.actionSuccess('User deleted successfully');
       setDeleteTarget(null);
       fetchInitialData();
@@ -233,13 +225,11 @@ export default function AdminUsersPage() {
     
     setUpdatingPassword(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      await axios.post('/api/admin/users/password', { 
-        userId: selectedUserForPassword.id, 
-        newPassword 
-      }, {
-        headers: { 'Authorization': `Bearer ${session?.access_token}` }
-      });
+      await axios.post(
+        '/api/admin/users/password',
+        { userId: selectedUserForPassword.id, newPassword },
+        apiOpts
+      );
       feedback.actionSuccess('Password updated successfully');
       setShowPasswordModal(false);
       setNewPassword('');

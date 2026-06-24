@@ -66,7 +66,7 @@ export async function signInViaDatabase(
     const sessionId = randomUUID();
     const refreshToken = randomBytes(32).toString('base64url');
     const instanceId = '00000000-0000-0000-0000-000000000000';
-    const expiresIn = 3600;
+    const expiresIn = process.env.NODE_ENV === 'development' ? 7 * 24 * 3600 : 3600;
     const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
 
     await pool.query(

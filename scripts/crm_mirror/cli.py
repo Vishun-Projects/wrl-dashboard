@@ -113,7 +113,8 @@ def cmd_retry(args: argparse.Namespace) -> int:
         conn.execute(
             """
             UPDATE crm_mirror.sync_state
-            SET phase = 'pending', last_error = NULL, catchup_empty_passes = 0
+            SET phase = 'pending', last_error = NULL, catchup_empty_passes = 0,
+                last_ncode = NULL, last_cursor = NULL, rows_loaded = 0
             WHERE table_name = %s AND phase = 'error'
             """,
             (args.table.lower(),),

@@ -49,8 +49,9 @@ def classify_capability(
     row_count: int,
     small_table_rows: int,
     heap_only: bool = False,
+    pk_unique: bool = True,
 ) -> str:
-    if heap_only or not pk_column:
+    if heap_only or not pk_column or not pk_unique:
         return CAP_HEAP_SCAN
     if row_count > 0 and row_count < small_table_rows:
         return CAP_SMALL_SNAPSHOT
@@ -114,6 +115,12 @@ def resolve_table_metadata(
     has_editedon = "editedon" in col_set
     has_addedon = "addedon" in col_set
 
+    pk_unique = True
+    if pk and not heap_only:
+        from .fetch_pages import probe_pk_uniqueness
+
+        pk_unique = probe_pk_uniqueness(table_name, pk, session=session)
+
     capability = classify_capability(
         pk_column=pk,
         has_editedon=has_editedon,
@@ -121,6 +128,7 @@ def resolve_table_metadata(
         row_count=row_count,
         small_table_rows=small_table_rows,
         heap_only=heap_only,
+        pk_unique=pk_unique,
     )
 
     return {
@@ -129,6 +137,7 @@ def resolve_table_metadata(
         "has_editedon": has_editedon,
         "has_addedon": has_addedon,
         "sync_capability": capability,
+        "pk_unique": pk_unique,
     }
 
 

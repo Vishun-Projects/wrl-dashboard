@@ -87,7 +87,11 @@ def init_catalog(*, create_ddl: bool = True) -> dict[str, Any]:
 
 
 def repair_catalog_fast() -> dict[str, Any]:
-    """Reset locks/errors/blocked back to pending — never block tables."""
+    """Reset locks/errors/blocked back to pending; re-probe sync_capability for queued tables."""
+    blueprint = parse_blueprint()
+    sess = requests.Session()
+    reprobed = 0
+
     with connect() as conn:
         with tx(conn):
             conn.execute(
@@ -96,14 +100,16 @@ def repair_catalog_fast() -> dict[str, Any]:
             reset_blocked = conn.execute(
                 """
                 UPDATE crm_mirror.sync_state
-                SET phase = 'pending', last_error = NULL, is_running = false
+                SET phase = 'pending', last_error = NULL, is_running = false,
+                    last_ncode = NULL, last_cursor = NULL, rows_loaded = 0
                 WHERE phase IN ('blocked', 'error')
                 """
             ).rowcount
             reset_pooler = conn.execute(
                 """
                 UPDATE crm_mirror.sync_state
-                SET phase = 'pending', last_error = NULL, is_running = false
+                SET phase = 'pending', last_error = NULL, is_running = false,
+                    last_ncode = NULL, last_cursor = NULL, rows_loaded = 0
                 WHERE phase = 'error'
                   AND (
                     last_error ILIKE '%prepared statement%'
@@ -111,7 +117,50 @@ def repair_catalog_fast() -> dict[str, Any]:
                   )
                 """
             ).rowcount
-    return {"reset_to_pending": reset_blocked, "reset_pooler_errors": reset_pooler}
+
+        rows = conn.execute(
+            """
+            SELECT table_name, crm_row_count, size_kb
+            FROM crm_mirror.sync_state
+            WHERE phase = 'pending'
+            ORDER BY size_kb NULLS LAST, table_name
+            """
+        ).fetchall()
+
+        for row in rows:
+            name = row["table_name"]
+            bp = blueprint.get(name)
+            meta = resolve_table_metadata(
+                table_name=name,
+                blueprint_columns=bp.columns if bp else [],
+                row_count=int(row.get("crm_row_count") or 0),
+                session=sess,
+                small_table_rows=SMALL_TABLE_ROWS,
+            )
+            with tx(conn):
+                conn.execute(
+                    """
+                    UPDATE crm_mirror.sync_state
+                    SET sync_capability = %s, pk_column = %s,
+                        has_editedon = %s, has_addedon = %s,
+                        last_ncode = NULL, last_cursor = NULL, rows_loaded = 0
+                    WHERE table_name = %s
+                    """,
+                    (
+                        meta["sync_capability"],
+                        meta["pk_column"],
+                        meta["has_editedon"],
+                        meta["has_addedon"],
+                        name,
+                    ),
+                )
+                reprobed += 1
+
+    return {
+        "reset_to_pending": reset_blocked,
+        "reset_pooler_errors": reset_pooler,
+        "reprobed": reprobed,
+    }
 
 
 def repair_catalog(*, table: str | None = None, fast: bool = False) -> dict[str, Any]:

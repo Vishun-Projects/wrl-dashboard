@@ -136,7 +136,10 @@ def _run_backfill_table_impl(table: str, sess: requests.Session) -> dict[str, An
             columns = _resolve_columns(conn, table, pk, sess)
             resume_cursor = _cursor_from_state(state)
             resume_offset = _heap_offset_from_state(state) if is_heap else 0
-            fresh_start = state["phase"] == PHASE_PENDING and not resume_cursor and resume_offset == 0
+            fresh_start = (
+                state["phase"] == PHASE_ERROR
+                or (state["phase"] == PHASE_PENDING and not resume_cursor and resume_offset == 0)
+            )
 
             with tx(conn):
                 if fresh_start:

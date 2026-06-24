@@ -59,6 +59,8 @@ def insert_rows(
                 if k.lower() == col:
                     val = v
                     break
+            if isinstance(val, str):
+                val = val.replace("\x00", "")
             payload[col] = val if val != "" else None
         payload["_mirror_synced_at"] = now
         payload["_mirror_batch_id"] = batch_id

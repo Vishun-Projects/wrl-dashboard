@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
+import {
+  createAuthUserViaDatabase,
+  deleteAuthUserViaDatabase,
+  findAuthUserIdByEmail,
+} from '@/lib/auth/db-create-user';
+import { isDbSignInAvailable } from '@/lib/auth/db-sign-in';
 import { isDevAuthBypass } from '@/lib/auth/verify-jwt';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
@@ -92,15 +98,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  if (isDevAuthBypass()) {
-    return NextResponse.json(
-      {
-        error:
-          'Creating auth users requires Supabase Admin API over HTTPS. Use Vercel preview or VPN.',
-      },
-      { status: 503 }
-    );
-  }
+  const useDbAuthFallback = isDevAuthBypass() && isDbSignInAvailable();
 
   let authUserId: string | null = null;
   let createdAuthThisRequest = false;
@@ -125,6 +123,29 @@ export async function POST(request: Request) {
       officeIds: office_ids || [],
       visibleStatuses: visible_statuses || [],
     };
+
+    if (useDbAuthFallback) {
+      const dbResult = await createAuthUserViaDatabase({
+        email: profileParams.email,
+        password,
+        name: profileParams.name,
+      });
+      if (!dbResult.ok) {
+        if (dbResult.status === 409) {
+          const existingId = await findAuthUserIdByEmail(profileParams.email);
+          if (existingId && !(await profileExists(existingId))) {
+            await insertAppUser({ id: existingId, ...profileParams });
+            return NextResponse.json({ success: true, id: existingId, recovered: true });
+          }
+        }
+        return NextResponse.json({ error: dbResult.message }, { status: dbResult.status });
+      }
+
+      authUserId = dbResult.id;
+      createdAuthThisRequest = true;
+      await insertAppUser({ id: dbResult.id, ...profileParams });
+      return NextResponse.json({ success: true, id: dbResult.id });
+    }
 
     const { data: authData, error: createError } = await supabaseAdmin.auth.admin.createUser({
       email: profileParams.email,
@@ -157,7 +178,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, id: authData.user.id });
   } catch (err: any) {
     if (authUserId && createdAuthThisRequest && !(await profileExists(authUserId))) {
-      await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => {});
+      if (useDbAuthFallback) {
+        await deleteAuthUserViaDatabase(authUserId).catch(() => {});
+      } else {
+        await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => {});
+      }
     }
     const message = err?.message || 'User creation failed';
     const status = isDuplicateEmailMessage(message) ? 409 : 500;

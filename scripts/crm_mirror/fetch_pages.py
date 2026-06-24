@@ -215,6 +215,35 @@ def crm_count(table_name: str, condition: str = "1=1", session=None) -> int:
     return int(float(rows[0].get("cnt") or 0))
 
 
+def probe_pk_uniqueness(table_name: str, pk_column: str, session=None) -> bool:
+    """Return True when pk_column is safe for keyset (pk > cursor) pagination."""
+    sql = (
+        f"SELECT COUNT(1) AS total, COUNT(DISTINCT {pk_column}) AS distinct_pk "
+        f"FROM {table_name} (NOLOCK)"
+    )
+    try:
+        result = post_query(session=session, gap_ms=FETCH_GAP_MS, raw_sql=sql)
+    except Exception:
+        return False
+    rows = result.get("data") or []
+    if not rows:
+        return True
+    row = rows[0]
+    total = int(float(row.get("total") or row.get("Total") or 0))
+    distinct_pk = int(float(row.get("distinct_pk") or row.get("Distinct_pk") or 0))
+    if total != distinct_pk:
+        return False
+    try:
+        empty_pk = crm_count(
+            table_name,
+            condition=f"COALESCE(CAST({pk_column} AS NVARCHAR(MAX)), '') = ''",
+            session=session,
+        )
+        return empty_pk == 0
+    except Exception:
+        return True
+
+
 def probe_crm_columns(table_name: str, session=None) -> list[str]:
     """Fetch CRM column names via TOP 1 row (live schema)."""
     try:
