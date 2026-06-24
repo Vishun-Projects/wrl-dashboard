@@ -79,8 +79,18 @@ export function Sidebar({ user }: SidebarProps) {
   };
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    router.push('/login');
+    try {
+      await fetch('/api/auth/sign-out', { method: 'POST', credentials: 'include' });
+    } catch {
+      /* still navigate to login */
+    }
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      /* client storage cleanup is best-effort */
+    }
+    // Full page load clears dashboard state and stops in-flight report fetches.
+    window.location.assign('/login');
   };
 
   const navigation = ALL_PAGE_ACCESS.map((page) => ({

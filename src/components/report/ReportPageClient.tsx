@@ -744,6 +744,7 @@ export default function ReportPageClient() {
   };
 
   const fetchControllerRef = React.useRef<AbortController | null>(null);
+  const registerAuthFailedRef = React.useRef(false);
   const drillDownControllerRef = React.useRef<AbortController | null>(null);
   const sentinelRef = React.useRef<HTMLDivElement | null>(null);
   const lastSummaryQueryKeyRef = React.useRef<string | null>(globalReportCache?.summaryQueryKey ?? null);
@@ -1422,6 +1423,7 @@ export default function ReportPageClient() {
 
   useEffect(() => {
     if (!dbInitialized) return;
+    if (registerAuthFailedRef.current) return;
     if (debouncedSearch?.trim() || debouncedPincodeSearch?.trim()) return;
     const registerRowsReady =
       data.length > 0 &&
@@ -1768,17 +1770,7 @@ export default function ReportPageClient() {
     };
 
     try {
-      const tBeforeSession = performance.now();
-      const { data: { session } } = await supabase.auth.getSession();
-      const tAfterSession = performance.now();
-      reportPerf('fetchData', 'supabase.getSession done', opStart, {
-        opId,
-        getSessionMs: Number((tAfterSession - tBeforeSession).toFixed(1)),
-        why: 'Auth token for API Authorization header.',
-      });
-      const headers = {
-        Authorization: `Bearer ${session?.access_token}`,
-      };
+      const requestConfig = { withCredentials: true as const, signal: controller.signal };
 
       const prefetchAdjacentPages = (currentPage: number) => {
         const prefetchSessionStart = performance.now();
@@ -1825,7 +1817,7 @@ export default function ReportPageClient() {
               `/api/report?page=${nextPage}&limit=${pageSize}&fetchTotals=false&officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
             );
             axios
-              .get(nextUrl, { headers, signal: controller.signal })
+              .get(nextUrl, requestConfig)
               .then((res) => {
                 storePrefetched(nextPage, res.data);
                 reportPerf('prefetch', `page ${nextPage} response stored`, prefetchSessionStart, {
@@ -1841,7 +1833,7 @@ export default function ReportPageClient() {
             `/api/report?page=${nextPage}&limit=${pageSize}&fetchTotals=false&officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
           );
           axios
-            .get(nextUrl, { headers, signal: controller.signal })
+            .get(nextUrl, requestConfig)
             .then((res) => {
               storePrefetched(nextPage, res.data);
               reportPerf('prefetch', `page ${nextPage} response stored`, prefetchSessionStart, {
@@ -1862,7 +1854,7 @@ export default function ReportPageClient() {
 
       if (p === 1) {
         const tBeforeRegister = performance.now();
-        const regRes = await axios.get(url, { headers, signal: controller.signal });
+        const regRes = await axios.get(url, requestConfig);
         const tAfterRegister = performance.now();
         reportPerf('fetchData', 'network: /api/report (page 1) complete', opStart, {
           opId,
@@ -1894,7 +1886,7 @@ export default function ReportPageClient() {
             const totalsUrl = appendRegisterFilters(
               `/api/report/totals?officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
             );
-            const totalsRes = await axios.get(totalsUrl, { headers });
+            const totalsRes = await axios.get(totalsUrl, { withCredentials: true });
             const lazyTotal = totalsRes.data.total ?? 0;
             lastKnownRegisterTotalRef.current = lazyTotal;
             setTotal(lazyTotal);
@@ -1970,7 +1962,7 @@ export default function ReportPageClient() {
       } else {
         url += `&fetchTotals=false`;
         const tBeforePage = performance.now();
-        const regRes = await axios.get(url, { headers, signal: controller.signal });
+        const regRes = await axios.get(url, requestConfig);
         const tAfterPage = performance.now();
         reportPerf('fetchData', 'network: /api/report (page>1, fetchTotals=false) complete', opStart, {
           opId,
@@ -2038,6 +2030,13 @@ export default function ReportPageClient() {
           opId,
           why: 'AbortController: newer fetchData or navigation cancelled this request.',
         });
+        return;
+      }
+      const unauthorized = axios.isAxiosError(err) && err.response?.status === 401;
+      if (unauthorized) {
+        registerAuthFailedRef.current = true;
+        fetchControllerRef.current?.abort();
+        window.location.assign('/login');
         return;
       }
       reportPerf('fetchData', 'request failed (error toast)', opStart, {

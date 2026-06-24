@@ -111,3 +111,30 @@ export function persistSessionCookies(
     })),
   ]);
 }
+
+/** Remove Supabase SSR auth cookies (sign-out without calling GoTrue). */
+export function clearSessionCookies(cookieWriter: CookieWriter): void {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  if (!supabaseUrl) {
+    throw new Error('NEXT_PUBLIC_SUPABASE_URL is not configured');
+  }
+
+  const storageKey = getSupabaseAuthStorageKey(supabaseUrl);
+  const cookieNames = cookieWriter.getAll().map((cookie) => cookie.name);
+  const removeCookies = cookieNames.filter((name) => isChunkLike(name, storageKey));
+
+  const removeCookieOptions = {
+    path: DEFAULT_COOKIE_OPTIONS.path,
+    maxAge: 0,
+    sameSite: 'lax' as const,
+    httpOnly: DEFAULT_COOKIE_OPTIONS.httpOnly,
+  };
+
+  cookieWriter.setAll(
+    removeCookies.map((name) => ({
+      name,
+      value: '',
+      options: removeCookieOptions,
+    }))
+  );
+}
