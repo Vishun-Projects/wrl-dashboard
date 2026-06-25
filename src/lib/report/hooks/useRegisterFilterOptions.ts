@@ -3,8 +3,11 @@
 import { useCallback, useRef } from 'react';
 import axios from 'axios';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { getBearerAuthHeaders } from '@/lib/supabase/session';
-import { readRegisterFromPostgresClient } from '@/lib/read-model/client-flags';
+import { cookieAuthRequestConfig } from '@/lib/api/cookie-auth';
+import {
+  readRegisterFromPostgresClient,
+  registerPostgresHotPathAvailable,
+} from '@/lib/read-model/client-flags';
 import {
   joinFilterParam,
   resolveViewCallTypesParam,
@@ -26,13 +29,22 @@ export function useRegisterFilterOptions(
   const loadedRef = useRef(false);
 
   const loadFilterOptions = useCallback(async () => {
-    if (!readRegisterFromPostgresClient() || !appliedFilters || loadedRef.current) return;
+    if (
+      !readRegisterFromPostgresClient() ||
+      !appliedFilters ||
+      !registerPostgresHotPathAvailable(
+        toDateString(appliedFilters.dateRange.start),
+        toDateString(appliedFilters.dateRange.end)
+      ) ||
+      loadedRef.current
+    ) {
+      return;
+    }
     loadedRef.current = true;
 
     try {
-      const headers = await getBearerAuthHeaders(supabase);
       const res = await axios.get('/api/report/filter-options', {
-        headers,
+        ...cookieAuthRequestConfig,
         params: {
           startDate: toDateString(appliedFilters.dateRange.start),
           endDate: toDateString(appliedFilters.dateRange.end),
@@ -61,7 +73,7 @@ export function useRegisterFilterOptions(
     } catch {
       loadedRef.current = false;
     }
-  }, [appliedFilters, setters, supabase]);
+  }, [appliedFilters, setters]);
 
   const resetFilterOptionsCache = useCallback(() => {
     loadedRef.current = false;

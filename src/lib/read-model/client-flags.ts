@@ -1,3 +1,5 @@
+import { isWithinHotWindow } from '@/lib/read-model/hot-window';
+
 type ReadSource = 'crm' | 'postgres';
 
 /** Next.js only inlines NEXT_PUBLIC_* when accessed with literal keys — not process.env[variable]. */
@@ -22,6 +24,14 @@ export function readRegisterFromPostgresClient(): boolean {
   return (
     readClientSource(process.env.NEXT_PUBLIC_READ_REGISTER_FROM) === 'postgres'
   );
+}
+
+/** Postgres hot-table APIs (/totals, /filter-options) only for ranges inside the ~90-day window. */
+export function registerPostgresHotPathAvailable(
+  startDate: string,
+  endDate: string
+): boolean {
+  return readRegisterFromPostgresClient() && isWithinHotWindow(startDate, endDate);
 }
 
 function readDistributionFromPostgresClient(): boolean {

@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
+import { cookieAuthRequestConfig } from '@/lib/api/cookie-auth';
 import { TrnLink } from '@/components/calls/TrnLink';
 import {
   MapPin,
@@ -219,15 +220,6 @@ export default function LocationAuditPage() {
     [getAppliedFiltersSnapshot]
   );
 
-  const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session?.access_token) return {};
-    return { Authorization: `Bearer ${session.access_token}` };
-  }, [supabase]);
-
-
   const runAudit = useCallback(async () => {
     const snap = getAppliedFiltersSnapshot();
     if (!snap) return;
@@ -252,13 +244,12 @@ export default function LocationAuditPage() {
     clearPageAlert();
 
     try {
-      const headers = await getAuthHeaders();
       const qs = new URLSearchParams({
         ...buildParams(),
         mode: 'full',
       });
       const res = await fetch(`/api/report/location-audit?${qs.toString()}`, {
-        headers,
+        credentials: 'include',
         signal: abort.signal,
       });
       if (!res.ok) {
@@ -296,7 +287,7 @@ export default function LocationAuditPage() {
         setLoadStage('idle');
       }
     }
-  }, [getAppliedFiltersSnapshot, buildParams, getAuthHeaders, clearPageAlert, setPageError]);
+  }, [getAppliedFiltersSnapshot, buildParams, clearPageAlert, setPageError]);
 
   useEffect(() => {
     if (!resourcesLoaded || !prefsReady || auditBootstrapRef.current) return;
@@ -323,14 +314,13 @@ export default function LocationAuditPage() {
       setDetailRow(null);
 
       try {
-        const headers = await getAuthHeaders();
         const qs = new URLSearchParams({
           mode: 'row',
           ncode: list.ncode,
           officeId: list.officeId,
         });
         const res = await fetch(`/api/report/location-audit?${qs.toString()}`, {
-          headers,
+          credentials: 'include',
           signal: abort.signal,
         });
         if (!res.ok) {
@@ -352,7 +342,7 @@ export default function LocationAuditPage() {
         if (!abort.signal.aborted) setDetailLoading(false);
       }
     },
-    [getAuthHeaders]
+    []
   );
 
   useEffect(() => {
@@ -374,9 +364,8 @@ export default function LocationAuditPage() {
   const handleExportCsv = async () => {
     setExporting(true);
     try {
-      const headers = await getAuthHeaders();
       const res = await axios.get('/api/report/location-audit', {
-        headers,
+        ...cookieAuthRequestConfig,
         timeout: 300_000,
         params: { ...buildParams(), format: 'csv' },
         responseType: 'blob',

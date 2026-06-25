@@ -109,14 +109,6 @@ export default function WarrantyMasterPage() {
 
   const isFilterStale = deferredFilters !== filters;
 
-  const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session?.access_token) return {};
-    return { Authorization: `Bearer ${session.access_token}` };
-  }, [supabase]);
-
   const dims = useMemo(() => buildWarrantyMasterDimsFromFgLines(allFgLines), [allFgLines]);
 
   const catalogMachineTotal = useMemo(
@@ -154,34 +146,32 @@ export default function WarrantyMasterPage() {
     []
   );
 
-  const fetchMeta = useCallback(
-    async (signal?: AbortSignal) => {
-      const headers = await getAuthHeaders();
-      const res = await fetch('/api/report/warranty-master?mode=meta', { headers, signal });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(String((errJson as { error?: string }).error ?? res.statusText));
-      }
-      return (await res.json()) as { totalMachines: number };
-    },
-    [getAuthHeaders]
-  );
+  const fetchMeta = useCallback(async (signal?: AbortSignal) => {
+    const res = await fetch('/api/report/warranty-master?mode=meta', {
+      credentials: 'include',
+      signal,
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(String((errJson as { error?: string }).error ?? res.statusText));
+    }
+    return (await res.json()) as { totalMachines: number };
+  }, []);
 
-  const fetchAllFgLines = useCallback(
-    async (signal?: AbortSignal) => {
-      const headers = await getAuthHeaders();
-      const res = await fetch('/api/report/warranty-master?mode=fgLines', { headers, signal });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(String((errJson as { error?: string }).error ?? res.statusText));
-      }
-      return (await res.json()) as {
-        fgLines: WarrantyMasterFgLineRow[];
-        meta?: { totalMachines: number };
-      };
-    },
-    [getAuthHeaders]
-  );
+  const fetchAllFgLines = useCallback(async (signal?: AbortSignal) => {
+    const res = await fetch('/api/report/warranty-master?mode=fgLines', {
+      credentials: 'include',
+      signal,
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(String((errJson as { error?: string }).error ?? res.statusText));
+    }
+    return (await res.json()) as {
+      fgLines: WarrantyMasterFgLineRow[];
+      meta?: { totalMachines: number };
+    };
+  }, []);
 
   const loadFromDatabase = useCallback(
     async (options?: { force?: boolean }) => {

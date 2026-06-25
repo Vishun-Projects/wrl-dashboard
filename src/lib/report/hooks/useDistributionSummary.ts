@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { getBearerAuthHeaders } from '@/lib/supabase/session';
+import { cookieAuthRequestConfig } from '@/lib/api/cookie-auth';
 import {
   joinFilterParam,
   resolveViewCallTypesParam,
@@ -42,7 +42,6 @@ export function useDistributionSummary(
     setState((prev) => ({ ...prev, loading: true, error: null }));
 
     try {
-      const headers = await getBearerAuthHeaders(supabase);
       const startDate = toDateString(appliedFilters.dateRange.start);
       const endDate = toDateString(appliedFilters.dateRange.end);
       const officeId =
@@ -51,7 +50,7 @@ export function useDistributionSummary(
           : 'All';
 
       const res = await axios.get('/api/report/distribution-summary', {
-        headers,
+        ...cookieAuthRequestConfig,
         signal: controller.signal,
         params: {
           startDate,

@@ -1,14 +1,8 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import {
-  ensureFreshAccessToken,
-  getBearerAuthHeaders,
-  refreshSessionOnce,
-} from '@/lib/supabase/session';
+import { cookieAuthRequestConfig } from '@/lib/api/cookie-auth';
 
 export type ChunkedFetchAuth = {
-  getAuthHeaders: () => Promise<Record<string, string>>;
-  refreshAuth: () => Promise<void>;
   getWithAuthRetry: <T>(
     url: string,
     config?: Omit<AxiosRequestConfig, 'headers'>,
@@ -16,40 +10,19 @@ export type ChunkedFetchAuth = {
   ) => Promise<T>;
 };
 
-/** Auth helpers for long chunked API loops — refresh is single-flight, not per chunk. */
-export function createChunkedFetchAuth(supabase: SupabaseClient): ChunkedFetchAuth {
-  const getAuthHeaders = () => getBearerAuthHeaders(supabase);
-
-  const refreshAuth = async (): Promise<void> => {
-    await refreshSessionOnce(supabase);
-  };
-
+/** Cookie-auth helpers for long chunked API loops (no browser GoTrue refresh). */
+export function createChunkedFetchAuth(_supabase: SupabaseClient): ChunkedFetchAuth {
   const getWithAuthRetry = async <T>(
     url: string,
     config: Omit<AxiosRequestConfig, 'headers'> = {},
     _options?: { chunkIndex?: number; refreshEveryN?: number }
   ): Promise<T> => {
-    const attempt = async () => {
-      const headers = await getAuthHeaders();
-      const res = await axios.get<T>(url, { ...config, headers });
-      return res.data;
-    };
-
-    try {
-      return await attempt();
-    } catch (err) {
-      if (axios.isAxiosError(err) && err.response?.status === 401) {
-        await refreshSessionOnce(supabase);
-        return attempt();
-      }
-      throw err;
-    }
+    const res = await axios.get<T>(url, { ...config, ...cookieAuthRequestConfig });
+    return res.data;
   };
 
-  return { getAuthHeaders, refreshAuth, getWithAuthRetry };
+  return { getWithAuthRetry };
 }
-
-export { ensureFreshAccessToken };
 
 export function isChunkedFetchAuthError(err: unknown): boolean {
   return err instanceof Error && err.message.includes('Session expired');

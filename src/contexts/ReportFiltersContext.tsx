@@ -75,7 +75,6 @@ import {
   notifyCorpusRegisterDelta,
 } from '@/lib/report/corpus';
 import { ensurePortalAuditCache } from '@/lib/report/portal-cache';
-import { getBearerAuthHeaders } from '@/lib/supabase/session';
 import {
   readCallsFromPostgresClient,
   readRegisterFromPostgresClient,
@@ -893,7 +892,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       }
       setLastSyncedAt(new Date(store.lastSyncedAt));
       syncCascadeOptionsFromCalls(calls);
-      void getBearerAuthHeaders(supabase).then((headers) => ensurePortalAuditCache(headers));
+      void ensurePortalAuditCache();
       if (store.calls.size > 0) {
         corpusHydratedAtRef.current = Date.now();
         markCorpusSatisfied(store.cacheKey);
@@ -1350,7 +1349,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
               ageMs: Date.now() - idbCache.fetchedAt,
             });
             applySharedCalls(idbCache.calls, idbCache.lastSyncedAt);
-            await ensurePortalAuditCache(await getBearerAuthHeaders(supabase));
+            await ensurePortalAuditCache();
             return;
           }
         }
@@ -1386,7 +1385,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
               rows: calls.length,
               networkMs: Number((performance.now() - networkStart).toFixed(1)),
             });
-            await ensurePortalAuditCache(await getBearerAuthHeaders(supabase));
+            await ensurePortalAuditCache();
             return;
           }
 
@@ -1421,7 +1420,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
             rows: calls.length,
             networkMs: Number((performance.now() - networkStart).toFixed(1)),
           });
-          await ensurePortalAuditCache(await getBearerAuthHeaders(supabase));
+          await ensurePortalAuditCache();
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : 'Distribution load failed';
           logRegisterBulk('bulk LOAD failed', {

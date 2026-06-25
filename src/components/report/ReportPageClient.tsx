@@ -11,7 +11,6 @@ import {
   hasCapability,
   visibleTabs,
 } from '@/lib/auth/rbac-catalog';
-import { getBearerAuthHeaders } from '@/lib/supabase/session';
 import axios from 'axios';
 import {
   Download,
@@ -102,7 +101,10 @@ import {
 } from '@/lib/report/corpus';
 import { openReportsDb, readCorpusMeta } from '@/lib/report/corpus-storage';
 import { deriveSummaryDashboard, diagnoseSummaryDerivation } from '@/lib/report/summary-derive';
-import { readRegisterFromPostgresClient, readSummaryFromPostgresClient } from '@/lib/read-model/client-flags';
+import {
+  readRegisterFromPostgresClient,
+  registerPostgresHotPathAvailable,
+} from '@/lib/read-model/client-flags';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import { deriveRegisterPageFromCalls, deriveRegisterView } from '@/lib/report/register-view';
 import {
@@ -1687,7 +1689,7 @@ export default function ReportPageClient() {
           force: !!opts?.forceCorpus,
         });
       }
-      await ensurePortalAuditCache(await getBearerAuthHeaders(supabase));
+      await ensurePortalAuditCache();
       const viewFilters = registerViewFilterRef.current;
       let corpusStore = callCorpusStore;
       if (corpusStore?.calls.size && corpusStore.cacheKey !== corpusKey) {
@@ -1918,9 +1920,10 @@ export default function ReportPageClient() {
 
         const loadTotalsLazy = async () => {
           try {
-            const totalsUrl = appendRegisterFilters(
-              `/api/report/totals?officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
-            );
+            const totalsPath = registerPostgresHotPathAvailable(startDateStr, endDateStr)
+              ? `/api/report/totals?officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
+              : `/api/report?page=1&limit=1&fetchTotals=true&officeId=${officeIdsParam}&callType=${viewCallTypesParam}`;
+            const totalsUrl = appendRegisterFilters(totalsPath);
             const totalsRes = await axios.get(totalsUrl, { withCredentials: true });
             const lazyTotal = totalsRes.data.total ?? 0;
             lastKnownRegisterTotalRef.current = lazyTotal;
@@ -2763,7 +2766,7 @@ export default function ReportPageClient() {
         if (!hasCorpus) {
           await ensureCorpusLoaded({ silent: false, force: !!opts?.force });
         }
-        await ensurePortalAuditCache(await getBearerAuthHeaders(supabase));
+        await ensurePortalAuditCache();
         applyRegisterFromCorpus(1);
         applySummaryFromCorpus();
         if (corpusSpanDays(startDateStr, endDateStr) > MAX_CLIENT_CORPUS_DAYS) {

@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
+import { cookieAuthRequestConfig } from '@/lib/api/cookie-auth';
 import { FileSpreadsheet, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { ArcpClaimsTable } from '@/components/arcp-claims/ArcpClaimsTable';
@@ -845,12 +846,11 @@ export default function ArcpClaimsPage() {
       let failedChunks = 0;
 
       try {
-      const headers = await chunkedAuth.getAuthHeaders();
       const jobStartRes = await axios.post<ArcpLoadJobStartResponse>(
         '/api/report/arcp-claims/load-start',
         null,
         {
-          headers,
+          ...cookieAuthRequestConfig,
           signal,
           params: { kind: 'agg', ...arcpFilterParams(filters) },
         }
@@ -1493,12 +1493,11 @@ export default function ArcpClaimsPage() {
     let completedChunks = 0;
     const exportStartedAt = Date.now();
 
-    const detailHeaders = await chunkedAuth.getAuthHeaders();
     const detailJobRes = await axios.post<ArcpLoadJobStartResponse>(
       '/api/report/arcp-claims/load-start',
       null,
       {
-        headers: detailHeaders,
+        ...cookieAuthRequestConfig,
         params: { kind: 'detail', ...arcpFilterParams(appliedFilters) },
       }
     );

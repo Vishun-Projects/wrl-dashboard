@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { browserTokenRefreshDisabled } from '@/lib/api/cookie-auth';
 
 /** Seconds before expiry when we proactively refresh (avoids mid-request 401s). */
 const REFRESH_BUFFER_SEC = 120;
@@ -14,10 +15,14 @@ function accessTokenStillValid(session: { access_token?: string; expires_at?: nu
 }
 
 /**
- * Single-flight refresh — concurrent refreshSession() calls can rotate the refresh
- * token and invalidate other tabs / in-flight requests (forced logout).
+ * Single-flight refresh — only for Supabase Cloud. Self-hosted uses cookie auth;
+ * browser refresh to api.wrl-fsm.cloud fails with ERR_CERT_AUTHORITY_INVALID.
  */
 export async function refreshSessionOnce(supabase: SupabaseClient): Promise<string> {
+  if (browserTokenRefreshDisabled()) {
+    throw new Error('Session refresh disabled — use withCredentials for API requests');
+  }
+
   if (refreshInFlight) return refreshInFlight;
 
   refreshInFlight = (async () => {
@@ -34,16 +39,23 @@ export async function refreshSessionOnce(supabase: SupabaseClient): Promise<stri
   return refreshInFlight;
 }
 
-/** Returns a valid access token; refreshes only when missing or near expiry. */
+/** Returns a valid access token; refreshes only on Supabase Cloud. */
 export async function ensureFreshAccessToken(supabase: SupabaseClient): Promise<string> {
+  if (browserTokenRefreshDisabled()) {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      return session.access_token;
+    }
+    throw new Error('Session refresh disabled — use withCredentials for API requests');
+  }
+
   const {
     data: { session },
   } = await supabase.auth.getSession();
   if (!session?.access_token) {
     throw new Error('Session expired — please sign in again and retry.');
-  }
-  if (process.env.NODE_ENV === 'development') {
-    return session.access_token;
   }
   if (accessTokenStillValid(session)) {
     return session.access_token;
