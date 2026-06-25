@@ -2,14 +2,11 @@ import { withClient } from '@/lib/read-model/db';
 import {
   fetchCrmOpenOldRows,
   fetchCrmRowsForBackfill,
+  forEachCrmBackfillChunk,
 } from '@/lib/read-model/crm-fetch';
 import { todayLocalDate } from '@/lib/read-model/dates';
-import { registerHotRetentionStart } from '@/lib/read-model/hot-window';
-import {
-  dedupeCrmRows,
-  processCrmRows,
-  processCrmRowsForYtdLoad,
-} from '@/lib/read-model/transform';
+import { dayBeforeDate, registerHotRetentionStart } from '@/lib/read-model/hot-window';
+import { processCrmRows, processCrmRowsForYtdLoad } from '@/lib/read-model/transform';
 import { countHotRows, upsertHotRows } from '@/lib/read-model/upsert-hot';
 
 const DEFAULT_UPSERT_BATCH = Math.max(
@@ -17,15 +14,16 @@ const DEFAULT_UPSERT_BATCH = Math.max(
   Number(process.env.SYNC_HOT_UPSERT_BATCH ?? 300) || 300
 );
 
-export type HotYtdSyncResult = {
+export type HotRangeSyncResult = {
   totalUpserted: number;
+  totalFetched: number;
   hotCount: number;
-  ytdStart: string;
-  ytdEnd: string;
-  janFebHotCount: number;
+  startDate: string;
+  endDate: string;
+  rangeHotCount: number;
 };
 
-async function upsertCrmChunk(
+async function upsertCrmRows(
   rows: Record<string, unknown>[],
   label: string,
   batchSize: number,
@@ -55,27 +53,88 @@ async function countHotInRange(startDate: string, endDate: string): Promise<numb
   });
 }
 
+/** Upsert CRM rows for a date range — no truncate. Streams chunk-by-chunk by default. */
+export async function syncHotDateRangeFromCrm(opts: {
+  startDate: string;
+  endDate: string;
+  label?: string;
+  upsertBatchSize?: number;
+  /** When true, fetch each CRM chunk then upsert immediately (safe for large ranges). */
+  streamChunks?: boolean;
+}): Promise<HotRangeSyncResult> {
+  const batchSize = opts.upsertBatchSize ?? DEFAULT_UPSERT_BATCH;
+  const label = opts.label ?? `${opts.startDate}..${opts.endDate}`;
+  const streamChunks = opts.streamChunks !== false;
+  let totalUpserted = 0;
+  let totalFetched = 0;
+
+  console.log(`[sync-worker] Hot range sync ${label} (stream=${streamChunks})`);
+
+  if (streamChunks) {
+    totalFetched = await forEachCrmBackfillChunk(
+      opts.startDate,
+      opts.endDate,
+      async ({ chunk, rows }) => {
+        totalUpserted += await upsertCrmRows(rows, chunk, batchSize, true);
+      }
+    );
+  } else {
+    const rows = await fetchCrmRowsForBackfill(opts.startDate, opts.endDate);
+    totalFetched = rows.length;
+    totalUpserted += await upsertCrmRows(rows, label, batchSize, true);
+  }
+
+  const hotCount = await withClient((client) => countHotRows(client));
+  const rangeHotCount = await countHotInRange(opts.startDate, opts.endDate);
+
+  console.log(
+    `[sync-worker] Range sync done (${label}) — fetched ${totalFetched}, upserted ${totalUpserted}, in-range hot ${rangeHotCount}, table total ${hotCount}`
+  );
+
+  return {
+    totalUpserted,
+    totalFetched,
+    hotCount,
+    startDate: opts.startDate,
+    endDate: opts.endDate,
+    rangeHotCount,
+  };
+}
+
+export type HotYtdSyncResult = HotRangeSyncResult & {
+  ytdStart: string;
+  ytdEnd: string;
+  janFebHotCount: number;
+};
+
 /** Load calendar YTD (+ open-old) from CRM into calls_latest_hot — upsert only, no truncate. */
 export async function syncHotYtdFromCrm(opts?: {
   upsertBatchSize?: number;
 }): Promise<HotYtdSyncResult> {
-  const batchSize = opts?.upsertBatchSize ?? DEFAULT_UPSERT_BATCH;
   const ytdStart = registerHotRetentionStart();
   const ytdEnd = todayLocalDate();
-  let totalUpserted = 0;
 
-  console.log(`[sync-worker] YTD hot sync ${ytdStart} .. ${ytdEnd}`);
-
-  const ytdRows = await fetchCrmRowsForBackfill(ytdStart, ytdEnd);
-  totalUpserted += await upsertCrmChunk(ytdRows, `ytd ${ytdStart}..${ytdEnd}`, batchSize, true);
+  const ytdResult = await syncHotDateRangeFromCrm({
+    startDate: ytdStart,
+    endDate: ytdEnd,
+    label: `ytd ${ytdStart}..${ytdEnd}`,
+    upsertBatchSize: opts?.upsertBatchSize,
+    streamChunks: true,
+  });
 
   console.log('[sync-worker] Fetching open-old exception rows…');
   const openOldRows = await fetchCrmOpenOldRows();
-  totalUpserted += await upsertCrmChunk(openOldRows, 'open-old', batchSize, false);
+  const openUpserted = await upsertCrmRows(
+    openOldRows,
+    'open-old',
+    opts?.upsertBatchSize ?? DEFAULT_UPSERT_BATCH,
+    false
+  );
 
   const hotCount = await withClient((client) => countHotRows(client));
   const year = ytdStart.slice(0, 4);
   const janFebHotCount = await countHotInRange(`${year}-01-01`, `${year}-02-28`);
+  const totalUpserted = ytdResult.totalUpserted + openUpserted;
 
   console.log(
     `[sync-worker] YTD sync done — upserted ${totalUpserted}, hot table ${hotCount}, Jan–Feb ${janFebHotCount}`
@@ -87,5 +146,12 @@ export async function syncHotYtdFromCrm(opts?: {
     );
   }
 
-  return { totalUpserted, hotCount, ytdStart, ytdEnd, janFebHotCount };
+  return {
+    ...ytdResult,
+    totalUpserted,
+    hotCount,
+    ytdStart,
+    ytdEnd,
+    janFebHotCount,
+  };
 }

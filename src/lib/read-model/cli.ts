@@ -6,6 +6,7 @@ import { resetArcpReadModel } from '@/lib/read-model/arcp/reset';
 import { runArcpIncrementalSync } from '@/lib/read-model/arcp/incremental';
 import { runInitialBackfill, runDimsRefresh } from '@/lib/read-model/backfill';
 import { runFillYtdHot } from '@/lib/read-model/fill-ytd';
+import { runBackfillHistoricalHot } from '@/lib/read-model/backfill-historical';
 import { runIncrementalSync } from '@/lib/read-model/incremental';
 import { runNightlyReconcile } from '@/lib/read-model/nightly';
 import { runRetentionJobs } from '@/lib/read-model/retention';
@@ -87,6 +88,9 @@ async function main(): Promise<void> {
     case 'fill-ytd':
       await runFillYtdHot();
       break;
+    case 'backfill-historical':
+      await runBackfillHistoricalHot();
+      break;
     case 'nightly':
       await runNightlyReconcile();
       break;
@@ -119,6 +123,7 @@ Usage: npx tsx src/lib/read-model/cli.ts <command>
 Commands:
   backfill          Full reload: TRUNCATE hot + YTD CRM load + facts (use once)
   fill-ytd          Upsert YTD + open-old only — no truncate (safe refresh)
+  backfill-historical  Upsert pre-YTD CRM calls (default 2020-01-01 .. day before Jan 1) — no truncate
   incremental       Single calls incremental sync run
   backfill-bm-approval  Fill calls_latest_hot.bapproval / bm_approved_at from CRM (no truncate)
   arcp-reset        Truncate arcp_lines_hot + reset sync_state (fresh start)
@@ -138,6 +143,8 @@ Environment:
   SYNC_WORKER_ENABLED    Must be "true" for incremental/nightly/daemon
   SYNC_ARCP_ENABLED      Run ARCP incremental in daemon / API sync
   SYNC_INTERVAL_MS       Daemon interval (default 180000)
+  SYNC_HISTORICAL_START_DATE First day for backfill-historical (default 2020-01-01)
+  SYNC_PRE_YTD_START_DATE    Alias for SYNC_HISTORICAL_START_DATE
   SYNC_BACKFILL_CHUNK_DAYS     CRM days per backfill request (default 14)
   SYNC_BACKFILL_FETCH_GAP_MS   Pause between backfill CRM chunks (default 400)
   SYNC_HOT_UPSERT_BATCH        Postgres upsert batch size (default 300)

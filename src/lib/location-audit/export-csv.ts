@@ -1,4 +1,4 @@
-import { formatGpsSourceForDisplay } from '@/lib/geo/parse-latlong';
+import { formatExportDate } from '@/lib/utils/export-dates';
 import { escapeCsvCell } from '@/lib/utils/csv';
 import type { LocationAuditDetailRow } from '@/lib/location-audit/types';
 
@@ -57,7 +57,7 @@ export function exportLocationAuditCsv(rows: LocationAuditDetailRow[]): string {
         r.ncode,
         r.officeId,
         r.vcclid,
-        r.callDate,
+        formatExportDate(r.callDate),
         formatSeverity(r.severity),
         r.branchName,
         r.partyName,

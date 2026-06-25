@@ -103,37 +103,11 @@ export function resolveArcpApproveAt(row: Record<string, unknown>): Date | null 
 
 export const ARCP_APPROVE_EFFECTIVE_SQL = 'COALESCE(ho_approved_at, bm_approved_at)';
 
-/** Detail CSV / Excel — dd/MM/yyyy HH:mm in report timezone (not ISO Z). */
+import { formatExportDate } from '@/lib/utils/export-dates';
+
+/** Detail CSV / Excel — DD.MM.YYYY in report timezone (date-only unless time is present). */
 export function formatArcpClaimsExportDate(value: unknown): string {
-  if (value == null || value === '') return '';
-  const raw = String(value).trim();
-  if (!raw || raw === '-' || raw === '0') return '';
-  if (/^\d{1,2}[\/-]\d{1,2}[\/-]\d{4}/.test(raw)) return raw;
-
-  const d = value instanceof Date ? value : new Date(raw);
-  if (Number.isNaN(d.getTime())) return raw;
-
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: ARCP_REPORT_TIMEZONE,
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(d);
-
-  const pick = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((p) => p.type === type)?.value ?? '';
-
-  const day = pick('day');
-  const month = pick('month');
-  const year = pick('year');
-  const hour = pick('hour');
-  const minute = pick('minute');
-  if (!day || !month || !year) return raw;
-  if (hour && minute) return `${day}/${month}/${year} ${hour}:${minute}`;
-  return `${day}/${month}/${year}`;
+  return formatExportDate(value);
 }
 
 export function arcpBackfillYears(): number {

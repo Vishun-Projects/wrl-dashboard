@@ -1,8 +1,8 @@
 import { postQuery } from '@/lib/db/proxy';
 import { normalizeCrmCallRow } from '@/lib/call-row/normalize';
-import { escapeCsvCell } from '@/lib/utils/csv';
 import { formatRegisterExportDate } from '@/lib/register/export-dates';
-import { REGISTER_EXPORT_COLUMNS } from '../table-columns';
+import { REGISTER_EXPORT_COLUMNS } from '@/lib/register/table-columns';
+import { escapeCsvCell } from '@/lib/utils/csv';
 
 const CSV_COLUMNS = REGISTER_EXPORT_COLUMNS;
 
@@ -51,8 +51,8 @@ export function rowForCsv(raw: Record<string, unknown>): Record<string, unknown>
     display_status: statusText,
     solvedDate: isSolved ? formatRegisterExportDate(row.callsolveddate) : '',
     remarks: row.vsolveremarks || row.cancel_reason || '',
-    bm_approved_date: row.bm_approved_date ?? '',
-    ho_approved_date: row.ho_approved_date ?? '',
+    bm_approved_date: formatRegisterExportDate(row.bm_approved_date) || '',
+    ho_approved_date: formatRegisterExportDate(row.ho_approved_date) || '',
     vpersoncalling: row.vpersoncalling,
     vinsttel1: row.vinsttel1,
     vinstaddress: row.vinstaddress,

@@ -360,13 +360,13 @@ export async function fetchCrmIncrementalChunk(
   );
 }
 
-export async function fetchCrmRowsForBackfill(
+export async function forEachCrmBackfillChunk(
   startDate: string,
   endDate: string,
-  onProgress?: (info: { chunk: string; rows: number; total: number }) => void
-): Promise<Record<string, unknown>[]> {
+  fn: (info: { chunk: string; rows: Record<string, unknown>[] }) => Promise<void>
+): Promise<number> {
   const chunks = splitDateRangeByDays(startDate, endDate, SYNC_BACKFILL_CHUNK_DAYS);
-  const allRows: Record<string, unknown>[] = [];
+  let totalFetched = 0;
 
   console.log(
     `[sync-worker] Backfill CRM fetch: ${chunks.length} chunk(s) × ${SYNC_BACKFILL_CHUNK_DAYS} day(s), gap ${SYNC_BACKFILL_FETCH_GAP_MS}ms`
@@ -379,17 +379,28 @@ export async function fetchCrmRowsForBackfill(
       chunk.end,
       SYNC_BACKFILL_TIMEOUT_MS
     );
-    allRows.push(...rows);
-    onProgress?.({
-      chunk: `${chunk.start}..${chunk.end}`,
-      rows: rows.length,
-      total: allRows.length,
-    });
+    totalFetched += rows.length;
     console.log(
-      `[sync-worker] CRM chunk ${chunk.start}..${chunk.end} → ${rows.length} rows (${allRows.length} total)`
+      `[sync-worker] CRM chunk ${chunk.start}..${chunk.end} → ${rows.length} rows (${totalFetched} total)`
     );
+    await fn({ chunk: `${chunk.start}..${chunk.end}`, rows });
     await sleep(SYNC_BACKFILL_FETCH_GAP_MS);
   }
+
+  return totalFetched;
+}
+
+export async function fetchCrmRowsForBackfill(
+  startDate: string,
+  endDate: string,
+  onProgress?: (info: { chunk: string; rows: number; total: number }) => void
+): Promise<Record<string, unknown>[]> {
+  const allRows: Record<string, unknown>[] = [];
+
+  await forEachCrmBackfillChunk(startDate, endDate, async ({ chunk, rows }) => {
+    allRows.push(...rows);
+    onProgress?.({ chunk, rows: rows.length, total: allRows.length });
+  });
 
   return allRows;
 }

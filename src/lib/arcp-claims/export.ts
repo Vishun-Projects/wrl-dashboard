@@ -6,6 +6,7 @@ import {
 } from './query';
 import { resolveArcpItemCategoryDisplay } from './labels';
 import type { ArcpClaimsTableModel, ArcpClaimsTotals } from './table';
+import { formatArcpClaimsExportDate } from '@/lib/read-model/arcp/dates';
 import { escapeCsvCell } from '@/lib/utils/csv';
 
 function csvRow(cells: (string | number | null | undefined)[]): string {
@@ -149,9 +150,9 @@ export function buildArcpClaimsDetailCsv(
         row.vucnno,
         row.branch_name,
         row.franchisee_name,
-        row.call_date,
-        row.solve_date,
-        row.bm_approved_date,
+        formatArcpClaimsExportDate(row.call_date),
+        formatArcpClaimsExportDate(row.solve_date),
+        formatArcpClaimsExportDate(row.bm_approved_date),
         row.call_type,
         resolveArcpItemCategoryDisplay(row.item_category),
         row.local_upcountry,

@@ -63,29 +63,20 @@ export async function runNightlyReconcile(): Promise<void> {
       const upserted = await upsertHotRows(client, hotRows);
 
       const crmTrns = new Set(hotRows.map((row) => row.vtrnno));
-      const existing = await client.query(`SELECT vtrnno FROM calls_latest_hot`);
-      const orphanTrns = existing.rows
+      const existingYtd = await client.query<{ vtrnno: string }>(
+        `SELECT vtrnno FROM calls_latest_hot WHERE logged_at >= $1::timestamptz`,
+        [`${hotStart}T00:00:00`]
+      );
+      const orphanTrns = existingYtd.rows
         .map((row) => String(row.vtrnno))
         .filter((trn) => !crmTrns.has(trn));
       const deletedOrphans = await deleteHotRowsByTrn(client, orphanTrns);
 
-      const yearStart = registerHotRetentionStart();
-      const pruneResult = await client.query(
-        `
-        DELETE FROM calls_latest_hot h
-        WHERE NOT (
-          h.logged_at >= $1::timestamptz
-          OR (
-            h.status_bucket IN ('open_unallocated', 'assigned', 'tech_solved')
-            AND h.logged_at < $1::timestamptz
-          )
-        )
-      `,
-        [`${yearStart}T00:00:00`]
-      );
-      const pruned = pruneResult.rowCount ?? 0;
+      // Do not prune pre-YTD rows — historical backfill keeps older solved/cancelled calls in hot.
+      const pruned = 0;
 
       console.log('[sync-worker] Rebuilding current-year facts');
+      const yearStart = hotStart;
       await truncateCurrentYearFacts(client, yearStart);
       const ytdRows = await fetchCrmRowsForRange(yearStart, hotEnd);
       const ytdDeduped = dedupeCrmRows(ytdRows);

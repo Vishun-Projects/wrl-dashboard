@@ -1,4 +1,5 @@
 import type ExcelJS from 'exceljs';
+import { formatRegisterExportDate } from '@/lib/register/export-dates';
 import { isRegisterRowCancelled } from '@/lib/report/search';
 
 /** Excel worksheet limit minus header row. */
@@ -27,11 +28,10 @@ const REGISTER_COLUMNS: { header: string; key: string; width: number }[] = [
   { header: 'Address', key: 'address', width: 40 },
 ];
 
-function formatExportDate(dateStr: unknown): string {
+function formatExcelExportDate(dateStr: unknown): string {
   if (dateStr == null || dateStr === '') return '—';
-  const d = new Date(String(dateStr));
-  if (Number.isNaN(d.getTime())) return String(dateStr);
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const formatted = formatRegisterExportDate(dateStr);
+  return formatted || String(dateStr);
 }
 
 function applyHeaderStyle(row: ExcelJS.Row): void {
@@ -71,7 +71,7 @@ function mapRegisterRow(row: Record<string, unknown>) {
       id: row.UniqueCallNo,
       vcclid: row.vcclid ?? '—',
       type: row.calltype,
-      date: formatExportDate(row.callsdtrndate),
+      date: formatExcelExportDate(row.callsdtrndate),
       customer: row.PartyName,
       branch: row.officename ?? row.resolved_branch_name ?? '—',
       franchisee:
@@ -82,7 +82,7 @@ function mapRegisterRow(row: Record<string, unknown>) {
       tech: row.serviceman,
       complaint: row.vcomplaint,
       status: statusText,
-      solvedDate: isSolved ? formatExportDate(row.callsolveddate) : '—',
+      solvedDate: isSolved ? formatExcelExportDate(row.callsolveddate) : '—',
       remarks: row.vsolveremarks || row.cancel_reason || '—',
       contact: row.vpersoncalling,
       phone: row.vinsttel1,

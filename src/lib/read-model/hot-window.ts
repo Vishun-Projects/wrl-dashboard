@@ -22,6 +22,10 @@ function dayBefore(dateStr: string): string {
   return formatLocalDate(d);
 }
 
+export function dayBeforeDate(dateStr: string): string {
+  return dayBefore(dateStr);
+}
+
 function dayAfter(dateStr: string): string {
   const d = new Date(`${dateStr}T00:00:00`);
   d.setDate(d.getDate() + 1);

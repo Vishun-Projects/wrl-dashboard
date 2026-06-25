@@ -15,6 +15,7 @@
     "sync-worker": "npx tsx src/lib/read-model/cli.ts",
     "sync-worker:backfill": "npx tsx src/lib/read-model/cli.ts backfill",
     "sync-worker:fill-ytd": "npx tsx src/lib/read-model/cli.ts fill-ytd",
+    "sync-worker:backfill-historical": "npx tsx src/lib/read-model/cli.ts backfill-historical",
     "sync-worker:incremental": "npx tsx src/lib/read-model/cli.ts incremental",
     "sync-worker:backfill-bm-approval": "npx tsx src/lib/read-model/cli.ts backfill-bm-approval",
     "sync-worker:dims": "npx tsx src/lib/read-model/cli.ts dims",

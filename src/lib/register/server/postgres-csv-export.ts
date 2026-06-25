@@ -4,7 +4,6 @@ import {
   appDatabaseBulkStatementTimeoutMs,
   withAppClient,
 } from '@/lib/read-model/db';
-import { formatArcpClaimsExportDate } from '@/lib/read-model/arcp/dates';
 import { formatRegisterExportDate } from '@/lib/register/export-dates';
 import {
   buildWhere,
@@ -42,7 +41,7 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
   const bmAt = row.bm_approved_at;
   const bmDate =
     bmAt instanceof Date || (bmAt != null && bmAt !== '')
-      ? formatArcpClaimsExportDate(bmAt as Date | string)
+      ? formatRegisterExportDate(bmAt as Date | string)
       : '';
 
   const cells: unknown[] = [
