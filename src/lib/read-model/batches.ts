@@ -109,3 +109,20 @@ export async function purgeOldIngestBatches(client: pg.PoolClient, days = 90): P
   );
   return result.rowCount ?? 0;
 }
+
+/** Mark worker-crash batches as failed so admin UI does not show stuck started rows. */
+export async function repairStaleIngestBatches(
+  client: pg.PoolClient,
+  staleMinutes = 10
+): Promise<number> {
+  const result = await client.query(
+    `
+    UPDATE raw_ingest_batches
+    SET status = 'failed'
+    WHERE status = 'started'
+      AND created_at < now() - ($1 || ' minutes')::interval
+    `,
+    [String(staleMinutes)]
+  );
+  return result.rowCount ?? 0;
+}

@@ -3,7 +3,8 @@ import { updateSession } from '@/lib/supabase/middleware';
 import { getClientIp } from '@/lib/security/rate-limit';
 import { checkRateLimitKv, rateLimitClassForPath } from '@/lib/security/rate-limit-kv';
 
-export async function middleware(request: NextRequest) {
+/** Next.js 16 proxy entry — replaces deprecated middleware convention. */
+export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   if (pathname.startsWith('/api/')) {

@@ -15,6 +15,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import axios from 'axios';
 import { feedback } from '@/lib/ui/feedback';
 import { seesAllOfficesForUser } from '@/lib/auth/rbac-catalog';
+import { useUser } from '@/components/layout/DashboardLayout';
 import type { PageAlertState } from '@/hooks/usePageAlert';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -79,9 +80,13 @@ import {
   readCallsFromPostgresClient,
   readRegisterFromPostgresClient,
 } from '@/lib/read-model/client-flags';
+import {
+  routeNeedsCorpusPreload,
+  routeNeedsDistributionPreload,
+  routeNeedsSharedResources,
+} from '@/lib/report/route-scope';
 import { fetchAllRegisterRowsForExport, logRegisterBulk } from '@/lib/register/export-fetch';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
-import { createChunkedFetchAuth } from '@/lib/supabase/chunked-fetch';
 import { persistSharedRegisterCache, readSharedRegisterCache, SHARED_REGISTER_CACHE_VERSION } from '@/lib/report/corpus-storage';
 import {
   buildDefaultFilterSnapshot,
@@ -211,23 +216,14 @@ type ReportFiltersContextValue = {
 
 const ReportFiltersContext = createContext<ReportFiltersContextValue | null>(null);
 
-function routeNeedsCorpusPreload(pathname: string | null): boolean {
-  if (!pathname) return false;
-  if (readCallsFromPostgresClient()) return false;
-  return pathname.startsWith('/report');
-}
-
-function routeNeedsDistributionPreload(pathname: string | null): boolean {
-  if (readRegisterFromPostgresClient()) return false;
-  return routeNeedsCorpusPreload(pathname);
-}
-
 export function ReportFiltersProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { userProfile, loadingProfile } = useUser();
   const needsCorpusPreload = routeNeedsCorpusPreload(pathname);
+  const needsSharedResources = routeNeedsSharedResources(pathname);
   const needsDistributionPreload = needsCorpusPreload;
 
   const [registerBootstrap] = useState(() =>
@@ -570,6 +566,11 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   const corpusCallCount = corpusSnapshot?.calls.size ?? 0;
 
   useEffect(() => {
+    if (!needsSharedResources) {
+      setResourcesLoaded(true);
+      return;
+    }
+
     let cancelled = false;
     (async () => {
       try {
@@ -624,7 +625,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     return () => {
       cancelled = true;
     };
-  }, [supabase]);
+  }, [supabase, needsSharedResources]);
 
   const buildRestoreContextFromLoaded = useCallback((): RestoreFilterContext => {
     const { role, officeIds, permissions } = userRoleRef.current;
@@ -641,77 +642,55 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     };
   }, [offices, callTypes]);
 
+  const syncUserRoleFromProfile = useCallback(() => {
+    if (!userProfile) return false;
+    userRoleRef.current = {
+      role: userProfile.role ?? 'branch_manager',
+      officeIds: (userProfile.office_ids ?? []).map(String),
+      permissions: userProfile.permissions ?? [],
+    };
+    return true;
+  }, [userProfile]);
+
   useEffect(() => {
-    if (!resourcesLoaded || prefsRestoreAttemptedRef.current) return;
+    if (!resourcesLoaded || prefsRestoreAttemptedRef.current || loadingProfile) return;
+    if (!syncUserRoleFromProfile()) return;
 
     const deepLinkOnLoad = parseRegisterDeepLinkSearchParams(searchParams);
     if (deepLinkOnLoad || registerBootstrap.fromDeepLink || appliedFiltersRef.current) {
       prefsRestoreAttemptedRef.current = true;
       setPrefsReady(true);
-      void axios
-        .get('/api/auth/me', { withCredentials: true })
-        .then((res) => {
-          userRoleRef.current = {
-            role: res.data.role ?? 'branch_manager',
-            officeIds: (res.data.office_ids ?? []).map(String),
-            permissions: res.data.permissions ?? userRoleRef.current.permissions,
-          };
-        })
-        .catch(() => {});
       return;
     }
 
     prefsRestoreAttemptedRef.current = true;
-    let cancelled = false;
 
-    void (async () => {
-      try {
-        const res = await axios.get('/api/auth/me', { withCredentials: true });
-        if (cancelled) return;
-
-        userRoleRef.current = {
-          role: res.data.role ?? 'branch_manager',
-          officeIds: (res.data.office_ids ?? []).map(String),
-          permissions: res.data.permissions ?? userRoleRef.current.permissions,
-        };
-
-        const ctx: RestoreFilterContext = {
-          role: userRoleRef.current.role,
-          officeIds: userRoleRef.current.officeIds,
-          callTypes,
-          visibleOfficeIds: seesAllOfficesForUser(
-            userRoleRef.current.permissions,
-            userRoleRef.current.role,
-            userRoleRef.current.officeIds
-          )
-            ? offices
-                .map((o: { ncode?: string | number }) => String(o.ncode ?? ''))
-                .filter(Boolean)
-            : userRoleRef.current.officeIds,
-        };
-
-        const snapshot = buildDefaultFilterSnapshot(ctx);
-        applyFilterSnapshot(snapshot);
-      } catch {
-        if (cancelled) return;
-        const ctx = buildRestoreContextFromLoaded();
-        const snapshot = storedSharedToSnapshot(buildRoleDefaultShared(ctx));
-        applyFilterSnapshot(snapshot);
-      } finally {
-        if (!cancelled) setPrefsReady(true);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
+    const ctx: RestoreFilterContext = {
+      role: userRoleRef.current.role,
+      officeIds: userRoleRef.current.officeIds,
+      callTypes,
+      visibleOfficeIds: seesAllOfficesForUser(
+        userRoleRef.current.permissions,
+        userRoleRef.current.role,
+        userRoleRef.current.officeIds
+      )
+        ? offices
+            .map((o: { ncode?: string | number }) => String(o.ncode ?? ''))
+            .filter(Boolean)
+        : userRoleRef.current.officeIds,
     };
+
+    const snapshot = buildDefaultFilterSnapshot(ctx);
+    applyFilterSnapshot(snapshot);
+    setPrefsReady(true);
   }, [
     resourcesLoaded,
+    loadingProfile,
     callTypes,
     offices,
     applyFilterSnapshot,
-    buildRestoreContextFromLoaded,
     searchParams,
+    syncUserRoleFromProfile,
   ]);
 
   useEffect(() => {
@@ -1385,13 +1364,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
           if (!applied) return;
           const startDateStr = toDateString(applied.dateRange.start);
           const endDateStr = toDateString(applied.dateRange.end);
-          const auth = createChunkedFetchAuth(supabase);
-          await auth.refreshAuth();
-
           if (readRegisterFromPostgresClient()) {
             const calls = await fetchAllRegisterRowsForExport({
-              getAuthHeaders: auth.getAuthHeaders,
-              refreshAuth: auth.refreshAuth,
               query: {
                 officeId: 'All',
                 callType: 'All',
@@ -1417,8 +1391,6 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
           }
 
           const calls = await fetchAllRegisterRowsForExport({
-            getAuthHeaders: auth.getAuthHeaders,
-            refreshAuth: auth.refreshAuth,
             query: {
               officeId: 'All',
               callType: 'All',

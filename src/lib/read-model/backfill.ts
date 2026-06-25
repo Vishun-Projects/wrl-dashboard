@@ -119,6 +119,9 @@ export async function runInitialBackfill(opts?: { resume?: boolean }): Promise<v
     const factRows = Array.from(factMap.values());
     await withClient(async (client) => {
       await upsertFactRows(client, factRows);
+      await client.query(
+        `UPDATE sync_state SET status = 'ok', is_running = false, last_run_at = now() WHERE entity = 'call_metrics_daily'`
+      );
     });
     console.log(`[sync-worker] Upserted ${factRows.length} fact grains`);
 
@@ -167,6 +170,10 @@ export async function runInitialBackfill(opts?: { resume?: boolean }): Promise<v
     await withClient(async (client) => {
       await completeIngestBatch(client, batch.batchId, null, totalUpserted, 'failed');
       await finishSyncRunLog(client, batch.logId, 'failed', { startedAt, errorMessage: message });
+      await client.query(
+        `UPDATE sync_state SET status = 'error', is_running = false WHERE entity = $1`,
+        [ENTITY]
+      );
     });
     throw err;
   }

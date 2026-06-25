@@ -11,18 +11,6 @@ import { PerformanceMetricsLogger } from '@/components/performance/PerformanceMe
 import { performanceLogEnabledClient } from '@/lib/performance/log-config';
 import { MotionProvider } from '@/components/motion';
 
-function MainContentPlaceholder() {
-  return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0 bg-slate-50 animate-pulse">
-      <div className="h-14 flex-shrink-0 border-b border-slate-200 bg-white" />
-      <div className="flex-1 p-6 space-y-4">
-        <div className="h-10 w-64 rounded-xl bg-slate-200/80" />
-        <div className="flex-1 rounded-2xl bg-slate-200/60" />
-      </div>
-    </div>
-  );
-}
-
 interface UserContextType {
   userProfile: any;
   loadingProfile: boolean;
@@ -39,12 +27,20 @@ export function useUser() {
   return context;
 }
 
-export function DashboardLayout({ children }: { children: React.ReactNode }) {
+export function DashboardLayout({
+  children,
+  initialUser = null,
+}: {
+  children: React.ReactNode;
+  initialUser?: Record<string, unknown> | null;
+}) {
   const router = useRouter();
   const pathname = usePathname();
-  const [userProfile, setUserProfile] = useState<any>(null);
-  const [loadingProfile, setLoadingProfile] = useState(pathname !== '/login');
-  const authLoadedRef = useRef(false);
+  const [userProfile, setUserProfile] = useState<any>(initialUser);
+  const [loadingProfile, setLoadingProfile] = useState(
+    pathname !== '/login' && !initialUser
+  );
+  const authLoadedRef = useRef(!!initialUser);
   const profileRequestRef = useRef<Promise<void> | null>(null);
 
   const fetchProfile = useCallback(async () => {
@@ -113,9 +109,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  const authReady = !loadingProfile && !!userProfile;
-  const allowImmediatePaint = pathname === '/admin/performance-insights';
-
   return (
     <UserContext.Provider value={{ userProfile, loadingProfile, refreshProfile: fetchProfile }}>
       <MotionProvider>
@@ -123,13 +116,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         {performanceLogEnabledClient() ? <PerformanceMetricsLogger /> : null}
         <div className="flex flex-col md:flex-row h-screen overflow-hidden w-screen bg-slate-50 text-slate-700 font-sans">
           <Sidebar user={userProfile} />
-          {authReady || allowImmediatePaint ? (
-            <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
-              <PageAccessGuard>{children}</PageAccessGuard>
-            </div>
-          ) : (
-            <MainContentPlaceholder />
-          )}
+          <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+            <PageAccessGuard>{children}</PageAccessGuard>
+          </div>
         </div>
       </CallDetailDialogProvider>
       </MotionProvider>

@@ -120,8 +120,6 @@ export function downloadRegisterCsvFromRows(
 
 /** One server request: streams CSV using keyset pagination (no slow OFFSET in browser). */
 export async function downloadRegisterCsvFromServer(opts: {
-  getAuthHeaders: () => Promise<Record<string, string>>;
-  refreshAuth?: () => Promise<void>;
   query: RegisterExportQuery;
   knownTotal?: number;
   signal?: AbortSignal;
@@ -136,26 +134,11 @@ export async function downloadRegisterCsvFromServer(opts: {
   const total = Math.max(0, opts.knownTotal ?? 0);
   opts.onProgress?.(0, total);
 
-  const attempt = async () => {
-    const headers = await opts.getAuthHeaders();
-    return axios.get(`/api/report?${params.toString()}`, {
-      headers,
-      signal: opts.signal,
-      responseType: 'blob',
-    });
-  };
-
-  let res;
-  try {
-    if (opts.refreshAuth) await opts.refreshAuth();
-    res = await attempt();
-  } catch (err) {
-    if (!axios.isAxiosError(err) || err.response?.status !== 401 || !opts.refreshAuth) {
-      throw err;
-    }
-    await opts.refreshAuth();
-    res = await attempt();
-  }
+  const res = await axios.get(`/api/report?${params.toString()}`, {
+    withCredentials: true,
+    signal: opts.signal,
+    responseType: 'blob',
+  });
 
   opts.onProgress?.(total > 0 ? total : 1, total > 0 ? total : 1);
 
@@ -184,8 +167,6 @@ export async function downloadRegisterCsvFromServer(opts: {
 }
 
 async function fetchRegisterBulkForCache(opts: {
-  getAuthHeaders: () => Promise<Record<string, string>>;
-  refreshAuth?: () => Promise<void>;
   query: RegisterExportQuery;
   signal?: AbortSignal;
   onProgress?: (fetched: number, total: number) => void;
@@ -201,25 +182,15 @@ async function fetchRegisterBulkForCache(opts: {
   params.set('export', 'bulk');
   const url = `/api/report?${params.toString()}`;
 
-  const attempt = async () => {
-    const headers = await opts.getAuthHeaders();
-    return axios.get(url, { headers, signal: opts.signal });
-  };
-
-  if (opts.refreshAuth) await opts.refreshAuth();
   let res;
   try {
-    res = await attempt();
+    res = await axios.get(url, { withCredentials: true, signal: opts.signal });
   } catch (err) {
-    if (!axios.isAxiosError(err) || err.response?.status !== 401 || !opts.refreshAuth) {
-      logRegisterBulk('bulk preload FAILED', {
-        ms: Number((performance.now() - t0).toFixed(1)),
-        error: err instanceof Error ? err.message : String(err),
-      });
-      throw err;
-    }
-    await opts.refreshAuth();
-    res = await attempt();
+    logRegisterBulk('bulk preload FAILED', {
+      ms: Number((performance.now() - t0).toFixed(1)),
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
   }
 
   const rows = (res.data?.data ?? []) as Record<string, unknown>[];
@@ -239,34 +210,16 @@ async function fetchRegisterExportPage(
   page: number,
   batchSize: number,
   fetchTotals: boolean,
-  getAuthHeaders: () => Promise<Record<string, string>>,
-  refreshAuth: (() => Promise<void>) | undefined,
   signal: AbortSignal | undefined,
   cursorNcode?: number
 ) {
   const params = buildRegisterExportParams(query, page, batchSize, fetchTotals, cursorNcode);
   const url = `/api/report?${params.toString()}`;
-
-  const attempt = async () => {
-    const headers = await getAuthHeaders();
-    return axios.get(url, { headers, signal });
-  };
-
-  try {
-    return await attempt();
-  } catch (err) {
-    if (!axios.isAxiosError(err) || err.response?.status !== 401 || !refreshAuth) {
-      throw err;
-    }
-    await refreshAuth();
-    return attempt();
-  }
+  return axios.get(url, { withCredentials: true, signal });
 }
 
 /** Legacy multi-page JSON fetch (small exports / detailed breakdown). */
 export async function fetchAllRegisterRowsForExport(opts: {
-  getAuthHeaders: () => Promise<Record<string, string>>;
-  refreshAuth?: () => Promise<void>;
   query: RegisterExportQuery;
   knownTotal?: number;
   signal?: AbortSignal;
@@ -294,17 +247,12 @@ export async function fetchAllRegisterRowsForExport(opts: {
     }
 
     const fetchTotals = page === 1 && total <= 0;
-    if (page === 1 || page % 10 === 0) {
-      await opts.refreshAuth?.();
-    }
     const pageStart = performance.now();
     const res = await fetchRegisterExportPage(
       opts.query,
       page,
       batchSize,
       fetchTotals,
-      opts.getAuthHeaders,
-      opts.refreshAuth,
       opts.signal,
       cursorNcode
     );

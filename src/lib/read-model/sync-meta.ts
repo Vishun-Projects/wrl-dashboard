@@ -4,6 +4,7 @@ import { releaseStaleArcpSyncLock } from '@/lib/read-model/arcp/lock';
 import { arcpBackfillStartDate } from '@/lib/read-model/arcp/dates';
 import { withClient } from '@/lib/read-model/db';
 import { releaseStaleSyncLock } from '@/lib/read-model/lock';
+import { repairStaleIngestBatches } from '@/lib/read-model/batches';
 import type { ArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-shared';
 import {
   readDimsFromPostgres,
@@ -135,6 +136,7 @@ async function loadReadModelProgressUncached(): Promise<ReadModelProgress> {
   } = await withClient(async (client) => {
     await releaseStaleSyncLock(client);
     await releaseStaleArcpSyncLock(client);
+    await repairStaleIngestBatches(client);
 
     const hotEst = await client.query<{ count: number }>(
       `SELECT COALESCE(n_live_tup, 0)::int AS count FROM pg_stat_user_tables WHERE relname = 'calls_latest_hot'`
@@ -242,6 +244,9 @@ async function loadReadModelProgressUncached(): Promise<ReadModelProgress> {
   const callsRunning = hotState?.is_running === true;
   const arcpRunning = arcpState?.is_running === true;
   const hotStatus = hotState?.status ?? 'unknown';
+  const dimPending = syncStates.filter(
+    (s) => s.entity.startsWith('dim_') && s.status === 'pending_backfill'
+  );
 
   let phase: ReadModelProgress['phase'] = 'pending_backfill';
   let message = 'Waiting for initial backfill to start.';
@@ -258,6 +263,9 @@ async function loadReadModelProgressUncached(): Promise<ReadModelProgress> {
   } else if (hotStatus === 'ok' && hotCount >= HOT_TARGET_ROWS * 0.95) {
     phase = 'ready';
     message = 'Backfill complete. Start the incremental sync service when ready.';
+    if (dimPending.length > 0) {
+      message += ` Dimension sync_state still pending for ${dimPending.map((d) => d.entity).join(', ')}.`;
+    }
   } else if (callsRunning || arcpRunning || hotCount > 0) {
     phase = 'backfilling';
     message = 'Initial data load in progress. This can take several hours.';

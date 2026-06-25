@@ -1,5 +1,11 @@
 import { withClient } from '@/lib/read-model/db';
 import {
+  completeIngestBatch,
+  finishSyncRunLog,
+  startIngestBatch,
+  startSyncRunLog,
+} from '@/lib/read-model/batches';
+import {
   fetchCrmIncrementalChunk,
   planCrmIncrementalChunks,
 } from '@/lib/read-model/crm-fetch';
@@ -35,6 +41,7 @@ import type { HotRow } from '@/lib/read-model/types';
 const OVERLAP_MS = 2 * 60 * 1000;
 const MIN_HOT_FOR_INCREMENTAL = Math.floor(HOT_TARGET_ROWS * 0.95);
 const SYNC_TX_LOCK_TIMEOUT_MS = Number(process.env.PG_SYNC_LOCK_TIMEOUT_MS ?? 120_000);
+const INCREMENTAL_ENTITY = 'calls_latest_hot';
 
 async function skipIncrementalReason(client: import('pg').PoolClient): Promise<string | null> {
   const state = await getSyncState(client);
@@ -228,6 +235,39 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
     return new Date(watermarkBase.getTime() - OVERLAP_MS);
   });
 
+  const startedAt = new Date();
+  const audit = await withClient(async (client) => {
+    const batch = await startIngestBatch(client, INCREMENTAL_ENTITY, watermarkStart);
+    const logId = await startSyncRunLog(client, INCREMENTAL_ENTITY, batch.batchId);
+    return { batchId: batch.batchId, logId };
+  });
+
+  const finishIncrementalAudit = async (
+    status: 'completed' | 'partial' | 'failed',
+    opts: {
+      watermarkEnd?: Date | null;
+      rowsUpserted: number;
+      rowsDeleted?: number;
+      errorMessage?: string;
+    }
+  ) => {
+    await withClient(async (client) => {
+      await completeIngestBatch(
+        client,
+        audit.batchId,
+        opts.watermarkEnd ?? null,
+        opts.rowsUpserted,
+        status === 'partial' ? 'partial' : status === 'completed' ? 'completed' : 'failed'
+      );
+      await finishSyncRunLog(client, audit.logId, status === 'failed' ? 'failed' : 'completed', {
+        startedAt,
+        rowsUpserted: opts.rowsUpserted,
+        rowsDeleted: opts.rowsDeleted ?? 0,
+        errorMessage: opts.errorMessage,
+      });
+    });
+  };
+
   console.log(`[sync-worker] Incremental fetch from ${watermarkStart.toISOString()}`);
   const plan = planCrmIncrementalChunks(watermarkStart);
   if (plan.catchUpDays > 1) {
@@ -255,6 +295,11 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
         console.warn(
           `[sync-worker] Incremental partial — ${chunksCompleted}/${plan.chunks.length} chunks synced before CRM error: ${message}`
         );
+        await finishIncrementalAudit('partial', {
+          rowsUpserted: totalUpserted,
+          rowsDeleted: totalDeleted,
+          errorMessage: message,
+        });
         return {
           ok: true,
           partial: true,
@@ -266,6 +311,11 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
           reason: message,
         };
       }
+      await finishIncrementalAudit('failed', {
+        rowsUpserted: totalUpserted,
+        rowsDeleted: totalDeleted,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
       throw err;
     }
 
@@ -317,6 +367,11 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
   console.log(
     `[sync-worker] Incremental complete — upserted ${totalUpserted}, deleted ${totalDeleted}, fetched ${totalFetched}, ${chunksCompleted}/${plan.chunks.length} chunks`
   );
+
+  await finishIncrementalAudit('completed', {
+    rowsUpserted: totalUpserted,
+    rowsDeleted: totalDeleted,
+  });
 
   return {
     ok: true,

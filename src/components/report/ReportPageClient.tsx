@@ -1,6 +1,7 @@
 'use client';
 
 import type ExcelJS from 'exceljs';
+import dynamic from 'next/dynamic';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { signOutAndGoToLogin } from '@/lib/auth/sign-out-client';
@@ -35,7 +36,6 @@ import { useRegisterFilterOptions } from '@/lib/report/hooks/useRegisterFilterOp
 import { feedback } from '@/lib/ui/feedback';
 import { useUser } from '@/components/layout/DashboardLayout';
 import { DateRangeSelector } from '@/components/register/DateRangeSelector';
-import dynamic from 'next/dynamic';
 import { useRouter, usePathname } from 'next/navigation';
 
 const CallDetail = dynamic(
@@ -2920,22 +2920,6 @@ export default function ReportPageClient() {
     });
   };
 
-  const getRegisterExportAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    if (!token) throw new Error('Unauthorized');
-    return { Authorization: `Bearer ${token}` };
-  }, [supabase]);
-
-  const refreshRegisterExportAuth = useCallback(async (): Promise<void> => {
-    const { data, error } = await supabase.auth.refreshSession();
-    if (error || !data.session?.access_token) {
-      throw new Error('Unauthorized');
-    }
-  }, [supabase]);
-
   const buildCurrentRegisterQueryKey = useCallback(() => {
     const startDateStr = toDateString(dateRange.start);
     const endDateStr = toDateString(dateRange.end);
@@ -2978,28 +2962,7 @@ export default function ReportPageClient() {
   ]);
 
   const handleExport = async (format: 'excel' | 'csv' = 'excel') => {
-    const ExcelJS = (await import('exceljs')).default;
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Report');
-    let fileName = `WRL_MIS_Report_${new Date().toISOString().split('T')[0]}.${format === 'csv' ? 'csv' : 'xlsx'}`;
-
-    const getRegionColor = (region: string) => {
-      const r = (region || '').toUpperCase();
-      if (r.includes('NORTH')) return 'FFC6E0B4';
-      if (r.includes('EAST')) return 'FFBDD7EE';
-      if (r.includes('WEST')) return 'FFF8CBAD';
-      if (r.includes('SOUTH')) return 'FFD9D9D9';
-      return 'FFF1F5F9';
-    };
-
-    const applyHeaderStyle = (row: ExcelJS.Row) => {
-      row.eachCell((cell) => {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } };
-        cell.font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 10 };
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-      });
-    };
+    const fileName = `WRL_MIS_Report_${new Date().toISOString().split('T')[0]}.${format === 'csv' ? 'csv' : 'xlsx'}`;
 
     if (activeTab === 'register') {
       cancelRegisterExport();
@@ -3065,10 +3028,7 @@ export default function ReportPageClient() {
         }
 
         if (needsFullFetch && exportData.length < total) {
-          await supabase.auth.refreshSession();
           exportData = await fetchAllRegisterRowsForExport({
-            getAuthHeaders: getRegisterExportAuthHeaders,
-            refreshAuth: refreshRegisterExportAuth,
             knownTotal: total,
             signal: controller.signal,
             onProgress: (fetched, exportTotal) => {
@@ -3131,138 +3091,27 @@ export default function ReportPageClient() {
       }
       return;
     } else if (activeTab === 'summary') {
-      const regions = Array.from(new Set(summaryData.map(b => b.region))).sort();
-      const topLevelBranches = summaryData.filter(b => b.parentId === 0 || !summaryData.find(p => p.officeId === b.parentId));
-
-      const getAggregate = (item: any, key: string, regionBranches: any[]) => {
-        const getAllChildren = (id: number): any[] => {
-          let direct = regionBranches.filter(b => b.parentId === id);
-          let all = [...direct];
-          direct.forEach(d => { all = [...all, ...getAllChildren(d.officeId)]; });
-          return all;
-        };
-        const allDescendants = getAllChildren(item.officeId);
-        return Number(item[key] || 0) + allDescendants.reduce((sum, d) => sum + Number(d[key] || 0), 0);
-      };
-
-      // 1. Regional Performance
-      sheet.addRow(['Regional Performance']).font = { bold: true, size: 12 };
-      const regHeader = sheet.addRow(['Region', 'Total', 'Solved', 'Cancelled', 'Open', '<2 Days', '2-7 Days', '7-15 Days', '>15 Days', 'Parts', 'Engineers']);
-      applyHeaderStyle(regHeader);
-
-      regions.forEach(region => {
-        const rb = summaryData.filter(b => b.region === region);
-        const t = rb.reduce((acc, b) => ({
-          t: acc.t + Number(b.total_calls || 0), s: acc.s + Number(b.solved_calls || 0), c: acc.c + Number(b.cancelled_calls || 0), o: acc.o + Number(b.open_calls || 0),
-          a2: acc.a2 + Number(b.age_2 || 0), a3: acc.a3 + Number(b.age_3 || 0), a7: acc.a7 + Number(b.age_7 || 0), a15: acc.a15 + Number(b.age_15 || 0),
-          p: acc.p + Number(b.part_pending || 0), e: acc.e + Number(b.active_eng || 0)
-        }), { t: 0, s: 0, c: 0, o: 0, a2: 0, a3: 0, a7: 0, a15: 0, p: 0, e: 0 });
-
-        const r = sheet.addRow([region, t.t, t.s, t.c, t.o, t.a2, t.a3, t.a7, t.a15, t.p, t.e]);
-        r.eachCell(cell => {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: getRegionColor(region) } };
-          cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-        });
-        r.getCell(3).font = { color: { argb: 'FF059669' } };
-        r.getCell(4).font = { color: { argb: 'FFDC2626' } };
-        r.getCell(5).font = { bold: true };
-      });
-
-      // AI Total
-      const aiRow = sheet.addRow([
-        'AI TOTAL',
-        summaryData.reduce((s, b) => s + Number(b.total_calls || 0), 0),
-        summaryData.reduce((s, b) => s + Number(b.solved_calls || 0), 0),
-        summaryData.reduce((s, b) => s + Number(b.cancelled_calls || 0), 0),
-        summaryData.reduce((s, b) => s + Number(b.open_calls || 0), 0),
-        summaryData.reduce((s, b) => s + Number(b.age_2 || 0), 0),
-        summaryData.reduce((s, b) => s + Number(b.age_3 || 0), 0),
-        summaryData.reduce((s, b) => s + Number(b.age_7 || 0), 0),
-        summaryData.reduce((s, b) => s + Number(b.age_15 || 0), 0),
-        summaryData.reduce((s, b) => s + Number(b.part_pending || 0), 0),
-        summaryData.reduce((s, b) => s + Number(b.active_eng || 0), 0)
-      ]);
-      aiRow.eachCell(cell => {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
-        cell.font = { bold: true };
-        cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-      });
-
-      sheet.addRow([]); // Gap
-
-      // 2. Branch Wise Performance
-      sheet.addRow(['Branch Wise Performance']).font = { bold: true, size: 12 };
-      const brHeader = sheet.addRow(['Branch', 'Total', 'Solved', 'Cancelled', 'Open', '<2 Days', '2-7 Days', '7-15 Days', '>15 Days', 'Parts', 'Engineers']);
-      applyHeaderStyle(brHeader);
-
-      topLevelBranches
-        .sort((a, b) => a.region.localeCompare(b.region))
-        .forEach(b => {
-          const rb = summaryData.filter(x => x.region === b.region);
-          const r = sheet.addRow([
-            b.branch,
-            getAggregate(b, 'total_calls', rb),
-            getAggregate(b, 'solved_calls', rb),
-            getAggregate(b, 'cancelled_calls', rb),
-            getAggregate(b, 'open_calls', rb),
-            getAggregate(b, 'age_2', rb),
-            getAggregate(b, 'age_3', rb),
-            getAggregate(b, 'age_7', rb),
-            getAggregate(b, 'age_15', rb),
-            getAggregate(b, 'part_pending', rb),
-            getAggregate(b, 'active_eng', rb)
-          ]);
-          r.eachCell(cell => {
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: getRegionColor(b.region) } };
-            cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-          });
-          r.getCell(3).font = { color: { argb: 'FF059669' } };
-          r.getCell(4).font = { color: { argb: 'FFDC2626' } };
-          r.getCell(5).font = { bold: true };
-        });
-
+      const {
+        buildSummaryDashboardWorkbook,
+        downloadWorkbook,
+      } = await import('@/lib/report/summary-excel-export');
+      const workbook = await buildSummaryDashboardWorkbook(summaryData);
+      await downloadWorkbook(workbook, fileName);
+      return;
     } else {
-      // Key Account MIS
-      const filtered = accountsData.filter(a => {
+      const {
+        buildKeyAccountMisWorkbook,
+        downloadWorkbook,
+      } = await import('@/lib/report/summary-excel-export');
+      const filtered = accountsData.filter((a) => {
         const matchRegion = filterRegion.length === 0 || filterRegion.includes(a.region);
         const matchAccount = filterAccount.length === 0 || filterAccount.includes(a.account);
         return matchRegion && matchAccount;
-      }).sort((a, b) => a.region.localeCompare(b.region));
-
-      const kaHeader = sheet.addRow(['Region', 'Account', 'Population', 'Total', 'Solved', 'Cancelled', 'Open', '<2 Days', '2-7 Days', '7-15 Days', '>15 Days', 'Parts', 'Engineers']);
-      applyHeaderStyle(kaHeader);
-
-      filtered.forEach(a => {
-        const openCalls = Number(a.age_2 || 0) + Number(a.age_3 || 0) + Number(a.age_7 || 0) + Number(a.age_15 || 0);
-        const r = sheet.addRow([
-          a.region, a.account, a.population || 0, a.total_calls, a.total_solved, a.cancelled_calls, openCalls,
-          a.age_2, a.age_3, a.age_7, a.age_15, a.part_pending, a.active_eng
-        ]);
-        r.eachCell(cell => {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: getRegionColor(a.region) } };
-          cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-        });
-        r.getCell(5).font = { color: { argb: 'FF059669' } };
-        r.getCell(6).font = { color: { argb: 'FFDC2626' } };
-        r.getCell(7).font = { bold: true };
       });
+      const workbook = await buildKeyAccountMisWorkbook(filtered);
+      await downloadWorkbook(workbook, fileName);
+      return;
     }
-
-    let buffer;
-    let mimeType;
-    buffer = await workbook.xlsx.writeBuffer();
-    mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-    if (!fileName.endsWith('.xlsx')) {
-      fileName = fileName.replace(/\.csv$/i, '.xlsx');
-    }
-
-    const blob = new Blob([buffer], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = fileName;
-    link.click();
-    URL.revokeObjectURL(url);
   };
 
   const totalPages = Math.ceil(total / limit);

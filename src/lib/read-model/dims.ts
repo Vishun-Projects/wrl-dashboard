@@ -109,9 +109,23 @@ export async function refreshDimensions(client: pg.PoolClient): Promise<{
     callTypeRows.map((row) => [...row, new Date()])
   );
 
+  await markDimensionSyncStateOk(client);
+
   return {
     offices: officeRows.length,
     engineers: engineerRows.length,
     callTypes: callTypeRows.length,
   };
+}
+
+export async function markDimensionSyncStateOk(client: pg.PoolClient): Promise<void> {
+  const entities = ['dim_offices', 'dim_engineers', 'dim_call_types'];
+  for (const entity of entities) {
+    await client.query(
+      `UPDATE sync_state
+       SET status = 'ok', is_running = false, last_run_at = now()
+       WHERE entity = $1`,
+      [entity]
+    );
+  }
 }

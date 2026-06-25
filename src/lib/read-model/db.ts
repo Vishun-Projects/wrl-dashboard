@@ -71,7 +71,7 @@ export function appDatabaseBulkStatementTimeoutMs(): number {
   return 300_000;
 }
 
-/** Supabase cloud requires TLS; self-hosted VPS pooler (6543) typically does not. */
+/** Supabase cloud requires TLS; loopback pooler does not; remote VPS pooler may use self-signed TLS. */
 export function resolvePgSsl(connectionString: string): false | { rejectUnauthorized: false } {
   const override = process.env.PG_SSL?.trim().toLowerCase();
   if (override === 'false' || override === '0' || override === 'disable') return false;
@@ -82,19 +82,54 @@ export function resolvePgSsl(connectionString: string): false | { rejectUnauthor
   try {
     const url = new URL(connectionString.replace(/^postgresql:/, 'postgres:'));
     const host = url.hostname.toLowerCase();
+    const port = url.port || '5432';
+
+    // VPS MIS cron / sync on same host: Supavisor on loopback is plain TCP
+    if (host === '127.0.0.1' || host === 'localhost') {
+      return false;
+    }
+
+    // Supabase Cloud pooler
     if (host.endsWith('.supabase.co') || host.includes('pooler.supabase.com')) {
       return { rejectUnauthorized: false };
     }
+
+    // Vercel / remote clients → self-hosted VPS pooler (TLS, often self-signed)
+    if (host === 'api.wrl-fsm.cloud' && port === '6543') {
+      return { rejectUnauthorized: false };
+    }
   } catch {
-    /* fall through — self-hosted */
+    /* fall through */
   }
   return false;
 }
 
 export function loadEnv(): void {
   const root = path.join(process.cwd());
-  dotenv.config({ path: path.join(root, '.env.local') });
-  dotenv.config({ path: path.join(root, '.env') });
+
+  let existing = process.env.DATABASE_URL?.replace(/^["']|["']$/g, '') ?? '';
+  if (existing.startsWith('prisma+postgres://')) {
+    delete process.env.DATABASE_URL;
+    existing = '';
+  }
+  if (existing) {
+    return;
+  }
+
+  const opts = { override: false };
+  dotenv.config({ path: path.join(root, '.env.mis-email'), ...opts });
+
+  let afterMis = process.env.DATABASE_URL?.replace(/^["']|["']$/g, '') ?? '';
+  if (afterMis.startsWith('prisma+postgres://')) {
+    delete process.env.DATABASE_URL;
+    afterMis = '';
+  }
+  if (afterMis) {
+    return;
+  }
+
+  dotenv.config({ path: path.join(root, '.env.local'), ...opts });
+  dotenv.config({ path: path.join(root, '.env'), ...opts });
 }
 
 /** Pooled Supabase URL for Next.js API routes (port 6543). */

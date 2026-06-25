@@ -63,6 +63,7 @@ PY
   playwright install-deps chromium 2>/dev/null || true
 
   chmod +x "${root}/scripts/vps-hosting/warranty-nightly.sh" 2>/dev/null || true
+  chmod +x "${root}/scripts/"*.sh 2>/dev/null || true
   chmod +x "${root}/run_nightly.py" 2>/dev/null || true
 
   if [[ ! -f "${root}/.env" ]]; then
@@ -77,6 +78,7 @@ PY
   echo "    Cron (1 AM IST):"
   echo "    CRON_TZ=Asia/Kolkata"
   echo "    0 1 * * * ${root}/scripts/vps-hosting/warranty-nightly.sh >> ${root}/logs/cron.log 2>&1"
+  echo "    Stale job kill: NIGHTLY_MAX_RUNTIME_SEC=10800 (3h) in warranty-nightly.sh"
 }
 
 if [[ "${1:-}" == "--local" ]]; then

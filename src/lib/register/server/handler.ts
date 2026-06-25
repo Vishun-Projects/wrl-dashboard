@@ -26,7 +26,11 @@ import {
 } from '@/lib/trhcalls/query';
 import { getPincodeMapData } from '@/lib/geo/pincode-map';
 import { CITY_TO_STATE_MAP, getGeographicDetails } from '@/lib/geo/india-states';
-import { isHodUser, resolveReportSecurity } from '@/lib/auth/report-security';
+import {
+  isHodUser,
+  resolveExportOfficeScope,
+  resolveReportSecurity,
+} from '@/lib/auth/report-security';
 import { mergeBranchFilterListEntry } from '@/lib/report/filters';
 import {
   enrichRegisterRowArcpApproveDates,
@@ -180,11 +184,15 @@ export async function handleRegisterGet(req: NextRequest) {
     const userId = await resolveRequestUserId(req, supabase);
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const security = await resolveReportSecurity(userId, {
-      pageId: 'mis_reports',
-      tabId: 'register',
-    });
-    if (security.forbidden) {
+    const exportMode = searchParams.get('export');
+    const isRegisterExport = exportMode === 'bulk' || exportMode === 'csv';
+    const security = isRegisterExport
+      ? await resolveExportOfficeScope(userId)
+      : await resolveReportSecurity(userId, {
+          pageId: 'mis_reports',
+          tabId: 'register',
+        });
+    if (!isRegisterExport && security.forbidden) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

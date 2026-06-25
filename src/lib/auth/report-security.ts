@@ -49,3 +49,14 @@ export async function resolveReportSecurity(
 
   return { isHod, assignedOffices };
 }
+
+/** Office scope for exports — session auth only; no tab/page permission gate. */
+export async function resolveExportOfficeScope(userId: string): Promise<ReportSecurity> {
+  const auth = await loadUserAuth(userId);
+  const profile = auth?.profile;
+  const permissions = auth?.permissions ?? [];
+  return {
+    isHod: isHodUser(profile, permissions),
+    assignedOffices: profile?.office_ids || [],
+  };
+}

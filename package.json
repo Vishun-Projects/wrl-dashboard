@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "knip": "knip",
     "analyze": "ANALYZE=true next build",
     "db:apply-read-model": "node scripts/apply-read-model-schema.mjs",
@@ -24,7 +26,13 @@
     "crm-mirror:status": "python scripts/crm_mirror_sync.py status",
     "db:apply-old-crm": "node scripts/apply-old-crm-schema.mjs",
     "arcp-trends-html": "npx tsx scripts/generate-arcp-trends-html.ts",
-    "performance-log:analyze": "node scripts/analyze-performance-log.mjs"
+    "performance-log:analyze": "node scripts/analyze-performance-log.mjs",
+    "mis-email:digest": "npx tsx src/lib/mis-email/cli.ts digest",
+    "mis-email:test": "npx tsx src/lib/mis-email/cli.ts test",
+    "mis-email:test:vps": "bash scripts/vps-hosting/run-mis-email-test-vps.sh",
+    "mis-email:diagnose:vps": "bash scripts/vps-hosting/diagnose-mis-email-vps.sh",
+    "mis-email:setup-postfix:vps": "bash scripts/vps-hosting/setup-vps-postfix.sh --remote",
+    "mis-email:dns:vps": "bash scripts/vps-hosting/show-mis-email-dns-vps.sh"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
@@ -52,10 +60,12 @@
     "motion": "^12.40.0",
     "next": "16.2.6",
     "next-themes": "^0.4.6",
+    "nodemailer": "^9.0.1",
     "pg": "^8.20.0",
     "react": "19.2.4",
     "react-day-picker": "^10.0.1",
     "react-dom": "19.2.4",
+    "server-only": "^0.0.1",
     "sharp": "^0.35.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
@@ -69,6 +79,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/dotenv": "^6.1.1",
     "@types/node": "^20",
+    "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -78,6 +89,8 @@
     "prisma": "^7.8.0",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite": "^8.1.0",
+    "vitest": "^3.2.4"
   }
 }

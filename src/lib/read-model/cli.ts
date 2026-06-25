@@ -11,6 +11,7 @@ import { runRetentionJobs } from '@/lib/read-model/retention';
 import { runBackfillCallsHotBmApproval } from '@/lib/read-model/backfill-bm-approval';
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
+const DAEMON_MAX_CONSECUTIVE_FAILURES = Number(process.env.SYNC_DAEMON_MAX_FAILURES ?? 5) || 5;
 
 function formatSyncWorkerError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
@@ -36,14 +37,27 @@ function formatSyncWorkerError(err: unknown): string {
 
 async function runDaemon(): Promise<void> {
   console.log(`[sync-worker] Daemon started — incremental every ${INCREMENTAL_INTERVAL_MS / 1000}s`);
+  let consecutiveFailures = 0;
   for (;;) {
     try {
-      await runIncrementalSync();
+      const result = await runIncrementalSync();
+      if (result.ok && !result.skipped) {
+        consecutiveFailures = 0;
+      } else if (!result.ok) {
+        consecutiveFailures += 1;
+      }
       if (process.env.SYNC_ARCP_ENABLED === 'true') {
         await runArcpIncrementalSync();
       }
     } catch (err) {
+      consecutiveFailures += 1;
       console.error('[sync-worker] Incremental failed:', formatSyncWorkerError(err));
+      if (consecutiveFailures >= DAEMON_MAX_CONSECUTIVE_FAILURES) {
+        console.error(
+          `[sync-worker] ${consecutiveFailures} consecutive incremental failures — check CRM connectivity and DATABASE_URL`
+        );
+        consecutiveFailures = 0;
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, INCREMENTAL_INTERVAL_MS));
   }

@@ -23,9 +23,10 @@ scp "${WP}/requirements-vps.txt" "${VPS}:${REMOTE_DIR}/requirements-vps.txt"
 scp -r "${WP}/pipeline" "${VPS}:${REMOTE_DIR}/"
 
 # VPS helper scripts
-ssh "${VPS}" "mkdir -p ${REMOTE_DIR}/scripts"
-scp "${WP}/scripts/restart-nightly.sh" "${VPS}:${REMOTE_DIR}/scripts/restart-nightly.sh"
-ssh "${VPS}" "chmod +x ${REMOTE_DIR}/scripts/restart-nightly.sh"
+ssh "${VPS}" "mkdir -p ${REMOTE_DIR}/scripts ${REMOTE_DIR}/scripts/vps-hosting"
+scp "${WP}/scripts/"*.sh "${VPS}:${REMOTE_DIR}/scripts/"
+scp "${ROOT}/scripts/vps-hosting/warranty-nightly.sh" "${VPS}:${REMOTE_DIR}/scripts/vps-hosting/warranty-nightly.sh"
+ssh "${VPS}" "chmod +x ${REMOTE_DIR}/scripts/*.sh ${REMOTE_DIR}/scripts/vps-hosting/warranty-nightly.sh"
 
 echo "==> Verifying key files on VPS"
 ssh "${VPS}" "grep -E 'CACHE_VERSION|close_playwright_session|_apply_region_focus' \

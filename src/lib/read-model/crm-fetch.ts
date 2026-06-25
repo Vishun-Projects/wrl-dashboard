@@ -177,6 +177,7 @@ async function fetchCrmCorpusWindowSharded(
         `[sync-worker] ncode shard ${shardIndex}/${shardCount} slow on ${day} — trying hour windows`
       );
       const merged: Record<string, unknown>[] = [];
+      let hourFailures = 0;
       for (const hour of splitDayByHours(day)) {
         try {
           const rows = await fetchCrmCorpusWindow({
@@ -190,8 +191,14 @@ async function fetchCrmCorpusWindowSharded(
           merged.push(...rows);
         } catch (hourErr) {
           if (!isRetryableCrmFetchError(hourErr)) throw hourErr;
+          hourFailures += 1;
         }
         await sleep(FETCH_GAP_MS);
+      }
+      if (hourFailures > 0) {
+        throw new Error(
+          `[sync-worker] ${hourFailures} hour window(s) failed for ${day} on ncode shard ${shardIndex}/${shardCount}`
+        );
       }
       return merged;
     }
@@ -457,33 +464,56 @@ export async function fetchCrmOpenOldRows(): Promise<Record<string, unknown>[]> 
 }
 
 export async function fetchDimOffices(): Promise<Record<string, string>[]> {
-  const result = await postQuery({
+  return fetchDimQuery({
     fields: 'ncode, vcompanyname, nunder, nzone',
     tableName: 'mstoffice (NOLOCK)',
     condition: '1=1',
     orderBy: 'ncode ASC',
   });
-  return (result.data ?? []) as Record<string, string>[];
 }
 
 export async function fetchDimEngineers(): Promise<Record<string, string>[]> {
-  const result = await postQuery({
+  return fetchDimQuery({
     fields: 'ncode, vname, nofficeid',
     tableName: 'mstusers (NOLOCK)',
     condition: "bactive = 'True'",
     orderBy: 'vname ASC',
   });
-  return (result.data ?? []) as Record<string, string>[];
 }
 
 export async function fetchDimCallTypes(): Promise<Record<string, string>[]> {
-  const result = await postQuery({
+  return fetchDimQuery({
     fields: 'ncode, vdisplayvalue',
     tableName: 'mstfixedselection (NOLOCK)',
     condition: "vfieldname = 'ncalltype'",
     orderBy: 'vdisplayvalue ASC',
   });
-  return (result.data ?? []) as Record<string, string>[];
+}
+
+async function fetchDimQuery(params: {
+  fields: string;
+  tableName: string;
+  condition: string;
+  orderBy: string;
+}): Promise<Record<string, string>[]> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < RETRY_DELAYS_MS.length + 1; attempt++) {
+    try {
+      const result = await postQuery({
+        fields: params.fields,
+        tableName: params.tableName,
+        condition: params.condition,
+        orderBy: params.orderBy,
+      });
+      return (result.data ?? []) as Record<string, string>[];
+    } catch (err) {
+      lastErr = err;
+      if (isCrmOutOfMemoryError(err) || isCrmSqlTimeoutError(err)) throw err;
+      if (attempt >= RETRY_DELAYS_MS.length) break;
+      await sleep(RETRY_DELAYS_MS[attempt]);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 export { looksLikeBranchOffice };

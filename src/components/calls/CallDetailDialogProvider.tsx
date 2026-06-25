@@ -1,11 +1,16 @@
 'use client';
 
 import React, { createContext, useCallback, useContext, useState } from 'react';
+import dynamic from 'next/dynamic';
 import axios from 'axios';
 import { createClient } from '@/lib/supabase/client';
 import { feedback } from '@/lib/ui/feedback';
-import { CallDetail } from '@/components/calls/CallDetail';
 import { useUser } from '@/components/layout/DashboardLayout';
+
+const CallDetail = dynamic(
+  () => import('@/components/calls/CallDetail').then((m) => ({ default: m.CallDetail })),
+  { ssr: false }
+);
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import { clearPortalAuditCache } from '@/lib/report/portal-cache';
 
