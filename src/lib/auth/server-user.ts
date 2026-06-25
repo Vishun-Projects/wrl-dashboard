@@ -15,17 +15,6 @@ export type ServerAuthUser = {
   email?: string;
 };
 
-const EXPIRY_MARGIN_SEC = 90;
-
-function sessionAccessTokenValid(session: {
-  access_token?: string;
-  expires_at?: number;
-} | null): boolean {
-  if (!session?.access_token) return false;
-  if (session.expires_at == null) return true;
-  return session.expires_at - Math.floor(Date.now() / 1000) > EXPIRY_MARGIN_SEC;
-}
-
 /** Resolve user id from Bearer access token — local JWT first, GoTrue fallback on production. */
 export async function resolveUserIdFromAccessToken(token: string): Promise<string | null> {
   const trimmed = token.trim();
@@ -52,40 +41,27 @@ export async function resolveUserIdFromAccessToken(token: string): Promise<strin
 export async function requireSupabaseUser(
   supabase: SupabaseClient
 ): Promise<ServerAuthUser | null> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (session?.access_token && sessionAccessTokenValid(session)) {
-    if (canVerifyJwtLocally()) {
-      const userId = await verifyLocalAccessToken(session.access_token);
-      if (userId) {
-        return { id: userId, email: session.user?.email };
-      }
-    }
-
-    if (session.user?.id) {
-      return { id: session.user.id, email: session.user.email };
-    }
-  }
-
-  if (isDevAuthBypass()) {
-    try {
-      const cookieStore = await cookies();
-      const fromCookies = await resolveSupabaseUserFromCookies(cookieStore.getAll());
-      if (fromCookies) return fromCookies;
-    } catch {
-      /* cookies() unavailable outside request scope */
-    }
-    return null;
+  try {
+    const cookieStore = await cookies();
+    const fromCookies = await resolveSupabaseUserFromCookies(cookieStore.getAll());
+    if (fromCookies) return fromCookies;
+  } catch {
+    /* cookies() unavailable outside request scope */
   }
 
   const {
     data: { user },
     error,
   } = await supabase.auth.getUser();
-  if (error || !user) return null;
-  return { id: user.id, email: user.email };
+  if (!error && user) {
+    return { id: user.id, email: user.email };
+  }
+
+  if (isDevAuthBypass()) {
+    return null;
+  }
+
+  return null;
 }
 
 /** Bearer header first, then cookie session. */

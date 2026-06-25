@@ -17,8 +17,8 @@ describe('resolvePgSsl', () => {
     expect(resolvePgSsl(LOOPBACK_POOLER)).toBe(false);
   });
 
-  it('accepts self-signed TLS for remote VPS pooler (Vercel)', () => {
-    expect(resolvePgSsl(REMOTE_VPS_POOLER)).toEqual({ rejectUnauthorized: false });
+  it('uses plain TCP for remote VPS pooler (Vercel → self-hosted Supavisor)', () => {
+    expect(resolvePgSsl(REMOTE_VPS_POOLER)).toBe(false);
   });
 
   it('accepts self-signed TLS for Supabase Cloud pooler', () => {
@@ -28,6 +28,12 @@ describe('resolvePgSsl', () => {
   it('honours PG_SSL=false override', () => {
     process.env.PG_SSL = 'false';
     expect(resolvePgSsl(REMOTE_VPS_POOLER)).toBe(false);
+  });
+
+  it('honours sslmode=require in connection string', () => {
+    const url =
+      'postgresql://postgres:secret@api.wrl-fsm.cloud:6543/postgres?sslmode=require';
+    expect(resolvePgSsl(url)).toEqual({ rejectUnauthorized: false });
   });
 
   it('honours PG_SSL=true override', () => {

@@ -3,13 +3,11 @@ import 'server-only';
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
 import { Pool } from 'pg';
+import { resolveAppDatabaseUrl, resolvePgSsl } from '@/lib/read-model/db';
 
 function getPool(): Pool {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error('DATABASE_URL is not configured');
-  }
-  return new Pool({ connectionString, max: 2 });
+  const connectionString = resolveAppDatabaseUrl();
+  return new Pool({ connectionString, ssl: resolvePgSsl(connectionString), max: 2 });
 }
 
 export type DbCreateUserResult =

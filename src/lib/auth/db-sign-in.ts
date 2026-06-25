@@ -17,12 +17,11 @@ export type DbSignInResult = {
   };
 };
 
+import { resolveAppDatabaseUrl, resolvePgSsl } from '@/lib/read-model/db';
+
 function getPool(): Pool {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error('DATABASE_URL is not configured');
-  }
-  return new Pool({ connectionString, max: 2 });
+  const connectionString = resolveAppDatabaseUrl();
+  return new Pool({ connectionString, ssl: resolvePgSsl(connectionString), max: 2 });
 }
 
 /** Dev fallback when HTTPS to GoTrue is blocked (corporate firewall) but Postgres pooler works. */

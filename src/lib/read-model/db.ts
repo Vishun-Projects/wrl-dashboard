@@ -71,7 +71,7 @@ export function appDatabaseBulkStatementTimeoutMs(): number {
   return 300_000;
 }
 
-/** Supabase cloud requires TLS; loopback pooler does not; remote VPS pooler may use self-signed TLS. */
+/** Supabase cloud requires TLS; loopback and self-hosted VPS pooler use plain TCP. */
 export function resolvePgSsl(connectionString: string): false | { rejectUnauthorized: false } {
   const override = process.env.PG_SSL?.trim().toLowerCase();
   if (override === 'false' || override === '0' || override === 'disable') return false;
@@ -83,19 +83,30 @@ export function resolvePgSsl(connectionString: string): false | { rejectUnauthor
     const url = new URL(connectionString.replace(/^postgresql:/, 'postgres:'));
     const host = url.hostname.toLowerCase();
     const port = url.port || '5432';
+    const sslmode = url.searchParams.get('sslmode')?.toLowerCase();
+
+    if (sslmode === 'disable' || sslmode === 'allow') return false;
+    if (
+      sslmode === 'require' ||
+      sslmode === 'verify-ca' ||
+      sslmode === 'verify-full' ||
+      sslmode === 'prefer'
+    ) {
+      return { rejectUnauthorized: false };
+    }
 
     // VPS MIS cron / sync on same host: Supavisor on loopback is plain TCP
     if (host === '127.0.0.1' || host === 'localhost') {
       return false;
     }
 
-    // Supabase Cloud pooler
-    if (host.endsWith('.supabase.co') || host.includes('pooler.supabase.com')) {
-      return { rejectUnauthorized: false };
+    // Self-hosted VPS Supavisor — plain TCP (no TLS on pooler port)
+    if (host === 'api.wrl-fsm.cloud') {
+      return false;
     }
 
-    // Vercel / remote clients → self-hosted VPS pooler (TLS, often self-signed)
-    if (host === 'api.wrl-fsm.cloud' && port === '6543') {
+    // Supabase Cloud pooler
+    if (host.endsWith('.supabase.co') || host.includes('pooler.supabase.com')) {
       return { rejectUnauthorized: false };
     }
   } catch {
