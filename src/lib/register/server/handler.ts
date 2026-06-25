@@ -218,6 +218,11 @@ export async function handleRegisterGet(req: NextRequest) {
       }
 
       if (searchParams.get('export') === 'csv') {
+        const knownTotalRaw = searchParams.get('knownTotal');
+        const knownTotal =
+          knownTotalRaw != null && knownTotalRaw !== ''
+            ? Number(knownTotalRaw)
+            : undefined;
         return buildPostgresRegisterCsvStream({
           search,
           officeId,
@@ -238,6 +243,7 @@ export async function handleRegisterGet(req: NextRequest) {
           assignedOffices,
           visibleStatuses,
           isHod,
+          knownTotal: Number.isFinite(knownTotal) && knownTotal! > 0 ? knownTotal : undefined,
         });
       }
 

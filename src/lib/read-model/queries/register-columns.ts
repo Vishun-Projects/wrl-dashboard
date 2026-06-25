@@ -39,6 +39,33 @@ export const REGISTER_HOT_COLUMNS = [
   'h.lng',
 ].join(',\n    ');
 
+/** Minimal hot-table projection for register CSV export (fewer columns, faster I/O). */
+export const REGISTER_EXPORT_HOT_COLUMNS = [
+  'h.ncode',
+  'h.vtrnno',
+  'h.vcclid',
+  'h.party_name',
+  'h.branch_name',
+  'h.franchisee_name',
+  'h.pincode',
+  'h.item_name',
+  'h.serial',
+  'h.engineer_name',
+  'h.call_type',
+  'h.complaint',
+  'h.status_label',
+  'h.logged_at',
+  'h.solved_at',
+  'h.solve_remarks',
+  'h.contact_person',
+  'h.phone',
+  'h.address',
+  'h.bsolved',
+  'h.bfastclose',
+  'h.ncancelreason',
+  'h.bm_approved_at',
+].join(',\n    ');
+
 /** Minimal columns for distribution idle-assignee / audit scope computations. */
 export const DISTRIBUTION_COMPACT_COLUMNS = [
   'h.ncode',

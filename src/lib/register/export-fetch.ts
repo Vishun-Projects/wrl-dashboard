@@ -131,7 +131,7 @@ export function downloadRegisterCsvFromRows(
   downloadRegisterCsvInBrowser(rows, filename);
 }
 
-/** One server request: streams CSV using keyset pagination (no slow OFFSET in browser). */
+/** One server request: streams CSV; reports row progress while bytes arrive. */
 export async function downloadRegisterCsvFromServer(opts: {
   query: RegisterExportQuery;
   knownTotal?: number;
@@ -147,31 +147,72 @@ export async function downloadRegisterCsvFromServer(opts: {
   const total = Math.max(0, opts.knownTotal ?? 0);
   opts.onProgress?.(0, total);
 
-  const res = await axios.get(`/api/report?${params.toString()}`, {
-    withCredentials: true,
+  const res = await fetch(`/api/report?${params.toString()}`, {
+    credentials: 'include',
     signal: opts.signal,
-    responseType: 'blob',
-    timeout: 600_000,
   });
 
-  opts.onProgress?.(total > 0 ? total : 1, total > 0 ? total : 1);
-
-  const contentType = String(res.headers['content-type'] ?? '');
-  const blobData = res.data as Blob;
-  const rawText = await blobData.text();
-  const trimmed = rawText.trimStart();
-  if (contentType.includes('application/json') || trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    let message = 'Server returned JSON instead of CSV';
-    try {
-      const parsed = JSON.parse(trimmed) as { error?: string };
-      if (parsed.error) message = parsed.error;
-    } catch {
-      /* keep default message */
-    }
-    throw new Error(message);
+  if (!res.ok) {
+    const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(errBody.error || `Export failed (${res.status})`);
   }
 
-  const blob = new Blob(['\uFEFF', rawText], { type: 'text/csv;charset=utf-8;' });
+  const contentType = String(res.headers.get('content-type') ?? '');
+  if (contentType.includes('application/json')) {
+    const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(errBody.error || 'Server returned JSON instead of CSV');
+  }
+
+  const headerTotal = Number(res.headers.get('X-Register-Export-Total') ?? 0);
+  const exportTotal = headerTotal > 0 ? headerTotal : total;
+
+  const reader = res.body?.getReader();
+  if (!reader) {
+    throw new Error('Export response has no body');
+  }
+
+  const chunks: Uint8Array[] = [];
+  const decoder = new TextDecoder();
+  let dataRowCount = 0;
+  let headerDone = false;
+  let carry = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value?.length) continue;
+
+    chunks.push(value);
+
+    const text = carry + decoder.decode(value, { stream: true });
+    const lines = text.split('\n');
+    carry = lines.pop() ?? '';
+
+    for (const line of lines) {
+      if (!headerDone) {
+        headerDone = true;
+        continue;
+      }
+      if (line.replace(/\r/g, '').trim().length > 0) {
+        dataRowCount += 1;
+      }
+    }
+
+    if (exportTotal > 0) {
+      opts.onProgress?.(Math.min(dataRowCount, exportTotal), exportTotal);
+    }
+  }
+
+  if (carry.replace(/\r/g, '').trim().length > 0 && headerDone) {
+    dataRowCount += 1;
+  }
+
+  opts.onProgress?.(
+    exportTotal > 0 ? exportTotal : dataRowCount,
+    exportTotal > 0 ? exportTotal : dataRowCount
+  );
+
+  const blob = new Blob(chunks as BlobPart[], { type: 'text/csv;charset=utf-8;' });
   const filename = `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);

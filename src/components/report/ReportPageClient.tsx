@@ -118,6 +118,24 @@ import {
 } from '@/lib/register/export-fetch';
 import { clearPortalAuditCache, ensurePortalAuditCache } from '@/lib/report/portal-cache';
 
+function formatRegisterExportEta(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 1) return '';
+  if (seconds < 60) return `~${seconds}s remaining`;
+  return `~${Math.ceil(seconds / 60)}m remaining`;
+}
+
+function registerExportStatusLabel(progress: {
+  fetched: number;
+  total: number;
+  etaSeconds?: number;
+}): string {
+  const pct = Math.min(100, Math.round((progress.fetched / progress.total) * 100));
+  const base = `Exporting ${progress.fetched.toLocaleString()} / ${progress.total.toLocaleString()} rows (${pct}%)`;
+  const eta =
+    progress.etaSeconds != null ? formatRegisterExportEta(progress.etaSeconds) : '';
+  return eta ? `${base} — ${eta}` : base;
+}
+
 // --- IndexedDB Local Storage Cache Helpers (same DB version as report-corpus-storage) ---
 const saveCallsToDB = async (calls: any[]) => {
   try {
@@ -487,8 +505,10 @@ export default function ReportPageClient() {
     fetched: number;
     total: number;
     serverStream?: boolean;
+    etaSeconds?: number;
   } | null>(null);
   const exportAbortRef = React.useRef<AbortController | null>(null);
+  const exportStartedAtRef = React.useRef<number>(0);
   const [agingAsOf, setAgingAsOf] = useState<string>(() => {
     if (globalReportCache && typeof globalReportCache.agingAsOf === 'string' && globalReportCache.agingAsOf.includes('-') && !globalReportCache.agingAsOf.includes(':')) {
       return globalReportCache.agingAsOf;
@@ -3035,13 +3055,25 @@ export default function ReportPageClient() {
 
         if (needsFullFetch && exportData.length < total) {
           if (shouldStreamRegisterExportFromServer(total, exportData.length)) {
+            exportStartedAtRef.current = Date.now();
             setExportProgress({ fetched: 0, total, serverStream: true });
             await downloadRegisterCsvFromServer({
               query: exportQuery,
               knownTotal: total,
               signal: controller.signal,
               onProgress: (fetched, exportTotal) => {
-                setExportProgress({ fetched, total: exportTotal, serverStream: true });
+                const elapsed = (Date.now() - exportStartedAtRef.current) / 1000;
+                const rate = fetched > 0 && elapsed >= 0.5 ? fetched / elapsed : 0;
+                const etaSeconds =
+                  rate > 0 && exportTotal > fetched
+                    ? Math.max(1, Math.ceil((exportTotal - fetched) / rate))
+                    : undefined;
+                setExportProgress({
+                  fetched,
+                  total: exportTotal,
+                  serverStream: true,
+                  etaSeconds,
+                });
               },
             });
             if (format === 'excel') {
@@ -3246,11 +3278,9 @@ export default function ReportPageClient() {
             className="flex items-center gap-2 bg-white text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
             title={
               exportingDetailed
-                ? exportProgress?.serverStream
-                  ? 'Generating export on server — click to cancel'
-                  : exportProgress && exportProgress.total > 0
-                    ? `Exporting ${exportProgress.fetched.toLocaleString()} / ${exportProgress.total.toLocaleString()} — click to cancel`
-                    : 'Export in progress — click to cancel'
+                ? exportProgress && exportProgress.total > 0
+                  ? `${registerExportStatusLabel(exportProgress)} — click to cancel`
+                  : 'Export in progress — click to cancel'
                 : total > 500
                   ? 'Export filtered register (large datasets download as CSV from server)'
                   : 'Export filtered register to Excel (.xlsx)'
@@ -3258,11 +3288,9 @@ export default function ReportPageClient() {
           >
             <FileSpreadsheet size={14} className={exportingDetailed ? 'animate-pulse text-amber-600' : 'text-emerald-600'} />
             {exportingDetailed
-              ? exportProgress?.serverStream
-                ? 'Generating…'
-                : exportProgress && exportProgress.total > 0
-                  ? `Exporting ${Math.min(100, Math.round((exportProgress.fetched / exportProgress.total) * 100))}%`
-                  : 'Exporting…'
+              ? exportProgress && exportProgress.total > 0
+                ? `${Math.min(100, Math.round((exportProgress.fetched / exportProgress.total) * 100))}%`
+                : 'Exporting…'
               : 'Export Excel'}
           </button>
           <div className="relative">
@@ -3326,11 +3354,9 @@ export default function ReportPageClient() {
           <div className="flex min-w-0 items-center gap-2">
             <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-600 border-t-transparent" />
             <span className="font-medium">
-              {exportProgress?.serverStream
-                ? `Generating export on server (${exportProgress.total.toLocaleString()} rows)…`
-                : exportProgress && exportProgress.total > 0
-                  ? `Exporting ${exportProgress.fetched.toLocaleString()} / ${exportProgress.total.toLocaleString()} rows (${Math.min(100, Math.round((exportProgress.fetched / exportProgress.total) * 100))}%)`
-                  : 'Preparing export…'}
+              {exportProgress && exportProgress.total > 0
+                ? registerExportStatusLabel(exportProgress)
+                : 'Preparing export…'}
             </span>
           </div>
           <button
