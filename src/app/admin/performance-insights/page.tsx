@@ -5,3 +5,4 @@ export default async function PerformanceInsightsPage() {
   await requirePageAccess('/admin/performance-insights');
   return <PerformanceInsightsPageClient />;
 }
+ 
