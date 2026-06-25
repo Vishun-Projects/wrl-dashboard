@@ -47,7 +47,7 @@ export type RegisterPostgresParams = {
   isHod: boolean;
 };
 
-function hotRowToRegisterRow(row: Record<string, unknown>): Record<string, unknown> {
+export function hotRowToRegisterRow(row: Record<string, unknown>): Record<string, unknown> {
   return mapCachedRowToRegisterRow({
     ncode: row.ncode,
     id: row.ncode,
@@ -97,7 +97,7 @@ function hotRowToRegisterRow(row: Record<string, unknown>): Record<string, unkno
   });
 }
 
-function buildWhere(params: RegisterPostgresParams): { sql: string; values: unknown[] } {
+export function buildWhere(params: RegisterPostgresParams): { sql: string; values: unknown[] } {
   const clauses: string[] = ['1=1'];
   const values: unknown[] = [];
   let idx = 1;

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchAppUserAuthProfile } from '@/lib/auth/app-user-profile';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { readRegisterFromPostgres } from '@/lib/read-model/flags';
-import { resolveHotWindowCoverage } from '@/lib/read-model/hot-window';
 import { queryDistributionCompactFromPostgres } from '@/lib/read-model/queries/register';
 
 export async function GET(req: NextRequest) {
@@ -31,14 +30,6 @@ export async function GET(req: NextRequest) {
     const branch = searchParams.get('branch') || '';
     const franchisee = searchParams.get('franchisee') || '';
     const technician = searchParams.get('technician') || '';
-
-    const coverage = resolveHotWindowCoverage(startDate, endDate);
-    if (coverage.mode !== 'postgres') {
-      return NextResponse.json(
-        { error: 'Date range is outside the Postgres hot window' },
-        { status: 400 }
-      );
-    }
 
     const profile = await fetchAppUserAuthProfile(userId);
 

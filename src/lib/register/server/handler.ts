@@ -3,14 +3,12 @@ import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { resolveRequestUserId } from '@/lib/auth/server-user';
 import { createClient } from '@/lib/supabase/server';
 import { postQuery } from '@/lib/db/proxy';
-import { buildRegisterCsvResponse, createRegisterCsvResponse } from './csv-export';
-import { resolveHotWindowCoverage } from '@/lib/read-model/hot-window';
+import { buildRegisterCsvResponse } from './csv-export';
+import { buildPostgresRegisterCsvStream } from './postgres-csv-export';
 import { readRegisterFromPostgres } from '@/lib/read-model/flags';
 import {
   queryRegisterBulkFromPostgres,
-  queryRegisterExportFromPostgres,
   queryRegisterFromPostgres,
-  REGISTER_BULK_MAX_ROWS,
 } from '@/lib/read-model/queries/register';
 import {
   appendCallTypeFilter,
@@ -206,51 +204,44 @@ export async function handleRegisterGet(req: NextRequest) {
     const isHod = isHodUser(profile ?? undefined, permissions);
 
     if (readRegisterFromPostgres() && !lastSync) {
-      const coverage = resolveHotWindowCoverage(startDate, endDate);
-      if (coverage.mode === 'postgres') {
-        if (searchParams.get('export') === 'bulk') {
-          const payload = await queryRegisterBulkFromPostgres({
-            officeId,
-            callType: callType ?? null,
-            startDate,
-            endDate,
-            assignedOffices,
-            visibleStatuses,
-            isHod,
-          });
-          return NextResponse.json(payload);
-        }
+      if (searchParams.get('export') === 'bulk') {
+        const payload = await queryRegisterBulkFromPostgres({
+          officeId,
+          callType: callType ?? null,
+          startDate,
+          endDate,
+          assignedOffices,
+          visibleStatuses,
+          isHod,
+        });
+        return NextResponse.json(payload);
+      }
 
-        if (searchParams.get('export') === 'csv') {
-          const rows = await queryRegisterExportFromPostgres({
-            page: 1,
-            limit: REGISTER_BULK_MAX_ROWS,
-            search,
-            officeId,
-            callType: callType ?? null,
-            startDate,
-            endDate,
-            status,
-            account,
-            region,
-            pincode,
-            priority,
-            portalFilter,
-            state,
-            city,
-            branch,
-            franchisee,
-            technician,
-            fetchTotals: false,
-            fetchFilterOptions: false,
-            assignedOffices,
-            visibleStatuses,
-            isHod,
-          });
-          return createRegisterCsvResponse(rows);
-        }
+      if (searchParams.get('export') === 'csv') {
+        return buildPostgresRegisterCsvStream({
+          search,
+          officeId,
+          callType: callType ?? null,
+          startDate,
+          endDate,
+          status,
+          account,
+          region,
+          pincode,
+          priority,
+          portalFilter,
+          state,
+          city,
+          branch,
+          franchisee,
+          technician,
+          assignedOffices,
+          visibleStatuses,
+          isHod,
+        });
+      }
 
-        const payload = await queryRegisterFromPostgres({
+      const payload = await queryRegisterFromPostgres({
           page,
           limit,
           search,
@@ -276,11 +267,9 @@ export async function handleRegisterGet(req: NextRequest) {
           isHod,
         });
         return NextResponse.json(payload);
-      }
-      // hybrid or fully outside hot window → CRM path below
     }
 
-    // Base condition is on raw table alias 'tc' — exclude transferred calls from all counts and listings
+    // Live CRM path (only when READ_REGISTER_FROM != postgres)
     const excludeTransferred = " AND ISNULL(tc.vtransfercallno, '') = '' AND ISNULL(tc.ncancelreason, 0) <> 2";
     const isLookupSearch = !!(search && search.trim());
     const registerDateCol = resolveRegisterDateSqlColumn(dateFilterColumnParam);

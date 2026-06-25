@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { isWithinHotWindow } from '@/lib/read-model/hot-window';
 import { readRegisterFromPostgresClient } from '@/lib/read-model/client-flags';
 import { downloadRegisterCsvInBrowser } from './server/csv-export';
 
@@ -95,8 +94,8 @@ export function buildRegisterExportParams(
   return params;
 }
 
-export function resolveRegisterExportBatchSize(startDate: string, endDate: string): number {
-  if (readRegisterFromPostgresClient() && isWithinHotWindow(startDate, endDate)) {
+export function resolveRegisterExportBatchSize(_startDate: string, _endDate: string): number {
+  if (readRegisterFromPostgresClient()) {
     return REGISTER_EXPORT_BATCH_POSTGRES;
   }
   return REGISTER_EXPORT_BATCH_CRM;
@@ -240,7 +239,7 @@ export async function fetchAllRegisterRowsForExport(opts: {
   signal?: AbortSignal;
   onProgress?: (fetched: number, total: number) => void;
 }): Promise<Record<string, unknown>[]> {
-  if (readRegisterFromPostgresClient() && isWithinHotWindow(opts.query.startDate, opts.query.endDate)) {
+  if (readRegisterFromPostgresClient()) {
     return fetchRegisterBulkForCache(opts);
   }
 

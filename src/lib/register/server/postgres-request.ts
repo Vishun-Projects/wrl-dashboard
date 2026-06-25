@@ -7,7 +7,6 @@ import { isHodUser, resolveReportSecurity } from '@/lib/auth/report-security';
 import { resolveRequestUserId } from '@/lib/auth/server-user';
 import { createClient } from '@/lib/supabase/server';
 import { readRegisterFromPostgres } from '@/lib/read-model/flags';
-import { resolveHotWindowCoverage } from '@/lib/read-model/hot-window';
 import type { RegisterPostgresParams } from '@/lib/read-model/queries/register';
 
 export type RegisterPostgresRequestContext = {
@@ -67,16 +66,6 @@ export async function resolveRegisterPostgresRequest(
 
   const { searchParams } = new URL(req.url);
   const parsed = parseRegisterSearchParams(searchParams);
-  const coverage = resolveHotWindowCoverage(parsed.startDate, parsed.endDate);
-  if (coverage.mode !== 'postgres') {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        { error: 'Date range is outside the Postgres hot window' },
-        { status: 400 }
-      ),
-    };
-  }
 
   const auth = await loadUserAuth(userId);
   const permissions = auth?.permissions ?? [];

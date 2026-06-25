@@ -56,7 +56,7 @@ export function rowForCsv(raw: Record<string, unknown>): Record<string, unknown>
   };
 }
 
-function registerCsvLine(row: Record<string, unknown>): string {
+export function registerRowToCsvLine(row: Record<string, unknown>): string {
   const mapped = rowForCsv(row);
   return CSV_COLUMNS.map((col) => csvEscape(mapped[col.key as keyof typeof mapped])).join(',');
 }
@@ -65,7 +65,7 @@ function registerCsvLine(row: Record<string, unknown>): string {
 export function buildRegisterCsvContent(rows: Record<string, unknown>[]): string {
   const lines = [CSV_COLUMNS.map((c) => csvEscape(c.header)).join(',')];
   for (const row of rows) {
-    lines.push(registerCsvLine(row));
+    lines.push(registerRowToCsvLine(row));
   }
   return `${lines.join('\r\n')}\r\n`;
 }
@@ -82,7 +82,7 @@ export function createRegisterCsvResponse(
         encoder.encode(`${CSV_COLUMNS.map((c) => csvEscape(c.header)).join(',')}\r\n`)
       );
       for (const row of rows) {
-        controller.enqueue(encoder.encode(`${registerCsvLine(row)}\r\n`));
+        controller.enqueue(encoder.encode(`${registerRowToCsvLine(row)}\r\n`));
       }
       controller.close();
     },
@@ -157,7 +157,7 @@ export async function buildRegisterCsvResponse(opts: RegisterCsvExportOpts): Pro
 
           const processed = await opts.processRows(rawRows);
           for (const raw of processed) {
-            controller.enqueue(encoder.encode(`${registerCsvLine(raw)}\r\n`));
+            controller.enqueue(encoder.encode(`${registerRowToCsvLine(raw)}\r\n`));
           }
 
           fetched += processed.length;
