@@ -34,6 +34,16 @@ const SYNC_CATCHUP_CHUNK_DAYS = Math.max(
 const SYNC_INCREMENTAL_TIMEOUT_MS =
   Number(process.env.SYNC_CRM_INCREMENTAL_TIMEOUT_MS ?? 300_000) || 300_000;
 
+/** Wider CRM windows for YTD backfill (fewer round trips than 1-day incremental chunks). */
+const SYNC_BACKFILL_CHUNK_DAYS = Math.max(
+  1,
+  Number(process.env.SYNC_BACKFILL_CHUNK_DAYS ?? 14) || 14
+);
+const SYNC_BACKFILL_FETCH_GAP_MS =
+  Number(process.env.SYNC_BACKFILL_FETCH_GAP_MS ?? 400) || 400;
+const SYNC_BACKFILL_TIMEOUT_MS =
+  Number(process.env.SYNC_BACKFILL_TIMEOUT_MS ?? 600_000) || 600_000;
+
 const SYNC_EXTRA_FIELDS = `
   COALESCE(NULLIF(p.vlatlong, ''), NULLIF(p.mlatlong, '')) AS latlong
 `;
@@ -348,6 +358,40 @@ export async function fetchCrmIncrementalChunk(
     },
     `${chunk.start}..${chunk.end}`
   );
+}
+
+export async function fetchCrmRowsForBackfill(
+  startDate: string,
+  endDate: string,
+  onProgress?: (info: { chunk: string; rows: number; total: number }) => void
+): Promise<Record<string, unknown>[]> {
+  const chunks = splitDateRangeByDays(startDate, endDate, SYNC_BACKFILL_CHUNK_DAYS);
+  const allRows: Record<string, unknown>[] = [];
+
+  console.log(
+    `[sync-worker] Backfill CRM fetch: ${chunks.length} chunk(s) × ${SYNC_BACKFILL_CHUNK_DAYS} day(s), gap ${SYNC_BACKFILL_FETCH_GAP_MS}ms`
+  );
+
+  for (const chunk of chunks) {
+    const rows = await fetchCrmRangeChunkResilient(
+      chunk,
+      chunk.start,
+      chunk.end,
+      SYNC_BACKFILL_TIMEOUT_MS
+    );
+    allRows.push(...rows);
+    onProgress?.({
+      chunk: `${chunk.start}..${chunk.end}`,
+      rows: rows.length,
+      total: allRows.length,
+    });
+    console.log(
+      `[sync-worker] CRM chunk ${chunk.start}..${chunk.end} → ${rows.length} rows (${allRows.length} total)`
+    );
+    await sleep(SYNC_BACKFILL_FETCH_GAP_MS);
+  }
+
+  return allRows;
 }
 
 export async function fetchCrmRowsForRange(

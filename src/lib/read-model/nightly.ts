@@ -7,17 +7,17 @@ import {
 } from '@/lib/read-model/batches';
 import {
   fetchCrmOpenOldRows,
+  fetchCrmRowsForBackfill,
   fetchCrmRowsForRange,
 } from '@/lib/read-model/crm-fetch';
 import { refreshDimensions } from '@/lib/read-model/dims';
 import {
-  currentYearStart,
-  daysAgoDate,
   todayLocalDate,
 } from '@/lib/read-model/dates';
+import { registerHotRetentionStart } from '@/lib/read-model/hot-window';
 import { tryAcquireSyncLock, releaseSyncLock, markSyncError } from '@/lib/read-model/lock';
 import { aggregateFactCounts } from '@/lib/read-model/metrics';
-import { dedupeCrmRows, processCrmRows, transformCrmRowToHot } from '@/lib/read-model/transform';
+import { dedupeCrmRows, processCrmRows, processCrmRowsForYtdLoad, transformCrmRowToHot } from '@/lib/read-model/transform';
 import { isSummaryEligibleCall } from '@/lib/report/summary-derive';
 import {
   countHotRows,
@@ -50,13 +50,16 @@ export async function runNightlyReconcile(): Promise<void> {
     const logId = await startSyncRunLog(client, ENTITY, batch.batchId);
 
     try {
-      console.log('[sync-worker] Nightly reconcile — refreshing hot window from CRM');
-      const hotStart = daysAgoDate(90);
+      console.log('[sync-worker] Nightly reconcile — refreshing hot table from CRM');
+      const hotStart = registerHotRetentionStart();
       const hotEnd = todayLocalDate();
-      const windowRows = await fetchCrmRowsForRange(hotStart, hotEnd);
+      const windowRows = await fetchCrmRowsForBackfill(hotStart, hotEnd);
       const openOldRows = await fetchCrmOpenOldRows();
-      const combined = dedupeCrmRows([...windowRows, ...openOldRows]);
-      const hotRows = processCrmRows(combined);
+      const ytdHot = processCrmRowsForYtdLoad(windowRows);
+      const openHot = processCrmRows(openOldRows);
+      const byTrn = new Map(ytdHot.map((r) => [r.vtrnno, r]));
+      for (const row of openHot) byTrn.set(row.vtrnno, row);
+      const hotRows = Array.from(byTrn.values());
       const upserted = await upsertHotRows(client, hotRows);
 
       const crmTrns = new Set(hotRows.map((row) => row.vtrnno));
@@ -66,20 +69,23 @@ export async function runNightlyReconcile(): Promise<void> {
         .filter((trn) => !crmTrns.has(trn));
       const deletedOrphans = await deleteHotRowsByTrn(client, orphanTrns);
 
-      const pruneResult = await client.query(`
+      const yearStart = registerHotRetentionStart();
+      const pruneResult = await client.query(
+        `
         DELETE FROM calls_latest_hot h
         WHERE NOT (
-          h.logged_at >= now() - interval '90 days'
+          h.logged_at >= $1::timestamptz
           OR (
             h.status_bucket IN ('open_unallocated', 'assigned', 'tech_solved')
-            AND h.logged_at < now() - interval '90 days'
+            AND h.logged_at < $1::timestamptz
           )
         )
-      `);
+      `,
+        [`${yearStart}T00:00:00`]
+      );
       const pruned = pruneResult.rowCount ?? 0;
 
       console.log('[sync-worker] Rebuilding current-year facts');
-      const yearStart = currentYearStart();
       await truncateCurrentYearFacts(client, yearStart);
       const ytdRows = await fetchCrmRowsForRange(yearStart, hotEnd);
       const ytdDeduped = dedupeCrmRows(ytdRows);

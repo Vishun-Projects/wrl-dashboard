@@ -1,6 +1,7 @@
 import { postQuery } from '@/lib/db/proxy';
 import { normalizeCrmCallRow } from '@/lib/call-row/normalize';
 import { escapeCsvCell } from '@/lib/utils/csv';
+import { formatRegisterExportDate } from '@/lib/register/export-dates';
 import { REGISTER_EXPORT_COLUMNS } from '../table-columns';
 
 const CSV_COLUMNS = REGISTER_EXPORT_COLUMNS;
@@ -38,7 +39,7 @@ export function rowForCsv(raw: Record<string, unknown>): Record<string, unknown>
     UniqueCallNo: row.UniqueCallNo,
     vcclid: row.vcclid ?? '',
     calltype: row.calltype,
-    callsdtrndate: row.callsdtrndate,
+    callsdtrndate: formatRegisterExportDate(row.callsdtrndate),
     PartyName: row.PartyName,
     officename: branch,
     franchisee_name: franchisee,
@@ -48,8 +49,10 @@ export function rowForCsv(raw: Record<string, unknown>): Record<string, unknown>
     serviceman: row.serviceman,
     vcomplaint: row.vcomplaint,
     display_status: statusText,
-    solvedDate: isSolved ? row.callsolveddate : '',
+    solvedDate: isSolved ? formatRegisterExportDate(row.callsolveddate) : '',
     remarks: row.vsolveremarks || row.cancel_reason || '',
+    bm_approved_date: row.bm_approved_date ?? '',
+    ho_approved_date: row.ho_approved_date ?? '',
     vpersoncalling: row.vpersoncalling,
     vinsttel1: row.vinsttel1,
     vinstaddress: row.vinstaddress,

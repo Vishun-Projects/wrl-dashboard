@@ -1,8 +1,13 @@
-import { daysAgoDate, todayLocalDate } from '@/lib/read-model/dates';
+import { currentYearStart, daysAgoDate, todayLocalDate } from '@/lib/read-model/dates';
 import { formatLocalDate } from '@/lib/report/filters';
 
 /** Matches backfill hot window in sync worker (rolling 90 days). */
 export const HOT_WINDOW_DAYS = 90;
+
+/** Hot table retains all calls from this date (calendar YTD) plus open-old exceptions. */
+export function registerHotRetentionStart(): string {
+  return currentYearStart();
+}
 
 export type DateRange = { start: string; end: string };
 
@@ -32,7 +37,7 @@ export function hotWindowRange(): DateRange {
 
 /**
  * Decide whether a user date range is served from Supabase hot table, CRM, or both.
- * Hot table holds ~90 days of calls (+ open-old exceptions stored without date clip).
+ * Hot table holds calendar-year-to-date calls (+ open-old exceptions outside YTD).
  */
 export function resolveHotWindowCoverage(
   startDate: string | null | undefined,

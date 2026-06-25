@@ -5,6 +5,7 @@ import {
   withAppClient,
 } from '@/lib/read-model/db';
 import { formatArcpClaimsExportDate } from '@/lib/read-model/arcp/dates';
+import { formatRegisterExportDate } from '@/lib/register/export-dates';
 import {
   buildWhere,
   type RegisterPostgresParams,
@@ -48,7 +49,7 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
     row.vtrnno,
     row.vcclid ?? '',
     row.call_type,
-    row.logged_at,
+    formatRegisterExportDate(row.logged_at),
     row.party_name,
     row.branch_name,
     franchisee,
@@ -58,7 +59,7 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
     row.engineer_name,
     row.complaint,
     statusText,
-    isSolved ? row.solved_at : '',
+    isSolved ? formatRegisterExportDate(row.solved_at) : '',
     bmDate,
     '',
     row.solve_remarks || '',

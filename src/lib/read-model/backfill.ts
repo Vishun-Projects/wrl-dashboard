@@ -6,42 +6,25 @@ import {
   startIngestBatch,
   startSyncRunLog,
 } from '@/lib/read-model/batches';
-import {
-  fetchCrmOpenOldRows,
-  fetchCrmRowsForRange,
-} from '@/lib/read-model/crm-fetch';
+import { fetchCrmRowsForBackfill } from '@/lib/read-model/crm-fetch';
 import { refreshDimensions } from '@/lib/read-model/dims';
 import {
   currentYearStart,
-  daysAgoDate,
   splitDateRangeByDays,
-  todayLocalDate,
-  maxCrmWatermarks,
-  parseCrmDate,
 } from '@/lib/read-model/dates';
 import { updateSyncWatermarks, readHotTableWatermarks } from '@/lib/read-model/lock';
 import { aggregateFactCounts } from '@/lib/read-model/metrics';
 import type { HotRow } from '@/lib/read-model/types';
-import { dedupeCrmRows, processCrmRows, transformCrmRowToHot } from '@/lib/read-model/transform';
+import { dedupeCrmRows, transformCrmRowToHot } from '@/lib/read-model/transform';
 import { isSummaryEligibleCall } from '@/lib/report/summary-derive';
-import { countHotRows, truncateHot, upsertHotRows } from '@/lib/read-model/upsert-hot';
+import { syncHotYtdFromCrm } from '@/lib/read-model/sync-hot-ytd';
+import { countHotRows, truncateHot } from '@/lib/read-model/upsert-hot';
 import {
   truncateCurrentYearFacts,
   upsertFactRows,
 } from '@/lib/read-model/upsert-facts';
 
 const ENTITY = 'calls_latest_hot';
-const HOT_CHUNK_DAYS = 7;
-
-async function upsertHotChunk(rows: Record<string, unknown>[], label: string): Promise<number> {
-  const hotRows = processCrmRows(dedupeCrmRows(rows));
-  if (hotRows.length === 0) return 0;
-  await withClient(async (client) => {
-    await upsertHotRows(client, hotRows, 50);
-  });
-  console.log(`[sync-worker] Upserted ${hotRows.length} hot rows (${label})`);
-  return hotRows.length;
-}
 
 export async function runInitialBackfill(opts?: { resume?: boolean }): Promise<void> {
   const startedAt = new Date();
@@ -76,25 +59,12 @@ export async function runInitialBackfill(opts?: { resume?: boolean }): Promise<v
   });
 
   let totalUpserted = 0;
-  const allRawRows: Record<string, unknown>[] = [];
 
   try {
-    const hotStart = daysAgoDate(90);
-    const hotEnd = todayLocalDate();
-    console.log(`[sync-worker] Backfilling hot window ${hotStart} .. ${hotEnd}`);
+    const ytdResult = await syncHotYtdFromCrm();
+    totalUpserted = ytdResult.totalUpserted;
 
-    const chunks = splitDateRangeByDays(hotStart, hotEnd, HOT_CHUNK_DAYS);
-    for (const chunk of chunks) {
-      console.log(`[sync-worker] Fetching hot chunk ${chunk.start} .. ${chunk.end}`);
-      const rows = await fetchCrmRowsForRange(chunk.start, chunk.end);
-      allRawRows.push(...rows);
-      totalUpserted += await upsertHotChunk(rows, `${chunk.start}..${chunk.end}`);
-    }
-
-    console.log('[sync-worker] Fetching open-old exception rows…');
-    const openOldRows = await fetchCrmOpenOldRows();
-    allRawRows.push(...openOldRows);
-    totalUpserted += await upsertHotChunk(openOldRows, 'open-old');
+    const hotEnd = ytdResult.ytdEnd;
 
     const yearStart = currentYearStart();
     console.log(`[sync-worker] Backfilling YTD facts from ${yearStart} .. ${hotEnd}`);
@@ -107,7 +77,7 @@ export async function runInitialBackfill(opts?: { resume?: boolean }): Promise<v
     const allMetricRows: HotRow[] = [];
     for (const chunk of factChunks) {
       console.log(`[sync-worker] Fetching facts chunk ${chunk.start} .. ${chunk.end}`);
-      const ytdRows = await fetchCrmRowsForRange(chunk.start, chunk.end);
+      const ytdRows = await fetchCrmRowsForBackfill(chunk.start, chunk.end);
       const metricRows = dedupeCrmRows(ytdRows)
         .filter((row) => isSummaryEligibleCall(row))
         .map((row) => transformCrmRowToHot(row))
@@ -125,27 +95,20 @@ export async function runInitialBackfill(opts?: { resume?: boolean }): Promise<v
     });
     console.log(`[sync-worker] Upserted ${factRows.length} fact grains`);
 
-    const combined = dedupeCrmRows(allRawRows);
-    let watermarks = maxCrmWatermarks(combined);
-
     await withClient(async (client) => {
-      if (!watermarks.lastEditedon) {
-        const fromHot = await readHotTableWatermarks(client);
-        watermarks = {
-          lastEditedon: fromHot.lastEditedon,
-          lastAddedon: fromHot.lastAddedon ?? watermarks.lastAddedon,
-        };
-      }
+      const fromHot = await readHotTableWatermarks(client);
+      const watermarks = {
+        lastEditedon: fromHot.lastEditedon,
+        lastAddedon: fromHot.lastAddedon,
+      };
 
       await updateSyncWatermarks(client, watermarks.lastEditedon, watermarks.lastAddedon, totalUpserted);
       const hotCount = await countHotRows(client);
+      const trnRes = await client.query<{ vtrnno: string }>(
+        `SELECT vtrnno FROM calls_latest_hot ORDER BY vtrnno`
+      );
       const checksum = createHash('sha256')
-        .update(
-          processCrmRows(combined)
-            .map((r) => r.vtrnno)
-            .sort()
-            .join(',')
-        )
+        .update(trnRes.rows.map((r) => r.vtrnno).join(','))
         .digest('hex');
 
       await completeIngestBatch(
@@ -162,7 +125,7 @@ export async function runInitialBackfill(opts?: { resume?: boolean }): Promise<v
       });
 
       console.log(
-        `[sync-worker] Backfill complete — hot rows ${hotCount}, facts ${factRows.length}, watermark ${watermarks.lastEditedon?.toISOString() ?? 'n/a'}`
+        `[sync-worker] Backfill complete — hot rows ${hotCount}, Jan–Feb ${ytdResult.janFebHotCount}, facts ${factRows.length}, watermark ${watermarks.lastEditedon?.toISOString() ?? 'n/a'}`
       );
     });
   } catch (err) {

@@ -10,6 +10,7 @@ import { parseLatLngFromRow } from '@/lib/geo/parse-latlong';
 import { enrichTrhcallBranchFranchisee } from '@/lib/trhcalls/query';
 import type { HotRow, StatusBucket } from '@/lib/read-model/types';
 import { parseCrmDate } from '@/lib/read-model/dates';
+import { registerHotRetentionStart } from '@/lib/read-model/hot-window';
 import { isTruthyCrmRowFlag, resolveTrhcallsBmApprovedAt } from '@/lib/trhcalls/bm-approval';
 import { toBigInt } from '@/lib/read-model/coerce';
 
@@ -70,11 +71,11 @@ export function isHotEligibleRow(row: Record<string, unknown>, now = new Date())
   const loggedAt = parseCrmDate(row.callsdtrndate ?? row.dtrndate);
   if (!loggedAt) return false;
 
-  const cutoff = new Date(now);
-  cutoff.setDate(cutoff.getDate() - 90);
-  cutoff.setHours(0, 0, 0, 0);
+  const ytdStart = new Date(`${registerHotRetentionStart()}T00:00:00`);
+  if (loggedAt >= ytdStart) return true;
 
-  if (loggedAt >= cutoff) return true;
+  // Pre-YTD: keep open pipeline rows only (legacy open-old path).
+  void now;
   return isOpenPipelineRow(row);
 }
 
@@ -201,6 +202,17 @@ export function processCrmRows(rows: Record<string, unknown>[], now = new Date()
   const hotRows: HotRow[] = [];
   for (const row of deduped) {
     if (!isHotEligibleRow(row, now)) continue;
+    const hot = transformCrmRowToHot(row);
+    if (hot) hotRows.push(hot);
+  }
+  return hotRows;
+}
+
+/** Backfill / YTD load — store every transformed CRM row (date window is enforced by fetch). */
+export function processCrmRowsForYtdLoad(rows: Record<string, unknown>[]): HotRow[] {
+  const deduped = dedupeCrmRows(rows);
+  const hotRows: HotRow[] = [];
+  for (const row of deduped) {
     const hot = transformCrmRowToHot(row);
     if (hot) hotRows.push(hot);
   }
