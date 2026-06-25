@@ -12,6 +12,20 @@ export function isRegisterExportAbortError(err: unknown): boolean {
   return false;
 }
 
+/** Above this count, paginated browser fetch is avoided — server streams CSV in one request. */
+export const REGISTER_SERVER_STREAM_MIN_ROWS = 500;
+
+export function shouldStreamRegisterExportFromServer(
+  knownTotal: number,
+  cachedRowCount: number
+): boolean {
+  if (cachedRowCount > 0 && knownTotal > 0 && cachedRowCount >= knownTotal) {
+    return false;
+  }
+  if (knownTotal <= 0) return true;
+  return knownTotal > REGISTER_SERVER_STREAM_MIN_ROWS;
+}
+
 /** Batch size for CRM paginated fetches (server export uses keyset internally). */
 export const REGISTER_EXPORT_BATCH_CRM = 1000;
 /** Larger batches when the API serves from Postgres hot table. */
@@ -138,6 +152,7 @@ export async function downloadRegisterCsvFromServer(opts: {
     withCredentials: true,
     signal: opts.signal,
     responseType: 'blob',
+    timeout: 600_000,
   });
 
   opts.onProgress?.(total > 0 ? total : 1, total > 0 ? total : 1);

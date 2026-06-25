@@ -114,6 +114,7 @@ import {
   fetchAllRegisterRowsForExport,
   isRegisterExportAbortError,
   logRegisterBulk,
+  shouldStreamRegisterExportFromServer,
 } from '@/lib/register/export-fetch';
 import { clearPortalAuditCache, ensurePortalAuditCache } from '@/lib/report/portal-cache';
 
@@ -482,9 +483,11 @@ export default function ReportPageClient() {
   const [tempFilterRegion, setTempFilterRegion] = useState<string[]>([]);
   const [tempFilterAccount, setTempFilterAccount] = useState<string[]>([]);
   const [exportingDetailed, setExportingDetailed] = useState(false);
-  const [exportProgress, setExportProgress] = useState<{ fetched: number; total: number } | null>(
-    null
-  );
+  const [exportProgress, setExportProgress] = useState<{
+    fetched: number;
+    total: number;
+    serverStream?: boolean;
+  } | null>(null);
   const exportAbortRef = React.useRef<AbortController | null>(null);
   const [agingAsOf, setAgingAsOf] = useState<string>(() => {
     if (globalReportCache && typeof globalReportCache.agingAsOf === 'string' && globalReportCache.agingAsOf.includes('-') && !globalReportCache.agingAsOf.includes(':')) {
@@ -3031,6 +3034,22 @@ export default function ReportPageClient() {
         }
 
         if (needsFullFetch && exportData.length < total) {
+          if (shouldStreamRegisterExportFromServer(total, exportData.length)) {
+            setExportProgress({ fetched: 0, total, serverStream: true });
+            await downloadRegisterCsvFromServer({
+              query: exportQuery,
+              knownTotal: total,
+              signal: controller.signal,
+              onProgress: (fetched, exportTotal) => {
+                setExportProgress({ fetched, total: exportTotal, serverStream: true });
+              },
+            });
+            if (format === 'excel') {
+              feedback.actionSuccess('Large export saved as CSV — open in Excel');
+            }
+            return;
+          }
+
           exportData = await fetchAllRegisterRowsForExport({
             knownTotal: total,
             signal: controller.signal,
@@ -3227,17 +3246,23 @@ export default function ReportPageClient() {
             className="flex items-center gap-2 bg-white text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
             title={
               exportingDetailed
-                ? exportProgress && exportProgress.total > 0
-                  ? `Exporting ${exportProgress.fetched.toLocaleString()} / ${exportProgress.total.toLocaleString()} — click to cancel`
-                  : 'Export in progress — click to cancel'
-                : 'Export filtered register to Excel (.xlsx)'
+                ? exportProgress?.serverStream
+                  ? 'Generating export on server — click to cancel'
+                  : exportProgress && exportProgress.total > 0
+                    ? `Exporting ${exportProgress.fetched.toLocaleString()} / ${exportProgress.total.toLocaleString()} — click to cancel`
+                    : 'Export in progress — click to cancel'
+                : total > 500
+                  ? 'Export filtered register (large datasets download as CSV from server)'
+                  : 'Export filtered register to Excel (.xlsx)'
             }
           >
             <FileSpreadsheet size={14} className={exportingDetailed ? 'animate-pulse text-amber-600' : 'text-emerald-600'} />
             {exportingDetailed
-              ? exportProgress && exportProgress.total > 0
-                ? `Exporting ${Math.min(100, Math.round((exportProgress.fetched / exportProgress.total) * 100))}%`
-                : 'Exporting…'
+              ? exportProgress?.serverStream
+                ? 'Generating…'
+                : exportProgress && exportProgress.total > 0
+                  ? `Exporting ${Math.min(100, Math.round((exportProgress.fetched / exportProgress.total) * 100))}%`
+                  : 'Exporting…'
               : 'Export Excel'}
           </button>
           <div className="relative">
@@ -3301,9 +3326,11 @@ export default function ReportPageClient() {
           <div className="flex min-w-0 items-center gap-2">
             <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-600 border-t-transparent" />
             <span className="font-medium">
-              {exportProgress && exportProgress.total > 0
-                ? `Exporting ${exportProgress.fetched.toLocaleString()} / ${exportProgress.total.toLocaleString()} rows (${Math.min(100, Math.round((exportProgress.fetched / exportProgress.total) * 100))}%)`
-                : 'Preparing export…'}
+              {exportProgress?.serverStream
+                ? `Generating export on server (${exportProgress.total.toLocaleString()} rows)…`
+                : exportProgress && exportProgress.total > 0
+                  ? `Exporting ${exportProgress.fetched.toLocaleString()} / ${exportProgress.total.toLocaleString()} rows (${Math.min(100, Math.round((exportProgress.fetched / exportProgress.total) * 100))}%)`
+                  : 'Preparing export…'}
             </span>
           </div>
           <button
