@@ -95,6 +95,8 @@ export function emptyReportFilterSnapshot(
     portalFilter: [],
     selectedState: [],
     selectedCity: [],
+    selectedRegion: [],
+    selectedAccount: [],
     selectedBranch: [],
     selectedFranchisee: [],
     selectedTechnician: [],
@@ -365,6 +367,8 @@ export function buildRegisterListQueryKey(parts: {
   dateFilterColumn: string;
   selectedState: string[];
   selectedCity: string[];
+  selectedRegion: string[];
+  selectedAccount: string[];
   selectedBranch: string[];
   selectedFranchisee: string[];
   selectedTechnician: string[];
@@ -379,6 +383,8 @@ export function buildRegisterListQueryKey(parts: {
     pageLimit: normalizeRegisterPageSize(parts.pageLimit),
     selectedState: serializeFilterKey(parts.selectedState),
     selectedCity: serializeFilterKey(parts.selectedCity),
+    selectedRegion: serializeFilterKey(parts.selectedRegion),
+    selectedAccount: serializeFilterKey(parts.selectedAccount),
     selectedBranch: serializeFilterKey(parts.selectedBranch),
     selectedFranchisee: serializeFilterKey(parts.selectedFranchisee),
     selectedTechnician: serializeFilterKey(parts.selectedTechnician),
@@ -440,6 +446,8 @@ export function matchesCallTypeFilter(
 export type FilterCallsCriteria = {
   state?: string[] | string;
   city?: string[] | string;
+  region?: string[] | string;
+  account?: string[] | string;
   branch?: string[] | string;
   franchisee?: string[] | string;
   technician?: string[] | string;
@@ -604,6 +612,13 @@ export function filterCallsCSR(calls: any[], criteria: FilterCallsCriteria, excl
     if (exclude !== 'state' && !matchesFilterSelection(c.state || '', criteria.state)) return false;
     if (exclude !== 'city' && !matchesFilterSelection(c.city || c.ncode || '', criteria.city)) return false;
 
+    if (exclude !== 'region' && !matchesFilterSelection(String(c.region || ''), criteria.region)) {
+      return false;
+    }
+    if (exclude !== 'account' && !matchesFilterSelection(String(c.account || ''), criteria.account)) {
+      return false;
+    }
+
     if (exclude !== 'branch') {
       const branchSelection = criteria.selectedBranch?.length
         ? criteria.selectedBranch
@@ -717,6 +732,8 @@ export type ActiveFilterChipDescriptor = {
     | 'selectedFranchisee'
     | 'selectedState'
     | 'selectedCity'
+    | 'selectedRegion'
+    | 'selectedAccount'
     | 'selectedTechnician';
   removeValue?: string;
 };
@@ -817,6 +834,16 @@ export function snapshotAfterRemovingActiveFilterChip(
         ...applied,
         selectedCity: applied.selectedCity.filter((v) => v !== chip.removeValue),
       });
+    case 'selectedRegion':
+      return buildReportFilterSnapshot({
+        ...applied,
+        selectedRegion: applied.selectedRegion.filter((v) => v !== chip.removeValue),
+      });
+    case 'selectedAccount':
+      return buildReportFilterSnapshot({
+        ...applied,
+        selectedAccount: applied.selectedAccount.filter((v) => v !== chip.removeValue),
+      });
     case 'selectedTechnician':
       return buildReportFilterSnapshot({
         ...applied,
@@ -871,6 +898,8 @@ export function buildActiveFilterChips(input: RegisterActiveFilterInput): Active
   pushArrayChips(chips, 'selectedFranchisee', 'Franchisee', input.selectedFranchisee, resolveLabel);
   pushArrayChips(chips, 'selectedState', 'State', input.selectedState, resolveLabel);
   pushArrayChips(chips, 'selectedCity', 'City', input.selectedCity, resolveLabel);
+  pushArrayChips(chips, 'selectedRegion', 'Region', input.selectedRegion, resolveLabel);
+  pushArrayChips(chips, 'selectedAccount', 'Account', input.selectedAccount, resolveLabel);
   pushArrayChips(chips, 'selectedTechnician', 'Technician', input.selectedTechnician, resolveLabel);
 
   return chips;
@@ -885,6 +914,8 @@ export type RegisterViewFilterParts = {
   pincodeSearch?: string;
   selectedState: string[];
   selectedCity: string[];
+  selectedRegion: string[];
+  selectedAccount: string[];
   selectedBranch: string[];
   selectedFranchisee: string[];
   selectedTechnician: string[];
@@ -902,6 +933,8 @@ export function isAnyFilterActive(parts: RegisterViewFilterParts): boolean {
     (parts.pincodeSearch || '') !== '' ||
     parts.selectedState.length > 0 ||
     parts.selectedCity.length > 0 ||
+    parts.selectedRegion.length > 0 ||
+    parts.selectedAccount.length > 0 ||
     parts.selectedBranch.length > 0 ||
     parts.selectedFranchisee.length > 0 ||
     parts.selectedTechnician.length > 0 ||
@@ -918,6 +951,8 @@ export type RegisterViewFilterContextInput = {
   pincodeSearch?: string;
   selectedState: string[];
   selectedCity: string[];
+  selectedRegion: string[];
+  selectedAccount: string[];
   selectedBranch: string[];
   selectedFranchisee: string[];
   selectedTechnician: string[];
@@ -937,6 +972,8 @@ export function buildRegisterViewFiltersFromContext(
     pincodeSearch: input.pincodeSearch ?? '',
     selectedState: input.selectedState,
     selectedCity: input.selectedCity,
+    selectedRegion: input.selectedRegion,
+    selectedAccount: input.selectedAccount,
     selectedBranch: input.selectedBranch,
     selectedFranchisee: input.selectedFranchisee,
     selectedTechnician: input.selectedTechnician,
@@ -961,6 +998,8 @@ export type ReportFilterSnapshot = {
   portalFilter: string[];
   selectedState: string[];
   selectedCity: string[];
+  selectedRegion: string[];
+  selectedAccount: string[];
   selectedBranch: string[];
   selectedFranchisee: string[];
   selectedTechnician: string[];
@@ -983,6 +1022,8 @@ export function buildReportFilterSnapshot(input: ReportFilterSnapshotInput): Rep
     portalFilter: [...input.portalFilter],
     selectedState: [...input.selectedState],
     selectedCity: [...input.selectedCity],
+    selectedRegion: [...input.selectedRegion],
+    selectedAccount: [...input.selectedAccount],
     selectedBranch: [...input.selectedBranch],
     selectedFranchisee: [...input.selectedFranchisee],
     selectedTechnician: [...input.selectedTechnician],
@@ -1008,6 +1049,8 @@ export function reportFilterSnapshotFromCache(
     portalFilter: migrateStringFilter(cache.portalFilter),
     selectedState: migrateStringFilter(cache.selectedState),
     selectedCity: migrateStringFilter(cache.selectedCity),
+    selectedRegion: migrateStringFilter(cache.selectedRegion),
+    selectedAccount: migrateStringFilter(cache.selectedAccount),
     selectedBranch: migrateStringFilter(cache.selectedBranch),
     selectedFranchisee: migrateStringFilter(cache.selectedFranchisee),
     selectedTechnician: migrateStringFilter(cache.selectedTechnician),
@@ -1028,6 +1071,8 @@ export function filterSnapshotKey(snapshot: ReportFilterSnapshot): string {
     portalFilter: serializeFilterKey(snapshot.portalFilter),
     selectedState: serializeFilterKey(snapshot.selectedState),
     selectedCity: serializeFilterKey(snapshot.selectedCity),
+    selectedRegion: serializeFilterKey(snapshot.selectedRegion),
+    selectedAccount: serializeFilterKey(snapshot.selectedAccount),
     selectedBranch: serializeFilterKey(snapshot.selectedBranch),
     selectedFranchisee: serializeFilterKey(snapshot.selectedFranchisee),
     selectedTechnician: serializeFilterKey(snapshot.selectedTechnician),
@@ -1056,6 +1101,8 @@ export type DraftFilterOverrides = Partial<{
   portalFilter: string[];
   selectedState: string[];
   selectedCity: string[];
+  selectedRegion: string[];
+  selectedAccount: string[];
   selectedBranch: string[];
   selectedFranchisee: string[];
   selectedTechnician: string[];
@@ -1073,6 +1120,8 @@ export function buildDraftFilterSnapshot(input: {
   portalFilter: string[];
   selectedState: string[];
   selectedCity: string[];
+  selectedRegion: string[];
+  selectedAccount: string[];
   selectedBranch: string[];
   selectedFranchisee: string[];
   selectedTechnician: string[];
@@ -1088,6 +1137,8 @@ export function appliedFilterPartsFromSnapshot(
     pincodeSearch: snapshot.pincodeSearch,
     selectedState: snapshot.selectedState,
     selectedCity: snapshot.selectedCity,
+    selectedRegion: snapshot.selectedRegion,
+    selectedAccount: snapshot.selectedAccount,
     selectedBranch: snapshot.selectedBranch,
     selectedFranchisee: snapshot.selectedFranchisee,
     selectedTechnician: snapshot.selectedTechnician,

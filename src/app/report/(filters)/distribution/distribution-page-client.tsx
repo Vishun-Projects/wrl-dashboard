@@ -202,6 +202,8 @@ export default function CallDistributionPage() {
         pincodeSearch: '',
         selectedState: [],
         selectedCity: [],
+        selectedRegion: [],
+        selectedAccount: [],
         selectedBranch: [],
         selectedFranchisee: [],
         selectedTechnician: [],

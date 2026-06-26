@@ -25,6 +25,8 @@ export interface GlobalReportCacheType {
   portalFilter: string[];
   selectedState?: string[];
   selectedCity?: string[];
+  selectedRegion?: string[];
+  selectedAccount?: string[];
   selectedBranch?: string[] | string;
   selectedFranchisee?: string[] | string;
   selectedTechnician?: string[];

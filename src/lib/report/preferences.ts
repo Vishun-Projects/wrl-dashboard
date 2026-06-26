@@ -28,6 +28,8 @@ export type StoredSharedFilters = {
   portalFilter?: string[];
   selectedState?: string[];
   selectedCity?: string[];
+  selectedRegion?: string[];
+  selectedAccount?: string[];
   selectedBranch?: string[];
   selectedFranchisee?: string[];
   selectedTechnician?: string[];
@@ -171,6 +173,8 @@ export function buildRoleDefaultShared(ctx: RestoreFilterContext): StoredSharedF
     portalFilter: [],
     selectedState: [],
     selectedCity: [],
+    selectedRegion: [],
+    selectedAccount: [],
     selectedBranch: [],
     selectedFranchisee: [],
     selectedTechnician: [],
@@ -202,6 +206,8 @@ export function storedSharedToSnapshot(stored: StoredSharedFilters): ReportFilte
     portalFilter: capStrings(stored.portalFilter).filter((p) => VALID_PORTAL.has(p)),
     selectedState: capStrings(stored.selectedState),
     selectedCity: capStrings(stored.selectedCity),
+    selectedRegion: capStrings(stored.selectedRegion),
+    selectedAccount: capStrings(stored.selectedAccount),
     selectedBranch: capStrings(stored.selectedBranch),
     selectedFranchisee: capStrings(stored.selectedFranchisee),
     selectedTechnician: capStrings(stored.selectedTechnician),

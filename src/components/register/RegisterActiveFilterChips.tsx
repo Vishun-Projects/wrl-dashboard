@@ -33,6 +33,8 @@ export function RegisterActiveFilterChips({
     callTypeOptions,
     stateOptions,
     cityOptions,
+    regionOptions,
+    accountOptions,
     technicianOptions,
     removeActiveFilterChip,
   } = useReportFilters();
@@ -57,6 +59,8 @@ export function RegisterActiveFilterChips({
       if (field === 'selectedCallTypes') return callTypeOptions.find((o) => o.value === value)?.label || value;
       if (field === 'selectedState') return stateOptions.find((o) => o.value === value)?.label || value;
       if (field === 'selectedCity') return cityOptions.find((o) => o.value === value)?.label || value;
+      if (field === 'selectedRegion') return regionOptions.find((o) => o.value === value)?.label || value;
+      if (field === 'selectedAccount') return accountOptions.find((o) => o.value === value)?.label || value;
       if (field === 'selectedTechnician') return technicianOptions.find((o) => o.value === value)?.label || value;
       return value;
     };
@@ -71,6 +75,8 @@ export function RegisterActiveFilterChips({
       portalFilter: applied.portalFilter,
       selectedState: applied.selectedState,
       selectedCity: applied.selectedCity,
+      selectedRegion: applied.selectedRegion,
+      selectedAccount: applied.selectedAccount,
       selectedBranch: applied.selectedBranch,
       selectedFranchisee: applied.selectedFranchisee,
       selectedTechnician: applied.selectedTechnician,
@@ -84,6 +90,8 @@ export function RegisterActiveFilterChips({
     callTypeOptions,
     stateOptions,
     cityOptions,
+    regionOptions,
+    accountOptions,
     technicianOptions,
   ]);
 

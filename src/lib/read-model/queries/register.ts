@@ -134,9 +134,12 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
   }
 
   if (params.account && params.account !== 'All') {
-    clauses.push(`h.account ILIKE $${idx}`);
-    values.push(`%${params.account}%`);
-    idx++;
+    const accounts = params.account.split(',').map((a) => a.trim()).filter(Boolean);
+    if (accounts.length > 0) {
+      clauses.push(`h.account = ANY($${idx}::text[])`);
+      values.push(accounts);
+      idx++;
+    }
   }
 
   if (params.region && params.region !== 'All') {
@@ -224,7 +227,7 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
       idx += 2;
     } else {
       clauses.push(
-        `(h.vtrnno ILIKE $${idx} OR h.party_name ILIKE $${idx} OR h.serial ILIKE $${idx} OR h.pincode ILIKE $${idx})`
+        `(h.vtrnno ILIKE $${idx} OR h.party_name ILIKE $${idx} OR h.serial ILIKE $${idx} OR h.pincode ILIKE $${idx} OR h.region ILIKE $${idx} OR h.account ILIKE $${idx})`
       );
       values.push(`%${params.search.trim()}%`);
       idx++;
@@ -256,6 +259,8 @@ type RegisterTotalsResult = {
 type RegisterFilterOptionsResult = {
   statesList: ReturnType<typeof aggregateDistinct>;
   citiesList: ReturnType<typeof aggregateDistinct>;
+  regionsList: Array<{ vname: string; call_count: number }>;
+  accountsList: Array<{ vname: string; call_count: number }>;
   branchesList: Array<{ ncode: string; vcompanyname: string; call_count: number }>;
   franchiseesList: Array<{ ncode: string; vcompanyname: string; call_count: number }>;
   techniciansList: ReturnType<typeof aggregateDistinct>;
@@ -397,6 +402,30 @@ export async function queryRegisterFilterOptionsFromPostgres(
   return {
     statesList: aggregateDistinct(processedOptions, 'state'),
     citiesList: aggregateDistinct(processedOptions, 'city'),
+    regionsList: (
+      await prisma.$queryRawUnsafe<Array<{ vname: string; call_count: number }>>(
+        `
+        SELECT h.region AS vname, count(*)::int AS call_count
+        FROM calls_latest_hot h
+        WHERE ${whereSql}
+        GROUP BY h.region
+        ORDER BY h.region
+        `,
+        ...values
+      )
+    ).filter((row) => row.vname),
+    accountsList: (
+      await prisma.$queryRawUnsafe<Array<{ vname: string; call_count: number }>>(
+        `
+        SELECT h.account AS vname, count(*)::int AS call_count
+        FROM calls_latest_hot h
+        WHERE ${whereSql}
+        GROUP BY h.account
+        ORDER BY h.account
+        `,
+        ...values
+      )
+    ).filter((row) => row.vname),
     branchesList: aggregateDistinct(processedOptions, 'resolved_branch_code', 'officename').map(
       (row) => ({ ncode: row.ncode, vcompanyname: row.vname, call_count: row.call_count })
     ),
@@ -444,6 +473,8 @@ export async function queryRegisterFromPostgres(params: RegisterPostgresParams) 
       const options = await queryRegisterFilterOptionsFromPostgres(params);
       response.statesList = options.statesList;
       response.citiesList = options.citiesList;
+      response.regionsList = options.regionsList;
+      response.accountsList = options.accountsList;
       response.branchesList = options.branchesList;
       response.franchiseesList = options.franchiseesList;
       response.techniciansList = options.techniciansList;

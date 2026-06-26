@@ -21,6 +21,8 @@ export function useRegisterFilterOptions(
   setters: {
     setStatesList: (v: any[]) => void;
     setCitiesList: (v: any[]) => void;
+    setRegionsList: (v: Array<{ vname: string; call_count?: number }>) => void;
+    setAccountsList: (v: Array<{ vname: string; call_count?: number }>) => void;
     setBranchesList: (v: any[]) => void;
     setFranchiseesList: (v: any[]) => void;
     setTechniciansList: (v: any[]) => void;
@@ -59,6 +61,8 @@ export function useRegisterFilterOptions(
           portalFilter: joinFilterParam(appliedFilters.portalFilter) || 'All',
           state: joinFilterParam(appliedFilters.selectedState),
           city: joinFilterParam(appliedFilters.selectedCity),
+          region: joinFilterParam(appliedFilters.selectedRegion),
+          account: joinFilterParam(appliedFilters.selectedAccount),
           branch: joinFilterParam(appliedFilters.selectedBranch),
           franchisee: joinFilterParam(appliedFilters.selectedFranchisee),
           technician: joinFilterParam(appliedFilters.selectedTechnician),
@@ -67,6 +71,8 @@ export function useRegisterFilterOptions(
 
       if (res.data.statesList) setters.setStatesList(res.data.statesList);
       if (res.data.citiesList) setters.setCitiesList(res.data.citiesList);
+      if (res.data.regionsList) setters.setRegionsList(res.data.regionsList);
+      if (res.data.accountsList) setters.setAccountsList(res.data.accountsList);
       if (res.data.branchesList) setters.setBranchesList(res.data.branchesList);
       if (res.data.franchiseesList) setters.setFranchiseesList(res.data.franchiseesList);
       if (res.data.techniciansList) setters.setTechniciansList(res.data.techniciansList);

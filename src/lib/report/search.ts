@@ -190,6 +190,8 @@ export function callMatchesRegisterSearch(
     row.callsvserialno,
     row.Pincode,
     row.pincode,
+    row.region,
+    row.account,
   ];
   return fields.some((v) => v != null && String(v).toLowerCase().includes(needle));
 }
@@ -209,6 +211,8 @@ export function registerRowMatchesViewFilters(
   const csrMatches = filterCallsCSR([row as any], {
     state: parts.selectedState,
     city: parts.selectedCity,
+    region: parts.selectedRegion,
+    account: parts.selectedAccount,
     selectedBranch: parts.selectedBranch,
     selectedFranchisee: parts.selectedFranchisee,
     selectedOfficeIds: parts.selectedOfficeIds,

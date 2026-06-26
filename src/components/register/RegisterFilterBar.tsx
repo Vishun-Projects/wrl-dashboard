@@ -20,6 +20,8 @@ type FilterArrayField = keyof Pick<
   | 'selectedCallTypes'
   | 'priorityFilter'
   | 'portalFilter'
+  | 'selectedRegion'
+  | 'selectedAccount'
   | 'selectedTechnician'
 >;
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
@@ -80,6 +82,12 @@ function FilterGroups({
     cityOptions,
     selectedCity,
     handleCitiesChange,
+    regionOptions,
+    selectedRegion,
+    setSelectedRegion,
+    accountOptions,
+    selectedAccount,
+    setSelectedAccount,
     technicianOptions,
     selectedTechnician,
     setSelectedTechnician,
@@ -113,12 +121,32 @@ function FilterGroups({
       }
     : handleCitiesChange;
   const onTechnicianChange = wrapCommit(setSelectedTechnician, 'selectedTechnician');
+  const onRegionChange = wrapCommit(setSelectedRegion, 'selectedRegion');
+  const onAccountChange = wrapCommit(setSelectedAccount, 'selectedAccount');
   const [showAdvanced, setShowAdvanced] = React.useState(!collapseAdvanced);
 
   const advancedFilters = (
     <>
       <FilterGroup label="Location">
         <RegisterBranchFranchiseeFilters applyMode={applyMode} commitOnChange={commitOnChange} />
+        <RegisterMultiSelect
+          label="Region"
+          emptyLabel="All regions"
+          options={regionOptions}
+          selected={selectedRegion}
+          onChange={onRegionChange}
+          searchable
+          applyMode={applyMode}
+        />
+        <RegisterMultiSelect
+          label="Account"
+          emptyLabel="All accounts"
+          options={accountOptions}
+          selected={selectedAccount}
+          onChange={onAccountChange}
+          searchable
+          applyMode={applyMode}
+        />
         <RegisterMultiSelect
           label="State"
           emptyLabel="All states"
@@ -262,7 +290,7 @@ export function RegisterFilterBar({
               <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search by ID, customer name, serial, TRN…"
+                placeholder="Search by ID, customer, serial, TRN, region, account…"
                 className="register-search-input"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}

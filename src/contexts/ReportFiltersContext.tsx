@@ -136,6 +136,10 @@ type ReportFiltersContextValue = {
   setSelectedState: (v: string[]) => void;
   selectedCity: string[];
   setSelectedCity: (v: string[]) => void;
+  selectedRegion: string[];
+  setSelectedRegion: (v: string[]) => void;
+  selectedAccount: string[];
+  setSelectedAccount: (v: string[]) => void;
   selectedBranch: string[];
   setSelectedBranch: (v: string[]) => void;
   selectedFranchisee: string[];
@@ -148,6 +152,10 @@ type ReportFiltersContextValue = {
   setStatesList: (v: any[]) => void;
   citiesList: any[];
   setCitiesList: (v: any[]) => void;
+  regionsList: Array<{ vname: string; call_count?: number }>;
+  setRegionsList: (v: Array<{ vname: string; call_count?: number }>) => void;
+  accountsList: Array<{ vname: string; call_count?: number }>;
+  setAccountsList: (v: Array<{ vname: string; call_count?: number }>) => void;
   techniciansList: any[];
   setTechniciansList: (v: any[]) => void;
   showOfficeDropdown: boolean;
@@ -164,6 +172,8 @@ type ReportFiltersContextValue = {
   callTypeOptions: { value: string; label: string }[];
   stateOptions: { value: string; label: string }[];
   cityOptions: { value: string; label: string }[];
+  regionOptions: { value: string; label: string }[];
+  accountOptions: { value: string; label: string }[];
   technicianOptions: { value: string; label: string }[];
   branchesList: Array<{ ncode: string; vcompanyname: string; call_count?: number }>;
   franchiseesList: Array<{ ncode: string; vcompanyname: string; call_count?: number }>;
@@ -312,6 +322,12 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   const [selectedCity, setSelectedCity] = useState<string[]>(() =>
     migrateStringFilter(bootstrapSnapshot?.selectedCity ?? globalReportCache?.selectedCity)
   );
+  const [selectedRegion, setSelectedRegion] = useState<string[]>(() =>
+    migrateStringFilter(bootstrapSnapshot?.selectedRegion ?? globalReportCache?.selectedRegion)
+  );
+  const [selectedAccount, setSelectedAccount] = useState<string[]>(() =>
+    migrateStringFilter(bootstrapSnapshot?.selectedAccount ?? globalReportCache?.selectedAccount)
+  );
   const [selectedBranch, setSelectedBranch] = useState<string[]>(() =>
     migrateStringFilter(bootstrapSnapshot?.selectedBranch ?? globalReportCache?.selectedBranch)
   );
@@ -326,6 +342,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   const [callTypes, setCallTypes] = useState<string[]>([]);
   const [statesList, setStatesList] = useState<any[]>([]);
   const [citiesList, setCitiesList] = useState<any[]>([]);
+  const [regionsList, setRegionsList] = useState<Array<{ vname: string; call_count?: number }>>([]);
+  const [accountsList, setAccountsList] = useState<Array<{ vname: string; call_count?: number }>>([]);
   const [techniciansList, setTechniciansList] = useState<any[]>([]);
   const [branchesList, setBranchesList] = useState<Array<{ ncode: string; vcompanyname: string; call_count?: number }>>([]);
   const [franchiseesList, setFranchiseesList] = useState<Array<{ ncode: string; vcompanyname: string; call_count?: number }>>([]);
@@ -409,6 +427,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     portalFilter,
     selectedState,
     selectedCity,
+    selectedRegion,
+    selectedAccount,
     selectedBranch,
     selectedFranchisee,
     selectedTechnician,
@@ -425,6 +445,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     portalFilter,
     selectedState,
     selectedCity,
+    selectedRegion,
+    selectedAccount,
     selectedBranch,
     selectedFranchisee,
     selectedTechnician,
@@ -444,6 +466,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     setPortalFilter([...snapshot.portalFilter]);
     setSelectedState([...snapshot.selectedState]);
     setSelectedCity([...snapshot.selectedCity]);
+    setSelectedRegion([...snapshot.selectedRegion]);
+    setSelectedAccount([...snapshot.selectedAccount]);
     setSelectedBranch([...snapshot.selectedBranch]);
     setSelectedFranchisee([...snapshot.selectedFranchisee]);
     setSelectedTechnician([...snapshot.selectedTechnician]);
@@ -514,6 +538,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         portalFilter,
         selectedState,
         selectedCity,
+        selectedRegion,
+        selectedAccount,
         selectedBranch,
         selectedFranchisee,
         selectedTechnician,
@@ -530,6 +556,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       portalFilter,
       selectedState,
       selectedCity,
+      selectedRegion,
+      selectedAccount,
       selectedBranch,
       selectedFranchisee,
       selectedTechnician,
@@ -743,6 +771,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       dateFilterColumn: resolveRegisterDateSqlColumn(undefined),
       selectedState: [],
       selectedCity: [],
+      selectedRegion: [],
+      selectedAccount: [],
       selectedBranch: [],
       selectedFranchisee: [],
       selectedTechnician: [],
@@ -761,6 +791,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     if (!calls.length) {
       setStatesList([]);
       setCitiesList([]);
+      setRegionsList([]);
+      setAccountsList([]);
       setTechniciansList([]);
       return;
     }
@@ -768,6 +800,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     const baseCriteria = {
       state: selectedState,
       city: selectedCity,
+      region: selectedRegion,
+      account: selectedAccount,
       selectedBranch,
       selectedFranchisee,
       technician: selectedTechnician,
@@ -791,6 +825,24 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       cityCounts[c.city].call_count++;
     });
     setCitiesList(Object.values(cityCounts).sort((a, b) => a.vname.localeCompare(b.vname)));
+
+    const regionsFiltered = filterCallsCSR(calls, baseCriteria, 'region');
+    const regionCounts: Record<string, { vname: string; call_count: number }> = {};
+    regionsFiltered.forEach((c) => {
+      if (!c.region) return;
+      regionCounts[c.region] = regionCounts[c.region] || { vname: c.region, call_count: 0 };
+      regionCounts[c.region].call_count++;
+    });
+    setRegionsList(Object.values(regionCounts).sort((a, b) => a.vname.localeCompare(b.vname)));
+
+    const accountsFiltered = filterCallsCSR(calls, baseCriteria, 'account');
+    const accountCounts: Record<string, { vname: string; call_count: number }> = {};
+    accountsFiltered.forEach((c) => {
+      if (!c.account) return;
+      accountCounts[c.account] = accountCounts[c.account] || { vname: c.account, call_count: 0 };
+      accountCounts[c.account].call_count++;
+    });
+    setAccountsList(Object.values(accountCounts).sort((a, b) => a.vname.localeCompare(b.vname)));
 
     const techFiltered = filterCallsCSR(calls, baseCriteria, 'technician');
     const techCounts: Record<string, { ncode: string; vname: string; call_count: number }> = {};
@@ -829,7 +881,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       franchiseeCounts[fCode].call_count++;
     });
     setFranchiseesList(Object.values(franchiseeCounts).sort((a, b) => a.vcompanyname.localeCompare(b.vcompanyname)));
-  }, [pincodeSearch, selectedBranch, selectedCity, selectedFranchisee, selectedState, selectedTechnician]);
+  }, [pincodeSearch, selectedAccount, selectedBranch, selectedCity, selectedFranchisee, selectedRegion, selectedState, selectedTechnician]);
 
   const getDateStrings = useCallback(() => {
     const applied = appliedFiltersRef.current;
@@ -1697,6 +1749,14 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     () => citiesList.map((c) => ({ value: c.ncode, label: c.vname })),
     [citiesList]
   );
+  const regionOptions = useMemo(
+    () => regionsList.map((r) => ({ value: r.vname, label: r.vname })),
+    [regionsList]
+  );
+  const accountOptions = useMemo(
+    () => accountsList.map((a) => ({ value: a.vname, label: a.vname })),
+    [accountsList]
+  );
   const technicianOptions = useMemo(
     () => techniciansList.map((t) => ({ value: t.ncode, label: t.vname })),
     [techniciansList]
@@ -1730,6 +1790,10 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     setSelectedState,
     selectedCity,
     setSelectedCity,
+    selectedRegion,
+    setSelectedRegion,
+    selectedAccount,
+    setSelectedAccount,
     selectedBranch,
     setSelectedBranch,
     selectedFranchisee,
@@ -1742,6 +1806,10 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     setStatesList,
     citiesList,
     setCitiesList,
+    regionsList,
+    setRegionsList,
+    accountsList,
+    setAccountsList,
     techniciansList,
     setTechniciansList,
     showOfficeDropdown,
@@ -1759,6 +1827,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       pincodeSearch,
       selectedState,
       selectedCity,
+      selectedRegion,
+      selectedAccount,
       selectedBranch,
       selectedFranchisee,
       selectedTechnician,
@@ -1771,6 +1841,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     callTypeOptions,
     stateOptions,
     cityOptions,
+    regionOptions,
+    accountOptions,
     technicianOptions,
     branchesList,
     franchiseesList,
@@ -1825,6 +1897,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     portalFilter,
     selectedState,
     selectedCity,
+    selectedRegion,
+    selectedAccount,
     selectedBranch,
     selectedFranchisee,
     selectedTechnician,
@@ -1832,6 +1906,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     callTypes,
     statesList,
     citiesList,
+    regionsList,
+    accountsList,
     techniciansList,
     showOfficeDropdown,
     tempSelectedOfficeIds,
@@ -1843,6 +1919,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     callTypeOptions,
     stateOptions,
     cityOptions,
+    regionOptions,
+    accountOptions,
     technicianOptions,
     branchesList,
     franchiseesList,

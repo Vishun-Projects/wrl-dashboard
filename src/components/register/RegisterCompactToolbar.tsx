@@ -46,6 +46,8 @@ export function RegisterCompactToolbar({
     portalFilter,
     selectedState,
     selectedCity,
+    selectedRegion,
+    selectedAccount,
     selectedBranch,
     selectedFranchisee,
     selectedTechnician,
@@ -55,6 +57,8 @@ export function RegisterCompactToolbar({
     callTypeOptions,
     stateOptions,
     cityOptions,
+    regionOptions,
+    accountOptions,
     technicianOptions,
   } = useReportFilters();
 
@@ -73,6 +77,8 @@ export function RegisterCompactToolbar({
     if (field === 'selectedCallTypes') return callTypeOptions.find((o) => o.value === value)?.label || value;
     if (field === 'selectedState') return stateOptions.find((o) => o.value === value)?.label || value;
     if (field === 'selectedCity') return cityOptions.find((o) => o.value === value)?.label || value;
+    if (field === 'selectedRegion') return regionOptions.find((o) => o.value === value)?.label || value;
+    if (field === 'selectedAccount') return accountOptions.find((o) => o.value === value)?.label || value;
     if (field === 'selectedTechnician') return technicianOptions.find((o) => o.value === value)?.label || value;
     return value;
   };
@@ -88,6 +94,8 @@ export function RegisterCompactToolbar({
     portalFilter,
     selectedState,
     selectedCity,
+    selectedRegion,
+    selectedAccount,
     selectedBranch,
     selectedFranchisee,
     selectedTechnician,
@@ -101,7 +109,7 @@ export function RegisterCompactToolbar({
         <Search className="register-compact-toolbar-icon" />
         <input
           type="text"
-          placeholder="Search by ID, customer name, serial, TRN…"
+          placeholder="Search by ID, customer, serial, TRN, region, account…"
           className="register-compact-toolbar-input"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
