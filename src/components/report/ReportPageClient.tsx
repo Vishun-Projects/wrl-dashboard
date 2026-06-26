@@ -716,6 +716,10 @@ export default function ReportPageClient() {
         );
       case 'officename':
         return row.officename && row.officename !== 'UNKNOWN' ? row.officename : '—';
+      case 'region':
+        return row.region ?? '—';
+      case 'account':
+        return row.account ?? '—';
       case 'franchisee_name':
         return row.franchisee_name && row.franchisee_name !== 'Unallocated'
           ? row.franchisee_name
@@ -793,7 +797,7 @@ export default function ReportPageClient() {
     if (key === 'vcclid') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] font-medium text-slate-900';
     if (key === 'PartyName') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] font-medium text-slate-800';
     if (key === 'Pincode' || key === 'callsvserialno') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 font-mono text-[11px] text-slate-700';
-    if (key === 'officename' || key === 'franchisee_name' || key === 'itemname') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-700';
+    if (key === 'officename' || key === 'region' || key === 'account' || key === 'franchisee_name' || key === 'itemname') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-700';
     if (key === 'serviceman' || key === 'vinsttel1') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-900';
     if (key === 'vpersoncalling') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-600';
     if (key === 'bm_approved_date' || key === 'ho_approved_date') {

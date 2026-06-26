@@ -5,6 +5,8 @@ export type RegisterTableColumnKey =
   | 'callsdtrndate'
   | 'PartyName'
   | 'officename'
+  | 'region'
+  | 'account'
   | 'franchisee_name'
   | 'Pincode'
   | 'itemname'
@@ -34,6 +36,8 @@ export const REGISTER_TABLE_COLUMNS: RegisterTableColumnDef[] = [
   { key: 'PartyName', label: 'Customer' },
   { key: 'Status', label: 'Status' },
   { key: 'officename', label: 'Branch' },
+  { key: 'region', label: 'Region' },
+  { key: 'account', label: 'Account' },
   { key: 'franchisee_name', label: 'Franchisee' },
   { key: 'Pincode', label: 'Pincode' },
   { key: 'itemname', label: 'Product' },
@@ -60,6 +64,8 @@ export const REGISTER_EXPORT_COLUMNS: { key: string; header: string }[] = [
   { key: 'callsdtrndate', header: 'Date' },
   { key: 'PartyName', header: 'Customer' },
   { key: 'officename', header: 'Branch' },
+  { key: 'region', header: 'Region' },
+  { key: 'account', header: 'Account' },
   { key: 'franchisee_name', header: 'Franchisee' },
   { key: 'Pincode', header: 'Pincode' },
   { key: 'itemname', header: 'Product' },
@@ -90,7 +96,9 @@ export function loadVisibleRegisterColumns(
     const valid = parsed.filter((k): k is RegisterTableColumnKey =>
       REGISTER_TABLE_COLUMN_KEYS.includes(k as RegisterTableColumnKey)
     );
-    return valid.length > 0 ? valid : [...REGISTER_TABLE_COLUMN_KEYS];
+    if (valid.length === 0) return [...REGISTER_TABLE_COLUMN_KEYS];
+    const missing = REGISTER_TABLE_COLUMN_KEYS.filter((k) => !valid.includes(k));
+    return missing.length > 0 ? [...valid, ...missing] : valid;
   } catch {
     return [...REGISTER_TABLE_COLUMN_KEYS];
   }

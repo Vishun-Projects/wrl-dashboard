@@ -14,6 +14,8 @@ const REGISTER_COLUMNS: { header: string; key: string; width: number }[] = [
   { header: 'Date', key: 'date', width: 12 },
   { header: 'Customer', key: 'customer', width: 30 },
   { header: 'Branch', key: 'branch', width: 20 },
+  { header: 'Region', key: 'region', width: 15 },
+  { header: 'Account', key: 'account', width: 25 },
   { header: 'Franchisee', key: 'franchisee', width: 20 },
   { header: 'Pincode', key: 'pincode', width: 12 },
   { header: 'Product', key: 'product', width: 20 },
@@ -74,6 +76,8 @@ function mapRegisterRow(row: Record<string, unknown>) {
       date: formatExcelExportDate(row.callsdtrndate),
       customer: row.PartyName,
       branch: row.officename ?? row.resolved_branch_name ?? '—',
+      region: row.region ?? '—',
+      account: row.account ?? '—',
       franchisee:
         row.franchisee_name && row.franchisee_name !== 'Unallocated' ? row.franchisee_name : '—',
       pincode: row.Pincode || '—',

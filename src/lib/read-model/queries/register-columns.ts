@@ -46,6 +46,8 @@ export const REGISTER_EXPORT_HOT_COLUMNS = [
   'h.vcclid',
   'h.party_name',
   'h.branch_name',
+  'h.region',
+  'h.account',
   'h.franchisee_name',
   'h.pincode',
   'h.item_name',

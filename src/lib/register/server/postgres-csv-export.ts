@@ -51,6 +51,8 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
     formatRegisterExportDate(row.logged_at),
     row.party_name,
     row.branch_name,
+    row.region,
+    row.account,
     franchisee,
     row.pincode,
     row.item_name,

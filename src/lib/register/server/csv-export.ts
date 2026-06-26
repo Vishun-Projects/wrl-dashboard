@@ -42,6 +42,8 @@ export function rowForCsv(raw: Record<string, unknown>): Record<string, unknown>
     callsdtrndate: formatRegisterExportDate(row.callsdtrndate),
     PartyName: row.PartyName,
     officename: branch,
+    region: row.region ?? '',
+    account: row.account ?? '',
     franchisee_name: franchisee,
     Pincode: row.Pincode,
     itemname: row.itemname,
