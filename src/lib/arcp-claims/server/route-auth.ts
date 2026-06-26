@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db/prisma';
 import { hasPagePermission } from '@/lib/auth/rbac-catalog';
 import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims/query';
-import { resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
+import { resolveRequestUserId } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { isHodUser } from '@/lib/auth/report-security';
+import { createClient } from '@/lib/supabase/server';
 import type { ArcpFetchOpts } from '@/lib/arcp-claims/server/fetch';
 
 export type ArcpClaimsAuthContext = {
@@ -18,13 +18,8 @@ export async function authenticateArcpClaimsRequest(
   req: NextRequest,
   options?: { bypassChunkCache?: boolean; jobId?: string | null; kind?: 'agg' | 'detail' }
 ): Promise<ArcpClaimsAuthContext | NextResponse> {
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) {
-    return NextResponse.json({ error: 'No authorization header' }, { status: 401 });
-  }
-
-  const token = authHeader.split(' ')[1];
-  const userId = await resolveUserIdFromAccessToken(token);
+  const supabase = await createClient();
+  const userId = await resolveRequestUserId(req, supabase);
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
