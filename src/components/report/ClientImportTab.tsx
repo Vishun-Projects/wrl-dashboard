@@ -31,19 +31,26 @@ export default function ClientImportTab({
   onImportComplete,
 }: Props) {
   const [activeSources, setActiveSources] = useState<Array<{ code: string; name: string }>>([]);
-  const canUpload = canUploadClientMis(email);
+  const [canManageImports, setCanManageImports] = useState(() => canUploadClientMis(email));
 
   const loadSources = useCallback(async () => {
     try {
-      const res = await axios.get<{ sources: Array<{ code: string; name: string }> }>(
-        '/api/mis-client-import/sources',
-        { withCredentials: true }
-      );
-      setActiveSources(res.data.sources ?? []);
+      const [sourcesRes, metaRes] = await Promise.all([
+        axios.get<{ sources: Array<{ code: string; name: string }> }>(
+          '/api/mis-client-import/sources',
+          { withCredentials: true }
+        ),
+        axios.get<{ canUpload?: boolean }>('/api/mis-client-import/meta', {
+          withCredentials: true,
+        }),
+      ]);
+      setActiveSources(sourcesRes.data.sources ?? []);
+      setCanManageImports(Boolean(metaRes.data.canUpload));
     } catch {
       setActiveSources([]);
+      setCanManageImports(canUploadClientMis(email));
     }
-  }, []);
+  }, [email]);
 
   useEffect(() => {
     void loadSources();
@@ -60,8 +67,8 @@ export default function ClientImportTab({
         <div>
           <h2 className="text-sm font-semibold text-slate-800">Client file import</h2>
           <p className="mt-1 text-[11px] text-slate-500">
-            Upload Coke, Cadbury, or other client MIS files. Summary and Key Account tabs use the
-            source checkboxes below.
+            Upload Coke, Cadbury, or other client MIS files. Download or delete past uploads in the
+            history table below. Summary and Key Account tabs use the source checkboxes.
           </p>
         </div>
 
@@ -84,7 +91,7 @@ export default function ClientImportTab({
         />
 
         <MisCompanyAdminForm
-          canEdit={canUpload}
+          canEdit={canManageImports}
           onSaved={() => {
             void loadSources();
             onImportComplete();
