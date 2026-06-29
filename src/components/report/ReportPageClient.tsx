@@ -16,6 +16,7 @@ import axios from 'axios';
 import {
   Download,
   Filter,
+  Loader2,
   Search,
   ChevronLeft,
   ChevronRight,
@@ -31,7 +32,7 @@ import { HorizontalScrollFade } from '@/components/ui/HorizontalScrollFade';
 import { TruncatedText } from '@/components/ui/TruncatedText';
 import { ReportOrientationBanner } from '@/components/report/ReportOrientationBanner';
 import { ReportErrorBoundary } from '@/components/report/ReportErrorBoundary';
-import { ReportPageSkeleton, ReportLoadingPanel } from '@/components/report/ReportLoadingFeedback';
+import { ReportPageSkeleton, ReportLoadingPanel, ReportFetchingBar } from '@/components/report/ReportLoadingFeedback';
 import { useRegisterFilterOptions } from '@/lib/report/hooks/useRegisterFilterOptions';
 import { feedback } from '@/lib/ui/feedback';
 import { useUser } from '@/components/layout/DashboardLayout';
@@ -948,6 +949,7 @@ export default function ReportPageClient() {
   const summaryFilterLoadInFlightRef = React.useRef(false);
   const summaryFilterLoadKeyRef = React.useRef<string | null>(null);
   const summaryTabLoadRef = React.useRef(0);
+  const summaryUserApplyRef = React.useRef(false);
   const clientImportSourceFetchTabRef = React.useRef<MisTabId | null>(null);
   const dataRef = React.useRef(data);
   const totalRef = React.useRef(total);
@@ -3155,22 +3157,56 @@ export default function ReportPageClient() {
   ]);
 
   const handleApplySummaryFilters = useCallback(() => {
+    if (summaryTabLoading || summaryFilterLoadInFlightRef.current) {
+      return;
+    }
+    if (!hasPendingFilterChanges) {
+      feedback.actionSuccess('Filters are already applied', { duration: 2500 });
+      return;
+    }
+    summaryUserApplyRef.current = true;
+    setSummaryTabLoading(true);
     applyFilters();
-  }, [applyFilters]);
+  }, [applyFilters, hasPendingFilterChanges, summaryTabLoading]);
+
+  const finishSummaryUserApply = useCallback((message: string, failed = false) => {
+    if (!summaryUserApplyRef.current) return;
+    summaryUserApplyRef.current = false;
+    if (failed) {
+      feedback.actionFailed(message);
+    } else {
+      feedback.actionSuccess(message, { duration: 2500 });
+    }
+  }, []);
 
   useEffect(() => {
     if (!dbInitialized) return;
     if (activeTab !== 'summary' && activeTab !== 'accounts') return;
-    if (hydrateSummaryFromCache()) return;
+    if (hydrateSummaryFromCache()) {
+      finishSummaryUserApply('Filters applied');
+      setSummaryTabLoading(false);
+      return;
+    }
 
     const generation = ++summaryTabLoadRef.current;
     setSummaryTabLoading(true);
-    void runSummaryFilterLoad().finally(() => {
-      if (generation === summaryTabLoadRef.current) {
-        setSummaryTabLoading(false);
-      }
-    });
-  }, [dbInitialized, activeTab, appliedRevision, runSummaryFilterLoad]);
+    void runSummaryFilterLoad()
+      .then(() => {
+        if (generation === summaryTabLoadRef.current) {
+          finishSummaryUserApply('Filters applied');
+        }
+      })
+      .catch(() => {
+        if (generation === summaryTabLoadRef.current) {
+          finishSummaryUserApply('Could not apply filters — try again', true);
+        }
+      })
+      .finally(() => {
+        if (generation === summaryTabLoadRef.current) {
+          setSummaryTabLoading(false);
+        }
+      });
+  }, [dbInitialized, activeTab, appliedRevision, runSummaryFilterLoad, finishSummaryUserApply]);
 
   // Client import tab: refetch when applied filters change (summary/accounts load via runSummaryFilterLoad).
   useEffect(() => {
@@ -3700,75 +3736,88 @@ export default function ReportPageClient() {
           onPincodeEnter={() => void runRegisterFilterLoad({ force: true })}
         />
       ) : (
-        <div className="report-toolbar-filters-row border-b border-slate-200 bg-white px-4 py-2">
-          <RegisterMultiSelect
-            label="Call Type"
-            emptyLabel="All Call Types"
-            options={callTypeOptions}
-            selected={selectedCallTypes}
-            onChange={setSelectedCallTypes}
-            applyMode="confirm"
-            layout="inline"
-            searchable
-            panelClassName="w-64"
-          />
-          <RegisterBranchFranchiseeFilters applyMode="confirm" layout="inline" />
-          <div className="report-toolbar-filters-date shrink-0">
-            <DateRangeSelector
-              value={dateRange.label}
-              startDate={dateRange.start}
-              endDate={dateRange.end}
-              onChange={(range) => setDateRange(range)}
+        <>
+          <div className="report-toolbar-filters-row border-b border-slate-200 bg-white px-4 py-2">
+            <RegisterMultiSelect
+              label="Call Type"
+              emptyLabel="All Call Types"
+              options={callTypeOptions}
+              selected={selectedCallTypes}
+              onChange={setSelectedCallTypes}
+              applyMode="confirm"
+              layout="inline"
+              searchable
+              panelClassName="w-64"
             />
+            <RegisterBranchFranchiseeFilters applyMode="confirm" layout="inline" />
+            <div className="report-toolbar-filters-date shrink-0">
+              <DateRangeSelector
+                value={dateRange.label}
+                startDate={dateRange.start}
+                endDate={dateRange.end}
+                onChange={(range) => setDateRange(range)}
+              />
+            </div>
+            <div className="report-toolbar-filters-aging flex shrink-0 items-center gap-2">
+              <span className="text-[10px] whitespace-nowrap text-amber-600 ui-label">Aging As Of</span>
+              <input
+                type="date"
+                className="register-filter-select h-8 w-auto bg-amber-50/80 text-amber-900"
+                value={agingAsOf}
+                max={new Date().toISOString().split('T')[0]}
+                onChange={(e) => setAgingAsOf(e.target.value)}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleApplySummaryFilters}
+              disabled={summaryTabLoading}
+              aria-busy={summaryTabLoading}
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                summaryTabLoading
+                  ? 'border border-blue-300 bg-blue-50 text-blue-800'
+                  : hasPendingFilterChanges
+                    ? 'border border-slate-800 bg-slate-900 text-white hover:bg-slate-800'
+                    : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              {summaryTabLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <Filter className="h-3.5 w-3.5" aria-hidden />
+              )}
+              {summaryTabLoading ? 'Applying…' : 'Apply filters'}
+            </button>
+            {(activeTab === 'summary' || activeTab === 'accounts') &&
+              (clientImportActiveSources.length > 0 ||
+                sourceSelection.clientSourceCodes.includes('cadbury')) && (
+                <div className="report-toolbar-filters-sources shrink-0 border-l border-slate-200 pl-2 flex flex-wrap items-center gap-2">
+                  {clientImportActiveSources.length > 0 && (
+                    <MisSourceCheckboxes
+                      selection={sourceSelection}
+                      activeSources={clientImportActiveSources}
+                      onChange={(selection) => {
+                        saveMisSourceSelection(selection);
+                        setSourceSelection(selection);
+                      }}
+                    />
+                  )}
+                  {sourceSelection.clientSourceCodes.includes('cadbury') && (
+                    <MisCadburyMergeCheckbox
+                      checked={cadburyMergeWithCrm}
+                      onChange={(checked) => {
+                        setCadburyMergeWithCrm(checked);
+                        localStorage.setItem('report_cadbury_merge_crm', String(checked));
+                      }}
+                    />
+                  )}
+                </div>
+              )}
           </div>
-          <div className="report-toolbar-filters-aging flex shrink-0 items-center gap-2">
-            <span className="text-[10px] whitespace-nowrap text-amber-600 ui-label">Aging As Of</span>
-            <input
-              type="date"
-              className="register-filter-select h-8 w-auto bg-amber-50/80 text-amber-900"
-              value={agingAsOf}
-              max={new Date().toISOString().split('T')[0]}
-              onChange={(e) => setAgingAsOf(e.target.value)}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={handleApplySummaryFilters}
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium shadow-sm ${
-              hasPendingFilterChanges
-                ? 'border border-slate-800 bg-slate-900 text-white hover:bg-slate-800'
-                : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-            }`}
-          >
-            <Filter className="h-3.5 w-3.5" />
-            Apply filters
-          </button>
-          {(activeTab === 'summary' || activeTab === 'accounts') &&
-            (clientImportActiveSources.length > 0 ||
-              sourceSelection.clientSourceCodes.includes('cadbury')) && (
-              <div className="report-toolbar-filters-sources shrink-0 border-l border-slate-200 pl-2 flex flex-wrap items-center gap-2">
-                {clientImportActiveSources.length > 0 && (
-                  <MisSourceCheckboxes
-                    selection={sourceSelection}
-                    activeSources={clientImportActiveSources}
-                    onChange={(selection) => {
-                      saveMisSourceSelection(selection);
-                      setSourceSelection(selection);
-                    }}
-                  />
-                )}
-                {sourceSelection.clientSourceCodes.includes('cadbury') && (
-                  <MisCadburyMergeCheckbox
-                    checked={cadburyMergeWithCrm}
-                    onChange={(checked) => {
-                      setCadburyMergeWithCrm(checked);
-                      localStorage.setItem('report_cadbury_merge_crm', String(checked));
-                    }}
-                  />
-                )}
-              </div>
-            )}
-        </div>
+          {(activeTab === 'summary' || activeTab === 'accounts') && (
+            <ReportFetchingBar active={summaryTabLoading} label="Applying filters…" />
+          )}
+        </>
       )}
 
       {/* Main Area */}
