@@ -1,5 +1,6 @@
 import { withAppClient } from '@/lib/read-model/db';
 import { deleteImportFile, saveImportFile } from '@/lib/mis-client-import/file-store';
+import { saveBatchFileBlob } from '@/lib/mis-client-import/batch-file';
 import type { ImportResult, NormalizedClientRow } from '@/lib/mis-client-import/types';
 
 const INSERT_BATCH_SIZE = 500;
@@ -46,6 +47,15 @@ export async function storeImportBatch(params: {
         fileName,
         buffer: fileBuffer,
       });
+
+      try {
+        await saveBatchFileBlob(batchId, fileBuffer);
+      } catch (blobErr) {
+        console.warn(
+          '[mis-client-import] stored_file_blob save failed (run db:apply-read-model for migration 15):',
+          blobErr
+        );
+      }
 
       await client.query(
         `UPDATE mis_client_import_batches SET stored_file_path = $2 WHERE batch_id = $1::uuid`,

@@ -585,3 +585,29 @@ describe('buildImportFilePath', () => {
     expect(storedFilePath).toBe('coke/batch-uuid/report.csv');
   });
 });
+
+describe('batch file export', () => {
+  it('rebuilds pipe-delimited csv from raw rows', async () => {
+    const { rawRowsToCsvBuffer } = await import('@/lib/mis-client-import/batch-file');
+    const buffer = rawRowsToCsvBuffer(
+      [
+        { '.TicketNumber': 'T1', VDate: '2026-01-01', Service_Provider: 'Western Refrigeration' },
+        { '.TicketNumber': 'T2', VDate: '2026-01-02', Service_Provider: 'Probiz Solutions' },
+      ],
+      '|'
+    );
+    const text = buffer.toString('utf8');
+    expect(text).toContain('.TicketNumber|VDate|Service_Provider');
+    expect(text).toContain('T1|2026-01-01|Western Refrigeration');
+  });
+
+  it('rebuilds xlsx from raw rows', async () => {
+    const { rawRowsToXlsxBuffer } = await import('@/lib/mis-client-import/batch-file');
+    const buffer = rawRowsToXlsxBuffer([
+      { 'Call No': '1001', 'Entity Name': 'MH' },
+      { 'Call No': '1002', 'Entity Name': 'KA' },
+    ]);
+    expect(buffer.length).toBeGreaterThan(100);
+    expect(buffer.subarray(0, 2).toString()).toBe('PK');
+  });
+});
