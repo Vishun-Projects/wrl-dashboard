@@ -18,6 +18,8 @@ import {
   TRHCALLS_EXCLUDE_TRANSFERRED,
 } from '@/lib/trhcalls/query';
 import { deriveSummaryDashboard } from '@/lib/report/summary-derive';
+import { queryAllClientBranchSummary, countClientRowsInRange } from '@/lib/mis-client-import/aggregate';
+import { listAllSourcesWithBatches } from '@/lib/mis-client-import/config';
 
 export async function GET(req: NextRequest) {
   try {
@@ -34,6 +36,7 @@ export async function GET(req: NextRequest) {
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
     const agingAsOf = searchParams.get('agingAsOf');
+    const includeClient = searchParams.get('includeClient') === 'true';
 
     const assignedOffices = security.assignedOffices.map(String);
     const isHod = security.isHod;
@@ -49,7 +52,37 @@ export async function GET(req: NextRequest) {
         isHod,
       });
       const syncMeta = await getSyncMeta();
-      return NextResponse.json({ ...result, syncMeta, readSource: 'postgres' });
+      let clientBranchSummary;
+      let clientMeta;
+      if (includeClient) {
+        clientBranchSummary = await queryAllClientBranchSummary({
+          startDate,
+          endDate,
+          agingAsOf: agingAsOf || undefined,
+        });
+        const sources = await listAllSourcesWithBatches();
+        const rowsInDateRange = await countClientRowsInRange({
+          sourceCode: 'all',
+          startDate,
+          endDate,
+        });
+        const totalRowsInFiles = sources.reduce(
+          (sum, s) => sum + s.batches.reduce((bSum, b) => bSum + b.rowCount, 0),
+          0
+        );
+        clientMeta = {
+          sources,
+          rowsInDateRange,
+          totalRowsInFiles,
+        };
+      }
+      return NextResponse.json({
+        ...result,
+        clientBranchSummary,
+        clientMeta,
+        syncMeta,
+        readSource: 'postgres',
+      });
     }
 
     let condition = `(tc.vtrnno IS NOT NULL AND tc.vtrnno <> '')${TRHCALLS_EXCLUDE_TRANSFERRED}`;

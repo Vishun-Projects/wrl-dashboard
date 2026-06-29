@@ -10,6 +10,7 @@ import {
   defaultMisTab,
   hasCapability,
   visibleTabs,
+  type MisTabId,
 } from '@/lib/auth/rbac-catalog';
 import axios from 'axios';
 import {
@@ -84,6 +85,7 @@ import {
 import {
   appliedFilterPartsFromSnapshot,
   isAnyFilterActive,
+  normalizeAgingAsOfDate,
   toDateString,
 } from '@/lib/report/filters';
 import { globalReportCache, setGlobalReportCache, distributionDataCache, setDistributionDataCache, callCorpusStore } from '@/lib/report/data-store';
@@ -117,6 +119,73 @@ import {
   shouldStreamRegisterExportFromServer,
 } from '@/lib/register/export-fetch';
 import { clearPortalAuditCache, ensurePortalAuditCache } from '@/lib/report/portal-cache';
+import ClientImportTab from '@/components/report/ClientImportTab';
+import MisSourceCheckboxes from '@/components/report/MisSourceCheckboxes';
+import MisCadburyMergeCheckbox from '@/components/report/MisCadburyMergeCheckbox';
+import {
+  SummaryMergedMetricCell,
+  accountOpenCallsFromAging,
+  accountOpenCallsFromAgingByAccount,
+  accountMergeFlags,
+  accountRowScore,
+  buildAccountDisplayRows,
+  buildClientOnlyRegionalRows,
+  filterClientAccountSummary,
+  filterTopAccountsByZone,
+  findAccountMetric,
+  DEFAULT_ZONE_TOP_EXCLUDE_ACCOUNTS,
+  isAccountExcludedFromZoneTop,
+  findAccountMetricByAccount,
+  findBranchMetric,
+  findBranchRowMetric,
+  matchesAccountFilter,
+  matchesRegionFilter,
+  mergeFlagsFromSelection,
+  mergeSelectedMetrics,
+  rollupAccountsByAccount,
+  rollupCrmAccountsByRegion,
+  sumAccountMetric,
+  sumMergedAccountMetric,
+  sumMergedAccountOpenCalls,
+  resolveSummaryRegionMetric,
+  resolveSummaryRegionOpenCalls,
+  sumAccountMetricByRegion,
+  sumBranchMetric,
+} from '@/components/report/SummaryMergedMetricCell';
+import {
+  isClientOnlyMode,
+  loadMisSourceSelection,
+  saveMisSourceSelection,
+  sourceCodesToParam,
+  type MisSourceSelection,
+} from '@/lib/mis-client-import/source-selection';
+
+type AccountMisGrouping = 'zone' | 'overview' | 'zone-top';
+
+function resolveAccountMisTableRows(
+  filteredAccounts: Array<Record<string, unknown>>,
+  grouping: AccountMisGrouping,
+  topN: number,
+  clientAccountSummaryData: Array<Record<string, unknown>> | undefined,
+  mergeFlags: { crm: boolean; client: boolean },
+  cadburyMergeWithCrm: boolean,
+  zoneTopExcludeAccounts: string[] = []
+): Array<Record<string, unknown>> {
+  if (grouping === 'overview') {
+    return rollupAccountsByAccount(filteredAccounts);
+  }
+  if (grouping === 'zone-top') {
+    const scoreFn = (row: Record<string, unknown>) =>
+      accountRowScore(row, clientAccountSummaryData, mergeFlags, cadburyMergeWithCrm);
+    return filterTopAccountsByZone(
+      filteredAccounts,
+      topN,
+      scoreFn,
+      zoneTopExcludeAccounts
+    );
+  }
+  return filteredAccounts;
+}
 
 function formatRegisterExportEta(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 1) return '';
@@ -309,6 +378,7 @@ export default function ReportPageClient() {
       register: canAccessMisTab(userPermissions, 'register'),
       summary: canAccessMisTab(userPermissions, 'summary'),
       accounts: canAccessMisTab(userPermissions, 'accounts'),
+      client_import: canAccessMisTab(userPermissions, 'client_import'),
     }),
     [userPermissions]
   );
@@ -316,7 +386,7 @@ export default function ReportPageClient() {
   const misTabs = useMemo(
     () =>
       visibleTabs(userPermissions, 'mis_reports').map((tab) => ({
-        id: tab.id as 'register' | 'summary' | 'accounts',
+        id: tab.id as MisTabId,
         label: tab.label,
         allowed: true,
       })),
@@ -346,6 +416,8 @@ export default function ReportPageClient() {
     debouncedPincodeSearch,
     dateRange,
     setDateRange,
+    agingAsOf,
+    setAgingAsOf,
     dateFilterColumn,
     selectedOfficeIds,
     setSelectedOfficeIds,
@@ -439,12 +511,28 @@ export default function ReportPageClient() {
   const registerOfficeIdsParam = 'All';
 
   const [dbInitialized, setDbInitialized] = useState(!!globalReportCache);
-  const [activeTab, setActiveTab] = useState<'register' | 'summary' | 'accounts'>('register');
+  const [activeTab, setActiveTab] = useState<MisTabId>('register');
   const [visibleRegisterColumns, setVisibleRegisterColumns] = useState<RegisterTableColumnKey[]>(() =>
     loadVisibleRegisterColumns()
   );
   const [data, setData] = useState<any[]>(globalReportCache?.data || []);
   const [summaryData, setSummaryData] = useState<any[]>(globalReportCache?.summaryData || []);
+  const [clientSummaryData, setClientSummaryData] = useState<any[]>([]);
+  const [clientAccountSummaryData, setClientAccountSummaryData] = useState<any[]>([]);
+  const [uploadSource, setUploadSource] = useState('coke');
+  const [clientImportActiveSources, setClientImportActiveSources] = useState<
+    Array<{ code: string; name: string }>
+  >([]);
+  const [sourceSelection, setSourceSelection] = useState<MisSourceSelection>(() =>
+    loadMisSourceSelection()
+  );
+  const mergeFlags = useMemo(() => mergeFlagsFromSelection(sourceSelection), [sourceSelection]);
+  const clientOnlyMode = isClientOnlyMode(sourceSelection);
+  const alignCrmToAccounts = mergeFlags.crm && mergeFlags.client;
+  const [clientImportMeta, setClientImportMeta] = useState<{
+    rowsInDateRange: number;
+    totalRowsInFiles: number;
+  } | null>(null);
   const [accountsData, setAccountsData] = useState<any[]>(globalReportCache?.accountsData || []);
   const [globalHeadcount, setGlobalHeadcount] = useState<number>(globalReportCache?.globalHeadcount || 0);
   const [loading, setLoading] = useState(!globalReportCache);
@@ -503,6 +591,35 @@ export default function ReportPageClient() {
   const [filterRegion, setFilterRegion] = useState<string[]>(globalReportCache?.filterRegion || []); // Array for multiselect
   const [showRegionDropdown, setShowRegionDropdown] = useState(false);
   const [filterAccount, setFilterAccount] = useState<string[]>(Array.isArray(globalReportCache?.filterAccount) ? globalReportCache.filterAccount : []);
+  const [accountMisGrouping, setAccountMisGrouping] = useState<AccountMisGrouping>(() => {
+    if (typeof window === 'undefined') return 'zone';
+    const saved = localStorage.getItem('report_account_mis_grouping');
+    if (saved === 'overview') return 'overview';
+    if (saved === 'zone-top') return 'zone-top';
+    return 'zone';
+  });
+  const [accountMisTopN, setAccountMisTopN] = useState(() => {
+    if (typeof window === 'undefined') return 5;
+    const n = parseInt(localStorage.getItem('report_account_mis_top_n') ?? '5', 10);
+    return Number.isFinite(n) && n > 0 ? Math.min(100, n) : 5;
+  });
+  const [cadburyMergeWithCrm, setCadburyMergeWithCrm] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('report_cadbury_merge_crm') === 'true';
+  });
+  const [accountMisZoneTopExclude, setAccountMisZoneTopExclude] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [...DEFAULT_ZONE_TOP_EXCLUDE_ACCOUNTS];
+    try {
+      const raw = localStorage.getItem('report_account_mis_zone_top_exclude');
+      if (!raw) return [...DEFAULT_ZONE_TOP_EXCLUDE_ACCOUNTS];
+      const parsed = JSON.parse(raw) as unknown;
+      return Array.isArray(parsed) ? parsed.map(String) : [...DEFAULT_ZONE_TOP_EXCLUDE_ACCOUNTS];
+    } catch {
+      return [...DEFAULT_ZONE_TOP_EXCLUDE_ACCOUNTS];
+    }
+  });
+  const [showZoneTopExcludeDropdown, setShowZoneTopExcludeDropdown] = useState(false);
+  const [tempZoneTopExclude, setTempZoneTopExclude] = useState<string[]>([]);
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
   const [tempFilterRegion, setTempFilterRegion] = useState<string[]>([]);
   const [tempFilterAccount, setTempFilterAccount] = useState<string[]>([]);
@@ -515,12 +632,14 @@ export default function ReportPageClient() {
   } | null>(null);
   const exportAbortRef = React.useRef<AbortController | null>(null);
   const exportStartedAtRef = React.useRef<number>(0);
-  const [agingAsOf, setAgingAsOf] = useState<string>(() => {
-    if (globalReportCache && typeof globalReportCache.agingAsOf === 'string' && globalReportCache.agingAsOf.includes('-') && !globalReportCache.agingAsOf.includes(':')) {
-      return globalReportCache.agingAsOf;
-    }
-    return new Date().toISOString().split('T')[0];
-  });
+
+  const resolveSummaryAgingStr = useCallback(
+    (applied?: ReturnType<typeof getAppliedFiltersSnapshot>) => {
+      const snap = applied ?? getAppliedFiltersSnapshot();
+      return normalizeAgingAsOfDate(snap?.agingAsOf ?? agingAsOf);
+    },
+    [getAppliedFiltersSnapshot, agingAsOf]
+  );
 
   const cancelRegisterExport = useCallback(() => {
     exportAbortRef.current?.abort();
@@ -974,14 +1093,11 @@ export default function ReportPageClient() {
     );
 
   const buildCurrentSummaryQueryKey = () => {
-    const startDateStr =
-      toDateString(dateRange.start);
-    const endDateStr =
-      toDateString(dateRange.end);
-    const agingStr =
-      agingAsOf.includes(' ') || agingAsOf.includes(':')
-        ? new Date(agingAsOf).toISOString().split('T')[0]
-        : agingAsOf;
+    const applied = getAppliedFiltersSnapshot();
+    const range = applied?.dateRange ?? dateRange;
+    const startDateStr = toDateString(range.start);
+    const endDateStr = toDateString(range.end);
+    const agingStr = resolveSummaryAgingStr(applied);
     return buildSummaryQueryKey({
       officeIdsParam: summaryOfficeIdsParam,
       callTypesParam: viewCallTypesParam,
@@ -1007,12 +1123,8 @@ export default function ReportPageClient() {
     const exactKeyMatch =
       globalReportCache?.summaryQueryKey === summaryQueryKey ||
       lastSummaryQueryKeyRef.current === summaryQueryKey;
-    const datesMatch =
-      !!globalReportCache?.dateRange &&
-      globalReportCache.dateRange.start.getTime() === dateRange.start.getTime() &&
-      globalReportCache.dateRange.end.getTime() === dateRange.end.getTime();
 
-    if (!exactKeyMatch && !datesMatch) {
+    if (!exactKeyMatch) {
       return false;
     }
 
@@ -1021,10 +1133,8 @@ export default function ReportPageClient() {
     if (globalReportCache?.globalHeadcount !== undefined) {
       setGlobalHeadcount(globalReportCache.globalHeadcount);
     }
-    if (exactKeyMatch) {
-      lastSummaryQueryKeyRef.current = summaryQueryKey;
-    }
-    return exactKeyMatch;
+    lastSummaryQueryKeyRef.current = summaryQueryKey;
+    return true;
   };
 
   const commitSummaryResult = useCallback(
@@ -1054,6 +1164,7 @@ export default function ReportPageClient() {
         globalReportCache.accountsData = accountSummary;
         globalReportCache.globalHeadcount = headcount;
         globalReportCache.summaryQueryKey = summaryQueryKey;
+        globalReportCache.agingAsOf = agingStr;
       }
 
       void persistCurrentCache(
@@ -1074,16 +1185,14 @@ export default function ReportPageClient() {
   );
 
   const applySummaryFromCorpus = useCallback((): boolean => {
-    const startDateStr =
-      toDateString(dateRange.start);
-    const endDateStr =
-      toDateString(dateRange.end);
-    const agingStr =
-      agingAsOf.includes(' ') || agingAsOf.includes(':')
-        ? new Date(agingAsOf).toISOString().split('T')[0]
-        : agingAsOf;
-    const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
-    const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
+    const applied = getAppliedFiltersSnapshot();
+    if (!applied) return false;
+    const startDateStr = toDateString(applied.dateRange.start);
+    const endDateStr = toDateString(applied.dateRange.end);
+    const agingStr = normalizeAgingAsOfDate(applied.agingAsOf);
+    const appliedDateColumn = applied.dateFilterColumn;
+    const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, appliedDateColumn);
+    const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, appliedDateColumn);
     const spanDays = corpusSpanDays(startDateStr, endDateStr);
     const deriveOpts = {
       agingAsOf: agingStr,
@@ -1147,15 +1256,64 @@ export default function ReportPageClient() {
 
     return branchSummary.length > 0 || callCorpusStore.calls.size > 0;
   }, [
-    dateRange.start,
-    dateRange.end,
-    agingAsOf,
+    getAppliedFiltersSnapshot,
     summaryOfficeIdsParam,
     viewCallTypesParam,
-    dateFilterColumn,
     callCorpusStore,
     commitSummaryResult,
   ]);
+
+  const resolveClientImportScope = useCallback(() => {
+    const snap = getAppliedFiltersSnapshot();
+    const start = snap?.dateRange.start ?? dateRange.start;
+    const end = snap?.dateRange.end ?? dateRange.end;
+    const agingStr = normalizeAgingAsOfDate(snap?.agingAsOf ?? agingAsOf);
+    return {
+      startDate: toDateString(start),
+      endDate: toDateString(end),
+      agingAsOf: agingStr,
+    };
+  }, [getAppliedFiltersSnapshot, dateRange.start, dateRange.end, agingAsOf]);
+
+  const fetchClientImportSummary = useCallback(
+    async (scope?: { startDate: string; endDate: string; agingAsOf: string }): Promise<void> => {
+      const applied = scope ?? resolveClientImportScope();
+      const sourceCodes = sourceCodesToParam(sourceSelection.clientSourceCodes);
+
+      try {
+        const res = await axios.get('/api/mis-client-import/summary', {
+          withCredentials: true,
+          params: {
+            startDate: applied.startDate,
+            endDate: applied.endDate,
+            agingAsOf: applied.agingAsOf,
+            ...(sourceCodes ? { sourceCodes } : {}),
+          },
+        });
+        setClientSummaryData(res.data?.clientBranchSummary ?? []);
+        setClientAccountSummaryData(res.data?.clientAccountSummary ?? []);
+        setClientImportMeta({
+          rowsInDateRange: Number(res.data?.rowsInDateRange ?? 0),
+          totalRowsInFiles: Number(res.data?.totalRowsInFiles ?? 0),
+        });
+      } catch (err) {
+        console.warn('Client import summary fetch failed:', err);
+      }
+    },
+    [resolveClientImportScope, sourceSelection.clientSourceCodes]
+  );
+
+  const loadClientImportSources = useCallback(async () => {
+    try {
+      const res = await axios.get<{ sources: Array<{ code: string; name: string }> }>(
+        '/api/mis-client-import/sources',
+        { withCredentials: true }
+      );
+      setClientImportActiveSources(res.data.sources ?? []);
+    } catch {
+      setClientImportActiveSources([]);
+    }
+  }, []);
 
   const fetchSummaryFromApi = useCallback(async (): Promise<boolean> => {
     const applied = appliedFilters;
@@ -1168,10 +1326,7 @@ export default function ReportPageClient() {
       applied.selectedFranchisee
     );
     const callTypesParam = resolveViewCallTypesParam(applied.selectedCallTypes);
-    const agingStr =
-      agingAsOf.includes(' ') || agingAsOf.includes(':')
-        ? new Date(agingAsOf).toISOString().split('T')[0]
-        : agingAsOf;
+    const agingStr = normalizeAgingAsOfDate(applied.agingAsOf);
 
     try {
       const res = await axios.get('/api/report/summary', {
@@ -1219,7 +1374,7 @@ export default function ReportPageClient() {
       });
       return false;
     }
-  }, [appliedFilters, agingAsOf, offices, supabase, commitSummaryResult]);
+  }, [appliedFilters, offices, supabase, commitSummaryResult]);
 
   const applyRegisterFromCorpus = useCallback(
     (pageNum = 1, pageLimit: RegisterPageSize = limit): boolean => {
@@ -1549,10 +1704,8 @@ export default function ReportPageClient() {
     const { calls, startDateStr, endDateStr } = scope;
     const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
     const viewFilters = registerViewFilterRef.current;
-    const agingStr =
-      agingAsOf.includes(' ') || agingAsOf.includes(':')
-        ? new Date(agingAsOf).toISOString().split('T')[0]
-        : agingAsOf;
+    const applied = getAppliedFiltersSnapshot();
+    const agingStr = normalizeAgingAsOfDate(applied?.agingAsOf ?? agingAsOf);
 
     const { filteredCalls } = deriveRegisterView(calls, viewFilters, viewDateFilter);
     const { branchSummary, accountSummary, globalHeadcount: headcount } = deriveSummaryDashboard(
@@ -1575,7 +1728,7 @@ export default function ReportPageClient() {
 
     commitSummaryResult(branchSummary, accountSummary, headcount, startDateStr, endDateStr, agingStr);
     return branchSummary.length > 0 || filteredCalls.length > 0;
-  }, [getSharedCallsForScope, dateFilterColumn, agingAsOf, commitSummaryResult]);
+  }, [getSharedCallsForScope, getAppliedFiltersSnapshot, dateFilterColumn, agingAsOf, commitSummaryResult]);
 
   const fetchData = async (
     p = 1,
@@ -2427,12 +2580,11 @@ export default function ReportPageClient() {
     reportPerf('drillDown', 'POST /api/report/drilldown start', d0, { type, title });
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const startDateStr = toDateString(dateRange.start);
-      const endDateStr = toDateString(dateRange.end);
-      const agingStr =
-        agingAsOf.includes(' ') || agingAsOf.includes(':')
-          ? new Date(agingAsOf).toISOString().split('T')[0]
-          : agingAsOf;
+      const applied = getAppliedFiltersSnapshot();
+      const range = applied?.dateRange ?? dateRange;
+      const startDateStr = toDateString(range.start);
+      const endDateStr = toDateString(range.end);
+      const agingStr = resolveSummaryAgingStr(applied);
       const res = await axios.post('/api/report/drilldown', {
         type,
         callType: params.callType || viewCallTypesParam,
@@ -2692,10 +2844,7 @@ export default function ReportPageClient() {
               if (cacheParams.summaryQueryKey) {
                 lastSummaryQueryKeyRef.current = cacheParams.summaryQueryKey;
               } else if (cacheParams.summaryData?.length) {
-                const agingStr =
-                  agingAsOf.includes(' ') || agingAsOf.includes(':')
-                    ? new Date(agingAsOf).toISOString().split('T')[0]
-                    : agingAsOf;
+                const agingStr = resolveSummaryAgingStr();
                 lastSummaryQueryKeyRef.current = buildSummaryQueryKey({
                   officeIdsParam,
                   callTypesParam: viewCallTypesParam,
@@ -2938,9 +3087,15 @@ export default function ReportPageClient() {
     const startDateStr = toDateString(applied.dateRange.start);
     const endDateStr = toDateString(applied.dateRange.end);
     const appliedDateColumn = applied.dateFilterColumn;
+    const agingStr = normalizeAgingAsOfDate(applied.agingAsOf);
+    const clientImportPromise = fetchClientImportSummary({
+      startDate: startDateStr,
+      endDate: endDateStr,
+      agingAsOf: agingStr,
+    });
 
     if (readRegisterFromPostgresClient()) {
-      await fetchSummaryFromApi();
+      await Promise.all([fetchSummaryFromApi(), clientImportPromise]);
       return;
     }
 
@@ -2951,8 +3106,11 @@ export default function ReportPageClient() {
     if (!hasCorpus) {
       await ensureCorpusLoaded({ silent: true });
     }
-    if (applySummaryFromCorpus()) return;
-    await fetchSummaryFromApi();
+    if (applySummaryFromCorpus()) {
+      await clientImportPromise;
+      return;
+    }
+    await Promise.all([fetchSummaryFromApi(), clientImportPromise]);
   }, [
     getAppliedFiltersSnapshot,
     applySummaryFromCorpus,
@@ -2960,6 +3118,7 @@ export default function ReportPageClient() {
     ensureCorpusLoaded,
     ensureSharedCallsLoaded,
     fetchSummaryFromApi,
+    fetchClientImportSummary,
     getSharedCallsForScope,
   ]);
 
@@ -2981,6 +3140,31 @@ export default function ReportPageClient() {
       }
     });
   }, [dbInitialized, activeTab, appliedRevision, runSummaryFilterLoad]);
+
+  // Client import overlay: refetch when filters or source selection change.
+  useEffect(() => {
+    if (!dbInitialized) return;
+    if (activeTab !== 'summary' && activeTab !== 'accounts' && activeTab !== 'client_import') return;
+    void fetchClientImportSummary(resolveClientImportScope());
+  }, [
+    dbInitialized,
+    activeTab,
+    appliedRevision,
+    resolveClientImportScope,
+    fetchClientImportSummary,
+    sourceSelection,
+  ]);
+
+  useEffect(() => {
+    if (!misAccess.summary && !misAccess.accounts && !misAccess.client_import) return;
+    void loadClientImportSources();
+  }, [
+    misAccess.summary,
+    misAccess.accounts,
+    misAccess.client_import,
+    loadClientImportSources,
+    appliedRevision,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -3219,12 +3403,30 @@ export default function ReportPageClient() {
         buildKeyAccountMisWorkbook,
         downloadWorkbook,
       } = await import('@/lib/report/summary-excel-export');
-      const filtered = accountsData.filter((a) => {
-        const matchRegion = filterRegion.length === 0 || filterRegion.includes(a.region);
-        const matchAccount = filterAccount.length === 0 || filterAccount.includes(a.account);
+      const displayAccounts = buildAccountDisplayRows(
+        accountsData,
+        clientAccountSummaryData,
+        mergeFlags
+      );
+      const filtered = displayAccounts.filter((a) => {
+        const matchRegion = matchesRegionFilter(filterRegion, String(a.region ?? ''));
+        const matchAccount = matchesAccountFilter(filterAccount, String(a.account ?? ''));
         return matchRegion && matchAccount;
       });
-      const workbook = await buildKeyAccountMisWorkbook(filtered);
+      const exportRows = resolveAccountMisTableRows(
+        filtered,
+        accountMisGrouping,
+        accountMisTopN,
+        clientAccountSummaryData,
+        mergeFlags,
+        cadburyMergeWithCrm,
+        accountMisZoneTopExclude
+      );
+      const workbook = await buildKeyAccountMisWorkbook(
+        exportRows as import('@/lib/report/summary-derive').AccountSummaryRow[],
+        undefined,
+        { hideRegion: accountMisGrouping === 'overview' }
+      );
       await downloadWorkbook(workbook, fileName);
       return;
     }
@@ -3491,6 +3693,31 @@ export default function ReportPageClient() {
             <Filter className="h-3.5 w-3.5" />
             Apply filters
           </button>
+          {(activeTab === 'summary' || activeTab === 'accounts') &&
+            (clientImportActiveSources.length > 0 ||
+              sourceSelection.clientSourceCodes.includes('cadbury')) && (
+              <div className="report-toolbar-filters-sources shrink-0 border-l border-slate-200 pl-2 flex flex-wrap items-center gap-2">
+                {clientImportActiveSources.length > 0 && (
+                  <MisSourceCheckboxes
+                    selection={sourceSelection}
+                    activeSources={clientImportActiveSources}
+                    onChange={(selection) => {
+                      saveMisSourceSelection(selection);
+                      setSourceSelection(selection);
+                    }}
+                  />
+                )}
+                {sourceSelection.clientSourceCodes.includes('cadbury') && (
+                  <MisCadburyMergeCheckbox
+                    checked={cadburyMergeWithCrm}
+                    onChange={(checked) => {
+                      setCadburyMergeWithCrm(checked);
+                      localStorage.setItem('report_cadbury_merge_crm', String(checked));
+                    }}
+                  />
+                )}
+              </div>
+            )}
         </div>
       )}
 
@@ -3697,8 +3924,8 @@ export default function ReportPageClient() {
           </ReportErrorBoundary>
         ) : activeTab === 'summary' ? (
           <ReportErrorBoundary label="Summary Dashboard">
-          <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-slate-50/10">
-            <div className="grid h-full min-h-0 grid-rows-[auto_minmax(70vh,1fr)] gap-3 p-4">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-slate-50/10 inner-scrollbar">
+            <div className="flex flex-col gap-3 p-4 pb-8">
               {/* Region Summary Table — fixed compact block, always visible */}
               <section>
                 <h2 className="mb-2 px-2 text-[11px] text-slate-500 ui-label">Regional Performance (AI)</h2>
@@ -3720,20 +3947,209 @@ export default function ReportPageClient() {
                       </tr>
                     </thead>
                     <tbody>
-                      {Array.from(new Set(summaryData.map(b => b.region))).sort().map(region => {
-                        const regionBranches = summaryData.filter(b => b.region === region);
-                        const totals = regionBranches.reduce((acc, b) => ({
-                          total: acc.total + Number(b.total_calls || 0),
-                          solved: acc.solved + Number(b.solved_calls || 0),
-                          cancelled: acc.cancelled + Number(b.cancelled_calls || 0),
-                          open: acc.open + Number(b.open_calls || 0),
-                          age2: acc.age2 + Number(b.age_2 || 0),
-                          age3: acc.age3 + Number(b.age_3 || 0),
-                          age7: acc.age7 + Number(b.age_7 || 0),
-                          age15: acc.age15 + Number(b.age_15 || 0),
-                          parts: acc.parts + Number(b.part_pending || 0),
-                          engs: acc.engs + Number(b.active_eng || 0)
-                        }), { total: 0, solved: 0, cancelled: 0, open: 0, age2: 0, age3: 0, age7: 0, age15: 0, parts: 0, engs: 0 });
+                      {clientOnlyMode
+                        ? buildClientOnlyRegionalRows(clientAccountSummaryData).map((row) => {
+                            const getRegionBg = (reg: string) => {
+                              const r = reg.toUpperCase();
+                              if (r.includes('NORTH')) return 'bg-[#c6e0b4]';
+                              if (r.includes('EAST')) return 'bg-[#bdd7ee]';
+                              if (r.includes('WEST')) return 'bg-[#f8cbad]';
+                              if (r.includes('SOUTH')) return 'bg-[#d9d9d9]';
+                              return 'bg-slate-100';
+                            };
+                            const open =
+                              row.age_2 + row.age_3 + row.age_7 + row.age_15;
+                            return (
+                              <tr
+                                key={row.region}
+                                className={`${getRegionBg(row.region)} text-slate-900 ui-strong`}
+                              >
+                                <td className="p-2 border border-slate-300">{row.region}</td>
+                                <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.total_calls} />
+                                <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.total_solved} className="text-emerald-600" />
+                                <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.cancelled_calls} className="text-rose-600" />
+                                <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={open} className="bg-slate-100/50 ui-strong" />
+                                <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.age_2} />
+                                <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.age_3} />
+                                <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.age_7} />
+                                <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.age_15} />
+                                <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.part_pending} />
+                                <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.active_eng} />
+                              </tr>
+                            );
+                          })
+                        : Array.from(
+                            new Set(
+                              (alignCrmToAccounts ? accountsData : summaryData).map((b) => b.region)
+                            )
+                          )
+                            .sort()
+                            .map((region) => {
+                        const totals = alignCrmToAccounts
+                          ? rollupCrmAccountsByRegion(accountsData, region)
+                          : summaryData
+                              .filter((b) => b.region === region)
+                              .reduce(
+                                (acc, b) => ({
+                                  total: acc.total + Number(b.total_calls || 0),
+                                  solved: acc.solved + Number(b.solved_calls || 0),
+                                  cancelled: acc.cancelled + Number(b.cancelled_calls || 0),
+                                  open: acc.open + Number(b.open_calls || 0),
+                                  age2: acc.age2 + Number(b.age_2 || 0),
+                                  age3: acc.age3 + Number(b.age_3 || 0),
+                                  age7: acc.age7 + Number(b.age_7 || 0),
+                                  age15: acc.age15 + Number(b.age_15 || 0),
+                                  parts: acc.parts + Number(b.part_pending || 0),
+                                  engs: acc.engs + Number(b.active_eng || 0),
+                                }),
+                                {
+                                  total: 0,
+                                  solved: 0,
+                                  cancelled: 0,
+                                  open: 0,
+                                  age2: 0,
+                                  age3: 0,
+                                  age7: 0,
+                                  age15: 0,
+                                  parts: 0,
+                                  engs: 0,
+                                }
+                              );
+
+                        const crmTotal = alignCrmToAccounts ? totals.total_calls : totals.total;
+                        const crmSolved = alignCrmToAccounts ? totals.total_solved : totals.solved;
+                        const crmCancelled = alignCrmToAccounts ? totals.cancelled_calls : totals.cancelled;
+                        const crmOpen = alignCrmToAccounts
+                          ? totals.age_2 + totals.age_3 + totals.age_7 + totals.age_15
+                          : totals.open;
+                        const crmAge2 = alignCrmToAccounts ? totals.age_2 : totals.age2;
+                        const crmAge3 = alignCrmToAccounts ? totals.age_3 : totals.age3;
+                        const crmAge7 = alignCrmToAccounts ? totals.age_7 : totals.age7;
+                        const crmAge15 = alignCrmToAccounts ? totals.age_15 : totals.age15;
+                        const crmParts = alignCrmToAccounts ? totals.part_pending : totals.parts;
+                        const crmEngs = alignCrmToAccounts ? totals.active_eng : totals.engs;
+
+                        const clientField = (field: string) =>
+                          mergeFlags.client
+                            ? alignCrmToAccounts
+                              ? sumAccountMetricByRegion(clientAccountSummaryData, region, field)
+                              : findBranchMetric(clientSummaryData, region, field)
+                            : 0;
+
+                        const mTotal = resolveSummaryRegionMetric(
+                          alignCrmToAccounts,
+                          accountsData,
+                          clientAccountSummaryData,
+                          region,
+                          'total_calls',
+                          mergeFlags,
+                          cadburyMergeWithCrm,
+                          crmTotal,
+                          clientField('total_calls')
+                        );
+                        const mSolved = resolveSummaryRegionMetric(
+                          alignCrmToAccounts,
+                          accountsData,
+                          clientAccountSummaryData,
+                          region,
+                          alignCrmToAccounts ? 'total_solved' : 'solved_calls',
+                          mergeFlags,
+                          cadburyMergeWithCrm,
+                          crmSolved,
+                          clientField(alignCrmToAccounts ? 'total_solved' : 'solved_calls')
+                        );
+                        const mCancelled = resolveSummaryRegionMetric(
+                          alignCrmToAccounts,
+                          accountsData,
+                          clientAccountSummaryData,
+                          region,
+                          'cancelled_calls',
+                          mergeFlags,
+                          cadburyMergeWithCrm,
+                          crmCancelled,
+                          clientField('cancelled_calls')
+                        );
+                        const mOpen = resolveSummaryRegionOpenCalls(
+                          alignCrmToAccounts,
+                          accountsData,
+                          clientAccountSummaryData,
+                          region,
+                          mergeFlags,
+                          cadburyMergeWithCrm,
+                          crmOpen,
+                          alignCrmToAccounts
+                            ? clientField('age_2') +
+                                clientField('age_3') +
+                                clientField('age_7') +
+                                clientField('age_15')
+                            : clientField('open_calls')
+                        );
+                        const mAge2 = resolveSummaryRegionMetric(
+                          alignCrmToAccounts,
+                          accountsData,
+                          clientAccountSummaryData,
+                          region,
+                          'age_2',
+                          mergeFlags,
+                          cadburyMergeWithCrm,
+                          crmAge2,
+                          clientField('age_2')
+                        );
+                        const mAge3 = resolveSummaryRegionMetric(
+                          alignCrmToAccounts,
+                          accountsData,
+                          clientAccountSummaryData,
+                          region,
+                          'age_3',
+                          mergeFlags,
+                          cadburyMergeWithCrm,
+                          crmAge3,
+                          clientField('age_3')
+                        );
+                        const mAge7 = resolveSummaryRegionMetric(
+                          alignCrmToAccounts,
+                          accountsData,
+                          clientAccountSummaryData,
+                          region,
+                          'age_7',
+                          mergeFlags,
+                          cadburyMergeWithCrm,
+                          crmAge7,
+                          clientField('age_7')
+                        );
+                        const mAge15 = resolveSummaryRegionMetric(
+                          alignCrmToAccounts,
+                          accountsData,
+                          clientAccountSummaryData,
+                          region,
+                          'age_15',
+                          mergeFlags,
+                          cadburyMergeWithCrm,
+                          crmAge15,
+                          clientField('age_15')
+                        );
+                        const mParts = resolveSummaryRegionMetric(
+                          alignCrmToAccounts,
+                          accountsData,
+                          clientAccountSummaryData,
+                          region,
+                          'part_pending',
+                          mergeFlags,
+                          cadburyMergeWithCrm,
+                          crmParts,
+                          clientField('part_pending')
+                        );
+                        const mEngs = resolveSummaryRegionMetric(
+                          alignCrmToAccounts,
+                          accountsData,
+                          clientAccountSummaryData,
+                          region,
+                          'active_eng',
+                          mergeFlags,
+                          cadburyMergeWithCrm,
+                          crmEngs,
+                          clientField('active_eng')
+                        );
 
                         const getRegionBg = (reg: string) => {
                           const r = reg.toUpperCase();
@@ -3747,16 +4163,16 @@ export default function ReportPageClient() {
                         return (
                           <tr key={region} className={`${getRegionBg(region)} text-slate-900 ui-strong`}>
                             <td className="p-2 border border-slate-300">{region}</td>
-                            <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${region} - Total Calls`, { region })}>{totals.total}</td>
-                            <td className="p-2 border border-slate-300 text-center text-emerald-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${region} - Solved Calls`, { region })}>{totals.solved}</td>
-                            <td className="p-2 border border-slate-300 text-center text-rose-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('cancelled_calls', `${region} - Cancelled Calls`, { region })}>{totals.cancelled}</td>
-                            <td className="p-2 border border-slate-300 text-center bg-slate-100/50 cursor-pointer hover:bg-black/5 ui-strong" onClick={() => handleDrillDown('open_calls', `${region} - Open Calls`, { region })}>{totals.open}</td>
-                            <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_2', `${region} - <2 Days`, { region })}>{totals.age2}</td>
-                            <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_3', `${region} - 2-7 Days`, { region })}>{totals.age3}</td>
-                            <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${region} - 7-15 Days`, { region })}>{totals.age7}</td>
-                            <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_15', `${region} - >15 Days`, { region })}>{totals.age15}</td>
-                            <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${region} - Part Pending`, { region })}>{totals.parts}</td>
-                            <td className="p-2 border border-slate-300 text-center">{totals.engs}</td>
+                            <SummaryMergedMetricCell {...mTotal} onClick={() => handleDrillDown('total_calls', `${region} - Total Calls`, { region })} />
+                            <SummaryMergedMetricCell {...mSolved} className="text-emerald-600" onClick={() => handleDrillDown('solved_calls', `${region} - Solved Calls`, { region })} />
+                            <SummaryMergedMetricCell {...mCancelled} className="text-rose-600" onClick={() => handleDrillDown('cancelled_calls', `${region} - Cancelled Calls`, { region })} />
+                            <SummaryMergedMetricCell {...mOpen} className="bg-slate-100/50 ui-strong" onClick={() => handleDrillDown('open_calls', `${region} - Open Calls`, { region })} />
+                            <SummaryMergedMetricCell {...mAge2} onClick={() => handleDrillDown('age_2', `${region} - <2 Days`, { region })} />
+                            <SummaryMergedMetricCell {...mAge3} onClick={() => handleDrillDown('age_3', `${region} - 2-7 Days`, { region })} />
+                            <SummaryMergedMetricCell {...mAge7} onClick={() => handleDrillDown('age_7', `${region} - 7-15 Days`, { region })} />
+                            <SummaryMergedMetricCell {...mAge15} onClick={() => handleDrillDown('age_15', `${region} - >15 Days`, { region })} />
+                            <SummaryMergedMetricCell {...mParts} onClick={() => handleDrillDown('part_pending', `${region} - Part Pending`, { region })} />
+                            <SummaryMergedMetricCell {...mEngs} />
                           </tr>
                         );
                       })}
@@ -3772,26 +4188,226 @@ export default function ReportPageClient() {
                             <AlertCircle className="w-3 h-3 text-slate-700" />
                           </button>
                         </td>
-                        <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.total_calls || 0), 0)}</td>
-                        <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.solved_calls || 0), 0)}</td>
-                        <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.cancelled_calls || 0), 0)}</td>
-                        <td className="p-2 border border-slate-300 text-center bg-slate-800/20">{summaryData.reduce((sum, b) => sum + Number(b.open_calls || 0), 0)}</td>
-                        <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.age_2 || 0), 0)}</td>
-                        <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.age_3 || 0), 0)}</td>
-                        <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.age_7 || 0), 0)}</td>
-                        <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.age_15 || 0), 0)}</td>
-                        <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.part_pending || 0), 0)}</td>
-                        <td className="p-2 border border-slate-300 text-center">{summaryData.reduce((sum, b) => sum + Number(b.active_eng || 0), 0)}</td>
+                        <SummaryMergedMetricCell
+                          mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
+                          crm={
+                            alignCrmToAccounts
+                              ? sumMergedAccountMetric(
+                                  accountsData,
+                                  clientAccountSummaryData,
+                                  'total_calls',
+                                  mergeFlags,
+                                  cadburyMergeWithCrm
+                                )
+                              : summaryData.reduce((sum, b) => sum + Number(b.total_calls || 0), 0)
+                          }
+                          client={
+                            alignCrmToAccounts
+                              ? 0
+                              : mergeFlags.client
+                                ? sumBranchMetric(clientSummaryData, 'total_calls')
+                                : 0
+                          }
+                        />
+                        <SummaryMergedMetricCell
+                          mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
+                          crm={
+                            alignCrmToAccounts
+                              ? sumMergedAccountMetric(
+                                  accountsData,
+                                  clientAccountSummaryData,
+                                  'total_solved',
+                                  mergeFlags,
+                                  cadburyMergeWithCrm
+                                )
+                              : summaryData.reduce((sum, b) => sum + Number(b.solved_calls || 0), 0)
+                          }
+                          client={
+                            alignCrmToAccounts
+                              ? 0
+                              : mergeFlags.client
+                                ? sumBranchMetric(clientSummaryData, 'solved_calls')
+                                : 0
+                          }
+                        />
+                        <SummaryMergedMetricCell
+                          mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
+                          crm={
+                            alignCrmToAccounts
+                              ? sumMergedAccountMetric(
+                                  accountsData,
+                                  clientAccountSummaryData,
+                                  'cancelled_calls',
+                                  mergeFlags,
+                                  cadburyMergeWithCrm
+                                )
+                              : summaryData.reduce((sum, b) => sum + Number(b.cancelled_calls || 0), 0)
+                          }
+                          client={
+                            alignCrmToAccounts
+                              ? 0
+                              : mergeFlags.client
+                                ? sumBranchMetric(clientSummaryData, 'cancelled_calls')
+                                : 0
+                          }
+                        />
+                        <SummaryMergedMetricCell
+                          mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
+                          crm={
+                            alignCrmToAccounts
+                              ? sumMergedAccountOpenCalls(
+                                  accountsData,
+                                  clientAccountSummaryData,
+                                  mergeFlags,
+                                  cadburyMergeWithCrm
+                                )
+                              : summaryData.reduce((sum, b) => sum + Number(b.open_calls || 0), 0)
+                          }
+                          client={
+                            alignCrmToAccounts
+                              ? 0
+                              : mergeFlags.client
+                                ? sumBranchMetric(clientSummaryData, 'open_calls')
+                                : 0
+                          }
+                          className="bg-slate-800/20"
+                        />
+                        <SummaryMergedMetricCell
+                          mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
+                          crm={
+                            alignCrmToAccounts
+                              ? sumMergedAccountMetric(
+                                  accountsData,
+                                  clientAccountSummaryData,
+                                  'age_2',
+                                  mergeFlags,
+                                  cadburyMergeWithCrm
+                                )
+                              : summaryData.reduce((sum, b) => sum + Number(b.age_2 || 0), 0)
+                          }
+                          client={
+                            alignCrmToAccounts
+                              ? 0
+                              : mergeFlags.client
+                                ? sumBranchMetric(clientSummaryData, 'age_2')
+                                : 0
+                          }
+                        />
+                        <SummaryMergedMetricCell
+                          mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
+                          crm={
+                            alignCrmToAccounts
+                              ? sumMergedAccountMetric(
+                                  accountsData,
+                                  clientAccountSummaryData,
+                                  'age_3',
+                                  mergeFlags,
+                                  cadburyMergeWithCrm
+                                )
+                              : summaryData.reduce((sum, b) => sum + Number(b.age_3 || 0), 0)
+                          }
+                          client={
+                            alignCrmToAccounts
+                              ? 0
+                              : mergeFlags.client
+                                ? sumBranchMetric(clientSummaryData, 'age_3')
+                                : 0
+                          }
+                        />
+                        <SummaryMergedMetricCell
+                          mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
+                          crm={
+                            alignCrmToAccounts
+                              ? sumMergedAccountMetric(
+                                  accountsData,
+                                  clientAccountSummaryData,
+                                  'age_7',
+                                  mergeFlags,
+                                  cadburyMergeWithCrm
+                                )
+                              : summaryData.reduce((sum, b) => sum + Number(b.age_7 || 0), 0)
+                          }
+                          client={
+                            alignCrmToAccounts
+                              ? 0
+                              : mergeFlags.client
+                                ? sumBranchMetric(clientSummaryData, 'age_7')
+                                : 0
+                          }
+                        />
+                        <SummaryMergedMetricCell
+                          mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
+                          crm={
+                            alignCrmToAccounts
+                              ? sumMergedAccountMetric(
+                                  accountsData,
+                                  clientAccountSummaryData,
+                                  'age_15',
+                                  mergeFlags,
+                                  cadburyMergeWithCrm
+                                )
+                              : summaryData.reduce((sum, b) => sum + Number(b.age_15 || 0), 0)
+                          }
+                          client={
+                            alignCrmToAccounts
+                              ? 0
+                              : mergeFlags.client
+                                ? sumBranchMetric(clientSummaryData, 'age_15')
+                                : 0
+                          }
+                        />
+                        <SummaryMergedMetricCell
+                          mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
+                          crm={
+                            alignCrmToAccounts
+                              ? sumMergedAccountMetric(
+                                  accountsData,
+                                  clientAccountSummaryData,
+                                  'part_pending',
+                                  mergeFlags,
+                                  cadburyMergeWithCrm
+                                )
+                              : summaryData.reduce((sum, b) => sum + Number(b.part_pending || 0), 0)
+                          }
+                          client={
+                            alignCrmToAccounts
+                              ? 0
+                              : mergeFlags.client
+                                ? sumBranchMetric(clientSummaryData, 'part_pending')
+                                : 0
+                          }
+                        />
+                        <SummaryMergedMetricCell
+                          mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
+                          crm={
+                            alignCrmToAccounts
+                              ? sumMergedAccountMetric(
+                                  accountsData,
+                                  clientAccountSummaryData,
+                                  'active_eng',
+                                  mergeFlags,
+                                  cadburyMergeWithCrm
+                                )
+                              : summaryData.reduce((sum, b) => sum + Number(b.active_eng || 0), 0)
+                          }
+                          client={
+                            alignCrmToAccounts
+                              ? 0
+                              : mergeFlags.client
+                                ? sumBranchMetric(clientSummaryData, 'active_eng')
+                                : 0
+                          }
+                        />
                       </tr>
                     </tbody>
                   </table>
                 </div>
               </section>
 
-              {/* Branch table — grid 1fr row + tall scroll panel; header stays sticky inside */}
-              <section className="flex h-full min-h-0 flex-col overflow-hidden">
+              {/* Branch table — full height via page scroll */}
+              <section className="flex flex-col">
                 <h2 className="mb-2 flex-shrink-0 px-2 text-[11px] text-slate-500 ui-label">Branch Wise Performance</h2>
-                <div className="h-full min-h-0 flex-1 overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm inner-scrollbar">
+                <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm inner-scrollbar">
                   <table className="w-full text-left border-collapse text-[11px]">
                     <thead className="sticky top-0 z-20 bg-[#0070c0] shadow-sm outline outline-1 outline-[#0070c0]">
                       <tr className="text-white text-[10px] ui-label border-b border-blue-800">
@@ -3809,7 +4425,40 @@ export default function ReportPageClient() {
                       </tr>
                     </thead>
                     <tbody>
-                      {Array.from(new Set(summaryData.map(b => b.region))).sort().map(region => {
+                      {clientOnlyMode ? (
+                        clientSummaryData.length === 0 ? (
+                          <tr>
+                            <td colSpan={11} className="p-4 text-center text-[10px] text-slate-500">
+                              No client branch data for selected sources.
+                            </td>
+                          </tr>
+                        ) : (
+                          clientSummaryData.map((branch, idx) => (
+                            <tr key={idx} className="hover:bg-slate-50 text-slate-900">
+                              <td className="p-2 border border-slate-300">
+                                {String(branch.branch ?? branch.region ?? '')}
+                              </td>
+                              <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={Number(branch.total_calls ?? 0)} />
+                              <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={Number(branch.solved_calls ?? branch.total_solved ?? 0)} />
+                              <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={Number(branch.cancelled_calls ?? 0)} />
+                              <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={Number(branch.open_calls ?? 0)} />
+                              <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={Number(branch.age_2 ?? 0)} />
+                              <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={Number(branch.age_3 ?? 0)} />
+                              <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={Number(branch.age_7 ?? 0)} />
+                              <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={Number(branch.age_15 ?? 0)} />
+                              <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={Number(branch.part_pending ?? 0)} />
+                              <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={Number(branch.active_eng ?? 0)} />
+                            </tr>
+                          ))
+                        )
+                      ) : !mergeFlags.crm ? (
+                        <tr>
+                          <td colSpan={11} className="p-4 text-center text-[10px] text-slate-500">
+                            CRM branch data hidden — enable CRM under Data sources.
+                          </td>
+                        </tr>
+                      ) : (
+                      Array.from(new Set(summaryData.map(b => b.region))).sort().map(region => {
                         const regionBranches = summaryData.filter(b => b.region === region);
                         if (regionBranches.length === 0) return null;
 
@@ -3866,15 +4515,15 @@ export default function ReportPageClient() {
                                         <span className="truncate">{branch.branch}</span>
                                       </div>
                                     </td>
-                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${branch.branch} - Total Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'total_calls')}</td>
-                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${branch.branch} - Solved Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'solved_calls')}</td>
-                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5 text-rose-600" onClick={() => handleDrillDown('cancelled_calls', `${branch.branch} - Cancelled Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'cancelled_calls')}</td>
-                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5 ui-strong" onClick={() => handleDrillDown('open_calls', `${branch.branch} - Open Calls`, { officeId: branch.officeId })}>{getAggregate(branch, 'open_calls')}</td>
-                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_2', `${branch.branch} - <2 Days`, { officeId: branch.officeId })}>{getAggregate(branch, 'age_2')}</td>
-                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_3', `${branch.branch} - 2-7 Days`, { officeId: branch.officeId })}>{getAggregate(branch, 'age_3')}</td>
-                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${branch.branch} - 7-15 Days`, { officeId: branch.officeId })}>{getAggregate(branch, 'age_7')}</td>
-                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_15', `${branch.branch} - >15 Days`, { officeId: branch.officeId })}>{getAggregate(branch, 'age_15')}</td>
-                                    <td className="p-2 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${branch.branch} - Part Pending`, { officeId: branch.officeId })}>{getAggregate(branch, 'part_pending')}</td>
+                                    <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={getAggregate(branch, 'total_calls')} client={findBranchRowMetric(clientSummaryData, region, branch.branch, 'total_calls')} onClick={() => handleDrillDown('total_calls', `${branch.branch} - Total Calls`, { officeId: branch.officeId })} />
+                                    <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={getAggregate(branch, 'solved_calls')} client={findBranchRowMetric(clientSummaryData, region, branch.branch, 'solved_calls')} onClick={() => handleDrillDown('solved_calls', `${branch.branch} - Solved Calls`, { officeId: branch.officeId })} />
+                                    <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={getAggregate(branch, 'cancelled_calls')} client={findBranchRowMetric(clientSummaryData, region, branch.branch, 'cancelled_calls')} className="text-rose-600" onClick={() => handleDrillDown('cancelled_calls', `${branch.branch} - Cancelled Calls`, { officeId: branch.officeId })} />
+                                    <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={getAggregate(branch, 'open_calls')} client={findBranchRowMetric(clientSummaryData, region, branch.branch, 'open_calls')} className="ui-strong" onClick={() => handleDrillDown('open_calls', `${branch.branch} - Open Calls`, { officeId: branch.officeId })} />
+                                    <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={getAggregate(branch, 'age_2')} client={findBranchRowMetric(clientSummaryData, region, branch.branch, 'age_2')} onClick={() => handleDrillDown('age_2', `${branch.branch} - <2 Days`, { officeId: branch.officeId })} />
+                                    <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={getAggregate(branch, 'age_3')} client={findBranchRowMetric(clientSummaryData, region, branch.branch, 'age_3')} onClick={() => handleDrillDown('age_3', `${branch.branch} - 2-7 Days`, { officeId: branch.officeId })} />
+                                    <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={getAggregate(branch, 'age_7')} client={findBranchRowMetric(clientSummaryData, region, branch.branch, 'age_7')} onClick={() => handleDrillDown('age_7', `${branch.branch} - 7-15 Days`, { officeId: branch.officeId })} />
+                                    <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={getAggregate(branch, 'age_15')} client={findBranchRowMetric(clientSummaryData, region, branch.branch, 'age_15')} onClick={() => handleDrillDown('age_15', `${branch.branch} - >15 Days`, { officeId: branch.officeId })} />
+                                    <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={getAggregate(branch, 'part_pending')} client={findBranchRowMetric(clientSummaryData, region, branch.branch, 'part_pending')} onClick={() => handleDrillDown('part_pending', `${branch.branch} - Part Pending`, { officeId: branch.officeId })} />
                                     <td className="p-2 border border-slate-300 text-center">
                                       <div className="flex flex-col items-center justify-center leading-tight">
                                         <span className="text-blue-700 ui-strong">{getAggregate(branch, 'active_eng')}</span>
@@ -3891,15 +4540,15 @@ export default function ReportPageClient() {
                                           <span>{child.branch}</span>
                                         </div>
                                       </td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${child.branch} - Total Calls`, { officeId: child.officeId })}>{child.total_calls}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('solved_calls', `${child.branch} - Solved Calls`, { officeId: child.officeId })}>{child.solved_calls}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5 text-rose-600" onClick={() => handleDrillDown('cancelled_calls', `${child.branch} - Cancelled Calls`, { officeId: child.officeId })}>{child.cancelled_calls}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5 ui-label" onClick={() => handleDrillDown('open_calls', `${child.branch} - Open Calls`, { officeId: child.officeId })}>{child.open_calls}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_2', `${child.branch} - <2 Days`, { officeId: child.officeId })}>{child.age_2}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_3', `${child.branch} - 2-7 Days`, { officeId: child.officeId })}>{child.age_3}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${child.branch} - 7-15 Days`, { officeId: child.officeId })}>{child.age_7}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_15', `${child.branch} - >15 Days`, { officeId: child.officeId })}>{child.age_15}</td>
-                                      <td className="p-1.5 border border-slate-300 text-center text-[10px] cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${child.branch} - Part Pending`, { officeId: child.officeId })}>{child.part_pending}</td>
+                                      <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={Number(child.total_calls)} client={findBranchRowMetric(clientSummaryData, region, child.branch, 'total_calls')} className="p-1.5 text-[10px]" onClick={() => handleDrillDown('total_calls', `${child.branch} - Total Calls`, { officeId: child.officeId })} />
+                                      <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={Number(child.solved_calls)} client={findBranchRowMetric(clientSummaryData, region, child.branch, 'solved_calls')} className="p-1.5 text-[10px]" onClick={() => handleDrillDown('solved_calls', `${child.branch} - Solved Calls`, { officeId: child.officeId })} />
+                                      <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={Number(child.cancelled_calls)} client={findBranchRowMetric(clientSummaryData, region, child.branch, 'cancelled_calls')} className="p-1.5 text-[10px] text-rose-600" onClick={() => handleDrillDown('cancelled_calls', `${child.branch} - Cancelled Calls`, { officeId: child.officeId })} />
+                                      <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={Number(child.open_calls)} client={findBranchRowMetric(clientSummaryData, region, child.branch, 'open_calls')} className="p-1.5 text-[10px] ui-label" onClick={() => handleDrillDown('open_calls', `${child.branch} - Open Calls`, { officeId: child.officeId })} />
+                                      <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={Number(child.age_2)} client={findBranchRowMetric(clientSummaryData, region, child.branch, 'age_2')} className="p-1.5 text-[10px]" onClick={() => handleDrillDown('age_2', `${child.branch} - <2 Days`, { officeId: child.officeId })} />
+                                      <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={Number(child.age_3)} client={findBranchRowMetric(clientSummaryData, region, child.branch, 'age_3')} className="p-1.5 text-[10px]" onClick={() => handleDrillDown('age_3', `${child.branch} - 2-7 Days`, { officeId: child.officeId })} />
+                                      <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={Number(child.age_7)} client={findBranchRowMetric(clientSummaryData, region, child.branch, 'age_7')} className="p-1.5 text-[10px]" onClick={() => handleDrillDown('age_7', `${child.branch} - 7-15 Days`, { officeId: child.officeId })} />
+                                      <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={Number(child.age_15)} client={findBranchRowMetric(clientSummaryData, region, child.branch, 'age_15')} className="p-1.5 text-[10px]" onClick={() => handleDrillDown('age_15', `${child.branch} - >15 Days`, { officeId: child.officeId })} />
+                                      <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={Number(child.part_pending)} client={findBranchRowMetric(clientSummaryData, region, child.branch, 'part_pending')} className="p-1.5 text-[10px]" onClick={() => handleDrillDown('part_pending', `${child.branch} - Part Pending`, { officeId: child.officeId })} />
                                       <td className="p-1.5 border border-slate-300 text-center text-[10px]">
                                         <span className="text-blue-600 ui-strong">{child.active_eng}</span>
                                         <span className="text-slate-400 ml-1">/ {child.headcount}</span>
@@ -3911,7 +4560,8 @@ export default function ReportPageClient() {
                             })}
                           </React.Fragment>
                         );
-                      })}
+                      })
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -3923,29 +4573,227 @@ export default function ReportPageClient() {
           <ReportErrorBoundary label="Key Account MIS">
             <div className="flex-1 flex flex-col min-h-0 p-6 space-y-4 bg-slate-50/10">
               {(() => {
-                const filteredAccounts = accountsData.filter(a => {
-                  const matchRegion = filterRegion.length === 0 || filterRegion.includes(a.region);
-                  const matchAccount = filterAccount.length === 0 || filterAccount.includes(a.account);
+                const displayAccounts = buildAccountDisplayRows(
+                  accountsData,
+                  clientAccountSummaryData,
+                  mergeFlags
+                );
+                const filteredAccounts = displayAccounts.filter((a) => {
+                  const matchRegion = matchesRegionFilter(filterRegion, String(a.region ?? ''));
+                  const matchAccount = matchesAccountFilter(filterAccount, String(a.account ?? ''));
                   return matchRegion && matchAccount;
                 });
+                const tableAccounts = resolveAccountMisTableRows(
+                  filteredAccounts,
+                  accountMisGrouping,
+                  accountMisTopN,
+                  clientAccountSummaryData,
+                  mergeFlags,
+                  cadburyMergeWithCrm,
+                  accountMisZoneTopExclude
+                );
+                const filteredClientAccounts = filterClientAccountSummary(
+                  clientAccountSummaryData,
+                  filterRegion,
+                  filterAccount
+                );
 
                 return (
                   <div className="flex-1 flex flex-col min-h-0">
-                    <div className="flex items-center justify-between px-2 mb-2 flex-shrink-0">
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-2 mb-2 flex-shrink-0">
                       <h2 className="text-[11px] text-slate-500 ui-label">Key Account Wise Performance</h2>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {accountMisGrouping === 'zone-top' ? (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <label className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-600">
+                              <span className="ui-label">Top</span>
+                              <input
+                                type="number"
+                                min={1}
+                                max={100}
+                                value={accountMisTopN}
+                                onChange={(e) => {
+                                  const n = parseInt(e.target.value, 10);
+                                  if (!Number.isFinite(n)) return;
+                                  const clamped = Math.max(1, Math.min(100, n));
+                                  setAccountMisTopN(clamped);
+                                  localStorage.setItem('report_account_mis_top_n', String(clamped));
+                                }}
+                                className="w-10 rounded border border-slate-200 px-1 py-0.5 text-center text-[10px] ui-strong"
+                              />
+                              <span className="ui-label">per zone</span>
+                            </label>
+                            <div className="relative">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!showZoneTopExcludeDropdown) {
+                                    setTempZoneTopExclude(accountMisZoneTopExclude);
+                                  }
+                                  setShowZoneTopExcludeDropdown(!showZoneTopExcludeDropdown);
+                                }}
+                                className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-600 hover:border-slate-400 ui-label"
+                              >
+                                <span>
+                                  Exclude
+                                  {accountMisZoneTopExclude.length > 0
+                                    ? ` (${accountMisZoneTopExclude.length})`
+                                    : ''}
+                                </span>
+                                <ChevronDown size={10} />
+                              </button>
+                              {showZoneTopExcludeDropdown ? (
+                                <>
+                                  <div
+                                    className="fixed inset-0 z-[60]"
+                                    onClick={() => setShowZoneTopExcludeDropdown(false)}
+                                  />
+                                  <div className="absolute right-0 top-full mt-1 w-52 bg-white border border-slate-200 shadow-xl rounded-md z-[70] overflow-hidden">
+                                    <div className="p-1 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                                      <button
+                                        type="button"
+                                        onClick={() => setTempZoneTopExclude([])}
+                                        className="text-[9px] text-slate-400 hover:text-slate-900 px-1.5 py-0.5 ui-strong"
+                                      >
+                                        Clear
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setAccountMisZoneTopExclude(tempZoneTopExclude);
+                                          localStorage.setItem(
+                                            'report_account_mis_zone_top_exclude',
+                                            JSON.stringify(tempZoneTopExclude)
+                                          );
+                                          setShowZoneTopExcludeDropdown(false);
+                                        }}
+                                        className="text-[9px] text-slate-900 px-1.5 py-0.5 ui-strong"
+                                      >
+                                        Done
+                                      </button>
+                                    </div>
+                                    <p className="px-2 py-1 text-[9px] text-slate-500 border-b border-slate-100">
+                                      Checked accounts are hidden from zone top ranking.
+                                    </p>
+                                    <div className="max-h-48 overflow-y-auto p-1">
+                                      {Array.from(
+                                        new Set(displayAccounts.map((a) => String(a.account ?? '')))
+                                      )
+                                        .sort()
+                                        .map((acc) => (
+                                          <label
+                                            key={acc}
+                                            className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer"
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              className="w-3 h-3 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                                              checked={tempZoneTopExclude.some(
+                                                (x) =>
+                                                  x.trim().toLowerCase() === acc.trim().toLowerCase()
+                                              )}
+                                              onChange={(e) => {
+                                                if (e.target.checked) {
+                                                  setTempZoneTopExclude([...tempZoneTopExclude, acc]);
+                                                } else {
+                                                  setTempZoneTopExclude(
+                                                    tempZoneTopExclude.filter(
+                                                      (x) =>
+                                                        x.trim().toLowerCase() !==
+                                                        acc.trim().toLowerCase()
+                                                    )
+                                                  );
+                                                }
+                                              }}
+                                            />
+                                            <span className="text-[10px] text-slate-600 ui-label">
+                                              {acc}
+                                            </span>
+                                          </label>
+                                        ))}
+                                    </div>
+                                  </div>
+                                </>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
+                        <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+                        <div
+                          className="flex items-center gap-1.5"
+                          role="group"
+                          aria-labelledby="account-mis-layout-label"
+                        >
+                          <span
+                            id="account-mis-layout-label"
+                            className="text-[10px] font-normal text-slate-400 ui-label select-none cursor-default"
+                          >
+                            Layout:
+                          </span>
+                          <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50/80 p-0.5 text-[10px]">
+                          <button
+                            type="button"
+                            aria-pressed={accountMisGrouping === 'zone'}
+                            onClick={() => {
+                              setAccountMisGrouping('zone');
+                              localStorage.setItem('report_account_mis_grouping', 'zone');
+                            }}
+                            className={`rounded px-2 py-0.5 ui-label transition-colors ${
+                              accountMisGrouping === 'zone'
+                                ? 'bg-slate-900 text-white shadow-sm'
+                                : 'text-slate-600 hover:bg-white'
+                            }`}
+                          >
+                            Total Calls
+                          </button>
+                          <button
+                            type="button"
+                            aria-pressed={accountMisGrouping === 'zone-top'}
+                            onClick={() => {
+                              setAccountMisGrouping('zone-top');
+                              localStorage.setItem('report_account_mis_grouping', 'zone-top');
+                            }}
+                            className={`rounded px-2 py-0.5 ui-label transition-colors ${
+                              accountMisGrouping === 'zone-top'
+                                ? 'bg-slate-900 text-white shadow-sm'
+                                : 'text-slate-600 hover:bg-white'
+                            }`}
+                          >
+                            Top Client
+                          </button>
+                          <button
+                            type="button"
+                            aria-pressed={accountMisGrouping === 'overview'}
+                            onClick={() => {
+                              setAccountMisGrouping('overview');
+                              localStorage.setItem('report_account_mis_grouping', 'overview');
+                            }}
+                            className={`rounded px-2 py-0.5 ui-label transition-colors ${
+                              accountMisGrouping === 'overview'
+                                ? 'bg-slate-900 text-white shadow-sm'
+                                : 'text-slate-600 hover:bg-white'
+                            }`}
+                          >
+                            Client Wise
+                          </button>
+                          </div>
+                        </div>
+                        </div>
+                      </div>
                     </div>
                     <div className="flex-1 bg-white border border-slate-200 rounded-lg shadow-sm overflow-auto custom-scrollbar relative">
                       <table className="w-full text-left border-collapse text-[10px]">
                         <thead className="sticky top-0 z-20 outline outline-1 outline-slate-800 shadow-sm">
                           {/* Category Headers */}
                           <tr className="bg-slate-800 text-white ui-strong">
-                            <th className="p-1.5 border-r border-slate-600/50" colSpan={3}>Basics</th>
+                            <th className="p-1.5 border-r border-slate-600/50" colSpan={accountMisGrouping === 'overview' ? 2 : 3}>Basics</th>
                             <th className="p-1.5 border-r border-slate-600/50 text-center" colSpan={4}>Calls Summary (Breakdown)</th>
                             <th className="p-1.5 border-r border-slate-600/50 text-center bg-blue-600" colSpan={7}>Breakdown (Aging)</th>
                             <th className="p-1.5 border-r border-slate-600/50 text-center bg-amber-600" colSpan={3}>Deployment</th>
                             <th className="p-1.5 text-center bg-emerald-600" colSpan={2}>Installation</th>
                           </tr>
                           <tr className="bg-slate-100 text-slate-700 ui-strong">
+                            {accountMisGrouping !== 'overview' ? (
                             <th className="p-1.5 border border-slate-300">
                               <div className="flex flex-col gap-1 relative">
                                 <span>Region</span>
@@ -3986,7 +4834,7 @@ export default function ReportPageClient() {
                                         </button>
                                       </div>
                                       <div className="max-h-48 overflow-y-auto p-1">
-                                        {Array.from(new Set(accountsData.map(a => a.region))).sort().map(r => (
+                                        {Array.from(new Set(displayAccounts.map(a => String(a.region ?? '')))).sort().map(r => (
                                           <label key={r} className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
                                             <input
                                               type="checkbox"
@@ -4009,6 +4857,7 @@ export default function ReportPageClient() {
                                 )}
                               </div>
                             </th>
+                            ) : null}
                             <th className="p-1.5 border border-slate-300">
                               <div className="flex flex-col gap-1 relative">
                                 <span>Key Account</span>
@@ -4049,7 +4898,7 @@ export default function ReportPageClient() {
                                         </button>
                                       </div>
                                       <div className="max-h-48 overflow-y-auto p-1">
-                                        {Array.from(new Set(accountsData.map(a => a.account))).sort().map(acc => (
+                                        {Array.from(new Set(displayAccounts.map(a => String(a.account ?? '')))).sort().map(acc => (
                                           <label key={acc} className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
                                             <input
                                               type="checkbox"
@@ -4096,99 +4945,278 @@ export default function ReportPageClient() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {filteredAccounts.map((a, i) => {
-                            const open_calls_sum = Number(a.age_2 || 0) + Number(a.age_3 || 0) + Number(a.age_7 || 0) + Number(a.age_15 || 0);
-                            const perc_gt_7 = open_calls_sum > 0 ? (((Number(a.age_7 || 0) + Number(a.age_15 || 0)) / open_calls_sum) * 100).toFixed(0) + '%' : '0%';
+                          {tableAccounts.map((a, i) => {
+                            const region = String(a.region ?? '');
+                            const account = String(a.account ?? '');
+                            const isOverview = accountMisGrouping === 'overview';
+                            const rowMergeFlags = accountMergeFlags(account, mergeFlags, cadburyMergeWithCrm);
+                            const drillRegion = isOverview ? 'AI' : region;
+                            const clientMetric = (field: string) =>
+                              isOverview
+                                ? findAccountMetricByAccount(filteredClientAccounts, account, field)
+                                : findAccountMetric(clientAccountSummaryData, region, account, field);
+                            const crmOpenSum =
+                              Number(a.age_2 || 0) +
+                              Number(a.age_3 || 0) +
+                              Number(a.age_7 || 0) +
+                              Number(a.age_15 || 0);
+                            const clientOpen = isOverview
+                              ? accountOpenCallsFromAgingByAccount(filteredClientAccounts, account)
+                              : accountOpenCallsFromAging(
+                                  clientAccountSummaryData,
+                                  region,
+                                  account
+                                );
+                            const openDisplay = mergeSelectedMetrics(crmOpenSum, clientOpen, rowMergeFlags);
+                            const mergedAge7 = mergeSelectedMetrics(
+                              Number(a.age_7 || 0),
+                              clientMetric('age_7'),
+                              rowMergeFlags
+                            );
+                            const mergedAge15 = mergeSelectedMetrics(
+                              Number(a.age_15 || 0),
+                              clientMetric('age_15'),
+                              rowMergeFlags
+                            );
+                            const perc_gt_7 =
+                              openDisplay > 0
+                                ? (((mergedAge7 + mergedAge15) / openDisplay) * 100).toFixed(0) + '%'
+                                : '0%';
                             const dep_pending = Number(a.deployment_total || 0) - Number(a.deployment_done || 0);
                             const inst_pending = Number(a.installation_total || 0) - Number(a.installation_done || 0);
 
-                            // Dynamic colors for regions
-                            const regColor = a.region === 'NORTH' ? 'bg-green-50 text-green-700' :
-                              a.region === 'EAST' ? 'bg-blue-50 text-blue-700' :
-                                a.region === 'WEST' ? 'bg-amber-50 text-amber-700' :
-                                  a.region === 'SOUTH' ? 'bg-purple-50 text-purple-700' : 'bg-slate-50 text-slate-700';
+                            const regColor = isOverview
+                              ? 'bg-slate-100 text-slate-700'
+                              : region === 'NORTH' || region === 'NORTH ZONE' ? 'bg-green-50 text-green-700' :
+                              region === 'EAST' || region === 'EAST ZONE' ? 'bg-blue-50 text-blue-700' :
+                                region === 'WEST' || region === 'WEST ZONE' ? 'bg-amber-50 text-amber-700' :
+                                  region === 'SOUTH' || region === 'SOUTH ZONE' ? 'bg-purple-50 text-purple-700' : 'bg-slate-50 text-slate-700';
 
                             return (
                               <tr key={i} className="hover:bg-slate-50 transition-colors text-slate-900 border-b border-slate-200">
-                                <td className={`p-1.5 border border-slate-300 ${regColor} ui-strong`}>{a.region}</td>
-                                <td className="p-1.5 border border-slate-300 font-medium text-[9px] bg-slate-50/30">{a.account}</td>
-                                <td className="p-1.5 border border-slate-300 text-center text-slate-500 ui-strong">{a.population || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_calls', `${a.account} - Total Calls`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.total_calls}</td>
-                                <td className="p-1.5 border border-slate-300 text-center text-emerald-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('total_solved', `${a.account} - Solved Calls`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.total_solved}</td>
-                                <td className="p-1.5 border border-slate-300 text-center text-rose-600 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('cancelled_calls', `${a.account} - Cancelled Calls`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.cancelled_calls}</td>
-                                <td className="p-1.5 border border-slate-300 text-center text-slate-900 bg-slate-100/50 cursor-pointer hover:bg-black/5 ui-strong" onClick={() => handleDrillDown('open_calls', `${a.account} - Open Calls`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{open_calls_sum}</td>
+                                {!isOverview ? (
+                                  <td className={`p-1.5 border border-slate-300 ${regColor} ui-strong`}>{region}</td>
+                                ) : null}
+                                <td className="p-1.5 border border-slate-300 font-medium text-[9px] bg-slate-50/30">{account}</td>
+                                <SummaryMergedMetricCell
+                                  mergeSelection={rowMergeFlags}
+                                  crm={Number(a.population || 0)}
+                                  client={clientMetric('population')}
+                                  className="p-1.5 text-slate-500 ui-strong"
+                                />
+                                <SummaryMergedMetricCell
+                                  mergeSelection={rowMergeFlags}
+                                  crm={Number(a.total_calls || 0)}
+                                  client={clientMetric('total_calls')}
+                                  className="p-1.5"
+                                  onClick={() => handleDrillDown('total_calls', `${account} - Total Calls`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
+                                />
+                                <SummaryMergedMetricCell
+                                  mergeSelection={rowMergeFlags}
+                                  crm={Number(a.total_solved || 0)}
+                                  client={clientMetric('total_solved')}
+                                  className="p-1.5 text-emerald-600"
+                                  onClick={() => handleDrillDown('total_solved', `${account} - Solved Calls`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
+                                />
+                                <SummaryMergedMetricCell
+                                  mergeSelection={rowMergeFlags}
+                                  crm={Number(a.cancelled_calls || 0)}
+                                  client={clientMetric('cancelled_calls')}
+                                  className="p-1.5 text-rose-600"
+                                  onClick={() => handleDrillDown('cancelled_calls', `${account} - Cancelled Calls`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
+                                />
+                                <td
+                                  className="p-1.5 border border-slate-300 text-center text-slate-900 bg-slate-100/50 cursor-pointer hover:bg-black/5 ui-strong"
+                                  onClick={() => handleDrillDown('open_calls', `${account} - Open Calls`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
+                                >
+                                  {openDisplay.toLocaleString()}
+                                </td>
 
-                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_2', `${a.account} - <2 Days`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.age_2 || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_3', `${a.account} - 2-7 Days`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.age_3 || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_7', `${a.account} - 7-15 Days`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.age_7 || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center bg-blue-50/30 cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('age_15', `${a.account} - >15 Days`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.age_15 || 0}</td>
+                                <SummaryMergedMetricCell
+                                  mergeSelection={rowMergeFlags}
+                                  crm={Number(a.age_2 || 0)}
+                                  client={clientMetric('age_2')}
+                                  className="p-1.5 bg-blue-50/30"
+                                  onClick={() => handleDrillDown('age_2', `${account} - <2 Days`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
+                                />
+                                <SummaryMergedMetricCell
+                                  mergeSelection={rowMergeFlags}
+                                  crm={Number(a.age_3 || 0)}
+                                  client={clientMetric('age_3')}
+                                  className="p-1.5 bg-blue-50/30"
+                                  onClick={() => handleDrillDown('age_3', `${account} - 2-7 Days`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
+                                />
+                                <SummaryMergedMetricCell
+                                  mergeSelection={rowMergeFlags}
+                                  crm={Number(a.age_7 || 0)}
+                                  client={clientMetric('age_7')}
+                                  className="p-1.5 bg-blue-50/30"
+                                  onClick={() => handleDrillDown('age_7', `${account} - 7-15 Days`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
+                                />
+                                <SummaryMergedMetricCell
+                                  mergeSelection={rowMergeFlags}
+                                  crm={Number(a.age_15 || 0)}
+                                  client={clientMetric('age_15')}
+                                  className="p-1.5 bg-blue-50/30"
+                                  onClick={() => handleDrillDown('age_15', `${account} - >15 Days`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
+                                />
                                 <td className="p-1.5 border border-slate-300 text-center text-blue-700 bg-blue-100/20 ui-strong">{perc_gt_7}</td>
 
-                                <td className="p-1.5 border border-slate-300 text-center cursor-pointer hover:bg-black/5" onClick={() => handleDrillDown('part_pending', `${a.account} - Part Pending`, { account: a.account, region: a.region, callType: 'BREAKDOWN' })}>{a.part_pending || 0}</td>
+                                <SummaryMergedMetricCell
+                                  mergeSelection={rowMergeFlags}
+                                  crm={Number(a.part_pending || 0)}
+                                  client={clientMetric('part_pending')}
+                                  className="p-1.5"
+                                  onClick={() => handleDrillDown('part_pending', `${account} - Part Pending`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
+                                />
                                 <td className="p-1.5 border border-slate-300 text-center">
                                   <div className="flex items-center justify-center gap-1.5">
-                                    <span className="text-blue-700 ui-strong">{a.active_eng || 0}</span>
-                                    <span className="text-[9px] text-slate-400 font-medium">({a.headcount || 0})</span>
+                                    <span className="text-blue-700 ui-strong">
+                                      {mergeSelectedMetrics(
+                                        Number(a.active_eng || 0),
+                                        clientMetric('active_eng'),
+                                        rowMergeFlags
+                                      )}
+                                    </span>
+                                    <span className="text-[9px] text-slate-400 font-medium">({Number(a.headcount || 0)})</span>
                                   </div>
                                 </td>
 
-                                <td className="p-1.5 border border-slate-300 text-center bg-amber-50/30">{a.deployment_total || 0}</td>
-                                <td className="p-1.5 border border-slate-300 text-center bg-amber-50/30">{a.deployment_done || 0}</td>
+                                <td className="p-1.5 border border-slate-300 text-center bg-amber-50/30">{Number(a.deployment_total || 0)}</td>
+                                <td className="p-1.5 border border-slate-300 text-center bg-amber-50/30">{Number(a.deployment_done || 0)}</td>
                                 <td className="p-1.5 border border-slate-300 text-center text-amber-700 bg-amber-100/20 ui-strong">{dep_pending}</td>
 
-                                <td className="p-1.5 border border-slate-300 text-center bg-emerald-50/30">{a.installation_done || 0}</td>
+                                <td className="p-1.5 border border-slate-300 text-center bg-emerald-50/30">{Number(a.installation_done || 0)}</td>
                                 <td className="p-1.5 border border-slate-300 text-center text-emerald-700 bg-emerald-100/20 ui-strong">{inst_pending}</td>
                               </tr>
                             );
                           })}
 
                           {/* Account Total Row */}
+                          {(() => {
+                            const totalPopulation = sumMergedAccountMetric(
+                              filteredAccounts,
+                              clientAccountSummaryData,
+                              'population',
+                              mergeFlags,
+                              cadburyMergeWithCrm
+                            );
+                            const totalCalls = sumMergedAccountMetric(
+                              filteredAccounts,
+                              clientAccountSummaryData,
+                              'total_calls',
+                              mergeFlags,
+                              cadburyMergeWithCrm
+                            );
+                            const totalSolved = sumMergedAccountMetric(
+                              filteredAccounts,
+                              clientAccountSummaryData,
+                              'total_solved',
+                              mergeFlags,
+                              cadburyMergeWithCrm
+                            );
+                            const totalCancelled = sumMergedAccountMetric(
+                              filteredAccounts,
+                              clientAccountSummaryData,
+                              'cancelled_calls',
+                              mergeFlags,
+                              cadburyMergeWithCrm
+                            );
+                            const totalOpen = sumMergedAccountOpenCalls(
+                              filteredAccounts,
+                              clientAccountSummaryData,
+                              mergeFlags,
+                              cadburyMergeWithCrm
+                            );
+                            const totalAge2 = sumMergedAccountMetric(
+                              filteredAccounts,
+                              clientAccountSummaryData,
+                              'age_2',
+                              mergeFlags,
+                              cadburyMergeWithCrm
+                            );
+                            const totalAge3 = sumMergedAccountMetric(
+                              filteredAccounts,
+                              clientAccountSummaryData,
+                              'age_3',
+                              mergeFlags,
+                              cadburyMergeWithCrm
+                            );
+                            const totalAge7 = sumMergedAccountMetric(
+                              filteredAccounts,
+                              clientAccountSummaryData,
+                              'age_7',
+                              mergeFlags,
+                              cadburyMergeWithCrm
+                            );
+                            const totalAge15 = sumMergedAccountMetric(
+                              filteredAccounts,
+                              clientAccountSummaryData,
+                              'age_15',
+                              mergeFlags,
+                              cadburyMergeWithCrm
+                            );
+                            const totalParts = sumMergedAccountMetric(
+                              filteredAccounts,
+                              clientAccountSummaryData,
+                              'part_pending',
+                              mergeFlags,
+                              cadburyMergeWithCrm
+                            );
+                            const totalEngs = sumMergedAccountMetric(
+                              filteredAccounts,
+                              clientAccountSummaryData,
+                              'active_eng',
+                              mergeFlags,
+                              cadburyMergeWithCrm
+                            );
+                            const totalPercGt7 =
+                              totalOpen > 0
+                                ? (((totalAge7 + totalAge15) / totalOpen) * 100).toFixed(0) + '%'
+                                : '0%';
+
+                            return (
                           <tr className="bg-slate-900 text-white text-[10px] ui-label">
-                            <td className="p-1.5 border border-slate-700" colSpan={2}>GRAND TOTAL (AI)</td>
+                            <td className="p-1.5 border border-slate-700" colSpan={accountMisGrouping === 'overview' ? 1 : 2}>GRAND TOTAL (AI)</td>
                             <td className="p-1.5 border border-slate-700 text-center">
-                              {filteredAccounts.reduce((sum, a) => sum + Number(a.population || 0), 0).toLocaleString()}
+                              {totalPopulation.toLocaleString()}
                             </td>
                             <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_calls', `All India - Total Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
-                              {filteredAccounts.reduce((sum, a) => sum + Number(a.total_calls || 0), 0).toLocaleString()}
+                              {totalCalls.toLocaleString()}
                             </td>
                             <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_solved', `All India - Solved Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
-                              {filteredAccounts.reduce((sum, a) => sum + Number(a.total_solved || 0), 0).toLocaleString()}
+                              {totalSolved.toLocaleString()}
                             </td>
                             <td className="p-1.5 border border-slate-700 text-center text-rose-400 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('cancelled_calls', `All India - Cancelled Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
-                              {filteredAccounts.reduce((sum, a) => sum + Number(a.cancelled_calls || 0), 0).toLocaleString()}
+                              {totalCancelled.toLocaleString()}
                             </td>
                             <td className="p-1.5 border border-slate-700 text-center bg-slate-800 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('open_calls', `All India - Open Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
-                              {filteredAccounts.reduce((sum, a) => sum + (Number(a.age_2 || 0) + Number(a.age_3 || 0) + Number(a.age_7 || 0) + Number(a.age_15 || 0)), 0).toLocaleString()}
+                              {totalOpen.toLocaleString()}
                             </td>
 
                             {/* Aging Totals */}
                             <td className="p-1.5 border border-slate-700 text-center">
-                              {filteredAccounts.reduce((sum, a) => sum + Number(a.age_2 || 0), 0).toLocaleString()}
+                              {totalAge2.toLocaleString()}
                             </td>
                             <td className="p-1.5 border border-slate-700 text-center">
-                              {filteredAccounts.reduce((sum, a) => sum + Number(a.age_3 || 0), 0).toLocaleString()}
+                              {totalAge3.toLocaleString()}
                             </td>
                             <td className="p-1.5 border border-slate-700 text-center">
-                              {filteredAccounts.reduce((sum, a) => sum + Number(a.age_7 || 0), 0).toLocaleString()}
+                              {totalAge7.toLocaleString()}
                             </td>
                             <td className="p-1.5 border border-slate-700 text-center">
-                              {filteredAccounts.reduce((sum, a) => sum + Number(a.age_15 || 0), 0).toLocaleString()}
+                              {totalAge15.toLocaleString()}
                             </td>
                             <td className="p-1.5 border border-slate-700 text-center text-blue-400">
-                              {(() => {
-                                const t7 = filteredAccounts.reduce((sum, a) => sum + Number(a.age_7 || 0), 0);
-                                const t15 = filteredAccounts.reduce((sum, a) => sum + Number(a.age_15 || 0), 0);
-                                const topen = filteredAccounts.reduce((sum, a) => sum + (Number(a.age_2 || 0) + Number(a.age_3 || 0) + Number(a.age_7 || 0) + Number(a.age_15 || 0)), 0);
-                                return topen > 0 ? ((t7 + t15) / topen * 100).toFixed(0) + '%' : '0%';
-                              })()}
+                              {totalPercGt7}
                             </td>
 
                             {/* Support Totals */}
                             <td className="p-1.5 border border-slate-700 text-center">
-                              {filteredAccounts.reduce((sum, a) => sum + Number(a.part_pending || 0), 0).toLocaleString()}
+                              {totalParts.toLocaleString()}
                             </td>
                             <td className="p-1.5 border border-slate-700 text-center text-blue-400">
-                              {filteredAccounts.reduce((sum, a) => sum + Number(a.active_eng || 0), 0)}
+                              {totalEngs}
                               <span className="text-[9px] text-slate-400 ml-1">({globalHeadcount})</span>
                             </td>
 
@@ -4211,6 +5239,8 @@ export default function ReportPageClient() {
                               {filteredAccounts.reduce((sum, a) => sum + (Number(a.installation_total || 0) - Number(a.installation_done || 0)), 0).toLocaleString()}
                             </td>
                           </tr>
+                            );
+                          })()}
                         </tbody>
                       </table>
                     </div>
@@ -4218,6 +5248,24 @@ export default function ReportPageClient() {
                 );
               })()}
             </div>
+          </ReportErrorBoundary>
+        ) : activeTab === 'client_import' ? (
+          <ReportErrorBoundary label="Client Import">
+            <ClientImportTab
+              email={userProfile?.email}
+              uploadSource={uploadSource}
+              sourceSelection={sourceSelection}
+              dateScope={resolveClientImportScope()}
+              metaRefreshKey={appliedRevision}
+              onUploadSourceChange={setUploadSource}
+              onSourceSelectionChange={(selection) => {
+                saveMisSourceSelection(selection);
+                setSourceSelection(selection);
+              }}
+              onImportComplete={() => {
+                void fetchClientImportSummary(resolveClientImportScope());
+              }}
+            />
           </ReportErrorBoundary>
           ) : null}
       </div>

@@ -1,7 +1,9 @@
 import {
   buildReportFilterSnapshot,
+  defaultAgingAsOfForRange,
   defaultDateRange,
   findBreakdownCallType,
+  normalizeAgingAsOfDate,
   REGISTER_PORTAL_OPTIONS,
   REGISTER_STATUS_OPTIONS,
   type ReportDateRange,
@@ -33,6 +35,7 @@ export type StoredSharedFilters = {
   selectedBranch?: string[];
   selectedFranchisee?: string[];
   selectedTechnician?: string[];
+  agingAsOf?: string;
 };
 
 export type RestoreFilterContext = {
@@ -211,6 +214,9 @@ export function storedSharedToSnapshot(stored: StoredSharedFilters): ReportFilte
     selectedBranch: capStrings(stored.selectedBranch),
     selectedFranchisee: capStrings(stored.selectedFranchisee),
     selectedTechnician: capStrings(stored.selectedTechnician),
+    agingAsOf: stored.agingAsOf
+      ? normalizeAgingAsOfDate(stored.agingAsOf)
+      : defaultAgingAsOfForRange(dateRange),
   });
 }
 

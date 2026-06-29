@@ -1,11 +1,16 @@
 #!/usr/bin/env node
+import { config } from 'dotenv';
 import { readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import pg from 'pg';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const schemaDir = join(__dirname, '..', 'docs', 'read-model-phase1-schema');
+const root = join(__dirname, '..');
+config({ path: join(root, '.env.local') });
+config({ path: join(root, '.env') });
+
+const schemaDir = join(root, 'docs', 'read-model-phase1-schema');
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {

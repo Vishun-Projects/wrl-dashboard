@@ -29,6 +29,7 @@ const ALL_PERMISSION_SEED = [
   { name: 'tab_mis_summary', description: 'Summary Dashboard tab on MIS Reports' },
   { name: 'tab_mis_register', description: 'Call Register tab on MIS Reports' },
   { name: 'tab_mis_accounts', description: 'Key Account MIS tab on MIS Reports' },
+  { name: 'tab_mis_client_import', description: 'Client file import tab on MIS Reports' },
   { name: 'view_all_offices', description: 'National data scope across all branches' },
 ];
 

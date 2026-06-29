@@ -26,7 +26,12 @@ const REPORT_PAGE_PERMS = [
   'page_warranty_master',
 ];
 
-const MIS_TAB_PERMS = ['tab_mis_summary', 'tab_mis_register', 'tab_mis_accounts'];
+const MIS_TAB_PERMS = [
+  'tab_mis_summary',
+  'tab_mis_register',
+  'tab_mis_accounts',
+  'tab_mis_client_import',
+];
 
 const LEGACY_TO_CANONICAL = {
   view_mis_summary: 'tab_mis_summary',
@@ -143,6 +148,10 @@ try {
 
     for (const [legacy, canonical] of Object.entries(LEGACY_TO_CANONICAL)) {
       if (before.includes(legacy)) grants.add(canonical);
+    }
+
+    if (before.includes('tab_mis_summary') || before.includes('tab_mis_accounts')) {
+      grants.add('tab_mis_client_import');
     }
 
     for (const p of before) {

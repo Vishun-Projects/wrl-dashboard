@@ -85,6 +85,33 @@ npm run dev   # login, reports, sync
 
 Create `profiles` storage bucket in Supabase Studio if avatar uploads fail.
 
+## CRM sync worker (always on, every 3 minutes)
+
+Keeps Postgres read-model in sync with Western CRM while the app is not open.
+
+**One-time setup from Git Bash** (uses `.env.vps-setup`):
+
+```bash
+npm run sync-worker:setup:vps
+```
+
+Then on the VPS, edit `/opt/fast-close-app/.env.sync-worker`:
+
+- `DATABASE_URL` — direct Postgres (`127.0.0.1:5432` on VPS)
+- `SYNC_WORKER_ENABLED=true`
+- `SYNC_INTERVAL_MS=180000` (3 minutes, default)
+
+**Manage from your PC:**
+
+```bash
+npm run sync-worker:status:vps   # systemd status + last log lines
+npm run sync-worker:logs:vps     # tail -f logs
+```
+
+On VPS: `systemctl restart fast-close-sync-worker`
+
+See [`docs/sync.md`](../docs/sync.md) for tuning and catch-up after downtime.
+
 ## View database (Supabase Studio)
 
 Studio is served through **Kong on port 8000** (not 54323).

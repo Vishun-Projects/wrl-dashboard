@@ -177,53 +177,95 @@ export async function buildSummaryDashboardWorkbook(
 
 export async function buildKeyAccountMisWorkbook(
   accountsData: AccountSummaryRow[],
-  sheetName = 'Key Account MIS'
+  sheetName = 'Key Account MIS',
+  opts?: { hideRegion?: boolean }
 ): Promise<ExcelJS.Workbook> {
   const ExcelJSRuntime = (await import('exceljs')).default;
   const workbook = new ExcelJSRuntime.Workbook();
   const sheet = workbook.addWorksheet(sheetName);
+  const hideRegion = opts?.hideRegion ?? false;
 
-  const sorted = [...accountsData].sort((a, b) => a.region.localeCompare(b.region));
+  const sorted = [...accountsData].sort((a, b) =>
+    hideRegion
+      ? a.account.localeCompare(b.account)
+      : a.region.localeCompare(b.region) || a.account.localeCompare(b.account)
+  );
 
-  const kaHeader = sheet.addRow([
-    'Region',
-    'Account',
-    'Population',
-    'Total',
-    'Solved',
-    'Cancelled',
-    'Open',
-    '<2 Days',
-    '2-7 Days',
-    '7-15 Days',
-    '>15 Days',
-    'Parts',
-    'Engineers',
-  ]);
+  const kaHeader = sheet.addRow(
+    hideRegion
+      ? [
+          'Account',
+          'Population',
+          'Total',
+          'Solved',
+          'Cancelled',
+          'Open',
+          '<2 Days',
+          '2-7 Days',
+          '7-15 Days',
+          '>15 Days',
+          'Parts',
+          'Engineers',
+        ]
+      : [
+          'Region',
+          'Account',
+          'Population',
+          'Total',
+          'Solved',
+          'Cancelled',
+          'Open',
+          '<2 Days',
+          '2-7 Days',
+          '7-15 Days',
+          '>15 Days',
+          'Parts',
+          'Engineers',
+        ]
+  );
   applySummaryHeaderStyle(kaHeader);
 
   sorted.forEach((a) => {
     const openCalls =
       Number(a.age_2 || 0) + Number(a.age_3 || 0) + Number(a.age_7 || 0) + Number(a.age_15 || 0);
-    const r = sheet.addRow([
-      a.region,
-      a.account,
-      a.population || 0,
-      a.total_calls,
-      a.total_solved,
-      a.cancelled_calls,
-      openCalls,
-      a.age_2,
-      a.age_3,
-      a.age_7,
-      a.age_15,
-      a.part_pending,
-      a.active_eng,
-    ]);
+    const rowValues = hideRegion
+      ? [
+          a.account,
+          a.population || 0,
+          a.total_calls,
+          a.total_solved,
+          a.cancelled_calls,
+          openCalls,
+          a.age_2,
+          a.age_3,
+          a.age_7,
+          a.age_15,
+          a.part_pending,
+          a.active_eng,
+        ]
+      : [
+          a.region,
+          a.account,
+          a.population || 0,
+          a.total_calls,
+          a.total_solved,
+          a.cancelled_calls,
+          openCalls,
+          a.age_2,
+          a.age_3,
+          a.age_7,
+          a.age_15,
+          a.part_pending,
+          a.active_eng,
+        ];
+    const r = sheet.addRow(rowValues);
     applyRegionRowStyle(r, a.region);
-    r.getCell(5).font = { color: { argb: 'FF059669' } };
-    r.getCell(6).font = { color: { argb: 'FFDC2626' } };
-    r.getCell(7).font = { bold: true };
+    const solvedCol = hideRegion ? 4 : 5;
+    const cancelledCol = hideRegion ? 5 : 6;
+    const openCol = hideRegion ? 6 : 7;
+    r.getCell(solvedCol).font = { color: { argb: 'FF059669' } };
+    r.getCell(cancelledCol).font = { color: { argb: 'FFDC2626' } };
+    r.getCell(openCol).font = { bold: true };
   });
 
   return workbook;

@@ -83,6 +83,10 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.join(appDir),
   },
+  experimental: {
+    // MIS client CSV/Excel uploads (UTF-16 pipe exports can be 100MB+).
+    proxyClientMaxBodySize: '320mb',
+  },
   serverExternalPackages: [
     '@zxing/library',
     'india-pincode',

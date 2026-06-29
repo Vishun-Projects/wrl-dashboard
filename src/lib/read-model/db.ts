@@ -128,6 +128,17 @@ export function loadEnv(): void {
   }
 
   const opts = { override: false };
+  dotenv.config({ path: path.join(root, '.env.sync-worker'), ...opts });
+
+  let afterSync = process.env.DATABASE_URL?.replace(/^["']|["']$/g, '') ?? '';
+  if (afterSync.startsWith('prisma+postgres://')) {
+    delete process.env.DATABASE_URL;
+    afterSync = '';
+  }
+  if (afterSync) {
+    return;
+  }
+
   dotenv.config({ path: path.join(root, '.env.mis-email'), ...opts });
 
   let afterMis = process.env.DATABASE_URL?.replace(/^["']|["']$/g, '') ?? '';

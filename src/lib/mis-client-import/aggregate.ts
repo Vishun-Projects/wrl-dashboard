@@ -1,0 +1,332 @@
+import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/report/summary-derive';
+import { withAppClient } from '@/lib/read-model/db';
+import type { StatusBucket } from '@/lib/mis-client-import/types';
+
+export type ClientAggregateParams = {
+  sourceCode?: string | null;
+  sourceCodes?: string[] | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  agingAsOf?: string | null;
+};
+
+type DbRow = {
+  region: string;
+  account: string;
+  branch_label: string | null;
+  logged_at: Date | null;
+  status_bucket: StatusBucket;
+  is_part_pending: boolean;
+  engineer_name: string | null;
+};
+
+function resolveAgingDate(params: ClientAggregateParams): string {
+  if (params.agingAsOf) return params.agingAsOf;
+  if (params.endDate) return params.endDate;
+  return new Date().toISOString().slice(0, 10);
+}
+
+function sqlDayDiff(loggedAt: Date, agingDate: string): number {
+  const callDate = new Date(loggedAt);
+  const aging = new Date(`${agingDate}T23:59:59`);
+  const startUtc = Date.UTC(callDate.getFullYear(), callDate.getMonth(), callDate.getDate());
+  const endUtc = Date.UTC(aging.getFullYear(), aging.getMonth(), aging.getDate());
+  return Math.floor((endUtc - startUtc) / 86400000);
+}
+
+function isOpen(bucket: StatusBucket): boolean {
+  return bucket === 'open_unallocated' || bucket === 'assigned';
+}
+
+function isSolved(bucket: StatusBucket): boolean {
+  return bucket === 'solved' || bucket === 'tech_solved';
+}
+
+function branchKey(region: string, branchLabel: string | null): string {
+  return `${region}::${branchLabel ?? region}`;
+}
+
+function accountKey(region: string, account: string): string {
+  return `${region}::${account}`;
+}
+
+function emptyAccountRow(region: string, account: string): AccountSummaryRow {
+  return {
+    region,
+    account,
+    population: 0,
+    total_calls: 0,
+    total_solved: 0,
+    cancelled_calls: 0,
+    open_calls: 0,
+    age_2: 0,
+    age_3: 0,
+    age_7: 0,
+    age_15: 0,
+    part_pending: 0,
+    deployment_total: 0,
+    deployment_done: 0,
+    installation_total: 0,
+    installation_done: 0,
+    active_eng: 0,
+    headcount: 0,
+    total_tech_solved: 0,
+  };
+}
+
+function emptyBranchRow(region: string, branch: string, officeId: number): BranchSummaryRow {
+  return {
+    officeId,
+    parentId: 0,
+    branch,
+    region,
+    total_calls: 0,
+    solved_calls: 0,
+    cancelled_calls: 0,
+    open_calls: 0,
+    age_2: 0,
+    age_3: 0,
+    age_7: 0,
+    age_15: 0,
+    part_pending: 0,
+    all_total: 0,
+    all_solved: 0,
+    all_cancelled: 0,
+    all_open: 0,
+    all_age_2: 0,
+    all_age_3: 0,
+    all_age_7: 0,
+    all_age_15: 0,
+    all_part_pending: 0,
+    all_tech_solved: 0,
+    tech_solved_calls: 0,
+    deployment_total: 0,
+    deployment_done: 0,
+    installation_total: 0,
+    installation_done: 0,
+    active_eng: 0,
+    population: 0,
+    headcount: 0,
+  };
+}
+
+function aggregateRows(rows: DbRow[], agingDate: string): BranchSummaryRow[] {
+  const branchMap = new Map<string, BranchSummaryRow & { engineers: Set<string> }>();
+  let syntheticId = -1;
+
+  for (const row of rows) {
+    const region = String(row.region ?? 'OTHER').toUpperCase();
+    const branch = row.branch_label?.trim() || region;
+    const key = branchKey(region, branch);
+
+    if (!branchMap.has(key)) {
+      syntheticId -= 1;
+      branchMap.set(key, {
+        ...emptyBranchRow(region, branch, syntheticId),
+        engineers: new Set<string>(),
+      });
+    }
+
+    const b = branchMap.get(key)!;
+    b.total_calls += 1;
+    b.all_total += 1;
+    b.population += 1;
+
+    if (isSolved(row.status_bucket)) {
+      b.solved_calls += 1;
+      b.all_solved += 1;
+      if (row.status_bucket === 'tech_solved') {
+        b.tech_solved_calls += 1;
+        b.all_tech_solved += 1;
+      }
+    }
+    if (row.status_bucket === 'cancelled') {
+      b.cancelled_calls += 1;
+      b.all_cancelled += 1;
+    }
+    if (isOpen(row.status_bucket)) {
+      b.open_calls += 1;
+      b.all_open += 1;
+      if (row.logged_at) {
+        const dayDiff = sqlDayDiff(row.logged_at, agingDate);
+        if (dayDiff <= 2) b.age_2 += 1;
+        else if (dayDiff <= 7) b.age_3 += 1;
+        else if (dayDiff <= 15) b.age_7 += 1;
+        else b.age_15 += 1;
+      }
+    }
+    if (row.is_part_pending) {
+      b.part_pending += 1;
+      b.all_part_pending += 1;
+    }
+    if (row.engineer_name) b.engineers.add(row.engineer_name.trim().toLowerCase());
+  }
+
+  return [...branchMap.values()]
+    .map(({ engineers, ...row }) => ({
+      ...row,
+      active_eng: engineers.size,
+    }))
+    .sort((a, b) => a.branch.localeCompare(b.branch));
+}
+
+function aggregateAccountRows(rows: DbRow[], agingDate: string): AccountSummaryRow[] {
+  const accountMap = new Map<string, AccountSummaryRow & { engineers: Set<string> }>();
+
+  for (const row of rows) {
+    const region = String(row.region ?? 'OTHER').toUpperCase();
+    const account = String(row.account ?? 'UNCLASSIFIED').trim() || 'UNCLASSIFIED';
+    const key = accountKey(region, account);
+
+    if (!accountMap.has(key)) {
+      accountMap.set(key, {
+        ...emptyAccountRow(region, account),
+        engineers: new Set<string>(),
+      });
+    }
+
+    const a = accountMap.get(key)!;
+    a.total_calls += 1;
+    a.population += 1;
+
+    if (isSolved(row.status_bucket)) {
+      a.total_solved += 1;
+      if (row.status_bucket === 'tech_solved') {
+        a.total_tech_solved += 1;
+      }
+    }
+    if (row.status_bucket === 'cancelled') {
+      a.cancelled_calls += 1;
+    }
+    if (isOpen(row.status_bucket)) {
+      a.open_calls += 1;
+      if (row.logged_at) {
+        const dayDiff = sqlDayDiff(row.logged_at, agingDate);
+        if (dayDiff <= 2) a.age_2 += 1;
+        else if (dayDiff <= 7) a.age_3 += 1;
+        else if (dayDiff <= 15) a.age_7 += 1;
+        else a.age_15 += 1;
+      }
+    }
+    if (row.is_part_pending) {
+      a.part_pending += 1;
+    }
+    if (row.engineer_name) a.engineers.add(row.engineer_name.trim().toLowerCase());
+  }
+
+  return [...accountMap.values()]
+    .map(({ engineers, ...row }) => ({
+      ...row,
+      active_eng: engineers.size,
+    }))
+    .sort((a, b) => a.account.localeCompare(b.account) || a.region.localeCompare(b.region));
+}
+
+function resolveSourceFilter(params: ClientAggregateParams): string[] | null {
+  if (params.sourceCodes?.length) {
+    return params.sourceCodes.map((c) => c.toLowerCase());
+  }
+  if (!params.sourceCode || params.sourceCode === 'all') return null;
+  return [params.sourceCode.toLowerCase()];
+}
+
+async function queryDedupedRows(params: ClientAggregateParams): Promise<DbRow[]> {
+  const startDate = params.startDate ?? `${new Date().getFullYear()}-01-01`;
+  const endDate = params.endDate ?? new Date().toISOString().slice(0, 10);
+  const sourceCodes = resolveSourceFilter(params);
+
+  return withAppClient(async (client) => {
+    const values: unknown[] = [startDate, endDate];
+    let sourceClause = '';
+    if (sourceCodes) {
+      values.push(sourceCodes);
+      sourceClause = `AND s.code = ANY($${values.length}::text[])`;
+    }
+
+    const res = await client.query<DbRow>(
+      `
+      SELECT DISTINCT ON (r.source_id, r.call_key)
+        r.region, s.name AS account, r.branch_label, r.logged_at, r.status_bucket, r.is_part_pending, r.engineer_name
+      FROM mis_client_import_rows r
+      JOIN mis_client_import_batches b ON b.batch_id = r.batch_id
+      JOIN mis_client_sources s ON s.id = r.source_id
+      WHERE b.status = 'completed'
+        AND r.source_id IS NOT NULL
+        ${sourceClause}
+        AND r.logged_at >= $1::date
+        AND r.logged_at <= ($2::date + interval '1 day' - interval '1 second')
+      ORDER BY r.source_id, r.call_key, b.created_at DESC
+      `,
+      values
+    );
+    return res.rows;
+  });
+}
+
+export async function queryClientBranchSummary(
+  params: ClientAggregateParams
+): Promise<BranchSummaryRow[]> {
+  const agingDate = resolveAgingDate(params);
+  const rows = await queryDedupedRows(params);
+  return aggregateRows(rows, agingDate);
+}
+
+export async function queryAllClientBranchSummary(
+  params: Omit<ClientAggregateParams, 'sourceCode'>
+): Promise<BranchSummaryRow[]> {
+  return queryClientBranchSummary({ ...params, sourceCode: 'all' });
+}
+
+export async function queryClientBranchSummaryFiltered(
+  params: ClientAggregateParams
+): Promise<BranchSummaryRow[]> {
+  const agingDate = resolveAgingDate(params);
+  const rows = await queryDedupedRows(params);
+  return aggregateRows(rows, agingDate);
+}
+
+export async function queryClientAccountSummaryFiltered(
+  params: ClientAggregateParams
+): Promise<AccountSummaryRow[]> {
+  const agingDate = resolveAgingDate(params);
+  const rows = await queryDedupedRows(params);
+  return aggregateAccountRows(rows, agingDate);
+}
+
+export async function queryClientAccountSummary(
+  params: ClientAggregateParams
+): Promise<AccountSummaryRow[]> {
+  const agingDate = resolveAgingDate(params);
+  const rows = await queryDedupedRows(params);
+  return aggregateAccountRows(rows, agingDate);
+}
+
+export async function queryAllClientAccountSummary(
+  params: Omit<ClientAggregateParams, 'sourceCode'>
+): Promise<AccountSummaryRow[]> {
+  return queryClientAccountSummary({ ...params, sourceCode: 'all' });
+}
+
+export async function countClientRowsInRange(params: ClientAggregateParams): Promise<number> {
+  const rows = await queryDedupedRows(params);
+  return rows.length;
+}
+
+export type ClientRowWithBatchMeta = DbRow & {
+  source_id: string;
+  call_key: string;
+  batch_created_at: Date;
+};
+
+/** Mirrors DISTINCT ON (source_id, call_key) ORDER BY batch_created_at DESC */
+export function dedupeClientRowsLatestBatchWins(rows: ClientRowWithBatchMeta[]): DbRow[] {
+  const best = new Map<string, ClientRowWithBatchMeta>();
+  for (const row of rows) {
+    const key = `${row.source_id}\0${row.call_key}`;
+    const prev = best.get(key);
+    if (!prev || row.batch_created_at > prev.batch_created_at) {
+      best.set(key, row);
+    }
+  }
+  return [...best.values()].map(({ source_id: _s, call_key: _c, batch_created_at: _b, ...dbRow }) => dbRow);
+}

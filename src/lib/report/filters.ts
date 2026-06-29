@@ -21,6 +21,23 @@ export function toDateString(value: Date | string): string {
   return String(value);
 }
 
+/** Normalize `<input type="date">` or legacy timestamp strings to `YYYY-MM-DD`. */
+export function normalizeAgingAsOfDate(value: string | null | undefined): string {
+  if (!value?.trim()) return toDateString(new Date());
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const d = new Date(trimmed);
+  if (!Number.isNaN(d.getTime())) return toDateString(d);
+  return toDateString(new Date());
+}
+
+/** Default aging anchor for a report period — period end, capped at today. */
+export function defaultAgingAsOfForRange(dateRange: ReportDateRange): string {
+  const end = toDateString(dateRange.end);
+  const today = toDateString(new Date());
+  return end <= today ? end : today;
+}
+
 /** Query params for opening Call Register with pre-filled filters (consumed on load, then stripped from URL). */
 export type RegisterDeepLinkParams = {
   search?: string;
@@ -100,6 +117,7 @@ export function emptyReportFilterSnapshot(
     selectedBranch: [],
     selectedFranchisee: [],
     selectedTechnician: [],
+    agingAsOf: defaultAgingAsOfForRange(dateRange),
   });
 }
 
@@ -153,6 +171,11 @@ export function parseLocalDateString(value: string): Date {
 
 export function endOfLocalDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+}
+
+/** End of local calendar day for aging bucket calculations. */
+export function resolveAgingAsOfDate(value: string): Date {
+  return endOfLocalDay(parseLocalDateString(normalizeAgingAsOfDate(value)));
 }
 
 export function startOfLocalDay(d: Date): Date {
@@ -787,8 +810,14 @@ export function snapshotAfterRemovingActiveFilterChip(
       return buildReportFilterSnapshot({ ...applied, search: '' });
     case 'pincodeSearch':
       return buildReportFilterSnapshot({ ...applied, pincodeSearch: '' });
-    case 'dateRange':
-      return buildReportFilterSnapshot({ ...applied, dateRange: defaultDateRange() });
+    case 'dateRange': {
+      const nextRange = defaultDateRange();
+      return buildReportFilterSnapshot({
+        ...applied,
+        dateRange: nextRange,
+        agingAsOf: defaultAgingAsOfForRange(nextRange),
+      });
+    }
     case 'dateFilterColumn':
       return buildReportFilterSnapshot({
         ...applied,
@@ -1003,10 +1032,12 @@ export type ReportFilterSnapshot = {
   selectedBranch: string[];
   selectedFranchisee: string[];
   selectedTechnician: string[];
+  agingAsOf: string;
 };
 
-export type ReportFilterSnapshotInput = Omit<ReportFilterSnapshot, 'dateRange'> & {
+export type ReportFilterSnapshotInput = Omit<ReportFilterSnapshot, 'dateRange' | 'agingAsOf'> & {
   dateRange: ReportDateRange;
+  agingAsOf?: string;
 };
 
 export function buildReportFilterSnapshot(input: ReportFilterSnapshotInput): ReportFilterSnapshot {
@@ -1027,6 +1058,9 @@ export function buildReportFilterSnapshot(input: ReportFilterSnapshotInput): Rep
     selectedBranch: [...input.selectedBranch],
     selectedFranchisee: [...input.selectedFranchisee],
     selectedTechnician: [...input.selectedTechnician],
+    agingAsOf: normalizeAgingAsOfDate(
+      input.agingAsOf ?? defaultAgingAsOfForRange(input.dateRange)
+    ),
   };
 }
 
@@ -1054,6 +1088,14 @@ export function reportFilterSnapshotFromCache(
     selectedBranch: migrateStringFilter(cache.selectedBranch),
     selectedFranchisee: migrateStringFilter(cache.selectedFranchisee),
     selectedTechnician: migrateStringFilter(cache.selectedTechnician),
+    agingAsOf: normalizeAgingAsOfDate(
+      cache.agingAsOf ||
+        defaultAgingAsOfForRange({
+          start: new Date(cache.dateRange.start),
+          end: new Date(cache.dateRange.end),
+          label: cache.dateRange.label || 'This Month',
+        })
+    ),
   });
 }
 
@@ -1076,6 +1118,7 @@ export function filterSnapshotKey(snapshot: ReportFilterSnapshot): string {
     selectedBranch: serializeFilterKey(snapshot.selectedBranch),
     selectedFranchisee: serializeFilterKey(snapshot.selectedFranchisee),
     selectedTechnician: serializeFilterKey(snapshot.selectedTechnician),
+    agingAsOf: normalizeAgingAsOfDate(snapshot.agingAsOf),
   });
 }
 
@@ -1106,6 +1149,7 @@ export type DraftFilterOverrides = Partial<{
   selectedBranch: string[];
   selectedFranchisee: string[];
   selectedTechnician: string[];
+  agingAsOf: string;
 }>;
 
 export function buildDraftFilterSnapshot(input: {
@@ -1125,6 +1169,7 @@ export function buildDraftFilterSnapshot(input: {
   selectedBranch: string[];
   selectedFranchisee: string[];
   selectedTechnician: string[];
+  agingAsOf: string;
 }): ReportFilterSnapshot {
   return buildReportFilterSnapshot(input);
 }

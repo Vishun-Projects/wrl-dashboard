@@ -29,7 +29,7 @@ export type RbacCapability = {
   description: string;
 };
 
-export type MisTabId = 'summary' | 'register' | 'accounts';
+export type MisTabId = 'summary' | 'register' | 'accounts' | 'client_import';
 
 export type RbacApiSpec =
   | { pageId: string }
@@ -53,6 +53,12 @@ const MIS_TABS: RbacTab[] = [
     id: 'accounts',
     permission: 'tab_mis_accounts',
     label: 'Key Account MIS',
+    parentPageId: 'mis_reports',
+  },
+  {
+    id: 'client_import',
+    permission: 'tab_mis_client_import',
+    label: 'Client Import',
     parentPageId: 'mis_reports',
   },
 ];

@@ -3,7 +3,7 @@
  * Mirrors aggregation in /api/report/summary (Node rollup section).
  */
 
-import { matchesCallTypeFilter, normalizeCallTypeDisplay } from '@/lib/report/filters';
+import { matchesCallTypeFilter, normalizeCallTypeDisplay, resolveAgingAsOfDate } from '@/lib/report/filters';
 
 export type BranchSummaryRow = {
   officeId: number;
@@ -105,15 +105,10 @@ function matchesOfficeFilter(row: Record<string, unknown>, officeIdsParam?: stri
 
 function resolveAgingDate(opts: DeriveSummaryOptions): Date {
   if (opts.agingAsOf) {
-    const d = new Date(opts.agingAsOf);
-    if (!Number.isNaN(d.getTime())) {
-      d.setHours(23, 59, 59, 999);
-      return d;
-    }
+    return resolveAgingAsOfDate(opts.agingAsOf);
   }
   if (opts.endDate) {
-    const d = new Date(`${opts.endDate}T23:59:59`);
-    if (!Number.isNaN(d.getTime())) return d;
+    return resolveAgingAsOfDate(opts.endDate);
   }
   const now = new Date();
   now.setHours(23, 59, 59, 999);

@@ -25,6 +25,7 @@ import {
   buildReportFilterSnapshot,
   type DraftFilterOverrides,
   dateRangeFromDeepLinkParams,
+  defaultAgingAsOfForRange,
   defaultDateRange,
   filterCallsCSR,
   filterSnapshotsEqual,
@@ -33,6 +34,7 @@ import {
   migrateStringFilter,
   joinFilterParam,
   mergeBranchFilterListEntry,
+  normalizeAgingAsOfDate,
   parseRegisterDeepLinkSearchParams,
   reportFilterSnapshotFromCache,
   snapshotAfterRemovingActiveFilterChip,
@@ -119,6 +121,8 @@ type ReportFiltersContextValue = {
   flushSearchDebounce: () => void;
   dateRange: ReportDateRange;
   setDateRange: (v: ReportDateRange) => void;
+  agingAsOf: string;
+  setAgingAsOf: (v: string) => void;
   dateFilterColumn: RegisterDateFilterColumn;
   setDateFilterColumn: (v: RegisterDateFilterColumn) => void;
   dateFilterColumnOptions: typeof REGISTER_DATE_FILTER_OPTIONS;
@@ -285,7 +289,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
 
   const isSearchDebouncing =
     search !== debouncedSearch || pincodeSearch !== debouncedPincodeSearch;
-  const [dateRange, setDateRange] = useState<ReportDateRange>(() => {
+  const [dateRange, setDateRangeState] = useState<ReportDateRange>(() => {
     if (bootstrapSnapshot?.dateRange) return bootstrapSnapshot.dateRange;
     if (globalReportCache) {
       return {
@@ -296,6 +300,29 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     }
     return defaultDateRange();
   });
+  const [agingAsOf, setAgingAsOfState] = useState<string>(() =>
+    normalizeAgingAsOfDate(
+      bootstrapSnapshot?.agingAsOf ??
+        globalReportCache?.agingAsOf ??
+        defaultAgingAsOfForRange(
+          bootstrapSnapshot?.dateRange ??
+            (globalReportCache
+              ? {
+                  start: new Date(globalReportCache.dateRange.start),
+                  end: new Date(globalReportCache.dateRange.end),
+                  label: globalReportCache.dateRange.label || 'This Month',
+                }
+              : defaultDateRange())
+        )
+    )
+  );
+  const setDateRange = useCallback((range: ReportDateRange) => {
+    setDateRangeState(range);
+    setAgingAsOfState(defaultAgingAsOfForRange(range));
+  }, []);
+  const setAgingAsOf = useCallback((value: string) => {
+    setAgingAsOfState(normalizeAgingAsOfDate(value));
+  }, []);
   const [dateFilterColumn, setDateFilterColumn] = useState<RegisterDateFilterColumn>(() =>
     resolveRegisterDateSqlColumn(
       bootstrapSnapshot?.dateFilterColumn ?? globalReportCache?.dateFilterColumn
@@ -419,6 +446,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     search,
     pincodeSearch,
     dateRange,
+    agingAsOf,
     dateFilterColumn,
     selectedOfficeIds,
     selectedCallTypes,
@@ -437,6 +465,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     search,
     pincodeSearch,
     dateRange,
+    agingAsOf,
     dateFilterColumn,
     selectedOfficeIds,
     selectedCallTypes,
@@ -457,7 +486,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     setPincodeSearch(snapshot.pincodeSearch);
     setDebouncedSearch(snapshot.search);
     setDebouncedPincodeSearch(snapshot.pincodeSearch);
-    setDateRange(snapshot.dateRange);
+    setDateRangeState(snapshot.dateRange);
+    setAgingAsOfState(normalizeAgingAsOfDate(snapshot.agingAsOf));
     setDateFilterColumn(snapshot.dateFilterColumn);
     setSelectedOfficeIds([...snapshot.selectedOfficeIds]);
     setSelectedCallTypes([...snapshot.selectedCallTypes]);
@@ -530,6 +560,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         search,
         pincodeSearch,
         dateRange,
+        agingAsOf,
         dateFilterColumn,
         selectedOfficeIds,
         selectedCallTypes,
@@ -548,6 +579,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       search,
       pincodeSearch,
       dateRange,
+      agingAsOf,
       dateFilterColumn,
       selectedOfficeIds,
       selectedCallTypes,
@@ -768,6 +800,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       search: '',
       pincodeSearch: '',
       dateRange: defaultDateRange(),
+      agingAsOf: defaultAgingAsOfForRange(defaultDateRange()),
       dateFilterColumn: resolveRegisterDateSqlColumn(undefined),
       selectedState: [],
       selectedCity: [],
@@ -1773,6 +1806,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     flushSearchDebounce,
     dateRange,
     setDateRange,
+    agingAsOf,
+    setAgingAsOf,
     dateFilterColumn,
     setDateFilterColumn,
     dateFilterColumnOptions: REGISTER_DATE_FILTER_OPTIONS,
@@ -1889,6 +1924,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     isSearchDebouncing,
     flushSearchDebounce,
     dateRange,
+    agingAsOf,
     dateFilterColumn,
     selectedOfficeIds,
     selectedCallTypes,

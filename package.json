@@ -12,6 +12,10 @@
     "knip": "knip",
     "analyze": "ANALYZE=true next build",
     "db:apply-read-model": "node scripts/apply-read-model-schema.mjs",
+    "db:apply-read-model:vps": "bash scripts/vps-hosting/apply-read-model-vps.sh",
+    "db:seed-mis-client": "node scripts/mis-client/seed-coke-cadbury-config.mjs",
+    "db:reprocess-cadbury-regions": "npx tsx scripts/mis-client/reprocess-cadbury-regions.ts",
+    "db:truncate-mis-client-import": "node scripts/mis-client/truncate-import-data.mjs",
     "sync-worker": "npx tsx src/lib/read-model/cli.ts",
     "sync-worker:backfill": "npx tsx src/lib/read-model/cli.ts backfill",
     "sync-worker:fill-ytd": "npx tsx src/lib/read-model/cli.ts fill-ytd",
@@ -21,6 +25,9 @@
     "sync-worker:dims": "npx tsx src/lib/read-model/cli.ts dims",
     "sync-worker:nightly": "npx tsx src/lib/read-model/cli.ts nightly",
     "sync-worker:daemon": "npx tsx src/lib/read-model/cli.ts daemon",
+    "sync-worker:setup:vps": "bash scripts/vps-hosting/setup-sync-worker-daemon.sh",
+    "sync-worker:status:vps": "bash scripts/vps-hosting/sync-worker-status-vps.sh",
+    "sync-worker:logs:vps": "bash scripts/vps-hosting/sync-worker-logs-vps.sh",
     "sync-worker:arcp-reset": "npx tsx src/lib/read-model/cli.ts arcp-reset",
     "sync-worker:arcp-backfill": "npx tsx src/lib/read-model/cli.ts arcp-backfill",
     "sync-worker:arcp-incremental": "npx tsx src/lib/read-model/cli.ts arcp-incremental",
@@ -73,6 +80,7 @@
     "tailwind-merge": "^3.6.0",
     "tesseract.js": "^7.0.0",
     "web-vitals": "^5.3.0",
+    "xlsx": "^0.18.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {

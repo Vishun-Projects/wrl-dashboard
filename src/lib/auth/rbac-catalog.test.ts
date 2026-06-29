@@ -87,6 +87,12 @@ describe('resolveApiAccess', () => {
 describe('canAccessMisTab', () => {
   it('grants all tabs when page_mis_reports is present', () => {
     expect(canAccessMisTab(['page_mis_reports'], 'accounts')).toBe(true);
+    expect(canAccessMisTab(['page_mis_reports'], 'client_import')).toBe(true);
+  });
+
+  it('grants client import tab with dedicated permission', () => {
+    expect(canAccessMisTab(['tab_mis_client_import'], 'client_import')).toBe(true);
+    expect(canAccessMisTab(['tab_mis_client_import'], 'summary')).toBe(false);
   });
 });
 
