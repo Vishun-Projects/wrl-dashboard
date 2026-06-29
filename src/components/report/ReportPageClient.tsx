@@ -32,7 +32,7 @@ import { HorizontalScrollFade } from '@/components/ui/HorizontalScrollFade';
 import { TruncatedText } from '@/components/ui/TruncatedText';
 import { ReportOrientationBanner } from '@/components/report/ReportOrientationBanner';
 import { ReportErrorBoundary } from '@/components/report/ReportErrorBoundary';
-import { ReportPageSkeleton, ReportLoadingPanel, ReportFetchingBar } from '@/components/report/ReportLoadingFeedback';
+import { ReportPageSkeleton, ReportLoadingPanel } from '@/components/report/ReportLoadingFeedback';
 import { useRegisterFilterOptions } from '@/lib/report/hooks/useRegisterFilterOptions';
 import { feedback } from '@/lib/ui/feedback';
 import { useUser } from '@/components/layout/DashboardLayout';
@@ -950,6 +950,7 @@ export default function ReportPageClient() {
   const summaryFilterLoadKeyRef = React.useRef<string | null>(null);
   const summaryTabLoadRef = React.useRef(0);
   const summaryUserApplyRef = React.useRef(false);
+  const runSummaryFilterLoadRef = React.useRef<() => Promise<void>>(async () => {});
   const clientImportSourceFetchTabRef = React.useRef<MisTabId | null>(null);
   const dataRef = React.useRef(data);
   const totalRef = React.useRef(total);
@@ -1189,9 +1190,16 @@ export default function ReportPageClient() {
     ]
   );
 
-  const applySummaryFromCorpus = useCallback((): boolean => {
+  const deriveSummaryFromCorpusPayload = useCallback((): {
+    branchSummary: ReturnType<typeof deriveSummaryDashboard>['branchSummary'];
+    accountSummary: ReturnType<typeof deriveSummaryDashboard>['accountSummary'];
+    globalHeadcount: number;
+    startDateStr: string;
+    endDateStr: string;
+    agingStr: string;
+  } | null => {
     const applied = getAppliedFiltersSnapshot();
-    if (!applied) return false;
+    if (!applied) return null;
     const startDateStr = toDateString(applied.dateRange.start);
     const endDateStr = toDateString(applied.dateRange.end);
     const agingStr = normalizeAgingAsOfDate(applied.agingAsOf);
@@ -1199,34 +1207,41 @@ export default function ReportPageClient() {
     const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, appliedDateColumn);
     const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, appliedDateColumn);
     const spanDays = corpusSpanDays(startDateStr, endDateStr);
+    const officeIdsParam = resolveSummaryOfficeIdsParam(
+      offices,
+      applied.selectedBranch,
+      applied.selectedFranchisee
+    );
+    const callTypesParam = resolveViewCallTypesParam(applied.selectedCallTypes);
     const deriveOpts = {
       agingAsOf: agingStr,
       endDate: endDateStr,
-      officeIdsParam: summaryOfficeIdsParam,
-      callTypesParam: viewCallTypesParam,
+      officeIdsParam,
+      callTypesParam,
     };
+    const store = callCorpusStore;
 
-    if (!callCorpusStore?.calls.size || callCorpusStore.cacheKey !== corpusKey) {
+    if (!store?.calls.size || store.cacheKey !== corpusKey) {
       logSummaryDebug('corpus not ready — summary cannot derive client-side', {
-        reason: !callCorpusStore?.calls.size ? 'empty_or_missing_corpus' : 'cache_key_mismatch',
+        reason: !store?.calls.size ? 'empty_or_missing_corpus' : 'cache_key_mismatch',
         expectedCorpusKey: corpusKey,
-        actualCorpusKey: callCorpusStore?.cacheKey ?? null,
-        corpusCallCount: callCorpusStore?.calls.size ?? 0,
+        actualCorpusKey: store?.cacheKey ?? null,
+        corpusCallCount: store?.calls.size ?? 0,
         dateRange: `${startDateStr} → ${endDateStr}`,
         spanDays,
         maxClientCorpusDays: MAX_CLIENT_CORPUS_DAYS,
         exceedsCorpusLimit: spanDays > MAX_CLIENT_CORPUS_DAYS,
-        officeFilter: summaryOfficeIdsParam,
-        callTypeFilter: viewCallTypesParam,
+        officeFilter: officeIdsParam,
+        callTypeFilter: callTypesParam,
         nextStep:
           spanDays > MAX_CLIENT_CORPUS_DAYS
             ? 'Will fetch /api/report/summary (full SQL range; client corpus capped at 120 days)'
             : 'Will retry after corpus load or fall back to /api/report/summary',
       });
-      return false;
+      return null;
     }
 
-    const calls = filterCorpusCallsByViewDate(getCorpusCallsArray(callCorpusStore), viewDateFilter);
+    const calls = filterCorpusCallsByViewDate(getCorpusCallsArray(store), viewDateFilter);
     const viewFilters = registerViewFilterRef.current;
     const { filteredCalls } = deriveRegisterView(calls, viewFilters, viewDateFilter);
     const diagnostic = diagnoseSummaryDerivation(filteredCalls, deriveOpts);
@@ -1241,7 +1256,7 @@ export default function ReportPageClient() {
 
     logSummaryDebug('derived from corpus', {
       ...diagnostic,
-      corpusTruncated: callCorpusStore.truncated ?? false,
+      corpusTruncated: store.truncated ?? false,
       branchRows: branchSummary.length,
       accountRows: accountSummary.length,
       globalHeadcount: headcount,
@@ -1257,72 +1272,116 @@ export default function ReportPageClient() {
           : null,
     });
 
-    commitSummaryResult(branchSummary, accountSummary, headcount, startDateStr, endDateStr, agingStr);
-
-    return branchSummary.length > 0 || callCorpusStore.calls.size > 0;
-  }, [
-    getAppliedFiltersSnapshot,
-    summaryOfficeIdsParam,
-    viewCallTypesParam,
-    callCorpusStore,
-    commitSummaryResult,
-  ]);
-
-  const resolveClientImportScope = useCallback(() => {
-    const snap = getAppliedFiltersSnapshot();
-    const start = snap?.dateRange.start ?? dateRange.start;
-    const end = snap?.dateRange.end ?? dateRange.end;
-    const agingStr = normalizeAgingAsOfDate(snap?.agingAsOf ?? agingAsOf);
     return {
-      startDate: toDateString(start),
-      endDate: toDateString(end),
-      agingAsOf: agingStr,
+      branchSummary,
+      accountSummary,
+      globalHeadcount: headcount,
+      startDateStr,
+      endDateStr,
+      agingStr,
     };
-  }, [getAppliedFiltersSnapshot, dateRange.start, dateRange.end, agingAsOf]);
+  }, [getAppliedFiltersSnapshot, offices]);
 
-  const fetchClientImportSummary = useCallback(
-    async (scope?: { startDate: string; endDate: string; agingAsOf: string }): Promise<void> => {
-      const applied = scope ?? resolveClientImportScope();
+  const applySummaryFromCorpus = useCallback((): boolean => {
+    const payload = deriveSummaryFromCorpusPayload();
+    if (!payload) return false;
+    commitSummaryResult(
+      payload.branchSummary,
+      payload.accountSummary,
+      payload.globalHeadcount,
+      payload.startDateStr,
+      payload.endDateStr,
+      payload.agingStr
+    );
+    return payload.branchSummary.length > 0 || (callCorpusStore?.calls.size ?? 0) > 0;
+  }, [deriveSummaryFromCorpusPayload, commitSummaryResult]);
+
+  const commitClientImportSummary = useCallback(
+    (client: {
+      clientBranchSummary: any[];
+      clientAccountSummary: any[];
+      rowsInDateRange: number;
+      totalRowsInFiles: number;
+    }) => {
+      setClientSummaryData(client.clientBranchSummary);
+      setClientAccountSummaryData(client.clientAccountSummary);
+      setClientImportMeta({
+        rowsInDateRange: client.rowsInDateRange,
+        totalRowsInFiles: client.totalRowsInFiles,
+      });
+    },
+    []
+  );
+
+  const loadClientImportSummaryPayload = useCallback(
+    async (scope: { startDate: string; endDate: string; agingAsOf: string }) => {
       const sourceCodes = sourceCodesToParam(sourceSelection.clientSourceCodes);
-
       try {
         const res = await axios.get('/api/mis-client-import/summary', {
           withCredentials: true,
           params: {
-            startDate: applied.startDate,
-            endDate: applied.endDate,
-            agingAsOf: applied.agingAsOf,
+            startDate: scope.startDate,
+            endDate: scope.endDate,
+            agingAsOf: scope.agingAsOf,
             ...(sourceCodes ? { sourceCodes } : {}),
           },
         });
-        setClientSummaryData(res.data?.clientBranchSummary ?? []);
-        setClientAccountSummaryData(res.data?.clientAccountSummary ?? []);
-        setClientImportMeta({
+        return {
+          clientBranchSummary: res.data?.clientBranchSummary ?? [],
+          clientAccountSummary: res.data?.clientAccountSummary ?? [],
           rowsInDateRange: Number(res.data?.rowsInDateRange ?? 0),
           totalRowsInFiles: Number(res.data?.totalRowsInFiles ?? 0),
-        });
+        };
       } catch (err) {
         console.warn('Client import summary fetch failed:', err);
+        return {
+          clientBranchSummary: [],
+          clientAccountSummary: [],
+          rowsInDateRange: 0,
+          totalRowsInFiles: 0,
+        };
       }
     },
-    [resolveClientImportScope, sourceSelection.clientSourceCodes]
+    [sourceSelection.clientSourceCodes]
   );
 
-  const loadClientImportSources = useCallback(async () => {
-    try {
-      const res = await axios.get<{ sources: Array<{ code: string; name: string }> }>(
-        '/api/mis-client-import/sources',
-        { withCredentials: true }
-      );
-      setClientImportActiveSources(res.data.sources ?? []);
-    } catch {
-      setClientImportActiveSources([]);
-    }
-  }, []);
+  const commitSummaryLoadBundle = useCallback(
+    (
+      crm: {
+        branchSummary: ReturnType<typeof deriveSummaryDashboard>['branchSummary'];
+        accountSummary: ReturnType<typeof deriveSummaryDashboard>['accountSummary'];
+        globalHeadcount: number;
+        startDateStr: string;
+        endDateStr: string;
+        agingStr: string;
+      } | null,
+      client: {
+        clientBranchSummary: any[];
+        clientAccountSummary: any[];
+        rowsInDateRange: number;
+        totalRowsInFiles: number;
+      } | null
+    ) => {
+      if (crm) {
+        commitSummaryResult(
+          crm.branchSummary,
+          crm.accountSummary,
+          crm.globalHeadcount,
+          crm.startDateStr,
+          crm.endDateStr,
+          crm.agingStr
+        );
+      }
+      if (client) {
+        commitClientImportSummary(client);
+      }
+    },
+    [commitSummaryResult, commitClientImportSummary]
+  );
 
-  const fetchSummaryFromApi = useCallback(async (): Promise<boolean> => {
+  const loadSummaryFromApiPayload = useCallback(async () => {
     const applied = getAppliedFiltersSnapshot();
-    if (!applied) return false;
+    if (!applied) return null;
     const startDateStr = toDateString(applied.dateRange.start);
     const endDateStr = toDateString(applied.dateRange.end);
     const summaryOfficeIds = resolveSummaryOfficeIdsParam(
@@ -1362,8 +1421,14 @@ export default function ReportPageClient() {
             : null,
       });
 
-      commitSummaryResult(branchSummary, accountSummary, headcount, startDateStr, endDateStr, agingStr);
-      return branchSummary.length > 0 || accountSummary.length > 0;
+      return {
+        branchSummary,
+        accountSummary,
+        globalHeadcount: headcount,
+        startDateStr,
+        endDateStr,
+        agingStr,
+      };
     } catch (err: unknown) {
       const message =
         axios.isAxiosError(err) && err.response?.data?.error
@@ -1377,9 +1442,55 @@ export default function ReportPageClient() {
         officeFilter: summaryOfficeIds,
         callTypeFilter: callTypesParam,
       });
-      return false;
+      return null;
     }
-  }, [getAppliedFiltersSnapshot, offices, commitSummaryResult]);
+  }, [getAppliedFiltersSnapshot, offices]);
+
+  const resolveClientImportScope = useCallback(() => {
+    const snap = getAppliedFiltersSnapshot();
+    const start = snap?.dateRange.start ?? dateRange.start;
+    const end = snap?.dateRange.end ?? dateRange.end;
+    const agingStr = normalizeAgingAsOfDate(snap?.agingAsOf ?? agingAsOf);
+    return {
+      startDate: toDateString(start),
+      endDate: toDateString(end),
+      agingAsOf: agingStr,
+    };
+  }, [getAppliedFiltersSnapshot, dateRange.start, dateRange.end, agingAsOf]);
+
+  const fetchClientImportSummary = useCallback(
+    async (scope?: { startDate: string; endDate: string; agingAsOf: string }): Promise<void> => {
+      const payload = await loadClientImportSummaryPayload(scope ?? resolveClientImportScope());
+      commitClientImportSummary(payload);
+    },
+    [loadClientImportSummaryPayload, resolveClientImportScope, commitClientImportSummary]
+  );
+
+  const loadClientImportSources = useCallback(async () => {
+    try {
+      const res = await axios.get<{ sources: Array<{ code: string; name: string }> }>(
+        '/api/mis-client-import/sources',
+        { withCredentials: true }
+      );
+      setClientImportActiveSources(res.data.sources ?? []);
+    } catch {
+      setClientImportActiveSources([]);
+    }
+  }, []);
+
+  const fetchSummaryFromApi = useCallback(async (): Promise<boolean> => {
+    const payload = await loadSummaryFromApiPayload();
+    if (!payload) return false;
+    commitSummaryResult(
+      payload.branchSummary,
+      payload.accountSummary,
+      payload.globalHeadcount,
+      payload.startDateStr,
+      payload.endDateStr,
+      payload.agingStr
+    );
+    return payload.branchSummary.length > 0 || payload.accountSummary.length > 0;
+  }, [loadSummaryFromApiPayload, commitSummaryResult]);
 
   const applyRegisterFromCorpus = useCallback(
     (pageNum = 1, pageLimit: RegisterPageSize = limit): boolean => {
@@ -3092,9 +3203,15 @@ export default function ReportPageClient() {
     const endDateStr = toDateString(applied.dateRange.end);
     const appliedDateColumn = applied.dateFilterColumn;
     const agingStr = normalizeAgingAsOfDate(applied.agingAsOf);
+    const officeIdsParam = resolveSummaryOfficeIdsParam(
+      offices,
+      applied.selectedBranch,
+      applied.selectedFranchisee
+    );
+    const callTypesParam = resolveViewCallTypesParam(applied.selectedCallTypes);
     const loadKey = buildSummaryQueryKey({
-      officeIdsParam: summaryOfficeIdsParam,
-      callTypesParam: viewCallTypesParam,
+      officeIdsParam,
+      callTypesParam,
       startDateStr,
       endDateStr,
       agingAsOf: agingStr,
@@ -3109,10 +3226,11 @@ export default function ReportPageClient() {
       endDate: endDateStr,
       agingAsOf: agingStr,
     };
-    const clientImportPromise = fetchClientImportSummary(clientImportScope);
+    const clientImportPromise = loadClientImportSummaryPayload(clientImportScope);
 
     if (hydrateSummaryFromCache()) {
-      await clientImportPromise;
+      const client = await clientImportPromise;
+      commitSummaryLoadBundle(null, client);
       return;
     }
 
@@ -3120,23 +3238,26 @@ export default function ReportPageClient() {
     summaryFilterLoadKeyRef.current = loadKey;
 
     try {
-      if (readRegisterFromPostgresClient()) {
-        await Promise.all([fetchSummaryFromApi(), clientImportPromise]);
-        return;
-      }
+      const crmPromise = (async () => {
+        if (readRegisterFromPostgresClient()) {
+          return loadSummaryFromApiPayload();
+        }
 
-      const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, appliedDateColumn);
-      const hasCorpus =
-        callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0;
+        const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, appliedDateColumn);
+        const hasCorpus =
+          callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0;
 
-      if (!hasCorpus) {
-        await ensureCorpusLoaded({ silent: true });
-      }
-      if (applySummaryFromCorpus()) {
-        await clientImportPromise;
-        return;
-      }
-      await Promise.all([fetchSummaryFromApi(), clientImportPromise]);
+        if (!hasCorpus) {
+          await ensureCorpusLoaded({ silent: true });
+        }
+
+        const derived = deriveSummaryFromCorpusPayload();
+        if (derived) return derived;
+        return loadSummaryFromApiPayload();
+      })();
+
+      const [crm, client] = await Promise.all([crmPromise, clientImportPromise]);
+      commitSummaryLoadBundle(crm, client);
     } finally {
       summaryFilterLoadInFlightRef.current = false;
       if (summaryFilterLoadKeyRef.current === loadKey) {
@@ -3145,16 +3266,15 @@ export default function ReportPageClient() {
     }
   }, [
     getAppliedFiltersSnapshot,
-    applySummaryFromCorpus,
-    applySummaryFromSharedCalls,
+    offices,
+    deriveSummaryFromCorpusPayload,
     ensureCorpusLoaded,
-    ensureSharedCallsLoaded,
-    fetchSummaryFromApi,
-    fetchClientImportSummary,
-    getSharedCallsForScope,
-    summaryOfficeIdsParam,
-    viewCallTypesParam,
+    loadSummaryFromApiPayload,
+    loadClientImportSummaryPayload,
+    commitSummaryLoadBundle,
   ]);
+
+  runSummaryFilterLoadRef.current = runSummaryFilterLoad;
 
   const handleApplySummaryFilters = useCallback(() => {
     if (summaryTabLoading || summaryFilterLoadInFlightRef.current) {
@@ -3174,28 +3294,17 @@ export default function ReportPageClient() {
     summaryUserApplyRef.current = false;
     if (failed) {
       feedback.actionFailed(message);
-    } else {
-      feedback.actionSuccess(message, { duration: 2500 });
     }
   }, []);
 
   useEffect(() => {
     if (!dbInitialized) return;
     if (activeTab !== 'summary' && activeTab !== 'accounts') return;
-    if (hydrateSummaryFromCache()) {
-      finishSummaryUserApply('Filters applied');
-      setSummaryTabLoading(false);
-      return;
-    }
 
     const generation = ++summaryTabLoadRef.current;
     setSummaryTabLoading(true);
-    void runSummaryFilterLoad()
-      .then(() => {
-        if (generation === summaryTabLoadRef.current) {
-          finishSummaryUserApply('Filters applied');
-        }
-      })
+    void runSummaryFilterLoadRef
+      .current()
       .catch(() => {
         if (generation === summaryTabLoadRef.current) {
           finishSummaryUserApply('Could not apply filters — try again', true);
@@ -3203,10 +3312,11 @@ export default function ReportPageClient() {
       })
       .finally(() => {
         if (generation === summaryTabLoadRef.current) {
+          summaryUserApplyRef.current = false;
           setSummaryTabLoading(false);
         }
       });
-  }, [dbInitialized, activeTab, appliedRevision, runSummaryFilterLoad, finishSummaryUserApply]);
+  }, [dbInitialized, activeTab, appliedRevision, finishSummaryUserApply]);
 
   // Client import tab: refetch when applied filters change (summary/accounts load via runSummaryFilterLoad).
   useEffect(() => {
@@ -3814,9 +3924,6 @@ export default function ReportPageClient() {
                 </div>
               )}
           </div>
-          {(activeTab === 'summary' || activeTab === 'accounts') && (
-            <ReportFetchingBar active={summaryTabLoading} label="Applying filters…" />
-          )}
         </>
       )}
 
@@ -4023,7 +4130,13 @@ export default function ReportPageClient() {
           </ReportErrorBoundary>
         ) : activeTab === 'summary' ? (
           <ReportErrorBoundary label="Summary Dashboard">
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-slate-50/10 inner-scrollbar">
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto bg-slate-50/10 inner-scrollbar">
+            {summaryTabLoading ? (
+              <div
+                className="pointer-events-none absolute inset-0 z-20 bg-white/50"
+                aria-hidden
+              />
+            ) : null}
             <div className="flex flex-col gap-3 p-4 pb-8">
               {/* Region Summary Table — fixed compact block, always visible */}
               <section>
@@ -4670,7 +4783,13 @@ export default function ReportPageClient() {
           </ReportErrorBoundary>
         ) : activeTab === 'accounts' ? (
           <ReportErrorBoundary label="Key Account MIS">
-            <div className="flex-1 flex flex-col min-h-0 p-6 space-y-4 bg-slate-50/10">
+            <div className="relative flex-1 flex flex-col min-h-0 p-6 space-y-4 bg-slate-50/10">
+              {summaryTabLoading ? (
+                <div
+                  className="pointer-events-none absolute inset-0 z-20 bg-white/50"
+                  aria-hidden
+                />
+              ) : null}
               {(() => {
                 const displayAccounts = buildAccountDisplayRows(
                   accountsData,
