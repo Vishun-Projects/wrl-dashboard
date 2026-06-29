@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { Upload, Loader2, Trash2, Download } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 import { canUploadClientMis } from '@/lib/mis-client-import/upload-access';
+import { postMisClientUpload, readMisUploadError } from '@/lib/mis-client-import/upload-client';
 import {
-  formatMisUploadTooLargeMessage,
-  MIS_CLIENT_MAX_UPLOAD_BYTES,
+  isBrowserOnVercel,
+  misUploadUsesExternalHost,
 } from '@/lib/mis-client-import/upload-limits';
 
 type BatchMeta = {
@@ -93,6 +95,7 @@ export default function MisClientImportToolbar({
 }: Props) {
   const canUploadFallback = canUploadClientMis(email);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const supabase = createClient();
   const [sources, setSources] = useState<SourceMeta[]>([]);
   const [stats, setStats] = useState<ImportStats | null>(null);
   const [rowsInDateRange, setRowsInDateRange] = useState<number | null>(null);
@@ -151,29 +154,25 @@ export default function MisClientImportToolbar({
     setUploading(true);
     setUploadMessage(null);
     try {
-      if (file.size > MIS_CLIENT_MAX_UPLOAD_BYTES) {
-        setUploadMessage(formatMisUploadTooLargeMessage(file.size));
-        return;
-      }
-      const formData = new FormData();
-      formData.append('sourceCode', uploadSource);
-      formData.append('file', file);
-      const res = await axios.post('/api/mis-client-import/upload', formData, {
-        withCredentials: true,
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const data = await postMisClientUpload({
+        sourceCode: uploadSource,
+        file,
+        accessToken: session?.access_token,
       });
-      const { rowCount, errorCount, warnings } = res.data;
-      const warnText = warnings?.length ? ` (${warnings.join('; ')})` : '';
+      const rowCount = Number(data.rowCount ?? 0);
+      const errorCount = Number(data.errorCount ?? 0);
+      const warnings = Array.isArray(data.warnings) ? (data.warnings as string[]) : [];
+      const warnText = warnings.length ? ` (${warnings.join('; ')})` : '';
       setUploadMessage(
         `Imported ${rowCount} rows` + (errorCount ? `, ${errorCount} skipped` : '') + warnText
       );
       await loadMeta();
       onImportComplete();
     } catch (err: unknown) {
-      const message =
-        axios.isAxiosError(err) && err.response?.data?.error
-          ? String(err.response.data.error)
-          : 'Upload failed';
-      setUploadMessage(message);
+      setUploadMessage(await readMisUploadError(err));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -295,6 +294,14 @@ export default function MisClientImportToolbar({
               Import file
             </button>
           </>
+        )}
+
+        {canManageImports && isBrowserOnVercel() && !misUploadUsesExternalHost() && (
+          <p className="w-full rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-900">
+            Vercel only accepts uploads up to ~4 MB. Large Coke/Cadbury files need the VPS upload
+            endpoint — set <code className="text-amber-950">NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL</code>{' '}
+            on Vercel (see scripts/vps-hosting/VERCEL_ENV.md).
+          </p>
         )}
 
         {hasAnyBatch && (

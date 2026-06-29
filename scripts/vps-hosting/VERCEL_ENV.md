@@ -49,7 +49,21 @@ Also copy from `.env.local`:
 
 **Local dev only:** `SUPABASE_JWT_SECRET` (Legacy JWT Secret) in `.env.local` enables localhost auth when GoTrue HTTPS is blocked. **Do not require it on Vercel** — production uses normal GoTrue `getUser()` / `setSession()` over HTTPS to your VPS.
 
-## Critical: Redeploy after changing env
+## Large MIS client imports (Coke / Cadbury)
+
+Vercel serverless functions reject request bodies **larger than ~4.5 MB** (HTTP **413**). Coke/Cadbury files are often 30–100 MB.
+
+1. On VPS: `npm run mis-upload:setup:vps` (systemd upload server + Caddy `320MB` route on `api.wrl-fsm.cloud`)
+2. On Vercel → **Environment Variables** → Production:
+
+| Variable | Value |
+|----------|--------|
+| `NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL` | `https://api.wrl-fsm.cloud/api/mis-client-import/upload` |
+
+3. **Redeploy** Vercel ( `NEXT_PUBLIC_*` is build-time)
+
+Uploads from the Vercel app then POST to VPS with your Supabase Bearer token (CORS allowed for `wrl-dashboard.vercel.app`).
+
 
 `NEXT_PUBLIC_*` variables are **baked in at build time**. Changing env alone is not enough.
 

@@ -28,6 +28,7 @@
     "sync-worker:setup:vps": "bash scripts/vps-hosting/setup-sync-worker-daemon.sh",
     "sync-worker:status:vps": "bash scripts/vps-hosting/sync-worker-status-vps.sh",
     "sync-worker:logs:vps": "bash scripts/vps-hosting/sync-worker-logs-vps.sh",
+    "mis-upload:setup:vps": "bash scripts/vps-hosting/setup-mis-upload-server.sh",
     "sync-worker:arcp-reset": "npx tsx src/lib/read-model/cli.ts arcp-reset",
     "sync-worker:arcp-backfill": "npx tsx src/lib/read-model/cli.ts arcp-backfill",
     "sync-worker:arcp-incremental": "npx tsx src/lib/read-model/cli.ts arcp-incremental",
