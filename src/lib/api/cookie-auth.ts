@@ -14,3 +14,8 @@ export function isSelfHostedSupabaseUrl(url?: string): boolean {
 export function browserTokenRefreshDisabled(): boolean {
   return isSelfHostedSupabaseUrl() || process.env.NODE_ENV === 'development';
 }
+
+/** Always disable browser GoTrue refresh — auth uses httpOnly cookies + /api/auth/*. */
+export function browserGoTrueRefreshDisabled(): boolean {
+  return true;
+}

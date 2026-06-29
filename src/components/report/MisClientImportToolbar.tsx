@@ -3,9 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { Upload, Loader2, Trash2, Download } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 import { canUploadClientMis } from '@/lib/mis-client-import/upload-access';
-import { postMisClientUpload, readMisUploadError } from '@/lib/mis-client-import/upload-client';
+import {
+  estimateMisUploadEtaSec,
+  formatMisUploadProgressLabel,
+  postMisClientUpload,
+  readMisUploadError,
+  type MisUploadProgress,
+} from '@/lib/mis-client-import/upload-client';
 import {
   isBrowserOnVercel,
   misUploadUsesExternalHost,
@@ -95,7 +100,7 @@ export default function MisClientImportToolbar({
 }: Props) {
   const canUploadFallback = canUploadClientMis(email);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const supabase = createClient();
+  const uploadStartedAtRef = useRef<number>(0);
   const [sources, setSources] = useState<SourceMeta[]>([]);
   const [stats, setStats] = useState<ImportStats | null>(null);
   const [rowsInDateRange, setRowsInDateRange] = useState<number | null>(null);
@@ -105,6 +110,7 @@ export default function MisClientImportToolbar({
   const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null);
   const [downloadingBatchId, setDownloadingBatchId] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<MisUploadProgress | null>(null);
   const [showHistory, setShowHistory] = useState(true);
 
   const loadMeta = useCallback(async () => {
@@ -153,14 +159,13 @@ export default function MisClientImportToolbar({
   const handleUpload = async (file: File) => {
     setUploading(true);
     setUploadMessage(null);
+    setUploadProgress(null);
+    uploadStartedAtRef.current = Date.now();
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
       const data = await postMisClientUpload({
         sourceCode: uploadSource,
         file,
-        accessToken: session?.access_token,
+        onProgress: setUploadProgress,
       });
       const rowCount = Number(data.rowCount ?? 0);
       const errorCount = Number(data.errorCount ?? 0);
@@ -175,9 +180,18 @@ export default function MisClientImportToolbar({
       setUploadMessage(await readMisUploadError(err));
     } finally {
       setUploading(false);
+      setUploadProgress(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
+
+  const uploadPct =
+    uploadProgress && uploadProgress.total > 0
+      ? Math.min(100, Math.round((uploadProgress.sent / uploadProgress.total) * 100))
+      : 0;
+  const uploadEtaSec = uploadProgress
+    ? estimateMisUploadEtaSec(uploadProgress, uploadStartedAtRef.current)
+    : null;
 
   const handleDownloadBatch = async (batchId: string, fileName: string) => {
     setDownloadingBatchId(batchId);
@@ -291,9 +305,28 @@ export default function MisClientImportToolbar({
               className="inline-flex items-center gap-1.5 rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-60"
             >
               {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-              Import file
+              {uploading ? 'Importing…' : 'Import file'}
             </button>
           </>
+        )}
+
+        {uploading && uploadProgress && (
+          <div className="w-full space-y-1 rounded border border-indigo-100 bg-indigo-50/50 px-2 py-2">
+            <div className="flex items-center justify-between gap-2 text-[10px] text-indigo-900">
+              <span>{formatMisUploadProgressLabel(uploadProgress)}</span>
+              {uploadEtaSec != null && uploadProgress.phase === 'uploading' && (
+                <span className="shrink-0 text-indigo-600">~{uploadEtaSec}s left</span>
+              )}
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-indigo-100">
+              <div
+                className="h-full rounded-full bg-indigo-600 transition-all duration-300"
+                style={{
+                  width: `${uploadProgress.phase === 'processing' ? 100 : uploadPct}%`,
+                }}
+              />
+            </div>
+          </div>
         )}
 
         {canManageImports && isBrowserOnVercel() && misUploadUsesExternalHost() && (

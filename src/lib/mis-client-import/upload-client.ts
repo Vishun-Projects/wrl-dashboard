@@ -44,7 +44,41 @@ export function extractMisApiErrorMessage(data: unknown, status?: number): strin
   return 'Upload failed';
 }
 
-export function validateMisUploadFileSize(file: File): string | null {
+export type MisUploadProgress = {
+  sent: number;
+  total: number;
+  chunkIndex: number;
+  chunkTotal: number;
+  phase: 'uploading' | 'processing';
+};
+
+export function formatMisUploadProgressLabel(progress: MisUploadProgress): string {
+  const pct = progress.total > 0 ? Math.round((progress.sent / progress.total) * 100) : 0;
+  const sentMb = (progress.sent / (1024 * 1024)).toFixed(1);
+  const totalMb = (progress.total / (1024 * 1024)).toFixed(1);
+
+  if (progress.phase === 'processing') {
+    return `Importing rows… (${totalMb} MB uploaded)`;
+  }
+  if (progress.chunkTotal > 1) {
+    return `Uploading part ${progress.chunkIndex}/${progress.chunkTotal} · ${sentMb}/${totalMb} MB (${pct}%)`;
+  }
+  return `Uploading ${sentMb} MB…`;
+}
+
+export function estimateMisUploadEtaSec(
+  progress: MisUploadProgress,
+  startedAtMs: number
+): number | null {
+  if (progress.phase === 'processing' || progress.sent <= 0) return null;
+  const elapsedSec = (Date.now() - startedAtMs) / 1000;
+  if (elapsedSec < 2) return null;
+  const rate = progress.sent / elapsedSec;
+  const remaining = progress.total - progress.sent;
+  if (rate <= 0) return null;
+  return Math.ceil(remaining / rate);
+}
+
   const maxBytes = resolveMisUploadMaxBytes();
   if (file.size <= maxBytes) return null;
   if (shouldUseChunkedMisUpload(file.size)) return null;
@@ -59,7 +93,7 @@ export function validateMisUploadFileSize(file: File): string | null {
 async function postMisClientUploadChunked(params: {
   sourceCode: string;
   file: File;
-  onProgress?: (sent: number, total: number) => void;
+  onProgress?: (progress: MisUploadProgress) => void;
 }): Promise<Record<string, unknown>> {
   const uploadId = crypto.randomUUID();
   const chunkTotal = Math.max(1, Math.ceil(params.file.size / MIS_UPLOAD_CHUNK_BYTES));
@@ -69,6 +103,15 @@ async function postMisClientUploadChunked(params: {
     const start = chunkIndex * MIS_UPLOAD_CHUNK_BYTES;
     const end = Math.min(params.file.size, start + MIS_UPLOAD_CHUNK_BYTES);
     const blob = params.file.slice(start, end);
+    const isLast = chunkIndex === chunkTotal - 1;
+
+    params.onProgress?.({
+      sent: start,
+      total: params.file.size,
+      chunkIndex: chunkIndex + 1,
+      chunkTotal,
+      phase: 'uploading',
+    });
 
     const formData = new FormData();
     formData.append('uploadId', uploadId);
@@ -78,6 +121,16 @@ async function postMisClientUploadChunked(params: {
     formData.append('fileName', params.file.name);
     formData.append('chunk', blob, params.file.name);
 
+    if (isLast) {
+      params.onProgress?.({
+        sent: params.file.size,
+        total: params.file.size,
+        chunkIndex: chunkTotal,
+        chunkTotal,
+        phase: 'processing',
+      });
+    }
+
     const res = await axios.post('/api/mis-client-import/upload-chunk', formData, {
       withCredentials: true,
       maxBodyLength: Infinity,
@@ -85,7 +138,16 @@ async function postMisClientUploadChunked(params: {
       timeout: 300_000,
     });
     lastResponse = res.data as Record<string, unknown>;
-    params.onProgress?.(end, params.file.size);
+
+    if (!isLast) {
+      params.onProgress?.({
+        sent: end,
+        total: params.file.size,
+        chunkIndex: chunkIndex + 1,
+        chunkTotal,
+        phase: 'uploading',
+      });
+    }
   }
 
   return lastResponse;
@@ -125,7 +187,7 @@ export async function postMisClientUpload(params: {
   sourceCode: string;
   file: File;
   accessToken?: string | null;
-  onProgress?: (sent: number, total: number) => void;
+  onProgress?: (progress: MisUploadProgress) => void;
 }): Promise<Record<string, unknown>> {
   const tooLarge = validateMisUploadFileSize(params.file);
   if (tooLarge) {
@@ -133,10 +195,32 @@ export async function postMisClientUpload(params: {
   }
 
   if (shouldUseChunkedMisUpload(params.file.size)) {
-    return postMisClientUploadChunked(params);
+    return postMisClientUploadChunked({
+      sourceCode: params.sourceCode,
+      file: params.file,
+      onProgress: params.onProgress,
+    });
   }
 
-  return postMisClientUploadDirect(params);
+  params.onProgress?.({
+    sent: 0,
+    total: params.file.size,
+    chunkIndex: 0,
+    chunkTotal: 1,
+    phase: 'uploading',
+  });
+
+  const result = await postMisClientUploadDirect(params);
+
+  params.onProgress?.({
+    sent: params.file.size,
+    total: params.file.size,
+    chunkIndex: 1,
+    chunkTotal: 1,
+    phase: 'processing',
+  });
+
+  return result;
 }
 
 export async function readMisUploadError(err: unknown): Promise<string> {
