@@ -10,7 +10,7 @@ import { canUploadClientMis } from '@/lib/mis-client-import/upload-access';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 export const runtime = 'nodejs';
-export const maxDuration = 600;
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   try {
