@@ -950,7 +950,7 @@ export default function ReportPageClient() {
   const summaryFilterLoadKeyRef = React.useRef<string | null>(null);
   const summaryTabLoadRef = React.useRef(0);
   const summaryUserApplyRef = React.useRef(false);
-  const runSummaryFilterLoadRef = React.useRef<() => Promise<void>>(async () => {});
+  const runSummaryFilterLoadRef = React.useRef<(generation: number) => Promise<void>>(async () => {});
   const clientImportSourceFetchTabRef = React.useRef<MisTabId | null>(null);
   const dataRef = React.useRef(data);
   const totalRef = React.useRef(total);
@@ -1100,13 +1100,17 @@ export default function ReportPageClient() {
 
   const buildCurrentSummaryQueryKey = () => {
     const applied = getAppliedFiltersSnapshot();
-    const range = applied?.dateRange ?? dateRange;
-    const startDateStr = toDateString(range.start);
-    const endDateStr = toDateString(range.end);
-    const agingStr = resolveSummaryAgingStr(applied);
+    if (!applied) return null;
+    const startDateStr = toDateString(applied.dateRange.start);
+    const endDateStr = toDateString(applied.dateRange.end);
+    const agingStr = normalizeAgingAsOfDate(applied.agingAsOf);
     return buildSummaryQueryKey({
-      officeIdsParam: summaryOfficeIdsParam,
-      callTypesParam: viewCallTypesParam,
+      officeIdsParam: resolveSummaryOfficeIdsParam(
+        offices,
+        applied.selectedBranch,
+        applied.selectedFranchisee
+      ),
+      callTypesParam: resolveViewCallTypesParam(applied.selectedCallTypes),
       startDateStr,
       endDateStr,
       agingAsOf: agingStr,
@@ -1115,6 +1119,7 @@ export default function ReportPageClient() {
 
   const hydrateSummaryFromCache = (): boolean => {
     const summaryQueryKey = buildCurrentSummaryQueryKey();
+    if (!summaryQueryKey) return false;
     const cachedSummary = globalReportCache?.summaryData?.length
       ? globalReportCache.summaryData
       : summaryDataRef.current;
@@ -1150,15 +1155,29 @@ export default function ReportPageClient() {
       headcount: number,
       startDateStr: string,
       endDateStr: string,
-      agingStr: string
+      agingStr: string,
+      appliedOverride?: ReturnType<typeof getAppliedFiltersSnapshot>
     ) => {
-      const summaryQueryKey = buildSummaryQueryKey({
-        officeIdsParam: summaryOfficeIdsParam,
-        callTypesParam: viewCallTypesParam,
-        startDateStr,
-        endDateStr,
-        agingAsOf: agingStr,
-      });
+      const applied = appliedOverride ?? getAppliedFiltersSnapshot();
+      const summaryQueryKey = applied
+        ? buildSummaryQueryKey({
+            officeIdsParam: resolveSummaryOfficeIdsParam(
+              offices,
+              applied.selectedBranch,
+              applied.selectedFranchisee
+            ),
+            callTypesParam: resolveViewCallTypesParam(applied.selectedCallTypes),
+            startDateStr,
+            endDateStr,
+            agingAsOf: agingStr,
+          })
+        : buildSummaryQueryKey({
+            officeIdsParam: summaryOfficeIdsParam,
+            callTypesParam: viewCallTypesParam,
+            startDateStr,
+            endDateStr,
+            agingAsOf: agingStr,
+          });
 
       setSummaryData(branchSummary);
       setAccountsData(accountSummary);
@@ -1183,11 +1202,7 @@ export default function ReportPageClient() {
         callCorpusStore?.lastSyncedAt ? new Date(callCorpusStore.lastSyncedAt) : new Date()
       );
     },
-    [
-      summaryOfficeIdsParam,
-      viewCallTypesParam,
-      callCorpusStore?.lastSyncedAt,
-    ]
+    [getAppliedFiltersSnapshot, offices, summaryOfficeIdsParam, viewCallTypesParam, callCorpusStore?.lastSyncedAt]
   );
 
   const deriveSummaryFromCorpusPayload = useCallback((): {
@@ -1360,7 +1375,8 @@ export default function ReportPageClient() {
         clientAccountSummary: any[];
         rowsInDateRange: number;
         totalRowsInFiles: number;
-      } | null
+      } | null,
+      appliedOverride?: ReturnType<typeof getAppliedFiltersSnapshot>
     ) => {
       if (crm) {
         commitSummaryResult(
@@ -1369,7 +1385,8 @@ export default function ReportPageClient() {
           crm.globalHeadcount,
           crm.startDateStr,
           crm.endDateStr,
-          crm.agingStr
+          crm.agingStr,
+          appliedOverride
         );
       }
       if (client) {
@@ -3195,7 +3212,9 @@ export default function ReportPageClient() {
     agingAsOf,
   ]);
 
-  const runSummaryFilterLoad = useCallback(async () => {
+  const runSummaryFilterLoad = useCallback(async (generation: number) => {
+    const isStale = () => generation !== summaryTabLoadRef.current;
+
     const applied = getAppliedFiltersSnapshot();
     if (!applied) return;
 
@@ -3230,7 +3249,8 @@ export default function ReportPageClient() {
 
     if (hydrateSummaryFromCache()) {
       const client = await clientImportPromise;
-      commitSummaryLoadBundle(null, client);
+      if (isStale()) return;
+      commitSummaryLoadBundle(null, client, applied);
       return;
     }
 
@@ -3250,6 +3270,7 @@ export default function ReportPageClient() {
         if (!hasCorpus) {
           await ensureCorpusLoaded({ silent: true });
         }
+        if (isStale()) return null;
 
         const derived = deriveSummaryFromCorpusPayload();
         if (derived) return derived;
@@ -3257,10 +3278,11 @@ export default function ReportPageClient() {
       })();
 
       const [crm, client] = await Promise.all([crmPromise, clientImportPromise]);
-      commitSummaryLoadBundle(crm, client);
+      if (isStale()) return;
+      commitSummaryLoadBundle(crm, client, applied);
     } finally {
-      summaryFilterLoadInFlightRef.current = false;
       if (summaryFilterLoadKeyRef.current === loadKey) {
+        summaryFilterLoadInFlightRef.current = false;
         summaryFilterLoadKeyRef.current = null;
       }
     }
@@ -3304,7 +3326,7 @@ export default function ReportPageClient() {
     const generation = ++summaryTabLoadRef.current;
     setSummaryTabLoading(true);
     void runSummaryFilterLoadRef
-      .current()
+      .current(generation)
       .catch(() => {
         if (generation === summaryTabLoadRef.current) {
           finishSummaryUserApply('Could not apply filters — try again', true);
