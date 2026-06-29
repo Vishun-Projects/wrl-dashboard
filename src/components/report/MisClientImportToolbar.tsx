@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { Upload, Loader2, Trash2, Download } from 'lucide-react';
-import { canUploadClientMis } from '@/lib/mis-client-import/upload-access';
 import {
   estimateMisUploadEtaSec,
   formatMisUploadProgressLabel,
@@ -44,7 +43,6 @@ type ImportStats = {
 };
 
 type Props = {
-  email?: string | null;
   uploadSource: string;
   dateScope?: { startDate: string; endDate: string } | null;
   metaRefreshKey?: number;
@@ -91,20 +89,19 @@ function StatChip({
 }
 
 export default function MisClientImportToolbar({
-  email,
   uploadSource,
   dateScope,
   metaRefreshKey = 0,
   onUploadSourceChange,
   onImportComplete,
 }: Props) {
-  const canUploadFallback = canUploadClientMis(email);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadStartedAtRef = useRef<number>(0);
   const [sources, setSources] = useState<SourceMeta[]>([]);
   const [stats, setStats] = useState<ImportStats | null>(null);
   const [rowsInDateRange, setRowsInDateRange] = useState<number | null>(null);
-  const [canManageImports, setCanManageImports] = useState(canUploadFallback);
+  const [canUpload, setCanUpload] = useState(false);
+  const [canDelete, setCanDelete] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null);
@@ -121,6 +118,7 @@ export default function MisClientImportToolbar({
       if (dateScope?.endDate) params.endDate = dateScope.endDate;
       const res = await axios.get<{
         canUpload?: boolean;
+        canDelete?: boolean;
         sources: SourceMeta[];
         stats: ImportStats;
         rowsInDateRange: number | null;
@@ -130,19 +128,21 @@ export default function MisClientImportToolbar({
       });
       setSources(res.data.sources ?? []);
       setStats(res.data.stats ?? null);
-      setCanManageImports(Boolean(res.data.canUpload));
+      setCanUpload(Boolean(res.data.canUpload));
+      setCanDelete(Boolean(res.data.canDelete));
       setRowsInDateRange(
         res.data.rowsInDateRange != null ? Number(res.data.rowsInDateRange) : null
       );
     } catch {
       setSources([]);
       setStats(null);
-      setCanManageImports(canUploadFallback);
+      setCanUpload(false);
+      setCanDelete(false);
       setRowsInDateRange(null);
     } finally {
       setLoadingMeta(false);
     }
-  }, [canUploadFallback, dateScope?.startDate, dateScope?.endDate]);
+  }, [dateScope?.startDate, dateScope?.endDate]);
 
   useEffect(() => {
     void loadMeta();
@@ -263,14 +263,14 @@ export default function MisClientImportToolbar({
     );
   }
 
-  if (!canManageImports && !hasAnyBatch) {
+  if (!canUpload && !canDelete && !hasAnyBatch) {
     return null;
   }
 
   return (
     <div className="mb-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] shadow-sm">
       <div className="flex flex-wrap items-center gap-3">
-        {canManageImports && (
+        {canUpload && (
           <>
             <div className="flex items-center gap-2">
               <span className="text-slate-500 ui-label">Import as</span>
@@ -329,7 +329,7 @@ export default function MisClientImportToolbar({
           </div>
         )}
 
-        {canManageImports && isBrowserOnVercel() && misUploadUsesExternalHost() && (
+        {canUpload && isBrowserOnVercel() && misUploadUsesExternalHost() && (
           <p className="w-full rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-900">
             Remove <code className="text-amber-950">NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL</code> from
             Vercel and redeploy. Browser uploads to api.wrl-fsm.cloud fail with certificate errors;
@@ -444,7 +444,7 @@ export default function MisClientImportToolbar({
                           )}
                           Download
                         </button>
-                        {canManageImports && (
+                        {canDelete && (
                           <button
                             type="button"
                             title="Delete import"

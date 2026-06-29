@@ -29,7 +29,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     if (!auth.ok) return auth.response;
 
     const userAuth = await loadUserAuth(auth.userId);
-    if (!canUploadClientMis(userAuth?.profile?.email)) {
+    if (!canUploadClientMis(userAuth?.permissions ?? [])) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

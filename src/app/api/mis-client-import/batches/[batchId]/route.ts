@@ -3,7 +3,7 @@ import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { deleteImportFile } from '@/lib/mis-client-import/file-store';
 import { deleteImportBatch } from '@/lib/mis-client-import/store';
-import { canUploadClientMis } from '@/lib/mis-client-import/upload-access';
+import { canDeleteClientMis } from '@/lib/mis-client-import/upload-access';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 type RouteContext = { params: Promise<{ batchId: string }> };
@@ -14,8 +14,7 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
     if (!auth.ok) return auth.response;
 
     const userAuth = await loadUserAuth(auth.userId);
-    const email = userAuth?.profile?.email;
-    if (!canUploadClientMis(email)) {
+    if (!canDeleteClientMis(userAuth?.permissions ?? [])) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

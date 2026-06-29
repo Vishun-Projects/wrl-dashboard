@@ -146,6 +146,16 @@ export const RBAC_CAPABILITIES: RbacCapability[] = [
     label: 'View all offices',
     description: 'National data scope across all branches',
   },
+  {
+    permission: 'mis_client_import_upload',
+    label: 'Import client MIS files',
+    description: 'Upload Coke, Cadbury, and other client import files',
+  },
+  {
+    permission: 'mis_client_import_delete',
+    label: 'Delete client imports',
+    description: 'Remove uploaded client import batches and their rows',
+  },
 ];
 
 /** Legacy permission names mapped to canonical tab permissions (pre-migration DB rows). */

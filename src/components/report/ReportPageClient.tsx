@@ -945,7 +945,10 @@ export default function ReportPageClient() {
   const lastRegisterListQueryKeyRef = React.useRef<string | null>(null);
   const lastAppliedFilterSnapshotRef = React.useRef<string | null>(null);
   const filterEffectInFlightRef = React.useRef(false);
+  const summaryFilterLoadInFlightRef = React.useRef(false);
+  const summaryFilterLoadKeyRef = React.useRef<string | null>(null);
   const summaryTabLoadRef = React.useRef(0);
+  const clientImportSourceFetchTabRef = React.useRef<MisTabId | null>(null);
   const dataRef = React.useRef(data);
   const totalRef = React.useRef(total);
   const registerSummaryRef = React.useRef(registerSummary);
@@ -1316,7 +1319,7 @@ export default function ReportPageClient() {
   }, []);
 
   const fetchSummaryFromApi = useCallback(async (): Promise<boolean> => {
-    const applied = appliedFilters;
+    const applied = getAppliedFiltersSnapshot();
     if (!applied) return false;
     const startDateStr = toDateString(applied.dateRange.start);
     const endDateStr = toDateString(applied.dateRange.end);
@@ -1374,7 +1377,7 @@ export default function ReportPageClient() {
       });
       return false;
     }
-  }, [appliedFilters, offices, supabase, commitSummaryResult]);
+  }, [getAppliedFiltersSnapshot, offices, commitSummaryResult]);
 
   const applyRegisterFromCorpus = useCallback(
     (pageNum = 1, pageLimit: RegisterPageSize = limit): boolean => {
@@ -3082,35 +3085,62 @@ export default function ReportPageClient() {
   const runSummaryFilterLoad = useCallback(async () => {
     const applied = getAppliedFiltersSnapshot();
     if (!applied) return;
-    hydrateSummaryFromCache();
 
     const startDateStr = toDateString(applied.dateRange.start);
     const endDateStr = toDateString(applied.dateRange.end);
     const appliedDateColumn = applied.dateFilterColumn;
     const agingStr = normalizeAgingAsOfDate(applied.agingAsOf);
-    const clientImportPromise = fetchClientImportSummary({
-      startDate: startDateStr,
-      endDate: endDateStr,
+    const loadKey = buildSummaryQueryKey({
+      officeIdsParam: summaryOfficeIdsParam,
+      callTypesParam: viewCallTypesParam,
+      startDateStr,
+      endDateStr,
       agingAsOf: agingStr,
     });
 
-    if (readRegisterFromPostgresClient()) {
-      await Promise.all([fetchSummaryFromApi(), clientImportPromise]);
+    if (summaryFilterLoadInFlightRef.current && summaryFilterLoadKeyRef.current === loadKey) {
       return;
     }
 
-    const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, appliedDateColumn);
-    const hasCorpus =
-      callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0;
+    const clientImportScope = {
+      startDate: startDateStr,
+      endDate: endDateStr,
+      agingAsOf: agingStr,
+    };
+    const clientImportPromise = fetchClientImportSummary(clientImportScope);
 
-    if (!hasCorpus) {
-      await ensureCorpusLoaded({ silent: true });
-    }
-    if (applySummaryFromCorpus()) {
+    if (hydrateSummaryFromCache()) {
       await clientImportPromise;
       return;
     }
-    await Promise.all([fetchSummaryFromApi(), clientImportPromise]);
+
+    summaryFilterLoadInFlightRef.current = true;
+    summaryFilterLoadKeyRef.current = loadKey;
+
+    try {
+      if (readRegisterFromPostgresClient()) {
+        await Promise.all([fetchSummaryFromApi(), clientImportPromise]);
+        return;
+      }
+
+      const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, appliedDateColumn);
+      const hasCorpus =
+        callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0;
+
+      if (!hasCorpus) {
+        await ensureCorpusLoaded({ silent: true });
+      }
+      if (applySummaryFromCorpus()) {
+        await clientImportPromise;
+        return;
+      }
+      await Promise.all([fetchSummaryFromApi(), clientImportPromise]);
+    } finally {
+      summaryFilterLoadInFlightRef.current = false;
+      if (summaryFilterLoadKeyRef.current === loadKey) {
+        summaryFilterLoadKeyRef.current = null;
+      }
+    }
   }, [
     getAppliedFiltersSnapshot,
     applySummaryFromCorpus,
@@ -3120,12 +3150,13 @@ export default function ReportPageClient() {
     fetchSummaryFromApi,
     fetchClientImportSummary,
     getSharedCallsForScope,
+    summaryOfficeIdsParam,
+    viewCallTypesParam,
   ]);
 
   const handleApplySummaryFilters = useCallback(() => {
     applyFilters();
-    void runSummaryFilterLoad();
-  }, [applyFilters, runSummaryFilterLoad]);
+  }, [applyFilters]);
 
   useEffect(() => {
     if (!dbInitialized) return;
@@ -3141,15 +3172,34 @@ export default function ReportPageClient() {
     });
   }, [dbInitialized, activeTab, appliedRevision, runSummaryFilterLoad]);
 
-  // Client import overlay: refetch when filters or source selection change.
+  // Client import tab: refetch when applied filters change (summary/accounts load via runSummaryFilterLoad).
   useEffect(() => {
     if (!dbInitialized) return;
-    if (activeTab !== 'summary' && activeTab !== 'accounts' && activeTab !== 'client_import') return;
+    if (activeTab !== 'client_import') return;
     void fetchClientImportSummary(resolveClientImportScope());
   }, [
     dbInitialized,
     activeTab,
     appliedRevision,
+    resolveClientImportScope,
+    fetchClientImportSummary,
+  ]);
+
+  // Summary/accounts: refetch client overlay when CRM/Cadbury source toggles change (no full summary reload).
+  useEffect(() => {
+    if (!dbInitialized) return;
+    if (activeTab !== 'summary' && activeTab !== 'accounts') {
+      clientImportSourceFetchTabRef.current = null;
+      return;
+    }
+    if (clientImportSourceFetchTabRef.current !== activeTab) {
+      clientImportSourceFetchTabRef.current = activeTab;
+      return;
+    }
+    void fetchClientImportSummary(resolveClientImportScope());
+  }, [
+    dbInitialized,
+    activeTab,
     resolveClientImportScope,
     fetchClientImportSummary,
     sourceSelection,
@@ -5252,7 +5302,6 @@ export default function ReportPageClient() {
         ) : activeTab === 'client_import' ? (
           <ReportErrorBoundary label="Client Import">
             <ClientImportTab
-              email={userProfile?.email}
               uploadSource={uploadSource}
               sourceSelection={sourceSelection}
               dateScope={resolveClientImportScope()}

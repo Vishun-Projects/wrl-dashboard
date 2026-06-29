@@ -1,5 +1,6 @@
 import { resolveApiAccess } from '@/lib/auth/rbac-catalog';
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
+import { canUploadClientMis } from '@/lib/mis-client-import/upload-access';
 import {
   canVerifyJwtLocally,
   verifyLocalAccessToken,
@@ -26,5 +27,8 @@ export async function resolveMisUploadUserId(token: string): Promise<string | nu
 export async function assertMisUploadAccess(userId: string): Promise<boolean> {
   const auth = await queryUserAuth(userId);
   if (!auth) return false;
-  return resolveApiAccess(auth.permissions, { pageId: 'mis_reports', shared: true });
+  if (!resolveApiAccess(auth.permissions, { pageId: 'mis_reports', shared: true })) {
+    return false;
+  }
+  return canUploadClientMis(auth.permissions);
 }

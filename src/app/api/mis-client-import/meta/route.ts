@@ -3,7 +3,7 @@ import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { listAllSourcesWithBatches, summarizeImportBatches } from '@/lib/mis-client-import/config';
 import { countClientRowsInRange } from '@/lib/mis-client-import/aggregate';
-import { canUploadClientMis } from '@/lib/mis-client-import/upload-access';
+import { canDeleteClientMis, canUploadClientMis } from '@/lib/mis-client-import/upload-access';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 export async function GET(req: NextRequest) {
@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     if (!auth.ok) return auth.response;
 
     const userAuth = await loadUserAuth(auth.userId);
-    const email = userAuth?.profile?.email ?? null;
+    const permissions = userAuth?.permissions ?? [];
 
     const { searchParams } = new URL(req.url);
     const startDate = searchParams.get('startDate');
@@ -30,7 +30,8 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
-      canUpload: canUploadClientMis(email),
+      canUpload: canUploadClientMis(permissions),
+      canDelete: canDeleteClientMis(permissions),
       sources,
       stats,
       rowsInDateRange,

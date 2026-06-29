@@ -5,12 +5,10 @@ import axios from 'axios';
 import MisClientImportToolbar from '@/components/report/MisClientImportToolbar';
 import MisSourceCheckboxes from '@/components/report/MisSourceCheckboxes';
 import MisCompanyAdminForm from '@/components/report/MisCompanyAdminForm';
-import { canUploadClientMis } from '@/lib/mis-client-import/upload-access';
 import type { MisSourceSelection } from '@/lib/mis-client-import/source-selection';
 import { saveMisSourceSelection } from '@/lib/mis-client-import/source-selection';
 
 type Props = {
-  email?: string | null;
   uploadSource: string;
   sourceSelection: MisSourceSelection;
   dateScope: { startDate: string; endDate: string };
@@ -21,7 +19,6 @@ type Props = {
 };
 
 export default function ClientImportTab({
-  email,
   uploadSource,
   sourceSelection,
   dateScope,
@@ -31,7 +28,7 @@ export default function ClientImportTab({
   onImportComplete,
 }: Props) {
   const [activeSources, setActiveSources] = useState<Array<{ code: string; name: string }>>([]);
-  const [canManageImports, setCanManageImports] = useState(() => canUploadClientMis(email));
+  const [canManageImports, setCanManageImports] = useState(false);
 
   const loadSources = useCallback(async () => {
     try {
@@ -48,9 +45,9 @@ export default function ClientImportTab({
       setCanManageImports(Boolean(metaRes.data.canUpload));
     } catch {
       setActiveSources([]);
-      setCanManageImports(canUploadClientMis(email));
+      setCanManageImports(false);
     }
-  }, [email]);
+  }, []);
 
   useEffect(() => {
     void loadSources();
@@ -79,7 +76,6 @@ export default function ClientImportTab({
         />
 
         <MisClientImportToolbar
-          email={email}
           uploadSource={uploadSource}
           dateScope={dateScope}
           metaRefreshKey={metaRefreshKey}

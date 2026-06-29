@@ -33,6 +33,11 @@ const MIS_TAB_PERMS = [
   'tab_mis_client_import',
 ];
 
+const MIS_CLIENT_IMPORT_CAP_PERMS = [
+  'mis_client_import_upload',
+  'mis_client_import_delete',
+];
+
 const LEGACY_TO_CANONICAL = {
   view_mis_summary: 'tab_mis_summary',
   view_summary: 'tab_mis_summary',
@@ -45,6 +50,10 @@ const ALL_SEED = [
   { name: 'manage_users', description: 'Create and edit portal users' },
   { name: 'manage_roles', description: 'Define roles and page permissions' },
   ...MIS_TAB_PERMS.map((name) => ({ name, description: `MIS tab: ${name}` })),
+  ...MIS_CLIENT_IMPORT_CAP_PERMS.map((name) => ({
+    name,
+    description: `Client import capability: ${name}`,
+  })),
   {
     name: 'view_all_offices',
     description: 'National data scope across all branches',
@@ -152,6 +161,13 @@ try {
 
     if (before.includes('tab_mis_summary') || before.includes('tab_mis_accounts')) {
       grants.add('tab_mis_client_import');
+    }
+
+    if (
+      before.includes('tab_mis_client_import') ||
+      before.includes('page_mis_reports')
+    ) {
+      for (const p of MIS_CLIENT_IMPORT_CAP_PERMS) grants.add(p);
     }
 
     for (const p of before) {

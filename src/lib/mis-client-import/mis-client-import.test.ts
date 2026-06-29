@@ -261,11 +261,15 @@ describe('Coke region from Entity Name', () => {
   });
 });
 
-describe('canUploadClientMis', () => {
-  it('allows pilot email only', () => {
-    expect(canUploadClientMis('vishunvishwakarma90211@gmail.com')).toBe(true);
-    expect(canUploadClientMis('other@example.com')).toBe(false);
-    expect(canUploadClientMis(null)).toBe(false);
+describe('canUploadClientMis / canDeleteClientMis', () => {
+  it('checks RBAC capabilities', async () => {
+    const { canUploadClientMis, canDeleteClientMis } = await import(
+      '@/lib/mis-client-import/upload-access'
+    );
+    expect(canUploadClientMis(['mis_client_import_upload'])).toBe(true);
+    expect(canUploadClientMis(['tab_mis_client_import'])).toBe(false);
+    expect(canDeleteClientMis(['mis_client_import_delete'])).toBe(true);
+    expect(canDeleteClientMis([])).toBe(false);
   });
 });
 

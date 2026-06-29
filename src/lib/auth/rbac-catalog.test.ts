@@ -106,4 +106,10 @@ describe('ALL_PERMISSION_SEED', () => {
       }
     }
   });
+
+  it('includes client import capabilities', () => {
+    const seeded = new Set(ALL_PERMISSION_SEED.map((p) => p.name));
+    expect(seeded.has('mis_client_import_upload')).toBe(true);
+    expect(seeded.has('mis_client_import_delete')).toBe(true);
+  });
 });

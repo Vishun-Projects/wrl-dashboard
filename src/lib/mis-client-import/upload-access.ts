@@ -1,14 +1,12 @@
-const DEFAULT_ALLOWLIST = ['vishunvishwakarma90211@gmail.com'];
+import { hasCapability } from '@/lib/auth/rbac-catalog';
 
-function buildAllowlist(): Set<string> {
-  const env = process.env.MIS_CLIENT_UPLOAD_ALLOWLIST?.trim();
-  const emails = env
-    ? env.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
-    : DEFAULT_ALLOWLIST.map((e) => e.toLowerCase());
-  return new Set(emails);
+export const MIS_CLIENT_IMPORT_UPLOAD_PERMISSION = 'mis_client_import_upload';
+export const MIS_CLIENT_IMPORT_DELETE_PERMISSION = 'mis_client_import_delete';
+
+export function canUploadClientMis(permissions: string[]): boolean {
+  return hasCapability(permissions, MIS_CLIENT_IMPORT_UPLOAD_PERMISSION);
 }
 
-export function canUploadClientMis(email: string | null | undefined): boolean {
-  if (!email) return false;
-  return buildAllowlist().has(email.toLowerCase().trim());
+export function canDeleteClientMis(permissions: string[]): boolean {
+  return hasCapability(permissions, MIS_CLIENT_IMPORT_DELETE_PERMISSION);
 }

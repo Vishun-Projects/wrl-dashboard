@@ -18,8 +18,7 @@ export async function handleMisClientUploadBuffer(params: {
   buffer: Buffer;
 }): Promise<MisUploadHttpResult> {
   const userAuth = await queryUserAuth(params.userId);
-  const email = userAuth?.profile?.email;
-  if (!canUploadClientMis(email)) {
+  if (!canUploadClientMis(userAuth?.permissions ?? [])) {
     return { status: 403, body: { error: 'Forbidden' } };
   }
 
