@@ -79,6 +79,7 @@ export function estimateMisUploadEtaSec(
   return Math.ceil(remaining / rate);
 }
 
+export function validateMisUploadFileSize(file: File): string | null {
   const maxBytes = resolveMisUploadMaxBytes();
   if (file.size <= maxBytes) return null;
   if (shouldUseChunkedMisUpload(file.size)) return null;
