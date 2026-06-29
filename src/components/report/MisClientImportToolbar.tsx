@@ -296,11 +296,11 @@ export default function MisClientImportToolbar({
           </>
         )}
 
-        {canManageImports && isBrowserOnVercel() && !misUploadUsesExternalHost() && (
+        {canManageImports && isBrowserOnVercel() && misUploadUsesExternalHost() && (
           <p className="w-full rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-900">
-            Vercel only accepts uploads up to ~4 MB. Large Coke/Cadbury files need the VPS upload
-            endpoint — set <code className="text-amber-950">NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL</code>{' '}
-            on Vercel (see scripts/vps-hosting/VERCEL_ENV.md).
+            Remove <code className="text-amber-950">NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL</code> from
+            Vercel and redeploy. Browser uploads to api.wrl-fsm.cloud fail with certificate errors;
+            large files are sent in chunks through this app instead.
           </p>
         )}
 

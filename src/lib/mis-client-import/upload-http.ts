@@ -11,9 +11,11 @@ export type MisUploadHttpResult = {
   body: Record<string, unknown>;
 };
 
-export async function handleMisClientUploadFormData(params: {
+export async function handleMisClientUploadBuffer(params: {
   userId: string;
-  formData: FormData;
+  sourceCode: string;
+  fileName: string;
+  buffer: Buffer;
 }): Promise<MisUploadHttpResult> {
   const userAuth = await queryUserAuth(params.userId);
   const email = userAuth?.profile?.email;
@@ -21,29 +23,21 @@ export async function handleMisClientUploadFormData(params: {
     return { status: 403, body: { error: 'Forbidden' } };
   }
 
-  const sourceCode = String(params.formData.get('sourceCode') ?? '').trim().toLowerCase();
-  const file = params.formData.get('file');
-
+  const sourceCode = params.sourceCode.trim().toLowerCase();
   if (!sourceCode) {
     return { status: 400, body: { error: 'sourceCode is required' } };
   }
-  if (!(file instanceof File) && !(file && typeof file === 'object' && 'arrayBuffer' in file)) {
-    return { status: 400, body: { error: 'file is required' } };
-  }
-
-  const uploadFile = file as File;
-  if (uploadFile.size > MIS_CLIENT_MAX_UPLOAD_BYTES) {
+  if (params.buffer.length > MIS_CLIENT_MAX_UPLOAD_BYTES) {
     return {
       status: 400,
-      body: { error: formatMisUploadTooLargeMessage(uploadFile.size) },
+      body: { error: formatMisUploadTooLargeMessage(params.buffer.length) },
     };
   }
 
-  const buffer = Buffer.from(await uploadFile.arrayBuffer());
   const result = await processClientMisUpload({
     sourceCode,
-    fileName: uploadFile.name,
-    buffer,
+    fileName: params.fileName,
+    buffer: params.buffer,
     uploadedBy: params.userId,
   });
 
@@ -71,4 +65,28 @@ export async function handleMisClientUploadFormData(params: {
       filterEnd: result.filterEnd,
     },
   };
+}
+
+export async function handleMisClientUploadFormData(params: {
+  userId: string;
+  formData: FormData;
+}): Promise<MisUploadHttpResult> {
+  const sourceCode = String(params.formData.get('sourceCode') ?? '').trim().toLowerCase();
+  const file = params.formData.get('file');
+
+  if (!sourceCode) {
+    return { status: 400, body: { error: 'sourceCode is required' } };
+  }
+  if (!(file instanceof File) && !(file && typeof file === 'object' && 'arrayBuffer' in file)) {
+    return { status: 400, body: { error: 'file is required' } };
+  }
+
+  const uploadFile = file as File;
+  const buffer = Buffer.from(await uploadFile.arrayBuffer());
+  return handleMisClientUploadBuffer({
+    userId: params.userId,
+    sourceCode,
+    fileName: uploadFile.name,
+    buffer,
+  });
 }

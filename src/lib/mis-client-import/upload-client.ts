@@ -3,17 +3,18 @@ import {
   formatMisVercelUploadTooLargeMessage,
   isBrowserOnVercel,
   misUploadUsesExternalHost,
-  resolveMisUploadEndpoint,
+  MIS_CLIENT_VERCEL_MAX_UPLOAD_BYTES,
   resolveMisUploadMaxBytes,
 } from '@/lib/mis-client-import/upload-limits';
+import {
+  MIS_UPLOAD_CHUNK_BYTES,
+  shouldUseChunkedMisUpload,
+} from '@/lib/mis-client-import/upload-chunk-constants';
 
 export function extractMisApiErrorMessage(data: unknown, status?: number): string {
   if (status === 413) {
-    if (isBrowserOnVercel() && !misUploadUsesExternalHost()) {
-      return (
-        'File exceeds Vercel hosting limit (~4 MB). ' +
-        'Set NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL on Vercel to upload large Coke/Cadbury files via VPS.'
-      );
+    if (isBrowserOnVercel()) {
+      return formatMisVercelUploadTooLargeMessage(MIS_CLIENT_VERCEL_MAX_UPLOAD_BYTES);
     }
     return 'Upload was rejected because the file is too large for this server.';
   }
@@ -46,7 +47,8 @@ export function extractMisApiErrorMessage(data: unknown, status?: number): strin
 export function validateMisUploadFileSize(file: File): string | null {
   const maxBytes = resolveMisUploadMaxBytes();
   if (file.size <= maxBytes) return null;
-  if (isBrowserOnVercel() && !misUploadUsesExternalHost()) {
+  if (shouldUseChunkedMisUpload(file.size)) return null;
+  if (isBrowserOnVercel()) {
     return formatMisVercelUploadTooLargeMessage(file.size);
   }
   const mb = (file.size / (1024 * 1024)).toFixed(1);
@@ -54,22 +56,56 @@ export function validateMisUploadFileSize(file: File): string | null {
   return `File is ${mb} MB. Maximum upload size is ${maxMb} MB.`;
 }
 
-export async function postMisClientUpload(params: {
+async function postMisClientUploadChunked(params: {
+  sourceCode: string;
+  file: File;
+  onProgress?: (sent: number, total: number) => void;
+}): Promise<Record<string, unknown>> {
+  const uploadId = crypto.randomUUID();
+  const chunkTotal = Math.max(1, Math.ceil(params.file.size / MIS_UPLOAD_CHUNK_BYTES));
+  let lastResponse: Record<string, unknown> = {};
+
+  for (let chunkIndex = 0; chunkIndex < chunkTotal; chunkIndex++) {
+    const start = chunkIndex * MIS_UPLOAD_CHUNK_BYTES;
+    const end = Math.min(params.file.size, start + MIS_UPLOAD_CHUNK_BYTES);
+    const blob = params.file.slice(start, end);
+
+    const formData = new FormData();
+    formData.append('uploadId', uploadId);
+    formData.append('chunkIndex', String(chunkIndex));
+    formData.append('chunkTotal', String(chunkTotal));
+    formData.append('sourceCode', params.sourceCode);
+    formData.append('fileName', params.file.name);
+    formData.append('chunk', blob, params.file.name);
+
+    const res = await axios.post('/api/mis-client-import/upload-chunk', formData, {
+      withCredentials: true,
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      timeout: 300_000,
+    });
+    lastResponse = res.data as Record<string, unknown>;
+    params.onProgress?.(end, params.file.size);
+  }
+
+  return lastResponse;
+}
+
+async function postMisClientUploadDirect(params: {
   sourceCode: string;
   file: File;
   accessToken?: string | null;
 }): Promise<Record<string, unknown>> {
-  const tooLarge = validateMisUploadFileSize(params.file);
-  if (tooLarge) {
-    throw new Error(tooLarge);
-  }
-
   const formData = new FormData();
   formData.append('sourceCode', params.sourceCode);
   formData.append('file', params.file);
 
-  const url = resolveMisUploadEndpoint();
   const external = misUploadUsesExternalHost();
+  const url = external
+    ? (process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL?.trim().replace(/\/$/, '') ??
+      '/api/mis-client-import/upload')
+    : '/api/mis-client-import/upload';
+
   const headers: Record<string, string> = {};
   if (external && params.accessToken) {
     headers.Authorization = `Bearer ${params.accessToken}`;
@@ -85,11 +121,38 @@ export async function postMisClientUpload(params: {
   return res.data as Record<string, unknown>;
 }
 
+export async function postMisClientUpload(params: {
+  sourceCode: string;
+  file: File;
+  accessToken?: string | null;
+  onProgress?: (sent: number, total: number) => void;
+}): Promise<Record<string, unknown>> {
+  const tooLarge = validateMisUploadFileSize(params.file);
+  if (tooLarge) {
+    throw new Error(tooLarge);
+  }
+
+  if (shouldUseChunkedMisUpload(params.file.size)) {
+    return postMisClientUploadChunked(params);
+  }
+
+  return postMisClientUploadDirect(params);
+}
+
 export async function readMisUploadError(err: unknown): Promise<string> {
   if (err instanceof Error && !axios.isAxiosError(err)) {
     return err.message;
   }
   if (axios.isAxiosError(err)) {
+    if (!err.response && err.code === 'ERR_NETWORK') {
+      if (misUploadUsesExternalHost()) {
+        return (
+          'Browser blocked the VPS upload (certificate error on api.wrl-fsm.cloud). ' +
+          'Remove NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL from Vercel, redeploy, and retry — large files use chunked upload through the app.'
+        );
+      }
+      return 'Network error during upload — check your connection and retry.';
+    }
     const status = err.response?.status;
     const data = err.response?.data;
     if (data instanceof Blob) {

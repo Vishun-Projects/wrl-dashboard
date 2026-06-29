@@ -51,18 +51,17 @@ Also copy from `.env.local`:
 
 ## Large MIS client imports (Coke / Cadbury)
 
-Vercel serverless functions reject request bodies **larger than ~4.5 MB** (HTTP **413**). Coke/Cadbury files are often 30–100 MB.
+Vercel rejects single request bodies **larger than ~4.5 MB** (HTTP **413**). Browsers also **cannot POST directly to `api.wrl-fsm.cloud`** from the Vercel app (TLS / certificate errors).
 
-1. On VPS: `npm run mis-upload:setup:vps` (systemd upload server + Caddy `320MB` route on `api.wrl-fsm.cloud`)
-2. On Vercel → **Environment Variables** → Production:
+**Do not set** `NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL` on Vercel — remove it if present, then redeploy.
 
-| Variable | Value |
-|----------|--------|
-| `NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL` | `https://api.wrl-fsm.cloud/api/mis-client-import/upload` |
+Large files are uploaded in **3 MB chunks** to `/api/mis-client-import/upload-chunk` on the same Vercel origin (no browser → VPS hop).
 
-3. **Redeploy** Vercel ( `NEXT_PUBLIC_*` is build-time)
+After deploy, apply DB migration if needed:
 
-Uploads from the Vercel app then POST to VPS with your Supabase Bearer token (CORS allowed for `wrl-dashboard.vercel.app`).
+```bash
+npm run db:apply-read-model:vps
+```
 
 
 `NEXT_PUBLIC_*` variables are **baked in at build time**. Changing env alone is not enough.
