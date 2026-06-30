@@ -351,7 +351,7 @@ export function PerformanceInsightsPanel() {
           <button
             type="button"
             onClick={() => void loadServerSnapshot('manual_refresh')}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-bg-canvas px-3 py-2 text-sm text-slate-700 hover:bg-bg-soft"
           >
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
             Refresh
@@ -369,7 +369,7 @@ export function PerformanceInsightsPanel() {
 
       <ReportFetchingBar active={loading} label="Refreshing server snapshot…" />
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5">
+      <section className="rounded-2xl border border-slate-200 bg-bg-canvas p-5">
         <h2 className="text-sm font-semibold text-slate-900 mb-3">Core Web Vitals (live)</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {(['LCP', 'INP', 'CLS', 'FCP', 'TTFB'] as VitalName[]).map((name) => {
@@ -377,7 +377,7 @@ export function PerformanceInsightsPanel() {
             return (
               <div
                 key={name}
-                className={`rounded-xl border px-4 py-3 ${entry ? ratingClass(entry.rating) : 'border-slate-200 bg-slate-50 text-slate-500'}`}
+                className={`rounded-xl border px-4 py-3 ${entry ? ratingClass(entry.rating) : 'border-slate-200 bg-bg-soft text-slate-500'}`}
               >
                 <div className="text-xs uppercase tracking-wide">{name}</div>
                 <div className="text-xl font-semibold mt-1">
@@ -395,7 +395,7 @@ export function PerformanceInsightsPanel() {
       </section>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+        <section className="rounded-2xl border border-slate-200 bg-bg-canvas p-5">
           <h2 className="text-sm font-semibold text-slate-900 mb-3">Navigation timing</h2>
           {navigationTiming ? (
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
@@ -411,14 +411,14 @@ export function PerformanceInsightsPanel() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+        <section className="rounded-2xl border border-slate-200 bg-bg-canvas p-5">
           <h2 className="text-sm font-semibold text-slate-900 mb-3">Resource summary</h2>
           <div className="text-sm text-slate-600 mb-3">
             {resourceSummary.count} resources · {formatBytes(resourceSummary.totalTransferSize)} transferred
           </div>
           <div className="space-y-2">
             {resourceSummary.slowest.map((entry) => (
-              <div key={`${entry.name}-${entry.duration}`} className="rounded-lg bg-slate-50 px-3 py-2 text-xs">
+              <div key={`${entry.name}-${entry.duration}`} className="rounded-lg bg-bg-soft px-3 py-2 text-xs">
                 <div className="font-medium text-slate-800 truncate">{entry.name}</div>
                 <div className="text-slate-500 mt-1">
                   {formatMs(entry.duration)} · {formatBytes(entry.transferSize)} · {entry.initiatorType}
@@ -429,14 +429,14 @@ export function PerformanceInsightsPanel() {
         </section>
       </div>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5">
+      <section className="rounded-2xl border border-slate-200 bg-bg-canvas p-5">
         <h2 className="text-sm font-semibold text-slate-900 mb-3">Long tasks (&gt;50ms)</h2>
         {longTasks.length === 0 ? (
           <p className="text-sm text-slate-500">No long tasks recorded on this page load yet.</p>
         ) : (
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {longTasks.map((task, index) => (
-              <div key={`${task.startTime}-${index}`} className="rounded-lg bg-slate-50 px-3 py-2 text-xs">
+              <div key={`${task.startTime}-${index}`} className="rounded-lg bg-bg-soft px-3 py-2 text-xs">
                 <div className="font-medium text-slate-800">{task.name || 'longtask'}</div>
                 <div className="text-slate-500 mt-1">
                   {formatMs(task.duration)} at {formatMs(task.startTime)}
@@ -447,7 +447,7 @@ export function PerformanceInsightsPanel() {
         )}
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5">
+      <section className="rounded-2xl border border-slate-200 bg-bg-canvas p-5">
         <h2 className="text-sm font-semibold text-slate-900 mb-3">Server health snapshot</h2>
         {serverError && <p className="text-sm text-rose-600 mb-3">{serverError}</p>}
         <pre className="max-h-80 overflow-auto rounded-xl bg-slate-950 p-4 text-xs text-slate-100">
@@ -455,7 +455,7 @@ export function PerformanceInsightsPanel() {
         </pre>
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5">
+      <section className="rounded-2xl border border-slate-200 bg-bg-canvas p-5">
         <h2 className="text-sm font-semibold text-slate-900 mb-3">Vercel dashboards</h2>
         <p className="text-sm text-slate-500 mb-4">
           Speed Insights and Web Analytics aggregate RUM data across all users in the Vercel project.
@@ -465,7 +465,7 @@ export function PerformanceInsightsPanel() {
             href="https://vercel.com/dashboard"
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-bg-soft"
           >
             Vercel project dashboards
             <ExternalLink size={14} />

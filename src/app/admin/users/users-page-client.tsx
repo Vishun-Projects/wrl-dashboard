@@ -120,7 +120,7 @@ export default function AdminUsersPage() {
   const router = useRouter();
 
   const inputClass = (hasError: boolean) =>
-    `w-full h-9 bg-white border rounded-md px-3 text-[13px] transition-all focus:outline-none focus:ring-2 ${
+    `w-full h-9 bg-bg-canvas border rounded-md px-3 text-[13px] transition-all focus:outline-none focus:ring-2 ${
       hasError
         ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500/20'
         : 'border-slate-200 focus:ring-indigo-500/20 focus:border-indigo-500'
@@ -337,7 +337,7 @@ export default function AdminUsersPage() {
       title="User Management"
       subtitle="Manage portal accounts, roles, and branch access"
       icon={<Users size={16} />}
-      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-soft"
       toolbar={
         <AdminToolbar
           search={search}
@@ -467,10 +467,10 @@ export default function AdminUsersPage() {
         <ModalPortal open={showAddModal}>
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
           <ModalBackdrop onClick={() => setShowAddModal(false)} />
-          <div className="relative z-[1] flex min-h-[520px] w-full max-w-3xl overflow-hidden rounded-xl border border-slate-200 bg-white animate-in zoom-in-95 duration-200">
+          <div className="relative z-[1] flex min-h-[520px] w-full max-w-3xl overflow-hidden rounded-xl border border-slate-200 bg-bg-canvas animate-in zoom-in-95 duration-200">
             
             {/* Sidebar Navigation */}
-            <div className="w-56 bg-slate-50 border-r border-slate-200 flex flex-col">
+            <div className="w-56 bg-bg-soft border-r border-slate-200 flex flex-col">
               <div className="p-5 border-b border-slate-200">
                 <h2 className="text-base font-medium text-slate-900">
                   {editingUser ? 'Edit User' : 'New User'}
@@ -486,7 +486,7 @@ export default function AdminUsersPage() {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id as any)}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-colors ${ activeTab === tab.id ? 'bg-white text-indigo-600 shadow-sm border border-slate-200' : 'text-slate-600 hover:bg-slate-100' }`}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-colors ${ activeTab === tab.id ? 'bg-bg-canvas text-indigo-600 shadow-sm border border-slate-200' : 'text-slate-600 hover:bg-slate-100' }`}
                   >
                     <tab.icon size={16} />
                     {tab.label}
@@ -494,7 +494,7 @@ export default function AdminUsersPage() {
                 ))}
               </nav>
 
-              <div className="p-4 border-t border-slate-200 bg-white/50 space-y-3">
+              <div className="p-4 border-t border-slate-200 bg-bg-canvas/50 space-y-3">
                 {!editingUser && (
                   <div>
                     <div className="text-[10px] font-medium text-slate-500 mb-2">Required to create</div>
@@ -537,7 +537,7 @@ export default function AdminUsersPage() {
             </div>
 
             {/* Main Content Area */}
-            <div className="flex-1 flex flex-col bg-white">
+            <div className="flex-1 flex flex-col bg-bg-canvas">
               {/* Content Header */}
               <div className="h-14 px-6 border-b border-slate-100 flex items-center justify-between">
                 <span className="text-[13px] font-medium text-slate-700">
@@ -586,7 +586,7 @@ export default function AdminUsersPage() {
                           type="email"
                           disabled={!!editingUser}
                           aria-invalid={showValidation && !!formErrors.email}
-                          className={`${inputClass(showValidation && !!formErrors.email)} disabled:bg-slate-50 disabled:text-slate-500`}
+                          className={`${inputClass(showValidation && !!formErrors.email)} disabled:bg-bg-soft disabled:text-slate-500`}
                           value={formData.email}
                           onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                         />
@@ -660,7 +660,7 @@ export default function AdminUsersPage() {
                           return (
                             <button
                               key={status} type="button" onClick={() => toggleStatus(status)}
-                              className={`px-3 py-1.5 rounded-md text-[12px] font-medium border transition-all ${ isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300' }`}
+                              className={`px-3 py-1.5 rounded-md text-[12px] font-medium border transition-all ${ isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' : 'bg-bg-canvas border-slate-200 text-slate-600 hover:border-slate-300' }`}
                             >
                               {status}
                             </button>
@@ -692,12 +692,12 @@ export default function AdminUsersPage() {
                         branches. Select specific branches to limit which offices this user can see.
                       </p>
                       <div className="border border-slate-200 rounded-lg overflow-hidden">
-                        <div className="p-2 bg-slate-50 border-b border-slate-200">
+                        <div className="p-2 bg-bg-soft border-b border-slate-200">
                           <div className="relative">
                             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
                             <input 
                               placeholder="Filter branches..."
-                              className="w-full h-8 bg-white border border-slate-200 rounded pl-8 pr-3 text-[12px] focus:outline-none focus:border-indigo-500"
+                              className="w-full h-8 bg-bg-canvas border border-slate-200 rounded pl-8 pr-3 text-[12px] focus:outline-none focus:border-indigo-500"
                               value={branchSearch}
                               onChange={(e) => setBranchSearch(e.target.value)}
                             />
@@ -719,7 +719,7 @@ export default function AdminUsersPage() {
               </form>
 
               {/* Action Footer */}
-              <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50/50">
+              <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-end gap-3 bg-bg-soft/50">
                 <button
                   type="button"
                   onClick={() => {
@@ -755,7 +755,7 @@ export default function AdminUsersPage() {
         <ModalPortal open={showPasswordModal}>
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
           <ModalBackdrop onClick={() => setShowPasswordModal(false)} />
-          <div className="relative z-[1] w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+          <div className="relative z-[1] w-full max-w-md rounded-xl border border-slate-200 bg-bg-canvas p-6 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-amber-600">
@@ -781,7 +781,7 @@ export default function AdminUsersPage() {
                   required type="password"
                   autoFocus
                   placeholder="Enter new secure password"
-                  className="w-full h-10 bg-white border border-slate-200 rounded-lg px-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                  className="w-full h-10 bg-bg-canvas border border-slate-200 rounded-lg px-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                 />

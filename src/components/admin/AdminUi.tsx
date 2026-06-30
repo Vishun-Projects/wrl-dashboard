@@ -42,7 +42,7 @@ export function AdminToolbar({
 
 export function AdminStatPill({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[11px] shadow-sm">
+    <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-bg-canvas px-3 py-1.5 text-[11px] shadow-sm">
       <span className="text-slate-400">{label}</span>
       <span className="font-semibold text-slate-800">{value}</span>
     </div>
@@ -63,7 +63,7 @@ export function AdminTableCard({
   const reducedMotion = usePrefersReducedMotion();
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-bg-canvas shadow-sm">
       {isEmpty ? (
         <motion.div
           className="flex flex-1 flex-col items-center justify-center gap-2 p-12 text-center"
@@ -113,7 +113,7 @@ export function AdminTable({
 
 export function AdminThead({ children }: { children: React.ReactNode }) {
   return (
-    <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50">
+    <thead className="sticky top-0 z-10 border-b border-slate-200 bg-bg-soft">
       {children}
     </thead>
   );
@@ -150,7 +150,7 @@ export function AdminTr({
 }) {
   return (
     <tr
-      className={`border-b border-slate-100 transition-colors hover:bg-slate-50/80 ${
+      className={`border-b border-slate-100 transition-colors hover:bg-bg-soft/80 ${
         onClick ? 'cursor-pointer' : ''
       } ${className}`}
       onClick={onClick}
@@ -184,7 +184,7 @@ export function RoleBadge({ name, isHod }: { name: string; isHod?: boolean }) {
       className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold ${
         isHod
           ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
-          : 'border-slate-200 bg-slate-50 text-slate-600'
+          : 'border-slate-200 bg-bg-soft text-slate-600'
       }`}
     >
       {name}
@@ -212,7 +212,7 @@ export function ChipList({
   const chipClass =
     variant === 'indigo'
       ? 'border-indigo-100 bg-indigo-50 text-indigo-700'
-      : 'border-slate-200 bg-slate-50 text-slate-600';
+      : 'border-slate-200 bg-bg-soft text-slate-600';
 
   if (expanded || items.length <= maxVisible) {
     return (
@@ -256,7 +256,7 @@ export function ChipList({
       <button
         type="button"
         onClick={() => setExpanded(true)}
-        className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+        className="rounded border border-slate-200 bg-bg-canvas px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-bg-soft"
       >
         +{rest} more
       </button>
@@ -280,7 +280,7 @@ export function AdminIconButton({
       ? 'hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700'
       : variant === 'danger'
         ? 'hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600'
-        : 'hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900';
+        : 'hover:border-slate-300 hover:bg-bg-soft hover:text-slate-900';
 
   return (
     <button
@@ -307,7 +307,7 @@ export function SettingsLayout({
 }) {
   return (
     <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col gap-4 p-6">
-      <div className="flex gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+      <div className="flex gap-1 rounded-lg border border-slate-200 bg-bg-canvas p-1 shadow-sm">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -316,7 +316,7 @@ export function SettingsLayout({
             className={`flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition-colors ui-label ${
               activeTab === tab.id
                 ? 'bg-slate-900 text-white'
-                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                : 'text-slate-500 hover:bg-bg-soft hover:text-slate-800'
             }`}
           >
             {tab.icon}
@@ -341,14 +341,14 @@ export function SettingsCard({
   footer?: React.ReactNode;
 }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-bg-canvas shadow-sm">
       <div className="border-b border-slate-100 px-6 py-4">
-        <h2 className="text-sm text-slate-900 ui-strong">{title}</h2>
-        {description ? <p className="mt-0.5 text-[11px] text-slate-500">{description}</p> : null}
+        <h2 className="text-sm text-fg-primary ui-strong">{title}</h2>
+        {description ? <p className="mt-0.5 text-[11px] text-fg-muted">{description}</p> : null}
       </div>
       <div className="px-6 py-5">{children}</div>
       {footer ? (
-        <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/50 px-6 py-3">
+        <div className="flex justify-end gap-2 border-t border-slate-100 bg-bg-soft/50 px-6 py-3">
           {footer}
         </div>
       ) : null}
@@ -372,7 +372,7 @@ export function SettingsField({
 }
 
 export function settingsInputClass(disabled = false) {
-  return `h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-[13px] text-slate-900 outline-none transition-colors focus:border-slate-400 focus:ring-1 focus:ring-slate-200 ${
-    disabled ? 'cursor-not-allowed bg-slate-50 text-slate-400' : ''
+  return `h-9 w-full rounded-md border border-slate-200 bg-bg-canvas px-3 text-[13px] text-fg-primary outline-none transition-colors focus:border-slate-400 focus:ring-1 focus:ring-slate-200 ${
+    disabled ? 'cursor-not-allowed bg-bg-soft text-slate-400' : ''
   }`;
 }

@@ -246,7 +246,9 @@ async function queryDedupedRows(params: ClientAggregateParams): Promise<DbRow[]>
     const res = await client.query<DbRow>(
       `
       SELECT DISTINCT ON (r.source_id, r.call_key)
-        r.region, s.name AS account, r.branch_label, r.logged_at, r.status_bucket, r.is_part_pending, r.engineer_name
+        r.region,
+        COALESCE(NULLIF(TRIM(s.crm_account_filter), ''), s.name) AS account,
+        r.branch_label, r.logged_at, r.status_bucket, r.is_part_pending, r.engineer_name
       FROM mis_client_import_rows r
       JOIN mis_client_import_batches b ON b.batch_id = r.batch_id
       JOIN mis_client_sources s ON s.id = r.source_id

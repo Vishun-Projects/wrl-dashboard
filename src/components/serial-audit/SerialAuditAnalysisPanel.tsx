@@ -77,7 +77,7 @@ function InvolvementTable({
         <col style={{ width: '14%' }} />
       </colgroup>
       <thead>
-        <tr className="border-b border-slate-200 bg-slate-50">
+        <tr className="border-b border-slate-200 bg-bg-soft">
           <InvolvementColumnHeader label="ASP — Technician" help={INVOLVEMENT_COLUMN_HELP.asp} />
           <InvolvementColumnHeader
             label="M/C's"
@@ -214,7 +214,7 @@ export function SerialAuditAnalysisPanel({
   const rankOffset = (page - 1) * pageSize;
 
   return (
-    <section className="flex min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:max-h-full">
+    <section className="flex min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-bg-canvas shadow-sm lg:max-h-full">
       <div className="shrink-0 border-b border-slate-100 px-3 py-2.5">
         <div className="flex items-start gap-2">
           <div className="rounded-md bg-amber-50 p-1.5 text-amber-700">
@@ -271,7 +271,7 @@ export function SerialAuditAnalysisPanel({
             <select
               value={pageSize}
               onChange={(e) => setPageSize(Number(e.target.value) as SerialAuditInvolvementPageSize)}
-              className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-700"
+              className="rounded border border-slate-200 bg-bg-canvas px-1.5 py-0.5 text-[10px] font-medium text-slate-700"
             >
               {pageSizeOptions.map((size) => (
                 <option key={size} value={size}>
@@ -289,7 +289,7 @@ export function SerialAuditAnalysisPanel({
                 type="button"
                 disabled={page <= 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="rounded border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                className="rounded border border-slate-200 bg-bg-canvas p-1 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
                 aria-label="Previous page"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
@@ -301,7 +301,7 @@ export function SerialAuditAnalysisPanel({
                 type="button"
                 disabled={page >= totalPages}
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                className="rounded border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                className="rounded border border-slate-200 bg-bg-canvas p-1 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
                 aria-label="Next page"
               >
                 <ChevronRight className="h-3.5 w-3.5" />

@@ -20,18 +20,48 @@ export function mergeFlagsFromSelection(selection: MisSourceSelection): MergeSel
   };
 }
 
+export type ClientMergeWithCrmPrefs = {
+  cadbury: boolean;
+  coke: boolean;
+};
+
+export const DEFAULT_CLIENT_MERGE_WITH_CRM: ClientMergeWithCrmPrefs = {
+  cadbury: false,
+  coke: false,
+};
+
 export function isCadburyAccount(account: string): boolean {
   return account.trim().toLowerCase() === 'cadbury';
 }
 
-/** Per-account merge flags — Cadbury defaults to import-only unless merge-with-CRM is enabled. */
+export function isCokeAccount(account: string): boolean {
+  return account.trim().toLowerCase() === 'coke';
+}
+
+/** Coke / Cadbury client-import rows on Key Account (case-insensitive). */
+export function isClientImportAccount(account: string): boolean {
+  const key = account.trim().toLowerCase();
+  return key === 'cadbury' || key === 'coke';
+}
+
+function mergeWithCrmForAccount(
+  account: string,
+  prefs: ClientMergeWithCrmPrefs
+): boolean {
+  const key = account.trim().toLowerCase();
+  if (key === 'cadbury') return prefs.cadbury;
+  if (key === 'coke') return prefs.coke;
+  return false;
+}
+
+/** Per-account merge flags — client-import accounts default to import-only unless merge-with-CRM is enabled. */
 export function accountMergeFlags(
   account: string,
   globalFlags: MergeSelection,
-  cadburyMergeWithCrm: boolean
+  clientMergeWithCrm: ClientMergeWithCrmPrefs
 ): MergeSelection {
-  if (!isCadburyAccount(account)) return globalFlags;
-  if (cadburyMergeWithCrm) return globalFlags;
+  if (!isClientImportAccount(account)) return globalFlags;
+  if (mergeWithCrmForAccount(account, clientMergeWithCrm)) return globalFlags;
   return { crm: false, client: globalFlags.client };
 }
 
@@ -39,11 +69,11 @@ export function accountRowScore(
   row: Record<string, unknown>,
   clientAccounts: Array<Record<string, unknown>> | undefined,
   globalMergeFlags: MergeSelection,
-  cadburyMergeWithCrm: boolean
+  clientMergeWithCrm: ClientMergeWithCrmPrefs
 ): number {
   const account = String(row.account ?? '');
   const region = String(row.region ?? '');
-  const flags = accountMergeFlags(account, globalMergeFlags, cadburyMergeWithCrm);
+  const flags = accountMergeFlags(account, globalMergeFlags, clientMergeWithCrm);
   const client = findAccountMetric(clientAccounts, region, account, 'total_calls');
   return mergeSelectedMetrics(Number(row.total_calls ?? 0), client, flags);
 }
@@ -96,13 +126,13 @@ export function sumMergedAccountMetric(
   clientAccounts: Array<Record<string, unknown>> | undefined,
   field: string,
   globalMergeFlags: MergeSelection,
-  cadburyMergeWithCrm: boolean,
+  clientMergeWithCrm: ClientMergeWithCrmPrefs,
   byAccountOnly = false
 ): number {
   return accounts.reduce((sum, a) => {
     const account = String(a.account ?? '');
     const region = String(a.region ?? '');
-    const flags = accountMergeFlags(account, globalMergeFlags, cadburyMergeWithCrm);
+    const flags = accountMergeFlags(account, globalMergeFlags, clientMergeWithCrm);
     const client = byAccountOnly
       ? findAccountMetricByAccount(clientAccounts, account, field)
       : findAccountMetric(clientAccounts, region, account, field);
@@ -123,14 +153,14 @@ export function sumMergedAccountMetricByRegion(
   region: string,
   field: string,
   globalMergeFlags: MergeSelection,
-  cadburyMergeWithCrm: boolean
+  clientMergeWithCrm: ClientMergeWithCrmPrefs
 ): number {
   return sumMergedAccountMetric(
     accountsInRegion(accounts, region),
     clientAccounts,
     field,
     globalMergeFlags,
-    cadburyMergeWithCrm
+    clientMergeWithCrm
   );
 }
 
@@ -139,7 +169,7 @@ export function sumMergedAccountOpenCallsByRegion(
   clientAccounts: Array<Record<string, unknown>> | undefined,
   region: string,
   globalMergeFlags: MergeSelection,
-  cadburyMergeWithCrm: boolean
+  clientMergeWithCrm: ClientMergeWithCrmPrefs
 ): number {
   const agingFields = ['age_2', 'age_3', 'age_7', 'age_15'] as const;
   return agingFields.reduce(
@@ -151,13 +181,13 @@ export function sumMergedAccountOpenCallsByRegion(
         region,
         field,
         globalMergeFlags,
-        cadburyMergeWithCrm
+        clientMergeWithCrm
       ),
     0
   );
 }
 
-/** Summary dashboard cells — match Key Account per-account Cadbury merge rules. */
+/** Summary dashboard cells — match Key Account per-account client-import merge rules. */
 export function resolveSummaryRegionMetric(
   alignCrmToAccounts: boolean,
   accounts: Array<Record<string, unknown>>,
@@ -165,7 +195,7 @@ export function resolveSummaryRegionMetric(
   region: string,
   field: string,
   globalMergeFlags: MergeSelection,
-  cadburyMergeWithCrm: boolean,
+  clientMergeWithCrm: ClientMergeWithCrmPrefs,
   crmFallback: number,
   clientFallback: number
 ): { mergeSelection: MergeSelection; crm: number; client: number } {
@@ -178,7 +208,7 @@ export function resolveSummaryRegionMetric(
         region,
         field,
         globalMergeFlags,
-        cadburyMergeWithCrm
+        clientMergeWithCrm
       ),
       client: 0,
     };
@@ -192,7 +222,7 @@ export function resolveSummaryRegionOpenCalls(
   clientAccounts: Array<Record<string, unknown>> | undefined,
   region: string,
   globalMergeFlags: MergeSelection,
-  cadburyMergeWithCrm: boolean,
+  clientMergeWithCrm: ClientMergeWithCrmPrefs,
   crmFallback: number,
   clientFallback: number
 ): { mergeSelection: MergeSelection; crm: number; client: number } {
@@ -204,7 +234,7 @@ export function resolveSummaryRegionOpenCalls(
         clientAccounts,
         region,
         globalMergeFlags,
-        cadburyMergeWithCrm
+        clientMergeWithCrm
       ),
       client: 0,
     };
@@ -216,7 +246,7 @@ export function sumMergedAccountOpenCalls(
   accounts: Array<Record<string, unknown>>,
   clientAccounts: Array<Record<string, unknown>> | undefined,
   globalMergeFlags: MergeSelection,
-  cadburyMergeWithCrm: boolean,
+  clientMergeWithCrm: ClientMergeWithCrmPrefs,
   byAccountOnly = false
 ): number {
   const agingFields = ['age_2', 'age_3', 'age_7', 'age_15'] as const;
@@ -228,7 +258,7 @@ export function sumMergedAccountOpenCalls(
         clientAccounts,
         field,
         globalMergeFlags,
-        cadburyMergeWithCrm,
+        clientMergeWithCrm,
         byAccountOnly
       ),
     0

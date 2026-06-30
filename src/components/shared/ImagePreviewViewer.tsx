@@ -195,7 +195,7 @@ export function ImagePreviewViewer({ src, title, onClose }: ImagePreviewViewerPr
             <ZoomIn size={18} aria-hidden />
           </ToolbarButton>
 
-          <span className="mx-1 hidden h-5 w-px bg-white/15 sm:inline" aria-hidden />
+          <span className="mx-1 hidden h-5 w-px bg-bg-canvas/15 sm:inline" aria-hidden />
 
           <ToolbarButton label="Rotate left" shortcut="Shift+R" onClick={() => rotateBy(-90)}>
             <RotateCcw size={18} aria-hidden />
@@ -207,7 +207,7 @@ export function ImagePreviewViewer({ src, title, onClose }: ImagePreviewViewerPr
             <span className="text-[10px] font-semibold">Reset</span>
           </ToolbarButton>
 
-          <span className="mx-1 hidden h-5 w-px bg-white/15 sm:inline" aria-hidden />
+          <span className="mx-1 hidden h-5 w-px bg-bg-canvas/15 sm:inline" aria-hidden />
 
           <ToolbarButton
             label="Open image in new tab"
@@ -220,7 +220,7 @@ export function ImagePreviewViewer({ src, title, onClose }: ImagePreviewViewerPr
             download
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-white/80 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-white/80 transition-colors hover:bg-bg-canvas/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
             aria-label="Download image"
             onClick={(e) => e.stopPropagation()}
           >
@@ -281,7 +281,7 @@ function ToolbarButton({
       aria-label={shortcut ? `${label}, shortcut ${shortcut}` : label}
       disabled={disabled}
       onClick={onClick}
-      className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-white/80 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-40"
+      className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-white/80 transition-colors hover:bg-bg-canvas/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-40"
     >
       {children}
     </button>

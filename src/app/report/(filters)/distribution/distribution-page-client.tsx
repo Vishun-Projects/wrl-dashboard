@@ -618,7 +618,7 @@ export default function CallDistributionPage() {
 
         // HTML Tooltip contents (Premium Light Mode styling)
         const popupContent = `
-          <div class="p-2.5 text-slate-800 font-sans min-w-[220px] bg-white rounded-xl border border-slate-200/80 shadow-xl">
+          <div class="p-2.5 text-slate-800 font-sans min-w-[220px] bg-bg-canvas rounded-xl border border-slate-200/80 shadow-xl">
             <h4 class="font-bold border-b border-slate-100 pb-1.5 mb-1.5 flex justify-between items-center text-xs text-slate-900">
               <span>Pincode: <b class="text-teal-650">${pin.pincode}</b></span>
               <span class="px-1.5 py-0.5 rounded-full text-[9px] bg-slate-100 text-slate-650 font-bold">Cluster</span>
@@ -852,7 +852,7 @@ export default function CallDistributionPage() {
       <PageShell
         title="Call Distribution Audit"
         icon={<LucideMap size={16} className="text-teal-600" />}
-        bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
+        bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-soft"
       >
         <ReportPageSkeleton />
       </PageShell>
@@ -864,7 +864,7 @@ export default function CallDistributionPage() {
       title="Call Distribution Audit"
       subtitle=""
       icon={<LucideMap size={16} className="text-teal-600" />}
-      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-soft"
       toolbar={
         <RegisterPageFilters
           onClearAll={() => {
@@ -887,7 +887,7 @@ export default function CallDistributionPage() {
           <button
             onClick={() => void refetchDistribution()}
             disabled={distributionLoading}
-            className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-50 disabled:opacity-50 ui-label"
+            className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-bg-canvas px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition-all hover:bg-bg-soft disabled:opacity-50 ui-label"
           >
             <RefreshCw size={13} className={distributionLoading ? 'animate-spin' : ''} />
             Refresh
@@ -905,12 +905,12 @@ export default function CallDistributionPage() {
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
 
         {/* Left Side: Call Distribution Map */}
-        <div className={`${showMap ? 'w-full lg:w-1/2 h-[350px] lg:h-full border-r' : 'hidden'} relative border-slate-200/80 bg-slate-50 flex-shrink-0`}>
+        <div className={`${showMap ? 'w-full lg:w-1/2 h-[350px] lg:h-full border-r' : 'hidden'} relative border-slate-200/80 bg-bg-soft flex-shrink-0`}>
           <div ref={mapRef} className="w-full h-full z-10" />
 
           {/* Simple overlay when Map is not ready */}
           {!mapReady ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 bg-slate-50 text-slate-450 gap-3 z-20">
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 bg-bg-soft text-slate-450 gap-3 z-20">
               <div className="w-7 h-7 border-3 border-teal-600 border-t-transparent rounded-full animate-spin" />
               <div className="text-center space-y-0.5">
                 <p className="text-xs font-bold text-slate-700">
@@ -924,7 +924,7 @@ export default function CallDistributionPage() {
           ) : null}
 
           {/* Floating Map Indicators */}
-          <div className="absolute bottom-4 left-4 z-[500] p-3 rounded-xl bg-white border border-slate-200/80 backdrop-blur shadow-lg flex flex-col gap-2 pointer-events-none">
+          <div className="absolute bottom-4 left-4 z-[500] p-3 rounded-xl bg-bg-canvas border border-slate-200/80 backdrop-blur shadow-lg flex flex-col gap-2 pointer-events-none">
             <span className="text-[9px] uppercase tracking-wider text-slate-500 font-extrabold">Capacity Health Index</span>
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/20" />
@@ -942,7 +942,7 @@ export default function CallDistributionPage() {
         </div>
 
         {/* Right Side: KPIs and Tables */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg-canvas">
 
           {/* Stat summary — MIS Register counts + distribution-specific metrics */}
           <div className="shrink-0 border-b border-slate-200 px-3 py-2">
@@ -1003,7 +1003,7 @@ export default function CallDistributionPage() {
             </button>
           </div>
           {/* {!rosterBranchId && (
-            <p className="distribution-idle-hint border-b border-slate-200 bg-slate-50/90 px-4 py-1.5 text-[10px] text-slate-500">
+            <p className="distribution-idle-hint border-b border-slate-200 bg-bg-soft/90 px-4 py-1.5 text-[10px] text-slate-500">
               Select a branch to list roster members with zero allocations (one roster load per branch, cached).
             </p>
           )} */}

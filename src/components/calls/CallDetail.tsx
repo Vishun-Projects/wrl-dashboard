@@ -229,7 +229,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
   };
 
   return (
-    <div className="flex flex-col h-full bg-white font-sans w-full overflow-hidden relative">
+    <div className="call-detail-root flex flex-col h-full bg-bg-canvas font-sans w-full overflow-hidden relative">
       {/* Swipe Feedback Overlay */}
       {Math.abs(swipeOffset) > 20 && (
         <div
@@ -238,10 +238,10 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
             backgroundColor: swipeOffset > 0 ? 'rgba(244, 63, 94, 0.1)' : 'rgba(16, 185, 129, 0.1)'
           }}
         >
-          <div className={`p-6 rounded-full bg-white shadow-2xl scale-[1.5] transition-transform ${Math.abs(swipeOffset) > minSwipeDistance ? 'scale-[2]' : ''}`}>
+          <div className={`p-6 rounded-full bg-bg-canvas shadow-2xl scale-[1.5] transition-transform ${Math.abs(swipeOffset) > minSwipeDistance ? 'scale-[2]' : ''}`}>
             {swipeOffset > 0 ? <XCircle size={32} className="text-rose-500" /> : <CheckCircle size={32} className="text-emerald-500" />}
           </div>
-          <div className="absolute bottom-24 text-[14px] text-slate-900 bg-white px-4 py-2 rounded-full shadow-lg ui-strong">
+          <div className="absolute bottom-24 text-[14px] text-slate-900 bg-bg-canvas px-4 py-2 rounded-full shadow-lg ui-strong">
             {swipeOffset > 0 ? 'Swipe Right to Reject' : 'Swipe Left to Approve'}
           </div>
         </div>
@@ -249,8 +249,8 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
 
       {/* Reason Prompt Modal */}
       {pendingAction !== 'none' && (
-        <div className="absolute inset-0 z-[200] bg-slate-900/60 flex items-end sm:items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-md rounded-[32px] p-6 shadow-2xl animate-in slide-in-from-bottom-full duration-300">
+        <div className="modal-backdrop modal-backdrop--strong absolute inset-0 z-[200] flex items-end sm:items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="call-detail-modal-surface bg-bg-canvas w-full max-w-md rounded-[32px] p-6 shadow-2xl animate-in slide-in-from-bottom-full duration-300">
             <div className="flex items-center gap-3 mb-4">
               <div className={`p-2 rounded-xl ${pendingAction === 'reject' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'}`}>
                 <AlertCircle size={24} />
@@ -261,7 +261,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
             </div>
             <textarea
               autoFocus
-              className="w-full h-32 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm font-medium outline-none focus:border-slate-400 transition-all resize-none mb-4"
+              className="call-detail-textarea w-full h-32 bg-bg-soft border border-slate-200 rounded-2xl p-4 text-sm font-medium outline-none focus:border-slate-400 transition-all resize-none mb-4"
               placeholder={`Why are you ${pendingAction === 'reject' ? 'rejecting' : 'holding'} this ticket?`}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
@@ -269,14 +269,14 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
             <div className="flex gap-3">
               <button
                 onClick={() => { setPendingAction('none'); setReason(''); }}
-                className="flex-1 py-4 text-sm text-slate-500 hover:bg-slate-50 rounded-2xl transition-all ui-label"
+                className="call-detail-action call-detail-action--cancel flex-1 py-4 text-sm text-slate-500 hover:bg-bg-soft rounded-2xl transition-all ui-label"
               >
                 Cancel
               </button>
               <button
                 onClick={() => handleStatusUpdate(pendingAction === 'reject' ? 'escalate' : 'query', reason)}
                 disabled={!reason.trim()}
-                className={`flex-1 py-4 text-sm text-white rounded-2xl shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 ${pendingAction === 'reject' ? 'bg-rose-600 shadow-rose-100' : 'bg-amber-500 shadow-amber-100'} ui-label`}
+                className={`call-detail-action flex-1 py-4 text-sm text-white rounded-2xl shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 ${pendingAction === 'reject' ? 'call-detail-action--reject bg-rose-600 shadow-rose-100' : 'call-detail-action--hold bg-amber-500 shadow-amber-100'} ui-label`}
               >
                 Confirm {pendingAction === 'reject' ? 'Reject' : 'Hold'}
               </button>
@@ -294,7 +294,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
       ) : null}
 
       {/* Header Area */}
-      <div className="px-6 py-4 flex-shrink-0 border-b border-slate-100 bg-white">
+      <div className="px-6 py-4 flex-shrink-0 border-b border-slate-100 bg-bg-canvas">
         <div className="flex items-start justify-between">
           <div className="flex flex-col">
             <div className="flex items-center gap-3 mb-1">
@@ -329,7 +329,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-full transition-all"
+              className="p-2 text-slate-400 hover:text-slate-600 hover:bg-bg-soft rounded-full transition-all"
             >
               <X size={20} />
             </button>
@@ -365,11 +365,11 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                 <button
                   key={t.id}
                   onClick={() => setActiveTab(t.id)}
-                  className={`flex items-center gap-1 px-4 py-3.5 text-[13px] font-medium transition-all border-b-2 -mb-px whitespace-nowrap ${activeTab === t.id ? 'text-slate-900 border-slate-900' : 'text-slate-400 border-transparent hover:text-slate-600'}`}
+                  className={`call-detail-tab flex items-center gap-1 px-4 py-3.5 text-[13px] font-medium transition-all border-b-2 -mb-px whitespace-nowrap ${activeTab === t.id ? 'call-detail-tab--active text-slate-900 border-slate-900' : 'text-slate-400 border-transparent hover:text-slate-600'}`}
                 >
                   {t.label}
                   {t.count !== undefined && (
-                    <span className={`text-[10px] rounded-md px-1.5 py-0.5 min-w-[20px] text-center ${activeTab === t.id ? 'bg-slate-100 text-slate-900' : 'bg-slate-50 text-slate-400'} border border-slate-200 ui-label`}>
+                    <span className={`text-[10px] rounded-md px-1.5 py-0.5 min-w-[20px] text-center ${activeTab === t.id ? 'bg-slate-100 text-slate-900' : 'bg-bg-soft text-slate-400'} border border-slate-200 ui-label`}>
                       {t.count}
                     </span>
                   )}
@@ -405,7 +405,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
 
                   <div className="space-y-2">
                     <div className="text-[11px] text-slate-400 ui-label">Complaint</div>
-                    <div className="p-3.5 bg-slate-50 rounded-lg text-[13px] text-slate-500 italic border border-slate-100">
+                    <div className="p-3.5 bg-bg-soft rounded-lg text-[13px] text-slate-500 italic border border-slate-100">
                       {call.complaint_label || 'No description provided'}
                     </div>
                   </div>
@@ -413,7 +413,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                   {isMobile && (
                     <div className="space-y-2 border-t border-slate-50 pt-6">
                       <div className="text-[11px] text-slate-400 ui-label">Lifecycle Timeline</div>
-                      <div className="bg-slate-50/50 p-4 rounded-2xl space-y-3">
+                      <div className="bg-bg-soft/50 p-4 rounded-2xl space-y-3">
                         <TimelineItem label="Logged" date={call.logged_at} />
                         {call.started_at && <TimelineItem label="Started" date={call.started_at} />}
                         {call.resolved_at && <TimelineItem label="Solved" date={call.resolved_at} highlight />}
@@ -426,7 +426,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                 <div className="space-y-4">
                   {(call.visits || []).length > 0 ? (
                     call.visits.map((v: any, i: number) => (
-                      <div key={i} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+                      <div key={i} className="bg-bg-canvas p-4 rounded-xl border border-slate-100 shadow-sm">
                         <div className="flex items-center justify-between mb-3">
                           <span className="text-[11px] text-slate-900 ui-label">Visit #{i + 1}</span>
                           <span className="text-[11px] text-slate-400 ui-label">
@@ -447,7 +447,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                 <div className="space-y-4">
                   {(call.faults || []).length > 0 ? (
                     call.faults.map((f: any, i: number) => (
-                      <div key={i} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm space-y-3">
+                      <div key={i} className="bg-bg-canvas p-4 rounded-xl border border-slate-100 shadow-sm space-y-3">
                         <div className="flex items-center justify-between">
                           <span className="text-[11px] text-slate-900 ui-label">Fault #{i + 1}</span>
                           {f.is_solved && (
@@ -470,7 +470,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
 
                         <div className="pt-2 border-t border-slate-50">
                           <div className="text-[10px] text-slate-400 mb-1 ui-label">Work Done / Repair</div>
-                          <div className="text-[13px] text-slate-900 bg-slate-50 p-3 rounded-lg border border-slate-100 ui-label">
+                          <div className="text-[13px] text-slate-900 bg-bg-soft p-3 rounded-lg border border-slate-100 ui-label">
                             {f.repair || 'No repair recorded'}
                           </div>
                         </div>
@@ -494,13 +494,13 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                       ) : null}
 
                       {regularParts.map((p: any, i: number) => (
-                        <div key={i} className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+                        <div key={i} className="bg-bg-canvas rounded-xl border border-slate-100 shadow-sm overflow-hidden">
                           <div className="p-4 flex items-center justify-between border-b border-slate-50">
                             <div className="space-y-1">
                               <div className="text-[13px] text-slate-900 ui-label">{p.vpartname}</div>
                               <div className="text-[11px] text-slate-400 font-medium">{p.vpartcode}</div>
                             </div>
-                            <div className="text-[16px] text-slate-900 bg-slate-50 px-3 py-1 rounded-lg ui-strong">x{p.nqty || 1}</div>
+                            <div className="text-[16px] text-slate-900 bg-bg-soft px-3 py-1 rounded-lg ui-strong">x{p.nqty || 1}</div>
                           </div>
 
                           {p.vremarks ? (
@@ -553,13 +553,13 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                   )}
 
                   {isMobile && (
-                    <div className="mt-8 space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <div className="mt-8 space-y-4 bg-bg-soft p-4 rounded-2xl border border-slate-100">
                       <div className="text-[11px] text-slate-400 ui-label">Quick Note</div>
                       <textarea
                         value={note}
                         onChange={(e) => setNote(e.target.value)}
                         placeholder="Add observations..."
-                        className="w-full bg-white border border-slate-200 rounded-xl p-3 text-[13px] outline-none resize-none focus:border-slate-400"
+                        className="call-detail-textarea w-full bg-bg-canvas border border-slate-200 rounded-xl p-3 text-[13px] outline-none resize-none focus:border-slate-400"
                         rows={3}
                       />
                       <button
@@ -584,12 +584,12 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                       return (
                         <div key={i} className="relative">
                           {/* Timeline dot */}
-                          <span className={`absolute -left-[35px] top-1.5 flex items-center justify-center w-6 h-6 rounded-full border ${color} bg-white shadow-sm ring-4 ring-white`}>
+                          <span className={`absolute -left-[35px] top-1.5 flex items-center justify-center w-6 h-6 rounded-full border ${color} bg-bg-canvas shadow-sm ring-4 ring-white`}>
                             {icon}
                           </span>
 
                           {/* Timeline Card */}
-                          <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 space-y-2 hover:bg-slate-100/50 transition-colors">
+                          <div className="bg-bg-soft border border-slate-100 rounded-xl p-4 space-y-2 hover:bg-slate-100/50 transition-colors">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${color}`}>
                                 {statusLabel}
@@ -623,7 +623,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                             </div>
 
                             {h.vcomment && h.vcomment.trim() && (
-                              <div className="text-xs text-slate-500 bg-white border border-slate-100 rounded-lg p-2.5 italic">
+                              <div className="text-xs text-slate-500 bg-bg-canvas border border-slate-100 rounded-lg p-2.5 italic">
                                 &ldquo;{h.vcomment}&rdquo;
                               </div>
                             )}
@@ -666,7 +666,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                     if (errorType !== 'none') setErrorType('none');
                   }}
                   placeholder="Add observations..."
-                  className="flex-1 w-full bg-white border border-slate-200 rounded-lg p-3 text-[13px] outline-none resize-none focus:border-slate-400"
+                  className="call-detail-textarea flex-1 w-full bg-bg-canvas border border-slate-200 rounded-lg p-3 text-[13px] outline-none resize-none focus:border-slate-400"
                 />
                 {errorType !== 'none' ? (
                   <p className="text-xs text-red-600">
@@ -688,22 +688,22 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
       </div>
 
       {/* Mobile Footer Actions */}
-      <div className="px-4 py-4 border-t border-slate-100 flex items-center gap-2 bg-white pb-safe">
+      <div className="call-detail-footer-actions px-4 py-4 border-t border-slate-100 flex items-center gap-2 bg-bg-canvas pb-safe">
         <button
           onClick={() => handleStatusUpdate('noted')}
-          className="flex-1 py-3.5 bg-slate-900 text-white rounded-2xl text-[13px] ui-label"
+          className="call-detail-action call-detail-action--approve flex-1 py-3.5 bg-slate-900 text-white rounded-2xl text-[13px] ui-label"
         >
           Approve
         </button>
         <button
           onClick={() => setPendingAction('hold')}
-          className="px-6 py-3.5 bg-slate-50 text-slate-600 rounded-2xl text-[13px] border border-slate-200 ui-label"
+          className="call-detail-action call-detail-action--hold px-6 py-3.5 bg-bg-soft text-slate-600 rounded-2xl text-[13px] border border-slate-200 ui-label"
         >
           Hold
         </button>
         <button
           onClick={() => setPendingAction('reject')}
-          className="px-6 py-3.5 bg-rose-50 text-rose-600 rounded-2xl text-[13px] border border-rose-100 ui-label"
+          className="call-detail-action call-detail-action--reject px-6 py-3.5 bg-rose-50 text-rose-600 rounded-2xl text-[13px] border border-rose-100 ui-label"
         >
           Reject
         </button>
@@ -719,14 +719,14 @@ function ImageCard({ img, onPreview, onLoaded }: { img: any; onPreview: () => vo
   if (error) return null;
 
   return (
-    <div className="relative aspect-square cursor-pointer overflow-hidden rounded-xl border border-slate-100 bg-slate-50" onClick={onPreview}>
+    <div className="relative aspect-square cursor-pointer overflow-hidden rounded-xl border border-slate-100 bg-bg-soft" onClick={onPreview}>
       <img
         src={img.url}
         className={`w-full h-full object-cover transition-opacity duration-300 ${loading ? 'opacity-0' : 'opacity-100'}`}
         onLoad={() => { setLoading(false); onLoaded(); }}
         onError={() => setError(true)}
       />
-      {loading && <div className="absolute inset-0 flex items-center justify-center bg-slate-50 animate-pulse"><Image size={20} className="text-slate-200" /></div>}
+      {loading && <div className="absolute inset-0 flex items-center justify-center bg-bg-soft animate-pulse"><Image size={20} className="text-slate-200" /></div>}
     </div>
   );
 }

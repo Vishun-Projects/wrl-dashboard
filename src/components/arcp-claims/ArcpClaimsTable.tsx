@@ -64,7 +64,7 @@ export function ArcpClaimsTable({ model, loading, updating }: ArcpClaimsTablePro
 
   if (model.rows.length === 0) {
     return (
-      <div className="rounded-lg border border-slate-200 bg-white px-4 py-8 text-center">
+      <div className="rounded-lg border border-slate-200 bg-bg-canvas px-4 py-8 text-center">
         <p className="text-sm font-medium text-slate-700">Grand total </p>
         <div className="mt-4 grid gap-3 text-left sm:grid-cols-2 lg:grid-cols-4">
           <div>
@@ -100,7 +100,7 @@ export function ArcpClaimsTable({ model, loading, updating }: ArcpClaimsTablePro
       ) : null}
       <AdminTable>
       <AdminThead>
-        <tr className="bg-slate-50">
+        <tr className="bg-bg-soft">
           <AdminTh className={`${cellBorder} text-[11px] tracking-wide text-slate-600`}>
             Service Description
           </AdminTh>
@@ -125,7 +125,7 @@ export function ArcpClaimsTable({ model, loading, updating }: ArcpClaimsTablePro
         {model.rows.map((row, index) => {
           if (row.kind === 'section-header') {
             return (
-              <tr key={`header-${index}`} className="bg-slate-50/80">
+              <tr key={`header-${index}`} className="bg-bg-soft/80">
                 <td
                   colSpan={6}
                   className={`${cellBorder} py-2 text-[12px] font-semibold text-slate-800`}
@@ -150,7 +150,7 @@ export function ArcpClaimsTable({ model, loading, updating }: ArcpClaimsTablePro
           const isCategoryRollup = row.isCategoryTotal === true;
 
           return (
-            <tr key={`data-${index}`} className={isCategoryRollup ? 'bg-slate-50/40' : undefined}>
+            <tr key={`data-${index}`} className={isCategoryRollup ? 'bg-bg-soft/40' : undefined}>
               <td
                 className={`${cellBorder} text-[12px] text-slate-700 ${
                   isCategoryRollup ? 'font-medium' : 'pl-8'

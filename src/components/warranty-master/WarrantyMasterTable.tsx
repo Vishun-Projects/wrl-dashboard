@@ -61,7 +61,7 @@ const WarrantyMasterDataRow = memo(function WarrantyMasterDataRow({
   return (
     <>
       <AdminTr
-        className={`warranty-master-row cursor-pointer ${isExpanded ? 'bg-slate-50' : 'hover:bg-slate-50/80'}`}
+        className={`warranty-master-row cursor-pointer ${isExpanded ? 'bg-bg-soft' : 'hover:bg-bg-soft/80'}`}
         onClick={onToggle}
       >
         <AdminTd className="w-8 text-slate-400">
@@ -83,7 +83,7 @@ const WarrantyMasterDataRow = memo(function WarrantyMasterDataRow({
         </AdminTd>
       </AdminTr>
       {showDetailRow ? (
-        <AdminTr className="warranty-master-row-expanded border-b border-slate-100 bg-slate-50/60">
+        <AdminTr className="warranty-master-row-expanded border-b border-slate-100 bg-bg-soft/60">
           <td colSpan={5} className="warranty-master-expanded-cell p-0">
             <Collapse
               open={isExpanded && !!detailRows}

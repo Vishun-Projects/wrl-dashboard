@@ -12,6 +12,7 @@
     "knip": "knip",
     "analyze": "ANALYZE=true next build",
     "db:apply-read-model": "node scripts/apply-read-model-schema.mjs",
+    "db:apply-app-theme": "node scripts/apply-app-users-theme.mjs",
     "db:apply-read-model:vps": "bash scripts/vps-hosting/apply-read-model-vps.sh",
     "db:seed-mis-client": "node scripts/mis-client/seed-coke-cadbury-config.mjs",
     "db:reprocess-cadbury-regions": "npx tsx scripts/mis-client/reprocess-cadbury-regions.ts",

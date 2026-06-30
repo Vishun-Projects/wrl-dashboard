@@ -59,7 +59,7 @@ export default function ClientImportTab({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-slate-50/10 inner-scrollbar">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-bg-soft/10 inner-scrollbar">
       <div className="flex flex-col gap-4 p-6">
         <div>
           <h2 className="text-sm font-semibold text-slate-800">Client file import</h2>

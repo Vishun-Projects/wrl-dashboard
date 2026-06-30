@@ -175,10 +175,10 @@ export function CallDetailDialogProvider({ children }: { children: React.ReactNo
       {isOpen && selectedCall ? (
         <div className="fixed inset-0 z-[210] flex items-center justify-center p-4">
           <div
-            className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200"
+            className="modal-backdrop fixed inset-0 backdrop-blur-sm animate-in fade-in duration-200"
             onClick={closeCallDetail}
           />
-          <div className="relative flex h-[min(760px,92vh)] w-full max-w-[900px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow animate-in zoom-in-95 duration-200">
+          <div className="relative flex h-[min(760px,92vh)] w-full max-w-[900px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-bg-canvas shadow animate-in zoom-in-95 duration-200">
             <CallDetail
               call={selectedCall}
               onClose={closeCallDetail}

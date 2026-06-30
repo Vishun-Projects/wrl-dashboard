@@ -121,11 +121,11 @@ export function ReportLoadingPanel({
 export function ReportPageSkeleton({ className = '' }: { className?: string }) {
   return (
     <div
-      className={`flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-slate-50 animate-pulse ${className}`.trim()}
+      className={`flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg-soft animate-pulse ${className}`.trim()}
       aria-busy="true"
       aria-live="polite"
     >
-      <div className="h-14 flex-shrink-0 border-b border-slate-200 bg-white" />
+      <div className="h-14 flex-shrink-0 border-b border-slate-200 bg-bg-canvas" />
       <div className="flex-1 space-y-4 p-6">
         <div className="h-10 w-64 rounded-xl bg-slate-200/80" />
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

@@ -31,6 +31,7 @@ const MIS_TAB_PERMS = [
   'tab_mis_register',
   'tab_mis_accounts',
   'tab_mis_client_import',
+  'tab_mis_bd_mis_summary',
 ];
 
 const MIS_CLIENT_IMPORT_CAP_PERMS = [
@@ -161,6 +162,7 @@ try {
 
     if (before.includes('tab_mis_summary') || before.includes('tab_mis_accounts')) {
       grants.add('tab_mis_client_import');
+      grants.add('tab_mis_bd_mis_summary');
     }
 
     if (

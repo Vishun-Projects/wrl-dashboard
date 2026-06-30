@@ -3,7 +3,7 @@ import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { dedupeClientRowsLatestBatchWins } from '@/lib/mis-client-import/aggregate';
 import { buildImportFilePath } from '@/lib/mis-client-import/file-store';
-import { mergedMetricValue, findAccountMetric, mergeSelectedMetrics, rollupAccountsByAccount, accountMergeFlags, filterTopAccountsByZone, accountRowScore, isAccountExcludedFromZoneTop } from '@/components/report/SummaryMergedMetricCell';
+import { mergedMetricValue, findAccountMetric, mergeSelectedMetrics, rollupAccountsByAccount, accountMergeFlags, filterTopAccountsByZone, accountRowScore, isAccountExcludedFromZoneTop, DEFAULT_CLIENT_MERGE_WITH_CRM, type ClientMergeWithCrmPrefs } from '@/components/report/SummaryMergedMetricCell';
 import { parsePipeDelimitedCsv, decodeCsvBuffer } from '@/lib/mis-client-import/parse-csv';
 import { parseClientDate } from '@/lib/mis-client-import/parse-dates';
 import { normalizeClientRows } from '@/lib/mis-client-import/normalize';
@@ -39,7 +39,7 @@ const cokeConfig: MisClientSourceConfig = {
     { client_column: 'Complaint Description', crm_field: 'complaint', transform: null },
   ],
   statusMappings: [
-    { client_status: 'Open', status_bucket: 'open_unallocated', status_label: 'Open' },
+    { client_status: 'Open', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'Closed', status_bucket: 'solved', status_label: 'Closed' },
   ],
   stateMappings: [
@@ -86,6 +86,27 @@ describe('parseClientDate', () => {
     expect(d!.getMonth()).toBe(11);
     expect(d!.getDate()).toBe(29);
   });
+
+  it('parses Excel serial day numbers', () => {
+    const d = parseClientDate(46020);
+    expect(d).not.toBeNull();
+    expect(d!.getFullYear()).toBeGreaterThanOrEqual(2025);
+  });
+
+  it('parses dd/mm/yyyy slash format (Coke CDMS)', () => {
+    const d = parseClientDate('29/12/2025');
+    expect(d).not.toBeNull();
+    expect(d!.getDate()).toBe(29);
+    expect(d!.getMonth()).toBe(11);
+  });
+
+  it('parses 07/01/2026 as 7 Jan not 1 Jul (dd/mm before US Date)', () => {
+    const d = parseClientDate('07/01/2026');
+    expect(d).not.toBeNull();
+    expect(d!.getFullYear()).toBe(2026);
+    expect(d!.getMonth()).toBe(0);
+    expect(d!.getDate()).toBe(7);
+  });
 });
 
 describe('normalizeClientRows', () => {
@@ -110,9 +131,30 @@ describe('normalizeClientRows', () => {
     ]);
     expect(errors).toHaveLength(0);
     expect(rows).toHaveLength(2);
-    expect(rows[0].status_bucket).toBe('open_unallocated');
+    expect(rows[0].status_bucket).toBe('assigned');
     expect(rows[0].region).toBe('SOUTH');
     expect(rows[1].status_bucket).toBe('solved');
+  });
+
+  it('maps Coke CDMS statuses: Closed/Service Done solved, Service Engg Assigned open', () => {
+    const config: MisClientSourceConfig = {
+      ...cokeConfig,
+      statusMappings: [
+        { client_status: 'Open', status_bucket: 'assigned', status_label: 'Assigned' },
+        { client_status: 'Service Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
+        { client_status: 'Service Done', status_bucket: 'solved', status_label: 'Closed' },
+        { client_status: 'Closed', status_bucket: 'solved', status_label: 'Closed' },
+      ],
+    };
+    const { rows, errors } = normalizeClientRows(config, [
+      { 'Call No': '1', 'Call Status': 'Closed', 'Entity Name': 'Vijaywada Beverage' },
+      { 'Call No': '2', 'Call Status': 'Service Done', 'Entity Name': 'Vijaywada Beverage' },
+      { 'Call No': '3', 'Call Status': 'Service Engg Assigned', 'Entity Name': 'Vijaywada Beverage' },
+    ]);
+    expect(errors).toHaveLength(0);
+    expect(rows.find((r) => r.call_key === '1')?.status_bucket).toBe('solved');
+    expect(rows.find((r) => r.call_key === '2')?.status_bucket).toBe('solved');
+    expect(rows.find((r) => r.call_key === '3')?.status_bucket).toBe('assigned');
   });
 });
 
@@ -352,18 +394,30 @@ describe('rollupAccountsByAccount', () => {
 
 describe('accountMergeFlags', () => {
   const global = { crm: true, client: true };
+  const noMerge: ClientMergeWithCrmPrefs = { ...DEFAULT_CLIENT_MERGE_WITH_CRM };
+  const cadburyMerge: ClientMergeWithCrmPrefs = { cadbury: true, coke: false };
+  const cokeMerge: ClientMergeWithCrmPrefs = { cadbury: false, coke: true };
 
   it('defaults Cadbury to import-only', () => {
-    expect(accountMergeFlags('Cadbury', global, false)).toEqual({ crm: false, client: true });
-    expect(accountMergeFlags('CADBURY', global, false)).toEqual({ crm: false, client: true });
+    expect(accountMergeFlags('Cadbury', global, noMerge)).toEqual({ crm: false, client: true });
+    expect(accountMergeFlags('CADBURY', global, noMerge)).toEqual({ crm: false, client: true });
+  });
+
+  it('defaults Coke to import-only', () => {
+    expect(accountMergeFlags('Coke', global, noMerge)).toEqual({ crm: false, client: true });
+    expect(accountMergeFlags('COKE', global, noMerge)).toEqual({ crm: false, client: true });
   });
 
   it('merges Cadbury with CRM when enabled', () => {
-    expect(accountMergeFlags('Cadbury', global, true)).toEqual(global);
+    expect(accountMergeFlags('Cadbury', global, cadburyMerge)).toEqual(global);
+  });
+
+  it('merges Coke with CRM when enabled', () => {
+    expect(accountMergeFlags('Coke', global, cokeMerge)).toEqual(global);
   });
 
   it('does not affect other accounts', () => {
-    expect(accountMergeFlags('Coke', global, false)).toEqual(global);
+    expect(accountMergeFlags('UB', global, noMerge)).toEqual(global);
   });
 });
 
@@ -380,6 +434,9 @@ describe('resolveSummaryRegionMetric', () => {
     ];
     const global = { crm: true, client: true };
 
+    const noMerge: ClientMergeWithCrmPrefs = { cadbury: false, coke: false };
+    const cadburyMerge: ClientMergeWithCrmPrefs = { cadbury: true, coke: false };
+
     const withoutMerge = resolveSummaryRegionMetric(
       true,
       accounts,
@@ -387,11 +444,11 @@ describe('resolveSummaryRegionMetric', () => {
       'SOUTH',
       'total_calls',
       global,
-      false,
+      noMerge,
       0,
       0
     );
-    expect(withoutMerge.crm).toBe(100);
+    expect(withoutMerge.crm).toBe(50);
 
     const withMerge = resolveSummaryRegionMetric(
       true,
@@ -400,11 +457,11 @@ describe('resolveSummaryRegionMetric', () => {
       'SOUTH',
       'total_calls',
       global,
-      true,
+      cadburyMerge,
       0,
       0
     );
-    expect(withMerge.crm).toBe(200);
+    expect(withMerge.crm).toBe(150);
   });
 });
 
@@ -462,8 +519,18 @@ describe('accountRowScore', () => {
     const crmRow = { region: 'WEST', account: 'Cadbury', total_calls: 100 };
     const client = [{ region: 'WEST', account: 'Cadbury', total_calls: 20 }];
     const global = { crm: true, client: true };
-    expect(accountRowScore(crmRow, client, global, false)).toBe(20);
-    expect(accountRowScore(crmRow, client, global, true)).toBe(120);
+    const noMerge: ClientMergeWithCrmPrefs = { cadbury: false, coke: false };
+    const cadburyMerge: ClientMergeWithCrmPrefs = { cadbury: true, coke: false };
+    expect(accountRowScore(crmRow, client, global, noMerge)).toBe(20);
+    expect(accountRowScore(crmRow, client, global, cadburyMerge)).toBe(120);
+  });
+
+  it('uses import-only Coke score when merge is off', () => {
+    const crmRow = { region: 'SOUTH', account: 'Coke', total_calls: 50 };
+    const client = [{ region: 'SOUTH', account: 'COKE', total_calls: 30 }];
+    const global = { crm: true, client: true };
+    const noMerge: ClientMergeWithCrmPrefs = { cadbury: false, coke: false };
+    expect(accountRowScore(crmRow, client, global, noMerge)).toBe(30);
   });
 });
 
@@ -495,6 +562,20 @@ describe('findAccountMetric', () => {
 const cokeConfigFull: MisClientSourceConfig = {
   ...cokeConfig,
   header_row_index: 5,
+  statusMappings: [
+    { client_status: 'Open', status_bucket: 'assigned', status_label: 'Assigned' },
+    { client_status: 'S.Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
+    { client_status: 'Service Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
+    { client_status: 'Service Done', status_bucket: 'solved', status_label: 'Closed' },
+    { client_status: 'Closed', status_bucket: 'solved', status_label: 'Closed' },
+  ],
+  stateMappings: [
+    { client_state: 'Ameenpur Beverage', plan_code: '1162', region_override: 'SOUTH' },
+    { client_state: 'Moula Ali Beverage', plan_code: '1162', region_override: 'SOUTH' },
+    { client_state: 'Vijaywada Beverage', plan_code: '1181', region_override: 'SOUTH' },
+    { client_state: 'Vizag Beverage', plan_code: '1181', region_override: 'SOUTH' },
+    { client_state: 'Chittoor Beverage', plan_code: '1181', region_override: 'SOUTH' },
+  ],
 };
 
 describe('detect-parse', () => {
@@ -567,6 +648,20 @@ describe('detect-parse', () => {
     expect(rows[0].call_key).toBeTruthy();
     expect(rows[0].region).toBeTruthy();
   });
+
+  it('parses Coke CDMS xlsx with thousands of rows end-to-end', async () => {
+    const buf = readFileSync(cdmsPath);
+    const rawRows = (await parseImportFile(buf, 'CDMS_CallStatus_Detailed (37).xlsx', cokeConfigFull))
+      .rawRows;
+    const { rows, errors } = normalizeClientRows(cokeConfigFull, rawRows);
+    expect(errors).toHaveLength(0);
+    expect(rows.length).toBeGreaterThan(30_000);
+    expect(rows.every((r) => r.region === 'SOUTH')).toBe(true);
+    expect(rows.every((r) => r.logged_at != null)).toBe(true);
+    const ytdStart = new Date('2026-01-01');
+    const inYtd = rows.filter((r) => r.logged_at! >= ytdStart).length;
+    expect(inYtd).toBeGreaterThan(30_000);
+  }, 120_000);
 
   it('reports mismatch when CDMS uploaded as Cadbury', async () => {
     const buf = readFileSync(cdmsPath);

@@ -15,8 +15,8 @@ export type ButtonProps = React.ComponentPropsWithoutRef<typeof motion.button> &
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary: 'border border-slate-800 bg-slate-900 text-white hover:bg-slate-800 shadow-sm',
-  secondary: 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 shadow-sm',
-  ghost: 'border border-transparent bg-transparent text-slate-600 hover:bg-slate-50',
+  secondary: 'border border-slate-200 bg-bg-canvas text-slate-700 hover:bg-bg-soft shadow-sm',
+  ghost: 'border border-transparent bg-transparent text-slate-600 hover:bg-bg-soft',
 };
 
 const sizeClasses: Record<ButtonSize, string> = {

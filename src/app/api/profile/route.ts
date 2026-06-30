@@ -19,7 +19,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Invalid payload' }, { status: 400 });
     }
 
-    const { name, avatar_url } = parsed.data;
+    const { name, avatar_url, theme } = parsed.data;
 
     if (avatar_url && !isAllowedAvatarUrl(avatar_url)) {
       return NextResponse.json({ error: 'avatar_url host is not allowed' }, { status: 400 });
@@ -36,6 +36,10 @@ export async function PATCH(request: Request) {
     if (avatar_url !== undefined) {
       updates.push(`avatar_url = $${paramIndex++}`);
       values.push(avatar_url);
+    }
+    if (theme !== undefined) {
+      updates.push(`theme = $${paramIndex++}`);
+      values.push(theme);
     }
 
     if (updates.length === 0) {

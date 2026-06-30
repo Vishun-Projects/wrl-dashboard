@@ -64,7 +64,7 @@ export default function LoginPage() {
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-slate-200 blur-[120px]" />
       </div>
 
-      <div className="relative w-full max-w-[400px] bg-white rounded-[32px] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.08)] border border-slate-100 p-10">
+      <div className="relative w-full max-w-[400px] bg-bg-canvas rounded-[32px] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.08)] border border-slate-100 p-10">
         <div className="flex flex-col items-center text-center">
           {/* Logo Section */}
           <div className="mb-8">
@@ -94,7 +94,7 @@ export default function LoginPage() {
               <input
                 type="email"
                 required
-                className="w-full h-13 bg-slate-50/50 border border-slate-100 rounded-2xl px-5 py-3 text-[14px] font-medium text-slate-900 placeholder:text-slate-300 outline-none focus:ring-2 focus:ring-slate-900/5 focus:border-slate-400 transition-all"
+                className="w-full h-13 bg-bg-soft/50 border border-slate-100 rounded-2xl px-5 py-3 text-[14px] font-medium text-slate-900 placeholder:text-slate-300 outline-none focus:ring-2 focus:ring-slate-900/5 focus:border-slate-400 transition-all"
                 placeholder="name@westernequipments.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -108,7 +108,7 @@ export default function LoginPage() {
               <input
                 type="password"
                 required
-                className="w-full h-13 bg-slate-50/50 border border-slate-100 rounded-2xl px-5 py-3 text-[14px] font-medium text-slate-900 placeholder:text-slate-300 outline-none focus:ring-2 focus:ring-slate-900/5 focus:border-slate-400 transition-all"
+                className="w-full h-13 bg-bg-soft/50 border border-slate-100 rounded-2xl px-5 py-3 text-[14px] font-medium text-slate-900 placeholder:text-slate-300 outline-none focus:ring-2 focus:ring-slate-900/5 focus:border-slate-400 transition-all"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

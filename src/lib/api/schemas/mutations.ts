@@ -21,8 +21,11 @@ export const commentPostSchema = z.object({
   path: ['callId'],
 });
 
+export const appThemeSchema = z.enum(['white', 'cream', 'dark']);
+
 export const profilePatchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
+  theme: appThemeSchema.optional(),
   avatar_url: z
     .string()
     .url()

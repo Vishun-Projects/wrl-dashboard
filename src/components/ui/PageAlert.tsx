@@ -34,7 +34,7 @@ const styles: Record<
     icon: AlertTriangle,
   },
   info: {
-    box: 'border-slate-200 bg-slate-50',
+    box: 'border-slate-200 bg-bg-soft',
     text: 'text-slate-700',
     icon: Info,
   },

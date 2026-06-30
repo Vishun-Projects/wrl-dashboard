@@ -52,7 +52,7 @@ export function ArcpClaimsLoadBanner({
           runningTotals.hoApproved > 0) ? (
           <p
             className={`rounded-md px-2 py-1.5 ${
-              isDetailExport ? 'bg-blue-100/60 text-blue-900' : 'bg-slate-50 text-slate-600'
+              isDetailExport ? 'bg-blue-100/60 text-blue-900' : 'bg-bg-soft text-slate-600'
             }`}
           >
             {isDetailExport ? 'Detail export tally so far' : 'Cumulative tally so far'}:{' '}

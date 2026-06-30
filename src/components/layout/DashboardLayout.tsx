@@ -10,6 +10,7 @@ import { CallDetailDialogProvider } from '@/components/calls/CallDetailDialogPro
 import { PerformanceMetricsLogger } from '@/components/performance/PerformanceMetricsLogger';
 import { performanceLogEnabledClient } from '@/lib/performance/log-config';
 import { MotionProvider } from '@/components/motion';
+import { ThemeProvider } from '@/components/theme/ThemeProvider';
 
 interface UserContextType {
   userProfile: any;
@@ -111,10 +112,11 @@ export function DashboardLayout({
 
   return (
     <UserContext.Provider value={{ userProfile, loadingProfile, refreshProfile: fetchProfile }}>
+      <ThemeProvider serverTheme={initialUser?.theme}>
       <MotionProvider>
       <CallDetailDialogProvider>
         {performanceLogEnabledClient() ? <PerformanceMetricsLogger /> : null}
-        <div className="flex flex-col md:flex-row h-screen overflow-hidden w-screen bg-slate-50 text-slate-700 font-sans">
+        <div className="flex flex-col md:flex-row h-screen overflow-hidden w-screen bg-bg-soft text-slate-700 font-sans">
           <Sidebar user={userProfile} />
           <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
             <PageAccessGuard>{children}</PageAccessGuard>
@@ -122,6 +124,7 @@ export function DashboardLayout({
         </div>
       </CallDetailDialogProvider>
       </MotionProvider>
+      </ThemeProvider>
     </UserContext.Provider>
   );
 }

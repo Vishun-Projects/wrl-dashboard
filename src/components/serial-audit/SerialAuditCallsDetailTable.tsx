@@ -95,7 +95,7 @@ export function SerialAuditCallsDetailTable({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {showAllTimeToggle ? (
-            <label className="flex cursor-pointer items-center gap-1.5 rounded border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-600">
+            <label className="flex cursor-pointer items-center gap-1.5 rounded border border-slate-200 bg-bg-canvas px-2 py-1 text-[10px] text-slate-600">
               <input
                 type="checkbox"
                 checked={showAllTime}
@@ -114,7 +114,7 @@ export function SerialAuditCallsDetailTable({
               search: serial,
               ...registerLinkContext,
             })}
-            className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+            className="inline-flex items-center gap-1 rounded border border-slate-200 bg-bg-canvas px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-bg-soft"
           >
             <ExternalLink className="h-3 w-3" />
             Open in register

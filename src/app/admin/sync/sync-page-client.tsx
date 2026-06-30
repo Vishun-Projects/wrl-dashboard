@@ -202,7 +202,7 @@ export default function ReadModelSyncPage() {
           type="button"
           onClick={() => void load(true)}
           disabled={refreshing}
-          className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+          className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-bg-canvas px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-bg-soft disabled:opacity-60"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
           Refresh
@@ -216,7 +216,7 @@ export default function ReadModelSyncPage() {
           </div>
         ) : null}
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="rounded-xl border border-slate-200 bg-bg-canvas p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
@@ -262,7 +262,7 @@ export default function ReadModelSyncPage() {
             <PhaseBanner phase={progress.phase} message={progress.message} />
 
             <div className="grid gap-4 lg:grid-cols-2">
-              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="rounded-xl border border-slate-200 bg-bg-canvas p-5 shadow-sm">
                 <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-800">
                   <Database className="h-4 w-4" />
                   Hot register (`calls_latest_hot`)
@@ -273,7 +273,7 @@ export default function ReadModelSyncPage() {
                 </p>
               </div>
 
-              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="rounded-xl border border-slate-200 bg-bg-canvas p-5 shadow-sm">
                 <div className="mb-4 text-sm font-semibold text-slate-800">Summary facts & dimensions</div>
                 <div className="flex flex-wrap gap-2">
                   <AdminStatPill label="Fact grains" value={progress.facts.grainCount.toLocaleString()} />
@@ -287,7 +287,7 @@ export default function ReadModelSyncPage() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="rounded-xl border border-slate-200 bg-bg-canvas p-5 shadow-sm">
               <div className="mb-3 text-sm font-semibold text-slate-800">App read sources</div>
               <div className="flex flex-wrap gap-2">
                 <AdminStatPill label="Summary" value={progress.appFlags.summary} />
@@ -360,14 +360,14 @@ export default function ReadModelSyncPage() {
               </div>
             ) : null}
 
-            <details className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
+            <details className="rounded-xl border border-slate-200 bg-bg-canvas p-4 text-sm text-slate-600">
               <summary className="cursor-pointer font-medium text-slate-800">Recent ingest batches</summary>
               <div className="mt-3 space-y-2">
                 {progress.recentBatches.length === 0 ? (
                   <p>No batches yet.</p>
                 ) : (
                   progress.recentBatches.map((batch) => (
-                    <div key={batch.batchId} className="rounded-md bg-slate-50 px-3 py-2 text-xs">
+                    <div key={batch.batchId} className="rounded-md bg-bg-soft px-3 py-2 text-xs">
                       <span className="font-medium">{batch.entity}</span> · {batch.status} ·{' '}
                       {batch.rowCount.toLocaleString()} rows · {formatWhen(batch.createdAt)}
                     </div>
@@ -376,7 +376,7 @@ export default function ReadModelSyncPage() {
               </div>
             </details>
 
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+            <div className="rounded-xl border border-slate-200 bg-bg-soft px-4 py-3 text-xs text-slate-600">
               <p className="font-medium text-slate-800">What to do next</p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li>
@@ -385,7 +385,7 @@ export default function ReadModelSyncPage() {
                 </li>
                 <li>
                   <strong>Ongoing updates:</strong> keep the sync worker daemon running on the server (see{' '}
-                  <code className="rounded bg-white px-1">docs/sync.md</code>). Reports read from the local
+                  <code className="rounded bg-bg-canvas px-1">docs/sync.md</code>). Reports read from the local
                   cache once backfill finishes.
                 </li>
                 <li>

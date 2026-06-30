@@ -27,6 +27,7 @@ model AppUser {
   role               String   // "branch_manager", "hod"
   office_ids         String[] @default([]) // Array of ncode values from CRM mstoffice
   avatar_url         String?
+  theme              String   @default("cream")
   created_at         DateTime @default(now())
 
   @@map("app_users")

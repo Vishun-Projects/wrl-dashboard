@@ -44,7 +44,7 @@ function ReplacementPartCard({
         : 'Replacement';
 
   return (
-    <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+    <div className="bg-bg-canvas rounded-xl border border-slate-100 shadow-sm overflow-hidden">
       <div className="p-4 flex items-start justify-between gap-3 border-b border-slate-50">
         <div className="space-y-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -58,13 +58,13 @@ function ReplacementPartCard({
           ) : null}
         </div>
         {view.part.nqty != null ? (
-          <div className="text-[16px] text-slate-900 bg-slate-50 px-3 py-1 rounded-lg ui-strong shrink-0">
+          <div className="text-[16px] text-slate-900 bg-bg-soft px-3 py-1 rounded-lg ui-strong shrink-0">
             x{view.part.nqty || 1}
           </div>
         ) : null}
       </div>
 
-      <div className="p-4 space-y-4 bg-slate-50/50">
+      <div className="p-4 space-y-4 bg-bg-soft/50">
         <BarcodeRow label="Old barcode" match={view.oldBarcode} onPreview={onPreview} />
         <BarcodeRow label="New barcode" match={view.newBarcode} onPreview={onPreview} highlight />
 
@@ -109,7 +109,7 @@ function BarcodeRow({
         className={`text-[12px] font-mono px-2 py-1.5 rounded border ${
           highlight
             ? 'text-slate-900 bg-emerald-50 border-emerald-100'
-            : 'text-slate-600 bg-white border-slate-100'
+            : 'text-slate-600 bg-bg-canvas border-slate-100'
         }`}
       >
         {match.barcode}
@@ -137,7 +137,7 @@ function Thumbnail({ img, onPreview }: { img: CallImage; onPreview: () => void }
     <button
       type="button"
       onClick={onPreview}
-      className="relative aspect-square overflow-hidden rounded-xl border border-slate-100 bg-white text-left"
+      className="relative aspect-square overflow-hidden rounded-xl border border-slate-100 bg-bg-canvas text-left"
       title={img.title || img.filename}
     >
       <img
@@ -148,7 +148,7 @@ function Thumbnail({ img, onPreview }: { img: CallImage; onPreview: () => void }
         onError={() => setError(true)}
       />
       {loading ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-slate-50 animate-pulse">
+        <div className="absolute inset-0 flex items-center justify-center bg-bg-soft animate-pulse">
           <Image size={18} className="text-slate-200" />
         </div>
       ) : null}

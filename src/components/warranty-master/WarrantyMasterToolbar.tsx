@@ -42,7 +42,7 @@ export function WarrantyMasterToolbar({
   const hasEndDates = Boolean(filters.warrEndFrom || filters.warrEndTo);
 
   return (
-    <div className="relative z-20 shrink-0 border-b border-slate-200 bg-white">
+    <div className="relative z-20 shrink-0 border-b border-slate-200 bg-bg-canvas">
       <div className="report-toolbar-filters-row px-3 py-1.5">
         <RegisterMultiSelect
           label="Customer"
@@ -94,7 +94,7 @@ export function WarrantyMasterToolbar({
           className={`inline-flex h-7 shrink-0 items-center rounded-full border px-2.5 text-[10px] font-medium transition-colors ${
             filters.activeOnly
               ? 'border-teal-700 bg-teal-50 text-teal-800'
-              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+              : 'border-slate-200 bg-bg-canvas text-slate-600 hover:border-slate-300'
           }`}
         >
           Active warranty today
@@ -108,7 +108,7 @@ export function WarrantyMasterToolbar({
             type="date"
             value={filters.warrEndFrom}
             onChange={(e) => onWarrEndFromChange(e.target.value)}
-            className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+            className="h-7 rounded-md border border-slate-200 bg-bg-canvas px-2 text-[11px] text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
             aria-label="Warranty end from"
           />
           <span className="text-[10px] text-slate-300">–</span>
@@ -116,7 +116,7 @@ export function WarrantyMasterToolbar({
             type="date"
             value={filters.warrEndTo}
             onChange={(e) => onWarrEndToChange(e.target.value)}
-            className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+            className="h-7 rounded-md border border-slate-200 bg-bg-canvas px-2 text-[11px] text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
             aria-label="Warranty end to"
           />
         </div>

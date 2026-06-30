@@ -121,8 +121,14 @@ import {
 } from '@/lib/register/export-fetch';
 import { clearPortalAuditCache, ensurePortalAuditCache } from '@/lib/report/portal-cache';
 import ClientImportTab from '@/components/report/ClientImportTab';
+import { BdMisSummaryPanel } from '@/components/report/BdMisSummaryPanel';
+import type { BdMisGrandRow, BdMisRegionalRow, BdMisSourceFlags } from '@/lib/report/bd-mis-summary';
+import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/report/summary-derive';
 import MisSourceCheckboxes from '@/components/report/MisSourceCheckboxes';
-import MisCadburyMergeCheckbox from '@/components/report/MisCadburyMergeCheckbox';
+import MisClientMergeCheckbox, {
+  loadClientMergeWithCrmPrefs,
+  saveClientMergeWithCrmPrefs,
+} from '@/components/report/MisClientMergeCheckbox';
 import {
   SummaryMergedMetricCell,
   accountOpenCallsFromAging,
@@ -131,6 +137,7 @@ import {
   accountRowScore,
   buildAccountDisplayRows,
   buildClientOnlyRegionalRows,
+  type ClientMergeWithCrmPrefs,
   filterClientAccountSummary,
   filterTopAccountsByZone,
   findAccountMetric,
@@ -163,13 +170,31 @@ import {
 
 type AccountMisGrouping = 'zone' | 'overview' | 'zone-top';
 
+function regionPerfRowClass(region: string): string {
+  const r = String(region ?? '').toUpperCase();
+  if (r.includes('NORTH')) return 'perf-region-row perf-region-row--north';
+  if (r.includes('EAST')) return 'perf-region-row perf-region-row--east';
+  if (r.includes('WEST')) return 'perf-region-row perf-region-row--west';
+  if (r.includes('SOUTH')) return 'perf-region-row perf-region-row--south';
+  return 'perf-region-row perf-region-row--default';
+}
+
+function regionPerfAccountCellClass(region: string): string {
+  const r = String(region ?? '').toUpperCase();
+  if (r === 'NORTH' || r === 'NORTH ZONE') return 'perf-region-cell perf-region-cell--north';
+  if (r === 'EAST' || r === 'EAST ZONE') return 'perf-region-cell perf-region-cell--east';
+  if (r === 'WEST' || r === 'WEST ZONE') return 'perf-region-cell perf-region-cell--west';
+  if (r === 'SOUTH' || r === 'SOUTH ZONE') return 'perf-region-cell perf-region-cell--south';
+  return 'perf-region-cell perf-region-cell--default';
+}
+
 function resolveAccountMisTableRows(
   filteredAccounts: Array<Record<string, unknown>>,
   grouping: AccountMisGrouping,
   topN: number,
   clientAccountSummaryData: Array<Record<string, unknown>> | undefined,
   mergeFlags: { crm: boolean; client: boolean },
-  cadburyMergeWithCrm: boolean,
+  clientMergeWithCrm: ClientMergeWithCrmPrefs,
   zoneTopExcludeAccounts: string[] = []
 ): Array<Record<string, unknown>> {
   if (grouping === 'overview') {
@@ -177,7 +202,7 @@ function resolveAccountMisTableRows(
   }
   if (grouping === 'zone-top') {
     const scoreFn = (row: Record<string, unknown>) =>
-      accountRowScore(row, clientAccountSummaryData, mergeFlags, cadburyMergeWithCrm);
+      accountRowScore(row, clientAccountSummaryData, mergeFlags, clientMergeWithCrm);
     return filterTopAccountsByZone(
       filteredAccounts,
       topN,
@@ -369,6 +394,8 @@ function reportPerf(
   /* no-op */
 }
 
+/** Cadbury+Coke+CRM Summary tab — hidden until reconciliation is production-ready. */
+const BD_MIS_SUMMARY_TAB_ENABLED = false;
 
 export default function ReportPageClient() {
   const [mounted, setMounted] = useState(false);
@@ -380,13 +407,17 @@ export default function ReportPageClient() {
       summary: canAccessMisTab(userPermissions, 'summary'),
       accounts: canAccessMisTab(userPermissions, 'accounts'),
       client_import: canAccessMisTab(userPermissions, 'client_import'),
+      bd_mis_summary:
+        BD_MIS_SUMMARY_TAB_ENABLED && canAccessMisTab(userPermissions, 'bd_mis_summary'),
     }),
     [userPermissions]
   );
 
   const misTabs = useMemo(
     () =>
-      visibleTabs(userPermissions, 'mis_reports').map((tab) => ({
+      visibleTabs(userPermissions, 'mis_reports')
+        .filter((tab) => BD_MIS_SUMMARY_TAB_ENABLED || tab.id !== 'bd_mis_summary')
+        .map((tab) => ({
         id: tab.id as MisTabId,
         label: tab.label,
         allowed: true,
@@ -528,6 +559,10 @@ export default function ReportPageClient() {
     loadMisSourceSelection()
   );
   const mergeFlags = useMemo(() => mergeFlagsFromSelection(sourceSelection), [sourceSelection]);
+  const sourceSelectionKey = useMemo(
+    () => [...sourceSelection.clientSourceCodes].sort().join(','),
+    [sourceSelection.clientSourceCodes]
+  );
   const clientOnlyMode = isClientOnlyMode(sourceSelection);
   const alignCrmToAccounts = mergeFlags.crm && mergeFlags.client;
   const [clientImportMeta, setClientImportMeta] = useState<{
@@ -539,6 +574,17 @@ export default function ReportPageClient() {
   const [loading, setLoading] = useState(!globalReportCache);
   const [filterUpdating, setFilterUpdating] = useState(false);
   const [summaryTabLoading, setSummaryTabLoading] = useState(false);
+  const [bdMisTabLoading, setBdMisTabLoading] = useState(false);
+  const [bdMisRegionalRows, setBdMisRegionalRows] = useState<BdMisRegionalRow[]>([]);
+  const [bdMisGrand, setBdMisGrand] = useState<BdMisGrandRow | null>(null);
+  const [bdMisExportData, setBdMisExportData] = useState<{
+    regionalRows: BdMisRegionalRow[];
+    grand: BdMisGrandRow;
+    crmBranchSummary: BranchSummaryRow[];
+    crmAccountSummary: AccountSummaryRow[];
+    clientAccountSummary: AccountSummaryRow[];
+    sources: BdMisSourceFlags;
+  } | null>(null);
   const [total, setTotal] = useState<number>(globalReportCache?.total || 0);
 
   useEffect(() => {
@@ -604,10 +650,9 @@ export default function ReportPageClient() {
     const n = parseInt(localStorage.getItem('report_account_mis_top_n') ?? '5', 10);
     return Number.isFinite(n) && n > 0 ? Math.min(100, n) : 5;
   });
-  const [cadburyMergeWithCrm, setCadburyMergeWithCrm] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return localStorage.getItem('report_cadbury_merge_crm') === 'true';
-  });
+  const [clientMergeWithCrm, setClientMergeWithCrm] = useState<ClientMergeWithCrmPrefs>(
+    loadClientMergeWithCrmPrefs
+  );
   const [accountMisZoneTopExclude, setAccountMisZoneTopExclude] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [...DEFAULT_ZONE_TOP_EXCLUDE_ACCOUNTS];
     try {
@@ -840,7 +885,7 @@ export default function ReportPageClient() {
           <span className="inline-flex items-center gap-1.5">
             {row.PartyName}
             {priorityFilter.length === 0 && row.is_major_repair === 'True' && (
-              <span className="rounded bg-rose-500 px-1 py-0.5 text-[8px] text-white ui-strong">MAJOR</span>
+              <span className="report-major-badge rounded bg-rose-500 px-1 py-0.5 text-[8px] text-white ui-strong">MAJOR</span>
             )}
           </span>
         );
@@ -952,6 +997,13 @@ export default function ReportPageClient() {
   const summaryUserApplyRef = React.useRef(false);
   const runSummaryFilterLoadRef = React.useRef<(generation: number) => Promise<void>>(async () => {});
   const clientImportSourceFetchTabRef = React.useRef<MisTabId | null>(null);
+  const prevSourceSelectionKeyRef = React.useRef<string | null>(null);
+  const fetchClientImportSummaryRef = React.useRef<
+    (scope?: { startDate: string; endDate: string; agingAsOf: string }) => Promise<void>
+  >(async () => {});
+  const resolveClientImportScopeRef = React.useRef<
+    () => { startDate: string; endDate: string; agingAsOf: string }
+  >(() => ({ startDate: '', endDate: '', agingAsOf: '' }));
   const dataRef = React.useRef(data);
   const totalRef = React.useRef(total);
   const registerSummaryRef = React.useRef(registerSummary);
@@ -1477,11 +1529,19 @@ export default function ReportPageClient() {
 
   const fetchClientImportSummary = useCallback(
     async (scope?: { startDate: string; endDate: string; agingAsOf: string }): Promise<void> => {
-      const payload = await loadClientImportSummaryPayload(scope ?? resolveClientImportScope());
+      const genAtStart = summaryTabLoadRef.current;
+      const resolvedScope = scope ?? resolveClientImportScope();
+      const payload = await loadClientImportSummaryPayload(resolvedScope);
+      if (genAtStart !== summaryTabLoadRef.current) {
+        return;
+      }
       commitClientImportSummary(payload);
     },
     [loadClientImportSummaryPayload, resolveClientImportScope, commitClientImportSummary]
   );
+
+  fetchClientImportSummaryRef.current = fetchClientImportSummary;
+  resolveClientImportScopeRef.current = resolveClientImportScope;
 
   const loadClientImportSources = useCallback(async () => {
     try {
@@ -1859,7 +1919,14 @@ export default function ReportPageClient() {
       globalHeadcount: headcount,
     });
 
-    commitSummaryResult(branchSummary, accountSummary, headcount, startDateStr, endDateStr, agingStr);
+    commitSummaryResult(
+      branchSummary,
+      accountSummary,
+      headcount,
+      startDateStr,
+      endDateStr,
+      agingStr
+    );
     return branchSummary.length > 0 || filteredCalls.length > 0;
   }, [getSharedCallsForScope, getAppliedFiltersSnapshot, dateFilterColumn, agingAsOf, commitSummaryResult]);
 
@@ -3299,7 +3366,7 @@ export default function ReportPageClient() {
   runSummaryFilterLoadRef.current = runSummaryFilterLoad;
 
   const handleApplySummaryFilters = useCallback(() => {
-    if (summaryTabLoading || summaryFilterLoadInFlightRef.current) {
+    if (summaryTabLoading || bdMisTabLoading || summaryFilterLoadInFlightRef.current) {
       return;
     }
     if (!hasPendingFilterChanges) {
@@ -3307,9 +3374,13 @@ export default function ReportPageClient() {
       return;
     }
     summaryUserApplyRef.current = true;
-    setSummaryTabLoading(true);
+    if (activeTab === 'bd_mis_summary') {
+      setBdMisTabLoading(true);
+    } else {
+      setSummaryTabLoading(true);
+    }
     applyFilters();
-  }, [applyFilters, hasPendingFilterChanges, summaryTabLoading]);
+  }, [activeTab, applyFilters, bdMisTabLoading, hasPendingFilterChanges, summaryTabLoading]);
 
   const finishSummaryUserApply = useCallback((message: string, failed = false) => {
     if (!summaryUserApplyRef.current) return;
@@ -3340,41 +3411,98 @@ export default function ReportPageClient() {
       });
   }, [dbInitialized, activeTab, appliedRevision, finishSummaryUserApply]);
 
+  const loadBdMisSummary = useCallback(async () => {
+    const applied = getAppliedFiltersSnapshot();
+    if (!applied) return;
+    const startDateStr = toDateString(applied.dateRange.start);
+    const endDateStr = toDateString(applied.dateRange.end);
+    const summaryOfficeIds = resolveSummaryOfficeIdsParam(
+      offices,
+      applied.selectedBranch,
+      applied.selectedFranchisee
+    );
+    const callTypesParam = resolveViewCallTypesParam(applied.selectedCallTypes);
+    const agingStr = normalizeAgingAsOfDate(applied.agingAsOf);
+    const clientSources = sourceSelection.clientSourceCodes.length
+      ? sourceSelection.clientSourceCodes.join(',')
+      : 'coke,cadbury';
+
+    const res = await axios.get('/api/report/bd-mis-summary', {
+      withCredentials: true,
+      params: {
+        officeId: summaryOfficeIds,
+        callType: callTypesParam,
+        startDate: startDateStr,
+        endDate: endDateStr,
+        agingAsOf: agingStr,
+        includeCrm: sourceSelection.crm ? 'true' : 'false',
+        clientSources,
+      },
+    });
+
+    setBdMisRegionalRows(res.data?.regionalRows ?? []);
+    setBdMisGrand(res.data?.grand ?? null);
+    const regionalRows = res.data?.regionalRows ?? [];
+    const grand = res.data?.grand;
+    if (grand && regionalRows.length) {
+      setBdMisExportData({
+        regionalRows,
+        grand,
+        crmBranchSummary: res.data?.crmBranchSummary ?? [],
+        crmAccountSummary: res.data?.crmAccountSummary ?? [],
+        clientAccountSummary: res.data?.clientAccountSummary ?? [],
+        sources: res.data?.sources ?? {
+          crm: sourceSelection.crm,
+          cadbury: sourceSelection.clientSourceCodes.includes('cadbury'),
+          coke: sourceSelection.clientSourceCodes.includes('coke'),
+        },
+      });
+    } else {
+      setBdMisExportData(null);
+    }
+  }, [getAppliedFiltersSnapshot, offices, sourceSelection]);
+
+  useEffect(() => {
+    if (!dbInitialized) return;
+    if (activeTab !== 'bd_mis_summary') return;
+
+    setBdMisTabLoading(true);
+    void loadBdMisSummary()
+      .catch((err) => {
+        console.warn('BD MIS summary fetch failed:', err);
+      })
+      .finally(() => {
+        setBdMisTabLoading(false);
+      });
+  }, [dbInitialized, activeTab, appliedRevision, loadBdMisSummary, sourceSelectionKey]);
+
   // Client import tab: refetch when applied filters change (summary/accounts load via runSummaryFilterLoad).
   useEffect(() => {
     if (!dbInitialized) return;
     if (activeTab !== 'client_import') return;
-    void fetchClientImportSummary(resolveClientImportScope());
-  }, [
-    dbInitialized,
-    activeTab,
-    appliedRevision,
-    resolveClientImportScope,
-    fetchClientImportSummary,
-  ]);
+    void fetchClientImportSummaryRef.current(resolveClientImportScopeRef.current());
+  }, [dbInitialized, activeTab, appliedRevision]);
 
-  // Summary/accounts: refetch client overlay when CRM/Cadbury source toggles change (no full summary reload).
+  // Summary/accounts: refetch client overlay only when CRM/Cadbury/Coke toggles change.
   useEffect(() => {
     if (!dbInitialized) return;
     if (activeTab !== 'summary' && activeTab !== 'accounts') {
       clientImportSourceFetchTabRef.current = null;
+      prevSourceSelectionKeyRef.current = null;
       return;
     }
     if (clientImportSourceFetchTabRef.current !== activeTab) {
       clientImportSourceFetchTabRef.current = activeTab;
+      prevSourceSelectionKeyRef.current = sourceSelectionKey;
       return;
     }
-    void fetchClientImportSummary(resolveClientImportScope());
-  }, [
-    dbInitialized,
-    activeTab,
-    resolveClientImportScope,
-    fetchClientImportSummary,
-    sourceSelection,
-  ]);
+    if (prevSourceSelectionKeyRef.current === sourceSelectionKey) return;
+    prevSourceSelectionKeyRef.current = sourceSelectionKey;
+    void fetchClientImportSummaryRef.current(resolveClientImportScopeRef.current());
+  }, [dbInitialized, activeTab, sourceSelectionKey]);
 
   useEffect(() => {
-    if (!misAccess.summary && !misAccess.accounts && !misAccess.client_import) return;
+    if (!misAccess.summary && !misAccess.accounts && !misAccess.client_import && !misAccess.bd_mis_summary) return;
     void loadClientImportSources();
   }, [
     misAccess.summary,
@@ -3608,6 +3736,35 @@ export default function ReportPageClient() {
         setExportProgress(null);
       }
       return;
+    } else if (activeTab === 'bd_mis_summary') {
+      if (!bdMisExportData?.regionalRows?.length) {
+        alert('No data to export. Apply filters and wait for the summary to load.');
+        return;
+      }
+      const applied = getAppliedFiltersSnapshot();
+      const { buildBdMisSummaryWorkbook, bdMisSummaryFilename } = await import(
+        '@/lib/report/bd-mis-excel-export'
+      );
+      const { downloadWorkbook } = await import('@/lib/report/summary-excel-export');
+      const workbook = await buildBdMisSummaryWorkbook({
+        ...bdMisExportData,
+        filterMeta: {
+          startDate: toDateString(applied?.dateRange.start ?? dateRange.start),
+          endDate: toDateString(applied?.dateRange.end ?? dateRange.end),
+          agingAsOf: normalizeAgingAsOfDate(applied?.agingAsOf ?? agingAsOf),
+          callTypes:
+            applied?.selectedCallTypes?.map((t) => String(t).toUpperCase()).join(', ') ||
+            'BREAKDOWN',
+          branches:
+            joinFilterParam(applied?.selectedBranch ?? selectedBranch) || 'All Branches',
+          franchisees:
+            joinFilterParam(applied?.selectedFranchisee ?? selectedFranchisee) ||
+            'All Franchisees',
+          sources: bdMisExportData.sources,
+        },
+      });
+      await downloadWorkbook(workbook, bdMisSummaryFilename());
+      return;
     } else if (activeTab === 'summary') {
       const {
         buildSummaryDashboardWorkbook,
@@ -3637,7 +3794,7 @@ export default function ReportPageClient() {
         accountMisTopN,
         clientAccountSummaryData,
         mergeFlags,
-        cadburyMergeWithCrm,
+        clientMergeWithCrm,
         accountMisZoneTopExclude
       );
       const workbook = await buildKeyAccountMisWorkbook(
@@ -3684,13 +3841,13 @@ export default function ReportPageClient() {
 
 
   if (!mounted) {
-    return <ReportPageSkeleton className="bg-white" />;
+    return <ReportPageSkeleton className="bg-bg-canvas" />;
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-white text-slate-900">
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg-canvas text-slate-900">
       {/* Page Header / Controls — h-14 matches sidebar header */}
-      <div className="sticky top-0 z-30 flex h-14 flex-shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4">
+      <div className="sticky top-0 z-30 flex h-14 flex-shrink-0 items-center justify-between border-b border-slate-200 bg-bg-canvas px-4">
         <div className="flex items-center gap-6">
           <div className="flex">
             {misTabs.map((tab) => (
@@ -3724,8 +3881,8 @@ export default function ReportPageClient() {
               Updating filters…
             </span>
           )}
-          {(activeTab === 'summary' || activeTab === 'accounts') &&
-            (syncInProgress || corpusLoading || filterUpdating || summaryTabLoading) && (
+          {(activeTab === 'summary' || activeTab === 'accounts' || activeTab === 'bd_mis_summary') &&
+            (syncInProgress || corpusLoading || filterUpdating || summaryTabLoading || bdMisTabLoading) && (
             <span
               className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-400 border-t-transparent"
               title="Updating summary…"
@@ -3740,7 +3897,7 @@ export default function ReportPageClient() {
               fetchDelta();
             }}
             disabled={syncInProgress}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 shadow-sm transition-all hover:bg-slate-50 disabled:opacity-50"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-bg-canvas text-slate-700 shadow-sm transition-all hover:bg-bg-soft disabled:opacity-50"
             title="Refresh report data"
           >
             <div className={`${syncInProgress ? 'animate-spin' : ''}`}>
@@ -3757,15 +3914,17 @@ export default function ReportPageClient() {
               void handleExport('excel');
             }}
             disabled={false}
-            className="flex items-center gap-2 bg-white text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
+            className="flex items-center gap-2 bg-bg-canvas text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-bg-soft transition-all shadow-sm disabled:opacity-50"
             title={
               exportingDetailed
                 ? exportProgress && exportProgress.total > 0
                   ? `${registerExportStatusLabel(exportProgress)} — click to cancel`
                   : 'Export in progress — click to cancel'
-                : total > 500
-                  ? 'Export filtered register (large datasets download as CSV from server)'
-                  : 'Export filtered register to Excel (.xlsx)'
+                : activeTab === 'bd_mis_summary'
+                  ? 'Export audit workbook — how regional counts were built'
+                  : total > 500
+                    ? 'Export filtered register (large datasets download as CSV from server)'
+                    : 'Export filtered register to Excel (.xlsx)'
             }
           >
             <FileSpreadsheet size={14} className={exportingDetailed ? 'animate-pulse text-amber-600' : 'text-emerald-600'} />
@@ -3779,7 +3938,7 @@ export default function ReportPageClient() {
             <button
               type="button"
               onClick={() => setHeaderMenuOpen((open) => !open)}
-              className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm transition-all hover:bg-slate-50"
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-bg-canvas text-slate-600 shadow-sm transition-all hover:bg-bg-soft"
               title="More actions"
             >
               <MoreVertical size={14} />
@@ -3787,7 +3946,7 @@ export default function ReportPageClient() {
             {headerMenuOpen && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setHeaderMenuOpen(false)} />
-                <div className="absolute right-0 top-full z-50 mt-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
+                <div className="absolute right-0 top-full z-50 mt-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-bg-canvas shadow-xl">
                   <button
                     type="button"
                     onClick={() => {
@@ -3799,7 +3958,7 @@ export default function ReportPageClient() {
                       fetchData(1, { skipCache: true });
                     }}
                     disabled={loading}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-slate-700 hover:bg-bg-soft disabled:opacity-50"
                   >
                     Full reload
                   </button>
@@ -3847,7 +4006,7 @@ export default function ReportPageClient() {
               cancelRegisterExport();
               feedback.cancelled('Export cancelled');
             }}
-            className="shrink-0 rounded-md border border-amber-300 bg-white px-2 py-1 text-[11px] font-medium hover:bg-amber-100"
+            className="shrink-0 rounded-md border border-amber-300 bg-bg-canvas px-2 py-1 text-[11px] font-medium hover:bg-amber-100"
           >
             Cancel export
           </button>
@@ -3869,7 +4028,7 @@ export default function ReportPageClient() {
         />
       ) : (
         <>
-          <div className="report-toolbar-filters-row border-b border-slate-200 bg-white px-4 py-2">
+          <div className="report-toolbar-filters-row report-shared-filters-surface border-b border-slate-200 bg-bg-canvas px-4 py-2">
             <RegisterMultiSelect
               label="Call Type"
               emptyLabel="All Call Types"
@@ -3882,7 +4041,7 @@ export default function ReportPageClient() {
               panelClassName="w-64"
             />
             <RegisterBranchFranchiseeFilters applyMode="confirm" layout="inline" />
-            <div className="report-toolbar-filters-date shrink-0">
+            <div className="report-toolbar-filters-date report-shared-date-field shrink-0">
               <DateRangeSelector
                 value={dateRange.label}
                 startDate={dateRange.start}
@@ -3890,11 +4049,11 @@ export default function ReportPageClient() {
                 onChange={(range) => setDateRange(range)}
               />
             </div>
-            <div className="report-toolbar-filters-aging flex shrink-0 items-center gap-2">
-              <span className="text-[10px] whitespace-nowrap text-amber-600 ui-label">Aging As Of</span>
+            <div className="report-toolbar-filters-aging report-shared-aging-group flex shrink-0 items-center gap-2">
+              <span className="report-shared-aging-label text-[10px] whitespace-nowrap text-amber-600 ui-label">Aging As Of</span>
               <input
                 type="date"
-                className="register-filter-select h-8 w-auto bg-amber-50/80 text-amber-900"
+                className="register-filter-select report-shared-aging-input h-8 w-auto bg-amber-50/80 text-amber-900"
                 value={agingAsOf}
                 max={new Date().toISOString().split('T')[0]}
                 onChange={(e) => setAgingAsOf(e.target.value)}
@@ -3903,27 +4062,27 @@ export default function ReportPageClient() {
             <button
               type="button"
               onClick={handleApplySummaryFilters}
-              disabled={summaryTabLoading}
-              aria-busy={summaryTabLoading}
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                summaryTabLoading
+              disabled={summaryTabLoading || bdMisTabLoading}
+              aria-busy={summaryTabLoading || bdMisTabLoading}
+          className={`filter-apply-btn report-shared-apply-btn ${
+                summaryTabLoading || bdMisTabLoading
                   ? 'border border-blue-300 bg-blue-50 text-blue-800'
                   : hasPendingFilterChanges
-                    ? 'border border-slate-800 bg-slate-900 text-white hover:bg-slate-800'
-                    : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                    ? 'filter-apply-btn--pending'
+                    : ''
               }`}
             >
-              {summaryTabLoading ? (
+              {summaryTabLoading || bdMisTabLoading ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
               ) : (
                 <Filter className="h-3.5 w-3.5" aria-hidden />
               )}
-              {summaryTabLoading ? 'Applying…' : 'Apply filters'}
+              {summaryTabLoading || bdMisTabLoading ? 'Applying…' : 'Apply filters'}
             </button>
-            {(activeTab === 'summary' || activeTab === 'accounts') &&
+            {(activeTab === 'summary' || activeTab === 'accounts' || activeTab === 'bd_mis_summary') &&
               (clientImportActiveSources.length > 0 ||
                 sourceSelection.clientSourceCodes.includes('cadbury')) && (
-                <div className="report-toolbar-filters-sources shrink-0 border-l border-slate-200 pl-2 flex flex-wrap items-center gap-2">
+                <div className="report-toolbar-filters-sources report-shared-sources-group shrink-0 border-l border-slate-200 pl-2 flex flex-wrap items-center gap-2">
                   {clientImportActiveSources.length > 0 && (
                     <MisSourceCheckboxes
                       selection={sourceSelection}
@@ -3934,12 +4093,16 @@ export default function ReportPageClient() {
                       }}
                     />
                   )}
-                  {sourceSelection.clientSourceCodes.includes('cadbury') && (
-                    <MisCadburyMergeCheckbox
-                      checked={cadburyMergeWithCrm}
-                      onChange={(checked) => {
-                        setCadburyMergeWithCrm(checked);
-                        localStorage.setItem('report_cadbury_merge_crm', String(checked));
+                  {(activeTab === 'summary' || activeTab === 'accounts') &&
+                  (sourceSelection.clientSourceCodes.includes('cadbury') ||
+                    sourceSelection.clientSourceCodes.includes('coke')) && (
+                    <MisClientMergeCheckbox
+                      prefs={clientMergeWithCrm}
+                      showCadbury={sourceSelection.clientSourceCodes.includes('cadbury')}
+                      showCoke={sourceSelection.clientSourceCodes.includes('coke')}
+                      onChange={(prefs) => {
+                        setClientMergeWithCrm(prefs);
+                        saveClientMergeWithCrmPrefs(prefs);
                       }}
                     />
                   )}
@@ -3950,7 +4113,7 @@ export default function ReportPageClient() {
       )}
 
       {/* Main Area */}
-      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-bg-canvas">
         <style jsx global>{`
           @keyframes loading {
             0% { transform: translateX(-100%); }
@@ -4006,7 +4169,7 @@ export default function ReportPageClient() {
                 <col className="register-col-num" />
                 <col className="register-col-id" />
               </colgroup>
-              <thead className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50">
+              <thead className="sticky top-0 z-20 border-b border-slate-200 bg-bg-soft">
                 <tr>
                   <th className="register-table-sticky-col register-table-sticky-col-1 border-r border-slate-100 px-2 py-2.5 text-center text-[11px] font-medium whitespace-nowrap text-slate-500">#</th>
                   {visibleRegisterColumnDefs.map((col, colIdx) => (
@@ -4019,9 +4182,9 @@ export default function ReportPageClient() {
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
+              <tbody className="divide-y divide-slate-100 bg-bg-canvas">
                 {displayedData.length > 0 ? displayedData.map((row, idx) => (
-                  <tr key={idx} className="transition-colors hover:bg-slate-50">
+                  <tr key={idx} className="transition-colors hover:bg-bg-soft">
                     <td className="register-table-sticky-col register-table-sticky-col-1 whitespace-nowrap border-r border-slate-50 px-2 py-2 text-center text-[11px] text-slate-400">
                       {(page - 1) * limit + idx + 1}
                     </td>
@@ -4045,7 +4208,7 @@ export default function ReportPageClient() {
                             clearAllFilters();
                             void runRegisterFilterLoad({ force: true });
                           }}
-                          className="mt-3 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                          className="mt-3 rounded-md border border-slate-200 bg-bg-canvas px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-bg-soft"
                         >
                           Clear filters
                         </button>
@@ -4057,7 +4220,7 @@ export default function ReportPageClient() {
             </table>
             </HorizontalScrollFade>
           {/* Pagination Controls */}
-          <div className="flex h-11 flex-shrink-0 items-center justify-between border-t border-slate-200 bg-slate-50 px-4">
+          <div className="flex h-11 flex-shrink-0 items-center justify-between border-t border-slate-200 bg-bg-soft px-4">
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
               <span className="font-medium text-slate-700">
                 {total > 0 ? (page - 1) * limit + 1 : 0}–{Math.min(page * limit, total)} of {total.toLocaleString()}
@@ -4068,7 +4231,7 @@ export default function ReportPageClient() {
                   value={limit}
                   onChange={(e) => handleRegisterPageSizeChange(Number(e.target.value))}
                   disabled={loading && data.length === 0}
-                  className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700 shadow-sm hover:border-slate-300 focus:border-slate-400 focus:outline-none disabled:opacity-50"
+                  className="rounded border border-slate-200 bg-bg-canvas px-2 py-0.5 text-[11px] font-medium text-slate-700 shadow-sm hover:border-slate-300 focus:border-slate-400 focus:outline-none disabled:opacity-50"
                   aria-label="Rows per page"
                 >
                   {REGISTER_PAGE_SIZE_OPTIONS.map((size) => (
@@ -4087,7 +4250,7 @@ export default function ReportPageClient() {
                   fetchData(newPage);
                 }}
                 disabled={page <= 1 || loading}
-                className="p-1.5 rounded bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                className="p-1.5 rounded bg-bg-canvas border border-slate-200 text-slate-600 hover:bg-bg-soft disabled:opacity-50 transition-colors"
               >
                 <ChevronLeft size={16} />
               </button>
@@ -4119,7 +4282,7 @@ export default function ReportPageClient() {
                           setPage(p as number);
                           fetchData(p as number);
                         }}
-                        className={`w-8 h-8 flex items-center justify-center rounded text-[12px] transition-all font-medium ${page === p ? 'bg-slate-900 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                        className={`w-8 h-8 flex items-center justify-center rounded text-[12px] transition-all font-medium ${page === p ? 'bg-slate-900 text-white shadow-sm' : 'bg-bg-canvas border border-slate-200 text-slate-600 hover:bg-bg-soft'}`}
                       >
                         {p}
                       </button>
@@ -4140,7 +4303,7 @@ export default function ReportPageClient() {
                   fetchData(newPage);
                 }}
                 disabled={page >= Math.ceil(total / limit) || loading}
-                className="p-1.5 rounded bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                className="p-1.5 rounded bg-bg-canvas border border-slate-200 text-slate-600 hover:bg-bg-soft disabled:opacity-50 transition-colors"
               >
                 <ChevronRight size={16} />
               </button>
@@ -4152,10 +4315,10 @@ export default function ReportPageClient() {
           </ReportErrorBoundary>
         ) : activeTab === 'summary' ? (
           <ReportErrorBoundary label="Summary Dashboard">
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto bg-slate-50/10 inner-scrollbar">
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto bg-bg-soft/10 inner-scrollbar">
             {summaryTabLoading ? (
               <div
-                className="pointer-events-none absolute inset-0 z-20 bg-white/50"
+                className="pointer-events-none absolute inset-0 z-20 bg-bg-canvas/50"
                 aria-hidden
               />
             ) : null}
@@ -4163,9 +4326,9 @@ export default function ReportPageClient() {
               {/* Region Summary Table — fixed compact block, always visible */}
               <section>
                 <h2 className="mb-2 px-2 text-[11px] text-slate-500 ui-label">Regional Performance (AI)</h2>
-                <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
-                  <table className="w-full text-left border-collapse text-[11px]">
-                    <thead className="bg-[#0070c0]">
+                <div className="overflow-x-auto rounded-lg border border-slate-200 bg-bg-canvas shadow-sm">
+                  <table className="perf-dashboard-table w-full text-left border-collapse text-[11px]">
+                    <thead className="perf-table-header">
                       <tr className="text-white text-[10px] ui-label border-b border-blue-800">
                         <th className="p-2 border-r border-slate-300/30">Region</th>
                         <th className="p-2 border border-slate-300 text-center">Total calls</th>
@@ -4183,26 +4346,18 @@ export default function ReportPageClient() {
                     <tbody>
                       {clientOnlyMode
                         ? buildClientOnlyRegionalRows(clientAccountSummaryData).map((row) => {
-                            const getRegionBg = (reg: string) => {
-                              const r = reg.toUpperCase();
-                              if (r.includes('NORTH')) return 'bg-[#c6e0b4]';
-                              if (r.includes('EAST')) return 'bg-[#bdd7ee]';
-                              if (r.includes('WEST')) return 'bg-[#f8cbad]';
-                              if (r.includes('SOUTH')) return 'bg-[#d9d9d9]';
-                              return 'bg-slate-100';
-                            };
                             const open =
                               row.age_2 + row.age_3 + row.age_7 + row.age_15;
                             return (
                               <tr
                                 key={row.region}
-                                className={`${getRegionBg(row.region)} text-slate-900 ui-strong`}
+                                className={`${regionPerfRowClass(row.region)} text-slate-900 ui-strong`}
                               >
                                 <td className="p-2 border border-slate-300">{row.region}</td>
                                 <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.total_calls} />
                                 <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.total_solved} className="text-emerald-600" />
                                 <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.cancelled_calls} className="text-rose-600" />
-                                <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={open} className="bg-slate-100/50 ui-strong" />
+                                <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={open} className="perf-metric-open ui-strong" />
                                 <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.age_2} />
                                 <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.age_3} />
                                 <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.age_7} />
@@ -4277,7 +4432,7 @@ export default function ReportPageClient() {
                           region,
                           'total_calls',
                           mergeFlags,
-                          cadburyMergeWithCrm,
+                          clientMergeWithCrm,
                           crmTotal,
                           clientField('total_calls')
                         );
@@ -4288,7 +4443,7 @@ export default function ReportPageClient() {
                           region,
                           alignCrmToAccounts ? 'total_solved' : 'solved_calls',
                           mergeFlags,
-                          cadburyMergeWithCrm,
+                          clientMergeWithCrm,
                           crmSolved,
                           clientField(alignCrmToAccounts ? 'total_solved' : 'solved_calls')
                         );
@@ -4299,7 +4454,7 @@ export default function ReportPageClient() {
                           region,
                           'cancelled_calls',
                           mergeFlags,
-                          cadburyMergeWithCrm,
+                          clientMergeWithCrm,
                           crmCancelled,
                           clientField('cancelled_calls')
                         );
@@ -4309,7 +4464,7 @@ export default function ReportPageClient() {
                           clientAccountSummaryData,
                           region,
                           mergeFlags,
-                          cadburyMergeWithCrm,
+                          clientMergeWithCrm,
                           crmOpen,
                           alignCrmToAccounts
                             ? clientField('age_2') +
@@ -4325,7 +4480,7 @@ export default function ReportPageClient() {
                           region,
                           'age_2',
                           mergeFlags,
-                          cadburyMergeWithCrm,
+                          clientMergeWithCrm,
                           crmAge2,
                           clientField('age_2')
                         );
@@ -4336,7 +4491,7 @@ export default function ReportPageClient() {
                           region,
                           'age_3',
                           mergeFlags,
-                          cadburyMergeWithCrm,
+                          clientMergeWithCrm,
                           crmAge3,
                           clientField('age_3')
                         );
@@ -4347,7 +4502,7 @@ export default function ReportPageClient() {
                           region,
                           'age_7',
                           mergeFlags,
-                          cadburyMergeWithCrm,
+                          clientMergeWithCrm,
                           crmAge7,
                           clientField('age_7')
                         );
@@ -4358,7 +4513,7 @@ export default function ReportPageClient() {
                           region,
                           'age_15',
                           mergeFlags,
-                          cadburyMergeWithCrm,
+                          clientMergeWithCrm,
                           crmAge15,
                           clientField('age_15')
                         );
@@ -4369,7 +4524,7 @@ export default function ReportPageClient() {
                           region,
                           'part_pending',
                           mergeFlags,
-                          cadburyMergeWithCrm,
+                          clientMergeWithCrm,
                           crmParts,
                           clientField('part_pending')
                         );
@@ -4380,27 +4535,18 @@ export default function ReportPageClient() {
                           region,
                           'active_eng',
                           mergeFlags,
-                          cadburyMergeWithCrm,
+                          clientMergeWithCrm,
                           crmEngs,
                           clientField('active_eng')
                         );
 
-                        const getRegionBg = (reg: string) => {
-                          const r = reg.toUpperCase();
-                          if (r.includes('NORTH')) return 'bg-[#c6e0b4]';
-                          if (r.includes('EAST')) return 'bg-[#bdd7ee]';
-                          if (r.includes('WEST')) return 'bg-[#f8cbad]';
-                          if (r.includes('SOUTH')) return 'bg-[#d9d9d9]';
-                          return 'bg-slate-100';
-                        };
-
                         return (
-                          <tr key={region} className={`${getRegionBg(region)} text-slate-900 ui-strong`}>
+                          <tr key={region} className={`${regionPerfRowClass(region)} text-slate-900 ui-strong`}>
                             <td className="p-2 border border-slate-300">{region}</td>
                             <SummaryMergedMetricCell {...mTotal} onClick={() => handleDrillDown('total_calls', `${region} - Total Calls`, { region })} />
                             <SummaryMergedMetricCell {...mSolved} className="text-emerald-600" onClick={() => handleDrillDown('solved_calls', `${region} - Solved Calls`, { region })} />
                             <SummaryMergedMetricCell {...mCancelled} className="text-rose-600" onClick={() => handleDrillDown('cancelled_calls', `${region} - Cancelled Calls`, { region })} />
-                            <SummaryMergedMetricCell {...mOpen} className="bg-slate-100/50 ui-strong" onClick={() => handleDrillDown('open_calls', `${region} - Open Calls`, { region })} />
+                            <SummaryMergedMetricCell {...mOpen} className="perf-metric-open ui-strong" onClick={() => handleDrillDown('open_calls', `${region} - Open Calls`, { region })} />
                             <SummaryMergedMetricCell {...mAge2} onClick={() => handleDrillDown('age_2', `${region} - <2 Days`, { region })} />
                             <SummaryMergedMetricCell {...mAge3} onClick={() => handleDrillDown('age_3', `${region} - 2-7 Days`, { region })} />
                             <SummaryMergedMetricCell {...mAge7} onClick={() => handleDrillDown('age_7', `${region} - 7-15 Days`, { region })} />
@@ -4411,7 +4557,7 @@ export default function ReportPageClient() {
                         );
                       })}
                       {/* All India Total Row */}
-                      <tr className="bg-[#ffff00] text-slate-900 group ui-strong">
+                      <tr className="perf-total-row text-slate-900 group ui-strong">
                         <td className="p-2 border border-slate-300 flex items-center justify-between">
                           <span>AI</span>
                           <button
@@ -4431,7 +4577,7 @@ export default function ReportPageClient() {
                                   clientAccountSummaryData,
                                   'total_calls',
                                   mergeFlags,
-                                  cadburyMergeWithCrm
+                                  clientMergeWithCrm
                                 )
                               : summaryData.reduce((sum, b) => sum + Number(b.total_calls || 0), 0)
                           }
@@ -4452,7 +4598,7 @@ export default function ReportPageClient() {
                                   clientAccountSummaryData,
                                   'total_solved',
                                   mergeFlags,
-                                  cadburyMergeWithCrm
+                                  clientMergeWithCrm
                                 )
                               : summaryData.reduce((sum, b) => sum + Number(b.solved_calls || 0), 0)
                           }
@@ -4473,7 +4619,7 @@ export default function ReportPageClient() {
                                   clientAccountSummaryData,
                                   'cancelled_calls',
                                   mergeFlags,
-                                  cadburyMergeWithCrm
+                                  clientMergeWithCrm
                                 )
                               : summaryData.reduce((sum, b) => sum + Number(b.cancelled_calls || 0), 0)
                           }
@@ -4493,7 +4639,7 @@ export default function ReportPageClient() {
                                   accountsData,
                                   clientAccountSummaryData,
                                   mergeFlags,
-                                  cadburyMergeWithCrm
+                                  clientMergeWithCrm
                                 )
                               : summaryData.reduce((sum, b) => sum + Number(b.open_calls || 0), 0)
                           }
@@ -4515,7 +4661,7 @@ export default function ReportPageClient() {
                                   clientAccountSummaryData,
                                   'age_2',
                                   mergeFlags,
-                                  cadburyMergeWithCrm
+                                  clientMergeWithCrm
                                 )
                               : summaryData.reduce((sum, b) => sum + Number(b.age_2 || 0), 0)
                           }
@@ -4536,7 +4682,7 @@ export default function ReportPageClient() {
                                   clientAccountSummaryData,
                                   'age_3',
                                   mergeFlags,
-                                  cadburyMergeWithCrm
+                                  clientMergeWithCrm
                                 )
                               : summaryData.reduce((sum, b) => sum + Number(b.age_3 || 0), 0)
                           }
@@ -4557,7 +4703,7 @@ export default function ReportPageClient() {
                                   clientAccountSummaryData,
                                   'age_7',
                                   mergeFlags,
-                                  cadburyMergeWithCrm
+                                  clientMergeWithCrm
                                 )
                               : summaryData.reduce((sum, b) => sum + Number(b.age_7 || 0), 0)
                           }
@@ -4578,7 +4724,7 @@ export default function ReportPageClient() {
                                   clientAccountSummaryData,
                                   'age_15',
                                   mergeFlags,
-                                  cadburyMergeWithCrm
+                                  clientMergeWithCrm
                                 )
                               : summaryData.reduce((sum, b) => sum + Number(b.age_15 || 0), 0)
                           }
@@ -4599,7 +4745,7 @@ export default function ReportPageClient() {
                                   clientAccountSummaryData,
                                   'part_pending',
                                   mergeFlags,
-                                  cadburyMergeWithCrm
+                                  clientMergeWithCrm
                                 )
                               : summaryData.reduce((sum, b) => sum + Number(b.part_pending || 0), 0)
                           }
@@ -4620,7 +4766,7 @@ export default function ReportPageClient() {
                                   clientAccountSummaryData,
                                   'active_eng',
                                   mergeFlags,
-                                  cadburyMergeWithCrm
+                                  clientMergeWithCrm
                                 )
                               : summaryData.reduce((sum, b) => sum + Number(b.active_eng || 0), 0)
                           }
@@ -4641,9 +4787,9 @@ export default function ReportPageClient() {
               {/* Branch table — full height via page scroll */}
               <section className="flex flex-col">
                 <h2 className="mb-2 flex-shrink-0 px-2 text-[11px] text-slate-500 ui-label">Branch Wise Performance</h2>
-                <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm inner-scrollbar">
-                  <table className="w-full text-left border-collapse text-[11px]">
-                    <thead className="sticky top-0 z-20 bg-[#0070c0] shadow-sm outline outline-1 outline-[#0070c0]">
+                <div className="overflow-x-auto rounded-lg border border-slate-200 bg-bg-canvas shadow-sm inner-scrollbar">
+                  <table className="perf-dashboard-table w-full text-left border-collapse text-[11px]">
+                    <thead className="perf-table-header sticky top-0 z-20 shadow-sm">
                       <tr className="text-white text-[10px] ui-label border-b border-blue-800">
                         <th className="p-2 border-r border-slate-300/30 min-w-[200px]">Branches</th>
                         <th className="p-2 border border-slate-300 text-center">Total calls</th>
@@ -4668,7 +4814,7 @@ export default function ReportPageClient() {
                           </tr>
                         ) : (
                           clientSummaryData.map((branch, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50 text-slate-900">
+                            <tr key={idx} className="hover:bg-bg-soft text-slate-900">
                               <td className="p-2 border border-slate-300">
                                 {String(branch.branch ?? branch.region ?? '')}
                               </td>
@@ -4700,16 +4846,7 @@ export default function ReportPageClient() {
                           b.parentId === 0 || !regionBranches.find(p => p.officeId === b.parentId)
                         ).sort((a, b) => Number(b.total_calls) - Number(a.total_calls));
 
-                        const getRegionBg = (reg: string) => {
-                          const r = reg.toUpperCase();
-                          if (r.includes('NORTH')) return 'bg-[#c6e0b4]';
-                          if (r.includes('EAST')) return 'bg-[#bdd7ee]';
-                          if (r.includes('WEST')) return 'bg-[#f8cbad]';
-                          if (r.includes('SOUTH')) return 'bg-[#d9d9d9]';
-                          return 'bg-slate-100';
-                        };
-
-                        const bgClass = getRegionBg(region);
+                        const bgClass = regionPerfRowClass(region);
 
                         return (
                           <React.Fragment key={region}>
@@ -4733,13 +4870,13 @@ export default function ReportPageClient() {
 
                               return (
                                 <React.Fragment key={branch.officeId}>
-                                  <tr className={`${bgClass} hover:brightness-95 transition-all font-medium text-slate-900`}>
+                                  <tr className={`${bgClass} transition-colors font-medium text-slate-900`}>
                                     <td className="p-2 border border-slate-300">
                                       <div className="flex items-center gap-1">
                                         {hasChildren ? (
                                           <button
                                             onClick={() => setExpandedBranches(prev => ({ ...prev, [branch.officeId]: !prev[branch.officeId] }))}
-                                            className="p-0.5 hover:bg-white/50 rounded transition-all text-slate-700"
+                                            className="p-0.5 hover:bg-bg-canvas/50 rounded transition-all text-slate-700"
                                           >
                                             {isExpanded ? <ChevronDown size={12} strokeWidth={3} /> : <ChevronRight size={12} strokeWidth={3} />}
                                           </button>
@@ -4767,7 +4904,7 @@ export default function ReportPageClient() {
                                   </tr>
 
                                   {isExpanded && children.map(child => (
-                                    <tr key={child.officeId} className="bg-white/60 hover:bg-white transition-colors text-slate-600 italic">
+                                    <tr key={child.officeId} className="bg-bg-canvas/60 hover:bg-bg-canvas transition-colors text-slate-600 italic">
                                       <td className="p-1.5 pl-8 border border-slate-300">
                                         <div className="flex items-center gap-2">
                                           <div className="w-1 h-1 rounded-full bg-slate-300" />
@@ -4805,10 +4942,10 @@ export default function ReportPageClient() {
           </ReportErrorBoundary>
         ) : activeTab === 'accounts' ? (
           <ReportErrorBoundary label="Key Account MIS">
-            <div className="relative flex-1 flex flex-col min-h-0 p-6 space-y-4 bg-slate-50/10">
+            <div className="relative flex-1 flex flex-col min-h-0 p-6 space-y-4 bg-bg-soft/10">
               {summaryTabLoading ? (
                 <div
-                  className="pointer-events-none absolute inset-0 z-20 bg-white/50"
+                  className="pointer-events-none absolute inset-0 z-20 bg-bg-canvas/50"
                   aria-hidden
                 />
               ) : null}
@@ -4829,7 +4966,7 @@ export default function ReportPageClient() {
                   accountMisTopN,
                   clientAccountSummaryData,
                   mergeFlags,
-                  cadburyMergeWithCrm,
+                  clientMergeWithCrm,
                   accountMisZoneTopExclude
                 );
                 const filteredClientAccounts = filterClientAccountSummary(
@@ -4845,7 +4982,7 @@ export default function ReportPageClient() {
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         {accountMisGrouping === 'zone-top' ? (
                           <div className="flex flex-wrap items-center gap-2">
-                            <label className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-600">
+                            <label className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-bg-canvas px-2 py-1 text-[10px] text-slate-600">
                               <span className="ui-label">Top</span>
                               <input
                                 type="number"
@@ -4872,7 +5009,7 @@ export default function ReportPageClient() {
                                   }
                                   setShowZoneTopExcludeDropdown(!showZoneTopExcludeDropdown);
                                 }}
-                                className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-600 hover:border-slate-400 ui-label"
+                                className="flex items-center gap-1 rounded-md border border-slate-200 bg-bg-canvas px-2 py-1 text-[10px] text-slate-600 hover:border-slate-400 ui-label"
                               >
                                 <span>
                                   Exclude
@@ -4888,8 +5025,8 @@ export default function ReportPageClient() {
                                     className="fixed inset-0 z-[60]"
                                     onClick={() => setShowZoneTopExcludeDropdown(false)}
                                   />
-                                  <div className="absolute right-0 top-full mt-1 w-52 bg-white border border-slate-200 shadow-xl rounded-md z-[70] overflow-hidden">
-                                    <div className="p-1 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                                  <div className="absolute right-0 top-full mt-1 w-52 bg-bg-canvas border border-slate-200 shadow-xl rounded-md z-[70] overflow-hidden">
+                                    <div className="p-1 border-b border-slate-100 bg-bg-soft flex items-center justify-between">
                                       <button
                                         type="button"
                                         onClick={() => setTempZoneTopExclude([])}
@@ -4923,7 +5060,7 @@ export default function ReportPageClient() {
                                         .map((acc) => (
                                           <label
                                             key={acc}
-                                            className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer"
+                                            className="flex items-center gap-2 px-2 py-1.5 hover:bg-bg-soft rounded cursor-pointer"
                                           >
                                             <input
                                               type="checkbox"
@@ -4970,7 +5107,7 @@ export default function ReportPageClient() {
                           >
                             Layout:
                           </span>
-                          <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50/80 p-0.5 text-[10px]">
+                          <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-bg-soft/80 p-0.5 text-[10px]">
                           <button
                             type="button"
                             aria-pressed={accountMisGrouping === 'zone'}
@@ -4981,7 +5118,7 @@ export default function ReportPageClient() {
                             className={`rounded px-2 py-0.5 ui-label transition-colors ${
                               accountMisGrouping === 'zone'
                                 ? 'bg-slate-900 text-white shadow-sm'
-                                : 'text-slate-600 hover:bg-white'
+                                : 'text-slate-600 hover:bg-bg-canvas'
                             }`}
                           >
                             Total Calls
@@ -4996,7 +5133,7 @@ export default function ReportPageClient() {
                             className={`rounded px-2 py-0.5 ui-label transition-colors ${
                               accountMisGrouping === 'zone-top'
                                 ? 'bg-slate-900 text-white shadow-sm'
-                                : 'text-slate-600 hover:bg-white'
+                                : 'text-slate-600 hover:bg-bg-canvas'
                             }`}
                           >
                             Top Client
@@ -5011,7 +5148,7 @@ export default function ReportPageClient() {
                             className={`rounded px-2 py-0.5 ui-label transition-colors ${
                               accountMisGrouping === 'overview'
                                 ? 'bg-slate-900 text-white shadow-sm'
-                                : 'text-slate-600 hover:bg-white'
+                                : 'text-slate-600 hover:bg-bg-canvas'
                             }`}
                           >
                             Client Wise
@@ -5021,18 +5158,18 @@ export default function ReportPageClient() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex-1 bg-white border border-slate-200 rounded-lg shadow-sm overflow-auto custom-scrollbar relative">
-                      <table className="w-full text-left border-collapse text-[10px]">
+                    <div className="flex-1 bg-bg-canvas border border-slate-200 rounded-lg shadow-sm overflow-auto custom-scrollbar relative">
+                      <table className="perf-account-mis-table w-full text-left border-collapse text-[10px]">
                         <thead className="sticky top-0 z-20 outline outline-1 outline-slate-800 shadow-sm">
                           {/* Category Headers */}
-                          <tr className="bg-slate-800 text-white ui-strong">
+                          <tr className="account-mis-cat-header bg-slate-800 text-white ui-strong">
                             <th className="p-1.5 border-r border-slate-600/50" colSpan={accountMisGrouping === 'overview' ? 2 : 3}>Basics</th>
                             <th className="p-1.5 border-r border-slate-600/50 text-center" colSpan={4}>Calls Summary (Breakdown)</th>
-                            <th className="p-1.5 border-r border-slate-600/50 text-center bg-blue-600" colSpan={7}>Breakdown (Aging)</th>
-                            <th className="p-1.5 border-r border-slate-600/50 text-center bg-amber-600" colSpan={3}>Deployment</th>
-                            <th className="p-1.5 text-center bg-emerald-600" colSpan={2}>Installation</th>
+                            <th className="p-1.5 border-r border-slate-600/50 text-center account-mis-cat-header--aging" colSpan={7}>Breakdown (Aging)</th>
+                            <th className="p-1.5 border-r border-slate-600/50 text-center account-mis-cat-header--deploy" colSpan={3}>Deployment</th>
+                            <th className="p-1.5 text-center account-mis-cat-header--install" colSpan={2}>Installation</th>
                           </tr>
-                          <tr className="bg-slate-100 text-slate-700 ui-strong">
+                          <tr className="account-mis-col-header bg-slate-100 text-slate-700 ui-strong">
                             {accountMisGrouping !== 'overview' ? (
                             <th className="p-1.5 border border-slate-300">
                               <div className="flex flex-col gap-1 relative">
@@ -5044,7 +5181,7 @@ export default function ReportPageClient() {
                                     }
                                     setShowRegionDropdown(!showRegionDropdown);
                                   }}
-                                  className="w-full bg-white border border-slate-200 rounded px-1.5 py-1 text-[9px] text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all ui-strong"
+                                  className="w-full bg-bg-canvas border border-slate-200 rounded px-1.5 py-1 text-[9px] text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all ui-strong"
                                 >
                                   <span className="truncate">
                                     {filterRegion.length === 0 ? 'All' : `${filterRegion.length} Selected`}
@@ -5055,8 +5192,8 @@ export default function ReportPageClient() {
                                 {showRegionDropdown && (
                                   <>
                                     <div className="fixed inset-0 z-[60]" onClick={() => setShowRegionDropdown(false)} />
-                                    <div className="absolute top-full left-0 mt-1 w-40 bg-white border border-slate-200 shadow-xl rounded-md z-[70] overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-                                      <div className="p-1 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                                    <div className="absolute top-full left-0 mt-1 w-40 bg-bg-canvas border border-slate-200 shadow-xl rounded-md z-[70] overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+                                      <div className="p-1 border-b border-slate-100 bg-bg-soft flex items-center justify-between">
                                         <button
                                           onClick={() => setTempFilterRegion([])}
                                           className="text-[9px] text-slate-400 hover:text-slate-900 px-1.5 py-0.5 ui-strong"
@@ -5075,7 +5212,7 @@ export default function ReportPageClient() {
                                       </div>
                                       <div className="max-h-48 overflow-y-auto p-1">
                                         {Array.from(new Set(displayAccounts.map(a => String(a.region ?? '')))).sort().map(r => (
-                                          <label key={r} className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
+                                          <label key={r} className="flex items-center gap-2 px-2 py-1.5 hover:bg-bg-soft rounded cursor-pointer transition-colors group">
                                             <input
                                               type="checkbox"
                                               className="w-3 h-3 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
@@ -5108,7 +5245,7 @@ export default function ReportPageClient() {
                                     }
                                     setShowAccountDropdown(!showAccountDropdown);
                                   }}
-                                  className="w-full bg-white border border-slate-200 rounded px-1.5 py-1 text-[9px] text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all ui-strong font-medium"
+                                  className="w-full bg-bg-canvas border border-slate-200 rounded px-1.5 py-1 text-[9px] text-slate-700 flex items-center justify-between hover:border-slate-400 transition-all ui-strong font-medium"
                                 >
                                   <span className="truncate">
                                     {filterAccount.length === 0 ? 'All' : `${filterAccount.length} Selected`}
@@ -5119,8 +5256,8 @@ export default function ReportPageClient() {
                                 {showAccountDropdown && (
                                   <>
                                     <div className="fixed inset-0 z-[60]" onClick={() => setShowAccountDropdown(false)} />
-                                    <div className="absolute top-full left-0 mt-1 w-48 bg-white border border-slate-200 shadow-xl rounded-md z-[70] overflow-hidden animate-in fade-in zoom-in-95 duration-100 font-medium">
-                                      <div className="p-1 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                                    <div className="absolute top-full left-0 mt-1 w-48 bg-bg-canvas border border-slate-200 shadow-xl rounded-md z-[70] overflow-hidden animate-in fade-in zoom-in-95 duration-100 font-medium">
+                                      <div className="p-1 border-b border-slate-100 bg-bg-soft flex items-center justify-between">
                                         <button
                                           onClick={() => setTempFilterAccount([])}
                                           className="text-[9px] text-slate-400 hover:text-slate-900 px-1.5 py-0.5 ui-strong font-semibold"
@@ -5139,7 +5276,7 @@ export default function ReportPageClient() {
                                       </div>
                                       <div className="max-h-48 overflow-y-auto p-1">
                                         {Array.from(new Set(displayAccounts.map(a => String(a.account ?? '')))).sort().map(acc => (
-                                          <label key={acc} className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
+                                          <label key={acc} className="flex items-center gap-2 px-2 py-1.5 hover:bg-bg-soft rounded cursor-pointer transition-colors group">
                                             <input
                                               type="checkbox"
                                               className="w-3 h-3 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
@@ -5189,7 +5326,7 @@ export default function ReportPageClient() {
                             const region = String(a.region ?? '');
                             const account = String(a.account ?? '');
                             const isOverview = accountMisGrouping === 'overview';
-                            const rowMergeFlags = accountMergeFlags(account, mergeFlags, cadburyMergeWithCrm);
+                            const rowMergeFlags = accountMergeFlags(account, mergeFlags, clientMergeWithCrm);
                             const drillRegion = isOverview ? 'AI' : region;
                             const clientMetric = (field: string) =>
                               isOverview
@@ -5226,18 +5363,15 @@ export default function ReportPageClient() {
                             const inst_pending = Number(a.installation_total || 0) - Number(a.installation_done || 0);
 
                             const regColor = isOverview
-                              ? 'bg-slate-100 text-slate-700'
-                              : region === 'NORTH' || region === 'NORTH ZONE' ? 'bg-green-50 text-green-700' :
-                              region === 'EAST' || region === 'EAST ZONE' ? 'bg-blue-50 text-blue-700' :
-                                region === 'WEST' || region === 'WEST ZONE' ? 'bg-amber-50 text-amber-700' :
-                                  region === 'SOUTH' || region === 'SOUTH ZONE' ? 'bg-purple-50 text-purple-700' : 'bg-slate-50 text-slate-700';
+                              ? 'perf-region-cell perf-region-cell--default'
+                              : regionPerfAccountCellClass(region);
 
                             return (
-                              <tr key={i} className="hover:bg-slate-50 transition-colors text-slate-900 border-b border-slate-200">
+                              <tr key={i} className="hover:bg-bg-soft transition-colors text-slate-900 border-b border-slate-200">
                                 {!isOverview ? (
                                   <td className={`p-1.5 border border-slate-300 ${regColor} ui-strong`}>{region}</td>
                                 ) : null}
-                                <td className="p-1.5 border border-slate-300 font-medium text-[9px] bg-slate-50/30">{account}</td>
+                                <td className="p-1.5 border border-slate-300 font-medium text-[9px] bg-bg-soft/30">{account}</td>
                                 <SummaryMergedMetricCell
                                   mergeSelection={rowMergeFlags}
                                   crm={Number(a.population || 0)}
@@ -5266,7 +5400,7 @@ export default function ReportPageClient() {
                                   onClick={() => handleDrillDown('cancelled_calls', `${account} - Cancelled Calls`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
                                 />
                                 <td
-                                  className="p-1.5 border border-slate-300 text-center text-slate-900 bg-slate-100/50 cursor-pointer hover:bg-black/5 ui-strong"
+                                  className="p-1.5 border border-slate-300 text-center text-slate-900 perf-metric-open cursor-pointer hover:bg-black/5 ui-strong"
                                   onClick={() => handleDrillDown('open_calls', `${account} - Open Calls`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
                                 >
                                   {openDisplay.toLocaleString()}
@@ -5276,31 +5410,31 @@ export default function ReportPageClient() {
                                   mergeSelection={rowMergeFlags}
                                   crm={Number(a.age_2 || 0)}
                                   client={clientMetric('age_2')}
-                                  className="p-1.5 bg-blue-50/30"
+                                  className="p-1.5 perf-metric-aging"
                                   onClick={() => handleDrillDown('age_2', `${account} - <2 Days`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
                                 />
                                 <SummaryMergedMetricCell
                                   mergeSelection={rowMergeFlags}
                                   crm={Number(a.age_3 || 0)}
                                   client={clientMetric('age_3')}
-                                  className="p-1.5 bg-blue-50/30"
+                                  className="p-1.5 perf-metric-aging"
                                   onClick={() => handleDrillDown('age_3', `${account} - 2-7 Days`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
                                 />
                                 <SummaryMergedMetricCell
                                   mergeSelection={rowMergeFlags}
                                   crm={Number(a.age_7 || 0)}
                                   client={clientMetric('age_7')}
-                                  className="p-1.5 bg-blue-50/30"
+                                  className="p-1.5 perf-metric-aging"
                                   onClick={() => handleDrillDown('age_7', `${account} - 7-15 Days`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
                                 />
                                 <SummaryMergedMetricCell
                                   mergeSelection={rowMergeFlags}
                                   crm={Number(a.age_15 || 0)}
                                   client={clientMetric('age_15')}
-                                  className="p-1.5 bg-blue-50/30"
+                                  className="p-1.5 perf-metric-aging"
                                   onClick={() => handleDrillDown('age_15', `${account} - >15 Days`, { account, region: drillRegion, callType: 'BREAKDOWN' })}
                                 />
-                                <td className="p-1.5 border border-slate-300 text-center text-blue-700 bg-blue-100/20 ui-strong">{perc_gt_7}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-blue-700 perf-metric-pct ui-strong">{perc_gt_7}</td>
 
                                 <SummaryMergedMetricCell
                                   mergeSelection={rowMergeFlags}
@@ -5322,12 +5456,12 @@ export default function ReportPageClient() {
                                   </div>
                                 </td>
 
-                                <td className="p-1.5 border border-slate-300 text-center bg-amber-50/30">{Number(a.deployment_total || 0)}</td>
-                                <td className="p-1.5 border border-slate-300 text-center bg-amber-50/30">{Number(a.deployment_done || 0)}</td>
-                                <td className="p-1.5 border border-slate-300 text-center text-amber-700 bg-amber-100/20 ui-strong">{dep_pending}</td>
+                                <td className="p-1.5 border border-slate-300 text-center perf-metric-deploy">{Number(a.deployment_total || 0)}</td>
+                                <td className="p-1.5 border border-slate-300 text-center perf-metric-deploy">{Number(a.deployment_done || 0)}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-amber-700 perf-metric-pending-deploy ui-strong">{dep_pending}</td>
 
-                                <td className="p-1.5 border border-slate-300 text-center bg-emerald-50/30">{Number(a.installation_done || 0)}</td>
-                                <td className="p-1.5 border border-slate-300 text-center text-emerald-700 bg-emerald-100/20 ui-strong">{inst_pending}</td>
+                                <td className="p-1.5 border border-slate-300 text-center perf-metric-install">{Number(a.installation_done || 0)}</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-emerald-700 perf-metric-pending-install ui-strong">{inst_pending}</td>
                               </tr>
                             );
                           })}
@@ -5339,76 +5473,76 @@ export default function ReportPageClient() {
                               clientAccountSummaryData,
                               'population',
                               mergeFlags,
-                              cadburyMergeWithCrm
+                              clientMergeWithCrm
                             );
                             const totalCalls = sumMergedAccountMetric(
                               filteredAccounts,
                               clientAccountSummaryData,
                               'total_calls',
                               mergeFlags,
-                              cadburyMergeWithCrm
+                              clientMergeWithCrm
                             );
                             const totalSolved = sumMergedAccountMetric(
                               filteredAccounts,
                               clientAccountSummaryData,
                               'total_solved',
                               mergeFlags,
-                              cadburyMergeWithCrm
+                              clientMergeWithCrm
                             );
                             const totalCancelled = sumMergedAccountMetric(
                               filteredAccounts,
                               clientAccountSummaryData,
                               'cancelled_calls',
                               mergeFlags,
-                              cadburyMergeWithCrm
+                              clientMergeWithCrm
                             );
                             const totalOpen = sumMergedAccountOpenCalls(
                               filteredAccounts,
                               clientAccountSummaryData,
                               mergeFlags,
-                              cadburyMergeWithCrm
+                              clientMergeWithCrm
                             );
                             const totalAge2 = sumMergedAccountMetric(
                               filteredAccounts,
                               clientAccountSummaryData,
                               'age_2',
                               mergeFlags,
-                              cadburyMergeWithCrm
+                              clientMergeWithCrm
                             );
                             const totalAge3 = sumMergedAccountMetric(
                               filteredAccounts,
                               clientAccountSummaryData,
                               'age_3',
                               mergeFlags,
-                              cadburyMergeWithCrm
+                              clientMergeWithCrm
                             );
                             const totalAge7 = sumMergedAccountMetric(
                               filteredAccounts,
                               clientAccountSummaryData,
                               'age_7',
                               mergeFlags,
-                              cadburyMergeWithCrm
+                              clientMergeWithCrm
                             );
                             const totalAge15 = sumMergedAccountMetric(
                               filteredAccounts,
                               clientAccountSummaryData,
                               'age_15',
                               mergeFlags,
-                              cadburyMergeWithCrm
+                              clientMergeWithCrm
                             );
                             const totalParts = sumMergedAccountMetric(
                               filteredAccounts,
                               clientAccountSummaryData,
                               'part_pending',
                               mergeFlags,
-                              cadburyMergeWithCrm
+                              clientMergeWithCrm
                             );
                             const totalEngs = sumMergedAccountMetric(
                               filteredAccounts,
                               clientAccountSummaryData,
                               'active_eng',
                               mergeFlags,
-                              cadburyMergeWithCrm
+                              clientMergeWithCrm
                             );
                             const totalPercGt7 =
                               totalOpen > 0
@@ -5416,21 +5550,21 @@ export default function ReportPageClient() {
                                 : '0%';
 
                             return (
-                          <tr className="bg-slate-900 text-white text-[10px] ui-label">
+                          <tr className="account-mis-grand-total bg-slate-900 text-white text-[10px] ui-label">
                             <td className="p-1.5 border border-slate-700" colSpan={accountMisGrouping === 'overview' ? 1 : 2}>GRAND TOTAL (AI)</td>
                             <td className="p-1.5 border border-slate-700 text-center">
                               {totalPopulation.toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_calls', `All India - Total Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
+                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-bg-canvas/10" onClick={() => handleDrillDown('total_calls', `All India - Total Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
                               {totalCalls.toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('total_solved', `All India - Solved Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
+                            <td className="p-1.5 border border-slate-700 text-center cursor-pointer hover:bg-bg-canvas/10" onClick={() => handleDrillDown('total_solved', `All India - Solved Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
                               {totalSolved.toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center text-rose-400 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('cancelled_calls', `All India - Cancelled Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
+                            <td className="p-1.5 border border-slate-700 text-center text-rose-400 cursor-pointer hover:bg-bg-canvas/10" onClick={() => handleDrillDown('cancelled_calls', `All India - Cancelled Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
                               {totalCancelled.toLocaleString()}
                             </td>
-                            <td className="p-1.5 border border-slate-700 text-center bg-slate-800 cursor-pointer hover:bg-white/10" onClick={() => handleDrillDown('open_calls', `All India - Open Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
+                            <td className="p-1.5 border border-slate-700 text-center bg-slate-800 cursor-pointer hover:bg-bg-canvas/10" onClick={() => handleDrillDown('open_calls', `All India - Open Calls`, { account: filterAccount.length === 0 ? 'All India' : filterAccount.join(','), region: 'AI', callType: 'BREAKDOWN' })}>
                               {totalOpen.toLocaleString()}
                             </td>
 
@@ -5489,6 +5623,38 @@ export default function ReportPageClient() {
               })()}
             </div>
           </ReportErrorBoundary>
+        ) : activeTab === 'bd_mis_summary' ? (
+          <ReportErrorBoundary label="Cadbury+Coke+CRM Summary Dashboard">
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto bg-bg-soft/10 inner-scrollbar">
+              {bdMisTabLoading ? (
+                <div
+                  className="pointer-events-none absolute inset-0 z-20 bg-bg-canvas/50"
+                  aria-hidden
+                />
+              ) : null}
+              <div className="flex flex-col gap-3 p-4 pb-8">
+                <BdMisSummaryPanel
+                  rows={bdMisRegionalRows}
+                  grand={
+                    bdMisGrand ?? {
+                      region: 'ALL',
+                      total_calls: 0,
+                      total_solved: 0,
+                      cancelled_calls: 0,
+                      age_2: 0,
+                      age_3: 0,
+                      age_7: 0,
+                      age_15: 0,
+                      part_pending: 0,
+                      active_eng: 0,
+                      open_calls: 0,
+                    }
+                  }
+                  loading={bdMisTabLoading}
+                />
+              </div>
+            </div>
+          </ReportErrorBoundary>
         ) : activeTab === 'client_import' ? (
           <ReportErrorBoundary label="Client Import">
             <ClientImportTab
@@ -5502,7 +5668,7 @@ export default function ReportPageClient() {
                 setSourceSelection(selection);
               }}
               onImportComplete={() => {
-                void fetchClientImportSummary(resolveClientImportScope());
+                void fetchClientImportSummaryRef.current(resolveClientImportScopeRef.current());
               }}
             />
           </ReportErrorBoundary>
@@ -5513,8 +5679,8 @@ export default function ReportPageClient() {
       {/* Engineer Popup */}
       {isDrawerOpen && selectedCall && (
         <div className="fixed inset-0 z-[210] flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-slate-900/40 animate-in fade-in duration-200" onClick={() => setIsDrawerOpen(false)} />
-          <div className="relative bg-white shadow rounded-lg w-full max-w-[900px] h-[min(760px,92vh)] flex flex-col animate-in zoom-in-95 duration-200 overflow-hidden border border-slate-200">
+          <div className="modal-backdrop fixed inset-0 animate-in fade-in duration-200" onClick={() => setIsDrawerOpen(false)} />
+          <div className="relative bg-bg-canvas shadow rounded-lg w-full max-w-[900px] h-[min(760px,92vh)] flex flex-col animate-in zoom-in-95 duration-200 overflow-hidden border border-slate-200">
             <CallDetail
               call={selectedCall}
               onClose={() => setIsDrawerOpen(false)}
@@ -5526,9 +5692,9 @@ export default function ReportPageClient() {
       )}
 
       {showEngPopup && (
-        <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+        <div className="modal-backdrop modal-backdrop--soft fixed inset-0 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-bg-canvas rounded-xl shadow-2xl border border-slate-200 w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-bg-soft/50">
               <div>
                 <h3 className="text-sm text-slate-900 ui-label">Engineer List</h3>
                 <p className="text-[10px] text-slate-400 font-medium mt-0.5">{showEngPopup}</p>
@@ -5549,7 +5715,7 @@ export default function ReportPageClient() {
               ) : selectedBranchEngs.length > 0 ? (
                 <div className="grid grid-cols-1 gap-1">
                   {selectedBranchEngs.map((name, i) => (
-                    <div key={i} className="px-3 py-2 text-[11px] font-medium text-slate-700 bg-slate-50/50 rounded-lg border border-slate-100/50 hover:border-slate-200 hover:bg-white transition-all">
+                    <div key={i} className="px-3 py-2 text-[11px] font-medium text-slate-700 bg-bg-soft/50 rounded-lg border border-slate-100/50 hover:border-slate-200 hover:bg-bg-canvas transition-all">
                       {name}
                     </div>
                   ))}
@@ -5560,7 +5726,7 @@ export default function ReportPageClient() {
                 </div>
               )}
             </div>
-            <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex justify-end">
+            <div className="px-5 py-3 bg-bg-soft border-t border-slate-100 flex justify-end">
               <button
                 onClick={() => setShowEngPopup(null)}
                 className="px-4 py-1.5 bg-slate-900 text-white text-[10px] rounded-lg hover:bg-slate-800 transition-all ui-label"
@@ -5575,10 +5741,10 @@ export default function ReportPageClient() {
       {/* Drill Down Side Panel */}
       {drillDown.isOpen && (
         <div className="fixed inset-0 z-[200] flex justify-end">
-          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setDrillDown(prev => ({ ...prev, isOpen: false }))} />
-          <div className="relative w-full max-w-5xl bg-white h-full shadow-2xl border-l border-slate-200 flex flex-col animate-in slide-in-from-right duration-300">
+          <div className="modal-backdrop absolute inset-0 backdrop-blur-sm" onClick={() => setDrillDown(prev => ({ ...prev, isOpen: false }))} />
+          <div className="relative w-full max-w-5xl bg-bg-canvas h-full shadow-2xl border-l border-slate-200 flex flex-col animate-in slide-in-from-right duration-300">
             {/* Header */}
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-bg-soft">
               <div>
                 <h3 className="text-sm text-slate-900 ui-label">{drillDown.title}</h3>
                 <p className="text-[10px] text-slate-500 font-medium">Detailed breakdown of selected metric</p>
@@ -5600,7 +5766,7 @@ export default function ReportPageClient() {
                 <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                   <div className="overflow-x-auto max-h-[500px]">
                     <table className="w-full text-left border-collapse text-[10px]">
-                      <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
+                      <thead className="sticky top-0 bg-bg-soft border-b border-slate-200 z-10">
                         <tr>
                           {drillDown.data.length > 0 && Object.keys(drillDown.data[0]).map(key => (
                             <th key={key} className="p-3 text-slate-500 border-r border-slate-100 whitespace-nowrap ui-strong">{key}</th>
@@ -5629,7 +5795,7 @@ export default function ReportPageClient() {
                             return (
                               <tr 
                                 key={i} 
-                                className={`transition-colors group ${callId && callId !== '—' ? 'cursor-pointer hover:bg-blue-50' : 'hover:bg-slate-50'}`}
+                                className={`transition-colors group ${callId && callId !== '—' ? 'cursor-pointer hover:bg-blue-50' : 'hover:bg-bg-soft'}`}
                                 onClick={() => {
                                   if (callId && callId !== '—') {
                                     handleSelectCall(callId);

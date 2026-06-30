@@ -47,7 +47,7 @@ type ReportLoadBannerProps = {
 
 const variantStyles = {
   loading: {
-    wrap: 'border-slate-200 bg-white text-slate-700',
+    wrap: 'border-slate-200 bg-bg-canvas text-slate-700',
     bar: 'bg-slate-100',
     fill: 'bg-slate-800',
     icon: 'text-slate-700',

@@ -73,7 +73,7 @@ function StatChip({
   tone?: 'slate' | 'emerald' | 'amber' | 'indigo';
 }) {
   const tones = {
-    slate: 'border-slate-200 bg-slate-50 text-slate-700',
+    slate: 'border-slate-200 bg-bg-soft text-slate-700',
     emerald: 'border-emerald-200 bg-emerald-50 text-emerald-800',
     amber: 'border-amber-200 bg-amber-50 text-amber-800',
     indigo: 'border-indigo-200 bg-indigo-50 text-indigo-800',
@@ -100,6 +100,7 @@ export default function MisClientImportToolbar({
   const [sources, setSources] = useState<SourceMeta[]>([]);
   const [stats, setStats] = useState<ImportStats | null>(null);
   const [rowsInDateRange, setRowsInDateRange] = useState<number | null>(null);
+  const [rowsInDateRangeBySource, setRowsInDateRangeBySource] = useState<Record<string, number>>({});
   const [canUpload, setCanUpload] = useState(false);
   const [canDelete, setCanDelete] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(true);
@@ -122,6 +123,7 @@ export default function MisClientImportToolbar({
         sources: SourceMeta[];
         stats: ImportStats;
         rowsInDateRange: number | null;
+        rowsInDateRangeBySource?: Record<string, number>;
       }>('/api/mis-client-import/meta', {
         withCredentials: true,
         params,
@@ -133,12 +135,14 @@ export default function MisClientImportToolbar({
       setRowsInDateRange(
         res.data.rowsInDateRange != null ? Number(res.data.rowsInDateRange) : null
       );
+      setRowsInDateRangeBySource(res.data.rowsInDateRangeBySource ?? {});
     } catch {
       setSources([]);
       setStats(null);
       setCanUpload(false);
       setCanDelete(false);
       setRowsInDateRange(null);
+      setRowsInDateRangeBySource({});
     } finally {
       setLoadingMeta(false);
     }
@@ -256,7 +260,7 @@ export default function MisClientImportToolbar({
 
   if (loadingMeta && sources.length === 0) {
     return (
-      <div className="mb-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-3 text-[11px] text-slate-500 shadow-sm">
+      <div className="mb-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-bg-canvas px-3 py-3 text-[11px] text-slate-500 shadow-sm">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
         Loading import history…
       </div>
@@ -268,7 +272,7 @@ export default function MisClientImportToolbar({
   }
 
   return (
-    <div className="mb-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] shadow-sm">
+    <div className="mb-3 rounded-lg border border-slate-200 bg-bg-canvas px-3 py-2 text-[11px] shadow-sm">
       <div className="flex flex-wrap items-center gap-3">
         {canUpload && (
           <>
@@ -364,14 +368,18 @@ export default function MisClientImportToolbar({
         </div>
       )}
 
-      {hasAnyBatch && sources.length > 1 && stats && (
+      {hasAnyBatch && sources.length >= 1 && stats && (
         <div className="mt-1.5 flex flex-wrap gap-2 text-[9px] text-slate-500">
           {sources.map((source) => {
+            const imported = source.batches.reduce((s, b) => s + b.rowCount, 0);
             const inUse = source.batches.reduce((s, b) => s + b.activeRows, 0);
-            if (inUse === 0 && source.batches.length === 0) return null;
+            if (imported === 0 && source.batches.length === 0) return null;
+            const inRange = rowsInDateRangeBySource[source.sourceCode];
             return (
-              <span key={source.sourceCode} className="rounded bg-slate-50 px-1.5 py-0.5">
-                {source.sourceName}: {inUse.toLocaleString()} in use
+              <span key={source.sourceCode} className="rounded bg-bg-soft px-1.5 py-0.5">
+                {source.sourceName}: {imported.toLocaleString()} imported
+                {inUse !== imported ? ` · ${inUse.toLocaleString()} in use` : ''}
+                {inRange != null ? ` · ${inRange.toLocaleString()} in date range` : ''}
               </span>
             );
           })}
@@ -379,7 +387,7 @@ export default function MisClientImportToolbar({
       )}
 
       {showHistory && allBatches.length > 0 && (
-        <div className="mt-2 max-h-56 overflow-auto rounded border border-slate-100 bg-slate-50/50">
+        <div className="mt-2 max-h-56 overflow-auto rounded border border-slate-100 bg-bg-soft/50">
           <table className="w-full min-w-[760px] text-left text-[10px]">
             <thead className="sticky top-0 z-10 bg-slate-100 text-slate-600">
               <tr>
@@ -435,7 +443,7 @@ export default function MisClientImportToolbar({
                           }
                           disabled={downloadingBatchId === batch.batchId}
                           onClick={() => void handleDownloadBatch(batch.batchId, batch.fileName)}
-                          className="inline-flex items-center gap-0.5 rounded border border-indigo-200 bg-white px-1.5 py-0.5 text-[9px] font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                          className="inline-flex items-center gap-0.5 rounded border border-indigo-200 bg-bg-canvas px-1.5 py-0.5 text-[9px] font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
                         >
                           {downloadingBatchId === batch.batchId ? (
                             <Loader2 className="h-3 w-3 animate-spin" />
@@ -450,7 +458,7 @@ export default function MisClientImportToolbar({
                             title="Delete import"
                             disabled={deletingBatchId === batch.batchId}
                             onClick={() => void handleDeleteBatch(batch.batchId, batch.fileName)}
-                            className="inline-flex items-center gap-0.5 rounded border border-rose-200 bg-white px-1.5 py-0.5 text-[9px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                            className="inline-flex items-center gap-0.5 rounded border border-rose-200 bg-bg-canvas px-1.5 py-0.5 text-[9px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
                           >
                             {deletingBatchId === batch.batchId ? (
                               <Loader2 className="h-3 w-3 animate-spin" />

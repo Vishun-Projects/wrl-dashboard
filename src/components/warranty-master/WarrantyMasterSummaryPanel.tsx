@@ -28,7 +28,7 @@ export function WarrantyMasterSummaryPanel({
   const machineShare = formatPct(summary.totalMachines, catalogMachineTotal);
 
   return (
-    <div className="shrink-0 border-b border-slate-200 bg-white">
+    <div className="shrink-0 border-b border-slate-200 bg-bg-canvas">
       <div
         className={`register-stats-bar warranty-master-stats-bar transition-opacity duration-300 ease-out ${
           isStale ? 'opacity-70' : 'opacity-100'

@@ -438,7 +438,7 @@ export default function LocationAuditPage() {
             type="button"
             onClick={() => void handleExportCsv()}
             disabled={loading || exporting || !hasLoadedOnce}
-            className="flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-[10px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-[10px] font-medium text-slate-700 hover:bg-bg-soft disabled:opacity-50"
           >
             {exporting ? (
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -452,7 +452,7 @@ export default function LocationAuditPage() {
               type="button"
               onClick={() => void runAudit()}
               disabled={loading}
-              className="flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              className="flex items-center gap-1 rounded border border-slate-200 bg-bg-canvas px-2 py-1 text-[10px] font-medium text-slate-700 hover:bg-bg-soft disabled:opacity-50"
             >
               <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
               Refresh
@@ -460,7 +460,7 @@ export default function LocationAuditPage() {
           )}
         </div>
       }
-      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-soft"
     >
       <PageScrollRegion className="gap-3 p-4">
         {!hasLoadedOnce && loading ? (
@@ -474,7 +474,7 @@ export default function LocationAuditPage() {
         ) : null}
 
         {!hasLoadedOnce && !loading ? (
-          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-[11px] text-slate-600">
+          <div className="rounded-xl border border-dashed border-slate-300 bg-bg-soft px-4 py-8 text-center text-[11px] text-slate-600">
             Default filters are applied — click <strong>Run audit</strong> to load summary and
             mismatch calls. Row detail and maps load when you select a call.
           </div>
@@ -504,7 +504,7 @@ export default function LocationAuditPage() {
         )}
 
         {byBranch.length > 0 && hasLoadedOnce ? (
-          <div className="shrink-0 rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="shrink-0 rounded-xl border border-slate-200 bg-bg-canvas shadow-sm">
             <button
               type="button"
               onClick={() => setBranchOpen((o) => !o)}
@@ -617,7 +617,7 @@ export default function LocationAuditPage() {
               </DataTableLoading>
             </AdminTableCard>
             {hasLoadedOnce && rows.length > 0 && !listLoading ? (
-              <div className="flex shrink-0 items-center justify-between rounded-b-xl border border-t-0 border-slate-200 bg-white px-3 py-2 shadow-sm">
+              <div className="flex shrink-0 items-center justify-between rounded-b-xl border border-t-0 border-slate-200 bg-bg-canvas px-3 py-2 shadow-sm">
                 <span className="text-[11px] text-slate-500">
                   {(listPageSafe - 1) * LIST_PAGE_SIZE + 1}–
                   {Math.min(listPageSafe * LIST_PAGE_SIZE, rows.length)} of{' '}
@@ -628,7 +628,7 @@ export default function LocationAuditPage() {
                     type="button"
                     disabled={listPageSafe <= 1}
                     onClick={() => setListPage((p) => Math.max(1, p - 1))}
-                    className="rounded border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                    className="rounded border border-slate-200 bg-bg-canvas p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
                     aria-label="Previous page"
                   >
                     <ChevronLeft className="h-4 w-4" />
@@ -640,7 +640,7 @@ export default function LocationAuditPage() {
                     type="button"
                     disabled={listPageSafe >= listTotalPages}
                     onClick={() => setListPage((p) => Math.min(listTotalPages, p + 1))}
-                    className="rounded border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                    className="rounded border border-slate-200 bg-bg-canvas p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
                     aria-label="Next page"
                   >
                     <ChevronRight className="h-4 w-4" />

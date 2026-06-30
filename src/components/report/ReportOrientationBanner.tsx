@@ -30,7 +30,7 @@ export function ReportOrientationBanner({
   if (updated > 0) parts.push(`${updated} updated`);
 
   return (
-    <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2 text-[11px] text-slate-700">
+    <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-bg-soft px-4 py-2 text-[11px] text-slate-700">
       <p>
         <span className="font-medium text-slate-900">
           {greeting}, {name}.

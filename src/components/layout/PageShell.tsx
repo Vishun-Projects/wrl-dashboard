@@ -26,13 +26,13 @@ export function PageShell({
   subtitle,
   icon,
   actions,
-  bodyClassName = 'flex-1 flex flex-col min-h-0 overflow-hidden bg-slate-50',
+  bodyClassName = 'flex-1 flex flex-col min-h-0 overflow-hidden bg-bg-soft',
 }: PageShellProps) {
   const headerContent = header ?? (
     <>
       <div className="flex min-w-0 items-center gap-3">
         {icon ? (
-          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-slate-100 bg-slate-50 text-slate-600 shadow-sm">
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-slate-100 bg-bg-soft text-slate-600 shadow-sm">
             {icon}
           </div>
         ) : null}
@@ -48,9 +48,9 @@ export function PageShell({
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-white text-slate-900">
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg-canvas text-slate-900">
       <header
-        className={`${DASHBOARD_HEADER_HEIGHT_CLASS} flex flex-shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4`}
+        className={`${DASHBOARD_HEADER_HEIGHT_CLASS} flex flex-shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-bg-canvas px-4`}
       >
         {headerContent}
       </header>
@@ -79,7 +79,7 @@ export function PageScrollRegion({
 
 export function PageLoadingState({ label = 'Loading...' }: { label?: string }) {
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center bg-white">
+    <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center bg-bg-canvas">
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-900" />
       <p className="mt-3 text-[11px] font-medium text-slate-500">{label}</p>
     </div>

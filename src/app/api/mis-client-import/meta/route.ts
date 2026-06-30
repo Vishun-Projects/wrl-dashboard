@@ -21,12 +21,20 @@ export async function GET(req: NextRequest) {
     const sources = await listAllSourcesWithBatches();
     const stats = summarizeImportBatches(sources);
     let rowsInDateRange: number | null = null;
+    const rowsInDateRangeBySource: Record<string, number> = {};
     if (startDate && endDate) {
       rowsInDateRange = await countClientRowsInRange({
         sourceCode: 'all',
         startDate,
         endDate,
       });
+      for (const source of sources) {
+        rowsInDateRangeBySource[source.sourceCode] = await countClientRowsInRange({
+          sourceCodes: [source.sourceCode],
+          startDate,
+          endDate,
+        });
+      }
     }
 
     return NextResponse.json({
@@ -35,6 +43,7 @@ export async function GET(req: NextRequest) {
       sources,
       stats,
       rowsInDateRange,
+      rowsInDateRangeBySource,
     });
   } catch (err: unknown) {
     console.error('MIS client import meta error:', err);

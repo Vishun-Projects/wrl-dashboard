@@ -10,6 +10,7 @@ import {
   Save,
   Loader2,
   AlertCircle,
+  Palette,
 } from 'lucide-react';
 import { useUser } from '@/components/layout/DashboardLayout';
 import { PageShell } from '@/components/layout/PageShell';
@@ -24,6 +25,7 @@ import axios from 'axios';
 import { feedback } from '@/lib/ui/feedback';
 import { createClient } from '@/lib/supabase/client';
 import { useSearchParams } from 'next/navigation';
+import { ThemePicker } from '@/components/settings/ThemePicker';
 
 function ProfileContent() {
   const { userProfile: user, loadingProfile: loading, refreshProfile: fetchProfile } = useUser();
@@ -41,6 +43,7 @@ function ProfileContent() {
   useEffect(() => {
     const tab = searchParams.get('tab');
     if (tab === 'settings') setActiveTab('settings');
+    if (tab === 'appearance') setActiveTab('appearance');
   }, [searchParams]);
 
   useEffect(() => {
@@ -126,7 +129,7 @@ function ProfileContent() {
       <PageShell
         title="Profile Settings"
         icon={<User size={16} />}
-        bodyClassName="min-h-0 flex-1 overflow-y-auto bg-slate-50 custom-scrollbar"
+        bodyClassName="min-h-0 flex-1 overflow-y-auto bg-bg-soft custom-scrollbar"
       >
         <FormSkeleton fields={5} />
       </PageShell>
@@ -150,13 +153,14 @@ function ProfileContent() {
       title="Profile Settings"
       subtitle={user?.email}
       icon={<User size={16} />}
-      bodyClassName="min-h-0 flex-1 overflow-y-auto bg-slate-50 custom-scrollbar"
+      bodyClassName="min-h-0 flex-1 overflow-y-auto bg-bg-soft custom-scrollbar"
     >
       <SettingsLayout
         activeTab={activeTab}
         onTabChange={setActiveTab}
         tabs={[
           { id: 'general', label: 'General', icon: <User size={14} /> },
+          { id: 'appearance', label: 'Appearance', icon: <Palette size={14} /> },
           { id: 'settings', label: 'Security', icon: <Shield size={14} /> },
         ]}
       >
@@ -192,7 +196,7 @@ function ProfileContent() {
                     />
                   </label>
                   {uploadingImage && (
-                    <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-white/80">
+                    <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-bg-canvas/80">
                       <Loader2 className="animate-spin text-slate-900" size={20} />
                     </div>
                   )}
@@ -222,6 +226,15 @@ function ProfileContent() {
               </div>
             </SettingsCard>
           </form>
+        )}
+
+        {activeTab === 'appearance' && (
+          <SettingsCard
+            title="Color theme"
+            description="Choose how the portal looks on this device. Your choice is saved to your profile."
+          >
+            <ThemePicker />
+          </SettingsCard>
         )}
 
         {activeTab === 'settings' && (
@@ -296,7 +309,7 @@ export default function ProfilePage() {
         <PageShell
           title="Profile Settings"
           icon={<User size={16} />}
-          bodyClassName="min-h-0 flex-1 overflow-y-auto bg-slate-50 custom-scrollbar"
+          bodyClassName="min-h-0 flex-1 overflow-y-auto bg-bg-soft custom-scrollbar"
         >
           <FormSkeleton fields={5} />
         </PageShell>

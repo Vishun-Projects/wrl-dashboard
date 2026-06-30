@@ -13,7 +13,7 @@ export const statusSemantics = {
   info: 'text-blue-700',
   infoBg: 'bg-blue-50 border-blue-200 text-blue-700',
   neutral: 'text-slate-600',
-  neutralBg: 'bg-slate-50 border-slate-200 text-slate-600',
+  neutralBg: 'bg-bg-soft border-slate-200 text-slate-600',
 } as const;
 
 export const auditSemantics = {

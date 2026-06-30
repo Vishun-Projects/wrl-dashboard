@@ -59,7 +59,7 @@ export function ConfirmDialog({
           aria-modal="true"
           aria-labelledby="confirm-dialog-title"
           aria-describedby={description ? 'confirm-dialog-desc' : undefined}
-          className="relative z-[1] w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-xl animate-in zoom-in-95 fade-in duration-200"
+          className="relative z-[1] w-full max-w-md rounded-xl border border-slate-200 bg-bg-canvas p-5 shadow-xl animate-in zoom-in-95 fade-in duration-200"
         >
         <h2 id="confirm-dialog-title" className="text-sm font-semibold text-slate-900">
           {title}
@@ -75,7 +75,7 @@ export function ConfirmDialog({
             type="button"
             disabled={loading}
             onClick={onCancel}
-            className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="rounded-md border border-slate-200 bg-bg-canvas px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-bg-soft disabled:opacity-50"
           >
             {cancelLabel}
           </button>

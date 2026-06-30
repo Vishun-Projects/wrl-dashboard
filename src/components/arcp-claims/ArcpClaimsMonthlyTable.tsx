@@ -48,7 +48,7 @@ export function ArcpClaimsMonthlyTable({ model, loading, updating }: ArcpClaimsM
       ) : null}
       <AdminTable>
       <AdminThead>
-        <tr className="bg-slate-50">
+        <tr className="bg-bg-soft">
           <AdminTh className={`${cellBorder} text-[11px] tracking-wide text-slate-600`}>Month</AdminTh>
           <AdminTh align="right" className={`${cellBorder} text-[11px] tracking-wide text-slate-600`}>
             Qty

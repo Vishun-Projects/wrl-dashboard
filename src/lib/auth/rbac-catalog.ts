@@ -29,7 +29,7 @@ export type RbacCapability = {
   description: string;
 };
 
-export type MisTabId = 'summary' | 'register' | 'accounts' | 'client_import';
+export type MisTabId = 'summary' | 'register' | 'accounts' | 'client_import' | 'bd_mis_summary';
 
 export type RbacApiSpec =
   | { pageId: string }
@@ -59,6 +59,12 @@ const MIS_TABS: RbacTab[] = [
     id: 'client_import',
     permission: 'tab_mis_client_import',
     label: 'Client Import',
+    parentPageId: 'mis_reports',
+  },
+  {
+    id: 'bd_mis_summary',
+    permission: 'tab_mis_bd_mis_summary',
+    label: 'Cadbury+Coke+CRM Summary Dashboard',
     parentPageId: 'mis_reports',
   },
 ];

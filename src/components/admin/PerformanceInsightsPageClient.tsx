@@ -7,7 +7,7 @@ const PerformanceInsightsPanel = dynamic(
     import('@/components/admin/PerformanceInsightsPanel').then((mod) => mod.PerformanceInsightsPanel),
   {
     loading: () => (
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-500 animate-pulse">
+      <div className="rounded-2xl border border-slate-200 bg-bg-canvas p-8 text-sm text-slate-500 animate-pulse">
         Loading performance metrics…
       </div>
     ),

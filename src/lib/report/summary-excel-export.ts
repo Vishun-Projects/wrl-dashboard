@@ -24,7 +24,7 @@ export function applySummaryHeaderStyle(row: ExcelJS.Row): void {
   });
 }
 
-function applyRegionRowStyle(row: ExcelJS.Row, region: string): void {
+export function applyRegionRowStyle(row: ExcelJS.Row, region: string): void {
   row.eachCell((cell) => {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: getRegionColor(region) } };
     cell.border = {

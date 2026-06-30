@@ -6,14 +6,20 @@ import { cn } from '@/lib/cn';
 type ModalBackdropProps = {
   onClick?: () => void;
   className?: string;
+  /** Softer dim (engineer popup, etc.) */
+  soft?: boolean;
+  /** Stronger dim (nested prompts inside modals) */
+  strong?: boolean;
 };
 
 /** Full-viewport dim + blur (matches Call Detail dialog). */
-export function ModalBackdrop({ onClick, className }: ModalBackdropProps) {
+export function ModalBackdrop({ onClick, className, soft, strong }: ModalBackdropProps) {
   return (
     <div
       className={cn(
-        'fixed inset-0 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200',
+        'modal-backdrop fixed inset-0 backdrop-blur-sm animate-in fade-in duration-200',
+        soft && 'modal-backdrop--soft',
+        strong && 'modal-backdrop--strong',
         className
       )}
       onClick={onClick}

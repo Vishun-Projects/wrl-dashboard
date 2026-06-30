@@ -30,6 +30,7 @@ const ALL_PERMISSION_SEED = [
   { name: 'tab_mis_register', description: 'Call Register tab on MIS Reports' },
   { name: 'tab_mis_accounts', description: 'Key Account MIS tab on MIS Reports' },
   { name: 'tab_mis_client_import', description: 'Client file import tab on MIS Reports' },
+  { name: 'tab_mis_bd_mis_summary', description: 'CRM+Coke+Cadbury Summary tab (BD MIS Excel parity)' },
   { name: 'view_all_offices', description: 'National data scope across all branches' },
   { name: 'mis_client_import_upload', description: 'Upload client MIS import files' },
   { name: 'mis_client_import_delete', description: 'Delete client MIS import batches' },

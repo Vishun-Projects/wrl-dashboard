@@ -51,7 +51,7 @@ export function ArcpClaimsToolbar({
   loadProgressLabel,
 }: ArcpClaimsToolbarProps) {
   return (
-    <div className="relative z-20 border-b border-slate-200 bg-white px-3 py-1.5">
+    <div className="relative z-20 border-b border-slate-200 bg-bg-canvas px-3 py-1.5">
       <div className="report-toolbar-filters-row arcp-claims-toolbar-row">
         <div
           className="arcp-date-basis-control shrink-0"
@@ -68,7 +68,7 @@ export function ArcpClaimsToolbar({
               className={`rounded px-2 py-1 text-[10px] font-medium transition-colors ${
                 arcpDateFilterColumn === option.value
                   ? 'bg-slate-900 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-white hover:text-slate-900'
+                  : 'text-slate-600 hover:bg-bg-canvas hover:text-slate-900'
               }`}
             >
               {DATE_BASIS_SHORT[option.value]}
@@ -116,11 +116,7 @@ export function ArcpClaimsToolbar({
             type="button"
             onClick={onApply}
             disabled={applyDisabled}
-            className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-[11px] font-medium shadow-sm disabled:opacity-50 ${
-              hasPendingFilterChanges
-                ? 'border border-slate-800 bg-slate-900 text-white hover:bg-slate-800'
-                : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-            }`}
+            className={`filter-apply-btn ${hasPendingFilterChanges ? 'filter-apply-btn--pending' : ''}`}
           >
             {loading ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

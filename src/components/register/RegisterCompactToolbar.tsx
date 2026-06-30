@@ -104,7 +104,7 @@ export function RegisterCompactToolbar({
   });
 
   return (
-    <div className="register-compact-toolbar">
+    <div className="register-compact-toolbar register-page-filters-surface">
       <div className="register-compact-toolbar-search">
         <Search className="register-compact-toolbar-icon" />
         <input
@@ -166,10 +166,8 @@ export function RegisterCompactToolbar({
           type="button"
           onClick={onApply}
           disabled={applyDisabled}
-          className={`register-compact-toolbar-apply-btn inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium shadow-sm disabled:opacity-50 ${
-            hasPendingFilterChanges
-              ? 'border border-slate-800 bg-slate-900 text-white hover:bg-slate-800'
-              : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+          className={`filter-apply-btn register-compact-toolbar-apply-btn ${
+            hasPendingFilterChanges ? 'filter-apply-btn--pending' : ''
           }`}
         >
           <Filter className="h-3.5 w-3.5" />

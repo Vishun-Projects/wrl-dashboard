@@ -1,5 +1,5 @@
 /**
- * Re-normalize client import rows (zone/region) from stored raw JSON.
+ * Re-normalize client import rows (region, status, dates) from stored raw JSON.
  *
  * Usage: npx tsx scripts/mis-client/reprocess-cadbury-regions.ts [sourceCode...]
  */
@@ -19,18 +19,38 @@ const BATCH_SIZE = 500;
 
 async function flushBatch(
   client: import('pg').PoolClient,
-  batch: Array<{ id: string; region: string; state: string | null; branch_label: string | null }>
+  batch: Array<{
+    id: string;
+    region: string;
+    state: string | null;
+    branch_label: string | null;
+    status_bucket: string;
+    status_label: string;
+    is_part_pending: boolean;
+    logged_at: Date | null;
+    solved_at: Date | null;
+  }>
 ): Promise<void> {
   if (!batch.length) return;
   const ids: string[] = [];
   const regions: string[] = [];
   const states: (string | null)[] = [];
   const branches: (string | null)[] = [];
+  const statusBuckets: string[] = [];
+  const statusLabels: string[] = [];
+  const partPending: boolean[] = [];
+  const loggedAt: (Date | null)[] = [];
+  const solvedAt: (Date | null)[] = [];
   for (const row of batch) {
     ids.push(row.id);
     regions.push(row.region);
     states.push(row.state);
     branches.push(row.branch_label);
+    statusBuckets.push(row.status_bucket);
+    statusLabels.push(row.status_label);
+    partPending.push(row.is_part_pending);
+    loggedAt.push(row.logged_at);
+    solvedAt.push(row.solved_at);
   }
   await client.query(
     `
@@ -38,11 +58,19 @@ async function flushBatch(
     SET
       region = v.region,
       state = v.state,
-      branch_label = v.branch_label
-    FROM unnest($1::bigint[], $2::text[], $3::text[], $4::text[]) AS v(id, region, state, branch_label)
+      branch_label = v.branch_label,
+      status_bucket = v.status_bucket::status_bucket_type,
+      status_label = v.status_label,
+      is_part_pending = v.is_part_pending,
+      logged_at = v.logged_at,
+      solved_at = v.solved_at
+    FROM unnest(
+      $1::bigint[], $2::text[], $3::text[], $4::text[],
+      $5::text[], $6::text[], $7::boolean[], $8::timestamptz[], $9::timestamptz[]
+    ) AS v(id, region, state, branch_label, status_bucket, status_label, is_part_pending, logged_at, solved_at)
     WHERE r.id = v.id
     `,
-    [ids, regions, states, branches]
+    [ids, regions, states, branches, statusBuckets, statusLabels, partPending, loggedAt, solvedAt]
   );
 }
 
@@ -73,8 +101,17 @@ async function main() {
         [code]
       );
 
-      let batch: Array<{ id: string; region: string; state: string | null; branch_label: string | null }> =
-        [];
+      let batch: Array<{
+        id: string;
+        region: string;
+        state: string | null;
+        branch_label: string | null;
+        status_bucket: string;
+        status_label: string;
+        is_part_pending: boolean;
+        logged_at: Date | null;
+        solved_at: Date | null;
+      }> = [];
 
       for (const row of res.rows) {
         const raw = row.raw;
@@ -93,6 +130,11 @@ async function main() {
           region: n.region,
           state: n.state,
           branch_label: n.branch_label,
+          status_bucket: n.status_bucket,
+          status_label: n.status_label,
+          is_part_pending: n.is_part_pending,
+          logged_at: n.logged_at,
+          solved_at: n.solved_at,
         });
         updated += 1;
 

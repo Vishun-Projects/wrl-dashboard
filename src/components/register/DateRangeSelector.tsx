@@ -157,7 +157,7 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
         <div
           ref={panelRef}
           style={panelStyle}
-          className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl animate-in fade-in zoom-in-95 duration-200"
+          className="overflow-hidden rounded-xl border border-slate-200 bg-bg-canvas shadow-xl animate-in fade-in zoom-in-95 duration-200"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="p-1.5">
@@ -170,7 +170,7 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
                     onChange(range.getValue());
                     setIsOpen(false);
                   }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[12px] transition-colors ${isSelected ? 'bg-slate-900 text-white font-bold' : 'text-slate-600 hover:bg-slate-50'}`}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[12px] transition-colors ${isSelected ? 'bg-slate-900 text-white font-bold' : 'text-slate-600 hover:bg-bg-soft'}`}
                 >
                   {range.label}
                   {isSelected && <Check size={12} className="text-emerald-400" />}
@@ -178,12 +178,12 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
               );
             })}
           </div>
-          <div className="p-3 bg-slate-50 border-t border-slate-100 space-y-2">
+          <div className="p-3 bg-bg-soft border-t border-slate-100 space-y-2">
             <div className="space-y-1">
               <label className="text-[10px] text-slate-500 ui-label">Custom Start</label>
               <input
                 type="date"
-                className="w-full h-8 px-2 bg-white border border-slate-200 rounded text-[11px] outline-none focus:border-slate-400"
+                className="w-full h-8 px-2 bg-bg-canvas border border-slate-200 rounded text-[11px] outline-none focus:border-slate-400"
                 value={value === 'Custom Range' && startDate ? formatLocalDate(startDate) : ''}
                 onChange={(e) => {
                   if (!e.target.value) return;
@@ -199,7 +199,7 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
               <label className="text-[10px] text-slate-500 ui-label">Custom End</label>
               <input
                 type="date"
-                className="w-full h-8 px-2 bg-white border border-slate-200 rounded text-[11px] outline-none focus:border-slate-400"
+                className="w-full h-8 px-2 bg-bg-canvas border border-slate-200 rounded text-[11px] outline-none focus:border-slate-400"
                 value={value === 'Custom Range' && endDate ? formatLocalDate(endDate) : ''}
                 onChange={(e) => {
                   if (!e.target.value) return;
@@ -227,11 +227,11 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
       <button
         type="button"
         onClick={toggleOpen}
-        className="h-8 px-3 bg-white border border-[#e2e8f0] rounded-lg flex items-center gap-2 hover:border-slate-400 transition-all text-[#475569] text-[12px] font-medium min-w-[130px] shadow-sm active:scale-95"
+        className="register-filter-btn min-w-[130px] gap-2 text-[12px] active:scale-95"
       >
-        <Calendar size={14} className="text-slate-400" />
-        <span className="flex-1 text-left">{currentLabel}</span>
-        <ChevronDown size={14} className={`text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        <Calendar size={14} className="shrink-0 opacity-60" />
+        <span className="flex-1 truncate text-left">{currentLabel}</span>
+        <ChevronDown size={14} className={`shrink-0 opacity-60 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
       </button>
       {portalReady && panel ? createPortal(panel, document.body) : null}
     </div>

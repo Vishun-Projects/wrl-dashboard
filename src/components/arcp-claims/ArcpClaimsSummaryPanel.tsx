@@ -42,7 +42,7 @@ function InlinePills<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="inline-flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 p-0.5">
+    <div className="inline-flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 bg-bg-soft p-0.5">
       {options.map((opt) => (
         <button
           key={opt.value}
@@ -51,7 +51,7 @@ function InlinePills<T extends string>({
           onClick={() => onChange(opt.value)}
           className={`whitespace-nowrap rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
             value === opt.value
-              ? 'bg-white text-slate-900 shadow-sm'
+              ? 'bg-bg-canvas text-slate-900 shadow-sm'
               : 'text-slate-500 hover:text-slate-700'
           }`}
         >
@@ -101,7 +101,7 @@ export function ArcpClaimsSummaryPanel({
         : 'Per type';
 
   return (
-    <div className="shrink-0 border-b border-slate-200 bg-white">
+    <div className="shrink-0 border-b border-slate-200 bg-bg-canvas">
       <div className="register-stats-bar">
         <div className="register-stat-item">
           <AnimatedMetric

@@ -90,7 +90,7 @@ export function LocationAuditRowDetail({
 }) {
   if (loading) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-8">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-slate-200 bg-bg-canvas p-8">
         <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
         <p className="mt-3 text-[11px] text-slate-600">Loading location detail…</p>
       </div>
@@ -136,7 +136,7 @@ export function LocationAuditRowDetail({
     row.pincodeMatchStatus === 'different' || row.fraudSignal === 'pincode_mismatch';
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-bg-canvas shadow-sm">
       <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
         <div className="min-w-0">
           <p className="text-[12px] font-semibold text-slate-900">
@@ -183,7 +183,7 @@ export function LocationAuditRowDetail({
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-50"
+            className="shrink-0 rounded border border-slate-200 p-1.5 text-slate-500 hover:bg-bg-soft"
             aria-label="Close detail"
           >
             <X className="h-4 w-4" />
@@ -203,7 +203,7 @@ export function LocationAuditRowDetail({
         )}
 
         {row.signals && !pincodeOnly ? (
-          <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 space-y-2">
+          <div className="rounded-lg border border-slate-200 bg-bg-soft/80 p-3 space-y-2">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">
               Location checks
             </p>
@@ -214,7 +214,7 @@ export function LocationAuditRowDetail({
           </div>
         ) : null}
 
-        <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+        <div className="rounded-lg border border-slate-200 bg-bg-soft/80 p-3">
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
             Pincode check
           </p>
@@ -287,7 +287,7 @@ export function LocationAuditRowDetail({
         ) : null}
 
         {row.mismatchExplanation ? (
-          <p className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-[10px] leading-relaxed text-slate-700">
+          <p className="rounded-lg border border-slate-100 bg-bg-soft px-3 py-2 text-[10px] leading-relaxed text-slate-700">
             {row.mismatchExplanation}
           </p>
         ) : null}
@@ -298,7 +298,7 @@ export function LocationAuditRowDetail({
 
 export function LocationAuditMapPlaceholder() {
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50/80 p-6 text-center">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-bg-soft/80 p-6 text-center">
       <MapPinIcon />
       <p className="mt-3 text-[12px] font-semibold text-slate-700">Select a call to review location</p>
       <p className="mt-1 max-w-[260px] text-[10px] text-slate-500">

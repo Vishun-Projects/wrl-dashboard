@@ -11,6 +11,7 @@ export type AppUserAuthProfile = {
   visible_statuses: string[] | null;
   avatar_url: string | null;
   role_id: string | null;
+  theme: string;
 };
 
 /** Load app_users row via Postgres (no PostgREST HTTPS). */

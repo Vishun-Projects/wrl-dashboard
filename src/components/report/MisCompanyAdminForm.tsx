@@ -139,7 +139,7 @@ export default function MisCompanyAdminForm({ canEdit, onSaved }: Props) {
   if (!canEdit) return null;
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-bg-canvas shadow-sm">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -185,7 +185,7 @@ export default function MisCompanyAdminForm({ canEdit, onSaved }: Props) {
                 <input
                   value={editCode}
                   readOnly
-                  className="w-28 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-slate-600"
+                  className="w-28 rounded border border-slate-200 bg-bg-soft px-2 py-1 text-slate-600"
                 />
               </label>
             ) : (

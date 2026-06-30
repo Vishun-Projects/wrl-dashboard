@@ -90,7 +90,7 @@ export default function BranchTree({ offices, selectedIds, setSelectedIds, singl
         const id = String(o.ncode);
         const isSelected = normalizedSelectedIds.includes(id);
         return [
-          <label key={id} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded cursor-pointer transition-colors group">
+          <label key={id} className="flex items-center gap-2 px-3 py-2 hover:bg-bg-soft rounded cursor-pointer transition-colors group">
             <div style={{ width: `${level * 12}px` }} />
             <input
               type="checkbox"

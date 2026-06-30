@@ -1166,14 +1166,14 @@ export default function SerialAuditPage() {
             type="button"
             onClick={() => void loadWindowData({ refresh: true })}
             disabled={loading}
-            className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50"
+            className="flex items-center gap-1 rounded-md border border-slate-200 bg-bg-canvas px-2.5 py-1.5 text-[10px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-bg-soft disabled:opacity-50"
           >
             <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
           <Link
             href="/report"
-            className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50"
+            className="flex items-center gap-1 rounded-md border border-slate-200 bg-bg-canvas px-2.5 py-1.5 text-[10px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-bg-soft"
           >
             <ExternalLink className="h-3 w-3" />
             Call Register
@@ -1191,7 +1191,7 @@ export default function SerialAuditPage() {
           extraFilterCount={extraFilterCount}
         />
       }
-      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50 p-4"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-soft p-4"
     >
       <div className="flex shrink-0 flex-col gap-3">
       <SerialRepairLegend />
@@ -1279,7 +1279,7 @@ export default function SerialAuditPage() {
           </button>
         </div>
       ) : listRows.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 bg-white p-12 text-center">
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 bg-bg-canvas p-12 text-center">
           <AlertTriangle className="h-8 w-8 text-amber-500" />
           <p className="text-sm font-medium text-slate-700">No repeat serials found</p>
           <p className="max-w-md text-[11px] text-slate-500">
@@ -1337,7 +1337,7 @@ export default function SerialAuditPage() {
                 <button
                   type="button"
                   onClick={() => setSelectedInvolvementPair(null)}
-                  className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-900 hover:bg-amber-100"
+                  className="rounded-md border border-amber-200 bg-bg-canvas px-2 py-1 text-[10px] font-medium text-amber-900 hover:bg-amber-100"
                 >
                   Show all serials
                 </button>
@@ -1408,7 +1408,7 @@ export default function SerialAuditPage() {
               </tbody>
             </AdminTable>
             {displayedRows.length > SERIAL_PAGE_SIZE ? (
-              <div className="flex flex-shrink-0 items-center justify-between border-t border-slate-200 bg-slate-50 px-3 py-2">
+              <div className="flex flex-shrink-0 items-center justify-between border-t border-slate-200 bg-bg-soft px-3 py-2">
                 <span className="text-[11px] text-slate-500">
                   {(page - 1) * SERIAL_PAGE_SIZE + 1}–
                   {Math.min(page * SERIAL_PAGE_SIZE, displayedRows.length)} of{' '}
@@ -1419,7 +1419,7 @@ export default function SerialAuditPage() {
                     type="button"
                     disabled={page <= 1}
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    className="rounded border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                    className="rounded border border-slate-200 bg-bg-canvas p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </button>
@@ -1430,7 +1430,7 @@ export default function SerialAuditPage() {
                     type="button"
                     disabled={page >= totalPages}
                     onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    className="rounded border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                    className="rounded border border-slate-200 bg-bg-canvas p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40"
                   >
                     <ChevronRight className="h-4 w-4" />
                   </button>
@@ -1638,7 +1638,7 @@ function SerialAuditTableRow({
         </AdminTd>
       </AdminTr>
       {expanded ? (
-        <tr className="border-b border-slate-100 bg-slate-50/80">
+        <tr className="border-b border-slate-100 bg-bg-soft/80">
           <td colSpan={includeCancelled ? 9 : 8} className="serial-audit-expanded-cell px-3 py-3">
             {displayCalls.length === 0 && !allTimeLoading && !windowLoading && !callsLoading ? (
               <p className="py-4 text-center text-[11px] text-slate-500">

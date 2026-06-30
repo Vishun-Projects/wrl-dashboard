@@ -27,7 +27,7 @@ export function WarrantyMasterHeaderActions({
         onClick={onRefresh}
         disabled={refreshDisabled}
         title={cacheLabel ? `Refresh data (${cacheLabel})` : 'Refresh data'}
-        className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[10px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-bg-canvas px-2.5 text-[10px] font-medium text-slate-700 hover:bg-bg-soft disabled:opacity-50"
       >
         <RefreshCw className={`h-3.5 w-3.5 ${refreshDisabled ? 'animate-spin' : ''}`} />
         <span className="hidden sm:inline">Refresh</span>

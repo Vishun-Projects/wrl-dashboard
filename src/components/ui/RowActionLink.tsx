@@ -21,7 +21,7 @@ export function RowActionLink({ href, label, className, onClick }: RowActionLink
         onClick?.(e);
       }}
       className={cn(
-        'inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-700 hover:bg-slate-50',
+        'inline-flex items-center gap-1 rounded border border-slate-200 bg-bg-canvas px-2 py-0.5 text-[10px] font-medium text-slate-700 hover:bg-bg-soft',
         className
       )}
     >

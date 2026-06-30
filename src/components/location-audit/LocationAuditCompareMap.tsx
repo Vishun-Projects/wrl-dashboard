@@ -267,7 +267,7 @@ export function LocationAuditCompareMap({ stored, expected, visit, distanceM, ma
 
   if (error) {
     return (
-      <div className="flex h-[320px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-[11px] text-slate-500">
+      <div className="flex h-[320px] items-center justify-center rounded-lg border border-slate-200 bg-bg-soft text-[11px] text-slate-500">
         Map could not load. Use the coordinate cards and Google Maps links below.
       </div>
     );
@@ -282,7 +282,7 @@ export function LocationAuditCompareMap({ stored, expected, visit, distanceM, ma
         </div>
       )}
       <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 flex flex-wrap items-end justify-between gap-2">
-        <div className="flex flex-wrap gap-2 rounded-md border border-slate-200 bg-white/95 px-2.5 py-2 text-[11px] font-medium text-slate-700 shadow-md">
+        <div className="flex flex-wrap gap-2 rounded-md border border-slate-200 bg-bg-canvas/95 px-2.5 py-2 text-[11px] font-medium text-slate-700 shadow-md">
           {expected ? (
             <span className="flex items-center gap-1">
               <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-600" />
@@ -303,7 +303,7 @@ export function LocationAuditCompareMap({ stored, expected, visit, distanceM, ma
           ) : null}
         </div>
         {stored && expected && ready ? (
-          <div className="max-w-[200px] rounded-md bg-white/95 px-2 py-1 text-[9px] leading-snug text-slate-600 shadow-sm">
+          <div className="max-w-[200px] rounded-md bg-bg-canvas/95 px-2 py-1 text-[9px] leading-snug text-slate-600 shadow-sm">
             {routeMode === 'loading' && 'Loading road route…'}
             {routeMode === 'road' && (
               <>

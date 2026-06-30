@@ -4,6 +4,9 @@
  *
  * Usage:
  *   node scripts/mis-client/seed-coke-cadbury-config.mjs
+ *
+ * After changing mappings, re-normalize stored rows:
+ *   npx tsx scripts/mis-client/reprocess-cadbury-regions.ts coke cadbury
  */
 import { config } from 'dotenv';
 import { dirname, join } from 'path';
@@ -109,10 +112,11 @@ try {
   ]);
 
   await seedStatusMappings(cokeId, [
-    { client_status: 'Open', status_bucket: 'open_unallocated', status_label: 'Open' },
+    // CDMS: Closed + Service Done → solved; Service Engg Assigned (+ Open) → open
+    { client_status: 'Open', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'S.Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'Service Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
-    { client_status: 'Service Done', status_bucket: 'tech_solved', status_label: 'Tech. Solve Call' },
+    { client_status: 'Service Done', status_bucket: 'solved', status_label: 'Closed' },
     { client_status: 'Closed', status_bucket: 'solved', status_label: 'Closed' },
   ]);
 

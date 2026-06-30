@@ -52,10 +52,10 @@ export function RegisterColumnPicker({ visibleColumns, onChange }: RegisterColum
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div
-            className="absolute top-full right-0 z-50 mt-1 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl"
+            className="absolute top-full right-0 z-50 mt-1 w-56 overflow-hidden rounded-lg border border-slate-200 bg-bg-canvas shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 p-2">
+            <div className="flex items-center justify-between border-b border-slate-100 bg-bg-soft p-2">
               <span className="text-[10px] text-slate-500 ui-label">Visible columns</span>
               <button
                 type="button"
@@ -71,7 +71,7 @@ export function RegisterColumnPicker({ visibleColumns, onChange }: RegisterColum
                 return (
                   <label
                     key={col.key}
-                    className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-slate-50"
+                    className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-bg-soft"
                   >
                     <input
                       type="checkbox"
@@ -92,7 +92,7 @@ export function RegisterColumnPicker({ visibleColumns, onChange }: RegisterColum
                 );
               })}
             </div>
-            <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50 p-1.5">
+            <div className="flex items-center justify-between border-t border-slate-100 bg-bg-soft p-1.5">
               <button
                 type="button"
                 onClick={() => setTempSelected([...REGISTER_TABLE_COLUMN_KEYS])}

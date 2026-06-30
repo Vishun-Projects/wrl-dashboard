@@ -119,14 +119,14 @@ export function Sidebar({ user }: SidebarProps) {
   }));
 
   const sidebarContent = (
-    <div className="flex h-full flex-col border-r border-slate-200 bg-white text-slate-600 select-none">
+    <div className="flex h-full flex-col border-r border-slate-200 bg-bg-canvas text-slate-600 select-none">
       {/* Header / Logo — h-14 aligns with PageShell header border */}
       <div className="relative flex h-14 flex-shrink-0 items-center justify-between border-b border-slate-200 px-4">
         <div
           className="flex items-center gap-3 cursor-pointer group overflow-hidden"
           onClick={() => router.push(homePath)}
         >
-          <div className="w-8 h-8 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105 active:scale-95 shadow-sm flex-shrink-0">
+          <div className="w-8 h-8 bg-bg-soft border border-slate-100 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105 active:scale-95 shadow-sm flex-shrink-0">
             <Image src="/western-head-logo-2025.png" alt="W" width={20} height={20} className="object-contain" style={{ height: 'auto' }} />
           </div>
           {!isCollapsed && (
@@ -139,7 +139,7 @@ export function Sidebar({ user }: SidebarProps) {
         {/* Collapsible toggle button on desktop */}
         <button
           onClick={toggleCollapse}
-          className="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-slate-800 items-center justify-center transition-colors z-50"
+          className="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-bg-canvas border border-slate-200 text-slate-400 hover:text-slate-800 items-center justify-center transition-colors z-50"
         >
           {isCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
         </button>
@@ -158,11 +158,11 @@ export function Sidebar({ user }: SidebarProps) {
                 router.push(item.href);
                 setIsMobileOpen(false);
               }}
-              className={`w-full flex items-center gap-3 py-3 rounded-xl text-xs transition-colors relative ${isActive ? 'bg-slate-950 text-white' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'} ${isCollapsed ? 'justify-center px-0' : 'px-3'} ui-label`}
+              className={`sidebar-nav-button w-full flex items-center gap-3 py-3 rounded-xl text-xs transition-colors relative ${isActive ? 'is-active bg-slate-950 text-white' : 'text-slate-500 hover:bg-bg-soft hover:text-slate-900'} ${isCollapsed ? 'justify-center px-0' : 'px-3'} ui-label`}
             >
               <item.icon
                 size={18}
-                className={`transition-colors flex-shrink-0 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-700'}`}
+                className={`sidebar-nav-icon transition-colors flex-shrink-0 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-700'}`}
               />
 
               {!isCollapsed && (
@@ -186,7 +186,7 @@ export function Sidebar({ user }: SidebarProps) {
       <div className="p-3 border-t border-slate-100 flex-shrink-0 relative" ref={dropdownRef}>
         <div
           onClick={() => setIsProfileOpen(!isProfileOpen)}
-          className={`flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 cursor-pointer transition-all ${isCollapsed ? 'justify-center' : ''}`}
+          className={`flex items-center gap-3 p-2 rounded-xl hover:bg-bg-soft cursor-pointer transition-all ${isCollapsed ? 'justify-center' : ''}`}
         >
           <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 overflow-hidden flex-shrink-0">
             {user?.avatar_url ? (
@@ -208,7 +208,7 @@ export function Sidebar({ user }: SidebarProps) {
 
         {/* Profile Popover / Dropdown */}
         {isProfileOpen && (
-          <div className={`absolute bottom-full mb-2 bg-white border border-slate-200 shadow-sm rounded-xl z-[150] p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-200 ${isCollapsed ? 'left-3 w-48' : 'right-3'}`}>
+          <div className={`absolute bottom-full mb-2 bg-bg-canvas border border-slate-200 shadow-sm rounded-xl z-[150] p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-200 ${isCollapsed ? 'left-3 w-48' : 'right-3'}`}>
             <div className="p-2 border-b border-slate-100 text-slate-500">
               <p className="text-[9px] text-slate-400 mb-0.5 ui-strong">Signed in as</p>
               <p className="text-[11px] text-slate-700 truncate ui-label">{user?.email}</p>
@@ -216,7 +216,7 @@ export function Sidebar({ user }: SidebarProps) {
 
             <button
               onClick={() => { router.push('/profile'); setIsProfileOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] text-slate-600 hover:text-slate-950 hover:bg-slate-50 transition-all ui-label"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] text-slate-600 hover:text-slate-950 hover:bg-bg-soft transition-all ui-label"
             >
               <User size={14} />
               My Profile
@@ -224,7 +224,7 @@ export function Sidebar({ user }: SidebarProps) {
 
             <button
               onClick={() => { router.push('/profile?tab=settings'); setIsProfileOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] text-slate-600 hover:text-slate-950 hover:bg-slate-50 transition-all ui-label"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] text-slate-600 hover:text-slate-950 hover:bg-bg-soft transition-all ui-label"
             >
               <Settings size={14} />
               Settings
@@ -248,16 +248,16 @@ export function Sidebar({ user }: SidebarProps) {
   return (
     <>
       {/* Mobile Top Bar */}
-      <div className="md:hidden w-full h-14 bg-white text-slate-800 border-b border-slate-200 flex items-center justify-between px-4 z-[90] flex-shrink-0">
+      <div className="md:hidden w-full h-14 bg-bg-canvas text-slate-800 border-b border-slate-200 flex items-center justify-between px-4 z-[90] flex-shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center shadow-sm">
+          <div className="w-8 h-8 bg-bg-soft border border-slate-100 rounded-lg flex items-center justify-center shadow-sm">
             <Image src="/western-head-logo-2025.png" alt="W" width={20} height={20} className="object-contain" style={{ height: 'auto' }} />
           </div>
           <span className="text-xs text-slate-900 ui-label">WRL PORTAL</span>
         </div>
         <button
           onClick={() => setIsMobileOpen(!isMobileOpen)}
-          className="p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-all"
+          className="p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-bg-soft transition-all"
         >
           {isMobileOpen ? <X size={20} /> : <Menu size={20} />}
         </button>

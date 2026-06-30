@@ -1733,7 +1733,7 @@ export default function ArcpClaimsPage() {
       icon={<FileSpreadsheet className="h-4 w-4" />}
       actions={headerActions}
       toolbar={toolbar}
-      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-soft"
     >
       <div className="flex shrink-0 flex-col">
       {pageAlert ? (

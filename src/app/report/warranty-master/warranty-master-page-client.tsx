@@ -424,11 +424,11 @@ export default function WarrantyMasterPage() {
       icon={<Shield className="h-4 w-4" />}
       actions={headerActions}
       toolbar={toolbar}
-      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-soft"
     >
       <div className="flex shrink-0 flex-col">
         {activeChips.length > 0 ? (
-          <div className="register-filter-chips border-b border-slate-200 bg-white px-3 py-1.5">
+          <div className="register-filter-chips border-b border-slate-200 bg-bg-canvas px-3 py-1.5">
             <AnimatedChipList>
               {activeChips.map((chip) => (
                 <button

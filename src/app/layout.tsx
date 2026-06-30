@@ -6,6 +6,8 @@ import { Analytics } from '@vercel/analytics/next';
 import { Toaster } from 'sonner';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { getUserInfo } from '@/lib/auth/session';
+import { ThemeScript } from '@/components/theme/ThemeScript';
+import { resolveAppTheme } from '@/lib/ui/theme';
 
 const dmSans = DM_Sans({
   variable: "--font-dm-sans",
@@ -28,10 +30,12 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const initialUser = await getUserInfo();
+  const initialTheme = resolveAppTheme(initialUser?.theme);
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" data-theme={initialTheme} suppressHydrationWarning>
       <body className={`${dmSans.variable} ${jetbrainsMono.variable} antialiased font-sans`}>
+        <ThemeScript />
         <DashboardLayout initialUser={initialUser}>
           {children}
         </DashboardLayout>

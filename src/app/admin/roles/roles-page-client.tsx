@@ -70,12 +70,12 @@ function PermissionToggle({
       } ${
         selected
           ? 'border-slate-900 bg-slate-900 text-white'
-          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+          : 'border-slate-200 bg-bg-canvas text-slate-600 hover:border-slate-300'
       }`}
     >
       <div
         className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded ${
-          selected ? 'bg-white/20' : 'bg-slate-100 text-slate-400'
+          selected ? 'bg-bg-canvas/20' : 'bg-slate-100 text-slate-400'
         }`}
       >
         {selected ? <Check size={12} /> : <Lock size={10} />}
@@ -264,7 +264,7 @@ export default function RolesPage() {
       title="Roles & Access Control"
       subtitle="Assign pages, tabs, and capabilities per role — sidebar shows only what you grant"
       icon={<ShieldCheck size={16} />}
-      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-soft"
       toolbar={
         <AdminToolbar search={search} onSearchChange={setSearch} searchPlaceholder="Search roles...">
           <AdminStatPill label="Roles" value={loading ? '…' : roles.length} />
@@ -309,7 +309,7 @@ export default function RolesPage() {
                     <AdminTr key={role.id}>
                       <AdminTd>
                         <div className="flex items-center gap-2.5">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-700">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-bg-soft text-slate-700">
                             <Shield size={14} />
                           </div>
                           <span className="text-[13px] font-medium text-slate-800">{role.name}</span>
@@ -355,11 +355,11 @@ export default function RolesPage() {
         <ModalPortal open={showModal}>
           <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
             <ModalBackdrop onClick={() => setShowModal(false)} />
-            <div className="relative z-[1] w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl animate-in zoom-in-95 duration-200">
+            <div className="relative z-[1] w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200 bg-bg-canvas shadow-xl animate-in zoom-in-95 duration-200">
               <form onSubmit={handleSubmit}>
                 <div className="flex h-14 items-center justify-between border-b border-slate-200 px-5">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-slate-50">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-bg-soft">
                       <Key size={16} className="text-slate-700" />
                     </div>
                     <div>
@@ -374,7 +374,7 @@ export default function RolesPage() {
                   <button
                     type="button"
                     onClick={() => setShowModal(false)}
-                    className="rounded-md p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-800"
+                    className="rounded-md p-2 text-slate-400 hover:bg-bg-soft hover:text-slate-800"
                   >
                     <X size={18} />
                   </button>
@@ -414,7 +414,7 @@ export default function RolesPage() {
                         page.tabs.length > 0 ? (
                           <div
                             key={page.pageId}
-                            className="rounded-lg border border-slate-200 bg-slate-50/50 p-3 space-y-2"
+                            className="rounded-lg border border-slate-200 bg-bg-soft/50 p-3 space-y-2"
                           >
                             <PermissionToggle
                               selected={isPageFullSelected(page)}
@@ -492,7 +492,7 @@ export default function RolesPage() {
                   ) : null}
                 </div>
 
-                <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-5 py-3">
+                <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-bg-soft/80 px-5 py-3">
                   <button
                     type="button"
                     onClick={() => setShowModal(false)}

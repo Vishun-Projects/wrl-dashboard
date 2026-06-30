@@ -13,15 +13,26 @@ const MONTHS: Record<string, number> = {
   dec: 11,
 };
 
-/** Parse client date strings (Coke VDate, Cadbury Call Log Date, etc.). */
-export function parseClientDate(raw: string | null | undefined): Date | null {
-  if (!raw) return null;
+/** Parse client date strings (Coke VDate, Cadbury Call Log Date, Excel serial, etc.). */
+export function parseClientDate(raw: string | number | null | undefined): Date | null {
+  if (raw == null) return null;
+
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return excelSerialToDate(raw);
+  }
+
   const value = String(raw).trim();
   if (!value) return null;
 
-  const direct = new Date(value);
-  if (!Number.isNaN(direct.getTime())) return direct;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && /^\d+(\.\d+)?$/.test(value)) {
+    if (numeric > 10000 && numeric < 100000) {
+      const fromSerial = excelSerialToDate(numeric);
+      if (fromSerial) return fromSerial;
+    }
+  }
 
+  // Coke CDMS / India exports use DD/MM/YYYY — parse before `new Date()` (US MM/DD).
   const dmyDash = value.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
   if (dmyDash) {
     const [, d, m, y] = dmyDash;
@@ -50,5 +61,16 @@ export function parseClientDate(raw: string | null | undefined): Date | null {
     return Number.isNaN(dt.getTime()) ? null : dt;
   }
 
+  const direct = new Date(value);
+  if (!Number.isNaN(direct.getTime())) return direct;
+
   return null;
+}
+
+/** Excel day serial (1900 date system) → local Date at midnight. */
+function excelSerialToDate(serial: number): Date | null {
+  if (!Number.isFinite(serial) || serial <= 0) return null;
+  const utcMs = Math.round((serial - 25569) * 86400 * 1000);
+  const dt = new Date(utcMs);
+  return Number.isNaN(dt.getTime()) ? null : dt;
 }
