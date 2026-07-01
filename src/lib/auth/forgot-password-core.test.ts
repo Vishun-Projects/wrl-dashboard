@@ -18,6 +18,30 @@ describe('validateForgotPasswordEmail', () => {
   });
 });
 
+describe('forgotPasswordStatusMessage', () => {
+  it('reports when email is not registered', () => {
+    expect(
+      forgotPasswordStatusMessage({
+        email: 'nobody@example.com',
+        inAuth: false,
+        inAppUsers: false,
+        appUserName: null,
+      })
+    ).toMatch(/No account found/i);
+  });
+
+  it('reports when auth login exists', () => {
+    expect(
+      forgotPasswordStatusMessage({
+        email: 'user@example.com',
+        inAuth: true,
+        inAppUsers: true,
+        appUserName: 'Test User',
+      })
+    ).toMatch(/Account found/i);
+  });
+});
+
 describe('forgot password generic response', () => {
   it('uses non-enumerating message', () => {
     expect(FORGOT_PASSWORD_GENERIC_MESSAGE).toMatch(/If an account exists/i);

@@ -22,13 +22,12 @@ export default function ForgotPasswordPage() {
         body: JSON.stringify({ email }),
       });
       const payload = await res.json().catch(() => ({}));
+      const text = payload.message || payload.error;
       if (!res.ok) {
-        throw new Error(payload.error || 'Request failed');
+        setError(text || 'Request failed');
+        return;
       }
-      setMessage(
-        payload.message ||
-          'If an account exists for that email, you will receive password reset instructions shortly.'
-      );
+      setMessage(text || 'Reset link sent. Check your inbox.');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Request failed');
     } finally {

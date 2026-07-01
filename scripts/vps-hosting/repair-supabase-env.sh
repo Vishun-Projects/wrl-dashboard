@@ -22,7 +22,7 @@ set_env() {
   local val="$2"
   grep -v "^${key}=" .env > .env.tmp 2>/dev/null || true
   mv .env.tmp .env
-  printf '%s=%q\n' "$key" "$val" >> .env
+  printf '%s=%s\n' "$key" "$val" >> .env
 }
 
 if [[ ! -f .env.example ]]; then

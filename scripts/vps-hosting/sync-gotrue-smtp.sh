@@ -18,7 +18,7 @@ set_env() {
   local val="$2"
   grep -v "^${key}=" "${SUPABASE_DIR}/.env" > "${SUPABASE_DIR}/.env.tmp" 2>/dev/null || true
   mv "${SUPABASE_DIR}/.env.tmp" "${SUPABASE_DIR}/.env"
-  printf '%s=%q\n' "$key" "$val" >> "${SUPABASE_DIR}/.env"
+  printf '%s=%s\n' "$key" "$val" >> "${SUPABASE_DIR}/.env"
 }
 
 sync_gotrue_smtp() {
@@ -50,9 +50,9 @@ sync_gotrue_smtp() {
   set_env SMTP_PASS "${SMTP_PASS:-}"
   set_env SMTP_SENDER_NAME "$sender_name"
 
-  echo "==> Restarting GoTrue (auth)"
+  echo "==> Recreating GoTrue (auth) so SMTP env is picked up"
   cd "$SUPABASE_DIR"
-  docker compose restart auth
+  docker compose up -d --force-recreate auth
   sleep 5
   docker compose ps auth
   echo "==> Done — test forgot password on https://wrl-dashboard.vercel.app/forgot-password"
