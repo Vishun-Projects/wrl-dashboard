@@ -22,6 +22,8 @@ describe('canAccessPath', () => {
   it('allows login and profile without permissions', () => {
     expect(canAccessPath([], '/login')).toBe(true);
     expect(canAccessPath([], '/profile')).toBe(true);
+    expect(canAccessPath([], '/forgot-password')).toBe(true);
+    expect(canAccessPath([], '/reset-password')).toBe(true);
   });
 
   it('requires manage_users for admin sync', () => {

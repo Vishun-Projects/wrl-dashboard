@@ -289,12 +289,21 @@ export function defaultMisTab(permissions: string[]): MisTabId {
   return 'summary';
 }
 
+export function isPublicAuthRoute(path: string | null | undefined): boolean {
+  if (!path) return false;
+  return (
+    path === '/login' ||
+    path.startsWith('/forgot-password') ||
+    path.startsWith('/reset-password')
+  );
+}
+
 export function canAccessPath(
   permissions: string[],
   path: string,
   _options?: { email?: string | null }
 ): boolean {
-  if (path === '/login' || path.startsWith('/profile')) return true;
+  if (isPublicAuthRoute(path) || path.startsWith('/profile')) return true;
 
   if (path === '/admin' || path === '/admin/') {
     return hasPermission(permissions, 'manage_users') || hasPermission(permissions, 'manage_roles');

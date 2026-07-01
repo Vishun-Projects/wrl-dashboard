@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { useRouter, usePathname } from 'next/navigation';
 import axios from 'axios';
 import { signOutAndGoToLogin } from '@/lib/auth/sign-out-client';
+import { isPublicAuthRoute } from '@/lib/auth/rbac-catalog';
 import { Sidebar } from './Sidebar';
 import { PageAccessGuard } from './PageAccessGuard';
 import { CallDetailDialogProvider } from '@/components/calls/CallDetailDialogProvider';
@@ -39,7 +40,7 @@ export function DashboardLayout({
   const pathname = usePathname();
   const [userProfile, setUserProfile] = useState<any>(initialUser);
   const [loadingProfile, setLoadingProfile] = useState(
-    pathname !== '/login' && !initialUser
+    !isPublicAuthRoute(pathname) && !initialUser
   );
   const authLoadedRef = useRef(!!initialUser);
   const profileRequestRef = useRef<Promise<void> | null>(null);
@@ -67,7 +68,7 @@ export function DashboardLayout({
         if (unauthorized) {
           setUserProfile(null);
           authLoadedRef.current = false;
-          if (pathname !== '/login') {
+          if (!isPublicAuthRoute(pathname)) {
             void signOutAndGoToLogin();
           }
           setLoadingProfile(false);
@@ -93,7 +94,7 @@ export function DashboardLayout({
   }, [pathname, router]);
 
   useEffect(() => {
-    if (pathname === '/login') {
+    if (isPublicAuthRoute(pathname)) {
       setUserProfile(null);
       authLoadedRef.current = false;
       setLoadingProfile(false);
@@ -106,7 +107,7 @@ export function DashboardLayout({
     void fetchProfile();
   }, [pathname, fetchProfile, userProfile]);
 
-  if (pathname === '/login') {
+  if (isPublicAuthRoute(pathname)) {
     return <>{children}</>;
   }
 
