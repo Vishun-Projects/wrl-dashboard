@@ -12,6 +12,18 @@ systemctl restart postfix
 sleep 2
 systemctl is-active postfix
 
+echo "==> UFW: allow Docker subnets to reach host port 25"
+if command -v ufw >/dev/null 2>&1 && ufw status | grep -q 'Status: active'; then
+  ufw allow from 172.16.0.0/12 to any port 25 proto tcp comment 'Docker to Postfix' >/dev/null 2>&1 || true
+  ufw reload >/dev/null 2>&1 || true
+fi
+
+echo "==> iptables: allow Docker → host SMTP"
+if iptables -L INPUT -n >/dev/null 2>&1; then
+  iptables -C INPUT -p tcp -s 172.16.0.0/12 --dport 25 -j ACCEPT 2>/dev/null || \
+    iptables -I INPUT 1 -p tcp -s 172.16.0.0/12 --dport 25 -j ACCEPT
+fi
+
 echo "==> Listening on port 25:"
 ss -ltnp | grep ':25' || true
-echo "==> Done — Docker can reach host Postfix at 172.17.0.1:25"
+echo "==> Done — host Postfix accepts relay from Docker networks"

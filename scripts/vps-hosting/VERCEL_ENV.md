@@ -130,6 +130,25 @@ On Vercel, set `NEXT_PUBLIC_SITE_URL=https://wrl-dashboard.vercel.app` so reset 
 
 If these are not set on Vercel, reset mail is sent by GoTrue on the VPS (requires `npm run gotrue:sync-smtp:vps`).
 
+### Recommended: VPS mail relay (same Postfix as MIS, works from Vercel)
+
+GoTrue runs in Docker and often **cannot** reach host Postfix (`172.18.0.1:25` blocked). The mail relay runs **on the VPS host** (same as MIS cron) and Vercel calls it over HTTPS.
+
+One-time on VPS (from repo root):
+
+```bash
+bash scripts/vps-hosting/setup-mail-relay.sh --remote
+```
+
+Prints `VPS_MAIL_RELAY_SECRET` — add to **Vercel Production** env:
+
+| Variable | Value |
+|----------|--------|
+| `VPS_MAIL_RELAY_URL` | `https://api.wrl-fsm.cloud/internal/mail/send` |
+| `VPS_MAIL_RELAY_SECRET` | (secret printed by setup script) |
+
+Redeploy Vercel after adding env vars. Forgot-password will generate the reset link on Vercel and send mail via VPS Postfix — **identical path to MIS reports**.
+
 **Local dev:** forgot-password still requires production — `db-sign-in` bypass does not send mail.
 
 Apply DB migration for MIS email preferences before cron:

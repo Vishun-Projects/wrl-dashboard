@@ -85,10 +85,11 @@ EOF
   docker compose ps auth
 
   echo "==> SMTP connectivity from auth container"
-  if docker compose exec -T auth sh -c "nc -zv -w 3 ${gotrue_host} ${SMTP_PORT}" 2>&1 | grep -qi succeeded; then
+  if docker compose exec -T auth sh -c "nc -zv -w 3 ${gotrue_host} ${SMTP_PORT}" 2>&1 | grep -qiE 'open|succeeded'; then
     echo "    OK: auth → ${gotrue_host}:${SMTP_PORT}"
   else
-    echo "    WARN: auth cannot reach ${gotrue_host}:${SMTP_PORT} — check UFW/iptables" >&2
+    echo "    WARN: auth cannot reach ${gotrue_host}:${SMTP_PORT}" >&2
+    echo "    Use VPS mail relay instead: bash scripts/vps-hosting/setup-mail-relay.sh --remote" >&2
   fi
 
   echo "==> Done — test forgot password on https://wrl-dashboard.vercel.app/forgot-password"
