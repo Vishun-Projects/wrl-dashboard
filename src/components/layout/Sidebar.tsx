@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
+import { resolveAvatarDisplayUrl } from '@/lib/auth/avatar-url';
 import {
   Users,
   FileSpreadsheet,
@@ -190,7 +191,14 @@ export function Sidebar({ user }: SidebarProps) {
         >
           <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 overflow-hidden flex-shrink-0">
             {user?.avatar_url ? (
-              <Image src={user.avatar_url} alt="" width={32} height={32} className="h-full w-full object-cover" unoptimized />
+              <Image
+                src={resolveAvatarDisplayUrl(user.avatar_url) ?? user.avatar_url}
+                alt=""
+                width={32}
+                height={32}
+                className="h-full w-full object-cover"
+                unoptimized
+              />
             ) : (
               user?.name ? user.name.charAt(0).toUpperCase() : <User size={14} />
             )}

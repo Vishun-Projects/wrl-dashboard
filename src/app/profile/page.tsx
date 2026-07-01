@@ -24,7 +24,7 @@ import {
 } from '@/components/admin/AdminUi';
 import axios from 'axios';
 import { feedback } from '@/lib/ui/feedback';
-import { createClient } from '@/lib/supabase/client';
+import { resolveAvatarDisplayUrl } from '@/lib/auth/avatar-url';
 import { useSearchParams } from 'next/navigation';
 import { ThemePicker } from '@/components/settings/ThemePicker';
 import type { MisEmailPreferences } from '@/lib/mis-email/preferences';
@@ -55,7 +55,6 @@ function ProfileContent() {
   const [emailSaving, setEmailSaving] = useState(false);
   const [emailPrefs, setEmailPrefs] = useState<MisEmailPreferences>({});
 
-  const supabase = createClient();
   const searchParams = useSearchParams();
 
   useEffect(() => {
@@ -153,18 +152,12 @@ function ProfileContent() {
 
     try {
       setUploadingImage(true);
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${user.id}-${Math.random()}.${fileExt}`;
-      const filePath = `avatars/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage.from('profiles').upload(filePath, file);
-      if (uploadError) throw uploadError;
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from('profiles').getPublicUrl(filePath);
-
-      await axios.patch('/api/profile', { avatar_url: publicUrl });
+      const formData = new FormData();
+      formData.append('file', file);
+      await axios.post('/api/profile/avatar', formData, {
+        withCredentials: true,
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
       feedback.actionSuccess('Profile image updated');
       fetchProfile();
     } catch (err: any) {
@@ -233,7 +226,11 @@ function ProfileContent() {
                 <div className="relative flex-shrink-0">
                   <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-100 text-2xl text-slate-400 ui-strong">
                     {user?.avatar_url ? (
-                      <img src={user.avatar_url} alt="" className="h-full w-full object-cover" />
+                      <img
+                        src={resolveAvatarDisplayUrl(user.avatar_url) ?? ''}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
                     ) : (
                       user?.name?.charAt(0).toUpperCase()
                     )}

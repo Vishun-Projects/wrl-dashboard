@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import { resolveAvatarDisplayUrl } from '@/lib/auth/avatar-url';
 import { 
   Users, 
   UserPlus, 
@@ -401,7 +402,11 @@ export default function AdminUsersPage() {
                       <div className="flex items-center gap-3">
                         <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-[11px] font-semibold text-slate-500">
                           {u.avatar_url ? (
-                            <img src={u.avatar_url} alt="" className="h-full w-full object-cover" />
+                            <img
+                              src={resolveAvatarDisplayUrl(u.avatar_url) ?? ''}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
                           ) : (
                             u.name?.charAt(0)?.toUpperCase()
                           )}

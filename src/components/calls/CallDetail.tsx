@@ -10,6 +10,7 @@ import {
   buildReplacementPartViews,
   isSerialTrackedReplacementPart,
 } from '@/lib/calls/part-barcode-images';
+import { resolveAvatarDisplayUrl } from '@/lib/auth/avatar-url';
 
 interface CallDetailProps {
   call: any;
@@ -537,7 +538,11 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                       <div key={i} className="flex gap-3">
                         <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] ui-label overflow-hidden flex-shrink-0">
                           {c.author_avatar_url ? (
-                            <img src={c.author_avatar_url} alt="" className="w-full h-full object-cover" />
+                            <img
+                              src={resolveAvatarDisplayUrl(c.author_avatar_url) ?? ''}
+                              alt=""
+                              className="w-full h-full object-cover"
+                            />
                           ) : (
                             c.author_name?.charAt(0)
                           )}
