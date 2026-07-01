@@ -50,6 +50,24 @@ set_env STUDIO_DEFAULT_ORGANIZATION "WRL"
 set_env STUDIO_DEFAULT_PROJECT "fast-close-app"
 set_env COMPOSE_FILE "docker-compose.yml:docker-compose.pg17.yml"
 
+echo "==> GoTrue SMTP — same relay as MIS reports (.env.mis-email)"
+if [[ -f "$(dirname "$0")/mis-smtp-env.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "$(dirname "$0")/mis-smtp-env.sh"
+  load_mis_smtp_vars
+  gotrue_host="$(resolve_gotrue_smtp_host "$SMTP_HOST")"
+  set_env SMTP_ADMIN_EMAIL "$(parse_smtp_admin_email "$SMTP_FROM")"
+  set_env SMTP_HOST "$gotrue_host"
+  set_env SMTP_PORT "$SMTP_PORT"
+  set_env SMTP_USER "${SMTP_USER:-}"
+  set_env SMTP_PASS "${SMTP_PASS:-}"
+  set_env SMTP_SENDER_NAME "$(parse_smtp_sender_name "$SMTP_FROM")"
+  echo "    From: $(parse_smtp_sender_name "$SMTP_FROM") <$(parse_smtp_admin_email "$SMTP_FROM")>"
+  echo "    Relay: ${gotrue_host}:${SMTP_PORT}"
+else
+  echo "WARN: mis-smtp-env.sh not found — GoTrue SMTP not configured" >&2
+fi
+
 echo "==> Restarting Supabase stack"
 docker compose down
 docker compose pull

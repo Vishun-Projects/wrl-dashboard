@@ -44,7 +44,8 @@
     "mis-email:test:vps": "bash scripts/vps-hosting/run-mis-email-test-vps.sh",
     "mis-email:diagnose:vps": "bash scripts/vps-hosting/diagnose-mis-email-vps.sh",
     "mis-email:setup-postfix:vps": "bash scripts/vps-hosting/setup-vps-postfix.sh --remote",
-    "mis-email:dns:vps": "bash scripts/vps-hosting/show-mis-email-dns-vps.sh"
+    "mis-email:dns:vps": "bash scripts/vps-hosting/show-mis-email-dns-vps.sh",
+    "gotrue:sync-smtp:vps": "bash scripts/vps-hosting/sync-gotrue-smtp-vps.sh"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",

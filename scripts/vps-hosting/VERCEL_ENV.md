@@ -82,19 +82,32 @@ Vercel logs should **no longer** show `exceed_egress_quota`.
 
 ## GoTrue SMTP (forgot password)
 
-Self-service password reset uses Supabase GoTrue on `api.wrl-fsm.cloud`. Configure on the VPS (`scripts/vps-hosting/setup-supabase.sh` / `repair-supabase-env.sh`):
+**Uses the same SMTP as MIS reports** — reads `/opt/fast-close-app/.env.mis-email` (Postfix on the VPS, or Gmail if configured). No separate mail setup.
 
-| Variable | Purpose |
-|----------|---------|
+After MIS test mail works (`npm run mis-email:test:vps`), sync GoTrue:
+
+```bash
+npm run gotrue:sync-smtp:vps
+```
+
+Or on the VPS directly:
+
+```bash
+bash /opt/fast-close-app/scripts/vps-hosting/sync-gotrue-smtp.sh
+```
+
+This copies `SMTP_HOST` / `SMTP_FROM` from `.env.mis-email` into `/opt/supabase/docker/.env` and restarts the `auth` container. When MIS uses local Postfix (`127.0.0.1:25`), GoTrue uses `172.17.0.1:25` (Docker bridge to host Postfix).
+
+Also ensure redirect URLs are set (done by `repair-supabase-env.sh`):
+
+| Variable | Value |
+|----------|--------|
 | `SITE_URL` | `https://wrl-dashboard.vercel.app` |
-| `ADDITIONAL_REDIRECT_URLS` | Include `https://wrl-dashboard.vercel.app/**` and `http://localhost:3000/**` |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | Outbound mail relay (Hostinger or corporate SMTP) |
-| `SMTP_ADMIN_EMAIL` | From address for recovery emails |
-| `SMTP_SENDER_NAME` | e.g. `WRL Dashboard` |
+| `ADDITIONAL_REDIRECT_URLS` | `https://wrl-dashboard.vercel.app/**` |
 
-On Vercel, set `NEXT_PUBLIC_SITE_URL` or `SITE_URL` to the production dashboard URL so reset links point to `/reset-password`.
+On Vercel, set `NEXT_PUBLIC_SITE_URL=https://wrl-dashboard.vercel.app` so reset links point to `/reset-password`.
 
-**Local dev:** forgot-password requires GoTrue over HTTPS (same as profile password change). `db-sign-in` bypass does not send recovery emails — use staging/production to test.
+**Local dev:** forgot-password still requires production GoTrue — `db-sign-in` bypass does not send mail.
 
 Apply DB migration for MIS email preferences before cron:
 
