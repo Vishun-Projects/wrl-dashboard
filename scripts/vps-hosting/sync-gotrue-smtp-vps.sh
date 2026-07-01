@@ -20,7 +20,6 @@ tar -C "${ROOT}" -czf - \
   scripts/vps-hosting/mis-smtp-env.sh \
   scripts/vps-hosting/sync-gotrue-smtp.sh \
   scripts/vps-hosting/fix-postfix-docker-relay.sh \
-  scripts/vps-hosting/docker-compose.auth-smtp.override.yml \
   | ssh "$VPS_HOST" "tar -xzf - -C '${INSTALL_ROOT}'"
 
 ssh "$VPS_HOST" \

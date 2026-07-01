@@ -37,12 +37,33 @@ load_mis_smtp_vars() {
   fi
 }
 
-# GoTrue runs in Docker — host Postfix is not reachable at 127.0.0.1 from the container.
+# GoTrue runs on the Supabase Docker network (usually 172.18.x), not the default bridge.
+detect_docker_host_gateway() {
+  if command -v docker >/dev/null 2>&1; then
+    local gw=""
+    if docker inspect supabase-auth >/dev/null 2>&1; then
+      gw="$(docker inspect supabase-auth --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{println}}{{end}}' 2>/dev/null | head -1 | tr -d '[:space:]')"
+    fi
+    if [[ -z "$gw" ]]; then
+      for net in supabase_default docker_default; do
+        gw="$(docker network inspect "$net" --format '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null | tr -d '[:space:]')"
+        [[ -n "$gw" ]] && break
+      done
+    fi
+    if [[ -n "$gw" ]]; then
+      printf '%s' "$gw"
+      return 0
+    fi
+  fi
+  printf '%s' "172.18.0.1"
+}
+
+# Host Postfix listens on the VPS; GoTrue must use the Docker network gateway IP.
 resolve_gotrue_smtp_host() {
   local host="${1:-127.0.0.1}"
   case "$host" in
-    127.0.0.1 | localhost) echo "172.17.0.1" ;;
-    *) echo "$host" ;;
+    127.0.0.1 | localhost) detect_docker_host_gateway ;;
+    *) printf '%s' "$host" ;;
   esac
 }
 

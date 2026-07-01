@@ -82,7 +82,18 @@ Vercel logs should **no longer** show `exceed_egress_quota`.
 
 ## GoTrue SMTP (forgot password)
 
-**Uses the same SMTP as MIS reports** — reads `/opt/fast-close-app/.env.mis-email` (Postfix on the VPS, or Gmail if configured). No separate mail setup.
+### Why MIS mail works but forgot-password from Vercel did not
+
+| Flow | Where code runs | Who sends email | SMTP target |
+|------|-----------------|-----------------|-------------|
+| MIS digest / `mis-email:test:vps` | **VPS** (cron or SSH test) | Node on VPS → **Postfix `127.0.0.1:25`** | Same machine — works |
+| Forgot password | **Vercel** → calls GoTrue on VPS | **GoTrue Docker container** → host Postfix | Must use Docker gateway IP (`172.18.0.1`, not `127.0.0.1` or `172.17.0.1`) |
+
+Your PC “localhost” MIS test runs `run-mis-email-test-vps.sh`, which **SSHs to the VPS** and sends from there — it is not sending from your laptop.
+
+Forgot password runs on **Vercel serverless**. Vercel cannot reach VPS Postfix directly. GoTrue on the VPS must send the mail, and GoTrue runs **inside Docker** on network `172.18.x`.
+
+**Uses the same Postfix as MIS reports** — reads `/opt/fast-close-app/.env.mis-email`. No separate mail account.
 
 After MIS test mail works (`npm run mis-email:test:vps`), sync GoTrue:
 
