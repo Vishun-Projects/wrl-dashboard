@@ -276,12 +276,16 @@ export async function workbookToBuffer(workbook: ExcelJS.Workbook): Promise<Buff
   return Buffer.from(buffer);
 }
 
+function misExportDateLabel(date: Date): string {
+  return date.toISOString().split('T')[0];
+}
+
 export function summaryDashboardFilename(date = new Date()): string {
-  return `WRL_Summary_Dashboard_${date.toISOString().split('T')[0]}.xlsx`;
+  return `WRL Summary Dashboard — ${misExportDateLabel(date)}.xlsx`;
 }
 
 export function keyAccountMisFilename(date = new Date()): string {
-  return `WRL_Key_Account_MIS_${date.toISOString().split('T')[0]}.xlsx`;
+  return `WRL Key Account MIS — ${misExportDateLabel(date)}.xlsx`;
 }
 
 /** Browser download helper for MIS report tabs. */

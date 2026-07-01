@@ -21,14 +21,16 @@ model CallComment {
 }
 
 model AppUser {
-  id                 String   @id @default(uuid())
-  email              String   @unique
-  name               String
-  role               String   // "branch_manager", "hod"
-  office_ids         String[] @default([]) // Array of ncode values from CRM mstoffice
-  avatar_url         String?
-  theme              String   @default("cream")
-  created_at         DateTime @default(now())
+  id                    String   @id @default(uuid())
+  email                 String   @unique
+  name                  String
+  role                  String   // "branch_manager", "hod"
+  office_ids            String[] @default([]) // Array of ncode values from CRM mstoffice
+  avatar_url            String?
+  theme                 String   @default("cream")
+  mis_email_enabled     Boolean  @default(false)
+  mis_email_preferences Json     @default("{}")
+  created_at            DateTime @default(now())
 
   @@map("app_users")
 }

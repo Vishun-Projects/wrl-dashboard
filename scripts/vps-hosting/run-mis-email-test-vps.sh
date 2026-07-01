@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${ROOT}/.env.vps-setup"
 INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-/opt/fast-close-app}"
-TEST_TO="${MIS_EMAIL_TEST_TO:-vishunvishwakarma90211@gmail.com}"
+TEST_TO="${MIS_EMAIL_TEST_TO:-vishnu.vishwakarma@westernequipments.com}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Missing ${ENV_FILE} — copy from .env.vps-setup.example and set VPS_HOST" >&2

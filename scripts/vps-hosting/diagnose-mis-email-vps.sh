@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${ROOT}/.env.vps-setup"
 MAIL_DOMAIN="${MAIL_DOMAIN:-wrl-fsm.cloud}"
 DKIM_SELECTOR="${DKIM_SELECTOR:-mis}"
-TEST_TO="${MIS_EMAIL_TEST_TO:-vishunvishwakarma90211@gmail.com}"
+TEST_TO="${MIS_EMAIL_TEST_TO:-vishnu.vishwakarma@westernequipments.com}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Missing ${ENV_FILE}" >&2

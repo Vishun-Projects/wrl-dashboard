@@ -80,6 +80,28 @@ In browser (logged in on Vercel): DevTools → Network → `GET /api/auth/me` sh
 
 Vercel logs should **no longer** show `exceed_egress_quota`.
 
+## GoTrue SMTP (forgot password)
+
+Self-service password reset uses Supabase GoTrue on `api.wrl-fsm.cloud`. Configure on the VPS (`scripts/vps-hosting/setup-supabase.sh` / `repair-supabase-env.sh`):
+
+| Variable | Purpose |
+|----------|---------|
+| `SITE_URL` | `https://wrl-dashboard.vercel.app` |
+| `ADDITIONAL_REDIRECT_URLS` | Include `https://wrl-dashboard.vercel.app/**` and `http://localhost:3000/**` |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | Outbound mail relay (Hostinger or corporate SMTP) |
+| `SMTP_ADMIN_EMAIL` | From address for recovery emails |
+| `SMTP_SENDER_NAME` | e.g. `WRL Dashboard` |
+
+On Vercel, set `NEXT_PUBLIC_SITE_URL` or `SITE_URL` to the production dashboard URL so reset links point to `/reset-password`.
+
+**Local dev:** forgot-password requires GoTrue over HTTPS (same as profile password change). `db-sign-in` bypass does not send recovery emails — use staging/production to test.
+
+Apply DB migration for MIS email preferences before cron:
+
+```bash
+psql "$DATABASE_URL" -f docs/app-users-mis-email.sql
+```
+
 ## Sync on Vercel
 
 Sync **reads** Western CRM (`westerncrm.com`) and **writes** to whatever `DATABASE_URL` is on Vercel → your VPS after cutover. It does not use Supabase cloud.

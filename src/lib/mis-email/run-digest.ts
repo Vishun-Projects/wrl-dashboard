@@ -1,12 +1,19 @@
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
 import { buildDigestAttachments } from '@/lib/mis-email/build-attachments';
 import {
+  fetchDigestRegisterRows,
   fetchDigestSummaryData,
-  resolveDigestDateRange,
   type DigestDateRange,
 } from '@/lib/mis-email/fetch-digest-data';
 import {
+  hasAnyEffectiveDigestInclude,
+  resolveDigestDateRangeForPreferences,
+  resolveEffectiveDigestIncludes,
+} from '@/lib/mis-email/preferences';
+import {
+  loadAppUserProfileByEmail,
   loadDigestRecipientById,
+  loadDigestRecipientByEmail,
   loadDigestRecipients,
   type DigestRecipient,
 } from '@/lib/mis-email/recipients';
@@ -20,10 +27,10 @@ export type DigestSendResult = {
   attachments: string[];
   scopeLabel: string;
   messageId: string;
+  dateRange: DigestDateRange;
 };
 
 export type DigestRunResult = {
-  dateRange: DigestDateRange;
   sent: DigestSendResult[];
   skipped: Array<{ recipientId: string; reason: string }>;
   failed: Array<{ recipientId: string; email: string; error: string }>;
@@ -37,46 +44,106 @@ async function delay(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function resolveSendContext(
+  fallbackRecipient: DigestRecipient,
+  sentTo: string
+): Promise<{ effectiveRecipient: DigestRecipient; displayName: string }> {
+  const digestUser = await loadDigestRecipientByEmail(sentTo);
+  if (digestUser) {
+    return { effectiveRecipient: digestUser, displayName: digestUser.name };
+  }
+
+  const profile = await loadAppUserProfileByEmail(sentTo);
+  if (profile?.name.trim()) {
+    return { effectiveRecipient: fallbackRecipient, displayName: profile.name };
+  }
+
+  return { effectiveRecipient: fallbackRecipient, displayName: fallbackRecipient.name };
+}
+
 async function sendForRecipient(
   recipient: DigestRecipient,
   options: { testTo?: string; dateRange?: DigestDateRange }
 ): Promise<DigestSendResult> {
-  const dateRange = options.dateRange ?? resolveDigestDateRange();
-  const scope = await resolveUserDigestScopeWithLabel(recipient);
+  const sentTo = options.testTo?.trim() || recipient.email;
+  const { effectiveRecipient, displayName } = await resolveSendContext(recipient, sentTo);
+  const dateRange =
+    options.dateRange ??
+    resolveDigestDateRangeForPreferences(effectiveRecipient.mis_email_preferences);
+  const effectiveIncludes = resolveEffectiveDigestIncludes(
+    effectiveRecipient,
+    effectiveRecipient.mis_email_preferences
+  );
+
+  if (!hasAnyEffectiveDigestInclude(effectiveIncludes)) {
+    throw new Error('No report types selected for MIS email');
+  }
+
+  const scope = await resolveUserDigestScopeWithLabel(effectiveRecipient);
   const data = await fetchDigestSummaryData(scope, dateRange);
-  const attachments = await buildDigestAttachments(recipient, data);
+  const registerRows = effectiveIncludes.includeDetailed
+    ? await fetchDigestRegisterRows(effectiveRecipient, scope, dateRange)
+    : undefined;
+  const attachments = await buildDigestAttachments(effectiveRecipient, data, {
+    registerRows,
+    effectiveIncludes,
+  });
 
   if (attachments.length === 0) {
     throw new Error('No attachments generated for recipient permissions');
   }
 
-  const sentTo = options.testTo?.trim() || recipient.email;
   const { messageId } = await sendDigestEmail({
     to: sentTo,
-    recipientName: recipient.name,
+    recipientName: displayName,
+    recipientEmail: sentTo,
     dateRange,
     scopeLabel: scope.scopeLabel,
     attachments,
   });
 
   return {
-    recipientId: recipient.id,
-    recipientEmail: recipient.email,
+    recipientId: effectiveRecipient.id,
+    recipientEmail: effectiveRecipient.email,
     sentTo,
     attachments: attachments.map((a) => a.filename),
     scopeLabel: scope.scopeLabel,
     messageId,
+    dateRange,
   };
+}
+
+/** Parse comma/semicolon-separated test recipients; bare usernames get @gmail.com. */
+export function parseTestRecipientList(override?: string): string[] {
+  const raw =
+    override?.trim() ||
+    process.env.MIS_EMAIL_TEST_TO?.trim() ||
+    'vishnu.vishwakarma@westernequipments.com';
+
+  return raw
+    .split(/[,;]/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => (part.includes('@') ? part : `${part}@gmail.com`));
 }
 
 export async function runMisEmailTest(options: {
   userId?: string;
   recipientOverride?: string;
 }): Promise<DigestSendResult> {
-  const testTo =
-    options.recipientOverride?.trim() ||
-    process.env.MIS_EMAIL_TEST_TO?.trim() ||
-    'vishunvishwakarma90211@gmail.com';
+  const [testTo] = parseTestRecipientList(options.recipientOverride);
+  const results = await runMisEmailTestBatch({ ...options, recipients: [testTo] });
+  return results[0];
+}
+
+export async function runMisEmailTestBatch(options: {
+  userId?: string;
+  recipients?: string[];
+  recipientOverride?: string;
+}): Promise<DigestSendResult[]> {
+  const testRecipients = options.recipients?.length
+    ? options.recipients
+    : parseTestRecipientList(options.recipientOverride);
 
   let recipient: DigestRecipient | null = null;
 
@@ -94,28 +161,39 @@ export async function runMisEmailTest(options: {
         email: auth.profile.email,
         role: auth.profile.role,
         office_ids: auth.profile.office_ids ?? [],
+        visible_statuses: auth.profile.visible_statuses ?? [],
         permissions,
         includeSummary: permissions.includes('tab_mis_summary'),
+        includeDetailed: permissions.includes('tab_mis_register'),
         includeKeyAccount: permissions.includes('tab_mis_accounts'),
+        mis_email_enabled: true,
+        mis_email_preferences: {},
       };
-      if (!recipient.includeSummary && !recipient.includeKeyAccount) {
-        throw new Error('Selected user has no MIS summary or key account tab permissions');
+      if (!recipient.includeSummary && !recipient.includeDetailed && !recipient.includeKeyAccount) {
+        throw new Error('Selected user has no MIS summary, register, or key account tab permissions');
       }
     }
   } else {
-    const recipients = await loadDigestRecipients();
-    recipient = recipients[0] ?? null;
+    const all = await loadDigestRecipients();
+    recipient = all[0] ?? (await loadDigestRecipientByEmail(testRecipients[0]));
     if (!recipient) {
       throw new Error('No eligible MIS digest recipients found in app_users');
     }
   }
 
-  return sendForRecipient(recipient, { testTo });
+  const results: DigestSendResult[] = [];
+  for (let i = 0; i < testRecipients.length; i++) {
+    const testTo = testRecipients[i];
+    results.push(await sendForRecipient(recipient, { testTo }));
+    if (i < testRecipients.length - 1) {
+      await delay(SEND_DELAY_MS);
+    }
+  }
+  return results;
 }
 
 export async function runMisEmailDigest(): Promise<DigestRunResult> {
   const started = Date.now();
-  const dateRange = resolveDigestDateRange();
   const recipients = await loadDigestRecipients();
   const sent: DigestSendResult[] = [];
   const skipped: Array<{ recipientId: string; reason: string }> = [];
@@ -124,10 +202,10 @@ export async function runMisEmailDigest(): Promise<DigestRunResult> {
   for (let i = 0; i < recipients.length; i++) {
     const recipient = recipients[i];
     try {
-      const result = await sendForRecipient(recipient, { dateRange });
+      const result = await sendForRecipient(recipient, {});
       sent.push(result);
       console.log(
-        `[mis-email] Sent to ${recipient.email} (${result.attachments.length} attachments)`
+        `[mis-email] Sent to ${recipient.email} (${result.attachments.length} attachments, ${result.dateRange.label})`
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -145,7 +223,6 @@ export async function runMisEmailDigest(): Promise<DigestRunResult> {
   }
 
   return {
-    dateRange,
     sent,
     skipped,
     failed,

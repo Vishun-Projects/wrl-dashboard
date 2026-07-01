@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import type { EmailAttachment } from '@/lib/mis-email/build-attachments';
+import { buildDigestEmailHtml, buildDigestEmailPlainText } from '@/lib/mis-email/email-template';
 import type { DigestDateRange } from '@/lib/mis-email/fetch-digest-data';
 
 export type SmtpConfig = {
@@ -86,54 +87,18 @@ export function resolvePortalUrl(): string {
   if (explicit) return explicit.replace(/\/$/, '');
   const vercel = process.env.VERCEL_URL?.trim();
   if (vercel) return `https://${vercel}`;
-  return 'https://wrl-fsm.cloud';
+  return 'https://wrl-dashboard.vercel.app';
 }
 
 function formatEmailDate(date = new Date()): string {
-  return date.toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
-export function buildDigestEmailHtml(params: {
-  recipientName: string;
-  dateRange: DigestDateRange;
-  scopeLabel: string;
-  attachmentNames: string[];
-  portalUrl: string;
-}): string {
-  const attachmentList = params.attachmentNames
-    .map((name) => `<li>${escapeHtml(name)}</li>`)
-    .join('');
-
-  return `<!DOCTYPE html>
-<html>
-<body style="font-family: Arial, sans-serif; color: #1e293b; line-height: 1.5;">
-  <p>Hello ${escapeHtml(params.recipientName)},</p>
-  <p>Your daily MIS reports for <strong>${escapeHtml(params.dateRange.label)}</strong> (${escapeHtml(params.dateRange.startDate)} to ${escapeHtml(params.dateRange.endDate)}) are attached.</p>
-  <p><strong>Branch scope:</strong> ${escapeHtml(params.scopeLabel)}</p>
-  <p><strong>Attachments:</strong></p>
-  <ul>${attachmentList}</ul>
-  <p>View live reports in the portal: <a href="${escapeHtml(params.portalUrl)}/report">${escapeHtml(params.portalUrl)}/report</a></p>
-  <p style="color: #64748b; font-size: 12px;">Western Refrigeration — automated MIS digest</p>
-</body>
-</html>`;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return date.toISOString().split('T')[0];
 }
 
 /** Send digest with Excel attachments via configured SMTP (Gmail, or local VPS Postfix). */
 export async function sendDigestEmail(params: {
   to: string;
   recipientName: string;
+  recipientEmail?: string;
   dateRange: DigestDateRange;
   scopeLabel: string;
   attachments: EmailAttachment[];
@@ -151,24 +116,27 @@ export async function sendDigestEmail(params: {
   const transport = createMailTransport(smtp);
 
   const subjectDate = formatEmailDate(params.subjectDate);
-  const attachmentNames = params.attachments.map((a) => a.filename);
   const portalUrl = resolvePortalUrl();
+
+  const emailBody = {
+    recipientName: params.recipientName,
+    recipientEmail: params.recipientEmail ?? params.to,
+    dateRange: params.dateRange,
+    scopeLabel: params.scopeLabel,
+    portalUrl,
+  };
 
   const info = await transport.sendMail({
     from: smtp.from,
     to: params.to,
     subject: `WRL MIS Reports — ${subjectDate}`,
-    html: buildDigestEmailHtml({
-      recipientName: params.recipientName,
-      dateRange: params.dateRange,
-      scopeLabel: params.scopeLabel,
-      attachmentNames,
-      portalUrl,
-    }),
+    text: buildDigestEmailPlainText(emailBody),
+    html: buildDigestEmailHtml(emailBody),
     attachments: params.attachments.map((a) => ({
       filename: a.filename,
       content: a.content,
       contentType: a.contentType,
+      contentDisposition: 'attachment' as const,
     })),
   });
 

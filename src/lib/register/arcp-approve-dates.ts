@@ -3,7 +3,6 @@ import {
   resolveArcpBmApprovedAt,
   resolveArcpHoApprovedAt,
 } from '@/lib/read-model/arcp/dates';
-import { resolveTrhcallsBmApprovedAt } from '@/lib/trhcalls/bm-approval';
 
 /** CRM: latest ARCP line per call for BM/HO approve resolution. */
 export const REGISTER_ARCP_PICK_OUTER_APPLY = `
@@ -45,10 +44,29 @@ export const REGISTER_ARCP_PICK_FIELDS_SQL = `
   arcp_pick.napproval1amount,
   arcp_pick.napproval2amount`;
 
+/** Postgres: latest non-rejected ARCP line per call (mirrors REGISTER_ARCP_PICK_OUTER_APPLY). */
+export const REGISTER_ARCP_PICK_LATERAL_SQL = `
+LEFT JOIN LATERAL (
+  SELECT a.bm_approved_at, a.ho_approved_at
+  FROM arcp_lines_hot a
+  WHERE a.call_no = CAST(h.ncode AS TEXT)
+    AND NOT a.is_rejected
+  ORDER BY
+    CASE WHEN a.ho_approved_at IS NOT NULL THEN 1 ELSE 0 END DESC,
+    a.ho_approved_at DESC NULLS LAST,
+    a.bm_approved_at DESC NULLS LAST,
+    a.ncode DESC
+  LIMIT 1
+) arcp_pick ON true`;
+
+export const REGISTER_ARCP_PICK_HOT_FIELDS_SQL = `
+  arcp_pick.bm_approved_at,
+  arcp_pick.ho_approved_at`;
+
 export function enrichRegisterRowArcpApproveDates(
   row: Record<string, unknown>
 ): Record<string, unknown> {
-  const bm = resolveTrhcallsBmApprovedAt(row) ?? resolveArcpBmApprovedAt(row);
+  const bm = resolveArcpBmApprovedAt(row);
   const ho = resolveArcpHoApprovedAt(row);
   return {
     ...row,

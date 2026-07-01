@@ -4,7 +4,7 @@ set -euo pipefail
 
 root="${INSTALL_ROOT:-/opt/fast-close-app}"
 MAIL_DOMAIN="${MAIL_DOMAIN:-wrl-fsm.cloud}"
-TEST_TO="${MIS_EMAIL_TEST_TO:-vishunvishwakarma90211@gmail.com}"
+TEST_TO="${MIS_EMAIL_TEST_TO:-vishnu.vishwakarma@westernequipments.com}"
 
 cd "${root}"
 
@@ -127,9 +127,10 @@ cat > "${root}/.env.mis-email" <<EOF
 $(write_smtp_block)
 
 MIS_EMAIL_TEST_TO=${TEST_TO}
-MIS_EMAIL_PORTAL_URL=https://${MAIL_DOMAIN}
+MIS_EMAIL_PORTAL_URL=https://wrl-dashboard.vercel.app
 
 READ_SUMMARY_FROM=postgres
+READ_REGISTER_FROM=postgres
 READ_CALLS_FROM=postgres
 USE_DIRECT_DATABASE=false
 PG_SSL=false

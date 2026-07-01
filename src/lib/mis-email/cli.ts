@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import '@/lib/mis-email/bootstrap-env';
 import { closePool } from '@/lib/read-model/db';
-import { runMisEmailDigest, runMisEmailTest } from '@/lib/mis-email/run-digest';
+import { runMisEmailDigest, runMisEmailTest, runMisEmailTestBatch } from '@/lib/mis-email/run-digest';
 
 async function main(): Promise<void> {
   const command = process.argv[2] ?? 'help';
@@ -23,13 +23,16 @@ async function main(): Promise<void> {
         break;
       }
       case 'test': {
-        const result = await runMisEmailTest({ userId: userIdArg });
-        console.log('[mis-email] Test email sent:', {
-          sentTo: result.sentTo,
-          scope: result.scopeLabel,
-          attachments: result.attachments,
-          messageId: result.messageId,
-        });
+        const toArg = process.argv.find((a) => a.startsWith('--to='))?.slice('--to='.length);
+        const results = await runMisEmailTestBatch({ userId: userIdArg, recipientOverride: toArg });
+        for (const result of results) {
+          console.log('[mis-email] Test email sent:', {
+            sentTo: result.sentTo,
+            scope: result.scopeLabel,
+            attachments: result.attachments,
+            messageId: result.messageId,
+          });
+        }
         break;
       }
       default:
@@ -40,7 +43,7 @@ async function main(): Promise<void> {
 Environment:
   SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_FROM
   SMTP_USER + SMTP_PASS (Gmail etc.) OR SMTP_HOST=127.0.0.1 (VPS Postfix, no auth)
-  MIS_EMAIL_TEST_TO (default test recipient)
+  MIS_EMAIL_TEST_TO (comma-separated; bare name → @gmail.com)
   DATABASE_URL, READ_SUMMARY_FROM=postgres`);
         process.exitCode = command === 'help' ? 0 : 1;
     }

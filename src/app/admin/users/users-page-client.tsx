@@ -12,7 +12,8 @@ import {
   Check, 
   X,
   Search,
-  Key
+  Key,
+  Mail
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { feedback } from '@/lib/ui/feedback';
@@ -37,6 +38,15 @@ import {
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 import { ModalPortal } from '@/components/ui/ModalPortal';
+
+function roleHasMisPermissions(permissions: string[] | undefined): boolean {
+  const perms = permissions ?? [];
+  return (
+    perms.includes('tab_mis_summary') ||
+    perms.includes('tab_mis_register') ||
+    perms.includes('tab_mis_accounts')
+  );
+}
 
 export default function AdminUsersPage() {
   const { userProfile } = useUser();
@@ -107,6 +117,7 @@ export default function AdminUsersPage() {
       role_id: first?.id ?? '',
       office_ids: [] as string[],
       visible_statuses: [] as string[],
+      mis_email_enabled: false,
     };
   };
 
@@ -288,8 +299,12 @@ export default function AdminUsersPage() {
     const rolePerms = roleObj?.permissions ?? [];
     const isNational = seesAllOfficesForUser(rolePerms, u.role ?? '', u.office_ids ?? []);
     const roleName = roleObj?.name || (u.role === 'hod' ? 'HOD' : 'Branch Manager');
-    return { isHod: isNational, roleName };
+    const canMisEmail = roleHasMisPermissions(rolePerms);
+    return { isHod: isNational, roleName, canMisEmail };
   };
+
+  const selectedRole = roles.find((r) => r.id === formData.role_id);
+  const formRoleCanMisEmail = roleHasMisPermissions(selectedRole?.permissions);
 
   const branchLabelsForUser = (u: any) => {
     const ids = u.office_ids ?? [];
@@ -317,6 +332,7 @@ export default function AdminUsersPage() {
         role_id: user.role_id,
         office_ids: user.office_ids || [],
         visible_statuses: user.visible_statuses || [],
+        mis_email_enabled: Boolean(user.mis_email_enabled),
       });
       setActiveTab('profile');
       setShowOnlySelectedBranches(false);
@@ -361,7 +377,7 @@ export default function AdminUsersPage() {
       <div className="flex min-h-0 flex-1 flex-col p-4">
         <AdminTableCard isEmpty={!loading && filteredUsers.length === 0}>
           {loading ? (
-            <TableSkeleton columns={5} rows={8} />
+            <TableSkeleton columns={6} rows={8} />
           ) : (
           <AdminTable>
             <AdminThead>
@@ -370,12 +386,13 @@ export default function AdminUsersPage() {
                 <AdminTh className="w-[14%]">Role</AdminTh>
                 <AdminTh className="w-[22%]">Visible statuses</AdminTh>
                 <AdminTh className="w-[22%]">Branches</AdminTh>
+                <AdminTh className="w-[10%]">MIS email</AdminTh>
                 <AdminTh align="right" className="w-[14%]">Actions</AdminTh>
               </tr>
             </AdminThead>
             <tbody>
               {filteredUsers.map((u) => {
-                const { isHod, roleName } = getRoleInfo(u);
+                const { isHod, roleName, canMisEmail } = getRoleInfo(u);
                 const branchLabels = branchLabelsForUser(u);
 
                 return (
@@ -421,6 +438,19 @@ export default function AdminUsersPage() {
                           maxVisible={1}
                           emptyLabel="No branches"
                         />
+                      )}
+                    </AdminTd>
+                    <AdminTd>
+                      {u.mis_email_enabled ? (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                          <Mail size={11} /> On
+                        </span>
+                      ) : canMisEmail ? (
+                        <span className="text-[11px] text-slate-400">Off</span>
+                      ) : (
+                        <span className="text-[11px] text-slate-300" title="Assign MIS report permissions first">
+                          —
+                        </span>
                       )}
                     </AdminTd>
                     <AdminTd align="right">
@@ -630,7 +660,15 @@ export default function AdminUsersPage() {
                             <button
                               key={role.id}
                               type="button"
-                              onClick={() => setFormData({...formData, role: role.name.toLowerCase().replace(' ', '_'), role_id: role.id})}
+                              onClick={() => {
+                                const canEmail = roleHasMisPermissions(role.permissions);
+                                setFormData({
+                                  ...formData,
+                                  role: role.name.toLowerCase().replace(' ', '_'),
+                                  role_id: role.id,
+                                  mis_email_enabled: canEmail ? formData.mis_email_enabled : false,
+                                });
+                              }}
                               className={`p-2.5 text-left border rounded-lg transition-all ${ formData.role_id === role.id ? 'border-indigo-600 bg-indigo-50/50' : 'border-slate-200 hover:border-slate-300' }`}
                             >
                               <div className={`text-[12px] font-medium ${formData.role_id === role.id ? 'text-indigo-600' : 'text-slate-700'}`}>
@@ -644,6 +682,59 @@ export default function AdminUsersPage() {
                           <p className="text-[11px] text-rose-600">{formErrors.role_id}</p>
                         )}
                       </div>
+
+                      {editingUser ? (
+                        <div className="space-y-2 rounded-lg border border-slate-200 bg-bg-soft/50 p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-[12px] font-medium text-slate-800 flex items-center gap-1.5">
+                                <Mail size={14} className="text-slate-400" />
+                                MIS email reports
+                              </p>
+                              <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">
+                                Allow this user to receive scheduled MIS digests. They can fine-tune
+                                schedule and report types in Profile.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={!formRoleCanMisEmail}
+                              title={
+                                formRoleCanMisEmail
+                                  ? undefined
+                                  : 'Assign a role with MIS report access first'
+                              }
+                              onClick={() => {
+                                if (!formRoleCanMisEmail) return;
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  mis_email_enabled: !prev.mis_email_enabled,
+                                }));
+                              }}
+                              className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+                                !formRoleCanMisEmail
+                                  ? 'cursor-not-allowed bg-slate-200'
+                                  : formData.mis_email_enabled
+                                    ? 'bg-emerald-500'
+                                    : 'bg-slate-300'
+                              }`}
+                            >
+                              <span
+                                className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                                  formData.mis_email_enabled && formRoleCanMisEmail
+                                    ? 'translate-x-5'
+                                    : ''
+                                }`}
+                              />
+                            </button>
+                          </div>
+                          {!formRoleCanMisEmail ? (
+                            <p className="text-[10px] text-amber-700">
+                              Select a role with Summary, Register, or Key Account access to enable email.
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ) : (

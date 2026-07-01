@@ -226,7 +226,7 @@ export default function ReadModelSyncPage() {
               <p className="mt-1 text-sm text-slate-600">
                 Sends Summary Dashboard and Key Account MIS Excel files using your account scope.
                 Test emails go to{' '}
-                <strong>{misEmailTestTo ?? 'vish***@gmail.com'}</strong> (not user inboxes).
+                <strong>{misEmailTestTo ?? 'vish***@westernequipments.com'}</strong> (not user inboxes).
               </p>
               {!misEmailSmtpReady ? (
                 <p className="mt-2 text-xs text-amber-700">

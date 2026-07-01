@@ -9,7 +9,10 @@ import {
   buildWhere,
   type RegisterPostgresParams,
 } from '@/lib/read-model/queries/register';
-import { REGISTER_EXPORT_HOT_COLUMNS } from '@/lib/read-model/queries/register-columns';
+import {
+  REGISTER_EXPORT_ARCP_JOIN_SQL,
+  REGISTER_EXPORT_HOT_COLUMNS,
+} from '@/lib/read-model/queries/register-columns';
 import { csvEscape } from '@/lib/register/server/csv-export';
 import { REGISTER_EXPORT_COLUMNS } from '@/lib/register/table-columns';
 import { HOT_OFFICE_JOINS_SQL } from '@/lib/read-model/queries/register-columns';
@@ -40,9 +43,14 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
       : String(row.status_label || 'OPEN');
 
   const bmAt = row.bm_approved_at;
+  const hoAt = row.ho_approved_at;
   const bmDate =
     bmAt instanceof Date || (bmAt != null && bmAt !== '')
       ? formatRegisterExportDate(bmAt as Date | string)
+      : '';
+  const hoDate =
+    hoAt instanceof Date || (hoAt != null && hoAt !== '')
+      ? formatRegisterExportDate(hoAt as Date | string)
       : '';
 
   const cells: unknown[] = [
@@ -63,7 +71,7 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
     statusText,
     isSolved ? formatRegisterExportDate(row.solved_at) : '',
     bmDate,
-    '',
+    hoDate,
     row.solve_remarks || '',
     row.contact_person,
     row.phone,
@@ -116,6 +124,7 @@ export async function buildPostgresRegisterCsvStream(
                     SELECT ${REGISTER_EXPORT_HOT_COLUMNS}
                     FROM calls_latest_hot h
                     ${HOT_OFFICE_JOINS_SQL}
+                    ${REGISTER_EXPORT_ARCP_JOIN_SQL}
                     WHERE ${whereSql}
                     ORDER BY h.ncode DESC`,
                   values,

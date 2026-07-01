@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 
-const USER_COLUMNS = `id, name, email, role, role_id, office_ids, visible_statuses, avatar_url, created_at`;
+const USER_COLUMNS = `id, name, email, role, role_id, office_ids, visible_statuses, avatar_url, mis_email_enabled, mis_email_preferences, created_at`;
 const BOOTSTRAP_CACHE_TTL_MS = 15_000;
 const bootstrapCache = new Map<
   string,
@@ -47,7 +47,13 @@ export async function GET(request: Request) {
         offset
       ),
       prisma.$queryRawUnsafe(
-        `SELECT id, name FROM public.app_roles ORDER BY name ASC`
+        `SELECT r.id, r.name, r.description,
+                COALESCE(json_agg(p.name) FILTER (WHERE p.name IS NOT NULL), '[]') AS permissions
+         FROM public.app_roles r
+         LEFT JOIN public.app_role_permissions rp ON r.id = rp.role_id
+         LEFT JOIN public.app_permissions p ON p.id = rp.permission_id
+         GROUP BY r.id, r.name, r.description
+         ORDER BY r.name ASC`
       ),
     ]);
 

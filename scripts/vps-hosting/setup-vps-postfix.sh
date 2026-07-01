@@ -33,10 +33,12 @@ run_postfix_setup() {
 
   postconf -e "milter_protocol = 6"
   postconf -e "milter_default_action = accept"
-  postconf -e "smtpd_milters = local:/var/spool/postfix/opendkim/opendkim.sock"
-  postconf -e "non_smtpd_milters = local:/var/spool/postfix/opendkim/opendkim.sock"
+  # Path is relative to Postfix chroot (/var/spool/postfix)
+  postconf -e "smtpd_milters = local:opendkim/opendkim.sock"
+  postconf -e "non_smtpd_milters = local:opendkim/opendkim.sock"
 
   systemctl enable postfix opendkim
+  setup_opendkim_systemd_override
   systemctl restart opendkim
   systemctl restart postfix
 
@@ -101,6 +103,16 @@ InternalHosts           refile:${trusted_hosts}
 EOF
 }
 
+setup_opendkim_systemd_override() {
+  mkdir -p /etc/systemd/system/opendkim.service.d
+  cat > /etc/systemd/system/opendkim.service.d/override.conf <<'EOF'
+[Service]
+User=opendkim
+Group=postfix
+EOF
+  systemctl daemon-reload
+}
+
 print_dns_records() {
   local vps_ip dkim_value
   vps_ip="$(curl -s -4 --max-time 8 ifconfig.me 2>/dev/null || echo '187.127.145.253')"
@@ -117,8 +129,8 @@ print_dns_records() {
   echo "2) DKIM (TXT)"
   echo "   Name:  ${DKIM_SELECTOR}._domainkey"
   if [[ -f "/etc/opendkim/keys/${MAIL_DOMAIN}/${DKIM_SELECTOR}.txt" ]]; then
-    dkim_value="$(awk -F'"' '/p=/ { for (i=2; i<NF; i++) printf "%s", $i; print "" }' "/etc/opendkim/keys/${MAIL_DOMAIN}/${DKIM_SELECTOR}.txt" | tr -d '\n\t ')"
-    echo "   Value: ${dkim_value}"
+    dkim_value="$(awk -F'"' '{ for (i=2; i<NF; i++) printf "%s", $i }' "/etc/opendkim/keys/${MAIL_DOMAIN}/${DKIM_SELECTOR}.txt" | tr -d '\n\t ')"
+    echo "   Value: v=DKIM1; h=sha256; k=rsa; ${dkim_value}"
   else
     echo "   Value: (run: cat /etc/opendkim/keys/${MAIL_DOMAIN}/${DKIM_SELECTOR}.txt)"
   fi
@@ -143,8 +155,8 @@ SMTP_PORT=25
 SMTP_SECURE=false
 SMTP_FROM="WRL MIS Reports <${MAIL_FROM_LOCAL}@${MAIL_DOMAIN}>"
 
-MIS_EMAIL_TEST_TO=vishunvishwakarma90211@gmail.com
-MIS_EMAIL_PORTAL_URL=https://${MAIL_DOMAIN}
+MIS_EMAIL_TEST_TO=vishnu.vishwakarma@westernequipments.com
+MIS_EMAIL_PORTAL_URL=https://wrl-dashboard.vercel.app
 
 READ_SUMMARY_FROM=postgres
 READ_CALLS_FROM=postgres

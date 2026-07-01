@@ -51,7 +51,7 @@ export async function POST(request: Request) {
 }
 
 export async function GET() {
-  const testTo = process.env.MIS_EMAIL_TEST_TO?.trim() || 'vishunvishwakarma90211@gmail.com';
+  const testTo = process.env.MIS_EMAIL_TEST_TO?.trim() || 'vishnu.vishwakarma@westernequipments.com';
   const masked = testTo.replace(/(.{2}).*(@.*)/, '$1***$2');
   return NextResponse.json({
     testRecipient: masked,

@@ -11,8 +11,13 @@ import { isDbSignInAvailable } from '@/lib/auth/db-sign-in';
 import { isDevAuthBypass } from '@/lib/auth/verify-jwt';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
+import { expandPermissionList } from '@/lib/auth/rbac-catalog';
+import {
+  defaultPreferencesForRecipient,
+  userHasMisReportPermissions,
+} from '@/lib/mis-email/preferences';
 
-const USER_COLUMNS = `id, name, email, role, role_id, office_ids, visible_statuses, avatar_url, created_at`;
+const USER_COLUMNS = `id, name, email, role, role_id, office_ids, visible_statuses, avatar_url, mis_email_enabled, mis_email_preferences, created_at`;
 
 function normalizeUuid(value: unknown): string | null {
   if (value == null) return null;
@@ -65,6 +70,26 @@ async function insertAppUser(params: {
     params.officeIds,
     params.visibleStatuses
   );
+}
+
+async function loadRoleMisIncludes(roleId: string): Promise<{
+  includeSummary: boolean;
+  includeDetailed: boolean;
+  includeKeyAccount: boolean;
+} | null> {
+  const rows = (await prisma.$queryRawUnsafe(
+    `SELECT COALESCE(array_agg(DISTINCT ap.name) FILTER (WHERE ap.name IS NOT NULL), '{}') AS permission_names
+     FROM public.app_role_permissions arp
+     JOIN public.app_permissions ap ON ap.id = arp.permission_id
+     WHERE arp.role_id = $1`,
+    roleId
+  )) as { permission_names: string[] }[];
+  const permissions = expandPermissionList(rows[0]?.permission_names ?? []);
+  return {
+    includeSummary: permissions.includes('tab_mis_summary'),
+    includeDetailed: permissions.includes('tab_mis_register'),
+    includeKeyAccount: permissions.includes('tab_mis_accounts'),
+  };
 }
 
 export async function GET(request: Request) {
@@ -217,22 +242,57 @@ export async function PUT(request: Request) {
 
   try {
     const body = await request.json();
-    const { id, name, role, role_id, office_ids, visible_statuses } = body;
+    const { id, name, role, role_id, office_ids, visible_statuses, mis_email_enabled } = body;
     const roleId = normalizeUuid(role_id);
 
     if (!roleId) {
       return NextResponse.json({ error: 'Please select a system role.' }, { status: 400 });
     }
 
-    await prisma.$queryRawUnsafe(
-      'UPDATE public.app_users SET name = $1, role = $2, role_id = $3, office_ids = $4, visible_statuses = $5 WHERE id = $6',
-      name,
-      role,
-      roleId,
-      office_ids,
-      visible_statuses || [],
-      id
-    );
+    const misIncludes = await loadRoleMisIncludes(roleId);
+    const wantsEmail = Boolean(mis_email_enabled);
+
+    if (wantsEmail && (!misIncludes || !userHasMisReportPermissions(misIncludes))) {
+      return NextResponse.json(
+        { error: 'Assign a role with MIS report access before enabling email digests.' },
+        { status: 400 }
+      );
+    }
+
+    if (wantsEmail) {
+      const defaultPrefs = JSON.stringify(defaultPreferencesForRecipient(misIncludes!));
+      await prisma.$queryRawUnsafe(
+        `UPDATE public.app_users
+         SET name = $1, role = $2, role_id = $3, office_ids = $4, visible_statuses = $5,
+             mis_email_enabled = true,
+             mis_email_preferences = CASE
+               WHEN mis_email_preferences = '{}'::jsonb OR mis_email_preferences IS NULL
+               THEN $6::jsonb
+               ELSE mis_email_preferences
+             END
+         WHERE id = $7`,
+        name,
+        role,
+        roleId,
+        office_ids,
+        visible_statuses || [],
+        defaultPrefs,
+        id
+      );
+    } else {
+      await prisma.$queryRawUnsafe(
+        `UPDATE public.app_users
+         SET name = $1, role = $2, role_id = $3, office_ids = $4, visible_statuses = $5,
+             mis_email_enabled = false
+         WHERE id = $6`,
+        name,
+        role,
+        roleId,
+        office_ids,
+        visible_statuses || [],
+        id
+      );
+    }
 
     return NextResponse.json({ success: true });
   } catch (err: any) {

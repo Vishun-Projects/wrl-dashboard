@@ -118,7 +118,11 @@ type RegisterExcelExportOptions = {
   onProgress?: (processed: number, total: number) => void;
 };
 
-async function buildRegisterExcelWorkbook(
+export function detailedMisRegisterFilename(date = new Date()): string {
+  return `WRL Detailed MIS Register — ${date.toISOString().split('T')[0]}.xlsx`;
+}
+
+export async function buildRegisterExcelWorkbook(
   rawRows: Record<string, unknown>[],
   opts?: Pick<RegisterExcelExportOptions, 'sheetName' | 'onProgress'>
 ): Promise<ExcelJS.Workbook> {
@@ -179,6 +183,11 @@ async function buildRegisterExcelWorkbook(
   return workbook;
 }
 
+export async function registerWorkbookToBuffer(workbook: ExcelJS.Workbook): Promise<Buffer> {
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer);
+}
+
 export async function downloadRegisterExcelFromRows(
   rawRows: Record<string, unknown>[],
   opts?: RegisterExcelExportOptions
@@ -190,8 +199,7 @@ export async function downloadRegisterExcelFromRows(
 
   const workbook = await buildRegisterExcelWorkbook(rows, opts);
   const buffer = await workbook.xlsx.writeBuffer();
-  const filename =
-    opts?.filename ?? `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.xlsx`;
+  const filename = opts?.filename ?? detailedMisRegisterFilename();
 
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

@@ -5,8 +5,11 @@ import { resolveUserIdFromSupabaseCookies } from '@/lib/auth/supabase-cookie';
 import { requireSupabaseUser } from '@/lib/auth/server-user';
 
 function routeGuards(request: NextRequest, hasUser: boolean): NextResponse | null {
-  const isLoginPage = request.nextUrl.pathname.startsWith('/login');
-  const isPublicRoute = isLoginPage || request.nextUrl.pathname === '/';
+  const pathname = request.nextUrl.pathname;
+  const isLoginPage = pathname.startsWith('/login');
+  const isAuthRecoveryPage =
+    pathname.startsWith('/forgot-password') || pathname.startsWith('/reset-password');
+  const isPublicRoute = isLoginPage || isAuthRecoveryPage || pathname === '/';
   const isApiRoute = request.nextUrl.pathname.startsWith('/api');
 
   if (!hasUser && !isPublicRoute && !isApiRoute) {
