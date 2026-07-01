@@ -1,6 +1,11 @@
 import { prisma } from '@/lib/db/prisma';
 import type { SummaryDashboard } from '@/lib/report/summary-derive';
 import { normalizeCallTypeDisplay } from '@/lib/report/filters';
+import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
+import {
+  HOT_OFFICE_JOINS_SQL,
+  HOT_RESOLVED_REGION_SQL,
+} from '@/lib/read-model/queries/hot-region';
 
 const BREAKDOWN = 'BREAKDOWN';
 
@@ -129,7 +134,7 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
       h.nofficeid AS office_id,
       d.nunder AS parent_id,
       COALESCE(d.vcompanyname, h.branch_name, 'UNKNOWN') AS branch,
-      h.region,
+      ${HOT_RESOLVED_REGION_SQL} AS region,
       count(*)::int AS total_calls,
       count(*) FILTER (WHERE h.status_bucket IN ('solved', 'tech_solved'))::int AS solved_calls,
       count(*) FILTER (WHERE h.status_bucket = 'cancelled')::int AS cancelled_calls,
@@ -148,11 +153,13 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
       COALESCE(MAX(h.branch_headcount), 0)::int AS headcount
     FROM calls_latest_hot h
     LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
+    ${HOT_OFFICE_JOINS_SQL}
     WHERE h.logged_at >= $1::timestamptz
       AND h.logged_at <= $2::timestamptz
       ${officeFilter.clause}
       ${callTypeFilter.clause}
-    GROUP BY h.nofficeid, d.nunder, d.vcompanyname, h.branch_name, h.region
+      ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
+    GROUP BY h.nofficeid, d.nunder, d.vcompanyname, h.branch_name, ${HOT_RESOLVED_REGION_SQL}
     ORDER BY branch ASC
     `,
     ...values
@@ -183,9 +190,11 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
       SUM(CASE WHEN h.is_part_pending THEN 1 ELSE 0 END)::int AS part_pending,
       COUNT(DISTINCT NULLIF(h.engineer_name, ''))::int AS active_eng
     FROM calls_latest_hot h
+    LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
     WHERE h.status_bucket IN ('open_unallocated', 'assigned')
       ${agingOfficeFilter.clause}
       ${agingCallTypeFilter.clause}
+      ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
     GROUP BY h.nofficeid
     `,
     ...agingValues
@@ -250,7 +259,7 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
   >(
     `
     SELECT
-      h.region,
+      ${HOT_RESOLVED_REGION_SQL} AS region,
       h.account,
       count(*) FILTER (WHERE normalize_call_type(h.call_type) = normalize_call_type($3))::int AS total_calls,
       count(*) FILTER (
@@ -280,10 +289,13 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
           AND h.status_bucket IN ('solved', 'tech_solved')
       )::int AS installation_done
     FROM calls_latest_hot h
+    LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
+    ${HOT_OFFICE_JOINS_SQL}
     WHERE h.logged_at >= $1::timestamptz
       AND h.logged_at <= $2::timestamptz
       ${accountOfficeFilter.clause}
-    GROUP BY h.region, h.account
+      ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
+    GROUP BY ${HOT_RESOLVED_REGION_SQL}, h.account
     ORDER BY h.account ASC
     `,
     ...accountValues
@@ -306,7 +318,7 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
   >(
     `
     SELECT
-      h.region,
+      ${HOT_RESOLVED_REGION_SQL} AS region,
       h.account,
       SUM(CASE WHEN ($1::date - h.logged_at::date) <= 2 THEN 1 ELSE 0 END)::int AS age_2,
       SUM(CASE WHEN ($1::date - h.logged_at::date) BETWEEN 3 AND 7 THEN 1 ELSE 0 END)::int AS age_3,
@@ -315,10 +327,13 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
       SUM(CASE WHEN h.is_part_pending THEN 1 ELSE 0 END)::int AS part_pending,
       COUNT(DISTINCT NULLIF(h.engineer_name, ''))::int AS active_eng
     FROM calls_latest_hot h
+    LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
+    ${HOT_OFFICE_JOINS_SQL}
     WHERE h.status_bucket IN ('open_unallocated', 'assigned')
       AND normalize_call_type(h.call_type) = normalize_call_type($2)
       ${accountAgingOfficeFilter.clause}
-    GROUP BY h.region, h.account
+      ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
+    GROUP BY ${HOT_RESOLVED_REGION_SQL}, h.account
     `,
     ...accountAgingValues
   );

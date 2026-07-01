@@ -1,5 +1,6 @@
 import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/report/summary-derive';
 import { withAppClient } from '@/lib/read-model/db';
+import { SNAPSHOT_IMPORT_SOURCE_CODES } from '@/lib/mis-client-import/snapshot-sources';
 import type { StatusBucket } from '@/lib/mis-client-import/types';
 
 export type ClientAggregateParams = {
@@ -8,6 +9,8 @@ export type ClientAggregateParams = {
   startDate?: string | null;
   endDate?: string | null;
   agingAsOf?: string | null;
+  /** BD MIS Excel: count every row in the latest Coke/Cadbury snapshot batch (no logged_at filter). */
+  bdMisSnapshotMode?: boolean;
 };
 
 type DbRow = {
@@ -128,6 +131,13 @@ function aggregateRows(rows: DbRow[], agingDate: string): BranchSummaryRow[] {
     }
 
     const b = branchMap.get(key)!;
+
+    if (row.status_bucket === 'cancelled') {
+      b.cancelled_calls += 1;
+      b.all_cancelled += 1;
+      continue;
+    }
+
     b.total_calls += 1;
     b.all_total += 1;
     b.population += 1;
@@ -139,10 +149,6 @@ function aggregateRows(rows: DbRow[], agingDate: string): BranchSummaryRow[] {
         b.tech_solved_calls += 1;
         b.all_tech_solved += 1;
       }
-    }
-    if (row.status_bucket === 'cancelled') {
-      b.cancelled_calls += 1;
-      b.all_cancelled += 1;
     }
     if (isOpen(row.status_bucket)) {
       b.open_calls += 1;
@@ -186,6 +192,12 @@ function aggregateAccountRows(rows: DbRow[], agingDate: string): AccountSummaryR
     }
 
     const a = accountMap.get(key)!;
+
+    if (row.status_bucket === 'cancelled') {
+      a.cancelled_calls += 1;
+      continue;
+    }
+
     a.total_calls += 1;
     a.population += 1;
 
@@ -194,9 +206,6 @@ function aggregateAccountRows(rows: DbRow[], agingDate: string): AccountSummaryR
       if (row.status_bucket === 'tech_solved') {
         a.total_tech_solved += 1;
       }
-    }
-    if (row.status_bucket === 'cancelled') {
-      a.cancelled_calls += 1;
     }
     if (isOpen(row.status_bucket)) {
       a.open_calls += 1;
@@ -230,21 +239,36 @@ function resolveSourceFilter(params: ClientAggregateParams): string[] | null {
   return [params.sourceCode.toLowerCase()];
 }
 
-async function queryDedupedRows(params: ClientAggregateParams): Promise<DbRow[]> {
-  const startDate = params.startDate ?? `${new Date().getFullYear()}-01-01`;
-  const endDate = params.endDate ?? new Date().toISOString().slice(0, 10);
-  const sourceCodes = resolveSourceFilter(params);
+function buildDedupedRowsSql(
+  sourceClause: string,
+  snapshotParamIndex: number,
+  bdMisSnapshotMode: boolean
+): string {
+  const dateFilter = bdMisSnapshotMode
+    ? `AND (
+          (s.code = ANY($${snapshotParamIndex}::text[]) AND b.batch_id = lb.batch_id)
+          OR (
+            s.code <> ALL($${snapshotParamIndex}::text[])
+            AND r.logged_at >= $1::date
+            AND r.logged_at <= ($2::date + interval '1 day' - interval '1 second')
+          )
+        )`
+    : `AND r.logged_at >= $1::date
+        AND r.logged_at <= ($2::date + interval '1 day' - interval '1 second')
+        AND (
+          (s.code = ANY($${snapshotParamIndex}::text[]) AND b.batch_id = lb.batch_id)
+          OR (s.code <> ALL($${snapshotParamIndex}::text[]))
+        )`;
 
-  return withAppClient(async (client) => {
-    const values: unknown[] = [startDate, endDate];
-    let sourceClause = '';
-    if (sourceCodes) {
-      values.push(sourceCodes);
-      sourceClause = `AND s.code = ANY($${values.length}::text[])`;
-    }
-
-    const res = await client.query<DbRow>(
-      `
+  return `
+      WITH latest_batch AS (
+        SELECT DISTINCT ON (b.source_id)
+          b.source_id,
+          b.batch_id
+        FROM mis_client_import_batches b
+        WHERE b.status = 'completed'
+        ORDER BY b.source_id, b.created_at DESC
+      )
       SELECT DISTINCT ON (r.source_id, r.call_key)
         r.region,
         COALESCE(NULLIF(TRIM(s.crm_account_filter), ''), s.name) AS account,
@@ -252,13 +276,31 @@ async function queryDedupedRows(params: ClientAggregateParams): Promise<DbRow[]>
       FROM mis_client_import_rows r
       JOIN mis_client_import_batches b ON b.batch_id = r.batch_id
       JOIN mis_client_sources s ON s.id = r.source_id
+      LEFT JOIN latest_batch lb ON lb.source_id = r.source_id
       WHERE b.status = 'completed'
         AND r.source_id IS NOT NULL
         ${sourceClause}
-        AND r.logged_at >= $1::date
-        AND r.logged_at <= ($2::date + interval '1 day' - interval '1 second')
+        ${dateFilter}
       ORDER BY r.source_id, r.call_key, b.created_at DESC
-      `,
+    `;
+}
+
+async function queryDedupedRows(params: ClientAggregateParams): Promise<DbRow[]> {
+  const startDate = params.startDate ?? `${new Date().getFullYear()}-01-01`;
+  const endDate = params.endDate ?? new Date().toISOString().slice(0, 10);
+  const sourceCodes = resolveSourceFilter(params);
+  const bdMisSnapshotMode = params.bdMisSnapshotMode === true;
+
+  return withAppClient(async (client) => {
+    const values: unknown[] = [startDate, endDate, [...SNAPSHOT_IMPORT_SOURCE_CODES]];
+    let sourceClause = '';
+    if (sourceCodes) {
+      values.push(sourceCodes);
+      sourceClause = `AND s.code = ANY($${values.length}::text[])`;
+    }
+
+    const res = await client.query<DbRow>(
+      buildDedupedRowsSql(sourceClause, 3, bdMisSnapshotMode),
       values
     );
     return res.rows;
@@ -295,6 +337,13 @@ export async function queryClientAccountSummaryFiltered(
   return aggregateAccountRows(rows, agingDate);
 }
 
+/** Client counts for BD MIS regional union — full snapshot file rows, not logged_at filtered. */
+export async function queryClientAccountSummaryForBdMis(
+  params: Omit<ClientAggregateParams, 'bdMisSnapshotMode'>
+): Promise<AccountSummaryRow[]> {
+  return queryClientAccountSummaryFiltered({ ...params, bdMisSnapshotMode: true });
+}
+
 export async function queryClientAccountSummary(
   params: ClientAggregateParams
 ): Promise<AccountSummaryRow[]> {
@@ -310,8 +359,29 @@ export async function queryAllClientAccountSummary(
 }
 
 export async function countClientRowsInRange(params: ClientAggregateParams): Promise<number> {
-  const rows = await queryDedupedRows(params);
-  return rows.length;
+  const startDate = params.startDate ?? `${new Date().getFullYear()}-01-01`;
+  const endDate = params.endDate ?? new Date().toISOString().slice(0, 10);
+  const sourceCodes = resolveSourceFilter(params);
+
+  return withAppClient(async (client) => {
+    const values: unknown[] = [startDate, endDate, [...SNAPSHOT_IMPORT_SOURCE_CODES]];
+    let sourceClause = '';
+    if (sourceCodes) {
+      values.push(sourceCodes);
+      sourceClause = `AND s.code = ANY($${values.length}::text[])`;
+    }
+
+    const res = await client.query<{ n: number }>(
+      `
+      SELECT count(*)::int AS n
+      FROM (
+        ${buildDedupedRowsSql(sourceClause, 3, params.bdMisSnapshotMode === true).trim()}
+      ) deduped
+      `,
+      values
+    );
+    return res.rows[0]?.n ?? 0;
+  });
 }
 
 export type ClientRowWithBatchMeta = DbRow & {

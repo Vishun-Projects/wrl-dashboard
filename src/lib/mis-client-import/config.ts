@@ -40,23 +40,21 @@ export async function loadSourceConfigByCode(code: string): Promise<MisClientSou
     const source = sourceRes.rows[0];
     if (!source) return null;
 
-    const [fields, statuses, states] = await Promise.all([
-      client.query<MisClientFieldMapping>(
-        `SELECT client_column, crm_field, transform
-         FROM mis_client_field_mappings WHERE source_id = $1::uuid`,
-        [source.id]
-      ),
-      client.query<MisClientStatusMapping>(
-        `SELECT client_status, status_bucket, status_label
-         FROM mis_client_status_mappings WHERE source_id = $1::uuid`,
-        [source.id]
-      ),
-      client.query<MisClientStateMapping>(
-        `SELECT client_state, plan_code, region_override
-         FROM mis_client_state_mappings WHERE source_id = $1::uuid`,
-        [source.id]
-      ),
-    ]);
+    const fields = await client.query<MisClientFieldMapping>(
+      `SELECT client_column, crm_field, transform
+       FROM mis_client_field_mappings WHERE source_id = $1::uuid`,
+      [source.id]
+    );
+    const statuses = await client.query<MisClientStatusMapping>(
+      `SELECT client_status, status_bucket, status_label
+       FROM mis_client_status_mappings WHERE source_id = $1::uuid`,
+      [source.id]
+    );
+    const states = await client.query<MisClientStateMapping>(
+      `SELECT client_state, plan_code, region_override
+       FROM mis_client_state_mappings WHERE source_id = $1::uuid`,
+      [source.id]
+    );
 
     return {
       ...source,
@@ -93,40 +91,37 @@ export async function listSourceBatches(sourceCode: string): Promise<BatchMeta[]
       stored_file_path: string | null;
     }>(
       `
+      WITH keyed AS (
+        SELECT
+          r.batch_id,
+          b.created_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY r.source_id, r.call_key
+            ORDER BY b.created_at DESC
+          ) AS rn,
+          MIN(b.created_at) OVER (PARTITION BY r.source_id, r.call_key) AS first_batch_at
+        FROM mis_client_import_rows r
+        JOIN mis_client_import_batches b ON b.batch_id = r.batch_id
+        JOIN mis_client_sources s ON s.id = r.source_id
+        WHERE s.code = $1 AND b.status = 'completed'
+      ),
+      batch_stats AS (
+        SELECT
+          batch_id,
+          count(*) FILTER (WHERE rn = 1)::int AS active_rows,
+          count(*) FILTER (WHERE created_at = first_batch_at)::int AS new_rows
+        FROM keyed
+        GROUP BY batch_id
+      )
       SELECT b.batch_id, b.file_name, b.row_count, b.created_at,
              COALESCE(u.name, 'Unknown') AS uploader_name,
              b.stored_file_path,
-             stats.active_rows,
-             stats.new_rows
+             COALESCE(stats.active_rows, 0) AS active_rows,
+             COALESCE(stats.new_rows, 0) AS new_rows
       FROM mis_client_import_batches b
       JOIN mis_client_sources s ON s.id = b.source_id
       LEFT JOIN app_users u ON u.id = b.uploaded_by
-      LEFT JOIN LATERAL (
-        SELECT
-          count(*)::int AS active_rows,
-          count(*) FILTER (
-            WHERE NOT EXISTS (
-              SELECT 1
-              FROM mis_client_import_rows r_old
-              JOIN mis_client_import_batches b_old ON b_old.batch_id = r_old.batch_id
-              WHERE r_old.source_id = r.source_id
-                AND r_old.call_key = r.call_key
-                AND b_old.status = 'completed'
-                AND b_old.created_at < b.created_at
-            )
-          )::int AS new_rows
-        FROM mis_client_import_rows r
-        WHERE r.batch_id = b.batch_id
-          AND NOT EXISTS (
-            SELECT 1
-            FROM mis_client_import_rows r_new
-            JOIN mis_client_import_batches b_new ON b_new.batch_id = r_new.batch_id
-            WHERE r_new.source_id = r.source_id
-              AND r_new.call_key = r.call_key
-              AND b_new.status = 'completed'
-              AND b_new.created_at > b.created_at
-          )
-      ) stats ON true
+      LEFT JOIN batch_stats stats ON stats.batch_id = b.batch_id
       WHERE s.code = $1 AND b.status = 'completed'
       ORDER BY b.created_at DESC
       `,

@@ -9,6 +9,7 @@ import { runFillYtdHot } from '@/lib/read-model/fill-ytd';
 import { runBackfillHistoricalHot } from '@/lib/read-model/backfill-historical';
 import { runIncrementalSync } from '@/lib/read-model/incremental';
 import { runNightlyReconcile } from '@/lib/read-model/nightly';
+import { runPipelineReconcile } from '@/lib/read-model/pipeline-reconcile';
 import { runRetentionJobs } from '@/lib/read-model/retention';
 import { runBackfillCallsHotBmApproval } from '@/lib/read-model/backfill-bm-approval';
 
@@ -75,6 +76,11 @@ async function main(): Promise<void> {
     case 'incremental':
       await runIncrementalSync();
       break;
+    case 'pipeline-reconcile': {
+      const result = await runPipelineReconcile();
+      console.log('[sync-worker] Pipeline reconcile:', result);
+      break;
+    }
     case 'backfill-bm-approval': {
       const result = await runBackfillCallsHotBmApproval({
         onlyMissing: process.env.BM_BACKFILL_ALL !== 'true',
@@ -124,7 +130,8 @@ Commands:
   backfill          Full reload: TRUNCATE hot + YTD CRM load + facts (use once)
   fill-ytd          Upsert YTD + open-old only — no truncate (safe refresh)
   backfill-historical  Upsert pre-YTD CRM calls (default 2020-01-01 .. day before Jan 1) — no truncate
-  incremental       Single calls incremental sync run
+  incremental       Single calls incremental sync run (+ pipeline reconcile)
+  pipeline-reconcile  Refresh stale open/assigned hot rows from CRM by TRN
   backfill-bm-approval  Fill calls_latest_hot.bapproval / bm_approved_at from CRM (no truncate)
   arcp-reset        Truncate arcp_lines_hot + reset sync_state (fresh start)
   arcp-backfill     Initial ARCP lines backfill (ARCP_BACKFILL_START_DATE or YEARS)
@@ -143,6 +150,8 @@ Environment:
   SYNC_WORKER_ENABLED    Must be "true" for incremental/nightly/daemon
   SYNC_ARCP_ENABLED      Run ARCP incremental in daemon / API sync
   SYNC_INTERVAL_MS       Daemon interval (default 180000)
+  SYNC_PIPELINE_RECONCILE_ENABLED  Re-check open/assigned hot rows each incremental (default true)
+  SYNC_PIPELINE_RECONCILE_BATCH   Pipeline TRNs checked per run (default 150)
   SYNC_HISTORICAL_START_DATE First day for backfill-historical (default 2020-01-01)
   SYNC_PRE_YTD_START_DATE    Alias for SYNC_HISTORICAL_START_DATE
   SYNC_BACKFILL_CHUNK_DAYS     CRM days per backfill request (default 14)

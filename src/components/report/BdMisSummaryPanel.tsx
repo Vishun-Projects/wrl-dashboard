@@ -30,7 +30,7 @@ export function BdMisSummaryPanel({ rows, grand, loading }: Props) {
           Regional Performance (CRM + Cadbury + Coke)
         </h2>
         <p className="text-[10px] text-slate-400">
-          BD_MIS Excel union — CRM + Mondelez + HCCB; CRM excludes cancelled calls
+          BD MIS Excel union — CRM + Mondelez + HCCB; total calls exclude cancelled, cancelled column shown separately
         </p>
       </div>
       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-bg-canvas shadow-sm">

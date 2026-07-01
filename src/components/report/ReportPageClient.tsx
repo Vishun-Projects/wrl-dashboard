@@ -77,6 +77,7 @@ import {
   registerRowMatchesViewFilters,
   summarizeRegisterRows,
   classifyRegisterRowStatus,
+  isRegisterRowSolvedForMis,
   isRegisterRowCancelled,
   normalizeRegisterSummary,
   type RegisterSummary,
@@ -125,7 +126,7 @@ import { BdMisSummaryPanel } from '@/components/report/BdMisSummaryPanel';
 import type { BdMisGrandRow, BdMisRegionalRow, BdMisSourceFlags } from '@/lib/report/bd-mis-summary';
 import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/report/summary-derive';
 import MisSourceCheckboxes from '@/components/report/MisSourceCheckboxes';
-import MisClientMergeCheckbox, {
+import {
   loadClientMergeWithCrmPrefs,
   saveClientMergeWithCrmPrefs,
 } from '@/components/report/MisClientMergeCheckbox';
@@ -577,6 +578,11 @@ export default function ReportPageClient() {
   const [bdMisTabLoading, setBdMisTabLoading] = useState(false);
   const [bdMisRegionalRows, setBdMisRegionalRows] = useState<BdMisRegionalRow[]>([]);
   const [bdMisGrand, setBdMisGrand] = useState<BdMisGrandRow | null>(null);
+  /** BD MIS Excel union rows for Summary Dashboard when CRM + client sources are on. */
+  const [excelUnionRegionalRows, setExcelUnionRegionalRows] = useState<BdMisRegionalRow[]>([]);
+  const [excelUnionGrand, setExcelUnionGrand] = useState<BdMisGrandRow | null>(null);
+  const useBdMisExcelUnion = alignCrmToAccounts && excelUnionRegionalRows.length > 0;
+  const aiExcelUnion = useBdMisExcelUnion && excelUnionGrand ? excelUnionGrand : null;
   const [bdMisExportData, setBdMisExportData] = useState<{
     regionalRows: BdMisRegionalRow[];
     grand: BdMisGrandRow;
@@ -1001,6 +1007,7 @@ export default function ReportPageClient() {
   const fetchClientImportSummaryRef = React.useRef<
     (scope?: { startDate: string; endDate: string; agingAsOf: string }) => Promise<void>
   >(async () => {});
+  const loadExcelUnionSummaryRef = React.useRef<() => Promise<void>>(async () => {});
   const resolveClientImportScopeRef = React.useRef<
     () => { startDate: string; endDate: string; agingAsOf: string }
   >(() => ({ startDate: '', endDate: '', agingAsOf: '' }));
@@ -2558,19 +2565,16 @@ export default function ReportPageClient() {
     return (rec.vtransfercallno && String(rec.vtransfercallno).trim() !== '') || String(rec.ncancelreason) === '2';
   };
 
-  const isSolved = (rec: any) => {
-    if (isRegisterRowCancelled(rec) || isTransferred(rec)) return false;
-    const statusStr = String(rec.Status || rec.callstatus || '').toLowerCase();
-    return String(rec.callsolved).toLowerCase() === 'true' || String(rec.callsolved) === '1' || statusStr === 'closed' || statusStr === 'solved';
-  };
+  const isSolved = (rec: any) => isRegisterRowSolvedForMis(rec);
 
   const isCancelled = (rec: any) => {
     if (isTransferred(rec)) return false;
-    return isRegisterRowCancelled(rec);
+    return classifyRegisterRowStatus(rec) === 'cancelled';
   };
 
   const isOpen = (rec: any) => {
-    return !isSolved(rec) && !isCancelled(rec) && !isTransferred(rec);
+    const bucket = classifyRegisterRowStatus(rec);
+    return bucket === 'openUnallocated' || bucket === 'assigned';
   };
 
   const fetchDelta = async () => {
@@ -3313,9 +3317,10 @@ export default function ReportPageClient() {
       agingAsOf: agingStr,
     };
     const clientImportPromise = loadClientImportSummaryPayload(clientImportScope);
+    const excelUnionPromise = loadExcelUnionSummaryRef.current();
 
     if (hydrateSummaryFromCache()) {
-      const client = await clientImportPromise;
+      const [client] = await Promise.all([clientImportPromise, excelUnionPromise]);
       if (isStale()) return;
       commitSummaryLoadBundle(null, client, applied);
       return;
@@ -3344,7 +3349,11 @@ export default function ReportPageClient() {
         return loadSummaryFromApiPayload();
       })();
 
-      const [crm, client] = await Promise.all([crmPromise, clientImportPromise]);
+      const [crm, client] = await Promise.all([
+        crmPromise,
+        clientImportPromise,
+        excelUnionPromise,
+      ]);
       if (isStale()) return;
       commitSummaryLoadBundle(crm, client, applied);
     } finally {
@@ -3411,9 +3420,9 @@ export default function ReportPageClient() {
       });
   }, [dbInitialized, activeTab, appliedRevision, finishSummaryUserApply]);
 
-  const loadBdMisSummary = useCallback(async () => {
+  const fetchBdMisSummaryPayload = useCallback(async () => {
     const applied = getAppliedFiltersSnapshot();
-    if (!applied) return;
+    if (!applied) return null;
     const startDateStr = toDateString(applied.dateRange.start);
     const endDateStr = toDateString(applied.dateRange.end);
     const summaryOfficeIds = resolveSummaryOfficeIdsParam(
@@ -3439,19 +3448,45 @@ export default function ReportPageClient() {
         clientSources,
       },
     });
+    return res.data;
+  }, [getAppliedFiltersSnapshot, offices, sourceSelection]);
 
-    setBdMisRegionalRows(res.data?.regionalRows ?? []);
-    setBdMisGrand(res.data?.grand ?? null);
-    const regionalRows = res.data?.regionalRows ?? [];
-    const grand = res.data?.grand;
+  const loadExcelUnionSummary = useCallback(async () => {
+    if (!sourceSelection.crm || sourceSelection.clientSourceCodes.length === 0) {
+      setExcelUnionRegionalRows([]);
+      setExcelUnionGrand(null);
+      return;
+    }
+    try {
+      const data = await fetchBdMisSummaryPayload();
+      if (!data) return;
+      setExcelUnionRegionalRows(data.regionalRows ?? []);
+      setExcelUnionGrand(data.grand ?? null);
+    } catch (err) {
+      console.warn('Excel union summary fetch failed:', err);
+      setExcelUnionRegionalRows([]);
+      setExcelUnionGrand(null);
+    }
+  }, [fetchBdMisSummaryPayload, sourceSelection.crm, sourceSelection.clientSourceCodes.length]);
+
+  loadExcelUnionSummaryRef.current = loadExcelUnionSummary;
+
+  const loadBdMisSummary = useCallback(async () => {
+    const data = await fetchBdMisSummaryPayload();
+    if (!data) return;
+
+    const regionalRows = data.regionalRows ?? [];
+    const grand = data.grand;
+    setBdMisRegionalRows(regionalRows);
+    setBdMisGrand(grand ?? null);
     if (grand && regionalRows.length) {
       setBdMisExportData({
         regionalRows,
         grand,
-        crmBranchSummary: res.data?.crmBranchSummary ?? [],
-        crmAccountSummary: res.data?.crmAccountSummary ?? [],
-        clientAccountSummary: res.data?.clientAccountSummary ?? [],
-        sources: res.data?.sources ?? {
+        crmBranchSummary: data.crmBranchSummary ?? [],
+        crmAccountSummary: data.crmAccountSummary ?? [],
+        clientAccountSummary: data.clientAccountSummary ?? [],
+        sources: data.sources ?? {
           crm: sourceSelection.crm,
           cadbury: sourceSelection.clientSourceCodes.includes('cadbury'),
           coke: sourceSelection.clientSourceCodes.includes('coke'),
@@ -3460,7 +3495,7 @@ export default function ReportPageClient() {
     } else {
       setBdMisExportData(null);
     }
-  }, [getAppliedFiltersSnapshot, offices, sourceSelection]);
+  }, [fetchBdMisSummaryPayload, sourceSelection]);
 
   useEffect(() => {
     if (!dbInitialized) return;
@@ -3499,7 +3534,8 @@ export default function ReportPageClient() {
     if (prevSourceSelectionKeyRef.current === sourceSelectionKey) return;
     prevSourceSelectionKeyRef.current = sourceSelectionKey;
     void fetchClientImportSummaryRef.current(resolveClientImportScopeRef.current());
-  }, [dbInitialized, activeTab, sourceSelectionKey]);
+    void loadExcelUnionSummary();
+  }, [dbInitialized, activeTab, sourceSelectionKey, loadExcelUnionSummary]);
 
   useEffect(() => {
     if (!misAccess.summary && !misAccess.accounts && !misAccess.client_import && !misAccess.bd_mis_summary) return;
@@ -3826,13 +3862,11 @@ export default function ReportPageClient() {
       if (isTransferred) return;
 
       total++;
-      const isCancelled = isRegisterRowCancelled(row);
-      const isSolved =
-        !isCancelled &&
-        (row.Status === 'Closed' || row.callstatus === 'Solved' || row.callsolved === 'True' || row.callsolved === '1');
+      const bucket = classifyRegisterRowStatus(row);
+      if (bucket === 'transferred') return;
 
-      if (isCancelled) cancelled++;
-      else if (isSolved) solved++;
+      if (bucket === 'cancelled') cancelled++;
+      else if (bucket === 'closed' || bucket === 'techSolved') solved++;
       else open++;
     });
 
@@ -4083,29 +4117,19 @@ export default function ReportPageClient() {
               (clientImportActiveSources.length > 0 ||
                 sourceSelection.clientSourceCodes.includes('cadbury')) && (
                 <div className="report-toolbar-filters-sources report-shared-sources-group shrink-0 border-l border-slate-200 pl-2 flex flex-wrap items-center gap-2">
-                  {clientImportActiveSources.length > 0 && (
-                    <MisSourceCheckboxes
-                      selection={sourceSelection}
-                      activeSources={clientImportActiveSources}
-                      onChange={(selection) => {
-                        saveMisSourceSelection(selection);
-                        setSourceSelection(selection);
-                      }}
-                    />
-                  )}
-                  {(activeTab === 'summary' || activeTab === 'accounts') &&
-                  (sourceSelection.clientSourceCodes.includes('cadbury') ||
-                    sourceSelection.clientSourceCodes.includes('coke')) && (
-                    <MisClientMergeCheckbox
-                      prefs={clientMergeWithCrm}
-                      showCadbury={sourceSelection.clientSourceCodes.includes('cadbury')}
-                      showCoke={sourceSelection.clientSourceCodes.includes('coke')}
-                      onChange={(prefs) => {
-                        setClientMergeWithCrm(prefs);
-                        saveClientMergeWithCrmPrefs(prefs);
-                      }}
-                    />
-                  )}
+                  <MisSourceCheckboxes
+                    selection={sourceSelection}
+                    activeSources={clientImportActiveSources}
+                    onChange={(selection) => {
+                      saveMisSourceSelection(selection);
+                      setSourceSelection(selection);
+                    }}
+                    mergePrefs={clientMergeWithCrm}
+                    onMergePrefsChange={(prefs) => {
+                      setClientMergeWithCrm(prefs);
+                      saveClientMergeWithCrmPrefs(prefs);
+                    }}
+                  />
                 </div>
               )}
           </div>
@@ -4344,7 +4368,94 @@ export default function ReportPageClient() {
                       </tr>
                     </thead>
                     <tbody>
-                      {clientOnlyMode
+                      {useBdMisExcelUnion
+                        ? excelUnionRegionalRows.map((row) => (
+                            <tr
+                              key={row.region}
+                              className={`${regionPerfRowClass(row.region)} text-slate-900 ui-strong`}
+                            >
+                              <td className="p-2 border border-slate-300">{row.region}</td>
+                              <td
+                                className="p-2 border border-slate-300 text-center tabular-nums cursor-pointer hover:bg-black/5"
+                                onClick={() =>
+                                  handleDrillDown('total_calls', `${row.region} - Total Calls`, {
+                                    region: row.region,
+                                  })
+                                }
+                              >
+                                {(row.total_calls + row.cancelled_calls).toLocaleString()}
+                              </td>
+                              <td
+                                className="p-2 border border-slate-300 text-center tabular-nums text-emerald-600 cursor-pointer hover:bg-black/5"
+                                onClick={() =>
+                                  handleDrillDown('solved_calls', `${row.region} - Solved Calls`, {
+                                    region: row.region,
+                                  })
+                                }
+                              >
+                                {row.total_solved.toLocaleString()}
+                              </td>
+                              <td className="p-2 border border-slate-300 text-center tabular-nums text-rose-600">
+                                {row.cancelled_calls.toLocaleString()}
+                              </td>
+                              <td
+                                className="p-2 border border-slate-300 text-center tabular-nums perf-metric-open ui-strong cursor-pointer hover:bg-black/5"
+                                onClick={() =>
+                                  handleDrillDown('open_calls', `${row.region} - Open Calls`, {
+                                    region: row.region,
+                                  })
+                                }
+                              >
+                                {row.open_calls.toLocaleString()}
+                              </td>
+                              <td
+                                className="p-2 border border-slate-300 text-center tabular-nums cursor-pointer hover:bg-black/5"
+                                onClick={() =>
+                                  handleDrillDown('age_2', `${row.region} - <2 Days`, { region: row.region })
+                                }
+                              >
+                                {row.age_2.toLocaleString()}
+                              </td>
+                              <td
+                                className="p-2 border border-slate-300 text-center tabular-nums cursor-pointer hover:bg-black/5"
+                                onClick={() =>
+                                  handleDrillDown('age_3', `${row.region} - 2-7 Days`, { region: row.region })
+                                }
+                              >
+                                {row.age_3.toLocaleString()}
+                              </td>
+                              <td
+                                className="p-2 border border-slate-300 text-center tabular-nums cursor-pointer hover:bg-black/5"
+                                onClick={() =>
+                                  handleDrillDown('age_7', `${row.region} - 7-15 Days`, { region: row.region })
+                                }
+                              >
+                                {row.age_7.toLocaleString()}
+                              </td>
+                              <td
+                                className="p-2 border border-slate-300 text-center tabular-nums cursor-pointer hover:bg-black/5"
+                                onClick={() =>
+                                  handleDrillDown('age_15', `${row.region} - >15 Days`, { region: row.region })
+                                }
+                              >
+                                {row.age_15.toLocaleString()}
+                              </td>
+                              <td
+                                className="p-2 border border-slate-300 text-center tabular-nums cursor-pointer hover:bg-black/5"
+                                onClick={() =>
+                                  handleDrillDown('part_pending', `${row.region} - Part Pending`, {
+                                    region: row.region,
+                                  })
+                                }
+                              >
+                                {row.part_pending.toLocaleString()}
+                              </td>
+                              <td className="p-2 border border-slate-300 text-center tabular-nums">
+                                {row.active_eng.toLocaleString()}
+                              </td>
+                            </tr>
+                          ))
+                        : clientOnlyMode
                         ? buildClientOnlyRegionalRows(clientAccountSummaryData).map((row) => {
                             const open =
                               row.age_2 + row.age_3 + row.age_7 + row.age_15;
@@ -4354,7 +4465,9 @@ export default function ReportPageClient() {
                                 className={`${regionPerfRowClass(row.region)} text-slate-900 ui-strong`}
                               >
                                 <td className="p-2 border border-slate-300">{row.region}</td>
-                                <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.total_calls} />
+                                <td className="p-2 border border-slate-300 text-center tabular-nums">
+                                  {(row.total_calls + row.cancelled_calls).toLocaleString()}
+                                </td>
                                 <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.total_solved} className="text-emerald-600" />
                                 <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.cancelled_calls} className="text-rose-600" />
                                 <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={open} className="perf-metric-open ui-strong" />
@@ -4543,7 +4656,15 @@ export default function ReportPageClient() {
                         return (
                           <tr key={region} className={`${regionPerfRowClass(region)} text-slate-900 ui-strong`}>
                             <td className="p-2 border border-slate-300">{region}</td>
-                            <SummaryMergedMetricCell {...mTotal} onClick={() => handleDrillDown('total_calls', `${region} - Total Calls`, { region })} />
+                            <td
+                              className="p-2 border border-slate-300 text-center tabular-nums cursor-pointer hover:bg-black/5"
+                              onClick={() => handleDrillDown('total_calls', `${region} - Total Calls`, { region })}
+                            >
+                              {(
+                                mergeSelectedMetrics(mTotal.crm, mTotal.client, mTotal.mergeSelection) +
+                                mergeSelectedMetrics(mCancelled.crm, mCancelled.client, mCancelled.mergeSelection)
+                              ).toLocaleString()}
+                            </td>
                             <SummaryMergedMetricCell {...mSolved} className="text-emerald-600" onClick={() => handleDrillDown('solved_calls', `${region} - Solved Calls`, { region })} />
                             <SummaryMergedMetricCell {...mCancelled} className="text-rose-600" onClick={() => handleDrillDown('cancelled_calls', `${region} - Cancelled Calls`, { region })} />
                             <SummaryMergedMetricCell {...mOpen} className="perf-metric-open ui-strong" onClick={() => handleDrillDown('open_calls', `${region} - Open Calls`, { region })} />
@@ -4559,40 +4680,63 @@ export default function ReportPageClient() {
                       {/* All India Total Row */}
                       <tr className="perf-total-row text-slate-900 group ui-strong">
                         <td className="p-2 border border-slate-300 flex items-center justify-between">
-                          <span>AI</span>
-                          <button
-                            onClick={() => handleDrillDown('discrepancy', 'AI - Discrepancy Records', { region: 'AI' })}
-                            className="p-1 hover:bg-black/10 rounded transition-colors"
-                            title="View records handled by multiple branches"
-                          >
-                            <AlertCircle className="w-3 h-3 text-slate-700" />
-                          </button>
+                          <span>{useBdMisExcelUnion ? 'All' : 'AI'}</span>
+                          {!useBdMisExcelUnion ? (
+                            <button
+                              onClick={() => handleDrillDown('discrepancy', 'AI - Discrepancy Records', { region: 'AI' })}
+                              className="p-1 hover:bg-black/10 rounded transition-colors"
+                              title="View records handled by multiple branches"
+                            >
+                              <AlertCircle className="w-3 h-3 text-slate-700" />
+                            </button>
+                          ) : null}
+                        </td>
+                        <td className="p-2 border border-slate-300 text-center tabular-nums">
+                          {aiExcelUnion
+                            ? (aiExcelUnion.total_calls + aiExcelUnion.cancelled_calls).toLocaleString()
+                            : (
+                                mergeSelectedMetrics(
+                                  alignCrmToAccounts
+                                    ? sumMergedAccountMetric(
+                                        accountsData,
+                                        clientAccountSummaryData,
+                                        'total_calls',
+                                        mergeFlags,
+                                        clientMergeWithCrm
+                                      )
+                                    : summaryData.reduce((sum, b) => sum + Number(b.total_calls || 0), 0),
+                                  alignCrmToAccounts
+                                    ? 0
+                                    : mergeFlags.client
+                                      ? sumBranchMetric(clientSummaryData, 'total_calls')
+                                      : 0,
+                                  alignCrmToAccounts ? { crm: true, client: false } : mergeFlags
+                                ) +
+                                mergeSelectedMetrics(
+                                  alignCrmToAccounts
+                                    ? sumMergedAccountMetric(
+                                        accountsData,
+                                        clientAccountSummaryData,
+                                        'cancelled_calls',
+                                        mergeFlags,
+                                        clientMergeWithCrm
+                                      )
+                                    : summaryData.reduce((sum, b) => sum + Number(b.cancelled_calls || 0), 0),
+                                  alignCrmToAccounts
+                                    ? 0
+                                    : mergeFlags.client
+                                      ? sumBranchMetric(clientSummaryData, 'cancelled_calls')
+                                      : 0,
+                                  alignCrmToAccounts ? { crm: true, client: false } : mergeFlags
+                                )
+                              ).toLocaleString()}
                         </td>
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            alignCrmToAccounts
-                              ? sumMergedAccountMetric(
-                                  accountsData,
-                                  clientAccountSummaryData,
-                                  'total_calls',
-                                  mergeFlags,
-                                  clientMergeWithCrm
-                                )
-                              : summaryData.reduce((sum, b) => sum + Number(b.total_calls || 0), 0)
-                          }
-                          client={
-                            alignCrmToAccounts
-                              ? 0
-                              : mergeFlags.client
-                                ? sumBranchMetric(clientSummaryData, 'total_calls')
-                                : 0
-                          }
-                        />
-                        <SummaryMergedMetricCell
-                          mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
-                          crm={
-                            alignCrmToAccounts
+                            aiExcelUnion
+                              ? aiExcelUnion.total_solved
+                              : alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -4613,7 +4757,9 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            alignCrmToAccounts
+                            aiExcelUnion
+                              ? aiExcelUnion.cancelled_calls
+                              : alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -4634,7 +4780,9 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            alignCrmToAccounts
+                            aiExcelUnion
+                              ? aiExcelUnion.open_calls
+                              : alignCrmToAccounts
                               ? sumMergedAccountOpenCalls(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -4655,7 +4803,9 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            alignCrmToAccounts
+                            aiExcelUnion
+                              ? aiExcelUnion.age_2
+                              : alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -4676,7 +4826,9 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            alignCrmToAccounts
+                            aiExcelUnion
+                              ? aiExcelUnion.age_3
+                              : alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -4697,7 +4849,9 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            alignCrmToAccounts
+                            aiExcelUnion
+                              ? aiExcelUnion.age_7
+                              : alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -4718,7 +4872,9 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            alignCrmToAccounts
+                            aiExcelUnion
+                              ? aiExcelUnion.age_15
+                              : alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -4739,7 +4895,9 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            alignCrmToAccounts
+                            aiExcelUnion
+                              ? aiExcelUnion.part_pending
+                              : alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -4760,7 +4918,9 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            alignCrmToAccounts
+                            aiExcelUnion
+                              ? aiExcelUnion.active_eng
+                              : alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,

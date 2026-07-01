@@ -2,6 +2,7 @@
 
 import type { MisSourceSelection } from '@/lib/mis-client-import/source-selection';
 import { selectAllSources } from '@/lib/mis-client-import/source-selection';
+import type { ClientMergeWithCrmPrefs } from '@/components/report/SummaryMergedMetricCell';
 
 type SourceOption = { code: string; name: string };
 
@@ -9,9 +10,39 @@ type Props = {
   selection: MisSourceSelection;
   activeSources: SourceOption[];
   onChange: (selection: MisSourceSelection) => void;
+  mergePrefs?: ClientMergeWithCrmPrefs;
+  onMergePrefsChange?: (prefs: ClientMergeWithCrmPrefs) => void;
 };
 
-export default function MisSourceCheckboxes({ selection, activeSources, onChange }: Props) {
+function MergeChip({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="mis-client-merge-chip flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-200 bg-bg-canvas px-2 py-1 text-[10px] text-slate-600">
+      <input
+        type="checkbox"
+        className="mis-client-merge-checkbox h-3 w-3 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span className="ui-label">{label}</span>
+    </label>
+  );
+}
+
+export default function MisSourceCheckboxes({
+  selection,
+  activeSources,
+  onChange,
+  mergePrefs,
+  onMergePrefsChange,
+}: Props) {
   const codes = activeSources.map((s) => s.code);
   const allSelected =
     selection.crm &&
@@ -31,7 +62,11 @@ export default function MisSourceCheckboxes({ selection, activeSources, onChange
 
   const selectAll = () => onChange(selectAllSources(codes));
 
-  if (activeSources.length === 0) return null;
+  const showCadburyMerge = activeSources.some((s) => s.code.toLowerCase() === 'cadbury');
+  const showCokeMerge = activeSources.some((s) => s.code.toLowerCase() === 'coke');
+  const showMerge = Boolean(onMergePrefsChange && mergePrefs && (showCadburyMerge || showCokeMerge));
+
+  if (activeSources.length === 0 && !showMerge) return null;
 
   return (
     <div className="mis-sources-root flex flex-wrap items-center gap-3 text-[11px] text-slate-700">
@@ -67,6 +102,24 @@ export default function MisSourceCheckboxes({ selection, activeSources, onChange
       >
         All
       </button>
+      {showMerge ? (
+        <>
+          {showCadburyMerge ? (
+            <MergeChip
+              label="Merge Cadbury CRM Calls"
+              checked={mergePrefs!.cadbury}
+              onChange={(cadbury) => onMergePrefsChange!({ ...mergePrefs!, cadbury })}
+            />
+          ) : null}
+          {showCokeMerge ? (
+            <MergeChip
+              label="Merge Coke CRM Calls"
+              checked={mergePrefs!.coke}
+              onChange={(coke) => onMergePrefsChange!({ ...mergePrefs!, coke })}
+            />
+          ) : null}
+        </>
+      ) : null}
     </div>
   );
 }

@@ -22,6 +22,7 @@
     "sync-worker:fill-ytd": "npx tsx src/lib/read-model/cli.ts fill-ytd",
     "sync-worker:backfill-historical": "npx tsx src/lib/read-model/cli.ts backfill-historical",
     "sync-worker:incremental": "npx tsx src/lib/read-model/cli.ts incremental",
+    "sync-worker:pipeline-reconcile": "npx tsx src/lib/read-model/cli.ts pipeline-reconcile",
     "sync-worker:backfill-bm-approval": "npx tsx src/lib/read-model/cli.ts backfill-bm-approval",
     "sync-worker:dims": "npx tsx src/lib/read-model/cli.ts dims",
     "sync-worker:nightly": "npx tsx src/lib/read-model/cli.ts nightly",

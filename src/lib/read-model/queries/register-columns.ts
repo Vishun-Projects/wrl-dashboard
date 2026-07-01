@@ -1,4 +1,11 @@
 /** Columns selected for register list/bulk/export queries (avoids SELECT h.*). */
+import {
+  HOT_OFFICE_JOINS_SQL,
+  HOT_RESOLVED_REGION_SQL,
+} from '@/lib/read-model/queries/hot-region';
+
+export { HOT_OFFICE_JOINS_SQL };
+
 export const REGISTER_HOT_COLUMNS = [
   'h.ncode',
   'h.vtrnno',
@@ -13,7 +20,7 @@ export const REGISTER_HOT_COLUMNS = [
   'h.pincode',
   'h.city',
   'h.state',
-  'h.region',
+  `${HOT_RESOLVED_REGION_SQL} AS region`,
   'h.account',
   'h.item_name',
   'h.serial',
@@ -46,7 +53,7 @@ export const REGISTER_EXPORT_HOT_COLUMNS = [
   'h.vcclid',
   'h.party_name',
   'h.branch_name',
-  'h.region',
+  `${HOT_RESOLVED_REGION_SQL} AS region`,
   'h.account',
   'h.franchisee_name',
   'h.pincode',

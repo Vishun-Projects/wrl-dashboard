@@ -5,13 +5,19 @@ import {
   ensureNormalizeCallTypeFunction,
   type SummaryQueryParams,
 } from '@/lib/read-model/queries/summary';
+import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
+import {
+  HOT_OFFICE_JOINS_SQL,
+  HOT_RESOLVED_REGION_SQL,
+} from '@/lib/read-model/queries/hot-region';
 
 const BREAKDOWN = 'BREAKDOWN';
 
-/** BD MIS Excel Main union excludes cancelled calls (see Format.xlsx Cancelled sheet). */
-const BD_MIS_EXCLUDE_CANCELLED = ` AND h.status_bucket != 'cancelled'`;
+/** BD MIS Excel Main union: total_calls exclude cancelled; cancelled_calls counted separately. */
+const BD_MIS_NON_CANCELLED = `h.status_bucket != 'cancelled'`;
 
-const PLANT_REGION_SQL = `COALESCE(p.region_zone, upper(trim(h.region)))`;
+/** Register export / live CRM zone (blank h.region → office zone). */
+const BD_MIS_REGION_SQL = HOT_RESOLVED_REGION_SQL;
 
 function yearStart(): string {
   return `${new Date().getFullYear()}-01-01`;
@@ -75,7 +81,7 @@ function buildCallTypeFilter(
   };
 }
 
-/** CRM summary with plant→region mapping for BD MIS Excel parity. */
+/** CRM summary for BD MIS Excel parity (uses register Region column, not plant remap). */
 export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<SummaryDashboard> {
   await ensureNormalizeCallTypeFunction();
 
@@ -113,18 +119,24 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
       h.nofficeid AS office_id,
       d.nunder AS parent_id,
       COALESCE(d.vcompanyname, h.branch_name, 'UNKNOWN') AS branch,
-      ${PLANT_REGION_SQL} AS region,
-      count(*)::int AS total_calls,
+      ${BD_MIS_REGION_SQL} AS region,
+      count(*) FILTER (WHERE ${BD_MIS_NON_CANCELLED})::int AS total_calls,
       count(*) FILTER (WHERE h.status_bucket IN ('solved', 'tech_solved'))::int AS solved_calls,
       count(*) FILTER (WHERE h.status_bucket = 'cancelled')::int AS cancelled_calls,
       count(*) FILTER (WHERE h.status_bucket IN ('open_unallocated', 'assigned'))::int AS open_calls,
       count(*) FILTER (WHERE h.status_bucket = 'tech_solved')::int AS tech_solved_calls,
-      count(*) FILTER (WHERE normalize_call_type(h.call_type) = normalize_call_type('DEPLOYMENT'))::int AS deployment_total,
+      count(*) FILTER (
+        WHERE normalize_call_type(h.call_type) = normalize_call_type('DEPLOYMENT')
+          AND ${BD_MIS_NON_CANCELLED}
+      )::int AS deployment_total,
       count(*) FILTER (
         WHERE normalize_call_type(h.call_type) = normalize_call_type('DEPLOYMENT')
           AND h.status_bucket IN ('solved', 'tech_solved')
       )::int AS deployment_done,
-      count(*) FILTER (WHERE normalize_call_type(h.call_type) = normalize_call_type('INSTALLATION CALL'))::int AS installation_total,
+      count(*) FILTER (
+        WHERE normalize_call_type(h.call_type) = normalize_call_type('INSTALLATION CALL')
+          AND ${BD_MIS_NON_CANCELLED}
+      )::int AS installation_total,
       count(*) FILTER (
         WHERE normalize_call_type(h.call_type) = normalize_call_type('INSTALLATION CALL')
           AND h.status_bucket IN ('solved', 'tech_solved')
@@ -132,21 +144,27 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
       COALESCE(MAX(h.branch_headcount), 0)::int AS headcount
     FROM calls_latest_hot h
     LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
-    LEFT JOIN mis_plant_region_mappings p ON p.office_id = h.nofficeid
+    ${HOT_OFFICE_JOINS_SQL}
     WHERE h.logged_at >= $1::timestamptz
       AND h.logged_at <= $2::timestamptz
-      ${BD_MIS_EXCLUDE_CANCELLED}
       ${officeFilter.clause}
       ${callTypeFilter.clause}
-    GROUP BY h.nofficeid, d.nunder, d.vcompanyname, h.branch_name, ${PLANT_REGION_SQL}
+      ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
+    GROUP BY h.nofficeid, d.nunder, d.vcompanyname, h.branch_name, ${BD_MIS_REGION_SQL}
     ORDER BY branch ASC
     `,
     ...values
   );
 
-  const agingOfficeFilter = buildOfficeFilter(params, 'h', 2);
+  const agingOfficeFilter = buildOfficeFilter(params, 'h', 4);
   const agingCallTypeFilter = buildCallTypeFilter(params, 'h', agingOfficeFilter.nextIdx);
-  const agingValues = [agingDate, ...agingOfficeFilter.values, ...agingCallTypeFilter.values];
+  const agingValues = [
+    agingDate,
+    periodStart,
+    periodEnd,
+    ...agingOfficeFilter.values,
+    ...agingCallTypeFilter.values,
+  ];
 
   const agingRows = await prisma.$queryRawUnsafe<
     Array<{
@@ -169,9 +187,13 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
       SUM(CASE WHEN h.is_part_pending THEN 1 ELSE 0 END)::int AS part_pending,
       COUNT(DISTINCT NULLIF(h.engineer_name, ''))::int AS active_eng
     FROM calls_latest_hot h
-    WHERE h.status_bucket IN ('open_unallocated', 'assigned')
+    LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
+    WHERE h.logged_at >= $2::timestamptz
+      AND h.logged_at <= $3::timestamptz
+      AND h.status_bucket IN ('open_unallocated', 'assigned')
       ${agingOfficeFilter.clause}
       ${agingCallTypeFilter.clause}
+      ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
     GROUP BY h.nofficeid
     `,
     ...agingValues
@@ -236,9 +258,12 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
   >(
     `
     SELECT
-      ${PLANT_REGION_SQL} AS region,
+      ${BD_MIS_REGION_SQL} AS region,
       h.account,
-      count(*) FILTER (WHERE normalize_call_type(h.call_type) = normalize_call_type($3))::int AS total_calls,
+      count(*) FILTER (
+        WHERE normalize_call_type(h.call_type) = normalize_call_type($3)
+          AND ${BD_MIS_NON_CANCELLED}
+      )::int AS total_calls,
       count(*) FILTER (
         WHERE normalize_call_type(h.call_type) = normalize_call_type($3)
           AND h.status_bucket IN ('solved', 'tech_solved')
@@ -255,30 +280,43 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
         WHERE normalize_call_type(h.call_type) = normalize_call_type($3)
           AND h.status_bucket = 'tech_solved'
       )::int AS total_tech_solved,
-      count(*) FILTER (WHERE normalize_call_type(h.call_type) = normalize_call_type('DEPLOYMENT'))::int AS deployment_total,
+      count(*) FILTER (
+        WHERE normalize_call_type(h.call_type) = normalize_call_type('DEPLOYMENT')
+          AND ${BD_MIS_NON_CANCELLED}
+      )::int AS deployment_total,
       count(*) FILTER (
         WHERE normalize_call_type(h.call_type) = normalize_call_type('DEPLOYMENT')
           AND h.status_bucket IN ('solved', 'tech_solved')
       )::int AS deployment_done,
-      count(*) FILTER (WHERE normalize_call_type(h.call_type) = normalize_call_type('INSTALLATION CALL'))::int AS installation_total,
+      count(*) FILTER (
+        WHERE normalize_call_type(h.call_type) = normalize_call_type('INSTALLATION CALL')
+          AND ${BD_MIS_NON_CANCELLED}
+      )::int AS installation_total,
       count(*) FILTER (
         WHERE normalize_call_type(h.call_type) = normalize_call_type('INSTALLATION CALL')
           AND h.status_bucket IN ('solved', 'tech_solved')
       )::int AS installation_done
     FROM calls_latest_hot h
-    LEFT JOIN mis_plant_region_mappings p ON p.office_id = h.nofficeid
+    LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
+    ${HOT_OFFICE_JOINS_SQL}
     WHERE h.logged_at >= $1::timestamptz
       AND h.logged_at <= $2::timestamptz
-      ${BD_MIS_EXCLUDE_CANCELLED}
       ${accountOfficeFilter.clause}
-    GROUP BY ${PLANT_REGION_SQL}, h.account
+      ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
+    GROUP BY ${BD_MIS_REGION_SQL}, h.account
     ORDER BY h.account ASC
     `,
     ...accountValues
   );
 
-  const accountAgingOfficeFilter = buildOfficeFilter(params, 'h', 3);
-  const accountAgingValues = [agingDate, BREAKDOWN, ...accountAgingOfficeFilter.values];
+  const accountAgingOfficeFilter = buildOfficeFilter(params, 'h', 5);
+  const accountAgingValues = [
+    agingDate,
+    BREAKDOWN,
+    periodStart,
+    periodEnd,
+    ...accountAgingOfficeFilter.values,
+  ];
 
   const accountAgingRows = await prisma.$queryRawUnsafe<
     Array<{
@@ -294,7 +332,7 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
   >(
     `
     SELECT
-      ${PLANT_REGION_SQL} AS region,
+      ${BD_MIS_REGION_SQL} AS region,
       h.account,
       SUM(CASE WHEN ($1::date - h.logged_at::date) <= 2 THEN 1 ELSE 0 END)::int AS age_2,
       SUM(CASE WHEN ($1::date - h.logged_at::date) BETWEEN 3 AND 7 THEN 1 ELSE 0 END)::int AS age_3,
@@ -303,11 +341,15 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
       SUM(CASE WHEN h.is_part_pending THEN 1 ELSE 0 END)::int AS part_pending,
       COUNT(DISTINCT NULLIF(h.engineer_name, ''))::int AS active_eng
     FROM calls_latest_hot h
-    LEFT JOIN mis_plant_region_mappings p ON p.office_id = h.nofficeid
-    WHERE h.status_bucket IN ('open_unallocated', 'assigned')
+    LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
+    ${HOT_OFFICE_JOINS_SQL}
+    WHERE h.logged_at >= $3::timestamptz
+      AND h.logged_at <= $4::timestamptz
+      AND h.status_bucket IN ('open_unallocated', 'assigned')
       AND normalize_call_type(h.call_type) = normalize_call_type($2)
       ${accountAgingOfficeFilter.clause}
-    GROUP BY ${PLANT_REGION_SQL}, h.account
+      ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
+    GROUP BY ${BD_MIS_REGION_SQL}, h.account
     `,
     ...accountAgingValues
   );

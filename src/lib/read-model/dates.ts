@@ -91,6 +91,22 @@ export function parseCrmDate(value: unknown): Date | null {
   if (value == null || value === '') return null;
   const raw = String(value).trim();
   if (!raw) return null;
+
+  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (slash) {
+    const day = Number(slash[1]);
+    const month = Number(slash[2]) - 1;
+    const year = Number(slash[3]);
+    const h = Number(slash[4] ?? 0);
+    const min = Number(slash[5] ?? 0);
+    const s = Number(slash[6] ?? 0);
+    const hasTime = slash[4] != null;
+    const d = hasTime
+      ? new Date(year, month, day, h, min, s)
+      : new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
   const d = new Date(raw.includes('T') ? raw : raw.replace(' ', 'T'));
   return Number.isNaN(d.getTime()) ? null : d;
 }

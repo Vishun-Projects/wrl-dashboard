@@ -8,7 +8,12 @@ Run the daemon in a terminal (calls + ARCP incremental on an interval):
 npm run sync-worker:daemon
 ```
 
-Defaults: every `SYNC_INTERVAL_MS` (180000 ms). Requires:
+Defaults: every `SYNC_INTERVAL_MS` (180000 ms). Each run:
+
+1. **Editedon delta** — fetches CRM rows where `editedon >= watermark` (any logged date; fixes cancellations on older calls).
+2. **Pipeline reconcile** — re-checks open/assigned hot rows against live CRM by TRN (fixes rows already behind the watermark).
+
+Requires:
 
 ```bash
 SYNC_WORKER_ENABLED=true
@@ -30,12 +35,43 @@ The browser **does not** auto-sync anymore (`PostgresAutoSync` was removed). Use
 - **Admin → Sync** (`/admin/sync`) — status and `POST /api/read-model/sync`
 - Report pages may trigger sync via the same API when wired in UI
 
-## Nightly (Task Scheduler / cron)
+## Production sync model (MIS / dashboard)
+
+**Use incremental `editedon` sync only** — the 3-minute VPS daemon (`fast-close-sync-worker`):
+
+1. **`editedon >= watermark`** — pulls only CRM rows that changed since last sync (any logged date; status fixes on old calls included).
+2. **Pipeline reconcile** — small batch of open/assigned TRNs re-checked by ID when hot row is stale vs CRM (complement to editedon; not a full YTD rewrite).
+
+This is what produced **~8,774 open** aligned with Excel **8,773** before any bulk jobs ran: hot table + editedon deltas, not a full-table refresh.
+
+**Do not use for routine MIS close:**
+
+| Command | Why not |
+|---------|---------|
+| `fill-ytd` | Re-upserts **entire YTD** from live CRM — overwrites every status in one shot |
+| `restore-hot-status-from-csv.ts` without the frozen register | Only run against the **same** `CRM_WRL_MIS_Register_*.csv` export used for Excel; restores **status only** for snapshot TRNs (not region) |
+
+If a mistaken `fill-ytd` ran:
+
+1. Prefer a **database backup from before that run**.
+2. Otherwise run `npx tsx scripts/mis-client/restore-hot-status-from-csv.ts [path-to-register-csv]` — restores **status** from the frozen export.
+3. If `region` is blank on some rows, run `npx tsx scripts/mis-client/fix-hot-region-from-office.ts` — backfills from `dim_offices` zone (same as live CRM). Register/export queries also resolve blank `h.region` via office zone fallback.
+
+**BD MIS regional totals** use resolved region: stored `h.region`, or office zone when blank (matches CRM register export). Not `mis_plant_region_mappings`.
+
+Keep `fast-close-sync-worker-nightly.timer` **disabled** on VPS during MIS close.
+
+## Nightly (optional — not for MIS close weeks)
 
 ```bash
 npm run sync-worker:arcp-nightly   # ARCP incremental only
 npm run sync-worker:nightly        # calls reconcile + ARCP when SYNC_ARCP_ENABLED=true
+npm run sync-worker:fill-ytd       # YTD hot upsert (no truncate) — gap-fill only; avoid during Excel tally
 ```
+
+`setup-sync-worker-daemon.sh` can install a **02:30 daily timer** for `fill-ytd`. Leave it **disabled** while reconciling to BD MIS Excel.
+
+`fill-ytd` needs `NODE_OPTIONS=--max-old-space-size=4096` on an 8GB VPS. If nightly log shows `heap out of memory`, increase to `6144` or tune `SYNC_BACKFILL_CHUNK_DAYS`.
 
 ## One-time backfill
 
@@ -53,6 +89,8 @@ See `package.json` for all `sync-worker:*` commands.
 | `SYNC_WORKER_ENABLED` | Must be `true` for worker commands |
 | `SYNC_ARCP_ENABLED` | ARCP in daemon / nightly / API sync |
 | `SYNC_INTERVAL_MS` | Daemon interval (default 180000) |
+| `SYNC_PIPELINE_RECONCILE_ENABLED` | Re-check open/assigned hot rows each incremental (default on) |
+| `SYNC_PIPELINE_RECONCILE_BATCH` | Pipeline TRNs checked per incremental run (default 150) |
 | `SYNC_CRM_INCREMENTAL_CHUNK_DAYS` | CRM window for short catch-up (default 1) |
 | `SYNC_CRM_CATCHUP_CHUNK_DAYS` | CRM window when catch-up > 3 days (default 1) |
 | `SYNC_CRM_INCREMENTAL_TIMEOUT_MS` | HTTP timeout per CRM chunk (default 300000) |

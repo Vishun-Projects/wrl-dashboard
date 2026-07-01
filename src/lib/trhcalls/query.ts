@@ -239,6 +239,15 @@ export function enrichTrhcallBranchFranchisee<T extends Record<string, unknown>>
 
 export type TrhcallsNcodeShard = { index: number; count: number };
 
+function sqlVtrnnoInList(trns: string[]): string {
+  return trns.map((t) => `'${String(t).replace(/'/g, "''")}'`).join(',');
+}
+
+function appendSqlAnd(base: string, clause: string): string {
+  if (!base) return `WHERE ${clause}`;
+  return `${base} AND ${clause}`;
+}
+
 export function buildTrhcallsDeltaSubquery(
   lastSync: string,
   startDate?: string | null,
@@ -247,6 +256,7 @@ export function buildTrhcallsDeltaSubquery(
     startDateTime?: string | null;
     endDateTime?: string | null;
     ncodeShard?: TrhcallsNcodeShard | null;
+    vtrnnoIn?: string[] | null;
   }
 ): string {
   const lastSyncSafe = lastSync.replace(/'/g, "''");
@@ -263,6 +273,9 @@ export function buildTrhcallsDeltaSubquery(
   }
   if (opts?.ncodeShard && opts.ncodeShard.count > 1) {
     condition += ` AND (ncode % ${opts.ncodeShard.count}) = ${opts.ncodeShard.index}`;
+  }
+  if (opts?.vtrnnoIn?.length) {
+    condition = appendSqlAnd(condition, `vtrnno IN (${sqlVtrnnoInList(opts.vtrnnoIn)})`);
   }
 
   return `(
@@ -338,6 +351,7 @@ export function buildTrhcallsDedupSubquery(opts?: {
   startDateTime?: string | null;
   endDateTime?: string | null;
   ncodeShard?: TrhcallsNcodeShard | null;
+  vtrnnoIn?: string[] | null;
 }): string {
   let subqueryCondition = '';
   if (opts?.startDateTime || opts?.endDateTime) {
@@ -372,6 +386,12 @@ export function buildTrhcallsDedupSubquery(opts?: {
     } else if (opts?.ncodeShard && opts.ncodeShard.count > 1) {
       subqueryCondition = `WHERE (ncode % ${opts.ncodeShard.count}) = ${opts.ncodeShard.index}`;
     }
+  }
+  if (opts?.vtrnnoIn?.length) {
+    subqueryCondition = appendSqlAnd(
+      subqueryCondition,
+      `vtrnno IN (${sqlVtrnnoInList(opts.vtrnnoIn)})`
+    );
   }
 
   return `(
@@ -555,12 +575,14 @@ export function buildCorpusDedupSubquery(opts: {
   startDateTime?: string | null;
   endDateTime?: string | null;
   ncodeShard?: TrhcallsNcodeShard | null;
+  vtrnnoIn?: string[] | null;
 }): string {
   if (opts.lastSync) {
     return buildTrhcallsDeltaSubquery(opts.lastSync, opts.startDate, opts.endDate, {
       startDateTime: opts.startDateTime,
       endDateTime: opts.endDateTime,
       ncodeShard: opts.ncodeShard,
+      vtrnnoIn: opts.vtrnnoIn,
     });
   }
   return buildTrhcallsDedupSubquery({
@@ -571,6 +593,7 @@ export function buildCorpusDedupSubquery(opts: {
     startDateTime: opts.startDateTime,
     endDateTime: opts.endDateTime,
     ncodeShard: opts.ncodeShard,
+    vtrnnoIn: opts.vtrnnoIn,
   });
 }
 
@@ -582,6 +605,7 @@ export function buildSyncCorpusTableName(opts: {
   startDateTime?: string | null;
   endDateTime?: string | null;
   ncodeShard?: TrhcallsNcodeShard | null;
+  vtrnnoIn?: string[] | null;
 }): string {
   return `
     ${buildCorpusDedupSubquery(opts)}

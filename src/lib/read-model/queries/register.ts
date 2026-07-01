@@ -7,6 +7,7 @@ import { mergeAuditEnrichment } from '@/lib/register/audit-enrichment';
 import { buildPortalFilterSqlForHot } from '@/lib/register/portal-filter-sql';
 import {
   DISTRIBUTION_COMPACT_COLUMNS,
+  HOT_OFFICE_JOINS_SQL,
   REGISTER_BULK_MAX_ROWS,
   REGISTER_HOT_COLUMNS,
 } from '@/lib/read-model/queries/register-columns';
@@ -445,6 +446,7 @@ export async function queryRegisterFromPostgres(params: RegisterPostgresParams) 
     `
     SELECT ${REGISTER_HOT_COLUMNS}
     FROM calls_latest_hot h
+    ${HOT_OFFICE_JOINS_SQL}
     WHERE ${whereSql}
     ORDER BY h.logged_at DESC, h.ncode DESC
     LIMIT $${values.length + 1}
@@ -523,6 +525,7 @@ export async function queryRegisterBulkFromPostgres(
     `
     SELECT ${REGISTER_HOT_COLUMNS}
     FROM calls_latest_hot h
+    ${HOT_OFFICE_JOINS_SQL}
     WHERE ${whereSql}
     ORDER BY h.logged_at DESC, h.ncode DESC
     LIMIT $${values.length + 1}
@@ -553,6 +556,7 @@ export async function queryRegisterExportFromPostgres(
     `
     SELECT ${REGISTER_HOT_COLUMNS}
     FROM calls_latest_hot h
+    ${HOT_OFFICE_JOINS_SQL}
     WHERE ${whereSql}
     ORDER BY h.logged_at DESC, h.ncode DESC
     LIMIT $${values.length + 1}

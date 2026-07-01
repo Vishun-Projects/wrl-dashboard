@@ -50,20 +50,27 @@ export type MisUploadProgress = {
   chunkIndex: number;
   chunkTotal: number;
   phase: 'uploading' | 'processing';
+  fileIndex?: number;
+  fileTotal?: number;
+  fileName?: string;
 };
 
 export function formatMisUploadProgressLabel(progress: MisUploadProgress): string {
   const pct = progress.total > 0 ? Math.round((progress.sent / progress.total) * 100) : 0;
   const sentMb = (progress.sent / (1024 * 1024)).toFixed(1);
   const totalMb = (progress.total / (1024 * 1024)).toFixed(1);
+  const filePrefix =
+    progress.fileTotal && progress.fileTotal > 1 && progress.fileIndex
+      ? `File ${progress.fileIndex}/${progress.fileTotal}${progress.fileName ? ` (${progress.fileName})` : ''} · `
+      : '';
 
   if (progress.phase === 'processing') {
-    return `Importing rows… (${totalMb} MB uploaded)`;
+    return `${filePrefix}Importing rows… (${totalMb} MB uploaded)`;
   }
   if (progress.chunkTotal > 1) {
-    return `Uploading part ${progress.chunkIndex}/${progress.chunkTotal} · ${sentMb}/${totalMb} MB (${pct}%)`;
+    return `${filePrefix}Uploading part ${progress.chunkIndex}/${progress.chunkTotal} · ${sentMb}/${totalMb} MB (${pct}%)`;
   }
-  return `Uploading ${sentMb} MB…`;
+  return `${filePrefix}Uploading ${sentMb} MB…`;
 }
 
 export function estimateMisUploadEtaSec(
@@ -95,6 +102,8 @@ async function postMisClientUploadChunked(params: {
   sourceCode: string;
   file: File;
   onProgress?: (progress: MisUploadProgress) => void;
+  fileIndex?: number;
+  fileTotal?: number;
 }): Promise<Record<string, unknown>> {
   const uploadId = crypto.randomUUID();
   const chunkTotal = Math.max(1, Math.ceil(params.file.size / MIS_UPLOAD_CHUNK_BYTES));
@@ -112,6 +121,9 @@ async function postMisClientUploadChunked(params: {
       chunkIndex: chunkIndex + 1,
       chunkTotal,
       phase: 'uploading',
+      fileIndex: params.fileIndex,
+      fileTotal: params.fileTotal,
+      fileName: params.file.name,
     });
 
     const formData = new FormData();
@@ -129,6 +141,9 @@ async function postMisClientUploadChunked(params: {
         chunkIndex: chunkTotal,
         chunkTotal,
         phase: 'processing',
+        fileIndex: params.fileIndex,
+        fileTotal: params.fileTotal,
+        fileName: params.file.name,
       });
     }
 
@@ -147,6 +162,9 @@ async function postMisClientUploadChunked(params: {
         chunkIndex: chunkIndex + 1,
         chunkTotal,
         phase: 'uploading',
+        fileIndex: params.fileIndex,
+        fileTotal: params.fileTotal,
+        fileName: params.file.name,
       });
     }
   }
@@ -189,17 +207,27 @@ export async function postMisClientUpload(params: {
   file: File;
   accessToken?: string | null;
   onProgress?: (progress: MisUploadProgress) => void;
+  fileIndex?: number;
+  fileTotal?: number;
 }): Promise<Record<string, unknown>> {
   const tooLarge = validateMisUploadFileSize(params.file);
   if (tooLarge) {
     throw new Error(tooLarge);
   }
 
+  const progressBase = {
+    fileIndex: params.fileIndex,
+    fileTotal: params.fileTotal,
+    fileName: params.file.name,
+  };
+
   if (shouldUseChunkedMisUpload(params.file.size)) {
     return postMisClientUploadChunked({
       sourceCode: params.sourceCode,
       file: params.file,
       onProgress: params.onProgress,
+      fileIndex: params.fileIndex,
+      fileTotal: params.fileTotal,
     });
   }
 
@@ -209,6 +237,7 @@ export async function postMisClientUpload(params: {
     chunkIndex: 0,
     chunkTotal: 1,
     phase: 'uploading',
+    ...progressBase,
   });
 
   const result = await postMisClientUploadDirect(params);
@@ -219,9 +248,51 @@ export async function postMisClientUpload(params: {
     chunkIndex: 1,
     chunkTotal: 1,
     phase: 'processing',
+    ...progressBase,
   });
 
   return result;
+}
+
+export type MisUploadQueueResult = {
+  file: File;
+  data?: Record<string, unknown>;
+  error?: string;
+};
+
+export async function runMisClientUploadQueue(params: {
+  sourceCode: string;
+  files: File[];
+  onProgress?: (progress: MisUploadProgress) => void;
+  uploadFn?: (args: {
+    sourceCode: string;
+    file: File;
+    onProgress?: (progress: MisUploadProgress) => void;
+    fileIndex?: number;
+    fileTotal?: number;
+  }) => Promise<Record<string, unknown>>;
+}): Promise<MisUploadQueueResult[]> {
+  const upload = params.uploadFn ?? postMisClientUpload;
+  const fileTotal = params.files.length;
+  const results: MisUploadQueueResult[] = [];
+
+  for (let i = 0; i < params.files.length; i++) {
+    const file = params.files[i]!;
+    try {
+      const data = await upload({
+        sourceCode: params.sourceCode,
+        file,
+        onProgress: params.onProgress,
+        fileIndex: i + 1,
+        fileTotal,
+      });
+      results.push({ file, data });
+    } catch (err: unknown) {
+      results.push({ file, error: await readMisUploadError(err) });
+    }
+  }
+
+  return results;
 }
 
 export async function readMisUploadError(err: unknown): Promise<string> {

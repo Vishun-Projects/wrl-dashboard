@@ -1,0 +1,14 @@
+import { describe, expect, it } from 'vitest';
+import { isPracticeWinmaxOfficeName } from '@/lib/read-model/queries/summary-call-filters';
+
+describe('isPracticeWinmaxOfficeName', () => {
+  it('flags WinMax practice offices', () => {
+    expect(isPracticeWinmaxOfficeName('Z WinMax Practice Branch Office')).toBe(true);
+    expect(isPracticeWinmaxOfficeName('Z WINMAX BRANCH OFFICE 3')).toBe(true);
+  });
+
+  it('allows normal franchisee offices', () => {
+    expect(isPracticeWinmaxOfficeName('SIDDHIVINAYAK REFRIGERATION')).toBe(false);
+    expect(isPracticeWinmaxOfficeName('1171 - MUMBAI BRANCH')).toBe(false);
+  });
+});

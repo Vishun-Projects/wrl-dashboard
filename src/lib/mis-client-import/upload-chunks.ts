@@ -1,6 +1,6 @@
 import { withAppClient } from '@/lib/read-model/db';
 import { handleMisClientUploadBuffer } from '@/lib/mis-client-import/upload-http';
-import { MIS_UPLOAD_CHUNK_BYTES } from '@/lib/mis-client-import/upload-chunk-constants';
+import type { MisUploadHttpResult } from '@/lib/mis-client-import/upload-http';
 
 export async function storeUploadChunk(params: {
   uploadId: string;
@@ -37,7 +37,16 @@ export async function storeUploadChunk(params: {
   });
 }
 
-export async function assembleAndProcessUpload(uploadId: string, uploadedBy: string) {
+type AssembledUpload = {
+  sourceCode: string;
+  fileName: string;
+  buffer: Buffer;
+};
+
+async function readAssembledUpload(
+  uploadId: string,
+  uploadedBy: string
+): Promise<{ status: number; body: Record<string, unknown> } | AssembledUpload> {
   return withAppClient(async (client) => {
     const metaRes = await client.query<{
       chunk_total: number;
@@ -82,17 +91,43 @@ export async function assembleAndProcessUpload(uploadId: string, uploadedBy: str
     }
 
     const buffer = Buffer.concat(chunksRes.rows.map((row) => row.data));
-    await client.query(`DELETE FROM mis_client_import_upload_chunks WHERE upload_id = $1::uuid`, [
-      uploadId,
-    ]);
-
-    return handleMisClientUploadBuffer({
-      userId: uploadedBy,
+    return {
       sourceCode: meta.source_code,
       fileName: meta.file_name,
       buffer,
-    });
+    };
   });
+}
+
+export async function deleteUploadChunks(uploadId: string): Promise<void> {
+  await withAppClient(async (client) => {
+    await client.query(`DELETE FROM mis_client_import_upload_chunks WHERE upload_id = $1::uuid`, [
+      uploadId,
+    ]);
+  });
+}
+
+export async function assembleAndProcessUpload(
+  uploadId: string,
+  uploadedBy: string
+): Promise<MisUploadHttpResult> {
+  const assembled = await readAssembledUpload(uploadId, uploadedBy);
+  if ('status' in assembled) {
+    return assembled;
+  }
+
+  const result = await handleMisClientUploadBuffer({
+    userId: uploadedBy,
+    sourceCode: assembled.sourceCode,
+    fileName: assembled.fileName,
+    buffer: assembled.buffer,
+  });
+
+  if (result.status === 200) {
+    await deleteUploadChunks(uploadId);
+  }
+
+  return result;
 }
 
 export async function purgeStaleUploadChunks(): Promise<number> {

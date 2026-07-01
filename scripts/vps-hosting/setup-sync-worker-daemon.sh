@@ -11,6 +11,50 @@ ENV_FILE="${ROOT}/.env.vps-setup"
 INSTALL_ROOT="${SYNC_WORKER_INSTALL_ROOT:-/opt/fast-close-app}"
 SERVICE_NAME="fast-close-sync-worker"
 
+install_systemd_nightly_timer() {
+  local root="${1:?}"
+  local service_name="fast-close-sync-worker-nightly"
+  local service_unit="/etc/systemd/system/${service_name}.service"
+  local timer_unit="/etc/systemd/system/${service_name}.timer"
+
+  echo "==> Installing nightly YTD refresh timer ${timer_unit}"
+  cat >"$service_unit" <<EOF
+[Unit]
+Description=Fast Close CRM read-model nightly YTD hot refresh
+Documentation=file://${root}/docs/sync.md
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=${root}
+Environment=SYNC_WORKER_INSTALL_ROOT=${root}
+EnvironmentFile=-${root}/.env.sync-worker
+ExecStart=${root}/scripts/vps-hosting/sync-worker-nightly.sh
+StandardOutput=append:${root}/logs/sync-worker-nightly.log
+StandardError=append:${root}/logs/sync-worker-nightly.log
+EOF
+
+  cat >"$timer_unit" <<EOF
+[Unit]
+Description=Daily Fast Close CRM YTD hot refresh (02:30)
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  chmod 644 "$service_unit" "$timer_unit"
+  systemctl daemon-reload
+  systemctl enable "${service_name}.timer"
+  systemctl restart "${service_name}.timer"
+  echo "    systemctl list-timers ${service_name}.timer"
+  systemctl --no-pager list-timers "${service_name}.timer" || true
+}
+
 install_systemd_unit() {
   local root="${1:?}"
   local service_name="fast-close-sync-worker"
@@ -19,7 +63,7 @@ install_systemd_unit() {
   echo "==> Installing systemd unit ${unit}"
   cat >"$unit" <<EOF
 [Unit]
-Description=Fast Close CRM read-model sync worker (incremental every 3 min)
+Description=Fast Close CRM read-model sync worker (incremental + pipeline reconcile every 3 min)
 Documentation=file://${root}/docs/sync.md
 After=network-online.target docker.service
 Wants=network-online.target
@@ -73,6 +117,7 @@ run_install_on_machine() {
   fi
 
   chmod +x "${root}/scripts/vps-hosting/sync-worker-daemon.sh" 2>/dev/null || true
+  chmod +x "${root}/scripts/vps-hosting/sync-worker-nightly.sh" 2>/dev/null || true
 
   if [[ ! -f "${root}/.env.sync-worker" ]]; then
     if [[ -f "${root}/scripts/vps-hosting/.env.sync-worker.example" ]]; then
@@ -83,6 +128,7 @@ run_install_on_machine() {
 
   if command -v systemctl >/dev/null 2>&1; then
     install_systemd_unit "${root}"
+    install_systemd_nightly_timer "${root}"
   else
     echo "WARN: systemctl not found — install systemd unit manually or use cron (not recommended for daemon)"
     echo "    Test: bash ${root}/scripts/vps-hosting/sync-worker-daemon.sh"
@@ -90,6 +136,7 @@ run_install_on_machine() {
 
   echo "==> Sync worker daemon ready at ${root}"
   echo "    Logs: tail -f ${root}/logs/sync-worker.log"
+  echo "    Nightly: tail -f ${root}/logs/sync-worker-nightly.log"
   echo "    Status: systemctl status fast-close-sync-worker"
 }
 
@@ -132,6 +179,8 @@ fi
 
 scp "${ROOT}/scripts/vps-hosting/sync-worker-daemon.sh" \
   "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/sync-worker-daemon.sh"
+scp "${ROOT}/scripts/vps-hosting/sync-worker-nightly.sh" \
+  "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/sync-worker-nightly.sh"
 scp "${ROOT}/scripts/vps-hosting/.env.sync-worker.example" \
   "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/.env.sync-worker.example"
 scp "${ROOT}/scripts/vps-hosting/setup-sync-worker-daemon.sh" \
@@ -139,7 +188,7 @@ scp "${ROOT}/scripts/vps-hosting/setup-sync-worker-daemon.sh" \
 
 echo "==> Running install on VPS"
 ssh "$VPS_HOST" "SYNC_WORKER_INSTALL_ROOT='${INSTALL_ROOT}' bash -s" <<REMOTE
-$(declare -f install_systemd_unit run_install_on_machine)
+$(declare -f install_systemd_unit install_systemd_nightly_timer run_install_on_machine)
 run_install_on_machine '${INSTALL_ROOT}'
 REMOTE
 

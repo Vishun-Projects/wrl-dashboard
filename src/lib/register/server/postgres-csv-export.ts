@@ -12,6 +12,7 @@ import {
 import { REGISTER_EXPORT_HOT_COLUMNS } from '@/lib/read-model/queries/register-columns';
 import { csvEscape } from '@/lib/register/server/csv-export';
 import { REGISTER_EXPORT_COLUMNS } from '@/lib/register/table-columns';
+import { HOT_OFFICE_JOINS_SQL } from '@/lib/read-model/queries/register-columns';
 
 const CURSOR_FETCH_SIZE = 12_000;
 
@@ -114,6 +115,7 @@ export async function buildPostgresRegisterCsvStream(
                     DECLARE register_export CURSOR FOR
                     SELECT ${REGISTER_EXPORT_HOT_COLUMNS}
                     FROM calls_latest_hot h
+                    ${HOT_OFFICE_JOINS_SQL}
                     WHERE ${whereSql}
                     ORDER BY h.ncode DESC`,
                   values,

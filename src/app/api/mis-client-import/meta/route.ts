@@ -23,18 +23,24 @@ export async function GET(req: NextRequest) {
     let rowsInDateRange: number | null = null;
     const rowsInDateRangeBySource: Record<string, number> = {};
     if (startDate && endDate) {
-      rowsInDateRange = await countClientRowsInRange({
-        sourceCode: 'all',
-        startDate,
-        endDate,
-      });
-      for (const source of sources) {
-        rowsInDateRangeBySource[source.sourceCode] = await countClientRowsInRange({
-          sourceCodes: [source.sourceCode],
+      const [totalInRange, ...perSourceCounts] = await Promise.all([
+        countClientRowsInRange({
+          sourceCode: 'all',
           startDate,
           endDate,
-        });
-      }
+        }),
+        ...sources.map((source) =>
+          countClientRowsInRange({
+            sourceCodes: [source.sourceCode],
+            startDate,
+            endDate,
+          })
+        ),
+      ]);
+      rowsInDateRange = totalInRange;
+      sources.forEach((source, i) => {
+        rowsInDateRangeBySource[source.sourceCode] = perSourceCounts[i] ?? 0;
+      });
     }
 
     return NextResponse.json({

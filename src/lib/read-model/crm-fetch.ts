@@ -90,6 +90,23 @@ function resolveIncrementalChunkDays(catchUpDays: number): number {
   return SYNC_INCREMENTAL_CHUNK_DAYS;
 }
 
+export function planCrmIncrementalEditedonDelta(watermarkStart: Date): {
+  watermark: string;
+  catchUpDays: number;
+  estimatedCrmRequests: number;
+} {
+  const watermark = formatCrmDateTime(watermarkStart);
+  const catchUpDays = Math.max(
+    0,
+    Math.ceil((Date.now() - watermarkStart.getTime()) / (24 * 60 * 60 * 1000))
+  );
+  return {
+    watermark,
+    catchUpDays,
+    estimatedCrmRequests: SYNC_CRM_NCODE_SHARD_INITIAL,
+  };
+}
+
 export function planCrmIncrementalChunks(watermarkStart: Date): CrmIncrementalPlan {
   const watermark = formatCrmDateTime(watermarkStart);
   const startDate = formatLocalDate(watermarkStart);
@@ -343,6 +360,20 @@ async function fetchCrmRangeChunkResilient(
   );
 }
 
+export async function fetchCrmIncrementalEditedonDelta(
+  watermark: string,
+  timeoutMs = SYNC_INCREMENTAL_TIMEOUT_MS
+): Promise<Record<string, unknown>[]> {
+  return fetchCrmCorpusWindowResilient(
+    {
+      lastSync: watermark,
+      orderBy: 'ISNULL(tc.editedon, tc.addedon) ASC',
+      timeoutMs,
+    },
+    `editedon>=${watermark}`
+  );
+}
+
 export async function fetchCrmIncrementalChunk(
   watermark: string,
   chunk: CrmDateChunk,
@@ -515,7 +546,31 @@ export async function fetchCrmOpenOldRows(): Promise<Record<string, unknown>[]> 
     condition: '1=1',
     orderBy: 'tc.dtrndate ASC',
     timeoutMs: SYNC_INCREMENTAL_TIMEOUT_MS,
-  });
+  }  );
+}
+
+/** Latest CRM row per TRN (full sync corpus joins). */
+export async function fetchCrmRowsByTrns(trns: string[]): Promise<Record<string, unknown>[]> {
+  const unique = [...new Set(trns.map((t) => String(t).trim()).filter(Boolean))];
+  if (!unique.length) return [];
+
+  const merged: Record<string, unknown>[] = [];
+  const chunkSize = Math.max(10, Number(process.env.SYNC_PIPELINE_TRN_CHUNK ?? 40) || 40);
+
+  for (let i = 0; i < unique.length; i += chunkSize) {
+    const batch = unique.slice(i, i + chunkSize);
+    const tableName = buildSyncCorpusTableName({ vtrnnoIn: batch });
+    const rows = await fetchCrmChunk({
+      tableName,
+      condition: `(tc.vtrnno IS NOT NULL AND tc.vtrnno <> '')${TRHCALLS_EXCLUDE_TRANSFERRED}`,
+      orderBy: 'tc.dtrndate ASC',
+      timeoutMs: SYNC_INCREMENTAL_TIMEOUT_MS,
+    });
+    merged.push(...rows);
+    if (i + chunkSize < unique.length) await sleep(FETCH_GAP_MS);
+  }
+
+  return merged;
 }
 
 export async function fetchDimOffices(): Promise<Record<string, string>[]> {

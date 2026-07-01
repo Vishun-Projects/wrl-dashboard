@@ -296,6 +296,12 @@ export function isRegisterRowCancelled(row: Record<string, unknown>): boolean {
   return false;
 }
 
+/** Closed + tech-solve rows count toward MIS "total solved" from CRM. */
+export function isRegisterRowSolvedForMis(row: Record<string, unknown>): boolean {
+  const bucket = classifyRegisterRowStatus(row);
+  return bucket === 'closed' || bucket === 'techSolved';
+}
+
 export function classifyRegisterRowStatus(row: Record<string, unknown>): RegisterSummaryBucket {
   if (isRegisterRowTransferred(row)) return 'transferred';
 

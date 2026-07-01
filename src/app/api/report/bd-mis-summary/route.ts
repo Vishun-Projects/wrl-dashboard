@@ -7,7 +7,7 @@ import {
   parseCsvFilter,
 } from '@/lib/read-model/queries/summary';
 import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryFiltered } from '@/lib/mis-client-import/aggregate';
+import { queryClientAccountSummaryForBdMis } from '@/lib/mis-client-import/aggregate';
 import {
   buildBdMisRegionalRows,
   bdMisSourcesFromSelection,
@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
       isHod,
     });
 
-    const clientAccountSummary = await queryClientAccountSummaryFiltered({
+    const clientAccountSummary = await queryClientAccountSummaryForBdMis({
       startDate,
       endDate,
       agingAsOf: agingAsOf || undefined,

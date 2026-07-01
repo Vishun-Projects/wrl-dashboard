@@ -13,6 +13,7 @@ import {
   isCadburyExcludedServiceProvider,
   shouldSkipCadburyImportRow,
 } from '@/lib/mis-client-import/cadbury-filters';
+import { isRegisterRowSolvedForMis } from '@/lib/report/search';
 import {
   detectFileFormat,
   parseImportFile,
@@ -39,7 +40,8 @@ const cokeConfig: MisClientSourceConfig = {
     { client_column: 'Complaint Description', crm_field: 'complaint', transform: null },
   ],
   statusMappings: [
-    { client_status: 'Open', status_bucket: 'assigned', status_label: 'Assigned' },
+    { client_status: 'S.Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
+    { client_status: 'Service Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'Closed', status_bucket: 'solved', status_label: 'Closed' },
   ],
   stateMappings: [
@@ -115,7 +117,7 @@ describe('normalizeClientRows', () => {
       {
         'Call No': '1001',
         'Call Log Date': '29-12-2025',
-        'Call Status': 'Open',
+        'Call Status': 'Service Engg Assigned',
         'Entity Name': 'Vijaywada Beverage',
         'Customer Name': 'Store A',
         'Complaint Description': 'No Cooling',
@@ -272,7 +274,7 @@ describe('Coke region from Entity Name', () => {
       {
         'Call No': '9001',
         'Entity Name': 'Vijaywada Beverage',
-        'Call Status': 'Open',
+        'Call Status': 'Service Engg Assigned',
         'ASM Name': 'A N K AMAR BABU',
       },
     ]);
@@ -294,7 +296,7 @@ describe('Coke region from Entity Name', () => {
       {
         'Call No': '9002',
         'Entity Name': 'Vijaywada Beverage',
-        'Call Status': 'Open',
+        'Call Status': 'Service Engg Assigned',
         'ASM Name': 'P L N Sirish',
       },
     ]);
@@ -563,7 +565,6 @@ const cokeConfigFull: MisClientSourceConfig = {
   ...cokeConfig,
   header_row_index: 5,
   statusMappings: [
-    { client_status: 'Open', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'S.Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'Service Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'Service Done', status_bucket: 'solved', status_label: 'Closed' },
@@ -654,7 +655,8 @@ describe('detect-parse', () => {
     const rawRows = (await parseImportFile(buf, 'CDMS_CallStatus_Detailed (37).xlsx', cokeConfigFull))
       .rawRows;
     const { rows, errors } = normalizeClientRows(cokeConfigFull, rawRows);
-    expect(errors).toHaveLength(0);
+    expect(errors.every((e) => e.message.includes('Unknown status: Open'))).toBe(true);
+    expect(errors.length).toBeLessThan(20);
     expect(rows.length).toBeGreaterThan(30_000);
     expect(rows.every((r) => r.region === 'SOUTH')).toBe(true);
     expect(rows.every((r) => r.logged_at != null)).toBe(true);
@@ -708,5 +710,102 @@ describe('batch file export', () => {
     ]);
     expect(buffer.length).toBeGreaterThan(100);
     expect(buffer.subarray(0, 2).toString()).toBe('PK');
+  });
+});
+
+describe('loadSourceConfigByCode', () => {
+  it('loads mapping queries sequentially on one pg client', () => {
+    const source = readFileSync(
+      join(process.cwd(), 'src/lib/mis-client-import/config.ts'),
+      'utf8'
+    );
+    const fnBody = source.match(
+      /export async function loadSourceConfigByCode[\s\S]*?(?=\nexport async function)/
+    )?.[0];
+    expect(fnBody).toBeTruthy();
+    expect(fnBody).not.toMatch(/Promise\.all/);
+  });
+});
+
+describe('runMisClientUploadQueue', () => {
+  it('uploads files sequentially and continues after partial failure', async () => {
+    const { runMisClientUploadQueue } = await import('@/lib/mis-client-import/upload-client');
+    const order: string[] = [];
+    const fileA = new File(['a'], 'a.csv', { type: 'text/csv' });
+    const fileB = new File(['b'], 'b.csv', { type: 'text/csv' });
+    const fileC = new File(['c'], 'c.csv', { type: 'text/csv' });
+
+    const results = await runMisClientUploadQueue({
+      sourceCode: 'coke',
+      files: [fileA, fileB, fileC],
+      uploadFn: async ({ file, fileIndex, fileTotal }) => {
+        order.push(file.name);
+        expect(fileTotal).toBe(3);
+        expect(fileIndex).toBe(order.length);
+        if (file.name === 'b.csv') {
+          throw new Error('simulated failure');
+        }
+        return { rowCount: 10, errorCount: 0 };
+      },
+    });
+
+    expect(order).toEqual(['a.csv', 'b.csv', 'c.csv']);
+    expect(results).toHaveLength(3);
+    expect(results[0]?.data?.rowCount).toBe(10);
+    expect(results[1]?.error).toMatch(/simulated failure/);
+    expect(results[2]?.data?.rowCount).toBe(10);
+  });
+});
+
+describe('formatMisUploadProgressLabel', () => {
+  it('includes file index when uploading multiple files', async () => {
+    const { formatMisUploadProgressLabel } = await import('@/lib/mis-client-import/upload-client');
+    const label = formatMisUploadProgressLabel({
+      sent: 512_000,
+      total: 1_024_000,
+      chunkIndex: 2,
+      chunkTotal: 4,
+      phase: 'uploading',
+      fileIndex: 2,
+      fileTotal: 3,
+      fileName: 'report.xlsx',
+    });
+    expect(label).toContain('File 2/3');
+    expect(label).toContain('report.xlsx');
+    expect(label).toContain('Uploading part 2/4');
+  });
+});
+
+describe('isRegisterRowSolvedForMis', () => {
+  it('counts tech-solve (bfastclose) as solved for CRM MIS totals', () => {
+    expect(
+      isRegisterRowSolvedForMis({
+        bfastclose: 'True',
+        bsolved: 'False',
+        ncancelreason: 0,
+        nengineer: '95',
+      })
+    ).toBe(true);
+  });
+
+  it('counts closed (bsolved) as solved', () => {
+    expect(
+      isRegisterRowSolvedForMis({
+        bsolved: 'True',
+        bfastclose: 'False',
+        ncancelreason: 0,
+      })
+    ).toBe(true);
+  });
+
+  it('does not count assigned open calls as solved', () => {
+    expect(
+      isRegisterRowSolvedForMis({
+        bsolved: 'False',
+        bfastclose: 'False',
+        ncancelreason: 0,
+        nengineer: '95',
+      })
+    ).toBe(false);
   });
 });

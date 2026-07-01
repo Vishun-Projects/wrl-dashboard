@@ -1,4 +1,4 @@
-import { withAppClient } from '@/lib/read-model/db';
+import { withAppClient, appDatabaseBulkStatementTimeoutMs } from '@/lib/read-model/db';
 import { deleteImportFile, saveImportFile } from '@/lib/mis-client-import/file-store';
 import { saveBatchFileBlob } from '@/lib/mis-client-import/batch-file';
 import type { ImportResult, NormalizedClientRow } from '@/lib/mis-client-import/types';
@@ -25,7 +25,8 @@ export async function storeImportBatch(params: {
     if (!filterEnd || iso > filterEnd) filterEnd = iso;
   }
 
-  return withAppClient(async (client) => {
+  return withAppClient(
+    async (client) => {
     await client.query('BEGIN');
     let batchId = '';
     let storedFilePath: string | null = null;
@@ -47,15 +48,6 @@ export async function storeImportBatch(params: {
         fileName,
         buffer: fileBuffer,
       });
-
-      try {
-        await saveBatchFileBlob(batchId, fileBuffer);
-      } catch (blobErr) {
-        console.warn(
-          '[mis-client-import] stored_file_blob save failed (run db:apply-read-model for migration 15):',
-          blobErr
-        );
-      }
 
       await client.query(
         `UPDATE mis_client_import_batches SET stored_file_path = $2 WHERE batch_id = $1::uuid`,
@@ -120,6 +112,15 @@ export async function storeImportBatch(params: {
 
       await client.query('COMMIT');
 
+      try {
+        await saveBatchFileBlob(batchId, fileBuffer);
+      } catch (blobErr) {
+        console.warn(
+          '[mis-client-import] stored_file_blob save failed (run db:apply-read-model for migration 15):',
+          blobErr
+        );
+      }
+
       return {
         batchId,
         rowCount: rows.length,
@@ -136,7 +137,9 @@ export async function storeImportBatch(params: {
       }
       throw err;
     }
-  });
+  },
+    { statementTimeoutMs: appDatabaseBulkStatementTimeoutMs() }
+  );
 }
 
 export async function deleteImportBatch(batchId: string): Promise<{

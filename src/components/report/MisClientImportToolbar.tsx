@@ -6,8 +6,7 @@ import { Upload, Loader2, Trash2, Download } from 'lucide-react';
 import {
   estimateMisUploadEtaSec,
   formatMisUploadProgressLabel,
-  postMisClientUpload,
-  readMisUploadError,
+  runMisClientUploadQueue,
   type MisUploadProgress,
 } from '@/lib/mis-client-import/upload-client';
 import {
@@ -160,28 +159,50 @@ export default function MisClientImportToolbar({
     s.batches.map((b) => ({ ...b, sourceName: s.sourceName, sourceCode: s.sourceCode }))
   );
 
-  const handleUpload = async (file: File) => {
+  const handleUploadFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+
     setUploading(true);
     setUploadMessage(null);
     setUploadProgress(null);
     uploadStartedAtRef.current = Date.now();
+
+    let anySuccess = false;
     try {
-      const data = await postMisClientUpload({
+      const results = await runMisClientUploadQueue({
         sourceCode: uploadSource,
-        file,
+        files,
         onProgress: setUploadProgress,
       });
-      const rowCount = Number(data.rowCount ?? 0);
-      const errorCount = Number(data.errorCount ?? 0);
-      const warnings = Array.isArray(data.warnings) ? (data.warnings as string[]) : [];
-      const warnText = warnings.length ? ` (${warnings.join('; ')})` : '';
-      setUploadMessage(
-        `Imported ${rowCount} rows` + (errorCount ? `, ${errorCount} skipped` : '') + warnText
-      );
-      await loadMeta();
-      onImportComplete();
+
+      const lines: string[] = [];
+      for (const result of results) {
+        if (result.error) {
+          lines.push(`${result.file.name}: ${result.error}`);
+          continue;
+        }
+        anySuccess = true;
+        const rowCount = Number(result.data?.rowCount ?? 0);
+        const errorCount = Number(result.data?.errorCount ?? 0);
+        const warnings = Array.isArray(result.data?.warnings)
+          ? (result.data.warnings as string[])
+          : [];
+        const warnText = warnings.length ? ` (${warnings.join('; ')})` : '';
+        lines.push(
+          `${result.file.name}: imported ${rowCount} rows` +
+            (errorCount ? `, ${errorCount} skipped` : '') +
+            warnText
+        );
+      }
+
+      setUploadMessage(lines.join(' · '));
+
+      if (anySuccess) {
+        onImportComplete();
+        void loadMeta();
+      }
     } catch (err: unknown) {
-      setUploadMessage(await readMisUploadError(err));
+      setUploadMessage(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setUploading(false);
       setUploadProgress(null);
@@ -296,10 +317,11 @@ export default function MisClientImportToolbar({
               ref={fileInputRef}
               type="file"
               accept={accept}
+              multiple
               className="hidden"
               onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void handleUpload(file);
+                const picked = e.target.files ? Array.from(e.target.files) : [];
+                if (picked.length) void handleUploadFiles(picked);
               }}
             />
             <button
@@ -309,7 +331,7 @@ export default function MisClientImportToolbar({
               className="inline-flex items-center gap-1.5 rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-60"
             >
               {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-              {uploading ? 'Importing…' : 'Import file'}
+              {uploading ? 'Importing…' : 'Import file(s)'}
             </button>
           </>
         )}

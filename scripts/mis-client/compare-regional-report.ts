@@ -1,6 +1,13 @@
 /**
- * Compare BD MIS regional totals vs BD_MIS_29.06.2026.xlsx Summary sheet.
- * Usage: npx tsx scripts/mis-client/compare-regional-report.ts [path-to-xlsx]
+ * Compare BD MIS regional totals vs BD_MIS Excel Summary sheet.
+ *
+ * Usage:
+ *   npx tsx scripts/mis-client/compare-regional-report.ts [path-to-xlsx] [end-date]
+ *
+ * end-date: portal query end (YYYY-MM-DD). Default 2026-06-29.
+ * Match this to your Excel export: e.g. New_BD_MIS_30.06.2026.xlsx → use 2026-06-30.
+ *
+ * Date mismatch is the most common source of ~100+ row gaps vs a workbook named for 30-Jun.
  */
 import { config } from 'dotenv';
 import { join } from 'path';
@@ -10,22 +17,24 @@ import XLSX from 'xlsx';
 config({ path: join(process.cwd(), '.env.local') });
 
 import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryFiltered } from '@/lib/mis-client-import/aggregate';
+import { queryClientAccountSummaryForBdMis } from '@/lib/mis-client-import/aggregate';
 import {
   buildBdMisRegionalRows,
   sumBdMisRegionalGrand,
 } from '@/lib/report/bd-mis-summary';
 
 const DEFAULT_XLSX =
-  'C:/Users/Vishnu.Vishwakarma/Downloads/Testing/BD_MIS_29.06.2026.xlsx';
+  'C:/Users/Vishnu.Vishwakarma/Downloads/Raw/New_BD_MIS_30.06.2026.xlsx';
 
-const params = {
-  startDate: '2026-01-01',
-  endDate: '2026-06-29',
-  agingAsOf: '2026-06-29',
-  callTypes: ['BREAKDOWN'],
-  isHod: true,
-};
+function resolveParams(endDate: string) {
+  return {
+    startDate: '2026-01-01',
+    endDate,
+    agingAsOf: endDate,
+    callTypes: ['BREAKDOWN'],
+    isHod: true,
+  };
+}
 
 type RefRow = {
   total: number;
@@ -88,14 +97,24 @@ function zoneLabel(zone: string): string {
 
 async function main() {
   const xlsxPath = process.argv[2] ?? DEFAULT_XLSX;
+  const endDate = process.argv[3] ?? '2026-06-29';
+  const params = resolveParams(endDate);
+
   if (!existsSync(xlsxPath)) {
     console.error(`Excel not found: ${xlsxPath}`);
     process.exit(1);
   }
 
+  console.log(`Portal date range: ${params.startDate} → ${params.endDate} (aging ${params.agingAsOf})`);
+  if (xlsxPath.includes('30.06') && endDate < '2026-06-30') {
+    console.warn(
+      'WARNING: Excel filename suggests 30-Jun data but portal end date is earlier. Re-run with end-date 2026-06-30.\n'
+    );
+  }
+
   const ref = loadExcelTargets(xlsxPath);
   const crm = await queryBdMisCrmSummary(params);
-  const clientAccounts = await queryClientAccountSummaryFiltered({
+  const clientAccounts = await queryClientAccountSummaryForBdMis({
     startDate: params.startDate,
     endDate: params.endDate,
     agingAsOf: params.agingAsOf,
