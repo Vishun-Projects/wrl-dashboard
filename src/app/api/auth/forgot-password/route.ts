@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { isDevAuthBypass } from '@/lib/auth/verify-jwt';
-import { resolveAppOrigin } from '@/lib/auth/site-url';
 import { validateForgotPasswordEmail } from '@/lib/auth/forgot-password-core';
 import {
   forgotPasswordStatusMessage,
   lookupForgotPasswordAccount,
 } from '@/lib/auth/forgot-password-lookup';
+import { sendRecoveryEmailForAccount } from '@/lib/auth/send-recovery-email';
 
 export async function POST(request: Request) {
   try {
@@ -43,19 +42,20 @@ export async function POST(request: Request) {
       });
     }
 
-    const supabase = await createClient();
-    const redirectTo = `${resolveAppOrigin()}/reset-password`;
-    const { error } = await supabase.auth.resetPasswordForEmail(validated.email, { redirectTo });
+    const sent = await sendRecoveryEmailForAccount({
+      email: validated.email,
+      recipientName: account.appUserName,
+    });
 
-    if (error) {
-      console.error('[forgot-password] GoTrue error:', error.message);
+    if (!sent.ok) {
+      console.error('[forgot-password] send failed:', sent.error);
       return NextResponse.json(
         {
           ok: false,
           found: true,
           inAuth: true,
           inAppUsers: account.inAppUsers,
-          message: `Account found, but the reset email could not be sent: ${error.message}. Contact IT if this persists.`,
+          message: `Account found, but the reset email could not be sent: ${sent.error}. Contact IT if this persists.`,
         },
         { status: 502 }
       );

@@ -107,7 +107,19 @@ Also ensure redirect URLs are set (done by `repair-supabase-env.sh`):
 
 On Vercel, set `NEXT_PUBLIC_SITE_URL=https://wrl-dashboard.vercel.app` so reset links point to `/reset-password`.
 
-**Local dev:** forgot-password still requires production GoTrue — `db-sign-in` bypass does not send mail.
+**Optional — send reset mail directly from Vercel** (same SMTP vars as MIS Gmail test; bypasses GoTrue Docker relay):
+
+| Variable | Example |
+|----------|---------|
+| `SMTP_HOST` | `smtp.gmail.com` |
+| `SMTP_PORT` | `587` |
+| `SMTP_USER` | your Gmail address |
+| `SMTP_PASS` | Gmail app password |
+| `SMTP_FROM` | `WRL MIS Reports <your@gmail.com>` |
+
+If these are not set on Vercel, reset mail is sent by GoTrue on the VPS (requires `npm run gotrue:sync-smtp:vps`).
+
+**Local dev:** forgot-password still requires production — `db-sign-in` bypass does not send mail.
 
 Apply DB migration for MIS email preferences before cron:
 

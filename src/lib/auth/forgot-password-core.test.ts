@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  FORGOT_PASSWORD_GENERIC_MESSAGE,
-  validateForgotPasswordEmail,
-} from '@/lib/auth/forgot-password-core';
+import { validateForgotPasswordEmail } from '@/lib/auth/forgot-password-core';
+import { forgotPasswordStatusMessage } from '@/lib/auth/forgot-password-lookup';
 import { hasCapability, LEGACY_HOD_ROLE_NAMES } from '@/lib/auth/rbac-catalog';
 
 describe('validateForgotPasswordEmail', () => {
@@ -39,12 +37,6 @@ describe('forgotPasswordStatusMessage', () => {
         appUserName: 'Test User',
       })
     ).toMatch(/Account found/i);
-  });
-});
-
-describe('forgot password generic response', () => {
-  it('uses non-enumerating message', () => {
-    expect(FORGOT_PASSWORD_GENERIC_MESSAGE).toMatch(/If an account exists/i);
   });
 });
 

@@ -1,0 +1,10 @@
+# GoTrue SMTP — same Postfix relay as MIS reports (host gateway from Docker).
+services:
+  auth:
+    environment:
+      GOTRUE_SMTP_HOST: 172.17.0.1
+      GOTRUE_SMTP_PORT: 25
+      GOTRUE_SMTP_USER: ""
+      GOTRUE_SMTP_PASS: ""
+      GOTRUE_SMTP_ADMIN_EMAIL: reports@wrl-fsm.cloud
+      GOTRUE_SMTP_SENDER_NAME: WRL MIS Reports

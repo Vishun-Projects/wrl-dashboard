@@ -50,6 +50,26 @@ sync_gotrue_smtp() {
   set_env SMTP_PASS "${SMTP_PASS:-}"
   set_env SMTP_SENDER_NAME "$sender_name"
 
+  local override_src="${SCRIPT_DIR}/docker-compose.auth-smtp.override.yml"
+  local override_dst="${SUPABASE_DIR}/docker-compose.override.yml"
+  if [[ -f "$override_src" ]]; then
+    cp "$override_src" "$override_dst"
+    echo "==> Installed ${override_dst}"
+  fi
+
+  if ! grep -q 'docker-compose.override.yml' "${SUPABASE_DIR}/.env" 2>/dev/null; then
+    local compose_file
+    compose_file="$(grep '^COMPOSE_FILE=' "${SUPABASE_DIR}/.env" | cut -d= -f2- | tr -d "'\"")"
+    if [[ -n "$compose_file" ]]; then
+      set_env COMPOSE_FILE "${compose_file}:docker-compose.override.yml"
+    fi
+  fi
+
+  if [[ -f "${SCRIPT_DIR}/fix-postfix-docker-relay.sh" ]]; then
+    echo "==> Postfix docker relay"
+    bash "${SCRIPT_DIR}/fix-postfix-docker-relay.sh"
+  fi
+
   echo "==> Recreating GoTrue (auth) so SMTP env is picked up"
   cd "$SUPABASE_DIR"
   docker compose up -d --force-recreate auth
