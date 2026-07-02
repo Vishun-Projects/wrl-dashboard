@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
         type,
         officeId,
         region,
+        account,
         startDate,
         endDate,
         agingAsOf,

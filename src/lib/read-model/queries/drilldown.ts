@@ -14,6 +14,7 @@ export type DrilldownQueryParams = {
   agingAsOf?: string | null;
   officeId?: string | null;
   region?: string | null;
+  account?: string | null;
   callType?: string | null;
   assignedOffices?: string[];
   isHod?: boolean;
@@ -127,6 +128,18 @@ export async function querySummaryDrilldown(
     clauses.push(`upper(trim(${HOT_RESOLVED_REGION_SQL})) = $${idx}`);
     values.push(normalizeRegionFilter(params.region));
     idx++;
+  }
+
+  if (params.account && params.account !== 'All India' && params.account !== 'All') {
+    const accounts = params.account
+      .split(',')
+      .map((a) => a.trim())
+      .filter(Boolean);
+    if (accounts.length > 0) {
+      clauses.push(`h.account = ANY($${idx}::text[])`);
+      values.push(accounts);
+      idx++;
+    }
   }
 
   if (params.callType && params.callType !== 'All' && params.callType !== '') {
