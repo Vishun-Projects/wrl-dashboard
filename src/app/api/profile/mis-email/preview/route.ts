@@ -57,6 +57,7 @@ export async function POST(request: Request) {
       permissions,
       current,
       misEmailEnabled: true,
+      forPreview: true,
     });
 
     if (!validated.ok) {

@@ -55,6 +55,7 @@ function ProfileContent() {
   const [emailSettings, setEmailSettings] = useState<MisEmailSettings | null>(null);
   const [emailLoading, setEmailLoading] = useState(false);
   const [emailPrefs, setEmailPrefs] = useState<MisEmailPreferences>({});
+  const [avatarBroken, setAvatarBroken] = useState(false);
 
   const searchParams = useSearchParams();
 
@@ -67,6 +68,10 @@ function ProfileContent() {
   useEffect(() => {
     if (user) setName(user.name || '');
   }, [user]);
+
+  useEffect(() => {
+    setAvatarBroken(false);
+  }, [user?.avatar_url]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -229,11 +234,12 @@ function ProfileContent() {
               <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
                 <div className="relative flex-shrink-0">
                   <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-100 text-2xl text-slate-400 ui-strong">
-                    {user?.avatar_url ? (
+                    {user?.avatar_url && !avatarBroken ? (
                       <img
                         src={resolveAvatarDisplayUrl(user.avatar_url) ?? ''}
                         alt=""
                         className="h-full w-full object-cover"
+                        onError={() => setAvatarBroken(true)}
                       />
                     ) : (
                       user?.name?.charAt(0).toUpperCase()

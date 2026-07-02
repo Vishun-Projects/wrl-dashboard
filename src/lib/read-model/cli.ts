@@ -14,6 +14,11 @@ import { runEditedonCatchupRange, runEditedonCatchupStep } from '@/lib/read-mode
 import { todayLocalDate } from '@/lib/read-model/dates';
 import { runRetentionJobs } from '@/lib/read-model/retention';
 import { runBackfillCallsHotBmApproval } from '@/lib/read-model/backfill-bm-approval';
+import {
+  auditExitCode,
+  parseAuditCliArgs,
+  runFullReadModelAudit,
+} from '@/lib/read-model/audit/run-full-audit';
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
 const DAEMON_MAX_CONSECUTIVE_FAILURES = Number(process.env.SYNC_DAEMON_MAX_FAILURES ?? 5) || 5;
@@ -138,6 +143,12 @@ async function main(): Promise<void> {
     case 'daemon':
       await runDaemon();
       break;
+    case 'full-audit': {
+      const opts = parseAuditCliArgs(process.argv.slice(3));
+      const summary = await runFullReadModelAudit(opts);
+      process.exitCode = auditExitCode(summary);
+      break;
+    }
     default:
       console.log(`
 Read model sync worker
@@ -160,6 +171,8 @@ Commands:
   dims              Refresh dimension tables only
   nightly           Calls nightly + ARCP incremental when SYNC_ARCP_ENABLED=true
   retention         Purge old sync logs and ingest batches
+  full-audit        Full read-model audit vs live CRM (see scripts/audit-read-model-full.ts)
+                    --apply  refresh stale rows; --only hot,dims,facts; --resume-from-trn TRN
   daemon            Loop calls + ARCP incremental (optional; app auto-sync is default)
 
 Live sync: PostgresAutoSync in the app (see docs/sync.md). Use daemon only if you need

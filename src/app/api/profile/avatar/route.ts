@@ -21,7 +21,8 @@ export async function GET(request: Request) {
 
   const { data, error } = await supabaseAdmin.storage.from('profiles').download(path);
   if (error || !data) {
-    return NextResponse.json({ error: 'Avatar not found' }, { status: 404 });
+    console.warn('[avatar] storage miss:', path, error?.message);
+    return new NextResponse(null, { status: 404 });
   }
 
   const bytes = Buffer.from(await data.arrayBuffer());

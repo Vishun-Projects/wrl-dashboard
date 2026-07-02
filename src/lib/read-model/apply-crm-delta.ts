@@ -38,8 +38,6 @@ export type ApplyCrmDeltaResult = {
   rowsUpserted: number;
   rowsDeleted: number;
   rowsSkippedStale?: number;
-  rowsUpserted: number;
-  rowsDeleted: number;
   nextEdited: Date | null;
   nextAdded: Date | null;
 };

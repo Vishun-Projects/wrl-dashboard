@@ -27,6 +27,8 @@ export const DEFAULT_MIS_EMAIL_PREFERENCES: Required<MisEmailPreferences> = {
   includeSummary: true,
   includeDetailed: true,
   includeKeyAccount: true,
+  extraEmails: [],
+  bodyInEmail: [],
 };
 
 export type EffectiveDigestIncludes = {
@@ -161,6 +163,7 @@ export function validateMisEmailPreferencesPatch(params: {
   >;
   current: MisEmailPreferences;
   misEmailEnabled: boolean;
+  forPreview?: boolean;
 }): { ok: true; merged: MisEmailPreferences } | { ok: false; error: string } {
   if (!params.misEmailEnabled) {
     return { ok: false, error: 'MIS email is not enabled for your account' };
@@ -168,7 +171,7 @@ export function validateMisEmailPreferencesPatch(params: {
 
   const merged = mergeMisEmailPreferences(params.current, params.patch);
 
-  if (merged.subscribed !== false) {
+  if (!params.forPreview && merged.subscribed !== false) {
     const effective = resolveEffectiveDigestIncludes(params.permissions, merged);
     if (!hasAnyEffectiveDigestInclude(effective)) {
       return { ok: false, error: 'Select at least one report type to receive' };

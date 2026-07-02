@@ -16,6 +16,10 @@ import {
 import { feedback } from '@/lib/ui/feedback';
 import type { MisEmailBodySectionDef, MisEmailBodySectionId } from '@/lib/mis-email/body-sections';
 import type { MisEmailPreferences } from '@/lib/mis-email/preferences';
+import {
+  hasAnyEffectiveDigestInclude,
+  resolveEffectiveDigestIncludes,
+} from '@/lib/mis-email/preferences';
 import { settingsInputClass } from '@/components/admin/AdminUi';
 
 type MisEmailComposeSettings = {
@@ -80,6 +84,14 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
   const selectedBodyIds = draftPrefs.bodyInEmail ?? [];
 
   const loadPreview = useCallback(async () => {
+    const effective = resolveEffectiveDigestIncludes(settings.allowed, draftPrefs);
+    if (!hasAnyEffectiveDigestInclude(effective)) {
+      setPreview(null);
+      setPreviewError('Select at least one attachment to preview.');
+      setPreviewLoading(false);
+      return;
+    }
+
     setPreviewLoading(true);
     setPreviewError(null);
     try {
@@ -98,7 +110,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
     } finally {
       setPreviewLoading(false);
     }
-  }, [draftPrefs]);
+  }, [draftPrefs, settings.allowed]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {

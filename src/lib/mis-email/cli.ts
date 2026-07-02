@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import '@/lib/mis-email/bootstrap-env';
 import { closePool } from '@/lib/read-model/db';
-import { runMisEmailDigest, runMisEmailTest, runMisEmailTestBatch } from '@/lib/mis-email/run-digest';
+import { sendMisEmailComposeBatch } from '@/lib/mis-email/compose-digest';
+import { loadDigestRecipientById } from '@/lib/mis-email/recipients';
+import type { MisEmailPreferences } from '@/lib/mis-email/preferences';
+import { runMisEmailDigest, runMisEmailTestBatch } from '@/lib/mis-email/run-digest';
 
 async function main(): Promise<void> {
   const command = process.argv[2] ?? 'help';
@@ -22,6 +25,33 @@ async function main(): Promise<void> {
         }
         break;
       }
+      case 'send-user': {
+        const payloadRaw = process.env.MIS_EMAIL_SEND_PAYLOAD?.trim();
+        if (!payloadRaw) {
+          throw new Error('MIS_EMAIL_SEND_PAYLOAD is required');
+        }
+        const payload = JSON.parse(
+          Buffer.from(payloadRaw, 'base64').toString('utf8')
+        ) as {
+          userId?: string;
+          preferences?: MisEmailPreferences;
+          sendTo?: string[];
+        };
+        if (!payload.userId?.trim()) {
+          throw new Error('userId is required');
+        }
+        const recipient = await loadDigestRecipientById(payload.userId.trim());
+        if (!recipient) {
+          throw new Error(`Recipient not found: ${payload.userId}`);
+        }
+        const results = await sendMisEmailComposeBatch(recipient, {
+          preferences: payload.preferences,
+          sendTo: payload.sendTo,
+          displayName: recipient.name,
+        });
+        console.log(JSON.stringify(results));
+        break;
+      }
       case 'test': {
         const toArg = process.argv.find((a) => a.startsWith('--to='))?.slice('--to='.length);
         const results = await runMisEmailTestBatch({ userId: userIdArg, recipientOverride: toArg });
@@ -38,7 +68,8 @@ async function main(): Promise<void> {
       default:
         console.log(`Usage:
   npx tsx src/lib/mis-email/cli.ts digest
-  npx tsx src/lib/mis-email/cli.ts test [--user=<uuid>]
+  npx tsx src/lib/mis-email/cli.ts test [--user=<uuid>] [--to=email]
+  npx tsx src/lib/mis-email/cli.ts send-user   (MIS_EMAIL_SEND_PAYLOAD=base64 json)
 
 Environment:
   SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_FROM

@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadDigestRecipientById } from '@/lib/mis-email/recipients';
 import { sendMisEmailViaVpsRelay, isMisEmailRelayConfigured } from '@/lib/mis-email/send-relay';
+import { isVpsSshSendConfigured, sendMisEmailViaVpsSsh } from '@/lib/mis-email/send-vps-ssh';
 import {
   mergeMisEmailPreferences,
   validateMisEmailPreferencesPatch,
@@ -71,16 +72,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: validated.error }, { status: 400 });
     }
 
-    if (!isMisEmailRelayConfigured()) {
-      return NextResponse.json(
-        {
-          error:
-            'Mail not configured — set VPS_MAIL_RELAY_SECRET in environment (sends via VPS Postfix at api.wrl-fsm.cloud)',
-        },
-        { status: 503 }
-      );
-    }
-
     if (body.savePreferences) {
       await prisma.$queryRawUnsafe(
         `UPDATE public.app_users SET mis_email_preferences = $1::jsonb WHERE id = $2`,
@@ -89,11 +80,28 @@ export async function POST(request: Request) {
       );
     }
 
-    const results = await sendMisEmailViaVpsRelay({
-      userId: user.id,
-      preferences: validated.merged,
-      sendTo: body.sendTo,
-    });
+    let results;
+    try {
+      if (!isMisEmailRelayConfigured()) {
+        throw new Error('VPS_MAIL_RELAY_SECRET is not set');
+      }
+      results = await sendMisEmailViaVpsRelay({
+        userId: user.id,
+        preferences: validated.merged,
+        sendTo: body.sendTo,
+      });
+    } catch (relayErr) {
+      if (process.env.NODE_ENV === 'development' && isVpsSshSendConfigured()) {
+        console.warn('[mis-email/send] HTTPS relay failed, using VPS SSH fallback:', relayErr);
+        results = await sendMisEmailViaVpsSsh({
+          userId: user.id,
+          preferences: validated.merged,
+          sendTo: body.sendTo,
+        });
+      } else {
+        throw relayErr;
+      }
+    }
 
     return NextResponse.json({
       ok: true,
