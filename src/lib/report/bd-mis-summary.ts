@@ -1,6 +1,7 @@
 /**
- * BD MIS regional summary — mirrors Format.xlsx Main sheet union:
- * CRM (plant-mapped) − replaced CRM accounts + client Cadbury (N/E/S) + client Coke (South only).
+ * BD MIS regional summary union rules:
+ * - Cadbury: import only — subtract CRM Cadbury/Mondelez (N/E/S), add client Cadbury.
+ * - Coke: CRM + import — keep CRM Coke in branch base, add client Coke (South); never subtract CRM Coke.
  */
 
 import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/report/summary-derive';
@@ -25,6 +26,7 @@ export type BdMisMetricBundle = {
   total_calls: number;
   total_solved: number;
   cancelled_calls: number;
+  open_calls: number;
   age_2: number;
   age_3: number;
   age_7: number;
@@ -43,6 +45,7 @@ export function emptyBdMisMetrics(): BdMisMetricBundle {
     total_calls: 0,
     total_solved: 0,
     cancelled_calls: 0,
+    open_calls: 0,
     age_2: 0,
     age_3: 0,
     age_7: 0,
@@ -76,7 +79,7 @@ function isCrmCadburyAccount(account: string): boolean {
   return key === 'cadbury' || key === 'mondelez';
 }
 
-/** CRM Coke accounts replaced by HCCB import in South only. */
+/** CRM Coke/HCCB accounts — kept in branch base when Coke import is merged (both count). */
 function isCrmCokeAccountSouth(account: string): boolean {
   const key = account.trim().toLowerCase();
   return key === 'coke' || key === 'hccb';
@@ -91,6 +94,7 @@ function metricsFromBranch(row: BranchSummaryRow): BdMisMetricBundle {
     total_calls: Number(row.total_calls ?? 0),
     total_solved: Number(row.solved_calls ?? 0),
     cancelled_calls: Number(row.cancelled_calls ?? 0),
+    open_calls: Number(row.open_calls ?? 0),
     age_2: Number(row.age_2 ?? 0),
     age_3: Number(row.age_3 ?? 0),
     age_7: Number(row.age_7 ?? 0),
@@ -105,6 +109,7 @@ function metricsFromAccount(row: AccountSummaryRow): BdMisMetricBundle {
     total_calls: Number(row.total_calls ?? 0),
     total_solved: Number(row.total_solved ?? 0),
     cancelled_calls: Number(row.cancelled_calls ?? 0),
+    open_calls: Number(row.open_calls ?? 0),
     age_2: Number(row.age_2 ?? 0),
     age_3: Number(row.age_3 ?? 0),
     age_7: Number(row.age_7 ?? 0),
@@ -119,6 +124,7 @@ export function addBdMisMetrics(a: BdMisMetricBundle, b: BdMisMetricBundle): BdM
     total_calls: a.total_calls + b.total_calls,
     total_solved: a.total_solved + b.total_solved,
     cancelled_calls: a.cancelled_calls + b.cancelled_calls,
+    open_calls: a.open_calls + b.open_calls,
     age_2: a.age_2 + b.age_2,
     age_3: a.age_3 + b.age_3,
     age_7: a.age_7 + b.age_7,
@@ -133,6 +139,7 @@ export function subtractBdMisMetrics(a: BdMisMetricBundle, b: BdMisMetricBundle)
     total_calls: a.total_calls - b.total_calls,
     total_solved: a.total_solved - b.total_solved,
     cancelled_calls: a.cancelled_calls - b.cancelled_calls,
+    open_calls: a.open_calls - b.open_calls,
     age_2: a.age_2 - b.age_2,
     age_3: a.age_3 - b.age_3,
     age_7: a.age_7 - b.age_7,
@@ -181,46 +188,21 @@ export function buildBdMisRegionalBreakdown(params: {
   const { crmBranchSummary, crmAccountSummary, clientAccountSummary, sources } = params;
 
   return BD_MIS_ZONES.map((zone) => {
-    const crmBranchBase = sources.crm
-      ? sumBranchMetricsInZone(crmBranchSummary, zone)
-      : emptyBdMisMetrics();
-
-    const subtractCrmCadbury =
-      sources.crm && sources.cadbury && zone !== 'WEST ZONE'
-        ? sumAccountMetricsInZone(crmAccountSummary, zone, isCrmCadburyAccount)
-        : emptyBdMisMetrics();
-
-    const addClientCadbury =
-      sources.cadbury && zone !== 'WEST ZONE'
-        ? sumClientCadburyInZone(clientAccountSummary, zone)
-        : emptyBdMisMetrics();
-
-    const subtractCrmCoke = emptyBdMisMetrics();
-
-    const addClientCoke =
-      sources.coke && zone === 'SOUTH ZONE'
-        ? sumClientCokeMetricsSouth(clientAccountSummary)
-        : emptyBdMisMetrics();
-
-    let metrics = crmBranchBase;
-    if (subtractCrmCadbury.total_calls || subtractCrmCadbury.total_solved) {
-      metrics = subtractBdMisMetrics(metrics, subtractCrmCadbury);
-    }
-    if (addClientCadbury.total_calls || addClientCadbury.total_solved) {
-      metrics = addBdMisMetrics(metrics, addClientCadbury);
-    }
-    if (addClientCoke.total_calls || addClientCoke.total_solved) {
-      metrics = addBdMisMetrics(metrics, addClientCoke);
-    }
-
+    const steps = applyBdMisZoneUnion(
+      zone,
+      crmBranchSummary,
+      crmAccountSummary,
+      clientAccountSummary,
+      sources
+    );
     return {
       region: zone,
-      crmBranchBase,
-      subtractCrmCadbury,
-      addClientCadbury,
-      subtractCrmCoke,
-      addClientCoke,
-      result: toRegionalRow(zone, metrics),
+      crmBranchBase: steps.crmBranchBase,
+      subtractCrmCadbury: steps.subtractCrmCadbury,
+      addClientCadbury: steps.addClientCadbury,
+      subtractCrmCoke: steps.subtractCrmCoke,
+      addClientCoke: steps.addClientCoke,
+      result: toRegionalRow(zone, steps.result),
     };
   });
 }
@@ -240,11 +222,73 @@ function sumClientCadburyInZone(
   return sumAccountMetricsInZone(clientAccounts, zone, isCadburyAccount);
 }
 
+type ZoneUnionSteps = {
+  crmBranchBase: BdMisMetricBundle;
+  subtractCrmCadbury: BdMisMetricBundle;
+  addClientCadbury: BdMisMetricBundle;
+  subtractCrmCoke: BdMisMetricBundle;
+  addClientCoke: BdMisMetricBundle;
+  result: BdMisMetricBundle;
+};
+
+/** Apply per-zone source union (Cadbury import-only, Coke CRM + import). */
+function applyBdMisZoneUnion(
+  zone: BdMisZone,
+  crmBranchSummary: BranchSummaryRow[],
+  crmAccountSummary: AccountSummaryRow[],
+  clientAccountSummary: AccountSummaryRow[],
+  sources: BdMisSourceFlags
+): ZoneUnionSteps {
+  const crmBranchBase = sources.crm
+    ? sumBranchMetricsInZone(crmBranchSummary, zone)
+    : emptyBdMisMetrics();
+
+  const subtractCrmCadbury =
+    sources.crm && sources.cadbury && zone !== 'WEST ZONE'
+      ? sumAccountMetricsInZone(crmAccountSummary, zone, isCrmCadburyAccount)
+      : emptyBdMisMetrics();
+
+  const addClientCadbury =
+    sources.cadbury && zone !== 'WEST ZONE'
+      ? sumClientCadburyInZone(clientAccountSummary, zone)
+      : emptyBdMisMetrics();
+
+  // Coke: never subtract CRM — both CRM Coke (in branch base) and import Coke count.
+  const subtractCrmCoke = emptyBdMisMetrics();
+
+  const addClientCoke =
+    sources.coke && zone === 'SOUTH ZONE'
+      ? sumClientCokeMetricsSouth(clientAccountSummary)
+      : emptyBdMisMetrics();
+
+  let result = crmBranchBase;
+
+  if (sources.crm && sources.cadbury && zone !== 'WEST ZONE') {
+    result = subtractBdMisMetrics(result, subtractCrmCadbury);
+    result = addBdMisMetrics(result, addClientCadbury);
+  } else if (!sources.crm && sources.cadbury && zone !== 'WEST ZONE') {
+    result = addBdMisMetrics(result, addClientCadbury);
+  }
+
+  if (sources.coke && zone === 'SOUTH ZONE') {
+    result = addBdMisMetrics(result, addClientCoke);
+  }
+
+  return {
+    crmBranchBase,
+    subtractCrmCadbury,
+    addClientCadbury,
+    subtractCrmCoke,
+    addClientCoke,
+    result,
+  };
+}
+
 function toRegionalRow(zone: BdMisZone, metrics: BdMisMetricBundle): BdMisRegionalRow {
   return {
     region: zone,
     ...metrics,
-    open_calls: openCallsFromTotals(metrics),
+    open_calls: Math.max(0, metrics.open_calls),
   };
 }
 
@@ -260,28 +304,14 @@ export function buildBdMisRegionalRows(params: {
   const { crmBranchSummary, crmAccountSummary, clientAccountSummary, sources } = params;
 
   return BD_MIS_ZONES.map((zone) => {
-    let metrics = sources.crm
-      ? sumBranchMetricsInZone(crmBranchSummary, zone)
-      : emptyBdMisMetrics();
-
-    if (sources.crm && sources.cadbury && zone !== 'WEST ZONE') {
-      metrics = subtractBdMisMetrics(
-        metrics,
-        sumAccountMetricsInZone(crmAccountSummary, zone, isCrmCadburyAccount)
-      );
-      metrics = addBdMisMetrics(metrics, sumClientCadburyInZone(clientAccountSummary, zone));
-    }
-
-    if (sources.crm && sources.coke && zone === 'SOUTH ZONE') {
-      // Excel BD MIS: HCCB snapshot replaces CRM Coke rows at file level — do not subtract CRM Coke again.
-      metrics = addBdMisMetrics(metrics, sumClientCokeMetricsSouth(clientAccountSummary));
-    } else if (!sources.crm && sources.coke && zone === 'SOUTH ZONE') {
-      metrics = addBdMisMetrics(metrics, sumClientCokeMetricsSouth(clientAccountSummary));
-    } else if (!sources.crm && sources.cadbury && zone !== 'WEST ZONE') {
-      metrics = addBdMisMetrics(metrics, sumClientCadburyInZone(clientAccountSummary, zone));
-    }
-
-    return toRegionalRow(zone, metrics);
+    const steps = applyBdMisZoneUnion(
+      zone,
+      crmBranchSummary,
+      crmAccountSummary,
+      clientAccountSummary,
+      sources
+    );
+    return toRegionalRow(zone, steps.result);
   });
 }
 
@@ -295,7 +325,7 @@ export function sumBdMisRegionalGrand(rows: BdMisRegionalRow[]): BdMisGrandRow {
   return {
     region: 'ALL',
     ...grand,
-    open_calls: openCallsFromTotals(grand),
+    open_calls: Math.max(0, grand.open_calls),
   };
 }
 

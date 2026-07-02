@@ -155,24 +155,32 @@ export function buildDigestEmailPlainText(params: {
   dateRange: DigestDateRange;
   scopeLabel: string;
   portalUrl: string;
+  bodyPlainText?: string;
 }): string {
   const reportUrl = `${params.portalUrl.replace(/\/$/, '')}/report`;
   const greeting = formatRecipientGreeting(params.recipientName, params.recipientEmail);
   const period = formatReportPeriod(params.dateRange);
+  const bodyPreview = params.bodyPlainText?.trim();
 
-  return [
+  const lines = [
     'WRL Dashboard — Western Refrigeration Pvt. Ltd.',
     '',
     greeting,
     '',
-    `Your MIS report for ${period} is attached.`,
+    bodyPreview
+      ? `Your MIS report for ${period} is below. Full Excel reports are attached.`
+      : `Your MIS report for ${period} is attached.`,
     `Report period: ${period}`,
     `Branch scope: ${params.scopeLabel}`,
-    '',
-    `Open dashboard: ${reportUrl}`,
-    '',
-    'Automated MIS Digest',
-  ].join('\n');
+  ];
+
+  if (bodyPreview) {
+    lines.push('', bodyPreview);
+  }
+
+  lines.push('', `Open dashboard: ${reportUrl}`, '', 'Automated MIS Digest');
+
+  return lines.join('\n');
 }
 
 export function buildDigestEmailHtml(params: {
@@ -181,6 +189,7 @@ export function buildDigestEmailHtml(params: {
   dateRange: DigestDateRange;
   scopeLabel: string;
   portalUrl: string;
+  bodyHtml?: string;
 }): string {
   const t = MIS_EMAIL_THEME;
   const reportUrl = `${params.portalUrl.replace(/\/$/, '')}/report`;
@@ -188,6 +197,10 @@ export function buildDigestEmailHtml(params: {
   const period = formatReportPeriod(params.dateRange);
   const preheader = `MIS report for ${period} — ${params.scopeLabel}`;
   const cta = buildCtaLink(reportUrl, 'Open WRL Dashboard');
+  const bodyHtml = params.bodyHtml?.trim() ?? '';
+  const introText = bodyHtml
+    ? `Your MIS report for <strong class="email-strong" style="font-weight:bold;color:${t.fgPrimary};">${escapeHtml(period)}</strong> is below. Full Excel reports are attached to this email.`
+    : `Please find your MIS report for <strong class="email-strong" style="font-weight:bold;color:${t.fgPrimary};">${escapeHtml(period)}</strong> attached to this email.`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -203,8 +216,8 @@ export function buildDigestEmailHtml(params: {
   <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">${escapeHtml(preheader)}</div>
   <table role="presentation" class="email-outer" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="${t.bgSoft}" style="width:100%;background-color:${t.bgSoft};">
     <tr>
-      <td align="center" bgcolor="${t.bgSoft}" style="padding:40px 16px;background-color:${t.bgSoft};">
-        <table role="presentation" class="email-card" width="560" cellspacing="0" cellpadding="0" border="1" bordercolor="${t.border}" bgcolor="${t.bgCanvas}" style="width:100%;max-width:560px;background-color:${t.bgCanvas};border:1px solid ${t.border};">
+      <td align="left" bgcolor="${t.bgSoft}" style="padding:24px 20px;background-color:${t.bgSoft};">
+        <table role="presentation" class="email-card" width="100%" cellspacing="0" cellpadding="0" border="1" bordercolor="${t.border}" bgcolor="${t.bgCanvas}" style="width:100%;max-width:100%;background-color:${t.bgCanvas};border:1px solid ${t.border};">
           <tr>
             <td class="email-stripe" bgcolor="${t.accent}" width="4" style="width:4px;background-color:${t.accent};font-size:0;line-height:0;">&nbsp;</td>
             <td class="email-content" bgcolor="${t.bgCanvas}" style="background-color:${t.bgCanvas};">
@@ -225,11 +238,20 @@ export function buildDigestEmailHtml(params: {
                         <td class="email-text" style="padding:0 0 12px;font-family:${t.fontInline};font-size:14px;line-height:1.7;color:${t.fgPrimary};">${escapeHtml(greeting)}</td>
                       </tr>
                       <tr>
-                        <td class="email-text" style="padding:0 0 28px;font-family:${t.fontInline};font-size:14px;line-height:1.7;color:${t.fgPrimary};">Please find your MIS report for <strong class="email-strong" style="font-weight:bold;color:${t.fgPrimary};">${escapeHtml(period)}</strong> attached to this email.</td>
+                        <td class="email-text" style="padding:0 0 28px;font-family:${t.fontInline};font-size:14px;line-height:1.7;color:${t.fgPrimary};">${introText}</td>
                       </tr>
                     </table>
                   </td>
                 </tr>
+                ${
+                  bodyHtml
+                    ? `<tr>
+                  <td class="email-panel" bgcolor="${t.bgCanvas}" style="padding:0 36px 24px;background-color:${t.bgCanvas};">
+                    <div style="overflow-x:auto;">${bodyHtml}</div>
+                  </td>
+                </tr>`
+                    : ''
+                }
                 <tr>
                   <td class="email-panel" bgcolor="${t.bgCanvas}" style="padding:0 36px 28px;background-color:${t.bgCanvas};">
                     <table role="presentation" class="email-meta" width="100%" cellspacing="0" cellpadding="0" border="1" bordercolor="${t.border}" bgcolor="${t.bgMuted}" style="background-color:${t.bgMuted};border:1px solid ${t.border};">

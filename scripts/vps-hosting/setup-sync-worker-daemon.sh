@@ -20,7 +20,7 @@ install_systemd_nightly_timer() {
   echo "==> Installing nightly YTD refresh timer ${timer_unit}"
   cat >"$service_unit" <<EOF
 [Unit]
-Description=Fast Close CRM read-model nightly YTD hot refresh
+  Description=Fast Close CRM read-model nightly editedon catch-up (YTD status replay)
 Documentation=file://${root}/docs/sync.md
 After=network-online.target docker.service
 Wants=network-online.target
@@ -37,7 +37,7 @@ EOF
 
   cat >"$timer_unit" <<EOF
 [Unit]
-Description=Daily Fast Close CRM YTD hot refresh (02:30)
+Description=Daily Fast Close CRM editedon catch-up (02:30)
 
 [Timer]
 OnCalendar=*-*-* 02:30:00
@@ -63,7 +63,7 @@ install_systemd_unit() {
   echo "==> Installing systemd unit ${unit}"
   cat >"$unit" <<EOF
 [Unit]
-Description=Fast Close CRM read-model sync worker (incremental + pipeline reconcile every 3 min)
+Description=Fast Close CRM read-model sync worker (incremental + pipeline reconcile + editedon catch-up every 3 min)
 Documentation=file://${root}/docs/sync.md
 After=network-online.target docker.service
 Wants=network-online.target
@@ -153,11 +153,19 @@ fi
 source "$ENV_FILE"
 VPS_HOST="${VPS_HOST:?Set VPS_HOST in .env.vps-setup}"
 
+SSH_OPTS=(
+  -o ServerAliveInterval=30
+  -o ServerAliveCountMax=6
+  -o TCPKeepAlive=yes
+)
+
 echo "==> Syncing app to ${VPS_HOST}:${INSTALL_ROOT}"
-ssh "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}/scripts/vps-hosting' '${INSTALL_ROOT}/logs'"
+echo "    Tip: for code-only updates use: npm run sync-worker:deploy:vps"
+ssh "${SSH_OPTS[@]}" "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}/scripts/vps-hosting' '${INSTALL_ROOT}/logs'"
 
 if command -v rsync >/dev/null 2>&1; then
-  rsync -az \
+  RSYNC_SSH="ssh ${SSH_OPTS[*]}"
+  rsync -az -e "$RSYNC_SSH" \
     --exclude 'node_modules' \
     --exclude '.next' \
     --exclude '.git' \
@@ -166,7 +174,8 @@ if command -v rsync >/dev/null 2>&1; then
     --exclude '.env.local' \
     "${ROOT}/" "${VPS_HOST}:${INSTALL_ROOT}/"
 else
-  echo "    (rsync not found — using tar over ssh)"
+  echo "    (rsync not found — using tar over ssh; install rsync for faster deploys)"
+  echo "    Windows: winget install rsync  OR  choco install rsync"
   tar -C "${ROOT}" -czf - \
     --exclude='node_modules' \
     --exclude='.next' \
@@ -174,20 +183,34 @@ else
     --exclude='logs' \
     --exclude='.env' \
     --exclude='.env.local' \
-    . | ssh "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}' && tar -xzf - -C '${INSTALL_ROOT}'"
+    --exclude='assets' \
+    --exclude='public' \
+    --exclude='scripts/crm_mirror' \
+    --exclude='docs' \
+    --exclude='.cursor' \
+    . | ssh "${SSH_OPTS[@]}" "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}' && tar -xzf - -C '${INSTALL_ROOT}'"
 fi
 
-scp "${ROOT}/scripts/vps-hosting/sync-worker-daemon.sh" \
-  "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/sync-worker-daemon.sh"
-scp "${ROOT}/scripts/vps-hosting/sync-worker-nightly.sh" \
-  "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/sync-worker-nightly.sh"
-scp "${ROOT}/scripts/vps-hosting/.env.sync-worker.example" \
-  "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/.env.sync-worker.example"
-scp "${ROOT}/scripts/vps-hosting/setup-sync-worker-daemon.sh" \
-  "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/setup-sync-worker-daemon.sh"
+RSYNC_SSH="ssh ${SSH_OPTS[*]}"
+copy_one() {
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -az -e "$RSYNC_SSH" "$1" "${VPS_HOST}:$2"
+  else
+    scp "${SSH_OPTS[@]}" "$1" "${VPS_HOST}:$2"
+  fi
+}
+
+copy_one "${ROOT}/scripts/vps-hosting/sync-worker-daemon.sh" \
+  "${INSTALL_ROOT}/scripts/vps-hosting/sync-worker-daemon.sh"
+copy_one "${ROOT}/scripts/vps-hosting/sync-worker-nightly.sh" \
+  "${INSTALL_ROOT}/scripts/vps-hosting/sync-worker-nightly.sh"
+copy_one "${ROOT}/scripts/vps-hosting/.env.sync-worker.example" \
+  "${INSTALL_ROOT}/scripts/vps-hosting/.env.sync-worker.example"
+copy_one "${ROOT}/scripts/vps-hosting/setup-sync-worker-daemon.sh" \
+  "${INSTALL_ROOT}/scripts/vps-hosting/setup-sync-worker-daemon.sh"
 
 echo "==> Running install on VPS"
-ssh "$VPS_HOST" "SYNC_WORKER_INSTALL_ROOT='${INSTALL_ROOT}' bash -s" <<REMOTE
+ssh "${SSH_OPTS[@]}" "$VPS_HOST" "SYNC_WORKER_INSTALL_ROOT='${INSTALL_ROOT}' bash -s" <<REMOTE
 $(declare -f install_systemd_unit install_systemd_nightly_timer run_install_on_machine)
 run_install_on_machine '${INSTALL_ROOT}'
 REMOTE

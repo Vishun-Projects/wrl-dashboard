@@ -10,6 +10,8 @@ import { runBackfillHistoricalHot } from '@/lib/read-model/backfill-historical';
 import { runIncrementalSync } from '@/lib/read-model/incremental';
 import { runNightlyReconcile } from '@/lib/read-model/nightly';
 import { runPipelineReconcile } from '@/lib/read-model/pipeline-reconcile';
+import { runEditedonCatchupRange, runEditedonCatchupStep } from '@/lib/read-model/editedon-catchup';
+import { todayLocalDate } from '@/lib/read-model/dates';
 import { runRetentionJobs } from '@/lib/read-model/retention';
 import { runBackfillCallsHotBmApproval } from '@/lib/read-model/backfill-bm-approval';
 
@@ -81,6 +83,22 @@ async function main(): Promise<void> {
       console.log('[sync-worker] Pipeline reconcile:', result);
       break;
     }
+    case 'editedon-catchup': {
+      const args = process.argv.slice(3);
+      const fromIdx = args.indexOf('--from');
+      const toIdx = args.indexOf('--to');
+      const from =
+        fromIdx >= 0 ? args[fromIdx + 1] : process.env.SYNC_EDITEDON_CATCHUP_FROM;
+      const to =
+        toIdx >= 0
+          ? args[toIdx + 1]
+          : process.env.SYNC_EDITEDON_CATCHUP_TO ?? todayLocalDate();
+      const result = from
+        ? await runEditedonCatchupRange(from, to)
+        : await runEditedonCatchupStep();
+      console.log('[sync-worker] Editedon catch-up:', result);
+      break;
+    }
     case 'backfill-bm-approval': {
       const result = await runBackfillCallsHotBmApproval({
         onlyMissing: process.env.BM_BACKFILL_ALL !== 'true',
@@ -130,8 +148,10 @@ Commands:
   backfill          Full reload: TRUNCATE hot + YTD CRM load + facts (use once)
   fill-ytd          Upsert YTD + open-old only — no truncate (safe refresh)
   backfill-historical  Upsert pre-YTD CRM calls (default 2020-01-01 .. day before Jan 1) — no truncate
-  incremental       Single calls incremental sync run (+ pipeline reconcile)
+  incremental       Single calls incremental sync run (+ pipeline reconcile + editedon catch-up)
   pipeline-reconcile  Refresh stale open/assigned hot rows from CRM by TRN
+  editedon-catchup  Replay CRM edits by editedon day (addedon <> editedon)
+                    --from YYYY-MM-DD --to YYYY-MM-DD  (default: one step from cursor)
   backfill-bm-approval  Fill calls_latest_hot.bapproval / bm_approved_at from CRM (no truncate)
   arcp-reset        Truncate arcp_lines_hot + reset sync_state (fresh start)
   arcp-backfill     Initial ARCP lines backfill (ARCP_BACKFILL_START_DATE or YEARS)
@@ -151,7 +171,10 @@ Environment:
   SYNC_ARCP_ENABLED      Run ARCP incremental in daemon / API sync
   SYNC_INTERVAL_MS       Daemon interval (default 180000)
   SYNC_PIPELINE_RECONCILE_ENABLED  Re-check open/assigned hot rows each incremental (default true)
-  SYNC_PIPELINE_RECONCILE_BATCH   Pipeline TRNs checked per run (default 150)
+  SYNC_PIPELINE_RECONCILE_BATCH   Pipeline TRNs checked per run (default 400)
+  SYNC_EDITEDON_CATCHUP_ENABLED   Replay editedon day windows each incremental (default true)
+  SYNC_EDITEDON_CATCHUP_DAYS_PER_RUN  Calendar days per incremental catch-up step (default 1)
+  SYNC_EDITEDON_CATCHUP_FROM      Optional start for editedon-catchup CLI (default YTD)
   SYNC_HISTORICAL_START_DATE First day for backfill-historical (default 2020-01-01)
   SYNC_PRE_YTD_START_DATE    Alias for SYNC_HISTORICAL_START_DATE
   SYNC_BACKFILL_CHUNK_DAYS     CRM days per backfill request (default 14)

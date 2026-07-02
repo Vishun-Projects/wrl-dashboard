@@ -1,5 +1,3 @@
-import 'server-only';
-
 import nodemailer from 'nodemailer';
 import { resolveAppOrigin } from '@/lib/auth/site-url';
 import { resolveSmtpConfig } from '@/lib/mis-email/send';

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Nightly YTD hot refresh — catches any rows missed by incremental / pipeline reconcile.
-# Installed by setup-sync-worker-daemon.sh as systemd timer (02:30 daily).
+# Nightly editedon catch-up — replays CRM status edits (addedon <> editedon) for YTD.
+# Safer than fill-ytd during MIS close (status-only replay, no full YTD rewrite).
 set -euo pipefail
 
 INSTALL_ROOT="${SYNC_WORKER_INSTALL_ROOT:-/opt/fast-close-app}"
@@ -19,14 +19,18 @@ else
 fi
 
 export NODE_ENV=production
-# YTD fill loads large CRM chunks — default Node ~2GB heap OOMs on VPS (see logs).
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
 
 if [[ "${SYNC_WORKER_ENABLED:-}" != "true" ]]; then
-  echo "SYNC_WORKER_ENABLED is not true — skipping nightly hot refresh"
+  echo "SYNC_WORKER_ENABLED is not true — skipping nightly editedon catch-up"
   exit 0
 fi
 
+YTD_START="${SYNC_EDITEDON_CATCHUP_FROM:-$(date +%Y)-01-01}"
+TODAY="$(date +%Y-%m-%d)"
+
 echo "=== sync-worker-nightly $(date -Iseconds) TZ=${TZ:-system} ==="
-npm run sync-worker:fill-ytd
+echo "Editedon catch-up ${YTD_START} .. ${TODAY} (addedon <> editedon)"
+npm run sync-worker:editedon-catchup -- --from "${YTD_START}" --to "${TODAY}"
+npm run sync-worker:pipeline-reconcile
 echo "=== sync-worker-nightly done $(date -Iseconds) ==="

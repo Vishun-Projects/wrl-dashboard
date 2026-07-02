@@ -10,8 +10,9 @@ npm run sync-worker:daemon
 
 Defaults: every `SYNC_INTERVAL_MS` (180000 ms). Each run:
 
-1. **Editedon delta** — fetches CRM rows where `editedon >= watermark` (any logged date; fixes cancellations on older calls).
-2. **Pipeline reconcile** — re-checks open/assigned hot rows against live CRM by TRN (fixes rows already behind the watermark).
+1. **Editedon delta** — `ISNULL(editedon, addedon) >= watermark`; each fetched row is **fully upserted** into `calls_latest_hot` (status + all mapped fields).
+2. **Pipeline reconcile** — re-checks open/assigned hot rows against live CRM by TRN.
+3. **Editedon day catch-up** — one calendar day of `editedon BETWEEN day..day AND addedon <> editedon` (rotating YTD replay for missed status changes).
 
 Requires:
 
@@ -39,8 +40,9 @@ The browser **does not** auto-sync anymore (`PostgresAutoSync` was removed). Use
 
 **Use incremental `editedon` sync only** — the 3-minute VPS daemon (`fast-close-sync-worker`):
 
-1. **`editedon >= watermark`** — pulls only CRM rows that changed since last sync (any logged date; status fixes on old calls included).
-2. **Pipeline reconcile** — small batch of open/assigned TRNs re-checked by ID when hot row is stale vs CRM (complement to editedon; not a full YTD rewrite).
+1. **`editedon >= watermark`** — pulls CRM rows changed since last sync (edits on `editedon` when `addedon <> editedon`).
+2. **Pipeline reconcile** — open/assigned TRNs re-checked by ID when hot row is stale vs CRM.
+3. **Editedon day catch-up** — replays `editedon` calendar days with `addedon <> editedon` (fixes rows already behind the watermark).
 
 This is what produced **~8,774 open** aligned with Excel **8,773** before any bulk jobs ran: hot table + editedon deltas, not a full-table refresh.
 
@@ -65,7 +67,8 @@ Keep `fast-close-sync-worker-nightly.timer` **disabled** on VPS during MIS close
 
 ```bash
 npm run sync-worker:arcp-nightly   # ARCP incremental only
-npm run sync-worker:nightly        # calls reconcile + ARCP when SYNC_ARCP_ENABLED=true
+npm run sync-worker:nightly        # YTD editedon catch-up + pipeline reconcile (+ ARCP when enabled)
+npm run sync-worker:editedon-catchup -- --from 2026-06-30 --to 2026-06-30
 npm run sync-worker:fill-ytd       # YTD hot upsert (no truncate) — gap-fill only; avoid during Excel tally
 ```
 
@@ -90,7 +93,10 @@ See `package.json` for all `sync-worker:*` commands.
 | `SYNC_ARCP_ENABLED` | ARCP in daemon / nightly / API sync |
 | `SYNC_INTERVAL_MS` | Daemon interval (default 180000) |
 | `SYNC_PIPELINE_RECONCILE_ENABLED` | Re-check open/assigned hot rows each incremental (default on) |
-| `SYNC_PIPELINE_RECONCILE_BATCH` | Pipeline TRNs checked per incremental run (default 150) |
+| `SYNC_PIPELINE_RECONCILE_BATCH` | Pipeline TRNs checked per incremental run (default 400) |
+| `SYNC_EDITEDON_CATCHUP_ENABLED` | Replay editedon day windows each incremental (default on) |
+| `SYNC_EDITEDON_CATCHUP_DAYS_PER_RUN` | Calendar days per incremental catch-up step (default 1) |
+| `SYNC_EDITEDON_CATCHUP_FROM` | YTD start for nightly editedon catch-up (default Jan 1) |
 | `SYNC_CRM_INCREMENTAL_CHUNK_DAYS` | CRM window for short catch-up (default 1) |
 | `SYNC_CRM_CATCHUP_CHUNK_DAYS` | CRM window when catch-up > 3 days (default 1) |
 | `SYNC_CRM_INCREMENTAL_TIMEOUT_MS` | HTTP timeout per CRM chunk (default 300000) |

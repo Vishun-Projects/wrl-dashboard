@@ -281,16 +281,21 @@ export function truthyCrmFlag(value: unknown): boolean {
   return normalized === 'true' || normalized === '1' || normalized === 'yes';
 }
 
+/** ncancelreason 2 = transfer; 0/null = none; any other code = real cancellation. */
+export function isRealCancelReasonCode(reason: unknown): boolean {
+  if (reason == null || reason === '') return false;
+  const normalized = String(reason).trim();
+  if (!normalized) return false;
+  return normalized !== '0' && normalized !== '2';
+}
+
 export function isRegisterRowCancelled(row: Record<string, unknown>): boolean {
   if (isRegisterRowTransferred(row)) return false;
   if (row.callstatus === 'Cancel' || row.Status === 'Cancel') return true;
   const statusText = String(row.Status ?? row.callStatus ?? '').toLowerCase();
   if (statusText.includes('cancel')) return true;
   const reason = row.ncancelreason ?? row.ncancelReason;
-  if (reason != null && reason !== '') {
-    const normalized = String(reason).trim();
-    if (normalized !== '0' && normalized !== '2') return true;
-  }
+  if (isRealCancelReasonCode(reason)) return true;
   const cancelReason = row.cancel_reason;
   if (cancelReason != null && String(cancelReason).trim() !== '') return true;
   return false;

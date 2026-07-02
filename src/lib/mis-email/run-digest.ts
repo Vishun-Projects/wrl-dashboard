@@ -1,6 +1,11 @@
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
 import { buildDigestAttachments } from '@/lib/mis-email/build-attachments';
 import {
+  buildEmailBodySectionsHtml,
+  buildEmailBodySectionsPlainText,
+  resolveEffectiveBodySections,
+} from '@/lib/mis-email/body-sections';
+import {
   fetchDigestRegisterRows,
   fetchDigestSummaryData,
   type DigestDateRange,
@@ -9,6 +14,7 @@ import {
   hasAnyEffectiveDigestInclude,
   resolveDigestDateRangeForPreferences,
   resolveEffectiveDigestIncludes,
+  resolveExtraDigestEmails,
 } from '@/lib/mis-email/preferences';
 import {
   loadAppUserProfileByEmail,
@@ -93,6 +99,15 @@ async function sendForRecipient(
     throw new Error('No attachments generated for recipient permissions');
   }
 
+  const bodySectionIds = resolveEffectiveBodySections(
+    effectiveIncludes.includeSummary,
+    effectiveRecipient.mis_email_preferences
+  );
+  const bodyHtml =
+    bodySectionIds.length > 0 ? buildEmailBodySectionsHtml(bodySectionIds, data) : undefined;
+  const bodyPlainText =
+    bodySectionIds.length > 0 ? buildEmailBodySectionsPlainText(bodySectionIds, data) : undefined;
+
   const { messageId } = await sendDigestEmail({
     to: sentTo,
     recipientName: displayName,
@@ -100,6 +115,8 @@ async function sendForRecipient(
     dateRange,
     scopeLabel: scope.scopeLabel,
     attachments,
+    bodyHtml,
+    bodyPlainText,
   });
 
   return {
@@ -201,16 +218,30 @@ export async function runMisEmailDigest(): Promise<DigestRunResult> {
 
   for (let i = 0; i < recipients.length; i++) {
     const recipient = recipients[i];
-    try {
-      const result = await sendForRecipient(recipient, {});
-      sent.push(result);
-      console.log(
-        `[mis-email] Sent to ${recipient.email} (${result.attachments.length} attachments, ${result.dateRange.label})`
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      failed.push({ recipientId: recipient.id, email: recipient.email, error: message });
-      console.error(`[mis-email] Failed for ${recipient.email}:`, message);
+    const sendTargets = [
+      recipient.email,
+      ...resolveExtraDigestEmails(recipient.mis_email_preferences, recipient.email),
+    ];
+
+    for (let t = 0; t < sendTargets.length; t++) {
+      const sendTo = sendTargets[t];
+      try {
+        const result = await sendForRecipient(recipient, {
+          testTo: sendTo === recipient.email ? undefined : sendTo,
+        });
+        sent.push(result);
+        console.log(
+          `[mis-email] Sent to ${sendTo} (${result.attachments.length} attachments, ${result.dateRange.label})`
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        failed.push({ recipientId: recipient.id, email: sendTo, error: message });
+        console.error(`[mis-email] Failed for ${sendTo}:`, message);
+      }
+
+      if (t < sendTargets.length - 1) {
+        await delay(SEND_DELAY_MS);
+      }
     }
 
     if (i < recipients.length - 1) {

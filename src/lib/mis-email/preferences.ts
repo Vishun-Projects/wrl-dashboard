@@ -1,6 +1,11 @@
 import { defaultDateRange, formatLocalDate, toDateString } from '@/lib/report/filters';
 import type { DigestDateRange } from '@/lib/mis-email/fetch-digest-data';
 import type { DigestRecipient } from '@/lib/mis-email/recipients';
+import {
+  parseMisEmailBodySectionIds,
+  resolveEffectiveBodySections,
+  type MisEmailBodySectionId,
+} from '@/lib/mis-email/body-sections';
 
 export type MisEmailDateRangeMode = 'yesterday' | 'month_to_date';
 
@@ -10,6 +15,10 @@ export type MisEmailPreferences = {
   includeSummary?: boolean;
   includeDetailed?: boolean;
   includeKeyAccount?: boolean;
+  /** Additional inboxes that receive the same daily digest (e.g. work + personal). */
+  extraEmails?: string[];
+  /** Summary report sections rendered inline in the email body (full Excel still attached). */
+  bodyInEmail?: MisEmailBodySectionId[];
 };
 
 export const DEFAULT_MIS_EMAIL_PREFERENCES: Required<MisEmailPreferences> = {
@@ -41,8 +50,33 @@ export function parseMisEmailPreferences(raw: unknown): MisEmailPreferences {
   if (typeof raw.includeSummary === 'boolean') prefs.includeSummary = raw.includeSummary;
   if (typeof raw.includeDetailed === 'boolean') prefs.includeDetailed = raw.includeDetailed;
   if (typeof raw.includeKeyAccount === 'boolean') prefs.includeKeyAccount = raw.includeKeyAccount;
+  if (Array.isArray(raw.extraEmails)) {
+    prefs.extraEmails = raw.extraEmails
+      .filter((e): e is string => typeof e === 'string')
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => e.includes('@'));
+  }
+  if (Array.isArray(raw.bodyInEmail)) {
+    prefs.bodyInEmail = parseMisEmailBodySectionIds(raw.bodyInEmail);
+  }
 
   return prefs;
+}
+
+export function resolveExtraDigestEmails(
+  prefs: MisEmailPreferences,
+  primaryEmail: string
+): string[] {
+  const primary = primaryEmail.trim().toLowerCase();
+  const seen = new Set<string>(primary ? [primary] : []);
+  const extras: string[] = [];
+  for (const raw of prefs.extraEmails ?? []) {
+    const email = raw.trim().toLowerCase();
+    if (!email || !email.includes('@') || seen.has(email)) continue;
+    seen.add(email);
+    extras.push(email);
+  }
+  return extras;
 }
 
 export function mergeMisEmailPreferences(
@@ -150,6 +184,12 @@ export function validateMisEmailPreferencesPatch(params: {
   if (merged.includeKeyAccount && !params.permissions.includeKeyAccount) {
     return { ok: false, error: 'Key account report is not permitted for your role' };
   }
+
+  if ((merged.bodyInEmail?.length ?? 0) > 0 && !params.permissions.includeSummary) {
+    return { ok: false, error: 'Email body preview requires summary report access' };
+  }
+
+  merged.bodyInEmail = resolveEffectiveBodySections(params.permissions.includeSummary, merged);
 
   return { ok: true, merged };
 }

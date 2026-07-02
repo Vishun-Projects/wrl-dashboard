@@ -226,8 +226,7 @@ export async function buildKeyAccountMisWorkbook(
   applySummaryHeaderStyle(kaHeader);
 
   sorted.forEach((a) => {
-    const openCalls =
-      Number(a.age_2 || 0) + Number(a.age_3 || 0) + Number(a.age_7 || 0) + Number(a.age_15 || 0);
+    const openCalls = Number(a.open_calls || 0);
     const rowValues = hideRegion
       ? [
           a.account,

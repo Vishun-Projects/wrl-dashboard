@@ -8,6 +8,7 @@ import {
   validateMisEmailPreferencesPatch,
   type MisEmailPreferences,
 } from '@/lib/mis-email/preferences';
+import { resolveAvailableBodySections } from '@/lib/mis-email/body-sections';
 import { resolveUserDigestScopeWithLabel } from '@/lib/mis-email/user-scope';
 
 type MisEmailRow = {
@@ -63,6 +64,7 @@ export async function GET(request: Request) {
       mis_email_enabled: Boolean(row.mis_email_enabled),
       preferences,
       allowed,
+      availableBodySections: resolveAvailableBodySections(allowed.includeSummary),
       roleName: row.role_name,
       scopeLabel,
     });

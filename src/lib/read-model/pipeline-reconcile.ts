@@ -11,7 +11,9 @@ import {
   releaseSyncLock,
 } from '@/lib/read-model/lock';
 import { applyCrmRowsToHot } from '@/lib/read-model/apply-crm-delta';
+import { hotRowCancelReasonMismatch, repairHotCancelFromNcrReason } from '@/lib/read-model/repair-hot-cancel';
 import { transformCrmRowToHot } from '@/lib/read-model/transform';
+import { isRealCancelReasonCode } from '@/lib/report/search';
 import type { HotRow } from '@/lib/read-model/types';
 
 const PIPELINE_BATCH = Math.max(
@@ -38,6 +40,11 @@ export function hotRowNeedsCrmRefresh(
   >,
   crmRow: Record<string, unknown>
 ): boolean {
+  const crmEdited = parseCrmDate(crmRow.editedon) ?? parseCrmDate(crmRow.addedon);
+  const hotEdited = hot.source_editedon;
+  if (crmEdited && !hotEdited) return true;
+  if (crmEdited && hotEdited && crmEdited.getTime() > hotEdited.getTime()) return true;
+
   const fresh = transformCrmRowToHot(crmRow);
   if (!fresh) {
     return hot.status_bucket !== 'cancelled';
@@ -48,11 +55,11 @@ export function hotRowNeedsCrmRefresh(
   if (Number(hot.ncancelreason ?? 0) !== Number(fresh.ncancelreason ?? 0)) return true;
   if (Boolean(hot.bsolved) !== Boolean(fresh.bsolved)) return true;
   if (Boolean(hot.bfastclose) !== Boolean(fresh.bfastclose)) return true;
+  if (hotRowCancelReasonMismatch(hot)) return true;
+  if (isRealCancelReasonCode(crmRow.ncancelreason) && fresh?.status_bucket === 'cancelled' && hot.status_bucket !== 'cancelled') {
+    return true;
+  }
 
-  const crmEdited = parseCrmDate(crmRow.editedon) ?? parseCrmDate(crmRow.addedon);
-  const hotEdited = hot.source_editedon;
-  if (crmEdited && !hotEdited) return true;
-  if (crmEdited && hotEdited && crmEdited.getTime() > hotEdited.getTime()) return true;
   return false;
 }
 
@@ -61,11 +68,18 @@ async function listPipelineReconcileCandidates(limit: number): Promise<HotRow[]>
   return withClient(async (client) => {
     const res = await client.query<HotRow>(
       `
-      SELECT vtrnno, status_bucket, ncancelreason, source_editedon, bsolved, bfastclose, synced_at, region
-      FROM calls_latest_hot
-      WHERE status_bucket = ANY($1::status_bucket_type[])
-        AND logged_at >= $2::timestamptz
-      ORDER BY (source_editedon IS NULL) DESC, synced_at ASC NULLS FIRST, vtrnno ASC
+      SELECT h.vtrnno, h.status_bucket, h.ncancelreason, h.source_editedon,
+             h.bsolved, h.bfastclose, h.synced_at, h.region
+      FROM calls_latest_hot h
+      CROSS JOIN LATERAL (
+        SELECT last_editedon FROM sync_state WHERE entity = 'calls_latest_hot' LIMIT 1
+      ) s
+      WHERE h.status_bucket = ANY($1::status_bucket_type[])
+        AND h.logged_at >= $2::timestamptz
+      ORDER BY
+        (h.source_editedon IS NULL OR h.source_editedon < s.last_editedon) DESC,
+        h.synced_at ASC NULLS FIRST,
+        h.vtrnno ASC
       LIMIT $3
       `,
       [ACTIVE_PIPELINE_BUCKETS, `${ytdStart}T00:00:00`, limit]

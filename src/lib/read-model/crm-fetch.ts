@@ -127,6 +127,8 @@ type CorpusWindowOpts = {
   endDate?: string;
   startDateTime?: string;
   endDateTime?: string;
+  editedonStart?: string;
+  editedonEnd?: string;
   ncodeShard?: TrhcallsNcodeShard | null;
 };
 
@@ -137,6 +139,8 @@ function buildCorpusWindowTableName(opts: CorpusWindowOpts): string {
     endDate: opts.endDate,
     startDateTime: opts.startDateTime,
     endDateTime: opts.endDateTime,
+    editedonStart: opts.editedonStart,
+    editedonEnd: opts.editedonEnd,
     ncodeShard: opts.ncodeShard,
   });
 }
@@ -371,6 +375,23 @@ export async function fetchCrmIncrementalEditedonDelta(
       timeoutMs,
     },
     `editedon>=${watermark}`
+  );
+}
+
+/** CRM rows edited on a calendar day (addedon <> editedon) — replays status changes on any logged date. */
+export async function fetchCrmEditedonDayWindow(
+  startDate: string,
+  endDate: string,
+  timeoutMs = SYNC_INCREMENTAL_TIMEOUT_MS
+): Promise<Record<string, unknown>[]> {
+  return fetchCrmCorpusWindowResilient(
+    {
+      editedonStart: startDate,
+      editedonEnd: endDate,
+      orderBy: 'tc.editedon ASC',
+      timeoutMs,
+    },
+    `editedon ${startDate}..${endDate} edited-only`
   );
 }
 

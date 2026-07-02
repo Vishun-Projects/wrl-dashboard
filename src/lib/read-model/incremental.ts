@@ -26,6 +26,8 @@ import { processCrmRows } from '@/lib/read-model/transform';
 import { countHotRows } from '@/lib/read-model/upsert-hot';
 import { HOT_TARGET_ROWS } from '@/lib/read-model/constants';
 import { runPipelineReconcile } from '@/lib/read-model/pipeline-reconcile';
+import { runEditedonCatchupStep } from '@/lib/read-model/editedon-catchup';
+import { repairHotCancelFromNcrReason } from '@/lib/read-model/repair-hot-cancel';
 
 const OVERLAP_MS = 2 * 60 * 1000;
 const MIN_HOT_FOR_INCREMENTAL = Math.floor(HOT_TARGET_ROWS * 0.95);
@@ -64,6 +66,7 @@ export type IncrementalSyncResult = {
   rowsDeleted?: number;
   crmRowsFetched?: number;
   pipelineReconciled?: number;
+  editedonCatchup?: number;
 };
 
 let inFlightSync: Promise<IncrementalSyncResult> | null = null;
@@ -201,6 +204,10 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
     const state = await getSyncState(client);
     try {
       const written = await applyCrmRowsToHot(client, rawRows, { state, advanceWatermarks: true });
+      const repaired = await repairHotCancelFromNcrReason(client);
+      if (repaired > 0) {
+        console.log(`[sync-worker] Repaired ${repaired} hot row(s) — ncancelreason → cancelled`);
+      }
       await releaseSyncLock(client, 'ok', written.rowsUpserted);
       return { kind: 'written' as const, ...written };
     } catch (err) {
@@ -237,12 +244,29 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
     );
   }
 
+  let editedonCatchup = 0;
+  try {
+    const catchup = await runEditedonCatchupStep();
+    editedonCatchup = catchup.rowsUpserted ?? 0;
+    if (catchup.daysProcessed) {
+      console.log(
+        `[sync-worker] Editedon catch-up step ${catchup.fromDay}..${catchup.toDay} — upserted ${editedonCatchup}`
+      );
+    }
+  } catch (err) {
+    console.warn(
+      '[sync-worker] Editedon catch-up failed (incremental succeeded):',
+      err instanceof Error ? err.message : err
+    );
+  }
+
   return {
     ok: true,
     rowsUpserted: writeResult.rowsUpserted,
     rowsDeleted: writeResult.rowsDeleted,
     crmRowsFetched: rawRows.length,
     pipelineReconciled,
+    editedonCatchup,
   };
 }
 

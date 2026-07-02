@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/db/prisma';
 import { normalizeExactTrnSearch } from '@/lib/trhcalls/query';
-import { mapCachedRowToRegisterRow } from '@/lib/report/search';
+import { mapCachedRowToRegisterRow, isRealCancelReasonCode } from '@/lib/report/search';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
 import { mergeArcpApproveDatesFromHot } from '@/lib/register/arcp-approve-dates-server';
 import { mergeAuditEnrichment } from '@/lib/register/audit-enrichment';
@@ -11,6 +11,7 @@ import {
   REGISTER_BULK_MAX_ROWS,
   REGISTER_HOT_COLUMNS,
 } from '@/lib/read-model/queries/register-columns';
+import { REGISTER_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
 
 export { REGISTER_BULK_MAX_ROWS };
 
@@ -49,6 +50,8 @@ export type RegisterPostgresParams = {
 };
 
 export function hotRowToRegisterRow(row: Record<string, unknown>): Record<string, unknown> {
+  const cancelledByNcr = isRealCancelReasonCode(row.ncancelreason);
+  const statusLabel = cancelledByNcr ? 'Cancelled' : row.status_label;
   return mapCachedRowToRegisterRow({
     ncode: row.ncode,
     id: row.ncode,
@@ -80,8 +83,8 @@ export function hotRowToRegisterRow(row: Record<string, unknown>): Record<string
     itemname: row.item_name,
     callsvserialno: row.serial,
     vcomplaint: row.complaint,
-    Status: row.status_label,
-    callstatus: row.status_label,
+    Status: statusLabel,
+    callstatus: statusLabel,
     bsolved: row.bsolved,
     bfastclose: row.bfastclose,
     callsolved: row.bsolved,
@@ -240,6 +243,9 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
     clauses.push(portalSql);
   }
 
+  // Align with Summary / Key Account MIS — exclude WinMax practice offices.
+  clauses.push(REGISTER_EXCLUDE_PRACTICE_OFFICE_SQL.replace(/^AND /, ''));
+
   return { sql: clauses.join(' AND '), values };
 }
 
@@ -303,6 +309,7 @@ export async function queryRegisterTotalsFromPostgres(
       count(*) FILTER (WHERE h.status_bucket = 'tech_solved')::int AS tech_solved,
       count(*) FILTER (WHERE h.status_bucket = 'solved')::int AS closed
     FROM calls_latest_hot h
+    ${HOT_OFFICE_JOINS_SQL}
     WHERE ${whereSql}
     `,
     ...values
@@ -376,6 +383,7 @@ export async function queryRegisterFilterOptionsFromPostgres(
       h.state,
       count(*)::int AS call_count
     FROM calls_latest_hot h
+    ${HOT_OFFICE_JOINS_SQL}
     WHERE ${whereSql}
     GROUP BY
       h.nofficeid, h.branch_name, h.office_under, h.franchisee_code,
@@ -408,6 +416,7 @@ export async function queryRegisterFilterOptionsFromPostgres(
         `
         SELECT h.region AS vname, count(*)::int AS call_count
         FROM calls_latest_hot h
+        ${HOT_OFFICE_JOINS_SQL}
         WHERE ${whereSql}
         GROUP BY h.region
         ORDER BY h.region
@@ -420,6 +429,7 @@ export async function queryRegisterFilterOptionsFromPostgres(
         `
         SELECT h.account AS vname, count(*)::int AS call_count
         FROM calls_latest_hot h
+        ${HOT_OFFICE_JOINS_SQL}
         WHERE ${whereSql}
         GROUP BY h.account
         ORDER BY h.account
@@ -606,6 +616,7 @@ export async function queryDistributionCompactFromPostgres(
     `
     SELECT ${DISTRIBUTION_COMPACT_COLUMNS}
     FROM calls_latest_hot h
+    ${HOT_OFFICE_JOINS_SQL}
     WHERE ${whereSql}
     ORDER BY h.logged_at DESC, h.ncode DESC
     LIMIT $${values.length + 1}

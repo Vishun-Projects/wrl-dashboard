@@ -103,6 +103,8 @@ export async function sendDigestEmail(params: {
   scopeLabel: string;
   attachments: EmailAttachment[];
   subjectDate?: Date;
+  bodyHtml?: string;
+  bodyPlainText?: string;
 }): Promise<{ messageId: string }> {
   if (process.env.MIS_EMAIL_DRY_RUN === 'true') {
     console.log('[mis-email] DRY RUN — would send to', params.to, {
@@ -124,6 +126,8 @@ export async function sendDigestEmail(params: {
     dateRange: params.dateRange,
     scopeLabel: params.scopeLabel,
     portalUrl,
+    bodyHtml: params.bodyHtml,
+    bodyPlainText: params.bodyPlainText,
   };
 
   const info = await transport.sendMail({

@@ -9,10 +9,8 @@ import {
   buildWhere,
   type RegisterPostgresParams,
 } from '@/lib/read-model/queries/register';
-import {
-  REGISTER_EXPORT_ARCP_JOIN_SQL,
-  REGISTER_EXPORT_HOT_COLUMNS,
-} from '@/lib/read-model/queries/register-columns';
+import { REGISTER_EXPORT_HOT_COLUMNS } from '@/lib/read-model/queries/register-columns';
+import { mergeArcpPickOntoHotExportRows } from '@/lib/register/arcp-approve-dates-server';
 import { csvEscape } from '@/lib/register/server/csv-export';
 import { REGISTER_EXPORT_COLUMNS } from '@/lib/register/table-columns';
 import { HOT_OFFICE_JOINS_SQL } from '@/lib/read-model/queries/register-columns';
@@ -88,7 +86,7 @@ export type PostgresRegisterCsvStreamOptions = Omit<
   knownTotal?: number;
 };
 
-/** Stream register CSV from calls_latest_hot — single cursor, no per-batch enrichment. */
+/** Stream register CSV from calls_latest_hot — cursor + batch ARCP enrichment per chunk. */
 export async function buildPostgresRegisterCsvStream(
   params: PostgresRegisterCsvStreamOptions
 ): Promise<Response> {
@@ -124,7 +122,6 @@ export async function buildPostgresRegisterCsvStream(
                     SELECT ${REGISTER_EXPORT_HOT_COLUMNS}
                     FROM calls_latest_hot h
                     ${HOT_OFFICE_JOINS_SQL}
-                    ${REGISTER_EXPORT_ARCP_JOIN_SQL}
                     WHERE ${whereSql}
                     ORDER BY h.ncode DESC`,
                   values,
@@ -135,8 +132,12 @@ export async function buildPostgresRegisterCsvStream(
                 const res = await client.query(
                   `FETCH FORWARD ${CURSOR_FETCH_SIZE} FROM register_export`
                 );
-                const rows = res.rows as Record<string, unknown>[];
+                let rows = res.rows as Record<string, unknown>[];
                 if (!rows.length) break;
+
+                rows = await mergeArcpPickOntoHotExportRows(rows, (sql, params) =>
+                  client.query(sql, params)
+                );
 
                 let chunk = '';
                 for (const row of rows) {

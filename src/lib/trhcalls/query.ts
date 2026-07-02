@@ -248,6 +248,58 @@ function appendSqlAnd(base: string, clause: string): string {
   return `${base} AND ${clause}`;
 }
 
+/** Rows actually edited after create — status / assignment / cancel changes. */
+export const TRHCALLS_EDITED_ONLY_WHERE =
+  'editedon IS NOT NULL AND addedon IS NOT NULL AND editedon <> addedon';
+
+function sqlEscapeCrmLiteral(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+/**
+ * Incremental watermark — any row whose CRM edit timestamp advanced since last sync.
+ * Uses editedon for edits and addedon for brand-new calls (editedon = addedon at create).
+ * Fetched rows are fully upserted into calls_latest_hot (status + all mapped fields).
+ */
+export function buildTrhcallsWatermarkWhere(lastSync: string): string {
+  const wm = sqlEscapeCrmLiteral(lastSync);
+  return `ISNULL(editedon, addedon) >= '${wm}'`;
+}
+
+export function buildTrhcallsEditedonDaySubquery(
+  startDate: string,
+  endDate: string,
+  opts?: {
+    ncodeShard?: TrhcallsNcodeShard | null;
+    vtrnnoIn?: string[] | null;
+  }
+): string {
+  const startSafe = sqlEscapeCrmLiteral(startDate);
+  const endSafe = sqlEscapeCrmLiteral(endDate);
+  let condition = `WHERE editedon >= '${startSafe} 00:00:00' AND editedon <= '${endSafe} 23:59:59'
+    AND ${TRHCALLS_EDITED_ONLY_WHERE}`;
+  if (opts?.ncodeShard && opts.ncodeShard.count > 1) {
+    condition += ` AND (ncode % ${opts.ncodeShard.count}) = ${opts.ncodeShard.index}`;
+  }
+  if (opts?.vtrnnoIn?.length) {
+    condition = appendSqlAnd(condition, `vtrnno IN (${sqlVtrnnoInList(opts.vtrnnoIn)})`);
+  }
+
+  return `(
+    SELECT *
+    FROM (
+      SELECT ${TRHCALLS_DEDUP_INNER_COLUMNS},
+        ROW_NUMBER() OVER (
+          PARTITION BY CASE WHEN ISNULL(vtrnno, '') = '' THEN CAST(ncode AS VARCHAR(50)) ELSE vtrnno END
+          ORDER BY ISNULL(editedon, addedon) DESC, ncode DESC
+        ) as rn
+      FROM trhcalls (NOLOCK)
+      ${condition}
+    ) s
+    WHERE s.rn = 1
+  ) tc`;
+}
+
 export function buildTrhcallsDeltaSubquery(
   lastSync: string,
   startDate?: string | null,
@@ -259,8 +311,7 @@ export function buildTrhcallsDeltaSubquery(
     vtrnnoIn?: string[] | null;
   }
 ): string {
-  const lastSyncSafe = lastSync.replace(/'/g, "''");
-  let condition = `WHERE ISNULL(editedon, addedon) >= '${lastSyncSafe}'`;
+  let condition = `WHERE ${buildTrhcallsWatermarkWhere(lastSync)}`;
   if (opts?.startDateTime) {
     condition += ` AND dtrndate >= '${opts.startDateTime.replace(/'/g, "''")}'`;
   } else if (startDate) {
@@ -576,7 +627,15 @@ export function buildCorpusDedupSubquery(opts: {
   endDateTime?: string | null;
   ncodeShard?: TrhcallsNcodeShard | null;
   vtrnnoIn?: string[] | null;
+  editedonStart?: string | null;
+  editedonEnd?: string | null;
 }): string {
+  if (opts.editedonStart && opts.editedonEnd) {
+    return buildTrhcallsEditedonDaySubquery(opts.editedonStart, opts.editedonEnd, {
+      ncodeShard: opts.ncodeShard,
+      vtrnnoIn: opts.vtrnnoIn,
+    });
+  }
   if (opts.lastSync) {
     return buildTrhcallsDeltaSubquery(opts.lastSync, opts.startDate, opts.endDate, {
       startDateTime: opts.startDateTime,
@@ -588,7 +647,9 @@ export function buildCorpusDedupSubquery(opts: {
   return buildTrhcallsDedupSubquery({
     startDate: opts.startDate,
     endDate: opts.endDate,
-    fallbackDays: opts.startDate || opts.endDate ? null : 30,
+    // TRN lookup must not apply the default 30-day window — YTD open rows can be older.
+    fallbackDays:
+      opts.vtrnnoIn?.length || opts.startDate || opts.endDate ? null : 30,
     column: opts.dateColumn,
     startDateTime: opts.startDateTime,
     endDateTime: opts.endDateTime,
@@ -606,6 +667,8 @@ export function buildSyncCorpusTableName(opts: {
   endDateTime?: string | null;
   ncodeShard?: TrhcallsNcodeShard | null;
   vtrnnoIn?: string[] | null;
+  editedonStart?: string | null;
+  editedonEnd?: string | null;
 }): string {
   return `
     ${buildCorpusDedupSubquery(opts)}

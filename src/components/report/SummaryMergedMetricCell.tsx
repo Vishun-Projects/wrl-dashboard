@@ -171,19 +171,13 @@ export function sumMergedAccountOpenCallsByRegion(
   globalMergeFlags: MergeSelection,
   clientMergeWithCrm: ClientMergeWithCrmPrefs
 ): number {
-  const agingFields = ['age_2', 'age_3', 'age_7', 'age_15'] as const;
-  return agingFields.reduce(
-    (sum, field) =>
-      sum +
-      sumMergedAccountMetricByRegion(
-        accounts,
-        clientAccounts,
-        region,
-        field,
-        globalMergeFlags,
-        clientMergeWithCrm
-      ),
-    0
+  return sumMergedAccountMetricByRegion(
+    accounts,
+    clientAccounts,
+    region,
+    'open_calls',
+    globalMergeFlags,
+    clientMergeWithCrm
   );
 }
 
@@ -249,19 +243,13 @@ export function sumMergedAccountOpenCalls(
   clientMergeWithCrm: ClientMergeWithCrmPrefs,
   byAccountOnly = false
 ): number {
-  const agingFields = ['age_2', 'age_3', 'age_7', 'age_15'] as const;
-  return agingFields.reduce(
-    (sum, field) =>
-      sum +
-      sumMergedAccountMetric(
-        accounts,
-        clientAccounts,
-        field,
-        globalMergeFlags,
-        clientMergeWithCrm,
-        byAccountOnly
-      ),
-    0
+  return sumMergedAccountMetric(
+    accounts,
+    clientAccounts,
+    'open_calls',
+    globalMergeFlags,
+    clientMergeWithCrm,
+    byAccountOnly
   );
 }
 
@@ -401,12 +389,7 @@ export function accountOpenCallsFromAging(
   region: string,
   account: string
 ): number {
-  return (
-    findAccountMetric(accounts, region, account, 'age_2') +
-    findAccountMetric(accounts, region, account, 'age_3') +
-    findAccountMetric(accounts, region, account, 'age_7') +
-    findAccountMetric(accounts, region, account, 'age_15')
-  );
+  return findAccountMetric(accounts, region, account, 'open_calls');
 }
 
 export function sumAccountMetricByRegion(
@@ -536,12 +519,7 @@ export function accountOpenCallsFromAgingByAccount(
   accounts: Array<Record<string, unknown>> | undefined,
   account: string
 ): number {
-  return (
-    findAccountMetricByAccount(accounts, account, 'age_2') +
-    findAccountMetricByAccount(accounts, account, 'age_3') +
-    findAccountMetricByAccount(accounts, account, 'age_7') +
-    findAccountMetricByAccount(accounts, account, 'age_15')
-  );
+  return findAccountMetricByAccount(accounts, account, 'open_calls');
 }
 
 export function matchesRegionFilter(filterRegion: string[], region: string): boolean {
@@ -648,6 +626,7 @@ export type ClientRegionalRow = {
   total_calls: number;
   total_solved: number;
   cancelled_calls: number;
+  open_calls: number;
   age_2: number;
   age_3: number;
   age_7: number;
@@ -670,6 +649,7 @@ export function buildClientOnlyRegionalRows(
         total_calls: 0,
         total_solved: 0,
         cancelled_calls: 0,
+        open_calls: 0,
         age_2: 0,
         age_3: 0,
         age_7: 0,
@@ -680,6 +660,7 @@ export function buildClientOnlyRegionalRows(
     row.total_calls += Number(a.total_calls ?? 0);
     row.total_solved += Number(a.total_solved ?? 0);
     row.cancelled_calls += Number(a.cancelled_calls ?? 0);
+    row.open_calls += Number(a.open_calls ?? 0);
     row.age_2 += Number(a.age_2 ?? 0);
     row.age_3 += Number(a.age_3 ?? 0);
     row.age_7 += Number(a.age_7 ?? 0);

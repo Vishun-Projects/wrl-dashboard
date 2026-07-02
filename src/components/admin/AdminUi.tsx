@@ -299,14 +299,20 @@ export function SettingsLayout({
   activeTab,
   onTabChange,
   children,
+  fluid = false,
 }: {
   tabs: { id: string; label: string; icon: React.ReactNode }[];
   activeTab: string;
   onTabChange: (id: string) => void;
   children: React.ReactNode;
+  fluid?: boolean;
 }) {
   return (
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col gap-4 p-6">
+    <div
+      className={`flex h-full min-h-0 w-full flex-col gap-4 p-4 sm:p-6 ${
+        fluid ? '' : 'mx-auto max-w-4xl'
+      }`}
+    >
       <div className="flex gap-1 rounded-lg border border-slate-200 bg-bg-canvas p-1 shadow-sm">
         {tabs.map((tab) => (
           <button

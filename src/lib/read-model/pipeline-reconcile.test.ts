@@ -70,4 +70,24 @@ describe('hotRowNeedsCrmRefresh', () => {
     });
     expect(needs).toBe(true);
   });
+
+  it('detects newer CRM editedon even when status fields look aligned', () => {
+    const needs = hotRowNeedsCrmRefresh(
+      hot({ source_editedon: new Date('2026-06-01') }),
+      {
+        vtrnno: '26F01029',
+        ncode: '736',
+        nofficeid: '1175',
+        ncancelreason: '0',
+        bsolved: '0',
+        bfastclose: '0',
+        editedon: '30/06/2026 17:30:00',
+        addedon: '01/06/2026 10:04:53',
+        dtrndate: '01/06/2026 09:14:26',
+        region: 'WEST ZONE',
+        account: 'Pepsi',
+      }
+    );
+    expect(needs).toBe(true);
+  });
 });

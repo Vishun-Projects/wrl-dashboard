@@ -11,7 +11,6 @@ import {
   Loader2,
   AlertCircle,
   Palette,
-  FileSpreadsheet,
 } from 'lucide-react';
 import { useUser } from '@/components/layout/DashboardLayout';
 import { PageShell } from '@/components/layout/PageShell';
@@ -27,6 +26,8 @@ import { feedback } from '@/lib/ui/feedback';
 import { resolveAvatarDisplayUrl } from '@/lib/auth/avatar-url';
 import { useSearchParams } from 'next/navigation';
 import { ThemePicker } from '@/components/settings/ThemePicker';
+import { MisEmailComposer } from '@/components/settings/MisEmailComposer';
+import type { MisEmailBodySectionDef } from '@/lib/mis-email/body-sections';
 import type { MisEmailPreferences } from '@/lib/mis-email/preferences';
 
 type MisEmailSettings = {
@@ -37,6 +38,7 @@ type MisEmailSettings = {
     includeDetailed: boolean;
     includeKeyAccount: boolean;
   };
+  availableBodySections: MisEmailBodySectionDef[];
   roleName: string | null;
   scopeLabel: string | null;
 };
@@ -52,7 +54,6 @@ function ProfileContent() {
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [emailSettings, setEmailSettings] = useState<MisEmailSettings | null>(null);
   const [emailLoading, setEmailLoading] = useState(false);
-  const [emailSaving, setEmailSaving] = useState(false);
   const [emailPrefs, setEmailPrefs] = useState<MisEmailPreferences>({});
 
   const searchParams = useSearchParams();
@@ -76,7 +77,10 @@ function ProfileContent() {
     setEmailLoading(true);
     try {
       const res = await axios.get('/api/profile/mis-email', { withCredentials: true });
-      setEmailSettings(res.data);
+      setEmailSettings({
+        ...res.data,
+        availableBodySections: res.data.availableBodySections ?? [],
+      });
       setEmailPrefs(res.data.preferences ?? {});
     } catch {
       feedback.actionFailed('Failed to load email report settings');
@@ -85,17 +89,16 @@ function ProfileContent() {
     }
   }
 
-  async function handleSaveEmailPrefs() {
-    setEmailSaving(true);
+  async function handleToggleSubscribed() {
+    const nextSubscribed = emailPrefs.subscribed === false;
+    const nextPrefs = { ...emailPrefs, subscribed: nextSubscribed };
+    setEmailPrefs(nextPrefs);
     try {
-      const res = await axios.patch('/api/profile/mis-email', emailPrefs, { withCredentials: true });
-      setEmailPrefs(res.data.preferences ?? emailPrefs);
-      feedback.actionSuccess('Email report preferences saved');
-      await loadEmailSettings();
+      await axios.patch('/api/profile/mis-email', nextPrefs, { withCredentials: true });
+      feedback.actionSuccess(nextSubscribed ? 'Daily digest enabled' : 'Daily digest paused');
     } catch (err: any) {
-      feedback.actionFailed(err.response?.data?.error || 'Save failed');
-    } finally {
-      setEmailSaving(false);
+      setEmailPrefs(emailPrefs);
+      feedback.actionFailed(err.response?.data?.error || 'Update failed');
     }
   }
 
@@ -201,6 +204,7 @@ function ProfileContent() {
       <SettingsLayout
         activeTab={activeTab}
         onTabChange={setActiveTab}
+        fluid={activeTab === 'email'}
         tabs={[
           { id: 'general', label: 'General', icon: <User size={14} /> },
           { id: 'appearance', label: 'Appearance', icon: <Palette size={14} /> },
@@ -291,51 +295,24 @@ function ProfileContent() {
         )}
 
         {activeTab === 'email' && emailSettings?.mis_email_enabled ? (
-          <SettingsCard
-            title="MIS email reports"
-            description="Daily digest sent at 7:00 AM IST. Data matches your portal branch and report access."
-            footer={
-              <button
-                type="button"
-                disabled={emailSaving}
-                onClick={() => void handleSaveEmailPrefs()}
-                className="flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-50 ui-label"
-              >
-                {emailSaving ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
-                Save preferences
-              </button>
-            }
-          >
-            {emailLoading ? (
-              <p className="text-xs text-slate-500">Loading…</p>
-            ) : (
-              <div className="space-y-6">
-                <div className="grid gap-3 rounded-lg border border-slate-100 bg-bg-soft/60 p-4 sm:grid-cols-2">
-                  <div>
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Role</p>
-                    <p className="mt-1 text-[13px] text-slate-800">{emailSettings.roleName || user?.role}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Branch scope</p>
-                    <p className="mt-1 text-[13px] text-slate-800">
-                      {emailSettings.scopeLabel || 'All branches'}
-                    </p>
-                  </div>
-                </div>
-
+          <div className="space-y-4">
+            <SettingsCard
+              title="Scheduled digest"
+              description="Daily MIS email at 7:00 AM IST using your saved compose defaults."
+            >
+              {emailLoading ? (
+                <p className="text-xs text-slate-500">Loading…</p>
+              ) : (
                 <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 p-4">
                   <div>
-                    <p className="text-[13px] font-medium text-slate-800">Receive emails</p>
-                    <p className="text-[11px] text-slate-500">Turn off to pause digests without losing settings.</p>
+                    <p className="text-[13px] font-medium text-slate-800">Receive scheduled emails</p>
+                    <p className="text-[11px] text-slate-500">
+                      Turn off to pause 7 AM digests. Use Send now below for one-off reports.
+                    </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() =>
-                      setEmailPrefs((prev) => ({
-                        ...prev,
-                        subscribed: prev.subscribed === false,
-                      }))
-                    }
+                    onClick={() => void handleToggleSubscribed()}
                     className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
                       emailPrefs.subscribed !== false ? 'bg-emerald-500' : 'bg-slate-300'
                     }`}
@@ -347,82 +324,24 @@ function ProfileContent() {
                     />
                   </button>
                 </div>
+              )}
+            </SettingsCard>
 
-                <div className="space-y-3">
-                  <p className="text-[12px] font-medium text-slate-800">Report period</p>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {[
-                      { id: 'yesterday', label: 'Yesterday only' },
-                      { id: 'month_to_date', label: 'Month to date (1st → today)' },
-                    ].map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() =>
-                          setEmailPrefs((prev) => ({
-                            ...prev,
-                            dateRange: opt.id as MisEmailPreferences['dateRange'],
-                          }))
-                        }
-                        className={`rounded-lg border px-3 py-2.5 text-left text-[12px] transition-colors ${
-                          (emailPrefs.dateRange ?? 'month_to_date') === opt.id
-                            ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                            : 'border-slate-200 text-slate-600 hover:border-slate-300'
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <p className="text-[12px] font-medium text-slate-800 flex items-center gap-1.5">
-                    <FileSpreadsheet size={14} className="text-slate-400" />
-                    Attachments
-                  </p>
-                  <div className="space-y-2">
-                    {emailSettings.allowed.includeSummary ? (
-                      <label className="flex items-center gap-2 text-[12px] text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={emailPrefs.includeSummary !== false}
-                          onChange={(e) =>
-                            setEmailPrefs((prev) => ({ ...prev, includeSummary: e.target.checked }))
-                          }
-                        />
-                        Summary report
-                      </label>
-                    ) : null}
-                    {emailSettings.allowed.includeDetailed ? (
-                      <label className="flex items-center gap-2 text-[12px] text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={emailPrefs.includeDetailed !== false}
-                          onChange={(e) =>
-                            setEmailPrefs((prev) => ({ ...prev, includeDetailed: e.target.checked }))
-                          }
-                        />
-                        Detailed register
-                      </label>
-                    ) : null}
-                    {emailSettings.allowed.includeKeyAccount ? (
-                      <label className="flex items-center gap-2 text-[12px] text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={emailPrefs.includeKeyAccount !== false}
-                          onChange={(e) =>
-                            setEmailPrefs((prev) => ({ ...prev, includeKeyAccount: e.target.checked }))
-                          }
-                        />
-                        Key accounts
-                      </label>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            )}
-          </SettingsCard>
+            {!emailLoading && user?.email ? (
+              <MisEmailComposer
+                settings={{
+                  primaryEmail: user.email,
+                  roleName: emailSettings.roleName,
+                  scopeLabel: emailSettings.scopeLabel,
+                  allowed: emailSettings.allowed,
+                  availableBodySections: emailSettings.availableBodySections ?? [],
+                }}
+                prefs={emailPrefs}
+                onPrefsChange={setEmailPrefs}
+                onSaved={() => void loadEmailSettings()}
+              />
+            ) : null}
+          </div>
         ) : null}
 
         {activeTab === 'appearance' && (

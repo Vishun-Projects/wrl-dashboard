@@ -19,7 +19,25 @@ import type { getSyncState } from '@/lib/read-model/lock';
 
 const SYNC_TX_LOCK_TIMEOUT_MS = Number(process.env.PG_SYNC_LOCK_TIMEOUT_MS ?? 120_000);
 
+/**
+ * When CRM editedon (or addedon for new calls) is at least as fresh as hot, replace the
+ * whole row — not a partial status patch. Skips only strictly older CRM snapshots
+ * (overlap-window duplicates).
+ */
+export function shouldReplaceHotFromCrm(
+  existing: HotRow | undefined,
+  incoming: HotRow
+): boolean {
+  if (!existing) return true;
+  const existingTs = existing.source_editedon?.getTime() ?? 0;
+  const incomingTs = incoming.source_editedon?.getTime() ?? 0;
+  return incomingTs >= existingTs;
+}
+
 export type ApplyCrmDeltaResult = {
+  rowsUpserted: number;
+  rowsDeleted: number;
+  rowsSkippedStale?: number;
   rowsUpserted: number;
   rowsDeleted: number;
   nextEdited: Date | null;
@@ -53,17 +71,32 @@ export async function applyCrmRowsToHot(
 
     const upsertRows: HotRow[] = [];
     const deleteTrns: string[] = [];
+    let rowsSkippedStale = 0;
 
     for (const row of deduped) {
       const trn = String(row.vtrnno ?? row.UniqueCallNo ?? '').trim();
       if (!trn) continue;
       if (isHotEligibleRow(row)) {
         const hot = transformCrmRowToHot(row);
-        if (hot) upsertRows.push(hot);
-        else if (existingByTrn.has(trn)) deleteTrns.push(trn);
+        if (hot) {
+          const existing = existingByTrn.get(trn);
+          if (shouldReplaceHotFromCrm(existing, hot)) {
+            upsertRows.push(hot);
+          } else {
+            rowsSkippedStale += 1;
+          }
+        } else if (existingByTrn.has(trn)) {
+          deleteTrns.push(trn);
+        }
       } else if (existingByTrn.has(trn)) {
         deleteTrns.push(trn);
       }
+    }
+
+    if (rowsSkippedStale > 0) {
+      console.log(
+        `[sync-worker] Skipped ${rowsSkippedStale} CRM row(s) older than hot source_editedon (overlap duplicate)`
+      );
     }
 
     const rowsUpserted = await upsertHotRows(client, upsertRows);
@@ -100,7 +133,7 @@ export async function applyCrmRowsToHot(
 
     await client.query('COMMIT');
 
-    return { rowsUpserted, rowsDeleted, nextEdited, nextAdded };
+    return { rowsUpserted, rowsDeleted, rowsSkippedStale, nextEdited, nextAdded };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

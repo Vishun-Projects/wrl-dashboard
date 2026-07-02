@@ -1,9 +1,5 @@
 /** Columns selected for register list/bulk/export queries (avoids SELECT h.*). */
 import {
-  REGISTER_ARCP_PICK_HOT_FIELDS_SQL,
-  REGISTER_ARCP_PICK_LATERAL_SQL,
-} from '@/lib/register/arcp-approve-dates';
-import {
   HOT_OFFICE_JOINS_SQL,
   HOT_RESOLVED_REGION_SQL,
 } from '@/lib/read-model/queries/hot-region';
@@ -76,10 +72,7 @@ export const REGISTER_EXPORT_HOT_COLUMNS = [
   'h.bsolved',
   'h.bfastclose',
   'h.ncancelreason',
-  `${REGISTER_ARCP_PICK_HOT_FIELDS_SQL.trim()}`,
 ].join(',\n    ');
-
-export const REGISTER_EXPORT_ARCP_JOIN_SQL = REGISTER_ARCP_PICK_LATERAL_SQL;
 
 /** Minimal columns for distribution idle-assignee / audit scope computations. */
 export const DISTRIBUTION_COMPACT_COLUMNS = [

@@ -144,10 +144,10 @@ Prints `VPS_MAIL_RELAY_SECRET` — add to **Vercel Production** env:
 
 | Variable | Value |
 |----------|--------|
-| `VPS_MAIL_RELAY_URL` | `https://api.wrl-fsm.cloud/internal/mail/send` |
-| `VPS_MAIL_RELAY_SECRET` | (secret printed by setup script) |
+| `VPS_MAIL_RELAY_SECRET` | (secret from VPS `/opt/fast-close-app/.env.mis-email`) |
+| `VPS_MAIL_RELAY_URL` | optional — defaults to `https://api.wrl-fsm.cloud/internal/mail/send` |
 
-Redeploy Vercel after adding env vars. Forgot-password will generate the reset link on Vercel and send mail via VPS Postfix — **identical path to MIS reports**.
+Used for **forgot-password** (`/internal/mail/send`) and **Profile → Email reports → Send now** (`/internal/mail/mis-digest`). Both send via VPS Postfix — same path as the 7 AM MIS cron.
 
 **Local dev:** forgot-password still requires production — `db-sign-in` bypass does not send mail.
 

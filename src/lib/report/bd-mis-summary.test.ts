@@ -3,7 +3,6 @@ import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/report/summary-d
 import {
   buildBdMisRegionalBreakdown,
   buildBdMisRegionalRows,
-  openCallsFromTotals,
   sumBdMisRegionalGrand,
   sumClientCokeMetricsSouth,
 } from '@/lib/report/bd-mis-summary';
@@ -17,6 +16,7 @@ const EXCEL_REGIONAL = {
 } as const;
 
 function branch(zone: string, total: number, solved = total): BranchSummaryRow {
+  const open = Math.max(0, total - solved);
   return {
     officeId: 1,
     parentId: 0,
@@ -25,7 +25,7 @@ function branch(zone: string, total: number, solved = total): BranchSummaryRow {
     total_calls: total,
     solved_calls: solved,
     cancelled_calls: 0,
-    open_calls: 0,
+    open_calls: open,
     age_2: 0,
     age_3: 0,
     age_7: 0,
@@ -34,7 +34,7 @@ function branch(zone: string, total: number, solved = total): BranchSummaryRow {
     all_total: total,
     all_solved: solved,
     all_cancelled: 0,
-    all_open: 0,
+    all_open: open,
     all_age_2: 0,
     all_age_3: 0,
     all_age_7: 0,
@@ -58,6 +58,7 @@ function account(
   total: number,
   solved = total
 ): AccountSummaryRow {
+  const open = Math.max(0, total - solved);
   return {
     region: zone,
     account: name,
@@ -65,7 +66,7 @@ function account(
     total_calls: total,
     total_solved: solved,
     cancelled_calls: 0,
-    open_calls: 0,
+    open_calls: open,
     age_2: 0,
     age_3: 0,
     age_7: 0,
@@ -192,7 +193,7 @@ describe('buildBdMisRegionalRows', () => {
     expect(sumBdMisRegionalGrand(rows).cancelled_calls).toBe(17);
   });
 
-  it('derives open calls as total minus solved (Excel Summary formula)', () => {
+  it('sums open_calls from branch metrics (matches Summary / Register)', () => {
     const rows = buildBdMisRegionalRows({
       crmBranchSummary: [
         branch('NORTH ZONE', 100, 80),
@@ -202,12 +203,35 @@ describe('buildBdMisRegionalRows', () => {
       clientAccountSummary: [],
       sources: { crm: true, cadbury: false, coke: false },
     });
-    for (const row of rows) {
-      expect(row.open_calls).toBe(openCallsFromTotals(row));
-      expect(row.total_calls).toBe(row.total_solved + row.open_calls);
-    }
+    expect(rows.find((r) => r.region === 'NORTH ZONE')!.open_calls).toBe(20);
+    expect(rows.find((r) => r.region === 'WEST ZONE')!.open_calls).toBe(5);
     const grand = sumBdMisRegionalGrand(rows);
-    expect(grand.open_calls).toBe(grand.total_calls - grand.total_solved);
+    expect(grand.open_calls).toBe(25);
+  });
+
+  it('Cadbury import-only + Coke CRM+import open union', () => {
+    const crmBranches = [branch('SOUTH ZONE', 1000, 900)];
+    crmBranches[0].open_calls = 50;
+    const crmAccounts = [
+      { ...account('SOUTH ZONE', 'Cadbury', 100, 90), open_calls: 30 },
+      { ...account('SOUTH ZONE', 'Coke', 50, 45), open_calls: 20 },
+    ];
+    const clientAccounts = [
+      { ...account('SOUTH ZONE', 'Cadbury', 200, 180), open_calls: 40 },
+      { ...account('SOUTH ZONE', 'Coke', 80, 70), open_calls: 10 },
+    ];
+
+    const grand = sumBdMisRegionalGrand(
+      buildBdMisRegionalRows({
+        crmBranchSummary: crmBranches,
+        crmAccountSummary: crmAccounts,
+        clientAccountSummary: clientAccounts,
+        sources: { crm: true, cadbury: true, coke: true },
+      })
+    );
+
+    // 50 CRM branch open − 30 CRM Cadbury + 40 import Cadbury + 10 import Coke (CRM Coke 20 stays in base)
+    expect(grand.open_calls).toBe(50 - 30 + 40 + 10);
   });
 
   it('does not overlay Cadbury client in West', () => {

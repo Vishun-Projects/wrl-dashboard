@@ -5,18 +5,40 @@
  *
  *   MAIL_RELAY_PORT=8789 npx tsx scripts/vps-hosting/mail-relay-server.ts
  */
+import { createRequire } from 'node:module';
+
+// tsx CLI is not Next.js — stub server-only before app imports
+const require = createRequire(import.meta.url);
+try {
+  const serverOnlyPath = require.resolve('server-only');
+  require.cache[serverOnlyPath] = {
+    id: serverOnlyPath,
+    filename: serverOnlyPath,
+    loaded: true,
+    exports: {},
+  } as NodeModule;
+} catch {
+  /* optional */
+}
+
 import { config } from 'dotenv';
 import { createServer } from 'http';
 import { resolve } from 'path';
 import { sendPasswordResetEmail } from '@/lib/auth/send-password-reset-email';
+import '@/lib/mis-email/bootstrap-env';
+import { sendMisEmailComposeBatch } from '@/lib/mis-email/compose-digest';
+import { loadDigestRecipientById } from '@/lib/mis-email/recipients';
+import type { MisEmailPreferences } from '@/lib/mis-email/preferences';
 
 const root = resolve(__dirname, '../..');
 config({ path: resolve(root, '.env.local') });
 config({ path: resolve(root, '.env') });
 config({ path: resolve(root, '.env.mis-email') });
+config({ path: resolve(root, '.env.sync-worker') });
 
 const PORT = Number(process.env.MAIL_RELAY_PORT ?? 8789);
-const PATH = '/internal/mail/send';
+const RESET_PATH = '/internal/mail/send';
+const MIS_DIGEST_PATH = '/internal/mail/mis-digest';
 const SECRET = process.env.VPS_MAIL_RELAY_SECRET?.trim() ?? '';
 
 function readJson(req: import('http').IncomingMessage): Promise<unknown> {
@@ -40,7 +62,7 @@ if (!SECRET) {
 }
 
 createServer(async (req, res) => {
-  if (req.method !== 'POST' || req.url !== PATH) {
+  if (req.method !== 'POST') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
     return;
@@ -54,6 +76,43 @@ createServer(async (req, res) => {
   }
 
   try {
+    if (req.url === MIS_DIGEST_PATH) {
+      const body = (await readJson(req)) as {
+        userId?: string;
+        preferences?: MisEmailPreferences;
+        sendTo?: string[];
+      };
+
+      if (!body.userId?.trim()) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'userId is required' }));
+        return;
+      }
+
+      const recipient = await loadDigestRecipientById(body.userId.trim());
+      if (!recipient) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Recipient not found' }));
+        return;
+      }
+
+      const sent = await sendMisEmailComposeBatch(recipient, {
+        preferences: body.preferences,
+        sendTo: body.sendTo,
+        displayName: recipient.name,
+      });
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, sent }));
+      return;
+    }
+
+    if (req.url !== RESET_PATH) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not found' }));
+      return;
+    }
+
     const body = (await readJson(req)) as {
       to?: string;
       resetLink?: string;
@@ -81,5 +140,7 @@ createServer(async (req, res) => {
     res.end(JSON.stringify({ error: message }));
   }
 }).listen(PORT, '127.0.0.1', () => {
-  console.log(`[mail-relay] listening on 127.0.0.1:${PORT}${PATH}`);
+  console.log(`[mail-relay] listening on 127.0.0.1:${PORT}`);
+  console.log(`[mail-relay]   ${RESET_PATH} (password reset)`);
+  console.log(`[mail-relay]   ${MIS_DIGEST_PATH} (MIS digest)`);
 });

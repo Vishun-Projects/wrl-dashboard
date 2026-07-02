@@ -6,6 +6,7 @@ import {
   parseMisEmailPreferences,
   resolveDigestDateRangeForPreferences,
   resolveEffectiveDigestIncludes,
+  resolveExtraDigestEmails,
   validateMisEmailPreferencesPatch,
 } from '@/lib/mis-email/preferences';
 
@@ -24,6 +25,33 @@ describe('parseMisEmailPreferences', () => {
         includeSummary: true,
       })
     ).toEqual({ subscribed: false, dateRange: 'yesterday', includeSummary: true });
+  });
+
+  it('parses extraEmails', () => {
+    expect(
+      parseMisEmailPreferences({
+        extraEmails: ['Vishnu.Vishwakarma@westernequipments.com', 'bad'],
+      })
+    ).toEqual({ extraEmails: ['vishnu.vishwakarma@westernequipments.com'] });
+  });
+
+  it('parses bodyInEmail', () => {
+    expect(
+      parseMisEmailPreferences({
+        bodyInEmail: ['regional_performance', 'invalid'],
+      })
+    ).toEqual({ bodyInEmail: ['regional_performance'] });
+  });
+});
+
+describe('resolveExtraDigestEmails', () => {
+  it('dedupes primary and normalizes case', () => {
+    expect(
+      resolveExtraDigestEmails(
+        { extraEmails: ['Vishnu.Vishwakarma@westernequipments.com', 'vishunvishwakarma90211@gmail.com'] },
+        'vishunvishwakarma90211@gmail.com'
+      )
+    ).toEqual(['vishnu.vishwakarma@westernequipments.com']);
   });
 });
 

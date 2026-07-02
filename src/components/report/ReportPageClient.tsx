@@ -4457,8 +4457,7 @@ export default function ReportPageClient() {
                           ))
                         : clientOnlyMode
                         ? buildClientOnlyRegionalRows(clientAccountSummaryData).map((row) => {
-                            const open =
-                              row.age_2 + row.age_3 + row.age_7 + row.age_15;
+                            const open = row.open_calls;
                             return (
                               <tr
                                 key={row.region}
@@ -4521,9 +4520,7 @@ export default function ReportPageClient() {
                         const crmTotal = alignCrmToAccounts ? totals.total_calls : totals.total;
                         const crmSolved = alignCrmToAccounts ? totals.total_solved : totals.solved;
                         const crmCancelled = alignCrmToAccounts ? totals.cancelled_calls : totals.cancelled;
-                        const crmOpen = alignCrmToAccounts
-                          ? totals.age_2 + totals.age_3 + totals.age_7 + totals.age_15
-                          : totals.open;
+                        const crmOpen = alignCrmToAccounts ? totals.open_calls : totals.open;
                         const crmAge2 = alignCrmToAccounts ? totals.age_2 : totals.age2;
                         const crmAge3 = alignCrmToAccounts ? totals.age_3 : totals.age3;
                         const crmAge7 = alignCrmToAccounts ? totals.age_7 : totals.age7;
@@ -5492,11 +5489,7 @@ export default function ReportPageClient() {
                               isOverview
                                 ? findAccountMetricByAccount(filteredClientAccounts, account, field)
                                 : findAccountMetric(clientAccountSummaryData, region, account, field);
-                            const crmOpenSum =
-                              Number(a.age_2 || 0) +
-                              Number(a.age_3 || 0) +
-                              Number(a.age_7 || 0) +
-                              Number(a.age_15 || 0);
+                            const crmOpenSum = Number(a.open_calls || 0);
                             const clientOpen = isOverview
                               ? accountOpenCallsFromAgingByAccount(filteredClientAccounts, account)
                               : accountOpenCallsFromAging(
