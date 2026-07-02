@@ -5,7 +5,7 @@ import { isSummaryEligibleCall } from '@/lib/report/summary-derive';
 import { truncateCurrentYearFacts, upsertFactRows } from '@/lib/read-model/upsert-facts';
 import { normalizeHotRowFromDb } from '@/lib/read-model/audit/compare-hot';
 import type { AuditOptions, FactsAuditSummary } from '@/lib/read-model/audit/types';
-import type { FactCounts } from '@/lib/read-model/types';
+import type { FactCounts, FactKey } from '@/lib/read-model/types';
 
 const FACT_COUNT_COLUMNS = [
   'total',
@@ -43,27 +43,62 @@ async function loadPostgresFacts(client: pg.PoolClient, yearStart: string) {
   return res.rows;
 }
 
-async function computeExpectedFacts(client: pg.PoolClient, yearStart: string) {
-  const res = await client.query(`SELECT * FROM calls_latest_hot WHERE logged_at >= $1::timestamptz`, [
-    `${yearStart}T00:00:00`,
-  ]);
-  const hotRows = res.rows
-    .map((row) => normalizeHotRowFromDb(row as Record<string, unknown>))
-    .filter((row) => {
-      const crmLike = {
-        vtrnno: row.vtrnno,
-        dtrndate: row.logged_at,
-        ncancelreason: row.ncancelreason,
-        bsolved: row.bsolved,
-        bfastclose: row.bfastclose,
-        nofficeid: row.nofficeid,
-        calltype: row.call_type,
-        account: row.account,
-        region: row.region,
-      };
-      return isSummaryEligibleCall(crmLike);
-    });
-  return aggregateFactCounts(hotRows);
+async function computeExpectedFacts(
+  client: pg.PoolClient,
+  yearStart: string,
+  onProgress?: (message: string) => void
+) {
+  const pageSize = 10000;
+  const map = new Map<string, FactKey & FactCounts>();
+  const hotColumns = `
+    vtrnno, ncancelreason, logged_at, nofficeid, call_type, account, region, status_bucket
+  `;
+
+  let lastTrn = '';
+  let totalRows = 0;
+  for (;;) {
+    const res = await client.query(
+      `
+      SELECT ${hotColumns}
+      FROM calls_latest_hot
+      WHERE logged_at >= $1::timestamptz
+        AND ($2::text = '' OR vtrnno > $2)
+      ORDER BY vtrnno
+      LIMIT $3
+      `,
+      [`${yearStart}T00:00:00`, lastTrn, pageSize]
+    );
+    if (!res.rows.length) break;
+    totalRows += res.rows.length;
+
+    const hotRows = res.rows
+      .map((row) => normalizeHotRowFromDb(row as Record<string, unknown>))
+      .filter((row) =>
+        isSummaryEligibleCall({
+          vtrnno: row.vtrnno,
+          ncancelreason: row.ncancelreason,
+        })
+      );
+
+    const pageFacts = aggregateFactCounts(hotRows);
+    for (const [key, counts] of pageFacts) {
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, { ...counts });
+        continue;
+      }
+      for (const col of FACT_COUNT_COLUMNS) {
+        existing[col] = (existing[col] ?? 0) + (counts[col] ?? 0);
+      }
+    }
+
+    lastTrn = String(res.rows[res.rows.length - 1].vtrnno);
+    onProgress?.(`Facts recompute progress: ${totalRows} hot rows scanned`);
+    if (res.rows.length < pageSize) break;
+  }
+
+  onProgress?.(`Facts recompute complete: ${totalRows} hot rows → ${map.size} fact keys`);
+  return map;
 }
 
 export async function auditFacts(
@@ -74,7 +109,7 @@ export async function auditFacts(
   const summary = emptyFactsSummary();
   opts.onProgress?.(`Facts audit: recomputing from hot for ${yearStart}+`);
 
-  const expectedMap = await computeExpectedFacts(client, yearStart);
+  const expectedMap = await computeExpectedFacts(client, yearStart, opts.onProgress);
   const pgRows = await loadPostgresFacts(client, yearStart);
   const pgMap = new Map(
     pgRows.map((row) => {
@@ -90,8 +125,15 @@ export async function auditFacts(
   );
 
   summary.keys_checked = Math.max(expectedMap.size, pgMap.size);
+  let compared = 0;
 
   for (const [key, expected] of expectedMap) {
+    compared++;
+    if (compared % 10000 === 0) {
+      opts.onProgress?.(
+        `Facts compare progress: ${compared}/${expectedMap.size} expected keys checked`
+      );
+    }
     const pgRow = pgMap.get(key);
     if (!pgRow) {
       summary.missing_in_postgres++;
@@ -125,8 +167,16 @@ export async function auditFacts(
       columns: badCols,
     });
   }
+  opts.onProgress?.(
+    `Facts compare progress: ${compared}/${expectedMap.size} expected keys checked`
+  );
 
+  let extraScanned = 0;
   for (const key of pgMap.keys()) {
+    extraScanned++;
+    if (extraScanned % 10000 === 0) {
+      opts.onProgress?.(`Facts extra-key scan progress: ${extraScanned}/${pgMap.size}`);
+    }
     if (!expectedMap.has(key)) {
       summary.extra_in_postgres++;
       opts.onMismatch?.({
@@ -137,6 +187,7 @@ export async function auditFacts(
       });
     }
   }
+  opts.onProgress?.(`Facts extra-key scan progress: ${extraScanned}/${pgMap.size}`);
 
   opts.onProgress?.(
     `Facts audit done — keys ${summary.keys_checked}, mismatches ${summary.column_mismatch_keys}, missing ${summary.missing_in_postgres}, extra ${summary.extra_in_postgres}`
@@ -149,19 +200,8 @@ export async function applyFactsAuditFixes(client: pg.PoolClient): Promise<boole
   const yearStart = currentYearStart();
   await truncateCurrentYearFacts(client, yearStart);
 
-  const res = await client.query(`SELECT * FROM calls_latest_hot WHERE logged_at >= $1::timestamptz`, [
-    `${yearStart}T00:00:00`,
-  ]);
-  const hotRows = res.rows
-    .map((row) => normalizeHotRowFromDb(row as Record<string, unknown>))
-    .filter((row) =>
-      isSummaryEligibleCall({
-        vtrnno: row.vtrnno,
-        ncancelreason: row.ncancelreason,
-      })
-    );
-
-  const factRows = Array.from(aggregateFactCounts(hotRows).values());
+  const expectedMap = await computeExpectedFacts(client, yearStart);
+  const factRows = Array.from(expectedMap.values());
   await upsertFactRows(client, factRows);
   return true;
 }

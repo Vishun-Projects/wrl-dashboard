@@ -6,6 +6,7 @@ import {
   type BdMisRegionalRow,
   type BdMisSourceFlags,
 } from '@/lib/report/bd-mis-summary';
+import type { BdMisTraceRow } from '@/lib/report/bd-mis-trace';
 import {
   applySummaryHeaderStyle,
   applyRegionRowStyle,
@@ -29,6 +30,10 @@ export type BdMisExportPayload = {
   clientAccountSummary: AccountSummaryRow[];
   sources: BdMisSourceFlags;
   filterMeta: BdMisExportFilterMeta;
+};
+
+export type BdMisTraceableExportPayload = BdMisExportPayload & {
+  traceRows: BdMisTraceRow[];
 };
 
 function zoneShort(zone: string): string {
@@ -406,4 +411,185 @@ export async function buildBdMisSummaryWorkbook(
 
 export function bdMisSummaryFilename(date = new Date()): string {
   return `WRL_BD_MIS_Summary_Audit_${date.toISOString().split('T')[0]}.xlsx`;
+}
+
+const TRACE_DETAIL_COLUMNS = [
+  'Region',
+  'Main Plant/Main Branch Name',
+  'Branch/Franchisee name',
+  'ASP / WRL Technician Name',
+  'Customer Name',
+  'Call Date & Time',
+  'Service Order/ Call ID',
+  'Client',
+  'Call Status',
+  'Aging',
+  'File Name',
+  'Contribution Step',
+  'Included In Final Count',
+] as const;
+
+function addTraceSummarySheet(
+  workbook: ExcelJS.Workbook,
+  payload: BdMisTraceableExportPayload
+): void {
+  const summary = workbook.addWorksheet('Summary');
+  const sumHeader = summary.addRow([
+    'Region',
+    'Total calls',
+    'Total solved',
+    '# open calls',
+    '<2 days',
+    '>3 days',
+    '>7 days',
+    '>15 days',
+    '# active Eng.',
+  ]);
+  applySummaryHeaderStyle(sumHeader);
+
+  for (const row of payload.regionalRows) {
+    const r = summary.addRow([
+      zoneShort(row.region),
+      row.total_calls,
+      row.total_solved,
+      row.open_calls,
+      row.age_2,
+      row.age_3,
+      row.age_7,
+      row.age_15,
+      row.active_eng,
+    ]);
+    applyRegionRowStyle(r, row.region);
+  }
+
+  const g = payload.grand;
+  const totalRow = summary.addRow([
+    'All',
+    g.total_calls,
+    g.total_solved,
+    g.open_calls,
+    g.age_2,
+    g.age_3,
+    g.age_7,
+    g.age_15,
+    g.active_eng,
+  ]);
+  totalRow.eachCell((cell) => {
+    cell.font = { bold: true };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+  });
+}
+
+function addTraceCountSheet(
+  workbook: ExcelJS.Workbook,
+  payload: BdMisTraceableExportPayload
+): void {
+  const breakdown = buildBdMisRegionalBreakdown({
+    crmBranchSummary: payload.crmBranchSummary,
+    crmAccountSummary: payload.crmAccountSummary,
+    clientAccountSummary: payload.clientAccountSummary,
+    sources: payload.sources,
+  });
+
+  const recon = workbook.addWorksheet('Count Trace');
+  recon.addRow(['Regional total calls — how each zone is calculated']).font = {
+    bold: true,
+    size: 12,
+  };
+  recon.addRow([]);
+  addReconciliationMatrix(recon, breakdown);
+}
+
+function addTraceRowDetailSheet(
+  workbook: ExcelJS.Workbook,
+  traceRows: BdMisTraceRow[]
+): void {
+  const EXCEL_MAX_DATA_ROWS = 1_048_575;
+  const chunkCount = Math.max(1, Math.ceil(traceRows.length / EXCEL_MAX_DATA_ROWS));
+
+  for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
+    const start = chunkIndex * EXCEL_MAX_DATA_ROWS;
+    const chunk = traceRows.slice(start, start + EXCEL_MAX_DATA_ROWS);
+    const sheetLabel =
+      chunkCount === 1 ? 'Row Detail' : `Row Detail ${chunkIndex + 1}`;
+    const detail = workbook.addWorksheet(sheetLabel.slice(0, 31));
+
+    const header = detail.addRow([...TRACE_DETAIL_COLUMNS]);
+    applySummaryHeaderStyle(header);
+
+    for (const row of chunk) {
+      const excelRow = detail.addRow([
+        row.region.replace(/\s+ZONE$/i, ''),
+        row.plant,
+        row.office_under_branch,
+        row.technician_name,
+        row.customer_name,
+        row.call_date_time,
+        row.service_order,
+        row.client,
+        row.call_status,
+        row.aging,
+        row.file_name,
+        row.contribution_step,
+        row.included_in_final_count ? 'Yes' : 'No',
+      ]);
+      applyRegionRowStyle(excelRow, row.region);
+      const includedCell = excelRow.getCell(13);
+      includedCell.font = {
+        bold: true,
+        color: { argb: row.included_in_final_count ? 'FF059669' : 'FFDC2626' },
+      };
+    }
+  }
+}
+
+function autoSizeWorkbookColumns(workbook: ExcelJS.Workbook): void {
+  for (const sheet of workbook.worksheets) {
+    sheet.columns.forEach((col) => {
+      let max = 10;
+      col.eachCell?.({ includeEmpty: false }, (cell) => {
+        const len = String(cell.value ?? '').length;
+        if (len > max) max = Math.min(len + 2, 48);
+      });
+      col.width = max;
+    });
+  }
+}
+
+/** Traceable export: Summary dashboard + count reconciliation + full row detail. */
+export async function buildBdMisTraceableWorkbook(
+  payload: BdMisTraceableExportPayload
+): Promise<ExcelJS.Workbook> {
+  const ExcelJSRuntime = (await import('exceljs')).default;
+  const workbook = new ExcelJSRuntime.Workbook();
+
+  const meta = workbook.addWorksheet('About');
+  meta.addRow(['Cadbury+Coke+CRM — traceable export']).font = { bold: true, size: 12 };
+  meta.addRow([]);
+  meta.addRow(['Date range', `${payload.filterMeta.startDate} to ${payload.filterMeta.endDate}`]);
+  meta.addRow(['Aging as of', payload.filterMeta.agingAsOf]);
+  meta.addRow(['Call types', payload.filterMeta.callTypes]);
+  meta.addRow(['Branches', payload.filterMeta.branches]);
+  meta.addRow(['Franchisees', payload.filterMeta.franchisees]);
+  meta.addRow(['CRM source', payload.filterMeta.sources.crm ? 'On' : 'Off']);
+  meta.addRow(['Cadbury source', payload.filterMeta.sources.cadbury ? 'On' : 'Off']);
+  meta.addRow(['Coke source', payload.filterMeta.sources.coke ? 'On' : 'Off']);
+  meta.addRow([]);
+  meta.addRow(['Sheets:']);
+  meta.addRow(['  Summary — dashboard regional totals']);
+  meta.addRow(['  Count Trace — step matrix per region']);
+  meta.addRow(['  Row Detail — every call row with contribution trace']);
+  meta.addRow([]);
+  meta.addRow(['Row count', payload.traceRows.length]);
+
+  addTraceSummarySheet(workbook, payload);
+  addTraceCountSheet(workbook, payload);
+  addTraceRowDetailSheet(workbook, payload.traceRows);
+  autoSizeWorkbookColumns(workbook);
+
+  return workbook;
+}
+
+export function bdMisTraceableFilename(date = new Date()): string {
+  return `WRL_BD_MIS_Traceable_${date.toISOString().split('T')[0]}.xlsx`;
 }

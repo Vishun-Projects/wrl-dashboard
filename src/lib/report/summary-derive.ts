@@ -4,6 +4,10 @@
  */
 
 import { matchesCallTypeFilter, normalizeCallTypeDisplay, resolveAgingAsOfDate } from '@/lib/report/filters';
+import {
+  resolveMainBranchDisplayName,
+  resolveMainBranchOfficeId,
+} from '@/lib/read-model/queries/main-branch-resolve';
 
 export type BranchSummaryRow = {
   officeId: number;
@@ -161,15 +165,15 @@ function callTypeIs(row: Record<string, unknown>, type: string): boolean {
 }
 
 function rowOfficeId(row: Record<string, unknown>): number {
-  return Number(row.officeId ?? row.nofficeid ?? 0);
+  return resolveMainBranchOfficeId(row);
 }
 
-function rowParentId(row: Record<string, unknown>): number {
-  return Number(row.parentId ?? row.office_under ?? 0);
+function rowParentId(_row: Record<string, unknown>): number {
+  return 0;
 }
 
 function rowBranchName(row: Record<string, unknown>): string {
-  return String(row.office_name ?? row.officename ?? row.branch ?? '');
+  return resolveMainBranchDisplayName(row);
 }
 
 function rowRegion(row: Record<string, unknown>): string {
@@ -309,9 +313,18 @@ export function deriveSummaryDashboard(
       });
       const currentHc = regionHeadcountMap.get(region) || 0;
       regionHeadcountMap.set(region, currentHc + headcount);
+    } else if (headcount > branchMap.get(officeId)!.headcount) {
+      const branchRow = branchMap.get(officeId)!;
+      const delta = headcount - branchRow.headcount;
+      branchRow.headcount = headcount;
+      regionHeadcountMap.set(region, (regionHeadcountMap.get(region) || 0) + delta);
     }
 
     const b = branchMap.get(officeId)!;
+    const branchLabel = rowBranchName(row);
+    if (branchLabel !== 'UNKNOWN' && (b.branch === 'UNKNOWN' || b.branch === '')) {
+      b.branch = branchLabel;
+    }
     b.population += 1;
     b.total_calls += 1;
     if (solved) b.solved_calls += 1;

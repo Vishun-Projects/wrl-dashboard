@@ -37,7 +37,7 @@ export const drilldownBodySchema = z.object({
   startDate: z.string().optional(),
   endDate: z.string().optional(),
   agingAsOf: z.string().optional(),
-  officeId: z.string().optional(),
+  officeId: z.coerce.string().optional(),
   callType: z.string().optional(),
   status: z.string().optional(),
   account: z.string().optional(),

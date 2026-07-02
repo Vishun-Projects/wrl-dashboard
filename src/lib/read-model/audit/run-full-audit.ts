@@ -28,12 +28,14 @@ export function parseAuditCliArgs(argv: string[]): AuditOptions {
   const onlyIdx = argv.indexOf('--only');
   const resumeIdx = argv.indexOf('--resume-from-trn');
   const skipReverse = argv.includes('--skip-reverse');
+  const ytdOnly = argv.includes('--ytd-only') || !argv.includes('--all-hot');
 
   return {
     apply,
     phases: parsePhases(onlyIdx >= 0 ? argv[onlyIdx + 1] : undefined),
     resumeFromTrn: resumeIdx >= 0 ? argv[resumeIdx + 1] : undefined,
     skipReverse: skipReverse,
+    ytdOnly,
     onProgress: (message) => console.log(`[audit] ${message}`),
   };
 }

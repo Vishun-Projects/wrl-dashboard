@@ -6,13 +6,20 @@ import {
   parseCallTypes,
   parseCsvFilter,
 } from '@/lib/read-model/queries/summary';
-import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryForBdMis } from '@/lib/mis-client-import/aggregate';
+import {
+  queryBdMisCrmCallTraceRows,
+  queryBdMisCrmSummary,
+} from '@/lib/read-model/queries/bd-mis-summary';
+import {
+  queryClientAccountSummaryForBdMis,
+  queryClientCallTraceRowsForBdMis,
+} from '@/lib/mis-client-import/aggregate';
 import {
   buildBdMisRegionalRows,
   bdMisSourcesFromSelection,
   sumBdMisRegionalGrand,
 } from '@/lib/report/bd-mis-summary';
+import { buildBdMisTraceRows } from '@/lib/report/bd-mis-trace';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
 
 export async function GET(req: NextRequest) {
@@ -38,6 +45,7 @@ export async function GET(req: NextRequest) {
     const endDate = searchParams.get('endDate');
     const agingAsOf = searchParams.get('agingAsOf');
     const includeCrm = searchParams.get('includeCrm') !== 'false';
+    const includeTrace = searchParams.get('includeTrace') === 'true';
     const clientSources = (searchParams.get('clientSources') ?? 'coke,cadbury')
       .split(',')
       .map((s) => s.trim().toLowerCase())
@@ -46,7 +54,7 @@ export async function GET(req: NextRequest) {
     const assignedOffices = security.assignedOffices.map(String);
     const isHod = security.isHod;
 
-    const crm = await queryBdMisCrmSummary({
+    const queryParams = {
       startDate,
       endDate,
       agingAsOf: agingAsOf || undefined,
@@ -54,7 +62,9 @@ export async function GET(req: NextRequest) {
       callTypes: parseCallTypes(callType),
       assignedOffices,
       isHod,
-    });
+    };
+
+    const crm = await queryBdMisCrmSummary(queryParams);
 
     const clientAccountSummary = await queryClientAccountSummaryForBdMis({
       startDate,
@@ -73,6 +83,34 @@ export async function GET(req: NextRequest) {
     const grand = sumBdMisRegionalGrand(regionalRows);
     const syncMeta = await getSyncMeta();
 
+    const agingDate =
+      agingAsOf || endDate || new Date().toISOString().slice(0, 10);
+
+    let traceRows: ReturnType<typeof buildBdMisTraceRows> | undefined;
+    if (includeTrace) {
+      const [crmCallRows, clientCallRows] = await Promise.all([
+        includeCrm ? queryBdMisCrmCallTraceRows(queryParams) : Promise.resolve([]),
+        clientSources.length
+          ? queryClientCallTraceRowsForBdMis({
+              startDate,
+              endDate,
+              agingAsOf: agingAsOf || undefined,
+              sourceCodes: clientSources,
+            })
+          : Promise.resolve([]),
+      ]);
+
+      traceRows = buildBdMisTraceRows({
+        crmRows: crmCallRows.map((row) => ({
+          ...row,
+          status_bucket: row.status_bucket as import('@/lib/mis-client-import/types').StatusBucket,
+        })),
+        clientRows: clientCallRows,
+        sources,
+        agingDate,
+      });
+    }
+
     return NextResponse.json({
       regionalRows,
       grand,
@@ -80,6 +118,7 @@ export async function GET(req: NextRequest) {
       crmAccountSummary: crm.accountSummary,
       clientAccountSummary,
       sources,
+      traceRows,
       syncMeta,
       readSource: 'postgres',
     });

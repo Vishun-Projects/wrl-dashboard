@@ -151,11 +151,11 @@ export async function auditDimensions(
     fetchDimCallTypes(),
   ]);
 
-  const [pgOffices, pgEngineers, pgCallTypes] = await Promise.all([
-    loadPostgresOffices(client),
-    loadPostgresEngineers(client),
-    loadPostgresCallTypes(client),
-  ]);
+  const [pgOffices, pgEngineers, pgCallTypes] = [
+    await loadPostgresOffices(client),
+    await loadPostgresEngineers(client),
+    await loadPostgresCallTypes(client),
+  ];
 
   const pgOfficeMap = new Map(
     pgOffices.map((r) => [Number(r.ncode), r as Record<string, unknown>])

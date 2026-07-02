@@ -591,6 +591,7 @@ export default function ReportPageClient() {
     clientAccountSummary: AccountSummaryRow[];
     sources: BdMisSourceFlags;
   } | null>(null);
+  const [exportingBdMisTrace, setExportingBdMisTrace] = useState(false);
   const [total, setTotal] = useState<number>(globalReportCache?.total || 0);
 
   useEffect(() => {
@@ -2783,21 +2784,25 @@ export default function ReportPageClient() {
     const d0 = performance.now();
     reportPerf('drillDown', 'POST /api/report/drilldown start', d0, { type, title });
     try {
-      const { data: { session } } = await supabase.auth.getSession();
       const applied = getAppliedFiltersSnapshot();
       const range = applied?.dateRange ?? dateRange;
       const startDateStr = toDateString(range.start);
       const endDateStr = toDateString(range.end);
       const agingStr = resolveSummaryAgingStr(applied);
+      const { data: { session } } = await supabase.auth.getSession();
       const res = await axios.post('/api/report/drilldown', {
         type,
         callType: params.callType || viewCallTypesParam,
         ...params,
+        officeId: params.officeId != null ? String(params.officeId) : undefined,
         startDate: startDateStr,
         endDate: endDateStr,
         agingAsOf: agingStr,
       }, {
-        headers: { 'Authorization': `Bearer ${session?.access_token}` },
+        withCredentials: true,
+        headers: session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : undefined,
         signal: controller.signal
       });
       setDrillDown(prev => ({ ...prev, loading: false, data: res.data.data }));
@@ -3497,6 +3502,152 @@ export default function ReportPageClient() {
     }
   }, [fetchBdMisSummaryPayload, sourceSelection]);
 
+  const buildBdMisExportFilterMeta = useCallback(() => {
+    const applied = getAppliedFiltersSnapshot();
+    return {
+      startDate: toDateString(applied?.dateRange.start ?? dateRange.start),
+      endDate: toDateString(applied?.dateRange.end ?? dateRange.end),
+      agingAsOf: normalizeAgingAsOfDate(applied?.agingAsOf ?? agingAsOf),
+      callTypes:
+        applied?.selectedCallTypes?.map((t) => String(t).toUpperCase()).join(', ') || 'BREAKDOWN',
+      branches: joinFilterParam(applied?.selectedBranch ?? selectedBranch) || 'All Branches',
+      franchisees:
+        joinFilterParam(applied?.selectedFranchisee ?? selectedFranchisee) || 'All Franchisees',
+      sources:
+        bdMisExportData?.sources ??
+        ({
+          crm: sourceSelection.crm,
+          cadbury: sourceSelection.clientSourceCodes.includes('cadbury'),
+          coke: sourceSelection.clientSourceCodes.includes('coke'),
+        } satisfies BdMisSourceFlags),
+    };
+  }, [
+    getAppliedFiltersSnapshot,
+    dateRange.start,
+    dateRange.end,
+    agingAsOf,
+    selectedBranch,
+    selectedFranchisee,
+    bdMisExportData?.sources,
+    sourceSelection,
+  ]);
+
+  const handleBdMisTraceExport = useCallback(async () => {
+    if (exportingBdMisTrace) return;
+    setExportingBdMisTrace(true);
+    const traceT0 = performance.now();
+    console.info('[bd-mis-trace-export] start');
+    try {
+      const applied = getAppliedFiltersSnapshot();
+      if (!applied) {
+        alert('Apply filters before exporting.');
+        return;
+      }
+      const startDateStr = toDateString(applied.dateRange.start);
+      const endDateStr = toDateString(applied.dateRange.end);
+      const summaryOfficeIds = resolveSummaryOfficeIdsParam(
+        offices,
+        applied.selectedBranch,
+        applied.selectedFranchisee
+      );
+      const callTypesParam = resolveViewCallTypesParam(applied.selectedCallTypes);
+      const agingStr = normalizeAgingAsOfDate(applied.agingAsOf);
+      const clientSources = sourceSelection.clientSourceCodes.length
+        ? sourceSelection.clientSourceCodes.join(',')
+        : 'coke,cadbury';
+
+      const apiT0 = performance.now();
+      const res = await axios.get('/api/report/bd-mis-summary', {
+        withCredentials: true,
+        params: {
+          officeId: summaryOfficeIds,
+          callType: callTypesParam,
+          startDate: startDateStr,
+          endDate: endDateStr,
+          agingAsOf: agingStr,
+          includeCrm: sourceSelection.crm ? 'true' : 'false',
+          clientSources,
+          includeTrace: 'true',
+        },
+      });
+      console.info(
+        '[bd-mis-trace-export] api-ok',
+        {
+          elapsed_ms: Math.round(performance.now() - apiT0),
+          status: res.status,
+        }
+      );
+
+      const data = res.data;
+      const regionalRows = data.regionalRows ?? [];
+      const grand = data.grand;
+      const traceRows = data.traceRows ?? [];
+      console.info('[bd-mis-trace-export] payload', {
+        regional_rows: regionalRows.length,
+        trace_rows: traceRows.length,
+        has_grand: Boolean(grand),
+      });
+
+      if (!regionalRows.length || !grand) {
+        alert('No data to export. Apply filters and wait for the summary to load.');
+        return;
+      }
+      // Always allow export, even when row-level trace rows are empty for a filter set.
+      // This keeps Summary/Count Trace downloadable and avoids a hard-stop UX.
+
+      const { buildBdMisTraceableWorkbook, bdMisTraceableFilename } = await import(
+        '@/lib/report/bd-mis-excel-export'
+      );
+      const { downloadWorkbook } = await import('@/lib/report/summary-excel-export');
+      const buildT0 = performance.now();
+      const workbook = await buildBdMisTraceableWorkbook({
+        regionalRows,
+        grand,
+        crmBranchSummary: data.crmBranchSummary ?? [],
+        crmAccountSummary: data.crmAccountSummary ?? [],
+        clientAccountSummary: data.clientAccountSummary ?? [],
+        sources: data.sources ?? {
+          crm: sourceSelection.crm,
+          cadbury: sourceSelection.clientSourceCodes.includes('cadbury'),
+          coke: sourceSelection.clientSourceCodes.includes('coke'),
+        },
+        traceRows,
+        filterMeta: buildBdMisExportFilterMeta(),
+      });
+      console.info('[bd-mis-trace-export] workbook-built', {
+        elapsed_ms: Math.round(performance.now() - buildT0),
+        sheets: workbook.worksheets.length,
+      });
+      const filename = bdMisTraceableFilename();
+      const dlT0 = performance.now();
+      console.info('[bd-mis-trace-export] download-trigger', { filename });
+      await downloadWorkbook(workbook, filename);
+      console.info('[bd-mis-trace-export] download-finished', {
+        elapsed_ms: Math.round(performance.now() - dlT0),
+      });
+    } catch (err) {
+      console.error('BD MIS trace export failed:', err);
+      const message =
+        axios.isAxiosError(err) && err.response?.data?.error
+          ? String(err.response.data.error)
+          : err instanceof Error
+            ? err.message
+            : 'Export failed';
+      alert(`Failed to export trace workbook: ${message}`);
+    } finally {
+      console.info('[bd-mis-trace-export] done', {
+        total_elapsed_ms: Math.round(performance.now() - traceT0),
+      });
+      setExportingBdMisTrace(false);
+    }
+  }, [
+    exportingBdMisTrace,
+    getAppliedFiltersSnapshot,
+    offices,
+    sourceSelection,
+    buildBdMisExportFilterMeta,
+  ]);
+
   useEffect(() => {
     if (!dbInitialized) return;
     if (activeTab !== 'bd_mis_summary') return;
@@ -3777,27 +3928,13 @@ export default function ReportPageClient() {
         alert('No data to export. Apply filters and wait for the summary to load.');
         return;
       }
-      const applied = getAppliedFiltersSnapshot();
       const { buildBdMisSummaryWorkbook, bdMisSummaryFilename } = await import(
         '@/lib/report/bd-mis-excel-export'
       );
       const { downloadWorkbook } = await import('@/lib/report/summary-excel-export');
       const workbook = await buildBdMisSummaryWorkbook({
         ...bdMisExportData,
-        filterMeta: {
-          startDate: toDateString(applied?.dateRange.start ?? dateRange.start),
-          endDate: toDateString(applied?.dateRange.end ?? dateRange.end),
-          agingAsOf: normalizeAgingAsOfDate(applied?.agingAsOf ?? agingAsOf),
-          callTypes:
-            applied?.selectedCallTypes?.map((t) => String(t).toUpperCase()).join(', ') ||
-            'BREAKDOWN',
-          branches:
-            joinFilterParam(applied?.selectedBranch ?? selectedBranch) || 'All Branches',
-          franchisees:
-            joinFilterParam(applied?.selectedFranchisee ?? selectedFranchisee) ||
-            'All Franchisees',
-          sources: bdMisExportData.sources,
-        },
+        filterMeta: buildBdMisExportFilterMeta(),
       });
       await downloadWorkbook(workbook, bdMisSummaryFilename());
       return;
@@ -3947,7 +4084,7 @@ export default function ReportPageClient() {
               }
               void handleExport('excel');
             }}
-            disabled={false}
+            disabled={exportingBdMisTrace}
             className="flex items-center gap-2 bg-bg-canvas text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-bg-soft transition-all shadow-sm disabled:opacity-50"
             title={
               exportingDetailed
@@ -3968,6 +4105,25 @@ export default function ReportPageClient() {
                 : 'Exporting…'
               : 'Export Excel'}
           </button>
+          {activeTab === 'summary' || activeTab === 'bd_mis_summary' ? (
+            <button
+              type="button"
+              onClick={() => void handleBdMisTraceExport()}
+              disabled={
+                exportingBdMisTrace ||
+                exportingDetailed ||
+                (activeTab === 'summary' ? summaryTabLoading : bdMisTabLoading)
+              }
+              className="flex items-center gap-2 bg-bg-canvas text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-bg-soft transition-all shadow-sm disabled:opacity-50"
+              title="Export summary dashboard + full row-by-row trace (CRM, Cadbury, Coke)"
+            >
+              <FileSpreadsheet
+                size={14}
+                className={exportingBdMisTrace ? 'animate-pulse text-amber-600' : 'text-blue-600'}
+              />
+              {exportingBdMisTrace ? 'Trace export…' : 'Export Trace'}
+            </button>
+          ) : null}
           <div className="relative">
             <button
               type="button"

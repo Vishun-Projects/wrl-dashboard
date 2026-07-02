@@ -95,6 +95,7 @@ export type AuditOptions = {
   hotPageSize?: number;
   crmTrnChunk?: number;
   skipReverse?: boolean;
+  ytdOnly?: boolean;
   onMismatch?: (mismatch: AuditMismatch) => void;
   onProgress?: (message: string) => void;
 };

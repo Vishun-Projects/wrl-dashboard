@@ -396,3 +396,77 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
 
   return { branchSummary, accountSummary, globalHeadcount };
 }
+
+export type BdMisCrmCallTraceDbRow = {
+  region: string;
+  plant: string | null;
+  technician_name: string | null;
+  office_under_branch: string | null;
+  customer_name: string | null;
+  logged_at: Date;
+  service_order: string;
+  client: string;
+  call_status: string | null;
+  status_bucket: string;
+  ncancelreason: number | null;
+  account: string;
+};
+
+/** Call-level CRM rows for BD MIS trace export (same filters as summary rollup). */
+export async function queryBdMisCrmCallTraceRows(
+  params: SummaryQueryParams
+): Promise<BdMisCrmCallTraceDbRow[]> {
+  await ensureNormalizeCallTypeFunction();
+
+  const startDate = params.startDate || yearStart();
+  const endDate = params.endDate || new Date().toISOString().slice(0, 10);
+  const periodStart = `${startDate}T00:00:00`;
+  const periodEnd = `${endDate}T23:59:59`;
+
+  const officeFilter = buildOfficeFilter(params, 'h', 3);
+  const callTypeFilter = buildCallTypeFilter(params, 'h', officeFilter.nextIdx);
+  const values = [periodStart, periodEnd, ...officeFilter.values, ...callTypeFilter.values];
+
+  const rows = await prisma.$queryRawUnsafe<BdMisCrmCallTraceDbRow[]>(
+    `
+    SELECT
+      ${BD_MIS_REGION_SQL} AS region,
+      COALESCE(
+        NULLIF(trim(h.branch_name), ''),
+        NULLIF(trim(d.vcompanyname), ''),
+        NULLIF(trim(d_parent.vcompanyname), ''),
+        NULLIF(trim(h.franchisee_name), ''),
+        NULLIF(trim(h.party_name), '')
+      ) AS plant,
+      NULLIF(trim(h.engineer_name), '') AS technician_name,
+      COALESCE(
+        NULLIF(trim(h.franchisee_name), ''),
+        NULLIF(trim(h.party_name), ''),
+        NULLIF(trim(d_parent.vcompanyname), ''),
+        NULLIF(trim(h.branch_name), ''),
+        NULLIF(trim(d.vcompanyname), '')
+      ) AS office_under_branch,
+      NULLIF(trim(h.party_name), '') AS customer_name,
+      h.logged_at,
+      h.vtrnno AS service_order,
+      h.account AS client,
+      h.status_label AS call_status,
+      h.status_bucket::text AS status_bucket,
+      h.ncancelreason,
+      h.account
+    FROM calls_latest_hot h
+    LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
+    LEFT JOIN dim_offices d_parent ON d_parent.ncode = NULLIF(d.nunder, 0)
+    ${HOT_OFFICE_JOINS_SQL}
+    WHERE h.logged_at >= $1::timestamptz
+      AND h.logged_at <= $2::timestamptz
+      ${officeFilter.clause}
+      ${callTypeFilter.clause}
+      ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
+    ORDER BY ${BD_MIS_REGION_SQL}, h.logged_at, h.vtrnno
+    `,
+    ...values
+  );
+
+  return rows;
+}

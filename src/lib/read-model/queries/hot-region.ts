@@ -28,3 +28,35 @@ export const HOT_OFFICE_ZONE_NAME_SQL = `
 export const HOT_RESOLVED_REGION_SQL = `
   COALESCE(NULLIF(trim(h.region), ''), ${HOT_OFFICE_ZONE_NAME_SQL})
 `;
+
+/** WRL branch office name pattern (e.g. "1173 - DELHI BRANCH"). */
+export const HOT_OFFICE_IS_BRANCH_NAME_SQL = `
+  (
+    trim(COALESCE(d.vcompanyname, '')) ~* '\\mBRANCH\\M'
+    OR trim(COALESCE(d.vcompanyname, '')) ~ '^\\d+\\s*-'
+  )
+`;
+
+/** Franchisee → parent branch id; WRL branch office → self (not regional parent). */
+export const HOT_MAIN_BRANCH_OFFICE_ID_SQL = `
+  CASE
+    WHEN ${HOT_OFFICE_IS_BRANCH_NAME_SQL} THEN h.nofficeid
+    WHEN COALESCE(d.nunder, 0) <> 0 THEN d.nunder
+    ELSE h.nofficeid
+  END
+`;
+
+/** Summary branch label: hot branch_name / WRL branch office — never region or franchisee ASP. */
+export const HOT_MAIN_BRANCH_NAME_SQL = `
+  COALESCE(
+    NULLIF(trim(h.branch_name), ''),
+    CASE WHEN ${HOT_OFFICE_IS_BRANCH_NAME_SQL} THEN NULLIF(trim(d.vcompanyname), '') END,
+    CASE
+      WHEN trim(COALESCE(dp_reg.vcompanyname, '')) ~* '\\mBRANCH\\M'
+        OR trim(COALESCE(dp_reg.vcompanyname, '')) ~ '^\\d+\\s*-'
+      THEN NULLIF(trim(dp_reg.vcompanyname), '')
+    END,
+    NULLIF(trim(d.vcompanyname), ''),
+    'UNKNOWN'
+  )
+`;

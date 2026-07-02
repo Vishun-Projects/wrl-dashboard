@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { postQuery } from '@/lib/db/proxy';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
+import { readSummaryFromPostgres } from '@/lib/read-model/flags';
+import { querySummaryDrilldown } from '@/lib/read-model/queries/drilldown';
 import { appendCallTypeFilter } from '@/lib/trhcalls/query';
 import { appendOfficeSecurityFilter } from '@/lib/trhcalls/office-security';
 import {
@@ -28,6 +30,21 @@ export async function POST(req: NextRequest) {
     }
 
     const { type, officeId, account, region, startDate, endDate, callType, agingAsOf } = parsed.data;
+
+    if (readSummaryFromPostgres()) {
+      const data = await querySummaryDrilldown({
+        type,
+        officeId,
+        region,
+        startDate,
+        endDate,
+        agingAsOf,
+        callType,
+        assignedOffices: security.assignedOffices.map(String),
+        isHod: security.isHod,
+      });
+      return NextResponse.json({ data });
+    }
 
     const safeStart = startDate ? assertIsoDate(startDate, 'startDate') : null;
     const safeEnd = endDate ? assertIsoDate(endDate, 'endDate') : null;

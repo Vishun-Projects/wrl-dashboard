@@ -3,6 +3,8 @@ import type { SummaryDashboard } from '@/lib/report/summary-derive';
 import { normalizeCallTypeDisplay } from '@/lib/report/filters';
 import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
 import {
+  HOT_MAIN_BRANCH_NAME_SQL,
+  HOT_MAIN_BRANCH_OFFICE_ID_SQL,
   HOT_OFFICE_JOINS_SQL,
   HOT_RESOLVED_REGION_SQL,
 } from '@/lib/read-model/queries/hot-region';
@@ -131,9 +133,9 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
   >(
     `
     SELECT
-      h.nofficeid AS office_id,
-      d.nunder AS parent_id,
-      COALESCE(d.vcompanyname, h.branch_name, 'UNKNOWN') AS branch,
+      ${HOT_MAIN_BRANCH_OFFICE_ID_SQL} AS office_id,
+      0::int AS parent_id,
+      ${HOT_MAIN_BRANCH_NAME_SQL} AS branch,
       ${HOT_RESOLVED_REGION_SQL} AS region,
       count(*)::int AS total_calls,
       count(*) FILTER (WHERE h.status_bucket IN ('solved', 'tech_solved'))::int AS solved_calls,
@@ -159,7 +161,7 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
       ${officeFilter.clause}
       ${callTypeFilter.clause}
       ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
-    GROUP BY h.nofficeid, d.nunder, d.vcompanyname, h.branch_name, ${HOT_RESOLVED_REGION_SQL}
+    GROUP BY ${HOT_MAIN_BRANCH_OFFICE_ID_SQL}, ${HOT_MAIN_BRANCH_NAME_SQL}, ${HOT_RESOLVED_REGION_SQL}
     ORDER BY branch ASC
     `,
     ...values
@@ -182,7 +184,7 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
   >(
     `
     SELECT
-      h.nofficeid AS office_id,
+      ${HOT_MAIN_BRANCH_OFFICE_ID_SQL} AS office_id,
       SUM(CASE WHEN ($1::date - h.logged_at::date) <= 2 THEN 1 ELSE 0 END)::int AS age_2,
       SUM(CASE WHEN ($1::date - h.logged_at::date) BETWEEN 3 AND 7 THEN 1 ELSE 0 END)::int AS age_3,
       SUM(CASE WHEN ($1::date - h.logged_at::date) BETWEEN 8 AND 15 THEN 1 ELSE 0 END)::int AS age_7,
@@ -191,11 +193,12 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
       COUNT(DISTINCT NULLIF(h.engineer_name, ''))::int AS active_eng
     FROM calls_latest_hot h
     LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
+    ${HOT_OFFICE_JOINS_SQL}
     WHERE h.status_bucket IN ('open_unallocated', 'assigned')
       ${agingOfficeFilter.clause}
       ${agingCallTypeFilter.clause}
       ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
-    GROUP BY h.nofficeid
+    GROUP BY ${HOT_MAIN_BRANCH_OFFICE_ID_SQL}
     `,
     ...agingValues
   );

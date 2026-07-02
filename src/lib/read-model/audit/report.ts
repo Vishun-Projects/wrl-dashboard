@@ -16,14 +16,24 @@ export function createAuditReportWriter(timestamp?: string): AuditReportWriter {
   const summaryPath = join(dir, `read-model-${ts}.json`);
   const jsonlPath = join(dir, `read-model-${ts}.jsonl`);
   writeFileSync(jsonlPath, '');
+  const pendingLines: string[] = [];
+  const flushThreshold = 500;
+
+  function flushPending(): void {
+    if (!pendingLines.length) return;
+    appendFileSync(jsonlPath, `${pendingLines.join('\n')}\n`, 'utf8');
+    pendingLines.length = 0;
+  }
 
   return {
     summaryPath,
     jsonlPath,
     writeMismatch(mismatch: AuditMismatch) {
-      appendFileSync(jsonlPath, `${JSON.stringify(mismatch)}\n`, 'utf8');
+      pendingLines.push(JSON.stringify(mismatch));
+      if (pendingLines.length >= flushThreshold) flushPending();
     },
     writeSummary(summary: AuditSummary) {
+      flushPending();
       writeFileSync(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
       return summaryPath;
     },

@@ -289,13 +289,31 @@ export function keyAccountMisFilename(date = new Date()): string {
 
 /** Browser download helper for MIS report tabs. */
 export async function downloadWorkbook(workbook: ExcelJS.Workbook, filename: string): Promise<void> {
+  const t0 = performance.now();
+  console.info('[download-workbook] begin', { filename, sheets: workbook.worksheets.length });
   const buffer = await workbook.xlsx.writeBuffer();
+  console.info('[download-workbook] buffer-ready', {
+    elapsed_ms: Math.round(performance.now() - t0),
+    bytes: (buffer as ArrayBuffer).byteLength ?? 0,
+  });
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
   const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
+  const downloadUrl = URL.createObjectURL(blob);
+  link.href = downloadUrl;
   link.download = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
+  // For large files, ensure the element is attached and click occurs
+  // before revoking the object URL to avoid flaky no-download behavior.
+  link.style.display = 'none';
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(link.href);
+  console.info('[download-workbook] click-dispatched', {
+    elapsed_ms: Math.round(performance.now() - t0),
+  });
+  window.setTimeout(() => {
+    URL.revokeObjectURL(downloadUrl);
+    link.remove();
+    console.info('[download-workbook] cleanup-done', { filename });
+  }, 60_000);
 }

@@ -33,16 +33,32 @@ function emptyHotSummary(): HotAuditSummary {
 
 async function listHotTrns(
   client: pg.PoolClient,
-  resumeFromTrn?: string
+  resumeFromTrn?: string,
+  ytdOnly?: boolean
 ): Promise<string[]> {
+  const ytdStart = ytdOnly ? (process.env.AUDIT_HOT_YTD_FROM ?? '2026-01-01') : null;
   const res = resumeFromTrn
-    ? await client.query<{ vtrnno: string }>(
-        `SELECT vtrnno FROM calls_latest_hot WHERE vtrnno >= $1 ORDER BY vtrnno`,
-        [resumeFromTrn]
-      )
-    : await client.query<{ vtrnno: string }>(
-        `SELECT vtrnno FROM calls_latest_hot ORDER BY vtrnno`
-      );
+    ? ytdStart
+      ? await client.query<{ vtrnno: string }>(
+          `SELECT vtrnno FROM calls_latest_hot
+           WHERE vtrnno >= $1 AND logged_at >= $2::timestamptz
+           ORDER BY vtrnno`,
+          [resumeFromTrn, `${ytdStart}T00:00:00`]
+        )
+      : await client.query<{ vtrnno: string }>(
+          `SELECT vtrnno FROM calls_latest_hot WHERE vtrnno >= $1 ORDER BY vtrnno`,
+          [resumeFromTrn]
+        )
+    : ytdStart
+      ? await client.query<{ vtrnno: string }>(
+          `SELECT vtrnno FROM calls_latest_hot
+           WHERE logged_at >= $1::timestamptz
+           ORDER BY vtrnno`,
+          [`${ytdStart}T00:00:00`]
+        )
+      : await client.query<{ vtrnno: string }>(
+          `SELECT vtrnno FROM calls_latest_hot ORDER BY vtrnno`
+        );
   return res.rows.map((r) => String(r.vtrnno).trim());
 }
 
@@ -63,7 +79,7 @@ async function fetchHotPage(
 /** Forward scan: every calls_latest_hot row vs live CRM (full column diff). */
 export async function auditHotForward(
   client: pg.PoolClient,
-  opts: Pick<AuditOptions, 'resumeFromTrn' | 'hotPageSize' | 'crmTrnChunk' | 'onMismatch' | 'onProgress'>
+  opts: Pick<AuditOptions, 'resumeFromTrn' | 'hotPageSize' | 'crmTrnChunk' | 'ytdOnly' | 'onMismatch' | 'onProgress'>
 ): Promise<HotAuditResult> {
   const pageSize = opts.hotPageSize ?? DEFAULT_PAGE_SIZE;
   const trnChunk = opts.crmTrnChunk ?? DEFAULT_TRN_CHUNK;
@@ -72,9 +88,11 @@ export async function auditHotForward(
   const deleteTrns: string[] = [];
   const staleTrnSet = new Set<string>();
 
-  const allTrns = await listHotTrns(client, opts.resumeFromTrn);
+  const allTrns = await listHotTrns(client, opts.resumeFromTrn, opts.ytdOnly);
   summary.rows_checked = allTrns.length;
-  opts.onProgress?.(`Hot forward audit: ${allTrns.length} TRN(s) to check`);
+  opts.onProgress?.(
+    `Hot forward audit${opts.ytdOnly ? ' (YTD only)' : ''}: ${allTrns.length} TRN(s) to check`
+  );
 
   for (let pageStart = 0; pageStart < allTrns.length; pageStart += pageSize) {
     const pageTrns = allTrns.slice(pageStart, pageStart + pageSize);
