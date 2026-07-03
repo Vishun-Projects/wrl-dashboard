@@ -253,6 +253,22 @@ export function sumMergedAccountOpenCalls(
   );
 }
 
+/** CRM branch/account summary `total_calls` already includes cancelled; client-import rows do not. */
+export function displayLoggedCallCount(
+  totalCalls: number,
+  cancelledCalls: number,
+  totalIncludesCancelled = true
+): number {
+  return totalIncludesCancelled ? totalCalls : totalCalls + cancelledCalls;
+}
+
+export function sumBranchLoggedCalls(
+  branches: Array<Record<string, unknown>> | undefined
+): number {
+  if (!branches?.length) return 0;
+  return branches.reduce((sum, b) => sum + Number(b.total_calls ?? 0), 0);
+}
+
 export function mergeSelectedMetrics(
   crm: number,
   client: number,

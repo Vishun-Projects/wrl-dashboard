@@ -107,6 +107,7 @@ import { openReportsDb, readCorpusMeta } from '@/lib/report/corpus-storage';
 import { deriveSummaryDashboard, diagnoseSummaryDerivation } from '@/lib/report/summary-derive';
 import {
   readRegisterFromPostgresClient,
+  readSummaryFromPostgresClient,
   registerPostgresHotPathAvailable,
 } from '@/lib/read-model/client-flags';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
@@ -139,6 +140,7 @@ import {
   buildAccountDisplayRows,
   buildClientOnlyRegionalRows,
   type ClientMergeWithCrmPrefs,
+  displayLoggedCallCount,
   filterClientAccountSummary,
   filterTopAccountsByZone,
   findAccountMetric,
@@ -160,6 +162,7 @@ import {
   resolveSummaryRegionOpenCalls,
   sumAccountMetricByRegion,
   sumBranchMetric,
+  sumBranchLoggedCalls,
 } from '@/components/report/SummaryMergedMetricCell';
 import {
   isClientOnlyMode,
@@ -578,11 +581,10 @@ export default function ReportPageClient() {
   const [bdMisTabLoading, setBdMisTabLoading] = useState(false);
   const [bdMisRegionalRows, setBdMisRegionalRows] = useState<BdMisRegionalRow[]>([]);
   const [bdMisGrand, setBdMisGrand] = useState<BdMisGrandRow | null>(null);
-  /** BD MIS Excel union rows for Summary Dashboard when CRM + client sources are on. */
+  /** BD MIS Excel union uses full client snapshots (YTD); not used for date-filtered Summary Dashboard. */
   const [excelUnionRegionalRows, setExcelUnionRegionalRows] = useState<BdMisRegionalRow[]>([]);
   const [excelUnionGrand, setExcelUnionGrand] = useState<BdMisGrandRow | null>(null);
-  const useBdMisExcelUnion = alignCrmToAccounts && excelUnionRegionalRows.length > 0;
-  const aiExcelUnion = useBdMisExcelUnion && excelUnionGrand ? excelUnionGrand : null;
+  const useBdMisExcelUnion = false;
   const [bdMisExportData, setBdMisExportData] = useState<{
     regionalRows: BdMisRegionalRow[];
     grand: BdMisGrandRow;
@@ -1008,10 +1010,13 @@ export default function ReportPageClient() {
   const fetchClientImportSummaryRef = React.useRef<
     (scope?: { startDate: string; endDate: string; agingAsOf: string }) => Promise<void>
   >(async () => {});
+  const refreshClientImportOverlayRef = React.useRef<
+    (scope: { startDate: string; endDate: string; agingAsOf: string }) => Promise<void>
+  >(async () => {});
   const loadExcelUnionSummaryRef = React.useRef<() => Promise<void>>(async () => {});
   const resolveClientImportScopeRef = React.useRef<
-    () => { startDate: string; endDate: string; agingAsOf: string }
-  >(() => ({ startDate: '', endDate: '', agingAsOf: '' }));
+    () => { startDate: string; endDate: string; agingAsOf: string } | null
+  >(() => null);
   const dataRef = React.useRef(data);
   const totalRef = React.useRef(total);
   const registerSummaryRef = React.useRef(registerSummary);
@@ -1368,6 +1373,11 @@ export default function ReportPageClient() {
       payload.endDateStr,
       payload.agingStr
     );
+    void refreshClientImportOverlayRef.current({
+      startDate: payload.startDateStr,
+      endDate: payload.endDateStr,
+      agingAsOf: payload.agingStr,
+    });
     return payload.branchSummary.length > 0 || (callCorpusStore?.calls.size ?? 0) > 0;
   }, [deriveSummaryFromCorpusPayload, commitSummaryResult]);
 
@@ -1451,6 +1461,12 @@ export default function ReportPageClient() {
       }
       if (client) {
         commitClientImportSummary(client);
+      } else if (crm) {
+        void refreshClientImportOverlayRef.current({
+          startDate: crm.startDateStr,
+          endDate: crm.endDateStr,
+          agingAsOf: crm.agingStr,
+        });
       }
     },
     [commitSummaryResult, commitClientImportSummary]
@@ -1525,20 +1541,19 @@ export default function ReportPageClient() {
 
   const resolveClientImportScope = useCallback(() => {
     const snap = getAppliedFiltersSnapshot();
-    const start = snap?.dateRange.start ?? dateRange.start;
-    const end = snap?.dateRange.end ?? dateRange.end;
-    const agingStr = normalizeAgingAsOfDate(snap?.agingAsOf ?? agingAsOf);
+    if (!snap) return null;
     return {
-      startDate: toDateString(start),
-      endDate: toDateString(end),
-      agingAsOf: agingStr,
+      startDate: toDateString(snap.dateRange.start),
+      endDate: toDateString(snap.dateRange.end),
+      agingAsOf: normalizeAgingAsOfDate(snap.agingAsOf),
     };
-  }, [getAppliedFiltersSnapshot, dateRange.start, dateRange.end, agingAsOf]);
+  }, [getAppliedFiltersSnapshot]);
 
   const fetchClientImportSummary = useCallback(
     async (scope?: { startDate: string; endDate: string; agingAsOf: string }): Promise<void> => {
       const genAtStart = summaryTabLoadRef.current;
       const resolvedScope = scope ?? resolveClientImportScope();
+      if (!resolvedScope) return;
       const payload = await loadClientImportSummaryPayload(resolvedScope);
       if (genAtStart !== summaryTabLoadRef.current) {
         return;
@@ -1547,6 +1562,19 @@ export default function ReportPageClient() {
     },
     [loadClientImportSummaryPayload, resolveClientImportScope, commitClientImportSummary]
   );
+
+  refreshClientImportOverlayRef.current = async (scope) => {
+    if (sourceSelection.clientSourceCodes.length === 0) {
+      commitClientImportSummary({
+        clientBranchSummary: [],
+        clientAccountSummary: [],
+        rowsInDateRange: 0,
+        totalRowsInFiles: 0,
+      });
+      return;
+    }
+    await fetchClientImportSummary(scope);
+  };
 
   fetchClientImportSummaryRef.current = fetchClientImportSummary;
   resolveClientImportScopeRef.current = resolveClientImportScope;
@@ -1574,6 +1602,11 @@ export default function ReportPageClient() {
       payload.endDateStr,
       payload.agingStr
     );
+    void refreshClientImportOverlayRef.current({
+      startDate: payload.startDateStr,
+      endDate: payload.endDateStr,
+      agingAsOf: payload.agingStr,
+    });
     return payload.branchSummary.length > 0 || payload.accountSummary.length > 0;
   }, [loadSummaryFromApiPayload, commitSummaryResult]);
 
@@ -1935,6 +1968,11 @@ export default function ReportPageClient() {
       endDateStr,
       agingStr
     );
+    void refreshClientImportOverlayRef.current({
+      startDate: startDateStr,
+      endDate: endDateStr,
+      agingAsOf: agingStr,
+    });
     return branchSummary.length > 0 || filteredCalls.length > 0;
   }, [getSharedCallsForScope, getAppliedFiltersSnapshot, dateFilterColumn, agingAsOf, commitSummaryResult]);
 
@@ -3322,10 +3360,9 @@ export default function ReportPageClient() {
       agingAsOf: agingStr,
     };
     const clientImportPromise = loadClientImportSummaryPayload(clientImportScope);
-    const excelUnionPromise = loadExcelUnionSummaryRef.current();
 
     if (hydrateSummaryFromCache()) {
-      const [client] = await Promise.all([clientImportPromise, excelUnionPromise]);
+      const [client] = await Promise.all([clientImportPromise]);
       if (isStale()) return;
       commitSummaryLoadBundle(null, client, applied);
       return;
@@ -3336,7 +3373,7 @@ export default function ReportPageClient() {
 
     try {
       const crmPromise = (async () => {
-        if (readRegisterFromPostgresClient()) {
+        if (readSummaryFromPostgresClient()) {
           return loadSummaryFromApiPayload();
         }
 
@@ -3357,7 +3394,6 @@ export default function ReportPageClient() {
       const [crm, client] = await Promise.all([
         crmPromise,
         clientImportPromise,
-        excelUnionPromise,
       ]);
       if (isStale()) return;
       commitSummaryLoadBundle(crm, client, applied);
@@ -3666,7 +3702,9 @@ export default function ReportPageClient() {
   useEffect(() => {
     if (!dbInitialized) return;
     if (activeTab !== 'client_import') return;
-    void fetchClientImportSummaryRef.current(resolveClientImportScopeRef.current());
+    const scope = resolveClientImportScopeRef.current();
+    if (!scope) return;
+    void fetchClientImportSummaryRef.current(scope);
   }, [dbInitialized, activeTab, appliedRevision]);
 
   // Summary/accounts: refetch client overlay only when CRM/Cadbury/Coke toggles change.
@@ -3684,9 +3722,10 @@ export default function ReportPageClient() {
     }
     if (prevSourceSelectionKeyRef.current === sourceSelectionKey) return;
     prevSourceSelectionKeyRef.current = sourceSelectionKey;
-    void fetchClientImportSummaryRef.current(resolveClientImportScopeRef.current());
-    void loadExcelUnionSummary();
-  }, [dbInitialized, activeTab, sourceSelectionKey, loadExcelUnionSummary]);
+    const scope = resolveClientImportScopeRef.current();
+    if (!scope) return;
+    void fetchClientImportSummaryRef.current(scope);
+  }, [dbInitialized, activeTab, sourceSelectionKey, appliedRevision]);
 
   useEffect(() => {
     if (!misAccess.summary && !misAccess.accounts && !misAccess.client_import && !misAccess.bd_mis_summary) return;
@@ -4539,7 +4578,11 @@ export default function ReportPageClient() {
                                   })
                                 }
                               >
-                                {(row.total_calls + row.cancelled_calls).toLocaleString()}
+                                {displayLoggedCallCount(
+                                  row.total_calls,
+                                  row.cancelled_calls,
+                                  false
+                                ).toLocaleString()}
                               </td>
                               <td
                                 className="p-2 border border-slate-300 text-center tabular-nums text-emerald-600 cursor-pointer hover:bg-black/5"
@@ -4621,7 +4664,11 @@ export default function ReportPageClient() {
                               >
                                 <td className="p-2 border border-slate-300">{row.region}</td>
                                 <td className="p-2 border border-slate-300 text-center tabular-nums">
-                                  {(row.total_calls + row.cancelled_calls).toLocaleString()}
+                                  {displayLoggedCallCount(
+                                  row.total_calls,
+                                  row.cancelled_calls,
+                                  false
+                                ).toLocaleString()}
                                 </td>
                                 <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.total_solved} className="text-emerald-600" />
                                 <SummaryMergedMetricCell mergeSelection={mergeFlags} crm={0} client={row.cancelled_calls} className="text-rose-600" />
@@ -4813,9 +4860,14 @@ export default function ReportPageClient() {
                               className="p-2 border border-slate-300 text-center tabular-nums cursor-pointer hover:bg-black/5"
                               onClick={() => handleDrillDown('total_calls', `${region} - Total Calls`, { region })}
                             >
-                              {(
-                                mergeSelectedMetrics(mTotal.crm, mTotal.client, mTotal.mergeSelection) +
-                                mergeSelectedMetrics(mCancelled.crm, mCancelled.client, mCancelled.mergeSelection)
+                              {displayLoggedCallCount(
+                                mergeSelectedMetrics(mTotal.crm, mTotal.client, mTotal.mergeSelection),
+                                mergeSelectedMetrics(
+                                  mCancelled.crm,
+                                  mCancelled.client,
+                                  mCancelled.mergeSelection
+                                ),
+                                clientOnlyMode
                               ).toLocaleString()}
                             </td>
                             <SummaryMergedMetricCell {...mSolved} className="text-emerald-600" onClick={() => handleDrillDown('solved_calls', `${region} - Solved Calls`, { region })} />
@@ -4833,63 +4885,71 @@ export default function ReportPageClient() {
                       {/* All India Total Row */}
                       <tr className="perf-total-row text-slate-900 group ui-strong">
                         <td className="p-2 border border-slate-300 flex items-center justify-between">
-                          <span>{useBdMisExcelUnion ? 'All' : 'AI'}</span>
-                          {!useBdMisExcelUnion ? (
-                            <button
-                              onClick={() => handleDrillDown('discrepancy', 'AI - Discrepancy Records', { region: 'AI' })}
-                              className="p-1 hover:bg-black/10 rounded transition-colors"
-                              title="View records handled by multiple branches"
-                            >
-                              <AlertCircle className="w-3 h-3 text-slate-700" />
-                            </button>
-                          ) : null}
+                          <span>AI</span>
+                          <button
+                            onClick={() => handleDrillDown('discrepancy', 'AI - Discrepancy Records', { region: 'AI' })}
+                            className="p-1 hover:bg-black/10 rounded transition-colors"
+                            title="View records handled by multiple branches"
+                          >
+                            <AlertCircle className="w-3 h-3 text-slate-700" />
+                          </button>
                         </td>
                         <td className="p-2 border border-slate-300 text-center tabular-nums">
-                          {aiExcelUnion
-                            ? (aiExcelUnion.total_calls + aiExcelUnion.cancelled_calls).toLocaleString()
-                            : (
-                                mergeSelectedMetrics(
-                                  alignCrmToAccounts
-                                    ? sumMergedAccountMetric(
-                                        accountsData,
-                                        clientAccountSummaryData,
-                                        'total_calls',
-                                        mergeFlags,
-                                        clientMergeWithCrm
-                                      )
-                                    : summaryData.reduce((sum, b) => sum + Number(b.total_calls || 0), 0),
-                                  alignCrmToAccounts
-                                    ? 0
-                                    : mergeFlags.client
-                                      ? sumBranchMetric(clientSummaryData, 'total_calls')
-                                      : 0,
-                                  alignCrmToAccounts ? { crm: true, client: false } : mergeFlags
-                                ) +
-                                mergeSelectedMetrics(
-                                  alignCrmToAccounts
-                                    ? sumMergedAccountMetric(
-                                        accountsData,
-                                        clientAccountSummaryData,
-                                        'cancelled_calls',
-                                        mergeFlags,
-                                        clientMergeWithCrm
-                                      )
-                                    : summaryData.reduce((sum, b) => sum + Number(b.cancelled_calls || 0), 0),
-                                  alignCrmToAccounts
-                                    ? 0
-                                    : mergeFlags.client
-                                      ? sumBranchMetric(clientSummaryData, 'cancelled_calls')
-                                      : 0,
-                                  alignCrmToAccounts ? { crm: true, client: false } : mergeFlags
+                          {(
+                            mergeFlags.client
+                              ? displayLoggedCallCount(
+                                  mergeSelectedMetrics(
+                                    alignCrmToAccounts
+                                      ? sumMergedAccountMetric(
+                                          accountsData,
+                                          clientAccountSummaryData,
+                                          'total_calls',
+                                          mergeFlags,
+                                          clientMergeWithCrm
+                                        )
+                                      : sumBranchLoggedCalls(summaryData),
+                                    alignCrmToAccounts
+                                      ? 0
+                                      : sumBranchMetric(clientSummaryData, 'total_calls'),
+                                    alignCrmToAccounts ? { crm: true, client: false } : mergeFlags
+                                  ),
+                                  mergeSelectedMetrics(
+                                    alignCrmToAccounts
+                                      ? sumMergedAccountMetric(
+                                          accountsData,
+                                          clientAccountSummaryData,
+                                          'cancelled_calls',
+                                          mergeFlags,
+                                          clientMergeWithCrm
+                                        )
+                                      : summaryData.reduce(
+                                          (sum, b) => sum + Number(b.cancelled_calls || 0),
+                                          0
+                                        ),
+                                    alignCrmToAccounts
+                                      ? 0
+                                      : mergeFlags.client
+                                        ? sumBranchMetric(clientSummaryData, 'cancelled_calls')
+                                        : 0,
+                                    alignCrmToAccounts ? { crm: true, client: false } : mergeFlags
+                                  ),
+                                  false
                                 )
-                              ).toLocaleString()}
+                              : alignCrmToAccounts
+                                ? sumMergedAccountMetric(
+                                    accountsData,
+                                    clientAccountSummaryData,
+                                    'total_calls',
+                                    mergeFlags,
+                                    clientMergeWithCrm
+                                  )
+                                : sumBranchLoggedCalls(summaryData)
+                          ).toLocaleString()}
                         </td>
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            aiExcelUnion
-                              ? aiExcelUnion.total_solved
-                              : alignCrmToAccounts
+                            alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -4910,9 +4970,7 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            aiExcelUnion
-                              ? aiExcelUnion.cancelled_calls
-                              : alignCrmToAccounts
+                            alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -4933,9 +4991,7 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            aiExcelUnion
-                              ? aiExcelUnion.open_calls
-                              : alignCrmToAccounts
+                            alignCrmToAccounts
                               ? sumMergedAccountOpenCalls(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -4956,9 +5012,7 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            aiExcelUnion
-                              ? aiExcelUnion.age_2
-                              : alignCrmToAccounts
+                            alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -4979,9 +5033,7 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            aiExcelUnion
-                              ? aiExcelUnion.age_3
-                              : alignCrmToAccounts
+                            alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -5002,9 +5054,7 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            aiExcelUnion
-                              ? aiExcelUnion.age_7
-                              : alignCrmToAccounts
+                            alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -5025,9 +5075,7 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            aiExcelUnion
-                              ? aiExcelUnion.age_15
-                              : alignCrmToAccounts
+                            alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -5048,9 +5096,7 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            aiExcelUnion
-                              ? aiExcelUnion.part_pending
-                              : alignCrmToAccounts
+                            alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -5071,9 +5117,7 @@ export default function ReportPageClient() {
                         <SummaryMergedMetricCell
                           mergeSelection={alignCrmToAccounts ? { crm: true, client: false } : mergeFlags}
                           crm={
-                            aiExcelUnion
-                              ? aiExcelUnion.active_eng
-                              : alignCrmToAccounts
+                            alignCrmToAccounts
                               ? sumMergedAccountMetric(
                                   accountsData,
                                   clientAccountSummaryData,
@@ -5777,82 +5821,109 @@ export default function ReportPageClient() {
 
                           {/* Account Total Row */}
                           {(() => {
-                            const totalPopulation = sumMergedAccountMetric(
-                              filteredAccounts,
-                              clientAccountSummaryData,
-                              'population',
-                              mergeFlags,
-                              clientMergeWithCrm
-                            );
-                            const totalCalls = sumMergedAccountMetric(
-                              filteredAccounts,
-                              clientAccountSummaryData,
-                              'total_calls',
-                              mergeFlags,
-                              clientMergeWithCrm
-                            );
-                            const totalSolved = sumMergedAccountMetric(
-                              filteredAccounts,
-                              clientAccountSummaryData,
-                              'total_solved',
-                              mergeFlags,
-                              clientMergeWithCrm
-                            );
-                            const totalCancelled = sumMergedAccountMetric(
-                              filteredAccounts,
-                              clientAccountSummaryData,
-                              'cancelled_calls',
-                              mergeFlags,
-                              clientMergeWithCrm
-                            );
-                            const totalOpen = sumMergedAccountOpenCalls(
-                              filteredAccounts,
-                              clientAccountSummaryData,
-                              mergeFlags,
-                              clientMergeWithCrm
-                            );
-                            const totalAge2 = sumMergedAccountMetric(
-                              filteredAccounts,
-                              clientAccountSummaryData,
-                              'age_2',
-                              mergeFlags,
-                              clientMergeWithCrm
-                            );
-                            const totalAge3 = sumMergedAccountMetric(
-                              filteredAccounts,
-                              clientAccountSummaryData,
-                              'age_3',
-                              mergeFlags,
-                              clientMergeWithCrm
-                            );
-                            const totalAge7 = sumMergedAccountMetric(
-                              filteredAccounts,
-                              clientAccountSummaryData,
-                              'age_7',
-                              mergeFlags,
-                              clientMergeWithCrm
-                            );
-                            const totalAge15 = sumMergedAccountMetric(
-                              filteredAccounts,
-                              clientAccountSummaryData,
-                              'age_15',
-                              mergeFlags,
-                              clientMergeWithCrm
-                            );
-                            const totalParts = sumMergedAccountMetric(
-                              filteredAccounts,
-                              clientAccountSummaryData,
-                              'part_pending',
-                              mergeFlags,
-                              clientMergeWithCrm
-                            );
-                            const totalEngs = sumMergedAccountMetric(
-                              filteredAccounts,
-                              clientAccountSummaryData,
-                              'active_eng',
-                              mergeFlags,
-                              clientMergeWithCrm
-                            );
+                            const kamisFiltersActive =
+                              filterRegion.length > 0 || filterAccount.length > 0;
+                            const useBranchGrandTotals =
+                              mergeFlags.crm && !mergeFlags.client && !kamisFiltersActive;
+
+                            const totalPopulation = useBranchGrandTotals
+                              ? summaryData.reduce((sum, b) => sum + Number(b.population || b.total_calls || 0), 0)
+                              : sumMergedAccountMetric(
+                                  filteredAccounts,
+                                  clientAccountSummaryData,
+                                  'population',
+                                  mergeFlags,
+                                  clientMergeWithCrm
+                                );
+                            const totalCalls = useBranchGrandTotals
+                              ? sumBranchLoggedCalls(summaryData)
+                              : sumMergedAccountMetric(
+                                  filteredAccounts,
+                                  clientAccountSummaryData,
+                                  'total_calls',
+                                  mergeFlags,
+                                  clientMergeWithCrm
+                                );
+                            const totalSolved = useBranchGrandTotals
+                              ? summaryData.reduce((sum, b) => sum + Number(b.solved_calls || 0), 0)
+                              : sumMergedAccountMetric(
+                                  filteredAccounts,
+                                  clientAccountSummaryData,
+                                  'total_solved',
+                                  mergeFlags,
+                                  clientMergeWithCrm
+                                );
+                            const totalCancelled = useBranchGrandTotals
+                              ? summaryData.reduce((sum, b) => sum + Number(b.cancelled_calls || 0), 0)
+                              : sumMergedAccountMetric(
+                                  filteredAccounts,
+                                  clientAccountSummaryData,
+                                  'cancelled_calls',
+                                  mergeFlags,
+                                  clientMergeWithCrm
+                                );
+                            const totalOpen = useBranchGrandTotals
+                              ? summaryData.reduce((sum, b) => sum + Number(b.open_calls || 0), 0)
+                              : sumMergedAccountOpenCalls(
+                                  filteredAccounts,
+                                  clientAccountSummaryData,
+                                  mergeFlags,
+                                  clientMergeWithCrm
+                                );
+                            const totalAge2 = useBranchGrandTotals
+                              ? summaryData.reduce((sum, b) => sum + Number(b.age_2 || 0), 0)
+                              : sumMergedAccountMetric(
+                                  filteredAccounts,
+                                  clientAccountSummaryData,
+                                  'age_2',
+                                  mergeFlags,
+                                  clientMergeWithCrm
+                                );
+                            const totalAge3 = useBranchGrandTotals
+                              ? summaryData.reduce((sum, b) => sum + Number(b.age_3 || 0), 0)
+                              : sumMergedAccountMetric(
+                                  filteredAccounts,
+                                  clientAccountSummaryData,
+                                  'age_3',
+                                  mergeFlags,
+                                  clientMergeWithCrm
+                                );
+                            const totalAge7 = useBranchGrandTotals
+                              ? summaryData.reduce((sum, b) => sum + Number(b.age_7 || 0), 0)
+                              : sumMergedAccountMetric(
+                                  filteredAccounts,
+                                  clientAccountSummaryData,
+                                  'age_7',
+                                  mergeFlags,
+                                  clientMergeWithCrm
+                                );
+                            const totalAge15 = useBranchGrandTotals
+                              ? summaryData.reduce((sum, b) => sum + Number(b.age_15 || 0), 0)
+                              : sumMergedAccountMetric(
+                                  filteredAccounts,
+                                  clientAccountSummaryData,
+                                  'age_15',
+                                  mergeFlags,
+                                  clientMergeWithCrm
+                                );
+                            const totalParts = useBranchGrandTotals
+                              ? summaryData.reduce((sum, b) => sum + Number(b.part_pending || 0), 0)
+                              : sumMergedAccountMetric(
+                                  filteredAccounts,
+                                  clientAccountSummaryData,
+                                  'part_pending',
+                                  mergeFlags,
+                                  clientMergeWithCrm
+                                );
+                            const totalEngs = useBranchGrandTotals
+                              ? summaryData.reduce((sum, b) => sum + Number(b.active_eng || 0), 0)
+                              : sumMergedAccountMetric(
+                                  filteredAccounts,
+                                  clientAccountSummaryData,
+                                  'active_eng',
+                                  mergeFlags,
+                                  clientMergeWithCrm
+                                );
                             const totalPercGt7 =
                               totalOpen > 0
                                 ? (((totalAge7 + totalAge15) / totalOpen) * 100).toFixed(0) + '%'
@@ -5969,7 +6040,12 @@ export default function ReportPageClient() {
             <ClientImportTab
               uploadSource={uploadSource}
               sourceSelection={sourceSelection}
-              dateScope={resolveClientImportScope()}
+              dateScope={
+                resolveClientImportScope() ?? {
+                  startDate: toDateString(dateRange.start),
+                  endDate: toDateString(dateRange.end),
+                }
+              }
               metaRefreshKey={appliedRevision}
               onUploadSourceChange={setUploadSource}
               onSourceSelectionChange={(selection) => {
@@ -5977,7 +6053,8 @@ export default function ReportPageClient() {
                 setSourceSelection(selection);
               }}
               onImportComplete={() => {
-                void fetchClientImportSummaryRef.current(resolveClientImportScopeRef.current());
+                const scope = resolveClientImportScopeRef.current();
+                if (scope) void fetchClientImportSummaryRef.current(scope);
               }}
             />
           </ReportErrorBoundary>

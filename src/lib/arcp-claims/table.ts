@@ -788,13 +788,13 @@ export function buildArcpClaimsMonthlyBreakdown(
 
 export function formatArcpAmount(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value) || value === 0) return '';
-  return value.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /** Summary bar — show 0 instead of blank so totals are visible. */
 export function formatArcpAmountSummary(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—';
-  return value.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 export function formatArcpRate(value: number | null | undefined): string {

@@ -20,6 +20,13 @@ export async function GET(req: NextRequest) {
     const agingAsOf = searchParams.get('agingAsOf');
     const sourceCodes = parseSourceCodesParam(searchParams.get('sourceCodes'));
 
+    if (!startDate || !endDate) {
+      return NextResponse.json(
+        { error: 'startDate and endDate are required' },
+        { status: 400 }
+      );
+    }
+
     const aggregateParams = {
       startDate,
       endDate,
