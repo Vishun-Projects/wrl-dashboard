@@ -140,6 +140,46 @@ export function sumMergedAccountMetric(
   }, 0);
 }
 
+/** CRM + client grand totals — includes client-only account rows (same row set as Key Account MIS). */
+export function sumMergedGrandMetric(
+  crmAccounts: Array<Record<string, unknown>>,
+  clientAccounts: Array<Record<string, unknown>> | undefined,
+  field: string,
+  globalMergeFlags: MergeSelection,
+  clientMergeWithCrm: ClientMergeWithCrmPrefs,
+  accountRowsOverride?: Array<Record<string, unknown>>
+): number {
+  const rows =
+    accountRowsOverride ??
+    (globalMergeFlags.client
+      ? buildAccountDisplayRows(crmAccounts, clientAccounts, globalMergeFlags)
+      : crmAccounts);
+  return sumMergedAccountMetric(
+    rows,
+    clientAccounts,
+    field,
+    globalMergeFlags,
+    clientMergeWithCrm
+  );
+}
+
+export function sumMergedGrandOpenCalls(
+  crmAccounts: Array<Record<string, unknown>>,
+  clientAccounts: Array<Record<string, unknown>> | undefined,
+  globalMergeFlags: MergeSelection,
+  clientMergeWithCrm: ClientMergeWithCrmPrefs,
+  accountRowsOverride?: Array<Record<string, unknown>>
+): number {
+  return sumMergedGrandMetric(
+    crmAccounts,
+    clientAccounts,
+    'open_calls',
+    globalMergeFlags,
+    clientMergeWithCrm,
+    accountRowsOverride
+  );
+}
+
 function accountsInRegion(
   accounts: Array<Record<string, unknown>>,
   region: string

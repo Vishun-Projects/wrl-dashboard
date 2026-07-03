@@ -98,6 +98,37 @@ async function main() {
     solved: sum(excl, 'total_solved'),
     open: sum(excl, 'open_calls'),
   });
+
+  const allTypes = await querySummaryDashboard({
+    startDate: '2026-07-01',
+    endDate: '2026-07-03',
+    agingAsOf: '2026-07-03',
+    callTypes: [],
+    isHod: true,
+    assignedOffices: [],
+  });
+  const breakdownOnly = await querySummaryDashboard({
+    startDate: '2026-07-01',
+    endDate: '2026-07-03',
+    agingAsOf: '2026-07-03',
+    callTypes: ['BREAKDOWN'],
+    isHod: true,
+    assignedOffices: [],
+  });
+  const sumAcct = (rows: typeof allTypes.accountSummary, f: keyof (typeof allTypes.accountSummary)[0]) =>
+    rows.reduce((s, a) => s + Number(a[f] ?? 0), 0);
+  console.log('Account rollup All types:', {
+    total: sumAcct(allTypes.accountSummary, 'total_calls'),
+    solved: sumAcct(allTypes.accountSummary, 'total_solved'),
+  });
+  console.log('Account rollup BREAKDOWN only:', {
+    total: sumAcct(breakdownOnly.accountSummary, 'total_calls'),
+    solved: sumAcct(breakdownOnly.accountSummary, 'total_solved'),
+  });
+  console.log('Branch rollup All types:', {
+    total: allTypes.branchSummary.reduce((s, b) => s + b.total_calls, 0),
+    solved: allTypes.branchSummary.reduce((s, b) => s + b.solved_calls, 0),
+  });
 }
 
 main()

@@ -9,8 +9,6 @@ import {
   HOT_RESOLVED_REGION_SQL,
 } from '@/lib/read-model/queries/hot-region';
 
-const BREAKDOWN = 'BREAKDOWN';
-
 export type SummaryQueryParams = {
   startDate?: string | null;
   endDate?: string | null;
@@ -78,6 +76,29 @@ function buildCallTypeFilter(params: SummaryQueryParams, alias: string, startIdx
   }
   return {
     clause: ` AND upper(trim(${alias}.call_type)) = ANY($${startIdx}::text[])`,
+    values: [params.callTypes.map((t) => normalizeCallTypeDisplay(t).toUpperCase())],
+    nextIdx: startIdx + 1,
+  };
+}
+
+/** Predicate for account-row breakdown metrics — respects the same call-type filter as branch summary. */
+function buildAccountViewCallTypePredicate(
+  params: SummaryQueryParams,
+  alias: string,
+  startIdx: number
+): { predicate: string; values: unknown[]; nextIdx: number } {
+  if (!params.callTypes || params.callTypes.length === 0) {
+    return { predicate: 'TRUE', values: [], nextIdx: startIdx };
+  }
+  if (params.callTypes.length === 1) {
+    return {
+      predicate: `normalize_call_type(${alias}.call_type) = normalize_call_type($${startIdx})`,
+      values: [normalizeCallTypeDisplay(params.callTypes[0])],
+      nextIdx: startIdx + 1,
+    };
+  }
+  return {
+    predicate: `upper(trim(${alias}.call_type)) = ANY($${startIdx}::text[])`,
     values: [params.callTypes.map((t) => normalizeCallTypeDisplay(t).toUpperCase())],
     nextIdx: startIdx + 1,
   };
@@ -242,8 +263,15 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
     };
   });
 
-  const accountOfficeFilter = buildOfficeFilter(params, 'h', 4, 'nofficeid');
-  const accountValues = [periodStart, periodEnd, BREAKDOWN, ...accountOfficeFilter.values];
+  const accountOfficeFilter = buildOfficeFilter(params, 'h', 3, 'nofficeid');
+  const viewCallType = buildAccountViewCallTypePredicate(params, 'h', accountOfficeFilter.nextIdx);
+  const viewCallTypePredicate = viewCallType.predicate;
+  const accountValues = [
+    periodStart,
+    periodEnd,
+    ...accountOfficeFilter.values,
+    ...viewCallType.values,
+  ];
 
   const accountRows = await prisma.$queryRawUnsafe<
     Array<{
@@ -264,21 +292,21 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
     SELECT
       ${HOT_RESOLVED_REGION_SQL} AS region,
       h.account,
-      count(*) FILTER (WHERE normalize_call_type(h.call_type) = normalize_call_type($3))::int AS total_calls,
+      count(*) FILTER (WHERE ${viewCallTypePredicate})::int AS total_calls,
       count(*) FILTER (
-        WHERE normalize_call_type(h.call_type) = normalize_call_type($3)
+        WHERE ${viewCallTypePredicate}
           AND h.status_bucket IN ('solved', 'tech_solved')
       )::int AS total_solved,
       count(*) FILTER (
-        WHERE normalize_call_type(h.call_type) = normalize_call_type($3)
+        WHERE ${viewCallTypePredicate}
           AND h.status_bucket = 'cancelled'
       )::int AS cancelled_calls,
       count(*) FILTER (
-        WHERE normalize_call_type(h.call_type) = normalize_call_type($3)
+        WHERE ${viewCallTypePredicate}
           AND h.status_bucket IN ('open_unallocated', 'assigned')
       )::int AS open_calls,
       count(*) FILTER (
-        WHERE normalize_call_type(h.call_type) = normalize_call_type($3)
+        WHERE ${viewCallTypePredicate}
           AND h.status_bucket = 'tech_solved'
       )::int AS total_tech_solved,
       count(*) FILTER (WHERE normalize_call_type(h.call_type) = normalize_call_type('DEPLOYMENT'))::int AS deployment_total,
@@ -304,8 +332,18 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
     ...accountValues
   );
 
-  const accountAgingOfficeFilter = buildOfficeFilter(params, 'h', 3, 'nofficeid');
-  const accountAgingValues = [agingDate, BREAKDOWN, ...accountAgingOfficeFilter.values];
+  const accountAgingOfficeFilter = buildOfficeFilter(params, 'h', 2, 'nofficeid');
+  const agingViewCallType = buildAccountViewCallTypePredicate(
+    params,
+    'h',
+    accountAgingOfficeFilter.nextIdx
+  );
+  const accountAgingValues = [
+    agingDate,
+    ...accountAgingOfficeFilter.values,
+    ...agingViewCallType.values,
+  ];
+  const agingViewCallTypePredicate = agingViewCallType.predicate;
 
   const accountAgingRows = await prisma.$queryRawUnsafe<
     Array<{
@@ -333,7 +371,7 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
     LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
     ${HOT_OFFICE_JOINS_SQL}
     WHERE h.status_bucket IN ('open_unallocated', 'assigned')
-      AND normalize_call_type(h.call_type) = normalize_call_type($2)
+      AND (${agingViewCallTypePredicate})
       ${accountAgingOfficeFilter.clause}
       ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
     GROUP BY ${HOT_RESOLVED_REGION_SQL}, h.account

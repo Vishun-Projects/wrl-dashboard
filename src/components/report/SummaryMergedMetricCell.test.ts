@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   displayLoggedCallCount,
   sumBranchLoggedCalls,
+  sumMergedGrandMetric,
 } from '@/components/report/SummaryMergedMetricCell';
 
 describe('displayLoggedCallCount', () => {
@@ -11,6 +12,24 @@ describe('displayLoggedCallCount', () => {
 
   it('adds cancelled when total_calls excludes it (client import)', () => {
     expect(displayLoggedCallCount(100, 12, false)).toBe(112);
+  });
+});
+
+describe('sumMergedGrandMetric', () => {
+  it('includes client-only account rows not present in CRM accounts', () => {
+    const crm = [
+      { region: 'NORTH ZONE', account: 'Nestle', total_calls: 10, total_solved: 5 },
+    ];
+    const client = [
+      { region: 'NORTH ZONE', account: 'Nestle', total_calls: 3, total_solved: 1 },
+      { region: 'SOUTH ZONE', account: 'Cadbury', total_calls: 7, total_solved: 2 },
+    ];
+    const flags = { crm: true, client: true };
+    const prefs = { cadbury: false, coke: false };
+
+    expect(
+      sumMergedGrandMetric(crm, client, 'total_solved', flags, prefs)
+    ).toBe(8);
   });
 });
 

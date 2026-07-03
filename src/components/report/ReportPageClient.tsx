@@ -574,6 +574,10 @@ export default function ReportPageClient() {
     totalRowsInFiles: number;
   } | null>(null);
   const [accountsData, setAccountsData] = useState<any[]>(globalReportCache?.accountsData || []);
+  const mergedAccountRowsForTotals = useMemo(
+    () => buildAccountDisplayRows(accountsData, clientAccountSummaryData, mergeFlags),
+    [accountsData, clientAccountSummaryData, mergeFlags]
+  );
   const [globalHeadcount, setGlobalHeadcount] = useState<number>(globalReportCache?.globalHeadcount || 0);
   const [loading, setLoading] = useState(!globalReportCache);
   const [filterUpdating, setFilterUpdating] = useState(false);
@@ -3367,7 +3371,6 @@ export default function ReportPageClient() {
       commitSummaryLoadBundle(null, client, applied);
       return;
     }
-
     summaryFilterLoadInFlightRef.current = true;
     summaryFilterLoadKeyRef.current = loadKey;
 
@@ -4684,7 +4687,7 @@ export default function ReportPageClient() {
                           })
                         : Array.from(
                             new Set(
-                              (alignCrmToAccounts ? accountsData : summaryData).map((b) => b.region)
+                              (alignCrmToAccounts ? mergedAccountRowsForTotals : summaryData).map((b) => b.region)
                             )
                           )
                             .sort()
@@ -4740,7 +4743,7 @@ export default function ReportPageClient() {
 
                         const mTotal = resolveSummaryRegionMetric(
                           alignCrmToAccounts,
-                          accountsData,
+                          mergedAccountRowsForTotals,
                           clientAccountSummaryData,
                           region,
                           'total_calls',
@@ -4751,7 +4754,7 @@ export default function ReportPageClient() {
                         );
                         const mSolved = resolveSummaryRegionMetric(
                           alignCrmToAccounts,
-                          accountsData,
+                          mergedAccountRowsForTotals,
                           clientAccountSummaryData,
                           region,
                           alignCrmToAccounts ? 'total_solved' : 'solved_calls',
@@ -4762,7 +4765,7 @@ export default function ReportPageClient() {
                         );
                         const mCancelled = resolveSummaryRegionMetric(
                           alignCrmToAccounts,
-                          accountsData,
+                          mergedAccountRowsForTotals,
                           clientAccountSummaryData,
                           region,
                           'cancelled_calls',
@@ -4773,7 +4776,7 @@ export default function ReportPageClient() {
                         );
                         const mOpen = resolveSummaryRegionOpenCalls(
                           alignCrmToAccounts,
-                          accountsData,
+                          mergedAccountRowsForTotals,
                           clientAccountSummaryData,
                           region,
                           mergeFlags,
@@ -4788,7 +4791,7 @@ export default function ReportPageClient() {
                         );
                         const mAge2 = resolveSummaryRegionMetric(
                           alignCrmToAccounts,
-                          accountsData,
+                          mergedAccountRowsForTotals,
                           clientAccountSummaryData,
                           region,
                           'age_2',
@@ -4799,7 +4802,7 @@ export default function ReportPageClient() {
                         );
                         const mAge3 = resolveSummaryRegionMetric(
                           alignCrmToAccounts,
-                          accountsData,
+                          mergedAccountRowsForTotals,
                           clientAccountSummaryData,
                           region,
                           'age_3',
@@ -4810,7 +4813,7 @@ export default function ReportPageClient() {
                         );
                         const mAge7 = resolveSummaryRegionMetric(
                           alignCrmToAccounts,
-                          accountsData,
+                          mergedAccountRowsForTotals,
                           clientAccountSummaryData,
                           region,
                           'age_7',
@@ -4821,7 +4824,7 @@ export default function ReportPageClient() {
                         );
                         const mAge15 = resolveSummaryRegionMetric(
                           alignCrmToAccounts,
-                          accountsData,
+                          mergedAccountRowsForTotals,
                           clientAccountSummaryData,
                           region,
                           'age_15',
@@ -4832,7 +4835,7 @@ export default function ReportPageClient() {
                         );
                         const mParts = resolveSummaryRegionMetric(
                           alignCrmToAccounts,
-                          accountsData,
+                          mergedAccountRowsForTotals,
                           clientAccountSummaryData,
                           region,
                           'part_pending',
@@ -4843,7 +4846,7 @@ export default function ReportPageClient() {
                         );
                         const mEngs = resolveSummaryRegionMetric(
                           alignCrmToAccounts,
-                          accountsData,
+                          mergedAccountRowsForTotals,
                           clientAccountSummaryData,
                           region,
                           'active_eng',
@@ -4896,52 +4899,32 @@ export default function ReportPageClient() {
                         </td>
                         <td className="p-2 border border-slate-300 text-center tabular-nums">
                           {(
-                            mergeFlags.client
-                              ? displayLoggedCallCount(
-                                  mergeSelectedMetrics(
-                                    alignCrmToAccounts
-                                      ? sumMergedAccountMetric(
-                                          accountsData,
-                                          clientAccountSummaryData,
-                                          'total_calls',
-                                          mergeFlags,
-                                          clientMergeWithCrm
-                                        )
-                                      : sumBranchLoggedCalls(summaryData),
-                                    alignCrmToAccounts
-                                      ? 0
-                                      : sumBranchMetric(clientSummaryData, 'total_calls'),
-                                    alignCrmToAccounts ? { crm: true, client: false } : mergeFlags
-                                  ),
-                                  mergeSelectedMetrics(
-                                    alignCrmToAccounts
-                                      ? sumMergedAccountMetric(
-                                          accountsData,
-                                          clientAccountSummaryData,
-                                          'cancelled_calls',
-                                          mergeFlags,
-                                          clientMergeWithCrm
-                                        )
-                                      : summaryData.reduce(
-                                          (sum, b) => sum + Number(b.cancelled_calls || 0),
-                                          0
-                                        ),
-                                    alignCrmToAccounts
-                                      ? 0
-                                      : mergeFlags.client
+                            alignCrmToAccounts
+                              ? sumMergedAccountMetric(
+                                  mergedAccountRowsForTotals,
+                                  clientAccountSummaryData,
+                                  'total_calls',
+                                  mergeFlags,
+                                  clientMergeWithCrm
+                                )
+                              : mergeFlags.client
+                                ? displayLoggedCallCount(
+                                    mergeSelectedMetrics(
+                                      sumBranchLoggedCalls(summaryData),
+                                      sumBranchMetric(clientSummaryData, 'total_calls'),
+                                      mergeFlags
+                                    ),
+                                    mergeSelectedMetrics(
+                                      summaryData.reduce(
+                                        (sum, b) => sum + Number(b.cancelled_calls || 0),
+                                        0
+                                      ),
+                                      mergeFlags.client
                                         ? sumBranchMetric(clientSummaryData, 'cancelled_calls')
                                         : 0,
-                                    alignCrmToAccounts ? { crm: true, client: false } : mergeFlags
-                                  ),
-                                  false
-                                )
-                              : alignCrmToAccounts
-                                ? sumMergedAccountMetric(
-                                    accountsData,
-                                    clientAccountSummaryData,
-                                    'total_calls',
-                                    mergeFlags,
-                                    clientMergeWithCrm
+                                      mergeFlags
+                                    ),
+                                    false
                                   )
                                 : sumBranchLoggedCalls(summaryData)
                           ).toLocaleString()}
@@ -4951,7 +4934,7 @@ export default function ReportPageClient() {
                           crm={
                             alignCrmToAccounts
                               ? sumMergedAccountMetric(
-                                  accountsData,
+                                  mergedAccountRowsForTotals,
                                   clientAccountSummaryData,
                                   'total_solved',
                                   mergeFlags,
@@ -4972,7 +4955,7 @@ export default function ReportPageClient() {
                           crm={
                             alignCrmToAccounts
                               ? sumMergedAccountMetric(
-                                  accountsData,
+                                  mergedAccountRowsForTotals,
                                   clientAccountSummaryData,
                                   'cancelled_calls',
                                   mergeFlags,
@@ -4993,7 +4976,7 @@ export default function ReportPageClient() {
                           crm={
                             alignCrmToAccounts
                               ? sumMergedAccountOpenCalls(
-                                  accountsData,
+                                  mergedAccountRowsForTotals,
                                   clientAccountSummaryData,
                                   mergeFlags,
                                   clientMergeWithCrm
@@ -5014,7 +4997,7 @@ export default function ReportPageClient() {
                           crm={
                             alignCrmToAccounts
                               ? sumMergedAccountMetric(
-                                  accountsData,
+                                  mergedAccountRowsForTotals,
                                   clientAccountSummaryData,
                                   'age_2',
                                   mergeFlags,
@@ -5035,7 +5018,7 @@ export default function ReportPageClient() {
                           crm={
                             alignCrmToAccounts
                               ? sumMergedAccountMetric(
-                                  accountsData,
+                                  mergedAccountRowsForTotals,
                                   clientAccountSummaryData,
                                   'age_3',
                                   mergeFlags,
@@ -5056,7 +5039,7 @@ export default function ReportPageClient() {
                           crm={
                             alignCrmToAccounts
                               ? sumMergedAccountMetric(
-                                  accountsData,
+                                  mergedAccountRowsForTotals,
                                   clientAccountSummaryData,
                                   'age_7',
                                   mergeFlags,
@@ -5077,7 +5060,7 @@ export default function ReportPageClient() {
                           crm={
                             alignCrmToAccounts
                               ? sumMergedAccountMetric(
-                                  accountsData,
+                                  mergedAccountRowsForTotals,
                                   clientAccountSummaryData,
                                   'age_15',
                                   mergeFlags,
@@ -5098,7 +5081,7 @@ export default function ReportPageClient() {
                           crm={
                             alignCrmToAccounts
                               ? sumMergedAccountMetric(
-                                  accountsData,
+                                  mergedAccountRowsForTotals,
                                   clientAccountSummaryData,
                                   'part_pending',
                                   mergeFlags,
@@ -5119,7 +5102,7 @@ export default function ReportPageClient() {
                           crm={
                             alignCrmToAccounts
                               ? sumMergedAccountMetric(
-                                  accountsData,
+                                  mergedAccountRowsForTotals,
                                   clientAccountSummaryData,
                                   'active_eng',
                                   mergeFlags,
@@ -5307,11 +5290,7 @@ export default function ReportPageClient() {
                 />
               ) : null}
               {(() => {
-                const displayAccounts = buildAccountDisplayRows(
-                  accountsData,
-                  clientAccountSummaryData,
-                  mergeFlags
-                );
+                const displayAccounts = mergedAccountRowsForTotals;
                 const filteredAccounts = displayAccounts.filter((a) => {
                   const matchRegion = matchesRegionFilter(filterRegion, String(a.region ?? ''));
                   const matchAccount = matchesAccountFilter(filterAccount, String(a.account ?? ''));
@@ -5826,10 +5805,14 @@ export default function ReportPageClient() {
                             const useBranchGrandTotals =
                               mergeFlags.crm && !mergeFlags.client && !kamisFiltersActive;
 
+                            const kamisGrandAccountRows = kamisFiltersActive
+                              ? filteredAccounts
+                              : mergedAccountRowsForTotals;
+
                             const totalPopulation = useBranchGrandTotals
                               ? summaryData.reduce((sum, b) => sum + Number(b.population || b.total_calls || 0), 0)
                               : sumMergedAccountMetric(
-                                  filteredAccounts,
+                                  kamisGrandAccountRows,
                                   clientAccountSummaryData,
                                   'population',
                                   mergeFlags,
@@ -5838,7 +5821,7 @@ export default function ReportPageClient() {
                             const totalCalls = useBranchGrandTotals
                               ? sumBranchLoggedCalls(summaryData)
                               : sumMergedAccountMetric(
-                                  filteredAccounts,
+                                  kamisGrandAccountRows,
                                   clientAccountSummaryData,
                                   'total_calls',
                                   mergeFlags,
@@ -5847,7 +5830,7 @@ export default function ReportPageClient() {
                             const totalSolved = useBranchGrandTotals
                               ? summaryData.reduce((sum, b) => sum + Number(b.solved_calls || 0), 0)
                               : sumMergedAccountMetric(
-                                  filteredAccounts,
+                                  kamisGrandAccountRows,
                                   clientAccountSummaryData,
                                   'total_solved',
                                   mergeFlags,
@@ -5856,7 +5839,7 @@ export default function ReportPageClient() {
                             const totalCancelled = useBranchGrandTotals
                               ? summaryData.reduce((sum, b) => sum + Number(b.cancelled_calls || 0), 0)
                               : sumMergedAccountMetric(
-                                  filteredAccounts,
+                                  kamisGrandAccountRows,
                                   clientAccountSummaryData,
                                   'cancelled_calls',
                                   mergeFlags,
@@ -5865,7 +5848,7 @@ export default function ReportPageClient() {
                             const totalOpen = useBranchGrandTotals
                               ? summaryData.reduce((sum, b) => sum + Number(b.open_calls || 0), 0)
                               : sumMergedAccountOpenCalls(
-                                  filteredAccounts,
+                                  kamisGrandAccountRows,
                                   clientAccountSummaryData,
                                   mergeFlags,
                                   clientMergeWithCrm
@@ -5873,7 +5856,7 @@ export default function ReportPageClient() {
                             const totalAge2 = useBranchGrandTotals
                               ? summaryData.reduce((sum, b) => sum + Number(b.age_2 || 0), 0)
                               : sumMergedAccountMetric(
-                                  filteredAccounts,
+                                  kamisGrandAccountRows,
                                   clientAccountSummaryData,
                                   'age_2',
                                   mergeFlags,
@@ -5882,7 +5865,7 @@ export default function ReportPageClient() {
                             const totalAge3 = useBranchGrandTotals
                               ? summaryData.reduce((sum, b) => sum + Number(b.age_3 || 0), 0)
                               : sumMergedAccountMetric(
-                                  filteredAccounts,
+                                  kamisGrandAccountRows,
                                   clientAccountSummaryData,
                                   'age_3',
                                   mergeFlags,
@@ -5891,7 +5874,7 @@ export default function ReportPageClient() {
                             const totalAge7 = useBranchGrandTotals
                               ? summaryData.reduce((sum, b) => sum + Number(b.age_7 || 0), 0)
                               : sumMergedAccountMetric(
-                                  filteredAccounts,
+                                  kamisGrandAccountRows,
                                   clientAccountSummaryData,
                                   'age_7',
                                   mergeFlags,
@@ -5900,7 +5883,7 @@ export default function ReportPageClient() {
                             const totalAge15 = useBranchGrandTotals
                               ? summaryData.reduce((sum, b) => sum + Number(b.age_15 || 0), 0)
                               : sumMergedAccountMetric(
-                                  filteredAccounts,
+                                  kamisGrandAccountRows,
                                   clientAccountSummaryData,
                                   'age_15',
                                   mergeFlags,
@@ -5909,7 +5892,7 @@ export default function ReportPageClient() {
                             const totalParts = useBranchGrandTotals
                               ? summaryData.reduce((sum, b) => sum + Number(b.part_pending || 0), 0)
                               : sumMergedAccountMetric(
-                                  filteredAccounts,
+                                  kamisGrandAccountRows,
                                   clientAccountSummaryData,
                                   'part_pending',
                                   mergeFlags,
@@ -5918,7 +5901,7 @@ export default function ReportPageClient() {
                             const totalEngs = useBranchGrandTotals
                               ? summaryData.reduce((sum, b) => sum + Number(b.active_eng || 0), 0)
                               : sumMergedAccountMetric(
-                                  filteredAccounts,
+                                  kamisGrandAccountRows,
                                   clientAccountSummaryData,
                                   'active_eng',
                                   mergeFlags,
