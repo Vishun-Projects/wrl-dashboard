@@ -1,16 +1,21 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadDigestRecipientById } from '@/lib/mis-email/recipients';
-import { sendMisEmailViaVpsRelay, isMisEmailRelayConfigured } from '@/lib/mis-email/send-relay';
-import { isVpsSshSendConfigured, sendMisEmailViaVpsSsh } from '@/lib/mis-email/send-vps-ssh';
+import { sendMisEmailComposeBatch } from '@/lib/mis-email/compose-digest';
+import {
+  createMisEmailSendJob,
+  updateMisEmailSendJob,
+} from '@/lib/mis-email/send-jobs';
 import {
   mergeMisEmailPreferences,
   validateMisEmailPreferencesPatch,
   type MisEmailPreferences,
 } from '@/lib/mis-email/preferences';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
+
+export const maxDuration = 300;
 
 type MisEmailRow = {
   mis_email_enabled: boolean;
@@ -32,8 +37,6 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-
-  const started = Date.now();
 
   try {
     const body = (await request.json()) as {
@@ -80,39 +83,63 @@ export async function POST(request: Request) {
       );
     }
 
-    let results;
-    try {
-      if (!isMisEmailRelayConfigured()) {
-        throw new Error('VPS_MAIL_RELAY_SECRET is not set');
-      }
-      results = await sendMisEmailViaVpsRelay({
-        userId: user.id,
-        preferences: validated.merged,
-        sendTo: body.sendTo,
+    const job = await createMisEmailSendJob(user.id);
+    const jobStarted = Date.now();
+
+    after(async () => {
+      await updateMisEmailSendJob(job.id, {
+        status: 'running',
+        message: 'Building reports and sending email…',
       });
-    } catch (relayErr) {
-      if (process.env.NODE_ENV === 'development' && isVpsSshSendConfigured()) {
-        console.warn('[mis-email/send] HTTPS relay failed, using VPS SSH fallback:', relayErr);
-        results = await sendMisEmailViaVpsSsh({
-          userId: user.id,
+
+      try {
+        const results = await sendMisEmailComposeBatch(recipient, {
           preferences: validated.merged,
           sendTo: body.sendTo,
+          displayName: recipient.name,
         });
-      } else {
-        throw relayErr;
-      }
-    }
 
-    return NextResponse.json({
-      ok: true,
-      sent: results,
-      savedPreferences: Boolean(body.savePreferences),
-      durationMs: Date.now() - started,
+        const durationMs = Date.now() - jobStarted;
+        const timing = results[0]?.timing;
+        const sent = results.map(({ timing: _timing, ...rest }) => rest);
+        const summary = sent.map((item) => item.sentTo).join(', ');
+
+        console.log(
+          `[mis-email/send] job ${job.id} completed in ${durationMs}ms · recipients=${results.length} · dateRange=${validated.merged.dateRange ?? 'month_to_date'}`
+        );
+
+        await updateMisEmailSendJob(job.id, {
+          status: 'succeeded',
+          message: `Sent to ${summary}`,
+          sent,
+          durationMs,
+          timing,
+        });
+      } catch (sendErr: unknown) {
+        console.error(`[mis-email/send] job ${job.id}`, sendErr);
+        await updateMisEmailSendJob(job.id, {
+          status: 'failed',
+          message: toUserFacingError(sendErr) || 'Failed to send MIS email',
+          error: sendErr instanceof Error ? sendErr.message : String(sendErr),
+          durationMs: Date.now() - jobStarted,
+        });
+      }
     });
+
+    return NextResponse.json(
+      {
+        ok: true,
+        jobId: job.id,
+        status: job.status,
+        message: job.message,
+        savedPreferences: Boolean(body.savePreferences),
+      },
+      { status: 202 }
+    );
   } catch (err: unknown) {
     console.error('[mis-email/send]', err);
     return NextResponse.json(
-      { error: toUserFacingError(err) || 'Failed to send MIS email' },
+      { error: toUserFacingError(err) || 'Failed to queue MIS email send' },
       { status: 500 }
     );
   }

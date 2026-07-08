@@ -1,4 +1,5 @@
 import type ExcelJS from 'exceljs';
+import { blobToPreparedExport, triggerBlobDownload } from '@/lib/report/summary-excel-export';
 import { formatRegisterExportDate } from '@/lib/register/export-dates';
 import { isRegisterRowCancelled } from '@/lib/report/search';
 
@@ -188,6 +189,27 @@ export async function registerWorkbookToBuffer(workbook: ExcelJS.Workbook): Prom
   return Buffer.from(buffer);
 }
 
+export async function prepareRegisterExcelFromRows(
+  rawRows: Record<string, unknown>[],
+  opts?: RegisterExcelExportOptions
+): Promise<import('@/lib/report/summary-excel-export').PreparedFileExport> {
+  const rows = normalizeRegisterExportRows(rawRows);
+  if (!rows.length) {
+    throw new Error('No data to export');
+  }
+
+  const workbook = await buildRegisterExcelWorkbook(rows, opts);
+  const buffer = await workbook.xlsx.writeBuffer();
+  const baseName = opts?.filename ?? detailedMisRegisterFilename();
+  const filename = baseName.endsWith('.xlsx') ? baseName : `${baseName}.xlsx`;
+  return blobToPreparedExport(
+    new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }),
+    filename
+  );
+}
+
 export async function downloadRegisterExcelFromRows(
   rawRows: Record<string, unknown>[],
   opts?: RegisterExcelExportOptions
@@ -197,16 +219,8 @@ export async function downloadRegisterExcelFromRows(
     throw new Error('No data to export');
   }
 
-  const workbook = await buildRegisterExcelWorkbook(rows, opts);
-  const buffer = await workbook.xlsx.writeBuffer();
-  const filename = opts?.filename ?? detailedMisRegisterFilename();
-
-  const blob = new Blob([buffer], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  const prepared = await prepareRegisterExcelFromRows(rows, opts);
+  await triggerBlobDownload(prepared.blob, prepared.filename, {
+    objectUrl: prepared.objectUrl,
   });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
-  link.click();
-  URL.revokeObjectURL(link.href);
 }

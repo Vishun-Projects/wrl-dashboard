@@ -39,6 +39,7 @@ import {
 } from '@/components/location-audit/LocationAuditRowDetail';
 import { PageAlert } from '@/components/ui/PageAlert';
 import { feedback } from '@/lib/ui/feedback';
+import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
 import { usePageAlert } from '@/hooks/usePageAlert';
 import { ReportLoadingPanel } from '@/components/report/ReportLoadingFeedback';
 import { DataTableLoading } from '@/components/ui/DataTableLoading';
@@ -370,14 +371,15 @@ export default function LocationAuditPage() {
         params: { ...buildParams(), format: 'csv' },
         responseType: 'blob',
       });
+      const contentType = String(res.headers['content-type'] ?? '');
+      if (contentType.includes('application/json')) {
+        const errBody = JSON.parse(await res.data.text()) as { error?: string };
+        throw new Error(errBody.error || 'Export failed');
+      }
+      const fileName = `location-audit-${startDateStr}-${endDateStr}.csv`;
       const blob = new Blob([res.data], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `location-audit-${startDateStr}-${endDateStr}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-      feedback.actionSuccess('CSV exported');
+      await triggerBlobDownload(blob, fileName);
+      feedback.actionSuccess(`Downloading ${fileName}`);
     } catch {
       feedback.actionFailed('CSV export failed');
     } finally {

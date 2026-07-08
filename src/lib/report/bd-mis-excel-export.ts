@@ -6,7 +6,7 @@ import {
   type BdMisRegionalRow,
   type BdMisSourceFlags,
 } from '@/lib/report/bd-mis-summary';
-import type { BdMisTraceRow } from '@/lib/report/bd-mis-trace';
+import { filterTraceRowsForExport, type BdMisTraceRow } from '@/lib/report/bd-mis-trace';
 import {
   applySummaryHeaderStyle,
   applyRegionRowStyle,
@@ -34,6 +34,8 @@ export type BdMisExportPayload = {
 
 export type BdMisTraceableExportPayload = BdMisExportPayload & {
   traceRows: BdMisTraceRow[];
+  /** Summary dashboard uses date-filtered trace + UI regional totals; BD MIS uses snapshot client files. */
+  traceAlign?: 'summary' | 'bd_mis';
 };
 
 function zoneShort(zone: string): string {
@@ -233,9 +235,9 @@ export async function buildBdMisSummaryWorkbook(
     'Total calls',
     'Total solved',
     '# open calls',
-    '<2 days',
-    '>3 days',
-    '>7 days',
+    '≤2 days',
+    '3-7 days',
+    '8-15 days',
     '>15 days',
     '# active Eng.',
   ]);
@@ -282,9 +284,9 @@ export async function buildBdMisSummaryWorkbook(
     'Solved',
     'Cancelled',
     'Open',
-    '<2 days',
-    '>3 days',
-    '>7 days',
+    '≤2 days',
+    '3-7 days',
+    '8-15 days',
     '>15 days',
     'Active Eng.',
   ]);
@@ -321,9 +323,9 @@ export async function buildBdMisSummaryWorkbook(
     'Total calls',
     'Solved',
     'Open (aging)',
-    '<2 days',
-    '>3 days',
-    '>7 days',
+    '≤2 days',
+    '3-7 days',
+    '8-15 days',
     '>15 days',
   ]);
   applySummaryHeaderStyle(crmAccHeader);
@@ -362,9 +364,9 @@ export async function buildBdMisSummaryWorkbook(
     'Total calls',
     'Solved',
     'Open (aging)',
-    '<2 days',
-    '>3 days',
-    '>7 days',
+    '≤2 days',
+    '3-7 days',
+    '8-15 days',
     '>15 days',
   ]);
   applySummaryHeaderStyle(clientHeader);
@@ -439,16 +441,16 @@ function addTraceSummarySheet(
     'Total calls',
     'Total solved',
     '# open calls',
-    '<2 days',
-    '>3 days',
-    '>7 days',
+    '≤2 days',
+    '3-7 days',
+    '8-15 days',
     '>15 days',
     '# active Eng.',
   ]);
   applySummaryHeaderStyle(sumHeader);
 
   for (const row of payload.regionalRows) {
-    const r = summary.addRow([
+    summary.addRow([
       zoneShort(row.region),
       row.total_calls,
       row.total_solved,
@@ -459,7 +461,6 @@ function addTraceSummarySheet(
       row.age_15,
       row.active_eng,
     ]);
-    applyRegionRowStyle(r, row.region);
   }
 
   const g = payload.grand;
@@ -504,12 +505,13 @@ function addTraceRowDetailSheet(
   workbook: ExcelJS.Workbook,
   traceRows: BdMisTraceRow[]
 ): void {
+  const exportRows = filterTraceRowsForExport(traceRows);
   const EXCEL_MAX_DATA_ROWS = 1_048_575;
-  const chunkCount = Math.max(1, Math.ceil(traceRows.length / EXCEL_MAX_DATA_ROWS));
+  const chunkCount = Math.max(1, Math.ceil(exportRows.length / EXCEL_MAX_DATA_ROWS));
 
   for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
     const start = chunkIndex * EXCEL_MAX_DATA_ROWS;
-    const chunk = traceRows.slice(start, start + EXCEL_MAX_DATA_ROWS);
+    const chunk = exportRows.slice(start, start + EXCEL_MAX_DATA_ROWS);
     const sheetLabel =
       chunkCount === 1 ? 'Row Detail' : `Row Detail ${chunkIndex + 1}`;
     const detail = workbook.addWorksheet(sheetLabel.slice(0, 31));
@@ -518,7 +520,7 @@ function addTraceRowDetailSheet(
     applySummaryHeaderStyle(header);
 
     for (const row of chunk) {
-      const excelRow = detail.addRow([
+      detail.addRow([
         row.region.replace(/\s+ZONE$/i, ''),
         row.plant,
         row.office_under_branch,
@@ -533,18 +535,21 @@ function addTraceRowDetailSheet(
         row.contribution_step,
         row.included_in_final_count ? 'Yes' : 'No',
       ]);
-      applyRegionRowStyle(excelRow, row.region);
-      const includedCell = excelRow.getCell(13);
-      includedCell.font = {
-        bold: true,
-        color: { argb: row.included_in_final_count ? 'FF059669' : 'FFDC2626' },
-      };
     }
   }
 }
 
-function autoSizeWorkbookColumns(workbook: ExcelJS.Workbook): void {
+function autoSizeWorkbookColumns(
+  workbook: ExcelJS.Workbook,
+  opts?: { skipSheetNamePattern?: RegExp }
+): void {
   for (const sheet of workbook.worksheets) {
+    if (opts?.skipSheetNamePattern?.test(sheet.name)) {
+      sheet.columns.forEach((col) => {
+        col.width = 16;
+      });
+      continue;
+    }
     sheet.columns.forEach((col) => {
       let max = 10;
       col.eachCell?.({ includeEmpty: false }, (cell) => {
@@ -577,15 +582,28 @@ export async function buildBdMisTraceableWorkbook(
   meta.addRow([]);
   meta.addRow(['Sheets:']);
   meta.addRow(['  Summary — dashboard regional totals']);
-  meta.addRow(['  Count Trace — step matrix per region']);
-  meta.addRow(['  Row Detail — every call row with contribution trace']);
+  if (payload.traceAlign === 'bd_mis') {
+    meta.addRow(['  Count Trace — step matrix per region (BD MIS union)']);
+  } else {
+    meta.addRow(['  Count Trace — omitted (Summary dashboard uses on-screen merge, not BD MIS union)']);
+  }
+  meta.addRow(['  Row Detail — call rows in the selected date range (same scope as the dashboard)']);
   meta.addRow([]);
-  meta.addRow(['Row count', payload.traceRows.length]);
+  meta.addRow(['Row detail count', filterTraceRowsForExport(payload.traceRows).length]);
+  meta.addRow(['Row detail scope', 'Non-cancelled calls in the selected date range']);
+  meta.addRow([
+    'Trace scope',
+    payload.traceAlign === 'bd_mis'
+      ? 'BD MIS audit (client Coke/Cadbury use latest full snapshot files)'
+      : 'Summary dashboard (CRM + client rows filtered to the selected date range)',
+  ]);
 
   addTraceSummarySheet(workbook, payload);
-  addTraceCountSheet(workbook, payload);
+  if (payload.traceAlign === 'bd_mis') {
+    addTraceCountSheet(workbook, payload);
+  }
   addTraceRowDetailSheet(workbook, payload.traceRows);
-  autoSizeWorkbookColumns(workbook);
+  autoSizeWorkbookColumns(workbook, { skipSheetNamePattern: /^Row Detail/ });
 
   return workbook;
 }

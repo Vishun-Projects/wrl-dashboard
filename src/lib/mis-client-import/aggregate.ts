@@ -1,5 +1,5 @@
 import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/report/summary-derive';
-import { withAppClient } from '@/lib/read-model/db';
+import { withBulkReadClient } from '@/lib/read-model/db';
 import { SNAPSHOT_IMPORT_SOURCE_CODES } from '@/lib/mis-client-import/snapshot-sources';
 import type { StatusBucket } from '@/lib/mis-client-import/types';
 
@@ -28,6 +28,8 @@ function resolveAgingDate(params: ClientAggregateParams): string {
   if (params.endDate) return params.endDate;
   return new Date().toISOString().slice(0, 10);
 }
+
+import { incrementAgingBucket, openCallsFromAging } from '@/lib/report/aging-buckets';
 
 function sqlDayDiff(loggedAt: Date, agingDate: string): number {
   const callDate = new Date(loggedAt);
@@ -155,10 +157,7 @@ function aggregateRows(rows: DbRow[], agingDate: string): BranchSummaryRow[] {
       b.all_open += 1;
       if (row.logged_at) {
         const dayDiff = sqlDayDiff(row.logged_at, agingDate);
-        if (dayDiff <= 2) b.age_2 += 1;
-        else if (dayDiff <= 7) b.age_3 += 1;
-        else if (dayDiff <= 15) b.age_7 += 1;
-        else b.age_15 += 1;
+        incrementAgingBucket(b, dayDiff);
       }
     }
     if (row.is_part_pending) {
@@ -169,10 +168,15 @@ function aggregateRows(rows: DbRow[], agingDate: string): BranchSummaryRow[] {
   }
 
   return [...branchMap.values()]
-    .map(({ engineers, ...row }) => ({
-      ...row,
-      active_eng: engineers.size,
-    }))
+    .map(({ engineers, ...row }) => {
+      const agingOpen = openCallsFromAging(row);
+      return {
+        ...row,
+        open_calls: agingOpen > 0 ? agingOpen : row.open_calls,
+        all_open: agingOpen > 0 ? agingOpen : row.all_open,
+        active_eng: engineers.size,
+      };
+    })
     .sort((a, b) => a.branch.localeCompare(b.branch));
 }
 
@@ -211,10 +215,7 @@ function aggregateAccountRows(rows: DbRow[], agingDate: string): AccountSummaryR
       a.open_calls += 1;
       if (row.logged_at) {
         const dayDiff = sqlDayDiff(row.logged_at, agingDate);
-        if (dayDiff <= 2) a.age_2 += 1;
-        else if (dayDiff <= 7) a.age_3 += 1;
-        else if (dayDiff <= 15) a.age_7 += 1;
-        else a.age_15 += 1;
+        incrementAgingBucket(a, dayDiff);
       }
     }
     if (row.is_part_pending) {
@@ -224,10 +225,14 @@ function aggregateAccountRows(rows: DbRow[], agingDate: string): AccountSummaryR
   }
 
   return [...accountMap.values()]
-    .map(({ engineers, ...row }) => ({
-      ...row,
-      active_eng: engineers.size,
-    }))
+    .map(({ engineers, ...row }) => {
+      const agingOpen = openCallsFromAging(row);
+      return {
+        ...row,
+        open_calls: agingOpen > 0 ? agingOpen : row.open_calls,
+        active_eng: engineers.size,
+      };
+    })
     .sort((a, b) => a.account.localeCompare(b.account) || a.region.localeCompare(b.region));
 }
 
@@ -291,7 +296,7 @@ async function queryDedupedRows(params: ClientAggregateParams): Promise<DbRow[]>
   const sourceCodes = resolveSourceFilter(params);
   const bdMisSnapshotMode = params.bdMisSnapshotMode === true;
 
-  return withAppClient(async (client) => {
+  return withBulkReadClient(async (client) => {
     const values: unknown[] = [startDate, endDate, [...SNAPSHOT_IMPORT_SOURCE_CODES]];
     let sourceClause = '';
     if (sourceCodes) {
@@ -363,7 +368,7 @@ export async function countClientRowsInRange(params: ClientAggregateParams): Pro
   const endDate = params.endDate ?? new Date().toISOString().slice(0, 10);
   const sourceCodes = resolveSourceFilter(params);
 
-  return withAppClient(async (client) => {
+  return withBulkReadClient(async (client) => {
     const values: unknown[] = [startDate, endDate, [...SNAPSHOT_IMPORT_SOURCE_CODES]];
     let sourceClause = '';
     if (sourceCodes) {
@@ -490,7 +495,7 @@ async function queryDedupedTraceRows(params: ClientAggregateParams): Promise<Cli
   const sourceCodes = resolveSourceFilter(params);
   const bdMisSnapshotMode = params.bdMisSnapshotMode === true;
 
-  return withAppClient(async (client) => {
+  return withBulkReadClient(async (client) => {
     const values: unknown[] = [startDate, endDate, [...SNAPSHOT_IMPORT_SOURCE_CODES]];
     let sourceClause = '';
     if (sourceCodes) {
@@ -511,6 +516,13 @@ export async function queryClientCallTraceRowsForBdMis(
   params: Omit<ClientAggregateParams, 'bdMisSnapshotMode'>
 ): Promise<ClientCallTraceDbRow[]> {
   return queryDedupedTraceRows({ ...params, bdMisSnapshotMode: true });
+}
+
+/** Client call rows for Summary dashboard trace — same date filter as the on-screen merge. */
+export async function queryClientCallTraceRowsFiltered(
+  params: Omit<ClientAggregateParams, 'bdMisSnapshotMode'>
+): Promise<ClientCallTraceDbRow[]> {
+  return queryDedupedTraceRows({ ...params, bdMisSnapshotMode: false });
 }
 
 /** Mirrors DISTINCT ON (source_id, call_key) ORDER BY batch_created_at DESC */

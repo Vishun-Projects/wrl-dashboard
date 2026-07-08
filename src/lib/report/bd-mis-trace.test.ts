@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildBdMisTraceRows,
+  filterTraceRowsForExport,
   formatAgingLabel,
   mapClientCallToTraceRow,
   mapCrmCallToTraceRow,
@@ -90,7 +91,7 @@ describe('bd-mis-trace', () => {
     expect(formatAgingLabel(1, 'assigned')).toBe('<2 days');
     expect(formatAgingLabel(5, 'assigned')).toBe('3-7 days');
     expect(formatAgingLabel(20, 'open_unallocated')).toBe('>15 days');
-    expect(formatAgingLabel(3, 'solved')).toBe('Solved');
+    expect(formatAgingLabel(3, 'solved')).toBe('');
   });
 
   it('builds combined trace rows sorted by region and service order', () => {
@@ -157,6 +158,71 @@ describe('bd-mis-trace', () => {
     );
     expect(row.plant).toBe('—');
     expect(row.office_under_branch).toBe('—');
+  });
+
+  it('formats trace call dates as yyyy-mm-dd', () => {
+    const row = mapCrmCallToTraceRow(
+      {
+        region: 'NORTH ZONE',
+        plant: 'Plant A',
+        technician_name: 'Tech 1',
+        office_under_branch: 'Delhi Branch',
+        customer_name: 'Sri Durga',
+        logged_at: '2026-06-30T10:30:00Z',
+        service_order: 'SO-1',
+        client: 'Dealer',
+        call_status: 'Assigned',
+        status_bucket: 'assigned',
+        ncancelreason: null,
+        account: 'Dealer',
+      },
+      { crm: true, cadbury: false, coke: false },
+      '2026-06-29'
+    );
+
+    expect(row.call_date_time).toBe('2026-06-30');
+  });
+
+  it('excludes cancelled rows from trace export detail', () => {
+    const rows = buildBdMisTraceRows({
+      crmRows: [
+        {
+          region: 'EAST ZONE',
+          plant: 'P1',
+          technician_name: 'T',
+          office_under_branch: 'B',
+          customer_name: 'Cust 1',
+          logged_at: '2026-01-01T00:00:00Z',
+          service_order: 'OPEN-1',
+          client: 'Other',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Other',
+        },
+        {
+          region: 'EAST ZONE',
+          plant: 'P2',
+          technician_name: 'T2',
+          office_under_branch: 'B2',
+          customer_name: 'Cust 2',
+          logged_at: '2026-01-02T00:00:00Z',
+          service_order: 'CAN-1',
+          client: 'Other',
+          call_status: 'Cancelled',
+          status_bucket: 'cancelled',
+          ncancelreason: null,
+          account: 'Other',
+        },
+      ],
+      clientRows: [],
+      sources: { crm: true, cadbury: false, coke: false },
+      agingDate: '2026-06-29',
+    });
+
+    expect(rows).toHaveLength(2);
+    expect(filterTraceRowsForExport(rows)).toHaveLength(1);
+    expect(filterTraceRowsForExport(rows)[0].service_order).toBe('OPEN-1');
   });
 
   it('shows Cancelled when cancel reason exists even if status label differs', () => {

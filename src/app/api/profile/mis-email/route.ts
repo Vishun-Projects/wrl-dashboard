@@ -64,7 +64,11 @@ export async function GET(request: Request) {
       mis_email_enabled: Boolean(row.mis_email_enabled),
       preferences,
       allowed,
-      availableBodySections: resolveAvailableBodySections(allowed.includeSummary),
+      availableBodySections: resolveAvailableBodySections({
+        includeSummary: allowed.includeSummary,
+        includeKeyAccount: allowed.includeKeyAccount,
+      }),
+      availableKeyAccounts: [],
       roleName: row.role_name,
       scopeLabel,
     });

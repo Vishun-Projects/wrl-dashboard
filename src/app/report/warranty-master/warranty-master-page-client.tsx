@@ -31,6 +31,7 @@ import {
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import { PageAlert } from '@/components/ui/PageAlert';
 import { feedback } from '@/lib/ui/feedback';
+import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
 import { usePageAlert } from '@/hooks/usePageAlert';
 import { DataTableLoading } from '@/components/ui/DataTableLoading';
 
@@ -297,19 +298,18 @@ export default function WarrantyMasterPage() {
     setExpandedKey((prev) => (prev === key ? null : key));
   }, []);
 
-  const handleExportCsv = () => {
-    if (displayRows.length === 0) return;
+  const handleExportCsv = async () => {
+    if (displayRows.length === 0) {
+      feedback.actionFailed('Nothing to export');
+      return;
+    }
     setExporting(true);
     try {
       const csv = exportWarrantyMasterCsv(displayRows);
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `warranty-master-${new Date().toISOString().slice(0, 10)}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-      feedback.actionSuccess('CSV downloaded');
+      const fileName = `warranty-master-${new Date().toISOString().slice(0, 10)}.csv`;
+      await triggerBlobDownload(blob, fileName);
+      feedback.actionSuccess(`Downloading ${fileName}`);
     } catch (err: unknown) {
       feedback.actionFailed(
         sanitizeUserFacingMessage(err instanceof Error ? err.message : 'Export failed')

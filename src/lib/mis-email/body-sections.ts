@@ -1,10 +1,17 @@
 import { getRegionColor } from '@/lib/report/summary-excel-export';
 import type { BranchSummaryRow, SummaryDashboard } from '@/lib/report/summary-derive';
 import { MIS_EMAIL_THEME } from '@/lib/mis-email/email-template';
+import type { MisEmailBodyPermissions } from '@/lib/mis-email/preferences';
+import {
+  buildMergedAccountMetricRow,
+  DEFAULT_CLIENT_MERGE_WITH_CRM,
+  type MergeSelection,
+} from '@/lib/report/account-merge';
 
 export const MIS_EMAIL_BODY_SECTION_IDS = [
   'regional_performance',
   'branch_performance',
+  'key_account_performance',
 ] as const;
 
 export type MisEmailBodySectionId = (typeof MIS_EMAIL_BODY_SECTION_IDS)[number];
@@ -14,6 +21,7 @@ export type MisEmailBodySectionDef = {
   label: string;
   description: string;
   requiresSummary: boolean;
+  requiresKeyAccount: boolean;
 };
 
 export const MIS_EMAIL_BODY_SECTION_CATALOG: MisEmailBodySectionDef[] = [
@@ -22,14 +30,30 @@ export const MIS_EMAIL_BODY_SECTION_CATALOG: MisEmailBodySectionDef[] = [
     label: 'Regional performance',
     description: 'Zone-wise totals — calls, solved, open, aging, parts, engineers',
     requiresSummary: true,
+    requiresKeyAccount: false,
   },
   {
     id: 'branch_performance',
     label: 'Branch-wise performance',
     description: 'Top-level branch rows with the same metrics as the summary report',
     requiresSummary: true,
+    requiresKeyAccount: false,
+  },
+  {
+    id: 'key_account_performance',
+    label: 'Key account breakdown',
+    description: 'Selected key accounts with calls, solved, open, aging, and % >7 days',
+    requiresSummary: false,
+    requiresKeyAccount: true,
   },
 ];
+
+export type MisEmailBodyContext = {
+  summary: SummaryDashboard;
+  accountRows?: Array<Record<string, unknown>>;
+  clientAccountSummary?: Array<Record<string, unknown>>;
+  keyAccountsInBody?: string[];
+};
 
 export type RegionalPerformanceRow = {
   region: string;
@@ -44,6 +68,8 @@ export type RegionalPerformanceRow = {
   part_pending: number;
   active_eng: number;
 };
+
+const DIGEST_MERGE_FLAGS: MergeSelection = { crm: true, client: true };
 
 function sumField(rows: BranchSummaryRow[], key: keyof BranchSummaryRow): number {
   return rows.reduce((acc, row) => acc + Number(row[key] ?? 0), 0);
@@ -158,9 +184,9 @@ function buildPerformanceTableHtml(params: {
       <th style="${headerStyle}">Total solved</th>
       <th style="${headerStyle}">Cancelled</th>
       <th style="${headerStyle}"># open calls</th>
-      <th style="${headerStyle}">&lt;2 days</th>
-      <th style="${headerStyle}">&gt;3 days</th>
-      <th style="${headerStyle}">&gt;7 days</th>
+      <th style="${headerStyle}">&le;2 days</th>
+      <th style="${headerStyle}">3-7 days</th>
+      <th style="${headerStyle}">8-15 days</th>
       <th style="${headerStyle}">&gt;15 days</th>
       <th style="${headerStyle}">Part pending</th>
       <th style="${headerStyle}"># of active Eng.</th>
@@ -193,6 +219,75 @@ function buildPerformanceTableHtml(params: {
   return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 20px;border-collapse:collapse;width:100%;table-layout:auto;">
     <tr>
       <td style="padding:0 0 8px;font-family:${t.fontInline};font-size:12px;font-weight:bold;line-height:1.4;color:${t.fgPrimary};">${escapeHtml(params.title)}</td>
+    </tr>
+    <tr>
+      <td style="padding:0;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;width:100%;table-layout:auto;">
+          <thead>${header}</thead>
+          <tbody>${bodyRows}</tbody>
+        </table>
+      </td>
+    </tr>
+  </table>`;
+}
+
+function buildKeyAccountTableHtml(context: MisEmailBodyContext): string {
+  const accountRows = context.accountRows ?? [];
+  if (!accountRows.length) return '';
+
+  const t = MIS_EMAIL_THEME;
+  const headerStyle = `padding:6px 8px;font-family:${t.fontInline};font-size:10px;font-weight:bold;line-height:1.3;color:#ffffff;background-color:#0070C0;border:1px solid ${t.border};text-align:center;`;
+  const cellStyle = `padding:6px 8px;font-family:${t.fontInline};font-size:10px;line-height:1.35;color:${t.fgPrimary};border:1px solid ${t.border};text-align:center;`;
+  const labelStyle = `padding:6px 8px;font-family:${t.fontInline};font-size:10px;line-height:1.35;color:${t.fgPrimary};border:1px solid ${t.border};text-align:left;font-weight:bold;`;
+
+  const header = `
+    <tr>
+      <th style="${headerStyle.replace('text-align:center;', 'text-align:left;')}">Region</th>
+      <th style="${headerStyle.replace('text-align:center;', 'text-align:left;')}">Key Account</th>
+      <th style="${headerStyle}">Total calls</th>
+      <th style="${headerStyle}">Total solved</th>
+      <th style="${headerStyle}"># open calls</th>
+      <th style="${headerStyle}">&lt;2 days</th>
+      <th style="${headerStyle}">2-7 days</th>
+      <th style="${headerStyle}">7-15 days</th>
+      <th style="${headerStyle}">&gt;15 days</th>
+      <th style="${headerStyle}">% &gt;7 days</th>
+      <th style="${headerStyle}"># of active Eng.</th>
+    </tr>`;
+
+  const bodyRows = accountRows
+    .map((row) => {
+      const merged = buildMergedAccountMetricRow(
+        row,
+        context.clientAccountSummary,
+        DIGEST_MERGE_FLAGS,
+        DEFAULT_CLIENT_MERGE_WITH_CRM
+      );
+      const bg = regionBgColor(merged.region);
+      const rowStyle = `background-color:${bg};`;
+      const solvedStyle = `${cellStyle}color:#059669;`;
+      const openStyle = `${cellStyle}font-weight:bold;`;
+      const pctStyle = `${cellStyle}color:#1d4ed8;font-weight:bold;`;
+
+      return `<tr>
+        <td style="${labelStyle}${rowStyle}">${escapeHtml(formatRegionLabel(merged.region))}</td>
+        <td style="${labelStyle}${rowStyle}">${escapeHtml(merged.account)}</td>
+        <td style="${cellStyle}${rowStyle}">${formatNum(merged.total_calls)}</td>
+        <td style="${solvedStyle}${rowStyle}">${formatNum(merged.total_solved)}</td>
+        <td style="${openStyle}${rowStyle}">${formatNum(merged.open_calls)}</td>
+        <td style="${cellStyle}${rowStyle}">${formatNum(merged.age_2)}</td>
+        <td style="${cellStyle}${rowStyle}">${formatNum(merged.age_3)}</td>
+        <td style="${cellStyle}${rowStyle}">${formatNum(merged.age_7)}</td>
+        <td style="${cellStyle}${rowStyle}">${formatNum(merged.age_15)}</td>
+        <td style="${pctStyle}${rowStyle}">${escapeHtml(merged.pct_gt_7)}</td>
+        <td style="${cellStyle}${rowStyle}">${formatNum(merged.active_eng)}</td>
+      </tr>`;
+    })
+    .join('');
+
+  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 20px;border-collapse:collapse;width:100%;table-layout:auto;">
+    <tr>
+      <td style="padding:0 0 8px;font-family:${t.fontInline};font-size:12px;font-weight:bold;line-height:1.4;color:${t.fgPrimary};">Key Account Breakdown</td>
     </tr>
     <tr>
       <td style="padding:0;">
@@ -253,8 +348,11 @@ function buildBranchPerformanceHtml(data: SummaryDashboard): string {
 
 export function buildEmailBodySectionsHtml(
   sectionIds: MisEmailBodySectionId[],
-  data: SummaryDashboard
+  context: MisEmailBodyContext | SummaryDashboard
 ): string {
+  const bodyContext: MisEmailBodyContext =
+    'summary' in context ? context : { summary: context };
+  const data = bodyContext.summary;
   const blocks: string[] = [];
 
   for (const id of sectionIds) {
@@ -262,6 +360,9 @@ export function buildEmailBodySectionsHtml(
       blocks.push(buildRegionalPerformanceHtml(data));
     } else if (id === 'branch_performance') {
       blocks.push(buildBranchPerformanceHtml(data));
+    } else if (id === 'key_account_performance') {
+      const html = buildKeyAccountTableHtml(bodyContext);
+      if (html) blocks.push(html);
     }
   }
 
@@ -283,8 +384,11 @@ function buildPerformancePlainLines(
 
 export function buildEmailBodySectionsPlainText(
   sectionIds: MisEmailBodySectionId[],
-  data: SummaryDashboard
+  context: MisEmailBodyContext | SummaryDashboard
 ): string {
+  const bodyContext: MisEmailBodyContext =
+    'summary' in context ? context : { summary: context };
+  const data = bodyContext.summary;
   const blocks: string[] = [];
 
   if (sectionIds.includes('regional_performance')) {
@@ -322,6 +426,24 @@ export function buildEmailBodySectionsPlainText(
     );
   }
 
+  if (sectionIds.includes('key_account_performance') && (bodyContext.accountRows?.length ?? 0) > 0) {
+    const accountRows = bodyContext.accountRows ?? [];
+    if (accountRows.length > 0) {
+      blocks.push('', 'Key Account Breakdown', '');
+      for (const row of accountRows) {
+        const merged = buildMergedAccountMetricRow(
+          row,
+          bodyContext.clientAccountSummary,
+          DIGEST_MERGE_FLAGS,
+          DEFAULT_CLIENT_MERGE_WITH_CRM
+        );
+        blocks.push(
+          `${formatRegionLabel(merged.region)} / ${merged.account}: calls ${formatNum(merged.total_calls)}, solved ${formatNum(merged.total_solved)}, open ${formatNum(merged.open_calls)}, % >7 days ${merged.pct_gt_7}`
+        );
+      }
+    }
+  }
+
   return blocks.join('\n').trim();
 }
 
@@ -342,16 +464,48 @@ export function parseMisEmailBodySectionIds(raw: unknown): MisEmailBodySectionId
   return result;
 }
 
-export function resolveAvailableBodySections(includeSummary: boolean): MisEmailBodySectionDef[] {
-  if (!includeSummary) return [];
-  return MIS_EMAIL_BODY_SECTION_CATALOG.filter((section) => !section.requiresSummary || includeSummary);
+export function resolveAvailableBodySections(
+  permissions: MisEmailBodyPermissions | boolean
+): MisEmailBodySectionDef[] {
+  const perms: MisEmailBodyPermissions =
+    typeof permissions === 'boolean'
+      ? { includeSummary: permissions, includeKeyAccount: false }
+      : permissions;
+
+  return MIS_EMAIL_BODY_SECTION_CATALOG.filter((section) => {
+    if (section.requiresSummary && !perms.includeSummary) return false;
+    if (section.requiresKeyAccount && !perms.includeKeyAccount) return false;
+    return true;
+  });
 }
 
 export function resolveEffectiveBodySections(
-  includeSummary: boolean,
+  permissions: MisEmailBodyPermissions | boolean,
   prefs: { bodyInEmail?: MisEmailBodySectionId[] }
 ): MisEmailBodySectionId[] {
-  if (!includeSummary) return [];
-  const allowed = new Set(resolveAvailableBodySections(includeSummary).map((s) => s.id));
+  const allowed = new Set(resolveAvailableBodySections(permissions).map((s) => s.id));
   return parseMisEmailBodySectionIds(prefs.bodyInEmail).filter((id) => allowed.has(id));
+}
+
+/**
+ * Body sections for digest send/preview. When key-account attachment is enabled,
+ * always include the key-account table in the email body (legacy MIS layout).
+ * Users can uncheck "Key account breakdown" in settings and save to opt out.
+ */
+export function resolveDigestBodySections(
+  permissions: MisEmailBodyPermissions,
+  prefs: { bodyInEmail?: MisEmailBodySectionId[] },
+  options: { includeKeyAccountAttachment: boolean }
+): MisEmailBodySectionId[] {
+  const sections = resolveEffectiveBodySections(permissions, prefs);
+
+  if (
+    options.includeKeyAccountAttachment &&
+    permissions.includeKeyAccount &&
+    !sections.includes('key_account_performance')
+  ) {
+    return [...sections, 'key_account_performance'];
+  }
+
+  return sections;
 }

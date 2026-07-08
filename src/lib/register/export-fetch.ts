@@ -1,6 +1,12 @@
 import axios from 'axios';
 import { readRegisterFromPostgresClient } from '@/lib/read-model/client-flags';
 import { downloadRegisterCsvInBrowser } from './server/csv-export';
+import {
+  blobToPreparedExport,
+  resolveUniqueDownloadFilename,
+  triggerBlobDownload,
+  type PreparedFileExport,
+} from '@/lib/report/summary-excel-export';
 
 export function isRegisterExportAbortError(err: unknown): boolean {
   if (axios.isCancel(err)) return true;
@@ -124,20 +130,20 @@ export function collectRegisterRowsFromSessionCache(
 }
 
 /** Download register rows as a proper CSV file in the browser. */
-export function downloadRegisterCsvFromRows(
+export async function downloadRegisterCsvFromRows(
   rows: Record<string, unknown>[],
   filename?: string
-): void {
-  downloadRegisterCsvInBrowser(rows, filename);
+): Promise<void> {
+  await downloadRegisterCsvInBrowser(rows, filename);
 }
 
-/** One server request: streams CSV; reports row progress while bytes arrive. */
-export async function downloadRegisterCsvFromServer(opts: {
+/** Stream register CSV from server into a prepared export blob. */
+export async function prepareRegisterCsvFromServer(opts: {
   query: RegisterExportQuery;
   knownTotal?: number;
   signal?: AbortSignal;
   onProgress?: (fetched: number, total: number) => void;
-}): Promise<void> {
+}): Promise<PreparedFileExport> {
   const params = buildRegisterExportParams(opts.query, 1, REGISTER_EXPORT_BATCH_CRM, false);
   params.set('export', 'csv');
   if (opts.knownTotal != null && opts.knownTotal > 0) {
@@ -207,18 +213,31 @@ export async function downloadRegisterCsvFromServer(opts: {
     dataRowCount += 1;
   }
 
+  if (exportTotal > 0 && dataRowCount !== exportTotal) {
+    throw new Error(
+      `Export incomplete — received ${dataRowCount.toLocaleString()} of ${exportTotal.toLocaleString()} rows`
+    );
+  }
+
   opts.onProgress?.(
     exportTotal > 0 ? exportTotal : dataRowCount,
     exportTotal > 0 ? exportTotal : dataRowCount
   );
 
   const blob = new Blob(chunks as BlobPart[], { type: 'text/csv;charset=utf-8;' });
-  const filename = `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(link.href);
+  const baseName = `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
+  return blobToPreparedExport(blob, baseName);
+}
+
+/** One server request: streams CSV; reports row progress while bytes arrive. */
+export async function downloadRegisterCsvFromServer(opts: {
+  query: RegisterExportQuery;
+  knownTotal?: number;
+  signal?: AbortSignal;
+  onProgress?: (fetched: number, total: number) => void;
+}): Promise<void> {
+  const prepared = await prepareRegisterCsvFromServer(opts);
+  await triggerBlobDownload(prepared.blob, prepared.filename);
 }
 
 async function fetchRegisterBulkForCache(opts: {

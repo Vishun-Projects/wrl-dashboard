@@ -6,6 +6,9 @@
 
 import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/report/summary-derive';
 import { formatDisplayRegion } from '@/lib/mis-client-import/region';
+import { openCallsFromAging as openCallsFromAgingBuckets } from '@/lib/report/aging-buckets';
+
+export { openCallsFromAgingBuckets as openCallsFromAging };
 
 export const BD_MIS_ZONES = [
   'NORTH ZONE',
@@ -53,10 +56,6 @@ export function emptyBdMisMetrics(): BdMisMetricBundle {
     part_pending: 0,
     active_eng: 0,
   };
-}
-
-export function openCallsFromAging(m: Pick<BdMisMetricBundle, 'age_2' | 'age_3' | 'age_7' | 'age_15'>): number {
-  return m.age_2 + m.age_3 + m.age_7 + m.age_15;
 }
 
 /** Excel Summary: open = total − solved (cancelled excluded from both). */

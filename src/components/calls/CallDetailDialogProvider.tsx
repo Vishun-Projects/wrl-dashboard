@@ -106,6 +106,7 @@ export function CallDetailDialogProvider({ children }: { children: React.ReactNo
 
   const handleFlagUpdate = useCallback(
     async (id: string, flag: string) => {
+      const previous = selectedCall;
       setSelectedCall((prev) =>
         prev && String(prev.id) === String(id) ? { ...prev, audit_flag: flag } : prev
       );
@@ -124,8 +125,9 @@ export function CallDetailDialogProvider({ children }: { children: React.ReactNo
           { headers: { Authorization: `Bearer ${session?.access_token}` } }
         );
         clearPortalAuditCache();
-      } catch {
-        // ignore
+      } catch (err) {
+        setSelectedCall(previous);
+        throw err;
       }
     },
     [selectedCall, supabase]
@@ -133,25 +135,26 @@ export function CallDetailDialogProvider({ children }: { children: React.ReactNo
 
   const handlePostComment = useCallback(
     async (id: string, text: string) => {
+      const previous = selectedCall;
+      const newComment = {
+        author_name: userProfile?.name || 'User',
+        comment: text,
+        created_at: new Date().toISOString(),
+        author_avatar_url: userProfile?.avatar_url || null,
+      };
+      setSelectedCall((prev) => {
+        if (!prev || String(prev.id) !== String(id)) return prev;
+        const comments = Array.isArray(prev.comments) ? prev.comments : [];
+        return {
+          ...prev,
+          comments: [newComment, ...comments],
+          comment_count: (Number(prev.comment_count) || 0) + 1,
+        };
+      });
       try {
         const {
           data: { session },
         } = await supabase.auth.getSession();
-        const newComment = {
-          author_name: userProfile?.name || 'User',
-          comment: text,
-          created_at: new Date().toISOString(),
-          author_avatar_url: userProfile?.avatar_url || null,
-        };
-        setSelectedCall((prev) => {
-          if (!prev || String(prev.id) !== String(id)) return prev;
-          const comments = Array.isArray(prev.comments) ? prev.comments : [];
-          return {
-            ...prev,
-            comments: [newComment, ...comments],
-            comment_count: (Number(prev.comment_count) || 0) + 1,
-          };
-        });
         await axios.post(
           '/api/comments',
           {
@@ -162,8 +165,9 @@ export function CallDetailDialogProvider({ children }: { children: React.ReactNo
           { headers: { Authorization: `Bearer ${session?.access_token}` } }
         );
         clearPortalAuditCache();
-      } catch {
-        // ignore
+      } catch (err) {
+        setSelectedCall(previous);
+        throw err;
       }
     },
     [selectedCall, supabase, userProfile]

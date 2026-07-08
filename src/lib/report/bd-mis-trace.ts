@@ -137,7 +137,7 @@ export function formatAgingLabel(
   statusBucket: StatusBucket
 ): string {
   if (statusBucket === 'cancelled') return 'Cancelled';
-  if (statusBucket === 'solved' || statusBucket === 'tech_solved') return 'Solved';
+  if (statusBucket === 'solved' || statusBucket === 'tech_solved') return '';
   if (dayDiff == null) return '—';
   if (dayDiff <= 2) return '<2 days';
   if (dayDiff <= 7) return '3-7 days';
@@ -145,12 +145,12 @@ export function formatAgingLabel(
   return '>15 days';
 }
 
-function formatCallDateTime(value: Date | string | null): string {
+function formatTraceCallDate(value: Date | string | null): string {
   if (!value) return '—';
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 function displayCallStatus(
@@ -317,7 +317,7 @@ export function mapCrmCallToTraceRow(
     technician_name: row.technician_name?.trim() || '—',
     office_under_branch: cleanBranchLikeValue(row.office_under_branch),
     customer_name: row.customer_name?.trim() || '—',
-    call_date_time: formatCallDateTime(row.logged_at),
+    call_date_time: formatTraceCallDate(row.logged_at),
     service_order: row.service_order.trim() || '—',
     client: traceClientDisplayName(source, row.client),
     call_status: displayCallStatus(row.call_status, row.status_bucket, row.ncancelreason),
@@ -342,7 +342,7 @@ export function mapClientCallToTraceRow(
     technician_name: row.technician_name?.trim() || '—',
     office_under_branch: cleanBranchLikeValue(row.office_under_branch),
     customer_name: row.customer_name?.trim() || '—',
-    call_date_time: formatCallDateTime(row.logged_at),
+    call_date_time: formatTraceCallDate(row.logged_at),
     service_order: row.service_order.trim() || '—',
     client: traceClientDisplayName(source, row.client),
     call_status: displayCallStatus(row.call_status, row.status_bucket),
@@ -376,4 +376,9 @@ export function buildBdMisTraceRows(params: {
     if (fileCmp !== 0) return fileCmp;
     return a.service_order.localeCompare(b.service_order);
   });
+}
+
+/** Row detail export excludes cancelled calls. */
+export function filterTraceRowsForExport(traceRows: BdMisTraceRow[]): BdMisTraceRow[] {
+  return traceRows.filter((row) => row.counts_toward !== 'cancelled');
 }

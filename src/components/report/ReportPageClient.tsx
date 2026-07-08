@@ -31,6 +31,10 @@ import { PageAlert } from '@/components/ui/PageAlert';
 import { HorizontalScrollFade } from '@/components/ui/HorizontalScrollFade';
 import { TruncatedText } from '@/components/ui/TruncatedText';
 import { ReportOrientationBanner } from '@/components/report/ReportOrientationBanner';
+import ReportExportQueueBanner from '@/components/report/ReportExportQueueBanner';
+import { useReportExportQueue } from '@/components/report/useReportExportQueue';
+import type { ExportQueueRunContext } from '@/lib/report/export-queue';
+import { exportLabelForMisTab } from '@/lib/report/export-labels';
 import { ReportErrorBoundary } from '@/components/report/ReportErrorBoundary';
 import { ReportPageSkeleton, ReportLoadingPanel } from '@/components/report/ReportLoadingFeedback';
 import { useRegisterFilterOptions } from '@/lib/report/hooks/useRegisterFilterOptions';
@@ -115,7 +119,7 @@ import { deriveRegisterPageFromCalls, deriveRegisterView } from '@/lib/report/re
 import {
   collectRegisterRowsFromSessionCache,
   downloadRegisterCsvFromRows,
-  downloadRegisterCsvFromServer,
+  prepareRegisterCsvFromServer,
   fetchAllRegisterRowsForExport,
   isRegisterExportAbortError,
   logRegisterBulk,
@@ -215,24 +219,6 @@ function resolveAccountMisTableRows(
     );
   }
   return filteredAccounts;
-}
-
-function formatRegisterExportEta(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 1) return '';
-  if (seconds < 60) return `~${seconds}s remaining`;
-  return `~${Math.ceil(seconds / 60)}m remaining`;
-}
-
-function registerExportStatusLabel(progress: {
-  fetched: number;
-  total: number;
-  etaSeconds?: number;
-}): string {
-  const pct = Math.min(100, Math.round((progress.fetched / progress.total) * 100));
-  const base = `Exporting ${progress.fetched.toLocaleString()} / ${progress.total.toLocaleString()} rows (${pct}%)`;
-  const eta =
-    progress.etaSeconds != null ? formatRegisterExportEta(progress.etaSeconds) : '';
-  return eta ? `${base} — ${eta}` : base;
 }
 
 // --- IndexedDB Local Storage Cache Helpers (same DB version as report-corpus-storage) ---
@@ -597,7 +583,6 @@ export default function ReportPageClient() {
     clientAccountSummary: AccountSummaryRow[];
     sources: BdMisSourceFlags;
   } | null>(null);
-  const [exportingBdMisTrace, setExportingBdMisTrace] = useState(false);
   const [total, setTotal] = useState<number>(globalReportCache?.total || 0);
 
   useEffect(() => {
@@ -682,15 +667,20 @@ export default function ReportPageClient() {
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
   const [tempFilterRegion, setTempFilterRegion] = useState<string[]>([]);
   const [tempFilterAccount, setTempFilterAccount] = useState<string[]>([]);
-  const [exportingDetailed, setExportingDetailed] = useState(false);
-  const [exportProgress, setExportProgress] = useState<{
-    fetched: number;
-    total: number;
-    serverStream?: boolean;
-    etaSeconds?: number;
-  } | null>(null);
-  const exportAbortRef = React.useRef<AbortController | null>(null);
   const exportStartedAtRef = React.useRef<number>(0);
+  const {
+    items: exportQueueItems,
+    queuedCount: exportQueuedCount,
+    runningItem: exportRunningItem,
+    isProcessing: exportQueueProcessing,
+    enqueue: enqueueExport,
+    cancelJob: cancelExportJob,
+    clearFinished: clearFinishedExports,
+  } = useReportExportQueue({
+    onDownloadStarted: (filename) => {
+      feedback.actionSuccess(`Export ready — click Save in the queue for ${filename}`);
+    },
+  });
 
   const resolveSummaryAgingStr = useCallback(
     (applied?: ReturnType<typeof getAppliedFiltersSnapshot>) => {
@@ -699,13 +689,6 @@ export default function ReportPageClient() {
     },
     [getAppliedFiltersSnapshot, agingAsOf]
   );
-
-  const cancelRegisterExport = useCallback(() => {
-    exportAbortRef.current?.abort();
-    exportAbortRef.current = null;
-    setExportingDetailed(false);
-    setExportProgress(null);
-  }, []);
 
   const registerExportScopeKey = useMemo(
     () =>
@@ -753,24 +736,36 @@ export default function ReportPageClient() {
     ]
   );
 
+  const cancelRegisterExportsOnScopeChange = useCallback(() => {
+    for (const item of exportQueueItems) {
+      if (
+        (item.status === 'queued' || item.status === 'running') &&
+        item.label.includes('Call Register')
+      ) {
+        cancelExportJob(item.id);
+      }
+    }
+  }, [exportQueueItems, cancelExportJob]);
+
   const prevRegisterExportScopeKeyRef = React.useRef<string | null>(null);
   useEffect(() => {
     if (
       prevRegisterExportScopeKeyRef.current !== null &&
       prevRegisterExportScopeKeyRef.current !== registerExportScopeKey
     ) {
-      cancelRegisterExport();
+      cancelRegisterExportsOnScopeChange();
     }
     prevRegisterExportScopeKeyRef.current = registerExportScopeKey;
-  }, [registerExportScopeKey, cancelRegisterExport]);
+  }, [registerExportScopeKey, cancelRegisterExportsOnScopeChange]);
 
-  useEffect(() => () => cancelRegisterExport(), [cancelRegisterExport]);
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
   const [selectedCall, setSelectedCall] = useState<any | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
 
   const handleFlagUpdate = async (id: string, flag: string) => {
+    const previousData = data;
+    const previousSelected = selectedCall;
     setData(prev => prev.map(d => (String(d.id) === String(id) ? { ...d, audit_flag: flag } : d)));
     setSelectedCall((prev: any) => (prev && String(prev.id) === String(id) ? { ...prev, audit_flag: flag } : prev));
     try {
@@ -783,24 +778,37 @@ export default function ReportPageClient() {
       }, { headers: { 'Authorization': `Bearer ${session?.access_token}` } });
       clearPortalAuditCache();
     } catch (err) {
-      // ignore
+      setData(previousData);
+      setSelectedCall(previousSelected);
+      throw err;
     }
   };
 
   const handlePostComment = async (id: string, text: string) => {
+    const previousData = data;
+    const previousSelected = selectedCall;
+    const targetCall = data.find(d => String(d.id) === String(id)) || selectedCall;
+    const newComment = { author_name: userProfile?.name || 'User', comment: text, created_at: new Date().toISOString(), author_avatar_url: userProfile?.avatar_url || null };
+    setData(prev => prev.map(d => (String(d.id) === String(id) ? {
+      ...d,
+      comments: [newComment, ...(d.comments || [])],
+      comment_count: (d.comment_count || 0) + 1,
+    } : d)));
+    if (selectedCall && String(selectedCall.id) === String(id)) {
+      setSelectedCall((prev: any) => ({
+        ...prev,
+        comments: [newComment, ...(prev.comments || [])],
+        comment_count: (prev.comment_count || 0) + 1,
+      }));
+    }
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const targetCall = data.find(d => String(d.id) === String(id)) || selectedCall;
-      const newComment = { author_name: userProfile?.name || 'User', comment: text, created_at: new Date().toISOString(), author_avatar_url: userProfile?.avatar_url || null };
-      setData(prev => prev.map(d => (String(d.id) === String(id) ? {
-        ...d,
-        comments: [newComment, ...(d.comments || [])],
-        comment_count: (d.comment_count || 0) + 1,
-      } : d)));
       await axios.post('/api/comments', { call_id: id, text, office_id: targetCall?.nofficeid }, { headers: { 'Authorization': `Bearer ${session?.access_token}` } });
       clearPortalAuditCache();
     } catch (err) {
-      // ignore
+      setData(previousData);
+      setSelectedCall(previousSelected);
+      throw err;
     }
   };
 
@@ -1992,6 +2000,7 @@ export default function ReportPageClient() {
     }
   ) => {
     const pageSize: RegisterPageSize = opts?.pageLimit ?? limit;
+    let succeeded = false;
     const opStart = performance.now();
     const opId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const hadPriorRequest = !!fetchControllerRef.current;
@@ -2526,26 +2535,28 @@ export default function ReportPageClient() {
       }
 
       prefetchAdjacentPages(p);
+      succeeded = true;
     } catch (err: any) {
       if (axios.isCancel(err)) {
         reportPerf('fetchData', 'aborted (axios cancel)', opStart, {
           opId,
           why: 'AbortController: newer fetchData or navigation cancelled this request.',
         });
-        return;
+        return false;
       }
       const unauthorized = axios.isAxiosError(err) && err.response?.status === 401;
       if (unauthorized) {
         registerAuthFailedRef.current = true;
         fetchControllerRef.current?.abort();
         void signOutAndGoToLogin();
-        return;
+        return false;
       }
       reportPerf('fetchData', 'request failed (error toast)', opStart, {
         opId,
         message: err?.message || String(err),
       });
       setReportError('Failed to fetch report data');
+      return false;
     } finally {
       const isActiveController = fetchControllerRef.current === controller;
       if (isActiveController) {
@@ -2553,7 +2564,9 @@ export default function ReportPageClient() {
           setLoading(false);
         }
         setLoadingPage(null);
-        setLastRefreshed(new Date());
+        if (succeeded) {
+          setLastRefreshed(new Date());
+        }
       }
       reportPerf('fetchData', isActiveController ? 'done (this request owned controller)' : 'done (superseded)', opStart, {
         opId,
@@ -2564,6 +2577,7 @@ export default function ReportPageClient() {
           : 'Another fetchData replaced fetchControllerRef before finally ran.',
       });
     }
+    return succeeded;
   };
 
   const handleRegisterPageSizeChange = useCallback(
@@ -2623,8 +2637,12 @@ export default function ReportPageClient() {
   const fetchDelta = async () => {
     if (readRegisterFromPostgresClient()) {
       registerPagesCacheRef.current.clear();
-      await fetchData(1, { skipCache: true });
-      feedback.refreshed();
+      const ok = await fetchData(1, { skipCache: true });
+      if (ok) {
+        feedback.refreshed();
+      } else {
+        feedback.actionFailed('Failed to refresh report data');
+      }
       return;
     }
     await runBackgroundSync({ showToast: true });
@@ -3571,121 +3589,154 @@ export default function ReportPageClient() {
     sourceSelection,
   ]);
 
-  const handleBdMisTraceExport = useCallback(async () => {
-    if (exportingBdMisTrace) return;
-    setExportingBdMisTrace(true);
+  const executeBdMisTraceExport = useCallback(async () => {
     const traceT0 = performance.now();
     console.info('[bd-mis-trace-export] start');
-    try {
-      const applied = getAppliedFiltersSnapshot();
-      if (!applied) {
-        alert('Apply filters before exporting.');
-        return;
-      }
-      const startDateStr = toDateString(applied.dateRange.start);
-      const endDateStr = toDateString(applied.dateRange.end);
-      const summaryOfficeIds = resolveSummaryOfficeIdsParam(
-        offices,
-        applied.selectedBranch,
-        applied.selectedFranchisee
-      );
-      const callTypesParam = resolveViewCallTypesParam(applied.selectedCallTypes);
-      const agingStr = normalizeAgingAsOfDate(applied.agingAsOf);
-      const clientSources = sourceSelection.clientSourceCodes.length
-        ? sourceSelection.clientSourceCodes.join(',')
-        : 'coke,cadbury';
-
-      const apiT0 = performance.now();
-      const res = await axios.get('/api/report/bd-mis-summary', {
-        withCredentials: true,
-        params: {
-          officeId: summaryOfficeIds,
-          callType: callTypesParam,
-          startDate: startDateStr,
-          endDate: endDateStr,
-          agingAsOf: agingStr,
-          includeCrm: sourceSelection.crm ? 'true' : 'false',
-          clientSources,
-          includeTrace: 'true',
-        },
-      });
-      console.info(
-        '[bd-mis-trace-export] api-ok',
-        {
-          elapsed_ms: Math.round(performance.now() - apiT0),
-          status: res.status,
-        }
-      );
-
-      const data = res.data;
-      const regionalRows = data.regionalRows ?? [];
-      const grand = data.grand;
-      const traceRows = data.traceRows ?? [];
-      console.info('[bd-mis-trace-export] payload', {
-        regional_rows: regionalRows.length,
-        trace_rows: traceRows.length,
-        has_grand: Boolean(grand),
-      });
-
-      if (!regionalRows.length || !grand) {
-        alert('No data to export. Apply filters and wait for the summary to load.');
-        return;
-      }
-      // Always allow export, even when row-level trace rows are empty for a filter set.
-      // This keeps Summary/Count Trace downloadable and avoids a hard-stop UX.
-
-      const { buildBdMisTraceableWorkbook, bdMisTraceableFilename } = await import(
-        '@/lib/report/bd-mis-excel-export'
-      );
-      const { downloadWorkbook } = await import('@/lib/report/summary-excel-export');
-      const buildT0 = performance.now();
-      const workbook = await buildBdMisTraceableWorkbook({
-        regionalRows,
-        grand,
-        crmBranchSummary: data.crmBranchSummary ?? [],
-        crmAccountSummary: data.crmAccountSummary ?? [],
-        clientAccountSummary: data.clientAccountSummary ?? [],
-        sources: data.sources ?? {
-          crm: sourceSelection.crm,
-          cadbury: sourceSelection.clientSourceCodes.includes('cadbury'),
-          coke: sourceSelection.clientSourceCodes.includes('coke'),
-        },
-        traceRows,
-        filterMeta: buildBdMisExportFilterMeta(),
-      });
-      console.info('[bd-mis-trace-export] workbook-built', {
-        elapsed_ms: Math.round(performance.now() - buildT0),
-        sheets: workbook.worksheets.length,
-      });
-      const filename = bdMisTraceableFilename();
-      const dlT0 = performance.now();
-      console.info('[bd-mis-trace-export] download-trigger', { filename });
-      await downloadWorkbook(workbook, filename);
-      console.info('[bd-mis-trace-export] download-finished', {
-        elapsed_ms: Math.round(performance.now() - dlT0),
-      });
-    } catch (err) {
-      console.error('BD MIS trace export failed:', err);
-      const message =
-        axios.isAxiosError(err) && err.response?.data?.error
-          ? String(err.response.data.error)
-          : err instanceof Error
-            ? err.message
-            : 'Export failed';
-      alert(`Failed to export trace workbook: ${message}`);
-    } finally {
-      console.info('[bd-mis-trace-export] done', {
-        total_elapsed_ms: Math.round(performance.now() - traceT0),
-      });
-      setExportingBdMisTrace(false);
+    const applied = getAppliedFiltersSnapshot();
+    if (!applied) {
+      throw new Error('Apply filters before exporting.');
     }
+    const traceAlign = activeTab === 'summary' ? 'summary' : 'bd_mis';
+    const startDateStr = toDateString(applied.dateRange.start);
+    const endDateStr = toDateString(applied.dateRange.end);
+    const summaryOfficeIds = resolveSummaryOfficeIdsParam(
+      offices,
+      applied.selectedBranch,
+      applied.selectedFranchisee
+    );
+    const callTypesParam = resolveViewCallTypesParam(applied.selectedCallTypes);
+    const agingStr = normalizeAgingAsOfDate(applied.agingAsOf);
+    const clientSources = sourceSelection.clientSourceCodes.length
+      ? sourceSelection.clientSourceCodes.join(',')
+      : 'coke,cadbury';
+
+    const apiT0 = performance.now();
+    const res = await axios.get('/api/report/bd-mis-summary', {
+      withCredentials: true,
+      params: {
+        officeId: summaryOfficeIds,
+        callType: callTypesParam,
+        startDate: startDateStr,
+        endDate: endDateStr,
+        agingAsOf: agingStr,
+        includeCrm: sourceSelection.crm ? 'true' : 'false',
+        clientSources,
+        includeTrace: 'true',
+        traceAlign,
+      },
+    });
+    console.info('[bd-mis-trace-export] api-ok', {
+      elapsed_ms: Math.round(performance.now() - apiT0),
+      status: res.status,
+    });
+
+    const data = res.data;
+    let regionalRows = data.regionalRows ?? [];
+    let grand = data.grand;
+    let crmBranchSummary = data.crmBranchSummary ?? [];
+    let crmAccountSummary = data.crmAccountSummary ?? [];
+    let clientAccountSummary = data.clientAccountSummary ?? [];
+    const traceRows = data.traceRows ?? [];
+
+    if (traceAlign === 'summary') {
+      const {
+        buildUiRegionalPerformanceRows,
+        sumUiRegionalRows,
+        toBdMisGrandRow,
+        toBdMisRegionalRow,
+      } = await import('@/lib/report/summary-trace-export');
+      const uiRegional = buildUiRegionalPerformanceRows(
+        summaryData,
+        clientSummaryData,
+        mergeFlags
+      );
+      if (!uiRegional.length) {
+        throw new Error('No data to export. Apply filters and wait for the summary to load.');
+      }
+      const uiGrand = sumUiRegionalRows(uiRegional);
+      regionalRows = uiRegional.map(toBdMisRegionalRow);
+      grand = toBdMisGrandRow(uiGrand);
+      crmBranchSummary = summaryData;
+      crmAccountSummary = accountsData;
+      clientAccountSummary = clientAccountSummaryData ?? [];
+    }
+
+    console.info('[bd-mis-trace-export] payload', {
+      trace_align: traceAlign,
+      regional_rows: regionalRows.length,
+      trace_rows: traceRows.length,
+      has_grand: Boolean(grand),
+    });
+
+    if (!regionalRows.length || !grand) {
+      throw new Error('No data to export. Apply filters and wait for the summary to load.');
+    }
+
+    const { buildBdMisTraceableWorkbook, bdMisTraceableFilename } = await import(
+      '@/lib/report/bd-mis-excel-export'
+    );
+    const buildT0 = performance.now();
+    const workbook = await buildBdMisTraceableWorkbook({
+      regionalRows,
+      grand,
+      crmBranchSummary,
+      crmAccountSummary,
+      clientAccountSummary,
+      sources: data.sources ?? {
+        crm: sourceSelection.crm,
+        cadbury: sourceSelection.clientSourceCodes.includes('cadbury'),
+        coke: sourceSelection.clientSourceCodes.includes('coke'),
+      },
+      traceRows,
+      traceAlign,
+      filterMeta: buildBdMisExportFilterMeta(),
+    });
+    console.info('[bd-mis-trace-export] workbook-built', {
+      elapsed_ms: Math.round(performance.now() - buildT0),
+      sheets: workbook.worksheets.length,
+    });
+    const filename = bdMisTraceableFilename();
+    const dlT0 = performance.now();
+    console.info('[bd-mis-trace-export] download-trigger', { filename });
+    const { workbookToPreparedExport } = await import('@/lib/report/summary-excel-export');
+    const prepared = await workbookToPreparedExport(workbook, filename);
+    console.info('[bd-mis-trace-export] prepare-finished', {
+      elapsed_ms: Math.round(performance.now() - dlT0),
+    });
+    console.info('[bd-mis-trace-export] done', {
+      total_elapsed_ms: Math.round(performance.now() - traceT0),
+    });
+    return prepared;
   }, [
-    exportingBdMisTrace,
+    activeTab,
     getAppliedFiltersSnapshot,
     offices,
     sourceSelection,
     buildBdMisExportFilterMeta,
+    summaryData,
+    clientSummaryData,
+    mergeFlags,
+    accountsData,
+    clientAccountSummaryData,
   ]);
+
+  const handleBdMisTraceExport = useCallback(() => {
+    enqueueExport('Summary + Row Trace Excel', async (_ctx) => {
+      try {
+        return await executeBdMisTraceExport();
+      } catch (err) {
+        const message =
+          axios.isAxiosError(err) && err.response?.data?.error
+            ? String(err.response.data.error)
+            : err instanceof Error
+              ? err.message
+              : 'Export failed';
+        feedback.actionFailed(`Failed to export trace workbook: ${message}`);
+        throw err instanceof Error ? err : new Error(message);
+      }
+    });
+    feedback.actionSuccess('Export queued');
+  }, [enqueueExport, executeBdMisTraceExport]);
 
   useEffect(() => {
     if (!dbInitialized) return;
@@ -3806,221 +3857,270 @@ export default function ReportPageClient() {
     limit,
   ]);
 
-  const handleExport = async (format: 'excel' | 'csv' = 'excel') => {
-    const fileName = `WRL_MIS_Report_${new Date().toISOString().split('T')[0]}.${format === 'csv' ? 'csv' : 'xlsx'}`;
+  const executeExport = useCallback(
+    async (
+      format: 'excel' | 'csv',
+      sourceTab: MisTabId,
+      ctx: ExportQueueRunContext
+    ) => {
+      const fileName = `WRL_MIS_Report_${new Date().toISOString().split('T')[0]}.${format === 'csv' ? 'csv' : 'xlsx'}`;
+      const { signal, onProgress } = ctx;
 
-    if (activeTab === 'register') {
-      cancelRegisterExport();
-      const controller = new AbortController();
-      exportAbortRef.current = controller;
-      setExportingDetailed(true);
-      setExportProgress(null);
+      if (sourceTab === 'register') {
+        try {
+          const startDateStr = toDateString(dateRange.start);
+          const endDateStr = toDateString(dateRange.end);
+          const queryKey = buildCurrentRegisterQueryKey();
+          const exportQuery = {
+            officeId: summaryOfficeIdsParam,
+            callType: viewCallTypesParam,
+            startDate: startDateStr,
+            endDate: endDateStr,
+            dateFilterColumn,
+            search: debouncedSearch || undefined,
+            pincode: debouncedPincodeSearch || undefined,
+            state: joinFilterParam(selectedState),
+            city: joinFilterParam(selectedCity),
+            region: joinFilterParam(selectedRegion),
+            account: joinFilterParam(selectedAccount),
+            branch: joinFilterParam(selectedBranch),
+            franchisee: joinFilterParam(selectedFranchisee),
+            technician: joinFilterParam(selectedTechnician),
+            status: joinFilterParam(selectedStatus),
+            priority: joinFilterParam(priorityFilter),
+            portalFilter: joinFilterParam(portalFilter),
+          };
 
-      try {
-        const startDateStr = toDateString(dateRange.start);
-        const endDateStr = toDateString(dateRange.end);
-        const queryKey = buildCurrentRegisterQueryKey();
-        const exportQuery = {
-          officeId: summaryOfficeIdsParam,
-          callType: viewCallTypesParam,
-          startDate: startDateStr,
-          endDate: endDateStr,
-          dateFilterColumn,
-          search: debouncedSearch || undefined,
-          pincode: debouncedPincodeSearch || undefined,
-          state: joinFilterParam(selectedState),
-          city: joinFilterParam(selectedCity),
-          region: joinFilterParam(selectedRegion),
-          account: joinFilterParam(selectedAccount),
-          branch: joinFilterParam(selectedBranch),
-          franchisee: joinFilterParam(selectedFranchisee),
-          technician: joinFilterParam(selectedTechnician),
-          status: joinFilterParam(selectedStatus),
-          priority: joinFilterParam(priorityFilter),
-          portalFilter: joinFilterParam(portalFilter),
-        };
+          let exportData: Record<string, unknown>[] = data;
+          const needsFullFetch = total > limit || data.length < total;
 
-        let exportData: Record<string, unknown>[] = data;
-        const needsFullFetch = total > limit || data.length < total;
-
-        if (needsFullFetch && exportData.length < total) {
-          const cachedAllPages = collectRegisterRowsFromSessionCache(
-            registerPagesCacheRef.current,
-            queryKey,
-            total,
-            limit
-          );
-          if (cachedAllPages?.length) {
-            exportData = cachedAllPages;
+          if (needsFullFetch && exportData.length < total) {
+            const cachedAllPages = collectRegisterRowsFromSessionCache(
+              registerPagesCacheRef.current,
+              queryKey,
+              total,
+              limit
+            );
+            if (cachedAllPages?.length) {
+              exportData = cachedAllPages;
+            }
           }
-        }
 
-        if (needsFullFetch && !readRegisterFromPostgresClient() && exportData.length < total) {
-          const spanDays = corpusSpanDays(startDateStr, endDateStr);
-          if (spanDays <= MAX_CLIENT_CORPUS_DAYS) {
-            const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
-            if (callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0) {
+          if (needsFullFetch && !readRegisterFromPostgresClient() && exportData.length < total) {
+            const spanDays = corpusSpanDays(startDateStr, endDateStr);
+            if (spanDays <= MAX_CLIENT_CORPUS_DAYS) {
+              const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
+              if (callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0) {
+                const viewDateFilter = buildCorpusViewDateFilter(
+                  startDateStr,
+                  endDateStr,
+                  dateFilterColumn
+                );
+                exportData = getFilteredCorpusCalls(
+                  registerViewFilterRef.current,
+                  callCorpusStore,
+                  viewDateFilter
+                );
+              }
+            }
+          }
+
+          if (needsFullFetch && exportData.length < total) {
+            if (shouldStreamRegisterExportFromServer(total, exportData.length)) {
+              exportStartedAtRef.current = Date.now();
+              onProgress({ fetched: 0, total });
+              const prepared = await prepareRegisterCsvFromServer({
+                query: exportQuery,
+                knownTotal: total,
+                signal,
+                onProgress: (fetched, exportTotal) => {
+                  const elapsed = (Date.now() - exportStartedAtRef.current) / 1000;
+                  const rate = fetched > 0 && elapsed >= 0.5 ? fetched / elapsed : 0;
+                  const etaSeconds =
+                    rate > 0 && exportTotal > fetched
+                      ? Math.max(1, Math.ceil((exportTotal - fetched) / rate))
+                      : undefined;
+                  onProgress({ fetched, total: exportTotal, etaSeconds });
+                },
+              });
+              if (format === 'excel') {
+                feedback.actionSuccess('Large export queued as CSV');
+              }
+              return prepared;
+            }
+
+            exportData = await fetchAllRegisterRowsForExport({
+              knownTotal: total,
+              signal,
+              onProgress: (fetched, exportTotal) => {
+                onProgress({ fetched, total: exportTotal });
+              },
+              query: exportQuery,
+            });
+
+            if (readRegisterFromPostgresClient() && exportData.length) {
               const viewDateFilter = buildCorpusViewDateFilter(
                 startDateStr,
                 endDateStr,
                 dateFilterColumn
               );
-              exportData = getFilteredCorpusCalls(
+              exportData = deriveRegisterView(
+                exportData,
                 registerViewFilterRef.current,
-                callCorpusStore,
                 viewDateFilter
-              );
+              ).filteredCalls;
             }
           }
-        }
 
-        if (needsFullFetch && exportData.length < total) {
-          if (shouldStreamRegisterExportFromServer(total, exportData.length)) {
-            exportStartedAtRef.current = Date.now();
-            setExportProgress({ fetched: 0, total, serverStream: true });
-            await downloadRegisterCsvFromServer({
-              query: exportQuery,
-              knownTotal: total,
-              signal: controller.signal,
-              onProgress: (fetched, exportTotal) => {
-                const elapsed = (Date.now() - exportStartedAtRef.current) / 1000;
-                const rate = fetched > 0 && elapsed >= 0.5 ? fetched / elapsed : 0;
-                const etaSeconds =
-                  rate > 0 && exportTotal > fetched
-                    ? Math.max(1, Math.ceil((exportTotal - fetched) / rate))
-                    : undefined;
-                setExportProgress({
-                  fetched,
-                  total: exportTotal,
-                  serverStream: true,
-                  etaSeconds,
-                });
-              },
-            });
-            if (format === 'excel') {
-              feedback.actionSuccess('Large export saved as CSV — open in Excel');
-            }
-            return;
+          if (!exportData.length) {
+            throw new Error('No data to export');
           }
 
-          exportData = await fetchAllRegisterRowsForExport({
-            knownTotal: total,
-            signal: controller.signal,
-            onProgress: (fetched, exportTotal) => {
-              setExportProgress({ fetched, total: exportTotal });
-            },
-            query: exportQuery,
-          });
-
-          if (readRegisterFromPostgresClient() && exportData.length) {
-            const viewDateFilter = buildCorpusViewDateFilter(
-              startDateStr,
-              endDateStr,
-              dateFilterColumn
-            );
-            exportData = deriveRegisterView(
+          if (format === 'csv') {
+            const { prepareRegisterCsvExport } = await import('@/lib/register/server/csv-export');
+            return prepareRegisterCsvExport(
               exportData,
-              registerViewFilterRef.current,
-              viewDateFilter
-            ).filteredCalls;
+              `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`
+            );
           }
-        }
 
-        if (!exportData.length) {
-          alert('No data to export');
-          return;
+          const { prepareRegisterExcelFromRows } = await import('@/lib/register/excel-export');
+          return prepareRegisterExcelFromRows(exportData, {
+            filename: `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.xlsx`,
+            sheetName: 'Call Register',
+            onProgress: (processed, exportTotal) => {
+              onProgress({ fetched: processed, total: exportTotal });
+            },
+          });
+        } catch (err) {
+          if (isRegisterExportAbortError(err)) {
+            throw new DOMException('Export cancelled', 'AbortError');
+          }
+          console.error('Register export failed:', err);
+          const message =
+            axios.isAxiosError(err) && err.response?.data?.error
+              ? String(err.response.data.error)
+              : err instanceof Error
+                ? err.message
+                : 'Export failed';
+          throw new Error(message);
         }
+      }
 
-        if (format === 'csv') {
-          downloadRegisterCsvFromRows(
-            exportData,
-            `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`
-          );
-          return;
+      if (sourceTab === 'bd_mis_summary') {
+        if (!bdMisExportData?.regionalRows?.length) {
+          throw new Error('No data to export. Apply filters and wait for the summary to load.');
         }
-
-        const { downloadRegisterExcelFromRows } = await import('@/lib/register/excel-export');
-        await downloadRegisterExcelFromRows(exportData, {
-          filename: `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.xlsx`,
-          sheetName: 'Call Register',
-          onProgress: (processed, exportTotal) => {
-            setExportProgress({ fetched: processed, total: exportTotal });
-          },
+        const { buildBdMisSummaryWorkbook, bdMisSummaryFilename } = await import(
+          '@/lib/report/bd-mis-excel-export'
+        );
+        const { workbookToPreparedExport } = await import('@/lib/report/summary-excel-export');
+        const workbook = await buildBdMisSummaryWorkbook({
+          ...bdMisExportData,
+          filterMeta: buildBdMisExportFilterMeta(),
         });
-      } catch (err) {
-        if (isRegisterExportAbortError(err)) return;
-        console.error('Register export failed:', err);
-        const message =
-          axios.isAxiosError(err) && err.response?.data?.error
-            ? String(err.response.data.error)
-            : err instanceof Error
-              ? err.message
-              : 'Export failed';
-        alert(`Failed to export register: ${message}`);
-      } finally {
-        if (exportAbortRef.current === controller) {
-          exportAbortRef.current = null;
+        return workbookToPreparedExport(workbook, bdMisSummaryFilename());
+      }
+
+      if (sourceTab === 'summary') {
+        const {
+          buildSummaryDashboardWorkbook,
+          workbookToPreparedExport,
+        } = await import('@/lib/report/summary-excel-export');
+        const workbook = await buildSummaryDashboardWorkbook(summaryData);
+        return workbookToPreparedExport(workbook, fileName);
+      }
+
+      if (sourceTab === 'accounts') {
+        const {
+          buildKeyAccountMisWorkbook,
+          workbookToPreparedExport,
+        } = await import('@/lib/report/summary-excel-export');
+        const displayAccounts = buildAccountDisplayRows(
+          accountsData,
+          clientAccountSummaryData,
+          mergeFlags
+        );
+        const filtered = displayAccounts.filter((a) => {
+          const matchRegion = matchesRegionFilter(filterRegion, String(a.region ?? ''));
+          const matchAccount = matchesAccountFilter(filterAccount, String(a.account ?? ''));
+          return matchRegion && matchAccount;
+        });
+        const exportRows = resolveAccountMisTableRows(
+          filtered,
+          accountMisGrouping,
+          accountMisTopN,
+          clientAccountSummaryData,
+          mergeFlags,
+          clientMergeWithCrm,
+          accountMisZoneTopExclude
+        );
+        const workbook = await buildKeyAccountMisWorkbook(
+          exportRows as import('@/lib/report/summary-derive').AccountSummaryRow[],
+          undefined,
+          { hideRegion: accountMisGrouping === 'overview' }
+        );
+        return workbookToPreparedExport(workbook, fileName);
+      }
+
+      throw new Error('Export is not available on this tab');
+    },
+    [
+      dateRange.start,
+      dateRange.end,
+      dateFilterColumn,
+      debouncedSearch,
+      debouncedPincodeSearch,
+      selectedState,
+      selectedCity,
+      selectedRegion,
+      selectedAccount,
+      selectedBranch,
+      selectedFranchisee,
+      selectedTechnician,
+      selectedStatus,
+      priorityFilter,
+      portalFilter,
+      summaryOfficeIdsParam,
+      viewCallTypesParam,
+      data,
+      total,
+      limit,
+      bdMisExportData,
+      buildBdMisExportFilterMeta,
+      summaryData,
+      accountsData,
+      clientAccountSummaryData,
+      mergeFlags,
+      filterRegion,
+      filterAccount,
+      accountMisGrouping,
+      accountMisTopN,
+      clientMergeWithCrm,
+      accountMisZoneTopExclude,
+    ]
+  );
+
+  const handleExport = useCallback(
+    (format: 'excel' | 'csv' = 'excel') => {
+      const sourceTab = activeTab;
+      const label = exportLabelForMisTab(sourceTab, format);
+      enqueueExport(label, async (ctx) => {
+        try {
+          return await executeExport(format, sourceTab, ctx);
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            throw err;
+          }
+          const message = err instanceof Error ? err.message : 'Export failed';
+          feedback.actionFailed(`Failed to export: ${message}`);
+          throw err instanceof Error ? err : new Error(message);
         }
-        setExportingDetailed(false);
-        setExportProgress(null);
-      }
-      return;
-    } else if (activeTab === 'bd_mis_summary') {
-      if (!bdMisExportData?.regionalRows?.length) {
-        alert('No data to export. Apply filters and wait for the summary to load.');
-        return;
-      }
-      const { buildBdMisSummaryWorkbook, bdMisSummaryFilename } = await import(
-        '@/lib/report/bd-mis-excel-export'
-      );
-      const { downloadWorkbook } = await import('@/lib/report/summary-excel-export');
-      const workbook = await buildBdMisSummaryWorkbook({
-        ...bdMisExportData,
-        filterMeta: buildBdMisExportFilterMeta(),
       });
-      await downloadWorkbook(workbook, bdMisSummaryFilename());
-      return;
-    } else if (activeTab === 'summary') {
-      const {
-        buildSummaryDashboardWorkbook,
-        downloadWorkbook,
-      } = await import('@/lib/report/summary-excel-export');
-      const workbook = await buildSummaryDashboardWorkbook(summaryData);
-      await downloadWorkbook(workbook, fileName);
-      return;
-    } else {
-      const {
-        buildKeyAccountMisWorkbook,
-        downloadWorkbook,
-      } = await import('@/lib/report/summary-excel-export');
-      const displayAccounts = buildAccountDisplayRows(
-        accountsData,
-        clientAccountSummaryData,
-        mergeFlags
-      );
-      const filtered = displayAccounts.filter((a) => {
-        const matchRegion = matchesRegionFilter(filterRegion, String(a.region ?? ''));
-        const matchAccount = matchesAccountFilter(filterAccount, String(a.account ?? ''));
-        return matchRegion && matchAccount;
-      });
-      const exportRows = resolveAccountMisTableRows(
-        filtered,
-        accountMisGrouping,
-        accountMisTopN,
-        clientAccountSummaryData,
-        mergeFlags,
-        clientMergeWithCrm,
-        accountMisZoneTopExclude
-      );
-      const workbook = await buildKeyAccountMisWorkbook(
-        exportRows as import('@/lib/report/summary-derive').AccountSummaryRow[],
-        undefined,
-        { hideRegion: accountMisGrouping === 'overview' }
-      );
-      await downloadWorkbook(workbook, fileName);
-      return;
-    }
-  };
+      feedback.actionSuccess('Export queued');
+    },
+    [activeTab, enqueueExport, executeExport]
+  );
 
   const totalPages = Math.ceil(total / limit);
 
@@ -4118,21 +4218,11 @@ export default function ReportPageClient() {
             </div>
           </button>
           <button
-            onClick={() => {
-              if (exportingDetailed) {
-                cancelRegisterExport();
-                feedback.cancelled('Export cancelled');
-                return;
-              }
-              void handleExport('excel');
-            }}
-            disabled={exportingBdMisTrace}
-            className="flex items-center gap-2 bg-bg-canvas text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-bg-soft transition-all shadow-sm disabled:opacity-50"
+            onClick={() => handleExport('excel')}
+            className="flex items-center gap-2 bg-bg-canvas text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-bg-soft transition-all shadow-sm"
             title={
-              exportingDetailed
-                ? exportProgress && exportProgress.total > 0
-                  ? `${registerExportStatusLabel(exportProgress)} — click to cancel`
-                  : 'Export in progress — click to cancel'
+              exportQueuedCount > 0
+                ? `${exportQueuedCount} export(s) queued — click to add another`
                 : activeTab === 'bd_mis_summary'
                   ? 'Export audit workbook — how regional counts were built'
                   : total > 500
@@ -4140,30 +4230,44 @@ export default function ReportPageClient() {
                     : 'Export filtered register to Excel (.xlsx)'
             }
           >
-            <FileSpreadsheet size={14} className={exportingDetailed ? 'animate-pulse text-amber-600' : 'text-emerald-600'} />
-            {exportingDetailed
-              ? exportProgress && exportProgress.total > 0
-                ? `${Math.min(100, Math.round((exportProgress.fetched / exportProgress.total) * 100))}%`
-                : 'Exporting…'
-              : 'Export Excel'}
+            <FileSpreadsheet
+              size={14}
+              className={
+                exportRunningItem && !exportRunningItem.label.includes('Row Trace')
+                  ? 'animate-pulse text-amber-600'
+                  : 'text-emerald-600'
+              }
+            />
+            {exportQueuedCount > 0
+              ? `Export Excel (+${exportQueuedCount})`
+              : exportRunningItem && !exportRunningItem.label.includes('Row Trace')
+                ? 'Exporting…'
+                : 'Export Excel'}
           </button>
           {activeTab === 'summary' || activeTab === 'bd_mis_summary' ? (
             <button
               type="button"
-              onClick={() => void handleBdMisTraceExport()}
-              disabled={
-                exportingBdMisTrace ||
-                exportingDetailed ||
-                (activeTab === 'summary' ? summaryTabLoading : bdMisTabLoading)
+              onClick={() => handleBdMisTraceExport()}
+              className="flex items-center gap-2 bg-bg-canvas text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-bg-soft transition-all shadow-sm"
+              title={
+                exportQueuedCount > 0
+                  ? `${exportQueuedCount} export(s) queued — click to add trace export`
+                  : 'Export summary dashboard + full row-by-row trace (CRM, Cadbury, Coke)'
               }
-              className="flex items-center gap-2 bg-bg-canvas text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-bg-soft transition-all shadow-sm disabled:opacity-50"
-              title="Export summary dashboard + full row-by-row trace (CRM, Cadbury, Coke)"
             >
               <FileSpreadsheet
                 size={14}
-                className={exportingBdMisTrace ? 'animate-pulse text-amber-600' : 'text-blue-600'}
+                className={
+                  exportRunningItem?.label.includes('Row Trace')
+                    ? 'animate-pulse text-amber-600'
+                    : 'text-blue-600'
+                }
               />
-              {exportingBdMisTrace ? 'Trace export…' : 'Export Trace'}
+              {exportQueuedCount > 0
+                ? `Export Trace (+${exportQueuedCount})`
+                : exportRunningItem?.label.includes('Row Trace')
+                  ? 'Trace export…'
+                  : 'Export Trace'}
             </button>
           ) : null}
           <div className="relative">
@@ -4209,6 +4313,15 @@ export default function ReportPageClient() {
         />
       ) : null}
 
+      <ReportExportQueueBanner
+        items={exportQueueItems}
+        onClearFinished={clearFinishedExports}
+        onCancelItem={(id) => {
+          cancelExportJob(id);
+          feedback.cancelled('Export cancelled');
+        }}
+      />
+
       {activeTab === 'register' && !orientationDismissed ? (
         <ReportOrientationBanner
           userName={userProfile?.name}
@@ -4221,29 +4334,6 @@ export default function ReportPageClient() {
           }}
         />
       ) : null}
-
-      {exportingDetailed && (
-        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-950">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-600 border-t-transparent" />
-            <span className="font-medium">
-              {exportProgress && exportProgress.total > 0
-                ? registerExportStatusLabel(exportProgress)
-                : 'Preparing export…'}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              cancelRegisterExport();
-              feedback.cancelled('Export cancelled');
-            }}
-            className="shrink-0 rounded-md border border-amber-300 bg-bg-canvas px-2 py-1 text-[11px] font-medium hover:bg-amber-100"
-          >
-            Cancel export
-          </button>
-        </div>
-      )}
 
       {/* Control Bar */}
       {activeTab === 'register' ? (
@@ -4557,10 +4647,10 @@ export default function ReportPageClient() {
                         <th className="p-2 border border-slate-300 text-center">Total solved</th>
                         <th className="p-2 border border-slate-300 text-center">Cancelled</th>
                         <th className="p-2 border border-slate-300 text-center"># open calls</th>
-                        <th className="p-2 border border-slate-300 text-center">{'<2 days'}</th>
-                        <th className="p-2 border border-slate-300 text-center">{'>3 days'}</th>
-                        <th className="p-2 border border-slate-300 text-center">{'>7 days'}</th>
-                        <th className="p-2 border border-slate-300 text-center">{'>15days'}</th>
+                        <th className="p-2 border border-slate-300 text-center">{'≤2 days'}</th>
+                        <th className="p-2 border border-slate-300 text-center">{'3-7 days'}</th>
+                        <th className="p-2 border border-slate-300 text-center">{'8-15 days'}</th>
+                        <th className="p-2 border border-slate-300 text-center">{'>15 days'}</th>
                         <th className="p-2 border border-slate-300 text-center">Part pending</th>
                         <th className="p-2 border border-slate-300 text-center"># of active Eng.</th>
                       </tr>
@@ -5136,10 +5226,10 @@ export default function ReportPageClient() {
                         <th className="p-2 border border-slate-300 text-center">Total solved</th>
                         <th className="p-2 border border-slate-300 text-center">Cancelled</th>
                         <th className="p-2 border border-slate-300 text-center"># open calls</th>
-                        <th className="p-2 border border-slate-300 text-center">{'<2 days'}</th>
-                        <th className="p-2 border border-slate-300 text-center">{'>3 days'}</th>
-                        <th className="p-2 border border-slate-300 text-center">{'>7 days'}</th>
-                        <th className="p-2 border border-slate-300 text-center">{'>15days'}</th>
+                        <th className="p-2 border border-slate-300 text-center">{'≤2 days'}</th>
+                        <th className="p-2 border border-slate-300 text-center">{'3-7 days'}</th>
+                        <th className="p-2 border border-slate-300 text-center">{'8-15 days'}</th>
+                        <th className="p-2 border border-slate-300 text-center">{'>15 days'}</th>
                         <th className="p-2 border border-slate-300 text-center">Part pending</th>
                         <th className="p-2 border border-slate-300 text-center"># of active Eng.</th>
                       </tr>

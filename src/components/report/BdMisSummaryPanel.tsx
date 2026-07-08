@@ -41,10 +41,10 @@ export function BdMisSummaryPanel({ rows, grand, loading }: Props) {
               <th className="p-2 border border-slate-300 text-center">Total calls</th>
               <th className="p-2 border border-slate-300 text-center">Total solved</th>
               <th className="p-2 border border-slate-300 text-center"># open calls</th>
-              <th className="p-2 border border-slate-300 text-center">{'<2 days'}</th>
-              <th className="p-2 border border-slate-300 text-center">{'>3 days'}</th>
-              <th className="p-2 border border-slate-300 text-center">{'>7 days'}</th>
-              <th className="p-2 border border-slate-300 text-center">{'>15days'}</th>
+              <th className="p-2 border border-slate-300 text-center">{'≤2 days'}</th>
+              <th className="p-2 border border-slate-300 text-center">{'3-7 days'}</th>
+              <th className="p-2 border border-slate-300 text-center">{'8-15 days'}</th>
+              <th className="p-2 border border-slate-300 text-center">{'>15 days'}</th>
               <th className="p-2 border border-slate-300 text-center"># of active Eng.</th>
             </tr>
           </thead>

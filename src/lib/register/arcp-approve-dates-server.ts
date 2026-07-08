@@ -25,11 +25,31 @@ const ARCP_PICK_BY_CALL_NOS_SQL = `
     ncode DESC
 `;
 
+const ARCP_CALL_ID_BATCH_SIZE = 2_000;
+
+async function fetchArcpPickByCallNosBatched(
+  callIds: string[],
+  query?: (sql: string, params: unknown[]) => Promise<pg.QueryResult>
+): Promise<Map<string, ArcpPickByCall>> {
+  const byCall = new Map<string, ArcpPickByCall>();
+  for (let index = 0; index < callIds.length; index += ARCP_CALL_ID_BATCH_SIZE) {
+    const batch = callIds.slice(index, index + ARCP_CALL_ID_BATCH_SIZE);
+    const batchMap = await fetchArcpPickByCallNos(batch, query);
+    for (const [key, value] of batchMap) {
+      byCall.set(key, value);
+    }
+  }
+  return byCall;
+}
+
 async function fetchArcpPickByCallNos(
   callIds: string[],
   query?: (sql: string, params: unknown[]) => Promise<pg.QueryResult>
 ): Promise<Map<string, ArcpPickByCall>> {
   if (!callIds.length) return new Map();
+  if (callIds.length > ARCP_CALL_ID_BATCH_SIZE) {
+    return fetchArcpPickByCallNosBatched(callIds, query);
+  }
 
   const arcpRows = query
     ? (

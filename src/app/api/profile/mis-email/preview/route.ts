@@ -10,6 +10,8 @@ import {
   type MisEmailPreferences,
 } from '@/lib/mis-email/preferences';
 
+export const maxDuration = 300;
+
 type MisEmailRow = {
   mis_email_enabled: boolean;
   mis_email_preferences: unknown;

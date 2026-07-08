@@ -8,6 +8,7 @@ import {
   resolveMainBranchDisplayName,
   resolveMainBranchOfficeId,
 } from '@/lib/read-model/queries/main-branch-resolve';
+import { incrementAgingBucket, openCallsFromAging } from '@/lib/report/aging-buckets';
 
 export type BranchSummaryRow = {
   officeId: number;
@@ -333,10 +334,7 @@ export function deriveSummaryDashboard(
     if (cancelled) b.cancelled_calls += 1;
     if (open) b.open_calls += 1;
     if (open && dayDiff != null) {
-      if (dayDiff <= 2) b.age_2 += 1;
-      else if (dayDiff <= 7) b.age_3 += 1;
-      else if (dayDiff <= 15) b.age_7 += 1;
-      else b.age_15 += 1;
+      incrementAgingBucket(b, dayDiff);
     }
     if (partPending) b.part_pending += 1;
 
@@ -385,10 +383,7 @@ export function deriveSummaryDashboard(
       if (cancelled) a.cancelled_calls += 1;
       if (open) a.open_calls += 1;
       if (open && dayDiff != null) {
-        if (dayDiff <= 2) a.age_2 += 1;
-        else if (dayDiff <= 7) a.age_3 += 1;
-        else if (dayDiff <= 15) a.age_7 += 1;
-        else a.age_15 += 1;
+        incrementAgingBucket(a, dayDiff);
       }
       if (partPending) a.part_pending += 1;
     }
@@ -403,16 +398,25 @@ export function deriveSummaryDashboard(
     if (technician) a.active_eng_names.add(technician);
   }
 
-  const branchSummary = Array.from(branchMap.values()).map(({ active_eng_names, ...rest }) => ({
-    ...rest,
-    active_eng: active_eng_names.size,
-  }));
+  const branchSummary = Array.from(branchMap.values()).map(({ active_eng_names, ...rest }) => {
+    const agingOpen = openCallsFromAging(rest);
+    return {
+      ...rest,
+      open_calls: agingOpen > 0 ? agingOpen : rest.open_calls,
+      all_open: agingOpen > 0 ? agingOpen : rest.all_open,
+      active_eng: active_eng_names.size,
+    };
+  });
 
-  const accountSummary = Array.from(accountMap.values()).map(({ active_eng_names, ...rest }) => ({
-    ...rest,
-    active_eng: active_eng_names.size,
-    headcount: regionHeadcountMap.get(rest.region) || 0,
-  }));
+  const accountSummary = Array.from(accountMap.values()).map(({ active_eng_names, ...rest }) => {
+    const agingOpen = openCallsFromAging(rest);
+    return {
+      ...rest,
+      open_calls: agingOpen > 0 ? agingOpen : rest.open_calls,
+      active_eng: active_eng_names.size,
+      headcount: regionHeadcountMap.get(rest.region) || 0,
+    };
+  });
 
   const globalHeadcount = Array.from(regionHeadcountMap.values()).reduce((sum, val) => sum + val, 0);
 

@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db/prisma';
 import type { SummaryDashboard } from '@/lib/report/summary-derive';
 import { normalizeCallTypeDisplay } from '@/lib/report/filters';
 import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
+import { AGING_BUCKET_SQL, openCallsFromAging } from '@/lib/report/aging-buckets';
 import {
   HOT_MAIN_BRANCH_NAME_SQL,
   HOT_MAIN_BRANCH_OFFICE_ID_SQL,
@@ -134,7 +135,7 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
   const callTypeFilter = buildCallTypeFilter(params, 'h', officeFilter.nextIdx);
   const values = [periodStart, periodEnd, ...officeFilter.values, ...callTypeFilter.values];
 
-  const branchRows = await prisma.$queryRawUnsafe<
+  const branchRows = await prisma.$queryRawUnsafeBulk<
     Array<{
       office_id: number;
       parent_id: number | null;
@@ -188,11 +189,17 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
     ...values
   );
 
-  const agingOfficeFilter = buildOfficeFilter(params, 'h', 2, 'nofficeid');
+  const agingOfficeFilter = buildOfficeFilter(params, 'h', 4, 'nofficeid');
   const agingCallTypeFilter = buildCallTypeFilter(params, 'h', agingOfficeFilter.nextIdx);
-  const agingValues = [agingDate, ...agingOfficeFilter.values, ...agingCallTypeFilter.values];
+  const agingValues = [
+    agingDate,
+    periodStart,
+    periodEnd,
+    ...agingOfficeFilter.values,
+    ...agingCallTypeFilter.values,
+  ];
 
-  const agingRows = await prisma.$queryRawUnsafe<
+  const agingRows = await prisma.$queryRawUnsafeBulk<
     Array<{
       office_id: number;
       age_2: number;
@@ -206,16 +213,15 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
     `
     SELECT
       ${HOT_MAIN_BRANCH_OFFICE_ID_SQL} AS office_id,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) <= 2 THEN 1 ELSE 0 END)::int AS age_2,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) BETWEEN 3 AND 7 THEN 1 ELSE 0 END)::int AS age_3,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) BETWEEN 8 AND 15 THEN 1 ELSE 0 END)::int AS age_7,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) > 15 THEN 1 ELSE 0 END)::int AS age_15,
+      ${AGING_BUCKET_SQL},
       SUM(CASE WHEN h.is_part_pending THEN 1 ELSE 0 END)::int AS part_pending,
       COUNT(DISTINCT NULLIF(h.engineer_name, ''))::int AS active_eng
     FROM calls_latest_hot h
     LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
     ${HOT_OFFICE_JOINS_SQL}
-    WHERE h.status_bucket IN ('open_unallocated', 'assigned')
+    WHERE h.logged_at >= $2::timestamptz
+      AND h.logged_at <= $3::timestamptz
+      AND h.status_bucket IN ('open_unallocated', 'assigned')
       ${agingOfficeFilter.clause}
       ${agingCallTypeFilter.clause}
       ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
@@ -228,6 +234,11 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
 
   const branchSummary = branchRows.map((row) => {
     const aging = agingByOffice.get(Number(row.office_id));
+    const age_2 = aging?.age_2 ?? 0;
+    const age_3 = aging?.age_3 ?? 0;
+    const age_7 = aging?.age_7 ?? 0;
+    const age_15 = aging?.age_15 ?? 0;
+    const openFromAging = openCallsFromAging({ age_2, age_3, age_7, age_15 });
     return {
       officeId: Number(row.office_id),
       parentId: Number(row.parent_id ?? 0),
@@ -236,20 +247,20 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
       total_calls: row.total_calls,
       solved_calls: row.solved_calls,
       cancelled_calls: row.cancelled_calls,
-      open_calls: row.open_calls,
-      age_2: aging?.age_2 ?? 0,
-      age_3: aging?.age_3 ?? 0,
-      age_7: aging?.age_7 ?? 0,
-      age_15: aging?.age_15 ?? 0,
+      open_calls: openFromAging > 0 ? openFromAging : row.open_calls,
+      age_2,
+      age_3,
+      age_7,
+      age_15,
       part_pending: aging?.part_pending ?? 0,
       all_total: row.total_calls,
       all_solved: row.solved_calls,
       all_cancelled: row.cancelled_calls,
-      all_open: row.open_calls,
-      all_age_2: aging?.age_2 ?? 0,
-      all_age_3: aging?.age_3 ?? 0,
-      all_age_7: aging?.age_7 ?? 0,
-      all_age_15: aging?.age_15 ?? 0,
+      all_open: openFromAging > 0 ? openFromAging : row.open_calls,
+      all_age_2: age_2,
+      all_age_3: age_3,
+      all_age_7: age_7,
+      all_age_15: age_15,
       all_part_pending: aging?.part_pending ?? 0,
       all_tech_solved: row.tech_solved_calls,
       tech_solved_calls: row.tech_solved_calls,
@@ -273,7 +284,7 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
     ...viewCallType.values,
   ];
 
-  const accountRows = await prisma.$queryRawUnsafe<
+  const accountRows = await prisma.$queryRawUnsafeBulk<
     Array<{
       region: string;
       account: string;
@@ -332,7 +343,7 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
     ...accountValues
   );
 
-  const accountAgingOfficeFilter = buildOfficeFilter(params, 'h', 2, 'nofficeid');
+  const accountAgingOfficeFilter = buildOfficeFilter(params, 'h', 4, 'nofficeid');
   const agingViewCallType = buildAccountViewCallTypePredicate(
     params,
     'h',
@@ -340,12 +351,14 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
   );
   const accountAgingValues = [
     agingDate,
+    periodStart,
+    periodEnd,
     ...accountAgingOfficeFilter.values,
     ...agingViewCallType.values,
   ];
   const agingViewCallTypePredicate = agingViewCallType.predicate;
 
-  const accountAgingRows = await prisma.$queryRawUnsafe<
+  const accountAgingRows = await prisma.$queryRawUnsafeBulk<
     Array<{
       region: string;
       account: string;
@@ -361,16 +374,15 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
     SELECT
       ${HOT_RESOLVED_REGION_SQL} AS region,
       h.account,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) <= 2 THEN 1 ELSE 0 END)::int AS age_2,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) BETWEEN 3 AND 7 THEN 1 ELSE 0 END)::int AS age_3,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) BETWEEN 8 AND 15 THEN 1 ELSE 0 END)::int AS age_7,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) > 15 THEN 1 ELSE 0 END)::int AS age_15,
+      ${AGING_BUCKET_SQL},
       SUM(CASE WHEN h.is_part_pending THEN 1 ELSE 0 END)::int AS part_pending,
       COUNT(DISTINCT NULLIF(h.engineer_name, ''))::int AS active_eng
     FROM calls_latest_hot h
     LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
     ${HOT_OFFICE_JOINS_SQL}
-    WHERE h.status_bucket IN ('open_unallocated', 'assigned')
+    WHERE h.logged_at >= $2::timestamptz
+      AND h.logged_at <= $3::timestamptz
+      AND h.status_bucket IN ('open_unallocated', 'assigned')
       AND (${agingViewCallTypePredicate})
       ${accountAgingOfficeFilter.clause}
       ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
@@ -394,6 +406,11 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
   const accountSummary = accountRows.map((row) => {
     const key = `${row.region}-${row.account}`;
     const aging = agingByAccount.get(key);
+    const age_2 = aging?.age_2 ?? 0;
+    const age_3 = aging?.age_3 ?? 0;
+    const age_7 = aging?.age_7 ?? 0;
+    const age_15 = aging?.age_15 ?? 0;
+    const openFromAging = openCallsFromAging({ age_2, age_3, age_7, age_15 });
     return {
       region: String(row.region ?? 'OTHER').toUpperCase(),
       account: row.account,
@@ -401,11 +418,11 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
       total_calls: row.total_calls,
       total_solved: row.total_solved,
       cancelled_calls: row.cancelled_calls,
-      open_calls: row.open_calls,
-      age_2: aging?.age_2 ?? 0,
-      age_3: aging?.age_3 ?? 0,
-      age_7: aging?.age_7 ?? 0,
-      age_15: aging?.age_15 ?? 0,
+      open_calls: openFromAging > 0 ? openFromAging : row.open_calls,
+      age_2,
+      age_3,
+      age_7,
+      age_15,
       part_pending: aging?.part_pending ?? 0,
       deployment_total: row.deployment_total,
       deployment_done: row.deployment_done,

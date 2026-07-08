@@ -39,6 +39,7 @@ type MisEmailSettings = {
     includeKeyAccount: boolean;
   };
   availableBodySections: MisEmailBodySectionDef[];
+  availableKeyAccounts: string[];
   roleName: string | null;
   scopeLabel: string | null;
 };
@@ -85,6 +86,7 @@ function ProfileContent() {
       setEmailSettings({
         ...res.data,
         availableBodySections: res.data.availableBodySections ?? [],
+        availableKeyAccounts: res.data.availableKeyAccounts ?? [],
       });
       setEmailPrefs(res.data.preferences ?? {});
     } catch {
@@ -337,10 +339,12 @@ function ProfileContent() {
               <MisEmailComposer
                 settings={{
                   primaryEmail: user.email,
+                  recipientName: user.name ?? undefined,
                   roleName: emailSettings.roleName,
                   scopeLabel: emailSettings.scopeLabel,
                   allowed: emailSettings.allowed,
                   availableBodySections: emailSettings.availableBodySections ?? [],
+                  availableKeyAccounts: emailSettings.availableKeyAccounts ?? [],
                 }}
                 prefs={emailPrefs}
                 onPrefsChange={setEmailPrefs}

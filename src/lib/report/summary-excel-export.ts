@@ -80,8 +80,8 @@ export async function buildSummaryDashboardWorkbook(
     'Cancelled',
     'Open',
     '<2 Days',
-    '2-7 Days',
-    '7-15 Days',
+    '3-7 Days',
+    '8-15 Days',
     '>15 Days',
     'Parts',
     'Engineers',
@@ -144,8 +144,8 @@ export async function buildSummaryDashboardWorkbook(
     'Cancelled',
     'Open',
     '<2 Days',
-    '2-7 Days',
-    '7-15 Days',
+    '3-7 Days',
+    '8-15 Days',
     '>15 Days',
     'Parts',
     'Engineers',
@@ -201,8 +201,8 @@ export async function buildKeyAccountMisWorkbook(
           'Cancelled',
           'Open',
           '<2 Days',
-          '2-7 Days',
-          '7-15 Days',
+          '3-7 Days',
+          '8-15 Days',
           '>15 Days',
           'Parts',
           'Engineers',
@@ -216,8 +216,8 @@ export async function buildKeyAccountMisWorkbook(
           'Cancelled',
           'Open',
           '<2 Days',
-          '2-7 Days',
-          '7-15 Days',
+          '3-7 Days',
+          '8-15 Days',
           '>15 Days',
           'Parts',
           'Engineers',
@@ -287,33 +287,149 @@ export function keyAccountMisFilename(date = new Date()): string {
   return `WRL Key Account MIS — ${misExportDateLabel(date)}.xlsx`;
 }
 
+const recentDownloadNames = new Map<string, number>();
+
+export type PreparedFileExport = {
+  blob: Blob;
+  filename: string;
+  objectUrl: string;
+};
+
+/** Avoid browser duplicate-download suppression when exporting the same name twice. */
+export function resolveUniqueDownloadFilename(filename: string): string {
+  const base = filename.includes('.') ? filename : `${filename}.xlsx`;
+  const count = recentDownloadNames.get(base) ?? 0;
+  recentDownloadNames.set(base, count + 1);
+  if (count === 0) return base;
+  const dot = base.lastIndexOf('.');
+  const stem = dot >= 0 ? base.slice(0, dot) : base;
+  const ext = dot >= 0 ? base.slice(dot) : '';
+  return `${stem} (${count + 1})${ext}`;
+}
+
+function downloadCleanupDelayMs(blob: Blob): number {
+  const mb = blob.size / (1024 * 1024);
+  if (mb < 1) return 250;
+  if (mb < 5) return 3000;
+  if (mb < 20) return 10000;
+  return 30000;
+}
+
+function scheduleDownloadCleanup(
+  link: HTMLAnchorElement,
+  downloadUrl: string,
+  filename: string,
+  blob: Blob
+): Promise<void> {
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      URL.revokeObjectURL(downloadUrl);
+      link.remove();
+      console.info('[download-workbook] cleanup-done', { filename });
+      resolve();
+    };
+    const delayMs = downloadCleanupDelayMs(blob);
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        window.setTimeout(cleanup, delayMs);
+      });
+    } else {
+      window.setTimeout(cleanup, delayMs);
+    }
+  });
+}
+
+export type TriggerBlobDownloadOptions = {
+  /** Reuse a URL from workbookToPreparedExport instead of creating a second one. */
+  objectUrl?: string;
+  /** When false, the caller revokes objectUrl (e.g. export queue manual save link). */
+  autoRevoke?: boolean;
+};
+
+/** Trigger a file save in the browser (anchor fallback; no confirmation of success). */
+export async function triggerBlobDownload(
+  blob: Blob,
+  filename: string,
+  options: TriggerBlobDownloadOptions = {}
+): Promise<string> {
+  let link: HTMLAnchorElement | null = null;
+  const downloadUrl = options.objectUrl ?? URL.createObjectURL(blob);
+  const autoRevoke = options.autoRevoke !== false;
+  try {
+    link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = filename;
+    link.style.position = 'fixed';
+    link.style.left = '-9999px';
+    link.style.opacity = '0';
+    document.body.appendChild(link);
+    if (typeof MouseEvent !== 'undefined') {
+      link.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, cancelable: true, view: window })
+      );
+    } else {
+      link.click();
+    }
+    if (autoRevoke) {
+      await scheduleDownloadCleanup(link, downloadUrl, filename, blob);
+    } else {
+      link.remove();
+    }
+    return downloadUrl;
+  } catch (err) {
+    if (autoRevoke && !options.objectUrl) URL.revokeObjectURL(downloadUrl);
+    link?.remove();
+    throw err;
+  }
+}
+
+export function revokePreparedExport(prepared: PreparedFileExport): void {
+  URL.revokeObjectURL(prepared.objectUrl);
+}
+
+export function blobToPreparedExport(blob: Blob, filename: string): PreparedFileExport {
+  const resolvedName = resolveUniqueDownloadFilename(filename);
+  return {
+    blob,
+    filename: resolvedName,
+    objectUrl: URL.createObjectURL(blob),
+  };
+}
+
+export async function workbookToPreparedExport(
+  workbook: ExcelJS.Workbook,
+  filename: string
+): Promise<PreparedFileExport> {
+  const t0 = performance.now();
+  const buffer = await workbook.xlsx.writeBuffer();
+  const resolvedName = resolveUniqueDownloadFilename(filename);
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const objectUrl = URL.createObjectURL(blob);
+  console.info('[download-workbook] buffer-ready', {
+    filename: resolvedName,
+    elapsed_ms: Math.round(performance.now() - t0),
+    bytes: blob.size,
+  });
+  return {
+    blob,
+    filename: resolvedName,
+    objectUrl,
+  };
+}
+
 /** Browser download helper for MIS report tabs. */
 export async function downloadWorkbook(workbook: ExcelJS.Workbook, filename: string): Promise<void> {
   const t0 = performance.now();
   console.info('[download-workbook] begin', { filename, sheets: workbook.worksheets.length });
-  const buffer = await workbook.xlsx.writeBuffer();
-  console.info('[download-workbook] buffer-ready', {
-    elapsed_ms: Math.round(performance.now() - t0),
-    bytes: (buffer as ArrayBuffer).byteLength ?? 0,
-  });
-  const blob = new Blob([buffer], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  });
-  const link = document.createElement('a');
-  const downloadUrl = URL.createObjectURL(blob);
-  link.href = downloadUrl;
-  link.download = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
-  // For large files, ensure the element is attached and click occurs
-  // before revoking the object URL to avoid flaky no-download behavior.
-  link.style.display = 'none';
-  document.body.appendChild(link);
-  link.click();
+  const prepared = await workbookToPreparedExport(workbook, filename);
   console.info('[download-workbook] click-dispatched', {
+    filename: prepared.filename,
     elapsed_ms: Math.round(performance.now() - t0),
   });
-  window.setTimeout(() => {
-    URL.revokeObjectURL(downloadUrl);
-    link.remove();
-    console.info('[download-workbook] cleanup-done', { filename });
-  }, 60_000);
+  await triggerBlobDownload(prepared.blob, prepared.filename, {
+    objectUrl: prepared.objectUrl,
+    autoRevoke: true,
+  });
 }

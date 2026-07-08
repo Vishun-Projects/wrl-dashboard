@@ -12,6 +12,7 @@ import { PerformanceMetricsLogger } from '@/components/performance/PerformanceMe
 import { performanceLogEnabledClient } from '@/lib/performance/log-config';
 import { MotionProvider } from '@/components/motion';
 import { ThemeProvider } from '@/components/theme/ThemeProvider';
+import { MisEmailSendTracker } from '@/components/mis-email/MisEmailSendTracker';
 
 interface UserContextType {
   userProfile: any;
@@ -116,6 +117,7 @@ export function DashboardLayout({
       <ThemeProvider serverTheme={initialUser?.theme}>
       <MotionProvider>
       <CallDetailDialogProvider>
+        <MisEmailSendTracker />
         {performanceLogEnabledClient() ? <PerformanceMetricsLogger /> : null}
         <div className="flex flex-col md:flex-row h-screen overflow-hidden w-screen bg-bg-soft text-slate-700 font-sans">
           <Sidebar user={userProfile} />

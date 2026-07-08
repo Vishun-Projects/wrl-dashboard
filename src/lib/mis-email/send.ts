@@ -2,6 +2,11 @@ import nodemailer from 'nodemailer';
 import type { EmailAttachment } from '@/lib/mis-email/build-attachments';
 import { buildDigestEmailHtml, buildDigestEmailPlainText } from '@/lib/mis-email/email-template';
 import type { DigestDateRange } from '@/lib/mis-email/fetch-digest-data';
+import {
+  isMisEmailRelayConfigured,
+  sendPreparedMisEmailViaVpsRelay,
+} from '@/lib/mis-email/send-relay';
+import { formatBytes } from '@/lib/mis-email/timing';
 
 export type SmtpConfig = {
   host: string;
@@ -60,7 +65,7 @@ export function resolveSmtpConfig(): SmtpConfig {
   return { host, port, secure, user, pass, from, localRelay };
 }
 
-function createMailTransport(smtp: SmtpConfig) {
+export function createMailTransport(smtp: SmtpConfig) {
   const localTls = smtp.localRelay
     ? { ignoreTLS: true as const, tls: { rejectUnauthorized: false } }
     : { tls: { minVersion: 'TLSv1.2' as const } };
@@ -92,6 +97,70 @@ export function resolvePortalUrl(): string {
 
 function formatEmailDate(date = new Date()): string {
   return date.toISOString().split('T')[0];
+}
+
+function shouldSendViaPreparedRelay(): boolean {
+  if (process.env.MIS_EMAIL_SEND_LOCAL_SMTP === 'true') return false;
+  return isMisEmailRelayConfigured();
+}
+
+/** Send a pre-built digest (HTML + attachments) via VPS relay or local SMTP. */
+export async function sendPreparedDigestEmail(params: {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  attachments: EmailAttachment[];
+}): Promise<{ messageId: string }> {
+  if (process.env.MIS_EMAIL_DRY_RUN === 'true') {
+    console.log('[mis-email] DRY RUN — would send to', params.to, {
+      attachments: params.attachments.map((a) => `${a.filename} (${a.content.length} bytes)`),
+    });
+    return { messageId: 'dry-run' };
+  }
+
+  if (shouldSendViaPreparedRelay()) {
+    const started = Date.now();
+    const attachmentBytes = params.attachments.reduce((sum, file) => sum + file.content.length, 0);
+    console.log(
+      `[mis-email/timing] smtp relay → ${params.to} · attachments=${params.attachments.length} · payload ${formatBytes(attachmentBytes)} · html ${params.html.length} chars`
+    );
+    const result = await sendPreparedMisEmailViaVpsRelay({
+      to: params.to,
+      subject: params.subject,
+      html: params.html,
+      text: params.text,
+      attachments: params.attachments.map((attachment) => ({
+        filename: attachment.filename,
+        contentBase64: attachment.content.toString('base64'),
+        contentType: attachment.contentType,
+      })),
+    });
+    console.log(`[mis-email/timing] smtp relay done: ${Date.now() - started}ms · messageId=${result.messageId}`);
+    return result;
+  }
+
+  const started = Date.now();
+  console.log(`[mis-email/timing] smtp direct → ${params.to} · attachments=${params.attachments.length}`);
+  const smtp = resolveSmtpConfig();
+  const transport = createMailTransport(smtp);
+
+  const info = await transport.sendMail({
+    from: smtp.from,
+    to: params.to,
+    subject: params.subject,
+    text: params.text,
+    html: params.html,
+    attachments: params.attachments.map((a) => ({
+      filename: a.filename,
+      content: a.content,
+      contentType: a.contentType,
+      contentDisposition: 'attachment' as const,
+    })),
+  });
+
+  console.log(`[mis-email/timing] smtp direct done: ${Date.now() - started}ms · messageId=${info.messageId}`);
+  return { messageId: String(info.messageId || '') };
 }
 
 /** Send digest with Excel attachments via configured SMTP (Gmail, or local VPS Postfix). */

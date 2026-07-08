@@ -12,6 +12,7 @@ import {
 } from '@/lib/read-model/queries/bd-mis-summary';
 import {
   queryClientAccountSummaryForBdMis,
+  queryClientCallTraceRowsFiltered,
   queryClientCallTraceRowsForBdMis,
 } from '@/lib/mis-client-import/aggregate';
 import {
@@ -46,6 +47,7 @@ export async function GET(req: NextRequest) {
     const agingAsOf = searchParams.get('agingAsOf');
     const includeCrm = searchParams.get('includeCrm') !== 'false';
     const includeTrace = searchParams.get('includeTrace') === 'true';
+    const traceAlign = searchParams.get('traceAlign') === 'summary' ? 'summary' : 'bd_mis';
     const clientSources = (searchParams.get('clientSources') ?? 'coke,cadbury')
       .split(',')
       .map((s) => s.trim().toLowerCase())
@@ -88,15 +90,23 @@ export async function GET(req: NextRequest) {
 
     let traceRows: ReturnType<typeof buildBdMisTraceRows> | undefined;
     if (includeTrace) {
+      const useClientSnapshot = traceAlign === 'bd_mis';
       const [crmCallRows, clientCallRows] = await Promise.all([
         includeCrm ? queryBdMisCrmCallTraceRows(queryParams) : Promise.resolve([]),
         clientSources.length
-          ? queryClientCallTraceRowsForBdMis({
-              startDate,
-              endDate,
-              agingAsOf: agingAsOf || undefined,
-              sourceCodes: clientSources,
-            })
+          ? useClientSnapshot
+            ? queryClientCallTraceRowsForBdMis({
+                startDate,
+                endDate,
+                agingAsOf: agingAsOf || undefined,
+                sourceCodes: clientSources,
+              })
+            : queryClientCallTraceRowsFiltered({
+                startDate,
+                endDate,
+                agingAsOf: agingAsOf || undefined,
+                sourceCodes: clientSources,
+              })
           : Promise.resolve([]),
       ]);
 

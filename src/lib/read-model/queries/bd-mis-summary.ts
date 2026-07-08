@@ -10,6 +10,7 @@ import {
   HOT_OFFICE_JOINS_SQL,
   HOT_RESOLVED_REGION_SQL,
 } from '@/lib/read-model/queries/hot-region';
+import { AGING_BUCKET_SQL, openCallsFromAging } from '@/lib/report/aging-buckets';
 
 const BREAKDOWN = 'BREAKDOWN';
 
@@ -180,10 +181,7 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
     `
     SELECT
       h.nofficeid AS office_id,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) <= 2 THEN 1 ELSE 0 END)::int AS age_2,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) BETWEEN 3 AND 7 THEN 1 ELSE 0 END)::int AS age_3,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) BETWEEN 8 AND 15 THEN 1 ELSE 0 END)::int AS age_7,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) > 15 THEN 1 ELSE 0 END)::int AS age_15,
+      ${AGING_BUCKET_SQL},
       SUM(CASE WHEN h.is_part_pending THEN 1 ELSE 0 END)::int AS part_pending,
       COUNT(DISTINCT NULLIF(h.engineer_name, ''))::int AS active_eng
     FROM calls_latest_hot h
@@ -203,6 +201,11 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
 
   const branchSummary = branchRows.map((row) => {
     const aging = agingByOffice.get(Number(row.office_id));
+    const age_2 = aging?.age_2 ?? 0;
+    const age_3 = aging?.age_3 ?? 0;
+    const age_7 = aging?.age_7 ?? 0;
+    const age_15 = aging?.age_15 ?? 0;
+    const openFromAging = openCallsFromAging({ age_2, age_3, age_7, age_15 });
     return {
       officeId: Number(row.office_id),
       parentId: Number(row.parent_id ?? 0),
@@ -211,20 +214,20 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
       total_calls: row.total_calls,
       solved_calls: row.solved_calls,
       cancelled_calls: row.cancelled_calls,
-      open_calls: row.open_calls,
-      age_2: aging?.age_2 ?? 0,
-      age_3: aging?.age_3 ?? 0,
-      age_7: aging?.age_7 ?? 0,
-      age_15: aging?.age_15 ?? 0,
+      open_calls: openFromAging > 0 ? openFromAging : row.open_calls,
+      age_2,
+      age_3,
+      age_7,
+      age_15,
       part_pending: aging?.part_pending ?? 0,
       all_total: row.total_calls,
       all_solved: row.solved_calls,
       all_cancelled: row.cancelled_calls,
-      all_open: row.open_calls,
-      all_age_2: aging?.age_2 ?? 0,
-      all_age_3: aging?.age_3 ?? 0,
-      all_age_7: aging?.age_7 ?? 0,
-      all_age_15: aging?.age_15 ?? 0,
+      all_open: openFromAging > 0 ? openFromAging : row.open_calls,
+      all_age_2: age_2,
+      all_age_3: age_3,
+      all_age_7: age_7,
+      all_age_15: age_15,
       all_part_pending: aging?.part_pending ?? 0,
       all_tech_solved: row.tech_solved_calls,
       tech_solved_calls: row.tech_solved_calls,
@@ -334,10 +337,7 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
     SELECT
       ${BD_MIS_REGION_SQL} AS region,
       h.account,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) <= 2 THEN 1 ELSE 0 END)::int AS age_2,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) BETWEEN 3 AND 7 THEN 1 ELSE 0 END)::int AS age_3,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) BETWEEN 8 AND 15 THEN 1 ELSE 0 END)::int AS age_7,
-      SUM(CASE WHEN ($1::date - h.logged_at::date) > 15 THEN 1 ELSE 0 END)::int AS age_15,
+      ${AGING_BUCKET_SQL},
       SUM(CASE WHEN h.is_part_pending THEN 1 ELSE 0 END)::int AS part_pending,
       COUNT(DISTINCT NULLIF(h.engineer_name, ''))::int AS active_eng
     FROM calls_latest_hot h
@@ -369,6 +369,11 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
   const accountSummary = accountRows.map((row) => {
     const key = `${row.region}-${row.account}`;
     const aging = agingByAccount.get(key);
+    const age_2 = aging?.age_2 ?? 0;
+    const age_3 = aging?.age_3 ?? 0;
+    const age_7 = aging?.age_7 ?? 0;
+    const age_15 = aging?.age_15 ?? 0;
+    const openFromAging = openCallsFromAging({ age_2, age_3, age_7, age_15 });
     return {
       region: String(row.region ?? 'OTHER').toUpperCase(),
       account: row.account,
@@ -376,11 +381,11 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
       total_calls: row.total_calls,
       total_solved: row.total_solved,
       cancelled_calls: row.cancelled_calls,
-      open_calls: row.open_calls,
-      age_2: aging?.age_2 ?? 0,
-      age_3: aging?.age_3 ?? 0,
-      age_7: aging?.age_7 ?? 0,
-      age_15: aging?.age_15 ?? 0,
+      open_calls: openFromAging > 0 ? openFromAging : row.open_calls,
+      age_2,
+      age_3,
+      age_7,
+      age_15,
       part_pending: aging?.part_pending ?? 0,
       deployment_total: row.deployment_total,
       deployment_done: row.deployment_done,

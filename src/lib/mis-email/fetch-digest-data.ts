@@ -1,5 +1,7 @@
-import { defaultDateRange, toDateString } from '@/lib/report/filters';
-import { queryRegisterExportFromPostgres } from '@/lib/read-model/queries/register';
+import { defaultDateRange, toDateString, SUMMARY_DEFAULT_CALL_TYPE } from '@/lib/report/filters';
+import {
+  queryDigestRegisterExportFromPostgres,
+} from '@/lib/read-model/queries/register';
 import { querySummaryDashboard } from '@/lib/read-model/queries/summary';
 import { readCallsFromPostgres, readSummaryFromPostgres } from '@/lib/read-model/flags';
 import type { SummaryDashboard } from '@/lib/report/summary-derive';
@@ -31,15 +33,20 @@ export async function fetchDigestSummaryData(
     );
   }
 
-  return querySummaryDashboard({
+  const started = Date.now();
+  const data = await querySummaryDashboard({
     startDate: dateRange.startDate,
     endDate: dateRange.endDate,
     agingAsOf: dateRange.endDate,
     officeIds: [],
-    callTypes: [],
+    callTypes: [SUMMARY_DEFAULT_CALL_TYPE],
     assignedOffices: scope.assignedOffices,
     isHod: scope.isHod,
   });
+  console.log(
+    `[mis-email/timing] querySummaryDashboard ${dateRange.startDate}→${dateRange.endDate}: ${Date.now() - started}ms`
+  );
+  return data;
 }
 
 export async function fetchDigestRegisterRows(
@@ -51,12 +58,16 @@ export async function fetchDigestRegisterRows(
     throw new Error('MIS email detailed export requires READ_CALLS_FROM=postgres');
   }
 
-  return queryRegisterExportFromPostgres({
+  const started = Date.now();
+  console.log(
+    `[mis-email/timing] queryDigestRegisterExport ${dateRange.startDate}→${dateRange.endDate} · direct Postgres`
+  );
+  const rows = await queryDigestRegisterExportFromPostgres({
     page: 1,
     limit: 1,
     search: '',
     officeId: 'All',
-    callType: null,
+    callType: SUMMARY_DEFAULT_CALL_TYPE,
     startDate: dateRange.startDate,
     endDate: dateRange.endDate,
     status: '',
@@ -76,4 +87,8 @@ export async function fetchDigestRegisterRows(
     visibleStatuses: recipient.visible_statuses,
     isHod: scope.isHod,
   });
+  console.log(
+    `[mis-email/timing] queryDigestRegisterExport ${dateRange.startDate}→${dateRange.endDate}: ${Date.now() - started}ms · rows=${rows.length}`
+  );
+  return rows;
 }

@@ -8,6 +8,7 @@ import {
   type ArcpMonthlyBreakdownModel,
   type ArcpTallyDetailLevel,
 } from './table';
+import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
 
 export type ArcpClaimsPdfTableView = 'summary' | 'monthly' | 'both';
 
@@ -711,13 +712,8 @@ export async function buildArcpClaimsPdfBlob(
   };
 }
 
-export function downloadPdfBlob(blob: Blob, fileName: string): void {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = fileName;
-  link.click();
-  URL.revokeObjectURL(url);
+export async function downloadPdfBlob(blob: Blob, fileName: string): Promise<void> {
+  await triggerBlobDownload(blob, fileName);
 }
 
 export async function downloadArcpClaimsPdf(
@@ -725,5 +721,5 @@ export async function downloadArcpClaimsPdf(
   fileName: string
 ): Promise<void> {
   const { blob } = await buildArcpClaimsPdfBlob(payload, fileName);
-  downloadPdfBlob(blob, fileName);
+  await downloadPdfBlob(blob, fileName);
 }

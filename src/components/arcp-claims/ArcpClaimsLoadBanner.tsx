@@ -80,7 +80,7 @@ export function ArcpClaimsLoadBanner({
       previewApplyLabel="Apply filters"
       exportHint={
         isDetailExport
-          ? 'Full-year detail export can take several minutes. The CSV downloads automatically when all periods finish — please keep this tab open.'
+          ? 'Full-year detail export can take several minutes. The CSV will download automatically when all periods finish — please keep this tab open.'
           : undefined
       }
       footer={footer}

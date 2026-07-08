@@ -6,6 +6,9 @@ let pool: pg.Pool | null = null;
 let appPool: pg.Pool | null = null;
 
 export function resolveDirectDatabaseUrl(raw?: string): string {
+  const explicit = process.env.DIRECT_DATABASE_URL?.replace(/^["']|["']$/g, '');
+  if (explicit) return explicit;
+
   const connectionString = raw ?? process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error('DATABASE_URL not set in .env.local or .env');
@@ -167,6 +170,9 @@ export function getAppPool(): pg.Pool {
       connectionTimeoutMillis: appDatabaseConnectTimeoutMs(),
       allowExitOnIdle: true,
     });
+    appPool.on('error', (err) => {
+      console.error('[db] app pool idle client error:', err.message);
+    });
   }
   return appPool;
 }
@@ -187,6 +193,70 @@ export async function withAppClient<T>(
   }
 }
 
+function isConnectionTerminatedError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /connection terminated|ECONNRESET|ECONNREFUSED|Connection terminated unexpectedly/i.test(
+    message
+  );
+}
+
+function isConnectTimeoutError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /timeout exceeded when trying to connect|ECONNREFUSED|ETIMEDOUT/i.test(message);
+}
+
+/** Direct Postgres for sync worker / VPS cron — not the default for Next.js API routes. */
+export function useDirectDatabaseForBulkReads(): boolean {
+  if (process.env.USE_DIRECT_DATABASE === 'true') return true;
+  return Boolean(process.env.DIRECT_DATABASE_URL?.trim());
+}
+
+function bulkReadPool(forceDirect?: boolean): { pool: pg.Pool; label: 'direct' | 'pooler' } {
+  const useDirect = forceDirect ?? useDirectDatabaseForBulkReads();
+  return useDirect
+    ? { pool: getPool(), label: 'direct' }
+    : { pool: getAppPool(), label: 'pooler' };
+}
+
+/**
+ * Long-running read queries (register export, summary aggregates).
+ * Uses pooler by default (reachable from dev + Vercel). Direct Postgres only when
+ * USE_DIRECT_DATABASE=true or DIRECT_DATABASE_URL is set.
+ */
+export async function withBulkReadClient<T>(
+  fn: (client: pg.PoolClient) => Promise<T>,
+  retries = 1,
+  forceDirect?: boolean
+): Promise<T> {
+  const { pool, label } = bulkReadPool(forceDirect);
+  let client: pg.PoolClient | undefined;
+
+  try {
+    client = await pool.connect();
+    const statementMs = appDatabaseBulkStatementTimeoutMs();
+    const lockMs = Number(process.env.PG_LOCK_TIMEOUT_MS ?? 15_000);
+    await client.query(`SET statement_timeout = '${statementMs}'`);
+    await client.query(`SET lock_timeout = '${lockMs}'`);
+    return await fn(client);
+  } catch (err) {
+    if (retries > 0 && isConnectTimeoutError(err) && (forceDirect ?? useDirectDatabaseForBulkReads())) {
+      console.warn('[db] direct bulk connect failed — retrying on pooler');
+      return withBulkReadClient(fn, retries - 1, false);
+    }
+    if (retries > 0 && isConnectionTerminatedError(err) && !(forceDirect ?? useDirectDatabaseForBulkReads())) {
+      if (useDirectDatabaseForBulkReads()) {
+        console.warn('[db] bulk read on pooler lost — retrying on direct Postgres');
+        return withBulkReadClient(fn, retries - 1, true);
+      }
+      console.warn(`[db] bulk read connection lost on ${label} — retrying once`);
+      return withBulkReadClient(fn, retries - 1, forceDirect);
+    }
+    throw err;
+  } finally {
+    client?.release();
+  }
+}
+
 export function getPool(): pg.Pool {
   if (!pool) {
     loadEnv();
@@ -198,6 +268,9 @@ export function getPool(): pg.Pool {
       idleTimeoutMillis: 20_000,
       connectionTimeoutMillis: 30_000,
       allowExitOnIdle: true,
+    });
+    pool.on('error', (err) => {
+      console.error('[db] direct pool idle client error:', err.message);
     });
     /* Session timeouts are set per checkout in withClient / sync queries — avoid racing on connect. */
   }

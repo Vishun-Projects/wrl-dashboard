@@ -9,6 +9,7 @@ import {
   DISTRIBUTION_COMPACT_COLUMNS,
   HOT_OFFICE_JOINS_SQL,
   REGISTER_BULK_MAX_ROWS,
+  REGISTER_EXPORT_HOT_COLUMNS,
   REGISTER_HOT_COLUMNS,
 } from '@/lib/read-model/queries/register-columns';
 import { REGISTER_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
@@ -452,7 +453,7 @@ export async function queryRegisterFromPostgres(params: RegisterPostgresParams) 
   const offset = (params.page - 1) * params.limit;
   const listValues = [...values, params.limit, offset];
 
-  const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+  const rows = await prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(
     `
     SELECT ${REGISTER_HOT_COLUMNS}
     FROM calls_latest_hot h
@@ -562,7 +563,7 @@ export async function queryRegisterExportFromPostgres(
 ): Promise<Record<string, unknown>[]> {
   const { sql: whereSql, values } = buildWhere(params);
 
-  const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+  const rows = await prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(
     `
     SELECT ${REGISTER_HOT_COLUMNS}
     FROM calls_latest_hot h
@@ -576,6 +577,28 @@ export async function queryRegisterExportFromPostgres(
   );
 
   return mergeArcpApproveDatesFromHot(rows.map(hotRowToRegisterRow) as Record<string, unknown>[]);
+}
+
+/** Fast breakdown register export for MIS email — slim columns, no ARCP enrichment. */
+export async function queryDigestRegisterExportFromPostgres(
+  params: RegisterPostgresParams
+): Promise<Record<string, unknown>[]> {
+  const { sql: whereSql, values } = buildWhere(params);
+
+  const rows = await prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(
+    `
+    SELECT ${REGISTER_EXPORT_HOT_COLUMNS}
+    FROM calls_latest_hot h
+    ${HOT_OFFICE_JOINS_SQL}
+    WHERE ${whereSql}
+    ORDER BY h.ncode DESC
+    LIMIT $${values.length + 1}
+    `,
+    ...values,
+    REGISTER_BULK_MAX_ROWS
+  );
+
+  return rows.map((row) => hotRowToRegisterRow(row));
 }
 
 /** Compact call rows for distribution idle-assignee / map computations. */
@@ -612,7 +635,7 @@ export async function queryDistributionCompactFromPostgres(
   };
   const { sql: whereSql, values } = buildWhere(queryParams);
 
-  const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+  const rows = await prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(
     `
     SELECT ${DISTRIBUTION_COMPACT_COLUMNS}
     FROM calls_latest_hot h

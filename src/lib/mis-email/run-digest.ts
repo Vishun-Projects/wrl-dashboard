@@ -1,19 +1,8 @@
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
-import { buildDigestAttachments } from '@/lib/mis-email/build-attachments';
+import { buildMisEmailPayload } from '@/lib/mis-email/compose-digest';
+import type { DigestDateRange } from '@/lib/mis-email/fetch-digest-data';
 import {
-  buildEmailBodySectionsHtml,
-  buildEmailBodySectionsPlainText,
-  resolveEffectiveBodySections,
-} from '@/lib/mis-email/body-sections';
-import {
-  fetchDigestRegisterRows,
-  fetchDigestSummaryData,
-  type DigestDateRange,
-} from '@/lib/mis-email/fetch-digest-data';
-import {
-  hasAnyEffectiveDigestInclude,
   resolveDigestDateRangeForPreferences,
-  resolveEffectiveDigestIncludes,
   resolveExtraDigestEmails,
 } from '@/lib/mis-email/preferences';
 import {
@@ -24,7 +13,6 @@ import {
   type DigestRecipient,
 } from '@/lib/mis-email/recipients';
 import { sendDigestEmail } from '@/lib/mis-email/send';
-import { resolveUserDigestScopeWithLabel } from '@/lib/mis-email/user-scope';
 
 export type DigestSendResult = {
   recipientId: string;
@@ -76,45 +64,21 @@ async function sendForRecipient(
   const dateRange =
     options.dateRange ??
     resolveDigestDateRangeForPreferences(effectiveRecipient.mis_email_preferences);
-  const effectiveIncludes = resolveEffectiveDigestIncludes(
-    effectiveRecipient,
-    effectiveRecipient.mis_email_preferences
-  );
 
-  if (!hasAnyEffectiveDigestInclude(effectiveIncludes)) {
-    throw new Error('No report types selected for MIS email');
-  }
-
-  const scope = await resolveUserDigestScopeWithLabel(effectiveRecipient);
-  const data = await fetchDigestSummaryData(scope, dateRange);
-  const registerRows = effectiveIncludes.includeDetailed
-    ? await fetchDigestRegisterRows(effectiveRecipient, scope, dateRange)
-    : undefined;
-  const attachments = await buildDigestAttachments(effectiveRecipient, data, {
-    registerRows,
-    effectiveIncludes,
-  });
-
-  if (attachments.length === 0) {
-    throw new Error('No attachments generated for recipient permissions');
-  }
-
-  const bodySectionIds = resolveEffectiveBodySections(
-    effectiveIncludes.includeSummary,
-    effectiveRecipient.mis_email_preferences
-  );
-  const bodyHtml =
-    bodySectionIds.length > 0 ? buildEmailBodySectionsHtml(bodySectionIds, data) : undefined;
-  const bodyPlainText =
-    bodySectionIds.length > 0 ? buildEmailBodySectionsPlainText(bodySectionIds, data) : undefined;
+  const { preview, emailAttachments, scopeLabel, bodyHtml, bodyPlainText } =
+    await buildMisEmailPayload(effectiveRecipient, {
+      sentTo,
+      displayName,
+      dateRange,
+    });
 
   const { messageId } = await sendDigestEmail({
     to: sentTo,
     recipientName: displayName,
     recipientEmail: sentTo,
     dateRange,
-    scopeLabel: scope.scopeLabel,
-    attachments,
+    scopeLabel,
+    attachments: emailAttachments,
     bodyHtml,
     bodyPlainText,
   });
@@ -123,8 +87,8 @@ async function sendForRecipient(
     recipientId: effectiveRecipient.id,
     recipientEmail: effectiveRecipient.email,
     sentTo,
-    attachments: attachments.map((a) => a.filename),
-    scopeLabel: scope.scopeLabel,
+    attachments: preview.attachments,
+    scopeLabel,
     messageId,
     dateRange,
   };

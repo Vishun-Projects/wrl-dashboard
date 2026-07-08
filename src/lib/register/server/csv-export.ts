@@ -3,6 +3,12 @@ import { normalizeCrmCallRow } from '@/lib/call-row/normalize';
 import { formatRegisterExportDate } from '@/lib/register/export-dates';
 import { REGISTER_EXPORT_COLUMNS } from '@/lib/register/table-columns';
 import { escapeCsvCell } from '@/lib/utils/csv';
+import {
+  resolveUniqueDownloadFilename,
+  triggerBlobDownload,
+  blobToPreparedExport,
+  type PreparedFileExport,
+} from '@/lib/report/summary-excel-export';
 
 const CSV_COLUMNS = REGISTER_EXPORT_COLUMNS;
 
@@ -104,20 +110,29 @@ export function createRegisterCsvResponse(
   });
 }
 
-/** Trigger a register CSV download in the browser (UTF-8 BOM for Excel). */
-export function downloadRegisterCsvInBrowser(
+/** Build a register CSV blob for queued export (caller saves via user click when needed). */
+export function prepareRegisterCsvExport(
   rows: Record<string, unknown>[],
   filename?: string
-): void {
+): PreparedFileExport {
   const csv = buildRegisterCsvContent(rows);
-  const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' });
-  const resolvedName =
+  const baseName =
     filename ?? `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = resolvedName;
-  link.click();
-  URL.revokeObjectURL(link.href);
+  return blobToPreparedExport(
+    new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' }),
+    baseName
+  );
+}
+
+/** Trigger a register CSV download in the browser (UTF-8 BOM for Excel). */
+export async function downloadRegisterCsvInBrowser(
+  rows: Record<string, unknown>[],
+  filename?: string
+): Promise<void> {
+  const prepared = prepareRegisterCsvExport(rows, filename);
+  await triggerBlobDownload(prepared.blob, prepared.filename, {
+    objectUrl: prepared.objectUrl,
+  });
 }
 
 export type RegisterCsvExportOpts = {

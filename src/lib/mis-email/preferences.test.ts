@@ -3,6 +3,7 @@ import { formatLocalDate } from '@/lib/report/filters';
 import {
   DEFAULT_MIS_EMAIL_PREFERENCES,
   hasAnyEffectiveDigestInclude,
+  parseMisEmailKeyAccountsInBody,
   parseMisEmailPreferences,
   resolveDigestDateRangeForPreferences,
   resolveEffectiveDigestIncludes,
@@ -18,6 +19,16 @@ const perms = {
 
 describe('parseMisEmailPreferences', () => {
   it('parses valid fields', () => {
+    expect(
+      parseMisEmailPreferences({
+        subscribed: false,
+        dateRange: 'year_to_yesterday',
+        includeSummary: true,
+      })
+    ).toEqual({ subscribed: false, dateRange: 'year_to_yesterday', includeSummary: true });
+  });
+
+  it('parses valid fields with yesterday', () => {
     expect(
       parseMisEmailPreferences({
         subscribed: false,
@@ -41,6 +52,23 @@ describe('parseMisEmailPreferences', () => {
         bodyInEmail: ['regional_performance', 'invalid'],
       })
     ).toEqual({ bodyInEmail: ['regional_performance'] });
+  });
+
+  it('parses keyAccountsInBody', () => {
+    expect(
+      parseMisEmailPreferences({
+        keyAccountsInBody: ['Nestle', 'nestle', ' COKE '],
+      })
+    ).toEqual({ keyAccountsInBody: ['Nestle', 'COKE'] });
+  });
+});
+
+describe('parseMisEmailKeyAccountsInBody', () => {
+  it('dedupes case-insensitively while preserving first casing', () => {
+    expect(parseMisEmailKeyAccountsInBody(['Cadbury', 'cadbury', 'COKE'])).toEqual([
+      'Cadbury',
+      'COKE',
+    ]);
   });
 });
 
@@ -87,6 +115,17 @@ describe('resolveDigestDateRangeForPreferences', () => {
     expect(range.endDate).toBe(expected);
     expect(range.label).toContain('Yesterday');
   });
+
+  it('returns year to yesterday from Jan 1 through prior day', () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const expectedEnd = formatLocalDate(yesterday);
+    const expectedStart = `${yesterday.getFullYear()}-01-01`;
+    const range = resolveDigestDateRangeForPreferences({ dateRange: 'year_to_yesterday' });
+    expect(range.startDate).toBe(expectedStart);
+    expect(range.endDate).toBe(expectedEnd);
+    expect(range.label).toContain('Year to yesterday');
+  });
 });
 
 describe('validateMisEmailPreferencesPatch', () => {
@@ -108,6 +147,24 @@ describe('validateMisEmailPreferencesPatch', () => {
       misEmailEnabled: true,
     });
     expect(result.ok).toBe(false);
+  });
+
+  it('allows key account body section with key account permission', () => {
+    const result = validateMisEmailPreferencesPatch({
+      patch: {
+        bodyInEmail: ['key_account_performance'],
+        keyAccountsInBody: ['Nestle'],
+      },
+      permissions: { ...perms, includeKeyAccount: true },
+      current: DEFAULT_MIS_EMAIL_PREFERENCES,
+      misEmailEnabled: true,
+      forPreview: true,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.merged.bodyInEmail).toEqual(['key_account_performance']);
+      expect(result.merged.keyAccountsInBody).toEqual(['Nestle']);
+    }
   });
 });
 

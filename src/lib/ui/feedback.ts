@@ -52,6 +52,24 @@ export const feedback = {
     toast.loading(message, { id });
   },
 
+  /** Replace a loading toast with success. */
+  loadingSuccess(id: string | number, message: string, options?: { duration?: number }) {
+    toast.success(message, { id, duration: options?.duration ?? 5000 });
+  },
+
+  /** Replace a loading toast with error. */
+  loadingFailed(
+    id: string | number,
+    message: string,
+    options?: { description?: string; duration?: number }
+  ) {
+    toast.error(message, {
+      id,
+      description: options?.description,
+      duration: options?.duration ?? 6000,
+    });
+  },
+
   /** Update or dismiss a loading toast by id. */
   dismiss(id: string | number | undefined) {
     if (id != null) toast.dismiss(id);

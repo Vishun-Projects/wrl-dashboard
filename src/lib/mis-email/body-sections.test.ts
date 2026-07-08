@@ -3,7 +3,10 @@ import {
   buildEmailBodySectionsHtml,
   buildEmailBodySectionsPlainText,
   parseMisEmailBodySectionIds,
+  resolveAvailableBodySections,
+  resolveDigestBodySections,
   resolveEffectiveBodySections,
+  type MisEmailBodyContext,
 } from '@/lib/mis-email/body-sections';
 import type { SummaryDashboard } from '@/lib/report/summary-derive';
 
@@ -77,7 +80,29 @@ const sampleData: SummaryDashboard = {
       headcount: 5,
     },
   ],
-  accountSummary: [],
+  accountSummary: [
+    {
+      region: 'NORTH ZONE',
+      account: 'Nestle',
+      population: 10,
+      total_calls: 50,
+      total_solved: 45,
+      cancelled_calls: 1,
+      open_calls: 4,
+      age_2: 2,
+      age_3: 1,
+      age_7: 1,
+      age_15: 0,
+      part_pending: 0,
+      deployment_total: 0,
+      deployment_done: 0,
+      installation_total: 0,
+      installation_done: 0,
+      active_eng: 3,
+      headcount: 2,
+      total_tech_solved: 0,
+    },
+  ],
 };
 
 describe('parseMisEmailBodySectionIds', () => {
@@ -96,10 +121,42 @@ describe('parseMisEmailBodySectionIds', () => {
 describe('resolveEffectiveBodySections', () => {
   it('returns empty when summary is not permitted', () => {
     expect(
-      resolveEffectiveBodySections(false, {
-        bodyInEmail: ['regional_performance'],
-      })
+      resolveEffectiveBodySections(
+        { includeSummary: false, includeKeyAccount: false },
+        { bodyInEmail: ['regional_performance'] }
+      )
     ).toEqual([]);
+  });
+
+  it('allows key account section when key account permission is granted', () => {
+    expect(
+      resolveEffectiveBodySections(
+        { includeSummary: false, includeKeyAccount: true },
+        { bodyInEmail: ['key_account_performance'] }
+      )
+    ).toEqual(['key_account_performance']);
+  });
+});
+
+describe('resolveAvailableBodySections', () => {
+  it('includes key account section only with key account permission', () => {
+    const sections = resolveAvailableBodySections({
+      includeSummary: true,
+      includeKeyAccount: true,
+    });
+    expect(sections.map((s) => s.id)).toContain('key_account_performance');
+  });
+});
+
+describe('resolveDigestBodySections', () => {
+  it('auto-includes key account when attachment is enabled', () => {
+    expect(
+      resolveDigestBodySections(
+        { includeSummary: true, includeKeyAccount: true },
+        { bodyInEmail: ['regional_performance', 'branch_performance'] },
+        { includeKeyAccountAttachment: true }
+      )
+    ).toEqual(['regional_performance', 'branch_performance', 'key_account_performance']);
   });
 });
 
@@ -111,6 +168,64 @@ describe('buildEmailBodySectionsHtml', () => {
     expect(html).toContain('EAST');
     expect(html).toContain('All');
     expect(html).toContain('Part pending');
+  });
+
+  it('renders key account breakdown for selected accounts', () => {
+    const context: MisEmailBodyContext = {
+      summary: sampleData,
+      keyAccountsInBody: ['Nestle'],
+      accountRows: [
+        {
+          region: 'NORTH ZONE',
+          account: 'Nestle',
+          total_calls: 50,
+          total_solved: 45,
+          open_calls: 4,
+          age_2: 2,
+          age_3: 1,
+          age_7: 1,
+          age_15: 0,
+          active_eng: 3,
+        },
+      ],
+    };
+    const html = buildEmailBodySectionsHtml(['key_account_performance'], context);
+    expect(html).toContain('Key Account Breakdown');
+    expect(html).toContain('Nestle');
+    expect(html).toContain('% &gt;7 days');
+  });
+
+  it('renders key account rows when accountRows are provided', () => {
+    const context: MisEmailBodyContext = {
+      summary: sampleData,
+      keyAccountsInBody: [],
+      accountRows: [
+        {
+          region: 'NORTH ZONE',
+          account: 'Nestle',
+          total_calls: 50,
+          total_solved: 45,
+          open_calls: 4,
+          age_2: 2,
+          age_3: 1,
+          age_7: 1,
+          age_15: 0,
+          active_eng: 3,
+        },
+      ],
+    };
+    const html = buildEmailBodySectionsHtml(['key_account_performance'], context);
+    expect(html).toContain('Nestle');
+  });
+
+  it('renders nothing for key account section when no account rows', () => {
+    const context: MisEmailBodyContext = {
+      summary: sampleData,
+      keyAccountsInBody: [],
+      accountRows: [],
+    };
+    const html = buildEmailBodySectionsHtml(['key_account_performance'], context);
+    expect(html).toBe('');
   });
 });
 

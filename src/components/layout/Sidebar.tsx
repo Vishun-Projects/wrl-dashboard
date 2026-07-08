@@ -128,7 +128,7 @@ export function Sidebar({ user }: SidebarProps) {
           onClick={() => router.push(homePath)}
         >
           <div className="w-8 h-8 bg-bg-soft border border-slate-100 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105 active:scale-95 shadow-sm flex-shrink-0">
-            <Image src="/western-head-logo-2025.png" alt="W" width={20} height={20} className="object-contain" style={{ height: 'auto' }} />
+            <Image src="/western-head-logo-2025.png" alt="W" width={20} height={20} className="object-contain" style={{ width: 'auto', height: 'auto' }} />
           </div>
           {!isCollapsed && (
             <div className="flex flex-col justify-center animate-in fade-in slide-in-from-left-2 duration-300">
@@ -259,7 +259,7 @@ export function Sidebar({ user }: SidebarProps) {
       <div className="md:hidden w-full h-14 bg-bg-canvas text-slate-800 border-b border-slate-200 flex items-center justify-between px-4 z-[90] flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-bg-soft border border-slate-100 rounded-lg flex items-center justify-center shadow-sm">
-            <Image src="/western-head-logo-2025.png" alt="W" width={20} height={20} className="object-contain" style={{ height: 'auto' }} />
+            <Image src="/western-head-logo-2025.png" alt="W" width={20} height={20} className="object-contain" style={{ width: 'auto', height: 'auto' }} />
           </div>
           <span className="text-xs text-slate-900 ui-label">WRL PORTAL</span>
         </div>

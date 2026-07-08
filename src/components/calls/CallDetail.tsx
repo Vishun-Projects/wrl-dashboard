@@ -15,8 +15,8 @@ import { resolveAvatarDisplayUrl } from '@/lib/auth/avatar-url';
 interface CallDetailProps {
   call: any;
   onClose: () => void;
-  onFlagUpdate: (id: string, flag: string) => void;
-  onPostComment: (id: string, text: string) => void;
+  onFlagUpdate: (id: string, flag: string) => void | Promise<void>;
+  onPostComment: (id: string, text: string) => void | Promise<void>;
   onNext?: () => void;
   onPrev?: () => void;
   hasNext?: boolean;
@@ -117,7 +117,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
     setLoadedImages(prev => new Set(prev).add(url));
   };
 
-  const handleStatusUpdate = (flag: string, customReason?: string) => {
+  const handleStatusUpdate = async (flag: string, customReason?: string) => {
     const isMandatory = flag === 'query' || flag === 'escalate';
     const finalNote = customReason || note;
     const recentComment = (Date.now() - lastCommentedAt) < 120000;
@@ -132,26 +132,30 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
     }
 
     setErrorType('none');
-    if (finalNote.trim()) {
-      const prefix = flag === 'query' ? '[HOLD] ' : flag === 'escalate' ? '[REJECT] ' : '[APPROVE] ';
-      onPostComment(call.ncode, prefix + finalNote);
-      setNote('');
-      setReason('');
-      setPendingAction('none');
-      setLastCommentedAt(Date.now());
-    }
+    try {
+      if (finalNote.trim()) {
+        const prefix = flag === 'query' ? '[HOLD] ' : flag === 'escalate' ? '[REJECT] ' : '[APPROVE] ';
+        await onPostComment(call.ncode, prefix + finalNote);
+        setNote('');
+        setReason('');
+        setPendingAction('none');
+        setLastCommentedAt(Date.now());
+      }
 
-    onFlagUpdate(call.ncode, flag);
+      await onFlagUpdate(call.ncode, flag);
 
-    if (flag === 'noted') {
-      feedback.actionSuccess('Ticket approved and closed');
-      if (onNext) onNext(); else onClose();
-    } else if (flag === 'query') {
-      feedback.actionSuccess('Ticket placed on hold');
-      if (onNext) onNext();
-    } else if (flag === 'escalate') {
-      feedback.actionSuccess('Ticket rejected');
-      if (onNext) onNext();
+      if (flag === 'noted') {
+        feedback.actionSuccess('Ticket approved and closed');
+        if (onNext) onNext(); else onClose();
+      } else if (flag === 'query') {
+        feedback.actionSuccess('Ticket placed on hold');
+        if (onNext) onNext();
+      } else if (flag === 'escalate') {
+        feedback.actionSuccess('Ticket rejected');
+        if (onNext) onNext();
+      }
+    } catch {
+      feedback.actionFailed('Could not update ticket — please try again');
     }
   };
 
@@ -219,14 +223,18 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
 
   const currentFlag = call.audit_flag || call.flag;
 
-  const handlePostComment = () => {
+  const handlePostComment = async () => {
     if (!note.trim()) return;
-    onPostComment(call.ncode, note);
-    setNote('');
-    setLastCommentedAt(Date.now());
-    setErrorType('none');
-    feedback.actionSuccess('Comment added to trail');
-    setActiveTab('comments');
+    try {
+      await onPostComment(call.ncode, note);
+      setNote('');
+      setLastCommentedAt(Date.now());
+      setErrorType('none');
+      feedback.actionSuccess('Comment added to trail');
+      setActiveTab('comments');
+    } catch {
+      feedback.actionFailed('Could not add comment — please try again');
+    }
   };
 
   return (

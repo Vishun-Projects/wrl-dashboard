@@ -1330,23 +1330,28 @@ export default function ArcpClaimsPage() {
     setPdfFileName('');
   }, []);
 
-  const handleExportCsv = useCallback(() => {
+  const handleExportCsv = useCallback(async () => {
     const exportModel = displayModel ?? tableModel;
     if (
       !appliedFilters ||
       !exportModel ||
       (exportModel.rows.length === 0 && tallyDetailLevel !== 'totals')
     ) {
+      feedback.actionFailed('Nothing to export for the current filters');
       return;
     }
 
     const fileName = `ARCP_Claims_Summary_${appliedFilters.startDateStr}_${appliedFilters.endDateStr}.csv`;
-    downloadArcpClaimsCsv(exportModel, fileName);
-    feedback.actionSuccess('Summary CSV exported');
+    try {
+      await downloadArcpClaimsCsv(exportModel, fileName);
+      feedback.actionSuccess(`Downloading ${fileName}`);
+    } catch {
+      feedback.actionFailed('CSV export failed');
+    }
   }, [appliedFilters, displayModel, tableModel, tallyDetailLevel]);
 
   const downloadPreparedDetailCsv = useCallback(
-    (rows: ArcpClaimsDetailRow[]) => {
+    async (rows: ArcpClaimsDetailRow[]) => {
       if (!appliedFilters || !tableModel) return;
       const prepared = prepareArcpDetailExportRows(rows, {
         dateFilterColumn: appliedFilters.arcpDateFilterColumn,
@@ -1354,8 +1359,8 @@ export default function ArcpClaimsPage() {
       });
       if (prepared.length === 0) throw new Error('No detail rows to export');
       const fileName = `ARCP_Claims_Detail_${appliedFilters.startDateStr}_${appliedFilters.endDateStr}.csv`;
-      downloadArcpClaimsDetailCsv(prepared, fileName, { totals: tableModel.totals });
-      feedback.actionSuccess(`Exported ${prepared.length.toLocaleString('en-IN')} detail lines`);
+      await downloadArcpClaimsDetailCsv(prepared, fileName, { totals: tableModel.totals });
+      feedback.actionSuccess(`Downloading ${fileName}`);
     },
     [appliedFilters, tableModel, includeTravelReimbursement]
   );

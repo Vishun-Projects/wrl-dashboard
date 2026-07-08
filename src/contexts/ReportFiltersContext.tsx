@@ -1575,7 +1575,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       notifyCorpusRegisterDelta([], syncTime);
 
       if (opts?.showToast) {
-        feedback.refreshed();
+        feedback.backgroundUpdate('Sync timestamp updated');
       }
       syncInFlightRef.current = false;
       setSyncInProgress(false);

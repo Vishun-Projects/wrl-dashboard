@@ -8,19 +8,15 @@ import { resolveArcpItemCategoryDisplay } from './labels';
 import type { ArcpClaimsTableModel, ArcpClaimsTotals } from './table';
 import { formatArcpClaimsExportDate } from '@/lib/read-model/arcp/dates';
 import { escapeCsvCell } from '@/lib/utils/csv';
+import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
 
 function csvRow(cells: (string | number | null | undefined)[]): string {
   return cells.map(escapeCsvCell).join(',');
 }
 
-function downloadCsv(csv: string, fileName: string): void {
+async function downloadCsv(csv: string, fileName: string): Promise<void> {
   const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = fileName;
-  link.click();
-  URL.revokeObjectURL(url);
+  await triggerBlobDownload(blob, fileName);
 }
 
 export function buildArcpClaimsCsv(model: ArcpClaimsTableModel): string {
@@ -81,8 +77,8 @@ export function buildArcpClaimsCsv(model: ArcpClaimsTableModel): string {
   return lines.join('\r\n');
 }
 
-export function downloadArcpClaimsCsv(model: ArcpClaimsTableModel, fileName: string): void {
-  downloadCsv(buildArcpClaimsCsv(model), fileName);
+export async function downloadArcpClaimsCsv(model: ArcpClaimsTableModel, fileName: string): Promise<void> {
+  await downloadCsv(buildArcpClaimsCsv(model), fileName);
 }
 
 export type ArcpDetailExportOptions = {
@@ -221,10 +217,10 @@ export function buildArcpClaimsDetailCsv(
   return lines.join('\r\n');
 }
 
-export function downloadArcpClaimsDetailCsv(
+export async function downloadArcpClaimsDetailCsv(
   rows: ArcpClaimsDetailRow[],
   fileName: string,
   options: ArcpDetailExportOptions
-): void {
-  downloadCsv(buildArcpClaimsDetailCsv(rows, options), fileName);
+): Promise<void> {
+  await downloadCsv(buildArcpClaimsDetailCsv(rows, options), fileName);
 }

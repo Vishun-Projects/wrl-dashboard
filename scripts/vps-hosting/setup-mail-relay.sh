@@ -48,9 +48,16 @@ EOF
   systemctl restart "${SERVICE_NAME}"
   systemctl is-active "${SERVICE_NAME}"
 
+  echo "==> Postfix: allow large MIS attachments (default 10MB is too small for YTD register .xlsx)"
+  postconf -e 'message_size_limit = 52428800'
+  systemctl reload postfix
+
   echo "==> Patching Caddy for ${API_DOMAIN}/internal/mail/* → 127.0.0.1:${RELAY_PORT}"
   cat > /etc/caddy/Caddyfile <<EOF
 ${API_DOMAIN} {
+  request_body {
+    max_size 64MB
+  }
   handle /internal/mail* {
     reverse_proxy 127.0.0.1:${RELAY_PORT}
   }
@@ -73,15 +80,32 @@ EOF
 if [[ "${1:-}" == "--remote" ]]; then
   # shellcheck disable=SC1090
   source "$ENV_FILE"
-  VPS_HOST="${VPS_HOST:?Set VPS_HOST}"
-  tar -C "${ROOT}" -czf - \
-    scripts/vps-hosting/mail-relay-server.ts \
-    scripts/vps-hosting/setup-mail-relay.sh \
-    src/lib/auth/send-password-reset-email.ts \
-    src/lib/mis-email/send.ts \
-    src/lib/auth/site-url.ts \
-    | ssh "$VPS_HOST" "tar -xzf - -C '${INSTALL_ROOT}'"
-  ssh "$VPS_HOST" "INSTALL_ROOT='${INSTALL_ROOT}' API_DOMAIN='${API_DOMAIN}' bash '${INSTALL_ROOT}/scripts/vps-hosting/setup-mail-relay.sh'"
+  VPS_HOST="${VPS_HOST:?Set VPS_HOST in .env.vps-setup}"
+  SSH_OPTS=(-o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes)
+
+  echo "==> Syncing mail relay + app lib to ${VPS_HOST}:${INSTALL_ROOT}"
+  ssh "${SSH_OPTS[@]}" "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}/src/lib' '${INSTALL_ROOT}/scripts/vps-hosting'"
+
+  if command -v rsync >/dev/null 2>&1; then
+    RSYNC_SSH="ssh ${SSH_OPTS[*]}"
+    rsync -az -e "$RSYNC_SSH" \
+      "${ROOT}/src/lib/" "${VPS_HOST}:${INSTALL_ROOT}/src/lib/"
+    rsync -az -e "$RSYNC_SSH" \
+      "${ROOT}/scripts/vps-hosting/mail-relay-server.ts" \
+      "${ROOT}/scripts/vps-hosting/setup-mail-relay.sh" \
+      "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/"
+  else
+    tar -C "${ROOT}" -czf - \
+      src/lib \
+      scripts/vps-hosting/mail-relay-server.ts \
+      scripts/vps-hosting/setup-mail-relay.sh \
+      | ssh "${SSH_OPTS[@]}" "$VPS_HOST" "tar -xzf - -C '${INSTALL_ROOT}'"
+  fi
+
+  ssh "${SSH_OPTS[@]}" "$VPS_HOST" "INSTALL_ROOT='${INSTALL_ROOT}' API_DOMAIN='${API_DOMAIN}' bash '${INSTALL_ROOT}/scripts/vps-hosting/setup-mail-relay.sh'"
+
+  echo "==> Verifying /internal/mail/mis-digest-prepared (expect 400, not 404)"
+  ssh "${SSH_OPTS[@]}" "$VPS_HOST" "secret=\$(grep '^VPS_MAIL_RELAY_SECRET=' '${INSTALL_ROOT}/.env.mis-email' | cut -d= -f2- | tr -d '\"'); code=\$(curl -s -o /dev/null -w '%{http_code}' -X POST 'http://127.0.0.1:${RELAY_PORT}/internal/mail/mis-digest-prepared' -H 'Content-Type: application/json' -H \"X-Mail-Relay-Secret: \${secret}\" -d '{}'); echo \"    local relay HTTP \${code}\"; if [ \"\${code}\" = '404' ]; then echo 'ERROR: mis-digest-prepared still returns 404' >&2; exit 1; fi"
   exit 0
 fi
 

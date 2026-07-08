@@ -13,6 +13,7 @@ import {
 import type { SummaryDashboard } from '@/lib/report/summary-derive';
 import type { DigestRecipient } from '@/lib/mis-email/recipients';
 import type { EffectiveDigestIncludes } from '@/lib/mis-email/preferences';
+import { formatBytes } from '@/lib/mis-email/timing';
 
 export type EmailAttachment = {
   filename: string;
@@ -23,6 +24,24 @@ export type EmailAttachment = {
 const XLSX_CONTENT_TYPE =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
+/** Attachment names only — used for email preview without building workbooks. */
+export function resolveDigestAttachmentFilenames(
+  includes: EffectiveDigestIncludes,
+  date = new Date()
+): string[] {
+  const filenames: string[] = [];
+  if (includes.includeSummary) {
+    filenames.push(summaryDashboardFilename(date));
+  }
+  if (includes.includeDetailed) {
+    filenames.push(detailedMisRegisterFilename(date));
+  }
+  if (includes.includeKeyAccount) {
+    filenames.push(keyAccountMisFilename(date));
+  }
+  return filenames;
+}
+
 export async function buildDigestAttachments(
   recipient: DigestRecipient,
   data: SummaryDashboard,
@@ -32,7 +51,6 @@ export async function buildDigestAttachments(
     effectiveIncludes?: EffectiveDigestIncludes;
   }
 ): Promise<EmailAttachment[]> {
-  const attachments: EmailAttachment[] = [];
   const date = options?.date ?? new Date();
   const includes = options?.effectiveIncludes ?? {
     includeSummary: recipient.includeSummary,
@@ -40,36 +58,79 @@ export async function buildDigestAttachments(
     includeKeyAccount: recipient.includeKeyAccount,
   };
 
+  const tasks: Promise<EmailAttachment>[] = [];
+
   if (includes.includeSummary) {
-    const workbook = await buildSummaryDashboardWorkbook(data.branchSummary);
-    attachments.push({
-      filename: summaryDashboardFilename(date),
-      content: await workbookToBuffer(workbook),
-      contentType: XLSX_CONTENT_TYPE,
-    });
+    tasks.push(
+      (async () => {
+        const started = Date.now();
+        const workbook = await buildSummaryDashboardWorkbook(data.branchSummary);
+        const workbookMs = Date.now() - started;
+        const bufferStarted = Date.now();
+        const content = await workbookToBuffer(workbook);
+        const filename = summaryDashboardFilename(date);
+        console.log(
+          `[mis-email/timing] attachment summary · workbook ${workbookMs}ms · buffer ${Date.now() - bufferStarted}ms · ${formatBytes(content.length)} · branches=${data.branchSummary.length}`
+        );
+        return {
+          filename,
+          content,
+          contentType: XLSX_CONTENT_TYPE,
+        };
+      })()
+    );
   }
 
   if (includes.includeDetailed) {
-    const rows = options?.registerRows ?? [];
-    if (rows.length === 0) {
-      throw new Error('No register rows found for detailed MIS export');
-    }
-    const workbook = await buildRegisterExcelWorkbook(rows, { sheetName: 'Detailed MIS' });
-    attachments.push({
-      filename: detailedMisRegisterFilename(date),
-      content: await registerWorkbookToBuffer(workbook),
-      contentType: XLSX_CONTENT_TYPE,
-    });
+    tasks.push(
+      (async () => {
+        const rows = options?.registerRows ?? [];
+        if (rows.length === 0) {
+          throw new Error('No register rows found for detailed MIS export');
+        }
+        const started = Date.now();
+        const workbook = await buildRegisterExcelWorkbook(rows, { sheetName: 'Detailed MIS' });
+        const workbookMs = Date.now() - started;
+        const bufferStarted = Date.now();
+        const content = await registerWorkbookToBuffer(workbook);
+        const filename = detailedMisRegisterFilename(date);
+        console.log(
+          `[mis-email/timing] attachment detailed-register · workbook ${workbookMs}ms · buffer ${Date.now() - bufferStarted}ms · ${formatBytes(content.length)} · rows=${rows.length}`
+        );
+        return {
+          filename,
+          content,
+          contentType: XLSX_CONTENT_TYPE,
+        };
+      })()
+    );
   }
 
   if (includes.includeKeyAccount) {
-    const workbook = await buildKeyAccountMisWorkbook(data.accountSummary);
-    attachments.push({
-      filename: keyAccountMisFilename(date),
-      content: await workbookToBuffer(workbook),
-      contentType: XLSX_CONTENT_TYPE,
-    });
+    tasks.push(
+      (async () => {
+        const started = Date.now();
+        const workbook = await buildKeyAccountMisWorkbook(data.accountSummary);
+        const workbookMs = Date.now() - started;
+        const bufferStarted = Date.now();
+        const content = await workbookToBuffer(workbook);
+        const filename = keyAccountMisFilename(date);
+        console.log(
+          `[mis-email/timing] attachment key-account · workbook ${workbookMs}ms · buffer ${Date.now() - bufferStarted}ms · ${formatBytes(content.length)} · accounts=${data.accountSummary.length}`
+        );
+        return {
+          filename,
+          content,
+          contentType: XLSX_CONTENT_TYPE,
+        };
+      })()
+    );
   }
 
+  const allStarted = Date.now();
+  const attachments = await Promise.all(tasks);
+  console.log(
+    `[mis-email/timing] attachments total (parallel): ${Date.now() - allStarted}ms · count=${attachments.length}`
+  );
   return attachments;
 }

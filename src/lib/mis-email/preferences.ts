@@ -3,11 +3,12 @@ import type { DigestDateRange } from '@/lib/mis-email/fetch-digest-data';
 import type { DigestRecipient } from '@/lib/mis-email/recipients';
 import {
   parseMisEmailBodySectionIds,
+  resolveDigestBodySections,
   resolveEffectiveBodySections,
   type MisEmailBodySectionId,
 } from '@/lib/mis-email/body-sections';
 
-export type MisEmailDateRangeMode = 'yesterday' | 'month_to_date';
+export type MisEmailDateRangeMode = 'yesterday' | 'month_to_date' | 'year_to_yesterday';
 
 export type MisEmailPreferences = {
   subscribed?: boolean;
@@ -19,6 +20,8 @@ export type MisEmailPreferences = {
   extraEmails?: string[];
   /** Summary report sections rendered inline in the email body (full Excel still attached). */
   bodyInEmail?: MisEmailBodySectionId[];
+  /** Key account names to show in the email body when key_account_performance is enabled. */
+  keyAccountsInBody?: string[];
 };
 
 export const DEFAULT_MIS_EMAIL_PREFERENCES: Required<MisEmailPreferences> = {
@@ -29,6 +32,12 @@ export const DEFAULT_MIS_EMAIL_PREFERENCES: Required<MisEmailPreferences> = {
   includeKeyAccount: true,
   extraEmails: [],
   bodyInEmail: [],
+  keyAccountsInBody: [],
+};
+
+export type MisEmailBodyPermissions = {
+  includeSummary: boolean;
+  includeKeyAccount: boolean;
 };
 
 export type EffectiveDigestIncludes = {
@@ -46,7 +55,11 @@ export function parseMisEmailPreferences(raw: unknown): MisEmailPreferences {
   const prefs: MisEmailPreferences = {};
 
   if (typeof raw.subscribed === 'boolean') prefs.subscribed = raw.subscribed;
-  if (raw.dateRange === 'yesterday' || raw.dateRange === 'month_to_date') {
+  if (
+    raw.dateRange === 'yesterday' ||
+    raw.dateRange === 'month_to_date' ||
+    raw.dateRange === 'year_to_yesterday'
+  ) {
     prefs.dateRange = raw.dateRange;
   }
   if (typeof raw.includeSummary === 'boolean') prefs.includeSummary = raw.includeSummary;
@@ -61,8 +74,27 @@ export function parseMisEmailPreferences(raw: unknown): MisEmailPreferences {
   if (Array.isArray(raw.bodyInEmail)) {
     prefs.bodyInEmail = parseMisEmailBodySectionIds(raw.bodyInEmail);
   }
+  if (Array.isArray(raw.keyAccountsInBody)) {
+    prefs.keyAccountsInBody = parseMisEmailKeyAccountsInBody(raw.keyAccountsInBody);
+  }
 
   return prefs;
+}
+
+export function parseMisEmailKeyAccountsInBody(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string') continue;
+    const name = item.trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(name);
+  }
+  return result;
 }
 
 export function resolveExtraDigestEmails(
@@ -93,12 +125,22 @@ export function defaultPreferencesForRecipient(recipient: Pick<
   DigestRecipient,
   'includeSummary' | 'includeDetailed' | 'includeKeyAccount'
 >): MisEmailPreferences {
+  const bodyInEmail: MisEmailBodySectionId[] = [];
+  if (recipient.includeSummary) {
+    bodyInEmail.push('regional_performance', 'branch_performance');
+  }
+  if (recipient.includeKeyAccount) {
+    bodyInEmail.push('key_account_performance');
+  }
+
   return {
     subscribed: true,
     dateRange: 'month_to_date',
     includeSummary: recipient.includeSummary,
     includeDetailed: recipient.includeDetailed,
     includeKeyAccount: recipient.includeKeyAccount,
+    bodyInEmail,
+    keyAccountsInBody: [],
   };
 }
 
@@ -147,6 +189,23 @@ export function resolveDigestDateRangeForPreferences(
     };
   }
 
+  if (mode === 'year_to_yesterday') {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const endDate = toDateString(yesterday);
+    const startDate = `${yesterday.getFullYear()}-01-01`;
+    const endLabel = yesterday.toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+    return {
+      startDate,
+      endDate,
+      label: `Year to yesterday (${endLabel})`,
+    };
+  }
+
   const range = defaultDateRange();
   return {
     startDate: toDateString(range.start),
@@ -188,11 +247,30 @@ export function validateMisEmailPreferencesPatch(params: {
     return { ok: false, error: 'Key account report is not permitted for your role' };
   }
 
-  if ((merged.bodyInEmail?.length ?? 0) > 0 && !params.permissions.includeSummary) {
+  const bodyPermissions: MisEmailBodyPermissions = {
+    includeSummary: params.permissions.includeSummary,
+    includeKeyAccount: params.permissions.includeKeyAccount,
+  };
+
+  const effectiveBody = resolveEffectiveBodySections(bodyPermissions, merged);
+  const summaryBodySections = effectiveBody.filter(
+    (id) => id === 'regional_performance' || id === 'branch_performance'
+  );
+  if (summaryBodySections.length > 0 && !params.permissions.includeSummary) {
     return { ok: false, error: 'Email body preview requires summary report access' };
   }
+  if (
+    effectiveBody.includes('key_account_performance') &&
+    !params.permissions.includeKeyAccount
+  ) {
+    return { ok: false, error: 'Key account body section requires Key Account MIS access' };
+  }
 
-  merged.bodyInEmail = resolveEffectiveBodySections(params.permissions.includeSummary, merged);
+  const effectiveIncludes = resolveEffectiveDigestIncludes(params.permissions, merged);
+  merged.bodyInEmail = resolveDigestBodySections(bodyPermissions, merged, {
+    includeKeyAccountAttachment: effectiveIncludes.includeKeyAccount,
+  });
+  merged.keyAccountsInBody = parseMisEmailKeyAccountsInBody(merged.keyAccountsInBody);
 
   return { ok: true, merged };
 }

@@ -13,6 +13,7 @@ import {
   isBrowserOnVercel,
   misUploadUsesExternalHost,
 } from '@/lib/mis-client-import/upload-limits';
+import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
 
 type BatchMeta = {
   batchId: string;
@@ -225,14 +226,13 @@ export default function MisClientImportToolbar({
         withCredentials: true,
         responseType: 'blob',
       });
-      const url = URL.createObjectURL(res.data);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName || 'import.dat';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      const contentType = String(res.headers['content-type'] ?? '');
+      if (contentType.includes('application/json')) {
+        const errBody = JSON.parse(await res.data.text()) as { error?: string };
+        throw new Error(errBody.error || 'Download failed');
+      }
+      const resolvedName = fileName || 'import.dat';
+      await triggerBlobDownload(res.data, resolvedName);
     } catch (err: unknown) {
       let message = 'Download failed';
       if (axios.isAxiosError(err) && err.response?.data) {
