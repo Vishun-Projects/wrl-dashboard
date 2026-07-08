@@ -571,10 +571,14 @@ export async function fetchCrmOpenOldRows(): Promise<Record<string, unknown>[]> 
 }
 
 /** Latest CRM row per TRN (full sync corpus joins). */
-export async function fetchCrmRowsByTrns(trns: string[]): Promise<Record<string, unknown>[]> {
+export async function fetchCrmRowsByTrns(
+  trns: string[],
+  opts?: { includeTransferred?: boolean }
+): Promise<Record<string, unknown>[]> {
   const unique = [...new Set(trns.map((t) => String(t).trim()).filter(Boolean))];
   if (!unique.length) return [];
 
+  const transferFilter = opts?.includeTransferred ? '' : TRHCALLS_EXCLUDE_TRANSFERRED;
   const merged: Record<string, unknown>[] = [];
   const chunkSize = Math.max(10, Number(process.env.SYNC_PIPELINE_TRN_CHUNK ?? 40) || 40);
 
@@ -583,7 +587,7 @@ export async function fetchCrmRowsByTrns(trns: string[]): Promise<Record<string,
     const tableName = buildSyncCorpusTableName({ vtrnnoIn: batch });
     const rows = await fetchCrmChunk({
       tableName,
-      condition: `(tc.vtrnno IS NOT NULL AND tc.vtrnno <> '')${TRHCALLS_EXCLUDE_TRANSFERRED}`,
+      condition: `(tc.vtrnno IS NOT NULL AND tc.vtrnno <> '')${transferFilter}`,
       orderBy: 'tc.dtrndate ASC',
       timeoutMs: SYNC_INCREMENTAL_TIMEOUT_MS,
     });

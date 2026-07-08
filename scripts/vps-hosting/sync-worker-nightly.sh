@@ -33,4 +33,6 @@ echo "=== sync-worker-nightly $(date -Iseconds) TZ=${TZ:-system} ==="
 echo "Editedon catch-up ${YTD_START} .. ${TODAY} (addedon <> editedon)"
 npm run sync-worker:editedon-catchup -- --from "${YTD_START}" --to "${TODAY}"
 npm run sync-worker:pipeline-reconcile
+echo "Full YTD open/assigned reconcile (transferred + cancelled orphans)"
+npm run sync-worker:reconcile-ytd-open -- --apply
 echo "=== sync-worker-nightly done $(date -Iseconds) ==="

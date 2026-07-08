@@ -7,6 +7,14 @@ import {
   resolveEffectiveBodySections,
   type MisEmailBodySectionId,
 } from '@/lib/mis-email/body-sections';
+import {
+  DEFAULT_MIS_EMAIL_BODY_LAYOUT,
+  parseMisEmailBodyLayout,
+  resolveMisEmailBodyLayout,
+  type MisEmailBodyLayout,
+} from '@/lib/mis-email/email-body-layout';
+
+export type { MisEmailBodyLayout } from '@/lib/mis-email/email-body-layout';
 
 export type MisEmailDateRangeMode = 'yesterday' | 'month_to_date' | 'year_to_yesterday';
 
@@ -16,12 +24,16 @@ export type MisEmailPreferences = {
   includeSummary?: boolean;
   includeDetailed?: boolean;
   includeKeyAccount?: boolean;
+  /** Summary dashboard traceable export (row detail + reconciliation). */
+  includeTraceableExport?: boolean;
   /** Additional inboxes that receive the same daily digest (e.g. work + personal). */
   extraEmails?: string[];
   /** Summary report sections rendered inline in the email body (full Excel still attached). */
   bodyInEmail?: MisEmailBodySectionId[];
   /** Key account names to show in the email body when key_account_performance is enabled. */
   keyAccountsInBody?: string[];
+  /** How body tables are arranged (stacked default, or custom grid). */
+  bodyLayout?: MisEmailBodyLayout;
 };
 
 export const DEFAULT_MIS_EMAIL_PREFERENCES: Required<MisEmailPreferences> = {
@@ -30,9 +42,11 @@ export const DEFAULT_MIS_EMAIL_PREFERENCES: Required<MisEmailPreferences> = {
   includeSummary: true,
   includeDetailed: true,
   includeKeyAccount: true,
+  includeTraceableExport: false,
   extraEmails: [],
   bodyInEmail: [],
   keyAccountsInBody: [],
+  bodyLayout: { mode: 'stacked' },
 };
 
 export type MisEmailBodyPermissions = {
@@ -44,6 +58,7 @@ export type EffectiveDigestIncludes = {
   includeSummary: boolean;
   includeDetailed: boolean;
   includeKeyAccount: boolean;
+  includeTraceableExport: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -65,6 +80,9 @@ export function parseMisEmailPreferences(raw: unknown): MisEmailPreferences {
   if (typeof raw.includeSummary === 'boolean') prefs.includeSummary = raw.includeSummary;
   if (typeof raw.includeDetailed === 'boolean') prefs.includeDetailed = raw.includeDetailed;
   if (typeof raw.includeKeyAccount === 'boolean') prefs.includeKeyAccount = raw.includeKeyAccount;
+  if (typeof raw.includeTraceableExport === 'boolean') {
+    prefs.includeTraceableExport = raw.includeTraceableExport;
+  }
   if (Array.isArray(raw.extraEmails)) {
     prefs.extraEmails = raw.extraEmails
       .filter((e): e is string => typeof e === 'string')
@@ -77,8 +95,16 @@ export function parseMisEmailPreferences(raw: unknown): MisEmailPreferences {
   if (Array.isArray(raw.keyAccountsInBody)) {
     prefs.keyAccountsInBody = parseMisEmailKeyAccountsInBody(raw.keyAccountsInBody);
   }
+  const bodyLayout = parseMisEmailBodyLayout(raw.bodyLayout);
+  if (bodyLayout) prefs.bodyLayout = bodyLayout;
 
   return prefs;
+}
+
+export function resolveMisEmailBodyLayoutFromPrefs(
+  prefs: MisEmailPreferences
+): MisEmailBodyLayout {
+  return resolveMisEmailBodyLayout(prefs.bodyLayout ?? DEFAULT_MIS_EMAIL_BODY_LAYOUT);
 }
 
 export function parseMisEmailKeyAccountsInBody(raw: unknown): string[] {
@@ -161,11 +187,18 @@ export function resolveEffectiveDigestIncludes(
     includeSummary: recipient.includeSummary && merged.includeSummary,
     includeDetailed: recipient.includeDetailed && merged.includeDetailed,
     includeKeyAccount: recipient.includeKeyAccount && merged.includeKeyAccount,
+    includeTraceableExport:
+      recipient.includeSummary && merged.includeTraceableExport,
   };
 }
 
 export function hasAnyEffectiveDigestInclude(includes: EffectiveDigestIncludes): boolean {
-  return includes.includeSummary || includes.includeDetailed || includes.includeKeyAccount;
+  return (
+    includes.includeSummary ||
+    includes.includeDetailed ||
+    includes.includeKeyAccount ||
+    includes.includeTraceableExport
+  );
 }
 
 export function resolveDigestDateRangeForPreferences(
@@ -245,6 +278,9 @@ export function validateMisEmailPreferencesPatch(params: {
   }
   if (merged.includeKeyAccount && !params.permissions.includeKeyAccount) {
     return { ok: false, error: 'Key account report is not permitted for your role' };
+  }
+  if (merged.includeTraceableExport && !params.permissions.includeSummary) {
+    return { ok: false, error: 'Traceable export requires summary report access' };
   }
 
   const bodyPermissions: MisEmailBodyPermissions = {

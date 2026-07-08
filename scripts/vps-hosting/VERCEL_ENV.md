@@ -147,9 +147,31 @@ Prints `VPS_MAIL_RELAY_SECRET` — add to **Vercel Production** env:
 | `VPS_MAIL_RELAY_SECRET` | (secret from VPS `/opt/fast-close-app/.env.mis-email`) |
 | `VPS_MAIL_RELAY_URL` | optional — defaults to `https://api.wrl-fsm.cloud/internal/mail/send` |
 
-Used for **forgot-password** (`/internal/mail/send`) and **Profile → Email reports → Send now** (`/internal/mail/mis-digest`). Both send via VPS Postfix — same path as the 7 AM MIS cron.
+Used for **forgot-password** (`/internal/mail/send`) and **Profile → Email reports → Send now** (`/internal/mail/mis-digest-prepared`). Both send via VPS Postfix — same path as the 7 AM MIS cron.
 
-**Local dev:** forgot-password still requires production — `db-sign-in` bypass does not send mail.
+**Vercel Production (wrl-dashboard.vercel.app)** — required:
+
+| Variable | Value |
+|----------|--------|
+| `VPS_MAIL_RELAY_SECRET` | Copy from VPS: `grep VPS_MAIL_RELAY_SECRET /opt/fast-close-app/.env.mis-email` |
+| `VPS_MAIL_RELAY_URL` | `https://api.wrl-fsm.cloud` (optional; code defaults to this base) |
+
+Redeploy Vercel after changing env vars.
+
+**Local dev (corporate network often blocks `api.wrl-fsm.cloud`):**
+
+1. Terminal 1: `npm run mail-relay:tunnel` (keeps SSH tunnel open)
+2. `.env.local`:
+   ```
+   VPS_MAIL_RELAY_TUNNEL=true
+   VPS_MAIL_RELAY_URL=http://127.0.0.1:8789
+   VPS_MAIL_RELAY_SECRET=<same as VPS .env.mis-email>
+   ```
+3. Test: `npm run mail-relay:test` or `npm run mail-relay:test -- --send you@gmail.com`
+
+Without the tunnel, local send returns 403 from the corporate proxy (not a secret mismatch). Relay returns **401** for wrong secret.
+
+**Diagnostics:** `npm run mail-relay:test` — tries each relay URL and reports which works.
 
 Apply DB migration for MIS email preferences before cron:
 

@@ -218,6 +218,70 @@ describe('buildEmailBodySectionsHtml', () => {
     expect(html).toContain('Nestle');
   });
 
+  it('sorts key account rows by zone then account name', () => {
+    const context: MisEmailBodyContext = {
+      summary: sampleData,
+      keyAccountsInBody: ['Subway', 'Starbucks'],
+      accountRows: [
+        { region: 'WEST ZONE', account: 'Subway', total_calls: 1, total_solved: 0, open_calls: 1, age_2: 0, age_3: 0, age_7: 0, age_15: 0, active_eng: 0 },
+        { region: 'EAST ZONE', account: 'Starbucks', total_calls: 2, total_solved: 1, open_calls: 1, age_2: 0, age_3: 0, age_7: 0, age_15: 0, active_eng: 0 },
+        { region: 'EAST ZONE', account: 'Subway', total_calls: 3, total_solved: 2, open_calls: 1, age_2: 0, age_3: 0, age_7: 0, age_15: 0, active_eng: 0 },
+        { region: 'NORTH ZONE', account: 'Starbucks', total_calls: 4, total_solved: 3, open_calls: 1, age_2: 0, age_3: 0, age_7: 0, age_15: 0, active_eng: 0 },
+      ],
+    };
+    const html = buildEmailBodySectionsHtml(['key_account_performance'], context);
+    const eastStarbucks = html.indexOf('EAST</td>');
+    const eastSubway = html.indexOf('EAST', eastStarbucks + 1);
+    const northStarbucks = html.indexOf('NORTH</td>');
+    const westSubway = html.indexOf('WEST</td>');
+    expect(eastStarbucks).toBeGreaterThan(-1);
+    expect(eastSubway).toBeGreaterThan(eastStarbucks);
+    expect(northStarbucks).toBeGreaterThan(eastSubway);
+    expect(westSubway).toBeGreaterThan(northStarbucks);
+    expect(html.indexOf('Starbucks', eastStarbucks)).toBeLessThan(html.indexOf('Subway', eastStarbucks + 1));
+  });
+
+  it('merges key-account region cells in legacy grid layout', () => {
+    const context: MisEmailBodyContext = {
+      summary: sampleData,
+      keyAccountsInBody: ['Subway', 'Starbucks'],
+      accountRows: [
+        { region: 'EAST ZONE', account: 'Starbucks', total_calls: 2, total_solved: 1, open_calls: 1, age_2: 0, age_3: 0, age_7: 0, age_15: 0, active_eng: 0 },
+        { region: 'EAST ZONE', account: 'Subway', total_calls: 3, total_solved: 2, open_calls: 1, age_2: 0, age_3: 0, age_7: 0, age_15: 0, active_eng: 0 },
+        { region: 'NORTH ZONE', account: 'Starbucks', total_calls: 4, total_solved: 3, open_calls: 1, age_2: 0, age_3: 0, age_7: 0, age_15: 0, active_eng: 0 },
+      ],
+    };
+    const html = buildEmailBodySectionsHtml(
+      ['key_account_performance'],
+      context,
+      {
+        mode: 'grid',
+        columns: 2,
+        mergeKeyAccountRegions: true,
+        placements: [{ sectionId: 'key_account_performance', col: 1, row: 1 }],
+      }
+    );
+    expect(html).toContain('rowspan="2"');
+    const eastCount = (html.match(/EAST<\/td>/g) ?? []).length;
+    expect(eastCount).toBe(1);
+  });
+
+  it('truncates key account rows when maxRows is set', () => {
+    const context: MisEmailBodyContext = {
+      summary: sampleData,
+      keyAccountsInBody: [],
+      accountRows: [
+        { region: 'EAST ZONE', account: 'A', total_calls: 1, total_solved: 0, open_calls: 1, age_2: 0, age_3: 0, age_7: 0, age_15: 0, active_eng: 0 },
+        { region: 'NORTH ZONE', account: 'B', total_calls: 2, total_solved: 1, open_calls: 1, age_2: 0, age_3: 0, age_7: 0, age_15: 0, active_eng: 0 },
+      ],
+    };
+    const html = buildEmailBodySectionsHtml(['key_account_performance'], context, {
+      keyAccountMaxRows: 1,
+    });
+    expect(html).toContain('Showing 1 of 2');
+    expect(html).toContain('Gmail limits');
+  });
+
   it('renders nothing for key account section when no account rows', () => {
     const context: MisEmailBodyContext = {
       summary: sampleData,

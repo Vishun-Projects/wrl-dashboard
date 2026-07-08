@@ -76,7 +76,18 @@ export function resolveDigestKeyAccountBodyRows(
     explicitSelection
   );
   if (!accountNames.length) return [];
-  return filterDigestKeyAccountRows(crmAccounts, clientAccounts, accountNames);
+  const rows = filterDigestKeyAccountRows(crmAccounts, clientAccounts, accountNames);
+  if (rows.length > 0) return rows;
+
+  // If saved selections are stale for this period, fall back to all accounts
+  // so the key-account section is never blank unexpectedly.
+  if (explicitSelection.length > 0) {
+    const allNames = listDigestAvailableKeyAccounts(crmAccounts, clientAccounts);
+    if (!allNames.length) return [];
+    return filterDigestKeyAccountRows(crmAccounts, clientAccounts, allNames);
+  }
+
+  return [];
 }
 
 /** @deprecated scope reserved for future office-level client import filtering */

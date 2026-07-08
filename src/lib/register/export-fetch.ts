@@ -1,5 +1,10 @@
 import axios from 'axios';
 import { readRegisterFromPostgresClient } from '@/lib/read-model/client-flags';
+import {
+  createCsvRecordCounter,
+  feedCsvRecordCounter,
+  finalizeCsvRecordCounter,
+} from '@/lib/utils/csv';
 import { downloadRegisterCsvInBrowser } from './server/csv-export';
 import {
   blobToPreparedExport,
@@ -179,9 +184,7 @@ export async function prepareRegisterCsvFromServer(opts: {
 
   const chunks: Uint8Array[] = [];
   const decoder = new TextDecoder();
-  let dataRowCount = 0;
-  let headerDone = false;
-  let carry = '';
+  const rowCounter = createCsvRecordCounter();
 
   while (true) {
     const { done, value } = await reader.read();
@@ -190,28 +193,15 @@ export async function prepareRegisterCsvFromServer(opts: {
 
     chunks.push(value);
 
-    const text = carry + decoder.decode(value, { stream: true });
-    const lines = text.split('\n');
-    carry = lines.pop() ?? '';
-
-    for (const line of lines) {
-      if (!headerDone) {
-        headerDone = true;
-        continue;
-      }
-      if (line.replace(/\r/g, '').trim().length > 0) {
-        dataRowCount += 1;
-      }
-    }
+    feedCsvRecordCounter(rowCounter, decoder.decode(value, { stream: true }));
 
     if (exportTotal > 0) {
-      opts.onProgress?.(Math.min(dataRowCount, exportTotal), exportTotal);
+      opts.onProgress?.(Math.min(rowCounter.rowCount, exportTotal), exportTotal);
     }
   }
 
-  if (carry.replace(/\r/g, '').trim().length > 0 && headerDone) {
-    dataRowCount += 1;
-  }
+  feedCsvRecordCounter(rowCounter, decoder.decode());
+  const dataRowCount = finalizeCsvRecordCounter(rowCounter);
 
   if (exportTotal > 0 && dataRowCount !== exportTotal) {
     throw new Error(

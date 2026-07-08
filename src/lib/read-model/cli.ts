@@ -10,6 +10,7 @@ import { runBackfillHistoricalHot } from '@/lib/read-model/backfill-historical';
 import { runIncrementalSync } from '@/lib/read-model/incremental';
 import { runNightlyReconcile } from '@/lib/read-model/nightly';
 import { runPipelineReconcile } from '@/lib/read-model/pipeline-reconcile';
+import { runReconcileYtdOpen } from '@/lib/read-model/reconcile-ytd-open';
 import { runEditedonCatchupRange, runEditedonCatchupStep } from '@/lib/read-model/editedon-catchup';
 import { todayLocalDate } from '@/lib/read-model/dates';
 import { runRetentionJobs } from '@/lib/read-model/retention';
@@ -88,6 +89,11 @@ async function main(): Promise<void> {
       console.log('[sync-worker] Pipeline reconcile:', result);
       break;
     }
+    case 'reconcile-ytd-open': {
+      const result = await runReconcileYtdOpen({ apply: process.argv.includes('--apply') });
+      console.log('[sync-worker] YTD open reconcile:', result);
+      break;
+    }
     case 'editedon-catchup': {
       const args = process.argv.slice(3);
       const fromIdx = args.indexOf('--from');
@@ -160,7 +166,8 @@ Commands:
   fill-ytd          Upsert YTD + open-old only — no truncate (safe refresh)
   backfill-historical  Upsert pre-YTD CRM calls (default 2020-01-01 .. day before Jan 1) — no truncate
   incremental       Single calls incremental sync run (+ pipeline reconcile + editedon catch-up)
-  pipeline-reconcile  Refresh stale open/assigned hot rows from CRM by TRN
+  pipeline-reconcile  Refresh stale open/assigned hot rows from CRM by TRN (incl. transferred)
+  reconcile-ytd-open  Full YTD open/assigned scan vs CRM (--apply to fix)
   editedon-catchup  Replay CRM edits by editedon day (addedon <> editedon)
                     --from YYYY-MM-DD --to YYYY-MM-DD  (default: one step from cursor)
   backfill-bm-approval  Fill calls_latest_hot.bapproval / bm_approved_at from CRM (no truncate)

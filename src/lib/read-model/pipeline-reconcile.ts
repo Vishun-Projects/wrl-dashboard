@@ -12,7 +12,7 @@ import {
 } from '@/lib/read-model/lock';
 import { applyCrmRowsToHot } from '@/lib/read-model/apply-crm-delta';
 import { hotRowCancelReasonMismatch, repairHotCancelFromNcrReason } from '@/lib/read-model/repair-hot-cancel';
-import { transformCrmRowToHot } from '@/lib/read-model/transform';
+import { isHotEligibleRow, transformCrmRowToHot } from '@/lib/read-model/transform';
 import { isRealCancelReasonCode } from '@/lib/report/search';
 import type { HotRow } from '@/lib/read-model/types';
 
@@ -31,6 +31,8 @@ export type PipelineReconcileResult = {
   candidates?: number;
   refreshed?: number;
   rowsUpserted?: number;
+  rowsDeleted?: number;
+  ncrRepaired?: number;
 };
 
 export function hotRowNeedsCrmRefresh(
@@ -61,6 +63,20 @@ export function hotRowNeedsCrmRefresh(
   }
 
   return false;
+}
+
+/** Whether a hot row should be refreshed or removed based on live CRM (incl. transferred). */
+export function hotRowNeedsReconcileFromCrm(
+  hot: Pick<
+    HotRow,
+    'status_bucket' | 'ncancelreason' | 'source_editedon' | 'bsolved' | 'bfastclose' | 'region'
+  >,
+  crmRow: Record<string, unknown>
+): boolean {
+  if (!isHotEligibleRow(crmRow)) return true;
+  const fresh = transformCrmRowToHot(crmRow);
+  if (!fresh) return true;
+  return hotRowNeedsCrmRefresh(hot, crmRow);
 }
 
 async function listPipelineReconcileCandidates(limit: number): Promise<HotRow[]> {
@@ -117,7 +133,7 @@ export async function runPipelineReconcile(): Promise<PipelineReconcileResult> {
 
   for (let i = 0; i < trns.length; i += TRN_FETCH_CHUNK) {
     const chunk = trns.slice(i, i + TRN_FETCH_CHUNK);
-    const crmRows = await fetchCrmRowsByTrns(chunk);
+    const crmRows = await fetchCrmRowsByTrns(chunk, { includeTransferred: true });
     const crmByTrn = new Map<string, Record<string, unknown>>();
     for (const row of crmRows) {
       const trn = String(row.vtrnno ?? '').trim();
@@ -127,7 +143,7 @@ export async function runPipelineReconcile(): Promise<PipelineReconcileResult> {
       const hot = hotByTrn.get(trn);
       const crm = crmByTrn.get(trn);
       if (!hot || !crm) continue;
-      if (hotRowNeedsCrmRefresh(hot, crm)) staleTrns.push(trn);
+      if (hotRowNeedsReconcileFromCrm(hot, crm)) staleTrns.push(trn);
     }
   }
 
@@ -140,7 +156,7 @@ export async function runPipelineReconcile(): Promise<PipelineReconcileResult> {
     };
   }
 
-  const crmRows = await fetchCrmRowsByTrns(staleTrns);
+  const crmRows = await fetchCrmRowsByTrns(staleTrns, { includeTransferred: true });
   const result = await withClient(async (client) => {
     const acquired = await tryAcquireSyncLock(client);
     if (!acquired) {
@@ -151,8 +167,12 @@ export async function runPipelineReconcile(): Promise<PipelineReconcileResult> {
       state,
       advanceWatermarks: false,
     });
+    const ncrRepaired = await repairHotCancelFromNcrReason(client);
+    if (ncrRepaired > 0) {
+      console.log(`[sync-worker] Pipeline reconcile — repaired ${ncrRepaired} ncancelreason row(s)`);
+    }
     await releaseSyncLock(client, 'ok', applied.rowsUpserted);
-    return { kind: 'applied' as const, ...applied };
+    return { kind: 'applied' as const, ...applied, ncrRepaired };
   });
 
   if (result.kind === 'skipped') {
@@ -160,7 +180,7 @@ export async function runPipelineReconcile(): Promise<PipelineReconcileResult> {
   }
 
   console.log(
-    `[sync-worker] Pipeline reconcile — checked ${candidates.length}, refreshed ${staleTrns.length}, upserted ${result.rowsUpserted}`
+    `[sync-worker] Pipeline reconcile — checked ${candidates.length}, refreshed ${staleTrns.length}, upserted ${result.rowsUpserted}, deleted ${result.rowsDeleted ?? 0}`
   );
 
   return {
@@ -168,5 +188,7 @@ export async function runPipelineReconcile(): Promise<PipelineReconcileResult> {
     candidates: candidates.length,
     refreshed: staleTrns.length,
     rowsUpserted: result.rowsUpserted,
+    rowsDeleted: result.rowsDeleted,
+    ncrRepaired: result.ncrRepaired,
   };
 }

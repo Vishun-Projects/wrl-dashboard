@@ -16,9 +16,11 @@ import { feedback } from '@/lib/ui/feedback';
 import type { MisEmailComposePreview } from '@/lib/mis-email/compose-digest';
 import type { MisEmailBodySectionDef, MisEmailBodySectionId } from '@/lib/mis-email/body-sections';
 import type { MisEmailPreferences } from '@/lib/mis-email/preferences';
+import { DEFAULT_MIS_EMAIL_PREFERENCES } from '@/lib/mis-email/preferences';
 import { buildMisEmailSkeletonPreview } from '@/lib/mis-email/skeleton-preview';
 import { trackMisEmailSendJob, useMisEmailSendJobs } from '@/lib/mis-email/send-job-client';
 import { settingsInputClass } from '@/components/admin/AdminUi';
+import { MisEmailBodyLayoutEditor } from '@/components/settings/MisEmailBodyLayoutEditor';
 
 type MisEmailComposeSettings = {
   primaryEmail: string;
@@ -50,6 +52,18 @@ function formatExtraEmailsInput(emails: string[] | undefined): string {
 }
 
 const LIVE_PREVIEW_DEBOUNCE_MS = 800;
+
+type AttachmentPrefKey =
+  | 'includeSummary'
+  | 'includeDetailed'
+  | 'includeKeyAccount'
+  | 'includeTraceableExport';
+
+function isAttachmentEnabled(prefs: MisEmailPreferences, key: AttachmentPrefKey): boolean {
+  const value = prefs[key];
+  if (value !== undefined) return value;
+  return DEFAULT_MIS_EMAIL_PREFERENCES[key];
+}
 
 export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Props) {
   const [extraEmailsInput, setExtraEmailsInput] = useState(formatExtraEmailsInput(prefs.extraEmails));
@@ -186,7 +200,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
     setAvailableKeyAccounts([]);
   }
 
-  function toggleAttachment(key: 'includeSummary' | 'includeDetailed' | 'includeKeyAccount', checked: boolean) {
+  function toggleAttachment(key: AttachmentPrefKey, checked: boolean) {
     onPrefsChange({ ...prefs, [key]: checked });
   }
 
@@ -284,6 +298,13 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
   const attachmentOptions = [
     settings.allowed.includeSummary
       ? { key: 'includeSummary' as const, label: 'Summary report (.xlsx)' }
+      : null,
+    settings.allowed.includeSummary
+      ? {
+          key: 'includeTraceableExport' as const,
+          label: 'Traceable export (.xlsx)',
+          hint: 'Summary dashboard with row-level call detail — same as Export Trace on the report page',
+        }
       : null,
     settings.allowed.includeDetailed
       ? { key: 'includeDetailed' as const, label: 'Detailed register (.xlsx)' }
@@ -386,13 +407,21 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
             <div className="space-y-2">
               {attachmentOptions.map((opt) =>
                 opt ? (
-                  <label key={opt.key} className="flex items-center gap-2 text-[12px] text-slate-700">
+                  <label key={opt.key} className="flex items-start gap-2 text-[12px] text-slate-700">
                     <input
                       type="checkbox"
-                      checked={draftPrefs[opt.key] !== false}
+                      className="mt-0.5"
+                      checked={isAttachmentEnabled(draftPrefs, opt.key)}
                       onChange={(e) => toggleAttachment(opt.key, e.target.checked)}
                     />
-                    {opt.label}
+                    <span>
+                      {opt.label}
+                      {'hint' in opt && opt.hint ? (
+                        <span className="mt-0.5 block text-[10px] leading-relaxed text-slate-500">
+                          {opt.hint}
+                        </span>
+                      ) : null}
+                    </span>
                   </label>
                 ) : null
               )}
@@ -456,6 +485,18 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                   );
                 })}
               </div>
+            </div>
+          ) : null}
+
+          {selectedBodyIds.length > 0 ? (
+            <div className="grid grid-cols-[72px_1fr] items-start gap-3 px-4 py-3">
+              <span className="pt-1 text-[11px] font-medium text-slate-400">Layout</span>
+              <MisEmailBodyLayoutEditor
+                selectedSectionIds={selectedBodyIds}
+                bodySections={bodySections}
+                layout={draftPrefs.bodyLayout}
+                onLayoutChange={(bodyLayout) => onPrefsChange({ ...prefs, bodyLayout })}
+              />
             </div>
           ) : null}
 
@@ -605,6 +646,20 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
             </div>
           ) : null}
         </div>
+
+        {livePreview?.gmailClipWarning ? (
+          <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-[11px] text-amber-900">
+            <p>{livePreview.gmailClipWarning}</p>
+            {livePreview.keyAccountRowsTotal != null &&
+            livePreview.keyAccountRowsInBody != null &&
+            livePreview.keyAccountRowsInBody < livePreview.keyAccountRowsTotal ? (
+              <p className="mt-0.5 text-amber-700">
+                Key accounts in email body: {livePreview.keyAccountRowsInBody} of{' '}
+                {livePreview.keyAccountRowsTotal} — full list is in the attached Excel.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="relative min-h-0 flex-1 bg-slate-100">
           {previewWarning ? (

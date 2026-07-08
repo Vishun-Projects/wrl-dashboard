@@ -23,6 +23,7 @@
     "sync-worker:backfill-historical": "npx tsx src/lib/read-model/cli.ts backfill-historical",
     "sync-worker:incremental": "npx tsx src/lib/read-model/cli.ts incremental",
     "sync-worker:pipeline-reconcile": "npx tsx src/lib/read-model/cli.ts pipeline-reconcile",
+    "sync-worker:reconcile-ytd-open": "npx tsx src/lib/read-model/cli.ts reconcile-ytd-open",
     "sync-worker:editedon-catchup": "npx tsx src/lib/read-model/cli.ts editedon-catchup",
     "sync-worker:backfill-bm-approval": "npx tsx src/lib/read-model/cli.ts backfill-bm-approval",
     "sync-worker:dims": "npx tsx src/lib/read-model/cli.ts dims",
@@ -49,7 +50,9 @@
     "mis-email:setup-postfix:vps": "bash scripts/vps-hosting/setup-vps-postfix.sh --remote",
     "mis-email:dns:vps": "bash scripts/vps-hosting/show-mis-email-dns-vps.sh",
     "gotrue:sync-smtp:vps": "bash scripts/vps-hosting/sync-gotrue-smtp-vps.sh",
-    "mail-relay:setup:vps": "bash scripts/vps-hosting/setup-mail-relay.sh --remote"
+    "mail-relay:setup:vps": "bash scripts/vps-hosting/setup-mail-relay.sh --remote",
+    "mail-relay:tunnel": "bash scripts/vps-hosting/mail-relay-tunnel.sh",
+    "mail-relay:test": "npx tsx scripts/test-mail-relay.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
@@ -73,6 +76,7 @@
     "jose": "^6.2.3",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
+    "jszip": "^3.10.1",
     "lucide-react": "^1.14.0",
     "motion": "^12.40.0",
     "next": "16.2.6",

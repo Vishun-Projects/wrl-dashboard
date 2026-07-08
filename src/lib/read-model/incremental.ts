@@ -234,9 +234,16 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
   });
 
   let pipelineReconciled = 0;
+  let pipelineDeleted = 0;
   try {
     const pipeline = await runPipelineReconcile();
     pipelineReconciled = pipeline.refreshed ?? 0;
+    pipelineDeleted = pipeline.rowsDeleted ?? 0;
+    if (pipelineReconciled > 0 || pipelineDeleted > 0) {
+      console.log(
+        `[sync-worker] Pipeline reconcile — refreshed ${pipelineReconciled}, deleted ${pipelineDeleted}`
+      );
+    }
   } catch (err) {
     console.warn(
       '[sync-worker] Pipeline reconcile failed (incremental succeeded):',

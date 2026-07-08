@@ -13,7 +13,7 @@ import { withAppClient, closePool } from '@/lib/read-model/db';
 import { fetchCrmRowsByTrns } from '@/lib/read-model/crm-fetch';
 import { applyCrmRowsToHot } from '@/lib/read-model/apply-crm-delta';
 import { getSyncState, tryAcquireSyncLock, releaseSyncLock } from '@/lib/read-model/lock';
-import { hotRowNeedsCrmRefresh } from '@/lib/read-model/pipeline-reconcile';
+import { hotRowNeedsReconcileFromCrm } from '@/lib/read-model/pipeline-reconcile';
 import { registerHotRetentionStart } from '@/lib/read-model/hot-window';
 import type { HotRow } from '@/lib/read-model/types';
 
@@ -50,7 +50,7 @@ async function main() {
   const staleTrns: string[] = [];
   for (let i = 0; i < candidates.length && staleTrns.length < MAX_REFRESH; i += BATCH) {
     const chunk = candidates.slice(i, i + BATCH);
-    const crmRows = await fetchCrmRowsByTrns(chunk.map((r) => r.vtrnno));
+    const crmRows = await fetchCrmRowsByTrns(chunk.map((r) => r.vtrnno), { includeTransferred: true });
     const crmByTrn = new Map(
       crmRows.map((row) => [String(row.vtrnno ?? '').trim(), row]).filter(([t]) => t)
     );
@@ -62,7 +62,7 @@ async function main() {
         }
         continue;
       }
-      if (hotRowNeedsCrmRefresh(hot, crm)) {
+      if (hotRowNeedsReconcileFromCrm(hot, crm)) {
         staleTrns.push(hot.vtrnno);
         if (staleTrns.length <= 15) {
           const cr = crm.ncancelreason;
@@ -85,7 +85,7 @@ async function main() {
   let upserted = 0;
   for (let i = 0; i < staleTrns.length; i += BATCH) {
     const chunk = staleTrns.slice(i, i + BATCH);
-    const crmRows = await fetchCrmRowsByTrns(chunk);
+    const crmRows = await fetchCrmRowsByTrns(chunk, { includeTransferred: true });
     await withAppClient(async (client) => {
       if (!(await tryAcquireSyncLock(client))) {
         throw new Error('sync lock not acquired');
@@ -97,7 +97,7 @@ async function main() {
           advanceWatermarks: false,
         });
         await releaseSyncLock(client, 'ok', result.rowsUpserted);
-        upserted += result.rowsUpserted;
+        upserted += result.rowsUpserted + result.rowsDeleted;
       } catch (err) {
         await releaseSyncLock(client, 'error', 0);
         throw err;

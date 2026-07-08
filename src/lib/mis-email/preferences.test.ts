@@ -95,6 +95,20 @@ describe('resolveEffectiveDigestIncludes', () => {
       includeSummary: true,
       includeDetailed: false,
       includeKeyAccount: false,
+      includeTraceableExport: false,
+    });
+  });
+
+  it('enables traceable export when explicitly opted in', () => {
+    expect(
+      resolveEffectiveDigestIncludes(perms, {
+        includeTraceableExport: true,
+      })
+    ).toEqual({
+      includeSummary: true,
+      includeDetailed: true,
+      includeKeyAccount: false,
+      includeTraceableExport: true,
     });
   });
 });
@@ -175,6 +189,7 @@ describe('hasAnyEffectiveDigestInclude', () => {
         includeSummary: false,
         includeDetailed: false,
         includeKeyAccount: false,
+        includeTraceableExport: false,
       })
     ).toBe(false);
   });

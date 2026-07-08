@@ -102,7 +102,7 @@ export async function auditHotForward(
       const chunkTrns = pageTrns.slice(i, i + trnChunk);
       let crmRows: Record<string, unknown>[] = [];
       try {
-        crmRows = await fetchCrmRowsByTrns(chunkTrns);
+        crmRows = await fetchCrmRowsByTrns(chunkTrns, { includeTransferred: true });
       } catch (err) {
         opts.onProgress?.(
           `CRM fetch failed for batch starting ${chunkTrns[0]}: ${err instanceof Error ? err.message : err}`

@@ -707,9 +707,25 @@ export function filterKeyAccountRows(
   selectedAccounts: string[]
 ): Array<Record<string, unknown>> {
   if (!selectedAccounts.length) return [];
-  return rows.filter((row) =>
+  const filtered = rows.filter((row) =>
     selectedAccounts.some((name) => accountsMatch(name, String(row.account ?? '')))
   );
+  return sortAccountRowsByZoneThenAccount(filtered);
+}
+
+/** Key account MIS / email body: zone A→Z, then account name within each zone. */
+export function sortAccountRowsByZoneThenAccount(
+  rows: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  return [...rows].sort((a, b) => {
+    const regionA = formatDisplayRegion(String(a.region ?? ''));
+    const regionB = formatDisplayRegion(String(b.region ?? ''));
+    const byRegion = regionA.localeCompare(regionB, undefined, { sensitivity: 'base' });
+    if (byRegion !== 0) return byRegion;
+    return String(a.account ?? '').localeCompare(String(b.account ?? ''), undefined, {
+      sensitivity: 'base',
+    });
+  });
 }
 
 export type MergedAccountMetricRow = {

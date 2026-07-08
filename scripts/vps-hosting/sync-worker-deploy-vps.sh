@@ -85,6 +85,47 @@ EOF
 
 chmod +x "${root}/scripts/vps-hosting/sync-worker-daemon.sh" 2>/dev/null || true
 chmod +x "${root}/scripts/vps-hosting/sync-worker-nightly.sh" 2>/dev/null || true
+
+install_nightly_timer() {
+  local service_name="fast-close-sync-worker-nightly"
+  local service_unit="/etc/systemd/system/${service_name}.service"
+  local timer_unit="/etc/systemd/system/${service_name}.timer"
+  cat >"$service_unit" <<UNIT
+[Unit]
+Description=Fast Close CRM read-model nightly reconcile (editedon catch-up + YTD open scan)
+Documentation=file://${root}/docs/sync.md
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=${root}
+Environment=SYNC_WORKER_INSTALL_ROOT=${root}
+EnvironmentFile=-${root}/.env.sync-worker
+ExecStart=${root}/scripts/vps-hosting/sync-worker-nightly.sh
+StandardOutput=append:${root}/logs/sync-worker-nightly.log
+StandardError=append:${root}/logs/sync-worker-nightly.log
+UNIT
+  cat >"$timer_unit" <<TIMER
+[Unit]
+Description=Daily Fast Close CRM status reconcile (02:30)
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TIMER
+  chmod 644 "$service_unit" "$timer_unit"
+  systemctl daemon-reload
+  systemctl enable "${service_name}.timer"
+  systemctl restart "${service_name}.timer"
+  echo "--- nightly timer ---"
+  systemctl --no-pager list-timers "${service_name}.timer" || true
+}
+install_nightly_timer
+
 systemctl daemon-reload
 systemctl restart fast-close-sync-worker
 sleep 2

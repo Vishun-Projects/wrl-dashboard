@@ -44,19 +44,49 @@ const MIS_DIGEST_PREPARED_PATH = '/internal/mail/mis-digest-prepared';
 const MIGRATION_REPORT_PATH = '/internal/mail/migration-report';
 const SECRET = process.env.VPS_MAIL_RELAY_SECRET?.trim() ?? '';
 
-function readJson(req: import('http').IncomingMessage): Promise<unknown> {
+const MAX_BODY_BYTES = Math.max(
+  1_000_000,
+  Number(process.env.MAIL_RELAY_MAX_BODY_BYTES ?? 60 * 1024 * 1024) || 60 * 1024 * 1024
+);
+const REQUEST_TIMEOUT_MS = Math.max(
+  60_000,
+  Number(process.env.MAIL_RELAY_REQUEST_TIMEOUT_MS ?? 300_000) || 300_000
+);
+const HEADERS_TIMEOUT_MS = Math.max(
+  30_000,
+  Number(process.env.MAIL_RELAY_HEADERS_TIMEOUT_MS ?? 120_000) || 120_000
+);
+
+function readJson(req: import('http').IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
   return new Promise((resolveJson, reject) => {
     const chunks: Buffer[] = [];
-    req.on('data', (c) => chunks.push(c));
+    let total = 0;
+    req.on('data', (c: Buffer) => {
+      total += c.length;
+      if (total > maxBytes) {
+        reject(new Error(`Request body exceeds ${maxBytes} bytes`));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
     req.on('end', () => {
       try {
-        resolveJson(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
+        const raw = Buffer.concat(chunks).toString('utf8') || '{}';
+        resolveJson(JSON.parse(raw));
       } catch (err) {
-        reject(err);
+        reject(err instanceof Error ? err : new Error('Invalid JSON body'));
       }
     });
     req.on('error', reject);
+    req.on('aborted', () => reject(new Error('Request aborted before body complete')));
   });
+}
+
+function contentLength(req: import('http').IncomingMessage): number {
+  const raw = req.headers['content-length'];
+  const n = Number(raw ?? 0);
+  return Number.isFinite(n) ? n : 0;
 }
 
 if (!SECRET) {
@@ -64,7 +94,10 @@ if (!SECRET) {
   process.exit(1);
 }
 
-createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
+  req.setTimeout(REQUEST_TIMEOUT_MS);
+  res.setTimeout(REQUEST_TIMEOUT_MS);
+
   if (req.method !== 'POST') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
@@ -76,6 +109,17 @@ createServer(async (req, res) => {
     res.writeHead(401, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Unauthorized' }));
     return;
+  }
+
+  const len = contentLength(req);
+  if (len > MAX_BODY_BYTES) {
+    res.writeHead(413, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: `Request body too large (${len} bytes, max ${MAX_BODY_BYTES})` }));
+    return;
+  }
+
+  if (req.url === MIS_DIGEST_PREPARED_PATH && len > 0) {
+    console.log(`[mail-relay] ${MIS_DIGEST_PREPARED_PATH} Content-Length=${len}`);
   }
 
   try {
@@ -207,11 +251,17 @@ createServer(async (req, res) => {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Send failed';
     console.error('[mail-relay]', message);
-    res.writeHead(502, { 'Content-Type': 'application/json' });
+    const status = /exceeds|too large/i.test(message) ? 413 : 502;
+    res.writeHead(status, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: message }));
   }
-}).listen(PORT, '127.0.0.1', () => {
+});
+
+server.requestTimeout = REQUEST_TIMEOUT_MS;
+server.headersTimeout = HEADERS_TIMEOUT_MS;
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`[mail-relay] listening on 127.0.0.1:${PORT}`);
+  console.log(`[mail-relay]   max body ${MAX_BODY_BYTES} bytes, timeout ${REQUEST_TIMEOUT_MS}ms`);
   console.log(`[mail-relay]   ${RESET_PATH} (password reset)`);
   console.log(`[mail-relay]   ${MIS_DIGEST_PATH} (MIS digest — compose on VPS)`);
   console.log(`[mail-relay]   ${MIS_DIGEST_PREPARED_PATH} (MIS digest — pre-built from app)`);

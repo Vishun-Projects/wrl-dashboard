@@ -429,6 +429,7 @@ const TRACE_DETAIL_COLUMNS = [
   'File Name',
   'Contribution Step',
   'Included In Final Count',
+  'Counts Toward',
 ] as const;
 
 function addTraceSummarySheet(
@@ -450,7 +451,7 @@ function addTraceSummarySheet(
   applySummaryHeaderStyle(sumHeader);
 
   for (const row of payload.regionalRows) {
-    summary.addRow([
+    const r = summary.addRow([
       zoneShort(row.region),
       row.total_calls,
       row.total_solved,
@@ -461,6 +462,7 @@ function addTraceSummarySheet(
       row.age_15,
       row.active_eng,
     ]);
+    applyRegionRowStyle(r, row.region);
   }
 
   const g = payload.grand;
@@ -534,7 +536,13 @@ function addTraceRowDetailSheet(
         row.file_name,
         row.contribution_step,
         row.included_in_final_count ? 'Yes' : 'No',
+        row.counts_toward,
       ]);
+    }
+
+    const lastRow = detail.rowCount;
+    if (lastRow >= 2) {
+      detail.autoFilter = 'A1:N1';
     }
   }
 }
@@ -581,7 +589,7 @@ export async function buildBdMisTraceableWorkbook(
   meta.addRow(['Coke source', payload.filterMeta.sources.coke ? 'On' : 'Off']);
   meta.addRow([]);
   meta.addRow(['Sheets:']);
-  meta.addRow(['  Summary — dashboard regional totals']);
+  meta.addRow(['  Summary — dashboard regional table (snapshot at export)']);
   if (payload.traceAlign === 'bd_mis') {
     meta.addRow(['  Count Trace — step matrix per region (BD MIS union)']);
   } else {
@@ -598,11 +606,11 @@ export async function buildBdMisTraceableWorkbook(
       : 'Summary dashboard (CRM + client rows filtered to the selected date range)',
   ]);
 
+  addTraceRowDetailSheet(workbook, payload.traceRows);
   addTraceSummarySheet(workbook, payload);
   if (payload.traceAlign === 'bd_mis') {
     addTraceCountSheet(workbook, payload);
   }
-  addTraceRowDetailSheet(workbook, payload.traceRows);
   autoSizeWorkbookColumns(workbook, { skipSheetNamePattern: /^Row Detail/ });
 
   return workbook;

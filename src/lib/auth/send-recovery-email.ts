@@ -4,33 +4,30 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { resolveAppOrigin } from '@/lib/auth/site-url';
 import { isSmtpConfigured } from '@/lib/mis-email/send';
 import { sendPasswordResetEmail } from '@/lib/auth/send-password-reset-email';
+import {
+  relayPostJson,
+  resolveVpsMailRelaySecret,
+} from '@/lib/mis-email/relay-client';
+
+const RESET_PATH = '/internal/mail/send';
 
 async function sendViaVpsMailRelay(params: {
   to: string;
   resetLink: string;
   recipientName?: string | null;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const relayUrl = process.env.VPS_MAIL_RELAY_URL?.trim();
-  const relaySecret = process.env.VPS_MAIL_RELAY_SECRET?.trim();
-  if (!relayUrl || !relaySecret) {
+  const relaySecret = resolveVpsMailRelaySecret();
+  if (!relaySecret) {
     return { ok: false, error: 'VPS mail relay is not configured' };
   }
 
-  const res = await fetch(relayUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Mail-Relay-Secret': relaySecret,
-    },
-    body: JSON.stringify(params),
-    cache: 'no-store',
-  });
-
-  const payload = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) {
-    return { ok: false, error: payload.error || `Mail relay failed (${res.status})` };
+  try {
+    await relayPostJson(RESET_PATH, params, relaySecret);
+    return { ok: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Mail relay failed';
+    return { ok: false, error: message };
   }
-  return { ok: true };
 }
 
 export async function sendRecoveryEmailForAccount(params: {
@@ -54,7 +51,7 @@ export async function sendRecoveryEmailForAccount(params: {
     return { ok: false, error: 'Could not generate reset link' };
   }
 
-  if (process.env.VPS_MAIL_RELAY_URL?.trim() && process.env.VPS_MAIL_RELAY_SECRET?.trim()) {
+  if (resolveVpsMailRelaySecret()) {
     const relay = await sendViaVpsMailRelay({
       to: params.email,
       resetLink,

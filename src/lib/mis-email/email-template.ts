@@ -121,8 +121,40 @@ function buildMetaCell(label: string, value: string): string {
 </table>`;
 }
 
-function buildForceLightStyles(): string {
+function buildMisTableDarkModeStyles(prefix = ''): string {
+  const p = prefix ? `${prefix} ` : '';
+  return `
+    ${p}.mis-td, ${p}.mis-td-l { color: #e2e8f0 !important; }
+    ${p}.mis-th { background-color: #0070C0 !important; color: #ffffff !important; border-color: #334155 !important; }
+    ${p}.mis-td, ${p}.mis-th { border-color: #334155 !important; }
+    ${p}.mis-td.mis-zone-north { background-color: #223428 !important; color: #d9f99d !important; }
+    ${p}.mis-td.mis-zone-east { background-color: #1e3143 !important; color: #bfdbfe !important; }
+    ${p}.mis-td.mis-zone-west { background-color: #3a2b1e !important; color: #fed7aa !important; }
+    ${p}.mis-td.mis-zone-south { background-color: #2b313a !important; color: #e2e8f0 !important; }
+    ${p}.mis-td.mis-zone-grand { background-color: #3f3b1d !important; color: #fde68a !important; }
+    ${p}.mis-td.mis-zone-default { background-color: #1f2937 !important; color: #cbd5e1 !important; }
+    ${p}.mis-solved { color: #34d399 !important; }
+    ${p}.mis-cancel { color: #f87171 !important; }
+    ${p}.mis-pct { color: #60a5fa !important; }
+    ${p}.mis-open { color: #f1f5f9 !important; font-weight: bold !important; }
+    ${p}.mis-note { background-color: #1e293b !important; color: #94a3b8 !important; border-color: #334155 !important; }
+    ${p}.mis-title { color: #f1f5f9 !important; }`;
+}
+
+function buildMisZoneStyles(prefix = ''): string {
+  const p = prefix ? `${prefix} ` : '';
+  return `
+    ${p}.mis-td.mis-zone-north { background-color: #e7f3de !important; }
+    ${p}.mis-td.mis-zone-east { background-color: #deecf8 !important; }
+    ${p}.mis-td.mis-zone-west { background-color: #fbe8d9 !important; }
+    ${p}.mis-td.mis-zone-south { background-color: #eceef0 !important; }
+    ${p}.mis-td.mis-zone-grand { background-color: #fff8bf !important; }
+    ${p}.mis-td.mis-zone-default { background-color: #f1f5f9 !important; }`;
+}
+
+function buildForceLightStyles(params?: { includeDarkModeOverrides?: boolean }): string {
   const t = MIS_EMAIL_THEME;
+  const includeDarkModeOverrides = params?.includeDarkModeOverrides !== false;
 
   const ogBlock = (prefix: string) => {
     const p = prefix ? `${prefix} ` : '';
@@ -146,6 +178,31 @@ function buildForceLightStyles(): string {
     a[x-apple-data-detectors] { color: inherit !important; text-decoration: none !important; }
     ${ogBlock('[data-ogsc]')}
     ${ogBlock('[data-ogsb]')}
+    .mis-wrap { margin: 0 0 20px; border-collapse: collapse; width: 100%; table-layout: auto; background-color: ${t.bgCanvas} !important; }
+    .mis-title { padding: 0 0 8px; font-size: 12px; font-weight: bold; line-height: 1.4; }
+    .mis-inner { border-collapse: collapse; width: 100%; table-layout: auto; background-color: ${t.bgCanvas} !important; }
+    .mis-th { padding: 6px 8px; font-size: 10px; font-weight: bold; line-height: 1.3; color: #ffffff; background-color: #0070C0; border: 1px solid ${t.border}; text-align: center; }
+    .mis-th-l { text-align: left; }
+    .mis-td { padding: 6px 8px; font-size: 10px; line-height: 1.35; color: ${t.fgPrimary}; border: 1px solid ${t.border}; text-align: center; }
+    .mis-td-l { text-align: left; font-weight: bold; }
+    .mis-solved { color: #059669; }
+    .mis-cancel { color: #DC2626; }
+    .mis-open { font-weight: bold; }
+    .mis-pct { color: #1d4ed8; font-weight: bold; }
+    .mis-note { padding: 8px; font-size: 10px; line-height: 1.4; color: ${t.fgMuted}; text-align: center; border: 1px solid ${t.border}; background-color: ${t.bgMuted}; }
+    .mis-row td { background-color: transparent !important; }
+    ${buildMisZoneStyles()}
+    .mis-grid-cell .mis-wrap { margin: 0 0 12px; }
+    .mis-grid-cell .mis-th, .mis-grid-cell .mis-td { font-size: 9px; padding: 4px 5px; }
+    ${
+      includeDarkModeOverrides
+        ? `@media (prefers-color-scheme: dark) {
+      ${buildMisTableDarkModeStyles()}
+    }`
+        : ''
+    }
+    ${buildMisZoneStyles('[data-ogsc]')}
+    ${buildMisZoneStyles('[data-ogsb]')}
   `;
 }
 
@@ -190,7 +247,7 @@ export function buildDigestEmailHtml(params: {
   scopeLabel: string;
   portalUrl: string;
   bodyHtml?: string;
-}): string {
+}, options?: { forPreview?: boolean }): string {
   const t = MIS_EMAIL_THEME;
   const reportUrl = `${params.portalUrl.replace(/\/$/, '')}/report`;
   const greeting = formatRecipientGreeting(params.recipientName, params.recipientEmail);
@@ -210,7 +267,7 @@ export function buildDigestEmailHtml(params: {
   <meta name="color-scheme" content="light" />
   <meta name="supported-color-schemes" content="light" />
   <title>WRL MIS Reports</title>
-  <style type="text/css">${buildForceLightStyles()}</style>
+  <style type="text/css">${buildForceLightStyles({ includeDarkModeOverrides: false })}</style>
 </head>
 <body class="email-body" bgcolor="${t.bgSoft}" style="margin:0;padding:0;width:100%;background-color:${t.bgSoft};font-family:${t.fontInline};color:${t.fgPrimary};font-size:14px;line-height:1.6;">
   <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">${escapeHtml(preheader)}</div>
@@ -247,7 +304,17 @@ export function buildDigestEmailHtml(params: {
                   bodyHtml
                     ? `<tr>
                   <td class="email-panel" bgcolor="${t.bgCanvas}" style="padding:0 36px 24px;background-color:${t.bgCanvas};">
-                    <div style="overflow-x:auto;">${bodyHtml}</div>
+                    <!--[if mso]>
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="${t.bgCanvas}" style="background-color:${t.bgCanvas};">
+                      <tr>
+                        <td bgcolor="${t.bgCanvas}" style="background-color:${t.bgCanvas};">
+                    <![endif]-->
+                    <div style="overflow-x:auto;background-color:${t.bgCanvas};">${bodyHtml}</div>
+                    <!--[if mso]>
+                        </td>
+                      </tr>
+                    </table>
+                    <![endif]-->
                   </td>
                 </tr>`
                     : ''

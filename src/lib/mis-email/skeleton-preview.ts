@@ -3,6 +3,11 @@ import {
   type MisEmailBodySectionId,
 } from '@/lib/mis-email/body-sections';
 import {
+  composeEmailBodyGridHtml,
+  resolveMisEmailBodyLayout,
+  type MisEmailBodyLayout,
+} from '@/lib/mis-email/email-body-layout';
+import {
   buildDigestEmailHtml,
   formatReportPeriod,
   MIS_EMAIL_THEME,
@@ -12,6 +17,7 @@ import {
   hasAnyEffectiveDigestInclude,
   resolveDigestDateRangeForPreferences,
   resolveEffectiveDigestIncludes,
+  resolveMisEmailBodyLayoutFromPrefs,
   type MisEmailBodyPermissions,
   type MisEmailPreferences,
 } from '@/lib/mis-email/preferences';
@@ -45,11 +51,22 @@ function resolveSkeletonAttachmentFilenames(
   if (includes.includeKeyAccount) {
     filenames.push(`WRL Key Account MIS — ${label}.xlsx`);
   }
+  if (includes.includeTraceableExport) {
+    filenames.push(`WRL_BD_MIS_Traceable_${label}.xlsx`);
+  }
   return filenames;
 }
 
 function formatDigestSubject(date = new Date()): string {
   return `WRL MIS Reports — ${misExportDateLabel(date)}`;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function skeletonBar(widthPercent = 55): string {
@@ -118,15 +135,27 @@ function buildSkeletonPerformanceTable(params: {
   </table>`;
 }
 
-function buildSkeletonKeyAccountTable(keyAccountNames: string[]): string {
-  const labels =
+function buildSkeletonKeyAccountTable(
+  keyAccountNames: string[],
+  mergeRegionCells = false
+): string {
+  const zones = ['EAST ZONE', 'NORTH ZONE', 'SOUTH ZONE', 'WEST ZONE'];
+  const accounts =
     keyAccountNames.length > 0
-      ? keyAccountNames.map((name) => ({ label: name, isAccount: true }))
+      ? [...keyAccountNames].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+      : [];
+
+  type SkeletonRow = { zone: string; account: string; isPlaceholder: boolean };
+  const labels: SkeletonRow[] =
+    accounts.length > 0
+      ? zones.flatMap((zone) =>
+          accounts.map((name) => ({ zone, account: name, isPlaceholder: false }))
+        )
       : [
-          { label: 'Key account', isAccount: true },
-          { label: 'Key account', isAccount: true },
-          { label: 'Key account', isAccount: true },
-          { label: '…', isAccount: false },
+          { zone: zones[0], account: 'Key account', isPlaceholder: true },
+          { zone: zones[1], account: 'Key account', isPlaceholder: true },
+          { zone: zones[2], account: 'Key account', isPlaceholder: true },
+          { zone: '…', account: '…', isPlaceholder: false },
         ];
 
   const t = MIS_EMAIL_THEME;
@@ -144,23 +173,37 @@ function buildSkeletonKeyAccountTable(keyAccountNames: string[]): string {
         .join('')}
     </tr>`;
 
-  const bodyRows = labels
-    .map((row, index) => {
-      if (!row.isAccount) {
-        return `<tr>
+  const bodyRows: string[] = [];
+  for (let index = 0; index < labels.length; index++) {
+    const row = labels[index];
+    if (!row.isPlaceholder && row.zone === '…') {
+      bodyRows.push(`<tr>
           <td colspan="${2 + metricCount}" style="padding:8px;font-family:${t.fontInline};font-size:10px;color:${t.fgMuted};text-align:center;border:1px solid ${t.border};background-color:#f8fafc;">All key accounts in scope when none selected</td>
-        </tr>`;
+        </tr>`);
+      continue;
+    }
+    const barWidth = 42 + (index % 4) * 10;
+    let regionCell = '';
+    if (!mergeRegionCells) {
+      const zoneLabel = row.isPlaceholder ? skeletonBar(36) : escapeHtml(row.zone.replace(' ZONE', ''));
+      regionCell = `<td style="${cellStyle}">${zoneLabel}</td>`;
+    } else if (index === 0 || labels[index - 1].zone !== row.zone) {
+      let span = 1;
+      while (index + span < labels.length && labels[index + span].zone === row.zone) {
+        span++;
       }
-      const barWidth = 42 + (index % 4) * 10;
-      return `<tr>
-        <td style="${cellStyle}">${skeletonBar(36)}</td>
-        <td style="${labelStyle}">${row.label}</td>
+      const zoneLabel = row.isPlaceholder ? skeletonBar(36) : escapeHtml(row.zone.replace(' ZONE', ''));
+      const rowspanAttr = span > 1 ? ` rowspan="${span}"` : '';
+      regionCell = `<td style="${cellStyle}"${rowspanAttr}>${zoneLabel}</td>`;
+    }
+    bodyRows.push(`<tr>
+        ${regionCell}
+        <td style="${labelStyle}">${row.isPlaceholder ? row.account : escapeHtml(row.account)}</td>
         ${Array.from({ length: metricCount })
           .map((_, col) => `<td style="${cellStyle}">${skeletonBar(barWidth + (col % 2) * 6)}</td>`)
           .join('')}
-      </tr>`;
-    })
-    .join('');
+      </tr>`);
+  }
 
   return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 20px;border-collapse:collapse;width:100%;">
     <tr>
@@ -170,56 +213,65 @@ function buildSkeletonKeyAccountTable(keyAccountNames: string[]): string {
       <td style="padding:0;">
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;width:100%;">
           <thead>${header}</thead>
-          <tbody>${bodyRows}</tbody>
+          <tbody>${bodyRows.join('')}</tbody>
         </table>
       </td>
     </tr>
   </table>`;
 }
 
-function buildSkeletonBodySectionsHtml(
+function buildSkeletonSectionHtmlMap(
   sectionIds: MisEmailBodySectionId[],
-  keyAccountNames: string[]
-): string {
-  const blocks: string[] = [];
+  keyAccountNames: string[],
+  layout: MisEmailBodyLayout
+): Partial<Record<MisEmailBodySectionId, string>> {
+  const resolved = resolveMisEmailBodyLayout(layout);
+  const mergeRegionCells =
+    resolved.mergeKeyAccountRegions === true && resolved.mode === 'grid';
+  const map: Partial<Record<MisEmailBodySectionId, string>> = {};
 
   for (const id of sectionIds) {
     if (id === 'regional_performance') {
-      blocks.push(
-        buildSkeletonPerformanceTable({
-          title: 'Regional Performance',
-          labelColumn: 'Region',
-          rowLabels: [
-            { label: 'North zone' },
-            { label: 'South zone' },
-            { label: 'East zone' },
-            { label: 'West zone' },
-            { label: 'All', isGrand: true },
-          ],
-          metricColumns: 10,
-        })
-      );
+      map[id] = buildSkeletonPerformanceTable({
+        title: 'Regional Performance',
+        labelColumn: 'Region',
+        rowLabels: [
+          { label: 'North zone' },
+          { label: 'South zone' },
+          { label: 'East zone' },
+          { label: 'West zone' },
+          { label: 'All', isGrand: true },
+        ],
+        metricColumns: 10,
+      });
     } else if (id === 'branch_performance') {
-      blocks.push(
-        buildSkeletonPerformanceTable({
-          title: 'Branch-wise Performance',
-          labelColumn: 'Branch',
-          rowLabels: [
-            { label: 'Branch' },
-            { label: 'Branch' },
-            { label: 'Branch' },
-            { label: 'Branch' },
-            { label: 'Branch' },
-          ],
-          metricColumns: 10,
-        })
-      );
+      map[id] = buildSkeletonPerformanceTable({
+        title: 'Branch-wise Performance',
+        labelColumn: 'Branch',
+        rowLabels: [
+          { label: 'Branch' },
+          { label: 'Branch' },
+          { label: 'Branch' },
+          { label: 'Branch' },
+          { label: 'Branch' },
+        ],
+        metricColumns: 10,
+      });
     } else if (id === 'key_account_performance') {
-      blocks.push(buildSkeletonKeyAccountTable(keyAccountNames));
+      map[id] = buildSkeletonKeyAccountTable(keyAccountNames, mergeRegionCells);
     }
   }
 
-  return blocks.join('');
+  return map;
+}
+
+function buildSkeletonBodySectionsHtml(
+  sectionIds: MisEmailBodySectionId[],
+  keyAccountNames: string[],
+  layout: MisEmailBodyLayout
+): string {
+  const sectionHtml = buildSkeletonSectionHtmlMap(sectionIds, keyAccountNames, layout);
+  return composeEmailBodyGridHtml(sectionIds, sectionHtml, layout);
 }
 
 export function buildMisEmailSkeletonPreview(params: {
@@ -249,7 +301,8 @@ export function buildMisEmailSkeletonPreview(params: {
   });
 
   const keyAccountNames = (params.preferences.keyAccountsInBody ?? []).filter(Boolean);
-  const bodyHtml = buildSkeletonBodySectionsHtml(bodySectionIds, keyAccountNames);
+  const bodyLayout = resolveMisEmailBodyLayoutFromPrefs(params.preferences);
+  const bodyHtml = buildSkeletonBodySectionsHtml(bodySectionIds, keyAccountNames, bodyLayout);
   const portalUrl = params.portalUrl?.replace(/\/$/, '') || '/report';
 
   const html = buildDigestEmailHtml({
@@ -259,7 +312,7 @@ export function buildMisEmailSkeletonPreview(params: {
     scopeLabel: params.scopeLabel,
     portalUrl,
     bodyHtml,
-  });
+  }, { forPreview: true });
 
   return {
     subject: formatDigestSubject(),

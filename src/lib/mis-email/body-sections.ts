@@ -1,12 +1,17 @@
-import { getRegionColor } from '@/lib/report/summary-excel-export';
 import type { BranchSummaryRow, SummaryDashboard } from '@/lib/report/summary-derive';
 import { MIS_EMAIL_THEME } from '@/lib/mis-email/email-template';
 import type { MisEmailBodyPermissions } from '@/lib/mis-email/preferences';
 import {
   buildMergedAccountMetricRow,
   DEFAULT_CLIENT_MERGE_WITH_CRM,
+  sortAccountRowsByZoneThenAccount,
   type MergeSelection,
 } from '@/lib/report/account-merge';
+import {
+  composeEmailBodyGridHtml,
+  resolveMisEmailBodyLayout,
+  type MisEmailBodyLayout,
+} from '@/lib/mis-email/email-body-layout';
 
 export const MIS_EMAIL_BODY_SECTION_IDS = [
   'regional_performance',
@@ -149,8 +154,62 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function regionBgColor(region: string): string {
-  return `#${getRegionColor(region)}`.replace(/^#FF/, '#');
+function zoneClass(region: string, isGrand = false): string {
+  if (isGrand) return 'mis-zone-grand';
+  const normalized = (region || '').toUpperCase();
+  if (normalized.includes('NORTH')) return 'mis-zone-north';
+  if (normalized.includes('EAST')) return 'mis-zone-east';
+  if (normalized.includes('WEST')) return 'mis-zone-west';
+  if (normalized.includes('SOUTH')) return 'mis-zone-south';
+  return 'mis-zone-default';
+}
+
+function zoneBgColor(zoneClassName: string): string {
+  switch (zoneClassName) {
+    case 'mis-zone-north':
+      return '#e7f3de';
+    case 'mis-zone-east':
+      return '#deecf8';
+    case 'mis-zone-west':
+      return '#fbe8d9';
+    case 'mis-zone-south':
+      return '#eceef0';
+    case 'mis-zone-grand':
+      return '#fff8bf';
+    default:
+      return '#f1f5f9';
+  }
+}
+
+function thStyle(theme = MIS_EMAIL_THEME, left = false): string {
+  return [
+    `padding:6px 8px`,
+    `font-family:${theme.fontInline}`,
+    `font-size:10px`,
+    `font-weight:bold`,
+    `line-height:1.3`,
+    `color:#ffffff`,
+    `background-color:#0070C0`,
+    `border:1px solid ${theme.border}`,
+    `text-align:${left ? 'left' : 'center'}`,
+  ].join(';');
+}
+
+function tdStyle(theme = MIS_EMAIL_THEME, opts?: { left?: boolean; bold?: boolean; color?: string; bg?: string }): string {
+  const bg = opts?.bg ?? theme.bgCanvas;
+  return [
+    `padding:6px 8px`,
+    `font-family:${theme.fontInline}`,
+    `font-size:10px`,
+    `line-height:1.35`,
+    `color:${opts?.color ?? theme.fgPrimary}`,
+    `border:1px solid ${theme.border}`,
+    `text-align:${opts?.left ? 'left' : 'center'}`,
+    opts?.bold ? 'font-weight:bold' : '',
+    `background-color:${bg}`,
+  ]
+    .filter(Boolean)
+    .join(';');
 }
 
 function buildPerformanceTableHtml(params: {
@@ -173,56 +232,49 @@ function buildPerformanceTableHtml(params: {
   }>;
 }): string {
   const t = MIS_EMAIL_THEME;
-  const headerStyle = `padding:6px 8px;font-family:${t.fontInline};font-size:10px;font-weight:bold;line-height:1.3;color:#ffffff;background-color:#0070C0;border:1px solid ${t.border};text-align:center;`;
-  const cellStyle = `padding:6px 8px;font-family:${t.fontInline};font-size:10px;line-height:1.35;color:${t.fgPrimary};border:1px solid ${t.border};text-align:center;`;
-  const labelStyle = `padding:6px 8px;font-family:${t.fontInline};font-size:10px;line-height:1.35;color:${t.fgPrimary};border:1px solid ${t.border};text-align:left;font-weight:bold;`;
 
   const header = `
     <tr>
-      <th style="${headerStyle.replace('text-align:center;', 'text-align:left;')}">${escapeHtml(params.regionColumnLabel)}</th>
-      <th style="${headerStyle}">Total calls</th>
-      <th style="${headerStyle}">Total solved</th>
-      <th style="${headerStyle}">Cancelled</th>
-      <th style="${headerStyle}"># open calls</th>
-      <th style="${headerStyle}">&le;2 days</th>
-      <th style="${headerStyle}">3-7 days</th>
-      <th style="${headerStyle}">8-15 days</th>
-      <th style="${headerStyle}">&gt;15 days</th>
-      <th style="${headerStyle}">Part pending</th>
-      <th style="${headerStyle}"># of active Eng.</th>
+      <th class="mis-th mis-th-l" bgcolor="#0070C0" style="${thStyle(t, true)}">${escapeHtml(params.regionColumnLabel)}</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Total calls</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Total solved</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Cancelled</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}"># open calls</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&le;2 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">3-7 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">8-15 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;15 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Part pending</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}"># of active Eng.</th>
     </tr>`;
 
   const bodyRows = params.rows
     .map((row) => {
-      const bg = row.isGrand ? '#FFFF00' : regionBgColor(row.regionKey);
-      const rowStyle = `background-color:${bg};`;
-      const solvedStyle = `${cellStyle}color:#059669;`;
-      const cancelledStyle = `${cellStyle}color:#DC2626;`;
-      const openStyle = `${cellStyle}font-weight:bold;`;
-
-      return `<tr>
-        <td style="${labelStyle}${rowStyle}">${escapeHtml(formatRegionLabel(row.label))}</td>
-        <td style="${cellStyle}${rowStyle}">${formatNum(row.total_calls + row.cancelled_calls)}</td>
-        <td style="${solvedStyle}${rowStyle}">${formatNum(row.solved_calls)}</td>
-        <td style="${cancelledStyle}${rowStyle}">${formatNum(row.cancelled_calls)}</td>
-        <td style="${openStyle}${rowStyle}">${formatNum(row.open_calls)}</td>
-        <td style="${cellStyle}${rowStyle}">${formatNum(row.age_2)}</td>
-        <td style="${cellStyle}${rowStyle}">${formatNum(row.age_3)}</td>
-        <td style="${cellStyle}${rowStyle}">${formatNum(row.age_7)}</td>
-        <td style="${cellStyle}${rowStyle}">${formatNum(row.age_15)}</td>
-        <td style="${cellStyle}${rowStyle}">${formatNum(row.part_pending)}</td>
-        <td style="${cellStyle}${rowStyle}">${formatNum(row.active_eng)}</td>
+      const rowZoneClass = zoneClass(row.regionKey, row.isGrand);
+      const zoneBg = zoneBgColor(rowZoneClass);
+      return `<tr class="mis-row">
+        <td class="mis-td mis-td-l ${rowZoneClass}" bgcolor="${zoneBg}" style="${tdStyle(t, { left: true, bold: true, bg: zoneBg })}">${escapeHtml(formatRegionLabel(row.label))}</td>
+        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(row.total_calls + row.cancelled_calls)}</td>
+        <td class="mis-td mis-solved" bgcolor="#ffffff" style="${tdStyle(t, { color: '#059669' })}">${formatNum(row.solved_calls)}</td>
+        <td class="mis-td mis-cancel" bgcolor="#ffffff" style="${tdStyle(t, { color: '#DC2626' })}">${formatNum(row.cancelled_calls)}</td>
+        <td class="mis-td mis-open" bgcolor="#ffffff" style="${tdStyle(t, { bold: true })}">${formatNum(row.open_calls)}</td>
+        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(row.age_2)}</td>
+        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(row.age_3)}</td>
+        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(row.age_7)}</td>
+        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(row.age_15)}</td>
+        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(row.part_pending)}</td>
+        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(row.active_eng)}</td>
       </tr>`;
     })
     .join('');
 
-  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 20px;border-collapse:collapse;width:100%;table-layout:auto;">
+  return `<table role="presentation" class="mis-wrap" width="100%" cellspacing="0" cellpadding="0" border="0">
     <tr>
-      <td style="padding:0 0 8px;font-family:${t.fontInline};font-size:12px;font-weight:bold;line-height:1.4;color:${t.fgPrimary};">${escapeHtml(params.title)}</td>
+      <td class="mis-title" style="font-family:${t.fontInline};color:${t.fgPrimary};">${escapeHtml(params.title)}</td>
     </tr>
     <tr>
       <td style="padding:0;">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;width:100%;table-layout:auto;">
+        <table role="presentation" class="mis-inner" width="100%" cellspacing="0" cellpadding="0" border="0">
           <thead>${header}</thead>
           <tbody>${bodyRows}</tbody>
         </table>
@@ -231,69 +283,105 @@ function buildPerformanceTableHtml(params: {
   </table>`;
 }
 
-function buildKeyAccountTableHtml(context: MisEmailBodyContext): string {
-  const accountRows = context.accountRows ?? [];
-  if (!accountRows.length) return '';
+function buildKeyAccountTableHtml(
+  context: MisEmailBodyContext,
+  options?: { mergeRegionCells?: boolean; maxRows?: number }
+): string {
+  const allRows = sortAccountRowsByZoneThenAccount(context.accountRows ?? []);
+  if (!allRows.length) return '';
+
+  const totalRows = allRows.length;
+  const maxRows = options?.maxRows;
+  const accountRows =
+    typeof maxRows === 'number' && maxRows >= 0 && maxRows < totalRows
+      ? allRows.slice(0, maxRows)
+      : allRows;
+  const truncated = accountRows.length < totalRows;
 
   const t = MIS_EMAIL_THEME;
-  const headerStyle = `padding:6px 8px;font-family:${t.fontInline};font-size:10px;font-weight:bold;line-height:1.3;color:#ffffff;background-color:#0070C0;border:1px solid ${t.border};text-align:center;`;
-  const cellStyle = `padding:6px 8px;font-family:${t.fontInline};font-size:10px;line-height:1.35;color:${t.fgPrimary};border:1px solid ${t.border};text-align:center;`;
-  const labelStyle = `padding:6px 8px;font-family:${t.fontInline};font-size:10px;line-height:1.35;color:${t.fgPrimary};border:1px solid ${t.border};text-align:left;font-weight:bold;`;
 
   const header = `
     <tr>
-      <th style="${headerStyle.replace('text-align:center;', 'text-align:left;')}">Region</th>
-      <th style="${headerStyle.replace('text-align:center;', 'text-align:left;')}">Key Account</th>
-      <th style="${headerStyle}">Total calls</th>
-      <th style="${headerStyle}">Total solved</th>
-      <th style="${headerStyle}"># open calls</th>
-      <th style="${headerStyle}">&lt;2 days</th>
-      <th style="${headerStyle}">2-7 days</th>
-      <th style="${headerStyle}">7-15 days</th>
-      <th style="${headerStyle}">&gt;15 days</th>
-      <th style="${headerStyle}">% &gt;7 days</th>
-      <th style="${headerStyle}"># of active Eng.</th>
+      <th class="mis-th mis-th-l" bgcolor="#0070C0" style="${thStyle(t, true)}">Region</th>
+      <th class="mis-th mis-th-l" bgcolor="#0070C0" style="${thStyle(t, true)}">Key Account</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Total calls</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Total solved</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}"># open calls</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&lt;2 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">2-7 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">7-15 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;15 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">% &gt;7 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}"># of active Eng.</th>
     </tr>`;
 
-  const bodyRows = accountRows
-    .map((row) => {
-      const merged = buildMergedAccountMetricRow(
-        row,
-        context.clientAccountSummary,
-        DIGEST_MERGE_FLAGS,
-        DEFAULT_CLIENT_MERGE_WITH_CRM
-      );
-      const bg = regionBgColor(merged.region);
-      const rowStyle = `background-color:${bg};`;
-      const solvedStyle = `${cellStyle}color:#059669;`;
-      const openStyle = `${cellStyle}font-weight:bold;`;
-      const pctStyle = `${cellStyle}color:#1d4ed8;font-weight:bold;`;
+  const mergeRegionCells = options?.mergeRegionCells ?? false;
+  const mergedRows = accountRows.map((row) =>
+    buildMergedAccountMetricRow(
+      row,
+      context.clientAccountSummary,
+      DIGEST_MERGE_FLAGS,
+      DEFAULT_CLIENT_MERGE_WITH_CRM
+    )
+  );
 
-      return `<tr>
-        <td style="${labelStyle}${rowStyle}">${escapeHtml(formatRegionLabel(merged.region))}</td>
-        <td style="${labelStyle}${rowStyle}">${escapeHtml(merged.account)}</td>
-        <td style="${cellStyle}${rowStyle}">${formatNum(merged.total_calls)}</td>
-        <td style="${solvedStyle}${rowStyle}">${formatNum(merged.total_solved)}</td>
-        <td style="${openStyle}${rowStyle}">${formatNum(merged.open_calls)}</td>
-        <td style="${cellStyle}${rowStyle}">${formatNum(merged.age_2)}</td>
-        <td style="${cellStyle}${rowStyle}">${formatNum(merged.age_3)}</td>
-        <td style="${cellStyle}${rowStyle}">${formatNum(merged.age_7)}</td>
-        <td style="${cellStyle}${rowStyle}">${formatNum(merged.age_15)}</td>
-        <td style="${pctStyle}${rowStyle}">${escapeHtml(merged.pct_gt_7)}</td>
-        <td style="${cellStyle}${rowStyle}">${formatNum(merged.active_eng)}</td>
-      </tr>`;
-    })
-    .join('');
+  const bodyRows: string[] = [];
+  for (let i = 0; i < mergedRows.length; i++) {
+    const merged = mergedRows[i];
+    const rowZoneClass = zoneClass(merged.region);
+    const zoneBg = zoneBgColor(rowZoneClass);
 
-  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 20px;border-collapse:collapse;width:100%;table-layout:auto;">
+    let regionCell = '';
+    if (!mergeRegionCells) {
+      regionCell = `<td class="mis-td mis-td-l ${rowZoneClass}" bgcolor="${zoneBg}" style="${tdStyle(t, { left: true, bold: true, bg: zoneBg })}">${escapeHtml(formatRegionLabel(merged.region))}</td>`;
+    } else {
+      const prevRegion = i > 0 ? mergedRows[i - 1].region : null;
+      if (merged.region !== prevRegion) {
+        let span = 1;
+        while (
+          i + span < mergedRows.length &&
+          mergedRows[i + span].region === merged.region
+        ) {
+          span++;
+        }
+        const rowspanAttr = span > 1 ? ` rowspan="${span}"` : '';
+        regionCell = `<td class="mis-td mis-td-l ${rowZoneClass}"${rowspanAttr} bgcolor="${zoneBg}" style="${tdStyle(t, { left: true, bold: true, bg: zoneBg })}">${escapeHtml(formatRegionLabel(merged.region))}</td>`;
+      }
+    }
+
+    bodyRows.push(`<tr class="mis-row">
+        ${regionCell}
+        <td class="mis-td mis-td-l" bgcolor="#ffffff" style="${tdStyle(t, { left: true, bold: true })}">${escapeHtml(merged.account)}</td>
+        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(merged.total_calls)}</td>
+        <td class="mis-td mis-solved" bgcolor="#ffffff" style="${tdStyle(t, { color: '#059669' })}">${formatNum(merged.total_solved)}</td>
+        <td class="mis-td mis-open" bgcolor="#ffffff" style="${tdStyle(t, { bold: true })}">${formatNum(merged.open_calls)}</td>
+        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(merged.age_2)}</td>
+        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(merged.age_3)}</td>
+        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(merged.age_7)}</td>
+        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(merged.age_15)}</td>
+        <td class="mis-td mis-pct" bgcolor="#ffffff" style="${tdStyle(t, { color: '#1d4ed8', bold: true })}">${escapeHtml(merged.pct_gt_7)}</td>
+        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(merged.active_eng)}</td>
+      </tr>`);
+  }
+
+  if (truncated) {
+    bodyRows.push(`<tr>
+        <td colspan="11" class="mis-note" style="font-family:${t.fontInline};">
+          Showing ${accountRows.length} of ${totalRows} key-account rows — Gmail limits email size (~102 KB).
+          See the attached Key Account MIS Excel for the full list.
+        </td>
+      </tr>`);
+  }
+
+  return `<table role="presentation" class="mis-wrap" width="100%" cellspacing="0" cellpadding="0" border="0">
     <tr>
-      <td style="padding:0 0 8px;font-family:${t.fontInline};font-size:12px;font-weight:bold;line-height:1.4;color:${t.fgPrimary};">Key Account Breakdown</td>
+      <td class="mis-title" style="font-family:${t.fontInline};color:${t.fgPrimary};">Key Account Breakdown</td>
     </tr>
     <tr>
       <td style="padding:0;">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;width:100%;table-layout:auto;">
+        <table role="presentation" class="mis-inner" width="100%" cellspacing="0" cellpadding="0" border="0">
           <thead>${header}</thead>
-          <tbody>${bodyRows}</tbody>
+          <tbody>${bodyRows.join('')}</tbody>
         </table>
       </td>
     </tr>
@@ -346,27 +434,63 @@ function buildBranchPerformanceHtml(data: SummaryDashboard): string {
   });
 }
 
-export function buildEmailBodySectionsHtml(
+export type MisEmailBodyRenderOptions = {
+  layout?: MisEmailBodyLayout | null;
+  keyAccountMaxRows?: number;
+};
+
+function resolveBodyRenderOptions(
+  options?: MisEmailBodyLayout | null | MisEmailBodyRenderOptions
+): MisEmailBodyRenderOptions {
+  if (!options) return {};
+  if ('mode' in options) return { layout: options };
+  return options;
+}
+
+function buildSectionHtmlMap(
   sectionIds: MisEmailBodySectionId[],
-  context: MisEmailBodyContext | SummaryDashboard
-): string {
-  const bodyContext: MisEmailBodyContext =
-    'summary' in context ? context : { summary: context };
+  bodyContext: MisEmailBodyContext,
+  renderOptions: MisEmailBodyRenderOptions
+): Partial<Record<MisEmailBodySectionId, string>> {
   const data = bodyContext.summary;
-  const blocks: string[] = [];
+  const resolved = resolveMisEmailBodyLayout(renderOptions.layout);
+  const mergeRegionCells =
+    resolved.mergeKeyAccountRegions === true &&
+    resolved.mode === 'grid';
+  const map: Partial<Record<MisEmailBodySectionId, string>> = {};
 
   for (const id of sectionIds) {
     if (id === 'regional_performance') {
-      blocks.push(buildRegionalPerformanceHtml(data));
+      map[id] = buildRegionalPerformanceHtml(data);
     } else if (id === 'branch_performance') {
-      blocks.push(buildBranchPerformanceHtml(data));
+      map[id] = buildBranchPerformanceHtml(data);
     } else if (id === 'key_account_performance') {
-      const html = buildKeyAccountTableHtml(bodyContext);
-      if (html) blocks.push(html);
+      const html = buildKeyAccountTableHtml(bodyContext, {
+        mergeRegionCells,
+        maxRows: renderOptions.keyAccountMaxRows,
+      });
+      if (html) map[id] = html;
     }
   }
 
-  return blocks.join('');
+  return map;
+}
+
+export function buildEmailBodySectionsHtml(
+  sectionIds: MisEmailBodySectionId[],
+  context: MisEmailBodyContext | SummaryDashboard,
+  options?: MisEmailBodyLayout | null | MisEmailBodyRenderOptions
+): string {
+  const bodyContext: MisEmailBodyContext =
+    'summary' in context ? context : { summary: context };
+  const renderOptions = resolveBodyRenderOptions(options);
+  const resolvedLayout = resolveMisEmailBodyLayout(renderOptions.layout);
+  const sectionHtml = buildSectionHtmlMap(sectionIds, bodyContext, renderOptions);
+  return composeEmailBodyGridHtml(sectionIds, sectionHtml, resolvedLayout);
+}
+
+export function countKeyAccountBodyRows(context: MisEmailBodyContext): number {
+  return sortAccountRowsByZoneThenAccount(context.accountRows ?? []).length;
 }
 
 function buildPerformancePlainLines(
@@ -427,7 +551,7 @@ export function buildEmailBodySectionsPlainText(
   }
 
   if (sectionIds.includes('key_account_performance') && (bodyContext.accountRows?.length ?? 0) > 0) {
-    const accountRows = bodyContext.accountRows ?? [];
+    const accountRows = sortAccountRowsByZoneThenAccount(bodyContext.accountRows ?? []);
     if (accountRows.length > 0) {
       blocks.push('', 'Key Account Breakdown', '');
       for (const row of accountRows) {

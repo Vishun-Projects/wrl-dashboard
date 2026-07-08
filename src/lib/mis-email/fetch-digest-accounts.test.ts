@@ -101,4 +101,12 @@ describe('resolveDigestKeyAccountBodyRows', () => {
     const rows = resolveDigestKeyAccountBodyRows(crmAccounts, clientAccounts, []);
     expect(rows.length).toBeGreaterThanOrEqual(2);
   });
+
+  it('falls back to all accounts when explicit selection has no matches', () => {
+    const rows = resolveDigestKeyAccountBodyRows(crmAccounts, clientAccounts, ['Unknown Account']);
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    expect(rows.map((row) => String(row.account))).toEqual(
+      expect.arrayContaining(['Nestle', 'COKE'])
+    );
+  });
 });

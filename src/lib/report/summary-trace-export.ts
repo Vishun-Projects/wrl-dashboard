@@ -1,5 +1,11 @@
 import type { BranchSummaryRow } from '@/lib/report/summary-derive';
-import type { BdMisGrandRow, BdMisRegionalRow, BdMisZone } from '@/lib/report/bd-mis-summary';
+import { formatDisplayRegion } from '@/lib/mis-client-import/region';
+import {
+  BD_MIS_ZONES,
+  type BdMisGrandRow,
+  type BdMisRegionalRow,
+  type BdMisZone,
+} from '@/lib/report/bd-mis-summary';
 import {
   mergeSelectedMetrics,
   type MergeSelection,
@@ -34,12 +40,12 @@ const REGION_METRIC_KEYS = [
 
 function sumRegionBranchMetric(
   branches: BranchSummaryRow[] | undefined,
-  region: string,
+  zone: BdMisZone,
   key: keyof BranchSummaryRow
 ): number {
   if (!branches?.length) return 0;
   return branches
-    .filter((b) => b.region === region)
+    .filter((b) => formatDisplayRegion(b.region) === zone)
     .reduce((sum, b) => sum + Number(b[key] ?? 0), 0);
 }
 
@@ -49,14 +55,7 @@ export function buildUiRegionalPerformanceRows(
   clientSummaryData: BranchSummaryRow[] | undefined,
   mergeFlags: MergeSelection
 ): UiRegionalPerformanceRow[] {
-  const regions = Array.from(
-    new Set([
-      ...summaryData.map((b) => b.region),
-      ...(clientSummaryData?.map((b) => b.region) ?? []),
-    ])
-  ).sort();
-
-  return regions.map((region) => {
+  return BD_MIS_ZONES.map((region) => {
     const row = { region } as UiRegionalPerformanceRow;
     for (const key of REGION_METRIC_KEYS) {
       row[key] = mergeSelectedMetrics(

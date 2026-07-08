@@ -2,12 +2,14 @@ import { buildDigestAttachments, resolveDigestAttachmentFilenames, type EmailAtt
 import {
   buildEmailBodySectionsHtml,
   buildEmailBodySectionsPlainText,
+  countKeyAccountBodyRows,
   resolveDigestBodySections,
   type MisEmailBodyContext,
 } from '@/lib/mis-email/body-sections';
 import {
   resolveDigestKeyAccountBodyRows,
 } from '@/lib/mis-email/fetch-digest-accounts';
+import { buildDigestTraceableExportPayload } from '@/lib/mis-email/fetch-digest-trace';
 import {
   fetchDigestRegisterRows,
   type DigestDateRange,
@@ -28,6 +30,7 @@ import {
   resolveDigestDateRangeForPreferences,
   resolveEffectiveDigestIncludes,
   resolveExtraDigestEmails,
+  resolveMisEmailBodyLayoutFromPrefs,
   type MisEmailBodyPermissions,
   type MisEmailPreferences,
 } from '@/lib/mis-email/preferences';
@@ -35,6 +38,13 @@ import type { DigestRecipient } from '@/lib/mis-email/recipients';
 import { resolvePortalUrl, sendPreparedDigestEmail } from '@/lib/mis-email/send';
 import { resolveUserDigestScopeWithLabel } from '@/lib/mis-email/user-scope';
 import { formatBytes, MisEmailTimer, type MisEmailTimingReport } from '@/lib/mis-email/timing';
+import {
+  GMAIL_SAFE_HTML_BYTES,
+  gmailClipWarningMessage,
+  measureHtmlUtf8Bytes,
+} from '@/lib/mis-email/email-html-size';
+import type { MisEmailBodyLayout } from '@/lib/mis-email/email-body-layout';
+import type { MisEmailBodySectionId } from '@/lib/mis-email/body-sections';
 
 export type MisEmailComposePreview = {
   subject: string;
@@ -44,6 +54,10 @@ export type MisEmailComposePreview = {
   attachments: string[];
   html: string;
   plainText: string;
+  htmlSizeBytes?: number;
+  gmailClipWarning?: string;
+  keyAccountRowsInBody?: number;
+  keyAccountRowsTotal?: number;
 };
 
 export type MisEmailSendResult = {
@@ -117,6 +131,99 @@ async function buildMisEmailBodyContext(
   return context;
 }
 
+function buildDigestEmailContent(params: {
+  recipientName: string;
+  recipientEmail: string;
+  dateRange: DigestDateRange;
+  scopeLabel: string;
+  portalUrl: string;
+  bodySectionIds: MisEmailBodySectionId[];
+  bodyContext: MisEmailBodyContext;
+  bodyLayout: MisEmailBodyLayout;
+  forPreview?: boolean;
+}): {
+  bodyHtml?: string;
+  bodyPlainText?: string;
+  html: string;
+  plainText: string;
+  htmlSizeBytes: number;
+  gmailClipWarning?: string;
+  keyAccountRowsInBody?: number;
+  keyAccountRowsTotal?: number;
+} {
+  const { bodySectionIds, bodyContext, bodyLayout } = params;
+  const totalKeyRows = bodySectionIds.includes('key_account_performance')
+    ? countKeyAccountBodyRows(bodyContext)
+    : 0;
+
+  const render = (keyAccountMaxRows?: number) => {
+    const bodyHtml =
+      bodySectionIds.length > 0
+        ? buildEmailBodySectionsHtml(bodySectionIds, bodyContext, {
+            layout: bodyLayout,
+            keyAccountMaxRows,
+          })
+        : undefined;
+    const bodyPlainText =
+      bodySectionIds.length > 0
+        ? buildEmailBodySectionsPlainText(bodySectionIds, bodyContext)
+        : undefined;
+    const emailParams = {
+      recipientName: params.recipientName,
+      recipientEmail: params.recipientEmail,
+      dateRange: params.dateRange,
+      scopeLabel: params.scopeLabel,
+      portalUrl: params.portalUrl,
+      bodyHtml,
+      bodyPlainText,
+    };
+    return {
+      bodyHtml,
+      bodyPlainText,
+      html: buildDigestEmailHtml(emailParams, { forPreview: params.forPreview }),
+      plainText: buildDigestEmailPlainText(emailParams),
+    };
+  };
+
+  let keyAccountMaxRows: number | undefined;
+  let rendered = render();
+  let htmlSizeBytes = measureHtmlUtf8Bytes(rendered.html);
+
+  if (
+    htmlSizeBytes > GMAIL_SAFE_HTML_BYTES &&
+    totalKeyRows > 0 &&
+    bodySectionIds.includes('key_account_performance')
+  ) {
+    let lo = 0;
+    let hi = totalKeyRows;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      const trialBytes = measureHtmlUtf8Bytes(render(mid).html);
+      if (trialBytes <= GMAIL_SAFE_HTML_BYTES) lo = mid;
+      else hi = mid - 1;
+    }
+    if (lo === 0) {
+      // Truncation cannot make this email fit Gmail-safe size; avoid blanking key-account rows.
+      // Keep full body content and rely on Gmail clipping warning/attached Excel.
+    } else if (lo < totalKeyRows) {
+      keyAccountMaxRows = lo;
+      rendered = render(keyAccountMaxRows);
+      htmlSizeBytes = measureHtmlUtf8Bytes(rendered.html);
+    }
+  }
+
+  const rowsShown =
+    keyAccountMaxRows !== undefined ? keyAccountMaxRows : totalKeyRows;
+
+  return {
+    ...rendered,
+    htmlSizeBytes,
+    gmailClipWarning: gmailClipWarningMessage(htmlSizeBytes) || undefined,
+    keyAccountRowsInBody: totalKeyRows > 0 ? rowsShown : undefined,
+    keyAccountRowsTotal: totalKeyRows > 0 ? totalKeyRows : undefined,
+  };
+}
+
 export async function buildMisEmailPayload(
   recipient: DigestRecipient,
   options: {
@@ -150,7 +257,7 @@ export async function buildMisEmailPayload(
     throw new Error('Select at least one report attachment');
   }
 
-  timer.step('resolve preferences', `${dateRange.label} · summary=${effectiveIncludes.includeSummary} detailed=${effectiveIncludes.includeDetailed} keyAccount=${effectiveIncludes.includeKeyAccount}`);
+  timer.step('resolve preferences', `${dateRange.label} · summary=${effectiveIncludes.includeSummary} detailed=${effectiveIncludes.includeDetailed} keyAccount=${effectiveIncludes.includeKeyAccount} trace=${effectiveIncludes.includeTraceableExport}`);
 
   const scope = await timer.measure('resolve scope', () =>
     resolveUserDigestScopeWithLabel(effectiveRecipient)
@@ -164,15 +271,21 @@ export async function buildMisEmailPayload(
   });
   const needsClientAccounts = bodySectionIds.includes('key_account_performance');
   const includeDetailed = !options.forPreview && effectiveIncludes.includeDetailed;
+  const includeTraceableExport =
+    !options.forPreview && effectiveIncludes.includeTraceableExport;
+  const needsClientAccountData = needsClientAccounts || includeTraceableExport;
 
-  timer.step('plan data fetch', `sections=${bodySectionIds.join(',') || 'none'} · clientAccounts=${needsClientAccounts} · register=${includeDetailed}`);
+  timer.step(
+    'plan data fetch',
+    `sections=${bodySectionIds.join(',') || 'none'} · clientAccounts=${needsClientAccountData} · register=${includeDetailed} · trace=${includeTraceableExport || effectiveIncludes.includeTraceableExport}`
+  );
 
   const data = await timer.measure('fetch summary', () => fetchDigestSummaryDataCached(scope, dateRange), (result) =>
     `branches=${result.branchSummary.length} accounts=${result.accountSummary.length}`
   );
 
   let clientAccountSummary: Awaited<ReturnType<typeof fetchDigestClientAccountSummaryCached>> | undefined;
-  if (needsClientAccounts) {
+  if (needsClientAccountData) {
     try {
       clientAccountSummary = await timer.measure(
         'fetch client accounts',
@@ -196,6 +309,17 @@ export async function buildMisEmailPayload(
       )
     : undefined;
 
+  const tracePayload = includeTraceableExport
+    ? await timer.measure('build trace export', () =>
+        buildDigestTraceableExportPayload(
+          scope,
+          dateRange,
+          data,
+          clientAccountSummary ?? []
+        ), (payload) => `traceRows=${payload.traceRows.length}`
+      )
+    : undefined;
+
   let emailAttachments: EmailAttachment[];
   let attachmentFilenames: string[];
 
@@ -208,6 +332,7 @@ export async function buildMisEmailPayload(
       buildDigestAttachments(effectiveRecipient, data, {
         registerRows,
         effectiveIncludes,
+        tracePayload,
       }), (attachments) =>
         attachments
           .map((file) => `${file.filename} ${formatBytes(file.content.length)}`)
@@ -231,26 +356,26 @@ export async function buildMisEmailPayload(
     ), (ctx) => `accountRows=${ctx.accountRows?.length ?? 0}`
   );
 
-  const bodyHtml =
-    bodySectionIds.length > 0
-      ? buildEmailBodySectionsHtml(bodySectionIds, bodyContext)
-      : undefined;
-  const bodyPlainText =
-    bodySectionIds.length > 0
-      ? buildEmailBodySectionsPlainText(bodySectionIds, bodyContext)
-      : undefined;
-  timer.step('render body html', bodyHtml ? `${bodyHtml.length} chars` : 'none');
-
+  const bodyLayout = resolveMisEmailBodyLayoutFromPrefs(prefs);
   const portalUrl = resolvePortalUrl();
-  const emailParams = {
+  const emailContent = buildDigestEmailContent({
     recipientName: options.displayName,
     recipientEmail: options.sentTo,
     dateRange,
     scopeLabel: scope.scopeLabel,
     portalUrl,
-    bodyHtml,
-    bodyPlainText: bodyPlainText,
-  };
+    bodySectionIds,
+    bodyContext,
+    bodyLayout,
+    forPreview: options.forPreview,
+  });
+
+  timer.step(
+    'render body html',
+    emailContent.bodyHtml
+      ? `${emailContent.bodyHtml.length} chars · ${formatBytes(emailContent.htmlSizeBytes)} total`
+      : 'none'
+  );
 
   const timing = ownTimer ? timer.finish() : undefined;
 
@@ -261,14 +386,18 @@ export async function buildMisEmailPayload(
       dateRange,
       dateRangeLabel: formatReportPeriod(dateRange),
       attachments: attachmentFilenames,
-      html: buildDigestEmailHtml(emailParams),
-      plainText: buildDigestEmailPlainText(emailParams),
+      html: emailContent.html,
+      plainText: emailContent.plainText,
+      htmlSizeBytes: emailContent.htmlSizeBytes,
+      gmailClipWarning: emailContent.gmailClipWarning,
+      keyAccountRowsInBody: emailContent.keyAccountRowsInBody,
+      keyAccountRowsTotal: emailContent.keyAccountRowsTotal,
     },
     emailAttachments,
     dateRange,
     scopeLabel: scope.scopeLabel,
-    bodyHtml,
-    bodyPlainText,
+    bodyHtml: emailContent.bodyHtml,
+    bodyPlainText: emailContent.bodyPlainText,
     timing,
   };
 }

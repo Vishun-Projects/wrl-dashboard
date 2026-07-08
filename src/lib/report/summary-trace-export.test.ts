@@ -57,8 +57,8 @@ describe('summary-trace-export', () => {
     ];
 
     const rows = buildUiRegionalPerformanceRows(crm, client, { crm: true, client: true });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
+    expect(rows).toHaveLength(4);
+    expect(rows.find((r) => r.region === 'EAST ZONE')).toMatchObject({
       region: 'EAST ZONE',
       total_calls: 120,
       solved_calls: 45,
@@ -67,6 +67,16 @@ describe('summary-trace-export', () => {
 
     const grand = toBdMisGrandRow(sumUiRegionalRows(rows));
     expect(grand.total_calls).toBe(120);
-    expect(toBdMisRegionalRow(rows[0]).total_solved).toBe(45);
+    expect(toBdMisRegionalRow(rows.find((r) => r.region === 'EAST ZONE')!).total_solved).toBe(45);
+  });
+
+  it('merges EAST and EAST ZONE branch labels into one region row', () => {
+    const crm = [
+      branch('EAST', { total_calls: 10 }),
+      branch('EAST ZONE', { total_calls: 20 }),
+    ];
+    const rows = buildUiRegionalPerformanceRows(crm, undefined, { crm: true, client: false });
+    expect(rows.filter((r) => r.region === 'EAST ZONE')).toHaveLength(1);
+    expect(rows.find((r) => r.region === 'EAST ZONE')?.total_calls).toBe(30);
   });
 });

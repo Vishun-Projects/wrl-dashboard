@@ -19,7 +19,7 @@ if (!trns.length) {
 }
 
 async function main() {
-  const rows = await fetchCrmRowsByTrns(trns);
+  const rows = await fetchCrmRowsByTrns(trns, { includeTransferred: true });
   console.log(`CRM fetched ${rows.length} row(s) for ${trns.join(', ')}`);
   for (const row of rows) {
     console.log({
@@ -29,6 +29,7 @@ async function main() {
     });
   }
   if (!rows.length) {
+    console.error('No CRM row returned (check TRN or CRM connectivity)');
     process.exitCode = 1;
     return;
   }
@@ -44,7 +45,7 @@ async function main() {
         advanceWatermarks: false,
       });
       await releaseSyncLock(client, 'ok', result.rowsUpserted);
-      console.log('Upserted:', result);
+      console.log('Result:', result);
     } catch (err) {
       await releaseSyncLock(client, 'error', 0);
       throw err;

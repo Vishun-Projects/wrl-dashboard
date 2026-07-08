@@ -10,6 +10,11 @@ import {
   summaryDashboardFilename,
   workbookToBuffer,
 } from '@/lib/report/summary-excel-export';
+import {
+  buildBdMisTraceableWorkbook,
+  bdMisTraceableFilename,
+  type BdMisTraceableExportPayload,
+} from '@/lib/report/bd-mis-excel-export';
 import type { SummaryDashboard } from '@/lib/report/summary-derive';
 import type { DigestRecipient } from '@/lib/mis-email/recipients';
 import type { EffectiveDigestIncludes } from '@/lib/mis-email/preferences';
@@ -39,6 +44,9 @@ export function resolveDigestAttachmentFilenames(
   if (includes.includeKeyAccount) {
     filenames.push(keyAccountMisFilename(date));
   }
+  if (includes.includeTraceableExport) {
+    filenames.push(bdMisTraceableFilename(date));
+  }
   return filenames;
 }
 
@@ -49,6 +57,7 @@ export async function buildDigestAttachments(
     registerRows?: Record<string, unknown>[];
     date?: Date;
     effectiveIncludes?: EffectiveDigestIncludes;
+    tracePayload?: BdMisTraceableExportPayload;
   }
 ): Promise<EmailAttachment[]> {
   const date = options?.date ?? new Date();
@@ -56,6 +65,7 @@ export async function buildDigestAttachments(
     includeSummary: recipient.includeSummary,
     includeDetailed: recipient.includeDetailed,
     includeKeyAccount: recipient.includeKeyAccount,
+    includeTraceableExport: false,
   };
 
   const tasks: Promise<EmailAttachment>[] = [];
@@ -117,6 +127,31 @@ export async function buildDigestAttachments(
         const filename = keyAccountMisFilename(date);
         console.log(
           `[mis-email/timing] attachment key-account · workbook ${workbookMs}ms · buffer ${Date.now() - bufferStarted}ms · ${formatBytes(content.length)} · accounts=${data.accountSummary.length}`
+        );
+        return {
+          filename,
+          content,
+          contentType: XLSX_CONTENT_TYPE,
+        };
+      })()
+    );
+  }
+
+  if (includes.includeTraceableExport) {
+    tasks.push(
+      (async () => {
+        const payload = options?.tracePayload;
+        if (!payload) {
+          throw new Error('Traceable export data was not prepared');
+        }
+        const started = Date.now();
+        const workbook = await buildBdMisTraceableWorkbook(payload);
+        const workbookMs = Date.now() - started;
+        const bufferStarted = Date.now();
+        const content = await workbookToBuffer(workbook);
+        const filename = bdMisTraceableFilename(date);
+        console.log(
+          `[mis-email/timing] attachment traceable · workbook ${workbookMs}ms · buffer ${Date.now() - bufferStarted}ms · ${formatBytes(content.length)} · traceRows=${payload.traceRows.length}`
         );
         return {
           filename,
