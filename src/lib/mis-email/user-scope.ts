@@ -51,7 +51,13 @@ async function formatBranchScopeLabel(officeIds: string[]): Promise<string> {
   if (names.length === 0) {
     return `Branches: ${officeIds.join(', ')}`;
   }
-  return `Branches: ${names.join(', ')}`;
+  const MAX_BRANCH_NAMES_IN_SCOPE_LABEL = 3;
+  if (names.length <= MAX_BRANCH_NAMES_IN_SCOPE_LABEL) {
+    return `Branches: ${names.join(', ')}`;
+  }
+  const visible = names.slice(0, MAX_BRANCH_NAMES_IN_SCOPE_LABEL).join(', ');
+  const hiddenCount = names.length - MAX_BRANCH_NAMES_IN_SCOPE_LABEL;
+  return `Branches: ${visible} +${hiddenCount} more`;
 }
 
 export async function resolveUserDigestScopeWithLabel(

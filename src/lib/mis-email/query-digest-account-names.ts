@@ -18,7 +18,7 @@ function buildOfficeClause(
   };
 }
 
-async function queryDistinctCrmAccountNames(
+export async function queryCrmDigestAccountNames(
   scope: UserDigestScope,
   dateRange: DigestDateRange
 ): Promise<string[]> {
@@ -80,7 +80,7 @@ export async function queryDigestAccountNames(
   dateRange: DigestDateRange
 ): Promise<string[]> {
   const [crm, client] = await Promise.all([
-    queryDistinctCrmAccountNames(scope, dateRange),
+    queryCrmDigestAccountNames(scope, dateRange),
     queryDistinctClientAccountNames(dateRange),
   ]);
 

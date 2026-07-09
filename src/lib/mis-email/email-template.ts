@@ -136,6 +136,11 @@ function buildMisTableDarkModeStyles(prefix = ''): string {
     ${p}.mis-solved { color: #34d399 !important; }
     ${p}.mis-cancel { color: #f87171 !important; }
     ${p}.mis-pct { color: #60a5fa !important; }
+    ${p}.mis-pct-alert { color: #fca5a5 !important; background-color: #3f1d1d !important; }
+    ${p}.mis-pct-ok { color: #60a5fa !important; }
+    ${p}.mis-gt15-low { background-color: #1f3f2d !important; color: #bbf7d0 !important; font-weight: bold !important; }
+    ${p}.mis-gt15-mid { background-color: #3f331d !important; color: #fde68a !important; font-weight: bold !important; }
+    ${p}.mis-gt15-high { background-color: #3f1d1d !important; color: #fecaca !important; font-weight: bold !important; }
     ${p}.mis-open { color: #f1f5f9 !important; font-weight: bold !important; }
     ${p}.mis-note { background-color: #1e293b !important; color: #94a3b8 !important; border-color: #334155 !important; }
     ${p}.mis-title { color: #f1f5f9 !important; }`;
@@ -189,6 +194,11 @@ function buildForceLightStyles(params?: { includeDarkModeOverrides?: boolean }):
     .mis-cancel { color: #DC2626; }
     .mis-open { font-weight: bold; }
     .mis-pct { color: #1d4ed8; font-weight: bold; }
+    .mis-pct-alert { color: #b91c1c !important; background-color: #fee2e2 !important; font-weight: bold !important; }
+    .mis-pct-ok { color: #1d4ed8 !important; }
+    .mis-gt15-low { background-color: #dcfce7 !important; color: #166534 !important; font-weight: bold !important; }
+    .mis-gt15-mid { background-color: #fef3c7 !important; color: #92400e !important; font-weight: bold !important; }
+    .mis-gt15-high { background-color: #fee2e2 !important; color: #991b1b !important; font-weight: bold !important; }
     .mis-note { padding: 8px; font-size: 10px; line-height: 1.4; color: ${t.fgMuted}; text-align: center; border: 1px solid ${t.border}; background-color: ${t.bgMuted}; }
     .mis-row td { background-color: transparent !important; }
     ${buildMisZoneStyles()}

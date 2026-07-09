@@ -9,6 +9,7 @@ import {
   type MisEmailBodyContext,
 } from '@/lib/mis-email/body-sections';
 import type { SummaryDashboard } from '@/lib/report/summary-derive';
+import { buildMisEmailRegionalPerformanceRows } from '@/lib/mis-email/mail-basis';
 
 const sampleData: SummaryDashboard = {
   globalHeadcount: 10,
@@ -105,6 +106,13 @@ const sampleData: SummaryDashboard = {
   ],
 };
 
+function regionalBodyContext(summary: SummaryDashboard = sampleData): MisEmailBodyContext {
+  return {
+    summary,
+    regionalPerformanceRows: buildMisEmailRegionalPerformanceRows(summary, []),
+  };
+}
+
 describe('parseMisEmailBodySectionIds', () => {
   it('keeps known ids in order and dedupes', () => {
     expect(
@@ -162,12 +170,16 @@ describe('resolveDigestBodySections', () => {
 
 describe('buildEmailBodySectionsHtml', () => {
   it('renders regional performance with grand total', () => {
-    const html = buildEmailBodySectionsHtml(['regional_performance'], sampleData);
+    const html = buildEmailBodySectionsHtml(['regional_performance'], regionalBodyContext());
     expect(html).toContain('Regional Performance');
     expect(html).toContain('NORTH');
     expect(html).toContain('EAST');
     expect(html).toContain('All');
     expect(html).toContain('Part pending');
+    expect(html).not.toContain('>Cancelled<');
+    expect(html).not.toContain('Cancelled</th>');
+    // Total = solved + open (exclude cancelled): Delhi 90+8=98
+    expect(html).toContain('>98<');
   });
 
   it('renders key account breakdown for selected accounts', () => {
@@ -193,6 +205,8 @@ describe('buildEmailBodySectionsHtml', () => {
     expect(html).toContain('Key Account Breakdown');
     expect(html).toContain('Nestle');
     expect(html).toContain('% &gt;7 days');
+    // Total = solved + open = 45 + 4
+    expect(html).toContain('>49<');
   });
 
   it('renders key account rows when accountRows are provided', () => {
@@ -295,9 +309,11 @@ describe('buildEmailBodySectionsHtml', () => {
 
 describe('buildEmailBodySectionsPlainText', () => {
   it('includes regional lines', () => {
-    const text = buildEmailBodySectionsPlainText(['regional_performance'], sampleData);
+    const text = buildEmailBodySectionsPlainText(['regional_performance'], regionalBodyContext());
     expect(text).toContain('Regional Performance');
     expect(text).toContain('NORTH');
     expect(text).toContain('All');
+    expect(text).not.toContain('cancelled');
+    expect(text).toContain('total 98');
   });
 });

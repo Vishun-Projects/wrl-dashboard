@@ -20,6 +20,8 @@ export type MisEmailDateRangeMode = 'yesterday' | 'month_to_date' | 'year_to_yes
 
 export type MisEmailPreferences = {
   subscribed?: boolean;
+  /** Daily digest send time in IST, HH:mm (24-hour). */
+  sendTimeIst?: string;
   dateRange?: MisEmailDateRangeMode;
   includeSummary?: boolean;
   includeDetailed?: boolean;
@@ -38,6 +40,7 @@ export type MisEmailPreferences = {
 
 export const DEFAULT_MIS_EMAIL_PREFERENCES: Required<MisEmailPreferences> = {
   subscribed: true,
+  sendTimeIst: '07:00',
   dateRange: 'month_to_date',
   includeSummary: true,
   includeDetailed: true,
@@ -65,11 +68,54 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+const TIME_HH_MM_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+export function normalizeMisEmailSendTime(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim();
+  return TIME_HH_MM_RE.test(value) ? value : null;
+}
+
+export function resolveMisEmailSendTimeIst(prefs: MisEmailPreferences): string {
+  return normalizeMisEmailSendTime(prefs.sendTimeIst) ?? DEFAULT_MIS_EMAIL_PREFERENCES.sendTimeIst;
+}
+
+export function misEmailTimeToMinutes(sendTimeIst: string): number {
+  const normalized = normalizeMisEmailSendTime(sendTimeIst);
+  const value = normalized ?? DEFAULT_MIS_EMAIL_PREFERENCES.sendTimeIst;
+  const [h, m] = value.split(':').map(Number);
+  return h * 60 + m;
+}
+
+export function getCurrentIstMinutes(date = new Date()): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(date);
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+  return hour * 60 + minute;
+}
+
+export function shouldSendMisEmailNow(
+  prefs: MisEmailPreferences,
+  options?: { now?: Date; windowMinutes?: number }
+): boolean {
+  const nowMinutes = getCurrentIstMinutes(options?.now);
+  const targetMinutes = misEmailTimeToMinutes(resolveMisEmailSendTimeIst(prefs));
+  const windowMinutes = Math.max(1, Math.floor(options?.windowMinutes ?? 15));
+  return nowMinutes >= targetMinutes && nowMinutes < targetMinutes + windowMinutes;
+}
+
 export function parseMisEmailPreferences(raw: unknown): MisEmailPreferences {
   if (!isRecord(raw)) return {};
   const prefs: MisEmailPreferences = {};
 
   if (typeof raw.subscribed === 'boolean') prefs.subscribed = raw.subscribed;
+  const sendTimeIst = normalizeMisEmailSendTime(raw.sendTimeIst);
+  if (sendTimeIst) prefs.sendTimeIst = sendTimeIst;
   if (
     raw.dateRange === 'yesterday' ||
     raw.dateRange === 'month_to_date' ||
@@ -262,6 +308,12 @@ export function validateMisEmailPreferencesPatch(params: {
   }
 
   const merged = mergeMisEmailPreferences(params.current, params.patch);
+  if (
+    merged.sendTimeIst !== undefined &&
+    normalizeMisEmailSendTime(merged.sendTimeIst) === null
+  ) {
+    return { ok: false, error: 'Digest time must be in HH:mm format (IST)' };
+  }
 
   if (!params.forPreview && merged.subscribed !== false) {
     const effective = resolveEffectiveDigestIncludes(params.permissions, merged);

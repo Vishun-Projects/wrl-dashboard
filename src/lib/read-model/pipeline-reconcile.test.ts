@@ -4,10 +4,10 @@ import type { HotRow } from './types';
 
 function hot(overrides: Partial<HotRow> = {}): HotRow {
   return {
-    ncode: 1n,
+    ncode: 1,
     vtrnno: '26F01029',
     vcclid: null,
-    nofficeid: 1n,
+    nofficeid: 1,
     nengineer: null,
     office_under: null,
     franchisee_code: null,

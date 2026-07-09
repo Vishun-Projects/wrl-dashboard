@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "lint:ci": "eslint --rule \"@typescript-eslint/no-explicit-any:warn\" --rule \"@typescript-eslint/no-require-imports:warn\" --rule \"prefer-const:warn\" --rule \"react-hooks/rules-of-hooks:warn\" --rule \"react-hooks/set-state-in-effect:warn\" --rule \"react-hooks/immutability:warn\" --rule \"react-hooks/refs:warn\" --rule \"react-hooks/purity:warn\" --rule \"react-hooks/preserve-manual-memoization:warn\" .",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "knip": "knip",

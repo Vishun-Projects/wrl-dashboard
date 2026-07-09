@@ -2,13 +2,7 @@ import 'server-only';
 
 import { withAppClient } from '@/lib/read-model/db';
 import { findAuthUserIdByEmail } from '@/lib/auth/db-create-user';
-
-export type ForgotPasswordAccountStatus = {
-  email: string;
-  inAuth: boolean;
-  inAppUsers: boolean;
-  appUserName: string | null;
-};
+import { forgotPasswordStatusMessage, type ForgotPasswordAccountStatus } from '@/lib/auth/forgot-password-core';
 
 /** Internal portal — explicit account lookup for forgot-password UX. */
 export async function lookupForgotPasswordAccount(
@@ -34,15 +28,4 @@ export async function lookupForgotPasswordAccount(
   };
 }
 
-export function forgotPasswordStatusMessage(status: ForgotPasswordAccountStatus): string {
-  if (!status.inAuth && !status.inAppUsers) {
-    return 'No account found for this email. Contact your administrator to get portal access.';
-  }
-  if (!status.inAuth && status.inAppUsers) {
-    return 'This email is in the user list but has no login yet. Ask an administrator to complete account setup.';
-  }
-  if (status.inAuth && !status.inAppUsers) {
-    return 'Login exists but the portal profile is missing. Contact your administrator.';
-  }
-  return `Account found (${status.appUserName || status.email}). Sending password reset link…`;
-}
+export { forgotPasswordStatusMessage };

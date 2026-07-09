@@ -87,7 +87,6 @@ function buildSkeletonPerformanceTable(params: {
   const metricHeaders = [
     'Total calls',
     'Total solved',
-    'Cancelled',
     '# open calls',
     '≤2 days',
     '3-7 days',
@@ -242,7 +241,7 @@ function buildSkeletonSectionHtmlMap(
           { label: 'West zone' },
           { label: 'All', isGrand: true },
         ],
-        metricColumns: 10,
+        metricColumns: 9,
       });
     } else if (id === 'branch_performance') {
       map[id] = buildSkeletonPerformanceTable({
@@ -255,7 +254,7 @@ function buildSkeletonSectionHtmlMap(
           { label: 'Branch' },
           { label: 'Branch' },
         ],
-        metricColumns: 10,
+        metricColumns: 9,
       });
     } else if (id === 'key_account_performance') {
       map[id] = buildSkeletonKeyAccountTable(keyAccountNames, mergeRegionCells);

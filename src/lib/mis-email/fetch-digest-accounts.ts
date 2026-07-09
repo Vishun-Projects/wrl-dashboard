@@ -1,7 +1,7 @@
-import { DEFAULT_MIS_SOURCE_SELECTION } from '@/lib/mis-client-import/source-selection';
 import { queryClientAccountSummaryFiltered } from '@/lib/mis-client-import/aggregate';
 import type { DigestDateRange } from '@/lib/mis-email/fetch-digest-data';
 import type { UserDigestScope } from '@/lib/mis-email/user-scope';
+import { MIS_EMAIL_CLIENT_SOURCE_CODES } from '@/lib/mis-email/source-codes';
 import {
   buildAccountDisplayRows,
   filterKeyAccountRows,
@@ -15,9 +15,11 @@ const DIGEST_MERGE_FLAGS: MergeSelection = {
   client: true,
 };
 
+export { MIS_EMAIL_CLIENT_SOURCE_CODES } from '@/lib/mis-email/source-codes';
+
 export async function fetchDigestClientAccountSummary(
   dateRange: DigestDateRange,
-  sourceCodes: string[] = DEFAULT_MIS_SOURCE_SELECTION.clientSourceCodes
+  sourceCodes: string[] = [...MIS_EMAIL_CLIENT_SOURCE_CODES]
 ): Promise<AccountSummaryRow[]> {
   return queryClientAccountSummaryFiltered({
     startDate: dateRange.startDate,

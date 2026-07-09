@@ -218,11 +218,6 @@ export async function handleRegisterGet(req: NextRequest) {
       }
 
       if (searchParams.get('export') === 'csv') {
-        const knownTotalRaw = searchParams.get('knownTotal');
-        const knownTotal =
-          knownTotalRaw != null && knownTotalRaw !== ''
-            ? Number(knownTotalRaw)
-            : undefined;
         return buildPostgresRegisterCsvStream({
           search,
           officeId,
@@ -243,7 +238,6 @@ export async function handleRegisterGet(req: NextRequest) {
           assignedOffices,
           visibleStatuses,
           isHod,
-          knownTotal: Number.isFinite(knownTotal) && knownTotal! > 0 ? knownTotal : undefined,
         });
       }
 
@@ -271,6 +265,15 @@ export async function handleRegisterGet(req: NextRequest) {
           assignedOffices,
           visibleStatuses,
           isHod,
+          cursorLoggedAt: (() => {
+            const raw = searchParams.get('cursorLoggedAt');
+            return raw && raw.trim() ? raw.trim() : undefined;
+          })(),
+          cursorNcode: (() => {
+            const raw = searchParams.get('cursorNcode');
+            const parsed = raw ? parseInt(raw, 10) : NaN;
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+          })(),
         });
         return NextResponse.json(payload);
     }

@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  downloadWorkbook,
+  buildKeyAccountMisWorkbook,
+  buildSummaryDashboardWorkbook,
   resolveUniqueDownloadFilename,
   triggerBlobDownload,
   workbookToPreparedExport,
 } from '@/lib/report/summary-excel-export';
+import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/report/summary-derive';
 
 function createMockWorkbook() {
   return {
@@ -14,6 +16,62 @@ function createMockWorkbook() {
     },
   };
 }
+
+const sampleBranch: BranchSummaryRow = {
+  officeId: 1,
+  parentId: 0,
+  branch: 'Delhi',
+  region: 'NORTH ZONE',
+  total_calls: 100,
+  solved_calls: 90,
+  cancelled_calls: 2,
+  open_calls: 8,
+  age_2: 5,
+  age_3: 2,
+  age_7: 1,
+  age_15: 0,
+  part_pending: 1,
+  all_total: 100,
+  all_solved: 90,
+  all_cancelled: 2,
+  all_open: 8,
+  all_age_2: 5,
+  all_age_3: 2,
+  all_age_7: 1,
+  all_age_15: 0,
+  all_part_pending: 1,
+  all_tech_solved: 0,
+  tech_solved_calls: 0,
+  deployment_total: 0,
+  deployment_done: 0,
+  installation_total: 0,
+  installation_done: 0,
+  active_eng: 12,
+  population: 100,
+  headcount: 5,
+};
+
+const sampleAccount: AccountSummaryRow = {
+  region: 'NORTH ZONE',
+  account: 'Nestle',
+  population: 10,
+  total_calls: 50,
+  total_solved: 45,
+  cancelled_calls: 1,
+  open_calls: 4,
+  age_2: 2,
+  age_3: 1,
+  age_7: 1,
+  age_15: 0,
+  part_pending: 0,
+  deployment_total: 0,
+  deployment_done: 0,
+  installation_total: 0,
+  installation_done: 0,
+  active_eng: 3,
+  headcount: 2,
+  total_tech_solved: 0,
+};
 
 describe('resolveUniqueDownloadFilename', () => {
   it('returns the base name on first use and suffixes duplicates', () => {
@@ -32,6 +90,51 @@ describe('resolveUniqueDownloadFilename', () => {
 
   it('preserves csv extension', () => {
     expect(resolveUniqueDownloadFilename('register.csv')).toBe('register.csv');
+  });
+});
+
+describe('buildSummaryDashboardWorkbook excludeCancelled', () => {
+  it('includes Cancelled by default', async () => {
+    const wb = await buildSummaryDashboardWorkbook([sampleBranch]);
+    const sheet = wb.worksheets[0];
+    const header = sheet.getRow(2).values as unknown[];
+    expect(header).toContain('Cancelled');
+    const data = sheet.getRow(3).values as unknown[];
+    expect(data).toContain(100);
+    expect(data).toContain(2);
+  });
+
+  it('omits Cancelled and uses solved+open total when excludeCancelled', async () => {
+    const wb = await buildSummaryDashboardWorkbook([sampleBranch], 'Summary Dashboard', {
+      excludeCancelled: true,
+    });
+    const sheet = wb.worksheets[0];
+    const header = sheet.getRow(2).values as unknown[];
+    expect(header).not.toContain('Cancelled');
+    // Region, Total(solved+open), Solved, Open — no cancelled column
+    expect(sheet.getRow(3).getCell(2).value).toBe(98);
+    expect(sheet.getRow(3).getCell(3).value).toBe(90);
+    expect(sheet.getRow(3).getCell(4).value).toBe(8);
+  });
+});
+
+describe('buildKeyAccountMisWorkbook excludeCancelled', () => {
+  it('includes Cancelled by default', async () => {
+    const wb = await buildKeyAccountMisWorkbook([sampleAccount]);
+    const sheet = wb.worksheets[0];
+    const header = sheet.getRow(1).values as unknown[];
+    expect(header).toContain('Cancelled');
+  });
+
+  it('omits Cancelled and uses solved+open total when excludeCancelled', async () => {
+    const wb = await buildKeyAccountMisWorkbook([sampleAccount], 'Key Account MIS', {
+      excludeCancelled: true,
+    });
+    const sheet = wb.worksheets[0];
+    const header = sheet.getRow(1).values as unknown[];
+    expect(header).not.toContain('Cancelled');
+    const data = sheet.getRow(2).values as unknown[];
+    expect(data).toContain(49);
   });
 });
 

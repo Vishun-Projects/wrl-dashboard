@@ -234,6 +234,40 @@ describe('buildBdMisRegionalRows', () => {
     expect(grand.open_calls).toBe(50 - 30 + 40 + 10);
   });
 
+  it('excludes CRM Cadbury when excludeCrmCadbury is set (MIS mail)', () => {
+    const crmBranches = [branch('EAST ZONE', 1000, 900)];
+    crmBranches[0].open_calls = 100;
+    const crmAccounts = [{ ...account('EAST ZONE', 'Cadbury', 200, 150), open_calls: 50 }];
+    const clientAccounts = [{ ...account('SOUTH ZONE', 'Coke', 80, 70), open_calls: 10 }];
+
+    const grand = sumBdMisRegionalGrand(
+      buildBdMisRegionalRows({
+        crmBranchSummary: crmBranches,
+        crmAccountSummary: crmAccounts,
+        clientAccountSummary: clientAccounts,
+        sources: { crm: true, cadbury: false, coke: true, excludeCrmCadbury: true },
+      })
+    );
+
+    // 100 CRM branch open − 50 CRM Cadbury + 10 import Coke (South only)
+    expect(grand.open_calls).toBe(100 - 50 + 10);
+  });
+
+  it('excludes CRM Cadbury in West when excludeCrmCadbury is set (MIS mail)', () => {
+    const crmBranches = [branch('WEST ZONE', 1000, 900)];
+    crmBranches[0].open_calls = 50;
+    const crmAccounts = [{ ...account('WEST ZONE', 'Cadbury', 200, 150), open_calls: 20 }];
+
+    const west = buildBdMisRegionalRows({
+      crmBranchSummary: crmBranches,
+      crmAccountSummary: crmAccounts,
+      clientAccountSummary: [],
+      sources: { crm: true, cadbury: true, coke: true, excludeCrmCadbury: true },
+    }).find((r) => r.region === 'WEST ZONE')!;
+
+    expect(west.open_calls).toBe(50 - 20);
+  });
+
   it('does not overlay Cadbury client in West', () => {
     const rows = buildBdMisRegionalRows({
       crmBranchSummary: [branch('WEST ZONE', 24798)],

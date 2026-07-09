@@ -76,6 +76,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
   );
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [accountSearch, setAccountSearch] = useState('');
+  const [allowAutoSendOverride, setAllowAutoSendOverride] = useState(false);
 
   const draftPrefs = useMemo(
     (): MisEmailPreferences => ({
@@ -269,6 +270,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
           preferences: draftPrefs,
           sendTo: sendTargets,
           savePreferences: saveFirst,
+            allowAutoSendDisabledOverride: allowAutoSendOverride,
         },
         { withCredentials: true, timeout: 30_000, validateStatus: (status) => status === 202 || status === 200 }
       );
@@ -341,6 +343,15 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
               {sendInProgress ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
               Send now
             </button>
+            <label className="ml-2 inline-flex items-center gap-1 text-[10px] text-slate-600">
+              <input
+                type="checkbox"
+                checked={allowAutoSendOverride}
+                onChange={(e) => setAllowAutoSendOverride(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              Override HOD auto-send block
+            </label>
           </div>
         </div>
 

@@ -10,6 +10,8 @@ export type ExportQueueProgress = {
   fetched: number;
   total: number;
   etaSeconds?: number;
+  /** Overrides the default row counter when a recovery path is running. */
+  detail?: string;
 };
 
 export type ExportQueueItem = {
@@ -20,6 +22,7 @@ export type ExportQueueItem = {
   /** Kept alive until the user saves or clears finished exports. */
   downloadUrl?: string;
   error?: string;
+  warning?: string;
   enqueuedAt: number;
   progress?: ExportQueueProgress;
 };
@@ -39,6 +42,7 @@ export type ExportQueueJob = {
 };
 
 export function formatExportQueueProgress(progress: ExportQueueProgress): string {
+  if (progress.detail) return progress.detail;
   if (progress.total <= 0) return 'Preparing…';
   const pct = Math.min(100, Math.round((progress.fetched / progress.total) * 100));
   const base = `${progress.fetched.toLocaleString()} / ${progress.total.toLocaleString()} rows (${pct}%)`;

@@ -32,6 +32,14 @@ export const feedback = {
     });
   },
 
+  /** Action completed with a non-fatal caveat (partial export, degraded fallback, etc.). */
+  actionWarning(message: string, options?: { description?: string; duration?: number }) {
+    toast.warning(message, {
+      description: options?.description,
+      duration: options?.duration ?? 8000,
+    });
+  },
+
   /** User cancelled a reversible operation. */
   cancelled(message: string) {
     toast.info(message, { duration: 3000 });

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildBdMisTraceRows,
   filterTraceRowsForExport,
+  filterTraceRowsForSummaryExport,
+  countTraceOpenCalls,
   formatAgingLabel,
   mapClientCallToTraceRow,
   mapCrmCallToTraceRow,
@@ -32,6 +34,54 @@ describe('bd-mis-trace', () => {
     expect(row.contribution_step).toContain('replaced by Cadbury import');
     expect(row.file_name).toBe('CRM Files');
     expect(row.service_order).toBe('SO-1');
+  });
+
+  it('marks CRM Cadbury rows as replaced when Mondelez import is on', () => {
+    const row = mapCrmCallToTraceRow(
+      {
+        region: 'NORTH ZONE',
+        plant: 'Plant A',
+        technician_name: 'Tech 1',
+        office_under_branch: 'Delhi Branch',
+        customer_name: 'Sri Durga',
+        logged_at: '2026-03-01T10:00:00Z',
+        service_order: 'SO-1',
+        client: 'Cadbury',
+        call_status: 'Assigned',
+        status_bucket: 'assigned',
+        ncancelreason: null,
+        account: 'Cadbury',
+      },
+      { crm: true, cadbury: true, coke: true },
+      '2026-06-29'
+    );
+
+    expect(row.included_in_final_count).toBe(false);
+    expect(row.contribution_step).toContain('replaced by Cadbury import');
+  });
+
+  it('marks CRM Cadbury rows as excluded from MIS mail when Cadbury import is off', () => {
+    const row = mapCrmCallToTraceRow(
+      {
+        region: 'NORTH ZONE',
+        plant: 'Plant A',
+        technician_name: 'Tech 1',
+        office_under_branch: 'Delhi Branch',
+        customer_name: 'Sri Durga',
+        logged_at: '2026-03-01T10:00:00Z',
+        service_order: 'SO-1',
+        client: 'Cadbury',
+        call_status: 'Assigned',
+        status_bucket: 'assigned',
+        ncancelreason: null,
+        account: 'Cadbury',
+      },
+      { crm: true, cadbury: false, coke: true, excludeCrmCadbury: true },
+      '2026-06-29'
+    );
+
+    expect(row.included_in_final_count).toBe(false);
+    expect(row.contribution_step).toContain('excluded from MIS mail');
   });
 
   it('marks client Cadbury rows as added in East', () => {
@@ -225,25 +275,102 @@ describe('bd-mis-trace', () => {
     expect(filterTraceRowsForExport(rows)[0].service_order).toBe('OPEN-1');
   });
 
-  it('shows Cancelled when cancel reason exists even if status label differs', () => {
-    const row = mapCrmCallToTraceRow(
-      {
-        region: 'EAST ZONE',
-        plant: 'Branch X',
-        technician_name: 'Tech',
-        office_under_branch: 'Franchisee X',
-        customer_name: 'Customer X',
-        logged_at: '2026-01-03T00:00:00Z',
-        service_order: 'E-1',
-        client: 'Dealer',
-        call_status: 'Open Unallocated',
-        status_bucket: 'open_unallocated',
-        ncancelreason: 5,
-        account: 'Dealer',
-      },
-      { crm: true, cadbury: false, coke: false },
-      '2026-06-29'
-    );
-    expect(row.call_status).toBe('Cancelled');
+  it('filterTraceRowsForSummaryExport drops CRM Cadbury from CRM Files', () => {
+    const rows = buildBdMisTraceRows({
+      crmRows: [
+        {
+          region: 'NORTH ZONE',
+          plant: 'P1',
+          technician_name: 'T1',
+          office_under_branch: 'B1',
+          customer_name: 'C1',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'N-1',
+          client: 'Cadbury',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Cadbury',
+        },
+        {
+          region: 'NORTH ZONE',
+          plant: 'P2',
+          technician_name: 'T2',
+          office_under_branch: 'B2',
+          customer_name: 'C2',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'N-2',
+          client: 'Nestle',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+      ],
+      clientRows: [],
+      sources: { crm: true, cadbury: true, coke: true },
+      agingDate: '2026-07-09',
+    });
+
+    const exported = filterTraceRowsForSummaryExport(rows);
+    expect(exported).toHaveLength(1);
+    expect(exported[0].client).toBe('Nestle');
+    expect(countTraceOpenCalls(exported)).toBe(1);
+  });
+
+  it('filterTraceRowsForSummaryExport drops West CRM Cadbury but keeps other closed calls', () => {
+    const rows = buildBdMisTraceRows({
+      crmRows: [
+        {
+          region: 'WEST ZONE',
+          plant: 'P1',
+          technician_name: 'T1',
+          office_under_branch: 'B1',
+          customer_name: 'C1',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'W-CAD-CLOSED',
+          client: 'Cadbury',
+          call_status: 'Closed',
+          status_bucket: 'solved',
+          ncancelreason: null,
+          account: 'Cadbury',
+        },
+        {
+          region: 'WEST ZONE',
+          plant: 'P2',
+          technician_name: 'T2',
+          office_under_branch: 'B2',
+          customer_name: 'C2',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'W-NESTLE-CLOSED',
+          client: 'Nestle',
+          call_status: 'Closed',
+          status_bucket: 'solved',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+        {
+          region: 'WEST ZONE',
+          plant: 'P3',
+          technician_name: 'T3',
+          office_under_branch: 'B3',
+          customer_name: 'C3',
+          logged_at: '2026-07-02T00:00:00Z',
+          service_order: 'W-OPEN',
+          client: 'Nestle',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+      ],
+      clientRows: [],
+      sources: { crm: true, cadbury: true, coke: true, excludeCrmCadbury: true },
+      agingDate: '2026-07-09',
+    });
+
+    const exported = filterTraceRowsForSummaryExport(rows);
+    expect(exported.map((r) => r.service_order)).toEqual(['W-NESTLE-CLOSED', 'W-OPEN']);
+    expect(countTraceOpenCalls(exported)).toBe(1);
   });
 });

@@ -47,7 +47,7 @@ const basePayload = {
 };
 
 describe('bd-mis-excel-export trace row detail', () => {
-  it('exports static summary values and row detail without formulas', async () => {
+  it('exports row detail only without formulas', async () => {
     const traceRows: BdMisTraceRow[] = [
       {
         region: 'NORTH ZONE',
@@ -69,16 +69,12 @@ describe('bd-mis-excel-export trace row detail', () => {
     ];
 
     const workbook = await buildBdMisTraceableWorkbook({ ...basePayload, traceRows });
+    expect(workbook.worksheets.map((s) => s.name)).toEqual(['Row Detail']);
     const rowDetail = workbook.getWorksheet('Row Detail');
     expect(rowDetail).toBeDefined();
 
     const dataCell = rowDetail!.getRow(2).getCell(14);
     expect(dataCell.value).toBe('open');
     expect(dataCell.formula).toBeUndefined();
-
-    const summary = workbook.getWorksheet('Summary');
-    const totalCallsCell = summary!.getRow(2).getCell(2);
-    expect(totalCallsCell.value).toBe(10);
-    expect(totalCallsCell.formula).toBeUndefined();
   }, 30000);
 });

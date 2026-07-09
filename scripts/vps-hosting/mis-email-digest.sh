@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Daily MIS email digest — invoked by cron on VPS at 7 AM IST.
+# MIS email digest scheduler — run via cron every 15 minutes.
 set -euo pipefail
 
 INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-/opt/fast-close-app}"
@@ -31,6 +31,7 @@ else
 fi
 
 export NODE_ENV=production
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=8192}"
 # USE_DIRECT_DATABASE comes from .env.mis-email (false for VPS pooler)
 
 echo "=== mis-email-digest $(date -Iseconds) TZ=${TZ:-system} ==="

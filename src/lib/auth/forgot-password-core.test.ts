@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateForgotPasswordEmail } from '@/lib/auth/forgot-password-core';
-import { forgotPasswordStatusMessage } from '@/lib/auth/forgot-password-lookup';
+import { forgotPasswordStatusMessage, validateForgotPasswordEmail } from '@/lib/auth/forgot-password-core';
 import { hasCapability, LEGACY_HOD_ROLE_NAMES } from '@/lib/auth/rbac-catalog';
 
 describe('validateForgotPasswordEmail', () => {

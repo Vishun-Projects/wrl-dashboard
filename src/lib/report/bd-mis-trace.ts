@@ -91,6 +91,23 @@ function isCrmCadburyAccount(account: string): boolean {
   return key === 'cadbury' || key === 'mondelez';
 }
 
+/** CRM Cadbury/Mondelez from CRM Files — replaced by Mondelez import in the union. */
+export function isCrmCadburyCrmFileTraceRow(row: BdMisTraceRow): boolean {
+  if (row.source !== 'CRM' || row.file_name !== 'CRM Files') return false;
+  return isCrmCadburyAccount(row.client);
+}
+
+function crmRowIsCadburyUnionExcluded(
+  row: BdMisCrmCallTraceInput,
+  zone: string,
+  sources: BdMisSourceFlags
+): boolean {
+  if (!sources.crm) return false;
+  if (!(sources.cadbury || sources.excludeCrmCadbury === true)) return false;
+  if (!sources.excludeCrmCadbury && zone === 'WEST ZONE') return false;
+  return isCrmCadburyAccount(row.account) || isCrmCadburyAccount(row.client);
+}
+
 function isCadburyClientAccount(account: string): boolean {
   return account.trim().toLowerCase() === 'cadbury';
 }
@@ -197,14 +214,11 @@ function classifyCrmContribution(
     };
   }
 
-  if (
-    sources.crm &&
-    sources.cadbury &&
-    zone !== 'WEST ZONE' &&
-    isCrmCadburyAccount(row.account)
-  ) {
+  if (crmRowIsCadburyUnionExcluded(row, zone, sources)) {
     return {
-      contribution_step: '2. − CRM Cadbury/Mondelez (replaced by Cadbury import)',
+      contribution_step: sources.cadbury
+        ? '2. − CRM Cadbury/Mondelez (replaced by Cadbury import)'
+        : '2. − CRM Cadbury/Mondelez (excluded from MIS mail)',
       included_in_final_count: false,
       counts_toward: 'none',
     };
@@ -381,4 +395,23 @@ export function buildBdMisTraceRows(params: {
 /** Row detail export excludes cancelled calls. */
 export function filterTraceRowsForExport(traceRows: BdMisTraceRow[]): BdMisTraceRow[] {
   return traceRows.filter((row) => row.counts_toward !== 'cancelled');
+}
+
+/**
+ * MIS email / summary-aligned export: included rows only, minus CRM Cadbury from CRM Files.
+ * All other clients keep open, closed, solved, and tech-solved detail.
+ */
+export function filterTraceRowsForSummaryExport(traceRows: BdMisTraceRow[]): BdMisTraceRow[] {
+  return traceRows.filter((row) => {
+    if (row.counts_toward === 'cancelled') return false;
+    if (isCrmCadburyCrmFileTraceRow(row)) return false;
+    if (!row.included_in_final_count) return false;
+    return true;
+  });
+}
+
+/** Open calls in trace detail (assigned + open_unallocated, included in final count). */
+export function countTraceOpenCalls(traceRows: BdMisTraceRow[]): number {
+  return traceRows.filter((row) => row.included_in_final_count && row.counts_toward === 'open')
+    .length;
 }

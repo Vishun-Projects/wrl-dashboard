@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { formatLocalDate } from '@/lib/report/filters';
 import {
   DEFAULT_MIS_EMAIL_PREFERENCES,
+  getCurrentIstMinutes,
   hasAnyEffectiveDigestInclude,
+  normalizeMisEmailSendTime,
   parseMisEmailKeyAccountsInBody,
   parseMisEmailPreferences,
+  resolveMisEmailSendTimeIst,
   resolveDigestDateRangeForPreferences,
   resolveEffectiveDigestIncludes,
   resolveExtraDigestEmails,
+  shouldSendMisEmailNow,
   validateMisEmailPreferencesPatch,
 } from '@/lib/mis-email/preferences';
 
@@ -60,6 +64,42 @@ describe('parseMisEmailPreferences', () => {
         keyAccountsInBody: ['Nestle', 'nestle', ' COKE '],
       })
     ).toEqual({ keyAccountsInBody: ['Nestle', 'COKE'] });
+  });
+
+  it('parses valid IST send time', () => {
+    expect(
+      parseMisEmailPreferences({
+        sendTimeIst: '09:30',
+      })
+    ).toEqual({ sendTimeIst: '09:30' });
+  });
+});
+
+describe('send time helpers', () => {
+  it('normalizes valid HH:mm values', () => {
+    expect(normalizeMisEmailSendTime('07:00')).toBe('07:00');
+    expect(normalizeMisEmailSendTime('24:00')).toBeNull();
+  });
+
+  it('falls back to default IST send time', () => {
+    expect(resolveMisEmailSendTimeIst({})).toBe('07:00');
+  });
+
+  it('matches configured send window', () => {
+    const now = new Date('2026-01-01T01:30:00.000Z'); // 07:00 IST
+    expect(getCurrentIstMinutes(now)).toBe(420);
+    expect(
+      shouldSendMisEmailNow(
+        { sendTimeIst: '07:00' },
+        { now, windowMinutes: 15 }
+      )
+    ).toBe(true);
+    expect(
+      shouldSendMisEmailNow(
+        { sendTimeIst: '07:20' },
+        { now, windowMinutes: 15 }
+      )
+    ).toBe(false);
   });
 });
 
@@ -179,6 +219,16 @@ describe('validateMisEmailPreferencesPatch', () => {
       expect(result.merged.bodyInEmail).toEqual(['key_account_performance']);
       expect(result.merged.keyAccountsInBody).toEqual(['Nestle']);
     }
+  });
+
+  it('rejects invalid digest send time', () => {
+    const result = validateMisEmailPreferencesPatch({
+      patch: { sendTimeIst: '25:99' },
+      permissions: perms,
+      current: DEFAULT_MIS_EMAIL_PREFERENCES,
+      misEmailEnabled: true,
+    });
+    expect(result.ok).toBe(false);
   });
 });
 

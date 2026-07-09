@@ -24,7 +24,11 @@ export function applySummaryHeaderStyle(row: ExcelJS.Row): void {
   });
 }
 
-export function applyRegionRowStyle(row: ExcelJS.Row, region: string): void {
+export function applyRegionRowStyle(
+  row: ExcelJS.Row,
+  region: string,
+  opts?: { solvedCol?: number; cancelledCol?: number | null; openCol?: number }
+): void {
   row.eachCell((cell) => {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: getRegionColor(region) } };
     cell.border = {
@@ -34,9 +38,14 @@ export function applyRegionRowStyle(row: ExcelJS.Row, region: string): void {
       right: { style: 'thin' },
     };
   });
-  row.getCell(3).font = { color: { argb: 'FF059669' } };
-  row.getCell(4).font = { color: { argb: 'FFDC2626' } };
-  row.getCell(5).font = { bold: true };
+  const solvedCol = opts?.solvedCol ?? 3;
+  const cancelledCol = opts?.cancelledCol === undefined ? 4 : opts.cancelledCol;
+  const openCol = opts?.openCol ?? 5;
+  row.getCell(solvedCol).font = { color: { argb: 'FF059669' } };
+  if (cancelledCol != null) {
+    row.getCell(cancelledCol).font = { color: { argb: 'FFDC2626' } };
+  }
+  row.getCell(openCol).font = { bold: true };
 }
 
 function getAggregate(
@@ -59,13 +68,22 @@ function getAggregate(
   );
 }
 
+export type SummaryExcelExcludeCancelledOpts = {
+  excludeCancelled?: boolean;
+};
+
 export async function buildSummaryDashboardWorkbook(
   summaryData: BranchSummaryRow[],
-  sheetName = 'Summary Dashboard'
+  sheetName = 'Summary Dashboard',
+  opts?: SummaryExcelExcludeCancelledOpts
 ): Promise<ExcelJS.Workbook> {
   const ExcelJSRuntime = (await import('exceljs')).default;
   const workbook = new ExcelJSRuntime.Workbook();
   const sheet = workbook.addWorksheet(sheetName);
+  const excludeCancelled = opts?.excludeCancelled === true;
+  const metricStyle = excludeCancelled
+    ? { solvedCol: 3, cancelledCol: null as number | null, openCol: 4 }
+    : undefined;
 
   const regions = Array.from(new Set(summaryData.map((b) => b.region))).sort();
   const topLevelBranches = summaryData.filter(
@@ -73,19 +91,34 @@ export async function buildSummaryDashboardWorkbook(
   );
 
   sheet.addRow(['Regional Performance']).font = { bold: true, size: 12 };
-  const regHeader = sheet.addRow([
-    'Region',
-    'Total',
-    'Solved',
-    'Cancelled',
-    'Open',
-    '<2 Days',
-    '3-7 Days',
-    '8-15 Days',
-    '>15 Days',
-    'Parts',
-    'Engineers',
-  ]);
+  const regHeader = sheet.addRow(
+    excludeCancelled
+      ? [
+          'Region',
+          'Total',
+          'Solved',
+          'Open',
+          '<2 Days',
+          '3-7 Days',
+          '8-15 Days',
+          '>15 Days',
+          'Parts',
+          'Engineers',
+        ]
+      : [
+          'Region',
+          'Total',
+          'Solved',
+          'Cancelled',
+          'Open',
+          '<2 Days',
+          '3-7 Days',
+          '8-15 Days',
+          '>15 Days',
+          'Parts',
+          'Engineers',
+        ]
+  );
   applySummaryHeaderStyle(regHeader);
 
   regions.forEach((region) => {
@@ -106,23 +139,50 @@ export async function buildSummaryDashboardWorkbook(
       { t: 0, s: 0, c: 0, o: 0, a2: 0, a3: 0, a7: 0, a15: 0, p: 0, e: 0 }
     );
 
-    const r = sheet.addRow([region, t.t, t.s, t.c, t.o, t.a2, t.a3, t.a7, t.a15, t.p, t.e]);
-    applyRegionRowStyle(r, region);
+    const total = excludeCancelled ? t.s + t.o : t.t;
+    const r = sheet.addRow(
+      excludeCancelled
+        ? [region, total, t.s, t.o, t.a2, t.a3, t.a7, t.a15, t.p, t.e]
+        : [region, total, t.s, t.c, t.o, t.a2, t.a3, t.a7, t.a15, t.p, t.e]
+    );
+    applyRegionRowStyle(r, region, metricStyle);
   });
 
-  const aiRow = sheet.addRow([
-    'AI TOTAL',
-    summaryData.reduce((s, b) => s + Number(b.total_calls || 0), 0),
-    summaryData.reduce((s, b) => s + Number(b.solved_calls || 0), 0),
-    summaryData.reduce((s, b) => s + Number(b.cancelled_calls || 0), 0),
-    summaryData.reduce((s, b) => s + Number(b.open_calls || 0), 0),
-    summaryData.reduce((s, b) => s + Number(b.age_2 || 0), 0),
-    summaryData.reduce((s, b) => s + Number(b.age_3 || 0), 0),
-    summaryData.reduce((s, b) => s + Number(b.age_7 || 0), 0),
-    summaryData.reduce((s, b) => s + Number(b.age_15 || 0), 0),
-    summaryData.reduce((s, b) => s + Number(b.part_pending || 0), 0),
-    summaryData.reduce((s, b) => s + Number(b.active_eng || 0), 0),
-  ]);
+  const allSolved = summaryData.reduce((s, b) => s + Number(b.solved_calls || 0), 0);
+  const allOpen = summaryData.reduce((s, b) => s + Number(b.open_calls || 0), 0);
+  const allCancelled = summaryData.reduce((s, b) => s + Number(b.cancelled_calls || 0), 0);
+  const allTotal = excludeCancelled
+    ? allSolved + allOpen
+    : summaryData.reduce((s, b) => s + Number(b.total_calls || 0), 0);
+
+  const aiRow = sheet.addRow(
+    excludeCancelled
+      ? [
+          'AI TOTAL',
+          allTotal,
+          allSolved,
+          allOpen,
+          summaryData.reduce((s, b) => s + Number(b.age_2 || 0), 0),
+          summaryData.reduce((s, b) => s + Number(b.age_3 || 0), 0),
+          summaryData.reduce((s, b) => s + Number(b.age_7 || 0), 0),
+          summaryData.reduce((s, b) => s + Number(b.age_15 || 0), 0),
+          summaryData.reduce((s, b) => s + Number(b.part_pending || 0), 0),
+          summaryData.reduce((s, b) => s + Number(b.active_eng || 0), 0),
+        ]
+      : [
+          'AI TOTAL',
+          allTotal,
+          allSolved,
+          allCancelled,
+          allOpen,
+          summaryData.reduce((s, b) => s + Number(b.age_2 || 0), 0),
+          summaryData.reduce((s, b) => s + Number(b.age_3 || 0), 0),
+          summaryData.reduce((s, b) => s + Number(b.age_7 || 0), 0),
+          summaryData.reduce((s, b) => s + Number(b.age_15 || 0), 0),
+          summaryData.reduce((s, b) => s + Number(b.part_pending || 0), 0),
+          summaryData.reduce((s, b) => s + Number(b.active_eng || 0), 0),
+        ]
+  );
   aiRow.eachCell((cell) => {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
     cell.font = { bold: true };
@@ -137,39 +197,72 @@ export async function buildSummaryDashboardWorkbook(
   sheet.addRow([]);
 
   sheet.addRow(['Branch Wise Performance']).font = { bold: true, size: 12 };
-  const brHeader = sheet.addRow([
-    'Branch',
-    'Total',
-    'Solved',
-    'Cancelled',
-    'Open',
-    '<2 Days',
-    '3-7 Days',
-    '8-15 Days',
-    '>15 Days',
-    'Parts',
-    'Engineers',
-  ]);
+  const brHeader = sheet.addRow(
+    excludeCancelled
+      ? [
+          'Branch',
+          'Total',
+          'Solved',
+          'Open',
+          '<2 Days',
+          '3-7 Days',
+          '8-15 Days',
+          '>15 Days',
+          'Parts',
+          'Engineers',
+        ]
+      : [
+          'Branch',
+          'Total',
+          'Solved',
+          'Cancelled',
+          'Open',
+          '<2 Days',
+          '3-7 Days',
+          '8-15 Days',
+          '>15 Days',
+          'Parts',
+          'Engineers',
+        ]
+  );
   applySummaryHeaderStyle(brHeader);
 
   topLevelBranches
     .sort((a, b) => a.region.localeCompare(b.region))
     .forEach((b) => {
       const rb = summaryData.filter((x) => x.region === b.region);
-      const r = sheet.addRow([
-        b.branch,
-        getAggregate(b, 'total_calls', rb),
-        getAggregate(b, 'solved_calls', rb),
-        getAggregate(b, 'cancelled_calls', rb),
-        getAggregate(b, 'open_calls', rb),
-        getAggregate(b, 'age_2', rb),
-        getAggregate(b, 'age_3', rb),
-        getAggregate(b, 'age_7', rb),
-        getAggregate(b, 'age_15', rb),
-        getAggregate(b, 'part_pending', rb),
-        getAggregate(b, 'active_eng', rb),
-      ]);
-      applyRegionRowStyle(r, b.region);
+      const solved = getAggregate(b, 'solved_calls', rb);
+      const open = getAggregate(b, 'open_calls', rb);
+      const total = excludeCancelled ? solved + open : getAggregate(b, 'total_calls', rb);
+      const r = sheet.addRow(
+        excludeCancelled
+          ? [
+              b.branch,
+              total,
+              solved,
+              open,
+              getAggregate(b, 'age_2', rb),
+              getAggregate(b, 'age_3', rb),
+              getAggregate(b, 'age_7', rb),
+              getAggregate(b, 'age_15', rb),
+              getAggregate(b, 'part_pending', rb),
+              getAggregate(b, 'active_eng', rb),
+            ]
+          : [
+              b.branch,
+              total,
+              solved,
+              getAggregate(b, 'cancelled_calls', rb),
+              open,
+              getAggregate(b, 'age_2', rb),
+              getAggregate(b, 'age_3', rb),
+              getAggregate(b, 'age_7', rb),
+              getAggregate(b, 'age_15', rb),
+              getAggregate(b, 'part_pending', rb),
+              getAggregate(b, 'active_eng', rb),
+            ]
+      );
+      applyRegionRowStyle(r, b.region, metricStyle);
     });
 
   return workbook;
@@ -178,12 +271,13 @@ export async function buildSummaryDashboardWorkbook(
 export async function buildKeyAccountMisWorkbook(
   accountsData: AccountSummaryRow[],
   sheetName = 'Key Account MIS',
-  opts?: { hideRegion?: boolean }
+  opts?: { hideRegion?: boolean; excludeCancelled?: boolean }
 ): Promise<ExcelJS.Workbook> {
   const ExcelJSRuntime = (await import('exceljs')).default;
   const workbook = new ExcelJSRuntime.Workbook();
   const sheet = workbook.addWorksheet(sheetName);
   const hideRegion = opts?.hideRegion ?? false;
+  const excludeCancelled = opts?.excludeCancelled === true;
 
   const sorted = [...accountsData].sort((a, b) =>
     hideRegion
@@ -193,78 +287,135 @@ export async function buildKeyAccountMisWorkbook(
 
   const kaHeader = sheet.addRow(
     hideRegion
-      ? [
-          'Account',
-          'Population',
-          'Total',
-          'Solved',
-          'Cancelled',
-          'Open',
-          '<2 Days',
-          '3-7 Days',
-          '8-15 Days',
-          '>15 Days',
-          'Parts',
-          'Engineers',
-        ]
-      : [
-          'Region',
-          'Account',
-          'Population',
-          'Total',
-          'Solved',
-          'Cancelled',
-          'Open',
-          '<2 Days',
-          '3-7 Days',
-          '8-15 Days',
-          '>15 Days',
-          'Parts',
-          'Engineers',
-        ]
+      ? excludeCancelled
+        ? [
+            'Account',
+            'Population',
+            'Total',
+            'Solved',
+            'Open',
+            '<2 Days',
+            '3-7 Days',
+            '8-15 Days',
+            '>15 Days',
+            'Parts',
+            'Engineers',
+          ]
+        : [
+            'Account',
+            'Population',
+            'Total',
+            'Solved',
+            'Cancelled',
+            'Open',
+            '<2 Days',
+            '3-7 Days',
+            '8-15 Days',
+            '>15 Days',
+            'Parts',
+            'Engineers',
+          ]
+      : excludeCancelled
+        ? [
+            'Region',
+            'Account',
+            'Population',
+            'Total',
+            'Solved',
+            'Open',
+            '<2 Days',
+            '3-7 Days',
+            '8-15 Days',
+            '>15 Days',
+            'Parts',
+            'Engineers',
+          ]
+        : [
+            'Region',
+            'Account',
+            'Population',
+            'Total',
+            'Solved',
+            'Cancelled',
+            'Open',
+            '<2 Days',
+            '3-7 Days',
+            '8-15 Days',
+            '>15 Days',
+            'Parts',
+            'Engineers',
+          ]
   );
   applySummaryHeaderStyle(kaHeader);
 
   sorted.forEach((a) => {
     const openCalls = Number(a.open_calls || 0);
+    const solved = Number(a.total_solved || 0);
+    const total = excludeCancelled ? solved + openCalls : Number(a.total_calls || 0);
     const rowValues = hideRegion
-      ? [
-          a.account,
-          a.population || 0,
-          a.total_calls,
-          a.total_solved,
-          a.cancelled_calls,
-          openCalls,
-          a.age_2,
-          a.age_3,
-          a.age_7,
-          a.age_15,
-          a.part_pending,
-          a.active_eng,
-        ]
-      : [
-          a.region,
-          a.account,
-          a.population || 0,
-          a.total_calls,
-          a.total_solved,
-          a.cancelled_calls,
-          openCalls,
-          a.age_2,
-          a.age_3,
-          a.age_7,
-          a.age_15,
-          a.part_pending,
-          a.active_eng,
-        ];
+      ? excludeCancelled
+        ? [
+            a.account,
+            a.population || 0,
+            total,
+            solved,
+            openCalls,
+            a.age_2,
+            a.age_3,
+            a.age_7,
+            a.age_15,
+            a.part_pending,
+            a.active_eng,
+          ]
+        : [
+            a.account,
+            a.population || 0,
+            total,
+            solved,
+            a.cancelled_calls,
+            openCalls,
+            a.age_2,
+            a.age_3,
+            a.age_7,
+            a.age_15,
+            a.part_pending,
+            a.active_eng,
+          ]
+      : excludeCancelled
+        ? [
+            a.region,
+            a.account,
+            a.population || 0,
+            total,
+            solved,
+            openCalls,
+            a.age_2,
+            a.age_3,
+            a.age_7,
+            a.age_15,
+            a.part_pending,
+            a.active_eng,
+          ]
+        : [
+            a.region,
+            a.account,
+            a.population || 0,
+            total,
+            solved,
+            a.cancelled_calls,
+            openCalls,
+            a.age_2,
+            a.age_3,
+            a.age_7,
+            a.age_15,
+            a.part_pending,
+            a.active_eng,
+          ];
     const r = sheet.addRow(rowValues);
-    applyRegionRowStyle(r, a.region);
     const solvedCol = hideRegion ? 4 : 5;
-    const cancelledCol = hideRegion ? 5 : 6;
-    const openCol = hideRegion ? 6 : 7;
-    r.getCell(solvedCol).font = { color: { argb: 'FF059669' } };
-    r.getCell(cancelledCol).font = { color: { argb: 'FFDC2626' } };
-    r.getCell(openCol).font = { bold: true };
+    const cancelledCol = excludeCancelled ? null : hideRegion ? 5 : 6;
+    const openCol = excludeCancelled ? (hideRegion ? 5 : 6) : hideRegion ? 6 : 7;
+    applyRegionRowStyle(r, a.region, { solvedCol, cancelledCol, openCol });
   });
 
   return workbook;
@@ -293,6 +444,8 @@ export type PreparedFileExport = {
   blob: Blob;
   filename: string;
   objectUrl: string;
+  /** Non-fatal issue — file is still downloadable. */
+  warning?: string;
 };
 
 /** Avoid browser duplicate-download suppression when exporting the same name twice. */

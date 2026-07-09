@@ -28,6 +28,7 @@ import { useSearchParams } from 'next/navigation';
 import { ThemePicker } from '@/components/settings/ThemePicker';
 import { MisEmailComposer } from '@/components/settings/MisEmailComposer';
 import type { MisEmailBodySectionDef } from '@/lib/mis-email/body-sections';
+import { DEFAULT_MIS_EMAIL_PREFERENCES } from '@/lib/mis-email/preferences';
 import type { MisEmailPreferences } from '@/lib/mis-email/preferences';
 
 type MisEmailSettings = {
@@ -103,6 +104,18 @@ function ProfileContent() {
     try {
       await axios.patch('/api/profile/mis-email', nextPrefs, { withCredentials: true });
       feedback.actionSuccess(nextSubscribed ? 'Daily digest enabled' : 'Daily digest paused');
+    } catch (err: any) {
+      setEmailPrefs(emailPrefs);
+      feedback.actionFailed(err.response?.data?.error || 'Update failed');
+    }
+  }
+
+  async function handleScheduledTimeChange(nextTime: string) {
+    const nextPrefs = { ...emailPrefs, sendTimeIst: nextTime };
+    setEmailPrefs(nextPrefs);
+    try {
+      await axios.patch('/api/profile/mis-email', nextPrefs, { withCredentials: true });
+      feedback.actionSuccess(`Daily digest time updated to ${nextTime} IST`);
     } catch (err: any) {
       setEmailPrefs(emailPrefs);
       feedback.actionFailed(err.response?.data?.error || 'Update failed');
@@ -306,7 +319,7 @@ function ProfileContent() {
           <div className="space-y-4">
             <SettingsCard
               title="Scheduled digest"
-              description="Daily MIS email at 7:00 AM IST using your saved compose defaults."
+              description="Daily MIS email using your saved compose defaults at your selected IST time."
             >
               {emailLoading ? (
                 <p className="text-xs text-slate-500">Loading…</p>
@@ -315,7 +328,7 @@ function ProfileContent() {
                   <div>
                     <p className="text-[13px] font-medium text-slate-800">Receive scheduled emails</p>
                     <p className="text-[11px] text-slate-500">
-                      Turn off to pause 7 AM digests. Use Send now below for one-off reports.
+                      Turn off to pause daily digests. Use Send now below for one-off reports.
                     </p>
                   </div>
                   <button
@@ -333,6 +346,23 @@ function ProfileContent() {
                   </button>
                 </div>
               )}
+              {!emailLoading ? (
+                <div className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-slate-200 p-4">
+                  <div>
+                    <p className="text-[13px] font-medium text-slate-800">Send time (IST)</p>
+                    <p className="text-[11px] text-slate-500">
+                      Choose when your scheduled digest should be delivered.
+                    </p>
+                  </div>
+                  <input
+                    type="time"
+                    value={emailPrefs.sendTimeIst ?? DEFAULT_MIS_EMAIL_PREFERENCES.sendTimeIst}
+                    onChange={(e) => void handleScheduledTimeChange(e.target.value)}
+                    className={settingsInputClass()}
+                    step={300}
+                  />
+                </div>
+              ) : null}
             </SettingsCard>
 
             {!emailLoading && user?.email ? (

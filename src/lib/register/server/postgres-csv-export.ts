@@ -1,21 +1,20 @@
 import 'server-only';
 
-import {
-  appDatabaseBulkStatementTimeoutMs,
-  withAppClient,
-} from '@/lib/read-model/db';
+import { withBulkReadClient } from '@/lib/read-model/db';
 import { formatRegisterExportDate } from '@/lib/register/export-dates';
 import {
+  buildRegisterListQuery,
   buildWhere,
+  countRegisterRowsFromPostgres,
+  registerKeysetCursorFromRow,
   type RegisterPostgresParams,
 } from '@/lib/read-model/queries/register';
 import { REGISTER_EXPORT_HOT_COLUMNS } from '@/lib/read-model/queries/register-columns';
 import { mergeArcpPickOntoHotExportRows } from '@/lib/register/arcp-approve-dates-server';
 import { csvEscape } from '@/lib/register/server/csv-export';
 import { REGISTER_EXPORT_COLUMNS } from '@/lib/register/table-columns';
-import { HOT_OFFICE_JOINS_SQL } from '@/lib/read-model/queries/register-columns';
 
-const CURSOR_FETCH_SIZE = 12_000;
+const KEYSET_FETCH_SIZE = 12_000;
 
 function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
   const franchisee =
@@ -82,23 +81,21 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
 export type PostgresRegisterCsvStreamOptions = Omit<
   RegisterPostgresParams,
   'page' | 'limit' | 'fetchTotals' | 'fetchFilterOptions'
-> & {
-  knownTotal?: number;
-};
+>;
 
-/** Stream register CSV from calls_latest_hot — cursor + batch ARCP enrichment per chunk. */
+/** Stream register CSV from calls_latest_hot — composite keyset pages + batch ARCP enrichment per chunk. */
 export async function buildPostgresRegisterCsvStream(
   params: PostgresRegisterCsvStreamOptions
 ): Promise<Response> {
-  const { knownTotal, ...filterParams } = params;
   const fullParams: RegisterPostgresParams = {
-    ...filterParams,
+    ...params,
     page: 1,
-    limit: 1,
+    limit: KEYSET_FETCH_SIZE,
     fetchTotals: false,
     fetchFilterOptions: false,
   };
-  const { sql: whereSql, values } = buildWhere(fullParams);
+
+  const dbCount = await countRegisterRowsFromPostgres(fullParams);
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
@@ -111,55 +108,62 @@ export async function buildPostgresRegisterCsvStream(
           )
         );
 
-        await withAppClient(
-          async (client) => {
-            await client.query('BEGIN');
-            try {
-              await client.query(
-                {
-                  text: `
-                    DECLARE register_export CURSOR FOR
-                    SELECT ${REGISTER_EXPORT_HOT_COLUMNS}
-                    FROM calls_latest_hot h
-                    ${HOT_OFFICE_JOINS_SQL}
-                    WHERE ${whereSql}
-                    ORDER BY h.ncode DESC`,
-                  values,
-                }
-              );
+        let cursorLoggedAt: string | undefined;
+        let cursorNcode: number | undefined;
+        let exportedRows = 0;
 
-              while (true) {
-                const res = await client.query(
-                  `FETCH FORWARD ${CURSOR_FETCH_SIZE} FROM register_export`
-                );
-                let rows = res.rows as Record<string, unknown>[];
-                if (!rows.length) break;
+        await withBulkReadClient(async (client) => {
+          while (true) {
+            const pageParams: RegisterPostgresParams = {
+              ...fullParams,
+              cursorLoggedAt,
+              cursorNcode,
+            };
+            const { sql: whereSql, values } = buildWhere(pageParams);
+            const { text, values: queryValues } = buildRegisterListQuery(
+              REGISTER_EXPORT_HOT_COLUMNS,
+              whereSql,
+              values,
+              KEYSET_FETCH_SIZE
+            );
 
-                rows = await mergeArcpPickOntoHotExportRows(rows, (sql, params) =>
-                  client.query(sql, params)
-                );
+            const res = await client.query<Record<string, unknown>>({
+              text,
+              values: queryValues,
+            });
 
-                let chunk = '';
-                for (const row of rows) {
-                  chunk += `${hotPgRowToRegisterCsvLine(row)}\r\n`;
-                }
-                controller.enqueue(encoder.encode(chunk));
+            let rows = res.rows;
+            if (!rows.length) break;
 
-                if (rows.length < CURSOR_FETCH_SIZE) break;
-              }
+            rows = await mergeArcpPickOntoHotExportRows(rows, (sql, queryParams) =>
+              client.query(sql, queryParams)
+            );
 
-              await client.query('CLOSE register_export');
-              await client.query('COMMIT');
-            } catch (err) {
-              await client.query('ROLLBACK').catch(() => undefined);
-              throw err;
+            let chunk = '';
+            for (const row of rows) {
+              chunk += `${hotPgRowToRegisterCsvLine(row)}\r\n`;
             }
-          },
-          { statementTimeoutMs: appDatabaseBulkStatementTimeoutMs() }
-        );
+            controller.enqueue(encoder.encode(chunk));
+            exportedRows += rows.length;
+
+            const cursor = registerKeysetCursorFromRow(rows[rows.length - 1]!);
+            if (!cursor) break;
+            cursorLoggedAt = cursor.cursorLoggedAt;
+            cursorNcode = cursor.cursorNcode;
+
+            if (rows.length < KEYSET_FETCH_SIZE) break;
+          }
+        });
+
+        if (exportedRows !== dbCount) {
+          throw new Error(
+            `Export incomplete — server exported ${exportedRows.toLocaleString()} of ${dbCount.toLocaleString()} rows`
+          );
+        }
 
         controller.close();
       } catch (err) {
+        console.error('[register-export] CSV stream failed:', err);
         controller.error(err);
       }
     },
@@ -170,10 +174,8 @@ export async function buildPostgresRegisterCsvStream(
     'Content-Type': 'text/csv; charset=utf-8',
     'Content-Disposition': `attachment; filename="${filename}"`,
     'Cache-Control': 'no-store',
+    'X-Register-Export-Total': String(dbCount),
   };
-  if (knownTotal != null && knownTotal > 0) {
-    headers['X-Register-Export-Total'] = String(knownTotal);
-  }
 
   return new Response(stream, { headers });
 }

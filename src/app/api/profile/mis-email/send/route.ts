@@ -43,6 +43,7 @@ export async function POST(request: Request) {
       preferences?: MisEmailPreferences;
       sendTo?: string[];
       savePreferences?: boolean;
+      allowAutoSendDisabledOverride?: boolean;
     };
 
     const [row, recipient] = await Promise.all([
@@ -96,6 +97,7 @@ export async function POST(request: Request) {
         const results = await sendMisEmailComposeBatch(recipient, {
           preferences: validated.merged,
           sendTo: body.sendTo,
+          allowAutoSendDisabledOverride: body.allowAutoSendDisabledOverride === true,
           displayName: recipient.name,
         });
 

@@ -11,8 +11,8 @@ type ReportExportQueueBannerProps = {
   onCancelItem: (id: string) => void;
 };
 
-function statusLabel(status: ExportQueueItem['status']): string {
-  switch (status) {
+function statusLabel(item: ExportQueueItem): string {
+  switch (item.status) {
     case 'queued':
       return 'Queued';
     case 'running':
@@ -20,7 +20,7 @@ function statusLabel(status: ExportQueueItem['status']): string {
     case 'downloading':
       return 'Downloading…';
     case 'done':
-      return 'Ready — click Save';
+      return item.warning ? 'Ready (partial) — click Save' : 'Ready — click Save';
     case 'failed':
       return 'Failed';
     case 'cancelled':
@@ -28,15 +28,15 @@ function statusLabel(status: ExportQueueItem['status']): string {
   }
 }
 
-function statusClass(status: ExportQueueItem['status']): string {
-  switch (status) {
+function statusClass(item: ExportQueueItem): string {
+  switch (item.status) {
     case 'queued':
       return 'text-slate-600';
     case 'running':
     case 'downloading':
       return 'text-amber-700 font-medium';
     case 'done':
-      return 'text-emerald-700';
+      return item.warning ? 'text-amber-700' : 'text-emerald-700';
     case 'failed':
       return 'text-red-700';
     case 'cancelled':
@@ -85,7 +85,7 @@ export default function ReportExportQueueBanner({
                 <span className="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" />
               )}
               <div className="min-w-0">
-                <span className={statusClass(item.status)}>{statusLabel(item.status)}</span>
+                <span className={statusClass(item)}>{statusLabel(item)}</span>
                 <span className="text-slate-800"> — {item.label}</span>
                 {item.progress && item.status === 'running' ? (
                   <span className="mt-0.5 block text-slate-600">
@@ -97,6 +97,9 @@ export default function ReportExportQueueBanner({
                 ) : null}
                 {item.error ? (
                   <span className="mt-0.5 block text-red-600">{item.error}</span>
+                ) : null}
+                {item.warning ? (
+                  <span className="mt-0.5 block text-amber-700">{item.warning}</span>
                 ) : null}
                 {item.status === 'done' && item.downloadUrl && item.filename ? (
                   <a

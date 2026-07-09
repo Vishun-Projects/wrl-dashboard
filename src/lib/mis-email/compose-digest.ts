@@ -9,6 +9,7 @@ import {
 import {
   resolveDigestKeyAccountBodyRows,
 } from '@/lib/mis-email/fetch-digest-accounts';
+import { buildMisEmailRegionalPerformanceRows } from '@/lib/mis-email/mail-basis';
 import { buildDigestTraceableExportPayload } from '@/lib/mis-email/fetch-digest-trace';
 import {
   fetchDigestRegisterRows,
@@ -24,6 +25,7 @@ import {
   formatReportPeriod,
 } from '@/lib/mis-email/email-template';
 import {
+  DEFAULT_MIS_EMAIL_PREFERENCES,
   hasAnyEffectiveDigestInclude,
   mergeMisEmailPreferences,
   parseMisEmailKeyAccountsInBody,
@@ -36,6 +38,13 @@ import {
 } from '@/lib/mis-email/preferences';
 import type { DigestRecipient } from '@/lib/mis-email/recipients';
 import { resolvePortalUrl, sendPreparedDigestEmail } from '@/lib/mis-email/send';
+import { resolveUserDigestScope } from '@/lib/mis-email/user-scope';
+import {
+  listMatchingMisEmailRoutingRulesForResolvedClients,
+  listMisEmailRoutingRules,
+  resolveRoutingClientNamesForScope,
+  resolveRoutingScopeForOfficeIds,
+} from '@/lib/mis-email/routing-rules';
 import { resolveUserDigestScopeWithLabel } from '@/lib/mis-email/user-scope';
 import { formatBytes, MisEmailTimer, type MisEmailTimingReport } from '@/lib/mis-email/timing';
 import {
@@ -113,19 +122,30 @@ async function buildMisEmailBodyContext(
     keyAccountsInBody: explicitAccounts,
   };
 
-  if (bodySectionIds.includes('key_account_performance')) {
+  if (
+    bodySectionIds.includes('key_account_performance') ||
+    bodySectionIds.includes('regional_performance')
+  ) {
     const clientRows =
       clientAccountSummary !== undefined
         ? clientAccountSummary
         : await fetchDigestClientAccountSummaryCached(dateRange);
-    const accountRows = resolveDigestKeyAccountBodyRows(
-      data.accountSummary,
-      clientRows,
-      explicitAccounts
-    );
     context.clientAccountSummary = clientRows as Array<Record<string, unknown>>;
-    context.accountRows = accountRows;
-    context.keyAccountsInBody = accountRows.map((row) => String(row.account ?? ''));
+    if (bodySectionIds.includes('regional_performance')) {
+      context.regionalPerformanceRows = buildMisEmailRegionalPerformanceRows(
+        data,
+        clientRows
+      );
+    }
+    if (bodySectionIds.includes('key_account_performance')) {
+      const accountRows = resolveDigestKeyAccountBodyRows(
+        data.accountSummary,
+        clientRows,
+        explicitAccounts
+      );
+      context.accountRows = accountRows;
+      context.keyAccountsInBody = accountRows.map((row) => String(row.account ?? ''));
+    }
   }
 
   return context;
@@ -269,7 +289,9 @@ export async function buildMisEmailPayload(
   const bodySectionIds = resolveDigestBodySections(bodyPermissions, prefs, {
     includeKeyAccountAttachment: effectiveIncludes.includeKeyAccount,
   });
-  const needsClientAccounts = bodySectionIds.includes('key_account_performance');
+  const needsClientAccounts =
+    bodySectionIds.includes('key_account_performance') ||
+    bodySectionIds.includes('regional_performance');
   const includeDetailed = !options.forPreview && effectiveIncludes.includeDetailed;
   const includeTraceableExport =
     !options.forPreview && effectiveIncludes.includeTraceableExport;
@@ -469,6 +491,7 @@ export async function sendMisEmailComposeBatch(
   options: {
     preferences?: MisEmailPreferences;
     sendTo?: string[];
+    allowAutoSendDisabledOverride?: boolean;
     displayName?: string;
   }
 ): Promise<MisEmailSendResult[]> {
@@ -477,7 +500,45 @@ export async function sendMisEmailComposeBatch(
     recipient.mis_email_preferences,
     options.preferences ?? {}
   );
-  const targets = resolveMisEmailSendTargets(recipient, prefs, options.sendTo);
+  const explicitTargets = resolveMisEmailSendTargets(recipient, prefs, options.sendTo);
+  const dateRangeMode = prefs.dateRange ?? DEFAULT_MIS_EMAIL_PREFERENCES.dateRange;
+  const digestScope = resolveUserDigestScope(recipient);
+  const [rules, clientNames, officeScope] = await Promise.all([
+    listMisEmailRoutingRules(),
+    resolveRoutingClientNamesForScope({
+      officeIds: recipient.office_ids ?? [],
+      isHod: digestScope.isHod,
+      dateRangeMode,
+    }),
+    resolveRoutingScopeForOfficeIds(recipient.office_ids ?? []),
+  ]);
+  const matchedRule =
+    listMatchingMisEmailRoutingRulesForResolvedClients({
+      rules,
+      zones: officeScope.zones,
+      branches: officeScope.branches,
+      mailClients: clientNames.mail,
+      crmClients: clientNames.crm,
+    })[0] ?? null;
+  const routing = matchedRule
+    ? {
+        matchedRule,
+        to: matchedRule.toEmails,
+        cc: matchedRule.ccEmails,
+        autoSendEnabled: matchedRule.autoSendEnabled,
+      }
+    : {
+        matchedRule: null,
+        to: explicitTargets,
+        cc: [] as string[],
+        autoSendEnabled: true,
+      };
+  if (!routing.autoSendEnabled && options.allowAutoSendDisabledOverride !== true) {
+    throw new Error('Auto-send disabled by HOD routing rule for this scope');
+  }
+  const targets = options.sendTo?.length
+    ? explicitTargets
+    : [...new Set([...routing.to, ...routing.cc])];
   if (targets.length === 0) {
     throw new Error('Add at least one recipient email');
   }

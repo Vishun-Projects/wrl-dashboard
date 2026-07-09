@@ -5,7 +5,7 @@ import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
  * Lightweight stand-in for queue pump download step (no React hook runtime needed).
  */
 async function simulateQueueDownload(
-  prepared: { blob: Blob; filename: string },
+  prepared: { blob: Blob; filename: string; objectUrl?: string },
   patch: (status: string, error?: string) => void
 ): Promise<{ downloaded: boolean; filename: string }> {
   patch('downloading');

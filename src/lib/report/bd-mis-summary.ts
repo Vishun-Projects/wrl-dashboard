@@ -23,6 +23,8 @@ export type BdMisSourceFlags = {
   crm: boolean;
   cadbury: boolean;
   coke: boolean;
+  /** MIS email: subtract CRM Cadbury/Mondelez without substituting Mondelez import. */
+  excludeCrmCadbury?: boolean;
 };
 
 export type BdMisMetricBundle = {
@@ -230,6 +232,13 @@ type ZoneUnionSteps = {
   result: BdMisMetricBundle;
 };
 
+/** When true, CRM Cadbury is subtracted in every zone (MIS mail — import-only Cadbury). */
+function shouldSubtractCrmCadbury(zone: BdMisZone, sources: BdMisSourceFlags): boolean {
+  if (!sources.crm) return false;
+  if (sources.excludeCrmCadbury === true) return true;
+  return sources.cadbury && zone !== 'WEST ZONE';
+}
+
 /** Apply per-zone source union (Cadbury import-only, Coke CRM + import). */
 function applyBdMisZoneUnion(
   zone: BdMisZone,
@@ -242,10 +251,9 @@ function applyBdMisZoneUnion(
     ? sumBranchMetricsInZone(crmBranchSummary, zone)
     : emptyBdMisMetrics();
 
-  const subtractCrmCadbury =
-    sources.crm && sources.cadbury && zone !== 'WEST ZONE'
-      ? sumAccountMetricsInZone(crmAccountSummary, zone, isCrmCadburyAccount)
-      : emptyBdMisMetrics();
+  const subtractCrmCadbury = shouldSubtractCrmCadbury(zone, sources)
+    ? sumAccountMetricsInZone(crmAccountSummary, zone, isCrmCadburyAccount)
+    : emptyBdMisMetrics();
 
   const addClientCadbury =
     sources.cadbury && zone !== 'WEST ZONE'
@@ -262,8 +270,10 @@ function applyBdMisZoneUnion(
 
   let result = crmBranchBase;
 
-  if (sources.crm && sources.cadbury && zone !== 'WEST ZONE') {
+  if (shouldSubtractCrmCadbury(zone, sources)) {
     result = subtractBdMisMetrics(result, subtractCrmCadbury);
+  }
+  if (sources.cadbury && zone !== 'WEST ZONE') {
     result = addBdMisMetrics(result, addClientCadbury);
   } else if (!sources.crm && sources.cadbury && zone !== 'WEST ZONE') {
     result = addBdMisMetrics(result, addClientCadbury);

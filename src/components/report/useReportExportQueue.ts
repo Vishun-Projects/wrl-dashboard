@@ -21,11 +21,14 @@ function delay(ms: number): Promise<void> {
 
 export type UseReportExportQueueOptions = {
   onDownloadStarted?: (filename: string) => void;
+  onExportComplete?: (result: { filename: string; warning?: string }) => void;
 };
 
 export function useReportExportQueue(options: UseReportExportQueueOptions = {}) {
   const onDownloadStartedRef = useRef(options.onDownloadStarted);
   onDownloadStartedRef.current = options.onDownloadStarted;
+  const onExportCompleteRef = useRef(options.onExportComplete);
+  onExportCompleteRef.current = options.onExportComplete;
 
   const queueRef = useRef<ExportQueueJob[]>([]);
   const processingRef = useRef(false);
@@ -61,6 +64,7 @@ export function useReportExportQueue(options: UseReportExportQueueOptions = {}) 
             status: 'downloading',
             filename: result.filename,
             progress: undefined,
+            warning: undefined,
           });
           await triggerBlobDownload(result.blob, result.filename, {
             objectUrl: result.objectUrl,
@@ -71,8 +75,13 @@ export function useReportExportQueue(options: UseReportExportQueueOptions = {}) 
             filename: result.filename,
             downloadUrl: result.objectUrl,
             progress: undefined,
+            warning: result.warning,
           });
           onDownloadStartedRef.current?.(result.filename);
+          onExportCompleteRef.current?.({
+            filename: result.filename,
+            warning: result.warning,
+          });
         } catch (err) {
           const cancelled =
             err instanceof DOMException && err.name === 'AbortError'

@@ -1,14 +1,8 @@
 import axios from 'axios';
 import { readRegisterFromPostgresClient } from '@/lib/read-model/client-flags';
-import {
-  createCsvRecordCounter,
-  feedCsvRecordCounter,
-  finalizeCsvRecordCounter,
-} from '@/lib/utils/csv';
 import { downloadRegisterCsvInBrowser } from './server/csv-export';
 import {
   blobToPreparedExport,
-  resolveUniqueDownloadFilename,
   triggerBlobDownload,
   type PreparedFileExport,
 } from '@/lib/report/summary-excel-export';
@@ -40,6 +34,17 @@ export function shouldStreamRegisterExportFromServer(
 export const REGISTER_EXPORT_BATCH_CRM = 1000;
 /** Larger batches when the API serves from Postgres hot table. */
 export const REGISTER_EXPORT_BATCH_POSTGRES = 2000;
+
+export type RegisterExportProgress = {
+  fetched: number;
+  total: number;
+  detail?: string;
+};
+
+export type RegisterExportKeysetCursor = {
+  cursorLoggedAt?: string;
+  cursorNcode?: number;
+};
 
 export function logRegisterBulk(_message: string, _extra?: Record<string, unknown>) {
   /* no-op — avoid leaking load paths in the browser console */
@@ -74,7 +79,7 @@ export function buildRegisterExportParams(
   page: number,
   limit: number,
   fetchTotals: boolean,
-  cursorNcode?: number
+  cursor?: RegisterExportKeysetCursor
 ): URLSearchParams {
   const params = new URLSearchParams({
     page: String(page),
@@ -99,10 +104,22 @@ export function buildRegisterExportParams(
   setOptional(params, 'portalFilter', query.portalFilter);
   setOptional(params, 'account', query.account);
   setOptional(params, 'region', query.region);
-  if (cursorNcode != null && cursorNcode > 0) {
-    params.set('cursorNcode', String(cursorNcode));
+  if (cursor?.cursorLoggedAt && cursor.cursorNcode != null && cursor.cursorNcode > 0) {
+    params.set('cursorLoggedAt', cursor.cursorLoggedAt);
+    params.set('cursorNcode', String(cursor.cursorNcode));
   }
   return params;
+}
+
+export function registerExportCursorFromRow(
+  row: Record<string, unknown>
+): RegisterExportKeysetCursor | null {
+  const loggedAt = row.callsdtrndate ?? row.logged_at;
+  const ncode = Number(row.ncode ?? row.id);
+  if (loggedAt == null || !Number.isFinite(ncode) || ncode <= 0) return null;
+  const cursorLoggedAt =
+    loggedAt instanceof Date ? loggedAt.toISOString() : String(loggedAt);
+  return { cursorLoggedAt, cursorNcode: ncode };
 }
 
 export function resolveRegisterExportBatchSize(_startDate: string, _endDate: string): number {
@@ -142,21 +159,18 @@ export async function downloadRegisterCsvFromRows(
   await downloadRegisterCsvInBrowser(rows, filename);
 }
 
-/** Stream register CSV from server into a prepared export blob. */
+/** Stream register CSV from server into a prepared export blob (single server path). */
 export async function prepareRegisterCsvFromServer(opts: {
   query: RegisterExportQuery;
   knownTotal?: number;
   signal?: AbortSignal;
-  onProgress?: (fetched: number, total: number) => void;
+  onProgress?: (progress: RegisterExportProgress) => void;
 }): Promise<PreparedFileExport> {
   const params = buildRegisterExportParams(opts.query, 1, REGISTER_EXPORT_BATCH_CRM, false);
   params.set('export', 'csv');
-  if (opts.knownTotal != null && opts.knownTotal > 0) {
-    params.set('knownTotal', String(opts.knownTotal));
-  }
 
-  const total = Math.max(0, opts.knownTotal ?? 0);
-  opts.onProgress?.(0, total);
+  const fallbackTotal = Math.max(0, opts.knownTotal ?? 0);
+  opts.onProgress?.({ fetched: 0, total: fallbackTotal });
 
   const res = await fetch(`/api/report?${params.toString()}`, {
     credentials: 'include',
@@ -165,7 +179,10 @@ export async function prepareRegisterCsvFromServer(opts: {
 
   if (!res.ok) {
     const errBody = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(errBody.error || `Export failed (${res.status})`);
+    throw new Error(
+      errBody.error ||
+        `Export failed (${res.status}). Try a shorter date range or retry in a moment.`
+    );
   }
 
   const contentType = String(res.headers.get('content-type') ?? '');
@@ -175,7 +192,7 @@ export async function prepareRegisterCsvFromServer(opts: {
   }
 
   const headerTotal = Number(res.headers.get('X-Register-Export-Total') ?? 0);
-  const exportTotal = headerTotal > 0 ? headerTotal : total;
+  const exportTotal = headerTotal > 0 ? headerTotal : fallbackTotal;
 
   const reader = res.body?.getReader();
   if (!reader) {
@@ -183,8 +200,7 @@ export async function prepareRegisterCsvFromServer(opts: {
   }
 
   const chunks: Uint8Array[] = [];
-  const decoder = new TextDecoder();
-  const rowCounter = createCsvRecordCounter();
+  let receivedBytes = 0;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -192,27 +208,21 @@ export async function prepareRegisterCsvFromServer(opts: {
     if (!value?.length) continue;
 
     chunks.push(value);
-
-    feedCsvRecordCounter(rowCounter, decoder.decode(value, { stream: true }));
+    receivedBytes += value.length;
 
     if (exportTotal > 0) {
-      opts.onProgress?.(Math.min(rowCounter.rowCount, exportTotal), exportTotal);
+      const estimatedRows = Math.min(exportTotal, Math.floor(receivedBytes / 200));
+      opts.onProgress?.({
+        fetched: estimatedRows,
+        total: exportTotal,
+      });
     }
   }
 
-  feedCsvRecordCounter(rowCounter, decoder.decode());
-  const dataRowCount = finalizeCsvRecordCounter(rowCounter);
-
-  if (exportTotal > 0 && dataRowCount !== exportTotal) {
-    throw new Error(
-      `Export incomplete — received ${dataRowCount.toLocaleString()} of ${exportTotal.toLocaleString()} rows`
-    );
-  }
-
-  opts.onProgress?.(
-    exportTotal > 0 ? exportTotal : dataRowCount,
-    exportTotal > 0 ? exportTotal : dataRowCount
-  );
+  opts.onProgress?.({
+    fetched: exportTotal > 0 ? exportTotal : 0,
+    total: exportTotal > 0 ? exportTotal : 0,
+  });
 
   const blob = new Blob(chunks as BlobPart[], { type: 'text/csv;charset=utf-8;' });
   const baseName = `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
@@ -226,7 +236,12 @@ export async function downloadRegisterCsvFromServer(opts: {
   signal?: AbortSignal;
   onProgress?: (fetched: number, total: number) => void;
 }): Promise<void> {
-  const prepared = await prepareRegisterCsvFromServer(opts);
+  const prepared = await prepareRegisterCsvFromServer({
+    ...opts,
+    onProgress: opts.onProgress
+      ? ({ fetched, total }) => opts.onProgress!(fetched, total)
+      : undefined,
+  });
   await triggerBlobDownload(prepared.blob, prepared.filename);
 }
 
@@ -275,9 +290,9 @@ async function fetchRegisterExportPage(
   batchSize: number,
   fetchTotals: boolean,
   signal: AbortSignal | undefined,
-  cursorNcode?: number
+  cursor?: RegisterExportKeysetCursor
 ) {
-  const params = buildRegisterExportParams(query, page, batchSize, fetchTotals, cursorNcode);
+  const params = buildRegisterExportParams(query, page, batchSize, fetchTotals, cursor);
   const url = `/api/report?${params.toString()}`;
   return axios.get(url, { withCredentials: true, signal });
 }
@@ -290,7 +305,7 @@ export async function fetchAllRegisterRowsForExport(opts: {
   onProgress?: (fetched: number, total: number) => void;
 }): Promise<Record<string, unknown>[]> {
   if (readRegisterFromPostgresClient()) {
-    return fetchRegisterBulkForCache(opts);
+    return fetchRegisterKeysetPagesForExport(opts);
   }
 
   const batchSize = resolveRegisterExportBatchSize(opts.query.startDate, opts.query.endDate);
@@ -303,7 +318,7 @@ export async function fetchAllRegisterRowsForExport(opts: {
   const allRows: Record<string, unknown>[] = [];
   let total = Math.max(0, opts.knownTotal ?? 0);
   let page = 1;
-  let cursorNcode: number | undefined;
+  let cursor: RegisterExportKeysetCursor | undefined;
 
   while (true) {
     if (opts.signal?.aborted) {
@@ -318,7 +333,7 @@ export async function fetchAllRegisterRowsForExport(opts: {
       batchSize,
       fetchTotals,
       opts.signal,
-      cursorNcode
+      cursor
     );
 
     if (fetchTotals) {
@@ -337,9 +352,9 @@ export async function fetchAllRegisterRowsForExport(opts: {
       pageMs: Number((performance.now() - pageStart).toFixed(1)),
     });
 
-    const lastNcode = Number(rows[rows.length - 1]?.id ?? rows[rows.length - 1]?.ncode);
-    if (Number.isFinite(lastNcode) && lastNcode > 0) {
-      cursorNcode = lastNcode;
+    const nextCursor = registerExportCursorFromRow(rows[rows.length - 1]!);
+    if (nextCursor) {
+      cursor = nextCursor;
     }
 
     if (total > 0 && allRows.length >= total) break;
@@ -348,6 +363,75 @@ export async function fetchAllRegisterRowsForExport(opts: {
   }
 
   logRegisterBulk('paginated preload DONE (network)', {
+    rows: allRows.length,
+    pages: page,
+    ms: Number((performance.now() - t0).toFixed(1)),
+  });
+  return allRows;
+}
+
+/** Postgres composite keyset pages for in-browser small exports only. */
+async function fetchRegisterKeysetPagesForExport(opts: {
+  query: RegisterExportQuery;
+  knownTotal?: number;
+  signal?: AbortSignal;
+  onProgress?: (fetched: number, total: number) => void;
+}): Promise<Record<string, unknown>[]> {
+  const batchSize = REGISTER_EXPORT_BATCH_POSTGRES;
+  const t0 = performance.now();
+  logRegisterBulk('postgres keyset preload START', {
+    batchSize,
+    startDate: opts.query.startDate,
+    endDate: opts.query.endDate,
+  });
+
+  const allRows: Record<string, unknown>[] = [];
+  let total = Math.max(0, opts.knownTotal ?? 0);
+  let cursor: RegisterExportKeysetCursor | undefined;
+  let page = 0;
+
+  while (true) {
+    if (opts.signal?.aborted) {
+      throw new axios.Cancel('Register export cancelled');
+    }
+
+    page += 1;
+    const fetchTotals = page === 1 && total <= 0;
+    const pageStart = performance.now();
+    const res = await fetchRegisterExportPage(
+      opts.query,
+      page,
+      batchSize,
+      fetchTotals,
+      opts.signal,
+      cursor
+    );
+
+    if (fetchTotals) {
+      total = Number(res.data?.total ?? 0);
+    }
+
+    const rows = (res.data?.data ?? []) as Record<string, unknown>[];
+    if (!rows.length) break;
+
+    allRows.push(...rows);
+    opts.onProgress?.(allRows.length, total);
+    logRegisterBulk(`postgres keyset page ${page}`, {
+      pageRows: rows.length,
+      fetched: allRows.length,
+      total: total || 'unknown',
+      pageMs: Number((performance.now() - pageStart).toFixed(1)),
+    });
+
+    const nextCursor = registerExportCursorFromRow(rows[rows.length - 1]!);
+    if (!nextCursor) break;
+    cursor = nextCursor;
+
+    if (total > 0 && allRows.length >= total) break;
+    if (rows.length < batchSize) break;
+  }
+
+  logRegisterBulk('postgres keyset preload DONE (network)', {
     rows: allRows.length,
     pages: page,
     ms: Number((performance.now() - t0).toFixed(1)),

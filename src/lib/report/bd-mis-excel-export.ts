@@ -6,7 +6,7 @@ import {
   type BdMisRegionalRow,
   type BdMisSourceFlags,
 } from '@/lib/report/bd-mis-summary';
-import { filterTraceRowsForExport, type BdMisTraceRow } from '@/lib/report/bd-mis-trace';
+import { filterTraceRowsForExport, filterTraceRowsForSummaryExport, type BdMisTraceRow } from '@/lib/report/bd-mis-trace';
 import {
   applySummaryHeaderStyle,
   applyRegionRowStyle,
@@ -255,7 +255,7 @@ export async function buildBdMisSummaryWorkbook(
       row.age_15,
       row.active_eng,
     ]);
-    applyRegionRowStyle(r, row.region);
+    applyRegionRowStyle(r, row.region, { solvedCol: 3, cancelledCol: null, openCol: 4 });
   }
 
   const g = payload.grand;
@@ -312,7 +312,11 @@ export async function buildBdMisSummaryWorkbook(
       b.age_15,
       b.active_eng,
     ]);
-    applyRegionRowStyle(r, String(b.region));
+    applyRegionRowStyle(r, String(b.region), {
+      solvedCol: 5,
+      cancelledCol: 6,
+      openCol: 7,
+    });
   }
 
   const crmAcc = workbook.addWorksheet('CRM Accounts');
@@ -350,7 +354,7 @@ export async function buildBdMisSummaryWorkbook(
       a.age_7,
       a.age_15,
     ]);
-    applyRegionRowStyle(r, String(a.region));
+    applyRegionRowStyle(r, String(a.region), { solvedCol: 5, cancelledCol: null, openCol: 6 });
     if (role.startsWith('Subtracted')) {
       r.getCell(3).font = { color: { argb: 'FFDC2626' } };
     }
@@ -391,7 +395,7 @@ export async function buildBdMisSummaryWorkbook(
       a.age_7,
       a.age_15,
     ]);
-    applyRegionRowStyle(r, String(a.region));
+    applyRegionRowStyle(r, String(a.region), { solvedCol: 5, cancelledCol: null, openCol: 6 });
     if (role.startsWith('Added')) {
       r.getCell(3).font = { color: { argb: 'FF059669' } };
     }
@@ -462,7 +466,7 @@ function addTraceSummarySheet(
       row.age_15,
       row.active_eng,
     ]);
-    applyRegionRowStyle(r, row.region);
+    applyRegionRowStyle(r, row.region, { solvedCol: 3, cancelledCol: null, openCol: 4 });
   }
 
   const g = payload.grand;
@@ -503,11 +507,18 @@ function addTraceCountSheet(
   addReconciliationMatrix(recon, breakdown);
 }
 
+function resolveTraceRowDetailRows(payload: BdMisTraceableExportPayload): BdMisTraceRow[] {
+  if (payload.traceAlign === 'summary') {
+    return filterTraceRowsForSummaryExport(payload.traceRows);
+  }
+  return filterTraceRowsForExport(payload.traceRows);
+}
+
 function addTraceRowDetailSheet(
   workbook: ExcelJS.Workbook,
   traceRows: BdMisTraceRow[]
 ): void {
-  const exportRows = filterTraceRowsForExport(traceRows);
+  const exportRows = traceRows;
   const EXCEL_MAX_DATA_ROWS = 1_048_575;
   const chunkCount = Math.max(1, Math.ceil(exportRows.length / EXCEL_MAX_DATA_ROWS));
 
@@ -569,48 +580,14 @@ function autoSizeWorkbookColumns(
   }
 }
 
-/** Traceable export: Summary dashboard + count reconciliation + full row detail. */
+/** Traceable export: row detail only. */
 export async function buildBdMisTraceableWorkbook(
   payload: BdMisTraceableExportPayload
 ): Promise<ExcelJS.Workbook> {
   const ExcelJSRuntime = (await import('exceljs')).default;
   const workbook = new ExcelJSRuntime.Workbook();
 
-  const meta = workbook.addWorksheet('About');
-  meta.addRow(['Cadbury+Coke+CRM — traceable export']).font = { bold: true, size: 12 };
-  meta.addRow([]);
-  meta.addRow(['Date range', `${payload.filterMeta.startDate} to ${payload.filterMeta.endDate}`]);
-  meta.addRow(['Aging as of', payload.filterMeta.agingAsOf]);
-  meta.addRow(['Call types', payload.filterMeta.callTypes]);
-  meta.addRow(['Branches', payload.filterMeta.branches]);
-  meta.addRow(['Franchisees', payload.filterMeta.franchisees]);
-  meta.addRow(['CRM source', payload.filterMeta.sources.crm ? 'On' : 'Off']);
-  meta.addRow(['Cadbury source', payload.filterMeta.sources.cadbury ? 'On' : 'Off']);
-  meta.addRow(['Coke source', payload.filterMeta.sources.coke ? 'On' : 'Off']);
-  meta.addRow([]);
-  meta.addRow(['Sheets:']);
-  meta.addRow(['  Summary — dashboard regional table (snapshot at export)']);
-  if (payload.traceAlign === 'bd_mis') {
-    meta.addRow(['  Count Trace — step matrix per region (BD MIS union)']);
-  } else {
-    meta.addRow(['  Count Trace — omitted (Summary dashboard uses on-screen merge, not BD MIS union)']);
-  }
-  meta.addRow(['  Row Detail — call rows in the selected date range (same scope as the dashboard)']);
-  meta.addRow([]);
-  meta.addRow(['Row detail count', filterTraceRowsForExport(payload.traceRows).length]);
-  meta.addRow(['Row detail scope', 'Non-cancelled calls in the selected date range']);
-  meta.addRow([
-    'Trace scope',
-    payload.traceAlign === 'bd_mis'
-      ? 'BD MIS audit (client Coke/Cadbury use latest full snapshot files)'
-      : 'Summary dashboard (CRM + client rows filtered to the selected date range)',
-  ]);
-
-  addTraceRowDetailSheet(workbook, payload.traceRows);
-  addTraceSummarySheet(workbook, payload);
-  if (payload.traceAlign === 'bd_mis') {
-    addTraceCountSheet(workbook, payload);
-  }
+  addTraceRowDetailSheet(workbook, resolveTraceRowDetailRows(payload));
   autoSizeWorkbookColumns(workbook, { skipSheetNamePattern: /^Row Detail/ });
 
   return workbook;

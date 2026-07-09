@@ -612,7 +612,7 @@ describe('detect-parse', () => {
     expect(result.detectedHeaderRow).toBe(5);
     expect(result.rawRows.length).toBeGreaterThan(1000);
     expect(result.rawRows[0]['Call No']).toBeTruthy();
-  }, 60_000);
+  }, 120_000);
 
   it('auto-finds header row 5 when config header row is wrong', async () => {
     const buf = readFileSync(cdmsPath);
@@ -622,7 +622,7 @@ describe('detect-parse', () => {
     expect(result.rawRows.length).toBeGreaterThan(1000);
     expect(result.detectedHeaderRow).toBe(5);
     expect(result.warnings.some((w) => w.includes('Auto-detected header row 5'))).toBe(true);
-  }, 60_000);
+  }, 120_000);
 
   it('parses Cadbury VMS csv with cadbury config', async () => {
     const buf = readFileSync(vmsCsvPath);

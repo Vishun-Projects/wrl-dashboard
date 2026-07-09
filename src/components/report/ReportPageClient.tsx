@@ -677,8 +677,14 @@ export default function ReportPageClient() {
     cancelJob: cancelExportJob,
     clearFinished: clearFinishedExports,
   } = useReportExportQueue({
-    onDownloadStarted: (filename) => {
-      feedback.actionSuccess(`Export ready — click Save in the queue for ${filename}`);
+    onExportComplete: ({ filename, warning }) => {
+      if (warning) {
+        feedback.actionWarning(warning, {
+          description: `Save ${filename} from the export queue when ready.`,
+        });
+        return;
+      }
+      feedback.actionSuccess(`Export ready — save ${filename} from the queue.`);
     },
   });
 
@@ -3933,14 +3939,15 @@ export default function ReportPageClient() {
                 query: exportQuery,
                 knownTotal: total,
                 signal,
-                onProgress: (fetched, exportTotal) => {
+                onProgress: (progress) => {
+                  const { fetched, total: exportTotal, detail } = progress;
                   const elapsed = (Date.now() - exportStartedAtRef.current) / 1000;
                   const rate = fetched > 0 && elapsed >= 0.5 ? fetched / elapsed : 0;
                   const etaSeconds =
-                    rate > 0 && exportTotal > fetched
-                      ? Math.max(1, Math.ceil((exportTotal - fetched) / rate))
-                      : undefined;
-                  onProgress({ fetched, total: exportTotal, etaSeconds });
+                    detail || rate <= 0 || exportTotal <= fetched
+                      ? undefined
+                      : Math.max(1, Math.ceil((exportTotal - fetched) / rate));
+                  onProgress({ fetched, total: exportTotal, etaSeconds, detail });
                 },
               });
               if (format === 'excel') {
@@ -4113,11 +4120,14 @@ export default function ReportPageClient() {
             throw err;
           }
           const message = err instanceof Error ? err.message : 'Export failed';
-          feedback.actionFailed(`Failed to export: ${message}`);
+          const hint =
+            sourceTab === 'register' && !message.includes('date range')
+              ? ' Try narrowing the date range and export again.'
+              : '';
+          feedback.actionFailed(`Failed to export: ${message}${hint}`);
           throw err instanceof Error ? err : new Error(message);
         }
       });
-      feedback.actionSuccess('Export queued');
     },
     [activeTab, enqueueExport, executeExport]
   );

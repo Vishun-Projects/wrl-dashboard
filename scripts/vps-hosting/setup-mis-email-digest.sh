@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time VPS setup for daily MIS email digest (7 AM IST).
+# One-time VPS setup for per-user MIS email digest times (IST).
 # From Git Bash (repo root):
 #   bash scripts/vps-hosting/setup-mis-email-digest.sh
 # On VPS after manual copy:
@@ -47,9 +47,9 @@ run_install_on_machine() {
   echo "==> MIS email digest ready at ${root}"
   echo "    Test: bash ${root}/scripts/vps-hosting/mis-email-digest.sh"
   echo "    Or:   cd ${root} && npm run mis-email:test"
-  echo "    Cron (7 AM IST):"
+  echo "    Cron (every 15 min, IST):"
   echo "    CRON_TZ=Asia/Kolkata"
-  echo "    0 7 * * * ${root}/scripts/vps-hosting/mis-email-digest.sh >> ${root}/logs/mis-email-cron.log 2>&1"
+  echo "    */15 * * * * ${root}/scripts/vps-hosting/mis-email-digest.sh >> ${root}/logs/mis-email-cron.log 2>&1"
 }
 
 if [[ "${1:-}" == "--local" ]]; then
@@ -105,4 +105,4 @@ echo "Next steps:"
 echo "  1. ssh ${VPS_HOST}"
 echo "  2. nano ${INSTALL_ROOT}/.env.mis-email   # SMTP_PASS, DATABASE_URL"
 echo "  3. cd ${INSTALL_ROOT} && npm run mis-email:test"
-echo "  4. crontab -e   # add 7 AM IST line from setup output"
+echo "  4. crontab -e   # add 15-min IST line from setup output"

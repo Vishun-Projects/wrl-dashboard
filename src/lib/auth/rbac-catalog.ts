@@ -137,6 +137,14 @@ export const RBAC_PAGES: RbacPage[] = [
     group: 'Administration',
   },
   {
+    id: 'mis_email_routing',
+    permission: 'page_mis_email_routing',
+    path: '/admin/mis-email-routing',
+    label: 'MIS Email Routing',
+    description: 'Zone/branch/client-wise automail recipients and routing controls',
+    group: 'Administration',
+  },
+  {
     id: 'performance_insights',
     permission: 'page_performance_insights',
     path: '/admin/performance-insights',
@@ -232,6 +240,15 @@ export function hasFullPageAccess(permissions: string[], pageId: string): boolea
 export function canAccessPage(permissions: string[], pageId: string): boolean {
   const page = PAGE_BY_ID.get(pageId);
   if (!page) return false;
+  if (pageId === 'mis_email_routing') {
+    if (
+      hasCapability(permissions, 'view_all_offices') ||
+      hasPermission(permissions, 'manage_users') ||
+      hasPermission(permissions, 'manage_roles')
+    ) {
+      return true;
+    }
+  }
   if (hasFullPageAccess(permissions, pageId)) return true;
   if (page.tabs?.length) {
     return page.tabs.some((tab) => hasPermission(permissions, tab.permission));

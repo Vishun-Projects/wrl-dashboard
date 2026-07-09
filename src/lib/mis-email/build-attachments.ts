@@ -15,6 +15,7 @@ import {
   bdMisTraceableFilename,
   type BdMisTraceableExportPayload,
 } from '@/lib/report/bd-mis-excel-export';
+import { isRegisterRowCancelled } from '@/lib/report/search';
 import type { SummaryDashboard } from '@/lib/report/summary-derive';
 import type { DigestRecipient } from '@/lib/mis-email/recipients';
 import type { EffectiveDigestIncludes } from '@/lib/mis-email/preferences';
@@ -50,6 +51,38 @@ export function resolveDigestAttachmentFilenames(
   return filenames;
 }
 
+function excludeCancelledFromTracePayload(
+  payload: BdMisTraceableExportPayload
+): BdMisTraceableExportPayload {
+  const remapMetrics = <T extends { total_calls: number; total_solved: number; open_calls: number }>(
+    row: T
+  ): T => ({
+    ...row,
+    total_calls: Number(row.total_solved || 0) + Number(row.open_calls || 0),
+  });
+
+  return {
+    ...payload,
+    regionalRows: payload.regionalRows.map(remapMetrics),
+    grand: remapMetrics(payload.grand),
+    crmBranchSummary: payload.crmBranchSummary.map((b) => ({
+      ...b,
+      total_calls: Number(b.solved_calls || 0) + Number(b.open_calls || 0),
+      cancelled_calls: 0,
+    })),
+    crmAccountSummary: payload.crmAccountSummary.map((a) => ({
+      ...a,
+      total_calls: Number(a.total_solved || 0) + Number(a.open_calls || 0),
+      cancelled_calls: 0,
+    })),
+    clientAccountSummary: payload.clientAccountSummary.map((a) => ({
+      ...a,
+      total_calls: Number(a.total_solved || 0) + Number(a.open_calls || 0),
+      cancelled_calls: 0,
+    })),
+  };
+}
+
 export async function buildDigestAttachments(
   recipient: DigestRecipient,
   data: SummaryDashboard,
@@ -74,7 +107,9 @@ export async function buildDigestAttachments(
     tasks.push(
       (async () => {
         const started = Date.now();
-        const workbook = await buildSummaryDashboardWorkbook(data.branchSummary);
+        const workbook = await buildSummaryDashboardWorkbook(data.branchSummary, 'Summary Dashboard', {
+          excludeCancelled: true,
+        });
         const workbookMs = Date.now() - started;
         const bufferStarted = Date.now();
         const content = await workbookToBuffer(workbook);
@@ -94,7 +129,7 @@ export async function buildDigestAttachments(
   if (includes.includeDetailed) {
     tasks.push(
       (async () => {
-        const rows = options?.registerRows ?? [];
+        const rows = (options?.registerRows ?? []).filter((row) => !isRegisterRowCancelled(row));
         if (rows.length === 0) {
           throw new Error('No register rows found for detailed MIS export');
         }
@@ -120,7 +155,9 @@ export async function buildDigestAttachments(
     tasks.push(
       (async () => {
         const started = Date.now();
-        const workbook = await buildKeyAccountMisWorkbook(data.accountSummary);
+        const workbook = await buildKeyAccountMisWorkbook(data.accountSummary, 'Key Account MIS', {
+          excludeCancelled: true,
+        });
         const workbookMs = Date.now() - started;
         const bufferStarted = Date.now();
         const content = await workbookToBuffer(workbook);
@@ -145,7 +182,9 @@ export async function buildDigestAttachments(
           throw new Error('Traceable export data was not prepared');
         }
         const started = Date.now();
-        const workbook = await buildBdMisTraceableWorkbook(payload);
+        const workbook = await buildBdMisTraceableWorkbook(
+          excludeCancelledFromTracePayload(payload)
+        );
         const workbookMs = Date.now() - started;
         const bufferStarted = Date.now();
         const content = await workbookToBuffer(workbook);

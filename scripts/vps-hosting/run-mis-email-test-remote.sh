@@ -140,6 +140,9 @@ EOF
 echo "==> npm install"
 npm install --omit=dev 2>&1 | tail -8
 
+export NODE_ENV=production
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=8192}"
+
 echo "==> mis-email:test"
 # dotenv in cli loads .env.mis-email only; export as backup for npm child
 set -a

@@ -1,6 +1,4 @@
-import { DEFAULT_MIS_SOURCE_SELECTION } from '@/lib/mis-client-import/source-selection';
 import {
-  queryAllClientBranchSummary,
   queryClientCallTraceRowsFiltered,
 } from '@/lib/mis-client-import/aggregate';
 import type { StatusBucket } from '@/lib/mis-client-import/types';
@@ -8,18 +6,11 @@ import { queryBdMisCrmCallTraceRows } from '@/lib/read-model/queries/bd-mis-summ
 import type { DigestDateRange } from '@/lib/mis-email/fetch-digest-data';
 import type { UserDigestScope } from '@/lib/mis-email/user-scope';
 import type { BdMisTraceableExportPayload } from '@/lib/report/bd-mis-excel-export';
-import { bdMisSourcesFromSelection } from '@/lib/report/bd-mis-summary';
 import { buildBdMisTraceRows } from '@/lib/report/bd-mis-trace';
 import { SUMMARY_DEFAULT_CALL_TYPE } from '@/lib/report/filters';
-import {
-  buildUiRegionalPerformanceRows,
-  sumUiRegionalRows,
-  toBdMisGrandRow,
-  toBdMisRegionalRow,
-} from '@/lib/report/summary-trace-export';
+import { MIS_EMAIL_CLIENT_SOURCE_CODES } from '@/lib/mis-email/source-codes';
+import { buildMisEmailBdMisRegionalPayload, misEmailBdMisSources, reconcileMisEmailOpenCounts } from '@/lib/mis-email/mail-basis';
 import type { AccountSummaryRow, SummaryDashboard } from '@/lib/report/summary-derive';
-
-const DIGEST_MERGE_FLAGS = { crm: true, client: true };
 
 export async function buildDigestTraceableExportPayload(
   scope: UserDigestScope,
@@ -27,17 +18,12 @@ export async function buildDigestTraceableExportPayload(
   summaryData: SummaryDashboard,
   clientAccountSummary: AccountSummaryRow[]
 ): Promise<BdMisTraceableExportPayload> {
-  const sourceCodes = DEFAULT_MIS_SOURCE_SELECTION.clientSourceCodes;
-  const sources = bdMisSourcesFromSelection(true, sourceCodes);
+  // Mondelez + Coke client imports; CRM Cadbury replaced by Mondelez file in union formula.
+  const sourceCodes = [...MIS_EMAIL_CLIENT_SOURCE_CODES];
+  const sources = misEmailBdMisSources();
 
   const started = Date.now();
-  const [clientBranchSummary, crmCallRows, clientCallRows] = await Promise.all([
-    queryAllClientBranchSummary({
-      startDate: dateRange.startDate,
-      endDate: dateRange.endDate,
-      agingAsOf: dateRange.endDate,
-      sourceCodes,
-    }),
+  const [crmCallRows, clientCallRows] = await Promise.all([
     queryBdMisCrmCallTraceRows({
       startDate: dateRange.startDate,
       endDate: dateRange.endDate,
@@ -69,19 +55,27 @@ export async function buildDigestTraceableExportPayload(
     agingDate: dateRange.endDate,
   });
 
-  const uiRegional = buildUiRegionalPerformanceRows(
-    summaryData.branchSummary,
-    clientBranchSummary,
-    DIGEST_MERGE_FLAGS
+  const { regionalRows, grand } = buildMisEmailBdMisRegionalPayload(
+    summaryData,
+    clientAccountSummary
   );
-  if (!uiRegional.length) {
+  if (!regionalRows.length) {
     throw new Error('No summary data available for traceable export');
   }
-  const uiGrand = sumUiRegionalRows(uiRegional);
+
+  const reconciliation = reconcileMisEmailOpenCounts(grand, traceRows);
+  console.log(
+    `[mis-email/trace] open reconcile summary=${reconciliation.summaryOpen} trace=${reconciliation.traceOpenIncluded} delta=${reconciliation.delta} match=${reconciliation.matches}`
+  );
+  if (!reconciliation.matches) {
+    console.warn(
+      `[mis-email/trace] open call mismatch — summary ${reconciliation.summaryOpen} vs trace ${reconciliation.traceOpenIncluded} (delta ${reconciliation.delta})`
+    );
+  }
 
   return {
-    regionalRows: uiRegional.map(toBdMisRegionalRow),
-    grand: toBdMisGrandRow(uiGrand),
+    regionalRows,
+    grand,
     crmBranchSummary: summaryData.branchSummary,
     crmAccountSummary: summaryData.accountSummary,
     clientAccountSummary,

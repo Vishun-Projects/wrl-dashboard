@@ -48,7 +48,64 @@ export type RegisterPostgresParams = {
   assignedOffices: string[];
   visibleStatuses: string[];
   isHod: boolean;
+  /** Composite keyset cursor — both required when paginating past page 1. */
+  cursorLoggedAt?: string | Date;
+  cursorNcode?: number;
 };
+
+export const REGISTER_HOT_ORDER_BY = 'h.logged_at DESC, h.ncode DESC';
+
+export function hasRegisterKeysetCursor(params: RegisterPostgresParams): boolean {
+  return (
+    params.cursorNcode != null &&
+    params.cursorNcode > 0 &&
+    params.cursorLoggedAt != null &&
+    String(params.cursorLoggedAt).trim() !== ''
+  );
+}
+
+export function registerKeysetCursorFromRow(
+  row: Record<string, unknown>
+): { cursorLoggedAt: string; cursorNcode: number } | null {
+  const loggedAt = row.logged_at ?? row.callsdtrndate;
+  const ncode = Number(row.ncode ?? row.id);
+  if (loggedAt == null || !Number.isFinite(ncode) || ncode <= 0) return null;
+  const cursorLoggedAt =
+    loggedAt instanceof Date ? loggedAt.toISOString() : String(loggedAt);
+  return { cursorLoggedAt, cursorNcode: ncode };
+}
+
+export function buildRegisterListQuery(
+  columns: string,
+  whereSql: string,
+  values: unknown[],
+  limit: number,
+  offset?: number
+): { text: string; values: unknown[] } {
+  if (offset != null && offset > 0) {
+    return {
+      text: `
+    SELECT ${columns}
+    FROM calls_latest_hot h
+    ${HOT_OFFICE_JOINS_SQL}
+    WHERE ${whereSql}
+    ORDER BY ${REGISTER_HOT_ORDER_BY}
+    LIMIT $${values.length + 1}
+    OFFSET $${values.length + 2}`,
+      values: [...values, limit, offset],
+    };
+  }
+  return {
+    text: `
+    SELECT ${columns}
+    FROM calls_latest_hot h
+    ${HOT_OFFICE_JOINS_SQL}
+    WHERE ${whereSql}
+    ORDER BY ${REGISTER_HOT_ORDER_BY}
+    LIMIT $${values.length + 1}`,
+    values: [...values, limit],
+  };
+}
 
 export function hotRowToRegisterRow(row: Record<string, unknown>): Record<string, unknown> {
   const cancelledByNcr = isRealCancelReasonCode(row.ncancelreason);
@@ -198,6 +255,18 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
     clauses.push('h.is_major = false');
   }
 
+  if (params.cursorNcode != null && params.cursorNcode > 0 && params.cursorLoggedAt != null) {
+    const loggedAt =
+      params.cursorLoggedAt instanceof Date
+        ? params.cursorLoggedAt.toISOString()
+        : String(params.cursorLoggedAt);
+    clauses.push(
+      `(h.logged_at < $${idx}::timestamptz OR (h.logged_at = $${idx}::timestamptz AND h.ncode < $${idx + 1}))`
+    );
+    values.push(loggedAt, params.cursorNcode);
+    idx += 2;
+  }
+
   const statuses =
     params.status && params.status !== 'All'
       ? params.status.split(',').map((s) => s.trim()).filter(Boolean)
@@ -342,6 +411,30 @@ export async function queryRegisterTotalsFromPostgres(
   };
 }
 
+/** Row count for export validation — same filters as list, no pagination. */
+export async function countRegisterRowsFromPostgres(
+  params: Omit<RegisterPostgresParams, 'page' | 'limit' | 'fetchTotals' | 'fetchFilterOptions'>
+): Promise<number> {
+  const fullParams: RegisterPostgresParams = {
+    ...params,
+    page: 1,
+    limit: 1,
+    fetchTotals: false,
+    fetchFilterOptions: false,
+  };
+  const { sql: whereSql, values } = buildWhere(fullParams);
+  const rows = await prisma.$queryRawUnsafe<Array<{ total: number }>>(
+    `
+    SELECT count(*)::int AS total
+    FROM calls_latest_hot h
+    ${HOT_OFFICE_JOINS_SQL}
+    WHERE ${whereSql}
+    `,
+    ...values
+  );
+  return rows[0]?.total ?? 0;
+}
+
 /** Cascade dropdown options (lazy-loaded; expensive GROUP BY). */
 export async function queryRegisterFilterOptionsFromPostgres(
   params: Omit<RegisterPostgresParams, 'page' | 'limit' | 'fetchTotals' | 'fetchFilterOptions'>
@@ -450,21 +543,16 @@ export async function queryRegisterFilterOptionsFromPostgres(
 
 export async function queryRegisterFromPostgres(params: RegisterPostgresParams) {
   const { sql: whereSql, values } = buildWhere(params);
-  const offset = (params.page - 1) * params.limit;
-  const listValues = [...values, params.limit, offset];
-
-  const rows = await prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(
-    `
-    SELECT ${REGISTER_HOT_COLUMNS}
-    FROM calls_latest_hot h
-    ${HOT_OFFICE_JOINS_SQL}
-    WHERE ${whereSql}
-    ORDER BY h.logged_at DESC, h.ncode DESC
-    LIMIT $${values.length + 1}
-    OFFSET $${values.length + 2}
-    `,
-    ...listValues
+  const useKeyset = hasRegisterKeysetCursor(params);
+  const { text, values: listValues } = buildRegisterListQuery(
+    REGISTER_HOT_COLUMNS,
+    whereSql,
+    values,
+    params.limit,
+    useKeyset ? undefined : (params.page - 1) * params.limit
   );
+
+  const rows = await prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(text, ...listValues);
 
   const mapped = (await mergeArcpApproveDatesFromHot(
     (await mergeAuditEnrichment(rows.map(hotRowToRegisterRow))) as Record<string, unknown>[]
@@ -591,7 +679,7 @@ export async function queryDigestRegisterExportFromPostgres(
     FROM calls_latest_hot h
     ${HOT_OFFICE_JOINS_SQL}
     WHERE ${whereSql}
-    ORDER BY h.ncode DESC
+    ORDER BY ${REGISTER_HOT_ORDER_BY}
     LIMIT $${values.length + 1}
     `,
     ...values,
