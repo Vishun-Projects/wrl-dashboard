@@ -1,4 +1,22 @@
 import { describe, expect, it } from 'vitest';
+import { isExportActiveForTab, type ExportQueueItem } from '@/lib/report/export-queue';
+
+describe('isExportActiveForTab', () => {
+  const registerRunning: ExportQueueItem = {
+    id: '1',
+    label: 'Call Register Excel',
+    status: 'running',
+    enqueuedAt: Date.now(),
+    sourceTab: 'register',
+    kind: 'standard',
+  };
+
+  it('only reports active export for the tab that started it', () => {
+    expect(isExportActiveForTab([registerRunning], 'register')).toBe(true);
+    expect(isExportActiveForTab([registerRunning], 'summary')).toBe(false);
+    expect(isExportActiveForTab([registerRunning], 'accounts')).toBe(false);
+  });
+});
 
 describe('export queue job cancellation', () => {
   it('marks cancelled when abort fires during a long-running job', async () => {

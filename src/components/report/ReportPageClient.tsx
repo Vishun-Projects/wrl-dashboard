@@ -31,9 +31,11 @@ import { PageAlert } from '@/components/ui/PageAlert';
 import { HorizontalScrollFade } from '@/components/ui/HorizontalScrollFade';
 import { TruncatedText } from '@/components/ui/TruncatedText';
 import { ReportOrientationBanner } from '@/components/report/ReportOrientationBanner';
-import ReportExportQueueBanner from '@/components/report/ReportExportQueueBanner';
+import ReportExportQueuePanel from '@/components/report/ReportExportQueuePanel';
 import { useReportExportQueue } from '@/components/report/useReportExportQueue';
 import type { ExportQueueRunContext } from '@/lib/report/export-queue';
+import { isExportActiveForTab } from '@/lib/report/export-queue';
+import { consumeExportInterruptedFlag, markExportInterrupted } from '@/lib/report/export-queue-session';
 import { exportLabelForMisTab } from '@/lib/report/export-labels';
 import { ReportErrorBoundary } from '@/components/report/ReportErrorBoundary';
 import { ReportPageSkeleton, ReportLoadingPanel } from '@/components/report/ReportLoadingFeedback';
@@ -670,9 +672,6 @@ export default function ReportPageClient() {
   const exportStartedAtRef = React.useRef<number>(0);
   const {
     items: exportQueueItems,
-    queuedCount: exportQueuedCount,
-    runningItem: exportRunningItem,
-    isProcessing: exportQueueProcessing,
     enqueue: enqueueExport,
     cancelJob: cancelExportJob,
     clearFinished: clearFinishedExports,
@@ -746,12 +745,35 @@ export default function ReportPageClient() {
     for (const item of exportQueueItems) {
       if (
         (item.status === 'queued' || item.status === 'running') &&
-        item.label.includes('Call Register')
+        item.sourceTab === 'register'
       ) {
         cancelExportJob(item.id);
       }
     }
   }, [exportQueueItems, cancelExportJob]);
+
+  const isCurrentTabExcelExporting = isExportActiveForTab(exportQueueItems, activeTab, 'standard');
+  const isCurrentTabTraceExporting = isExportActiveForTab(exportQueueItems, activeTab, 'trace');
+
+  useEffect(() => {
+    if (consumeExportInterruptedFlag()) {
+      feedback.cancelled(
+        'Exports in progress were cancelled when you refreshed or left this page. Check your Downloads folder for files that already finished.'
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    const hasActive = exportQueueItems.some(
+      (item) =>
+        item.status === 'queued' || item.status === 'running' || item.status === 'downloading'
+    );
+    if (!hasActive) return;
+
+    const onBeforeUnload = () => markExportInterrupted();
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [exportQueueItems]);
 
   const prevRegisterExportScopeKeyRef = React.useRef<string | null>(null);
   useEffect(() => {
@@ -3727,22 +3749,26 @@ export default function ReportPageClient() {
   ]);
 
   const handleBdMisTraceExport = useCallback(() => {
-    enqueueExport('Summary + Row Trace Excel', async (_ctx) => {
-      try {
-        return await executeBdMisTraceExport();
-      } catch (err) {
-        const message =
-          axios.isAxiosError(err) && err.response?.data?.error
-            ? String(err.response.data.error)
-            : err instanceof Error
-              ? err.message
-              : 'Export failed';
-        feedback.actionFailed(`Failed to export trace workbook: ${message}`);
-        throw err instanceof Error ? err : new Error(message);
-      }
-    });
-    feedback.actionSuccess('Export queued');
-  }, [enqueueExport, executeBdMisTraceExport]);
+    const sourceTab = activeTab;
+    enqueueExport(
+      'Summary + Row Trace Excel',
+      async (_ctx) => {
+        try {
+          return await executeBdMisTraceExport();
+        } catch (err) {
+          const message =
+            axios.isAxiosError(err) && err.response?.data?.error
+              ? String(err.response.data.error)
+              : err instanceof Error
+                ? err.message
+                : 'Export failed';
+          feedback.actionFailed(`Failed to export trace workbook: ${message}`);
+          throw err instanceof Error ? err : new Error(message);
+        }
+      },
+      { sourceTab, kind: 'trace' }
+    );
+  }, [activeTab, enqueueExport, executeBdMisTraceExport]);
 
   useEffect(() => {
     if (!dbInitialized) return;
@@ -4112,22 +4138,26 @@ export default function ReportPageClient() {
     (format: 'excel' | 'csv' = 'excel') => {
       const sourceTab = activeTab;
       const label = exportLabelForMisTab(sourceTab, format);
-      enqueueExport(label, async (ctx) => {
-        try {
-          return await executeExport(format, sourceTab, ctx);
-        } catch (err) {
-          if (err instanceof DOMException && err.name === 'AbortError') {
-            throw err;
+      enqueueExport(
+        label,
+        async (ctx) => {
+          try {
+            return await executeExport(format, sourceTab, ctx);
+          } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') {
+              throw err;
+            }
+            const message = err instanceof Error ? err.message : 'Export failed';
+            const hint =
+              sourceTab === 'register' && !message.includes('date range')
+                ? ' Try narrowing the date range and export again.'
+                : '';
+            feedback.actionFailed(`Failed to export: ${message}${hint}`);
+            throw err instanceof Error ? err : new Error(message);
           }
-          const message = err instanceof Error ? err.message : 'Export failed';
-          const hint =
-            sourceTab === 'register' && !message.includes('date range')
-              ? ' Try narrowing the date range and export again.'
-              : '';
-          feedback.actionFailed(`Failed to export: ${message}${hint}`);
-          throw err instanceof Error ? err : new Error(message);
-        }
-      });
+        },
+        { sourceTab, kind: 'standard' }
+      );
     },
     [activeTab, enqueueExport, executeExport]
   );
@@ -4231,55 +4261,45 @@ export default function ReportPageClient() {
             onClick={() => handleExport('excel')}
             className="flex items-center gap-2 bg-bg-canvas text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-bg-soft transition-all shadow-sm"
             title={
-              exportQueuedCount > 0
-                ? `${exportQueuedCount} export(s) queued — click to add another`
-                : activeTab === 'bd_mis_summary'
-                  ? 'Export audit workbook — how regional counts were built'
-                  : total > 500
-                    ? 'Export filtered register (large datasets download as CSV from server)'
-                    : 'Export filtered register to Excel (.xlsx)'
+              activeTab === 'bd_mis_summary'
+                ? 'Export audit workbook — how regional counts were built'
+                : total > 500
+                  ? 'Export filtered register (large datasets download as CSV from server)'
+                  : 'Export filtered register to Excel (.xlsx)'
             }
           >
             <FileSpreadsheet
               size={14}
               className={
-                exportRunningItem && !exportRunningItem.label.includes('Row Trace')
-                  ? 'animate-pulse text-amber-600'
-                  : 'text-emerald-600'
+                isCurrentTabExcelExporting ? 'animate-pulse text-amber-600' : 'text-emerald-600'
               }
             />
-            {exportQueuedCount > 0
-              ? `Export Excel (+${exportQueuedCount})`
-              : exportRunningItem && !exportRunningItem.label.includes('Row Trace')
-                ? 'Exporting…'
-                : 'Export Excel'}
+            {isCurrentTabExcelExporting ? 'Exporting…' : 'Export Excel'}
           </button>
           {activeTab === 'summary' || activeTab === 'bd_mis_summary' ? (
             <button
               type="button"
               onClick={() => handleBdMisTraceExport()}
               className="flex items-center gap-2 bg-bg-canvas text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-bg-soft transition-all shadow-sm"
-              title={
-                exportQueuedCount > 0
-                  ? `${exportQueuedCount} export(s) queued — click to add trace export`
-                  : 'Export summary dashboard + full row-by-row trace (CRM, Cadbury, Coke)'
-              }
+              title="Export summary dashboard + full row-by-row trace (CRM, Cadbury, Coke)"
             >
               <FileSpreadsheet
                 size={14}
                 className={
-                  exportRunningItem?.label.includes('Row Trace')
-                    ? 'animate-pulse text-amber-600'
-                    : 'text-blue-600'
+                  isCurrentTabTraceExporting ? 'animate-pulse text-amber-600' : 'text-blue-600'
                 }
               />
-              {exportQueuedCount > 0
-                ? `Export Trace (+${exportQueuedCount})`
-                : exportRunningItem?.label.includes('Row Trace')
-                  ? 'Trace export…'
-                  : 'Export Trace'}
+              {isCurrentTabTraceExporting ? 'Trace export…' : 'Export Trace'}
             </button>
           ) : null}
+          <ReportExportQueuePanel
+            items={exportQueueItems}
+            onClearFinished={clearFinishedExports}
+            onCancelItem={(id) => {
+              cancelExportJob(id);
+              feedback.cancelled('Export cancelled');
+            }}
+          />
           <div className="relative">
             <button
               type="button"
@@ -4322,15 +4342,6 @@ export default function ReportPageClient() {
           onDismiss={clearReportBanner}
         />
       ) : null}
-
-      <ReportExportQueueBanner
-        items={exportQueueItems}
-        onClearFinished={clearFinishedExports}
-        onCancelItem={(id) => {
-          cancelExportJob(id);
-          feedback.cancelled('Export cancelled');
-        }}
-      />
 
       {activeTab === 'register' && !orientationDismissed ? (
         <ReportOrientationBanner

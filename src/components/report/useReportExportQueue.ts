@@ -5,9 +5,10 @@ import {
   EXPORT_QUEUE_PREP_GAP_MS,
   type ExportQueueItem,
   type ExportQueueJob,
+  type ExportQueueKind,
   type ExportQueueRunContext,
-  type ExportQueueStatus,
 } from '@/lib/report/export-queue';
+import type { MisTabId } from '@/lib/auth/rbac-catalog';
 import {
   triggerBlobDownload,
   type PreparedFileExport,
@@ -109,12 +110,29 @@ export function useReportExportQueue(options: UseReportExportQueueOptions = {}) 
   }, [patchItem]);
 
   const enqueue = useCallback(
-    (label: string, run: (ctx: ExportQueueRunContext) => Promise<PreparedFileExport>) => {
+    (
+      label: string,
+      run: (ctx: ExportQueueRunContext) => Promise<PreparedFileExport>,
+      meta?: { sourceTab?: MisTabId; kind?: ExportQueueKind }
+    ) => {
       const id = `exp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      queueRef.current.push({ id, label, run });
+      queueRef.current.push({
+        id,
+        label,
+        run,
+        sourceTab: meta?.sourceTab,
+        kind: meta?.kind ?? 'standard',
+      });
       setItems((prev) => [
         ...prev,
-        { id, label, status: 'queued', enqueuedAt: Date.now() },
+        {
+          id,
+          label,
+          status: 'queued',
+          enqueuedAt: Date.now(),
+          sourceTab: meta?.sourceTab,
+          kind: meta?.kind ?? 'standard',
+        },
       ]);
       void pump();
       return id;

@@ -156,9 +156,13 @@ export default function MisClientImportToolbar({
   const accept = '.csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
   const hasAnyBatch = sources.some((s) => s.batches.length > 0);
-  const allBatches = sources.flatMap((s) =>
-    s.batches.map((b) => ({ ...b, sourceName: s.sourceName, sourceCode: s.sourceCode }))
-  );
+  const allBatches = sources
+    .flatMap((s) =>
+      s.batches.map((b) => ({ ...b, sourceName: s.sourceName, sourceCode: s.sourceCode }))
+    )
+    .sort(
+      (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+    );
 
   const handleUploadFiles = async (files: File[]) => {
     if (files.length === 0) return;

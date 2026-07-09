@@ -1,3 +1,7 @@
+import type { MisTabId } from '@/lib/auth/rbac-catalog';
+
+export type ExportQueueKind = 'standard' | 'trace';
+
 export type ExportQueueStatus =
   | 'queued'
   | 'running'
@@ -25,6 +29,9 @@ export type ExportQueueItem = {
   warning?: string;
   enqueuedAt: number;
   progress?: ExportQueueProgress;
+  /** Tab where export was started — drives per-tab button state. */
+  sourceTab?: MisTabId;
+  kind?: ExportQueueKind;
 };
 
 /** Pause between consecutive downloads — reduces browser blocking across all engines. */
@@ -38,8 +45,29 @@ export type ExportQueueRunContext = {
 export type ExportQueueJob = {
   id: string;
   label: string;
+  sourceTab?: MisTabId;
+  kind?: ExportQueueKind;
   run: (ctx: ExportQueueRunContext) => Promise<import('@/lib/report/summary-excel-export').PreparedFileExport>;
 };
+
+const ACTIVE_EXPORT_STATUSES: ExportQueueStatus[] = ['queued', 'running', 'downloading'];
+
+export function isExportQueueItemActive(item: ExportQueueItem): boolean {
+  return ACTIVE_EXPORT_STATUSES.includes(item.status);
+}
+
+export function isExportActiveForTab(
+  items: ExportQueueItem[],
+  tab: MisTabId,
+  kind: ExportQueueKind = 'standard'
+): boolean {
+  return items.some(
+    (item) =>
+      item.sourceTab === tab &&
+      (item.kind ?? 'standard') === kind &&
+      isExportQueueItemActive(item)
+  );
+}
 
 export function formatExportQueueProgress(progress: ExportQueueProgress): string {
   if (progress.detail) return progress.detail;
