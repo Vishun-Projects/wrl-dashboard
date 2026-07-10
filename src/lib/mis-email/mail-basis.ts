@@ -1,5 +1,5 @@
 import { MIS_EMAIL_CLIENT_SOURCE_CODES } from '@/lib/mis-email/source-codes';
-import type { RegionalPerformanceRow } from '@/lib/mis-email/mail-types';
+import type { BranchPerformanceRow, RegionalPerformanceRow } from '@/lib/mis-email/mail-types';
 import {
   bdMisSourcesFromSelection,
   buildBdMisRegionalRows,
@@ -15,7 +15,7 @@ import {
 } from '@/lib/report/bd-mis-trace';
 import type { AccountSummaryRow, SummaryDashboard } from '@/lib/report/summary-derive';
 
-export type { RegionalPerformanceRow } from '@/lib/mis-email/mail-types';
+export type { BranchPerformanceRow, RegionalPerformanceRow } from '@/lib/mis-email/mail-types';
 
 /** CRM − CRM Cadbury (all zones) + Mondelez import (N/E/S) + Coke import. */
 export function misEmailBdMisSources(): BdMisSourceFlags {
@@ -92,4 +92,66 @@ export function reconcileMisEmailOpenCounts(
     delta,
     matches: delta === 0,
   };
+}
+
+function isRealTechnicianName(value: string): boolean {
+  const v = value.trim();
+  if (!v) return false;
+  return v !== '—' && v !== '-' && v.toLowerCase() !== 'unassigned';
+}
+
+export function buildMisEmailBranchPerformanceRowsFromTrace(
+  traceRows: BdMisTraceRow[]
+): BranchPerformanceRow[] {
+  const includedRows = filterTraceRowsForSummaryExport(traceRows);
+  const branchMap = new Map<string, BranchPerformanceRow & { engineers: Set<string> }>();
+
+  for (const row of includedRows) {
+    const branch = row.plant?.trim() || '—';
+    const region = String(row.region ?? 'OTHER').toUpperCase();
+    const key = `${region}::${branch}`;
+    if (!branchMap.has(key)) {
+      branchMap.set(key, {
+        branch,
+        region,
+        total_calls: 0,
+        solved_calls: 0,
+        cancelled_calls: 0,
+        open_calls: 0,
+        age_2: 0,
+        age_3: 0,
+        age_7: 0,
+        age_15: 0,
+        part_pending: 0,
+        active_eng: 0,
+        engineers: new Set<string>(),
+      });
+    }
+
+    const agg = branchMap.get(key)!;
+    agg.total_calls += 1;
+    if (row.counts_toward === 'solved') {
+      agg.solved_calls += 1;
+    } else if (row.counts_toward === 'open') {
+      agg.open_calls += 1;
+      const aging = String(row.aging ?? '').trim().toLowerCase();
+      if (aging === '<2 days') agg.age_2 += 1;
+      else if (aging === '>3 days' || aging === '3-7 days') agg.age_3 += 1;
+      else if (aging === '>7 days' || aging === '8-15 days') agg.age_7 += 1;
+      else if (aging === '>15 days') agg.age_15 += 1;
+    }
+
+    const technician = row.technician_name?.trim() ?? '';
+    if (isRealTechnicianName(technician)) {
+      agg.engineers.add(technician.toLowerCase());
+    }
+  }
+
+  return [...branchMap.values()]
+    .map(({ engineers, ...row }) => ({ ...row, active_eng: engineers.size }))
+    .sort((a, b) => {
+      const age15Diff = b.age_15 - a.age_15;
+      if (age15Diff !== 0) return age15Diff;
+      return a.branch.localeCompare(b.branch);
+    });
 }

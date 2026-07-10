@@ -204,12 +204,15 @@ export async function handleRegisterGet(req: NextRequest) {
     const isHod = isHodUser(profile ?? undefined, permissions);
 
     if (readRegisterFromPostgres() && !lastSync) {
+      const registerDateCol = resolveRegisterDateSqlColumn(dateFilterColumnParam);
+
       if (searchParams.get('export') === 'bulk') {
         const payload = await queryRegisterBulkFromPostgres({
           officeId,
           callType: callType ?? null,
           startDate,
           endDate,
+          dateFilterColumn: registerDateCol,
           assignedOffices,
           visibleStatuses,
           isHod,
@@ -224,6 +227,7 @@ export async function handleRegisterGet(req: NextRequest) {
           callType: callType ?? null,
           startDate,
           endDate,
+          dateFilterColumn: registerDateCol,
           status,
           account,
           region,
@@ -249,6 +253,7 @@ export async function handleRegisterGet(req: NextRequest) {
           callType: callType ?? null,
           startDate,
           endDate,
+          dateFilterColumn: registerDateCol,
           status,
           account,
           region,

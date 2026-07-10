@@ -28,8 +28,7 @@ import { useSearchParams } from 'next/navigation';
 import { ThemePicker } from '@/components/settings/ThemePicker';
 import { MisEmailComposer } from '@/components/settings/MisEmailComposer';
 import type { MisEmailBodySectionDef } from '@/lib/mis-email/body-sections';
-import { DEFAULT_MIS_EMAIL_PREFERENCES } from '@/lib/mis-email/preferences';
-import type { MisEmailPreferences } from '@/lib/mis-email/preferences';
+import type { MisEmailKeyAccountsByZone, MisEmailPreferences } from '@/lib/mis-email/preferences';
 
 type MisEmailSettings = {
   mis_email_enabled: boolean;
@@ -41,6 +40,7 @@ type MisEmailSettings = {
   };
   availableBodySections: MisEmailBodySectionDef[];
   availableKeyAccounts: string[];
+  availableKeyAccountsByZone?: MisEmailKeyAccountsByZone;
   roleName: string | null;
   scopeLabel: string | null;
 };
@@ -88,37 +88,13 @@ function ProfileContent() {
         ...res.data,
         availableBodySections: res.data.availableBodySections ?? [],
         availableKeyAccounts: res.data.availableKeyAccounts ?? [],
+        availableKeyAccountsByZone: res.data.accountsByZone ?? undefined,
       });
       setEmailPrefs(res.data.preferences ?? {});
     } catch {
       feedback.actionFailed('Failed to load email report settings');
     } finally {
       setEmailLoading(false);
-    }
-  }
-
-  async function handleToggleSubscribed() {
-    const nextSubscribed = emailPrefs.subscribed === false;
-    const nextPrefs = { ...emailPrefs, subscribed: nextSubscribed };
-    setEmailPrefs(nextPrefs);
-    try {
-      await axios.patch('/api/profile/mis-email', nextPrefs, { withCredentials: true });
-      feedback.actionSuccess(nextSubscribed ? 'Daily digest enabled' : 'Daily digest paused');
-    } catch (err: any) {
-      setEmailPrefs(emailPrefs);
-      feedback.actionFailed(err.response?.data?.error || 'Update failed');
-    }
-  }
-
-  async function handleScheduledTimeChange(nextTime: string) {
-    const nextPrefs = { ...emailPrefs, sendTimeIst: nextTime };
-    setEmailPrefs(nextPrefs);
-    try {
-      await axios.patch('/api/profile/mis-email', nextPrefs, { withCredentials: true });
-      feedback.actionSuccess(`Daily digest time updated to ${nextTime} IST`);
-    } catch (err: any) {
-      setEmailPrefs(emailPrefs);
-      feedback.actionFailed(err.response?.data?.error || 'Update failed');
     }
   }
 
@@ -317,54 +293,6 @@ function ProfileContent() {
 
         {activeTab === 'email' && emailSettings?.mis_email_enabled ? (
           <div className="space-y-4">
-            <SettingsCard
-              title="Scheduled digest"
-              description="Daily MIS email using your saved compose defaults at your selected IST time."
-            >
-              {emailLoading ? (
-                <p className="text-xs text-slate-500">Loading…</p>
-              ) : (
-                <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 p-4">
-                  <div>
-                    <p className="text-[13px] font-medium text-slate-800">Receive scheduled emails</p>
-                    <p className="text-[11px] text-slate-500">
-                      Turn off to pause daily digests. Use Send now below for one-off reports.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleToggleSubscribed()}
-                    className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
-                      emailPrefs.subscribed !== false ? 'bg-emerald-500' : 'bg-slate-300'
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                        emailPrefs.subscribed !== false ? 'translate-x-5' : ''
-                      }`}
-                    />
-                  </button>
-                </div>
-              )}
-              {!emailLoading ? (
-                <div className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-slate-200 p-4">
-                  <div>
-                    <p className="text-[13px] font-medium text-slate-800">Send time (IST)</p>
-                    <p className="text-[11px] text-slate-500">
-                      Choose when your scheduled digest should be delivered.
-                    </p>
-                  </div>
-                  <input
-                    type="time"
-                    value={emailPrefs.sendTimeIst ?? DEFAULT_MIS_EMAIL_PREFERENCES.sendTimeIst}
-                    onChange={(e) => void handleScheduledTimeChange(e.target.value)}
-                    className={settingsInputClass()}
-                    step={300}
-                  />
-                </div>
-              ) : null}
-            </SettingsCard>
-
             {!emailLoading && user?.email ? (
               <MisEmailComposer
                 settings={{
@@ -374,7 +302,7 @@ function ProfileContent() {
                   scopeLabel: emailSettings.scopeLabel,
                   allowed: emailSettings.allowed,
                   availableBodySections: emailSettings.availableBodySections ?? [],
-                  availableKeyAccounts: emailSettings.availableKeyAccounts ?? [],
+                  availableKeyAccountsByZone: emailSettings.availableKeyAccountsByZone,
                 }}
                 prefs={emailPrefs}
                 onPrefsChange={setEmailPrefs}

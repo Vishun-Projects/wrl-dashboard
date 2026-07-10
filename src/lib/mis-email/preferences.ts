@@ -17,6 +17,8 @@ import {
 export type { MisEmailBodyLayout } from '@/lib/mis-email/email-body-layout';
 
 export type MisEmailDateRangeMode = 'yesterday' | 'month_to_date' | 'year_to_yesterday';
+export type MisEmailZoneKey = 'NORTH' | 'EAST' | 'WEST' | 'SOUTH';
+export type MisEmailKeyAccountsByZone = Partial<Record<MisEmailZoneKey, string[]>>;
 
 export type MisEmailPreferences = {
   subscribed?: boolean;
@@ -28,12 +30,16 @@ export type MisEmailPreferences = {
   includeKeyAccount?: boolean;
   /** Summary dashboard traceable export (row detail + reconciliation). */
   includeTraceableExport?: boolean;
+  /** Open calls export (open + assigned only) in trace row-detail format. */
+  includeOpenCallsExport?: boolean;
   /** Additional inboxes that receive the same daily digest (e.g. work + personal). */
   extraEmails?: string[];
   /** Summary report sections rendered inline in the email body (full Excel still attached). */
   bodyInEmail?: MisEmailBodySectionId[];
   /** Key account names to show in the email body when key_account_performance is enabled. */
   keyAccountsInBody?: string[];
+  /** Optional per-zone account picks for key_account_performance body section. */
+  keyAccountsByZone?: MisEmailKeyAccountsByZone;
   /** How body tables are arranged (stacked default, or custom grid). */
   bodyLayout?: MisEmailBodyLayout;
 };
@@ -46,9 +52,11 @@ export const DEFAULT_MIS_EMAIL_PREFERENCES: Required<MisEmailPreferences> = {
   includeDetailed: true,
   includeKeyAccount: true,
   includeTraceableExport: false,
+  includeOpenCallsExport: false,
   extraEmails: [],
   bodyInEmail: [],
   keyAccountsInBody: [],
+  keyAccountsByZone: {},
   bodyLayout: { mode: 'stacked' },
 };
 
@@ -62,6 +70,7 @@ export type EffectiveDigestIncludes = {
   includeDetailed: boolean;
   includeKeyAccount: boolean;
   includeTraceableExport: boolean;
+  includeOpenCallsExport: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -129,6 +138,9 @@ export function parseMisEmailPreferences(raw: unknown): MisEmailPreferences {
   if (typeof raw.includeTraceableExport === 'boolean') {
     prefs.includeTraceableExport = raw.includeTraceableExport;
   }
+  if (typeof raw.includeOpenCallsExport === 'boolean') {
+    prefs.includeOpenCallsExport = raw.includeOpenCallsExport;
+  }
   if (Array.isArray(raw.extraEmails)) {
     prefs.extraEmails = raw.extraEmails
       .filter((e): e is string => typeof e === 'string')
@@ -140,6 +152,9 @@ export function parseMisEmailPreferences(raw: unknown): MisEmailPreferences {
   }
   if (Array.isArray(raw.keyAccountsInBody)) {
     prefs.keyAccountsInBody = parseMisEmailKeyAccountsInBody(raw.keyAccountsInBody);
+  }
+  if (isRecord(raw.keyAccountsByZone)) {
+    prefs.keyAccountsByZone = parseMisEmailKeyAccountsByZone(raw.keyAccountsByZone);
   }
   const bodyLayout = parseMisEmailBodyLayout(raw.bodyLayout);
   if (bodyLayout) prefs.bodyLayout = bodyLayout;
@@ -165,6 +180,17 @@ export function parseMisEmailKeyAccountsInBody(raw: unknown): string[] {
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(name);
+  }
+  return result;
+}
+
+const MIS_EMAIL_ZONE_KEYS: MisEmailZoneKey[] = ['NORTH', 'EAST', 'WEST', 'SOUTH'];
+
+export function parseMisEmailKeyAccountsByZone(raw: unknown): MisEmailKeyAccountsByZone {
+  if (!isRecord(raw)) return {};
+  const result: MisEmailKeyAccountsByZone = {};
+  for (const zone of MIS_EMAIL_ZONE_KEYS) {
+    result[zone] = parseMisEmailKeyAccountsInBody(raw[zone]);
   }
   return result;
 }
@@ -211,8 +237,10 @@ export function defaultPreferencesForRecipient(recipient: Pick<
     includeSummary: recipient.includeSummary,
     includeDetailed: recipient.includeDetailed,
     includeKeyAccount: recipient.includeKeyAccount,
+    includeOpenCallsExport: false,
     bodyInEmail,
     keyAccountsInBody: [],
+    keyAccountsByZone: {},
   };
 }
 
@@ -235,6 +263,8 @@ export function resolveEffectiveDigestIncludes(
     includeKeyAccount: recipient.includeKeyAccount && merged.includeKeyAccount,
     includeTraceableExport:
       recipient.includeSummary && merged.includeTraceableExport,
+    includeOpenCallsExport:
+      recipient.includeSummary && merged.includeOpenCallsExport,
   };
 }
 
@@ -243,7 +273,8 @@ export function hasAnyEffectiveDigestInclude(includes: EffectiveDigestIncludes):
     includes.includeSummary ||
     includes.includeDetailed ||
     includes.includeKeyAccount ||
-    includes.includeTraceableExport
+    includes.includeTraceableExport ||
+    includes.includeOpenCallsExport
   );
 }
 
@@ -334,6 +365,9 @@ export function validateMisEmailPreferencesPatch(params: {
   if (merged.includeTraceableExport && !params.permissions.includeSummary) {
     return { ok: false, error: 'Traceable export requires summary report access' };
   }
+  if (merged.includeOpenCallsExport && !params.permissions.includeSummary) {
+    return { ok: false, error: 'Open calls export requires summary report access' };
+  }
 
   const bodyPermissions: MisEmailBodyPermissions = {
     includeSummary: params.permissions.includeSummary,
@@ -356,9 +390,10 @@ export function validateMisEmailPreferencesPatch(params: {
 
   const effectiveIncludes = resolveEffectiveDigestIncludes(params.permissions, merged);
   merged.bodyInEmail = resolveDigestBodySections(bodyPermissions, merged, {
-    includeKeyAccountAttachment: effectiveIncludes.includeKeyAccount,
+    includeKeyAccountAttachment: false,
   });
   merged.keyAccountsInBody = parseMisEmailKeyAccountsInBody(merged.keyAccountsInBody);
+  merged.keyAccountsByZone = parseMisEmailKeyAccountsByZone(merged.keyAccountsByZone);
 
   return { ok: true, merged };
 }

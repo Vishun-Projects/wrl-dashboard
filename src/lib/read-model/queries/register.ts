@@ -1,5 +1,8 @@
 import { prisma } from '@/lib/db/prisma';
-import { normalizeExactTrnSearch } from '@/lib/trhcalls/query';
+import {
+  normalizeExactTrnSearch,
+  type RegisterDateFilterColumn,
+} from '@/lib/trhcalls/query';
 import { mapCachedRowToRegisterRow, isRealCancelReasonCode } from '@/lib/report/search';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
 import { mergeArcpApproveDatesFromHot } from '@/lib/register/arcp-approve-dates-server';
@@ -48,12 +51,31 @@ export type RegisterPostgresParams = {
   assignedOffices: string[];
   visibleStatuses: string[];
   isHod: boolean;
+  dateFilterColumn?: RegisterDateFilterColumn;
   /** Composite keyset cursor — both required when paginating past page 1. */
   cursorLoggedAt?: string | Date;
   cursorNcode?: number;
 };
 
+export type RegisterHotDateField = 'logged_at' | 'solved_at';
+
+export function resolveRegisterHotDateField(
+  column?: string | null
+): RegisterHotDateField {
+  return column === 'dsolvedatetime' ? 'solved_at' : 'logged_at';
+}
+
+export function registerHotDateSql(column?: string | null): `h.${RegisterHotDateField}` {
+  return `h.${resolveRegisterHotDateField(column)}`;
+}
+
 export const REGISTER_HOT_ORDER_BY = 'h.logged_at DESC, h.ncode DESC';
+
+export function registerHotOrderBy(column?: string | null): string {
+  return resolveRegisterHotDateField(column) === 'solved_at'
+    ? 'h.solved_at DESC NULLS LAST, h.ncode DESC'
+    : REGISTER_HOT_ORDER_BY;
+}
 
 export function hasRegisterKeysetCursor(params: RegisterPostgresParams): boolean {
   return (
@@ -65,13 +87,17 @@ export function hasRegisterKeysetCursor(params: RegisterPostgresParams): boolean
 }
 
 export function registerKeysetCursorFromRow(
-  row: Record<string, unknown>
+  row: Record<string, unknown>,
+  dateFilterColumn?: string | null
 ): { cursorLoggedAt: string; cursorNcode: number } | null {
-  const loggedAt = row.logged_at ?? row.callsdtrndate;
+  const useSolved = resolveRegisterHotDateField(dateFilterColumn) === 'solved_at';
+  const dateVal = useSolved
+    ? row.solved_at ?? row.callsolveddate
+    : row.logged_at ?? row.callsdtrndate;
   const ncode = Number(row.ncode ?? row.id);
-  if (loggedAt == null || !Number.isFinite(ncode) || ncode <= 0) return null;
+  if (dateVal == null || !Number.isFinite(ncode) || ncode <= 0) return null;
   const cursorLoggedAt =
-    loggedAt instanceof Date ? loggedAt.toISOString() : String(loggedAt);
+    dateVal instanceof Date ? dateVal.toISOString() : String(dateVal);
   return { cursorLoggedAt, cursorNcode: ncode };
 }
 
@@ -80,7 +106,8 @@ export function buildRegisterListQuery(
   whereSql: string,
   values: unknown[],
   limit: number,
-  offset?: number
+  offset?: number,
+  orderBy = REGISTER_HOT_ORDER_BY
 ): { text: string; values: unknown[] } {
   if (offset != null && offset > 0) {
     return {
@@ -89,7 +116,7 @@ export function buildRegisterListQuery(
     FROM calls_latest_hot h
     ${HOT_OFFICE_JOINS_SQL}
     WHERE ${whereSql}
-    ORDER BY ${REGISTER_HOT_ORDER_BY}
+    ORDER BY ${orderBy}
     LIMIT $${values.length + 1}
     OFFSET $${values.length + 2}`,
       values: [...values, limit, offset],
@@ -101,7 +128,7 @@ export function buildRegisterListQuery(
     FROM calls_latest_hot h
     ${HOT_OFFICE_JOINS_SQL}
     WHERE ${whereSql}
-    ORDER BY ${REGISTER_HOT_ORDER_BY}
+    ORDER BY ${orderBy}
     LIMIT $${values.length + 1}`,
     values: [...values, limit],
   };
@@ -163,6 +190,7 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
   const clauses: string[] = ['1=1'];
   const values: unknown[] = [];
   let idx = 1;
+  const dateSql = registerHotDateSql(params.dateFilterColumn);
 
   if (!params.isHod && params.assignedOffices.length > 0) {
     clauses.push(`h.nofficeid = ANY($${idx}::bigint[])`);
@@ -178,12 +206,12 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
   }
 
   if (params.startDate) {
-    clauses.push(`h.logged_at >= $${idx}::timestamptz`);
+    clauses.push(`${dateSql} >= $${idx}::timestamptz`);
     values.push(`${params.startDate}T00:00:00`);
     idx++;
   }
   if (params.endDate) {
-    clauses.push(`h.logged_at <= $${idx}::timestamptz`);
+    clauses.push(`${dateSql} <= $${idx}::timestamptz`);
     values.push(`${params.endDate}T23:59:59`);
     idx++;
   }
@@ -256,14 +284,14 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
   }
 
   if (params.cursorNcode != null && params.cursorNcode > 0 && params.cursorLoggedAt != null) {
-    const loggedAt =
+    const cursorDate =
       params.cursorLoggedAt instanceof Date
         ? params.cursorLoggedAt.toISOString()
         : String(params.cursorLoggedAt);
     clauses.push(
-      `(h.logged_at < $${idx}::timestamptz OR (h.logged_at = $${idx}::timestamptz AND h.ncode < $${idx + 1}))`
+      `(${dateSql} < $${idx}::timestamptz OR (${dateSql} = $${idx}::timestamptz AND h.ncode < $${idx + 1}))`
     );
-    values.push(loggedAt, params.cursorNcode);
+    values.push(cursorDate, params.cursorNcode);
     idx += 2;
   }
 
@@ -544,12 +572,14 @@ export async function queryRegisterFilterOptionsFromPostgres(
 export async function queryRegisterFromPostgres(params: RegisterPostgresParams) {
   const { sql: whereSql, values } = buildWhere(params);
   const useKeyset = hasRegisterKeysetCursor(params);
+  const orderBy = registerHotOrderBy(params.dateFilterColumn);
   const { text, values: listValues } = buildRegisterListQuery(
     REGISTER_HOT_COLUMNS,
     whereSql,
     values,
     params.limit,
-    useKeyset ? undefined : (params.page - 1) * params.limit
+    useKeyset ? undefined : (params.page - 1) * params.limit,
+    orderBy
   );
 
   const rows = await prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(text, ...listValues);
@@ -593,6 +623,7 @@ export async function queryRegisterBulkFromPostgres(
     | 'callType'
     | 'startDate'
     | 'endDate'
+    | 'dateFilterColumn'
     | 'assignedOffices'
     | 'visibleStatuses'
     | 'isHod'
@@ -619,6 +650,7 @@ export async function queryRegisterBulkFromPostgres(
   };
 
   const { sql: whereSql, values } = buildWhere(bulkParams);
+  const orderBy = registerHotOrderBy(bulkParams.dateFilterColumn);
 
   const rows = await prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(
     `
@@ -626,7 +658,7 @@ export async function queryRegisterBulkFromPostgres(
     FROM calls_latest_hot h
     ${HOT_OFFICE_JOINS_SQL}
     WHERE ${whereSql}
-    ORDER BY h.logged_at DESC, h.ncode DESC
+    ORDER BY ${orderBy}
     LIMIT $${values.length + 1}
     `,
     ...values,
@@ -650,6 +682,7 @@ export async function queryRegisterExportFromPostgres(
   params: RegisterPostgresParams
 ): Promise<Record<string, unknown>[]> {
   const { sql: whereSql, values } = buildWhere(params);
+  const orderBy = registerHotOrderBy(params.dateFilterColumn);
 
   const rows = await prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(
     `
@@ -657,7 +690,7 @@ export async function queryRegisterExportFromPostgres(
     FROM calls_latest_hot h
     ${HOT_OFFICE_JOINS_SQL}
     WHERE ${whereSql}
-    ORDER BY h.logged_at DESC, h.ncode DESC
+    ORDER BY ${orderBy}
     LIMIT $${values.length + 1}
     `,
     ...values,
@@ -672,6 +705,7 @@ export async function queryDigestRegisterExportFromPostgres(
   params: RegisterPostgresParams
 ): Promise<Record<string, unknown>[]> {
   const { sql: whereSql, values } = buildWhere(params);
+  const orderBy = registerHotOrderBy(params.dateFilterColumn);
 
   const rows = await prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(
     `
@@ -679,7 +713,7 @@ export async function queryDigestRegisterExportFromPostgres(
     FROM calls_latest_hot h
     ${HOT_OFFICE_JOINS_SQL}
     WHERE ${whereSql}
-    ORDER BY ${REGISTER_HOT_ORDER_BY}
+    ORDER BY ${orderBy}
     LIMIT $${values.length + 1}
     `,
     ...values,
@@ -722,6 +756,7 @@ export async function queryDistributionCompactFromPostgres(
     ...params,
   };
   const { sql: whereSql, values } = buildWhere(queryParams);
+  const orderBy = registerHotOrderBy(queryParams.dateFilterColumn);
 
   const rows = await prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(
     `
@@ -729,7 +764,7 @@ export async function queryDistributionCompactFromPostgres(
     FROM calls_latest_hot h
     ${HOT_OFFICE_JOINS_SQL}
     WHERE ${whereSql}
-    ORDER BY h.logged_at DESC, h.ncode DESC
+    ORDER BY ${orderBy}
     LIMIT $${values.length + 1}
     `,
     ...values,

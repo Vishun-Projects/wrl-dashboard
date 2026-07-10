@@ -158,12 +158,23 @@ try {
   await seedStateMappings(cadburyId, [
     { client_state: 'MAHARASHTRA', region_override: 'WEST' },
     { client_state: 'GUJARAT', region_override: 'WEST' },
-    { client_state: 'DELHI', region_override: 'NORTH' },
+    { client_state: 'DELHI', plan_code: '1173', region_override: 'NORTH' },
     { client_state: 'U.P', region_override: 'NORTH' },
-    { client_state: 'BIHAR', region_override: 'EAST' },
-    { client_state: 'W.B', region_override: 'EAST' },
-    { client_state: 'Karnataka', region_override: 'SOUTH' },
-    { client_state: 'A.P', region_override: 'SOUTH' },
+    { client_state: 'BIHAR', plan_code: '1182', region_override: 'EAST' },
+    { client_state: 'W.B', plan_code: '1154', region_override: 'EAST' },
+    { client_state: 'Karnataka', plan_code: '1152', region_override: 'SOUTH' },
+    { client_state: 'KARNATAKA', plan_code: '1152', region_override: 'SOUTH' },
+    { client_state: 'A.P', plan_code: '1181', region_override: 'SOUTH' },
+    { client_state: 'JHARKHAND', plan_code: '1150', region_override: 'EAST' },
+    { client_state: 'KERALA', plan_code: '1157', region_override: 'SOUTH' },
+    { client_state: 'NESA', plan_code: '1127', region_override: 'EAST' },
+    { client_state: 'ORISSA', plan_code: '1176', region_override: 'EAST' },
+    { client_state: 'PONDICHERRY', plan_code: '1159', region_override: 'SOUTH' },
+    { client_state: 'RAJASTHAN', plan_code: '1163', region_override: 'NORTH' },
+    { client_state: 'T.N', plan_code: '1159', region_override: 'SOUTH' },
+    { client_state: 'Haryana', plan_code: '1167', region_override: 'NORTH' },
+    { client_state: 'HARYANA', plan_code: '1167', region_override: 'NORTH' },
+    { client_state: 'J&K', plan_code: '1164', region_override: 'NORTH' },
   ]);
 
   // Import filter (code): skip Service_Provider = Span Spectrum Pvt Ltd | Punjab Refrigeration

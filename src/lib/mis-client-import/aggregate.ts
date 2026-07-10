@@ -444,14 +444,13 @@ function buildDedupedTraceRowsSql(
         s.code AS source_code,
         r.region,
         COALESCE(
-          NULLIF(TRIM(r.raw->>'Branchname'), ''),
-          NULLIF(TRIM(r.raw->>'Branch Name'), ''),
-          NULLIF(TRIM(r.raw->>'Regionname'), ''),
-          NULLIF(TRIM(r.raw->>'State'), ''),
-          NULLIF(TRIM(r.raw->>'Entity Name'), ''),
-          NULLIF(TRIM(r.branch_label), ''),
+          CASE
+            WHEN d_mapped.ncode IS NOT NULL
+              THEN d_mapped.ncode::text || ' - ' || d_mapped.vcompanyname
+          END,
           NULLIF(TRIM(r.state), ''),
-          r.region
+          NULLIF(TRIM(r.raw->>'State'), ''),
+          NULLIF(TRIM(r.raw->>'Entity Name'), '')
         ) AS plant,
         NULLIF(TRIM(r.engineer_name), '') AS technician_name,
         COALESCE(
@@ -480,6 +479,15 @@ function buildDedupedTraceRowsSql(
       FROM mis_client_import_rows r
       JOIN mis_client_import_batches b ON b.batch_id = r.batch_id
       JOIN mis_client_sources s ON s.id = r.source_id
+      LEFT JOIN mis_client_state_mappings sm
+        ON sm.source_id = r.source_id
+        AND lower(trim(sm.client_state)) = lower(trim(COALESCE(
+          NULLIF(TRIM(r.state), ''),
+          NULLIF(TRIM(r.raw->>'Entity Name'), ''),
+          NULLIF(TRIM(r.raw->>'State'), '')
+        )))
+      LEFT JOIN dim_offices d_mapped
+        ON d_mapped.ncode = NULLIF(TRIM(sm.plan_code), '')::bigint
       LEFT JOIN latest_batch lb ON lb.source_id = r.source_id
       WHERE b.status = 'completed'
         AND r.source_id IS NOT NULL

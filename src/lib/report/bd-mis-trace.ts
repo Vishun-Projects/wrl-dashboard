@@ -3,8 +3,11 @@
  * Each row shows how dashboard counts are built and whether it is included.
  */
 
+import { resolveClientImportPlant } from '@/lib/mis-client-import/client-branch-map';
 import { formatDisplayRegion } from '@/lib/mis-client-import/region';
+import { isPracticeWinmaxOfficeName } from '@/lib/read-model/queries/summary-call-filters';
 import type { StatusBucket } from '@/lib/mis-client-import/types';
+import { clientAccountDisplayName } from '@/lib/report/client-account-display';
 import type { BdMisSourceFlags } from '@/lib/report/bd-mis-summary';
 import { isRealCancelReasonCode } from '@/lib/report/search';
 
@@ -131,8 +134,8 @@ export function traceFileDisplayName(source: BdMisTraceSource, batchFileName?: s
 }
 
 export function traceClientDisplayName(source: BdMisTraceSource, account: string): string {
-  if (source === 'Cadbury') return 'Mondelez';
-  if (source === 'Coke') return 'HCCB';
+  if (source === 'Cadbury') return clientAccountDisplayName('cadbury');
+  if (source === 'Coke') return clientAccountDisplayName('coke');
   return account.trim() || '—';
 }
 
@@ -351,8 +354,11 @@ export function mapClientCallToTraceRow(
   const contribution = classifyClientContribution(row, sources);
   const dayDiff = dayDiffFromAgingDate(row.logged_at, agingDate);
 
+  const mappedPlant =
+    resolveClientImportPlant(row.plant);
+
   return {
-    plant: cleanBranchLikeValue(row.plant),
+    plant: mappedPlant ? cleanBranchLikeValue(mappedPlant) : '—',
     technician_name: row.technician_name?.trim() || '—',
     office_under_branch: cleanBranchLikeValue(row.office_under_branch),
     customer_name: row.customer_name?.trim() || '—',
@@ -394,7 +400,18 @@ export function buildBdMisTraceRows(params: {
 
 /** Row detail export excludes cancelled calls. */
 export function filterTraceRowsForExport(traceRows: BdMisTraceRow[]): BdMisTraceRow[] {
-  return traceRows.filter((row) => row.counts_toward !== 'cancelled');
+  return traceRows.filter((row) => {
+    if (row.counts_toward === 'cancelled') return false;
+    if (isExcludedMisBranchTraceRow(row)) return false;
+    return true;
+  });
+}
+
+function isExcludedMisBranchTraceRow(row: BdMisTraceRow): boolean {
+  return (
+    isPracticeWinmaxOfficeName(row.plant) ||
+    isPracticeWinmaxOfficeName(row.office_under_branch)
+  );
 }
 
 /**
@@ -405,8 +422,18 @@ export function filterTraceRowsForSummaryExport(traceRows: BdMisTraceRow[]): BdM
   return traceRows.filter((row) => {
     if (row.counts_toward === 'cancelled') return false;
     if (isCrmCadburyCrmFileTraceRow(row)) return false;
+    if (isExcludedMisBranchTraceRow(row)) return false;
     if (!row.included_in_final_count) return false;
     return true;
+  });
+}
+
+/** Open-calls export: included rows only (assigned + open_unallocated). */
+export function filterTraceRowsForOpenExport(traceRows: BdMisTraceRow[]): BdMisTraceRow[] {
+  return traceRows.filter((row) => {
+    if (isCrmCadburyCrmFileTraceRow(row)) return false;
+    if (isExcludedMisBranchTraceRow(row)) return false;
+    return row.included_in_final_count && row.counts_toward === 'open';
   });
 }
 

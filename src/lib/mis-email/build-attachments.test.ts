@@ -8,6 +8,7 @@ describe('resolveDigestAttachmentFilenames', () => {
       includeDetailed: true,
       includeKeyAccount: true,
       includeTraceableExport: true,
+      includeOpenCallsExport: false,
     });
     expect(names).toHaveLength(4);
     expect(names[0]).toMatch(/Summary Dashboard/);

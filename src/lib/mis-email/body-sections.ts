@@ -1,18 +1,19 @@
 import type { BranchSummaryRow, SummaryDashboard } from '@/lib/report/summary-derive';
 import { MIS_EMAIL_THEME } from '@/lib/mis-email/email-template';
-import type { MisEmailBodyPermissions } from '@/lib/mis-email/preferences';
+import type { MisEmailBodyPermissions, MisEmailKeyAccountsByZone } from '@/lib/mis-email/preferences';
 import {
   buildMergedAccountMetricRow,
   DEFAULT_CLIENT_MERGE_WITH_CRM,
   sortAccountRowsByZoneThenAccount,
   type MergeSelection,
 } from '@/lib/report/account-merge';
+import { clientAccountDisplayName } from '@/lib/report/client-account-display';
 import {
   composeEmailBodyGridHtml,
   resolveMisEmailBodyLayout,
   type MisEmailBodyLayout,
 } from '@/lib/mis-email/email-body-layout';
-import type { RegionalPerformanceRow } from '@/lib/mis-email/mail-types';
+import type { BranchPerformanceRow, RegionalPerformanceRow } from '@/lib/mis-email/mail-types';
 
 export const MIS_EMAIL_BODY_SECTION_IDS = [
   'regional_performance',
@@ -58,12 +59,15 @@ export type MisEmailBodyContext = {
   summary: SummaryDashboard;
   /** Pre-built on server (compose-digest); required for regional_performance in email body. */
   regionalPerformanceRows?: RegionalPerformanceRow[];
+  /** Pre-built on server from merged trace rows (CRM Cadbury excluded + imports included). */
+  branchPerformanceRows?: BranchPerformanceRow[];
   accountRows?: Array<Record<string, unknown>>;
   clientAccountSummary?: Array<Record<string, unknown>>;
   keyAccountsInBody?: string[];
+  keyAccountsByZone?: MisEmailKeyAccountsByZone;
 };
 
-export type { RegionalPerformanceRow } from '@/lib/mis-email/mail-types';
+export type { BranchPerformanceRow, RegionalPerformanceRow } from '@/lib/mis-email/mail-types';
 
 const DIGEST_MERGE_FLAGS: MergeSelection = { crm: true, client: true };
 
@@ -154,10 +158,32 @@ function age15BandClass(age15: number): string {
   return 'mis-gt15-high';
 }
 
+function age15BgColor(age15: number): string {
+  if (age15 < 30) return '#bbf7d0';
+  if (age15 <= 80) return '#fde68a';
+  return '#fecaca';
+}
+
+function age15TextColor(age15: number): string {
+  return '#111827';
+}
+
+function solvedTextColor(): string {
+  return '#065f46';
+}
+
 function pctGt7Class(age7: number, age15: number, openCalls: number): string {
   if (openCalls <= 0) return 'mis-pct-ok';
   const ratio = (age7 + age15) / openCalls;
   return ratio > 0.15 ? 'mis-pct-alert' : 'mis-pct-ok';
+}
+
+function pctGt7BgColor(pctClass: string): string | null {
+  return pctClass === 'mis-pct-alert' ? '#fee2e2' : null;
+}
+
+function pctGt7TextColor(pctClass: string): string {
+  return pctClass === 'mis-pct-alert' ? '#991b1b' : '#1e3a8a';
 }
 
 function thStyle(theme = MIS_EMAIL_THEME, left = false): string {
@@ -211,7 +237,6 @@ function buildPerformanceTableHtml(params: {
   }>;
 }): string {
   const t = MIS_EMAIL_THEME;
-
   const header = `
     <tr>
       <th class="mis-th mis-th-l" bgcolor="#0070C0" style="${thStyle(t, true)}">${escapeHtml(params.regionColumnLabel)}</th>
@@ -230,19 +255,25 @@ function buildPerformanceTableHtml(params: {
     .map((row) => {
       const rowZoneClass = zoneClass(row.regionKey, row.isGrand);
       const zoneBg = zoneBgColor(rowZoneClass);
+      const plainBg = t.bgCanvas;
+      const grandBg = zoneBgColor('mis-zone-grand');
+      const labelBg = row.isGrand ? grandBg : zoneBg;
+      const defaultBg = row.isGrand ? grandBg : plainBg;
       const age15Class = age15BandClass(row.age_15);
+      const age15Bg = row.isGrand ? grandBg : age15BgColor(row.age_15);
+      const age15Color = age15TextColor(row.age_15);
       const totalCalls = row.solved_calls + row.open_calls;
       return `<tr class="mis-row">
-        <td class="mis-td mis-td-l ${rowZoneClass}" bgcolor="${zoneBg}" style="${tdStyle(t, { left: true, bold: true, bg: zoneBg })}">${escapeHtml(formatRegionLabel(row.label))}</td>
-        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(totalCalls)}</td>
-        <td class="mis-td mis-solved" bgcolor="#ffffff" style="${tdStyle(t, { color: '#059669' })}">${formatNum(row.solved_calls)}</td>
-        <td class="mis-td mis-open" bgcolor="#ffffff" style="${tdStyle(t, { bold: true })}">${formatNum(row.open_calls)}</td>
-        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(row.age_2)}</td>
-        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(row.age_3)}</td>
-        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(row.age_7)}</td>
-        <td class="mis-td ${age15Class}" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(row.age_15)}</td>
-        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(row.part_pending)}</td>
-        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(row.active_eng)}</td>
+        <td class="mis-td mis-td-l ${rowZoneClass}" bgcolor="${labelBg}" style="${tdStyle(t, { left: true, bold: true, bg: labelBg })}">${escapeHtml(formatRegionLabel(row.label))}</td>
+        <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(totalCalls)}</td>
+        <td class="mis-td mis-solved" bgcolor="${defaultBg}" style="${tdStyle(t, { color: solvedTextColor(), bg: defaultBg, bold: true })}">${formatNum(row.solved_calls)}</td>
+        <td class="mis-td mis-open" bgcolor="${defaultBg}" style="${tdStyle(t, { bold: true, bg: defaultBg })}">${formatNum(row.open_calls)}</td>
+        <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.age_2)}</td>
+        <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.age_3)}</td>
+        <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.age_7)}</td>
+        <td class="mis-td ${age15Class}" bgcolor="${age15Bg}" style="${tdStyle(t, { bg: age15Bg, color: age15Color, bold: true })}">${formatNum(row.age_15)}</td>
+        <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.part_pending)}</td>
+        <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.active_eng)}</td>
       </tr>`;
     })
     .join('');
@@ -309,7 +340,12 @@ function buildKeyAccountTableHtml(
     const merged = mergedRows[i];
     const rowZoneClass = zoneClass(merged.region);
     const zoneBg = zoneBgColor(rowZoneClass);
+    const plainBg = t.bgCanvas;
+    const age15Bg = age15BgColor(merged.age_15);
+    const age15Color = age15TextColor(merged.age_15);
     const pctClass = pctGt7Class(merged.age_7, merged.age_15, merged.open_calls);
+    const pctBg = pctGt7BgColor(pctClass);
+    const pctCellBg = pctBg ?? plainBg;
 
     let regionCell = '';
     if (!mergeRegionCells) {
@@ -331,16 +367,16 @@ function buildKeyAccountTableHtml(
 
     bodyRows.push(`<tr class="mis-row">
         ${regionCell}
-        <td class="mis-td mis-td-l" bgcolor="#ffffff" style="${tdStyle(t, { left: true, bold: true })}">${escapeHtml(merged.account)}</td>
-        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(merged.total_solved + merged.open_calls)}</td>
-        <td class="mis-td mis-solved" bgcolor="#ffffff" style="${tdStyle(t, { color: '#059669' })}">${formatNum(merged.total_solved)}</td>
-        <td class="mis-td mis-open" bgcolor="#ffffff" style="${tdStyle(t, { bold: true })}">${formatNum(merged.open_calls)}</td>
-        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(merged.age_2)}</td>
-        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(merged.age_3)}</td>
-        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(merged.age_7)}</td>
-        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(merged.age_15)}</td>
-        <td class="mis-td mis-pct ${pctClass}" bgcolor="#ffffff" style="${tdStyle(t, { color: '#1d4ed8', bold: true })}">${escapeHtml(merged.pct_gt_7)}</td>
-        <td class="mis-td" bgcolor="#ffffff" style="${tdStyle(t)}">${formatNum(merged.active_eng)}</td>
+        <td class="mis-td mis-td-l" bgcolor="${plainBg}" style="${tdStyle(t, { left: true, bold: true, bg: plainBg })}">${escapeHtml(clientAccountDisplayName(merged.account))}</td>
+        <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.total_solved + merged.open_calls)}</td>
+        <td class="mis-td mis-solved" bgcolor="${plainBg}" style="${tdStyle(t, { color: solvedTextColor(), bg: plainBg, bold: true })}">${formatNum(merged.total_solved)}</td>
+        <td class="mis-td mis-open" bgcolor="${plainBg}" style="${tdStyle(t, { bold: true, bg: plainBg })}">${formatNum(merged.open_calls)}</td>
+        <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.age_2)}</td>
+        <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.age_3)}</td>
+        <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.age_7)}</td>
+        <td class="mis-td ${age15BandClass(merged.age_15)}" bgcolor="${age15Bg}" style="${tdStyle(t, { bg: age15Bg, color: age15Color, bold: true })}">${formatNum(merged.age_15)}</td>
+        <td class="mis-td mis-pct ${pctClass}" bgcolor="${pctCellBg}" style="${tdStyle(t, { color: pctGt7TextColor(pctClass), bold: true, bg: pctCellBg })}">${escapeHtml(merged.pct_gt_7)}</td>
+        <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.active_eng)}</td>
       </tr>`);
   }
 
@@ -403,8 +439,65 @@ function buildRegionalPerformanceHtml(bodyContext: MisEmailBodyContext): string 
   });
 }
 
-function buildBranchPerformanceHtml(data: SummaryDashboard): string {
-  const branches = buildTopLevelBranchRows(data.branchSummary);
+function isNonZeroBranchPerformanceRow(row: {
+  total_calls: number;
+  solved_calls: number;
+  cancelled_calls: number;
+  open_calls: number;
+  age_2: number;
+  age_3: number;
+  age_7: number;
+  age_15: number;
+  part_pending: number;
+  active_eng: number;
+}): boolean {
+  // Displayed total is solved+open; hide rows with nothing meaningful to show.
+  return (
+    Number(row.solved_calls || 0) +
+      Number(row.open_calls || 0) +
+      Number(row.cancelled_calls || 0) +
+      Number(row.age_2 || 0) +
+      Number(row.age_3 || 0) +
+      Number(row.age_7 || 0) +
+      Number(row.age_15 || 0) +
+      Number(row.part_pending || 0) +
+      Number(row.active_eng || 0) >
+    0
+  );
+}
+
+function resolveBranchPerformanceRows(
+  data: SummaryDashboard,
+  bodyContext: MisEmailBodyContext
+): BranchPerformanceRow[] {
+  const rows = bodyContext.branchPerformanceRows?.length
+    ? bodyContext.branchPerformanceRows
+    : buildTopLevelBranchRows(data.branchSummary)
+        .map((row) => ({
+          branch: row.branch,
+          region: row.region,
+          total_calls: row.total_calls,
+          solved_calls: row.solved_calls,
+          cancelled_calls: row.cancelled_calls,
+          open_calls: row.open_calls,
+          age_2: row.age_2,
+          age_3: row.age_3,
+          age_7: row.age_7,
+          age_15: row.age_15,
+          part_pending: row.part_pending,
+          active_eng: row.active_eng,
+        }))
+        .sort((a, b) => {
+          const age15Diff = Number(b.age_15 || 0) - Number(a.age_15 || 0);
+          if (age15Diff !== 0) return age15Diff;
+          return String(a.branch).localeCompare(String(b.branch));
+        });
+
+  return rows.filter(isNonZeroBranchPerformanceRow);
+}
+
+function buildBranchPerformanceHtml(data: SummaryDashboard, bodyContext: MisEmailBodyContext): string {
+  const branches = resolveBranchPerformanceRows(data, bodyContext);
 
   return buildPerformanceTableHtml({
     title: 'Branch-wise Performance',
@@ -455,7 +548,7 @@ function buildSectionHtmlMap(
     if (id === 'regional_performance') {
       map[id] = buildRegionalPerformanceHtml(bodyContext);
     } else if (id === 'branch_performance') {
-      map[id] = buildBranchPerformanceHtml(data);
+      map[id] = buildBranchPerformanceHtml(data, bodyContext);
     } else if (id === 'key_account_performance') {
       const html = buildKeyAccountTableHtml(bodyContext, {
         mergeRegionCells,
@@ -519,14 +612,13 @@ export function buildEmailBodySectionsPlainText(
   }
 
   if (sectionIds.includes('branch_performance')) {
-    const branches = buildTopLevelBranchRows(data.branchSummary);
+    const branches = resolveBranchPerformanceRows(data, bodyContext);
     blocks.push(
       '',
       ...buildPerformancePlainLines(
         'Branch-wise Performance',
         branches.map((row) => ({
           label: row.branch,
-          region: row.region,
           total_calls: row.total_calls,
           solved_calls: row.solved_calls,
           cancelled_calls: row.cancelled_calls,
@@ -554,7 +646,7 @@ export function buildEmailBodySectionsPlainText(
           DEFAULT_CLIENT_MERGE_WITH_CRM
         );
         blocks.push(
-          `${formatRegionLabel(merged.region)} / ${merged.account}: calls ${formatNum(merged.total_solved + merged.open_calls)}, solved ${formatNum(merged.total_solved)}, open ${formatNum(merged.open_calls)}, % >7 days ${merged.pct_gt_7}`
+          `${formatRegionLabel(merged.region)} / ${clientAccountDisplayName(merged.account)}: calls ${formatNum(merged.total_solved + merged.open_calls)}, solved ${formatNum(merged.total_solved)}, open ${formatNum(merged.open_calls)}, % >7 days ${merged.pct_gt_7}`
         );
       }
     }

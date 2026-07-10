@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildBdMisTraceableWorkbook } from '@/lib/report/bd-mis-excel-export';
+import {
+  buildBdMisOpenCallsWorkbook,
+  buildBdMisTraceableWorkbook,
+} from '@/lib/report/bd-mis-excel-export';
 import type { BdMisTraceRow } from '@/lib/report/bd-mis-trace';
 
 const basePayload = {
@@ -77,4 +80,29 @@ describe('bd-mis-excel-export trace row detail', () => {
     expect(dataCell.value).toBe('open');
     expect(dataCell.formula).toBeUndefined();
   }, 30000);
+
+  it('builds open-calls workbook with Unsolved status labels', async () => {
+    const traceRows: BdMisTraceRow[] = [
+      {
+        region: 'NORTH ZONE',
+        office_under_branch: 'DELHI BRANCH',
+        plant: '1101 - DELHI BRANCH',
+        technician_name: 'TECH A',
+        customer_name: 'CUSTOMER A',
+        call_date_time: '2026-06-30',
+        service_order: 'SO-OPEN',
+        client: 'Dealer',
+        call_status: 'ASSIGNED',
+        aging: '<2 days',
+        file_name: 'CRM Files',
+        source: 'CRM',
+        contribution_step: '1. CRM branch base (included)',
+        included_in_final_count: true,
+        counts_toward: 'open',
+      },
+    ];
+    const workbook = await buildBdMisOpenCallsWorkbook({ ...basePayload, traceRows });
+    const rowDetail = workbook.getWorksheet('Row Detail');
+    expect(rowDetail?.getRow(2).getCell(9).value).toBe('Unsolved');
+  });
 });

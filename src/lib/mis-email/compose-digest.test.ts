@@ -1,9 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const resolveMisEmailRoutingForRecipient = vi.fn();
+const listMisEmailRoutingRules = vi.fn();
+const resolveRoutingClientNamesForScope = vi.fn();
+const resolveRoutingScopeForOfficeIds = vi.fn();
+const listMatchingMisEmailRoutingRulesForResolvedClients = vi.fn();
 
 vi.mock('@/lib/mis-email/routing-rules', () => ({
-  resolveMisEmailRoutingForRecipient: (...args: unknown[]) => resolveMisEmailRoutingForRecipient(...args),
+  listMisEmailRoutingRules: (...args: unknown[]) => listMisEmailRoutingRules(...args),
+  resolveRoutingClientNamesForScope: (...args: unknown[]) =>
+    resolveRoutingClientNamesForScope(...args),
+  resolveRoutingScopeForOfficeIds: (...args: unknown[]) => resolveRoutingScopeForOfficeIds(...args),
+  listMatchingMisEmailRoutingRulesForResolvedClients: (...args: unknown[]) =>
+    listMatchingMisEmailRoutingRulesForResolvedClients(...args),
 }));
 
 vi.mock('@/lib/mis-email/send', () => ({
@@ -13,17 +21,29 @@ vi.mock('@/lib/mis-email/send', () => ({
 
 describe('sendMisEmailComposeBatch auto-send override', () => {
   beforeEach(() => {
-    resolveMisEmailRoutingForRecipient.mockReset();
+    listMisEmailRoutingRules.mockReset();
+    resolveRoutingClientNamesForScope.mockReset();
+    resolveRoutingScopeForOfficeIds.mockReset();
+    listMatchingMisEmailRoutingRulesForResolvedClients.mockReset();
+
+    listMisEmailRoutingRules.mockResolvedValue([{ id: 'r1' }]);
+    resolveRoutingClientNamesForScope.mockResolvedValue({ mail: [], crm: [] });
+    resolveRoutingScopeForOfficeIds.mockResolvedValue({ zones: ['NORTH'], branches: [] });
+    listMatchingMisEmailRoutingRulesForResolvedClients.mockReturnValue([
+      {
+        id: 'r1',
+        zone: 'NORTH',
+        branch: '',
+        client: '',
+        toEmails: ['team@example.com'],
+        ccEmails: [],
+        autoSendEnabled: false,
+      },
+    ]);
   });
 
   it('blocks manual send when routing disables auto-send and override is false', async () => {
     const mod = await import('@/lib/mis-email/compose-digest');
-    resolveMisEmailRoutingForRecipient.mockResolvedValue({
-      matchedRule: { id: 'r1' },
-      to: ['team@example.com'],
-      cc: [],
-      autoSendEnabled: false,
-    });
 
     await expect(
       mod.sendMisEmailComposeBatch(
@@ -31,7 +51,9 @@ describe('sendMisEmailComposeBatch auto-send override', () => {
           id: 'u1',
           name: 'User',
           email: 'user@example.com',
+          role: 'branch_manager',
           office_ids: ['1'],
+          permissions: [],
           mis_email_preferences: {},
         } as never,
         {
@@ -44,19 +66,15 @@ describe('sendMisEmailComposeBatch auto-send override', () => {
 
   it('allows override path to proceed past auto-send block', async () => {
     const mod = await import('@/lib/mis-email/compose-digest');
-    resolveMisEmailRoutingForRecipient.mockResolvedValue({
-      matchedRule: { id: 'r1' },
-      to: ['team@example.com'],
-      cc: [],
-      autoSendEnabled: false,
-    });
     await expect(
       mod.sendMisEmailComposeBatch(
         {
           id: 'u1',
           name: 'User',
           email: 'user@example.com',
+          role: 'branch_manager',
           office_ids: ['1'],
+          permissions: [],
           includeSummary: false,
           includeDetailed: false,
           includeKeyAccount: false,

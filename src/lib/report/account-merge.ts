@@ -1,4 +1,5 @@
 import { formatDisplayRegion } from '@/lib/mis-client-import/region';
+import { accountsMatchDisplayOrKey } from '@/lib/report/client-account-display';
 import type { MisSourceSelection } from '@/lib/mis-client-import/source-selection';
 
 export type MergeSelection = { crm: boolean; client: boolean };
@@ -708,19 +709,33 @@ export function filterKeyAccountRows(
 ): Array<Record<string, unknown>> {
   if (!selectedAccounts.length) return [];
   const filtered = rows.filter((row) =>
-    selectedAccounts.some((name) => accountsMatch(name, String(row.account ?? '')))
+    selectedAccounts.some((name) => accountsMatchDisplayOrKey(name, String(row.account ?? '')))
   );
   return sortAccountRowsByZoneThenAccount(filtered);
 }
 
-/** Key account MIS / email body: zone A→Z, then account name within each zone. */
+const ZONE_DISPLAY_ORDER: Record<string, number> = {
+  NORTH: 0,
+  'NORTH ZONE': 0,
+  EAST: 1,
+  'EAST ZONE': 1,
+  WEST: 2,
+  'WEST ZONE': 2,
+  SOUTH: 3,
+  'SOUTH ZONE': 3,
+};
+
+function zoneDisplayOrder(region: string): number {
+  const key = formatDisplayRegion(region).toUpperCase();
+  return ZONE_DISPLAY_ORDER[key] ?? ZONE_DISPLAY_ORDER[zoneKey(region)] ?? 99;
+}
+
+/** Key account MIS / email body: NORTH → EAST → WEST → SOUTH, then account name. */
 export function sortAccountRowsByZoneThenAccount(
   rows: Array<Record<string, unknown>>
 ): Array<Record<string, unknown>> {
   return [...rows].sort((a, b) => {
-    const regionA = formatDisplayRegion(String(a.region ?? ''));
-    const regionB = formatDisplayRegion(String(b.region ?? ''));
-    const byRegion = regionA.localeCompare(regionB, undefined, { sensitivity: 'base' });
+    const byRegion = zoneDisplayOrder(String(a.region ?? '')) - zoneDisplayOrder(String(b.region ?? ''));
     if (byRegion !== 0) return byRegion;
     return String(a.account ?? '').localeCompare(String(b.account ?? ''), undefined, {
       sensitivity: 'base',

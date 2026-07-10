@@ -11,6 +11,8 @@ import {
   workbookToBuffer,
 } from '@/lib/report/summary-excel-export';
 import {
+  bdMisOpenCallsFilename,
+  buildBdMisOpenCallsWorkbook,
   buildBdMisTraceableWorkbook,
   bdMisTraceableFilename,
   type BdMisTraceableExportPayload,
@@ -47,6 +49,9 @@ export function resolveDigestAttachmentFilenames(
   }
   if (includes.includeTraceableExport) {
     filenames.push(bdMisTraceableFilename(date));
+  }
+  if (includes.includeOpenCallsExport) {
+    filenames.push(bdMisOpenCallsFilename(date));
   }
   return filenames;
 }
@@ -99,6 +104,7 @@ export async function buildDigestAttachments(
     includeDetailed: recipient.includeDetailed,
     includeKeyAccount: recipient.includeKeyAccount,
     includeTraceableExport: false,
+    includeOpenCallsExport: false,
   };
 
   const tasks: Promise<EmailAttachment>[] = [];
@@ -191,6 +197,33 @@ export async function buildDigestAttachments(
         const filename = bdMisTraceableFilename(date);
         console.log(
           `[mis-email/timing] attachment traceable · workbook ${workbookMs}ms · buffer ${Date.now() - bufferStarted}ms · ${formatBytes(content.length)} · traceRows=${payload.traceRows.length}`
+        );
+        return {
+          filename,
+          content,
+          contentType: XLSX_CONTENT_TYPE,
+        };
+      })()
+    );
+  }
+
+  if (includes.includeOpenCallsExport) {
+    tasks.push(
+      (async () => {
+        const payload = options?.tracePayload;
+        if (!payload) {
+          throw new Error('Open calls export data was not prepared');
+        }
+        const started = Date.now();
+        const workbook = await buildBdMisOpenCallsWorkbook(
+          excludeCancelledFromTracePayload(payload)
+        );
+        const workbookMs = Date.now() - started;
+        const bufferStarted = Date.now();
+        const content = await workbookToBuffer(workbook);
+        const filename = bdMisOpenCallsFilename(date);
+        console.log(
+          `[mis-email/timing] attachment open-calls · workbook ${workbookMs}ms · buffer ${Date.now() - bufferStarted}ms · ${formatBytes(content.length)} · traceRows=${payload.traceRows.length}`
         );
         return {
           filename,

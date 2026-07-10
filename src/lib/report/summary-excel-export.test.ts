@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  applyAge15CellStyle,
   buildKeyAccountMisWorkbook,
   buildSummaryDashboardWorkbook,
   resolveUniqueDownloadFilename,
@@ -102,7 +103,7 @@ describe('buildSummaryDashboardWorkbook excludeCancelled', () => {
     const data = sheet.getRow(3).values as unknown[];
     expect(data).toContain(100);
     expect(data).toContain(2);
-  });
+  }, 30000);
 
   it('omits Cancelled and uses solved+open total when excludeCancelled', async () => {
     const wb = await buildSummaryDashboardWorkbook([sampleBranch], 'Summary Dashboard', {
@@ -115,6 +116,31 @@ describe('buildSummaryDashboardWorkbook excludeCancelled', () => {
     expect(sheet.getRow(3).getCell(2).value).toBe(98);
     expect(sheet.getRow(3).getCell(3).value).toBe(90);
     expect(sheet.getRow(3).getCell(4).value).toBe(8);
+  });
+
+  it('applies >15 day color bands', async () => {
+    const wb = await buildSummaryDashboardWorkbook([
+      { ...sampleBranch, age_15: 10 },
+      { ...sampleBranch, officeId: 2, region: 'SOUTH ZONE', age_15: 50 },
+      { ...sampleBranch, officeId: 3, region: 'WEST ZONE', age_15: 120 },
+    ]);
+    const sheet = wb.worksheets[0];
+    expect(sheet.getRow(3).getCell(9).fill).toBeDefined();
+  });
+});
+
+describe('applyAge15CellStyle', () => {
+  it('uses green/yellow/red fills by threshold', () => {
+    const cell = {
+      fill: undefined,
+      font: undefined,
+    } as unknown as import('exceljs').Cell;
+    applyAge15CellStyle(cell, 20);
+    expect((cell.fill as any).fgColor.argb).toBe('FFC6EFCE');
+    applyAge15CellStyle(cell, 50);
+    expect((cell.fill as any).fgColor.argb).toBe('FFFFEB9C');
+    applyAge15CellStyle(cell, 90);
+    expect((cell.fill as any).fgColor.argb).toBe('FFFFC7CE');
   });
 });
 

@@ -6,8 +6,14 @@ import {
   type BdMisRegionalRow,
   type BdMisSourceFlags,
 } from '@/lib/report/bd-mis-summary';
-import { filterTraceRowsForExport, filterTraceRowsForSummaryExport, type BdMisTraceRow } from '@/lib/report/bd-mis-trace';
 import {
+  filterTraceRowsForExport,
+  filterTraceRowsForOpenExport,
+  filterTraceRowsForSummaryExport,
+  type BdMisTraceRow,
+} from '@/lib/report/bd-mis-trace';
+import {
+  applyAge15CellStyle,
   applySummaryHeaderStyle,
   applyRegionRowStyle,
 } from '@/lib/report/summary-excel-export';
@@ -256,6 +262,7 @@ export async function buildBdMisSummaryWorkbook(
       row.active_eng,
     ]);
     applyRegionRowStyle(r, row.region, { solvedCol: 3, cancelledCol: null, openCol: 4 });
+    applyAge15CellStyle(r.getCell(8), Number(row.age_15 || 0));
   }
 
   const g = payload.grand;
@@ -467,6 +474,7 @@ function addTraceSummarySheet(
       row.active_eng,
     ]);
     applyRegionRowStyle(r, row.region, { solvedCol: 3, cancelledCol: null, openCol: 4 });
+    applyAge15CellStyle(r.getCell(8), Number(row.age_15 || 0));
   }
 
   const g = payload.grand;
@@ -516,7 +524,8 @@ function resolveTraceRowDetailRows(payload: BdMisTraceableExportPayload): BdMisT
 
 function addTraceRowDetailSheet(
   workbook: ExcelJS.Workbook,
-  traceRows: BdMisTraceRow[]
+  traceRows: BdMisTraceRow[],
+  opts?: { statusLabel?: string }
 ): void {
   const exportRows = traceRows;
   const EXCEL_MAX_DATA_ROWS = 1_048_575;
@@ -542,7 +551,7 @@ function addTraceRowDetailSheet(
         row.call_date_time,
         row.service_order,
         row.client,
-        row.call_status,
+        opts?.statusLabel ?? row.call_status,
         row.aging,
         row.file_name,
         row.contribution_step,
@@ -593,6 +602,23 @@ export async function buildBdMisTraceableWorkbook(
   return workbook;
 }
 
+/** Open-calls trace workbook: same row detail format, only included open rows. */
+export async function buildBdMisOpenCallsWorkbook(
+  payload: BdMisTraceableExportPayload
+): Promise<ExcelJS.Workbook> {
+  const ExcelJSRuntime = (await import('exceljs')).default;
+  const workbook = new ExcelJSRuntime.Workbook();
+  addTraceRowDetailSheet(workbook, filterTraceRowsForOpenExport(payload.traceRows), {
+    statusLabel: 'Unsolved',
+  });
+  autoSizeWorkbookColumns(workbook, { skipSheetNamePattern: /^Row Detail/ });
+  return workbook;
+}
+
 export function bdMisTraceableFilename(date = new Date()): string {
   return `WRL_BD_MIS_Traceable_${date.toISOString().split('T')[0]}.xlsx`;
+}
+
+export function bdMisOpenCallsFilename(date = new Date()): string {
+  return `WRL_BD_MIS_Open_Calls_${date.toISOString().split('T')[0]}.xlsx`;
 }

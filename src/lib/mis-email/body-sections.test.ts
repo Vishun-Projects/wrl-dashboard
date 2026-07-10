@@ -232,7 +232,134 @@ describe('buildEmailBodySectionsHtml', () => {
     expect(html).toContain('Nestle');
   });
 
-  it('sorts key account rows by zone then account name', () => {
+  it('displays Cadbury as Mondelez and Coke as HCCB in key account body', () => {
+    const html = buildEmailBodySectionsHtml(['key_account_performance'], {
+      summary: sampleData,
+      accountRows: [
+        {
+          region: 'NORTH ZONE',
+          account: 'CADBURY',
+          total_calls: 10,
+          total_solved: 8,
+          open_calls: 2,
+          age_2: 1,
+          age_3: 0,
+          age_7: 1,
+          age_15: 0,
+          active_eng: 1,
+        },
+        {
+          region: 'SOUTH ZONE',
+          account: 'COKE',
+          total_calls: 20,
+          total_solved: 15,
+          open_calls: 5,
+          age_2: 2,
+          age_3: 1,
+          age_7: 1,
+          age_15: 1,
+          active_eng: 2,
+        },
+      ],
+    });
+    expect(html).toContain('Mondelez');
+    expect(html).toContain('HCCB');
+    expect(html).not.toContain('>CADBURY<');
+    expect(html).not.toContain('>COKE<');
+  });
+
+  it('applies inline >15 day color bands for email clients', () => {
+    const highAgingSummary: SummaryDashboard = {
+      ...sampleData,
+      branchSummary: [
+        {
+          ...sampleData.branchSummary[0],
+          region: 'SOUTH ZONE',
+          age_15: 95,
+          solved_calls: 50,
+          open_calls: 120,
+          total_calls: 170,
+        },
+      ],
+    };
+    const html = buildEmailBodySectionsHtml(['branch_performance'], {
+      summary: highAgingSummary,
+    });
+    expect(html).toContain('bgcolor="#fecaca"');
+    expect(html).toContain('color:#111827');
+  });
+
+  it('uses background bands only on >15 days and alert %>7 cells', () => {
+    const html = buildEmailBodySectionsHtml(['key_account_performance'], {
+      summary: sampleData,
+      accountRows: [
+        {
+          region: 'NORTH ZONE',
+          account: 'Demo Account',
+          total_calls: 120,
+          total_solved: 80,
+          open_calls: 40,
+          age_2: 10,
+          age_3: 10,
+          age_7: 10,
+          age_15: 10,
+          active_eng: 5,
+        },
+      ],
+    });
+
+    expect(html).toContain('bgcolor="#fee2e2"');
+    expect(html).toContain('color:#991b1b');
+    expect(html).not.toContain('bgcolor="#dcfce7"');
+    expect(html).toContain('color:#065f46');
+  });
+
+  it('colors only the label column with zone bands in branch performance', () => {
+    const html = buildEmailBodySectionsHtml(['branch_performance'], {
+      summary: sampleData,
+    });
+    expect(html).toContain('bgcolor="#e7f3de"');
+    expect(html).not.toMatch(/mis-td mis-open" bgcolor="#e7f3de"/);
+  });
+
+  it('omits branch rows that are all zeros', () => {
+    const summary: SummaryDashboard = {
+      ...sampleData,
+      branchSummary: [
+        sampleData.branchSummary[0],
+        {
+          ...sampleData.branchSummary[0],
+          officeId: 99,
+          branch: 'AGRA BRANCH - 1160',
+          region: 'NORTH ZONE',
+          total_calls: 0,
+          solved_calls: 0,
+          cancelled_calls: 0,
+          open_calls: 0,
+          age_2: 0,
+          age_3: 0,
+          age_7: 0,
+          age_15: 0,
+          part_pending: 0,
+          active_eng: 0,
+          all_total: 0,
+          all_solved: 0,
+          all_cancelled: 0,
+          all_open: 0,
+          all_age_2: 0,
+          all_age_3: 0,
+          all_age_7: 0,
+          all_age_15: 0,
+          all_part_pending: 0,
+        },
+      ],
+    };
+    const html = buildEmailBodySectionsHtml(['branch_performance'], { summary });
+    expect(html).toContain('Delhi');
+    expect(html).not.toContain('AGRA BRANCH - 1160');
+  });
+
+  it('sorts key account rows NORTH → EAST → WEST → SOUTH, then account name', () => {
     const context: MisEmailBodyContext = {
       summary: sampleData,
       keyAccountsInBody: ['Subway', 'Starbucks'],
@@ -240,18 +367,21 @@ describe('buildEmailBodySectionsHtml', () => {
         { region: 'WEST ZONE', account: 'Subway', total_calls: 1, total_solved: 0, open_calls: 1, age_2: 0, age_3: 0, age_7: 0, age_15: 0, active_eng: 0 },
         { region: 'EAST ZONE', account: 'Starbucks', total_calls: 2, total_solved: 1, open_calls: 1, age_2: 0, age_3: 0, age_7: 0, age_15: 0, active_eng: 0 },
         { region: 'EAST ZONE', account: 'Subway', total_calls: 3, total_solved: 2, open_calls: 1, age_2: 0, age_3: 0, age_7: 0, age_15: 0, active_eng: 0 },
+        { region: 'SOUTH ZONE', account: 'Subway', total_calls: 5, total_solved: 4, open_calls: 1, age_2: 0, age_3: 0, age_7: 0, age_15: 0, active_eng: 0 },
         { region: 'NORTH ZONE', account: 'Starbucks', total_calls: 4, total_solved: 3, open_calls: 1, age_2: 0, age_3: 0, age_7: 0, age_15: 0, active_eng: 0 },
       ],
     };
     const html = buildEmailBodySectionsHtml(['key_account_performance'], context);
+    const northStarbucks = html.indexOf('NORTH</td>');
     const eastStarbucks = html.indexOf('EAST</td>');
     const eastSubway = html.indexOf('EAST', eastStarbucks + 1);
-    const northStarbucks = html.indexOf('NORTH</td>');
     const westSubway = html.indexOf('WEST</td>');
-    expect(eastStarbucks).toBeGreaterThan(-1);
+    const southSubway = html.indexOf('SOUTH</td>');
+    expect(northStarbucks).toBeGreaterThan(-1);
+    expect(eastStarbucks).toBeGreaterThan(northStarbucks);
     expect(eastSubway).toBeGreaterThan(eastStarbucks);
-    expect(northStarbucks).toBeGreaterThan(eastSubway);
-    expect(westSubway).toBeGreaterThan(northStarbucks);
+    expect(westSubway).toBeGreaterThan(eastSubway);
+    expect(southSubway).toBeGreaterThan(westSubway);
     expect(html.indexOf('Starbucks', eastStarbucks)).toBeLessThan(html.indexOf('Subway', eastStarbucks + 1));
   });
 

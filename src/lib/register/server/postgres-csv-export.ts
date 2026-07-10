@@ -6,6 +6,7 @@ import {
   buildRegisterListQuery,
   buildWhere,
   countRegisterRowsFromPostgres,
+  registerHotOrderBy,
   registerKeysetCursorFromRow,
   type RegisterPostgresParams,
 } from '@/lib/read-model/queries/register';
@@ -124,7 +125,9 @@ export async function buildPostgresRegisterCsvStream(
               REGISTER_EXPORT_HOT_COLUMNS,
               whereSql,
               values,
-              KEYSET_FETCH_SIZE
+              KEYSET_FETCH_SIZE,
+              undefined,
+              registerHotOrderBy(fullParams.dateFilterColumn)
             );
 
             const res = await client.query<Record<string, unknown>>({
@@ -146,7 +149,10 @@ export async function buildPostgresRegisterCsvStream(
             controller.enqueue(encoder.encode(chunk));
             exportedRows += rows.length;
 
-            const cursor = registerKeysetCursorFromRow(rows[rows.length - 1]!);
+            const cursor = registerKeysetCursorFromRow(
+              rows[rows.length - 1]!,
+              fullParams.dateFilterColumn
+            );
             if (!cursor) break;
             cursorLoggedAt = cursor.cursorLoggedAt;
             cursorNcode = cursor.cursorNcode;

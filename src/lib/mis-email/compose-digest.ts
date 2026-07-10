@@ -9,7 +9,10 @@ import {
 import {
   resolveDigestKeyAccountBodyRows,
 } from '@/lib/mis-email/fetch-digest-accounts';
-import { buildMisEmailRegionalPerformanceRows } from '@/lib/mis-email/mail-basis';
+import {
+  buildMisEmailBranchPerformanceRowsFromTrace,
+  buildMisEmailRegionalPerformanceRows,
+} from '@/lib/mis-email/mail-basis';
 import { buildDigestTraceableExportPayload } from '@/lib/mis-email/fetch-digest-trace';
 import {
   fetchDigestRegisterRows,
@@ -28,6 +31,7 @@ import {
   DEFAULT_MIS_EMAIL_PREFERENCES,
   hasAnyEffectiveDigestInclude,
   mergeMisEmailPreferences,
+  parseMisEmailKeyAccountsByZone,
   parseMisEmailKeyAccountsInBody,
   resolveDigestDateRangeForPreferences,
   resolveEffectiveDigestIncludes,
@@ -113,13 +117,16 @@ async function buildMisEmailBodyContext(
   data: Awaited<ReturnType<typeof fetchDigestSummaryDataCached>>,
   dateRange: DigestDateRange,
   bodySectionIds: ReturnType<typeof resolveDigestBodySections>,
-  clientAccountSummary?: Awaited<ReturnType<typeof fetchDigestClientAccountSummaryCached>>
+  clientAccountSummary?: Awaited<ReturnType<typeof fetchDigestClientAccountSummaryCached>>,
+  traceRows?: Awaited<ReturnType<typeof buildDigestTraceableExportPayload>>['traceRows']
 ): Promise<MisEmailBodyContext> {
   const explicitAccounts = parseMisEmailKeyAccountsInBody(prefs.keyAccountsInBody);
+  const explicitAccountsByZone = parseMisEmailKeyAccountsByZone(prefs.keyAccountsByZone);
 
   const context: MisEmailBodyContext = {
     summary: data,
     keyAccountsInBody: explicitAccounts,
+    keyAccountsByZone: explicitAccountsByZone,
   };
 
   if (
@@ -141,11 +148,16 @@ async function buildMisEmailBodyContext(
       const accountRows = resolveDigestKeyAccountBodyRows(
         data.accountSummary,
         clientRows,
-        explicitAccounts
+        explicitAccounts,
+        explicitAccountsByZone
       );
       context.accountRows = accountRows;
       context.keyAccountsInBody = accountRows.map((row) => String(row.account ?? ''));
     }
+  }
+
+  if (bodySectionIds.includes('branch_performance') && traceRows?.length) {
+    context.branchPerformanceRows = buildMisEmailBranchPerformanceRowsFromTrace(traceRows);
   }
 
   return context;
@@ -208,7 +220,6 @@ function buildDigestEmailContent(params: {
   let keyAccountMaxRows: number | undefined;
   let rendered = render();
   let htmlSizeBytes = measureHtmlUtf8Bytes(rendered.html);
-
   if (
     htmlSizeBytes > GMAIL_SAFE_HTML_BYTES &&
     totalKeyRows > 0 &&
@@ -273,33 +284,41 @@ export async function buildMisEmailPayload(
     options.dateRange ?? resolveDigestDateRangeForPreferences(prefs);
   const effectiveIncludes = resolveEffectiveDigestIncludes(effectiveRecipient, prefs);
 
-  if (!hasAnyEffectiveDigestInclude(effectiveIncludes)) {
-    throw new Error('Select at least one report attachment');
-  }
-
-  timer.step('resolve preferences', `${dateRange.label} · summary=${effectiveIncludes.includeSummary} detailed=${effectiveIncludes.includeDetailed} keyAccount=${effectiveIncludes.includeKeyAccount} trace=${effectiveIncludes.includeTraceableExport}`);
+  timer.step('resolve preferences', `${dateRange.label} · summary=${effectiveIncludes.includeSummary} detailed=${effectiveIncludes.includeDetailed} keyAccount=${effectiveIncludes.includeKeyAccount} trace=${effectiveIncludes.includeTraceableExport} open=${effectiveIncludes.includeOpenCallsExport}`);
 
   const scope = await timer.measure('resolve scope', () =>
     resolveUserDigestScopeWithLabel(effectiveRecipient)
   );
   const bodyPermissions: MisEmailBodyPermissions = {
-    includeSummary: effectiveIncludes.includeSummary,
-    includeKeyAccount: effectiveIncludes.includeKeyAccount,
+    includeSummary: effectiveRecipient.includeSummary,
+    includeKeyAccount: effectiveRecipient.includeKeyAccount,
   };
   const bodySectionIds = resolveDigestBodySections(bodyPermissions, prefs, {
-    includeKeyAccountAttachment: effectiveIncludes.includeKeyAccount,
+    includeKeyAccountAttachment: false,
   });
+  if (!hasAnyEffectiveDigestInclude(effectiveIncludes) && bodySectionIds.length === 0) {
+    throw new Error('Select at least one report attachment');
+  }
   const needsClientAccounts =
     bodySectionIds.includes('key_account_performance') ||
     bodySectionIds.includes('regional_performance');
   const includeDetailed = !options.forPreview && effectiveIncludes.includeDetailed;
   const includeTraceableExport =
     !options.forPreview && effectiveIncludes.includeTraceableExport;
-  const needsClientAccountData = needsClientAccounts || includeTraceableExport;
+  const includeOpenCallsExport =
+    !options.forPreview && effectiveIncludes.includeOpenCallsExport;
+  // Branch body must use the Cadbury-safe trace path (CRM Cadbury/Mondelez out, Mondelez import in).
+  // Preview previously used raw CRM branchSummary and incorrectly included CRM Cadbury in aging.
+  const needsTraceForBody = bodySectionIds.includes('branch_performance');
+  const needsClientAccountData =
+    needsClientAccounts ||
+    includeTraceableExport ||
+    includeOpenCallsExport ||
+    needsTraceForBody;
 
   timer.step(
     'plan data fetch',
-    `sections=${bodySectionIds.join(',') || 'none'} · clientAccounts=${needsClientAccountData} · register=${includeDetailed} · trace=${includeTraceableExport || effectiveIncludes.includeTraceableExport}`
+    `sections=${bodySectionIds.join(',') || 'none'} · clientAccounts=${needsClientAccountData} · register=${includeDetailed} · trace=${includeTraceableExport || includeOpenCallsExport || needsTraceForBody || effectiveIncludes.includeTraceableExport}`
   );
 
   const data = await timer.measure('fetch summary', () => fetchDigestSummaryDataCached(scope, dateRange), (result) =>
@@ -331,7 +350,7 @@ export async function buildMisEmailPayload(
       )
     : undefined;
 
-  const tracePayload = includeTraceableExport
+  const tracePayload = includeTraceableExport || includeOpenCallsExport || needsTraceForBody
     ? await timer.measure('build trace export', () =>
         buildDigestTraceableExportPayload(
           scope,
@@ -363,8 +382,8 @@ export async function buildMisEmailPayload(
     attachmentFilenames = emailAttachments.map((a) => a.filename);
   }
 
-  if (attachmentFilenames.length === 0) {
-    throw new Error('No attachments generated for your report permissions');
+  if (attachmentFilenames.length === 0 && bodySectionIds.length === 0) {
+    throw new Error('No report content selected');
   }
 
   const bodyContext = await timer.measure('build body context', async () =>
@@ -374,7 +393,8 @@ export async function buildMisEmailPayload(
       data,
       dateRange,
       bodySectionIds,
-      clientAccountSummary
+      clientAccountSummary,
+      tracePayload?.traceRows
     ), (ctx) => `accountRows=${ctx.accountRows?.length ?? 0}`
   );
 

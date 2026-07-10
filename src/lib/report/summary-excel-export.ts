@@ -48,6 +48,21 @@ export function applyRegionRowStyle(
   row.getCell(openCol).font = { bold: true };
 }
 
+export function applyAge15CellStyle(cell: ExcelJS.Cell, age15: number): void {
+  if (age15 < 30) {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC6EFCE' } };
+    cell.font = { color: { argb: 'FF166534' }, bold: true };
+    return;
+  }
+  if (age15 <= 80) {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEB9C' } };
+    cell.font = { color: { argb: 'FF92400E' }, bold: true };
+    return;
+  }
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } };
+  cell.font = { color: { argb: 'FF991B1B' }, bold: true };
+}
+
 function getAggregate(
   item: BranchSummaryRow,
   key: keyof BranchSummaryRow,
@@ -146,6 +161,8 @@ export async function buildSummaryDashboardWorkbook(
         : [region, total, t.s, t.c, t.o, t.a2, t.a3, t.a7, t.a15, t.p, t.e]
     );
     applyRegionRowStyle(r, region, metricStyle);
+    const age15Col = excludeCancelled ? 8 : 9;
+    applyAge15CellStyle(r.getCell(age15Col), Number(t.a15 || 0));
   });
 
   const allSolved = summaryData.reduce((s, b) => s + Number(b.solved_calls || 0), 0);
@@ -193,6 +210,8 @@ export async function buildSummaryDashboardWorkbook(
       right: { style: 'thin' },
     };
   });
+  const aiAge15Col = excludeCancelled ? 8 : 9;
+  applyAge15CellStyle(aiRow.getCell(aiAge15Col), Number(aiRow.getCell(aiAge15Col).value || 0));
 
   sheet.addRow([]);
 
@@ -263,6 +282,8 @@ export async function buildSummaryDashboardWorkbook(
             ]
       );
       applyRegionRowStyle(r, b.region, metricStyle);
+      const age15Col = excludeCancelled ? 8 : 9;
+      applyAge15CellStyle(r.getCell(age15Col), Number(getAggregate(b, 'age_15', rb) || 0));
     });
 
   return workbook;
@@ -416,6 +437,8 @@ export async function buildKeyAccountMisWorkbook(
     const cancelledCol = excludeCancelled ? null : hideRegion ? 5 : 6;
     const openCol = excludeCancelled ? (hideRegion ? 5 : 6) : hideRegion ? 6 : 7;
     applyRegionRowStyle(r, a.region, { solvedCol, cancelledCol, openCol });
+    const age15Col = excludeCancelled ? (hideRegion ? 9 : 10) : hideRegion ? 10 : 11;
+    applyAge15CellStyle(r.getCell(age15Col), Number(a.age_15 || 0));
   });
 
   return workbook;

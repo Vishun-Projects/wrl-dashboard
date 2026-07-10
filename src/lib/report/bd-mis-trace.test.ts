@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildBdMisTraceRows,
   filterTraceRowsForExport,
+  filterTraceRowsForOpenExport,
   filterTraceRowsForSummaryExport,
   countTraceOpenCalls,
   formatAgingLabel,
@@ -210,6 +211,68 @@ describe('bd-mis-trace', () => {
     expect(row.office_under_branch).toBe('—');
   });
 
+  it('maps Coke/Cadbury import plant to CRM branch labels', () => {
+    const cadbury = mapClientCallToTraceRow(
+      {
+        source_code: 'cadbury',
+        region: 'EAST',
+        plant: 'BIHAR',
+        technician_name: 'Tech',
+        office_under_branch: 'Patna',
+        customer_name: 'Store',
+        logged_at: '2026-01-03T00:00:00Z',
+        service_order: 'D-2',
+        client: 'Cadbury',
+        call_status: 'Open',
+        status_bucket: 'assigned',
+        file_name: 'cad.csv',
+      },
+      { crm: true, cadbury: true, coke: true },
+      '2026-06-29'
+    );
+    expect(cadbury.plant).toBe('1182 - PATNA BRANCH');
+
+    const eastZone = mapClientCallToTraceRow(
+      {
+        source_code: 'cadbury',
+        region: 'EAST',
+        plant: 'East',
+        technician_name: 'Tech',
+        office_under_branch: 'Kolkatta',
+        customer_name: 'Store',
+        logged_at: '2026-01-03T00:00:00Z',
+        service_order: 'D-3',
+        client: 'Cadbury',
+        call_status: 'Open',
+        status_bucket: 'assigned',
+        file_name: 'cad.csv',
+      },
+      { crm: true, cadbury: true, coke: true },
+      '2026-06-29'
+    );
+    expect(eastZone.plant).toBe('—');
+
+    const coke = mapClientCallToTraceRow(
+      {
+        source_code: 'coke',
+        region: 'SOUTH',
+        plant: 'Vizag Beverage',
+        technician_name: 'Tech',
+        office_under_branch: 'Vizag',
+        customer_name: 'Outlet',
+        logged_at: '2026-01-03T00:00:00Z',
+        service_order: 'C-1',
+        client: 'Coke',
+        call_status: 'Assigned',
+        status_bucket: 'assigned',
+        file_name: 'coke.xlsx',
+      },
+      { crm: true, cadbury: true, coke: true },
+      '2026-06-29'
+    );
+    expect(coke.plant).toBe('1181 - VIJAYAWADA BRANCH');
+  });
+
   it('formats trace call dates as yyyy-mm-dd', () => {
     const row = mapCrmCallToTraceRow(
       {
@@ -372,5 +435,88 @@ describe('bd-mis-trace', () => {
     const exported = filterTraceRowsForSummaryExport(rows);
     expect(exported.map((r) => r.service_order)).toEqual(['W-NESTLE-CLOSED', 'W-OPEN']);
     expect(countTraceOpenCalls(exported)).toBe(1);
+  });
+
+  it('filterTraceRowsForOpenExport keeps only included open rows', () => {
+    const rows = [
+      {
+        region: 'NORTH ZONE',
+        plant: 'P1',
+        technician_name: 'T1',
+        office_under_branch: 'B1',
+        customer_name: 'C1',
+        call_date_time: '2026-07-01',
+        service_order: 'OPEN-1',
+        client: 'Nestle',
+        call_status: 'Assigned',
+        aging: '<2 days',
+        file_name: 'CRM Files',
+        source: 'CRM' as const,
+        contribution_step: 'included',
+        included_in_final_count: true,
+        counts_toward: 'open' as const,
+      },
+      {
+        region: 'NORTH ZONE',
+        plant: 'P2',
+        technician_name: 'T2',
+        office_under_branch: 'B2',
+        customer_name: 'C2',
+        call_date_time: '2026-07-01',
+        service_order: 'SOLVED-1',
+        client: 'Nestle',
+        call_status: 'Closed',
+        aging: '',
+        file_name: 'CRM Files',
+        source: 'CRM' as const,
+        contribution_step: 'included',
+        included_in_final_count: true,
+        counts_toward: 'solved' as const,
+      },
+    ];
+    expect(filterTraceRowsForOpenExport(rows).map((r) => r.service_order)).toEqual(['OPEN-1']);
+  });
+
+  it('excludes WESTERN HEAD OFFICE - 1100 from all trace exports', () => {
+    const rows = [
+      {
+        region: 'WEST ZONE',
+        plant: 'WESTERN HEAD OFFICE - 1100',
+        technician_name: 'T1',
+        office_under_branch: 'WESTERN HEAD OFFICE - 1100',
+        customer_name: 'C1',
+        call_date_time: '2026-07-01',
+        service_order: 'HO-OPEN-1',
+        client: 'Nestle',
+        call_status: 'Assigned',
+        aging: '<2 days',
+        file_name: 'CRM Files',
+        source: 'CRM' as const,
+        contribution_step: 'included',
+        included_in_final_count: true,
+        counts_toward: 'open' as const,
+      },
+      {
+        region: 'WEST ZONE',
+        plant: '1171 - MUMBAI BRANCH',
+        technician_name: 'T2',
+        office_under_branch: '1171 - MUMBAI BRANCH',
+        customer_name: 'C2',
+        call_date_time: '2026-07-01',
+        service_order: 'NORMAL-OPEN-1',
+        client: 'Nestle',
+        call_status: 'Assigned',
+        aging: '<2 days',
+        file_name: 'CRM Files',
+        source: 'CRM' as const,
+        contribution_step: 'included',
+        included_in_final_count: true,
+        counts_toward: 'open' as const,
+      },
+    ];
+
+    expect(filterTraceRowsForExport(rows).map((r) => r.service_order)).toEqual(['NORMAL-OPEN-1']);
+    expect(filterTraceRowsForSummaryExport(rows).map((r) => r.service_order)).toEqual(['NORMAL-OPEN-1']);
+    expect(filterTraceRowsForOpenExport(rows).map((r) => r.service_order)).toEqual(['NORMAL-OPEN-1']);
   });
 });

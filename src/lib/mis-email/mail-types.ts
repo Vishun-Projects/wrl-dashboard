@@ -12,3 +12,19 @@ export type RegionalPerformanceRow = {
   part_pending: number;
   active_eng: number;
 };
+
+/** Branch-level body metric row derived from merged trace basis. */
+export type BranchPerformanceRow = {
+  branch: string;
+  region: string;
+  total_calls: number;
+  solved_calls: number;
+  cancelled_calls: number;
+  open_calls: number;
+  age_2: number;
+  age_3: number;
+  age_7: number;
+  age_15: number;
+  part_pending: number;
+  active_eng: number;
+};

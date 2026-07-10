@@ -66,6 +66,17 @@ describe('parseMisEmailPreferences', () => {
     ).toEqual({ keyAccountsInBody: ['Nestle', 'COKE'] });
   });
 
+  it('parses keyAccountsByZone', () => {
+    expect(
+      parseMisEmailPreferences({
+        keyAccountsByZone: {
+          NORTH: ['Nestle', 'nestle'],
+          EAST: ['COKE'],
+        },
+      })
+    ).toEqual({ keyAccountsByZone: { NORTH: ['Nestle'], EAST: ['COKE'], WEST: [], SOUTH: [] } });
+  });
+
   it('parses valid IST send time', () => {
     expect(
       parseMisEmailPreferences({
@@ -136,6 +147,7 @@ describe('resolveEffectiveDigestIncludes', () => {
       includeDetailed: false,
       includeKeyAccount: false,
       includeTraceableExport: false,
+      includeOpenCallsExport: false,
     });
   });
 
@@ -149,6 +161,7 @@ describe('resolveEffectiveDigestIncludes', () => {
       includeDetailed: true,
       includeKeyAccount: false,
       includeTraceableExport: true,
+      includeOpenCallsExport: false,
     });
   });
 });
@@ -240,6 +253,7 @@ describe('hasAnyEffectiveDigestInclude', () => {
         includeDetailed: false,
         includeKeyAccount: false,
         includeTraceableExport: false,
+        includeOpenCallsExport: false,
       })
     ).toBe(false);
   });

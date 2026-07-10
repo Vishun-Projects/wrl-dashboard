@@ -6,8 +6,11 @@ import {
   buildAccountDisplayRows,
   filterKeyAccountRows,
   listAvailableKeyAccounts,
+  zoneKey,
   type MergeSelection,
 } from '@/lib/report/account-merge';
+import type { MisEmailKeyAccountsByZone } from '@/lib/mis-email/preferences';
+import { accountsMatchDisplayOrKey } from '@/lib/report/client-account-display';
 import type { AccountSummaryRow } from '@/lib/report/summary-derive';
 
 const DIGEST_MERGE_FLAGS: MergeSelection = {
@@ -70,8 +73,25 @@ export function resolveDigestKeyAccountNames(
 export function resolveDigestKeyAccountBodyRows(
   crmAccounts: AccountSummaryRow[],
   clientAccounts: AccountSummaryRow[] | undefined,
-  explicitSelection: string[]
+  explicitSelection: string[],
+  byZoneSelection?: MisEmailKeyAccountsByZone
 ): Array<Record<string, unknown>> {
+  const zoneSelections = byZoneSelection ?? {};
+  const hasPerZoneSelection = Object.values(zoneSelections).some((values) => (values ?? []).length > 0);
+  if (hasPerZoneSelection) {
+    const rows = buildDigestAccountDisplayRows(crmAccounts, clientAccounts);
+    return rows.filter((row) => {
+      const region = String(row.region ?? '');
+      const account = String(row.account ?? '').trim();
+      if (!account) return false;
+      const zone = zoneKey(region) as keyof MisEmailKeyAccountsByZone;
+      const picks = zoneSelections[zone] ?? [];
+      // Empty zone list means "none from this zone" — not "all accounts".
+      if (!picks.length) return false;
+      return picks.some((selected) => accountsMatchDisplayOrKey(selected, account));
+    });
+  }
+
   const accountNames = resolveDigestKeyAccountNames(
     crmAccounts,
     clientAccounts,

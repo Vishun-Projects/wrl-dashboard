@@ -25,7 +25,6 @@ import {
   FileText,
   AlertCircle,
   X,
-  MoreVertical,
 } from 'lucide-react';
 import { PageAlert } from '@/components/ui/PageAlert';
 import { HorizontalScrollFade } from '@/components/ui/HorizontalScrollFade';
@@ -789,7 +788,6 @@ export default function ReportPageClient() {
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
   const [selectedCall, setSelectedCall] = useState<any | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
 
   const handleFlagUpdate = async (id: string, flag: string) => {
     const previousData = data;
@@ -4300,38 +4298,6 @@ export default function ReportPageClient() {
               feedback.cancelled('Export cancelled');
             }}
           />
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setHeaderMenuOpen((open) => !open)}
-              className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-bg-canvas text-slate-600 shadow-sm transition-all hover:bg-bg-soft"
-              title="More actions"
-            >
-              <MoreVertical size={14} />
-            </button>
-            {headerMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setHeaderMenuOpen(false)} />
-                <div className="absolute right-0 top-full z-50 mt-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-bg-canvas shadow-xl">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setHeaderMenuOpen(false);
-                      const t0 = performance.now();
-                      reportPerf('ui', 'Full Reload → fetchData(1, skipCache)', t0, {
-                        why: 'Forces network + summary; ignores session page cache.',
-                      });
-                      fetchData(1, { skipCache: true });
-                    }}
-                    disabled={loading}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-slate-700 hover:bg-bg-soft disabled:opacity-50"
-                  >
-                    Full reload
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
         </div>
       </div>
 

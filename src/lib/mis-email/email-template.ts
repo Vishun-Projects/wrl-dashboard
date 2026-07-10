@@ -133,7 +133,7 @@ function buildMisTableDarkModeStyles(prefix = ''): string {
     ${p}.mis-td.mis-zone-south { background-color: #2b313a !important; color: #e2e8f0 !important; }
     ${p}.mis-td.mis-zone-grand { background-color: #3f3b1d !important; color: #fde68a !important; }
     ${p}.mis-td.mis-zone-default { background-color: #1f2937 !important; color: #cbd5e1 !important; }
-    ${p}.mis-solved { color: #34d399 !important; }
+    ${p}.mis-solved { color: #34d399 !important; font-weight: bold !important; }
     ${p}.mis-cancel { color: #f87171 !important; }
     ${p}.mis-pct { color: #60a5fa !important; }
     ${p}.mis-pct-alert { color: #fca5a5 !important; background-color: #3f1d1d !important; }
@@ -176,7 +176,7 @@ function buildForceLightStyles(params?: { includeDarkModeOverrides?: boolean }):
     ${p}.email-link { color: ${t.link} !important; }`;
   };
 
-  return `
+  const css = `
     :root { color-scheme: light only; supported-color-schemes: light; }
     body { margin: 0; padding: 0; width: 100%; -webkit-text-size-adjust: 100%; }
     table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
@@ -190,17 +190,16 @@ function buildForceLightStyles(params?: { includeDarkModeOverrides?: boolean }):
     .mis-th-l { text-align: left; }
     .mis-td { padding: 6px 8px; font-size: 10px; line-height: 1.35; color: ${t.fgPrimary}; border: 1px solid ${t.border}; text-align: center; }
     .mis-td-l { text-align: left; font-weight: bold; }
-    .mis-solved { color: #059669; }
+    .mis-solved { color: #065f46 !important; font-weight: bold !important; }
     .mis-cancel { color: #DC2626; }
     .mis-open { font-weight: bold; }
     .mis-pct { color: #1d4ed8; font-weight: bold; }
-    .mis-pct-alert { color: #b91c1c !important; background-color: #fee2e2 !important; font-weight: bold !important; }
-    .mis-pct-ok { color: #1d4ed8 !important; }
-    .mis-gt15-low { background-color: #dcfce7 !important; color: #166534 !important; font-weight: bold !important; }
-    .mis-gt15-mid { background-color: #fef3c7 !important; color: #92400e !important; font-weight: bold !important; }
-    .mis-gt15-high { background-color: #fee2e2 !important; color: #991b1b !important; font-weight: bold !important; }
+    .mis-pct-alert { color: #991b1b !important; background-color: #fee2e2 !important; font-weight: bold !important; }
+    .mis-pct-ok { color: #1e3a8a !important; }
+    .mis-gt15-low { background-color: #bbf7d0 !important; color: #111827 !important; font-weight: bold !important; }
+    .mis-gt15-mid { background-color: #fde68a !important; color: #111827 !important; font-weight: bold !important; }
+    .mis-gt15-high { background-color: #fecaca !important; color: #111827 !important; font-weight: bold !important; }
     .mis-note { padding: 8px; font-size: 10px; line-height: 1.4; color: ${t.fgMuted}; text-align: center; border: 1px solid ${t.border}; background-color: ${t.bgMuted}; }
-    .mis-row td { background-color: transparent !important; }
     ${buildMisZoneStyles()}
     .mis-grid-cell .mis-wrap { margin: 0 0 12px; }
     .mis-grid-cell .mis-th, .mis-grid-cell .mis-td { font-size: 9px; padding: 4px 5px; }
@@ -214,6 +213,8 @@ function buildForceLightStyles(params?: { includeDarkModeOverrides?: boolean }):
     ${buildMisZoneStyles('[data-ogsc]')}
     ${buildMisZoneStyles('[data-ogsb]')}
   `;
+
+  return css;
 }
 
 export function buildDigestEmailPlainText(params: {
@@ -269,7 +270,7 @@ export function buildDigestEmailHtml(params: {
     ? `Your MIS report for <strong class="email-strong" style="font-weight:bold;color:${t.fgPrimary};">${escapeHtml(period)}</strong> is below. Full Excel reports are attached to this email.`
     : `Please find your MIS report for <strong class="email-strong" style="font-weight:bold;color:${t.fgPrimary};">${escapeHtml(period)}</strong> attached to this email.`;
 
-  return `<!DOCTYPE html>
+  const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -376,4 +377,6 @@ export function buildDigestEmailHtml(params: {
   </table>
 </body>
 </html>`;
+
+  return html;
 }

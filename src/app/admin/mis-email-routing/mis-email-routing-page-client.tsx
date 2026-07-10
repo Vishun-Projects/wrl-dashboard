@@ -166,6 +166,26 @@ function formatScopeCount(values: string[], label: string, totalWhenAll?: number
   return `${values.length}/${label}`;
 }
 
+function summarizeSelected(values: string[], fallback: string): string {
+  if (values.length === 0) return fallback;
+  if (values.length === 1) return values[0];
+  return `${values[0]} +${values.length - 1}`;
+}
+
+function serializeRow(row: EditableRuleRow): string {
+  return JSON.stringify({
+    ...row,
+    zone: [...row.zone].sort(),
+    branch: [...row.branch].sort(),
+    client: [...row.client].sort(),
+    scheduleDaysOfWeek: [...row.scheduleDaysOfWeek].sort(),
+    toEmailsCsv: row.toEmailsCsv.trim(),
+    ccEmailsCsv: row.ccEmailsCsv.trim(),
+    scheduleWindowStartIst: row.scheduleWindowStartIst ?? '',
+    scheduleWindowEndIst: row.scheduleWindowEndIst ?? '',
+  });
+}
+
 function ToggleSwitch({
   checked,
   onChange,
@@ -297,6 +317,9 @@ export default function MisEmailRoutingPageClient() {
   const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({});
   const [activeRowId, setActiveRowId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmAutoSend, setConfirmAutoSend] = useState<{ rowId: string; next: boolean } | null>(null);
+  const [pendingCloseDirty, setPendingCloseDirty] = useState(false);
+  const [drawerBaselineKey, setDrawerBaselineKey] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
@@ -454,6 +477,9 @@ export default function MisEmailRoutingPageClient() {
         : await axios.put<{ rule: RoutingRuleRow }>(API_URL, payload, { withCredentials: true });
       const persisted = toEditableRow(res.data.rule);
       setRows((prev) => prev.map((item) => (item.id === row.id ? persisted : item)));
+      if (activeRowId === row.id) {
+        setDrawerBaselineKey(serializeRow(persisted));
+      }
       if (closeDrawer) setActiveRowId(persisted.id);
       feedback.actionSuccess('Routing rule saved');
     } catch (err: unknown) {
@@ -535,6 +561,24 @@ export default function MisEmailRoutingPageClient() {
   const pagedRows = filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize);
   const activeRow = rows.find((row) => row.id === activeRowId) ?? null;
   const deleteTarget = rows.find((row) => row.id === confirmDeleteId) ?? null;
+  const activeRowKey = activeRow ? serializeRow(activeRow) : null;
+  const drawerDirty = !!(activeRow && drawerBaselineKey && activeRowKey !== drawerBaselineKey);
+
+  useEffect(() => {
+    if (!activeRow) {
+      setDrawerBaselineKey(null);
+      return;
+    }
+    setDrawerBaselineKey(serializeRow(activeRow));
+  }, [activeRowId]);
+
+  function requestCloseDrawer() {
+    if (drawerDirty) {
+      setPendingCloseDirty(true);
+      return;
+    }
+    setActiveRowId(null);
+  }
 
   return (
     <PageShell
@@ -601,23 +645,41 @@ export default function MisEmailRoutingPageClient() {
                           </span>
                         </AdminTd>
                         <AdminTd>
-                          <span className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                          <span
+                            title={row.zone.join(', ') || 'All zones'}
+                            className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700"
+                          >
                             {formatScopeCount(row.zone, 'zones', zoneOptions.length)}
                           </span>
+                          <p className="mt-1 text-[10px] text-slate-500">
+                            {summarizeSelected(row.zone, 'All zones')}
+                          </p>
                         </AdminTd>
                         <AdminTd>
-                          <span className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                          <span
+                            title={row.branch.join(', ') || 'All branches'}
+                            className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700"
+                          >
                             {formatScopeCount(row.branch, 'branches', globalBranchOptions.length)}
                           </span>
+                          <p className="mt-1 text-[10px] text-slate-500">
+                            {summarizeSelected(row.branch, 'All branches')}
+                          </p>
                         </AdminTd>
                         <AdminTd>
-                          <span className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                          <span
+                            title={row.client.join(', ') || 'All clients'}
+                            className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700"
+                          >
                             {formatScopeCount(
                               row.client,
                               'clients',
                               globalClientOptionsByMode[row.clientSourceMode]?.length ?? 0
                             )}
                           </span>
+                          <p className="mt-1 text-[10px] text-slate-500">
+                            {summarizeSelected(row.client, 'All clients')}
+                          </p>
                         </AdminTd>
                         <AdminTd>
                           <span className="text-[11px] font-medium text-slate-700">
@@ -625,17 +687,37 @@ export default function MisEmailRoutingPageClient() {
                           </span>
                         </AdminTd>
                         <AdminTd>
-                          <span className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                          <span
+                            title={parseEmailsCsv(row.toEmailsCsv).join(', ') || 'No recipients'}
+                            className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700"
+                          >
                             {parseEmailsCsv(row.toEmailsCsv).length} recipients
                           </span>
+                          <p className="mt-1 text-[10px] text-slate-500">
+                            {summarizeSelected(parseEmailsCsv(row.toEmailsCsv), 'None')}
+                          </p>
                         </AdminTd>
                         <AdminTd>
-                          <span className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                          <span
+                            title={parseEmailsCsv(row.ccEmailsCsv).join(', ') || 'No recipients'}
+                            className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700"
+                          >
                             {parseEmailsCsv(row.ccEmailsCsv).length} recipients
                           </span>
+                          <p className="mt-1 text-[10px] text-slate-500">
+                            {summarizeSelected(parseEmailsCsv(row.ccEmailsCsv), 'None')}
+                          </p>
                         </AdminTd>
                         <AdminTd>
                           <span className="text-[11px] text-slate-700">{scheduleSummary(row)}</span>
+                          <p className="mt-1 text-[10px] text-slate-500">
+                            {row.scheduleDaysOfWeek.length === DAY_OPTIONS.length
+                              ? 'All days'
+                              : summarizeSelected(
+                                  row.scheduleDaysOfWeek.map((d) => DAY_LABELS[d] || d),
+                                  'All days'
+                                )}
+                          </p>
                         </AdminTd>
                         <AdminTd align="center">
                           <ToggleSwitch
@@ -643,9 +725,7 @@ export default function MisEmailRoutingPageClient() {
                             disabled={saving || deleting}
                             label={`Toggle auto send for rule ${row.id}`}
                             onChange={(next) => {
-                              const updated = { ...row, autoSendEnabled: next };
-                              updateRow(row.id, { autoSendEnabled: next });
-                              void saveRow(updated);
+                              setConfirmAutoSend({ rowId: row.id, next });
                             }}
                           />
                         </AdminTd>
@@ -725,11 +805,40 @@ export default function MisEmailRoutingPageClient() {
           void deleteRow(deleteTarget);
         }}
       />
+      <ConfirmDialog
+        open={!!confirmAutoSend}
+        title={confirmAutoSend?.next ? 'Enable auto-send?' : 'Disable auto-send?'}
+        description="This change is saved immediately and affects live routing behavior."
+        confirmLabel={confirmAutoSend?.next ? 'Enable' : 'Disable'}
+        onCancel={() => setConfirmAutoSend(null)}
+        onConfirm={() => {
+          if (!confirmAutoSend) return;
+          const row = rows.find((item) => item.id === confirmAutoSend.rowId);
+          if (!row) return;
+          const updated = { ...row, autoSendEnabled: confirmAutoSend.next };
+          updateRow(row.id, { autoSendEnabled: confirmAutoSend.next });
+          setConfirmAutoSend(null);
+          void saveRow(updated);
+        }}
+      />
+      <ConfirmDialog
+        open={pendingCloseDirty}
+        title="Discard unsaved changes?"
+        description="Your unsaved edits in this routing rule will be lost."
+        confirmLabel="Discard changes"
+        variant="danger"
+        onCancel={() => setPendingCloseDirty(false)}
+        onConfirm={() => {
+          setPendingCloseDirty(false);
+          void loadRules();
+          setActiveRowId(null);
+        }}
+      />
 
       <ModalPortal open={!!activeRow}>
         {activeRow ? (
           <div className="fixed inset-0 z-[190]">
-            <ModalBackdrop onClick={() => setActiveRowId(null)} />
+            <ModalBackdrop onClick={requestCloseDrawer} />
             <div className="absolute right-0 top-0 z-[191] flex h-full w-full max-w-[760px] flex-col border-l border-slate-200 bg-bg-canvas shadow-2xl">
               <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
                 <div>
@@ -740,7 +849,7 @@ export default function MisEmailRoutingPageClient() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setActiveRowId(null)}
+                  onClick={requestCloseDrawer}
                   className="rounded-md border border-slate-200 p-1.5 text-slate-500 hover:bg-bg-soft"
                   aria-label="Close editor"
                 >
@@ -749,6 +858,10 @@ export default function MisEmailRoutingPageClient() {
               </div>
 
               <div className="custom-scrollbar flex-1 space-y-4 overflow-y-auto px-5 py-4">
+                <div className="rounded-lg border border-slate-200 bg-bg-soft/50 px-3 py-2 text-[11px] text-slate-600">
+                  Scope dependencies: selected zones filter branches, and zones + branches filter
+                  clients. Existing valid selections are preserved.
+                </div>
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-medium text-slate-500">Client basis</label>
@@ -783,9 +896,25 @@ export default function MisEmailRoutingPageClient() {
                       panelClassName="w-80"
                       onChange={(values) => {
                         const nextZones = normalizeUnique(values);
+                        const nextBranchOptions = branchOptionsForZones(nextZones);
+                        const preservedBranches =
+                          nextZones.length === 0
+                            ? activeRow.branch
+                            : activeRow.branch.filter((branch) =>
+                                nextBranchOptions.includes(branch)
+                              );
+                        const nextClientOptions = clientOptionsFor(
+                          nextZones,
+                          preservedBranches,
+                          activeRow.clientSourceMode
+                        );
+                        const preservedClients = activeRow.client.filter((client) =>
+                          nextClientOptions.includes(client)
+                        );
                         updateRow(activeRow.id, {
                           zone: nextZones,
-                          client: [],
+                          branch: preservedBranches,
+                          client: preservedClients,
                         });
                         nextZones.forEach((zone) => void loadBranchOptions(zone));
                       }}
@@ -807,10 +936,18 @@ export default function MisEmailRoutingPageClient() {
                         const branch = normalizeUnique(values);
                         const inferredZones = inferZonesForBranches(branch);
                         const zone = activeRow.zone.length > 0 ? activeRow.zone : inferredZones;
+                        const nextClientOptions = clientOptionsFor(
+                          normalizeUnique(zone),
+                          branch,
+                          activeRow.clientSourceMode
+                        );
+                        const preservedClients = activeRow.client.filter((client) =>
+                          nextClientOptions.includes(client)
+                        );
                         updateRow(activeRow.id, {
                           zone: normalizeUnique(zone),
                           branch,
-                          client: [],
+                          client: preservedClients,
                         });
                         zone.forEach((zoneName) => {
                           branch.forEach((branchName) => {
@@ -929,9 +1066,12 @@ export default function MisEmailRoutingPageClient() {
               </div>
 
               <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-slate-200 bg-bg-canvas px-5 py-3">
+                {drawerDirty ? (
+                  <p className="mr-auto text-[11px] text-amber-700">Unsaved changes</p>
+                ) : null}
                 <button
                   type="button"
-                  onClick={() => setActiveRowId(null)}
+                  onClick={requestCloseDrawer}
                   className="rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-bg-soft"
                 >
                   Cancel

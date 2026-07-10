@@ -58,4 +58,19 @@ describe('register export client helpers', () => {
       cursorNcode: 12,
     });
   });
+
+  it('derives solved-date export cursor from paginated row', () => {
+    expect(
+      registerExportCursorFromRow(
+        {
+          callsolveddate: '2026-06-15T14:30:00.000Z',
+          ncode: 12,
+        },
+        'dsolvedatetime'
+      )
+    ).toEqual({
+      cursorLoggedAt: '2026-06-15T14:30:00.000Z',
+      cursorNcode: 12,
+    });
+  });
 });

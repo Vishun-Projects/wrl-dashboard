@@ -8,6 +8,7 @@ import { resolveRequestUserId } from '@/lib/auth/server-user';
 import { createClient } from '@/lib/supabase/server';
 import { readRegisterFromPostgres } from '@/lib/read-model/flags';
 import type { RegisterPostgresParams } from '@/lib/read-model/queries/register';
+import { resolveRegisterDateSqlColumn } from '@/lib/trhcalls/query';
 
 export type RegisterPostgresRequestContext = {
   userId: string;
@@ -19,12 +20,14 @@ export type RegisterPostgresRequestResult =
   | { ok: false; response: NextResponse };
 
 export function parseRegisterSearchParams(searchParams: URLSearchParams) {
+  const dateFilterColumnParam = searchParams.get('dateFilterColumn') || 'dtrndate';
   return {
     search: searchParams.get('search') || '',
     officeId: searchParams.get('officeId') || 'All',
     callType: searchParams.get('callType'),
     startDate: searchParams.get('startDate') || '',
     endDate: searchParams.get('endDate') || '',
+    dateFilterColumn: resolveRegisterDateSqlColumn(dateFilterColumnParam),
     status: searchParams.get('status') || '',
     account: searchParams.get('account') || '',
     region: searchParams.get('region') || '',

@@ -6,7 +6,9 @@ import {
   resolveDigestDateRangeForPreferences,
   type MisEmailDateRangeMode,
 } from '@/lib/mis-email/preferences';
-import { queryDigestAccountNames } from '@/lib/mis-email/query-digest-account-names';
+import {
+  queryDigestAccountNamesByZone,
+} from '@/lib/mis-email/query-digest-account-names';
 import { resolveUserDigestScopeWithLabel } from '@/lib/mis-email/user-scope';
 
 /** Fast key-account name list for the email composer (no full MIS aggregation). */
@@ -30,14 +32,28 @@ export async function GET(request: Request) {
 
     const recipient = await loadDigestRecipientById(user.id);
     if (!recipient?.includeKeyAccount) {
-      return NextResponse.json({ availableKeyAccounts: [] });
+      return NextResponse.json({
+        availableKeyAccounts: [],
+        accountsByZone: { NORTH: [], EAST: [], WEST: [], SOUTH: [] },
+      });
     }
 
     const scope = await resolveUserDigestScopeWithLabel(recipient);
     const dateRange = resolveDigestDateRangeForPreferences({ dateRange: dateRangeMode });
-    const availableKeyAccounts = await queryDigestAccountNames(scope, dateRange);
+    const accountsByZone = await queryDigestAccountNamesByZone(scope, dateRange);
+    const seen = new Set<string>();
+    const availableKeyAccounts: string[] = [];
+    for (const zone of ['NORTH', 'EAST', 'WEST', 'SOUTH'] as const) {
+      for (const name of accountsByZone[zone] ?? []) {
+        const key = name.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        availableKeyAccounts.push(name);
+      }
+    }
+    availableKeyAccounts.sort((a, b) => a.localeCompare(b));
 
-    return NextResponse.json({ availableKeyAccounts });
+    return NextResponse.json({ availableKeyAccounts, accountsByZone });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to load key accounts';
     return NextResponse.json({ error: message }, { status: 500 });

@@ -44,11 +44,12 @@ describe('buildMisEmailSkeletonPreview', () => {
     expect(preview?.html).toContain('Regional Performance');
     expect(preview?.html).toContain('Branch-wise Performance');
     expect(preview?.html).toContain('background-color:#cbd5e1');
-    expect(preview?.html).toContain('Nestle');
+    expect(preview?.html).toContain('bgcolor="#fecaca"');
+    expect(preview?.html).not.toContain('bgcolor="#dcfce7"');
     expect(preview?.html).toContain('HOD — All branches');
   });
 
-  it('auto-includes key account section when attachment is enabled', () => {
+  it('does not auto-include key account section unless selected', () => {
     const preview = buildMisEmailSkeletonPreview({
       preferences: {
         bodyInEmail: ['regional_performance'],
@@ -59,7 +60,7 @@ describe('buildMisEmailSkeletonPreview', () => {
       recipientEmail: 'user@example.com',
     });
 
-    expect(preview?.bodySectionIds).toContain('key_account_performance');
-    expect(preview?.html).toContain('Key Account Breakdown');
+    expect(preview?.bodySectionIds).not.toContain('key_account_performance');
+    expect(preview?.html).not.toContain('Key Account Breakdown');
   });
 });

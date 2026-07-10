@@ -7,6 +7,11 @@ describe('isPracticeWinmaxOfficeName', () => {
     expect(isPracticeWinmaxOfficeName('Z WINMAX BRANCH OFFICE 3')).toBe(true);
   });
 
+  it('flags Western Head Office test branch', () => {
+    expect(isPracticeWinmaxOfficeName('WESTERN HEAD OFFICE - 1100')).toBe(true);
+    expect(isPracticeWinmaxOfficeName('Western Head Office-1100')).toBe(true);
+  });
+
   it('allows normal franchisee offices', () => {
     expect(isPracticeWinmaxOfficeName('SIDDHIVINAYAK REFRIGERATION')).toBe(false);
     expect(isPracticeWinmaxOfficeName('1171 - MUMBAI BRANCH')).toBe(false);

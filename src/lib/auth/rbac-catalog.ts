@@ -192,9 +192,10 @@ const PAGE_BY_ID = new Map(RBAC_PAGES.map((p) => [p.id, p]));
 const PAGE_BY_PERMISSION = new Map(RBAC_PAGES.map((p) => [p.permission, p]));
 const TAB_BY_ID = new Map(MIS_TABS.map((t) => [t.id, t]));
 
-function expandPermissions(permissions: string[]): Set<string> {
-  const expanded = new Set(permissions);
-  for (const name of permissions) {
+function expandPermissions(permissions: string[] | null | undefined): Set<string> {
+  const list = Array.isArray(permissions) ? permissions : [];
+  const expanded = new Set(list);
+  for (const name of list) {
     const canonical = TAB_PERMISSION_ALIASES[name];
     if (canonical) expanded.add(canonical);
   }

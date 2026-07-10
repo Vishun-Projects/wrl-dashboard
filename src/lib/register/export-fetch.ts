@@ -112,13 +112,17 @@ export function buildRegisterExportParams(
 }
 
 export function registerExportCursorFromRow(
-  row: Record<string, unknown>
+  row: Record<string, unknown>,
+  dateFilterColumn?: string | null
 ): RegisterExportKeysetCursor | null {
-  const loggedAt = row.callsdtrndate ?? row.logged_at;
+  const useSolved = dateFilterColumn === 'dsolvedatetime';
+  const dateVal = useSolved
+    ? row.callsolveddate ?? row.solved_at
+    : row.callsdtrndate ?? row.logged_at;
   const ncode = Number(row.ncode ?? row.id);
-  if (loggedAt == null || !Number.isFinite(ncode) || ncode <= 0) return null;
+  if (dateVal == null || !Number.isFinite(ncode) || ncode <= 0) return null;
   const cursorLoggedAt =
-    loggedAt instanceof Date ? loggedAt.toISOString() : String(loggedAt);
+    dateVal instanceof Date ? dateVal.toISOString() : String(dateVal);
   return { cursorLoggedAt, cursorNcode: ncode };
 }
 
@@ -352,7 +356,10 @@ export async function fetchAllRegisterRowsForExport(opts: {
       pageMs: Number((performance.now() - pageStart).toFixed(1)),
     });
 
-    const nextCursor = registerExportCursorFromRow(rows[rows.length - 1]!);
+    const nextCursor = registerExportCursorFromRow(
+      rows[rows.length - 1]!,
+      opts.query.dateFilterColumn
+    );
     if (nextCursor) {
       cursor = nextCursor;
     }
@@ -423,7 +430,10 @@ async function fetchRegisterKeysetPagesForExport(opts: {
       pageMs: Number((performance.now() - pageStart).toFixed(1)),
     });
 
-    const nextCursor = registerExportCursorFromRow(rows[rows.length - 1]!);
+    const nextCursor = registerExportCursorFromRow(
+      rows[rows.length - 1]!,
+      opts.query.dateFilterColumn
+    );
     if (!nextCursor) break;
     cursor = nextCursor;
 
