@@ -12,9 +12,6 @@ import {
 
 const CSV_COLUMNS = REGISTER_EXPORT_COLUMNS;
 
-/** @deprecated Use escapeCsvCell from @/lib/utils/csv */
-export const csvEscape = escapeCsvCell;
-
 export function rowForCsv(raw: Record<string, unknown>): Record<string, unknown> {
   const row = normalizeCrmCallRow(raw);
   const branch = row.officename ?? row.resolved_branch_name ?? row.branch_office_name ?? '';
@@ -69,12 +66,12 @@ export function rowForCsv(raw: Record<string, unknown>): Record<string, unknown>
 
 export function registerRowToCsvLine(row: Record<string, unknown>): string {
   const mapped = rowForCsv(row);
-  return CSV_COLUMNS.map((col) => csvEscape(mapped[col.key as keyof typeof mapped])).join(',');
+  return CSV_COLUMNS.map((col) => escapeCsvCell(mapped[col.key as keyof typeof mapped])).join(',');
 }
 
 /** Build RFC4180-style CSV with CRLF line endings (Excel-friendly). */
 export function buildRegisterCsvContent(rows: Record<string, unknown>[]): string {
-  const lines = [CSV_COLUMNS.map((c) => csvEscape(c.header)).join(',')];
+  const lines = [CSV_COLUMNS.map((c) => escapeCsvCell(c.header)).join(',')];
   for (const row of rows) {
     lines.push(registerRowToCsvLine(row));
   }
@@ -90,7 +87,7 @@ export function createRegisterCsvResponse(
     start(controller) {
       controller.enqueue(encoder.encode('\uFEFF'));
       controller.enqueue(
-        encoder.encode(`${CSV_COLUMNS.map((c) => csvEscape(c.header)).join(',')}\r\n`)
+        encoder.encode(`${CSV_COLUMNS.map((c) => escapeCsvCell(c.header)).join(',')}\r\n`)
       );
       for (const row of rows) {
         controller.enqueue(encoder.encode(`${registerRowToCsvLine(row)}\r\n`));
@@ -151,7 +148,7 @@ export async function buildRegisterCsvResponse(opts: RegisterCsvExportOpts): Pro
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const headerLine = CSV_COLUMNS.map((c) => csvEscape(c.header)).join(',') + '\r\n';
+      const headerLine = CSV_COLUMNS.map((c) => escapeCsvCell(c.header)).join(',') + '\r\n';
       controller.enqueue(encoder.encode(headerLine));
 
       let cursorNcode: number | null = null;

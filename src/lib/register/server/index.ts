@@ -4,6 +4,5 @@ export {
   createRegisterCsvResponse,
   downloadRegisterCsvInBrowser,
   buildRegisterCsvContent,
-  csvEscape,
   type RegisterCsvExportOpts,
 } from './csv-export';

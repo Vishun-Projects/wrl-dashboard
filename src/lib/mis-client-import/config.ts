@@ -179,41 +179,6 @@ export async function listAllSourcesWithBatches(): Promise<SourceWithBatches[]> 
   );
 }
 
-/** @deprecated Use listSourceBatches — kept for compatibility */
-export async function getActiveBatchMeta(
-  sourceCode: string
-): Promise<{
-  batchId: string;
-  sourceCode: string;
-  sourceName: string;
-  fileName: string;
-  rowCount: number;
-  uploadedAt: string;
-  uploadedByName: string;
-} | null> {
-  const batches = await listSourceBatches(sourceCode);
-  const latest = batches[0];
-  if (!latest) return null;
-
-  const sources = await listActiveSources();
-  const source = sources.find((s) => s.code === sourceCode.toLowerCase());
-  return {
-    batchId: latest.batchId,
-    sourceCode: sourceCode.toLowerCase(),
-    sourceName: source?.name ?? sourceCode,
-    fileName: latest.fileName,
-    rowCount: latest.rowCount,
-    uploadedAt: latest.uploadedAt,
-    uploadedByName: latest.uploadedByName,
-  };
-}
-
-/** @deprecated No longer used — aggregation queries all batches with latest-wins */
-export async function getActiveBatchId(sourceCode: string): Promise<string | null> {
-  const meta = await getActiveBatchMeta(sourceCode);
-  return meta?.batchId ?? null;
-}
-
 export type SourceConfigPayload = {
   code: string;
   name: string;

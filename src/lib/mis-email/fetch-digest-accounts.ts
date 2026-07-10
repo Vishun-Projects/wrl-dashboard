@@ -1,6 +1,5 @@
 import { queryClientAccountSummaryFiltered } from '@/lib/mis-client-import/aggregate';
 import type { DigestDateRange } from '@/lib/mis-email/fetch-digest-data';
-import type { UserDigestScope } from '@/lib/mis-email/user-scope';
 import { MIS_EMAIL_CLIENT_SOURCE_CODES } from '@/lib/mis-email/source-codes';
 import {
   buildAccountDisplayRows,
@@ -17,8 +16,6 @@ const DIGEST_MERGE_FLAGS: MergeSelection = {
   crm: true,
   client: true,
 };
-
-export { MIS_EMAIL_CLIENT_SOURCE_CODES } from '@/lib/mis-email/source-codes';
 
 export async function fetchDigestClientAccountSummary(
   dateRange: DigestDateRange,
@@ -111,6 +108,3 @@ export function resolveDigestKeyAccountBodyRows(
 
   return [];
 }
-
-/** @deprecated scope reserved for future office-level client import filtering */
-export type DigestAccountScope = UserDigestScope;

@@ -12,7 +12,7 @@ import {
 } from '@/lib/read-model/queries/register';
 import { REGISTER_EXPORT_HOT_COLUMNS } from '@/lib/read-model/queries/register-columns';
 import { mergeArcpPickOntoHotExportRows } from '@/lib/register/arcp-approve-dates-server';
-import { csvEscape } from '@/lib/register/server/csv-export';
+import { escapeCsvCell } from '@/lib/utils/csv';
 import { REGISTER_EXPORT_COLUMNS } from '@/lib/register/table-columns';
 
 const KEYSET_FETCH_SIZE = 12_000;
@@ -76,7 +76,7 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
     row.address,
   ];
 
-  return cells.map(csvEscape).join(',');
+  return cells.map(escapeCsvCell).join(',');
 }
 
 export type PostgresRegisterCsvStreamOptions = Omit<
@@ -105,7 +105,7 @@ export async function buildPostgresRegisterCsvStream(
         controller.enqueue(encoder.encode('\uFEFF'));
         controller.enqueue(
           encoder.encode(
-            `${REGISTER_EXPORT_COLUMNS.map((c) => csvEscape(c.header)).join(',')}\r\n`
+            `${REGISTER_EXPORT_COLUMNS.map((c) => escapeCsvCell(c.header)).join(',')}\r\n`
           )
         );
 

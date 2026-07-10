@@ -28,13 +28,6 @@ export type MisEmailRoutingRule = {
   updatedAt: string;
 };
 
-export type MisEmailRoutingResolution = {
-  matchedRule: MisEmailRoutingRule | null;
-  to: string[];
-  cc: string[];
-  autoSendEnabled: boolean;
-};
-
 export type MisEmailRoutingOptions = {
   zones: string[];
   branches: string[];
@@ -665,36 +658,6 @@ export function shouldTriggerRoutingRuleNow(
   return delta % interval < windowMinutes;
 }
 
-function getRuleMatchMetricsForRecipient(
-  rule: MisEmailRoutingRule,
-  params: { zones: string[]; branches: string[]; client: string | string[] }
-) {
-  const zones = new Set(params.zones.map(normalizeKey).filter(Boolean));
-  const branches = new Set(params.branches.map(normalizeKey).filter(Boolean));
-  const clientKeys = new Set(
-    (Array.isArray(params.client) ? params.client : [params.client]).map(normalizeKey).filter(Boolean)
-  );
-  return ruleMatchScore(rule, zones, branches, clientKeys);
-}
-
-export function listMatchingMisEmailRoutingRulesForRecipient(params: {
-  rules: MisEmailRoutingRule[];
-  zones: string[];
-  branches: string[];
-  client: string | string[];
-}): MisEmailRoutingRule[] {
-  return params.rules
-    .map((rule) => ({ rule, metrics: getRuleMatchMetricsForRecipient(rule, params) }))
-    .filter((item): item is { rule: MisEmailRoutingRule; metrics: NonNullable<ReturnType<typeof getRuleMatchMetricsForRecipient>> } => !!item.metrics)
-    .sort((a, b) => {
-      if (a.metrics.score !== b.metrics.score) return b.metrics.score - a.metrics.score;
-      if (a.metrics.totalKeys !== b.metrics.totalKeys) return a.metrics.totalKeys - b.metrics.totalKeys;
-      if (a.metrics.createdAtMs !== b.metrics.createdAtMs) return a.metrics.createdAtMs - b.metrics.createdAtMs;
-      return a.rule.id.localeCompare(b.rule.id);
-    })
-    .map((item) => item.rule);
-}
-
 export async function logMisEmailRoutingSendAttempt(input: {
   ruleId: string;
   recipientId: string;
@@ -719,47 +682,6 @@ export async function logMisEmailRoutingSendAttempt(input: {
       ]
     );
   });
-}
-
-export async function resolveMisEmailRoutingForRecipient(params: {
-  officeIds: string[];
-  client: string | string[];
-  defaultTo: string[];
-  defaultCc?: string[];
-}): Promise<MisEmailRoutingResolution> {
-  const rules = await listMisEmailRoutingRules();
-  if (rules.length === 0) {
-    return {
-      matchedRule: null,
-      to: params.defaultTo,
-      cc: params.defaultCc ?? [],
-      autoSendEnabled: true,
-    };
-  }
-
-  const { zones, branches } = await resolveRoutingScopeForOfficeIds(params.officeIds);
-  const matching = listMatchingMisEmailRoutingRulesForRecipient({
-    rules,
-    zones,
-    branches,
-    client: params.client,
-  });
-  const match = matching[0] ?? null;
-  if (!match) {
-    return {
-      matchedRule: null,
-      to: params.defaultTo,
-      cc: params.defaultCc ?? [],
-      autoSendEnabled: true,
-    };
-  }
-
-  return {
-    matchedRule: match,
-    to: match.toEmails,
-    cc: match.ccEmails,
-    autoSendEnabled: match.autoSendEnabled,
-  };
 }
 
 export async function resolveRoutingClientNamesForScope(params: {
