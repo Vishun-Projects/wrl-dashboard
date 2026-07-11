@@ -1,6 +1,10 @@
-import { defaultDateRange, formatLocalDate, toDateString } from '@/lib/report/filters';
 import type { DigestDateRange } from '@/lib/mis-email/fetch-digest-data';
 import type { DigestRecipient } from '@/lib/mis-email/recipients';
+import {
+  DEFAULT_MIS_EMAIL_CC_EMAILS,
+  DEFAULT_MIS_EMAIL_TO_EMAILS,
+} from '@/lib/mis-email/default-recipients';
+import { normalizeEmailList } from '@/lib/mis-email/parse-outlook-emails';
 import {
   parseMisEmailBodySectionIds,
   resolveDigestBodySections,
@@ -34,6 +38,10 @@ export type MisEmailPreferences = {
   includeOpenCallsExport?: boolean;
   /** Additional inboxes that receive the same daily digest (e.g. work + personal). */
   extraEmails?: string[];
+  /** Primary To recipients for profile / manual compose. */
+  toEmails?: string[];
+  /** Cc recipients for profile / manual compose. */
+  ccEmails?: string[];
   /** Summary report sections rendered inline in the email body (full Excel still attached). */
   bodyInEmail?: MisEmailBodySectionId[];
   /** Key account names to show in the email body when key_account_performance is enabled. */
@@ -46,7 +54,7 @@ export type MisEmailPreferences = {
 
 export const DEFAULT_MIS_EMAIL_PREFERENCES: Required<MisEmailPreferences> = {
   subscribed: true,
-  sendTimeIst: '07:00',
+  sendTimeIst: '09:30',
   dateRange: 'month_to_date',
   includeSummary: true,
   includeDetailed: true,
@@ -54,6 +62,8 @@ export const DEFAULT_MIS_EMAIL_PREFERENCES: Required<MisEmailPreferences> = {
   includeTraceableExport: false,
   includeOpenCallsExport: false,
   extraEmails: [],
+  toEmails: [...DEFAULT_MIS_EMAIL_TO_EMAILS],
+  ccEmails: [...DEFAULT_MIS_EMAIL_CC_EMAILS],
   bodyInEmail: [],
   keyAccountsInBody: [],
   keyAccountsByZone: {},
@@ -108,6 +118,38 @@ export function getCurrentIstMinutes(date = new Date()): number {
   return hour * 60 + minute;
 }
 
+/** Calendar YYYY-MM-DD in Asia/Kolkata. */
+export function formatIstDate(date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+function addCalendarDaysIso(isoDate: string, deltaDays: number): string {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d + deltaDays));
+  return utc.toISOString().slice(0, 10);
+}
+
+/** Yesterday's calendar date in IST (digest data never includes "today"). */
+export function istYesterdayDateString(date = new Date()): string {
+  return addCalendarDaysIso(formatIstDate(date), -1);
+}
+
+function formatIstDayLabel(isoDate: string): string {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d, 12));
+  return utc.toLocaleDateString('en-GB', {
+    timeZone: 'UTC',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
 export function shouldSendMisEmailNow(
   prefs: MisEmailPreferences,
   options?: { now?: Date; windowMinutes?: number }
@@ -115,7 +157,8 @@ export function shouldSendMisEmailNow(
   const nowMinutes = getCurrentIstMinutes(options?.now);
   const targetMinutes = misEmailTimeToMinutes(resolveMisEmailSendTimeIst(prefs));
   const windowMinutes = Math.max(1, Math.floor(options?.windowMinutes ?? 15));
-  return nowMinutes >= targetMinutes && nowMinutes < targetMinutes + windowMinutes;
+  // Inclusive upper bound so the next */15 cron tick still fires if the anchor tick was skipped (lock).
+  return nowMinutes >= targetMinutes && nowMinutes <= targetMinutes + windowMinutes;
 }
 
 export function parseMisEmailPreferences(raw: unknown): MisEmailPreferences {
@@ -142,10 +185,17 @@ export function parseMisEmailPreferences(raw: unknown): MisEmailPreferences {
     prefs.includeOpenCallsExport = raw.includeOpenCallsExport;
   }
   if (Array.isArray(raw.extraEmails)) {
-    prefs.extraEmails = raw.extraEmails
-      .filter((e): e is string => typeof e === 'string')
-      .map((e) => e.trim().toLowerCase())
-      .filter((e) => e.includes('@'));
+    prefs.extraEmails = normalizeEmailList(raw.extraEmails);
+  }
+  if (Array.isArray(raw.toEmails)) {
+    prefs.toEmails = normalizeEmailList(raw.toEmails);
+  }
+  if (Array.isArray(raw.ccEmails)) {
+    prefs.ccEmails = normalizeEmailList(raw.ccEmails);
+  }
+  // Migrate legacy extraEmails → toEmails when toEmails was never saved.
+  if (!Array.isArray(raw.toEmails) && (prefs.extraEmails?.length ?? 0) > 0) {
+    prefs.toEmails = [...(prefs.extraEmails ?? [])];
   }
   if (Array.isArray(raw.bodyInEmail)) {
     prefs.bodyInEmail = parseMisEmailBodySectionIds(raw.bodyInEmail);
@@ -211,6 +261,24 @@ export function resolveExtraDigestEmails(
   return extras;
 }
 
+/** To list for profile compose: explicit toEmails, else defaults (not primary+extras). */
+export function resolveMisEmailToEmails(prefs: MisEmailPreferences): string[] {
+  if (prefs.toEmails !== undefined) {
+    return normalizeEmailList(prefs.toEmails);
+  }
+  if ((prefs.extraEmails?.length ?? 0) > 0) {
+    return normalizeEmailList(prefs.extraEmails);
+  }
+  return [...DEFAULT_MIS_EMAIL_TO_EMAILS];
+}
+
+export function resolveMisEmailCcEmails(prefs: MisEmailPreferences): string[] {
+  if (prefs.ccEmails !== undefined) {
+    return normalizeEmailList(prefs.ccEmails);
+  }
+  return [...DEFAULT_MIS_EMAIL_CC_EMAILS];
+}
+
 export function mergeMisEmailPreferences(
   stored: unknown,
   patch?: MisEmailPreferences
@@ -238,6 +306,8 @@ export function defaultPreferencesForRecipient(recipient: Pick<
     includeDetailed: recipient.includeDetailed,
     includeKeyAccount: recipient.includeKeyAccount,
     includeOpenCallsExport: false,
+    toEmails: [...DEFAULT_MIS_EMAIL_TO_EMAILS],
+    ccEmails: [...DEFAULT_MIS_EMAIL_CC_EMAILS],
     bodyInEmail,
     keyAccountsInBody: [],
     keyAccountsByZone: {},
@@ -282,33 +352,19 @@ export function resolveDigestDateRangeForPreferences(
   prefs: MisEmailPreferences
 ): DigestDateRange {
   const mode = prefs.dateRange ?? DEFAULT_MIS_EMAIL_PREFERENCES.dateRange;
+  const endDate = istYesterdayDateString();
+  const endLabel = formatIstDayLabel(endDate);
 
   if (mode === 'yesterday') {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    const day = toDateString(d);
-    const label = d.toLocaleDateString('en-GB', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
     return {
-      startDate: day,
-      endDate: day,
-      label: `Yesterday (${label})`,
+      startDate: endDate,
+      endDate,
+      label: `Yesterday (${endLabel})`,
     };
   }
 
   if (mode === 'year_to_yesterday') {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const endDate = toDateString(yesterday);
-    const startDate = `${yesterday.getFullYear()}-01-01`;
-    const endLabel = yesterday.toLocaleDateString('en-GB', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
+    const startDate = `${endDate.slice(0, 4)}-01-01`;
     return {
       startDate,
       endDate,
@@ -316,11 +372,13 @@ export function resolveDigestDateRangeForPreferences(
     };
   }
 
-  const range = defaultDateRange();
+  // month_to_date — through yesterday only (never include today's partial CRM/import rows)
+  const [y, m] = endDate.split('-').map(Number);
+  const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
   return {
-    startDate: toDateString(range.start),
-    endDate: toDateString(range.end),
-    label: range.label || 'Month to date',
+    startDate,
+    endDate,
+    label: `Month to yesterday (${endLabel})`,
   };
 }
 

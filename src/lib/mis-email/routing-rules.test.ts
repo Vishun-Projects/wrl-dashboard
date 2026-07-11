@@ -157,4 +157,35 @@ describe('shouldTriggerRoutingRuleNow', () => {
     );
     expect(scheduled).toBe(true);
   });
+
+  it('uses personal sendTimeIst override instead of rule anchor', () => {
+    const atPersonal = shouldTriggerRoutingRuleNow(
+      {
+        ...rule('r1', {}),
+        scheduleAnchorTimeIst: '07:00',
+        scheduleIntervalMinutes: 1440,
+        scheduleDaysOfWeek: ['WED'],
+      },
+      {
+        now: new Date('2026-07-08T04:00:00.000Z'), // 09:30 IST
+        windowMinutes: 15,
+        sendTimeIst: '09:30',
+      }
+    );
+    expect(atPersonal).toBe(true);
+
+    const atRuleOnly = shouldTriggerRoutingRuleNow(
+      {
+        ...rule('r1', {}),
+        scheduleAnchorTimeIst: '07:00',
+        scheduleIntervalMinutes: 1440,
+        scheduleDaysOfWeek: ['WED'],
+      },
+      {
+        now: new Date('2026-07-08T04:00:00.000Z'), // 09:30 IST
+        windowMinutes: 15,
+      }
+    );
+    expect(atRuleOnly).toBe(false);
+  });
 });

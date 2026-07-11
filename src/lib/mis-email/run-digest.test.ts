@@ -29,6 +29,9 @@ vi.mock('@/lib/mis-email/send', () => ({
 
 vi.mock('@/lib/mis-email/preferences', () => ({
   DEFAULT_MIS_EMAIL_PREFERENCES: { dateRange: 'mtd' },
+  normalizeMisEmailSendTime: vi.fn((value: unknown) =>
+    typeof value === 'string' && /^\d{2}:\d{2}$/.test(value) ? value : null
+  ),
   resolveMisEmailSendTimeIst: vi.fn(() => '07:00'),
   resolveDigestDateRangeForPreferences: vi.fn(() => ({ label: 'Month to date' })),
   resolveExtraDigestEmails: vi.fn(() => []),
@@ -145,7 +148,14 @@ describe('runMisEmailDigest routing override', () => {
 
     const { runMisEmailDigest } = await import('@/lib/mis-email/run-digest');
     const result = await runMisEmailDigest();
-    expect(sendDigestEmail).toHaveBeenCalledTimes(2);
-    expect(result.sent.map((s) => s.sentTo).sort()).toEqual(['cc@example.com', 'to@example.com']);
+    expect(sendDigestEmail).toHaveBeenCalledTimes(1);
+    expect(sendDigestEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'to@example.com',
+        cc: ['cc@example.com'],
+      })
+    );
+    expect(result.sent).toHaveLength(1);
+    expect(result.sent[0].sentTo).toBe('to@example.com');
   });
 });

@@ -631,14 +631,20 @@ function minutesFromTime(value: string): number {
 
 export function shouldTriggerRoutingRuleNow(
   rule: MisEmailRoutingRule,
-  options?: { now?: Date; windowMinutes?: number }
+  options?: {
+    now?: Date;
+    windowMinutes?: number;
+    /** When set (saved personal digest time), overrides rule.scheduleAnchorTimeIst for the time-of-day window. */
+    sendTimeIst?: string | null;
+  }
 ): boolean {
   const now = options?.now ?? new Date();
   const dayCode = getIstDayCode(now);
   if (!rule.scheduleDaysOfWeek.includes(dayCode)) return false;
 
   const nowMinutes = getIstMinutes(now);
-  const anchor = minutesFromTime(rule.scheduleAnchorTimeIst);
+  const override = typeof options?.sendTimeIst === 'string' ? options.sendTimeIst.trim() : '';
+  const anchor = minutesFromTime(override || rule.scheduleAnchorTimeIst);
   const interval = Math.max(5, Math.floor(rule.scheduleIntervalMinutes));
   const windowMinutes = Math.max(1, Math.floor(options?.windowMinutes ?? 15));
 
@@ -655,7 +661,8 @@ export function shouldTriggerRoutingRuleNow(
 
   if (nowMinutes < anchor) return false;
   const delta = nowMinutes - anchor;
-  return delta % interval < windowMinutes;
+  // Inclusive upper bound so a skipped cron tick (lock) can still hit on the next */15 run.
+  return delta % interval <= windowMinutes;
 }
 
 export async function logMisEmailRoutingSendAttempt(input: {

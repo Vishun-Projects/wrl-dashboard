@@ -1,4 +1,4 @@
-import { defaultDateRange, toDateString, SUMMARY_DEFAULT_CALL_TYPE } from '@/lib/report/filters';
+import { resolveDigestDateRangeForPreferences } from '@/lib/mis-email/preferences';
 import {
   queryDigestRegisterExportFromPostgres,
 } from '@/lib/read-model/queries/register';
@@ -7,6 +7,7 @@ import { readCallsFromPostgres, readSummaryFromPostgres } from '@/lib/read-model
 import type { SummaryDashboard } from '@/lib/report/summary-derive';
 import type { DigestRecipient } from '@/lib/mis-email/recipients';
 import type { UserDigestScope } from '@/lib/mis-email/user-scope';
+import { SUMMARY_DEFAULT_CALL_TYPE } from '@/lib/report/filters';
 
 export type DigestDateRange = {
   startDate: string;
@@ -14,13 +15,9 @@ export type DigestDateRange = {
   label: string;
 };
 
+/** Default digest range: month through yesterday (IST). */
 export function resolveDigestDateRange(): DigestDateRange {
-  const range = defaultDateRange();
-  return {
-    startDate: toDateString(range.start),
-    endDate: toDateString(range.end),
-    label: range.label || 'This Month',
-  };
+  return resolveDigestDateRangeForPreferences({ dateRange: 'month_to_date' });
 }
 
 export async function fetchDigestSummaryData(

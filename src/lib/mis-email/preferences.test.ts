@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { formatLocalDate } from '@/lib/report/filters';
 import {
   DEFAULT_MIS_EMAIL_PREFERENCES,
+  formatIstDate,
   getCurrentIstMinutes,
   hasAnyEffectiveDigestInclude,
+  istYesterdayDateString,
   normalizeMisEmailSendTime,
   parseMisEmailKeyAccountsInBody,
   parseMisEmailPreferences,
@@ -42,12 +43,27 @@ describe('parseMisEmailPreferences', () => {
     ).toEqual({ subscribed: false, dateRange: 'yesterday', includeSummary: true });
   });
 
-  it('parses extraEmails', () => {
+  it('parses extraEmails and migrates to toEmails when missing', () => {
     expect(
       parseMisEmailPreferences({
         extraEmails: ['Vishnu.Vishwakarma@westernequipments.com', 'bad'],
       })
-    ).toEqual({ extraEmails: ['vishnu.vishwakarma@westernequipments.com'] });
+    ).toEqual({
+      extraEmails: ['vishnu.vishwakarma@westernequipments.com'],
+      toEmails: ['vishnu.vishwakarma@westernequipments.com'],
+    });
+  });
+
+  it('parses toEmails and ccEmails', () => {
+    expect(
+      parseMisEmailPreferences({
+        toEmails: ['Samiran.M@westernequipments.com'],
+        ccEmails: ['Parmeet@westernequipments.com', 'bad'],
+      })
+    ).toEqual({
+      toEmails: ['samiran.m@westernequipments.com'],
+      ccEmails: ['parmeet@westernequipments.com'],
+    });
   });
 
   it('parses bodyInEmail', () => {
@@ -93,7 +109,7 @@ describe('send time helpers', () => {
   });
 
   it('falls back to default IST send time', () => {
-    expect(resolveMisEmailSendTimeIst({})).toBe('07:00');
+    expect(resolveMisEmailSendTimeIst({})).toBe('09:30');
   });
 
   it('matches configured send window', () => {
@@ -111,6 +127,14 @@ describe('send time helpers', () => {
         { now, windowMinutes: 15 }
       )
     ).toBe(false);
+  });
+
+  it('still matches on the next */15 cron tick after the anchor', () => {
+    const now = new Date('2026-01-01T04:15:00.000Z'); // 09:45 IST
+    expect(getCurrentIstMinutes(now)).toBe(9 * 60 + 45);
+    expect(
+      shouldSendMisEmailNow({ sendTimeIst: '09:30' }, { now, windowMinutes: 15 })
+    ).toBe(true);
   });
 });
 
@@ -167,16 +191,19 @@ describe('resolveEffectiveDigestIncludes', () => {
 });
 
 describe('resolveDigestDateRangeForPreferences', () => {
-  it('returns month to date by default', () => {
+  it('returns month through yesterday by default (never includes today)', () => {
+    const expectedEnd = istYesterdayDateString();
+    const [y, m] = expectedEnd.split('-').map(Number);
+    const expectedStart = `${y}-${String(m).padStart(2, '0')}-01`;
     const range = resolveDigestDateRangeForPreferences({});
-    expect(range.startDate).toMatch(/^\d{4}-\d{2}-01$/);
-    expect(range.endDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(range.startDate).toBe(expectedStart);
+    expect(range.endDate).toBe(expectedEnd);
+    expect(range.endDate).not.toBe(formatIstDate());
+    expect(range.label).toContain('Month to yesterday');
   });
 
   it('returns yesterday only', () => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    const expected = formatLocalDate(d);
+    const expected = istYesterdayDateString();
     const range = resolveDigestDateRangeForPreferences({ dateRange: 'yesterday' });
     expect(range.startDate).toBe(expected);
     expect(range.endDate).toBe(expected);
@@ -184,10 +211,8 @@ describe('resolveDigestDateRangeForPreferences', () => {
   });
 
   it('returns year to yesterday from Jan 1 through prior day', () => {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const expectedEnd = formatLocalDate(yesterday);
-    const expectedStart = `${yesterday.getFullYear()}-01-01`;
+    const expectedEnd = istYesterdayDateString();
+    const expectedStart = `${expectedEnd.slice(0, 4)}-01-01`;
     const range = resolveDigestDateRangeForPreferences({ dateRange: 'year_to_yesterday' });
     expect(range.startDate).toBe(expectedStart);
     expect(range.endDate).toBe(expectedEnd);

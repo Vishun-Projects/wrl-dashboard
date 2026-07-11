@@ -3,6 +3,7 @@ import { buildMisEmailPayload } from '@/lib/mis-email/compose-digest';
 import type { DigestDateRange } from '@/lib/mis-email/fetch-digest-data';
 import {
   DEFAULT_MIS_EMAIL_PREFERENCES,
+  normalizeMisEmailSendTime,
   resolveMisEmailSendTimeIst,
   resolveDigestDateRangeForPreferences,
   resolveExtraDigestEmails,
@@ -69,25 +70,43 @@ async function resolveSendContext(
 
 async function sendForRecipient(
   recipient: DigestRecipient,
-  options: { testTo?: string; dateRange?: DigestDateRange }
+  options: {
+    testTo?: string;
+    to?: string[];
+    cc?: string[];
+    dateRange?: DigestDateRange;
+  }
 ): Promise<DigestSendResult> {
-  const sentTo = options.testTo?.trim() || recipient.email;
-  const { effectiveRecipient, displayName } = await resolveSendContext(recipient, sentTo);
+  const toList = (
+    options.to?.length ? options.to : [options.testTo?.trim() || recipient.email]
+  )
+    .map((email) => email.trim())
+    .filter(Boolean);
+  if (toList.length === 0) {
+    throw new Error('Add at least one To recipient');
+  }
+  const toLower = new Set(toList.map((email) => email.toLowerCase()));
+  const ccList = (options.cc ?? [])
+    .map((email) => email.trim())
+    .filter((email) => email && !toLower.has(email.toLowerCase()));
+  const primaryTo = toList[0];
+  const { effectiveRecipient, displayName } = await resolveSendContext(recipient, primaryTo);
   const dateRange =
     options.dateRange ??
     resolveDigestDateRangeForPreferences(effectiveRecipient.mis_email_preferences);
 
   const { preview, emailAttachments, scopeLabel, bodyHtml, bodyPlainText } =
     await buildMisEmailPayload(effectiveRecipient, {
-      sentTo,
+      sentTo: primaryTo,
       displayName,
       dateRange,
     });
 
   const { messageId } = await sendDigestEmail({
-    to: sentTo,
+    to: toList.length === 1 ? toList[0] : toList,
+    cc: ccList.length ? ccList : undefined,
     recipientName: displayName,
-    recipientEmail: sentTo,
+    recipientEmail: primaryTo,
     dateRange,
     scopeLabel,
     attachments: emailAttachments,
@@ -98,7 +117,7 @@ async function sendForRecipient(
   return {
     recipientId: effectiveRecipient.id,
     recipientEmail: effectiveRecipient.email,
-    sentTo,
+    sentTo: toList.join(', '),
     attachments: preview.attachments,
     scopeLabel,
     messageId,
@@ -133,10 +152,17 @@ export async function runMisEmailTestBatch(options: {
   userId?: string;
   recipients?: string[];
   recipientOverride?: string;
+  cc?: string[];
+  ccOverride?: string;
 }): Promise<DigestSendResult[]> {
   const testRecipients = options.recipients?.length
     ? options.recipients
     : parseTestRecipientList(options.recipientOverride);
+
+  const ccRaw = options.ccOverride?.trim() || process.env.MIS_EMAIL_TEST_CC?.trim() || '';
+  const ccRecipients = (
+    options.cc?.length ? options.cc : ccRaw ? parseTestRecipientList(ccRaw) : []
+  ).filter((email) => email.trim());
 
   let recipient: DigestRecipient | null = null;
 
@@ -174,15 +200,12 @@ export async function runMisEmailTestBatch(options: {
     }
   }
 
-  const results: DigestSendResult[] = [];
-  for (let i = 0; i < testRecipients.length; i++) {
-    const testTo = testRecipients[i];
-    results.push(await sendForRecipient(recipient, { testTo }));
-    if (i < testRecipients.length - 1) {
-      await delay(SEND_DELAY_MS);
-    }
-  }
-  return results;
+  // One SMTP message with To + optional Cc (matches automated routing delivery).
+  const result = await sendForRecipient(recipient, {
+    to: testRecipients,
+    cc: ccRecipients,
+  });
+  return [result];
 }
 
 export async function runMisEmailDigest(): Promise<DigestRunResult> {
@@ -271,53 +294,62 @@ export async function runMisEmailDigest(): Promise<DigestRunResult> {
         });
         continue;
       }
+      const personalSendTime = normalizeMisEmailSendTime(
+        recipient.mis_email_preferences.sendTimeIst
+      );
+      const effectiveSendTime = personalSendTime ?? rule.scheduleAnchorTimeIst;
       if (
         !shouldTriggerRoutingRuleNow(rule, {
           windowMinutes: scheduleWindowMinutes,
+          // Saved personal digest time wins over rule anchor (fixes 09:30 ignored by 07:00 catch-all).
+          sendTimeIst: personalSendTime,
         })
       ) {
         skipped.push({
           recipientId: recipient.id,
-          reason: `Rule not due now (${rule.scheduleAnchorTimeIst} / every ${rule.scheduleIntervalMinutes}m)`,
+          reason: `Rule not due now (send ${effectiveSendTime} IST · rule anchor ${rule.scheduleAnchorTimeIst} · every ${rule.scheduleIntervalMinutes}m)`,
         });
         continue;
       }
 
-      const sendTargets = [...new Set([...rule.toEmails, ...rule.ccEmails])];
-      for (let t = 0; t < sendTargets.length; t++) {
-        const sendTo = sendTargets[t];
-        try {
-          const result = await sendForRecipient(recipient, {
-            testTo: sendTo === recipient.email ? undefined : sendTo,
-          });
-          sent.push(result);
-          await logMisEmailRoutingSendAttempt({
-            ruleId: rule.id,
-            recipientId: recipient.id,
-            recipientEmail: recipient.email,
-            sentTo: sendTo,
-            status: 'sent',
-          });
-          console.log(
-            `[mis-email] Sent to ${sendTo} (${result.attachments.length} attachments, ${result.dateRange.label})`
-          );
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          failed.push({ recipientId: recipient.id, email: sendTo, error: message });
-          await logMisEmailRoutingSendAttempt({
-            ruleId: rule.id,
-            recipientId: recipient.id,
-            recipientEmail: recipient.email,
-            sentTo: sendTo,
-            status: 'failed',
-            error: message,
-          });
-          console.error(`[mis-email] Failed for ${sendTo}:`, message);
-        }
-
-        if (t < sendTargets.length - 1) {
-          await delay(SEND_DELAY_MS);
-        }
+      const toEmails = [...new Set(rule.toEmails.map((email) => email.trim()).filter(Boolean))];
+      if (toEmails.length === 0) {
+        skipped.push({
+          recipientId: recipient.id,
+          reason: `Routing rule has no To recipients (${rule.zone || '*'} / ${rule.branch || '*'} / ${rule.client || '*'})`,
+        });
+        continue;
+      }
+      const ccEmails = [...new Set(rule.ccEmails.map((email) => email.trim()).filter(Boolean))];
+      const sentToLabel = toEmails.join(', ');
+      try {
+        const result = await sendForRecipient(recipient, {
+          to: toEmails,
+          cc: ccEmails,
+        });
+        sent.push(result);
+        await logMisEmailRoutingSendAttempt({
+          ruleId: rule.id,
+          recipientId: recipient.id,
+          recipientEmail: recipient.email,
+          sentTo: sentToLabel,
+          status: 'sent',
+        });
+        console.log(
+          `[mis-email] Sent to ${sentToLabel}${ccEmails.length ? ` cc ${ccEmails.join(', ')}` : ''} (${result.attachments.length} attachments, ${result.dateRange.label})`
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        failed.push({ recipientId: recipient.id, email: sentToLabel, error: message });
+        await logMisEmailRoutingSendAttempt({
+          ruleId: rule.id,
+          recipientId: recipient.id,
+          recipientEmail: recipient.email,
+          sentTo: sentToLabel,
+          status: 'failed',
+          error: message,
+        });
+        console.error(`[mis-email] Failed for ${sentToLabel}:`, message);
       }
     }
 
