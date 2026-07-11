@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 import type { EmailAttachment } from '@/lib/mis-email/build-attachments';
-import { buildDigestEmailHtml, buildDigestEmailPlainText } from '@/lib/mis-email/email-template';
+import { buildDigestEmailHtml, buildDigestEmailPlainText, formatDigestSubject } from '@/lib/mis-email/email-template';
 import type { DigestDateRange } from '@/lib/mis-email/fetch-digest-data';
 import {
   isMisEmailRelayConfigured,
@@ -95,25 +95,32 @@ export function resolvePortalUrl(): string {
   return 'https://wrl-dashboard.vercel.app';
 }
 
-function formatEmailDate(date = new Date()): string {
-  return date.toISOString().split('T')[0];
-}
-
 function shouldSendViaPreparedRelay(): boolean {
   if (process.env.MIS_EMAIL_SEND_LOCAL_SMTP === 'true') return false;
   return isMisEmailRelayConfigured();
 }
 
+function formatMailAddresses(value: string | string[]): string {
+  return Array.isArray(value) ? value.join(', ') : value;
+}
+
+function primaryMailAddress(value: string | string[]): string {
+  return Array.isArray(value) ? (value[0] ?? '') : value;
+}
+
 /** Send a pre-built digest (HTML + attachments) via VPS relay or local SMTP. */
 export async function sendPreparedDigestEmail(params: {
-  to: string;
+  to: string | string[];
+  cc?: string | string[];
   subject: string;
   html: string;
   text: string;
   attachments: EmailAttachment[];
 }): Promise<{ messageId: string }> {
+  const toLabel = formatMailAddresses(params.to);
   if (process.env.MIS_EMAIL_DRY_RUN === 'true') {
-    console.log('[mis-email] DRY RUN — would send to', params.to, {
+    console.log('[mis-email] DRY RUN — would send to', toLabel, {
+      cc: params.cc ? formatMailAddresses(params.cc) : undefined,
       attachments: params.attachments.map((a) => `${a.filename} (${a.content.length} bytes)`),
     });
     return { messageId: 'dry-run' };
@@ -123,10 +130,11 @@ export async function sendPreparedDigestEmail(params: {
     const started = Date.now();
     const attachmentBytes = params.attachments.reduce((sum, file) => sum + file.content.length, 0);
     console.log(
-      `[mis-email/timing] smtp relay → ${params.to} · attachments=${params.attachments.length} · payload ${formatBytes(attachmentBytes)} · html ${params.html.length} chars`
+      `[mis-email/timing] smtp relay → ${toLabel} · attachments=${params.attachments.length} · payload ${formatBytes(attachmentBytes)} · html ${params.html.length} chars`
     );
     const result = await sendPreparedMisEmailViaVpsRelay({
-      to: params.to,
+      to: formatMailAddresses(params.to),
+      cc: params.cc ? formatMailAddresses(params.cc) : undefined,
       subject: params.subject,
       html: params.html,
       text: params.text,
@@ -141,13 +149,14 @@ export async function sendPreparedDigestEmail(params: {
   }
 
   const started = Date.now();
-  console.log(`[mis-email/timing] smtp direct → ${params.to} · attachments=${params.attachments.length}`);
+  console.log(`[mis-email/timing] smtp direct → ${toLabel} · attachments=${params.attachments.length}`);
   const smtp = resolveSmtpConfig();
   const transport = createMailTransport(smtp);
 
   const info = await transport.sendMail({
     from: smtp.from,
     to: params.to,
+    cc: params.cc,
     subject: params.subject,
     text: params.text,
     html: params.html,
@@ -165,7 +174,8 @@ export async function sendPreparedDigestEmail(params: {
 
 /** Send digest with Excel attachments via configured SMTP (Gmail, or local VPS Postfix). */
 export async function sendDigestEmail(params: {
-  to: string;
+  to: string | string[];
+  cc?: string | string[];
   recipientName: string;
   recipientEmail?: string;
   dateRange: DigestDateRange;
@@ -176,7 +186,8 @@ export async function sendDigestEmail(params: {
   bodyPlainText?: string;
 }): Promise<{ messageId: string }> {
   if (process.env.MIS_EMAIL_DRY_RUN === 'true') {
-    console.log('[mis-email] DRY RUN — would send to', params.to, {
+    console.log('[mis-email] DRY RUN — would send to', formatMailAddresses(params.to), {
+      cc: params.cc ? formatMailAddresses(params.cc) : undefined,
       attachments: params.attachments.map((a) => `${a.filename} (${a.content.length} bytes)`),
       scope: params.scopeLabel,
     });
@@ -186,12 +197,11 @@ export async function sendDigestEmail(params: {
   const smtp = resolveSmtpConfig();
   const transport = createMailTransport(smtp);
 
-  const subjectDate = formatEmailDate(params.subjectDate);
   const portalUrl = resolvePortalUrl();
 
   const emailBody = {
     recipientName: params.recipientName,
-    recipientEmail: params.recipientEmail ?? params.to,
+    recipientEmail: params.recipientEmail ?? primaryMailAddress(params.to),
     dateRange: params.dateRange,
     scopeLabel: params.scopeLabel,
     portalUrl,
@@ -202,7 +212,8 @@ export async function sendDigestEmail(params: {
   const info = await transport.sendMail({
     from: smtp.from,
     to: params.to,
-    subject: `WRL MIS Reports — ${subjectDate}`,
+    cc: params.cc,
+    subject: formatDigestSubject(params.dateRange.endDate, params.subjectDate),
     text: buildDigestEmailPlainText(emailBody),
     html: buildDigestEmailHtml(emailBody),
     attachments: params.attachments.map((a) => ({

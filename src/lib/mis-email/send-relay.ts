@@ -22,7 +22,8 @@ export type PreparedDigestEmailAttachment = {
 };
 
 export type PreparedDigestEmailPayload = {
-  to: string;
+  to: string | string[];
+  cc?: string | string[];
   subject: string;
   html: string;
   text: string;
@@ -40,9 +41,17 @@ export async function sendPreparedMisEmailViaVpsRelay(
     );
   }
 
+  // Relay (and older VPS builds) expect string addresses — arrays blow up on body.to.trim().
+  const to = Array.isArray(payload.to) ? payload.to.join(', ') : payload.to;
+  const cc = payload.cc == null
+    ? undefined
+    : Array.isArray(payload.cc)
+      ? payload.cc.join(', ')
+      : payload.cc;
+
   const result = await relayPostJson<{ error?: string; messageId?: string }>(
     PREPARED_DIGEST_PATH,
-    payload,
+    { ...payload, to, ...(cc !== undefined ? { cc } : {}) },
     relaySecret
   );
 

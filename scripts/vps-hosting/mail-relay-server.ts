@@ -89,6 +89,18 @@ function contentLength(req: import('http').IncomingMessage): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function normalizeMailAddresses(value: string | string[] | undefined): string[] {
+  if (value == null) return [];
+  const parts = Array.isArray(value) ? value : [value];
+  return [
+    ...new Set(
+      parts
+        .map((part) => String(part ?? '').trim().toLowerCase())
+        .filter(Boolean)
+    ),
+  ];
+}
+
 if (!SECRET) {
   console.error('FATAL: set VPS_MAIL_RELAY_SECRET in .env.mis-email');
   process.exit(1);
@@ -125,7 +137,8 @@ const server = createServer(async (req, res) => {
   try {
     if (req.url === MIS_DIGEST_PREPARED_PATH) {
       const body = (await readJson(req)) as {
-        to?: string;
+        to?: string | string[];
+        cc?: string | string[];
         subject?: string;
         html?: string;
         text?: string;
@@ -136,7 +149,9 @@ const server = createServer(async (req, res) => {
         }>;
       };
 
-      if (!body.to?.trim() || !body.subject?.trim()) {
+      const to = normalizeMailAddresses(body.to);
+      const cc = normalizeMailAddresses(body.cc);
+      if (to.length === 0 || !body.subject?.trim()) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'to and subject are required' }));
         return;
@@ -146,7 +161,8 @@ const server = createServer(async (req, res) => {
       const transport = createMailTransport(smtp);
       const info = await transport.sendMail({
         from: smtp.from,
-        to: body.to.trim(),
+        to,
+        ...(cc.length > 0 ? { cc } : {}),
         subject: body.subject.trim(),
         text: body.text ?? '',
         html: body.html ?? body.text ?? '',
