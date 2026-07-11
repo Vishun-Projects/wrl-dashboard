@@ -130,7 +130,7 @@ export async function sendPreparedDigestEmail(params: {
     const started = Date.now();
     const attachmentBytes = params.attachments.reduce((sum, file) => sum + file.content.length, 0);
     console.log(
-      `[mis-email/timing] smtp relay → ${toLabel} · attachments=${params.attachments.length} · payload ${formatBytes(attachmentBytes)} · html ${params.html.length} chars`
+      `[mis-email/timing] smtp relay → ${toLabel}${params.cc ? ` · cc ${formatMailAddresses(params.cc)}` : ''} · attachments=${params.attachments.length} · payload ${formatBytes(attachmentBytes)} · html ${params.html.length} chars`
     );
     const result = await sendPreparedMisEmailViaVpsRelay({
       to: formatMailAddresses(params.to),
