@@ -755,6 +755,22 @@ describe('runMisClientUploadQueue', () => {
     expect(results[1]?.error).toMatch(/simulated failure/);
     expect(results[2]?.data?.rowCount).toBe(10);
   });
+
+  it('forwards accessToken to uploadFn', async () => {
+    const { runMisClientUploadQueue } = await import('@/lib/mis-client-import/upload-client');
+    const file = new File(['x'], 'x.csv', { type: 'text/csv' });
+    let seen: string | null | undefined;
+    await runMisClientUploadQueue({
+      sourceCode: 'cadbury',
+      files: [file],
+      accessToken: 'tok-abc',
+      uploadFn: async ({ accessToken }) => {
+        seen = accessToken;
+        return { rowCount: 1 };
+      },
+    });
+    expect(seen).toBe('tok-abc');
+  });
 });
 
 describe('formatMisUploadProgressLabel', () => {

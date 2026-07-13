@@ -16,9 +16,9 @@ export function formatMisUploadTooLargeMessage(fileBytes: number): string {
 export function formatMisVercelUploadTooLargeMessage(fileBytes: number): string {
   const mb = (fileBytes / (1024 * 1024)).toFixed(1);
   return (
-    `File is ${mb} MB. Vercel hosting only accepts uploads up to ~${MIS_CLIENT_VERCEL_MAX_UPLOAD_LABEL}. ` +
-    'Large Coke/Cadbury files must use the VPS upload endpoint (ask admin to set NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL) ' +
-    'or run the app locally.'
+    `File is ${mb} MB. Vercel same-origin uploads are limited to ~${MIS_CLIENT_VERCEL_MAX_UPLOAD_LABEL}. ` +
+    'Set NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL to https://api.wrl-fsm.cloud/api/mis-client-import/upload ' +
+    'and redeploy for a single direct VPS upload, or use chunked upload / local import.'
   );
 }
 

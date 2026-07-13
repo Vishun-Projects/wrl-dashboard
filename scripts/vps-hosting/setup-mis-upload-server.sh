@@ -44,18 +44,49 @@ EOF
 
 install_caddy_route() {
   local caddyfile="/etc/caddy/Caddyfile"
-  echo "==> Updating ${caddyfile} for large MIS uploads"
-  cat >"$caddyfile" <<EOF
+  local upload_port="${UPLOAD_PORT}"
+  echo "==> Ensuring MIS upload route in ${caddyfile} (preserve mail relay / other handles)"
+
+  if [[ ! -f "$caddyfile" ]]; then
+    cat >"$caddyfile" <<EOF
 api.wrl-fsm.cloud {
 	handle /api/mis-client-import/upload {
 		request_body {
 			max_size 320MB
 		}
-		reverse_proxy 127.0.0.1:${UPLOAD_PORT}
+		reverse_proxy 127.0.0.1:${upload_port}
+	}
+	handle /internal/mail* {
+		reverse_proxy 127.0.0.1:8789
 	}
 	reverse_proxy localhost:8000
 }
 EOF
+  elif grep -Fq 'handle /api/mis-client-import/upload' "$caddyfile"; then
+    echo "    upload route already present — leaving Caddyfile unchanged"
+  else
+    python3 - "$caddyfile" "$upload_port" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+port = sys.argv[2]
+text = path.read_text()
+block = f"""\thandle /api/mis-client-import/upload {{
+\t\trequest_body {{
+\t\t\tmax_size 320MB
+\t\t}}
+\t\treverse_proxy 127.0.0.1:{port}
+\t}}
+"""
+needle = "api.wrl-fsm.cloud {"
+idx = text.find(needle)
+if idx < 0:
+    raise SystemExit("api.wrl-fsm.cloud site block not found in Caddyfile")
+insert_at = idx + len(needle)
+path.write_text(text[:insert_at] + "\n" + block + text[insert_at:])
+print("    inserted upload handle into existing Caddyfile")
+PY
+  fi
+
   if command -v caddy >/dev/null 2>&1; then
     caddy validate --config "$caddyfile"
     systemctl reload caddy

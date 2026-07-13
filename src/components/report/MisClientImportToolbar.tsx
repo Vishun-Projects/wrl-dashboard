@@ -13,6 +13,7 @@ import {
   isBrowserOnVercel,
   misUploadUsesExternalHost,
 } from '@/lib/mis-client-import/upload-limits';
+import { createClient } from '@/lib/supabase/client';
 import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
 import { feedback } from '@/lib/ui/feedback';
 
@@ -181,9 +182,21 @@ export default function MisClientImportToolbar({
 
     let anySuccess = false;
     try {
+      const supabase = createClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token ?? null;
+      if (misUploadUsesExternalHost() && !accessToken) {
+        feedback.dismiss(loadingId);
+        feedback.actionFailed('Sign in again to upload large files to the VPS.');
+        return;
+      }
+
       const results = await runMisClientUploadQueue({
         sourceCode: uploadSource,
         files,
+        accessToken,
         onProgress: (progress) => {
           setUploadProgress(progress);
           if (progress.phase === 'processing') {
@@ -407,11 +420,14 @@ export default function MisClientImportToolbar({
           </div>
         )}
 
-        {canUpload && isBrowserOnVercel() && misUploadUsesExternalHost() && (
+        {canUpload && isBrowserOnVercel() && !misUploadUsesExternalHost() && (
           <p className="w-full rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-900">
-            Remove <code className="text-amber-950">NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL</code> from
-            Vercel and redeploy. Browser uploads to api.wrl-fsm.cloud fail with certificate errors;
-            large files are sent in chunks through this app instead.
+            Large files use chunked upload on Vercel. For a fast single upload, set{' '}
+            <code className="text-amber-950">NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL</code> to{' '}
+            <code className="text-amber-950">
+              https://api.wrl-fsm.cloud/api/mis-client-import/upload
+            </code>{' '}
+            and redeploy.
           </p>
         )}
 

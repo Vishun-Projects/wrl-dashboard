@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MIS email digest scheduler — run via cron every 15 minutes.
+# MIS email digest scheduler — run via cron once daily (09:30 IST).
 set -euo pipefail
 
 INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-/opt/fast-close-app}"

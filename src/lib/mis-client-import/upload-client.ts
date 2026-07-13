@@ -224,6 +224,16 @@ async function postMisClientUploadDirect(params: {
   return res.data as Record<string, unknown>;
 }
 
+function isDirectUploadNetworkFailure(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) return false;
+  if (err.response) return false;
+  return (
+    err.code === 'ERR_NETWORK' ||
+    err.code === 'ECONNABORTED' ||
+    /certificate|SSL|TLS|Failed to fetch|Network Error/i.test(err.message)
+  );
+}
+
 export async function postMisClientUpload(params: {
   sourceCode: string;
   file: File;
@@ -262,25 +272,50 @@ export async function postMisClientUpload(params: {
     ...progressBase,
   });
 
-  const result = await postMisClientUploadDirect({
-    sourceCode: params.sourceCode,
-    file: params.file,
-    accessToken: params.accessToken,
-    onProgress: params.onProgress,
-    fileIndex: params.fileIndex,
-    fileTotal: params.fileTotal,
-  });
+  try {
+    const result = await postMisClientUploadDirect({
+      sourceCode: params.sourceCode,
+      file: params.file,
+      accessToken: params.accessToken,
+      onProgress: params.onProgress,
+      fileIndex: params.fileIndex,
+      fileTotal: params.fileTotal,
+    });
 
-  params.onProgress?.({
-    sent: params.file.size,
-    total: params.file.size,
-    chunkIndex: 1,
-    chunkTotal: 1,
-    phase: 'processing',
-    ...progressBase,
-  });
+    params.onProgress?.({
+      sent: params.file.size,
+      total: params.file.size,
+      chunkIndex: 1,
+      chunkTotal: 1,
+      phase: 'processing',
+      ...progressBase,
+    });
 
-  return result;
+    return result;
+  } catch (err) {
+    // Vercel + VPS URL: one-shot direct is preferred; fall back to same-origin chunks if TLS/network blocks the VPS.
+    const canFallbackToChunks =
+      misUploadUsesExternalHost() &&
+      isBrowserOnVercel() &&
+      isDirectUploadNetworkFailure(err) &&
+      params.file.size > 0;
+
+    if (!canFallbackToChunks) {
+      throw err;
+    }
+
+    console.warn(
+      '[mis-client-import] Direct VPS upload failed; falling back to chunked same-origin upload',
+      err
+    );
+    return postMisClientUploadChunked({
+      sourceCode: params.sourceCode,
+      file: params.file,
+      onProgress: params.onProgress,
+      fileIndex: params.fileIndex,
+      fileTotal: params.fileTotal,
+    });
+  }
 }
 
 export type MisUploadQueueResult = {
@@ -292,10 +327,12 @@ export type MisUploadQueueResult = {
 export async function runMisClientUploadQueue(params: {
   sourceCode: string;
   files: File[];
+  accessToken?: string | null;
   onProgress?: (progress: MisUploadProgress) => void;
   uploadFn?: (args: {
     sourceCode: string;
     file: File;
+    accessToken?: string | null;
     onProgress?: (progress: MisUploadProgress) => void;
     fileIndex?: number;
     fileTotal?: number;
@@ -311,6 +348,7 @@ export async function runMisClientUploadQueue(params: {
       const data = await upload({
         sourceCode: params.sourceCode,
         file,
+        accessToken: params.accessToken,
         onProgress: params.onProgress,
         fileIndex: i + 1,
         fileTotal,
@@ -332,8 +370,9 @@ export async function readMisUploadError(err: unknown): Promise<string> {
     if (!err.response && err.code === 'ERR_NETWORK') {
       if (misUploadUsesExternalHost()) {
         return (
-          'Browser blocked the VPS upload (certificate error on api.wrl-fsm.cloud). ' +
-          'Remove NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL from Vercel, redeploy, and retry — large files use chunked upload through the app.'
+          'Could not reach the VPS upload endpoint (network or certificate). ' +
+          'Check NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL, CORS, and that fast-close-mis-upload is running — ' +
+          'or retry; the app may fall back to chunked upload automatically.'
         );
       }
       return 'Network error during upload — check your connection and retry.';
