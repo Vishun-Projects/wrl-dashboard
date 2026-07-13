@@ -42,6 +42,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       preferences?: MisEmailPreferences;
       sendTo?: string[];
+      sendCc?: string[];
       savePreferences?: boolean;
       allowAutoSendDisabledOverride?: boolean;
     };
@@ -97,6 +98,7 @@ export async function POST(request: Request) {
         const results = await sendMisEmailComposeBatch(recipient, {
           preferences: validated.merged,
           sendTo: body.sendTo,
+          sendCc: body.sendCc,
           allowAutoSendDisabledOverride: body.allowAutoSendDisabledOverride === true,
           displayName: recipient.name,
         });

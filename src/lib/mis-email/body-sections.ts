@@ -164,7 +164,7 @@ function age15BgColor(age15: number): string {
   return '#fecaca';
 }
 
-function age15TextColor(age15: number): string {
+function age15TextColor(): string {
   return '#111827';
 }
 
@@ -243,11 +243,10 @@ function buildPerformanceTableHtml(params: {
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Total calls</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Total solved</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}"># open calls</th>
-      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&le;2 days</th>
-      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">3-7 days</th>
-      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">8-15 days</th>
-      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;15 days</th>
-      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Part pending</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&lt;2 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;3 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;7 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;15days</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}"># of active Eng.</th>
     </tr>`;
 
@@ -261,7 +260,7 @@ function buildPerformanceTableHtml(params: {
       const defaultBg = row.isGrand ? grandBg : plainBg;
       const age15Class = age15BandClass(row.age_15);
       const age15Bg = row.isGrand ? grandBg : age15BgColor(row.age_15);
-      const age15Color = age15TextColor(row.age_15);
+      const age15Color = age15TextColor();
       const totalCalls = row.solved_calls + row.open_calls;
       return `<tr class="mis-row">
         <td class="mis-td mis-td-l ${rowZoneClass}" bgcolor="${labelBg}" style="${tdStyle(t, { left: true, bold: true, bg: labelBg })}">${escapeHtml(formatRegionLabel(row.label))}</td>
@@ -272,7 +271,6 @@ function buildPerformanceTableHtml(params: {
         <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.age_3)}</td>
         <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.age_7)}</td>
         <td class="mis-td ${age15Class}" bgcolor="${age15Bg}" style="${tdStyle(t, { bg: age15Bg, color: age15Color, bold: true })}">${formatNum(row.age_15)}</td>
-        <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.part_pending)}</td>
         <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.active_eng)}</td>
       </tr>`;
     })
@@ -318,11 +316,10 @@ function buildKeyAccountTableHtml(
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Total solved</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}"># open calls</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&lt;2 days</th>
-      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">2-7 days</th>
-      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">7-15 days</th>
-      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;15 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;3 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;7 days</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;15days</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">% &gt;7 days</th>
-      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}"># of active Eng.</th>
     </tr>`;
 
   const mergeRegionCells = options?.mergeRegionCells ?? false;
@@ -341,8 +338,6 @@ function buildKeyAccountTableHtml(
     const rowZoneClass = zoneClass(merged.region);
     const zoneBg = zoneBgColor(rowZoneClass);
     const plainBg = t.bgCanvas;
-    const age15Bg = age15BgColor(merged.age_15);
-    const age15Color = age15TextColor(merged.age_15);
     const pctClass = pctGt7Class(merged.age_7, merged.age_15, merged.open_calls);
     const pctBg = pctGt7BgColor(pctClass);
     const pctCellBg = pctBg ?? plainBg;
@@ -374,16 +369,15 @@ function buildKeyAccountTableHtml(
         <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.age_2)}</td>
         <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.age_3)}</td>
         <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.age_7)}</td>
-        <td class="mis-td ${age15BandClass(merged.age_15)}" bgcolor="${age15Bg}" style="${tdStyle(t, { bg: age15Bg, color: age15Color, bold: true })}">${formatNum(merged.age_15)}</td>
+        <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.age_15)}</td>
         <td class="mis-td mis-pct ${pctClass}" bgcolor="${pctCellBg}" style="${tdStyle(t, { color: pctGt7TextColor(pctClass), bold: true, bg: pctCellBg })}">${escapeHtml(merged.pct_gt_7)}</td>
-        <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.active_eng)}</td>
       </tr>`);
   }
 
   if (truncated) {
     bodyRows.push(`<tr>
-        <td colspan="11" class="mis-note" style="font-family:${t.fontInline};">
-          Showing ${accountRows.length} of ${totalRows} key-account rows — Gmail limits email size (~102 KB).
+        <td colspan="10" class="mis-note" style="font-family:${t.fontInline};">
+          Showing ${accountRows.length} of ${totalRows} key-account rows.
           See the attached Key Account MIS Excel for the full list.
         </td>
       </tr>`);
@@ -501,7 +495,7 @@ function buildBranchPerformanceHtml(data: SummaryDashboard, bodyContext: MisEmai
 
   return buildPerformanceTableHtml({
     title: 'Branch-wise Performance',
-    regionColumnLabel: 'Branch',
+    regionColumnLabel: 'Branches',
     rows: branches.map((row) => ({
       label: row.branch,
       regionKey: row.region,

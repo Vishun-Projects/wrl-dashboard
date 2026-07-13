@@ -25,6 +25,7 @@ import {
 import {
   buildDigestEmailHtml,
   buildDigestEmailPlainText,
+  formatDigestSubject,
   formatReportPeriod,
 } from '@/lib/mis-email/email-template';
 import {
@@ -37,6 +38,8 @@ import {
   resolveEffectiveDigestIncludes,
   resolveExtraDigestEmails,
   resolveMisEmailBodyLayoutFromPrefs,
+  resolveMisEmailCcEmails,
+  resolveMisEmailToEmails,
   type MisEmailBodyPermissions,
   type MisEmailPreferences,
 } from '@/lib/mis-email/preferences';
@@ -52,7 +55,6 @@ import {
 import { resolveUserDigestScopeWithLabel } from '@/lib/mis-email/user-scope';
 import { formatBytes, MisEmailTimer, type MisEmailTimingReport } from '@/lib/mis-email/timing';
 import {
-  GMAIL_SAFE_HTML_BYTES,
   gmailClipWarningMessage,
   measureHtmlUtf8Bytes,
 } from '@/lib/mis-email/email-html-size';
@@ -82,10 +84,6 @@ export type MisEmailSendResult = {
   timing?: MisEmailTimingReport;
 };
 
-function formatDigestSubject(date = new Date()): string {
-  return `WRL MIS Reports — ${date.toISOString().split('T')[0]}`;
-}
-
 function recipientWithPreferences(
   recipient: DigestRecipient,
   preferences?: MisEmailPreferences
@@ -105,6 +103,8 @@ export function resolveMisEmailSendTargets(
   if (override?.length) {
     return [...new Set(override.map((e) => e.trim().toLowerCase()).filter((e) => e.includes('@')))];
   }
+  const toEmails = resolveMisEmailToEmails(preferences);
+  if (toEmails.length > 0) return toEmails;
   return [
     recipient.email.trim().toLowerCase(),
     ...resolveExtraDigestEmails(preferences, recipient.email),
@@ -217,40 +217,17 @@ function buildDigestEmailContent(params: {
     };
   };
 
-  let keyAccountMaxRows: number | undefined;
-  let rendered = render();
-  let htmlSizeBytes = measureHtmlUtf8Bytes(rendered.html);
-  if (
-    htmlSizeBytes > GMAIL_SAFE_HTML_BYTES &&
-    totalKeyRows > 0 &&
-    bodySectionIds.includes('key_account_performance')
-  ) {
-    let lo = 0;
-    let hi = totalKeyRows;
-    while (lo < hi) {
-      const mid = Math.ceil((lo + hi) / 2);
-      const trialBytes = measureHtmlUtf8Bytes(render(mid).html);
-      if (trialBytes <= GMAIL_SAFE_HTML_BYTES) lo = mid;
-      else hi = mid - 1;
-    }
-    if (lo === 0) {
-      // Truncation cannot make this email fit Gmail-safe size; avoid blanking key-account rows.
-      // Keep full body content and rely on Gmail clipping warning/attached Excel.
-    } else if (lo < totalKeyRows) {
-      keyAccountMaxRows = lo;
-      rendered = render(keyAccountMaxRows);
-      htmlSizeBytes = measureHtmlUtf8Bytes(rendered.html);
-    }
-  }
-
-  const rowsShown =
-    keyAccountMaxRows !== undefined ? keyAccountMaxRows : totalKeyRows;
+  // Always include all key-account rows. Gmail (~102 KB) may clip HTML for Gmail
+  // inboxes; Outlook and most corporate mail do not — truncation was hiding rows
+  // from the primary audience (WRL Outlook).
+  const rendered = render();
+  const htmlSizeBytes = measureHtmlUtf8Bytes(rendered.html);
 
   return {
     ...rendered,
     htmlSizeBytes,
     gmailClipWarning: gmailClipWarningMessage(htmlSizeBytes) || undefined,
-    keyAccountRowsInBody: totalKeyRows > 0 ? rowsShown : undefined,
+    keyAccountRowsInBody: totalKeyRows > 0 ? totalKeyRows : undefined,
     keyAccountRowsTotal: totalKeyRows > 0 ? totalKeyRows : undefined,
   };
 }
@@ -307,9 +284,11 @@ export async function buildMisEmailPayload(
     !options.forPreview && effectiveIncludes.includeTraceableExport;
   const includeOpenCallsExport =
     !options.forPreview && effectiveIncludes.includeOpenCallsExport;
-  // Branch body must use the Cadbury-safe trace path (CRM Cadbury/Mondelez out, Mondelez import in).
-  // Preview previously used raw CRM branchSummary and incorrectly included CRM Cadbury in aging.
-  const needsTraceForBody = bodySectionIds.includes('branch_performance');
+  // Send: branch body uses Cadbury-safe call-level trace (CRM Cadbury out, Mondelez import in).
+  // Preview: skip that path — Year-to-yesterday pulls ~250k call rows and takes minutes.
+  // Preview falls back to CRM branchSummary; send still builds the accurate trace.
+  const needsTraceForBody =
+    !options.forPreview && bodySectionIds.includes('branch_performance');
   const needsClientAccountData =
     needsClientAccounts ||
     includeTraceableExport ||
@@ -318,7 +297,7 @@ export async function buildMisEmailPayload(
 
   timer.step(
     'plan data fetch',
-    `sections=${bodySectionIds.join(',') || 'none'} · clientAccounts=${needsClientAccountData} · register=${includeDetailed} · trace=${includeTraceableExport || includeOpenCallsExport || needsTraceForBody || effectiveIncludes.includeTraceableExport}`
+    `sections=${bodySectionIds.join(',') || 'none'} · clientAccounts=${needsClientAccountData} · register=${includeDetailed} · trace=${includeTraceableExport || includeOpenCallsExport || needsTraceForBody}`
   );
 
   const data = await timer.measure('fetch summary', () => fetchDigestSummaryDataCached(scope, dateRange), (result) =>
@@ -423,7 +402,7 @@ export async function buildMisEmailPayload(
 
   return {
     preview: {
-      subject: formatDigestSubject(),
+      subject: formatDigestSubject(dateRange.endDate),
       scopeLabel: scope.scopeLabel,
       dateRange,
       dateRangeLabel: formatReportPeriod(dateRange),
@@ -511,6 +490,7 @@ export async function sendMisEmailComposeBatch(
   options: {
     preferences?: MisEmailPreferences;
     sendTo?: string[];
+    sendCc?: string[];
     allowAutoSendDisabledOverride?: boolean;
     displayName?: string;
   }
@@ -550,7 +530,7 @@ export async function sendMisEmailComposeBatch(
     : {
         matchedRule: null,
         to: explicitTargets,
-        cc: [] as string[],
+        cc: resolveMisEmailCcEmails(prefs),
         autoSendEnabled: true,
       };
   if (!routing.autoSendEnabled && options.allowAutoSendDisabledOverride !== true) {
@@ -558,12 +538,30 @@ export async function sendMisEmailComposeBatch(
   }
   const targets = options.sendTo?.length
     ? explicitTargets
-    : [...new Set([...routing.to, ...routing.cc])];
+    : [...new Set(routing.to.map((email) => email.trim().toLowerCase()).filter(Boolean))];
+  const ccTargets = options.sendTo?.length
+    ? [
+        ...new Set(
+          (options.sendCc ?? [])
+            .map((email) => email.trim().toLowerCase())
+            .filter((email) => email && !targets.includes(email))
+        ),
+      ]
+    : [
+        ...new Set(
+          routing.cc
+            .map((email) => email.trim().toLowerCase())
+            .filter((email) => email && !targets.includes(email))
+        ),
+      ];
   if (targets.length === 0) {
     throw new Error('Add at least one recipient email');
   }
 
-  batchTimer.step('resolve recipients', `${targets.length} inbox(es)`);
+  batchTimer.step(
+    'resolve recipients',
+    `${targets.length} to · ${ccTargets.length} cc`
+  );
 
   const primaryTarget = targets[0];
   const {
@@ -582,43 +580,43 @@ export async function sendMisEmailComposeBatch(
   });
 
   const portalUrl = resolvePortalUrl();
-  const results: MisEmailSendResult[] = [];
+  const emailBody = {
+    recipientName: options.displayName?.trim() || recipient.name,
+    recipientEmail: primaryTarget,
+    dateRange,
+    scopeLabel,
+    portalUrl,
+    bodyHtml,
+    bodyPlainText,
+  };
 
-  for (const sentTo of targets) {
-    const emailBody = {
-      recipientName: options.displayName?.trim() || recipient.name,
-      recipientEmail: sentTo,
-      dateRange,
-      scopeLabel,
-      portalUrl,
-      bodyHtml,
-      bodyPlainText,
-    };
+  const sentToLabel = targets.join(', ');
+  const { messageId } = await batchTimer.measure(`smtp send → ${sentToLabel}`, () =>
+    sendPreparedDigestEmail({
+      to: targets.length === 1 ? targets[0] : targets,
+      cc: ccTargets.length ? ccTargets : undefined,
+      subject: preview.subject,
+      html: buildDigestEmailHtml(emailBody),
+      text: buildDigestEmailPlainText(emailBody),
+      attachments: emailAttachments,
+    })
+  );
 
-    const { messageId } = await batchTimer.measure(`smtp send → ${sentTo}`, () =>
-      sendPreparedDigestEmail({
-        to: sentTo,
-        subject: preview.subject,
-        html: buildDigestEmailHtml(emailBody),
-        text: buildDigestEmailPlainText(emailBody),
-        attachments: emailAttachments,
-      })
-    );
-
-    results.push({
-      sentTo,
+  const results: MisEmailSendResult[] = [
+    {
+      sentTo: sentToLabel,
       attachments: preview.attachments,
       scopeLabel,
       messageId,
       dateRange,
       timing: buildTiming,
-    });
-  }
+    },
+  ];
 
-  const batchTiming = batchTimer.finish(`recipients=${targets.length}`);
-  if (results[0]) {
-    results[0].timing = batchTiming;
-  }
+  const batchTiming = batchTimer.finish(
+    `recipients=${targets.length} to · ${ccTargets.length} cc`
+  );
+  results[0].timing = batchTiming;
 
   return results;
 }

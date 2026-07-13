@@ -21,72 +21,9 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function titleCaseWord(word: string): string {
-  if (!word) return word;
-  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-}
-
-function stripLeadingRepeatedChars(value: string): string {
-  return value.replace(/^(.)\1{3,}/i, '');
-}
-
-function looksLikeGibberishName(name: string): boolean {
-  const trimmed = name.trim();
-  if (!trimmed || trimmed.length < 2) return true;
-  if (trimmed.length > 40) return true;
-
-  const core = stripLeadingRepeatedChars(trimmed);
-  if (!core || core.length < 2) return true;
-  if (/(.)\1{4,}/.test(core)) return true;
-  if (/^(asdf|qwer|zxcv|hjkl|sdfg|dfgh|fghj|ghjk)/i.test(core)) return true;
-  if (/[bcdfghjklmnpqrstvwxyz]{6,}/i.test(core)) return true;
-  if (/\d/.test(core) && !/\s/.test(core)) return true;
-  if (core.length > 18 && !/\s/.test(core)) return true;
-
-  const letters = core.replace(/[^a-zA-Z]/g, '');
-  if (letters.length < 2) return true;
-
-  const vowels = letters.replace(/[^aeiouAEIOU]/g, '').length;
-  const vowelRatio = vowels / letters.length;
-  if (letters.length >= 6 && vowelRatio < 0.2) return true;
-
-  return false;
-}
-
-function nameFromEmailLocal(email?: string): string | null {
-  const local = email?.split('@')[0]?.trim();
-  if (!local || looksLikeGibberishName(local)) return null;
-
-  const token = local.split(/[._-]/).find((part) => part.length >= 2 && !looksLikeGibberishName(part));
-  if (!token) return null;
-
-  return titleCaseWord(token);
-}
-
-function resolveDisplayName(name: string, email?: string): string {
-  const trimmed = name.trim();
-  const emailLocal = email?.split('@')[0]?.trim().toLowerCase();
-
-  if (emailLocal && trimmed.toLowerCase().replace(/[._-]/g, '') === emailLocal.replace(/[._-]/g, '')) {
-    const fromEmail = nameFromEmailLocal(email);
-    if (fromEmail) return fromEmail;
-  }
-
-  const core = stripLeadingRepeatedChars(trimmed);
-  if (core && !looksLikeGibberishName(core)) {
-    const first = core.split(/\s+/)[0] ?? core;
-    return titleCaseWord(first);
-  }
-
-  const fromEmail = nameFromEmailLocal(email);
-  if (fromEmail) return fromEmail;
-
-  return 'Colleague';
-}
-
-/** e.g. "Dear Vishnu," */
-export function formatRecipientGreeting(name: string, email?: string): string {
-  return `Dear ${resolveDisplayName(name, email)},`;
+/** Fixed greeting for Daily MIS Report distribution. */
+export function formatRecipientGreeting(_name?: string, _email?: string): string {
+  return 'Dear Zonal Heads,';
 }
 
 /** e.g. "July 2026" from date range end date */
@@ -98,6 +35,24 @@ export function formatReportPeriod(dateRange: DigestDateRange): string {
     return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
   }
   return dateRange.label?.trim() || 'this period';
+}
+
+/** YYYY-MM-DD → DD-MM-YYYY for subject line. */
+export function formatSubjectAsOnDate(isoDate?: string, fallback = new Date()): string {
+  const raw = isoDate?.trim();
+  if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [y, m, d] = raw.split('-');
+    return `${d}-${m}-${y}`;
+  }
+  const day = String(fallback.getDate()).padStart(2, '0');
+  const month = String(fallback.getMonth() + 1).padStart(2, '0');
+  const year = fallback.getFullYear();
+  return `${day}-${month}-${year}`;
+}
+
+/** Subject: Daily MIS Report as on DD-MM-YYYY */
+export function formatDigestSubject(endDate?: string, fallback = new Date()): string {
+  return `Daily MIS Report as on ${formatSubjectAsOnDate(endDate, fallback)}`;
 }
 
 function buildCtaLink(href: string, label: string): string {
@@ -235,9 +190,7 @@ export function buildDigestEmailPlainText(params: {
     '',
     greeting,
     '',
-    bodyPreview
-      ? `Your MIS report for ${period} is below. Full Excel reports are attached.`
-      : `Your MIS report for ${period} is attached.`,
+    'Please find enclosed daily MIS Report.',
     `Report period: ${period}`,
     `Branch scope: ${params.scopeLabel}`,
   ];
@@ -263,12 +216,10 @@ export function buildDigestEmailHtml(params: {
   const reportUrl = `${params.portalUrl.replace(/\/$/, '')}/report`;
   const greeting = formatRecipientGreeting(params.recipientName, params.recipientEmail);
   const period = formatReportPeriod(params.dateRange);
-  const preheader = `MIS report for ${period} — ${params.scopeLabel}`;
+  const preheader = `Daily MIS Report as on ${formatSubjectAsOnDate(params.dateRange.endDate)} — ${params.scopeLabel}`;
   const cta = buildCtaLink(reportUrl, 'Open WRL Dashboard');
   const bodyHtml = params.bodyHtml?.trim() ?? '';
-  const introText = bodyHtml
-    ? `Your MIS report for <strong class="email-strong" style="font-weight:bold;color:${t.fgPrimary};">${escapeHtml(period)}</strong> is below. Full Excel reports are attached to this email.`
-    : `Please find your MIS report for <strong class="email-strong" style="font-weight:bold;color:${t.fgPrimary};">${escapeHtml(period)}</strong> attached to this email.`;
+  const introText = 'Please find enclosed daily MIS Report.';
 
   const html = `<!DOCTYPE html>
 <html lang="en">

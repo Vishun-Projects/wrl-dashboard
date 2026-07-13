@@ -1,9 +1,14 @@
 import { decodeCsvBuffer, parsePipeDelimitedCsv } from '@/lib/mis-client-import/parse-csv';
 import { parseSpreadsheetMatrix, parseXlsxBuffer } from '@/lib/mis-client-import/parse-xlsx';
 import type { MisClientSourceConfig } from '@/lib/mis-client-import/types';
+import {
+  isWrlmisBuffer,
+  isWrlmisFileName,
+  unpackWrlmisBuffer,
+} from '@/lib/mis-client-import/wrlmis-pack';
 import * as XLSX from 'xlsx';
 
-export type DetectedFileFormat = 'csv' | 'spreadsheet';
+export type DetectedFileFormat = 'csv' | 'spreadsheet' | 'wrlmis';
 export type SniffedSource = 'coke' | 'cadbury' | 'unknown';
 
 export type ParseImportResult = {
@@ -49,6 +54,7 @@ function looksLikePipeCsv(buffer: Buffer): boolean {
 }
 
 export function detectFileFormat(buffer: Buffer, fileName: string): DetectedFileFormat {
+  if (isWrlmisFileName(fileName) || isWrlmisBuffer(buffer)) return 'wrlmis';
   const ext = fileName.toLowerCase().split('.').pop() ?? '';
   if (ext === 'xls' || ext === 'xlsx') return 'spreadsheet';
   if (ext === 'csv') return 'csv';
@@ -207,7 +213,7 @@ export function emptyFileMessage(
       ? 'Upload Coke CDMS Excel under Coke (header row is after filter rows).'
       : null,
     sniffedSource === 'cadbury'
-      ? 'Upload Cadbury VMS pipe CSV (VMSComplaintDetailsRpt.csv) or Excel (.xls/.xlsx).'
+      ? 'Upload Cadbury VMS pipe CSV (VMSComplaintDetailsRpt.csv), packed .wrlmis, or Excel (.xls/.xlsx).'
       : null,
     sniffedSource === 'unknown'
       ? 'Check that the file is not empty and you selected the correct import source.'
@@ -223,6 +229,23 @@ export async function parseImportFile(
 ): Promise<ParseImportResult> {
   const warnings: string[] = [];
   const primaryFormat = detectFileFormat(buffer, fileName);
+
+  if (primaryFormat === 'wrlmis') {
+    const unpacked = unpackWrlmisBuffer(buffer);
+    if (unpacked.packedAt) {
+      warnings.push(`Unpacked WRLMIS1 pack (packed ${unpacked.packedAt}).`);
+    } else {
+      warnings.push('Unpacked WRLMIS1 pack.');
+    }
+    return {
+      rawRows: unpacked.rows,
+      detectedFormat: 'wrlmis',
+      detectedHeaderRow: 1,
+      sniffedSource: unpacked.sourceHint,
+      warnings,
+    };
+  }
+
   const fallbackFormat: DetectedFileFormat =
     primaryFormat === 'csv' ? 'spreadsheet' : 'csv';
 

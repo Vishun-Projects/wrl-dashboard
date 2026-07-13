@@ -176,6 +176,9 @@ async function postMisClientUploadDirect(params: {
   sourceCode: string;
   file: File;
   accessToken?: string | null;
+  onProgress?: (progress: MisUploadProgress) => void;
+  fileIndex?: number;
+  fileTotal?: number;
 }): Promise<Record<string, unknown>> {
   const formData = new FormData();
   formData.append('sourceCode', params.sourceCode);
@@ -192,12 +195,31 @@ async function postMisClientUploadDirect(params: {
     headers.Authorization = `Bearer ${params.accessToken}`;
   }
 
+  const progressBase = {
+    fileIndex: params.fileIndex,
+    fileTotal: params.fileTotal,
+    fileName: params.file.name,
+  };
+
   const res = await axios.post(url, formData, {
     withCredentials: !external,
     headers,
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
     timeout: 300_000,
+    onUploadProgress: (event) => {
+      const total = event.total && event.total > 0 ? event.total : params.file.size;
+      const sent = Math.min(event.loaded, total);
+      const uploadDone = total > 0 && sent >= total;
+      params.onProgress?.({
+        sent: uploadDone ? total : sent,
+        total,
+        chunkIndex: 1,
+        chunkTotal: 1,
+        phase: uploadDone ? 'processing' : 'uploading',
+        ...progressBase,
+      });
+    },
   });
   return res.data as Record<string, unknown>;
 }
@@ -240,7 +262,14 @@ export async function postMisClientUpload(params: {
     ...progressBase,
   });
 
-  const result = await postMisClientUploadDirect(params);
+  const result = await postMisClientUploadDirect({
+    sourceCode: params.sourceCode,
+    file: params.file,
+    accessToken: params.accessToken,
+    onProgress: params.onProgress,
+    fileIndex: params.fileIndex,
+    fileTotal: params.fileTotal,
+  });
 
   params.onProgress?.({
     sent: params.file.size,

@@ -27,7 +27,7 @@ export function isNearGmailClipLimit(htmlBytes: number): boolean {
 export function gmailClipWarningMessage(htmlBytes: number): string {
   if (!isNearGmailClipLimit(htmlBytes)) return '';
   if (isLikelyGmailClipped(htmlBytes)) {
-    return `Email HTML is ${formatHtmlSize(htmlBytes)} — Gmail clips messages over ~102 KB. Key-account rows were shortened in the body; use the attached Excel for the full list.`;
+    return `Email HTML is ${formatHtmlSize(htmlBytes)} — Gmail may clip messages over ~102 KB. Outlook shows the full body; Gmail users can open “View entire message” or the attached Excel.`;
   }
-  return `Email HTML is ${formatHtmlSize(htmlBytes)} — close to Gmail's ~102 KB clip limit. Consider filtering key accounts in the body.`;
+  return `Email HTML is ${formatHtmlSize(htmlBytes)} — close to Gmail's ~102 KB clip limit (Outlook is fine).`;
 }

@@ -54,7 +54,12 @@ async function main(): Promise<void> {
       }
       case 'test': {
         const toArg = process.argv.find((a) => a.startsWith('--to='))?.slice('--to='.length);
-        const results = await runMisEmailTestBatch({ userId: userIdArg, recipientOverride: toArg });
+        const ccArg = process.argv.find((a) => a.startsWith('--cc='))?.slice('--cc='.length);
+        const results = await runMisEmailTestBatch({
+          userId: userIdArg,
+          recipientOverride: toArg,
+          ccOverride: ccArg,
+        });
         for (const result of results) {
           console.log('[mis-email] Test email sent:', {
             sentTo: result.sentTo,
@@ -68,13 +73,13 @@ async function main(): Promise<void> {
       default:
         console.log(`Usage:
   npx tsx src/lib/mis-email/cli.ts digest
-  npx tsx src/lib/mis-email/cli.ts test [--user=<uuid>] [--to=email]
+  npx tsx src/lib/mis-email/cli.ts test [--user=<uuid>] [--to=a@x.com,b@y.com] [--cc=c@z.com]
   npx tsx src/lib/mis-email/cli.ts send-user   (MIS_EMAIL_SEND_PAYLOAD=base64 json)
 
 Environment:
   SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_FROM
   SMTP_USER + SMTP_PASS (Gmail etc.) OR SMTP_HOST=127.0.0.1 (VPS Postfix, no auth)
-  MIS_EMAIL_TEST_TO (comma-separated; bare name → @gmail.com)
+  MIS_EMAIL_TEST_TO / MIS_EMAIL_TEST_CC (comma-separated; bare name → @gmail.com)
   DATABASE_URL, READ_SUMMARY_FROM=postgres`);
         process.exitCode = command === 'help' ? 0 : 1;
     }

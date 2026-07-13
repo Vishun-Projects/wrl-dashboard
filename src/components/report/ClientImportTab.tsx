@@ -64,7 +64,9 @@ export default function ClientImportTab({
         <div>
           <h2 className="text-sm font-semibold text-slate-800">Client file import</h2>
           <p className="mt-1 text-[11px] text-slate-500">
-            Upload Coke, Cadbury, or other client MIS files. Download or delete past uploads in the
+            Upload Coke, Cadbury, or other client MIS files. For large Mondelez CSVs, pack first
+            with <code className="text-xs">npm run mis-client:pack -- file.csv</code> then upload
+            the <code className="text-xs">.wrlmis</code>. Download or delete past uploads in the
             history table below. Summary and Key Account tabs use the source checkboxes.
           </p>
         </div>

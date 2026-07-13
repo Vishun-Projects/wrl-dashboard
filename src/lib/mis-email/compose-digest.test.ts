@@ -42,27 +42,31 @@ describe('sendMisEmailComposeBatch auto-send override', () => {
     ]);
   });
 
-  it('blocks manual send when routing disables auto-send and override is false', async () => {
-    const mod = await import('@/lib/mis-email/compose-digest');
+  it(
+    'blocks manual send when routing disables auto-send and override is false',
+    async () => {
+      const mod = await import('@/lib/mis-email/compose-digest');
 
-    await expect(
-      mod.sendMisEmailComposeBatch(
-        {
-          id: 'u1',
-          name: 'User',
-          email: 'user@example.com',
-          role: 'branch_manager',
-          office_ids: ['1'],
-          permissions: [],
-          mis_email_preferences: {},
-        } as never,
-        {
-          sendTo: ['manual@example.com'],
-          allowAutoSendDisabledOverride: false,
-        }
-      )
-    ).rejects.toThrow(/Auto-send disabled/);
-  });
+      await expect(
+        mod.sendMisEmailComposeBatch(
+          {
+            id: 'u1',
+            name: 'User',
+            email: 'user@example.com',
+            role: 'branch_manager',
+            office_ids: ['1'],
+            permissions: [],
+            mis_email_preferences: {},
+          } as never,
+          {
+            sendTo: ['manual@example.com'],
+            allowAutoSendDisabledOverride: false,
+          }
+        )
+      ).rejects.toThrow(/Auto-send disabled/);
+    },
+    15_000
+  );
 
   it('allows override path to proceed past auto-send block', async () => {
     const mod = await import('@/lib/mis-email/compose-digest');

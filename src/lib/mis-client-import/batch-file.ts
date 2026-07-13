@@ -13,6 +13,7 @@ type BatchFileMeta = {
 function contentTypeForFileName(fileName: string): string {
   const lower = fileName.toLowerCase();
   if (lower.endsWith('.csv')) return 'text/csv';
+  if (lower.endsWith('.wrlmis')) return 'application/octet-stream';
   if (lower.endsWith('.xls')) return 'application/vnd.ms-excel';
   return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 }

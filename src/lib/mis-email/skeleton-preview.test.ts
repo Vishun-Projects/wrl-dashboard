@@ -39,10 +39,14 @@ describe('buildMisEmailSkeletonPreview', () => {
     });
 
     expect(preview).not.toBeNull();
-    expect(preview?.subject).toMatch(/^WRL MIS Reports — \d{4}-\d{2}-\d{2}$/);
+    expect(preview?.subject).toMatch(/^Daily MIS Report as on \d{2}-\d{2}-\d{4}$/);
     expect(preview?.attachments).toHaveLength(3);
     expect(preview?.html).toContain('Regional Performance');
     expect(preview?.html).toContain('Branch-wise Performance');
+    expect(preview?.html).toContain('Branches');
+    expect(preview?.html).toContain('>3 days');
+    expect(preview?.html).toContain('>15days');
+    expect(preview?.html).not.toContain('Part pending');
     expect(preview?.html).toContain('background-color:#cbd5e1');
     expect(preview?.html).toContain('bgcolor="#fecaca"');
     expect(preview?.html).not.toContain('bgcolor="#dcfce7"');

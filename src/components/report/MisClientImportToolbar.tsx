@@ -14,6 +14,7 @@ import {
   misUploadUsesExternalHost,
 } from '@/lib/mis-client-import/upload-limits';
 import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
+import { feedback } from '@/lib/ui/feedback';
 
 type BatchMeta = {
   batchId: string;
@@ -96,7 +97,6 @@ export default function MisClientImportToolbar({
   onImportComplete,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const uploadStartedAtRef = useRef<number>(0);
   const [sources, setSources] = useState<SourceMeta[]>([]);
   const [stats, setStats] = useState<ImportStats | null>(null);
   const [rowsInDateRange, setRowsInDateRange] = useState<number | null>(null);
@@ -109,6 +109,7 @@ export default function MisClientImportToolbar({
   const [downloadingBatchId, setDownloadingBatchId] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<MisUploadProgress | null>(null);
+  const [uploadStartedAtMs, setUploadStartedAtMs] = useState<number>(0);
   const [showHistory, setShowHistory] = useState(true);
 
   const loadMeta = useCallback(async () => {
@@ -152,8 +153,8 @@ export default function MisClientImportToolbar({
     void loadMeta();
   }, [loadMeta, metaRefreshKey]);
 
-  const activeSource = sources.find((s) => s.sourceCode === uploadSource) ?? sources[0];
-  const accept = '.csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  const accept =
+    '.csv,.wrlmis,.xlsx,.xls,text/csv,application/octet-stream,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
   const hasAnyBatch = sources.some((s) => s.batches.length > 0);
   const allBatches = sources
@@ -170,20 +171,50 @@ export default function MisClientImportToolbar({
     setUploading(true);
     setUploadMessage(null);
     setUploadProgress(null);
-    uploadStartedAtRef.current = Date.now();
+    setUploadStartedAtMs(Date.now());
+
+    const loadingId = feedback.loading(
+      files.length === 1
+        ? `Importing ${files[0]!.name}…`
+        : `Importing ${files.length} files…`
+    );
 
     let anySuccess = false;
     try {
       const results = await runMisClientUploadQueue({
         sourceCode: uploadSource,
         files,
-        onProgress: setUploadProgress,
+        onProgress: (progress) => {
+          setUploadProgress(progress);
+          if (progress.phase === 'processing') {
+            feedback.loadingUpdate(
+              loadingId,
+              progress.fileName
+                ? `Processing ${progress.fileName}…`
+                : 'Processing import…'
+            );
+          } else if (progress.total > 0) {
+            const pct = Math.min(100, Math.round((progress.sent / progress.total) * 100));
+            feedback.loadingUpdate(
+              loadingId,
+              progress.fileName
+                ? `Uploading ${progress.fileName}… ${pct}%`
+                : `Uploading… ${pct}%`
+            );
+          }
+        },
       });
 
       const lines: string[] = [];
+      feedback.dismiss(loadingId);
+
       for (const result of results) {
         if (result.error) {
           lines.push(`${result.file.name}: ${result.error}`);
+          feedback.actionFailed(`Import failed: ${result.file.name}`, {
+            description: result.error,
+            duration: 8000,
+          });
           continue;
         }
         anySuccess = true;
@@ -192,12 +223,22 @@ export default function MisClientImportToolbar({
         const warnings = Array.isArray(result.data?.warnings)
           ? (result.data.warnings as string[])
           : [];
-        const warnText = warnings.length ? ` (${warnings.join('; ')})` : '';
-        lines.push(
-          `${result.file.name}: imported ${rowCount} rows` +
-            (errorCount ? `, ${errorCount} skipped` : '') +
-            warnText
-        );
+        const title = `${result.file.name}: imported ${rowCount.toLocaleString()} rows`;
+        const details = [
+          errorCount ? `${errorCount.toLocaleString()} skipped` : null,
+          ...warnings,
+        ].filter(Boolean) as string[];
+        const warnText = details.length ? ` (${details.join('; ')})` : '';
+        lines.push(title + warnText);
+
+        if (details.length > 0) {
+          feedback.actionWarning(title, {
+            description: details.join('\n'),
+            duration: 10_000,
+          });
+        } else {
+          feedback.actionSuccess(title, { duration: 5000 });
+        }
       }
 
       setUploadMessage(lines.join(' · '));
@@ -207,7 +248,9 @@ export default function MisClientImportToolbar({
         void loadMeta();
       }
     } catch (err: unknown) {
-      setUploadMessage(err instanceof Error ? err.message : 'Upload failed');
+      const message = err instanceof Error ? err.message : 'Upload failed';
+      setUploadMessage(message);
+      feedback.loadingFailed(loadingId, 'Import failed', { description: message });
     } finally {
       setUploading(false);
       setUploadProgress(null);
@@ -219,9 +262,10 @@ export default function MisClientImportToolbar({
     uploadProgress && uploadProgress.total > 0
       ? Math.min(100, Math.round((uploadProgress.sent / uploadProgress.total) * 100))
       : 0;
-  const uploadEtaSec = uploadProgress
-    ? estimateMisUploadEtaSec(uploadProgress, uploadStartedAtRef.current)
-    : null;
+  const uploadEtaSec =
+    uploadProgress && uploadStartedAtMs > 0
+      ? estimateMisUploadEtaSec(uploadProgress, uploadStartedAtMs)
+      : null;
 
   const handleDownloadBatch = async (batchId: string, fileName: string) => {
     setDownloadingBatchId(batchId);
@@ -237,6 +281,7 @@ export default function MisClientImportToolbar({
       }
       const resolvedName = fileName || 'import.dat';
       await triggerBlobDownload(res.data, resolvedName);
+      feedback.actionSuccess(`Downloaded ${resolvedName}`);
     } catch (err: unknown) {
       let message = 'Download failed';
       if (axios.isAxiosError(err) && err.response?.data) {
@@ -253,6 +298,7 @@ export default function MisClientImportToolbar({
         }
       }
       setUploadMessage(message);
+      feedback.actionFailed('Download failed', { description: message });
     } finally {
       setDownloadingBatchId(null);
     }
@@ -272,12 +318,14 @@ export default function MisClientImportToolbar({
       await loadMeta();
       onImportComplete();
       setUploadMessage('Import removed.');
+      feedback.actionSuccess(`Removed ${fileName}`);
     } catch (err: unknown) {
       const message =
         axios.isAxiosError(err) && err.response?.data?.error
           ? String(err.response.data.error)
           : 'Delete failed';
       setUploadMessage(message);
+      feedback.actionFailed('Delete failed', { description: message });
     } finally {
       setDeletingBatchId(null);
     }

@@ -5,6 +5,7 @@ set -euo pipefail
 root="${INSTALL_ROOT:-/opt/fast-close-app}"
 MAIL_DOMAIN="${MAIL_DOMAIN:-wrl-fsm.cloud}"
 TEST_TO="${MIS_EMAIL_TEST_TO:-vishnu.vishwakarma@westernequipments.com}"
+TEST_CC="${MIS_EMAIL_TEST_CC:-}"
 
 cd "${root}"
 
@@ -127,6 +128,7 @@ cat > "${root}/.env.mis-email" <<EOF
 $(write_smtp_block)
 
 MIS_EMAIL_TEST_TO=${TEST_TO}
+MIS_EMAIL_TEST_CC=${TEST_CC}
 MIS_EMAIL_PORTAL_URL=https://wrl-dashboard.vercel.app
 
 READ_SUMMARY_FROM=postgres
@@ -144,6 +146,10 @@ export NODE_ENV=production
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=8192}"
 
 echo "==> mis-email:test"
+echo "    To: ${TEST_TO}"
+if [[ -n "$TEST_CC" ]]; then
+  echo "    Cc: ${TEST_CC}"
+fi
 # dotenv in cli loads .env.mis-email only; export as backup for npm child
 set -a
 # shellcheck disable=SC1091

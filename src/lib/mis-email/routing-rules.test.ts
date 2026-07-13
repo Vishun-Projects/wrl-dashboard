@@ -5,6 +5,7 @@ import {
   normalizeMisEmailRoutingClientSourceMode,
   parseCommaEmails,
   pickBestMisEmailRoutingRule,
+  resolveRoutingScheduleSlotStart,
   shouldTriggerRoutingRuleNow,
   type MisEmailRoutingRule,
 } from '@/lib/mis-email/routing-rules';
@@ -187,5 +188,39 @@ describe('shouldTriggerRoutingRuleNow', () => {
       }
     );
     expect(atRuleOnly).toBe(false);
+  });
+
+  it('does not re-fire at 09:45 after a 09:30 daily anchor', () => {
+    expect(
+      shouldTriggerRoutingRuleNow(
+        {
+          ...rule('r1', {}),
+          scheduleAnchorTimeIst: '07:00',
+          scheduleIntervalMinutes: 1440,
+          scheduleDaysOfWeek: ['WED'],
+        },
+        {
+          now: new Date('2026-07-08T04:15:00.000Z'), // 09:45 IST
+          windowMinutes: 15,
+          sendTimeIst: '09:30',
+        }
+      )
+    ).toBe(false);
+  });
+});
+
+describe('resolveRoutingScheduleSlotStart', () => {
+  it('anchors the daily slot at personal send time in IST', () => {
+    const slot = resolveRoutingScheduleSlotStart(
+      {
+        scheduleAnchorTimeIst: '07:00',
+        scheduleIntervalMinutes: 1440,
+      },
+      {
+        now: new Date('2026-07-08T04:15:00.000Z'), // 09:45 IST
+        sendTimeIst: '09:30',
+      }
+    );
+    expect(slot.toISOString()).toBe('2026-07-08T04:00:00.000Z'); // 09:30 IST
   });
 });

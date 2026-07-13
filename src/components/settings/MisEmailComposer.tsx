@@ -19,7 +19,12 @@ import type {
   MisEmailPreferences,
   MisEmailZoneKey,
 } from '@/lib/mis-email/preferences';
-import { DEFAULT_MIS_EMAIL_PREFERENCES } from '@/lib/mis-email/preferences';
+import {
+  DEFAULT_MIS_EMAIL_PREFERENCES,
+  resolveMisEmailCcEmails,
+  resolveMisEmailToEmails,
+} from '@/lib/mis-email/preferences';
+import { parseOutlookEmailList } from '@/lib/mis-email/parse-outlook-emails';
 import { buildMisEmailSkeletonPreview } from '@/lib/mis-email/skeleton-preview';
 import { trackMisEmailSendJob, useMisEmailSendJobs } from '@/lib/mis-email/send-job-client';
 import {
@@ -51,22 +56,15 @@ type Props = {
   onSaved?: () => void;
 };
 
-function parseExtraEmailsInput(raw: string): string[] {
-  return [...new Set(raw.split(/[,;\s]+/).map((e) => e.trim().toLowerCase()).filter((e) => e.includes('@')))];
-}
-
-function formatExtraEmailsInput(emails: string[] | undefined): string {
-  return (emails ?? []).join(', ');
-}
-
 function formatDateRangeLabel(dateRange: MisEmailPreferences['dateRange'] | undefined): string {
   const value = dateRange ?? 'month_to_date';
   if (value === 'yesterday') return 'Yesterday';
   if (value === 'year_to_yesterday') return 'Year to yesterday';
-  return 'Month to date';
+  return 'Month to yesterday';
 }
 
 const LIVE_PREVIEW_DEBOUNCE_MS = 800;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type AttachmentPrefKey =
   | 'includeSummary'
@@ -87,8 +85,107 @@ function isAttachmentEnabled(prefs: MisEmailPreferences, key: AttachmentPrefKey)
   return DEFAULT_MIS_EMAIL_PREFERENCES[key];
 }
 
+function RecipientChipsInput({
+  label,
+  hint,
+  values,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  values: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState('');
+
+  function addFromRaw(raw: string) {
+    const parsed = parseOutlookEmailList(raw);
+    if (parsed.length === 0) {
+      const single = raw.trim().toLowerCase();
+      if (!single) return;
+      if (!EMAIL_RE.test(single)) {
+        setError(`Invalid email: ${single}`);
+        return;
+      }
+      if (values.includes(single)) {
+        setDraft('');
+        setError('');
+        return;
+      }
+      onChange([...values, single]);
+      setDraft('');
+      setError('');
+      return;
+    }
+    const next = [...values];
+    for (const email of parsed) {
+      if (!next.includes(email)) next.push(email);
+    }
+    onChange(next);
+    setDraft('');
+    setError('');
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <label className="text-[11px] font-medium text-stone-500">{label}</label>
+      <div className="rounded-md border border-stone-200 bg-stone-50 p-2">
+        <div className="mb-2 flex flex-wrap gap-1">
+          {values.map((email) => (
+            <span
+              key={email}
+              className="inline-flex items-center gap-1 rounded-full border border-stone-200 bg-white px-2 py-0.5 text-[11px] text-stone-700"
+            >
+              {email}
+              <button
+                type="button"
+                onClick={() => onChange(values.filter((item) => item !== email))}
+                className="text-stone-400 hover:text-stone-800"
+                aria-label={`Remove ${email}`}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          {values.length === 0 ? (
+            <span className="text-[11px] text-stone-400">No recipients</span>
+          ) : null}
+        </div>
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setError('');
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ';' || e.key === ',') {
+              e.preventDefault();
+              addFromRaw(draft);
+            }
+          }}
+          onPaste={(e) => {
+            const text = e.clipboardData.getData('text');
+            if (text && /[;,]|<[^>]+@/.test(text)) {
+              e.preventDefault();
+              addFromRaw(text);
+            }
+          }}
+          onBlur={() => {
+            if (draft.trim()) addFromRaw(draft);
+          }}
+          placeholder="Paste Outlook list or type email + Enter"
+          className={settingsInputClass()}
+        />
+      </div>
+      {error ? <p className="text-[10.5px] text-rose-600">{error}</p> : null}
+      <p className="text-[10.5px] text-stone-500">{hint}</p>
+    </div>
+  );
+}
+
 export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Props) {
-  const [extraEmailsInput, setExtraEmailsInput] = useState(formatExtraEmailsInput(prefs.extraEmails));
   const [saving, setSaving] = useState(false);
   const { activeJobs, lastFinished, hasActiveSend, clearLastFinished } = useMisEmailSendJobs();
   const [livePreview, setLivePreview] = useState<MisEmailComposePreview | null>(null);
@@ -111,16 +208,14 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
   const draftPrefs = useMemo(
     (): MisEmailPreferences => ({
       ...prefs,
-      extraEmails: parseExtraEmailsInput(extraEmailsInput),
+      toEmails: resolveMisEmailToEmails(prefs),
+      ccEmails: resolveMisEmailCcEmails(prefs),
     }),
-    [prefs, extraEmailsInput]
+    [prefs]
   );
 
-  const sendTargets = useMemo(() => {
-    const primary = settings.primaryEmail.trim().toLowerCase();
-    const extras = draftPrefs.extraEmails ?? [];
-    return [...new Set([primary, ...extras].filter(Boolean))];
-  }, [settings.primaryEmail, draftPrefs.extraEmails]);
+  const sendTargets = draftPrefs.toEmails ?? [];
+  const sendCcTargets = draftPrefs.ccEmails ?? [];
 
   const bodySections = settings.availableBodySections ?? [];
   const selectedBodyIds = draftPrefs.bodyInEmail ?? [];
@@ -322,6 +417,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
         {
           preferences: draftPrefs,
           sendTo: sendTargets,
+          sendCc: sendCcTargets,
           savePreferences: saveFirst,
             allowAutoSendDisabledOverride: allowAutoSendOverride,
         },
@@ -475,29 +571,21 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
           <section className="rounded-xl border border-stone-200 bg-white">
             <div className="border-b border-stone-200 px-3.5 py-3">
               <p className="text-[12.5px] font-semibold text-stone-900">Recipients</p>
-              <p className="text-[10.5px] text-stone-500">Who receives this report</p>
+              <p className="text-[10.5px] text-stone-500">To and Cc for this Daily MIS Report</p>
             </div>
-            <div className="space-y-2.5 px-3.5 py-3">
-              <div className="flex flex-wrap gap-1.5">
-                {sendTargets.map((email) => (
-                  <span
-                    key={email}
-                    className="inline-flex items-center rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-[11px] text-stone-700"
-                  >
-                    {email}
-                  </span>
-                ))}
-              </div>
-              <input
-                type="text"
-                value={extraEmailsInput}
-                onChange={(e) => setExtraEmailsInput(e.target.value)}
-                placeholder="Add another recipient email..."
-                className={settingsInputClass()}
+            <div className="space-y-3 px-3.5 py-3">
+              <RecipientChipsInput
+                label="To"
+                hint="Paste an Outlook To line, or add emails one by one."
+                values={sendTargets}
+                onChange={(toEmails) => onPrefsChange({ ...prefs, toEmails })}
               />
-              <p className="text-[10.5px] text-stone-500">
-                Your inbox is always included. Add work or personal copies above.
-              </p>
+              <RecipientChipsInput
+                label="Cc"
+                hint="Paste an Outlook Cc line, or add emails one by one."
+                values={sendCcTargets}
+                onChange={(ccEmails) => onPrefsChange({ ...prefs, ccEmails })}
+              />
             </div>
           </section>
 
@@ -508,12 +596,12 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
             </div>
             <div className="space-y-2.5 px-3.5 py-3">
               <div className="rounded-md border border-dashed border-stone-300 bg-stone-50 px-3 py-2 font-mono text-[11px] text-stone-700">
-                {displayPreview?.subject ?? 'WRL MIS Reports — ...'}
+                {displayPreview?.subject ?? 'Daily MIS Report as on ...'}
               </div>
               <div className="grid grid-cols-3 gap-1.5">
                 {[
                   { id: 'yesterday', label: 'Yesterday' },
-                  { id: 'month_to_date', label: 'Month to date' },
+                  { id: 'month_to_date', label: 'Month to yesterday' },
                   { id: 'year_to_yesterday', label: 'Year to yesterday' },
                 ].map((opt) => (
                   <button

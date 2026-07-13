@@ -175,7 +175,12 @@ describe('buildEmailBodySectionsHtml', () => {
     expect(html).toContain('NORTH');
     expect(html).toContain('EAST');
     expect(html).toContain('All');
-    expect(html).toContain('Part pending');
+    expect(html).toContain('&lt;2 days');
+    expect(html).toContain('&gt;3 days');
+    expect(html).toContain('&gt;7 days');
+    expect(html).toContain('&gt;15days');
+    expect(html).toContain('# of active Eng.');
+    expect(html).not.toContain('Part pending');
     expect(html).not.toContain('>Cancelled<');
     expect(html).not.toContain('Cancelled</th>');
     // Total = solved + open (exclude cancelled): Delhi 90+8=98
@@ -230,6 +235,12 @@ describe('buildEmailBodySectionsHtml', () => {
     };
     const html = buildEmailBodySectionsHtml(['key_account_performance'], context);
     expect(html).toContain('Nestle');
+    expect(html).toContain('&gt;3 days');
+    expect(html).toContain('&gt;7 days');
+    expect(html).toContain('&gt;15days');
+    expect(html).toContain('% &gt;7 days');
+    expect(html).not.toContain('# of active Eng.');
+    expect(html).not.toContain('Part pending');
   });
 
   it('displays Cadbury as Mondelez and Coke as HCCB in key account body', () => {
@@ -285,11 +296,12 @@ describe('buildEmailBodySectionsHtml', () => {
     const html = buildEmailBodySectionsHtml(['branch_performance'], {
       summary: highAgingSummary,
     });
+    expect(html).toContain('Branches');
     expect(html).toContain('bgcolor="#fecaca"');
     expect(html).toContain('color:#111827');
   });
 
-  it('uses background bands only on >15 days and alert %>7 cells', () => {
+  it('keeps %>7 alert bands on key accounts but does not color >15days cells', () => {
     const html = buildEmailBodySectionsHtml(['key_account_performance'], {
       summary: sampleData,
       accountRows: [
@@ -310,6 +322,8 @@ describe('buildEmailBodySectionsHtml', () => {
 
     expect(html).toContain('bgcolor="#fee2e2"');
     expect(html).toContain('color:#991b1b');
+    expect(html).not.toContain('bgcolor="#bbf7d0"');
+    expect(html).not.toContain('bgcolor="#fde68a"');
     expect(html).not.toContain('bgcolor="#dcfce7"');
     expect(html).toContain('color:#065f46');
   });
@@ -423,7 +437,9 @@ describe('buildEmailBodySectionsHtml', () => {
       keyAccountMaxRows: 1,
     });
     expect(html).toContain('Showing 1 of 2');
-    expect(html).toContain('Gmail limits');
+    expect(html).toContain('colspan="10"');
+    expect(html).toContain('attached Key Account MIS Excel');
+    expect(html).not.toContain('Gmail limits');
   });
 
   it('renders nothing for key account section when no account rows', () => {

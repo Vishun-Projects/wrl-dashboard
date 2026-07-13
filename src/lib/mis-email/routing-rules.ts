@@ -661,8 +661,8 @@ export function shouldTriggerRoutingRuleNow(
 
   if (nowMinutes < anchor) return false;
   const delta = nowMinutes - anchor;
-  // Inclusive upper bound so a skipped cron tick (lock) can still hit on the next */15 run.
-  return delta % interval <= windowMinutes;
+  // Half-open window: delta % interval in [0, window). Cron at 09:30 fires; 09:45 does not.
+  return delta % interval < windowMinutes;
 }
 
 export async function logMisEmailRoutingSendAttempt(input: {
@@ -688,6 +688,57 @@ export async function logMisEmailRoutingSendAttempt(input: {
         input.error ?? null,
       ]
     );
+  });
+}
+
+/**
+ * Start of the current schedule slot in absolute time (used to dedupe every-15-min
+ * cron re-fires inside the same daily/interval window after a successful send).
+ */
+export function resolveRoutingScheduleSlotStart(
+  rule: Pick<MisEmailRoutingRule, 'scheduleAnchorTimeIst' | 'scheduleIntervalMinutes'>,
+  options?: { now?: Date; sendTimeIst?: string | null }
+): Date {
+  const now = options?.now ?? new Date();
+  const override = typeof options?.sendTimeIst === 'string' ? options.sendTimeIst.trim() : '';
+  const anchor = minutesFromTime(override || rule.scheduleAnchorTimeIst);
+  const interval = Math.max(5, Math.floor(rule.scheduleIntervalMinutes));
+  const nowMinutes = getIstMinutes(now);
+  const delta = Math.max(0, nowMinutes - anchor);
+  const slotOffset = delta - (delta % interval);
+  const slotMinutes = anchor + slotOffset;
+
+  const istDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+  const hh = String(Math.floor(slotMinutes / 60) % 24).padStart(2, '0');
+  const mm = String(slotMinutes % 60).padStart(2, '0');
+  // Interpret slot wall-clock as IST.
+  return new Date(`${istDate}T${hh}:${mm}:00+05:30`);
+}
+
+/** True when this rule+recipient already had a successful SMTP send in the current slot. */
+export async function hasSuccessfulRoutingSendInSlot(params: {
+  ruleId: string;
+  recipientId: string;
+  since: Date;
+}): Promise<boolean> {
+  await ensureMisEmailRoutingRulesTable();
+  return withAppClient(async (client) => {
+    const res = await client.query<{ ok: number }>(
+      `SELECT 1 AS ok
+       FROM public.mis_email_routing_send_log
+       WHERE rule_id = $1::uuid
+         AND recipient_id = $2::uuid
+         AND status = 'sent'
+         AND triggered_at >= $3::timestamptz
+       LIMIT 1`,
+      [params.ruleId, params.recipientId, params.since.toISOString()]
+    );
+    return res.rows.length > 0;
   });
 }
 

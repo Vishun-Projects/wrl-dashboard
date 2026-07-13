@@ -129,9 +129,16 @@ describe('send time helpers', () => {
     ).toBe(false);
   });
 
-  it('still matches on the next */15 cron tick after the anchor', () => {
+  it('does not re-fire on the next */15 cron tick after the anchor', () => {
     const now = new Date('2026-01-01T04:15:00.000Z'); // 09:45 IST
     expect(getCurrentIstMinutes(now)).toBe(9 * 60 + 45);
+    expect(
+      shouldSendMisEmailNow({ sendTimeIst: '09:30' }, { now, windowMinutes: 15 })
+    ).toBe(false);
+  });
+
+  it('still matches a delayed run within the same */15 slot', () => {
+    const now = new Date('2026-01-01T04:10:00.000Z'); // 09:40 IST
     expect(
       shouldSendMisEmailNow({ sendTimeIst: '09:30' }, { now, windowMinutes: 15 })
     ).toBe(true);

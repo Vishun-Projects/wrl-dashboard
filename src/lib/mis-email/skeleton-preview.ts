@@ -9,6 +9,7 @@ import {
 } from '@/lib/mis-email/email-body-layout';
 import {
   buildDigestEmailHtml,
+  formatDigestSubject,
   formatReportPeriod,
   MIS_EMAIL_THEME,
 } from '@/lib/mis-email/email-template';
@@ -62,10 +63,6 @@ function resolveSkeletonAttachmentFilenames(
   return filenames;
 }
 
-function formatDigestSubject(date = new Date()): string {
-  return `WRL MIS Reports — ${misExportDateLabel(date)}`;
-}
-
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -80,7 +77,14 @@ function skeletonBar(widthPercent = 55): string {
 
 function skeletonMetricCellBg(metricHeader: string): string | null {
   const key = metricHeader.trim().toLowerCase();
-  if (key === '>15 days') return '#fecaca';
+  if (key === '>15days' || key === '>15 days') return '#fecaca';
+  if (key === '% >7 days') return '#fee2e2';
+  return null;
+}
+
+function skeletonKeyAccountMetricCellBg(metricHeader: string): string | null {
+  const key = metricHeader.trim().toLowerCase();
+  // Key Account >15days stays plain (no green/yellow/red); %>7 keeps alert tint.
   if (key === '% >7 days') return '#fee2e2';
   return null;
 }
@@ -110,11 +114,10 @@ function buildSkeletonPerformanceTable(params: {
     'Total calls',
     'Total solved',
     '# open calls',
-    '≤2 days',
-    '3-7 days',
-    '8-15 days',
-    '>15 days',
-    'Part pending',
+    '<2 days',
+    '>3 days',
+    '>7 days',
+    '>15days',
     '# of active Eng.',
   ].slice(0, params.metricColumns);
 
@@ -204,16 +207,23 @@ function buildSkeletonKeyAccountTable(
   const headerStyle = `padding:6px 8px;font-family:${t.fontInline};font-size:10px;font-weight:bold;line-height:1.3;color:#ffffff;background-color:#0070C0;border:1px solid ${t.border};text-align:center;`;
   const labelStyle = `padding:6px 8px;font-family:${t.fontInline};font-size:10px;line-height:1.35;color:${t.fgPrimary};border:1px solid ${t.border};text-align:left;font-weight:bold;`;
   const cellBaseStyle = `padding:8px 6px;font-family:${t.fontInline};font-size:10px;border:1px solid ${t.border};text-align:center;`;
-  const metricHeaders = ['Total calls', 'Total solved', '# open calls', '<2 days', '2-7 days', '7-15 days', '>15 days', '% >7 days', '# of active Eng.'];
+  const metricHeaders = [
+    'Total calls',
+    'Total solved',
+    '# open calls',
+    '<2 days',
+    '>3 days',
+    '>7 days',
+    '>15days',
+    '% >7 days',
+  ];
 
-  const metricCount = 9;
+  const metricCount = metricHeaders.length;
   const header = `
     <tr>
       <th style="${headerStyle.replace('text-align:center;', 'text-align:left;')}">Region</th>
       <th style="${headerStyle.replace('text-align:center;', 'text-align:left;')}">Key Account</th>
-      ${['Total calls', 'Total solved', '# open calls', '<2 days', '2-7 days', '7-15 days', '>15 days', '% >7 days', '# of active Eng.']
-        .map((h) => `<th style="${headerStyle}">${h}</th>`)
-        .join('')}
+      ${metricHeaders.map((h) => `<th style="${headerStyle}">${h}</th>`).join('')}
     </tr>`;
 
   const bodyRows: string[] = [];
@@ -247,7 +257,7 @@ function buildSkeletonKeyAccountTable(
         }</td>
         ${Array.from({ length: metricCount })
           .map((_, col) => {
-            const metricBg = skeletonMetricCellBg(metricHeaders[col] ?? '');
+            const metricBg = skeletonKeyAccountMetricCellBg(metricHeaders[col] ?? '');
             const cellBg = metricBg ?? '#ffffff';
             return `<td bgcolor="${cellBg}" style="${cellBaseStyle}background-color:${cellBg};">${skeletonBar(barWidth + (col % 2) * 6)}</td>`;
           })
@@ -292,12 +302,12 @@ function buildSkeletonSectionHtmlMap(
           { label: 'West zone' },
           { label: 'All', isGrand: true },
         ],
-        metricColumns: 9,
+        metricColumns: 8,
       });
     } else if (id === 'branch_performance') {
       map[id] = buildSkeletonPerformanceTable({
         title: 'Branch-wise Performance',
-        labelColumn: 'Branch',
+        labelColumn: 'Branches',
         rowLabels: [
           { label: 'Branch' },
           { label: 'Branch' },
@@ -305,7 +315,7 @@ function buildSkeletonSectionHtmlMap(
           { label: 'Branch' },
           { label: 'Branch' },
         ],
-        metricColumns: 9,
+        metricColumns: 8,
       });
     } else if (id === 'key_account_performance') {
       map[id] = buildSkeletonKeyAccountTable(keyAccountsByZone, mergeRegionCells);
@@ -369,7 +379,7 @@ export function buildMisEmailSkeletonPreview(params: {
   }, { forPreview: true });
 
   return {
-    subject: formatDigestSubject(),
+    subject: formatDigestSubject(dateRange.endDate),
     scopeLabel: params.scopeLabel,
     dateRange,
     dateRangeLabel: formatReportPeriod(dateRange),

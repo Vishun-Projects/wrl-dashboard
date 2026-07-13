@@ -16,35 +16,23 @@ const sampleRange: DigestDateRange = {
 };
 
 describe('formatRecipientGreeting', () => {
-  it('uses first name for normal names', () => {
-    expect(formatRecipientGreeting('Vishnu Vishwakarma')).toBe('Dear Vishnu,');
-  });
-
-  it('falls back for gibberish test names', () => {
-    expect(formatRecipientGreeting('aaaaaasdfghjk')).toBe('Dear Colleague,');
-    expect(formatRecipientGreeting('asdfghjk')).toBe('Dear Colleague,');
-  });
-
-  it('falls back to email local-part when name is gibberish', () => {
-    expect(formatRecipientGreeting('aaaaaasdfghjk', 'vishnu@wrl.com')).toBe('Dear Vishnu,');
-    expect(
-      formatRecipientGreeting('aaaaaasdfghjk', 'vishnu.vishwakarma@westernequipments.com')
-    ).toBe('Dear Vishnu,');
-  });
-
-  it('rejects username handles copied from email local-part', () => {
-    expect(
-      formatRecipientGreeting('vishunvishwakarma90211', 'vishunvishwakarma90211@gmail.com')
-    ).toBe('Dear Colleague,');
-    expect(formatRecipientGreeting('Vishnu Vishwakarma', 'vishunvishwakarma90211@gmail.com')).toBe(
-      'Dear Vishnu,'
-    );
+  it('uses fixed Zonal Heads greeting', () => {
+    expect(formatRecipientGreeting('Vishnu Vishwakarma')).toBe('Dear Zonal Heads,');
+    expect(formatRecipientGreeting('aaaaaasdfghjk')).toBe('Dear Zonal Heads,');
+    expect(formatRecipientGreeting('anyone', 'vishnu@wrl.com')).toBe('Dear Zonal Heads,');
   });
 });
 
 describe('formatReportPeriod', () => {
   it('formats end date as month and year', () => {
     expect(formatReportPeriod(sampleRange)).toBe('July 2026');
+  });
+});
+
+describe('formatDigestSubject', () => {
+  it('formats as Daily MIS Report as on DD-MM-YYYY', async () => {
+    const { formatDigestSubject } = await import('@/lib/mis-email/email-template');
+    expect(formatDigestSubject('2026-07-03')).toBe('Daily MIS Report as on 03-07-2026');
   });
 });
 
@@ -77,7 +65,8 @@ describe('buildDigestEmailHtml', () => {
   });
 
   it('includes greeting, period, and scope', () => {
-    expect(html).toContain('Dear Vishnu,');
+    expect(html).toContain('Dear Zonal Heads,');
+    expect(html).toContain('Please find enclosed daily MIS Report.');
     expect(html).toContain('July 2026');
     expect(html).toContain('All branches');
     expect(html).toContain('href="https://wrl-dashboard.vercel.app/report"');

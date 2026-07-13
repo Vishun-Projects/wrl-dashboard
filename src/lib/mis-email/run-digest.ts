@@ -3,7 +3,6 @@ import { buildMisEmailPayload } from '@/lib/mis-email/compose-digest';
 import type { DigestDateRange } from '@/lib/mis-email/fetch-digest-data';
 import {
   DEFAULT_MIS_EMAIL_PREFERENCES,
-  normalizeMisEmailSendTime,
   resolveMisEmailSendTimeIst,
   resolveDigestDateRangeForPreferences,
   resolveExtraDigestEmails,
@@ -19,11 +18,13 @@ import {
 import { sendDigestEmail } from '@/lib/mis-email/send';
 import { resolveUserDigestScope } from '@/lib/mis-email/user-scope';
 import {
+  hasSuccessfulRoutingSendInSlot,
   listMatchingMisEmailRoutingRulesForResolvedClients,
   listMisEmailRoutingRules,
   logMisEmailRoutingSendAttempt,
   resolveRoutingClientNamesForScope,
   resolveRoutingScopeForOfficeIds,
+  resolveRoutingScheduleSlotStart,
   shouldTriggerRoutingRuleNow,
 } from '@/lib/mis-email/routing-rules';
 
@@ -278,78 +279,95 @@ export async function runMisEmailDigest(): Promise<DigestRunResult> {
       continue;
     }
 
-    for (const rule of matchingRules) {
-      if (!rule.autoSendEnabled) {
-        skipped.push({
-          recipientId: recipient.id,
-          reason: `Auto-send disabled by HOD routing rule (${rule.zone || '*'} / ${rule.branch || '*'} / ${rule.client || '*'})`,
-        });
-        await logMisEmailRoutingSendAttempt({
-          ruleId: rule.id,
-          recipientId: recipient.id,
-          recipientEmail: recipient.email,
-          sentTo: recipient.email,
-          status: 'skipped',
-          error: 'Auto-send disabled',
-        });
-        continue;
-      }
-      const personalSendTime = normalizeMisEmailSendTime(
-        recipient.mis_email_preferences.sendTimeIst
-      );
-      const effectiveSendTime = personalSendTime ?? rule.scheduleAnchorTimeIst;
+    // Prefer the best-scoring match only (same as manual send) — avoid duplicate SMTP
+    // when catch-all + zone/branch rules both match.
+    const rule = matchingRules[0];
+    if (!rule) {
+      continue;
+    }
+
+    if (!rule.autoSendEnabled) {
+      skipped.push({
+        recipientId: recipient.id,
+        reason: `Auto-send disabled by HOD routing rule (${rule.zone || '*'} / ${rule.branch || '*'} / ${rule.client || '*'})`,
+      });
+      await logMisEmailRoutingSendAttempt({
+        ruleId: rule.id,
+        recipientId: recipient.id,
+        recipientEmail: recipient.email,
+        sentTo: recipient.email,
+        status: 'skipped',
+        error: 'Auto-send disabled',
+      });
+    } else {
+      // Personal prefs default to 09:30 — do not fall back to rule 07:00 when unset.
+      const effectiveSendTime = resolveMisEmailSendTimeIst(recipient.mis_email_preferences);
       if (
         !shouldTriggerRoutingRuleNow(rule, {
           windowMinutes: scheduleWindowMinutes,
-          // Saved personal digest time wins over rule anchor (fixes 09:30 ignored by 07:00 catch-all).
-          sendTimeIst: personalSendTime,
+          sendTimeIst: effectiveSendTime,
         })
       ) {
         skipped.push({
           recipientId: recipient.id,
           reason: `Rule not due now (send ${effectiveSendTime} IST · rule anchor ${rule.scheduleAnchorTimeIst} · every ${rule.scheduleIntervalMinutes}m)`,
         });
-        continue;
-      }
-
-      const toEmails = [...new Set(rule.toEmails.map((email) => email.trim()).filter(Boolean))];
-      if (toEmails.length === 0) {
-        skipped.push({
-          recipientId: recipient.id,
-          reason: `Routing rule has no To recipients (${rule.zone || '*'} / ${rule.branch || '*'} / ${rule.client || '*'})`,
+      } else {
+        const slotStart = resolveRoutingScheduleSlotStart(rule, {
+          sendTimeIst: effectiveSendTime,
         });
-        continue;
-      }
-      const ccEmails = [...new Set(rule.ccEmails.map((email) => email.trim()).filter(Boolean))];
-      const sentToLabel = toEmails.join(', ');
-      try {
-        const result = await sendForRecipient(recipient, {
-          to: toEmails,
-          cc: ccEmails,
-        });
-        sent.push(result);
-        await logMisEmailRoutingSendAttempt({
-          ruleId: rule.id,
-          recipientId: recipient.id,
-          recipientEmail: recipient.email,
-          sentTo: sentToLabel,
-          status: 'sent',
-        });
-        console.log(
-          `[mis-email] Sent to ${sentToLabel}${ccEmails.length ? ` cc ${ccEmails.join(', ')}` : ''} (${result.attachments.length} attachments, ${result.dateRange.label})`
-        );
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        failed.push({ recipientId: recipient.id, email: sentToLabel, error: message });
-        await logMisEmailRoutingSendAttempt({
-          ruleId: rule.id,
-          recipientId: recipient.id,
-          recipientEmail: recipient.email,
-          sentTo: sentToLabel,
-          status: 'failed',
-          error: message,
-        });
-        console.error(`[mis-email] Failed for ${sentToLabel}:`, message);
+        if (
+          await hasSuccessfulRoutingSendInSlot({
+            ruleId: rule.id,
+            recipientId: recipient.id,
+            since: slotStart,
+          })
+        ) {
+          skipped.push({
+            recipientId: recipient.id,
+            reason: `Already sent for this schedule slot (since ${slotStart.toISOString()} · ${effectiveSendTime} IST)`,
+          });
+        } else {
+          const toEmails = [...new Set(rule.toEmails.map((email) => email.trim()).filter(Boolean))];
+          if (toEmails.length === 0) {
+            skipped.push({
+              recipientId: recipient.id,
+              reason: `Routing rule has no To recipients (${rule.zone || '*'} / ${rule.branch || '*'} / ${rule.client || '*'})`,
+            });
+          } else {
+            const ccEmails = [...new Set(rule.ccEmails.map((email) => email.trim()).filter(Boolean))];
+            const sentToLabel = toEmails.join(', ');
+            try {
+              const result = await sendForRecipient(recipient, {
+                to: toEmails,
+                cc: ccEmails,
+              });
+              sent.push(result);
+              await logMisEmailRoutingSendAttempt({
+                ruleId: rule.id,
+                recipientId: recipient.id,
+                recipientEmail: recipient.email,
+                sentTo: sentToLabel,
+                status: 'sent',
+              });
+              console.log(
+                `[mis-email] Sent to ${sentToLabel}${ccEmails.length ? ` cc ${ccEmails.join(', ')}` : ''} (${result.attachments.length} attachments, ${result.dateRange.label})`
+              );
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              failed.push({ recipientId: recipient.id, email: sentToLabel, error: message });
+              await logMisEmailRoutingSendAttempt({
+                ruleId: rule.id,
+                recipientId: recipient.id,
+                recipientEmail: recipient.email,
+                sentTo: sentToLabel,
+                status: 'failed',
+                error: message,
+              });
+              console.error(`[mis-email] Failed for ${sentToLabel}:`, message);
+            }
+          }
+        }
       }
     }
 

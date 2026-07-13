@@ -157,8 +157,8 @@ export function shouldSendMisEmailNow(
   const nowMinutes = getCurrentIstMinutes(options?.now);
   const targetMinutes = misEmailTimeToMinutes(resolveMisEmailSendTimeIst(prefs));
   const windowMinutes = Math.max(1, Math.floor(options?.windowMinutes ?? 15));
-  // Inclusive upper bound so the next */15 cron tick still fires if the anchor tick was skipped (lock).
-  return nowMinutes >= targetMinutes && nowMinutes <= targetMinutes + windowMinutes;
+  // Half-open window [anchor, anchor+window): with */15 cron, 09:30 matches and 09:45 does not.
+  return nowMinutes >= targetMinutes && nowMinutes < targetMinutes + windowMinutes;
 }
 
 export function parseMisEmailPreferences(raw: unknown): MisEmailPreferences {

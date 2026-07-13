@@ -11,6 +11,8 @@ const resolveRoutingClientNamesForScope = vi.fn();
 const listMatchingMisEmailRoutingRulesForResolvedClients = vi.fn();
 const shouldTriggerRoutingRuleNow = vi.fn();
 const logMisEmailRoutingSendAttempt = vi.fn();
+const resolveRoutingScheduleSlotStart = vi.fn(() => new Date('2026-07-08T04:00:00.000Z'));
+const hasSuccessfulRoutingSendInSlot = vi.fn(async () => false);
 
 vi.mock('@/lib/mis-email/recipients', () => ({
   loadDigestRecipients: (...args: unknown[]) => loadDigestRecipients(...args),
@@ -32,7 +34,7 @@ vi.mock('@/lib/mis-email/preferences', () => ({
   normalizeMisEmailSendTime: vi.fn((value: unknown) =>
     typeof value === 'string' && /^\d{2}:\d{2}$/.test(value) ? value : null
   ),
-  resolveMisEmailSendTimeIst: vi.fn(() => '07:00'),
+  resolveMisEmailSendTimeIst: vi.fn(() => '09:30'),
   resolveDigestDateRangeForPreferences: vi.fn(() => ({ label: 'Month to date' })),
   resolveExtraDigestEmails: vi.fn(() => []),
   shouldSendMisEmailNow: vi.fn(() => true),
@@ -47,6 +49,8 @@ vi.mock('@/lib/mis-email/routing-rules', () => ({
     listMatchingMisEmailRoutingRulesForResolvedClients(...args),
   shouldTriggerRoutingRuleNow: (...args: unknown[]) => shouldTriggerRoutingRuleNow(...args),
   logMisEmailRoutingSendAttempt: (...args: unknown[]) => logMisEmailRoutingSendAttempt(...args),
+  resolveRoutingScheduleSlotStart: () => resolveRoutingScheduleSlotStart(),
+  hasSuccessfulRoutingSendInSlot: () => hasSuccessfulRoutingSendInSlot(),
 }));
 
 const disabledRule = {
@@ -73,6 +77,17 @@ const enabledRule = {
   autoSendEnabled: true,
 };
 
+const catchAllRule = {
+  ...enabledRule,
+  id: 'r-catch-all',
+  zone: '',
+  branch: '',
+  client: '',
+  toEmails: ['catch@example.com'],
+  ccEmails: [],
+  scheduleAnchorTimeIst: '07:00',
+};
+
 describe('runMisEmailDigest routing override', () => {
   beforeEach(() => {
     loadDigestRecipients.mockReset();
@@ -86,6 +101,9 @@ describe('runMisEmailDigest routing override', () => {
     listMatchingMisEmailRoutingRulesForResolvedClients.mockReset();
     shouldTriggerRoutingRuleNow.mockReset();
     logMisEmailRoutingSendAttempt.mockReset();
+    resolveRoutingScheduleSlotStart.mockClear();
+    hasSuccessfulRoutingSendInSlot.mockReset();
+    hasSuccessfulRoutingSendInSlot.mockResolvedValue(false);
 
     resolveRoutingScopeForOfficeIds.mockResolvedValue({
       zones: ['NORTH'],
@@ -148,6 +166,10 @@ describe('runMisEmailDigest routing override', () => {
 
     const { runMisEmailDigest } = await import('@/lib/mis-email/run-digest');
     const result = await runMisEmailDigest();
+    expect(shouldTriggerRoutingRuleNow).toHaveBeenCalledWith(
+      enabledRule,
+      expect.objectContaining({ sendTimeIst: '09:30' })
+    );
     expect(sendDigestEmail).toHaveBeenCalledTimes(1);
     expect(sendDigestEmail).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -157,5 +179,48 @@ describe('runMisEmailDigest routing override', () => {
     );
     expect(result.sent).toHaveLength(1);
     expect(result.sent[0].sentTo).toBe('to@example.com');
+  });
+
+  it('sends only via the best matching rule when multiple rules match', async () => {
+    loadDigestRecipients.mockResolvedValue([
+      {
+        id: 'u1',
+        name: 'User',
+        email: 'u@example.com',
+        role: 'branch_manager',
+        office_ids: ['1'],
+        permissions: [],
+        mis_email_preferences: {},
+      },
+    ]);
+    loadDigestRecipientByEmail.mockResolvedValue(null);
+    loadAppUserProfileByEmail.mockResolvedValue(null);
+    // Sorted best-first (zone rule before catch-all), as listMatching does.
+    listMatchingMisEmailRoutingRulesForResolvedClients.mockReturnValue([
+      enabledRule,
+      catchAllRule,
+    ]);
+    listMisEmailRoutingRules.mockResolvedValue([enabledRule, catchAllRule]);
+    shouldTriggerRoutingRuleNow.mockReturnValue(true);
+    buildMisEmailPayload.mockResolvedValue({
+      preview: { attachments: ['a.xlsx'], subject: 'Subject' },
+      emailAttachments: [],
+      scopeLabel: 'Scope',
+      bodyHtml: '',
+      bodyPlainText: '',
+      dateRange: { label: 'Month to date' },
+    });
+    sendDigestEmail.mockResolvedValue({ messageId: 'm1' });
+
+    const { runMisEmailDigest } = await import('@/lib/mis-email/run-digest');
+    const result = await runMisEmailDigest();
+    expect(sendDigestEmail).toHaveBeenCalledTimes(1);
+    expect(sendDigestEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'to@example.com',
+        cc: ['cc@example.com'],
+      })
+    );
+    expect(result.sent).toHaveLength(1);
   });
 });
