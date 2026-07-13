@@ -10,6 +10,10 @@ import {
   MIS_UPLOAD_CHUNK_BYTES,
   shouldUseChunkedMisUpload,
 } from '@/lib/mis-client-import/upload-chunk-constants';
+import {
+  peekAccessTokenMeta,
+  reportMisUploadTrace,
+} from '@/lib/mis-client-import/upload-trace';
 
 export function extractMisApiErrorMessage(data: unknown, status?: number): string {
   if (status === 413) {
@@ -190,7 +194,23 @@ async function postMisClientUploadDirect(params: {
       '/api/mis-client-import/upload')
     : '/api/mis-client-import/upload';
 
+  let uploadUrlHost: string | null = null;
+  try {
+    uploadUrlHost = external ? new URL(url).host : (typeof window !== 'undefined' ? window.location.host : 'same-origin');
+  } catch {
+    uploadUrlHost = url;
+  }
+
   if (external && !params.accessToken?.trim()) {
+    reportMisUploadTrace({
+      phase: 'direct_missing_token',
+      fileName: params.file.name,
+      fileSize: params.file.size,
+      sourceCode: params.sourceCode,
+      uploadMode: 'direct',
+      uploadUrlHost,
+      hasAccessToken: false,
+    });
     throw new Error('Sign in again to upload large files to the VPS.');
   }
 
@@ -201,33 +221,82 @@ async function postMisClientUploadDirect(params: {
     formData.append('accessToken', params.accessToken);
   }
 
+  reportMisUploadTrace({
+    phase: 'direct_start',
+    fileName: params.file.name,
+    fileSize: params.file.size,
+    sourceCode: params.sourceCode,
+    uploadMode: 'direct',
+    uploadUrlHost,
+    hasAccessToken: Boolean(params.accessToken?.trim()),
+    tokenMeta: peekAccessTokenMeta(params.accessToken),
+  });
+
   const progressBase = {
     fileIndex: params.fileIndex,
     fileTotal: params.fileTotal,
     fileName: params.file.name,
   };
 
-  const res = await axios.post(url, formData, {
-    withCredentials: !external,
-    headers,
-    maxBodyLength: Infinity,
-    maxContentLength: Infinity,
-    timeout: 300_000,
-    onUploadProgress: (event) => {
-      const total = event.total && event.total > 0 ? event.total : params.file.size;
-      const sent = Math.min(event.loaded, total);
-      const uploadDone = total > 0 && sent >= total;
-      params.onProgress?.({
-        sent: uploadDone ? total : sent,
-        total,
-        chunkIndex: 1,
-        chunkTotal: 1,
-        phase: uploadDone ? 'processing' : 'uploading',
-        ...progressBase,
-      });
-    },
-  });
-  return res.data as Record<string, unknown>;
+  try {
+    const res = await axios.post(url, formData, {
+      withCredentials: !external,
+      headers,
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      timeout: 300_000,
+      onUploadProgress: (event) => {
+        const total = event.total && event.total > 0 ? event.total : params.file.size;
+        const sent = Math.min(event.loaded, total);
+        const uploadDone = total > 0 && sent >= total;
+        params.onProgress?.({
+          sent: uploadDone ? total : sent,
+          total,
+          chunkIndex: 1,
+          chunkTotal: 1,
+          phase: uploadDone ? 'processing' : 'uploading',
+          ...progressBase,
+        });
+      },
+    });
+    reportMisUploadTrace({
+      phase: 'direct_ok',
+      fileName: params.file.name,
+      fileSize: params.file.size,
+      sourceCode: params.sourceCode,
+      uploadMode: 'direct',
+      uploadUrlHost,
+      hasAccessToken: Boolean(params.accessToken?.trim()),
+      httpStatus: res.status,
+    });
+    return res.data as Record<string, unknown>;
+  } catch (err) {
+    const status = axios.isAxiosError(err) ? (err.response?.status ?? null) : null;
+    let responseError: string | null = null;
+    if (axios.isAxiosError(err) && err.response?.data) {
+      const data = err.response.data;
+      if (typeof data === 'string') responseError = data.slice(0, 300);
+      else if (data && typeof data === 'object') {
+        const rec = data as Record<string, unknown>;
+        responseError = String(rec.error ?? rec.message ?? JSON.stringify(data)).slice(0, 300);
+      }
+    }
+    reportMisUploadTrace({
+      phase: 'direct_fail',
+      fileName: params.file.name,
+      fileSize: params.file.size,
+      sourceCode: params.sourceCode,
+      uploadMode: 'direct',
+      uploadUrlHost,
+      hasAccessToken: Boolean(params.accessToken?.trim()),
+      tokenMeta: peekAccessTokenMeta(params.accessToken),
+      httpStatus: status,
+      responseError,
+      axiosCode: axios.isAxiosError(err) ? (err.code ?? null) : null,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 }
 
 function isDirectUploadNetworkFailure(err: unknown): boolean {
@@ -385,19 +454,25 @@ export async function readMisUploadError(err: unknown): Promise<string> {
     }
     const status = err.response?.status;
     const data = err.response?.data;
+    let message: string;
     if (data instanceof Blob) {
       try {
         const text = await data.text();
         try {
-          return extractMisApiErrorMessage(JSON.parse(text) as unknown, status);
+          message = extractMisApiErrorMessage(JSON.parse(text) as unknown, status);
         } catch {
-          return extractMisApiErrorMessage(text, status);
+          message = extractMisApiErrorMessage(text, status);
         }
       } catch {
-        return extractMisApiErrorMessage(null, status);
+        message = extractMisApiErrorMessage(null, status);
       }
+    } else {
+      message = extractMisApiErrorMessage(data, status);
     }
-    return extractMisApiErrorMessage(data, status);
+    if (status && misUploadUsesExternalHost()) {
+      return `VPS upload HTTP ${status}: ${message}`;
+    }
+    return message;
   }
   return 'Upload failed';
 }

@@ -13,6 +13,10 @@ import {
   isBrowserOnVercel,
   misUploadUsesExternalHost,
 } from '@/lib/mis-client-import/upload-limits';
+import {
+  peekAccessTokenMeta,
+  reportMisUploadTrace,
+} from '@/lib/mis-client-import/upload-trace';
 import { createClient } from '@/lib/supabase/client';
 import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
 import { feedback } from '@/lib/ui/feedback';
@@ -187,6 +191,28 @@ export default function MisClientImportToolbar({
         data: { session },
       } = await supabase.auth.getSession();
       const accessToken = session?.access_token ?? null;
+      reportMisUploadTrace({
+        phase: 'toolbar_session',
+        sourceCode: uploadSource,
+        fileName: files[0]?.name,
+        fileSize: files[0]?.size,
+        hasAccessToken: Boolean(accessToken?.trim()),
+        tokenMeta: peekAccessTokenMeta(accessToken),
+        uploadUrlHost: misUploadUsesExternalHost()
+          ? (() => {
+              try {
+                return new URL(
+                  process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL ?? ''
+                ).host;
+              } catch {
+                return process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL ?? null;
+              }
+            })()
+          : typeof window !== 'undefined'
+            ? window.location.host
+            : null,
+        uploadMode: misUploadUsesExternalHost() ? 'direct' : 'chunked',
+      });
       if (misUploadUsesExternalHost() && !accessToken) {
         feedback.dismiss(loadingId);
         feedback.actionFailed('Sign in again to upload large files to the VPS.');
