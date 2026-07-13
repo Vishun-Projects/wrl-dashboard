@@ -213,7 +213,7 @@ export function emptyFileMessage(
       ? 'Upload Coke CDMS Excel under Coke (header row is after filter rows).'
       : null,
     sniffedSource === 'cadbury'
-      ? 'Upload Cadbury VMS pipe CSV (VMSComplaintDetailsRpt.csv), packed .wrlmis, or Excel (.xls/.xlsx).'
+      ? 'Upload Cadbury VMS pipe CSV (VMSComplaintDetailsRpt.csv) or Excel (.xls/.xlsx).'
       : null,
     sniffedSource === 'unknown'
       ? 'Check that the file is not empty and you selected the correct import source.'

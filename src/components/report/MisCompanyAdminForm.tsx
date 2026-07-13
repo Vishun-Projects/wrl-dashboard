@@ -157,7 +157,6 @@ export default function MisCompanyAdminForm({ canEdit, onSaved }: Props) {
             <code className="text-slate-600">VMSComplaintDetailsRpt.csv</code>,{' '}
             <code className="text-slate-600">.TicketNumber</code>,{' '}
             <code className="text-slate-600">VDate</code>, …) or Excel.
-            Run <code className="text-slate-600">npm run db:seed-mis-client</code> to reset built-in configs.
           </p>
           <div className="flex flex-wrap items-end gap-2">
             <label className="flex flex-col gap-0.5">
