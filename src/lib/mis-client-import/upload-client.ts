@@ -190,9 +190,15 @@ async function postMisClientUploadDirect(params: {
       '/api/mis-client-import/upload')
     : '/api/mis-client-import/upload';
 
+  if (external && !params.accessToken?.trim()) {
+    throw new Error('Sign in again to upload large files to the VPS.');
+  }
+
   const headers: Record<string, string> = {};
   if (external && params.accessToken) {
     headers.Authorization = `Bearer ${params.accessToken}`;
+    // Backup if a proxy strips Authorization on multipart requests.
+    formData.append('accessToken', params.accessToken);
   }
 
   const progressBase = {

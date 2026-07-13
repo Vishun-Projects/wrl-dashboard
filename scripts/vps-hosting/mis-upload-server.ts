@@ -16,6 +16,7 @@ import {
 } from '@/lib/mis-client-import/upload-standalone-auth';
 
 const root = resolve(__dirname, '../..');
+config({ path: resolve(root, '.env.mis-upload') });
 config({ path: resolve(root, '.env.local') });
 config({ path: resolve(root, '.env') });
 config({ path: resolve(root, '.env.mis-email') });
@@ -79,28 +80,41 @@ createServer(async (req, res) => {
 
   try {
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
+    let token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+
+    // Multipart body may include accessToken if a proxy stripped Authorization.
+    const formData = await readFormData(req);
+    if (!token) {
+      const fromForm = formData.get('accessToken');
+      if (typeof fromForm === 'string' && fromForm.trim()) {
+        token = fromForm.trim();
+      }
+    }
+
+    if (!token) {
+      console.warn('[mis-upload-server] 401 — missing Bearer / accessToken');
       res.writeHead(401, { ...baseHeaders, 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Unauthorized' }));
+      res.end(JSON.stringify({ error: 'Unauthorized — missing session token' }));
       return;
     }
 
-    const token = authHeader.slice(7).trim();
     const userId = await resolveMisUploadUserId(token);
     if (!userId) {
+      console.warn(
+        '[mis-upload-server] 401 — token rejected (check SUPABASE_JWT_SECRET / SERVICE_ROLE_KEY in .env.mis-upload)'
+      );
       res.writeHead(401, { ...baseHeaders, 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Unauthorized' }));
+      res.end(JSON.stringify({ error: 'Unauthorized — invalid or expired session' }));
       return;
     }
 
     const allowed = await assertMisUploadAccess(userId);
     if (!allowed) {
       res.writeHead(403, { ...baseHeaders, 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Forbidden' }));
+      res.end(JSON.stringify({ error: 'Forbidden — missing client import permission' }));
       return;
     }
 
-    const formData = await readFormData(req);
     const result = await handleMisClientUploadFormData({ userId, formData });
     res.writeHead(result.status, { ...baseHeaders, 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result.body));

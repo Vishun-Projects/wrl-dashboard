@@ -112,9 +112,22 @@ run_install_on_machine() {
         source "${root}/.env.vps-setup"
         echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}"
         echo "SUPABASE_JWT_SECRET=${JWT_SECRET}"
+      elif [[ -f "${ROOT}/.env.vps-setup" ]]; then
+        # shellcheck disable=SC1090
+        source "${ROOT}/.env.vps-setup"
+        echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}"
+        echo "SUPABASE_JWT_SECRET=${JWT_SECRET}"
       fi
     } >"${root}/.env.mis-upload"
     chmod 600 "${root}/.env.mis-upload"
+  else
+    echo "==> ${root}/.env.mis-upload already exists"
+    if ! grep -q '^SUPABASE_JWT_SECRET=.\+' "${root}/.env.mis-upload" 2>/dev/null; then
+      echo "WARN: SUPABASE_JWT_SECRET missing/empty — uploads will return Unauthorized" >&2
+    fi
+    if ! grep -q '^SUPABASE_SERVICE_ROLE_KEY=.\+' "${root}/.env.mis-upload" 2>/dev/null; then
+      echo "WARN: SUPABASE_SERVICE_ROLE_KEY missing/empty — token fallback verify will fail" >&2
+    fi
   fi
 
   cd "${root}"

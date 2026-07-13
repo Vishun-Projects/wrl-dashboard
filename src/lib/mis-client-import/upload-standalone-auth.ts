@@ -16,12 +16,27 @@ export async function resolveMisUploadUserId(token: string): Promise<string | nu
     if (userId) return userId;
   }
 
-  const {
-    data: { user },
-    error,
-  } = await supabaseAdmin.auth.getUser(trimmed);
-  if (error || !user) return null;
-  return user.id;
+  try {
+    const {
+      data: { user },
+      error,
+    } = await supabaseAdmin.auth.getUser(trimmed);
+    if (error || !user) {
+      console.warn(
+        '[mis-upload-auth] getUser failed:',
+        error?.message ?? 'no user',
+        canVerifyJwtLocally() ? '(local JWT verify also failed)' : '(no SUPABASE_JWT_SECRET)'
+      );
+      return null;
+    }
+    return user.id;
+  } catch (err) {
+    console.warn(
+      '[mis-upload-auth] getUser threw:',
+      err instanceof Error ? err.message : err
+    );
+    return null;
+  }
 }
 
 export async function assertMisUploadAccess(userId: string): Promise<boolean> {
