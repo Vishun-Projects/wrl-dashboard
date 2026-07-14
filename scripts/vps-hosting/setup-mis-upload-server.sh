@@ -25,6 +25,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=${root}
 Environment=MIS_UPLOAD_PORT=${UPLOAD_PORT}
+Environment=NODE_OPTIONS=--max-old-space-size=4096
 EnvironmentFile=-${root}/.env.mis-upload
 EnvironmentFile=-${root}/.env.mis-email
 ExecStart=/usr/bin/npx tsx ${root}/scripts/vps-hosting/mis-upload-server.ts

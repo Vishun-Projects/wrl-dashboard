@@ -2,6 +2,17 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 let adminClient: SupabaseClient | null = null;
 
+function resolveRealtimeTransport(): unknown {
+  if (typeof WebSocket !== 'undefined') return undefined;
+  try {
+    // Node < 22: supabase-js realtime requires an explicit WebSocket implementation.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('ws');
+  } catch {
+    return undefined;
+  }
+}
+
 function getSupabaseAdmin(): SupabaseClient {
   if (adminClient) return adminClient;
 
@@ -19,11 +30,13 @@ function getSupabaseAdmin(): SupabaseClient {
     );
   }
 
+  const transport = resolveRealtimeTransport();
   adminClient = createClient(supabaseUrl, supabaseServiceKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
+    ...(transport ? { realtime: { transport: transport as typeof WebSocket } } : {}),
   });
   return adminClient;
 }

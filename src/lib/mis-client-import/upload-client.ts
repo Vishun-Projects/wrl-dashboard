@@ -30,7 +30,11 @@ export function extractMisApiErrorMessage(data: unknown, status?: number): strin
   if (data && typeof data === 'object') {
     const record = data as Record<string, unknown>;
     if (typeof record.error === 'string' && record.error.trim()) {
-      return record.error;
+      const detail =
+        typeof record.detail === 'string' && record.detail.trim()
+          ? `: ${record.detail.trim()}`
+          : '';
+      return `${record.error.trim()}${detail}`.slice(0, 500);
     }
     if (record.error && typeof record.error === 'object') {
       const nested = record.error as Record<string, unknown>;
@@ -278,7 +282,10 @@ async function postMisClientUploadDirect(params: {
       if (typeof data === 'string') responseError = data.slice(0, 300);
       else if (data && typeof data === 'object') {
         const rec = data as Record<string, unknown>;
-        responseError = String(rec.error ?? rec.message ?? JSON.stringify(data)).slice(0, 300);
+        const base = String(rec.error ?? rec.message ?? JSON.stringify(data));
+        const detail =
+          typeof rec.detail === 'string' && rec.detail.trim() ? `: ${rec.detail.trim()}` : '';
+        responseError = `${base}${detail}`.slice(0, 400);
       }
     }
     reportMisUploadTrace({

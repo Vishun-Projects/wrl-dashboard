@@ -2131,7 +2131,7 @@ export default function ReportPageClient() {
           rows: cachedHits.length,
           why: 'Matched ID/TRN/call ID/serial in shared/distribution/IndexedDB before API.',
         });
-        return;
+        return true;
       }
 
       skipCache = true;
@@ -2166,7 +2166,7 @@ export default function ReportPageClient() {
           rows: cached.data.length,
           why: 'In-memory Map for this queryKey+page; avoids waiting on SQL/API again.',
         });
-        return;
+        return true;
       }
     }
 
@@ -2244,7 +2244,7 @@ export default function ReportPageClient() {
           rows: corpusDerived.rows.length,
           total: corpusDerived.total,
         });
-        return;
+        return true;
       }
 
       const spanDays = corpusSpanDays(startDateStr, endDateStr);
@@ -2258,7 +2258,7 @@ export default function ReportPageClient() {
           setLoading(false);
           setLoadingPage(null);
         }
-        return;
+        return true;
       }
     }
 
@@ -2563,12 +2563,18 @@ export default function ReportPageClient() {
       prefetchAdjacentPages(p);
       succeeded = true;
     } catch (err: any) {
-      if (axios.isCancel(err)) {
+      const aborted =
+        axios.isCancel(err) ||
+        err?.code === 'ERR_CANCELED' ||
+        err?.name === 'CanceledError' ||
+        err?.name === 'AbortError';
+      if (aborted) {
         reportPerf('fetchData', 'aborted (axios cancel)', opStart, {
           opId,
           why: 'AbortController: newer fetchData or navigation cancelled this request.',
         });
-        return false;
+        // Not a user-facing failure — a newer fetch owns the UI update.
+        return null;
       }
       const unauthorized = axios.isAxiosError(err) && err.response?.status === 401;
       if (unauthorized) {
@@ -2664,10 +2670,12 @@ export default function ReportPageClient() {
     if (readRegisterFromPostgresClient()) {
       registerPagesCacheRef.current.clear();
       const ok = await fetchData(1, { skipCache: true });
-      if (ok) {
-        feedback.refreshed();
-      } else {
+      // true = success; null = aborted by a newer fetch (ignore toast);
+      // false = real failure. Do not treat undefined/other as failure.
+      if (ok === false) {
         feedback.actionFailed('Failed to refresh report data');
+      } else if (ok !== null) {
+        feedback.refreshed();
       }
       return;
     }

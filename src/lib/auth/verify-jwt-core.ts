@@ -5,16 +5,34 @@ export async function verifyLocalAccessToken(token: string): Promise<string | nu
   const secret = process.env.SUPABASE_JWT_SECRET?.trim();
   if (!secret) return null;
 
+  const key = new TextEncoder().encode(secret);
+  const clockTolerance =
+    process.env.NODE_ENV === 'development' ? { clockTolerance: '7 days' as const } : {};
+
   try {
-    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret), {
+    const { payload } = await jwtVerify(token, key, {
       issuer: 'supabase',
       audience: 'authenticated',
-      // Local dev tokens are not refreshed (autoRefreshToken: false) — allow stale sessions.
-      ...(process.env.NODE_ENV === 'development' ? { clockTolerance: '7 days' as const } : {}),
+      ...clockTolerance,
     });
     return typeof payload.sub === 'string' ? payload.sub : null;
-  } catch {
-    return null;
+  } catch (strictErr) {
+    // Self-hosted tokens sometimes omit/ mismatch iss/aud — retry without those checks.
+    try {
+      const { payload } = await jwtVerify(token, key, clockTolerance);
+      return typeof payload.sub === 'string' ? payload.sub : null;
+    } catch (looseErr) {
+      const detail =
+        looseErr instanceof Error
+          ? looseErr.message
+          : strictErr instanceof Error
+            ? strictErr.message
+            : 'jwt verify failed';
+      if (process.env.MIS_UPLOAD_DEBUG_JWT === '1') {
+        console.warn('[verifyLocalAccessToken]', detail);
+      }
+      return null;
+    }
   }
 }
 

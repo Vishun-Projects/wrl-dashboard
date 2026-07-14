@@ -14,6 +14,9 @@ export async function resolveMisUploadUserId(token: string): Promise<string | nu
   if (canVerifyJwtLocally()) {
     const userId = await verifyLocalAccessToken(trimmed);
     if (userId) return userId;
+    console.warn(
+      '[mis-upload-auth] local JWT verify failed — falling back to auth.getUser (check SUPABASE_JWT_SECRET matches GoTrue)'
+    );
   }
 
   try {

@@ -119,9 +119,15 @@ createServer(async (req, res) => {
     res.writeHead(result.status, { ...baseHeaders, 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result.body));
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error('[mis-upload-server] error:', err);
     res.writeHead(500, { ...baseHeaders, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Upload failed' }));
+    res.end(
+      JSON.stringify({
+        error: 'Upload failed',
+        detail: message.slice(0, 500),
+      })
+    );
   }
 }).listen(PORT, '127.0.0.1', () => {
   console.log(`[mis-upload-server] listening on http://127.0.0.1:${PORT}${PATH}`);
