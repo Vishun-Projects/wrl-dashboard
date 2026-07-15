@@ -167,6 +167,7 @@ export function hotRowToRegisterRow(row: Record<string, unknown>): Record<string
     call_type: row.call_type,
     itemname: row.item_name,
     callsvserialno: row.serial,
+    WCO: row.wco,
     vcomplaint: row.complaint,
     Status: statusLabel,
     callstatus: statusLabel,

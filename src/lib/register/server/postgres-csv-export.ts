@@ -2,6 +2,7 @@ import 'server-only';
 
 import { withBulkReadClient } from '@/lib/read-model/db';
 import { formatRegisterExportDate } from '@/lib/register/export-dates';
+import { formatRegisterMajorMinor } from '@/lib/register/major-minor';
 import {
   buildRegisterListQuery,
   buildWhere,
@@ -55,6 +56,7 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
     row.vtrnno,
     row.vcclid ?? '',
     row.call_type,
+    formatRegisterMajorMinor(row),
     formatRegisterExportDate(row.logged_at),
     row.party_name,
     row.branch_name,
@@ -64,6 +66,7 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
     row.pincode,
     row.item_name,
     row.serial,
+    row.wco ?? '',
     row.engineer_name,
     row.complaint,
     statusText,

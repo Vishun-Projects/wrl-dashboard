@@ -8,8 +8,8 @@ cd "$INSTALL_ROOT"
 export PLAYWRIGHT_HEADED=false
 export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-${INSTALL_ROOT}/.playwright-browsers}"
 export NIGHTLY_ROOT="${INSTALL_ROOT}"
-# Default 3h — typical run ~1h; prevents multi-day stuck jobs blocking cron.
-export NIGHTLY_MAX_RUNTIME_SEC="${NIGHTLY_MAX_RUNTIME_SEC:-10800}"
+# Default 6h — spare-part EasyOCR verify can exceed 3h on busy days.
+export NIGHTLY_MAX_RUNTIME_SEC="${NIGHTLY_MAX_RUNTIME_SEC:-21600}"
 
 VENV="${INSTALL_ROOT}/.venv"
 if [[ ! -x "${VENV}/bin/python" ]]; then
@@ -46,6 +46,12 @@ if [[ "$rc" -eq 124 ]]; then
   pkill -9 -f '[c]hromium' 2>/dev/null || true
   rm -f "${INSTALL_ROOT}/logs/run_nightly.lock"
   exit 124
+fi
+
+# Drop generated data older than WARRANTY_RETENTION_DAYS (default 7)
+if [[ "$rc" -eq 0 ]]; then
+  "${VENV}/bin/python" "${INSTALL_ROOT}/scripts/cleanup_old_generated.py" \
+    || echo "cleanup warning (non-fatal)"
 fi
 
 exit "$rc"

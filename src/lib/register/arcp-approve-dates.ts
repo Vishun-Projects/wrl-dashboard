@@ -4,7 +4,7 @@ import {
   resolveArcpHoApprovedAt,
 } from '@/lib/read-model/arcp/dates';
 
-/** CRM: latest ARCP line per call for BM/HO approve resolution. */
+/** CRM: latest ARCP line per call — prefer Service Order (vucnno = vtrnno); ncode only if vucnno blank. */
 export const REGISTER_ARCP_PICK_OUTER_APPLY = `
 OUTER APPLY (
   SELECT TOP 1
@@ -19,9 +19,17 @@ OUTER APPLY (
     arcp.napproval1amount,
     arcp.napproval2amount
   FROM trdcalls10ARCP arcp (NOLOCK)
-  INNER JOIN trdcalls2fault tf (NOLOCK) ON arcp.ncalls2fault = tf.ncode
-  WHERE CAST(tf.ncalls AS VARCHAR(50)) = CAST(tc.ncode AS VARCHAR(50))
-    AND tf.nofficeid = tc.nofficeid
+  LEFT JOIN trdcalls2fault tf (NOLOCK) ON arcp.ncalls2fault = tf.ncode
+  WHERE (
+      NULLIF(LTRIM(RTRIM(CAST(arcp.vucnno AS VARCHAR(50)))), '') IS NOT NULL
+      AND UPPER(LTRIM(RTRIM(CAST(arcp.vucnno AS VARCHAR(50)))))
+        = UPPER(LTRIM(RTRIM(CAST(tc.vtrnno AS VARCHAR(50)))))
+    )
+    OR (
+      NULLIF(LTRIM(RTRIM(CAST(arcp.vucnno AS VARCHAR(50)))), '') IS NULL
+      AND CAST(tf.ncalls AS VARCHAR(50)) = CAST(tc.ncode AS VARCHAR(50))
+      AND tf.nofficeid = tc.nofficeid
+    )
   ORDER BY
     CASE
       WHEN NULLIF(LTRIM(RTRIM(CAST(arcp.dhoapproveddate AS VARCHAR(50)))), '') IS NOT NULL THEN 1
@@ -49,8 +57,17 @@ export const REGISTER_ARCP_PICK_LATERAL_SQL = `
 LEFT JOIN LATERAL (
   SELECT a.bm_approved_at, a.ho_approved_at
   FROM arcp_lines_hot a
-  WHERE a.call_no = CAST(h.ncode AS TEXT)
-    AND NOT a.is_rejected
+  WHERE NOT a.is_rejected
+    AND (
+      (
+        NULLIF(trim(a.vucnno), '') IS NOT NULL
+        AND upper(trim(a.vucnno)) = upper(trim(h.vtrnno))
+      )
+      OR (
+        NULLIF(trim(a.vucnno), '') IS NULL
+        AND a.call_no = CAST(h.ncode AS TEXT)
+      )
+    )
   ORDER BY
     CASE WHEN a.ho_approved_at IS NOT NULL THEN 1 ELSE 0 END DESC,
     a.ho_approved_at DESC NULLS LAST,

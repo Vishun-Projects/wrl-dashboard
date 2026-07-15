@@ -23,4 +23,5 @@ export const DEFAULT_MIS_EMAIL_CC_EMAILS: string[] = [
   'dipti.p@westernequipments.com',
   'mis.service@westernequipments.com',
   'vishnu.vishwakarma@westernequipments.com',
+  'uday.kavishwar@westernequipments.com',
 ];

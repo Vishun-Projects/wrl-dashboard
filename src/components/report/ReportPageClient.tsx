@@ -954,6 +954,10 @@ export default function ReportPageClient() {
         const serial = row.callsvserialno != null ? String(row.callsvserialno) : '';
         return serial ? <TruncatedText text={serial} className="font-mono" /> : '—';
       }
+      case 'WCO': {
+        const wco = row.WCO != null ? String(row.WCO).trim().toUpperCase() : '';
+        return wco === 'W' || wco === 'C' || wco === 'O' || wco === 'V' ? wco : '—';
+      }
       case 'serviceman':
         return resolveTechnicianDisplayName(row, technicianRoster);
       case 'vcomplaint':
@@ -1018,7 +1022,7 @@ export default function ReportPageClient() {
     if (key === 'UniqueCallNo') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] font-mono text-slate-400';
     if (key === 'vcclid') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] font-medium text-slate-900';
     if (key === 'PartyName') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] font-medium text-slate-800';
-    if (key === 'Pincode' || key === 'callsvserialno') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 font-mono text-[11px] text-slate-700';
+    if (key === 'Pincode' || key === 'callsvserialno' || key === 'WCO') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 font-mono text-[11px] text-slate-700';
     if (key === 'officename' || key === 'region' || key === 'account' || key === 'franchisee_name' || key === 'itemname') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-700';
     if (key === 'serviceman' || key === 'vinsttel1') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-900';
     if (key === 'vpersoncalling') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-600';
@@ -5294,7 +5298,7 @@ export default function ReportPageClient() {
                               };
 
                               return (
-                                <React.Fragment key={branch.officeId}>
+                                <React.Fragment key={`${region}::${branch.officeId}::${branch.branch}`}>
                                   <tr className={`${bgClass} transition-colors font-medium text-slate-900`}>
                                     <td className="p-2 border border-slate-300">
                                       <div className="flex items-center gap-1">
@@ -5329,7 +5333,7 @@ export default function ReportPageClient() {
                                   </tr>
 
                                   {isExpanded && children.map(child => (
-                                    <tr key={child.officeId} className="bg-bg-canvas/60 hover:bg-bg-canvas transition-colors text-slate-600 italic">
+                                    <tr key={`${region}::${branch.officeId}::${child.officeId}::${child.branch}`} className="bg-bg-canvas/60 hover:bg-bg-canvas transition-colors text-slate-600 italic">
                                       <td className="p-1.5 pl-8 border border-slate-300">
                                         <div className="flex items-center gap-2">
                                           <div className="w-1 h-1 rounded-full bg-slate-300" />

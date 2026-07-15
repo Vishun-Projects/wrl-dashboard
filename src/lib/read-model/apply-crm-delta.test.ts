@@ -21,6 +21,7 @@ function hotRow(overrides: Partial<HotRow> = {}): HotRow {
     account: 'Pepsi',
     item_name: null,
     serial: null,
+    wco: null,
     engineer_name: null,
     call_type: 'BREAKDOWN',
     complaint: null,

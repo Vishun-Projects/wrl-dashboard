@@ -28,6 +28,7 @@
     "sync-worker:reconcile-ytd-open": "npx tsx src/lib/read-model/cli.ts reconcile-ytd-open",
     "sync-worker:editedon-catchup": "npx tsx src/lib/read-model/cli.ts editedon-catchup",
     "sync-worker:backfill-bm-approval": "npx tsx src/lib/read-model/cli.ts backfill-bm-approval",
+    "sync-worker:backfill-wco": "npx tsx src/lib/read-model/cli.ts backfill-wco",
     "sync-worker:dims": "npx tsx src/lib/read-model/cli.ts dims",
     "sync-worker:nightly": "npx tsx src/lib/read-model/cli.ts nightly",
     "sync-worker:daemon": "npx tsx src/lib/read-model/cli.ts daemon",

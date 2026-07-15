@@ -27,7 +27,7 @@ VPS_HOST="${VPS_HOST:?Set VPS_HOST in .env.vps-setup}"
 
 echo "==> Deploying sync-worker code to ${VPS_HOST}:${INSTALL_ROOT}"
 
-ssh "${SSH_OPTS[@]}" "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}/src/lib' '${INSTALL_ROOT}/scripts/vps-hosting' '${INSTALL_ROOT}/logs'"
+ssh "${SSH_OPTS[@]}" "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}/src/lib' '${INSTALL_ROOT}/scripts/vps-hosting' '${INSTALL_ROOT}/docs/read-model-phase1-schema' '${INSTALL_ROOT}/logs'"
 
 if command -v rsync >/dev/null 2>&1; then
   # rsync -e needs ssh opts as a single string
@@ -38,17 +38,25 @@ if command -v rsync >/dev/null 2>&1; then
     "${ROOT}/package.json" "${ROOT}/package-lock.json" "${ROOT}/tsconfig.json" \
     "${VPS_HOST}:${INSTALL_ROOT}/"
   rsync -az -e "$RSYNC_SSH" \
+    "${ROOT}/docs/read-model-phase1-schema/" \
+    "${VPS_HOST}:${INSTALL_ROOT}/docs/read-model-phase1-schema/"
+  rsync -az -e "$RSYNC_SSH" \
+    "${ROOT}/scripts/apply-read-model-schema.mjs" \
+    "${VPS_HOST}:${INSTALL_ROOT}/scripts/"
+  rsync -az -e "$RSYNC_SSH" \
     "${ROOT}/scripts/vps-hosting/sync-worker-daemon.sh" \
     "${ROOT}/scripts/vps-hosting/sync-worker-nightly.sh" \
     "${ROOT}/scripts/vps-hosting/.env.sync-worker.example" \
     "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/"
 else
-  echo "    (rsync not found — streaming src/lib + package files via tar)"
+  echo "    (rsync not found — streaming src/lib + package/schema files via tar)"
   tar -C "${ROOT}" -czf - \
     src/lib \
     package.json \
     package-lock.json \
     tsconfig.json \
+    docs/read-model-phase1-schema \
+    scripts/apply-read-model-schema.mjs \
     scripts/vps-hosting/sync-worker-daemon.sh \
     scripts/vps-hosting/sync-worker-nightly.sh \
     scripts/vps-hosting/.env.sync-worker.example \
@@ -126,6 +134,36 @@ TIMER
 }
 install_nightly_timer
 
+# Ensure calls_latest_hot.wco exists (idempotent ADD COLUMN IF NOT EXISTS).
+if [[ -f "${root}/docs/read-model-phase1-schema/18-calls_hot_wco.sql" ]]; then
+  echo "==> Applying WCO hot-column migration (18-calls_hot_wco.sql)"
+  if [[ -f "${root}/.env.sync-worker" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "${root}/.env.sync-worker"
+    set +a
+  fi
+  if [[ -n "${DATABASE_URL:-}" ]]; then
+    cd "${root}"
+    DATABASE_URL="${DATABASE_URL}" node -e "
+      const {config}=require('dotenv');
+      const fs=require('fs');
+      const pg=require('pg');
+      const sql=fs.readFileSync('docs/read-model-phase1-schema/18-calls_hot_wco.sql','utf8');
+      (async()=>{
+        const c=new pg.Client({connectionString:process.env.DATABASE_URL});
+        await c.connect();
+        await c.query(sql);
+        const r=await c.query(\"SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='calls_latest_hot' AND column_name='wco') AS ok\");
+        console.log('wco column present:', r.rows[0]?.ok);
+        await c.end();
+      })().catch((e)=>{ console.error(e); process.exit(1); });
+    "
+  else
+    echo "WARN: DATABASE_URL missing in .env.sync-worker — skip WCO DDL (run npm run db:apply-read-model:vps)"
+  fi
+fi
+
 systemctl daemon-reload
 systemctl restart fast-close-sync-worker
 sleep 2
@@ -136,3 +174,4 @@ REMOTE
 
 echo ""
 echo "==> Deploy done. Verify: npm run sync-worker:status:vps"
+echo "    WCO backfill (optional historical): ssh ${VPS_HOST} 'cd ${INSTALL_ROOT} && npm run sync-worker:backfill-wco -- --from 2026-01-01 --to $(date +%Y-%m-%d)'"

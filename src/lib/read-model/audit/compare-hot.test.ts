@@ -21,6 +21,7 @@ function hot(overrides: Partial<HotRow> = {}): HotRow {
     account: 'PEPSI',
     item_name: 'Cooler',
     serial: 'SN1',
+    wco: null,
     engineer_name: 'Tech A',
     call_type: 'BREAKDOWN',
     complaint: 'Not cooling',

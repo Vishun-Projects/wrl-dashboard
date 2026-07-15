@@ -20,6 +20,7 @@ export const HOT_AUDIT_COLUMNS = [
   'account',
   'item_name',
   'serial',
+  'wco',
   'engineer_name',
   'call_type',
   'complaint',
@@ -204,6 +205,10 @@ export function normalizeHotRowFromDb(row: Record<string, unknown>): HotRow {
     account: normalizeString(row.account, true) ?? 'UNCLASSIFIED',
     item_name: normalizeString(row.item_name),
     serial: normalizeString(row.serial),
+    wco: (() => {
+      const raw = normalizeString(row.wco, true);
+      return raw === 'W' || raw === 'C' || raw === 'O' || raw === 'V' ? raw : null;
+    })(),
     engineer_name: normalizeString(row.engineer_name),
     call_type: normalizeString(row.call_type),
     complaint: normalizeString(row.complaint),

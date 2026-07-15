@@ -35,4 +35,16 @@ npm run sync-worker:editedon-catchup -- --from "${YTD_START}" --to "${TODAY}"
 npm run sync-worker:pipeline-reconcile
 echo "Full YTD open/assigned reconcile (transferred + cancelled orphans)"
 npm run sync-worker:reconcile-ytd-open -- --apply
+# Keep WCO filled for the rolling window (day-chunk CRM pull; safe / no truncate).
+WCO_FROM="${WCO_BACKFILL_FROM:-${TODAY}}"
+# Default: last 3 calendar days (covers late CRM edits + gap days).
+if [[ -z "${WCO_BACKFILL_FROM:-}" ]]; then
+  if date -d "${TODAY} -2 days" +%Y-%m-%d >/dev/null 2>&1; then
+    WCO_FROM="$(date -d "${TODAY} -2 days" +%Y-%m-%d)"
+  elif date -v-2d -j -f "%Y-%m-%d" "${TODAY}" +%Y-%m-%d >/dev/null 2>&1; then
+    WCO_FROM="$(date -v-2d -j -f "%Y-%m-%d" "${TODAY}" +%Y-%m-%d)"
+  fi
+fi
+echo "WCO backfill ${WCO_FROM} .. ${TODAY}"
+npm run sync-worker:backfill-wco -- --from "${WCO_FROM}" --to "${TODAY}" || echo "WARN: WCO backfill failed (non-fatal)"
 echo "=== sync-worker-nightly done $(date -Iseconds) ==="

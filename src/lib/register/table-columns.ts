@@ -11,6 +11,7 @@ export type RegisterTableColumnKey =
   | 'Pincode'
   | 'itemname'
   | 'callsvserialno'
+  | 'WCO'
   | 'serviceman'
   | 'vcomplaint'
   | 'Status'
@@ -42,6 +43,7 @@ export const REGISTER_TABLE_COLUMNS: RegisterTableColumnDef[] = [
   { key: 'Pincode', label: 'Pincode' },
   { key: 'itemname', label: 'Product' },
   { key: 'callsvserialno', label: 'Serial' },
+  { key: 'WCO', label: 'WCO' },
   { key: 'serviceman', label: 'Technician' },
   { key: 'vcomplaint', label: 'Complaint' },
   { key: 'portal_action', label: 'Portal Action' },
@@ -61,6 +63,7 @@ export const REGISTER_EXPORT_COLUMNS: { key: string; header: string }[] = [
   { key: 'UniqueCallNo', header: 'ID' },
   { key: 'vcclid', header: 'Call Centre ID' },
   { key: 'calltype', header: 'Call Type' },
+  { key: 'major_minor', header: 'Major / Minor' },
   { key: 'callsdtrndate', header: 'Date' },
   { key: 'PartyName', header: 'Customer' },
   { key: 'officename', header: 'Branch' },
@@ -70,6 +73,7 @@ export const REGISTER_EXPORT_COLUMNS: { key: string; header: string }[] = [
   { key: 'Pincode', header: 'Pincode' },
   { key: 'itemname', header: 'Product' },
   { key: 'callsvserialno', header: 'Serial' },
+  { key: 'WCO', header: 'WCO' },
   { key: 'serviceman', header: 'Technician' },
   { key: 'vcomplaint', header: 'Complaint' },
   { key: 'display_status', header: 'Status' },

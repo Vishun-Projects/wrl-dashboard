@@ -1,6 +1,7 @@
 import type ExcelJS from 'exceljs';
 import { blobToPreparedExport, triggerBlobDownload } from '@/lib/report/summary-excel-export';
 import { formatRegisterExportDate } from '@/lib/register/export-dates';
+import { formatRegisterMajorMinor } from '@/lib/register/major-minor';
 import { isRegisterRowCancelled } from '@/lib/report/search';
 
 /** Excel worksheet limit minus header row. */
@@ -12,6 +13,7 @@ const REGISTER_COLUMNS: { header: string; key: string; width: number }[] = [
   { header: 'ID', key: 'id', width: 15 },
   { header: 'Call Centre ID', key: 'vcclid', width: 15 },
   { header: 'Call Type', key: 'type', width: 15 },
+  { header: 'Major / Minor', key: 'majorMinor', width: 12 },
   { header: 'Date', key: 'date', width: 12 },
   { header: 'Customer', key: 'customer', width: 30 },
   { header: 'Branch', key: 'branch', width: 20 },
@@ -21,6 +23,7 @@ const REGISTER_COLUMNS: { header: string; key: string; width: number }[] = [
   { header: 'Pincode', key: 'pincode', width: 12 },
   { header: 'Product', key: 'product', width: 20 },
   { header: 'Serial', key: 'serial', width: 15 },
+  { header: 'WCO', key: 'wco', width: 8 },
   { header: 'Technician', key: 'tech', width: 20 },
   { header: 'Complaint', key: 'complaint', width: 40 },
   { header: 'Status', key: 'status', width: 12 },
@@ -74,6 +77,7 @@ function mapRegisterRow(row: Record<string, unknown>) {
       id: row.UniqueCallNo,
       vcclid: row.vcclid ?? '—',
       type: row.calltype,
+      majorMinor: formatRegisterMajorMinor(row),
       date: formatExcelExportDate(row.callsdtrndate),
       customer: row.PartyName,
       branch: row.officename ?? row.resolved_branch_name ?? '—',
@@ -84,6 +88,7 @@ function mapRegisterRow(row: Record<string, unknown>) {
       pincode: row.Pincode || '—',
       product: row.itemname,
       serial: row.callsvserialno,
+      wco: row.WCO != null && String(row.WCO).trim() !== '' ? String(row.WCO).trim().toUpperCase() : '—',
       tech: row.serviceman,
       complaint: row.vcomplaint,
       status: statusText,

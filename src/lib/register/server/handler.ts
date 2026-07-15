@@ -38,6 +38,7 @@ import {
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { mergeAuditEnrichment } from '@/lib/register/audit-enrichment';
 import { buildPortalFilterSqlForCrm } from '@/lib/register/portal-filter-sql';
+import { REGISTER_MSTPRORG_JOIN_SQL, SQL_WCO_EXPR } from '@/lib/register/wco';
 
 function getExactTrnQuery(search: string): string | null {
   return normalizeExactTrnSearch(search);
@@ -497,6 +498,7 @@ export async function handleRegisterGet(req: NextRequest) {
       mstitems.vitemcode as itemcode,
       mstitems.vname as itemname,
       tc.vserialno as callsvserialno,
+      ${SQL_WCO_EXPR} as WCO,
       u.vname as serviceman,
       f.vcompanyname as technician_office_name,
       f.ncode as technician_office_id,
@@ -582,6 +584,7 @@ export async function handleRegisterGet(req: NextRequest) {
       LEFT JOIN mstfixedselection calltype_fs (NOLOCK) ON tc.ncalltype = calltype_fs.ncode AND calltype_fs.vfieldname = 'ncalltype'
       LEFT JOIN mstfixedselection priority_fs (NOLOCK) ON tc.npriority = priority_fs.ncode AND priority_fs.vfieldname = 'npriority'
       LEFT JOIN mstoffice transferoffice (NOLOCK) ON tc.ntransfertooffice = transferoffice.ncode
+      ${REGISTER_MSTPRORG_JOIN_SQL}
       ${REGISTER_ARCP_PICK_OUTER_APPLY}
     `;
 

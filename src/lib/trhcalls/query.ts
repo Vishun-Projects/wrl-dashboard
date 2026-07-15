@@ -8,6 +8,7 @@ import {
   REGISTER_ARCP_PICK_FIELDS_SQL,
   REGISTER_ARCP_PICK_OUTER_APPLY,
 } from '@/lib/register/arcp-approve-dates';
+import { REGISTER_MSTPRORG_JOIN_SQL, SQL_WCO_EXPR } from '@/lib/register/wco';
 
 export const TRHCALLS_EXCLUDE_TRANSFERRED =
   " AND ISNULL(tc.vtransfercallno, '') = '' AND ISNULL(CAST(tc.ncancelreason AS INT), 0) <> 2";
@@ -376,6 +377,7 @@ const TRHCALLS_DEDUP_INNER_COLUMNS = [
   'ncancelreason',
   'ntransfertooffice',
   'vserialno',
+  'nitemserialno',
   'vtransfercallno',
   'bsolved',
   'bfastclose',
@@ -492,7 +494,8 @@ function buildTrhcallsCorpusJoinsSql(): string {
     LEFT JOIN mststate st (NOLOCK) ON cty.nstate = st.ncode
     LEFT JOIN mstitems (NOLOCK) ON tc.nitem = mstitems.ncode
     LEFT JOIN mstfixedselection calltype_fs (NOLOCK) ON tc.ncalltype = calltype_fs.ncode AND calltype_fs.vfieldname = 'ncalltype'
-    LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode`;
+    LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode
+    ${REGISTER_MSTPRORG_JOIN_SQL}`;
 }
 
 /** One row per call that has at least one major repair fault (sync-only; avoids per-row scalar subquery). */
@@ -517,6 +520,7 @@ export function buildSyncFieldsSql(): string {
     tc.vtrnno,
     tc.vtrnno AS UniqueCallNo,
     tc.vserialno AS callsvserialno,
+    ${SQL_WCO_EXPR} AS WCO,
     tc.vtransfercallno,
     tc.bsolved,
     tc.bfastclose,
@@ -573,6 +577,7 @@ export function buildCorpusFieldsSql(): string {
     tc.vtrnno,
     tc.vtrnno AS UniqueCallNo,
     tc.vserialno AS callsvserialno,
+    ${SQL_WCO_EXPR} AS WCO,
     tc.vtransfercallno,
     tc.bsolved,
     tc.bfastclose,

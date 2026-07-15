@@ -23,6 +23,8 @@ export type HotRow = {
   account: string;
   item_name: string | null;
   serial: string | null;
+  /** W/C/O/V from mstprorg as of call date; null when no serial link. */
+  wco: string | null;
   engineer_name: string | null;
   call_type: string | null;
   complaint: string | null;

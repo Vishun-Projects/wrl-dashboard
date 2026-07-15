@@ -1,6 +1,7 @@
 import { postQuery } from '@/lib/db/proxy';
 import { normalizeCrmCallRow } from '@/lib/call-row/normalize';
 import { formatRegisterExportDate } from '@/lib/register/export-dates';
+import { formatRegisterMajorMinor } from '@/lib/register/major-minor';
 import { REGISTER_EXPORT_COLUMNS } from '@/lib/register/table-columns';
 import { escapeCsvCell } from '@/lib/utils/csv';
 import {
@@ -42,6 +43,7 @@ export function rowForCsv(raw: Record<string, unknown>): Record<string, unknown>
     UniqueCallNo: row.UniqueCallNo,
     vcclid: row.vcclid ?? '',
     calltype: row.calltype,
+    major_minor: formatRegisterMajorMinor(row),
     callsdtrndate: formatRegisterExportDate(row.callsdtrndate),
     PartyName: row.PartyName,
     officename: branch,
@@ -51,6 +53,7 @@ export function rowForCsv(raw: Record<string, unknown>): Record<string, unknown>
     Pincode: row.Pincode,
     itemname: row.itemname,
     callsvserialno: row.callsvserialno,
+    WCO: row.WCO ?? '',
     serviceman: row.serviceman,
     vcomplaint: row.vcomplaint,
     display_status: statusText,

@@ -132,6 +132,10 @@ export function transformCrmRowToHot(row: Record<string, unknown>): HotRow | nul
     account: String(enriched.account ?? 'UNCLASSIFIED').trim() || 'UNCLASSIFIED',
     item_name: String(enriched.itemname ?? enriched.item_name ?? '').trim() || null,
     serial: String(enriched.callsvserialno ?? enriched.vserialno ?? '').trim() || null,
+    wco: (() => {
+      const raw = String(enriched.WCO ?? enriched.wco ?? '').trim().toUpperCase();
+      return raw === 'W' || raw === 'C' || raw === 'O' || raw === 'V' ? raw : null;
+    })(),
     engineer_name: String(enriched.serviceman ?? enriched.technician_name ?? '').trim() || null,
     call_type: String(enriched.calltype ?? enriched.call_type ?? '').trim() || null,
     complaint: String(enriched.vcomplaint ?? '').trim() || null,
