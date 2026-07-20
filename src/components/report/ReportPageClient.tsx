@@ -4373,16 +4373,20 @@ export default function ReportPageClient() {
                 onChange={(range) => setDateRange(range)}
               />
             </div>
-            <div className="report-toolbar-filters-aging report-shared-aging-group flex shrink-0 items-center gap-2">
-              <span className="report-shared-aging-label text-[10px] whitespace-nowrap text-amber-600 ui-label">Aging As Of</span>
-              <input
-                type="date"
-                className="register-filter-select report-shared-aging-input h-8 w-auto bg-amber-50/80 text-amber-900"
-                value={agingAsOf}
-                max={new Date().toISOString().split('T')[0]}
-                onChange={(e) => setAgingAsOf(e.target.value)}
-              />
-            </div>
+            {activeTab !== "deployment-completion" && (
+  <div className="report-toolbar-filters-aging report-shared-aging-group flex shrink-0 items-center gap-2">
+    <span className="report-shared-aging-label text-[10px] whitespace-nowrap text-amber-600 ui-label">
+      Aging As Of
+    </span>
+    <input
+      type="date"
+      className="register-filter-select report-shared-aging-input h-8 w-auto bg-amber-50/80 text-amber-900"
+      value={agingAsOf}
+      max={new Date().toISOString().split("T")[0]}
+      onChange={(e) => setAgingAsOf(e.target.value)}
+    />
+  </div>
+)}
             <button
               type="button"
               onClick={handleApplySummaryFilters}
