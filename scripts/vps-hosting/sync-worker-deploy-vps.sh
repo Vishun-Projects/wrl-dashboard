@@ -39,6 +39,18 @@ echo "==> Deploying sync-worker code to ${VPS_HOST}:${INSTALL_ROOT}"
 
 ssh "${SSH_OPTS[@]}" "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}/src/lib' '${INSTALL_ROOT}/scripts/vps-hosting' '${INSTALL_ROOT}/docs/read-model-phase1-schema' '${INSTALL_ROOT}/logs'"
 
+# Upload .env.sync-worker if VPS is missing it (never overwrite an existing remote file)
+if [[ -f "${ROOT}/.env.sync-worker" ]]; then
+  remote_has_env=$(ssh "${SSH_OPTS[@]}" "$VPS_HOST" "test -f '${INSTALL_ROOT}/.env.sync-worker' && echo yes || echo no")
+  if [[ "$remote_has_env" == "no" ]]; then
+    echo "==> Uploading .env.sync-worker (missing on VPS)"
+    scp "${SSH_OPTS[@]}" "${ROOT}/.env.sync-worker" "${VPS_HOST}:${INSTALL_ROOT}/.env.sync-worker"
+    ssh "${SSH_OPTS[@]}" "$VPS_HOST" "chmod 600 '${INSTALL_ROOT}/.env.sync-worker'"
+  else
+    echo "==> Keeping existing VPS .env.sync-worker"
+  fi
+fi
+
 if command -v rsync >/dev/null 2>&1; then
   # rsync -e needs ssh opts as a single string
   RSYNC_SSH="ssh ${SSH_OPTS[*]}"
@@ -80,6 +92,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=${root}
+Environment=HOME=/root
 Environment=SYNC_WORKER_INSTALL_ROOT=${root}
 EnvironmentFile=-${root}/.env.sync-worker
 ExecStart=${root}/scripts/vps-hosting/sync-worker-daemon.sh
@@ -135,16 +148,37 @@ TIMER
 }
 install_nightly_timer
 
+# Recover .env.sync-worker if missing (common after install-root path change)
+if [[ ! -f "${root}/.env.sync-worker" ]]; then
+  echo "==> .env.sync-worker missing at ${root} — searching known locations"
+  for candidate in /opt/fast-close-app/.env.sync-worker /opt/wrl/database/fast-close-app/.env.sync-worker; do
+    if [[ -f "$candidate" && "$candidate" != "${root}/.env.sync-worker" ]]; then
+      cp -a "$candidate" "${root}/.env.sync-worker"
+      echo "    Restored from ${candidate}"
+      break
+    fi
+  done
+fi
+if [[ ! -f "${root}/.env.sync-worker" ]]; then
+  echo "ERROR: ${root}/.env.sync-worker is missing on VPS." >&2
+  echo "  From your PC (repo root), after creating .env.sync-worker locally:" >&2
+  echo "    scp .env.sync-worker ${VPS_HOST:-root@vps}:${root}/.env.sync-worker" >&2
+  echo "  Or on VPS: cp ${root}/scripts/vps-hosting/.env.sync-worker.example ${root}/.env.sync-worker" >&2
+  exit 1
+fi
+
 # Ensure calls_latest_hot.wco exists (idempotent ADD COLUMN IF NOT EXISTS).
 if [[ -f "${root}/docs/read-model-phase1-schema/18-calls_hot_wco.sql" ]]; then
   echo "==> Applying WCO hot-column migration (18-calls_hot_wco.sql)"
   if [[ -f "${root}/.env.sync-worker" ]]; then
     set -a
     # shellcheck disable=SC1091
-    source "${root}/.env.sync-worker"
+    # Strip CRLF so DATABASE_URL checks work after Windows edits
+    source <(sed 's/\r$//' "${root}/.env.sync-worker")
     set +a
   fi
-  if [[ -n "${DATABASE_URL:-}" ]]; then
+  DATABASE_URL="$(echo -n "${DATABASE_URL:-}" | tr -d '\r' | xargs || true)"
+  if [[ -n "${DATABASE_URL}" ]]; then
     cd "${root}"
     DATABASE_URL="${DATABASE_URL}" node -e "
       const {config}=require('dotenv');
@@ -167,7 +201,14 @@ fi
 
 systemctl daemon-reload
 systemctl restart fast-close-sync-worker
-sleep 2
+sleep 3
+if ! systemctl is-active --quiet fast-close-sync-worker; then
+  echo "ERROR: sync worker failed to start — last journal lines:" >&2
+  journalctl -u fast-close-sync-worker -n 40 --no-pager >&2 || true
+  echo "--- sync-worker.log ---" >&2
+  tail -n 40 "${root}/logs/sync-worker.log" 2>/dev/null || true
+  exit 1
+fi
 systemctl --no-pager status fast-close-sync-worker | head -15
 echo "---"
 tail -n 8 "${root}/logs/sync-worker.log" 2>/dev/null || true

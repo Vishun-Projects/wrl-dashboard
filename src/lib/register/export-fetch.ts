@@ -66,6 +66,7 @@ export type RegisterExportQuery = {
   status?: string;
   priority?: string;
   portalFilter?: string;
+  repair?: string;
   account?: string;
   region?: string;
 };
@@ -102,6 +103,7 @@ export function buildRegisterExportParams(
   setOptional(params, 'status', query.status);
   setOptional(params, 'priority', query.priority);
   setOptional(params, 'portalFilter', query.portalFilter);
+  setOptional(params, 'repair', query.repair);
   setOptional(params, 'account', query.account);
   setOptional(params, 'region', query.region);
   if (cursor?.cursorLoggedAt && cursor.cursorNcode != null && cursor.cursorNcode > 0) {

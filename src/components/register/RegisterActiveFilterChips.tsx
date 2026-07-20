@@ -11,6 +11,7 @@ import {
 } from '@/lib/report/filters';
 import { AnimatedChipList } from '@/components/motion';
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
+import { useRepairFilterOptions } from '@/lib/report/hooks/useRepairFilterOptions';
 
 type RegisterActiveFilterChipsProps = {
   onClearAll?: () => void;
@@ -39,6 +40,8 @@ export function RegisterActiveFilterChips({
     removeActiveFilterChip,
   } = useReportFilters();
 
+  const { labelByValue: repairLabelByValue } = useRepairFilterOptions();
+
   const applied = appliedFilters;
   const appliedBranch = applied?.selectedBranch ?? selectedBranch;
 
@@ -62,6 +65,7 @@ export function RegisterActiveFilterChips({
       if (field === 'selectedRegion') return regionOptions.find((o) => o.value === value)?.label || value;
       if (field === 'selectedAccount') return accountOptions.find((o) => o.value === value)?.label || value;
       if (field === 'selectedTechnician') return technicianOptions.find((o) => o.value === value)?.label || value;
+      if (field === 'repairFilter') return repairLabelByValue.get(value) || value;
       return value;
     };
     return buildActiveFilterChips({
@@ -73,6 +77,7 @@ export function RegisterActiveFilterChips({
       selectedCallTypes: applied.selectedCallTypes,
       priorityFilter: applied.priorityFilter,
       portalFilter: applied.portalFilter,
+      repairFilter: applied.repairFilter,
       selectedState: applied.selectedState,
       selectedCity: applied.selectedCity,
       selectedRegion: applied.selectedRegion,
@@ -93,6 +98,7 @@ export function RegisterActiveFilterChips({
     regionOptions,
     accountOptions,
     technicianOptions,
+    repairLabelByValue,
   ]);
 
   const allChips = [...chips, ...extraActiveChips];

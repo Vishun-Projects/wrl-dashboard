@@ -1,6 +1,7 @@
 /**
- * Audit + optional bulk refresh: hot open/assigned rows whose CRM status differs.
- * Usage:
+ * Audit + optional bulk refresh: hot pipeline rows whose CRM status differs.
+ * Applies fixes per batch (no long scan-then-apply wait).
+ *
  *   npx tsx scripts/reconcile-stale-hot-status.ts           # audit only
  *   npx tsx scripts/reconcile-stale-hot-status.ts --apply   # refresh stale TRNs from CRM
  */
@@ -12,7 +13,7 @@ import '@/lib/read-model/bootstrap-env';
 import { withAppClient, closePool } from '@/lib/read-model/db';
 import { fetchCrmRowsByTrns } from '@/lib/read-model/crm-fetch';
 import { applyCrmRowsToHot } from '@/lib/read-model/apply-crm-delta';
-import { getSyncState, tryAcquireSyncLock, releaseSyncLock } from '@/lib/read-model/lock';
+import { getSyncState, tryAcquireSyncLock, releaseSyncLock, releaseStaleSyncLock } from '@/lib/read-model/lock';
 import { hotRowNeedsReconcileFromCrm } from '@/lib/read-model/pipeline-reconcile';
 import { registerHotRetentionStart } from '@/lib/read-model/hot-window';
 import type { HotRow } from '@/lib/read-model/types';
@@ -31,7 +32,7 @@ async function listCandidates(client: import('pg').PoolClient, ytdStart: string)
     CROSS JOIN LATERAL (
       SELECT last_editedon FROM sync_state WHERE entity = 'calls_latest_hot' LIMIT 1
     ) s
-    WHERE h.status_bucket IN ('assigned', 'open_unallocated')
+    WHERE h.status_bucket IN ('assigned', 'open_unallocated', 'tech_solved')
       AND h.logged_at >= $1::timestamptz
       AND (h.source_editedon IS NULL OR h.source_editedon < s.last_editedon)
     ORDER BY h.synced_at ASC NULLS FIRST, h.vtrnno ASC
@@ -43,69 +44,79 @@ async function listCandidates(client: import('pg').PoolClient, ytdStart: string)
 }
 
 async function main() {
+  await withAppClient((client) => releaseStaleSyncLock(client));
   const ytdStart = registerHotRetentionStart();
   const candidates = await withAppClient((client) => listCandidates(client, ytdStart));
-  console.log(`Behind-watermark open/assigned candidates: ${candidates.length}`);
+  console.log(`Behind-watermark pipeline candidates: ${candidates.length}`);
 
-  const staleTrns: string[] = [];
-  for (let i = 0; i < candidates.length && staleTrns.length < MAX_REFRESH; i += BATCH) {
+  let staleFound = 0;
+  let upserted = 0;
+  let deleted = 0;
+  const batches = Math.ceil(Math.min(candidates.length, MAX_REFRESH) / BATCH);
+
+  for (let i = 0; i < candidates.length && staleFound < MAX_REFRESH; i += BATCH) {
+    const batchIdx = i / BATCH + 1;
     const chunk = candidates.slice(i, i + BATCH);
     const crmRows = await fetchCrmRowsByTrns(chunk.map((r) => r.vtrnno), { includeTransferred: true });
-    const crmByTrn = new Map(
-      crmRows.map((row) => [String(row.vtrnno ?? '').trim(), row]).filter(([t]) => t)
-    );
+    const crmByTrn = new Map<string, Record<string, unknown>>();
+    for (const row of crmRows) {
+      const trn = String(row.vtrnno ?? '').trim();
+      if (trn) crmByTrn.set(trn, row);
+    }
+
+    const staleCrmRows: Record<string, unknown>[] = [];
     for (const hot of chunk) {
       const crm = crmByTrn.get(hot.vtrnno);
       if (!crm) {
-        if (staleTrns.length < 20) {
+        if (staleFound < 20) {
           console.log(`  no CRM row: ${hot.vtrnno} (${hot.status_bucket})`);
         }
         continue;
       }
       if (hotRowNeedsReconcileFromCrm(hot, crm)) {
-        staleTrns.push(hot.vtrnno);
-        if (staleTrns.length <= 15) {
-          const cr = crm.ncancelreason;
+        staleFound++;
+        staleCrmRows.push(crm);
+        if (staleFound <= 15) {
           console.log(
-            `  stale: ${hot.vtrnno} hot=${hot.status_bucket}/ncr=${hot.ncancelreason ?? 0} crm_ncr=${cr}`
+            `  stale: ${hot.vtrnno} hot=${hot.status_bucket}/ncr=${hot.ncancelreason ?? 0} crm_ncr=${String(crm.ncancelreason ?? '')}`
           );
         }
       }
     }
+
+    if (APPLY && staleCrmRows.length) {
+      await withAppClient(async (client) => {
+        if (!(await tryAcquireSyncLock(client))) {
+          throw new Error('sync lock not acquired');
+        }
+        try {
+          const state = await getSyncState(client);
+          const result = await applyCrmRowsToHot(client, staleCrmRows, {
+            state,
+            advanceWatermarks: false,
+          });
+          await releaseSyncLock(client, 'ok', result.rowsUpserted);
+          upserted += result.rowsUpserted;
+          deleted += result.rowsDeleted;
+        } catch (err) {
+          await releaseSyncLock(client, 'error', 0);
+          throw err;
+        }
+      });
+      console.log(
+        `  batch ${batchIdx}/${batches}: fixed ${staleCrmRows.length} (total stale ${staleFound}, upserted ${upserted})`
+      );
+    }
   }
 
-  console.log(`Stale vs CRM (scanned ${Math.min(candidates.length, MAX_REFRESH + BATCH)}): ${staleTrns.length}`);
-  if (!staleTrns.length) return;
-
-  if (!APPLY) {
+  console.log(`Stale vs CRM: ${staleFound}`);
+  if (!APPLY && staleFound > 0) {
     console.log('Run with --apply to refresh from CRM');
     return;
   }
-
-  let upserted = 0;
-  for (let i = 0; i < staleTrns.length; i += BATCH) {
-    const chunk = staleTrns.slice(i, i + BATCH);
-    const crmRows = await fetchCrmRowsByTrns(chunk, { includeTransferred: true });
-    await withAppClient(async (client) => {
-      if (!(await tryAcquireSyncLock(client))) {
-        throw new Error('sync lock not acquired');
-      }
-      try {
-        const state = await getSyncState(client);
-        const result = await applyCrmRowsToHot(client, crmRows, {
-          state,
-          advanceWatermarks: false,
-        });
-        await releaseSyncLock(client, 'ok', result.rowsUpserted);
-        upserted += result.rowsUpserted + result.rowsDeleted;
-      } catch (err) {
-        await releaseSyncLock(client, 'error', 0);
-        throw err;
-      }
-    });
-    console.log(`  refreshed ${Math.min(i + BATCH, staleTrns.length)}/${staleTrns.length}`);
+  if (APPLY) {
+    console.log(`Done — upserted ${upserted}, deleted ${deleted}`);
   }
-  console.log(`Done — upserted ${upserted} row(s)`);
 }
 
 main()

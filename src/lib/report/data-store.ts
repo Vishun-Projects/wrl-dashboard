@@ -23,6 +23,7 @@ export interface GlobalReportCacheType {
   selectedStatus: string[];
   priorityFilter: string[];
   portalFilter: string[];
+  repairFilter?: string[];
   selectedState?: string[];
   selectedCity?: string[];
   selectedRegion?: string[];

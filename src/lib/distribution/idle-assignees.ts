@@ -265,6 +265,7 @@ export function buildAuditScopeFilterParts(parts: RegisterViewFilterParts): Regi
     pincodeSearch: '',
     priorityFilter: [],
     portalFilter: [],
+    repairFilter: [],
   };
 }
 

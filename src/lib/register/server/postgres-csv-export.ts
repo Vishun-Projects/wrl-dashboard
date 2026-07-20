@@ -3,6 +3,7 @@ import 'server-only';
 import { withBulkReadClient } from '@/lib/read-model/db';
 import { formatRegisterExportDate } from '@/lib/register/export-dates';
 import { formatRegisterMajorMinor } from '@/lib/register/major-minor';
+import { formatRegisterRepairDone } from '@/lib/register/format-repair-done';
 import {
   buildRegisterListQuery,
   buildWhere,
@@ -13,6 +14,7 @@ import {
 } from '@/lib/read-model/queries/register';
 import { REGISTER_EXPORT_HOT_COLUMNS } from '@/lib/read-model/queries/register-columns';
 import { mergeArcpPickOntoHotExportRows } from '@/lib/register/arcp-approve-dates-server';
+import { enrichRegisterRowsRepairDone } from '@/lib/register/server/repair-done-enrich';
 import { escapeCsvCell } from '@/lib/utils/csv';
 import { REGISTER_EXPORT_COLUMNS } from '@/lib/register/table-columns';
 
@@ -69,6 +71,7 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
     row.wco ?? '',
     row.engineer_name,
     row.complaint,
+    formatRegisterRepairDone(row.repair_done),
     statusText,
     isSolved ? formatRegisterExportDate(row.solved_at) : '',
     bmDate,
@@ -144,6 +147,7 @@ export async function buildPostgresRegisterCsvStream(
             rows = await mergeArcpPickOntoHotExportRows(rows, (sql, queryParams) =>
               client.query(sql, queryParams)
             );
+            rows = await enrichRegisterRowsRepairDone(rows);
 
             let chunk = '';
             for (const row of rows) {

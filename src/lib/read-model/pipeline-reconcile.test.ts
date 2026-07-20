@@ -72,6 +72,34 @@ describe('hotRowNeedsCrmRefresh', () => {
     expect(needs).toBe(true);
   });
 
+  it('detects tech_solved hot row when CRM bsolved flipped to closed', () => {
+    const needs = hotRowNeedsCrmRefresh(
+      hot({
+        status_bucket: 'tech_solved',
+        status_label: 'Tech. Solve Call',
+        bsolved: false,
+        bfastclose: true,
+        source_editedon: new Date('2026-07-20T04:02:15Z'),
+      }),
+      {
+        vtrnno: '26G171195',
+        ncode: '2765',
+        nofficeid: '82',
+        ncancelreason: '0',
+        bsolved: 'True',
+        callsolved: 'True',
+        bfastclose: 'True',
+        callstatus: 'Solved',
+        editedon: '20/07/2026 12:11:42',
+        addedon: '17/07/2026 16:41:00',
+        callsdtrndate: '16/07/2026 11:56:49',
+        region: 'SOUTH ZONE',
+        account: 'GENERAL',
+      }
+    );
+    expect(needs).toBe(true);
+  });
+
   it('detects newer CRM editedon even when status fields look aligned', () => {
     const needs = hotRowNeedsCrmRefresh(
       hot({ source_editedon: new Date('2026-06-01') }),

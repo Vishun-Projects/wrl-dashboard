@@ -1,65 +1,62 @@
 import { withAppClient, withClient } from '@/lib/read-model/db';
 import { fetchCrmRowsByTrns } from '@/lib/read-model/crm-fetch';
 import { applyCrmRowsToHot } from '@/lib/read-model/apply-crm-delta';
-import { getSyncState, tryAcquireSyncLock, releaseSyncLock } from '@/lib/read-model/lock';
+import { getSyncState, tryAcquireSyncLock, releaseSyncLock, releaseStaleSyncLock } from '@/lib/read-model/lock';
 import { hotRowNeedsReconcileFromCrm } from '@/lib/read-model/pipeline-reconcile';
-import { repairHotCancelFromNcrReason } from '@/lib/read-model/repair-hot-cancel';
 import { registerHotRetentionStart } from '@/lib/read-model/hot-window';
 import type { HotRow } from '@/lib/read-model/types';
 
 const BATCH = Math.max(20, Number(process.env.SYNC_PIPELINE_TRN_CHUNK ?? 40) || 40);
 const PROGRESS_EVERY = 5;
+const DEFAULT_LIMIT = Math.max(100, Number(process.env.RECONCILE_TECH_SOLVED_LIMIT ?? 15000) || 15000);
 
-export type ReconcileYtdOpenResult = {
+export type ReconcileTechSolvedResult = {
   ok: boolean;
-  ytdStart: string;
   checked: number;
   stale: number;
   rowsUpserted: number;
   rowsDeleted: number;
-  ncrRepaired: number;
 };
 
-/** Full YTD scan: every open/assigned/tech_solved hot row vs live CRM (incl. transferred). */
-export async function runReconcileYtdOpen(opts?: {
+/** Refresh tech_solved hot rows whose CRM status moved on (closed, cancelled, etc.). */
+export async function runReconcileTechSolved(opts?: {
   apply?: boolean;
-  ytdStart?: string;
+  limit?: number;
   onProgress?: (message: string) => void;
-}): Promise<ReconcileYtdOpenResult> {
+}): Promise<ReconcileTechSolvedResult> {
   const apply = opts?.apply ?? false;
-  const ytdStart = opts?.ytdStart ?? process.env.RECONCILE_YTD_FROM ?? registerHotRetentionStart();
+  const limit = opts?.limit ?? DEFAULT_LIMIT;
+  const ytdStart = registerHotRetentionStart();
   const log = opts?.onProgress ?? ((msg: string) => console.log(msg));
 
-  let ncrRepaired = 0;
-  if (apply) {
-    ncrRepaired = await withClient((client) => repairHotCancelFromNcrReason(client));
-    if (ncrRepaired > 0) log(`SQL repair (ncr set, status open): ${ncrRepaired} row(s)`);
-  }
+  await withClient((client) => releaseStaleSyncLock(client));
 
   const candidates = await withAppClient(async (client) => {
     const res = await client.query<HotRow>(
-      `SELECT vtrnno, status_bucket, ncancelreason, source_editedon,
-              bsolved, bfastclose, synced_at, region
-       FROM calls_latest_hot
-       WHERE logged_at >= $1::timestamptz
-         AND status_bucket IN ('assigned', 'open_unallocated', 'tech_solved')
-       ORDER BY vtrnno`,
-      [`${ytdStart}T00:00:00`]
+      `
+      SELECT h.vtrnno, h.status_bucket, h.ncancelreason, h.source_editedon,
+             h.bsolved, h.bfastclose, h.synced_at, h.region
+      FROM calls_latest_hot h
+      CROSS JOIN LATERAL (
+        SELECT last_editedon FROM sync_state WHERE entity = 'calls_latest_hot' LIMIT 1
+      ) s
+      WHERE h.status_bucket = 'tech_solved'
+        AND h.logged_at >= $1::timestamptz
+      ORDER BY
+        (h.bsolved IS NOT TRUE) DESC,
+        (h.source_editedon IS NULL OR h.source_editedon < s.last_editedon) DESC,
+        h.synced_at ASC NULLS FIRST,
+        h.vtrnno ASC
+      LIMIT $2
+      `,
+      [`${ytdStart}T00:00:00`, limit]
     );
     return res.rows;
   });
 
-  log(`YTD open/assigned (${ytdStart}+): ${candidates.length}`);
+  log(`tech_solved candidates (${ytdStart}+): ${candidates.length}`);
   if (!candidates.length) {
-    return {
-      ok: true,
-      ytdStart,
-      checked: 0,
-      stale: 0,
-      rowsUpserted: 0,
-      rowsDeleted: 0,
-      ncrRepaired,
-    };
+    return { ok: true, checked: 0, stale: 0, rowsUpserted: 0, rowsDeleted: 0 };
   }
 
   let staleFound = 0;
@@ -78,15 +75,17 @@ export async function runReconcileYtdOpen(opts?: {
         { includeTransferred: true }
       );
     } catch (err) {
-      log(
-        `  batch ${batchIdx} CRM fetch failed: ${err instanceof Error ? err.message : String(err)}`
-      );
+      log(`  batch ${batchIdx} CRM fetch failed: ${err instanceof Error ? err.message : String(err)}`);
       continue;
     }
 
-    const crmByTrn = new Map(crmRows.map((r) => [String(r.vtrnno ?? '').trim(), r]));
-    const staleCrmRows: Record<string, unknown>[] = [];
+    const crmByTrn = new Map<string, Record<string, unknown>>();
+    for (const row of crmRows) {
+      const trn = String(row.vtrnno ?? '').trim();
+      if (trn) crmByTrn.set(trn, row);
+    }
 
+    const staleCrmRows: Record<string, unknown>[] = [];
     for (const hot of chunk) {
       const crm = crmByTrn.get(hot.vtrnno);
       if (!crm) continue;
@@ -94,9 +93,7 @@ export async function runReconcileYtdOpen(opts?: {
         staleFound++;
         staleCrmRows.push(crm);
         if (staleFound <= 15) {
-          log(
-            `  stale: ${hot.vtrnno} hot=${hot.status_bucket}/ncr=${hot.ncancelreason ?? 0} crm_ncr=${crm.ncancelreason}`
-          );
+          log(`  stale: ${hot.vtrnno} hot=${hot.status_bucket} bsolved=${hot.bsolved ?? false}`);
         }
       }
     }
@@ -120,42 +117,31 @@ export async function runReconcileYtdOpen(opts?: {
           throw err;
         }
       });
-    }
-
-    if (batchIdx % PROGRESS_EVERY === 0 || batchIdx === batches) {
       log(
-        `  … batch ${batchIdx}/${batches} — stale ${staleFound}${
-          apply ? `, upserted ${rowsUpserted}, deleted ${rowsDeleted}` : ''
-        }`
+        `  batch ${batchIdx}: fixed ${staleCrmRows.length} (total stale ${staleFound}, upserted ${rowsUpserted})`
       );
     }
-  }
 
-  if (apply) {
-    const postNcr = await withClient((client) => repairHotCancelFromNcrReason(client));
-    if (postNcr > 0) {
-      log(`Post SQL repair: ${postNcr} row(s)`);
-      ncrRepaired += postNcr;
+    if (!apply && batchIdx % PROGRESS_EVERY === 0) {
+      log(`  … batch ${batchIdx}/${batches} — stale ${staleFound}`);
     }
   }
 
-  log('\n=== YTD reconcile ===');
-  log(`Checked:   ${candidates.length}`);
-  log(`Stale:     ${staleFound}`);
+  log('\n=== tech_solved reconcile ===');
+  log(`Checked:  ${candidates.length}`);
+  log(`Stale:    ${staleFound}`);
   if (apply) {
-    log(`Upserted:  ${rowsUpserted}`);
-    log(`Deleted:   ${rowsDeleted}`);
+    log(`Upserted: ${rowsUpserted}`);
+    log(`Deleted:  ${rowsDeleted}`);
   } else if (staleFound > 0) {
-    log('Run with --apply to refresh stale TRNs from CRM');
+    log('Run with --apply to refresh from CRM');
   }
 
   return {
     ok: true,
-    ytdStart,
     checked: candidates.length,
     stale: staleFound,
     rowsUpserted,
     rowsDeleted,
-    ncrRepaired,
   };
 }

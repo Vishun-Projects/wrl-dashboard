@@ -26,6 +26,7 @@
     "sync-worker:incremental": "npx tsx src/lib/read-model/cli.ts incremental",
     "sync-worker:pipeline-reconcile": "npx tsx src/lib/read-model/cli.ts pipeline-reconcile",
     "sync-worker:reconcile-ytd-open": "npx tsx src/lib/read-model/cli.ts reconcile-ytd-open",
+    "sync-worker:reconcile-tech-solved": "npx tsx src/lib/read-model/cli.ts reconcile-tech-solved",
     "sync-worker:editedon-catchup": "npx tsx src/lib/read-model/cli.ts editedon-catchup",
     "sync-worker:backfill-bm-approval": "npx tsx src/lib/read-model/cli.ts backfill-bm-approval",
     "sync-worker:backfill-wco": "npx tsx src/lib/read-model/cli.ts backfill-wco",

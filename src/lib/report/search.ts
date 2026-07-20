@@ -234,6 +234,7 @@ export function registerRowMatchesViewFilters(
   if (!matchesStatusFilter(row, parts.selectedStatus)) return false;
   if (!matchesPriorityFilter(row, parts.priorityFilter)) return false;
   if (!matchesPortalFilter(row, parts.portalFilter, getPortalAuditCache())) return false;
+  // repairFilter is server-only (rows lack repair ncodes). Register skips corpus when set.
 
   return true;
 }

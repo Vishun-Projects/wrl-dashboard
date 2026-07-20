@@ -11,6 +11,7 @@ import { runIncrementalSync } from '@/lib/read-model/incremental';
 import { runNightlyReconcile } from '@/lib/read-model/nightly';
 import { runPipelineReconcile } from '@/lib/read-model/pipeline-reconcile';
 import { runReconcileYtdOpen } from '@/lib/read-model/reconcile-ytd-open';
+import { runReconcileTechSolved } from '@/lib/read-model/reconcile-tech-solved';
 import { runEditedonCatchupRange, runEditedonCatchupStep } from '@/lib/read-model/editedon-catchup';
 import { todayLocalDate } from '@/lib/read-model/dates';
 import { runRetentionJobs } from '@/lib/read-model/retention';
@@ -109,6 +110,11 @@ async function main(): Promise<void> {
       console.log('[sync-worker] YTD open reconcile:', result);
       break;
     }
+    case 'reconcile-tech-solved': {
+      const result = await runReconcileTechSolved({ apply: process.argv.includes('--apply') });
+      console.log('[sync-worker] tech_solved reconcile:', result);
+      break;
+    }
     case 'editedon-catchup': {
       const args = process.argv.slice(3);
       const fromIdx = args.indexOf('--from');
@@ -198,8 +204,9 @@ Commands:
   fill-ytd          Upsert YTD + open-old only — no truncate (safe refresh)
   backfill-historical  Upsert pre-YTD CRM calls (default 2020-01-01 .. day before Jan 1) — no truncate
   incremental       Single calls incremental sync run (+ pipeline reconcile + editedon catch-up)
-  pipeline-reconcile  Refresh stale open/assigned hot rows from CRM by TRN (incl. transferred)
-  reconcile-ytd-open  Full YTD open/assigned scan vs CRM (--apply to fix)
+  pipeline-reconcile  Refresh stale open/assigned/tech_solved hot rows from CRM by TRN (incl. transferred)
+  reconcile-ytd-open  Full YTD open/assigned/tech_solved scan vs CRM (--apply to fix)
+  reconcile-tech-solved  Refresh stale tech_solved rows from CRM (--apply to fix)
   editedon-catchup  Replay CRM edits by editedon day (addedon <> editedon)
                     --from YYYY-MM-DD --to YYYY-MM-DD  (default: one step from cursor)
   backfill-bm-approval  Fill calls_latest_hot.bapproval / bm_approved_at from CRM (no truncate)
@@ -229,10 +236,13 @@ Environment:
   TRANSACTION_ENTRY_START_DATE    Backfill start (default 2024-01-01)
   TRANSACTION_ENTRY_OVERLAP_MONTHS  Incremental lookback months (default 2)
   SYNC_INTERVAL_MS       Daemon interval (default 180000)
-  SYNC_PIPELINE_RECONCILE_ENABLED  Re-check open/assigned hot rows each incremental (default true)
+  SYNC_PIPELINE_RECONCILE_ENABLED  Re-check open/assigned/tech_solved hot rows each incremental (default true)
   SYNC_PIPELINE_RECONCILE_BATCH   Pipeline TRNs checked per run (default 400)
+  SYNC_TECH_SOLVED_RECONCILE_ENABLED  Refresh stale tech_solved each incremental (default true)
+  RECONCILE_TECH_SOLVED_PER_RUN   tech_solved TRNs checked per incremental (default 800)
   SYNC_EDITEDON_CATCHUP_ENABLED   Replay editedon day windows each incremental (default true)
-  SYNC_EDITEDON_CATCHUP_DAYS_PER_RUN  Calendar days per incremental catch-up step (default 1)
+  SYNC_EDITEDON_RECENT_DAYS       Always replay last N days each incremental (default 2)
+  SYNC_EDITEDON_CATCHUP_DAYS_PER_RUN  Extra rotating YTD days per incremental (default 1)
   SYNC_EDITEDON_CATCHUP_FROM      Optional start for editedon-catchup CLI (default YTD)
   SYNC_HISTORICAL_START_DATE First day for backfill-historical (default 2020-01-01)
   SYNC_PRE_YTD_START_DATE    Alias for SYNC_HISTORICAL_START_DATE

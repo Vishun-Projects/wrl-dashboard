@@ -20,11 +20,13 @@ type FilterArrayField = keyof Pick<
   | 'selectedCallTypes'
   | 'priorityFilter'
   | 'portalFilter'
+  | 'repairFilter'
   | 'selectedRegion'
   | 'selectedAccount'
   | 'selectedTechnician'
 >;
 import { useReportFilters } from '@/contexts/ReportFiltersContext';
+import { useRepairFilterOptions } from '@/lib/report/hooks/useRepairFilterOptions';
 
 type RegisterFilterBarProps = {
   layout?: 'inline' | 'drawer-content';
@@ -76,6 +78,8 @@ function FilterGroups({
     setPriorityFilter,
     portalFilter,
     setPortalFilter,
+    repairFilter,
+    setRepairFilter,
     stateOptions,
     selectedState,
     handleStatesChange,
@@ -93,6 +97,8 @@ function FilterGroups({
     setSelectedTechnician,
   } = useReportFilters();
 
+  const { options: repairOptions, loading: repairOptionsLoading } = useRepairFilterOptions();
+
   const wrapCommit = useCallback(
     (setter: (values: string[]) => void, field: FilterArrayField) => {
       if (!commitOnChange) return setter;
@@ -108,6 +114,7 @@ function FilterGroups({
   const onCallTypesChange = wrapCommit(setSelectedCallTypes, 'selectedCallTypes');
   const onPriorityChange = wrapCommit(setPriorityFilter, 'priorityFilter');
   const onPortalChange = wrapCommit(setPortalFilter, 'portalFilter');
+  const onRepairChange = wrapCommit(setRepairFilter, 'repairFilter');
   const onStateChange = commitOnChange
     ? (values: string[]) => {
         flushSync(() => handleStatesChange(values));
@@ -216,6 +223,14 @@ function FilterGroups({
           options={REGISTER_PORTAL_OPTIONS}
           selected={portalFilter}
           onChange={onPortalChange}
+          applyMode={applyMode}
+        />
+        <RegisterMultiSelect
+          label="Repair done"
+          emptyLabel={repairOptionsLoading ? 'Loading repair types…' : 'All repair types'}
+          options={repairOptions}
+          selected={repairFilter}
+          onChange={onRepairChange}
           applyMode={applyMode}
         />
       </FilterGroup>

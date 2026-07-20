@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/server';
 import { readRegisterFromPostgres } from '@/lib/read-model/flags';
 import type { RegisterPostgresParams } from '@/lib/read-model/queries/register';
 import { resolveRegisterDateSqlColumn } from '@/lib/trhcalls/query';
+import { resolveRegisterRepairCallKeys } from '@/lib/register/server/repair-call-ncodes';
 
 export type RegisterPostgresRequestContext = {
   userId: string;
@@ -34,6 +35,7 @@ export function parseRegisterSearchParams(searchParams: URLSearchParams) {
     pincode: searchParams.get('pincode') || '',
     priority: searchParams.get('priority') || 'all',
     portalFilter: searchParams.get('portalFilter') || 'All',
+    repair: searchParams.get('repair') || 'All',
     state: searchParams.get('state') || '',
     city: searchParams.get('city') || '',
     branch: searchParams.get('branch') || '',
@@ -78,15 +80,28 @@ export async function resolveRegisterPostgresRequest(
   const visibleStatuses = profile?.visible_statuses || [];
   const isHod = isHodUser(profile ?? undefined, permissions);
 
+  const repairCallKeys = await resolveRegisterRepairCallKeys({
+    repair: parsed.repair,
+    startDate: parsed.startDate,
+    endDate: parsed.endDate,
+    dateFilterColumn: parsed.dateFilterColumn,
+    isHod,
+    assignedOffices,
+    officeId: parsed.officeId,
+  });
+
+  const { repair: _repair, ...rest } = parsed;
+
   return {
     ok: true,
     ctx: {
       userId,
       params: {
-        ...parsed,
+        ...rest,
         assignedOffices,
         visibleStatuses,
         isHod,
+        repairCallKeys,
       },
     },
   };

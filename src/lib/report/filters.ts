@@ -110,6 +110,7 @@ export function emptyReportFilterSnapshot(
     selectedStatus: [],
     priorityFilter: [],
     portalFilter: [],
+    repairFilter: [],
     selectedState: [],
     selectedCity: [],
     selectedRegion: [],
@@ -398,6 +399,7 @@ export function buildRegisterListQueryKey(parts: {
   selectedStatus: string[];
   priorityFilter: string[];
   portalFilter: string[];
+  repairFilter: string[];
   agingAsOf: string;
   pageLimit: number;
 }) {
@@ -414,6 +416,7 @@ export function buildRegisterListQueryKey(parts: {
     selectedStatus: serializeFilterKey(parts.selectedStatus),
     priorityFilter: serializeFilterKey(parts.priorityFilter),
     portalFilter: serializeFilterKey(parts.portalFilter),
+    repairFilter: serializeFilterKey(parts.repairFilter),
   });
 }
 
@@ -751,6 +754,7 @@ export type ActiveFilterChipDescriptor = {
     | 'selectedCallTypes'
     | 'priorityFilter'
     | 'portalFilter'
+    | 'repairFilter'
     | 'selectedBranch'
     | 'selectedFranchisee'
     | 'selectedState'
@@ -843,6 +847,11 @@ export function snapshotAfterRemovingActiveFilterChip(
         ...applied,
         portalFilter: applied.portalFilter.filter((v) => v !== chip.removeValue),
       });
+    case 'repairFilter':
+      return buildReportFilterSnapshot({
+        ...applied,
+        repairFilter: applied.repairFilter.filter((v) => v !== chip.removeValue),
+      });
     case 'selectedBranch':
       return buildReportFilterSnapshot({
         ...applied,
@@ -923,6 +932,7 @@ export function buildActiveFilterChips(input: RegisterActiveFilterInput): Active
   pushArrayChips(chips, 'selectedCallTypes', 'Type', input.selectedCallTypes, resolveLabel);
   pushArrayChips(chips, 'priorityFilter', 'Priority', input.priorityFilter, resolveLabel);
   pushArrayChips(chips, 'portalFilter', 'Portal', input.portalFilter, resolveLabel);
+  pushArrayChips(chips, 'repairFilter', 'Repair', input.repairFilter, resolveLabel);
   pushArrayChips(chips, 'selectedBranch', 'Branch', input.selectedBranch, resolveLabel);
   pushArrayChips(chips, 'selectedFranchisee', 'Franchisee', input.selectedFranchisee, resolveLabel);
   pushArrayChips(chips, 'selectedState', 'State', input.selectedState, resolveLabel);
@@ -954,6 +964,7 @@ export type RegisterViewFilterParts = {
   selectedStatus: string[];
   priorityFilter: string[];
   portalFilter: string[];
+  repairFilter: string[];
 };
 
 export function isAnyFilterActive(parts: RegisterViewFilterParts): boolean {
@@ -971,7 +982,8 @@ export function isAnyFilterActive(parts: RegisterViewFilterParts): boolean {
     parts.selectedOfficeIds.length > 0 ||
     parts.selectedStatus.length > 0 ||
     parts.priorityFilter.length > 0 ||
-    parts.portalFilter.length > 0
+    parts.portalFilter.length > 0 ||
+    parts.repairFilter.length > 0
   );
 }
 
@@ -990,6 +1002,7 @@ export type RegisterViewFilterContextInput = {
   selectedStatus: string[];
   priorityFilter: string[];
   portalFilter: string[];
+  repairFilter: string[];
 };
 
 /** Build register view filters from shared report filter context state. */
@@ -1011,6 +1024,7 @@ export function buildRegisterViewFiltersFromContext(
     selectedStatus: input.selectedStatus,
     priorityFilter: input.priorityFilter,
     portalFilter: input.portalFilter,
+    repairFilter: input.repairFilter,
   };
 }
 
@@ -1025,6 +1039,7 @@ export type ReportFilterSnapshot = {
   selectedStatus: string[];
   priorityFilter: string[];
   portalFilter: string[];
+  repairFilter: string[];
   selectedState: string[];
   selectedCity: string[];
   selectedRegion: string[];
@@ -1051,6 +1066,7 @@ export function buildReportFilterSnapshot(input: ReportFilterSnapshotInput): Rep
     selectedStatus: [...input.selectedStatus],
     priorityFilter: [...input.priorityFilter],
     portalFilter: [...input.portalFilter],
+    repairFilter: [...input.repairFilter],
     selectedState: [...input.selectedState],
     selectedCity: [...input.selectedCity],
     selectedRegion: [...input.selectedRegion],
@@ -1081,6 +1097,7 @@ export function reportFilterSnapshotFromCache(
     selectedStatus: migrateStringFilter(cache.selectedStatus),
     priorityFilter: migrateStringFilter(cache.priorityFilter),
     portalFilter: migrateStringFilter(cache.portalFilter),
+    repairFilter: migrateStringFilter(cache.repairFilter),
     selectedState: migrateStringFilter(cache.selectedState),
     selectedCity: migrateStringFilter(cache.selectedCity),
     selectedRegion: migrateStringFilter(cache.selectedRegion),
@@ -1111,6 +1128,7 @@ export function filterSnapshotKey(snapshot: ReportFilterSnapshot): string {
     selectedStatus: serializeFilterKey(snapshot.selectedStatus),
     priorityFilter: serializeFilterKey(snapshot.priorityFilter),
     portalFilter: serializeFilterKey(snapshot.portalFilter),
+    repairFilter: serializeFilterKey(snapshot.repairFilter),
     selectedState: serializeFilterKey(snapshot.selectedState),
     selectedCity: serializeFilterKey(snapshot.selectedCity),
     selectedRegion: serializeFilterKey(snapshot.selectedRegion),
@@ -1142,6 +1160,7 @@ export type DraftFilterOverrides = Partial<{
   selectedStatus: string[];
   priorityFilter: string[];
   portalFilter: string[];
+  repairFilter: string[];
   selectedState: string[];
   selectedCity: string[];
   selectedRegion: string[];
@@ -1162,6 +1181,7 @@ export function buildDraftFilterSnapshot(input: {
   selectedStatus: string[];
   priorityFilter: string[];
   portalFilter: string[];
+  repairFilter: string[];
   selectedState: string[];
   selectedCity: string[];
   selectedRegion: string[];
@@ -1192,5 +1212,6 @@ export function appliedFilterPartsFromSnapshot(
     selectedStatus: snapshot.selectedStatus,
     priorityFilter: snapshot.priorityFilter,
     portalFilter: snapshot.portalFilter,
+    repairFilter: snapshot.repairFilter,
   });
 }

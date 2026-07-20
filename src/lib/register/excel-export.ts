@@ -2,6 +2,7 @@ import type ExcelJS from 'exceljs';
 import { blobToPreparedExport, triggerBlobDownload } from '@/lib/report/summary-excel-export';
 import { formatRegisterExportDate } from '@/lib/register/export-dates';
 import { formatRegisterMajorMinor } from '@/lib/register/major-minor';
+import { formatRegisterRepairDone } from '@/lib/register/format-repair-done';
 import { isRegisterRowCancelled } from '@/lib/report/search';
 
 /** Excel worksheet limit minus header row. */
@@ -26,6 +27,7 @@ const REGISTER_COLUMNS: { header: string; key: string; width: number }[] = [
   { header: 'WCO', key: 'wco', width: 8 },
   { header: 'Technician', key: 'tech', width: 20 },
   { header: 'Complaint', key: 'complaint', width: 40 },
+  { header: 'Repair done', key: 'repairDone', width: 22 },
   { header: 'Status', key: 'status', width: 12 },
   { header: 'Solved Date', key: 'solvedDate', width: 12 },
   { header: 'Remarks', key: 'remarks', width: 30 },
@@ -91,6 +93,7 @@ function mapRegisterRow(row: Record<string, unknown>) {
       wco: row.WCO != null && String(row.WCO).trim() !== '' ? String(row.WCO).trim().toUpperCase() : '—',
       tech: row.serviceman,
       complaint: row.vcomplaint,
+      repairDone: formatRegisterRepairDone(row.repair_done) || '—',
       status: statusText,
       solvedDate: isSolved ? formatExcelExportDate(row.callsolveddate) : '—',
       remarks: row.vsolveremarks || row.cancel_reason || '—',

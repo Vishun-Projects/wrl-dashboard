@@ -21,7 +21,11 @@ import {
   buildFranchiseeFilterSqlCondition,
   resolveRegisterDateSqlColumn,
   sqlRegisterDateColumn,
+  buildRegisterRepairNcodeExistsWhere,
 } from '@/lib/trhcalls/query';
+import { enrichRegisterRowsRepairDone } from '@/lib/register/server/repair-done-enrich';
+import { parseRepairQueryParam } from '@/lib/serial-audit/repair-options';
+import { resolveRegisterRepairCallKeys } from '@/lib/register/server/repair-call-ncodes';
 import { getPincodeMapData } from '@/lib/geo/pincode-map';
 import { CITY_TO_STATE_MAP, getGeographicDetails } from '@/lib/geo/india-states';
 import {
@@ -171,6 +175,8 @@ export async function handleRegisterGet(req: NextRequest) {
     const lastSync = searchParams.get('lastSync') || '';
     const priority = searchParams.get('priority') || 'all';
     const portalFilter = searchParams.get('portalFilter') || 'All';
+    const repair = searchParams.get('repair') || 'All';
+    const repairNcodes = parseRepairQueryParam(repair);
 
     // Cascading filters
     const state = searchParams.get('state') || '';
@@ -204,8 +210,37 @@ export async function handleRegisterGet(req: NextRequest) {
 
     const isHod = isHodUser(profile ?? undefined, permissions);
 
+    // Repair done: lean CRM id list → filter Postgres hot (avoid full CRM register grid timeout).
     if (readRegisterFromPostgres() && !lastSync) {
       const registerDateCol = resolveRegisterDateSqlColumn(dateFilterColumnParam);
+      let repairCallKeys: Array<{ ncode: number; officeId: number }> | undefined;
+      if (repairNcodes.length > 0) {
+        repairCallKeys = await resolveRegisterRepairCallKeys({
+          repair,
+          startDate,
+          endDate,
+          dateFilterColumn: registerDateCol,
+          isHod,
+          assignedOffices,
+          officeId,
+        });
+        if (!repairCallKeys?.length) {
+          return NextResponse.json({
+            data: [],
+            total: 0,
+            summary: {
+              total: 0,
+              cancelled: 0,
+              solved: 0,
+              open: 0,
+              openUnallocated: 0,
+              assigned: 0,
+              techSolved: 0,
+              closed: 0,
+            },
+          });
+        }
+      }
 
       if (searchParams.get('export') === 'bulk') {
         const payload = await queryRegisterBulkFromPostgres({
@@ -217,6 +252,7 @@ export async function handleRegisterGet(req: NextRequest) {
           assignedOffices,
           visibleStatuses,
           isHod,
+          repairCallKeys,
         });
         return NextResponse.json(payload);
       }
@@ -243,6 +279,7 @@ export async function handleRegisterGet(req: NextRequest) {
           assignedOffices,
           visibleStatuses,
           isHod,
+          repairCallKeys,
         });
       }
 
@@ -271,6 +308,7 @@ export async function handleRegisterGet(req: NextRequest) {
           assignedOffices,
           visibleStatuses,
           isHod,
+          repairCallKeys,
           cursorLoggedAt: (() => {
             const raw = searchParams.get('cursorLoggedAt');
             return raw && raw.trim() ? raw.trim() : undefined;
@@ -361,6 +399,11 @@ export async function handleRegisterGet(req: NextRequest) {
             baseCondition += " AND NOT EXISTS (SELECT 1 FROM trdcalls2fault tf (NOLOCK) JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode WHERE tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid AND r.bmajor = 'True')";
           }
         }
+      }
+
+      const repairWhere = buildRegisterRepairNcodeExistsWhere(repair, 'tc');
+      if (repairWhere) {
+        baseCondition += ` AND ${repairWhere}`;
       }
 
       if (pincode) {
@@ -614,7 +657,11 @@ export async function handleRegisterGet(req: NextRequest) {
         batchSize: Math.min(Math.max(parseInt(searchParams.get('batchSize') || '1000', 10) || 1000, 1), 1000),
         knownTotal: parseInt(searchParams.get('knownTotal') || '0', 10) || 0,
         processRows: async (rows) =>
-          mergeAuditEnrichment(rows.map((row: Record<string, unknown>) => mapCrmRegisterRow(row))),
+          enrichRegisterRowsRepairDone(
+            await mergeAuditEnrichment(
+              rows.map((row: Record<string, unknown>) => mapCrmRegisterRow(row))
+            )
+          ),
       });
     }
 
@@ -725,8 +772,10 @@ export async function handleRegisterGet(req: NextRequest) {
     };
     const totalCount = parseInt(summary.total || "0");
 
-    const processedData = await mergeAuditEnrichment(
-      (res.data || []).map((row: Record<string, unknown>) => mapCrmRegisterRow(row))
+    const processedData = await enrichRegisterRowsRepairDone(
+      await mergeAuditEnrichment(
+        (res.data || []).map((row: Record<string, unknown>) => mapCrmRegisterRow(row))
+      )
     );
 
     const responsePayload: any = {

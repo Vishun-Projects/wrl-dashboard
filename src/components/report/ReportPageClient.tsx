@@ -75,11 +75,13 @@ import {
   type RegisterTableColumnKey,
 } from '@/lib/register/table-columns';
 import { getCallTypeBadgeClass } from '@/lib/report/call-type-badge';
+import { repairSemantics } from '@/lib/ui/semantics';
 import { MAX_CLIENT_CORPUS_DAYS, resolveRegisterDateSqlColumn } from '@/lib/trhcalls/query';
 import {
   findCallsInIndexedDb,
   findCallsInMemoryCaches,
   isIdentifierLookupSearch,
+  isTrnLikeSearch,
   registerRowMatchesViewFilters,
   summarizeRegisterRows,
   classifyRegisterRowStatus,
@@ -454,6 +456,8 @@ export default function ReportPageClient() {
     setPriorityFilter,
     portalFilter,
     setPortalFilter,
+    repairFilter,
+    setRepairFilter,
     selectedState,
     setSelectedState,
     selectedCity,
@@ -716,6 +720,7 @@ export default function ReportPageClient() {
         selectedStatus,
         priorityFilter,
         portalFilter,
+        repairFilter,
         agingAsOf: agingAsOf || '',
         pageLimit: limit,
       }),
@@ -737,6 +742,7 @@ export default function ReportPageClient() {
       selectedStatus,
       priorityFilter,
       portalFilter,
+      repairFilter,
       agingAsOf,
       limit,
     ]
@@ -964,6 +970,33 @@ export default function ReportPageClient() {
         return resolveTechnicianDisplayName(row, technicianRoster);
       case 'vcomplaint':
         return row.vcomplaint;
+      case 'repair_done': {
+        const raw = String(row.repair_done ?? '');
+        const chips = [
+          raw.includes('Motor Replaced')
+            ? { label: 'Motor', className: repairSemantics.motor }
+            : null,
+          raw.includes('Compressor Replaced')
+            ? { label: 'Compressor', className: repairSemantics.compressor }
+            : null,
+          raw.includes('Gas Charging Done')
+            ? { label: 'Gas', className: repairSemantics.gas }
+            : null,
+        ].flatMap((c) => (c ? [c] : []));
+        if (!chips.length) return '—';
+        return (
+          <span className="inline-flex flex-wrap gap-1">
+            {chips.map((c) => (
+              <span
+                key={c.label}
+                className={`rounded border px-1.5 py-0.5 text-[9px] ui-label ${c.className}`}
+              >
+                {c.label}
+              </span>
+            ))}
+          </span>
+        );
+      }
       case 'Status':
         return (() => {
           const bucket = classifyRegisterRowStatus(row);
@@ -1089,6 +1122,7 @@ export default function ReportPageClient() {
     selectedStatus,
     priorityFilter,
     portalFilter,
+    repairFilter,
   });
   registerViewFilterRef.current = {
     search: debouncedSearch,
@@ -1106,6 +1140,7 @@ export default function ReportPageClient() {
     selectedStatus,
     priorityFilter,
     portalFilter,
+    repairFilter,
   };
 
   // Client-side cascades computation removed in favor of server-side cascades
@@ -1151,6 +1186,7 @@ export default function ReportPageClient() {
         selectedStatus.length === 0 &&
         priorityFilter.length === 0 &&
         portalFilter.length === 0 &&
+        repairFilter.length === 0 &&
         selectedOfficeIds.length === 0 &&
         selectedCallTypes.length === 0 &&
         !filterAccount && filterRegion.length === 0;
@@ -1657,6 +1693,8 @@ export default function ReportPageClient() {
   const applyRegisterFromCorpus = useCallback(
     (pageNum = 1, pageLimit: RegisterPageSize = limit): boolean => {
       if (readRegisterFromPostgresClient()) return false;
+      // Corpus rows lack repair ncodes — force server path when Repair done is active.
+      if (repairFilter.length > 0) return false;
       const applied = getAppliedFiltersSnapshot();
       const range = applied?.dateRange ?? dateRange;
       const dateCol = applied?.dateFilterColumn ?? dateFilterColumn;
@@ -1709,6 +1747,7 @@ export default function ReportPageClient() {
         selectedStatus: viewFilters.selectedStatus,
         priorityFilter: viewFilters.priorityFilter,
         portalFilter: viewFilters.portalFilter,
+        repairFilter: viewFilters.repairFilter,
         agingAsOf: agingAsOf || '',
         pageLimit,
       });
@@ -1752,6 +1791,7 @@ export default function ReportPageClient() {
         selectedStatus,
         priorityFilter,
         portalFilter,
+        repairFilter,
         selectedOfficeIds,
         agingAsOf,
         dateRange,
@@ -1783,6 +1823,7 @@ export default function ReportPageClient() {
       selectedStatus,
       priorityFilter,
       portalFilter,
+      repairFilter,
       selectedOfficeIds,
     ]
   );
@@ -1806,6 +1847,7 @@ export default function ReportPageClient() {
   const applyRegisterFromSharedCalls = useCallback(
     (pageNum = 1, pageLimit: RegisterPageSize = limit): boolean => {
       if (!readRegisterFromPostgresClient()) return false;
+      if (repairFilter.length > 0) return false;
       const applyStart = performance.now();
       const scope = getSharedCallsForScope();
       if (!scope) {
@@ -1849,6 +1891,7 @@ export default function ReportPageClient() {
         selectedStatus: viewFilters.selectedStatus,
         priorityFilter: viewFilters.priorityFilter,
         portalFilter: viewFilters.portalFilter,
+        repairFilter: viewFilters.repairFilter,
         agingAsOf: agingAsOf || '',
         pageLimit,
       });
@@ -1894,6 +1937,7 @@ export default function ReportPageClient() {
         selectedStatus,
         priorityFilter,
         portalFilter,
+        repairFilter,
         selectedOfficeIds,
         agingAsOf,
         dateRange,
@@ -1932,6 +1976,7 @@ export default function ReportPageClient() {
       selectedStatus,
       priorityFilter,
       portalFilter,
+      repairFilter,
       selectedOfficeIds,
       dateRange,
       filterRegion,
@@ -2080,6 +2125,7 @@ export default function ReportPageClient() {
       selectedStatus,
       priorityFilter,
       portalFilter,
+      repairFilter,
       agingAsOf: agingAsOf || '',
       pageLimit: pageSize,
     });
@@ -2093,6 +2139,7 @@ export default function ReportPageClient() {
       p === 1 &&
       searchForUrl?.trim() &&
       isIdentifierLookupSearch(searchForUrl) &&
+      !isTrnLikeSearch(searchForUrl) &&
       !pincodeForUrl &&
       !skipCache &&
       localCorpusMatchesAppliedRange
@@ -2176,7 +2223,7 @@ export default function ReportPageClient() {
       }
     }
 
-    if (!searchActive && !readRegisterFromPostgresClient()) {
+    if (!searchActive && !readRegisterFromPostgresClient() && repairFilter.length === 0) {
       const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
       const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
       const hasCorpus =
@@ -2305,6 +2352,11 @@ export default function ReportPageClient() {
       if (statusParam) u += `&status=${encodeURIComponent(statusParam)}`;
       if (priorityParam) u += `&priority=${encodeURIComponent(priorityParam)}`;
       if (portalParam) u += `&portalFilter=${encodeURIComponent(portalParam)}`;
+      const appliedRepair = getAppliedFiltersSnapshot()?.repairFilter;
+      const repairParam = joinFilterParam(
+        appliedRepair?.length ? appliedRepair : repairFilter
+      );
+      if (repairParam) u += `&repair=${encodeURIComponent(repairParam)}`;
       u += '&fetchFilterOptions=false';
       return u;
     };
@@ -2482,6 +2534,7 @@ export default function ReportPageClient() {
           selectedStatus,
           priorityFilter,
           portalFilter,
+          repairFilter,
           selectedState,
           selectedCity,
           selectedRegion,
@@ -2986,6 +3039,7 @@ export default function ReportPageClient() {
                   selectedStatus: [],
                   priorityFilter: [],
                   portalFilter: [],
+                  repairFilter: [],
                 },
                 1,
                 10,
@@ -3008,6 +3062,7 @@ export default function ReportPageClient() {
                     selectedStatus: [],
                     priorityFilter: [],
                     portalFilter: [],
+                  repairFilter: [],
                   },
                   restored,
                   viewDateFilter
@@ -3035,6 +3090,7 @@ export default function ReportPageClient() {
                   selectedStatus: [],
                   priorityFilter: [],
                   portalFilter: [],
+                  repairFilter: [],
                   agingAsOf: agingAsOf || '',
                   pageLimit: limit,
                 });
@@ -3054,6 +3110,7 @@ export default function ReportPageClient() {
                   selectedStatus: [],
                   priorityFilter: [],
                   portalFilter: [],
+                  repairFilter: [],
                   agingAsOf,
                   debouncedSearch: '',
                   debouncedPincodeSearch: '',
@@ -3079,6 +3136,7 @@ export default function ReportPageClient() {
                   selectedStatus: [],
                   priorityFilter: [],
                   portalFilter: [],
+                  repairFilter: [],
                   selectedState: [],
                   selectedCity: [],
                   selectedRegion: [],
@@ -3142,6 +3200,7 @@ export default function ReportPageClient() {
                 selectedStatus: [],
                 priorityFilter: [],
                 portalFilter: [],
+                  repairFilter: [],
                 selectedState: [],
                 selectedCity: [],
                 selectedBranch: [],
@@ -3181,6 +3240,7 @@ export default function ReportPageClient() {
                 selectedStatus: [],
                 priorityFilter: [],
                 portalFilter: [],
+                  repairFilter: [],
                 agingAsOf: agingAsOf || '',
                 pageLimit: limit,
               });
@@ -3236,6 +3296,7 @@ export default function ReportPageClient() {
         selectedStatus: applied.selectedStatus,
         priorityFilter: applied.priorityFilter,
         portalFilter: applied.portalFilter,
+        repairFilter: applied.repairFilter,
         agingAsOf,
         debouncedSearch: applied.search || '',
         debouncedPincodeSearch: applied.pincodeSearch || '',
@@ -3286,6 +3347,14 @@ export default function ReportPageClient() {
 
       try {
         if (readRegisterFromPostgresClient()) {
+          await fetchData(1, fetchOpts);
+          lastAppliedFilterSnapshotRef.current = filterSnapshot;
+          return;
+        }
+
+        const appliedRepair = applied.repairFilter?.length ?? 0;
+        if (appliedRepair > 0) {
+          // Corpus rows lack repair ncodes — must hit register API.
           await fetchData(1, fetchOpts);
           lastAppliedFilterSnapshotRef.current = filterSnapshot;
           return;
@@ -3364,6 +3433,7 @@ export default function ReportPageClient() {
       selectedStatus,
       priorityFilter,
       portalFilter,
+      repairFilter,
       agingAsOf: agingAsOf || '',
       pageLimit: limit,
     });
@@ -3385,6 +3455,7 @@ export default function ReportPageClient() {
     selectedStatus,
     priorityFilter,
     portalFilter,
+    repairFilter,
     agingAsOf,
   ]);
 
@@ -3878,6 +3949,7 @@ export default function ReportPageClient() {
       selectedStatus,
       priorityFilter,
       portalFilter,
+      repairFilter,
       agingAsOf: agingAsOf || '',
       pageLimit: limit,
     });
@@ -3897,6 +3969,7 @@ export default function ReportPageClient() {
     selectedStatus,
     priorityFilter,
     portalFilter,
+    repairFilter,
     agingAsOf,
     viewCallTypesParam,
     limit,
@@ -3934,6 +4007,7 @@ export default function ReportPageClient() {
             status: joinFilterParam(selectedStatus),
             priority: joinFilterParam(priorityFilter),
             portalFilter: joinFilterParam(portalFilter),
+            repair: joinFilterParam(repairFilter),
           };
 
           let exportData: Record<string, unknown>[] = data;
@@ -4127,6 +4201,7 @@ export default function ReportPageClient() {
       selectedStatus,
       priorityFilter,
       portalFilter,
+      repairFilter,
       summaryOfficeIdsParam,
       viewCallTypesParam,
       data,
@@ -4373,20 +4448,16 @@ export default function ReportPageClient() {
                 onChange={(range) => setDateRange(range)}
               />
             </div>
-            {activeTab !== "deployment-completion" && (
-  <div className="report-toolbar-filters-aging report-shared-aging-group flex shrink-0 items-center gap-2">
-    <span className="report-shared-aging-label text-[10px] whitespace-nowrap text-amber-600 ui-label">
-      Aging As Of
-    </span>
-    <input
-      type="date"
-      className="register-filter-select report-shared-aging-input h-8 w-auto bg-amber-50/80 text-amber-900"
-      value={agingAsOf}
-      max={new Date().toISOString().split("T")[0]}
-      onChange={(e) => setAgingAsOf(e.target.value)}
-    />
-  </div>
-)}
+            <div className="report-toolbar-filters-aging report-shared-aging-group flex shrink-0 items-center gap-2">
+              <span className="report-shared-aging-label text-[10px] whitespace-nowrap text-amber-600 ui-label">Aging As Of</span>
+              <input
+                type="date"
+                className="register-filter-select report-shared-aging-input h-8 w-auto bg-amber-50/80 text-amber-900"
+                value={agingAsOf}
+                max={new Date().toISOString().split('T')[0]}
+                onChange={(e) => setAgingAsOf(e.target.value)}
+              />
+            </div>
             <button
               type="button"
               onClick={handleApplySummaryFilters}

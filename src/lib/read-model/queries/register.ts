@@ -7,6 +7,7 @@ import { mapCachedRowToRegisterRow, isRealCancelReasonCode } from '@/lib/report/
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
 import { mergeArcpApproveDatesFromHot } from '@/lib/register/arcp-approve-dates-server';
 import { mergeAuditEnrichment } from '@/lib/register/audit-enrichment';
+import { enrichRegisterRowsRepairDone } from '@/lib/register/server/repair-done-enrich';
 import { buildPortalFilterSqlForHot } from '@/lib/register/portal-filter-sql';
 import {
   DISTRIBUTION_COMPACT_COLUMNS,
@@ -55,6 +56,8 @@ export type RegisterPostgresParams = {
   /** Composite keyset cursor — both required when paginating past page 1. */
   cursorLoggedAt?: string | Date;
   cursorNcode?: number;
+  /** Prefetched CRM (ncode, office) pairs for Repair done filter (Postgres path). */
+  repairCallKeys?: Array<{ ncode: number; officeId: number }>;
 };
 
 export type RegisterHotDateField = 'logged_at' | 'solved_at';
@@ -282,6 +285,23 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
     clauses.push('h.is_major = true');
   } else if (params.priority === 'minor') {
     clauses.push('h.is_major = false');
+  }
+
+  if (params.repairCallKeys) {
+    if (params.repairCallKeys.length === 0) {
+      clauses.push('1=0');
+    } else {
+      const ncodes = params.repairCallKeys.map((k) => k.ncode);
+      const offices = params.repairCallKeys.map((k) => k.officeId);
+      clauses.push(
+        `EXISTS (
+          SELECT 1 FROM unnest($${idx}::bigint[], $${idx + 1}::bigint[]) AS u(n, o)
+          WHERE u.n = h.ncode AND u.o = h.nofficeid
+        )`
+      );
+      values.push(ncodes, offices);
+      idx += 2;
+    }
   }
 
   if (params.cursorNcode != null && params.cursorNcode > 0 && params.cursorLoggedAt != null) {
@@ -589,9 +609,11 @@ export async function queryRegisterFromPostgres(params: RegisterPostgresParams) 
     (await mergeAuditEnrichment(rows.map(hotRowToRegisterRow))) as Record<string, unknown>[]
   )) as Record<string, unknown>[];
 
+  const withRepairs = await enrichRegisterRowsRepairDone(mapped);
+
   const syncMeta = await getSyncMeta();
   const response: Record<string, unknown> = {
-    data: mapped,
+    data: withRepairs,
     readSource: 'postgres',
     syncMeta,
   };
@@ -628,6 +650,7 @@ export async function queryRegisterBulkFromPostgres(
     | 'assignedOffices'
     | 'visibleStatuses'
     | 'isHod'
+    | 'repairCallKeys'
   >
 ) {
   const bulkParams: RegisterPostgresParams = {

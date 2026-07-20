@@ -2,6 +2,7 @@ import { postQuery } from '@/lib/db/proxy';
 import { normalizeCrmCallRow } from '@/lib/call-row/normalize';
 import { formatRegisterExportDate } from '@/lib/register/export-dates';
 import { formatRegisterMajorMinor } from '@/lib/register/major-minor';
+import { formatRegisterRepairDone } from '@/lib/register/format-repair-done';
 import { REGISTER_EXPORT_COLUMNS } from '@/lib/register/table-columns';
 import { escapeCsvCell } from '@/lib/utils/csv';
 import {
@@ -56,6 +57,7 @@ export function rowForCsv(raw: Record<string, unknown>): Record<string, unknown>
     WCO: row.WCO ?? '',
     serviceman: row.serviceman,
     vcomplaint: row.vcomplaint,
+    repair_done: formatRegisterRepairDone(row.repair_done),
     display_status: statusText,
     solvedDate: isSolved ? formatRegisterExportDate(row.callsolveddate) : '',
     remarks: row.vsolveremarks || row.cancel_reason || '',

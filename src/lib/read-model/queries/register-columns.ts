@@ -50,6 +50,7 @@ export const REGISTER_HOT_COLUMNS = [
 /** Minimal hot-table projection for register CSV export (fewer columns, faster I/O). */
 export const REGISTER_EXPORT_HOT_COLUMNS = [
   'h.ncode',
+  'h.nofficeid',
   'h.vtrnno',
   'h.vcclid',
   'h.party_name',

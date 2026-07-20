@@ -42,8 +42,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const security = await resolveReportSecurity(user.id, { pageId: 'serial_audit' });
-    if (security.forbidden) {
+    // Shared by Serial Audit + Call Register Repair done picker.
+    const serialAudit = await resolveReportSecurity(user.id, { pageId: 'serial_audit' });
+    const register =
+      serialAudit.forbidden
+        ? await resolveReportSecurity(user.id, { pageId: 'mis_reports', tabId: 'register' })
+        : null;
+    if (serialAudit.forbidden && register?.forbidden) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -69,16 +74,19 @@ export async function GET(req: NextRequest) {
         return repairMasterToPicker(filterRepairMasterForPicker(master));
       })();
     }
-    const repairs = await repairInflight;
-    repairInflight = null;
-    repairCache = { data: repairs, timestamp: now };
-
-    return NextResponse.json({
-      repairs,
-      source: 'mstrepair',
-      cached: false,
-    });
+    try {
+      const repairs = await repairInflight;
+      repairCache = { data: repairs, timestamp: now };
+      return NextResponse.json({
+        repairs,
+        source: 'mstrepair',
+        cached: false,
+      });
+    } finally {
+      repairInflight = null;
+    }
   } catch (err: unknown) {
+    repairInflight = null;
     console.error('Serial Audit repairs API Error:', err);
     const message = err instanceof Error ? err.message : 'Failed to load repair types';
     return NextResponse.json({ error: message }, { status: 500 });

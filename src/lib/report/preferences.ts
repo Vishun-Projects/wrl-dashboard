@@ -9,6 +9,7 @@ import {
   type ReportDateRange,
   type ReportFilterSnapshot,
 } from '@/lib/report/filters';
+import { isRepairNcodeValue } from '@/lib/serial-audit/repair-options';
 import {
   resolveRegisterDateSqlColumn,
   type RegisterDateFilterColumn,
@@ -28,6 +29,7 @@ export type StoredSharedFilters = {
   selectedStatus?: string[];
   priorityFilter?: string[];
   portalFilter?: string[];
+  repairFilter?: string[];
   selectedState?: string[];
   selectedCity?: string[];
   selectedRegion?: string[];
@@ -174,6 +176,7 @@ export function buildRoleDefaultShared(ctx: RestoreFilterContext): StoredSharedF
     selectedStatus: [],
     priorityFilter: [],
     portalFilter: [],
+    repairFilter: [],
     selectedState: [],
     selectedCity: [],
     selectedRegion: [],
@@ -207,6 +210,7 @@ export function storedSharedToSnapshot(stored: StoredSharedFilters): ReportFilte
     selectedStatus: capStrings(stored.selectedStatus).filter((s) => VALID_STATUS.has(s)),
     priorityFilter: capStrings(stored.priorityFilter).filter((p) => VALID_PRIORITY.has(p)),
     portalFilter: capStrings(stored.portalFilter).filter((p) => VALID_PORTAL.has(p)),
+    repairFilter: capStrings(stored.repairFilter).filter(isRepairNcodeValue),
     selectedState: capStrings(stored.selectedState),
     selectedCity: capStrings(stored.selectedCity),
     selectedRegion: capStrings(stored.selectedRegion),

@@ -26,6 +26,7 @@ import { processCrmRows } from '@/lib/read-model/transform';
 import { countHotRows } from '@/lib/read-model/upsert-hot';
 import { HOT_TARGET_ROWS } from '@/lib/read-model/constants';
 import { runPipelineReconcile } from '@/lib/read-model/pipeline-reconcile';
+import { runReconcileTechSolved } from '@/lib/read-model/reconcile-tech-solved';
 import { runEditedonCatchupStep } from '@/lib/read-model/editedon-catchup';
 import { repairHotCancelFromNcrReason } from '@/lib/read-model/repair-hot-cancel';
 
@@ -66,6 +67,7 @@ export type IncrementalSyncResult = {
   rowsDeleted?: number;
   crmRowsFetched?: number;
   pipelineReconciled?: number;
+  techSolvedReconciled?: number;
   editedonCatchup?: number;
 };
 
@@ -251,6 +253,25 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
     );
   }
 
+  let techSolvedReconciled = 0;
+  if (process.env.SYNC_TECH_SOLVED_RECONCILE_ENABLED !== 'false') {
+    try {
+      const perRun = Math.max(200, Number(process.env.RECONCILE_TECH_SOLVED_PER_RUN ?? 800) || 800);
+      const tech = await runReconcileTechSolved({ apply: true, limit: perRun });
+      techSolvedReconciled = tech.rowsUpserted ?? 0;
+      if (techSolvedReconciled > 0 || (tech.stale ?? 0) > 0) {
+        console.log(
+          `[sync-worker] tech_solved reconcile — checked ${tech.checked}, stale ${tech.stale}, upserted ${techSolvedReconciled}`
+        );
+      }
+    } catch (err) {
+      console.warn(
+        '[sync-worker] tech_solved reconcile failed (incremental succeeded):',
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
   let editedonCatchup = 0;
   try {
     const catchup = await runEditedonCatchupStep();
@@ -273,6 +294,7 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
     rowsDeleted: writeResult.rowsDeleted,
     crmRowsFetched: rawRows.length,
     pipelineReconciled,
+    techSolvedReconciled,
     editedonCatchup,
   };
 }

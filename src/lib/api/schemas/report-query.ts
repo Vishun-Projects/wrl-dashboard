@@ -15,6 +15,7 @@ export const registerQuerySchema = z.object({
   pincode: z.string().optional(),
   priority: z.string().optional(),
   portalFilter: z.string().optional(),
+  repair: z.string().optional(),
   state: z.string().optional(),
   city: z.string().optional(),
   branch: z.string().optional(),

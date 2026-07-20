@@ -136,6 +136,8 @@ type ReportFiltersContextValue = {
   setPriorityFilter: (v: string[]) => void;
   portalFilter: string[];
   setPortalFilter: (v: string[]) => void;
+  repairFilter: string[];
+  setRepairFilter: (v: string[]) => void;
   selectedState: string[];
   setSelectedState: (v: string[]) => void;
   selectedCity: string[];
@@ -343,6 +345,9 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   const [portalFilter, setPortalFilter] = useState<string[]>(() =>
     migrateStringFilter(bootstrapSnapshot?.portalFilter ?? globalReportCache?.portalFilter)
   );
+  const [repairFilter, setRepairFilter] = useState<string[]>(() =>
+    migrateStringFilter(bootstrapSnapshot?.repairFilter ?? globalReportCache?.repairFilter)
+  );
   const [selectedState, setSelectedState] = useState<string[]>(() =>
     migrateStringFilter(bootstrapSnapshot?.selectedState ?? globalReportCache?.selectedState)
   );
@@ -453,6 +458,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     selectedStatus,
     priorityFilter,
     portalFilter,
+    repairFilter,
     selectedState,
     selectedCity,
     selectedRegion,
@@ -472,6 +478,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     selectedStatus,
     priorityFilter,
     portalFilter,
+    repairFilter,
     selectedState,
     selectedCity,
     selectedRegion,
@@ -494,6 +501,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     setSelectedStatus([...snapshot.selectedStatus]);
     setPriorityFilter([...snapshot.priorityFilter]);
     setPortalFilter([...snapshot.portalFilter]);
+    setRepairFilter([...snapshot.repairFilter]);
     setSelectedState([...snapshot.selectedState]);
     setSelectedCity([...snapshot.selectedCity]);
     setSelectedRegion([...snapshot.selectedRegion]);
@@ -567,6 +575,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
         selectedStatus,
         priorityFilter,
         portalFilter,
+        repairFilter,
         selectedState,
         selectedCity,
         selectedRegion,
@@ -586,6 +595,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       selectedStatus,
       priorityFilter,
       portalFilter,
+      repairFilter,
       selectedState,
       selectedCity,
       selectedRegion,
@@ -814,6 +824,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       selectedStatus: [],
       priorityFilter: [],
       portalFilter: [],
+      repairFilter: [],
     });
     flushSync(() => {
       applyFilterSnapshot(snapshot);
@@ -1821,6 +1832,8 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     setPriorityFilter,
     portalFilter,
     setPortalFilter,
+    repairFilter,
+    setRepairFilter,
     selectedState,
     setSelectedState,
     selectedCity,
@@ -1872,6 +1885,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       selectedStatus,
       priorityFilter,
       portalFilter,
+      repairFilter,
     }),
     callTypeOptions,
     stateOptions,
@@ -1931,6 +1945,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     selectedStatus,
     priorityFilter,
     portalFilter,
+    repairFilter,
     selectedState,
     selectedCity,
     selectedRegion,

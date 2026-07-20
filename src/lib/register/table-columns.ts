@@ -15,6 +15,7 @@ export type RegisterTableColumnKey =
   | 'serviceman'
   | 'vcomplaint'
   | 'Status'
+  | 'repair_done'
   | 'portal_action'
   | 'callsolveddate'
   | 'vsolveremarks'
@@ -46,6 +47,7 @@ export const REGISTER_TABLE_COLUMNS: RegisterTableColumnDef[] = [
   { key: 'WCO', label: 'WCO' },
   { key: 'serviceman', label: 'Technician' },
   { key: 'vcomplaint', label: 'Complaint' },
+  { key: 'repair_done', label: 'Repair done' },
   { key: 'portal_action', label: 'Portal Action' },
   { key: 'callsolveddate', label: 'Solved' },
   { key: 'bm_approved_date', label: 'BM Approved Date' },
@@ -76,6 +78,7 @@ export const REGISTER_EXPORT_COLUMNS: { key: string; header: string }[] = [
   { key: 'WCO', header: 'WCO' },
   { key: 'serviceman', header: 'Technician' },
   { key: 'vcomplaint', header: 'Complaint' },
+  { key: 'repair_done', header: 'Repair done' },
   { key: 'display_status', header: 'Status' },
   { key: 'solvedDate', header: 'Solved Date' },
   { key: 'bm_approved_date', header: 'BM Approved Date' },

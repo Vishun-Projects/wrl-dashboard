@@ -174,6 +174,7 @@ export default function SerialAuditPage() {
             selectedStatus: [],
             priorityFilter: [],
             portalFilter: [],
+            repairFilter: [],
           },
     [appliedFilters]
   );

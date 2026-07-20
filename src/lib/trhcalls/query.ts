@@ -768,19 +768,109 @@ function prefixSerialAuditWhereForAlias(where: string, alias: string): string {
     .replace(/trhcalls\.nofficeid/g, `${alias}.nofficeid`);
 }
 
+/** EXISTS filter for visit repairs by mstrepair.ncode (Serial Audit + Call Register). */
+export function buildRepairNcodeExistsWhere(
+  repair: string | null | undefined,
+  alias: string
+): string | null {
+  const ncodes = parseRepairQueryParam(repair);
+  if (!ncodes.length) return null;
+  // Direct nrepair IN — avoid CAST + mstrepair join (correlated EXISTS was timing out on register).
+  const ncodeIn = ncodes.map((t) => t.replace(/[^\d]/g, '')).filter(Boolean).join(',');
+  if (!ncodeIn) return null;
+  return `EXISTS (
+    SELECT 1 FROM trdcalls2fault tf (NOLOCK)
+    WHERE tf.ncalls = ${alias}.ncode
+      AND tf.nofficeid = ${alias}.nofficeid
+      AND tf.nrepair IN (${ncodeIn})
+  )`;
+}
+
+/**
+ * Call Register only: repair nrepair must be on a call that has work underway/done
+ * (Assigned / Tech Solved / Closed) — not Open Unallocated with a planned repair only.
+ */
+export function trhcallsRepairFilterStatusPred(alias = 'tc'): string {
+  return `(
+    (${alias}.ncancelreason IS NULL OR ${alias}.ncancelreason = 0)
+    AND (
+      (${alias}.nengineer IS NOT NULL AND CAST(${alias}.nengineer AS NVARCHAR(50)) <> '0' AND ${alias}.nengineer <> 0)
+      OR (${alias}.bfastclose = 1 OR ${alias}.bfastclose = '1' OR ${alias}.bfastclose = 'True')
+      OR (${alias}.bsolved = 1 OR ${alias}.bsolved = '1' OR ${alias}.bsolved = 'True')
+    )
+  )`;
+}
+
+/** Register CRM path: fault has repair ncode AND call is Assigned / Tech Solved / Solved. */
+export function buildRegisterRepairNcodeExistsWhere(
+  repair: string | null | undefined,
+  alias: string
+): string | null {
+  const repairExists = buildRepairNcodeExistsWhere(repair, alias);
+  if (!repairExists) return null;
+  return `(${repairExists} AND ${trhcallsRepairFilterStatusPred(alias)})`;
+}
+
+/**
+ * Lean call-id list for Repair done filter (date-scoped). Used to keep register on Postgres
+ * instead of running the full CRM register grid with a correlated fault EXISTS.
+ */
+export function buildRegisterCallIdsWithRepairSql(opts: {
+  repair: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  dateFilterColumn?: RegisterDateFilterColumn;
+  isHod?: boolean;
+  assignedOffices?: string[];
+  officeId?: string | null;
+}): string | null {
+  const ncodes = parseRepairQueryParam(opts.repair);
+  if (!ncodes.length) return null;
+  const ncodeIn = ncodes.map((t) => t.replace(/[^\d]/g, '')).filter(Boolean).join(',');
+  if (!ncodeIn) return null;
+
+  const dateCol = resolveRegisterDateSqlColumn(opts.dateFilterColumn);
+  const dateSql = `tc.${dateCol}`;
+  let where = `tf.nrepair IN (${ncodeIn})
+    AND ${trhcallsRepairFilterStatusPred('tc')}
+    AND tc.vtrnno IS NOT NULL AND tc.vtrnno <> ''
+    ${TRHCALLS_EXCLUDE_TRANSFERRED}`;
+  if (opts.startDate) {
+    where += ` AND ${dateSql} >= '${opts.startDate.replace(/'/g, "''")}'`;
+  }
+  if (opts.endDate) {
+    where += ` AND ${dateSql} <= '${opts.endDate.replace(/'/g, "''")} 23:59:59'`;
+  }
+  if (opts.officeId && opts.officeId !== 'All') {
+    const offices = opts.officeId
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => /^\d+$/.test(id));
+    if (offices.length === 1) {
+      where += ` AND tc.nofficeid = ${offices[0]}`;
+    } else if (offices.length > 1) {
+      where += ` AND tc.nofficeid IN (${offices.join(',')})`;
+    }
+  } else if (!opts.isHod && opts.assignedOffices?.length) {
+    const allowed = opts.assignedOffices.filter((id) => /^\d+$/.test(String(id))).join(',');
+    if (allowed) {
+      where += ` AND (tc.nofficeid IN (${allowed}) OR tc.nofficeid IN (SELECT ncode FROM mstoffice (NOLOCK) WHERE nunder IN (${allowed})))`;
+    }
+  }
+
+  return `
+    SELECT DISTINCT tf.ncalls AS call_ncode, tf.nofficeid AS call_office_id
+    FROM trdcalls2fault tf (NOLOCK)
+    INNER JOIN trhcalls tc (NOLOCK) ON tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid
+    WHERE ${where}
+  `;
+}
+
 function buildSerialAuditRepairWhereClauseForAlias(
   repair: string | null | undefined,
   alias: string
 ): string | null {
-  const ncodeIn = buildSerialAuditRepairNcodeInList(repair);
-  if (!ncodeIn) return null;
-  return `EXISTS (
-    SELECT 1 FROM trdcalls2fault tf (NOLOCK)
-    INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
-    WHERE tf.ncalls = ${alias}.ncode
-      AND tf.nofficeid = ${alias}.nofficeid
-      AND CAST(r.ncode AS VARCHAR(50)) IN (${ncodeIn})
-  )`;
+  return buildRepairNcodeExistsWhere(repair, alias);
 }
 
 function buildSerialAuditBaseWhere(opts?: SerialAuditSqlOpts, tableAlias = 'trhcalls'): string {
@@ -918,6 +1008,45 @@ const SERIAL_AUDIT_INVOLVEMENT_REPAIR_DONE_EXPR = `LTRIM(
   + CASE WHEN ${SERIAL_AUDIT_COMPRESSOR_REPAIR_EXISTS} THEN '; Compressor Replaced' ELSE '' END
   + CASE WHEN ${SERIAL_AUDIT_GAS_REPAIR_EXISTS} THEN '; Gas Charging Done' ELSE '' END
 )`;
+
+/** Batch repair flags for register page rows — keyed by (ncalls, nofficeid). */
+export function buildRegisterRepairDoneByCallKeysSql(
+  keys: Array<{ ncode: number; officeId: number }>
+): string | null {
+  const pairs = [
+    ...new Map(
+      keys
+        .map((k) => ({
+          ncode: Math.trunc(Number(k.ncode)),
+          officeId: Math.trunc(Number(k.officeId)),
+        }))
+        .filter(
+          (k) =>
+            Number.isFinite(k.ncode) &&
+            k.ncode > 0 &&
+            Number.isFinite(k.officeId) &&
+            k.officeId > 0
+        )
+        .map((k) => [`${k.ncode}:${k.officeId}`, k] as const)
+    ).values(),
+  ];
+  if (!pairs.length) return null;
+  const valuesList = pairs.map((k) => `(${k.ncode},${k.officeId})`).join(',');
+  return `
+    SELECT
+      tf.ncalls AS id,
+      tf.nofficeid AS office_id,
+      MAX(CASE WHEN LTRIM(RTRIM(r.vname)) = 'Motor Replaced' THEN 1 ELSE 0 END) AS has_motor,
+      MAX(CASE WHEN LTRIM(RTRIM(r.vname)) = 'Compressor Replaced' THEN 1 ELSE 0 END) AS has_compressor,
+      MAX(CASE WHEN LTRIM(RTRIM(r.vname)) = 'Gas Charging Done' THEN 1 ELSE 0 END) AS has_gas
+    FROM trdcalls2fault tf (NOLOCK)
+    INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
+    INNER JOIN (VALUES ${valuesList}) AS keys(ncalls, nofficeid)
+      ON keys.ncalls = tf.ncalls AND keys.nofficeid = tf.nofficeid
+    WHERE LTRIM(RTRIM(r.vname)) IN ('Motor Replaced', 'Compressor Replaced', 'Gas Charging Done')
+    GROUP BY tf.ncalls, tf.nofficeid
+  `;
+}
 
 /** Repeated serials in a date window — deduped rows with status counts.
  *  Nested subqueries only (db-proxy wraps as SELECT * FROM (...) t — CTE/WITH is invalid). */

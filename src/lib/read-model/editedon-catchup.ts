@@ -26,6 +26,24 @@ function daysPerIncrementalStep(): number {
   return Math.max(1, Number(process.env.SYNC_EDITEDON_CATCHUP_DAYS_PER_RUN ?? 1) || 1);
 }
 
+/** Always replay last N calendar days each incremental (BM closes land here fast). */
+function recentDaysPerRun(): number {
+  return Math.max(0, Number(process.env.SYNC_EDITEDON_RECENT_DAYS ?? 2) || 2);
+}
+
+/** Inclusive recent day window ending at endDay (YYYY-MM-DD). */
+export function recentEditedonDays(endDay: string, count: number): string[] {
+  if (count <= 0) return [];
+  const end = new Date(`${endDay}T00:00:00`);
+  const days: string[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(end);
+    d.setDate(d.getDate() - i);
+    days.push(formatLocalDate(d));
+  }
+  return days;
+}
+
 async function ensureCatchupState(client: import('pg').PoolClient): Promise<void> {
   const ytdStart = registerHotRetentionStart();
   await client.query(
@@ -114,7 +132,11 @@ export async function runEditedonCatchupDay(day: string): Promise<EditedonCatchu
   };
 }
 
-/** Process the next N day(s) from the catch-up cursor through today (rotating YTD replay). */
+/**
+ * Each incremental cycle:
+ *  1) Always replay last N recent days (BM approval / status flips land here quickly)
+ *  2) Advance the rotating YTD cursor by SYNC_EDITEDON_CATCHUP_DAYS_PER_RUN
+ */
 export async function runEditedonCatchupStep(): Promise<EditedonCatchupResult> {
   if (!catchupEnabled()) {
     return { ok: true, skipped: true, reason: 'SYNC_EDITEDON_CATCHUP_ENABLED=false' };
@@ -124,27 +146,50 @@ export async function runEditedonCatchupStep(): Promise<EditedonCatchupResult> {
   }
 
   const endDay = todayLocalDate();
-  const cursor = await withClient((client) => readCatchupCursor(client));
-  if (cursor > endDay) {
-    await withClient((client) =>
-      writeCatchupCursor(client, registerHotRetentionStart())
+  let totalFetched = 0;
+  let totalUpserted = 0;
+  let daysProcessed = 0;
+  let fromDay: string | undefined;
+  let toDay: string | undefined;
+
+  // 1) Recent days — every run (does not move YTD cursor)
+  const recentDays = recentEditedonDays(endDay, recentDaysPerRun());
+  for (const day of recentDays) {
+    const rows = await fetchCrmEditedonDayWindow(day, day);
+    const applied = await applyEditedonRows(rows);
+    totalFetched += rows.length;
+    totalUpserted += applied.rowsUpserted;
+    daysProcessed += 1;
+    fromDay ??= day;
+    toDay = day;
+    console.log(
+      `[sync-worker] Editedon recent ${day} — fetched ${rows.length}, upserted ${applied.rowsUpserted}`
     );
-    return { ok: true, skipped: true, reason: 'catch-up cycle complete — reset to YTD start' };
+    await sleep(FETCH_GAP_MS);
+  }
+
+  // 2) Rotating YTD cursor (historical addedon <> editedon gaps)
+  let cursor = await withClient((client) => readCatchupCursor(client));
+  if (cursor > endDay) {
+    await withClient((client) => writeCatchupCursor(client, registerHotRetentionStart()));
+    cursor = registerHotRetentionStart();
   }
 
   const stepDays = daysPerIncrementalStep();
   const chunks = splitDateRangeByDays(cursor, endDay, stepDays).slice(0, stepDays);
-  if (!chunks.length) {
-    return { ok: true, skipped: true, reason: 'no catch-up days remaining' };
-  }
-
-  let totalFetched = 0;
-  let totalUpserted = 0;
   for (const chunk of chunks) {
+    // Skip days already covered by the recent window this cycle
+    if (recentDays.includes(chunk.start) && chunk.start === chunk.end) {
+      await withClient((client) => writeCatchupCursor(client, chunk.end));
+      continue;
+    }
     const rows = await fetchCrmEditedonDayWindow(chunk.start, chunk.end);
     const applied = await applyEditedonRows(rows);
     totalFetched += rows.length;
     totalUpserted += applied.rowsUpserted;
+    daysProcessed += 1;
+    fromDay ??= chunk.start;
+    toDay = chunk.end;
     await withClient((client) => writeCatchupCursor(client, chunk.end));
     console.log(
       `[sync-worker] Editedon catch-up ${chunk.start}..${chunk.end} — fetched ${rows.length}, upserted ${applied.rowsUpserted}`
@@ -152,13 +197,17 @@ export async function runEditedonCatchupStep(): Promise<EditedonCatchupResult> {
     await sleep(FETCH_GAP_MS);
   }
 
+  if (!daysProcessed) {
+    return { ok: true, skipped: true, reason: 'no catch-up days remaining' };
+  }
+
   return {
     ok: true,
-    daysProcessed: chunks.length,
+    daysProcessed,
     rowsFetched: totalFetched,
     rowsUpserted: totalUpserted,
-    fromDay: chunks[0]?.start,
-    toDay: chunks[chunks.length - 1]?.end,
+    fromDay,
+    toDay,
   };
 }
 

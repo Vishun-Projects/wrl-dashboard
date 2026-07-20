@@ -212,6 +212,7 @@ export default function CallDistributionPage() {
         selectedStatus: [],
         priorityFilter: [],
         portalFilter: [],
+        repairFilter: [],
       });
     }
     return appliedFilterPartsFromSnapshot(appliedFilters);
