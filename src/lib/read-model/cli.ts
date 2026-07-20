@@ -17,10 +17,9 @@ import { runRetentionJobs } from '@/lib/read-model/retention';
 import { runBackfillCallsHotBmApproval } from '@/lib/read-model/backfill-bm-approval';
 import { runBackfillCallsHotWco } from '@/lib/read-model/backfill-wco';
 import {
-  auditExitCode,
-  parseAuditCliArgs,
-  runFullReadModelAudit,
-} from '@/lib/read-model/audit/run-full-audit';
+  runTransactionEntryBackfill,
+  runTransactionEntryIncremental,
+} from '@/lib/read-model/transaction-entry';
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
 const DAEMON_MAX_CONSECUTIVE_FAILURES = Number(process.env.SYNC_DAEMON_MAX_FAILURES ?? 5) || 5;
@@ -60,6 +59,16 @@ async function runDaemon(): Promise<void> {
       }
       if (process.env.SYNC_ARCP_ENABLED === 'true') {
         await runArcpIncrementalSync();
+      }
+      if (process.env.SYNC_TRANSACTION_ENTRY_ENABLED !== 'false') {
+        try {
+          const te = await runTransactionEntryIncremental();
+          if (te.skipped) {
+            console.log(`[transaction-entry] Daemon skip — ${te.reason}`);
+          }
+        } catch (teErr) {
+          console.error('[transaction-entry] Daemon incremental failed:', formatSyncWorkerError(teErr));
+        }
       }
     } catch (err) {
       consecutiveFailures += 1;
@@ -158,6 +167,12 @@ async function main(): Promise<void> {
     case 'arcp-nightly':
       await runArcpIncrementalSync();
       break;
+    case 'transaction-entry-backfill':
+      await runTransactionEntryBackfill();
+      break;
+    case 'transaction-entry-incremental':
+      await runTransactionEntryIncremental();
+      break;
     case 'daemon':
       await runDaemon();
       break;
@@ -189,12 +204,14 @@ Commands:
   arcp-backfill     Initial ARCP lines backfill (ARCP_BACKFILL_START_DATE or YEARS)
   arcp-incremental  Single ARCP incremental sync run
   arcp-nightly      ARCP incremental only (for Task Scheduler / cron)
+  transaction-entry-backfill     Initial/resume CRM TransactionEntry → crm_transaction_entry
+  transaction-entry-incremental  Re-sync last N months of TransactionEntry (default 2)
   dims              Refresh dimension tables only
-  nightly           Calls nightly + ARCP incremental when SYNC_ARCP_ENABLED=true
+  nightly           Calls nightly + ARCP + TransactionEntry when enabled
   retention         Purge old sync logs and ingest batches
   full-audit        Full read-model audit vs live CRM (see scripts/audit-read-model-full.ts)
                     --apply  refresh stale rows; --only hot,dims,facts; --resume-from-trn TRN
-  daemon            Loop calls + ARCP incremental (optional; app auto-sync is default)
+  daemon            Loop calls + ARCP + TransactionEntry incremental
 
 Live sync: PostgresAutoSync in the app (see docs/sync.md). Use daemon only if you need
 sync while no browser is open.
@@ -203,6 +220,9 @@ Environment:
   DATABASE_URL           VPS Postgres (api.wrl-fsm.cloud; CLI uses direct :5432)
   SYNC_WORKER_ENABLED    Must be "true" for incremental/nightly/daemon
   SYNC_ARCP_ENABLED      Run ARCP incremental in daemon / API sync
+  SYNC_TRANSACTION_ENTRY_ENABLED  TransactionEntry sync in daemon/nightly (default on; set false to disable)
+  TRANSACTION_ENTRY_START_DATE    Backfill start (default 2024-01-01)
+  TRANSACTION_ENTRY_OVERLAP_MONTHS  Incremental lookback months (default 2)
   SYNC_INTERVAL_MS       Daemon interval (default 180000)
   SYNC_PIPELINE_RECONCILE_ENABLED  Re-check open/assigned hot rows each incremental (default true)
   SYNC_PIPELINE_RECONCILE_BATCH   Pipeline TRNs checked per run (default 400)

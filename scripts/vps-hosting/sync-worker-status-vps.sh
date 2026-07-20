@@ -6,4 +6,8 @@ INSTALL_ROOT="${SYNC_WORKER_INSTALL_ROOT:-/opt/fast-close-app}"
 # shellcheck disable=SC1090
 [[ -f "$ENV_FILE" ]] && source "$ENV_FILE"
 VPS_HOST="${VPS_HOST:?Set VPS_HOST in .env.vps-setup}"
+
+detected_root=$(ssh "$VPS_HOST" 'find /opt -name "mis-email-digest.sh" -path "*/scripts/vps-hosting/mis-email-digest.sh" 2>/dev/null | head -n 1 | sed "s|/scripts/vps-hosting/mis-email-digest.sh||"' || true)
+INSTALL_ROOT="${detected_root:-${SYNC_WORKER_INSTALL_ROOT:-/opt/fast-close-app}}"
+
 ssh "$VPS_HOST" "systemctl --no-pager status fast-close-sync-worker; echo '--- nightly timer ---'; systemctl --no-pager list-timers fast-close-sync-worker-nightly.timer 2>/dev/null || true; echo '--- nightly log ---'; tail -n 10 '${INSTALL_ROOT}/logs/sync-worker-nightly.log' 2>/dev/null || echo '(no nightly log yet)'; echo '--- sync log ---'; tail -n 20 '${INSTALL_ROOT}/logs/sync-worker.log' 2>/dev/null || true"

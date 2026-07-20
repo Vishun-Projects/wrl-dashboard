@@ -21,6 +21,49 @@ ssh -t "$VPS_HOST" \
   "MAIL_DOMAIN='${MAIL_DOMAIN}' DKIM_SELECTOR='${DKIM_SELECTOR}' TEST_TO='${TEST_TO}' bash -s" <<'REMOTE'
 set -euo pipefail
 
+echo "==> Cron & System Info"
+echo "    System Time/Timezone:"
+timedatectl | grep -E 'Local time|Universal time|Time zone' || date
+echo ""
+echo "    Active Root Crontab:"
+crontab -l 2>/dev/null | grep -E 'mis-email|CRON_TZ' || echo "    (no mis-email cron job installed)"
+echo ""
+detected_root=$(find /opt -name "mis-email-digest.sh" -path "*/scripts/vps-hosting/mis-email-digest.sh" 2>/dev/null | head -n 1 | sed 's|/scripts/vps-hosting/mis-email-digest.sh||')
+root="${detected_root:-/opt/fast-close-app}"
+echo "    Using App Root: ${root}"
+echo ""
+echo "    Script Permissions & Lock File:"
+ls -lh "${root}/scripts/vps-hosting/mis-email-digest.sh" 2>/dev/null || echo "    (mis-email-digest.sh NOT found)"
+ls -lh "${root}/logs/mis-email.lock" 2>/dev/null || echo "    (no active lock file)"
+echo ""
+echo "==> Recent Cron Logs (${root}/logs/mis-email-cron.log)"
+if [[ -f "${root}/logs/mis-email-cron.log" ]]; then
+  tail -n 30 "${root}/logs/mis-email-cron.log"
+else
+  echo "    (cron log file not found)"
+fi
+echo ""
+
+echo "==> Directory Listing (/opt)"
+ls -la /opt 2>/dev/null || echo "    (/opt not readable)"
+echo ""
+echo "==> Files under /opt/fast-close-app"
+find /opt/fast-close-app -maxdepth 3 2>/dev/null || echo "    (/opt/fast-close-app not found)"
+echo ""
+echo "==> Locating mis-email-digest.sh on VPS"
+find /opt -name "mis-email-digest.sh" 2>/dev/null || echo "    (not found)"
+echo ""
+
+echo "==> Postfix Mail Content (First stuck mail in queue)"
+first_q_id=$(postqueue -p 2>/dev/null | grep -E '^[0-9A-F]{10,12}' | head -1 | awk '{print $1}')
+if [[ -n "$first_q_id" ]]; then
+  echo "    Queue ID: $first_q_id"
+  postcat -q "$first_q_id" 2>/dev/null || echo "    (unable to read message body)"
+else
+  echo "    (no stuck mail in queue)"
+fi
+echo ""
+
 echo "==> Postfix / OpenDKIM"
 systemctl is-active postfix 2>/dev/null && echo "    postfix: active" || echo "    postfix: NOT running"
 systemctl is-active opendkim 2>/dev/null && echo "    opendkim: active" || echo "    opendkim: NOT installed — run: npm run mis-email:setup-postfix:vps"

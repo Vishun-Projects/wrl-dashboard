@@ -2,7 +2,9 @@
 # MIS email digest scheduler — run via cron once daily (09:30 IST).
 set -euo pipefail
 
-INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-/opt/fast-close-app}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_INSTALL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-$DEFAULT_INSTALL_ROOT}"
 cd "$INSTALL_ROOT"
 
 LOCK_FILE="${INSTALL_ROOT}/logs/mis-email.lock"

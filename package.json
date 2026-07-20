@@ -41,6 +41,8 @@
     "sync-worker:arcp-backfill": "npx tsx src/lib/read-model/cli.ts arcp-backfill",
     "sync-worker:arcp-incremental": "npx tsx src/lib/read-model/cli.ts arcp-incremental",
     "sync-worker:arcp-nightly": "npx tsx src/lib/read-model/cli.ts arcp-nightly",
+    "sync-worker:transaction-entry-backfill": "npx tsx src/lib/read-model/cli.ts transaction-entry-backfill",
+    "sync-worker:transaction-entry-incremental": "npx tsx src/lib/read-model/cli.ts transaction-entry-incremental",
     "crm-mirror:status": "python scripts/crm_mirror_sync.py status",
     "db:apply-old-crm": "node scripts/apply-old-crm-schema.mjs",
     "arcp-trends-html": "npx tsx scripts/generate-arcp-trends-html.ts",

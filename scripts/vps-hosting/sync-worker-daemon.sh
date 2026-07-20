@@ -3,7 +3,9 @@
 # Managed by systemd: fast-close-sync-worker.service
 set -euo pipefail
 
-INSTALL_ROOT="${SYNC_WORKER_INSTALL_ROOT:-/opt/fast-close-app}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_INSTALL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+INSTALL_ROOT="${SYNC_WORKER_INSTALL_ROOT:-$DEFAULT_INSTALL_ROOT}"
 cd "$INSTALL_ROOT"
 
 mkdir -p "${INSTALL_ROOT}/logs"

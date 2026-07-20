@@ -29,6 +29,7 @@ import {
   upsertFactRows,
 } from '@/lib/read-model/upsert-facts';
 import { runArcpIncrementalSync } from '@/lib/read-model/arcp/incremental';
+import { runTransactionEntryIncremental } from '@/lib/read-model/transaction-entry';
 
 const ENTITY = 'calls_latest_hot';
 
@@ -124,6 +125,22 @@ export async function runNightlyReconcile(): Promise<void> {
     } catch (err) {
       console.error(
         '[arcp-sync] Nightly incremental failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
+  if (process.env.SYNC_TRANSACTION_ENTRY_ENABLED !== 'false') {
+    try {
+      const te = await runTransactionEntryIncremental();
+      if (te.skipped) {
+        console.log(`[transaction-entry] Nightly skipped — ${te.reason}`);
+      } else {
+        console.log(`[transaction-entry] Nightly complete — upserted ${te.rowsUpserted}`);
+      }
+    } catch (err) {
+      console.error(
+        '[transaction-entry] Nightly failed:',
         err instanceof Error ? err.message : err
       );
     }

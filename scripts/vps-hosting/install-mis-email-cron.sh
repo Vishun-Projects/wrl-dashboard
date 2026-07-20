@@ -23,7 +23,7 @@ install_cron() {
 }
 
 if [[ "${1:-}" == "--local" ]]; then
-  install_cron "${MIS_EMAIL_INSTALL_ROOT:-/opt/fast-close-app}"
+  install_cron "${MIS_EMAIL_INSTALL_ROOT:-$ROOT}"
   exit 0
 fi
 
@@ -37,12 +37,14 @@ VPS_HOST="${VPS_HOST:?Set VPS_HOST in .env.vps-setup}"
 
 ssh "$VPS_HOST" "INSTALL_ROOT='${INSTALL_ROOT}' bash -s" <<'REMOTE'
 set -euo pipefail
-root="${INSTALL_ROOT:-/opt/fast-close-app}"
+detected_root=$(find /opt -name "mis-email-digest.sh" -path "*/scripts/vps-hosting/mis-email-digest.sh" 2>/dev/null | head -n 1 | sed 's|/scripts/vps-hosting/mis-email-digest.sh||')
+root="${detected_root:-${INSTALL_ROOT:-/opt/fast-close-app}}"
+mkdir -p "${root}/logs"
 (
   crontab -l 2>/dev/null | grep -v 'mis-email-digest.sh' | grep -v '^CRON_TZ=' || true
   echo "CRON_TZ=Asia/Kolkata"
   echo "30 9 * * * ${root}/scripts/vps-hosting/mis-email-digest.sh >> ${root}/logs/mis-email-cron.log 2>&1"
 ) | crontab -
-echo "==> Installed MIS email cron (once daily 09:30 IST)"
+echo "==> Installed MIS email cron (once daily 09:30 IST) at root: ${root}"
 crontab -l | grep -E 'CRON_TZ|mis-email' || true
 REMOTE

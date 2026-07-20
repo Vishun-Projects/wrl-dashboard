@@ -43,6 +43,7 @@ import { feedback } from '@/lib/ui/feedback';
 import { useUser } from '@/components/layout/DashboardLayout';
 import { DateRangeSelector } from '@/components/register/DateRangeSelector';
 import { useRouter, usePathname } from 'next/navigation';
+import { CallRegisterClient } from '@/app/report/call-register/call-register-client';
 
 const CallDetail = dynamic(
   () => import('@/components/calls/CallDetail').then((m) => ({ default: m.CallDetail })),
@@ -398,6 +399,7 @@ export default function ReportPageClient() {
       summary: canAccessMisTab(userPermissions, 'summary'),
       accounts: canAccessMisTab(userPermissions, 'accounts'),
       client_import: canAccessMisTab(userPermissions, 'client_import'),
+      deployment_completion: canAccessMisTab(userPermissions, 'deployment_completion'),
       bd_mis_summary:
         BD_MIS_SUMMARY_TAB_ENABLED && canAccessMisTab(userPermissions, 'bd_mis_summary'),
     }),
@@ -3830,6 +3832,7 @@ export default function ReportPageClient() {
     misAccess.summary,
     misAccess.accounts,
     misAccess.client_import,
+    misAccess.deployment_completion,
     loadClientImportSources,
     appliedRevision,
   ]);
@@ -6130,7 +6133,11 @@ export default function ReportPageClient() {
               }}
             />
           </ReportErrorBoundary>
-          ) : null}
+        ) : activeTab === 'deployment_completion' ? (
+          <ReportErrorBoundary label="Deployment Completion">
+            <CallRegisterClient />
+          </ReportErrorBoundary>
+        ) : null}
       </div>
 
 

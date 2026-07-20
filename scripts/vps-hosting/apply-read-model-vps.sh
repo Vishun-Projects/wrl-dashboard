@@ -17,6 +17,16 @@ fi
 source "$ENV_FILE"
 VPS_HOST="${VPS_HOST:?Set VPS_HOST in .env.vps-setup}"
 
+echo "==> Auto-detecting installation directory on VPS..."
+detected_root=$(ssh "$VPS_HOST" 'find /opt -name "mis-email-digest.sh" -path "*/scripts/vps-hosting/mis-email-digest.sh" 2>/dev/null | head -n 1 | sed "s|/scripts/vps-hosting/mis-email-digest.sh||"' || true)
+if [[ -n "$detected_root" ]]; then
+  INSTALL_ROOT="$detected_root"
+  echo "    Detected root: $INSTALL_ROOT"
+else
+  INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-/opt/fast-close-app}"
+  echo "    Using default root: $INSTALL_ROOT"
+fi
+
 REMOTE_SCRIPT="${INSTALL_ROOT}/scripts/vps-hosting/apply-read-model-remote.sh"
 
 echo "==> Syncing app and applying read-model schema on ${VPS_HOST}"

@@ -37,6 +37,7 @@ export function isCrmOutOfMemoryError(err: unknown): boolean {
   if (err && typeof err === 'object' && (err as CrmQueryError).crmOutOfMemory) return true;
   const msg = err instanceof Error ? err.message : String(err);
   if (msg.includes('OutOfMemoryException') || msg.includes('CRM viewstate OOM')) return true;
+  if (msg.includes('Date range too large')) return true;
   if (axios.isAxiosError(err) && typeof err.response?.data === 'string') {
     return err.response.data.includes('OutOfMemoryException');
   }

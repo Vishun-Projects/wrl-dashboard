@@ -63,5 +63,8 @@ CREATE INDEX IF NOT EXISTS idx_calls_hot_engineer_logged
 CREATE INDEX IF NOT EXISTS idx_calls_hot_ncode
   ON calls_latest_hot (ncode);
 
+CREATE INDEX IF NOT EXISTS idx_calls_hot_serial
+  ON calls_latest_hot (serial);
+
 COMMENT ON TABLE calls_latest_hot IS
   'Phase 1 hot read model: latest deduped call per vtrnno, 90d window + open-old exception.';
