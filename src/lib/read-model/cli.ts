@@ -20,6 +20,11 @@ import {
   runTransactionEntryBackfill,
   runTransactionEntryIncremental,
 } from '@/lib/read-model/transaction-entry';
+import {
+  auditExitCode,
+  parseAuditCliArgs,
+  runFullReadModelAudit,
+} from '@/lib/read-model/audit/run-full-audit';
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
 const DAEMON_MAX_CONSECUTIVE_FAILURES = Number(process.env.SYNC_DAEMON_MAX_FAILURES ?? 5) || 5;
