@@ -9,6 +9,7 @@ import { AdminTableCard } from '@/components/admin/AdminUi';
 import { PageAlert } from '@/components/ui/PageAlert';
 import { TableSkeleton } from '@/components/ui/DataTableLoading';
 import type { CallRegisterRow, CallRegisterSummary } from '@/lib/report/call-register/types';
+import { CALL_REGISTER_CLIENTS } from '@/lib/report/call-register/clients';
 import { usePageAlert } from '@/hooks/usePageAlert';
 import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
 
@@ -27,7 +28,7 @@ export function CallRegisterClient() {
   const [draftTo, setDraftTo] = useState(defaultDates.to);
   const [appliedFrom, setAppliedFrom] = useState(defaultDates.from);
   const [appliedTo, setAppliedTo] = useState(defaultDates.to);
-  const [exportClient, setExportClient] = useState('');
+  const [exportClient, setExportClient] = useState<string>(CALL_REGISTER_CLIENTS[0]);
   const [detailClient, setDetailClient] = useState<string | null>(null);
 
   const [rows, setRows] = useState<CallRegisterRow[]>([]);
@@ -192,7 +193,7 @@ export function CallRegisterClient() {
         onRefresh={handleRefresh}
         loading={loading}
         exportClient={exportClient}
-        exportClients={rows.map((r) => r.client)}
+        exportClients={[...CALL_REGISTER_CLIENTS]}
         onExportClientChange={setExportClient}
         onExport={handleExport}
         exporting={exporting}

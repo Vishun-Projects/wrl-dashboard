@@ -2,6 +2,7 @@ import 'server-only';
 
 import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
+import { CALL_REGISTER_CLIENTS, isCallRegisterClient } from './clients';
 import { isCallRegisterAllTime } from './dates';
 import type { CallRegisterQueryParams, CallRegisterRow, CallRegisterSummary } from './types';
 
@@ -12,12 +13,28 @@ type LocalTxnRow = {
   product_serial_no: string;
 };
 
+function ensureGridRows(rows: CallRegisterRow[]): CallRegisterRow[] {
+  const byClient = new Map(rows.map((r) => [r.client, r]));
+  return CALL_REGISTER_CLIENTS.map(
+    (client) =>
+      byClient.get(client) ?? {
+        client,
+        qty: 0,
+        installation: 0,
+        deployment: 0,
+        balanceInstallation: 0,
+        balanceDeployment: 0,
+      }
+  );
+}
+
 async function fetchLocalTransactionRows(
   params: CallRegisterQueryParams
 ): Promise<LocalTxnRow[]> {
   const { dateFrom, dateTo, client } = params;
 
   if (client) {
+    if (!isCallRegisterClient(client)) return [];
     if (dateFrom && dateTo) {
       return prisma.$queryRawUnsafeBulk<LocalTxnRow[]>(
         `SELECT client, product_serial_no
@@ -40,23 +57,25 @@ async function fetchLocalTransactionRows(
     return prisma.$queryRawUnsafeBulk<LocalTxnRow[]>(
       `SELECT client, product_serial_no
        FROM crm_transaction_entry
-       WHERE daddedon >= $1::date
-         AND daddedon < ($2::date + interval '1 day')`,
+       WHERE client = ANY($1::text[])
+         AND daddedon >= $2::date
+         AND daddedon < ($3::date + interval '1 day')`,
+      CALL_REGISTER_CLIENTS,
       dateFrom,
       dateTo
     );
   }
 
   return prisma.$queryRawUnsafeBulk<LocalTxnRow[]>(
-    `SELECT client, product_serial_no FROM crm_transaction_entry`
+    `SELECT client, product_serial_no
+     FROM crm_transaction_entry
+     WHERE client = ANY($1::text[])`,
+    CALL_REGISTER_CLIENTS
   );
 }
 
-export async function listCallRegisterClients(): Promise<string[]> {
-  const rows = await prisma.$queryRawUnsafeBulk<{ client: string }[]>(
-    `SELECT DISTINCT client FROM crm_transaction_entry ORDER BY client`
-  );
-  return rows.map((r) => r.client).filter(Boolean);
+export function listCallRegisterClients(): string[] {
+  return [...CALL_REGISTER_CLIENTS];
 }
 
 export async function fetchCallRegisterRows(
@@ -68,15 +87,15 @@ export async function fetchCallRegisterRows(
     const crmData = await prisma.$queryRawUnsafeBulk<{ client: string; qty: string | number }[]>(
       `SELECT client, COUNT(*)::int AS qty
        FROM crm_transaction_entry
-       GROUP BY client
-       ORDER BY client`
+       WHERE client = ANY($1::text[])
+       GROUP BY client`,
+      CALL_REGISTER_CLIENTS
     );
 
-    const clients = crmData.map((r) => (r.client || '').trim()).filter(Boolean);
     const supabase = await createClient();
     const supPromises = [];
 
-    for (const c of clients) {
+    for (const c of CALL_REGISTER_CLIENTS) {
       supPromises.push(
         supabase
           .from('calls_latest_hot')
@@ -98,14 +117,16 @@ export async function fetchCallRegisterRows(
     }
 
     const supResults = await Promise.all(supPromises);
+    const qtyByClient = new Map(
+      crmData.map((r) => [(r.client || '').trim(), Number(r.qty || 0)] as const)
+    );
     const rows: CallRegisterRow[] = [];
     let totalQty = 0;
     let totalInstallation = 0;
     let totalDeployment = 0;
 
-    for (const row of crmData) {
-      const clientName = (row.client || 'Unknown').trim();
-      const qty = Number(row.qty || 0);
+    for (const clientName of CALL_REGISTER_CLIENTS) {
+      const qty = qtyByClient.get(clientName) ?? 0;
       const installCount =
         supResults.find((r) => r.client === clientName && r.type === 'Installation')?.count || 0;
       const deployCount =
@@ -141,7 +162,7 @@ export async function fetchCallRegisterRows(
 
   if (crmRows.length === 0) {
     return {
-      rows: [],
+      rows: ensureGridRows([]),
       summary: {
         totalQty: 0,
         totalInstallation: 0,
@@ -157,6 +178,7 @@ export async function fetchCallRegisterRows(
 
   for (const row of crmRows) {
     const clientName = (row.client || 'Unknown').trim();
+    if (!isCallRegisterClient(clientName)) continue;
     const serial = (row.product_serial_no || '').trim();
     if (!serial) continue;
 
@@ -261,10 +283,8 @@ export async function fetchCallRegisterRows(
     });
   }
 
-  rows.sort((a, b) => a.client.localeCompare(b.client));
-
   return {
-    rows,
+    rows: ensureGridRows(rows),
     summary: {
       totalQty,
       totalInstallation,

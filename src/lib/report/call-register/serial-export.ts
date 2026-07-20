@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { prisma } from '@/lib/db/prisma';
-import type { CallRegisterClient } from './sql';
+import type { CallRegisterClient } from './clients';
 import type { CallRegisterQueryParams } from './types';
 import { isCallRegisterAllTime } from './dates';
 import {

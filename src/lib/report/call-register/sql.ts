@@ -1,11 +1,9 @@
 import type { CallRegisterQueryParams } from './types';
-
-/** Any non-empty client name is valid for export / detail (list comes from DB). */
-export function isCallRegisterClient(value: string): value is string {
-  return value.trim().length > 0;
-}
-
-export type CallRegisterClient = string;
+export {
+  CALL_REGISTER_CLIENTS,
+  isCallRegisterClient,
+  type CallRegisterClient,
+} from './clients';
 
 /** @deprecated CRM live queries — sync worker uses crm-fetch instead. */
 export function buildCrmTransactionQuery(params: CallRegisterQueryParams): string {
