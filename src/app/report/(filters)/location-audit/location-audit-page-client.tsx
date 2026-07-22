@@ -15,7 +15,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { RegisterPageFilters } from '@/components/register/RegisterPageFilters';
+import { RegisterPageFilters } from '@/features/register/ui/RegisterPageFilters';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import {
   AdminStatPill,
@@ -26,23 +26,23 @@ import {
   AdminThead,
   AdminTr,
 } from '@/components/admin/AdminUi';
-import { useReportFilters } from '@/contexts/ReportFiltersContext';
+import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import {
   SUMMARY_DEFAULT_CALL_TYPE,
   formatReportScopeSubtitle,
   toDateString,
-} from '@/lib/report/filters';
+} from '@/features/report/lib/filters';
 import {
   LocationAuditMapPlaceholder,
   LocationAuditRowDetail,
   type LocationAuditDetailRow,
-} from '@/components/location-audit/LocationAuditRowDetail';
+} from '@/features/location-audit/ui/LocationAuditRowDetail';
 import { PageAlert } from '@/components/ui/PageAlert';
 import { feedback } from '@/lib/ui/feedback';
-import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
+import { triggerBlobDownload } from '@/features/report/lib/summary-excel-export';
 import { usePageAlert } from '@/hooks/usePageAlert';
-import { ReportLoadingPanel } from '@/components/report/ReportLoadingFeedback';
+import { ReportLoadingPanel } from '@/features/report/ui/ReportLoadingFeedback';
 import { DataTableLoading } from '@/components/ui/DataTableLoading';
 import { Loader2 } from 'lucide-react';
 

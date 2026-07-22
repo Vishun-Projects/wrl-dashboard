@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
-import { listAllSourcesWithBatches, summarizeImportBatches } from '@/lib/mis-client-import/config';
-import { countClientRowsInRange } from '@/lib/mis-client-import/aggregate';
-import { canDeleteClientMis, canUploadClientMis } from '@/lib/mis-client-import/upload-access';
+import { listAllSourcesWithBatches, summarizeImportBatches } from '@/features/mis-import/lib/config';
+import { countClientRowsInRange } from '@/features/mis-import/lib/aggregate';
+import { canDeleteClientMis, canUploadClientMis } from '@/features/mis-import/lib/upload-access';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 export async function GET(req: NextRequest) {

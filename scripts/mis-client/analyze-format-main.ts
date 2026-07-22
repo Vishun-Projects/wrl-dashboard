@@ -2,7 +2,7 @@
  * Decompose Format.xlsx Main vs BD_MIS Summary targets.
  */
 import XLSX from 'xlsx';
-import { formatDisplayRegion } from '@/lib/mis-client-import/region';
+import { formatDisplayRegion } from '@/features/mis-import/lib/region';
 
 const FORMAT = 'C:/Users/Vishnu.Vishwakarma/Downloads/Testing/Format.xlsx';
 const REF: Record<string, number> = {

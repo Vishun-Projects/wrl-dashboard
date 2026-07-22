@@ -3,13 +3,13 @@ import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 
 import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryForBdMis } from '@/lib/mis-client-import/aggregate';
+import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/lib/aggregate';
 import {
   buildBdMisRegionalBreakdown,
   buildBdMisRegionalRows,
   openCallsFromTotals,
   sumBdMisRegionalGrand,
-} from '@/lib/report/bd-mis-summary';
+} from '@/features/report/lib/bd-mis-summary';
 import { withAppClient } from '@/lib/read-model/db';
 
 const END = '2026-06-29';

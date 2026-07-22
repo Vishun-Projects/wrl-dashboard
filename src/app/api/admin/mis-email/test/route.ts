@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
-import { isSmtpConfigured } from '@/lib/mis-email/send';
-import { runMisEmailTest } from '@/lib/mis-email/run-digest';
+import { isSmtpConfigured } from '@/features/mis-email/lib/send';
+import { runMisEmailTest } from '@/features/mis-email/lib/run-digest';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 export async function POST(request: Request) {

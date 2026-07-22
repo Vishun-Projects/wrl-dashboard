@@ -5,7 +5,7 @@ config({ path: join(process.cwd(), '.env') });
 
 import { prisma } from '@/lib/db/prisma';
 import { postQuery } from '@/lib/db/proxy';
-import { buildCrmTransactionQuery } from '@/lib/report/call-register/sql';
+import { buildCrmTransactionQuery } from '@/features/report/lib/call-register/sql';
 
 async function main() {
   const params = { dateFrom: '2026-06-01', dateTo: '2026-07-20' };

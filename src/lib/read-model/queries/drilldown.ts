@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
-import { normalizeCallTypeDisplay } from '@/lib/report/filters';
+import { normalizeCallTypeDisplay } from '@/lib/call-display/call-type';
 import {
   HOT_MAIN_BRANCH_OFFICE_ID_SQL,
   HOT_OFFICE_JOINS_SQL,

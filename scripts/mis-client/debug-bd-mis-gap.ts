@@ -3,12 +3,12 @@ import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 
 import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryFiltered } from '@/lib/mis-client-import/aggregate';
+import { queryClientAccountSummaryFiltered } from '@/features/mis-import/lib/aggregate';
 import {
   buildBdMisRegionalBreakdown,
   buildBdMisRegionalRows,
   sumBdMisRegionalGrand,
-} from '@/lib/report/bd-mis-summary';
+} from '@/features/report/lib/bd-mis-summary';
 import { withAppClient } from '@/lib/read-model/db';
 
 const END = '2026-06-29';

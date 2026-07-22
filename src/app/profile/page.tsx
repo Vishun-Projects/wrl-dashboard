@@ -27,8 +27,8 @@ import { resolveAvatarDisplayUrl } from '@/lib/auth/avatar-url';
 import { useSearchParams } from 'next/navigation';
 import { ThemePicker } from '@/components/settings/ThemePicker';
 import { MisEmailComposer } from '@/components/settings/MisEmailComposer';
-import type { MisEmailBodySectionDef } from '@/lib/mis-email/body-sections';
-import type { MisEmailKeyAccountsByZone, MisEmailPreferences } from '@/lib/mis-email/preferences';
+import type { MisEmailBodySectionDef } from '@/features/mis-email/lib/body-sections';
+import type { MisEmailKeyAccountsByZone, MisEmailPreferences } from '@/features/mis-email/lib/preferences';
 
 type MisEmailSettings = {
   mis_email_enabled: boolean;

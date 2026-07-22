@@ -12,7 +12,7 @@ const CallDetail = dynamic(
   { ssr: false }
 );
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
-import { clearPortalAuditCache } from '@/lib/report/portal-cache';
+import { clearPortalAuditCache } from '@/features/report/lib/portal-cache';
 
 export type OpenCallDetailParams = {
   callId?: string;

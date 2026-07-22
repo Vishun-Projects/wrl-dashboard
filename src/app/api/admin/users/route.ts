@@ -15,7 +15,7 @@ import { expandPermissionList } from '@/lib/auth/rbac-catalog';
 import {
   defaultPreferencesForRecipient,
   userHasMisReportPermissions,
-} from '@/lib/mis-email/preferences';
+} from '@/features/mis-email/lib/preferences';
 
 const USER_COLUMNS = `id, name, email, role, role_id, office_ids, visible_statuses, avatar_url, mis_email_enabled, mis_email_preferences, created_at`;
 

@@ -13,6 +13,12 @@ const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/g
 const MAX_BYTES = 2 * 1024 * 1024;
 
 export async function GET(request: Request) {
+  const supabase = await createClient();
+  const user = await requireRequestUser(request, supabase);
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
   const path = String(searchParams.get('path') ?? '').trim();
   if (!isValidAvatarStoragePath(path)) {
@@ -39,7 +45,7 @@ export async function GET(request: Request) {
   return new NextResponse(bytes, {
     headers: {
       'Content-Type': contentType,
-      'Cache-Control': 'public, max-age=3600',
+      'Cache-Control': 'private, max-age=3600',
     },
   });
 }

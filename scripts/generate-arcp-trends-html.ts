@@ -11,11 +11,11 @@ import fs from 'fs';
 import path from 'path';
 import '@/lib/read-model/bootstrap-env';
 import { arcpBackfillStartDate } from '@/lib/read-model/arcp/dates';
-import { fetchArcpClaimsAggregates } from '@/lib/arcp-claims/server/fetch';
+import { fetchArcpClaimsAggregates } from '@/features/arcp/lib/server/fetch';
 import {
   type ArcpClaimsAggregateRow,
   type ArcpClaimsQueryOpts,
-} from '@/lib/arcp-claims/query';
+} from '@/features/arcp/lib/query';
 
 type MonthMetrics = {
   month: string;

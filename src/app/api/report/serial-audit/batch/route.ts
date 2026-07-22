@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireSupabaseUser } from '@/lib/auth/server-user';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
-import { fetchSerialAuditCallsForSerials } from '@/lib/serial-audit/server/batch-fetch';
-import { resolveSerialAuditSqlOpts } from '@/lib/serial-audit/server/sql-scope';
+import { fetchSerialAuditCallsForSerials } from '@/features/serial-audit/lib/server/batch-fetch';
+import { resolveSerialAuditSqlOpts } from '@/features/serial-audit/lib/server/sql-scope';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 /** Matches Serial Audit table page size — one batched CRM query per visible page. */

@@ -3,12 +3,13 @@ import {
   normalizeExactTrnSearch,
   type RegisterDateFilterColumn,
 } from '@/lib/trhcalls/query';
-import { mapCachedRowToRegisterRow, isRealCancelReasonCode } from '@/lib/report/search';
+import { mapCachedRowToRegisterRow } from '@/lib/register-sql/map-cached-row';
+import { isRealCancelReasonCode } from '@/lib/call-status/cancel';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
-import { mergeArcpApproveDatesFromHot } from '@/lib/register/arcp-approve-dates-server';
-import { mergeAuditEnrichment } from '@/lib/register/audit-enrichment';
-import { enrichRegisterRowsRepairDone } from '@/lib/register/server/repair-done-enrich';
-import { buildPortalFilterSqlForHot } from '@/lib/register/portal-filter-sql';
+import { mergeArcpApproveDatesFromHot } from '@/lib/register-sql/arcp-approve-dates-server';
+import { mergeAuditEnrichment } from '@/lib/register-sql/audit-enrichment';
+import { enrichRegisterRowsRepairDone } from '@/lib/register-sql/repair-done-enrich';
+import { buildPortalFilterSqlForHot } from '@/lib/register-sql/portal-filter-sql';
 import {
   DISTRIBUTION_COMPACT_COLUMNS,
   HOT_OFFICE_JOINS_SQL,

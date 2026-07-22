@@ -170,10 +170,10 @@ fi
 source "$ENV_FILE"
 
 echo "==> Copying repo scripts to VPS"
-ssh "$VPS_HOST" "mkdir -p ${INSTALL_ROOT}/scripts/vps-hosting ${INSTALL_ROOT}/src/lib/mis-client-import ${INSTALL_ROOT}/src/lib/auth"
+ssh "$VPS_HOST" "mkdir -p ${INSTALL_ROOT}/scripts/vps-hosting ${INSTALL_ROOT}/src/features/mis-import/lib ${INSTALL_ROOT}/src/lib/auth"
 scp "${ROOT}/scripts/vps-hosting/mis-upload-server.ts" "${ROOT}/scripts/vps-hosting/setup-mis-upload-server.sh" \
   "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/"
-scp -r "${ROOT}/src/lib/mis-client-import/"* "${VPS_HOST}:${INSTALL_ROOT}/src/lib/mis-client-import/" 2>/dev/null || true
+scp -r "${ROOT}/src/features/mis-import/lib/"* "${VPS_HOST}:${INSTALL_ROOT}/src/features/mis-import/lib/" 2>/dev/null || true
 scp "${ROOT}/src/lib/auth/user-auth-query.ts" "${ROOT}/src/lib/auth/rbac-catalog.ts" \
   "${ROOT}/src/lib/auth/verify-jwt-core.ts" "${ROOT}/src/lib/auth/app-user-profile.ts" \
   "${VPS_HOST}:${INSTALL_ROOT}/src/lib/auth/" 2>/dev/null || true

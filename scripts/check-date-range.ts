@@ -4,7 +4,7 @@ config({ path: join(process.cwd(), '.env.local') });
 config({ path: join(process.cwd(), '.env') });
 
 import { postQuery } from '@/lib/db/proxy';
-import { buildCrmTransactionQuery } from '@/lib/report/call-register/sql';
+import { buildCrmTransactionQuery } from '@/features/report/lib/call-register/sql';
 
 async function checkDateRange(start: string, end: string) {
   const rawSql = buildCrmTransactionQuery({ dateFrom: start, dateTo: end });

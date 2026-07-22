@@ -3,11 +3,11 @@ import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 
 import { querySummaryDashboard } from '@/lib/read-model/queries/summary';
-import { queryClientAccountSummaryForBdMis } from '@/lib/mis-client-import/aggregate';
+import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/lib/aggregate';
 import {
   buildBdMisRegionalRows,
   sumBdMisRegionalGrand,
-} from '@/lib/report/bd-mis-summary';
+} from '@/features/report/lib/bd-mis-summary';
 
 const params = {
   startDate: '2026-01-01',

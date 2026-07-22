@@ -1,7 +1,7 @@
 import '@/lib/read-model/bootstrap-env';
 import { fetchCrmRowsByTrns } from '@/lib/read-model/crm-fetch';
 import { transformCrmRowToHot } from '@/lib/read-model/transform';
-import { classifyRegisterRowStatus } from '@/lib/report/search';
+import { classifyRegisterRowStatus } from '@/lib/call-status/register-row';
 import { prisma } from '@/lib/db/prisma';
 
 const trn = process.argv[2];

@@ -11,7 +11,7 @@ import {
   parseWarrantyMasterParams,
   runWarrantyMasterCsvExport,
   summarizeWarrantyMasterRows,
-} from '@/lib/warranty-master/server';
+} from '@/features/warranty-master/lib/server';
 
 export async function GET(req: NextRequest) {
   try {

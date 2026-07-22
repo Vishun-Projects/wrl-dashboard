@@ -12,11 +12,11 @@ import XLSX from 'xlsx';
 
 config({ path: join(process.cwd(), '.env.local') });
 
-import { queryClientAccountSummaryFiltered } from '@/lib/mis-client-import/aggregate';
-import { sumClientCokeMetricsSouth } from '@/lib/report/bd-mis-summary';
-import { parseClientDate } from '@/lib/mis-client-import/parse-dates';
-import { isCadburyExcludedServiceProvider } from '@/lib/mis-client-import/cadbury-filters';
-import { formatDisplayRegion } from '@/lib/mis-client-import/region';
+import { queryClientAccountSummaryFiltered } from '@/features/mis-import/lib/aggregate';
+import { sumClientCokeMetricsSouth } from '@/features/report/lib/bd-mis-summary';
+import { parseClientDate } from '@/features/mis-import/lib/parse-dates';
+import { isCadburyExcludedServiceProvider } from '@/features/mis-import/lib/cadbury-filters';
+import { formatDisplayRegion } from '@/features/mis-import/lib/region';
 
 const DEFAULT_RAW = 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw';
 

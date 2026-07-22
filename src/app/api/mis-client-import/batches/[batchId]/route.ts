@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
-import { deleteImportFile } from '@/lib/mis-client-import/file-store';
-import { deleteImportBatch } from '@/lib/mis-client-import/store';
-import { canDeleteClientMis } from '@/lib/mis-client-import/upload-access';
+import { deleteImportFile } from '@/features/mis-import/lib/file-store';
+import { deleteImportBatch } from '@/features/mis-import/lib/store';
+import { canDeleteClientMis } from '@/features/mis-import/lib/upload-access';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 type RouteContext = { params: Promise<{ batchId: string }> };

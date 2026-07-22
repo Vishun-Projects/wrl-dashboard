@@ -53,14 +53,15 @@ export function gzippedCsvPayload(
   fileName: string,
   acceptEncoding?: string | null,
   extraHeaders?: Record<string, string>
-): { body: string | Uint8Array; headers: Record<string, string> } {
+): { body: BodyInit; headers: Record<string, string> } {
   if (!clientAcceptsGzip(acceptEncoding)) {
     return {
       body: csv,
       headers: csvDownloadHeaders({ fileName, gzip: false, extra: extraHeaders }),
     };
   }
-  const body = gzipCsvBody(csv);
+  const gzipped = gzipCsvBody(csv);
+  const body = Buffer.from(gzipped);
   return {
     body,
     headers: csvDownloadHeaders({

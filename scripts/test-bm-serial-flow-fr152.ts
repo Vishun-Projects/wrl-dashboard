@@ -7,7 +7,7 @@ import { postQuery } from '../src/lib/db/proxy';
 import {
   buildArcpClaimsGrandTotalSql,
   parseArcpGrandTotals,
-} from '../src/lib/arcp-claims/query';
+} from '../src/features/arcp/lib/query';
 
 const FR = '152';
 const START = '2026-04-01';

@@ -1,15 +1,15 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
-import { loadDigestRecipientById } from '@/lib/mis-email/recipients';
+import { loadDigestRecipientById } from '@/features/mis-email/lib/recipients';
 import {
   resolveDigestDateRangeForPreferences,
   type MisEmailDateRangeMode,
-} from '@/lib/mis-email/preferences';
+} from '@/features/mis-email/lib/preferences';
 import {
   queryDigestAccountNamesByZone,
-} from '@/lib/mis-email/query-digest-account-names';
-import { resolveUserDigestScopeWithLabel } from '@/lib/mis-email/user-scope';
+} from '@/features/mis-email/lib/query-digest-account-names';
+import { resolveUserDigestScopeWithLabel } from '@/features/mis-email/lib/user-scope';
 
 /** Fast key-account name list for the email composer (no full MIS aggregation). */
 export async function GET(request: Request) {

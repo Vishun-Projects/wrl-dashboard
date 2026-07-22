@@ -3,11 +3,11 @@ import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 import { withAppClient } from '@/lib/read-model/db';
 import { querySummaryDashboard } from '@/lib/read-model/queries/summary';
-import { queryClientAccountSummaryFiltered } from '@/lib/mis-client-import/aggregate';
+import { queryClientAccountSummaryFiltered } from '@/features/mis-import/lib/aggregate';
 import {
   sumMergedAccountMetricByRegion,
   DEFAULT_CLIENT_MERGE_WITH_CRM,
-} from '@/components/report/SummaryMergedMetricCell';
+} from '@/features/report/ui/SummaryMergedMetricCell';
 
 async function main() {
   const start = '2026-07-01';

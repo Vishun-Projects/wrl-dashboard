@@ -9,7 +9,7 @@ import {
   tryAcquireSyncLock,
 } from '@/lib/read-model/lock';
 import { applyCrmRowsToHot } from '@/lib/read-model/apply-crm-delta';
-import { formatLocalDate } from '@/lib/report/filters';
+import { formatLocalDate } from '@/lib/dates/local-date';
 
 const CATCHUP_ENTITY = 'calls_latest_hot_editedon_catchup';
 const FETCH_GAP_MS = Number(process.env.SYNC_CRM_FETCH_GAP_MS ?? 1500) || 1500;

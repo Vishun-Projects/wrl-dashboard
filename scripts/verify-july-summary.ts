@@ -6,7 +6,7 @@ import { querySummaryDashboard } from '@/lib/read-model/queries/summary';
 import {
   queryAllClientBranchSummary,
   queryClientAccountSummaryFiltered,
-} from '@/lib/mis-client-import/aggregate';
+} from '@/features/mis-import/lib/aggregate';
 import { prisma } from '@/lib/db/prisma';
 
 async function main() {

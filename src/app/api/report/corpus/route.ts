@@ -14,10 +14,10 @@ import {
   type RegisterDateFilterColumn,
   TRHCALLS_EXCLUDE_TRANSFERRED,
 } from '@/lib/trhcalls/query';
-import { enrichCallRowForReport } from '@/lib/report/geo';
-import { CORPUS_SERVER_CACHE_TTL_MS, splitCalendarMonths } from '@/lib/report/corpus';
-import { formatLocalDate } from '@/lib/report/filters';
-import { readCorpusDiskCache, writeCorpusDiskCache } from '@/lib/report/server-cache';
+import { enrichCallRowForReport } from '@/features/report/lib/geo';
+import { CORPUS_SERVER_CACHE_TTL_MS, splitCalendarMonths } from '@/features/report/lib/corpus';
+import { formatLocalDate } from '@/features/report/lib/filters';
+import { readCorpusDiskCache, writeCorpusDiskCache } from '@/features/report/lib/server-cache';
 import { readCallsFromPostgres } from '@/lib/read-model/flags';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
 

@@ -1,8 +1,8 @@
 import dynamic from 'next/dynamic';
-import { ReportPageSkeleton } from '@/components/report/ReportLoadingFeedback';
+import { ReportPageSkeleton } from '@/features/report/ui/ReportLoadingFeedback';
 import { requirePageAccess } from '@/lib/auth/require-page-access';
 
-const ReportPageClient = dynamic(() => import('@/components/report/ReportPageClient'), {
+const ReportPageClient = dynamic(() => import('@/features/report/ui/ReportPageClient'), {
   loading: () => <ReportPageSkeleton />,
 });
 

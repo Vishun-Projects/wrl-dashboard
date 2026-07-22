@@ -8,7 +8,7 @@ import {
   canManageMisEmailRouting,
   listMisEmailRoutingOptions,
   normalizeMisEmailRoutingClientSourceMode,
-} from '@/lib/mis-email/routing-rules';
+} from '@/features/mis-email/lib/routing-rules';
 
 const TTL_MS = 5 * 60 * 1000;
 const cache = new Map<string, { expiresAt: number; payload: unknown }>();

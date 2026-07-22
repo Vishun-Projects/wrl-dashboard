@@ -6,9 +6,9 @@ import {
   isSmtpConfigured,
   resolvePortalUrl,
   resolveSmtpConfig,
-} from '@/lib/mis-email/send';
+} from '@/lib/mail/smtp';
 import type { HotRow } from '@/lib/read-model/types';
-import { normalizeSerial } from '@/lib/serial-audit/complaint-audit';
+import { normalizeSerial } from '@/lib/serial/normalize';
 import {
   buildMajorRepairRepeatCountSql,
   buildMajorRepairRepeatDetailSql,
@@ -113,7 +113,7 @@ async function fetchRepairDoneByTrn(rows: HotRow[]): Promise<Map<string, string>
     if (!rawSql) continue;
     const res = await postQuery({ rawSql, timeoutMs: CRM_TIMEOUT_MS });
     for (const row of (res.data || []) as Record<string, unknown>[]) {
-      const key = `${row.id}:${row.office_id}`;
+      const key = `${Number(row.id)}:${Number(row.office_id)}` as `${number}:${number}`;
       const trn = trnByKey.get(key);
       if (!trn) continue;
       const done = repairDoneFromCrmFlags(row);

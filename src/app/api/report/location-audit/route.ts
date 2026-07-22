@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
-import { exportLocationAuditCsv } from '@/lib/location-audit';
+import { exportLocationAuditCsv } from '@/features/location-audit/lib';
 import { gzippedCsvPayload } from '@/lib/net/csv-gzip-response';
 import {
   fetchLocationAuditFull,
@@ -12,7 +12,7 @@ import {
   parseLocationAuditQueryParams,
   resolveLocationAuditSecurity,
   runLocationAuditExport,
-} from '@/lib/location-audit/server';
+} from '@/features/location-audit/lib/server';
 
 export async function GET(req: NextRequest) {
   try {

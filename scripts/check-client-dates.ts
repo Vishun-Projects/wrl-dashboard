@@ -2,7 +2,7 @@ import { config } from 'dotenv';
 import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 import { withAppClient } from '@/lib/read-model/db';
-import { queryClientAccountSummaryFiltered } from '@/lib/mis-client-import/aggregate';
+import { queryClientAccountSummaryFiltered } from '@/features/mis-import/lib/aggregate';
 
 async function main() {
   const jul = await queryClientAccountSummaryFiltered({
@@ -45,7 +45,7 @@ async function main() {
   const { querySummaryDashboard } = await import('@/lib/read-model/queries/summary');
   const {
     sumMergedAccountMetricByRegion,
-  } = await import('@/components/report/SummaryMergedMetricCell');
+  } = await import('@/features/report/ui/SummaryMergedMetricCell');
 
   const crmJul = await querySummaryDashboard({
     startDate: '2026-07-01',

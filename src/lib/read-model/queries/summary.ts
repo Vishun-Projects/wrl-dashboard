@@ -1,8 +1,8 @@
 import { prisma } from '@/lib/db/prisma';
-import type { SummaryDashboard } from '@/lib/report/summary-derive';
-import { normalizeCallTypeDisplay } from '@/lib/report/filters';
+import type { SummaryDashboard } from '@/lib/summary/derive';
+import { normalizeCallTypeDisplay } from '@/lib/call-display/call-type';
 import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
-import { AGING_BUCKET_SQL, openCallsFromAging } from '@/lib/report/aging-buckets';
+import { AGING_BUCKET_SQL, openCallsFromAging } from '@/lib/aging/buckets';
 import {
   HOT_MAIN_BRANCH_NAME_SQL,
   HOT_MAIN_BRANCH_OFFICE_ID_SQL,

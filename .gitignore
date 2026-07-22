@@ -45,6 +45,10 @@ yarn-error.log*
 
 # scheduled sync logs
 /logs/
+
+# local dump of non-runtime archives / one-off scripts (see dump/README.md)
+/dump/
+
 next-env.d.ts
 
 /src/generated/prisma

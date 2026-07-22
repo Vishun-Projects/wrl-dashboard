@@ -1,20 +1,22 @@
 # `src/lib` layout
 
-Feature modules live in folders; shared infrastructure is grouped by concern.
+Domain UI/logic has moved under `src/features/<domain>/` (see [`docs/REMEDIATION_ROADMAP.md`](../../docs/REMEDIATION_ROADMAP.md)).
+
+What remains here is **shared infrastructure**:
 
 | Path | Purpose |
 |------|---------|
-| `arcp-claims/`, `location-audit/`, `register/`, `serial-audit/`, `warranty-master/` | Report feature logic (`/server` for CRM/API) |
-| `report/` | Portal corpus, filters, search, sync, preferences |
 | `sync/` | Sync-proxy routes for read-model |
 | `read-model/` | Nightly/incremental Postgres sync |
 | `db/` | Prisma + CRM `postQuery` proxy |
 | `supabase/` | Auth clients, admin, session, chunked fetch |
 | `auth/` | Session, permissions, page access |
 | `trhcalls/` | Call/register SQL helpers |
-| `distribution/` | Call distribution roster + idle assignees |
 | `geo/` | Geocoding, distance, Leaflet CDN |
 | `utils/` | CSV, async sleep, run pool, user-facing errors |
 | `call-row/` | Shared call row normalization |
 
-Import examples: `@/lib/warranty-master/server`, `@/lib/report/filters`, `@/lib/db/proxy`.
+Feature imports: `@/features/warranty-master/lib/server`, `@/features/report/lib/filters`, etc.  
+Infra: `@/lib/db/proxy`, `@/lib/read-model/...`.
+
+Cross-cutting extracts that are truly shared may move to `src/shared/` over time (auth/db/ui leaves only).

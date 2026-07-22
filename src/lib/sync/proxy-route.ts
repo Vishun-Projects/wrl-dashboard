@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { postQuery } from '@/lib/db/proxy';
 import { authorizeSyncProxy } from '@/lib/sync/proxy-auth';
-import { clampSyncProxyLimit } from '@/lib/report/limits';
+import { clampSyncProxyLimit } from '@/lib/sync/proxy-limit';
 import fs from 'fs';
 import path from 'path';
 

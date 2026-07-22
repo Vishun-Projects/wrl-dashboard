@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { LayoutGrid, Rows3, X } from 'lucide-react';
-import type { MisEmailBodySectionDef, MisEmailBodySectionId } from '@/lib/mis-email/body-sections';
+import type { MisEmailBodySectionDef, MisEmailBodySectionId } from '@/features/mis-email/lib/body-sections';
 import {
   MIS_EMAIL_BODY_LAYOUT_PRESETS,
   defaultGridRowsForSections,
@@ -11,7 +11,7 @@ import {
   type MisEmailBodyGridPlacement,
   type MisEmailBodyLayout,
   type MisEmailBodyLayoutPresetId,
-} from '@/lib/mis-email/email-body-layout';
+} from '@/features/mis-email/lib/email-body-layout';
 
 const SECTION_SHORT_LABEL: Record<MisEmailBodySectionId, string> = {
   regional_performance: 'Regional',

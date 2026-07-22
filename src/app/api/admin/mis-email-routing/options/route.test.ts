@@ -23,9 +23,9 @@ vi.mock('@/lib/auth/report-security', () => ({
   }),
 }));
 
-vi.mock('@/lib/mis-email/routing-rules', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/mis-email/routing-rules')>(
-    '@/lib/mis-email/routing-rules'
+vi.mock('@/features/mis-email/lib/routing-rules', async () => {
+  const actual = await vi.importActual<typeof import('@/features/mis-email/lib/routing-rules')>(
+    '@/features/mis-email/lib/routing-rules'
   );
   return {
     ...actual,

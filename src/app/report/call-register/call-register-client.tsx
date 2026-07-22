@@ -2,16 +2,16 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PageScrollRegion } from '@/components/layout/PageShell';
-import { CallRegisterToolbar } from '@/components/report/call-register/CallRegisterToolbar';
-import { CallRegisterGrid } from '@/components/report/call-register/CallRegisterGrid';
-import { CallRegisterSerialPanel } from '@/components/report/call-register/CallRegisterSerialPanel';
+import { CallRegisterToolbar } from '@/features/report/ui/call-register/CallRegisterToolbar';
+import { CallRegisterGrid } from '@/features/report/ui/call-register/CallRegisterGrid';
+import { CallRegisterSerialPanel } from '@/features/report/ui/call-register/CallRegisterSerialPanel';
 import { AdminTableCard } from '@/components/admin/AdminUi';
 import { PageAlert } from '@/components/ui/PageAlert';
 import { TableSkeleton } from '@/components/ui/DataTableLoading';
-import type { CallRegisterRow, CallRegisterSummary } from '@/lib/report/call-register/types';
-import { CALL_REGISTER_CLIENTS } from '@/lib/report/call-register/clients';
+import type { CallRegisterRow, CallRegisterSummary } from '@/features/report/lib/call-register/types';
+import { CALL_REGISTER_CLIENTS } from '@/features/report/lib/call-register/clients';
 import { usePageAlert } from '@/hooks/usePageAlert';
-import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
+import { triggerBlobDownload } from '@/features/report/lib/summary-excel-export';
 import { fetchWithRetry } from '@/lib/net/fetch-with-retry';
 
 function getDefaultDates() {

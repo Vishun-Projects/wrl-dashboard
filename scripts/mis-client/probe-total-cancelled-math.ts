@@ -3,8 +3,8 @@ import { join } from 'path';
 import { readFileSync } from 'fs';
 config({ path: join(process.cwd(), '.env.local') });
 import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryForBdMis } from '@/lib/mis-client-import/aggregate';
-import { buildBdMisRegionalRows, sumBdMisRegionalGrand } from '@/lib/report/bd-mis-summary';
+import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/lib/aggregate';
+import { buildBdMisRegionalRows, sumBdMisRegionalGrand } from '@/features/report/lib/bd-mis-summary';
 import { withAppClient } from '@/lib/read-model/db';
 
 const p = {

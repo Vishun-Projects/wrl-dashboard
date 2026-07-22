@@ -2,17 +2,17 @@ import { NextResponse, after } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
-import { loadDigestRecipientById } from '@/lib/mis-email/recipients';
-import { sendMisEmailComposeBatch } from '@/lib/mis-email/compose-digest';
+import { loadDigestRecipientById } from '@/features/mis-email/lib/recipients';
+import { sendMisEmailComposeBatch } from '@/features/mis-email/lib/compose-digest';
 import {
   createMisEmailSendJob,
   updateMisEmailSendJob,
-} from '@/lib/mis-email/send-jobs';
+} from '@/features/mis-email/lib/send-jobs';
 import {
   mergeMisEmailPreferences,
   validateMisEmailPreferencesPatch,
   type MisEmailPreferences,
-} from '@/lib/mis-email/preferences';
+} from '@/features/mis-email/lib/preferences';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 export const maxDuration = 300;

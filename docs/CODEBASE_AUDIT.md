@@ -1,5 +1,8 @@
 # Codebase Audit Summary
 
+> **Superseded for architecture/remediation tracking:** use [`REMEDIATION_ROADMAP.md`](./REMEDIATION_ROADMAP.md) (2026-07-22 staff audit + feature-layout plan).  
+> This file remains as a historical record of the Jun 2026 orphan cleanup.
+
 Executed: 2026-06-01  
 Scope: `src/` (~171 TS/TSX files), Prisma schema, selected docs.
 

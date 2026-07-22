@@ -13,15 +13,15 @@ import { config } from 'dotenv';
 import { createServer } from 'http';
 import { Readable } from 'stream';
 import { resolve } from 'path';
-import { handleMisClientUploadFormData } from '@/lib/mis-client-import/upload-http';
+import { handleMisClientUploadFormData } from '@/features/mis-import/lib/upload-http';
 import {
   handleMisClientUploadChunkFormData,
   handleMisClientUploadChunkStatus,
-} from '@/lib/mis-client-import/upload-chunk-http';
+} from '@/features/mis-import/lib/upload-chunk-http';
 import {
   assertMisUploadAccess,
   resolveMisUploadUserId,
-} from '@/lib/mis-client-import/upload-standalone-auth';
+} from '@/features/mis-import/lib/upload-standalone-auth';
 
 const root = resolve(__dirname, '../..');
 config({ path: resolve(root, '.env.mis-upload') });

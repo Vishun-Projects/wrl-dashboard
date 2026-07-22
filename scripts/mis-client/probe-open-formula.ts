@@ -1,8 +1,8 @@
 import { config } from 'dotenv';
 import { join } from 'path';
 import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryForBdMis } from '@/lib/mis-client-import/aggregate';
-import { buildBdMisRegionalRows, sumBdMisRegionalGrand } from '@/lib/report/bd-mis-summary';
+import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/lib/aggregate';
+import { buildBdMisRegionalRows, sumBdMisRegionalGrand } from '@/features/report/lib/bd-mis-summary';
 
 config({ path: join(process.cwd(), '.env.local') });
 

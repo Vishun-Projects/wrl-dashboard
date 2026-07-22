@@ -7,7 +7,7 @@
 import { writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { postQuery } from '../src/lib/db/proxy';
-import { buildArcpClaimsFilterCondition } from '../src/lib/arcp-claims/query';
+import { buildArcpClaimsFilterCondition } from '../src/features/arcp/lib/query';
 import { escapeCsvCell } from '../src/lib/utils/csv';
 
 const startDate = process.argv[2] || '2026-04-01';

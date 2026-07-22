@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import {
   getPortalAuditPayload,
   portalAuditEtag,
-} from '@/lib/report/portal-audit-server';
+} from '@/features/report/lib/portal-audit-server';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { seesAllOffices } from '@/lib/trhcalls/office-security';
 

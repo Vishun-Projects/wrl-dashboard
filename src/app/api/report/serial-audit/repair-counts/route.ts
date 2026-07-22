@@ -3,8 +3,8 @@ import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { postQuery } from '@/lib/db/proxy';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
-import { mapRepairCountsFromApiRow } from '@/lib/serial-audit/repair-options';
-import { resolveSerialAuditSqlOpts } from '@/lib/serial-audit/server/sql-scope';
+import { mapRepairCountsFromApiRow } from '@/features/serial-audit/lib/repair-options';
+import { resolveSerialAuditSqlOpts } from '@/features/serial-audit/lib/server/sql-scope';
 import { buildSerialAuditRepairCountsBySerialSql } from '@/lib/trhcalls/query';
 
 const QUERY_TIMEOUT_MS = 120000;

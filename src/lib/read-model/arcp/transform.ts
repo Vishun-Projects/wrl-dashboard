@@ -1,4 +1,4 @@
-import { LOCAL_UPCOUNTRY_NCODE_LABELS } from '@/lib/arcp-claims/query';
+import { LOCAL_UPCOUNTRY_NCODE_LABELS } from '@/lib/arcp/local-upcountry';
 import { maxCrmWatermarks, parseCrmDate } from '@/lib/read-model/dates';
 import {
   claimMonthFromDate,

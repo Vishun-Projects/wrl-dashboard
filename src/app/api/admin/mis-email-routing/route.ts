@@ -8,7 +8,7 @@ import {
   deleteMisEmailRoutingRule,
   listMisEmailRoutingRules,
   updateMisEmailRoutingRule,
-} from '@/lib/mis-email/routing-rules';
+} from '@/features/mis-email/lib/routing-rules';
 
 async function requireHodRoutingAccess(request: Request) {
   const supabase = await createClient();

@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/db/prisma';
-import type { SummaryDashboard } from '@/lib/report/summary-derive';
-import { normalizeCallTypeDisplay } from '@/lib/report/filters';
+import type { SummaryDashboard } from '@/lib/summary/derive';
+import { normalizeCallTypeDisplay } from '@/lib/call-display/call-type';
 import {
   ensureNormalizeCallTypeFunction,
   type SummaryQueryParams,
@@ -10,7 +10,7 @@ import {
   HOT_OFFICE_JOINS_SQL,
   HOT_RESOLVED_REGION_SQL,
 } from '@/lib/read-model/queries/hot-region';
-import { AGING_BUCKET_SQL, openCallsFromAging } from '@/lib/report/aging-buckets';
+import { AGING_BUCKET_SQL, openCallsFromAging } from '@/lib/aging/buckets';
 
 const BREAKDOWN = 'BREAKDOWN';
 

@@ -11,12 +11,12 @@ import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 config({ path: join(process.cwd(), '.env') });
 
-import '@/lib/mis-email/bootstrap-env';
+import '@/features/mis-email/lib/bootstrap-env';
 import {
   relayPostJson,
   resolveRelayTryUrls,
   resolveVpsMailRelaySecret,
-} from '@/lib/mis-email/relay-client';
+} from '@/features/mis-email/lib/relay-client';
 
 const LARGE = process.argv.includes('--large');
 const sendTo = (() => {

@@ -12,25 +12,25 @@ import {
   Send,
 } from 'lucide-react';
 import { feedback } from '@/lib/ui/feedback';
-import type { MisEmailComposePreview } from '@/lib/mis-email/compose-digest';
-import type { MisEmailBodySectionDef, MisEmailBodySectionId } from '@/lib/mis-email/body-sections';
+import type { MisEmailComposePreview } from '@/features/mis-email/lib/compose-digest';
+import type { MisEmailBodySectionDef, MisEmailBodySectionId } from '@/features/mis-email/lib/body-sections';
 import type {
   MisEmailKeyAccountsByZone,
   MisEmailPreferences,
   MisEmailZoneKey,
-} from '@/lib/mis-email/preferences';
+} from '@/features/mis-email/lib/preferences';
 import {
   DEFAULT_MIS_EMAIL_PREFERENCES,
   resolveMisEmailCcEmails,
   resolveMisEmailToEmails,
-} from '@/lib/mis-email/preferences';
-import { parseOutlookEmailList } from '@/lib/mis-email/parse-outlook-emails';
-import { buildMisEmailSkeletonPreview } from '@/lib/mis-email/skeleton-preview';
-import { trackMisEmailSendJob, useMisEmailSendJobs } from '@/lib/mis-email/send-job-client';
+} from '@/features/mis-email/lib/preferences';
+import { parseOutlookEmailList } from '@/features/mis-email/lib/parse-outlook-emails';
+import { buildMisEmailSkeletonPreview } from '@/features/mis-email/lib/skeleton-preview';
+import { trackMisEmailSendJob, useMisEmailSendJobs } from '@/features/mis-email/lib/send-job-client';
 import {
   accountsMatchDisplayOrKey,
   clientAccountDisplayName,
-} from '@/lib/report/client-account-display';
+} from '@/features/report/lib/client-account-display';
 import { settingsInputClass } from '@/components/admin/AdminUi';
 import { MisEmailBodyLayoutEditor } from '@/components/settings/MisEmailBodyLayoutEditor';
 import { Collapse } from '@/components/motion/Collapse';

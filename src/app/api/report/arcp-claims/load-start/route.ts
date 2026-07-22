@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateArcpClaimsRequest } from '@/lib/arcp-claims/server/route-auth';
+import { authenticateArcpClaimsRequest } from '@/features/arcp/lib/server/route-auth';
 import {
   mergeJobAggregatesFromDisk,
   mergeJobDetailFromDisk,
   startOrResumeLoadJob,
   type ArcpLoadJobView,
-} from '@/lib/arcp-claims/server/load-job';
-import { deriveArcpGrandTotalsFromAggregates } from '@/lib/arcp-claims/query';
-import type { ArcpChunkCacheKind } from '@/lib/arcp-claims/server/chunk-cache';
+} from '@/features/arcp/lib/server/load-job';
+import { deriveArcpGrandTotalsFromAggregates } from '@/features/arcp/lib/query';
+import type { ArcpChunkCacheKind } from '@/features/arcp/lib/server/chunk-cache';
 
 export const maxDuration = 60;
 

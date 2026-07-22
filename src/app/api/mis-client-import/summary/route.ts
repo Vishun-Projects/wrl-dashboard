@@ -4,9 +4,9 @@ import {
   countClientRowsInRange,
   queryClientAccountSummaryFiltered,
   queryClientBranchSummaryFiltered,
-} from '@/lib/mis-client-import/aggregate';
-import { parseSourceCodesParam } from '@/lib/mis-client-import/source-selection';
-import { listAllSourcesWithBatches } from '@/lib/mis-client-import/config';
+} from '@/features/mis-import/lib/aggregate';
+import { parseSourceCodesParam } from '@/features/mis-import/lib/source-selection';
+import { listAllSourcesWithBatches } from '@/features/mis-import/lib/config';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 export async function GET(req: NextRequest) {

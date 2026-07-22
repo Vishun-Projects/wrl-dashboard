@@ -1,6 +1,6 @@
 import type pg from 'pg';
 import { withTransaction, withClient } from '@/lib/read-model/db';
-import { CALL_REGISTER_CLIENTS } from '@/lib/report/call-register/clients';
+import { CALL_REGISTER_CLIENTS } from '@/lib/call-register/clients';
 import { TRANSACTION_ENTRY_ENTITY, monthChunks, yearChunks } from './shared';
 import {
   fetchTransactionEntryClients,

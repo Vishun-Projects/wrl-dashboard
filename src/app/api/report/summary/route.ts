@@ -17,9 +17,9 @@ import {
   enrichTrhcallBranchFranchisee,
   TRHCALLS_EXCLUDE_TRANSFERRED,
 } from '@/lib/trhcalls/query';
-import { deriveSummaryDashboard } from '@/lib/report/summary-derive';
-import { queryAllClientBranchSummary, countClientRowsInRange } from '@/lib/mis-client-import/aggregate';
-import { listAllSourcesWithBatches } from '@/lib/mis-client-import/config';
+import { deriveSummaryDashboard } from '@/features/report/lib/summary-derive';
+import { queryAllClientBranchSummary, countClientRowsInRange } from '@/features/mis-import/lib/aggregate';
+import { listAllSourcesWithBatches } from '@/features/mis-import/lib/config';
 
 export async function GET(req: NextRequest) {
   try {

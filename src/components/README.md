@@ -14,4 +14,4 @@
 | `shared/` | `BranchTree`, `ImagePreviewViewer` |
 | `admin/` | Admin UI primitives |
 
-Import example: `@/components/register/RegisterPageFilters`.
+Import example: `@/features/register/ui/RegisterPageFilters`.

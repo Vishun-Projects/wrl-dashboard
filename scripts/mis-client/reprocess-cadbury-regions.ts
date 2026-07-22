@@ -11,8 +11,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: join(__dirname, '..', '..', '.env.local') });
 config({ path: join(__dirname, '..', '..', '.env') });
 
-import { loadSourceConfigByCode } from '@/lib/mis-client-import/config';
-import { normalizeClientRows } from '@/lib/mis-client-import/normalize';
+import { loadSourceConfigByCode } from '@/features/mis-import/lib/config';
+import { normalizeClientRows } from '@/features/mis-import/lib/normalize';
 import { withAppClient } from '@/lib/read-model/db';
 
 const BATCH_SIZE = 500;

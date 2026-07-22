@@ -2,14 +2,14 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
-import { loadDigestRecipientById } from '@/lib/mis-email/recipients';
+import { loadDigestRecipientById } from '@/features/mis-email/lib/recipients';
 import {
   mergeMisEmailPreferences,
   validateMisEmailPreferencesPatch,
   type MisEmailPreferences,
-} from '@/lib/mis-email/preferences';
-import { resolveAvailableBodySections } from '@/lib/mis-email/body-sections';
-import { resolveUserDigestScopeWithLabel } from '@/lib/mis-email/user-scope';
+} from '@/features/mis-email/lib/preferences';
+import { resolveAvailableBodySections } from '@/features/mis-email/lib/body-sections';
+import { resolveUserDigestScopeWithLabel } from '@/features/mis-email/lib/user-scope';
 
 type MisEmailRow = {
   mis_email_enabled: boolean;

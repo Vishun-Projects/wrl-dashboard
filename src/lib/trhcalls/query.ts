@@ -3,12 +3,12 @@
  * Source table: trhcalls (deduplicated by vtrnno, latest row wins).
  */
 
-import { parseRepairQueryParam } from '@/lib/serial-audit/repair-options';
+import { parseRepairQueryParam } from '@/lib/repair/options';
 import {
   REGISTER_ARCP_PICK_FIELDS_SQL,
   REGISTER_ARCP_PICK_OUTER_APPLY,
-} from '@/lib/register/arcp-approve-dates';
-import { REGISTER_MSTPRORG_JOIN_SQL, SQL_WCO_EXPR } from '@/lib/register/wco';
+} from '@/lib/register-sql/arcp-approve-dates';
+import { REGISTER_MSTPRORG_JOIN_SQL, SQL_WCO_EXPR } from '@/lib/register-sql/wco';
 
 export const TRHCALLS_EXCLUDE_TRANSFERRED =
   " AND ISNULL(tc.vtransfercallno, '') = '' AND ISNULL(CAST(tc.ncancelreason AS INT), 0) <> 2";

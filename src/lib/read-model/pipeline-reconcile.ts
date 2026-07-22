@@ -13,7 +13,7 @@ import {
 import { applyCrmRowsToHot } from '@/lib/read-model/apply-crm-delta';
 import { hotRowCancelReasonMismatch, repairHotCancelFromNcrReason } from '@/lib/read-model/repair-hot-cancel';
 import { isHotEligibleRow, transformCrmRowToHot } from '@/lib/read-model/transform';
-import { isRealCancelReasonCode } from '@/lib/report/search';
+import { isRealCancelReasonCode } from '@/lib/call-status/cancel';
 import { deleteHotRowsByTrn } from '@/lib/read-model/upsert-hot';
 import type { HotRow } from '@/lib/read-model/types';
 

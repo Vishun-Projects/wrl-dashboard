@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
-import { getMisEmailSendJob } from '@/lib/mis-email/send-jobs';
+import { getMisEmailSendJob } from '@/features/mis-email/lib/send-jobs';
 
 export async function GET(request: Request) {
   const supabase = await createClient();

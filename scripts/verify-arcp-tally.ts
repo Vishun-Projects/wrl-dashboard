@@ -5,8 +5,8 @@ import {
   parseArcpAggregateRows,
   planArcpSummaryDateChunks,
   type ArcpClaimsQueryOpts,
-} from '../src/lib/arcp-claims/query';
-import { buildArcpClaimsRawSql } from '../src/lib/arcp-claims/query';
+} from '../src/features/arcp/lib/query';
+import { buildArcpClaimsRawSql } from '../src/features/arcp/lib/query';
 
 const startDate = process.argv[2] || '2025-01-01';
 const endDate = process.argv[3] || '2025-12-31';

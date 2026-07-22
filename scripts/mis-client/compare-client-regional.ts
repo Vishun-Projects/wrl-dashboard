@@ -1,8 +1,8 @@
 import { config } from 'dotenv';
 import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
-import { queryClientAccountSummaryFiltered } from '@/lib/mis-client-import/aggregate';
-import { formatDisplayRegion } from '@/lib/mis-client-import/region';
+import { queryClientAccountSummaryFiltered } from '@/features/mis-import/lib/aggregate';
+import { formatDisplayRegion } from '@/features/mis-import/lib/region';
 
 async function main() {
   const client = await queryClientAccountSummaryFiltered({

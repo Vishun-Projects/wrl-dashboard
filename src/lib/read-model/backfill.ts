@@ -16,7 +16,7 @@ import { updateSyncWatermarks, readHotTableWatermarks } from '@/lib/read-model/l
 import { aggregateFactCounts } from '@/lib/read-model/metrics';
 import type { HotRow } from '@/lib/read-model/types';
 import { dedupeCrmRows, transformCrmRowToHot } from '@/lib/read-model/transform';
-import { isSummaryEligibleCall } from '@/lib/report/summary-derive';
+import { isSummaryEligibleCall } from '@/lib/summary/derive';
 import { syncHotYtdFromCrm } from '@/lib/read-model/sync-hot-ytd';
 import { countHotRows, truncateHot } from '@/lib/read-model/upsert-hot';
 import {

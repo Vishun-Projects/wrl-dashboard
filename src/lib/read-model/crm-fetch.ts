@@ -12,7 +12,7 @@ import {
   formatCrmDateTime,
   todayLocalDate,
 } from '@/lib/read-model/dates';
-import { formatLocalDate } from '@/lib/report/filters';
+import { formatLocalDate } from '@/lib/dates/local-date';
 import {
   SYNC_CRM_NCODE_SHARD_INITIAL,
   SYNC_CRM_NCODE_SHARD_MAX,

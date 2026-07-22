@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { postQuery } from '@/lib/db/proxy';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
-import { serializeRepairFilterParam } from '@/lib/serial-audit/repair-options';
+import { serializeRepairFilterParam } from '@/features/serial-audit/lib/repair-options';
 import { buildSerialAuditCallIdsWithRepairSql } from '@/lib/trhcalls/query';
 
 const QUERY_TIMEOUT_MS = 120000;

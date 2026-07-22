@@ -2,12 +2,12 @@ import 'server-only';
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { resolveAppOrigin } from '@/lib/auth/site-url';
-import { isSmtpConfigured } from '@/lib/mis-email/send';
+import { isSmtpConfigured } from '@/lib/mail/smtp';
 import { sendPasswordResetEmail } from '@/lib/auth/send-password-reset-email';
 import {
   relayPostJson,
   resolveVpsMailRelaySecret,
-} from '@/lib/mis-email/relay-client';
+} from '@/lib/mail/relay-client';
 
 const RESET_PATH = '/internal/mail/send';
 

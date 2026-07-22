@@ -4,10 +4,10 @@ import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useSt
 import { createClient } from '@/lib/supabase/client';
 import { Shield, X } from 'lucide-react';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
-import { WarrantyMasterToolbar } from '@/components/warranty-master/WarrantyMasterToolbar';
-import { WarrantyMasterHeaderActions } from '@/components/warranty-master/WarrantyMasterHeaderActions';
-import { WarrantyMasterSummaryPanel } from '@/components/warranty-master/WarrantyMasterSummaryPanel';
-import { WarrantyMasterTable } from '@/components/warranty-master/WarrantyMasterTable';
+import { WarrantyMasterToolbar } from '@/features/warranty-master/ui/WarrantyMasterToolbar';
+import { WarrantyMasterHeaderActions } from '@/features/warranty-master/ui/WarrantyMasterHeaderActions';
+import { WarrantyMasterSummaryPanel } from '@/features/warranty-master/ui/WarrantyMasterSummaryPanel';
+import { WarrantyMasterTable } from '@/features/warranty-master/ui/WarrantyMasterTable';
 import { AdminTableCard } from '@/components/admin/AdminUi';
 import { AnimatedChipList } from '@/components/motion';
 import {
@@ -22,16 +22,16 @@ import {
   type WarrantyMasterAggregateRow,
   type WarrantyMasterClientFilters,
   type WarrantyMasterFgLineRow,
-} from '@/lib/warranty-master';
+} from '@/features/warranty-master/lib';
 import {
   clearWarrantyMasterCache,
   readWarrantyMasterCache,
   writeWarrantyMasterCache,
-} from '@/lib/warranty-master/client-cache';
+} from '@/features/warranty-master/lib/client-cache';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import { PageAlert } from '@/components/ui/PageAlert';
 import { feedback } from '@/lib/ui/feedback';
-import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
+import { triggerBlobDownload } from '@/features/report/lib/summary-excel-export';
 import { usePageAlert } from '@/hooks/usePageAlert';
 import { DataTableLoading } from '@/components/ui/DataTableLoading';
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateArcpClaimsRequest } from '@/lib/arcp-claims/server/route-auth';
-import { loadArcpCrmLabelLookups } from '@/lib/arcp-claims/server/crm-labels';
+import { authenticateArcpClaimsRequest } from '@/features/arcp/lib/server/route-auth';
+import { loadArcpCrmLabelLookups } from '@/features/arcp/lib/server/crm-labels';
 
 export const maxDuration = 60;
 

@@ -2,22 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   isCrmOutOfMemoryError,
   isCrmSqlTimeoutError,
-} from '@/lib/arcp-claims/server/fetch';
-import { loadArcpClaimsAggregates } from '@/lib/arcp-claims/server/load';
+} from '@/features/arcp/lib/server/fetch';
+import { loadArcpClaimsAggregates } from '@/features/arcp/lib/server/load';
 import {
   ARCP_CHUNK_CACHE_VERSION,
   clearArcpChunkCaches,
   clearArcpChunkDiskCache,
   type ArcpChunkLoadMeta,
-} from '@/lib/arcp-claims/server/chunk-cache';
-import { clearArcpLoadJobs } from '@/lib/arcp-claims/server/load-job';
-import { authenticateArcpClaimsRequest } from '@/lib/arcp-claims/server/route-auth';
+} from '@/features/arcp/lib/server/chunk-cache';
+import { clearArcpLoadJobs } from '@/features/arcp/lib/server/load-job';
+import { authenticateArcpClaimsRequest } from '@/features/arcp/lib/server/route-auth';
 import {
   deriveArcpGrandTotalsFromAggregates,
   resolveArcpDateFilterColumn,
   type ArcpGrandTotals,
-} from '@/lib/arcp-claims/query';
-import { buildArcpClaimsTableModel } from '@/lib/arcp-claims/table';
+} from '@/features/arcp/lib/query';
+import { buildArcpClaimsTableModel } from '@/features/arcp/lib/table';
 
 export const maxDuration = 300;
 

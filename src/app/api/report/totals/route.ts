@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveRegisterPostgresRequest } from '@/lib/register/server/postgres-request';
+import { resolveRegisterPostgresRequest } from '@/features/register/lib/server/postgres-request';
 import { queryRegisterTotalsFromPostgres } from '@/lib/read-model/queries/register';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';

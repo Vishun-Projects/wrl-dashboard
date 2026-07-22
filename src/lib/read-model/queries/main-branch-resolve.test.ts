@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveSummaryDashboard } from '@/lib/report/summary-derive';
+import { deriveSummaryDashboard } from '@/lib/summary/derive';
 import {
   resolveMainBranchDisplayName,
   resolveMainBranchOfficeId,

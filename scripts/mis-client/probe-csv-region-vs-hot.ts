@@ -6,7 +6,7 @@ import { join } from 'path';
 import { readFileSync } from 'fs';
 config({ path: join(process.cwd(), '.env.local') });
 import { withAppClient } from '@/lib/read-model/db';
-import { formatDisplayRegion } from '@/lib/mis-client-import/region';
+import { formatDisplayRegion } from '@/features/mis-import/lib/region';
 
 const CSV = 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw/CRM_WRL_MIS_Register_2026-06-30.csv';
 

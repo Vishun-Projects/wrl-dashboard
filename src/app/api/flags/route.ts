@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { clearPortalAuditServerCache } from '@/lib/report/portal-audit-server';
+import { clearPortalAuditServerCache } from '@/features/report/lib/portal-audit-server';
 import { requireBearerUser } from '@/lib/api/security';
 import { flagPostSchema } from '@/lib/api/schemas/mutations';
 import { canAccessOffice } from '@/lib/trhcalls/office-security';

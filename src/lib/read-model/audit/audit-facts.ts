@@ -1,7 +1,7 @@
 import type pg from 'pg';
 import { currentYearStart } from '@/lib/read-model/dates';
 import { aggregateFactCounts, serializeFactKey } from '@/lib/read-model/metrics';
-import { isSummaryEligibleCall } from '@/lib/report/summary-derive';
+import { isSummaryEligibleCall } from '@/lib/summary/derive';
 import { truncateCurrentYearFacts, upsertFactRows } from '@/lib/read-model/upsert-facts';
 import { normalizeHotRowFromDb } from '@/lib/read-model/audit/compare-hot';
 import type { AuditOptions, FactsAuditSummary } from '@/lib/read-model/audit/types';

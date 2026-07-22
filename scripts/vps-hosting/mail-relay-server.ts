@@ -25,11 +25,11 @@ import { config } from 'dotenv';
 import { createServer } from 'http';
 import { resolve } from 'path';
 import { sendPasswordResetEmail } from '@/lib/auth/send-password-reset-email';
-import '@/lib/mis-email/bootstrap-env';
-import { sendMisEmailComposeBatch } from '@/lib/mis-email/compose-digest';
-import { createMailTransport, resolveSmtpConfig } from '@/lib/mis-email/send';
-import { loadDigestRecipientById } from '@/lib/mis-email/recipients';
-import type { MisEmailPreferences } from '@/lib/mis-email/preferences';
+import '@/features/mis-email/lib/bootstrap-env';
+import { sendMisEmailComposeBatch } from '@/features/mis-email/lib/compose-digest';
+import { createMailTransport, resolveSmtpConfig } from '@/features/mis-email/lib/send';
+import { loadDigestRecipientById } from '@/features/mis-email/lib/recipients';
+import type { MisEmailPreferences } from '@/features/mis-email/lib/preferences';
 
 const root = resolve(__dirname, '../..');
 config({ path: resolve(root, '.env.local') });

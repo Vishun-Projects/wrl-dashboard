@@ -7,7 +7,7 @@ import { config } from 'dotenv';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import pg from 'pg';
-import { resolveClientImportPlant } from '../../src/lib/mis-client-import/client-branch-map';
+import { resolveClientImportPlant } from '../../src/features/mis-import/lib/client-branch-map';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: join(__dirname, '..', '..', '.env.local') });

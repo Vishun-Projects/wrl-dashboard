@@ -11,12 +11,12 @@ config({ path: join(process.cwd(), '.env.local') });
 import { withAppClient } from '@/lib/read-model/db';
 import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
 import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryForBdMis } from '@/lib/mis-client-import/aggregate';
+import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/lib/aggregate';
 import {
   buildBdMisRegionalBreakdown,
   openCallsFromTotals,
-} from '@/lib/report/bd-mis-summary';
-import { formatDisplayRegion } from '@/lib/mis-client-import/region';
+} from '@/features/report/lib/bd-mis-summary';
+import { formatDisplayRegion } from '@/features/mis-import/lib/region';
 
 const RAW = 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw';
 const CRM_CSV = `${RAW}/CRM_WRL_MIS_Register_2026-06-30.csv`;

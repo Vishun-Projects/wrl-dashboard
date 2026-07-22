@@ -4,7 +4,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import XLSX from 'xlsx';
-import { parseClientDate } from '@/lib/mis-client-import/parse-dates';
+import { parseClientDate } from '@/features/mis-import/lib/parse-dates';
 
 const RAW = process.argv[2] ?? 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw';
 

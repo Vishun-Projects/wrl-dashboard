@@ -8,9 +8,9 @@ import { readFileSync } from 'fs';
 config({ path: join(process.cwd(), '.env.local') });
 
 import { withAppClient } from '@/lib/read-model/db';
-import { queryClientAccountSummaryForBdMis } from '@/lib/mis-client-import/aggregate';
-import { openCallsFromTotals } from '@/lib/report/bd-mis-summary';
-import { formatDisplayRegion } from '@/lib/mis-client-import/region';
+import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/lib/aggregate';
+import { openCallsFromTotals } from '@/features/report/lib/bd-mis-summary';
+import { formatDisplayRegion } from '@/features/mis-import/lib/region';
 
 const CSV = 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw/CRM_WRL_MIS_Register_2026-06-30.csv';
 const END = '2026-06-29';

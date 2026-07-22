@@ -18,7 +18,7 @@ import { registerHotRetentionStart } from '@/lib/read-model/hot-window';
 import { tryAcquireSyncLock, releaseSyncLock, markSyncError } from '@/lib/read-model/lock';
 import { aggregateFactCounts } from '@/lib/read-model/metrics';
 import { dedupeCrmRows, processCrmRows, processCrmRowsForYtdLoad, transformCrmRowToHot } from '@/lib/read-model/transform';
-import { isSummaryEligibleCall } from '@/lib/report/summary-derive';
+import { isSummaryEligibleCall } from '@/lib/summary/derive';
 import {
   countHotRows,
   deleteHotRowsByTrn,

@@ -1,11 +1,11 @@
-import { applyPincodeGeo } from '@/lib/report/geo';
-import { isPartPending } from '@/lib/report/summary-derive';
+import { applyPincodeGeo } from '@/lib/geo/pincode-geo';
+import { isPartPending } from '@/lib/summary/derive';
 import {
   classifyRegisterRowStatus,
   isMajorRepairRow,
   isRegisterRowTransferred,
   type RegisterSummaryBucket,
-} from '@/lib/report/search';
+} from '@/lib/call-status/register-row';
 import { parseLatLngFromRow } from '@/lib/geo/parse-latlong';
 import { enrichTrhcallBranchFranchisee } from '@/lib/trhcalls/query';
 import type { HotRow, StatusBucket } from '@/lib/read-model/types';

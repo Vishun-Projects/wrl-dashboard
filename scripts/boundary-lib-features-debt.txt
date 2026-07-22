@@ -1,0 +1,5 @@
+# Known src/lib → @/features debt (dependency inversion pending).
+# New lib files that import features FAIL check:feature-boundaries.
+# Remove a line when that file no longer imports features.
+# Fail on these too: BOUNDARY_LIB_FEATURES=strict
+#

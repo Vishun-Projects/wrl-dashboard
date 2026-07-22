@@ -1,6 +1,6 @@
 import { postQuery } from '@/lib/db/proxy';
 import { withClient } from '@/lib/read-model/db';
-import { CALL_REGISTER_CLIENTS } from '@/lib/report/call-register/clients';
+import { CALL_REGISTER_CLIENTS } from '@/lib/call-register/clients';
 import { todayLocalDate } from '@/lib/read-model/dates';
 
 const CRM_TIMEOUT_MS = Number(process.env.TRANSACTION_ENTRY_CRM_TIMEOUT_MS ?? 180_000) || 180_000;

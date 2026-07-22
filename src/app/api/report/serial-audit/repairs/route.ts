@@ -8,7 +8,7 @@ import {
   repairMasterToPicker,
   type RepairMasterItem,
   type RepairPickerItem,
-} from '@/lib/serial-audit/repair-options';
+} from '@/features/serial-audit/lib/repair-options';
 import { buildMstRepairMasterListSql } from '@/lib/trhcalls/query';
 
 const REPAIR_CACHE_TTL = 60 * 60 * 1000;

@@ -1,9 +1,9 @@
 import dynamic from 'next/dynamic';
 import { requirePageAccess } from '@/lib/auth/require-page-access';
-import { ReportPageSkeleton } from '@/components/report/ReportLoadingFeedback';
+import { ReportPageSkeleton } from '@/features/report/ui/ReportLoadingFeedback';
 
 const SerialAuditPageClient = dynamic(
-  () => import('./serial-audit-page-client'),
+  () => import('@/features/serial-audit/ui/SerialAuditPageClient'),
   { loading: () => <ReportPageSkeleton /> }
 );
 

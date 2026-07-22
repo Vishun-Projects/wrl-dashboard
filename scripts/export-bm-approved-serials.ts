@@ -14,12 +14,12 @@
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { postQuery, isCrmOutOfMemoryError } from '../src/lib/db/proxy';
-import { queryArcpClaimsDetailRows } from '../src/lib/arcp-claims/server/postgres';
+import { queryArcpClaimsDetailRows } from '../src/features/arcp/lib/server/postgres';
 import {
   buildArcpClaimsFilterCondition,
   splitArcpDateRange,
   type ArcpClaimsDetailRow,
-} from '../src/lib/arcp-claims/query';
+} from '../src/features/arcp/lib/query';
 import { escapeCsvCell } from '../src/lib/utils/csv';
 
 const startDate = process.argv[2] || '2026-04-01';

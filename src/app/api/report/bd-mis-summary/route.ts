@@ -14,13 +14,13 @@ import {
   queryClientAccountSummaryForBdMis,
   queryClientCallTraceRowsFiltered,
   queryClientCallTraceRowsForBdMis,
-} from '@/lib/mis-client-import/aggregate';
+} from '@/features/mis-import/lib/aggregate';
 import {
   buildBdMisRegionalRows,
   bdMisSourcesFromSelection,
   sumBdMisRegionalGrand,
-} from '@/lib/report/bd-mis-summary';
-import { buildBdMisTraceRows } from '@/lib/report/bd-mis-trace';
+} from '@/features/report/lib/bd-mis-summary';
+import { buildBdMisTraceRows } from '@/features/report/lib/bd-mis-trace';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
 
 export async function GET(req: NextRequest) {
@@ -113,7 +113,7 @@ export async function GET(req: NextRequest) {
       traceRows = buildBdMisTraceRows({
         crmRows: crmCallRows.map((row) => ({
           ...row,
-          status_bucket: row.status_bucket as import('@/lib/mis-client-import/types').StatusBucket,
+          status_bucket: row.status_bucket as import('@/features/mis-import/lib/types').StatusBucket,
         })),
         clientRows: clientCallRows,
         sources,

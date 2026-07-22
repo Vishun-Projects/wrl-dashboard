@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   isCrmOutOfMemoryError,
   isCrmSqlTimeoutError,
-} from '@/lib/arcp-claims/server/fetch';
-import { loadArcpClaimsDetailRows } from '@/lib/arcp-claims/server/detail-load';
-import { buildArcpChunkCacheKey } from '@/lib/arcp-claims/server/chunk-cache';
-import { resolveArcpDateFilterColumn } from '@/lib/arcp-claims/query';
-import { authenticateArcpClaimsRequest } from '@/lib/arcp-claims/server/route-auth';
+} from '@/features/arcp/lib/server/fetch';
+import { loadArcpClaimsDetailRows } from '@/features/arcp/lib/server/detail-load';
+import { buildArcpChunkCacheKey } from '@/features/arcp/lib/server/chunk-cache';
+import { resolveArcpDateFilterColumn } from '@/features/arcp/lib/query';
+import { authenticateArcpClaimsRequest } from '@/features/arcp/lib/server/route-auth';
 
 export const maxDuration = 300;
 

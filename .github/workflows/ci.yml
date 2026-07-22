@@ -15,6 +15,9 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci
+      - run: npm run check:feature-boundaries
+        env:
+          BOUNDARY_LIB_FEATURES: strict
       - run: npm test
       - run: npm run lint:ci
       - run: npm run typecheck

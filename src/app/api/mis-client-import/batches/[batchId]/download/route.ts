@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
-import { loadBatchFileBytes } from '@/lib/mis-client-import/batch-file';
+import { loadBatchFileBytes } from '@/features/mis-import/lib/batch-file';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 type RouteContext = { params: Promise<{ batchId: string }> };

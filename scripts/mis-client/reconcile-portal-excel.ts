@@ -20,19 +20,19 @@ config({ path: join(process.cwd(), '.env.local') });
 
 import { prisma } from '@/lib/db/prisma';
 import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryFiltered } from '@/lib/mis-client-import/aggregate';
+import { queryClientAccountSummaryFiltered } from '@/features/mis-import/lib/aggregate';
 import {
   buildBdMisRegionalRows,
   sumBdMisRegionalGrand,
-} from '@/lib/report/bd-mis-summary';
+} from '@/features/report/lib/bd-mis-summary';
 import {
   DEFAULT_CLIENT_MERGE_WITH_CRM,
   sumMergedAccountMetric,
   sumMergedAccountOpenCalls,
-} from '@/components/report/SummaryMergedMetricCell';
-import { parseClientDate } from '@/lib/mis-client-import/parse-dates';
-import { isCadburyExcludedServiceProvider } from '@/lib/mis-client-import/cadbury-filters';
-import { formatDisplayRegion } from '@/lib/mis-client-import/region';
+} from '@/features/report/ui/SummaryMergedMetricCell';
+import { parseClientDate } from '@/features/mis-import/lib/parse-dates';
+import { isCadburyExcludedServiceProvider } from '@/features/mis-import/lib/cadbury-filters';
+import { formatDisplayRegion } from '@/features/mis-import/lib/region';
 
 const DEFAULT_RAW = 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw';
 

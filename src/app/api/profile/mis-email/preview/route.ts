@@ -2,13 +2,13 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
-import { loadDigestRecipientById } from '@/lib/mis-email/recipients';
-import { previewMisEmailCompose } from '@/lib/mis-email/compose-digest';
+import { loadDigestRecipientById } from '@/features/mis-email/lib/recipients';
+import { previewMisEmailCompose } from '@/features/mis-email/lib/compose-digest';
 import {
   mergeMisEmailPreferences,
   validateMisEmailPreferencesPatch,
   type MisEmailPreferences,
-} from '@/lib/mis-email/preferences';
+} from '@/features/mis-email/lib/preferences';
 
 export const maxDuration = 300;
 
