@@ -1,8 +1,10 @@
 'use client';
 
-import type { Dispatch, SetStateAction } from 'react';
+import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { ChevronLeft, X } from 'lucide-react';
 import dynamic from 'next/dynamic';
+import { SortableTh } from '@/components/ui/SortableTh';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 
 const CallDetail = dynamic(
   () => import('@/components/calls/CallDetail').then((m) => ({ default: m.CallDetail })),
@@ -47,6 +49,14 @@ export function ReportPageOverlays({
   setDrillDown,
   handleSelectCall,
 }: Props) {
+  const [drillSort, setDrillSort] = useState<TableSortState | null>(null);
+  const drillKeys =
+    drillDown.data.length > 0 ? Object.keys(drillDown.data[0] as Record<string, unknown>) : [];
+  const sortedDrillData = useMemo(() => {
+    if (!drillSort) return drillDown.data;
+    return sortRows(drillDown.data, (row) => row[drillSort.key], drillSort.dir);
+  }, [drillDown.data, drillSort]);
+
   return (
     <>
       {/* Engineer Popup */}
@@ -141,8 +151,16 @@ export function ReportPageOverlays({
                     <table className="w-full text-left border-collapse text-[10px]">
                       <thead className="sticky top-0 bg-bg-soft border-b border-slate-200 z-10">
                         <tr>
-                          {drillDown.data.length > 0 && Object.keys(drillDown.data[0]).map(key => (
-                            <th key={key} className="p-3 text-slate-500 border-r border-slate-100 whitespace-nowrap ui-strong">{key}</th>
+                          {drillKeys.map((key) => (
+                            <SortableTh
+                              key={key}
+                              className="p-3 text-slate-500 border-r border-slate-100 whitespace-nowrap ui-strong"
+                              active={drillSort?.key === key}
+                              dir={drillSort?.dir}
+                              onClick={() => setDrillSort((p) => toggleSort(p, key, 'asc'))}
+                            >
+                              {key}
+                            </SortableTh>
                           ))}
                         </tr>
                       </thead>
@@ -156,14 +174,14 @@ export function ReportPageOverlays({
                               </div>
                             </td>
                           </tr>
-                        ) : drillDown.data.length === 0 ? (
+                        ) : sortedDrillData.length === 0 ? (
                           <tr>
                             <td colSpan={10} className="p-20 text-center">
                               <p className="text-xs font-medium text-slate-400">No data available for this metric</p>
                             </td>
                           </tr>
                         ) : (
-                          drillDown.data.map((row, i) => {
+                          sortedDrillData.map((row, i) => {
                             const callIdRaw = row['Ref No'] ?? row['vtrnno'] ?? row['Ref. No'];
                             const callId =
                               callIdRaw != null && String(callIdRaw).trim() !== '' && String(callIdRaw) !== '—'
@@ -179,9 +197,9 @@ export function ReportPageOverlays({
                                   }
                                 }}
                               >
-                                {Object.values(row).map((val, j) => (
-                                  <td key={j} className="p-3 border-r border-slate-50 whitespace-nowrap text-slate-600 group-hover:text-slate-900 font-medium truncate max-w-[200px]">
-                                    {String(val ?? '—')}
+                                {drillKeys.map((key) => (
+                                  <td key={key} className="p-3 border-r border-slate-50 whitespace-nowrap text-slate-600 group-hover:text-slate-900 font-medium truncate max-w-[200px]">
+                                    {String(row[key] ?? '—')}
                                   </td>
                                 ))}
                               </tr>

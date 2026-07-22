@@ -70,6 +70,7 @@ import {
   saveVisibleRegisterColumns,
   type RegisterTableColumnKey,
 } from '@/features/register';
+import type { TableSortState } from '@/lib/ui/table-sort';
 import { getCallTypeBadgeClass } from '@/features/report/lib/call-type-badge';
 import { repairSemantics } from '@/lib/ui/semantics';
 import { MAX_CLIENT_CORPUS_DAYS, resolveRegisterDateSqlColumn } from '@/lib/trhcalls/query';
@@ -412,6 +413,8 @@ export default function ReportPageClient() {
   }, []);
   const [page, setPage] = useState(globalReportCache?.page || 1);
   const [limit, setLimit] = useState(readStoredRegisterPageSize);
+  const [registerSort, setRegisterSort] =
+    useState<TableSortState<RegisterTableColumnKey> | null>(null);
 
   const technicianRoster = useMemo(
     () =>
@@ -1879,9 +1882,11 @@ export default function ReportPageClient() {
       searchOverride?: string;
       pincodeOverride?: string;
       pageLimit?: RegisterPageSize;
+      sortOverride?: TableSortState<RegisterTableColumnKey> | null;
     }
   ) => {
     const pageSize: RegisterPageSize = opts?.pageLimit ?? limit;
+    const activeSort = opts?.sortOverride ?? registerSort;
     let succeeded = false;
     const opStart = performance.now();
     const opId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -1933,6 +1938,8 @@ export default function ReportPageClient() {
       repairFilter,
       agingAsOf: agingAsOf || '',
       pageLimit: pageSize,
+      sortBy: activeSort?.key,
+      sortDir: activeSort?.dir,
     });
 
     const localCorpusMatchesAppliedRange =
@@ -2137,6 +2144,9 @@ export default function ReportPageClient() {
       if (startDateStr) u += `&startDate=${startDateStr}`;
       if (endDateStr) u += `&endDate=${endDateStr}`;
       u += `&dateFilterColumn=${encodeURIComponent(dateFilterColumn)}`;
+      if (activeSort) {
+        u += `&sortBy=${encodeURIComponent(activeSort.key)}&sortDir=${activeSort.dir}`;
+      }
       const stateParam = joinFilterParam(selectedState);
       const cityParam = joinFilterParam(selectedCity);
       const regionParam = joinFilterParam(selectedRegion);
@@ -2501,6 +2511,16 @@ export default function ReportPageClient() {
       void fetchData(1, { pageLimit: next });
     },
     [limit, applyRegisterFromSharedCalls, applyRegisterFromCorpus]
+  );
+
+  const handleRegisterSortChange = useCallback(
+    (next: TableSortState<RegisterTableColumnKey>) => {
+      setRegisterSort(next);
+      registerPagesCacheRef.current.clear();
+      setPage(1);
+      void fetchData(1, { skipCache: true, sortOverride: next });
+    },
+    [fetchData]
   );
 
   const formatSQLDate = (date: Date) => {
@@ -4357,6 +4377,8 @@ export default function ReportPageClient() {
             handleRegisterPageSizeChange={handleRegisterPageSizeChange}
             setPage={setPage}
             fetchData={fetchData}
+            sort={registerSort}
+            onSortChange={handleRegisterSortChange}
           />
         ) : activeTab === 'summary' ? (
           <ReportSummaryTabPanel

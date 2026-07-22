@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Search } from 'lucide-react';
 import { motion } from 'motion/react';
+import { SortIndicator } from '@/components/ui/SortableTh';
 import {
   fadeSlideIn,
   instantTransition,
@@ -123,18 +124,49 @@ export function AdminTh({
   children,
   className = '',
   align = 'left',
+  sortable = false,
+  sortKey,
+  sort,
+  onSort,
 }: {
   children: React.ReactNode;
   className?: string;
   align?: 'left' | 'right' | 'center';
+  sortable?: boolean;
+  sortKey?: string;
+  sort?: { key: string; dir: 'asc' | 'desc' } | null;
+  onSort?: (key: string) => void;
 }) {
   const alignClass =
     align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left';
+  const justify =
+    align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start';
+  const active = Boolean(sortable && sortKey && sort?.key === sortKey);
+  const clickable = Boolean(sortable && sortKey && onSort);
+
   return (
     <th
-      className={`px-4 py-2.5 text-[10px] font-semibold text-slate-500 ${alignClass} ${className}`}
+      className={`px-4 py-2.5 text-[10px] font-semibold text-slate-500 ${alignClass} ${
+        clickable ? 'table-th-sortable' : ''
+      } ${className}`}
+      onClick={
+        clickable
+          ? () => onSort!(sortKey!)
+          : undefined
+      }
+      title={clickable ? 'Click to sort' : undefined}
+      aria-sort={
+        active ? (sort!.dir === 'asc' ? 'ascending' : 'descending') : clickable ? 'none' : undefined
+      }
     >
-      {children}
+      {clickable ? (
+        <div className={`flex items-center gap-1 ${justify}`}>
+          <span>{children}</span>
+          <SortIndicator active={active} dir={active ? sort!.dir : 'asc'} />
+        </div>
+      ) : (
+        children
+      )}
     </th>
   );
 }

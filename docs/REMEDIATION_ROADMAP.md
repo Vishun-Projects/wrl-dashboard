@@ -189,5 +189,21 @@ Production-capable for current MIS/register/ARCP volume, with pooler-aware regis
 
 1. **`src/shared/` empty** — auth/db/read-model/security still live in `src/lib/` (folder rename deferred until leaves settle; leaf helpers now under `lib/register-sql`, `lib/dates`, `lib/mail`, …).  
 2. **No `.test.tsx` / no ReportPageClient component test**; characterization is logic-only.  
-3. Split batched local work into land-order PRs + VPS staging before merge.  
+3. Split batched local work into land-order PRs + VPS staging before merge — see **Land order (uncommitted wave)** below.  
 4. Further shrink `ReportPageClient` orchestration.  
+
+### Land order (uncommitted wave — 2026-07-22)
+
+Do **not** merge current dirty `main` as one PR. Cut branches from `origin/main` (or from `bd9a8b7` if already pushed) in this order; VPS smoke each:
+
+| PR | Branch suggestion | Contents | Staging smoke |
+|----|-------------------|----------|---------------|
+| A | `fix/portal-table-sort` | `table-sort` + `SortableTh` + AdminTh + all table header wiring + globals.css affordance | Click-sort Summary / Register / one Admin table |
+| B | `perf/mis-import-meta-summary` | aggregate SQL rollups + meta by-source count + denorm batch stats (`22-*.sql`) + store recompute | Apply schema 22; time `/meta` + `/summary` |
+| C | `fix/export-rbac-avatar` | register export tab RBAC; avatar path ownership / published-url check | Export without register tab → 403; avatar IDOR blocked |
+| D | `feat/serial-distribution-csv` | CSV buttons on Serial Audit + Distribution | Download CSV on both pages |
+| E | `feat/register-server-sort` | `sortBy`/`sortDir` register API + ReportPageClient wiring | Sort register across pages |
+
+**VPS staging gate (each PR):** `npm run typecheck` + `npm run build` on VPS; smoke the row above; mark change-log `staging: OK` before merge to production.
+
+Local state when written: `main` ahead of `origin/main` by 2 commits + large unstaged wave (sort, MIS perf, security, CSV, register sort).

@@ -19,6 +19,7 @@ import {
   AdminTr,
   settingsInputClass,
 } from '@/components/admin/AdminUi';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 
 type ClientSourceMode = 'mail' | 'crm';
 
@@ -92,6 +93,17 @@ const SCHEDULE_INTERVAL_OPTIONS = [
 ];
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type RoutingSortKey =
+  | 'priority'
+  | 'zone'
+  | 'branch'
+  | 'client'
+  | 'clientSourceMode'
+  | 'to'
+  | 'cc'
+  | 'schedule'
+  | 'autoSend';
 
 function splitCsvValues(raw: string): string[] {
   return raw
@@ -322,6 +334,7 @@ export default function MisEmailRoutingPageClient() {
   const [drawerBaselineKey, setDrawerBaselineKey] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [sort, setSort] = useState<TableSortState<RoutingSortKey> | null>(null);
 
   useEffect(() => {
     void Promise.all([loadRules(), loadOptions()]);
@@ -339,7 +352,7 @@ export default function MisEmailRoutingPageClient() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, pageSize]);
+  }, [search, pageSize, sort]);
 
   async function loadRules() {
     setLoading(true);
@@ -556,9 +569,52 @@ export default function MisEmailRoutingPageClient() {
     });
   }, [rows, search]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const sortedFilteredRows = useMemo(() => {
+    const indexed = filteredRows.map((row, index) => ({ row, index }));
+    if (!sort) return indexed;
+    return sortRows(indexed, ({ row, index }) => {
+      switch (sort.key) {
+        case 'priority':
+          return index;
+        case 'zone':
+          return row.zone.join(', ');
+        case 'branch':
+          return row.branch.join(', ');
+        case 'client':
+          return row.client.join(', ');
+        case 'clientSourceMode':
+          return row.clientSourceMode;
+        case 'to':
+          return parseEmailsCsv(row.toEmailsCsv).length;
+        case 'cc':
+          return parseEmailsCsv(row.ccEmailsCsv).length;
+        case 'schedule':
+          return scheduleSummary(row);
+        case 'autoSend':
+          return row.autoSendEnabled;
+        default:
+          return '';
+      }
+    }, sort.dir);
+  }, [filteredRows, sort]);
+
+  const handleSort = (key: RoutingSortKey) => {
+    setSort((p) =>
+      toggleSort(
+        p,
+        key,
+        key === 'zone' || key === 'branch' || key === 'client' || key === 'clientSourceMode' || key === 'schedule'
+          ? 'asc'
+          : 'desc'
+      )
+    );
+  };
+
+  const totalPages = Math.max(1, Math.ceil(sortedFilteredRows.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const pagedRows = filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const pagedRows = sortedFilteredRows
+    .slice((safePage - 1) * pageSize, safePage * pageSize)
+    .map(({ row }) => row);
   const activeRow = rows.find((row) => row.id === activeRowId) ?? null;
   const deleteTarget = rows.find((row) => row.id === confirmDeleteId) ?? null;
   const activeRowKey = activeRow ? serializeRow(activeRow) : null;
@@ -612,15 +668,86 @@ export default function MisEmailRoutingPageClient() {
               <AdminTable className="w-full min-w-[1180px] border-collapse text-left">
                 <AdminThead>
                   <tr>
-                    <AdminTh className="w-[6%]">Priority</AdminTh>
-                    <AdminTh className="w-[12%]">Zone</AdminTh>
-                    <AdminTh className="w-[12%]">Branch</AdminTh>
-                    <AdminTh className="w-[10%]">Client</AdminTh>
-                    <AdminTh className="w-[10%]">Client basis</AdminTh>
-                    <AdminTh className="w-[10%]">To</AdminTh>
-                    <AdminTh className="w-[10%]">CC</AdminTh>
-                    <AdminTh className="w-[14%]">Schedule</AdminTh>
-                    <AdminTh className="w-[8%]" align="center">
+                    <AdminTh
+                      className="w-[6%]"
+                      sortable
+                      sortKey="priority"
+                      sort={sort}
+                      onSort={(k) => handleSort(k as RoutingSortKey)}
+                    >
+                      Priority
+                    </AdminTh>
+                    <AdminTh
+                      className="w-[12%]"
+                      sortable
+                      sortKey="zone"
+                      sort={sort}
+                      onSort={(k) => handleSort(k as RoutingSortKey)}
+                    >
+                      Zone
+                    </AdminTh>
+                    <AdminTh
+                      className="w-[12%]"
+                      sortable
+                      sortKey="branch"
+                      sort={sort}
+                      onSort={(k) => handleSort(k as RoutingSortKey)}
+                    >
+                      Branch
+                    </AdminTh>
+                    <AdminTh
+                      className="w-[10%]"
+                      sortable
+                      sortKey="client"
+                      sort={sort}
+                      onSort={(k) => handleSort(k as RoutingSortKey)}
+                    >
+                      Client
+                    </AdminTh>
+                    <AdminTh
+                      className="w-[10%]"
+                      sortable
+                      sortKey="clientSourceMode"
+                      sort={sort}
+                      onSort={(k) => handleSort(k as RoutingSortKey)}
+                    >
+                      Client basis
+                    </AdminTh>
+                    <AdminTh
+                      className="w-[10%]"
+                      sortable
+                      sortKey="to"
+                      sort={sort}
+                      onSort={(k) => handleSort(k as RoutingSortKey)}
+                    >
+                      To
+                    </AdminTh>
+                    <AdminTh
+                      className="w-[10%]"
+                      sortable
+                      sortKey="cc"
+                      sort={sort}
+                      onSort={(k) => handleSort(k as RoutingSortKey)}
+                    >
+                      CC
+                    </AdminTh>
+                    <AdminTh
+                      className="w-[14%]"
+                      sortable
+                      sortKey="schedule"
+                      sort={sort}
+                      onSort={(k) => handleSort(k as RoutingSortKey)}
+                    >
+                      Schedule
+                    </AdminTh>
+                    <AdminTh
+                      className="w-[8%]"
+                      align="center"
+                      sortable
+                      sortKey="autoSend"
+                      sort={sort}
+                      onSort={(k) => handleSort(k as RoutingSortKey)}
+                    >
                       Auto-send
                     </AdminTh>
                     <AdminTh className="w-[8%]" align="right">
@@ -630,7 +757,8 @@ export default function MisEmailRoutingPageClient() {
                 </AdminThead>
                 <tbody>
                   {pagedRows.map((row) => {
-                    const index = filteredRows.findIndex((candidate) => candidate.id === row.id) + 1;
+                    const index =
+                      sortedFilteredRows.findIndex((candidate) => candidate.row.id === row.id) + 1;
                     const deleting = deletingIds[row.id] === true;
                     const saving = savingIds[row.id] === true;
                     return (
@@ -751,8 +879,8 @@ export default function MisEmailRoutingPageClient() {
 
               <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-[11px] text-slate-600">
                 <div>
-                  Showing {filteredRows.length === 0 ? 0 : (safePage - 1) * pageSize + 1}-
-                  {Math.min(safePage * pageSize, filteredRows.length)} of {filteredRows.length}
+                  Showing {sortedFilteredRows.length === 0 ? 0 : (safePage - 1) * pageSize + 1}-
+                  {Math.min(safePage * pageSize, sortedFilteredRows.length)} of {sortedFilteredRows.length}
                 </div>
                 <div className="flex items-center gap-2">
                   <select

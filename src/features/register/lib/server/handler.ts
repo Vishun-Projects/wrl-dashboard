@@ -9,6 +9,7 @@ import { readRegisterFromPostgres } from '@/lib/read-model/flags';
 import {
   queryRegisterBulkFromPostgres,
   queryRegisterFromPostgres,
+  parseRegisterSortBy,
 } from '@/lib/read-model/queries/register';
 import {
   appendCallTypeFilter,
@@ -30,7 +31,6 @@ import { getPincodeMapData } from '@/lib/geo/pincode-map';
 import { CITY_TO_STATE_MAP, getGeographicDetails } from '@/lib/geo/india-states';
 import {
   isHodUser,
-  resolveExportOfficeScope,
   resolveReportSecurity,
 } from '@/lib/auth/report-security';
 import { mergeBranchFilterListEntry } from '@/features/report';
@@ -177,6 +177,8 @@ export async function handleRegisterGet(req: NextRequest) {
     const portalFilter = searchParams.get('portalFilter') || 'All';
     const repair = searchParams.get('repair') || 'All';
     const repairNcodes = parseRepairQueryParam(repair);
+    const sortBy = parseRegisterSortBy(searchParams.get('sortBy'));
+    const sortDir = searchParams.get('sortDir') === 'asc' ? 'asc' : 'desc';
 
     // Cascading filters
     const state = searchParams.get('state') || '';
@@ -192,13 +194,11 @@ export async function handleRegisterGet(req: NextRequest) {
     const exportMode = searchParams.get('export');
     const isRegisterExport = exportMode === 'bulk' || exportMode === 'csv';
     const acceptEncoding = req.headers.get('accept-encoding');
-    const security = isRegisterExport
-      ? await resolveExportOfficeScope(userId)
-      : await resolveReportSecurity(userId, {
-          pageId: 'mis_reports',
-          tabId: 'register',
-        });
-    if (!isRegisterExport && security.forbidden) {
+    const security = await resolveReportSecurity(userId, {
+      pageId: 'mis_reports',
+      tabId: 'register',
+    });
+    if (security.forbidden) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -320,6 +320,8 @@ export async function handleRegisterGet(req: NextRequest) {
             const parsed = raw ? parseInt(raw, 10) : NaN;
             return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
           })(),
+          sortBy,
+          sortDir,
         });
         return NextResponse.json(payload);
     }

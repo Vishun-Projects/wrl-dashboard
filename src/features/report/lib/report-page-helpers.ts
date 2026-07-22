@@ -1,4 +1,5 @@
 import type { RegisterSummary, RegisterSummaryBucket } from '@/features/report/lib/search';
+import type { BranchSummaryRow } from '@/lib/summary/derive';
 import { openReportsDb } from '@/features/report/lib/corpus-storage';
 import {
   accountRowScore,
@@ -8,6 +9,113 @@ import {
 } from '@/features/report/ui/SummaryMergedMetricCell';
 
 export type AccountMisGrouping = 'zone' | 'overview' | 'zone-top';
+
+const BRANCH_SUM_KEYS = [
+  'total_calls',
+  'solved_calls',
+  'cancelled_calls',
+  'open_calls',
+  'age_2',
+  'age_3',
+  'age_7',
+  'age_15',
+  'part_pending',
+  'all_total',
+  'all_solved',
+  'all_cancelled',
+  'all_open',
+  'all_age_2',
+  'all_age_3',
+  'all_age_7',
+  'all_age_15',
+  'all_part_pending',
+  'all_tech_solved',
+  'tech_solved_calls',
+  'deployment_total',
+  'deployment_done',
+  'installation_total',
+  'installation_done',
+  'active_eng',
+  'population',
+] as const satisfies ReadonlyArray<keyof BranchSummaryRow>;
+
+function branchDisplayKey(region: unknown, branch: unknown): string {
+  return `${String(region ?? '').trim().toUpperCase()}::${String(branch ?? '').trim().toLowerCase()}`;
+}
+
+/**
+ * Collapse rows that share the same region + branch label (e.g. franchisee offices
+ * that resolve to the same display name, or client import splits). Sums call metrics;
+ * keeps officeId/parentId from the row with the largest total_calls; headcount = max.
+ */
+export function mergeBranchSummaryRowsByName(rows: BranchSummaryRow[]): BranchSummaryRow[] {
+  const map = new Map<string, BranchSummaryRow>();
+  for (const row of rows) {
+    const key = branchDisplayKey(row.region, row.branch);
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, { ...row });
+      continue;
+    }
+    const preferRow = Number(row.total_calls) > Number(prev.total_calls) ? row : prev;
+    const merged: BranchSummaryRow = {
+      ...preferRow,
+      branch: preferRow.branch || prev.branch || row.branch,
+      region: preferRow.region || prev.region || row.region,
+      headcount: Math.max(Number(prev.headcount) || 0, Number(row.headcount) || 0),
+    };
+    for (const k of BRANCH_SUM_KEYS) {
+      (merged as Record<(typeof BRANCH_SUM_KEYS)[number], number>)[k] =
+        (Number(prev[k]) || 0) + (Number(row[k]) || 0);
+    }
+    map.set(key, merged);
+  }
+  return [...map.values()].sort((a, b) => Number(b.total_calls) - Number(a.total_calls));
+}
+
+/** Same collapse for loosely typed client branch rows used in Summary Dashboard. */
+export function mergeBranchRowsByName(
+  rows: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  const map = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const key = branchDisplayKey(row.region, row.branch ?? row.region);
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, { ...row });
+      continue;
+    }
+    const prevTotal = Number(prev.total_calls ?? 0);
+    const rowTotal = Number(row.total_calls ?? 0);
+    const preferRow = rowTotal > prevTotal ? row : prev;
+    const merged: Record<string, unknown> = {
+      ...preferRow,
+      branch: preferRow.branch ?? prev.branch ?? row.branch,
+      region: preferRow.region ?? prev.region ?? row.region,
+      headcount: Math.max(Number(prev.headcount) || 0, Number(row.headcount) || 0),
+    };
+    for (const k of [
+      'total_calls',
+      'solved_calls',
+      'total_solved',
+      'cancelled_calls',
+      'open_calls',
+      'age_2',
+      'age_3',
+      'age_7',
+      'age_15',
+      'part_pending',
+      'active_eng',
+      'population',
+    ] as const) {
+      merged[k] = (Number(prev[k]) || 0) + (Number(row[k]) || 0);
+    }
+    map.set(key, merged);
+  }
+  return [...map.values()].sort(
+    (a, b) => Number(b.total_calls ?? 0) - Number(a.total_calls ?? 0)
+  );
+}
 
 export function regionPerfRowClass(region: string): string {
   const r = String(region ?? '').toUpperCase();

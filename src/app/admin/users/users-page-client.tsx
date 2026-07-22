@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import axios from 'axios';
 import { resolveAvatarDisplayUrl } from '@/lib/auth/avatar-url';
 import { 
@@ -37,6 +37,7 @@ import {
   AdminIconButton,
 } from '@/components/admin/AdminUi';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 import { ModalPortal } from '@/components/ui/ModalPortal';
 
@@ -49,6 +50,8 @@ function roleHasMisPermissions(permissions: string[] | undefined): boolean {
   );
 }
 
+type UserSortKey = 'user' | 'role' | 'statuses' | 'branches' | 'misEmail';
+
 export default function AdminUsersPage() {
   const { userProfile } = useUser();
   const apiOpts = { withCredentials: true as const };
@@ -59,6 +62,7 @@ export default function AdminUsersPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<TableSortState<UserSortKey> | null>(null);
   const [branchSearch, setBranchSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'profile' | 'access'>('profile');
   const [showOnlySelectedBranches, setShowOnlySelectedBranches] = useState(false);
@@ -321,6 +325,32 @@ export default function AdminUsersPage() {
     });
   };
 
+  const sortedUsers = useMemo(() => {
+    if (!sort) return filteredUsers;
+    return sortRows(filteredUsers, (u) => {
+      const { roleName, isHod } = getRoleInfo(u);
+      const branchLabels = branchLabelsForUser(u);
+      switch (sort.key) {
+        case 'user':
+          return u.name ?? u.email ?? '';
+        case 'role':
+          return roleName;
+        case 'statuses':
+          return isHod ? 'All statuses' : (u.visible_statuses ?? []).join(', ');
+        case 'branches':
+          return branchLabels.join(', ');
+        case 'misEmail':
+          return Boolean(u.mis_email_enabled);
+        default:
+          return '';
+      }
+    }, sort.dir);
+  }, [filteredUsers, sort, roles, offices]);
+
+  const handleSort = (key: UserSortKey) => {
+    setSort((p) => toggleSort(p, key, key === 'user' || key === 'role' ? 'asc' : 'desc'));
+  };
+
   const openUserModal = (user?: any) => {
     void ensureOfficesLoaded();
     if (user) {
@@ -383,16 +413,56 @@ export default function AdminUsersPage() {
           <AdminTable>
             <AdminThead>
               <tr>
-                <AdminTh className="w-[28%]">User</AdminTh>
-                <AdminTh className="w-[14%]">Role</AdminTh>
-                <AdminTh className="w-[22%]">Visible statuses</AdminTh>
-                <AdminTh className="w-[22%]">Branches</AdminTh>
-                <AdminTh className="w-[10%]">MIS email</AdminTh>
+                <AdminTh
+                  className="w-[28%]"
+                  sortable
+                  sortKey="user"
+                  sort={sort}
+                  onSort={(k) => handleSort(k as UserSortKey)}
+                >
+                  User
+                </AdminTh>
+                <AdminTh
+                  className="w-[14%]"
+                  sortable
+                  sortKey="role"
+                  sort={sort}
+                  onSort={(k) => handleSort(k as UserSortKey)}
+                >
+                  Role
+                </AdminTh>
+                <AdminTh
+                  className="w-[22%]"
+                  sortable
+                  sortKey="statuses"
+                  sort={sort}
+                  onSort={(k) => handleSort(k as UserSortKey)}
+                >
+                  Visible statuses
+                </AdminTh>
+                <AdminTh
+                  className="w-[22%]"
+                  sortable
+                  sortKey="branches"
+                  sort={sort}
+                  onSort={(k) => handleSort(k as UserSortKey)}
+                >
+                  Branches
+                </AdminTh>
+                <AdminTh
+                  className="w-[10%]"
+                  sortable
+                  sortKey="misEmail"
+                  sort={sort}
+                  onSort={(k) => handleSort(k as UserSortKey)}
+                >
+                  MIS email
+                </AdminTh>
                 <AdminTh align="right" className="w-[14%]">Actions</AdminTh>
               </tr>
             </AdminThead>
             <tbody>
-              {filteredUsers.map((u) => {
+              {sortedUsers.map((u) => {
                 const { isHod, roleName, canMisEmail } = getRoleInfo(u);
                 const branchLabels = branchLabelsForUser(u);
 

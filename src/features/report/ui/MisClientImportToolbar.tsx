@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { Upload, Loader2, Trash2, Download } from 'lucide-react';
 import {
@@ -21,6 +21,8 @@ import { createClient } from '@/lib/supabase/client';
 import { triggerBlobDownload } from '@/features/report/lib/summary-excel-export';
 import { downloadMisBatchFile } from '@/features/mis-import';
 import { feedback } from '@/lib/ui/feedback';
+import { SortableTh } from '@/components/ui/SortableTh';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 
 type BatchMeta = {
   batchId: string;
@@ -163,13 +165,41 @@ export default function MisClientImportToolbar({
     '.csv,.wrlmis,.xlsx,.xls,text/csv,application/octet-stream,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
   const hasAnyBatch = sources.some((s) => s.batches.length > 0);
-  const allBatches = sources
-    .flatMap((s) =>
+  type BatchRow = BatchMeta & { sourceName: string; sourceCode: string };
+  type BatchSortKey =
+    | 'status'
+    | 'sourceName'
+    | 'fileName'
+    | 'rowCount'
+    | 'activeRows'
+    | 'supersededRows'
+    | 'newRows'
+    | 'uploadedAt';
+
+  const [batchSort, setBatchSort] = useState<TableSortState<BatchSortKey> | null>({
+    key: 'uploadedAt',
+    dir: 'desc',
+  });
+
+  const allBatches = useMemo(() => {
+    const flat: BatchRow[] = sources.flatMap((s) =>
       s.batches.map((b) => ({ ...b, sourceName: s.sourceName, sourceCode: s.sourceCode }))
-    )
-    .sort(
-      (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
     );
+    if (!batchSort) {
+      return [...flat].sort(
+        (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+      );
+    }
+    return sortRows(
+      flat,
+      (batch) => {
+        if (batchSort.key === 'status') return batchStatus(batch).label;
+        if (batchSort.key === 'uploadedAt') return new Date(batch.uploadedAt).getTime();
+        return batch[batchSort.key];
+      },
+      batchSort.dir
+    );
+  }, [sources, batchSort]);
 
   const handleUploadFiles = async (files: File[]) => {
     if (files.length === 0) return;
@@ -495,14 +525,33 @@ export default function MisClientImportToolbar({
           <table className="w-full min-w-[760px] text-left text-[10px]">
             <thead className="sticky top-0 z-10 bg-slate-100 text-slate-600">
               <tr>
-                <th className="p-1.5">Status</th>
-                <th className="p-1.5">Source</th>
-                <th className="p-1.5">File</th>
-                <th className="p-1.5 text-right">Rows</th>
-                <th className="p-1.5 text-right">In use</th>
-                <th className="p-1.5 text-right">Superseded</th>
-                <th className="p-1.5 text-right">New</th>
-                <th className="p-1.5">Uploaded</th>
+                {(
+                  [
+                    ['status', 'Status', 'left'],
+                    ['sourceName', 'Source', 'left'],
+                    ['fileName', 'File', 'left'],
+                    ['rowCount', 'Rows', 'right'],
+                    ['activeRows', 'In use', 'right'],
+                    ['supersededRows', 'Superseded', 'right'],
+                    ['newRows', 'New', 'right'],
+                    ['uploadedAt', 'Uploaded', 'left'],
+                  ] as const
+                ).map(([key, label, align]) => (
+                  <SortableTh
+                    key={key}
+                    className={`p-1.5${align === 'right' ? ' text-right' : ''}`}
+                    align={align}
+                    active={batchSort?.key === key}
+                    dir={batchSort?.dir}
+                    onClick={() =>
+                      setBatchSort((p) =>
+                        toggleSort(p, key, align === 'right' || key === 'uploadedAt' ? 'desc' : 'asc')
+                      )
+                    }
+                  >
+                    {label}
+                  </SortableTh>
+                ))}
                 <th className="p-1.5 text-right">Actions</th>
               </tr>
             </thead>

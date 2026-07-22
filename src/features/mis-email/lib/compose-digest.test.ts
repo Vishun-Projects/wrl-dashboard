@@ -70,6 +70,7 @@ describe('sendMisEmailComposeBatch auto-send override', () => {
 
   it('allows override path to proceed past auto-send block', async () => {
     const mod = await import('@/features/mis-email/lib/compose-digest');
+    // view_all_offices avoids a live DB lookup for branch scope labels in this unit test.
     await expect(
       mod.sendMisEmailComposeBatch(
         {
@@ -78,11 +79,18 @@ describe('sendMisEmailComposeBatch auto-send override', () => {
           email: 'user@example.com',
           role: 'branch_manager',
           office_ids: ['1'],
-          permissions: [],
+          permissions: ['view_all_offices'],
           includeSummary: false,
           includeDetailed: false,
           includeKeyAccount: false,
-          mis_email_preferences: {},
+          mis_email_preferences: {
+            includeSummary: false,
+            includeDetailed: false,
+            includeKeyAccount: false,
+            includeTraceableExport: false,
+            includeOpenCallsExport: false,
+            bodySections: [],
+          },
         } as never,
         {
           sendTo: ['manual@example.com'],

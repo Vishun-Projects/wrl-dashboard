@@ -1,12 +1,16 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { createClient } from '@/lib/supabase/client';
 import { RefreshCw, Database, Activity, CheckCircle2, AlertTriangle, Clock, Mail } from 'lucide-react';
 import { PageShell, PageLoadingState } from '@/components/layout/PageShell';
 import { AdminStatPill, AdminTable, AdminTableCard, AdminTd, AdminTh, AdminThead, AdminTr } from '@/components/admin/AdminUi';
 import type { ReadModelProgress } from '@/lib/read-model/sync-meta';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
+
+type SyncStateSortKey = 'entity' | 'status' | 'running' | 'lastRun' | 'rowsUpserted';
+type RecentRunSortKey = 'id' | 'entity' | 'status' | 'upserted' | 'duration' | 'started';
 
 function formatWhen(iso: string | null): string {
   if (!iso) return '—';
@@ -90,6 +94,50 @@ export default function ReadModelSyncPage() {
   const [misEmailSending, setMisEmailSending] = useState(false);
   const [misEmailResult, setMisEmailResult] = useState<string | null>(null);
   const [misEmailError, setMisEmailError] = useState<string | null>(null);
+  const [syncStateSort, setSyncStateSort] = useState<TableSortState<SyncStateSortKey> | null>(null);
+  const [recentRunsSort, setRecentRunsSort] = useState<TableSortState<RecentRunSortKey> | null>(null);
+
+  const sortedSyncState = useMemo(() => {
+    if (!progress || !syncStateSort) return progress?.syncState ?? [];
+    return sortRows(progress.syncState, (row) => {
+      switch (syncStateSort.key) {
+        case 'entity':
+          return row.entity;
+        case 'status':
+          return row.status ?? '';
+        case 'running':
+          return row.isRunning;
+        case 'lastRun':
+          return row.lastRunAt ?? '';
+        case 'rowsUpserted':
+          return row.rowsUpsertedLast;
+        default:
+          return '';
+      }
+    }, syncStateSort.dir);
+  }, [progress, syncStateSort]);
+
+  const sortedRecentRuns = useMemo(() => {
+    if (!progress || !recentRunsSort) return progress?.recentRuns ?? [];
+    return sortRows(progress.recentRuns, (row) => {
+      switch (recentRunsSort.key) {
+        case 'id':
+          return row.id;
+        case 'entity':
+          return row.entity;
+        case 'status':
+          return row.status;
+        case 'upserted':
+          return row.rowsUpserted;
+        case 'duration':
+          return row.durationMs ?? -1;
+        case 'started':
+          return row.startedAt ?? '';
+        default:
+          return '';
+      }
+    }, recentRunsSort.dir);
+  }, [progress, recentRunsSort]);
 
   const loadMisEmailConfig = useCallback(async () => {
     try {
@@ -305,15 +353,60 @@ export default function ReadModelSyncPage() {
               <AdminTable>
                 <AdminThead>
                   <tr>
-                    <AdminTh>Entity</AdminTh>
-                    <AdminTh>Status</AdminTh>
-                    <AdminTh>Running</AdminTh>
-                    <AdminTh>Last run</AdminTh>
-                    <AdminTh>Rows upserted</AdminTh>
+                    <AdminTh
+                      sortable
+                      sortKey="entity"
+                      sort={syncStateSort}
+                      onSort={(k) =>
+                        setSyncStateSort((p) => toggleSort(p, k as SyncStateSortKey, 'asc'))
+                      }
+                    >
+                      Entity
+                    </AdminTh>
+                    <AdminTh
+                      sortable
+                      sortKey="status"
+                      sort={syncStateSort}
+                      onSort={(k) =>
+                        setSyncStateSort((p) => toggleSort(p, k as SyncStateSortKey, 'asc'))
+                      }
+                    >
+                      Status
+                    </AdminTh>
+                    <AdminTh
+                      sortable
+                      sortKey="running"
+                      sort={syncStateSort}
+                      onSort={(k) =>
+                        setSyncStateSort((p) => toggleSort(p, k as SyncStateSortKey, 'desc'))
+                      }
+                    >
+                      Running
+                    </AdminTh>
+                    <AdminTh
+                      sortable
+                      sortKey="lastRun"
+                      sort={syncStateSort}
+                      onSort={(k) =>
+                        setSyncStateSort((p) => toggleSort(p, k as SyncStateSortKey, 'desc'))
+                      }
+                    >
+                      Last run
+                    </AdminTh>
+                    <AdminTh
+                      sortable
+                      sortKey="rowsUpserted"
+                      sort={syncStateSort}
+                      onSort={(k) =>
+                        setSyncStateSort((p) => toggleSort(p, k as SyncStateSortKey, 'desc'))
+                      }
+                    >
+                      Rows upserted
+                    </AdminTh>
                   </tr>
                 </AdminThead>
                 <tbody>
-                  {progress.syncState.map((row) => (
+                  {sortedSyncState.map((row) => (
                     <AdminTr key={row.entity}>
                       <AdminTd>{row.entity}</AdminTd>
                       <AdminTd>{row.status ?? '—'}</AdminTd>
@@ -330,16 +423,70 @@ export default function ReadModelSyncPage() {
               <AdminTable>
                 <AdminThead>
                   <tr>
-                    <AdminTh>Run</AdminTh>
-                    <AdminTh>Entity</AdminTh>
-                    <AdminTh>Status</AdminTh>
-                    <AdminTh>Upserted</AdminTh>
-                    <AdminTh>Duration</AdminTh>
-                    <AdminTh>Started</AdminTh>
+                    <AdminTh
+                      sortable
+                      sortKey="id"
+                      sort={recentRunsSort}
+                      onSort={(k) =>
+                        setRecentRunsSort((p) => toggleSort(p, k as RecentRunSortKey, 'desc'))
+                      }
+                    >
+                      Run
+                    </AdminTh>
+                    <AdminTh
+                      sortable
+                      sortKey="entity"
+                      sort={recentRunsSort}
+                      onSort={(k) =>
+                        setRecentRunsSort((p) => toggleSort(p, k as RecentRunSortKey, 'asc'))
+                      }
+                    >
+                      Entity
+                    </AdminTh>
+                    <AdminTh
+                      sortable
+                      sortKey="status"
+                      sort={recentRunsSort}
+                      onSort={(k) =>
+                        setRecentRunsSort((p) => toggleSort(p, k as RecentRunSortKey, 'asc'))
+                      }
+                    >
+                      Status
+                    </AdminTh>
+                    <AdminTh
+                      sortable
+                      sortKey="upserted"
+                      sort={recentRunsSort}
+                      onSort={(k) =>
+                        setRecentRunsSort((p) => toggleSort(p, k as RecentRunSortKey, 'desc'))
+                      }
+                    >
+                      Upserted
+                    </AdminTh>
+                    <AdminTh
+                      sortable
+                      sortKey="duration"
+                      sort={recentRunsSort}
+                      onSort={(k) =>
+                        setRecentRunsSort((p) => toggleSort(p, k as RecentRunSortKey, 'desc'))
+                      }
+                    >
+                      Duration
+                    </AdminTh>
+                    <AdminTh
+                      sortable
+                      sortKey="started"
+                      sort={recentRunsSort}
+                      onSort={(k) =>
+                        setRecentRunsSort((p) => toggleSort(p, k as RecentRunSortKey, 'desc'))
+                      }
+                    >
+                      Started
+                    </AdminTh>
                   </tr>
                 </AdminThead>
                 <tbody>
-                  {progress.recentRuns.map((row) => (
+                  {sortedRecentRuns.map((row) => (
                     <AdminTr key={row.id}>
                       <AdminTd>#{row.id}</AdminTd>
                       <AdminTd>{row.entity}</AdminTd>

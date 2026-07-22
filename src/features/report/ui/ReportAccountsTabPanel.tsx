@@ -1,6 +1,6 @@
 'use client';
 
-import type { Dispatch, SetStateAction } from 'react';
+import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { ReportErrorBoundary } from '@/features/report/ui/ReportErrorBoundary';
 import {
@@ -39,6 +39,8 @@ import {
 } from '@/features/report/lib/report-page-helpers';
 import { BdMisSummaryPanel } from '@/features/report/ui/BdMisSummaryPanel';
 import type { BranchSummaryRow } from '@/lib/summary/derive';
+import { SortableTh } from '@/components/ui/SortableTh';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 
 type Props = {
   accountMisGrouping: AccountMisGrouping;
@@ -105,6 +107,74 @@ export function ReportAccountsTabPanel({
   tempFilterRegion,
   tempZoneTopExclude,
 }: Props) {
+  type AccountSortKey =
+    | 'region'
+    | 'account'
+    | 'population'
+    | 'total_calls'
+    | 'total_solved'
+    | 'cancelled_calls'
+    | 'open_calls'
+    | 'age_2'
+    | 'age_3'
+    | 'age_7'
+    | 'age_15'
+    | 'perc_gt_7'
+    | 'part_pending'
+    | 'active_eng'
+    | 'deployment_total'
+    | 'deployment_done'
+    | 'deployment_pending'
+    | 'installation_done'
+    | 'installation_pending';
+  const [accountSort, setAccountSort] = useState<TableSortState<AccountSortKey> | null>(null);
+  const { displayAccounts, filteredAccounts, filteredClientAccounts, tableAccounts } = useMemo(() => {
+    const displayAccounts = mergedAccountRowsForTotals;
+    const filteredAccounts = displayAccounts.filter((a) => {
+      return (
+        matchesRegionFilter(filterRegion, String(a.region ?? '')) &&
+        matchesAccountFilter(filterAccount, String(a.account ?? ''))
+      );
+    });
+    return {
+      displayAccounts,
+      filteredAccounts,
+      filteredClientAccounts: filterClientAccountSummary(clientAccountSummaryData, filterRegion, filterAccount),
+      tableAccounts: resolveAccountMisTableRows(
+        filteredAccounts,
+        accountMisGrouping,
+        accountMisTopN,
+        clientAccountSummaryData,
+        mergeFlags,
+        clientMergeWithCrm,
+        accountMisZoneTopExclude
+      ),
+    };
+  }, [accountMisGrouping, accountMisTopN, accountMisZoneTopExclude, clientAccountSummaryData, clientMergeWithCrm, filterAccount, filterRegion, mergeFlags, mergedAccountRowsForTotals]);
+  const sortedTableAccounts = useMemo(() => {
+    if (!accountSort) return tableAccounts;
+    return sortRows(
+      tableAccounts,
+      (account) => {
+        if (accountSort.key === 'region' || accountSort.key === 'account') {
+          return String(account[accountSort.key] ?? '');
+        }
+        if (accountSort.key === 'perc_gt_7') {
+          const open = Number(account.open_calls || 0);
+          return open ? ((Number(account.age_7 || 0) + Number(account.age_15 || 0)) / open) * 100 : 0;
+        }
+        if (accountSort.key === 'deployment_pending') {
+          return Number(account.deployment_total || 0) - Number(account.deployment_done || 0);
+        }
+        if (accountSort.key === 'installation_pending') {
+          return Number(account.installation_total || 0) - Number(account.installation_done || 0);
+        }
+        return Number(account[accountSort.key] ?? 0);
+      },
+      accountSort.dir
+    );
+  }, [accountSort, tableAccounts]);
+
   return (
     <>
           <ReportErrorBoundary label="Key Account MIS">
@@ -115,30 +185,7 @@ export function ReportAccountsTabPanel({
                   aria-hidden
                 />
               ) : null}
-              {(() => {
-                const displayAccounts = mergedAccountRowsForTotals;
-                const filteredAccounts = displayAccounts.filter((a) => {
-                  const matchRegion = matchesRegionFilter(filterRegion, String(a.region ?? ''));
-                  const matchAccount = matchesAccountFilter(filterAccount, String(a.account ?? ''));
-                  return matchRegion && matchAccount;
-                });
-                const tableAccounts = resolveAccountMisTableRows(
-                  filteredAccounts,
-                  accountMisGrouping,
-                  accountMisTopN,
-                  clientAccountSummaryData,
-                  mergeFlags,
-                  clientMergeWithCrm,
-                  accountMisZoneTopExclude
-                );
-                const filteredClientAccounts = filterClientAccountSummary(
-                  clientAccountSummaryData,
-                  filterRegion,
-                  filterAccount
-                );
-
-                return (
-                  <div className="flex-1 flex flex-col min-h-0">
+              <div className="flex-1 flex flex-col min-h-0">
                     <div className="flex flex-wrap items-center justify-between gap-2 px-2 mb-2 flex-shrink-0">
                       <h2 className="text-[11px] text-slate-500 ui-label">Key Account Wise Performance</h2>
                       <div className="flex flex-wrap items-center justify-end gap-2">
@@ -333,11 +380,17 @@ export function ReportAccountsTabPanel({
                           </tr>
                           <tr className="account-mis-col-header bg-slate-100 text-slate-700 ui-strong">
                             {accountMisGrouping !== 'overview' ? (
-                            <th className="p-1.5 border border-slate-300">
+                            <SortableTh
+                              className="p-1.5 border border-slate-300"
+                              active={accountSort?.key === 'region'}
+                              dir={accountSort?.dir}
+                              onClick={() => setAccountSort((prev) => toggleSort(prev, 'region'))}
+                            >
                               <div className="flex flex-col gap-1 relative">
                                 <span>Region</span>
                                 <button
-                                  onClick={() => {
+                                  onClick={(event) => {
+                                    event.stopPropagation();
                                     if (!showRegionDropdown) {
                                       setTempFilterRegion(filterRegion);
                                     }
@@ -395,13 +448,19 @@ export function ReportAccountsTabPanel({
                                   </>
                                 )}
                               </div>
-                            </th>
+                            </SortableTh>
                             ) : null}
-                            <th className="p-1.5 border border-slate-300">
+                            <SortableTh
+                              className="p-1.5 border border-slate-300"
+                              active={accountSort?.key === 'account'}
+                              dir={accountSort?.dir}
+                              onClick={() => setAccountSort((prev) => toggleSort(prev, 'account'))}
+                            >
                               <div className="flex flex-col gap-1 relative">
                                 <span>Key Account</span>
                                 <button
-                                  onClick={() => {
+                                  onClick={(event) => {
+                                    event.stopPropagation();
                                     if (!showAccountDropdown) {
                                       setTempFilterAccount(filterAccount);
                                     }
@@ -459,32 +518,32 @@ export function ReportAccountsTabPanel({
                                   </>
                                 )}
                               </div>
-                            </th>
-                            <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3">Population</th>
-                            <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3">Total calls</th>
-                            <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3">Total solved</th>
-                            <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3 text-rose-700 font-semibold">Cancelled</th>
-                            <th className="p-1.5 border border-slate-300 text-center align-bottom pb-3"># open calls</th>
-
-                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong">&lt;2 Days</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong">2-7 Days</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong">7-15 Days</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong">&gt;15 Days</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong">% &gt;7 Days</th>
-
-                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong">Part pending</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong"># of active Eng.</th>
-
-                            <th className="p-1.5 border border-slate-300 text-center text-amber-700 ui-strong">Total</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-amber-700 ui-strong">Done</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-amber-700 ui-strong">Pending</th>
-
-                            <th className="p-1.5 border border-slate-300 text-center text-emerald-700 ui-strong">Done</th>
-                            <th className="p-1.5 border border-slate-300 text-center text-emerald-700 ui-strong">Pending</th>
+                            </SortableTh>
+                            {([
+                              ['population', 'Population', 'p-1.5 border border-slate-300 text-center align-bottom pb-3'],
+                              ['total_calls', 'Total calls', 'p-1.5 border border-slate-300 text-center align-bottom pb-3'],
+                              ['total_solved', 'Total solved', 'p-1.5 border border-slate-300 text-center align-bottom pb-3'],
+                              ['cancelled_calls', 'Cancelled', 'p-1.5 border border-slate-300 text-center align-bottom pb-3 text-rose-700 font-semibold'],
+                              ['open_calls', '# open calls', 'p-1.5 border border-slate-300 text-center align-bottom pb-3'],
+                              ['age_2', '<2 Days', 'p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong'],
+                              ['age_3', '2-7 Days', 'p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong'],
+                              ['age_7', '7-15 Days', 'p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong'],
+                              ['age_15', '>15 Days', 'p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong'],
+                              ['perc_gt_7', '% >7 Days', 'p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong'],
+                              ['part_pending', 'Part pending', 'p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong'],
+                              ['active_eng', '# of active Eng.', 'p-1.5 border border-slate-300 text-center text-blue-700 align-bottom pb-3 ui-strong'],
+                              ['deployment_total', 'Total', 'p-1.5 border border-slate-300 text-center text-amber-700 ui-strong'],
+                              ['deployment_done', 'Done', 'p-1.5 border border-slate-300 text-center text-amber-700 ui-strong'],
+                              ['deployment_pending', 'Pending', 'p-1.5 border border-slate-300 text-center text-amber-700 ui-strong'],
+                              ['installation_done', 'Done', 'p-1.5 border border-slate-300 text-center text-emerald-700 ui-strong'],
+                              ['installation_pending', 'Pending', 'p-1.5 border border-slate-300 text-center text-emerald-700 ui-strong'],
+                            ] as const).map(([key, label, className]) => (
+                              <SortableTh key={key} className={className} align="center" active={accountSort?.key === key} dir={accountSort?.dir} onClick={() => setAccountSort((prev) => toggleSort(prev, key, 'desc'))}>{label}</SortableTh>
+                            ))}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {tableAccounts.map((a, i) => {
+                          {sortedTableAccounts.map((a, i) => {
                             const region = String(a.region ?? '');
                             const account = String(a.account ?? '');
                             const isOverview = accountMisGrouping === 'overview';
@@ -808,8 +867,6 @@ export function ReportAccountsTabPanel({
                       </table>
                     </div>
                   </div>
-                );
-              })()}
             </div>
           </ReportErrorBoundary>
     </>

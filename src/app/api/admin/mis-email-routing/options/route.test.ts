@@ -23,15 +23,24 @@ vi.mock('@/lib/auth/report-security', () => ({
   }),
 }));
 
-vi.mock('@/features/mis-email/lib/routing-rules', async () => {
-  const actual = await vi.importActual<typeof import('@/features/mis-email/lib/routing-rules')>(
-    '@/features/mis-email/lib/routing-rules'
-  );
-  return {
-    ...actual,
-    listMisEmailRoutingOptions: (...args: unknown[]) => listMisEmailRoutingOptions(...args),
-  };
-});
+vi.mock('@/features/mis-email/lib/routing-rules', () => ({
+  canManageMisEmailRouting: (user: {
+    role?: string;
+    permissions?: string[];
+    office_ids?: string[];
+  }) =>
+    user.role === 'hod' ||
+    (user.permissions ?? []).includes('view_all_offices') ||
+    (user.permissions ?? []).includes('manage_users') ||
+    (user.permissions ?? []).includes('manage_roles'),
+  normalizeMisEmailRoutingClientSourceMode: (raw: string | null | undefined) =>
+    String(raw ?? '')
+      .trim()
+      .toLowerCase() === 'crm'
+      ? 'crm'
+      : 'mail',
+  listMisEmailRoutingOptions: (...args: unknown[]) => listMisEmailRoutingOptions(...args),
+}));
 
 describe('mis-email-routing options API', () => {
   beforeEach(() => {

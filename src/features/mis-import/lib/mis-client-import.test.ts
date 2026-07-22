@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { dedupeClientRowsLatestBatchWins } from '@/features/mis-import/lib/aggregate';
@@ -50,18 +50,35 @@ const cokeConfig: MisClientSourceConfig = {
 };
 
 describe('parsePipeDelimitedCsv', () => {
-  it('parses Coke sample header and first row', () => {
-    const samplePath = join(process.cwd(), 'VMSComplaintDetailsRpt.csv');
-    const buffer = readFileSync(samplePath);
-    const content = decodeCsvBuffer(buffer);
-    const lines = content.split(/\r?\n/).slice(0, 3).join('\n');
+  it('parses pipe-delimited header and first rows', () => {
+    const lines = [
+      '".TicketNumber"|"CallStatus"|"State"',
+      '"1180695"|"Open"|"MAHARASHTRA"',
+      '"1180696"|"Closed"|"GUJARAT"',
+    ].join('\n');
     const { headers, rows } = parsePipeDelimitedCsv(lines, '|');
     expect(headers).toContain('.TicketNumber');
     expect(headers).toContain('CallStatus');
     expect(rows.length).toBe(2);
-    expect(rows[0]['.TicketNumber']).toBe('1180695');
-    expect(rows[0].CallStatus).toBe('Open');
+    expect(rows[0]?.['.TicketNumber']).toBe('1180695');
+    expect(rows[0]?.CallStatus).toBe('Open');
   });
+
+  it.skipIf(!existsSync(join(process.cwd(), 'VMSComplaintDetailsRpt.csv')))(
+    'parses Cadbury VMS sample header and first row from local file',
+    () => {
+      const samplePath = join(process.cwd(), 'VMSComplaintDetailsRpt.csv');
+      const buffer = readFileSync(samplePath);
+      const content = decodeCsvBuffer(buffer);
+      const lines = content.split(/\r?\n/).slice(0, 3).join('\n');
+      const { headers, rows } = parsePipeDelimitedCsv(lines, '|');
+      expect(headers).toContain('.TicketNumber');
+      expect(headers).toContain('CallStatus');
+      expect(rows.length).toBe(2);
+      expect(rows[0]?.['.TicketNumber']).toBe('1180695');
+      expect(rows[0]?.CallStatus).toBe('Open');
+    }
+  );
 
   it('parses UTF-16 LE pipe CSV exports from Excel', () => {
     const line =
@@ -582,6 +599,8 @@ const cokeConfigFull: MisClientSourceConfig = {
 describe('detect-parse', () => {
   const cdmsPath = join(process.cwd(), 'CDMS_CallStatus_Detailed (37).xlsx');
   const vmsCsvPath = join(process.cwd(), 'VMSComplaintDetailsRpt.csv');
+  const hasCdms = existsSync(cdmsPath);
+  const hasVms = existsSync(vmsCsvPath);
 
   it('sniffs Coke CDMS headers', () => {
     expect(
@@ -595,45 +614,54 @@ describe('detect-parse', () => {
     ).toBe('cadbury');
   });
 
-  it('detects spreadsheet format for xlsx', () => {
-    const buf = readFileSync(cdmsPath);
+  it('detects spreadsheet format from xlsx magic bytes', () => {
+    // ZIP/OOXML signature is enough for spreadsheet sniffing without sample files.
+    const buf = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
     expect(detectFileFormat(buf, 'report.xlsx')).toBe('spreadsheet');
   });
 
-  it('detects csv format for VMS pipe file', () => {
-    const buf = readFileSync(vmsCsvPath);
+  it('detects csv format from text buffer', () => {
+    const buf = Buffer.from('".TicketNumber"|"CallStatus"\n"1"|"Open"\n', 'utf8');
     expect(detectFileFormat(buf, 'VMSComplaintDetailsRpt.csv')).toBe('csv');
   });
 
-  it('parses CDMS xlsx as Coke with thousands of rows', async () => {
-    const buf = readFileSync(cdmsPath);
-    const result = await parseImportFile(buf, 'CDMS_CallStatus_Detailed (37).xlsx', cokeConfigFull);
-    expect(result.sniffedSource).toBe('coke');
-    expect(result.detectedHeaderRow).toBe(5);
-    expect(result.rawRows.length).toBeGreaterThan(1000);
-    expect(result.rawRows[0]['Call No']).toBeTruthy();
-  }, 120_000);
+  it.skipIf(!hasCdms)(
+    'parses CDMS xlsx as Coke with thousands of rows',
+    async () => {
+      const buf = readFileSync(cdmsPath);
+      const result = await parseImportFile(buf, 'CDMS_CallStatus_Detailed (37).xlsx', cokeConfigFull);
+      expect(result.sniffedSource).toBe('coke');
+      expect(result.detectedHeaderRow).toBe(5);
+      expect(result.rawRows.length).toBeGreaterThan(1000);
+      expect(result.rawRows[0]?.['Call No']).toBeTruthy();
+    },
+    120_000
+  );
 
-  it('auto-finds header row 5 when config header row is wrong', async () => {
-    const buf = readFileSync(cdmsPath);
-    const wrongHeader = { ...cokeConfigFull, header_row_index: 1 };
-    const result = await parseImportFile(buf, 'CDMS_CallStatus_Detailed (37).xlsx', wrongHeader);
-    expect(result.sniffedSource).toBe('coke');
-    expect(result.rawRows.length).toBeGreaterThan(1000);
-    expect(result.detectedHeaderRow).toBe(5);
-    expect(result.warnings.some((w) => w.includes('Auto-detected header row 5'))).toBe(true);
-  }, 120_000);
+  it.skipIf(!hasCdms)(
+    'auto-finds header row 5 when config header row is wrong',
+    async () => {
+      const buf = readFileSync(cdmsPath);
+      const wrongHeader = { ...cokeConfigFull, header_row_index: 1 };
+      const result = await parseImportFile(buf, 'CDMS_CallStatus_Detailed (37).xlsx', wrongHeader);
+      expect(result.sniffedSource).toBe('coke');
+      expect(result.rawRows.length).toBeGreaterThan(1000);
+      expect(result.detectedHeaderRow).toBe(5);
+      expect(result.warnings.some((w) => w.includes('Auto-detected header row 5'))).toBe(true);
+    },
+    120_000
+  );
 
-  it('parses Cadbury VMS csv with cadbury config', async () => {
+  it.skipIf(!hasVms)('parses Cadbury VMS csv with cadbury config', async () => {
     const buf = readFileSync(vmsCsvPath);
     const result = await parseImportFile(buf, 'VMSComplaintDetailsRpt.csv', cadburyConfig);
     expect(result.sniffedSource).toBe('cadbury');
     expect(result.detectedFormat).toBe('csv');
     expect(result.rawRows.length).toBeGreaterThan(100);
-    expect(result.rawRows[0]['.TicketNumber']).toBeTruthy();
+    expect(result.rawRows[0]?.['.TicketNumber']).toBeTruthy();
   });
 
-  it('parses Cadbury VMS csv with thousands of rows end-to-end', async () => {
+  it.skipIf(!hasVms)('parses Cadbury VMS csv with thousands of rows end-to-end', async () => {
     const buf = readFileSync(vmsCsvPath);
     const rawRows = (
       await parseImportFile(buf, 'VMSComplaintDetailsRpt.csv', cadburyConfig)
@@ -646,33 +674,41 @@ describe('detect-parse', () => {
       true
     );
     expect(warnings.some((w) => w.includes('Span Spectrum Pvt Ltd'))).toBe(true);
-    expect(rows[0].call_key).toBeTruthy();
-    expect(rows[0].region).toBeTruthy();
+    expect(rows[0]?.call_key).toBeTruthy();
+    expect(rows[0]?.region).toBeTruthy();
   });
 
-  it('parses Coke CDMS xlsx with thousands of rows end-to-end', async () => {
-    const buf = readFileSync(cdmsPath);
-    const rawRows = (await parseImportFile(buf, 'CDMS_CallStatus_Detailed (37).xlsx', cokeConfigFull))
-      .rawRows;
-    const { rows, errors } = normalizeClientRows(cokeConfigFull, rawRows);
-    expect(errors.every((e) => e.message.includes('Unknown status: Open'))).toBe(true);
-    expect(errors.length).toBeLessThan(20);
-    expect(rows.length).toBeGreaterThan(30_000);
-    expect(rows.every((r) => r.region === 'SOUTH')).toBe(true);
-    expect(rows.every((r) => r.logged_at != null)).toBe(true);
-    const ytdStart = new Date('2026-01-01');
-    const inYtd = rows.filter((r) => r.logged_at! >= ytdStart).length;
-    expect(inYtd).toBeGreaterThan(30_000);
-  }, 120_000);
+  it.skipIf(!hasCdms)(
+    'parses Coke CDMS xlsx with thousands of rows end-to-end',
+    async () => {
+      const buf = readFileSync(cdmsPath);
+      const rawRows = (await parseImportFile(buf, 'CDMS_CallStatus_Detailed (37).xlsx', cokeConfigFull))
+        .rawRows;
+      const { rows, errors } = normalizeClientRows(cokeConfigFull, rawRows);
+      expect(errors.every((e) => e.message.includes('Unknown status: Open'))).toBe(true);
+      expect(errors.length).toBeLessThan(20);
+      expect(rows.length).toBeGreaterThan(30_000);
+      expect(rows.every((r) => r.region === 'SOUTH')).toBe(true);
+      expect(rows.every((r) => r.logged_at != null)).toBe(true);
+      const ytdStart = new Date('2026-01-01');
+      const inYtd = rows.filter((r) => r.logged_at! >= ytdStart).length;
+      expect(inYtd).toBeGreaterThan(30_000);
+    },
+    120_000
+  );
 
-  it('reports mismatch when CDMS uploaded as Cadbury', async () => {
-    const buf = readFileSync(cdmsPath);
-    const result = await parseImportFile(buf, 'CDMS.xlsx', cadburyConfig);
-    expect(result.sniffedSource).toBe('coke');
-    expect(sourceMismatchMessage(result.sniffedSource, 'cadbury')).toMatch(/Coke CDMS/i);
-  }, 30_000);
+  it.skipIf(!hasCdms)(
+    'reports mismatch when CDMS uploaded as Cadbury',
+    async () => {
+      const buf = readFileSync(cdmsPath);
+      const result = await parseImportFile(buf, 'CDMS.xlsx', cadburyConfig);
+      expect(result.sniffedSource).toBe('coke');
+      expect(sourceMismatchMessage(result.sniffedSource, 'cadbury')).toMatch(/Coke CDMS/i);
+    },
+    30_000
+  );
 
-  it('reports mismatch when VMS csv uploaded as Coke', async () => {
+  it.skipIf(!hasVms)('reports mismatch when VMS csv uploaded as Coke', async () => {
     const buf = readFileSync(vmsCsvPath);
     const result = await parseImportFile(buf, 'cadbury.csv', cokeConfigFull);
     expect(result.sniffedSource).toBe('cadbury');

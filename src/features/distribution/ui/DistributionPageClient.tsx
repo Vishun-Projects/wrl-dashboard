@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   Map as LucideMap,
   FilterX,
+  Download,
 } from 'lucide-react';
 import axios from 'axios';
 import { useDistributionSummary } from '@/features/report';
@@ -28,6 +29,17 @@ import { PageShell } from '@/components/layout/PageShell';
 import { ReportPageSkeleton } from '@/features/report';
 import { useReportFilters } from '@/features/report';
 import { createClient } from '@/lib/supabase/client';
+import {
+  sortRows,
+  toggleSort,
+  type TableSortState,
+} from '@/lib/ui/table-sort';
+import {
+  exportDistributionFranchiseeCsv,
+  exportDistributionIdleCsv,
+} from '@/features/distribution/lib/export-csv';
+import { triggerBlobDownload } from '@/features/report';
+import { feedback } from '@/lib/ui/feedback';
 import { buildCorpusViewDateFilter, filterCorpusCallsByViewDate } from '@/features/report';
 import { loadEngineerRosterForBranch, getCachedEngineerRoster } from '@/features/distribution/lib/engineer-roster-cache';
 import {
@@ -174,16 +186,17 @@ export default function CallDistributionPage() {
   // Idle assignees
   const [rosterTechnicians, setRosterTechnicians] = useState<RosterTechnician[]>([]);
   const [idleRosterLoading, setIdleRosterLoading] = useState(false);
-  const [idleSortField, setIdleSortField] = useState<keyof IdleAssigneeRow | 'issue'>('issue');
-  const [idleSortAsc, setIdleSortAsc] = useState(true);
+  const [idleSort, setIdleSort] = useState<TableSortState<keyof IdleAssigneeRow | 'issue'>>({
+    key: 'issue',
+    dir: 'asc',
+  });
   const [idleIssueFilter, setIdleIssueFilter] = useState<IdleAssigneeIssue | null>(
     'assigned_no_completions'
   );
   const [highlightedIdleKey, setHighlightedIdleKey] = useState<string | null>(null);
 
   // Loading & Sorting States
-  const [sortField, setSortField] = useState('ratio');
-  const [sortAsc, setSortAsc] = useState(false);
+  const [franSort, setFranSort] = useState<TableSortState>({ key: 'ratio', dir: 'desc' });
   const [highlightedFranchisee, setHighlightedFranchisee] = useState<string | null>(null);
 
   useEffect(() => {
@@ -662,16 +675,6 @@ export default function CallDistributionPage() {
     return () => clearTimeout(timer);
   }, [pincodeSummary, highlightedFranchisee, selectedPincode, mapReady, debouncedPincodeSearch]);
 
-  // Sorting Logic for Franchisee Table
-  const handleSort = (field: string) => {
-    if (sortField === field) {
-      setSortAsc(!sortAsc);
-    } else {
-      setSortField(field);
-      setSortAsc(false);
-    }
-  };
-
   type FranchiseeRow = {
     franchisee_code: string;
     franchisee_name: string;
@@ -681,17 +684,16 @@ export default function CallDistributionPage() {
     ratio: number;
   };
 
-  const compareFranchiseeRows = (a: FranchiseeRow, b: FranchiseeRow) => {
-    let valA: string | number = a[sortField as keyof FranchiseeRow] as string | number;
-    let valB: string | number = b[sortField as keyof FranchiseeRow] as string | number;
-    if (typeof valA === 'string') {
-      return sortAsc ? valA.localeCompare(String(valB)) : String(valB).localeCompare(valA);
-    }
-    return sortAsc ? Number(valA) - Number(valB) : Number(valB) - Number(valA);
+  const handleSort = (field: string) => {
+    setFranSort((prev) => toggleSort(prev, field, field === 'franchisee_name' ? 'asc' : 'desc'));
   };
 
   const displayedFranchiseeList = useMemo(() => {
-    const sorted = [...franchiseeSummary].sort(compareFranchiseeRows);
+    const sorted = sortRows(
+      franchiseeSummary as FranchiseeRow[],
+      (row) => row[franSort.key as keyof FranchiseeRow],
+      franSort.dir
+    );
     if (!highlightedFranchisee) return sorted;
 
     const linked: FranchiseeRow[] = [];
@@ -707,37 +709,27 @@ export default function CallDistributionPage() {
       }
     }
     return [...linked, ...rest];
-  }, [franchiseeSummary, sortField, sortAsc, highlightedFranchisee]);
+  }, [franchiseeSummary, franSort, highlightedFranchisee]);
 
   const handleIdleSort = (field: keyof IdleAssigneeRow | 'issue') => {
-    if (idleSortField === field) {
-      setIdleSortAsc(!idleSortAsc);
-    } else {
-      setIdleSortField(field);
-      setIdleSortAsc(field === 'name');
-    }
-  };
-
-  const idleSortValue = (row: IdleAssigneeRow): string | number => {
-    if (idleSortField === 'issue') return row.issue;
-    if (idleSortField === 'assignedCalls' || idleSortField === 'totalCalls') {
-      return row[idleSortField];
-    }
-    return String(row[idleSortField] ?? '');
+    setIdleSort((prev) =>
+      toggleSort(prev, field, field === 'name' || field === 'issue' || field === 'branchName' ? 'asc' : 'desc')
+    );
   };
 
   const sortedIdleAssigneeRows = useMemo(() => {
-    const s = [...idleAssigneeRows];
-    s.sort((a, b) => {
-      const valA = idleSortValue(a);
-      const valB = idleSortValue(b);
-      if (typeof valA === 'string' && typeof valB === 'string') {
-        return idleSortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
-      }
-      return idleSortAsc ? Number(valA) - Number(valB) : Number(valB) - Number(valA);
-    });
-    return s;
-  }, [idleAssigneeRows, idleSortField, idleSortAsc]);
+    return sortRows(
+      idleAssigneeRows,
+      (row) => {
+        if (idleSort.key === 'issue') return row.issue;
+        if (idleSort.key === 'assignedCalls' || idleSort.key === 'totalCalls') {
+          return row[idleSort.key];
+        }
+        return String(row[idleSort.key] ?? '');
+      },
+      idleSort.dir
+    );
+  }, [idleAssigneeRows, idleSort]);
 
   const idleRowsByIssue = useMemo(() => {
     if (!idleIssueFilter) return sortedIdleAssigneeRows;
@@ -885,6 +877,41 @@ export default function CallDistributionPage() {
               Clear Pincode ({selectedPincode})
             </button>
           )}
+          <button
+            type="button"
+            disabled={
+              distributionLoading ||
+              (displayedFranchiseeList.length === 0 && displayedIdleAssigneeRows.length === 0)
+            }
+            onClick={() => {
+              try {
+                const stamp = new Date().toISOString().slice(0, 10);
+                if (displayedFranchiseeList.length > 0) {
+                  const csv = exportDistributionFranchiseeCsv(displayedFranchiseeList);
+                  void triggerBlobDownload(
+                    new Blob([csv], { type: 'text/csv;charset=utf-8' }),
+                    `distribution-franchisees-${stamp}.csv`
+                  );
+                }
+                if (displayedIdleAssigneeRows.length > 0) {
+                  const csv = exportDistributionIdleCsv(displayedIdleAssigneeRows);
+                  void triggerBlobDownload(
+                    new Blob([csv], { type: 'text/csv;charset=utf-8' }),
+                    `distribution-idle-techs-${stamp}.csv`
+                  );
+                }
+                feedback.actionSuccess('CSV download started');
+              } catch (err) {
+                console.error(err);
+                feedback.actionFailed('CSV export failed');
+              }
+            }}
+            className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-bg-canvas px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition-all hover:bg-bg-soft disabled:opacity-50 ui-label"
+            title="Download franchisee and idle-technician tables as CSV"
+          >
+            <Download size={13} />
+            CSV
+          </button>
           <button
             onClick={() => void refetchDistribution()}
             disabled={distributionLoading}
@@ -1037,8 +1064,8 @@ export default function CallDistributionPage() {
                 loadingMessage="Analyzing capacity…"
                 emptyMessage="No franchisee backlog for current filters."
                 isEmpty={!distributionLoading && franchiseeSummary.length === 0}
-                sortField={sortField}
-                sortAsc={sortAsc}
+                sortField={franSort.key}
+                sortAsc={franSort.dir === 'asc'}
                 onSort={handleSort}
                 columns={franchiseeColumns}
                 footerHint=""
@@ -1114,8 +1141,8 @@ export default function CallDistributionPage() {
                     : 'No idle assignees for this scope.'
                 }
                 isEmpty={!idleTableLoading && displayedIdleAssigneeRows.length === 0}
-                sortField={idleSortField}
-                sortAsc={idleSortAsc}
+                sortField={idleSort.key}
+                sortAsc={idleSort.dir === 'asc'}
                 onSort={(field) => handleIdleSort(field as keyof IdleAssigneeRow | 'issue')}
                 columns={idleColumns}
                 tableMinWidth="36rem"

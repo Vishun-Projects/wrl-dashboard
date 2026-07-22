@@ -86,13 +86,46 @@ export async function listSourceBatches(sourceCode: string): Promise<BatchMeta[]
       batch_id: string;
       file_name: string;
       row_count: number;
-      active_rows: number;
-      new_rows: number;
+      active_row_count: number;
+      new_row_count: number;
       created_at: Date;
       uploader_name: string;
       stored_file_path: string | null;
     }>(
       `
+      SELECT b.batch_id, b.file_name, b.row_count, b.created_at,
+             COALESCE(u.name, 'Unknown') AS uploader_name,
+             b.stored_file_path,
+             COALESCE(b.active_row_count, 0) AS active_row_count,
+             COALESCE(b.new_row_count, 0) AS new_row_count
+      FROM mis_client_import_batches b
+      JOIN mis_client_sources s ON s.id = b.source_id
+      LEFT JOIN app_users u ON u.id = b.uploaded_by
+      WHERE s.code = $1 AND b.status = 'completed'
+      ORDER BY b.created_at DESC
+      `,
+      [sourceCode.toLowerCase()]
+    );
+    return res.rows.map((row) => ({
+      batchId: row.batch_id,
+      fileName: row.file_name,
+      rowCount: row.row_count,
+      activeRows: row.active_row_count ?? 0,
+      supersededRows: Math.max(0, row.row_count - (row.active_row_count ?? 0)),
+      newRows: row.new_row_count ?? 0,
+      uploadedAt: row.created_at.toISOString(),
+      uploadedByName: row.uploader_name,
+      storedFilePath: row.stored_file_path,
+    }));
+  });
+}
+
+/** Recompute denormalized active/new counts for every completed batch of a source. */
+export async function recomputeBatchRowStatsForSource(
+  sourceId: string,
+  client?: import('pg').PoolClient
+): Promise<void> {
+  const sql = `
       WITH keyed AS (
         SELECT
           r.batch_id,
@@ -104,8 +137,7 @@ export async function listSourceBatches(sourceCode: string): Promise<BatchMeta[]
           MIN(b.created_at) OVER (PARTITION BY r.source_id, r.call_key) AS first_batch_at
         FROM mis_client_import_rows r
         JOIN mis_client_import_batches b ON b.batch_id = r.batch_id
-        JOIN mis_client_sources s ON s.id = r.source_id
-        WHERE s.code = $1 AND b.status = 'completed'
+        WHERE r.source_id = $1::uuid AND b.status = 'completed'
       ),
       batch_stats AS (
         SELECT
@@ -114,32 +146,30 @@ export async function listSourceBatches(sourceCode: string): Promise<BatchMeta[]
           count(*) FILTER (WHERE created_at = first_batch_at)::int AS new_rows
         FROM keyed
         GROUP BY batch_id
+      ),
+      targets AS (
+        SELECT
+          b.batch_id,
+          COALESCE(stats.active_rows, 0) AS active_rows,
+          COALESCE(stats.new_rows, 0) AS new_rows
+        FROM mis_client_import_batches b
+        LEFT JOIN batch_stats stats ON stats.batch_id = b.batch_id
+        WHERE b.source_id = $1::uuid AND b.status = 'completed'
       )
-      SELECT b.batch_id, b.file_name, b.row_count, b.created_at,
-             COALESCE(u.name, 'Unknown') AS uploader_name,
-             b.stored_file_path,
-             COALESCE(stats.active_rows, 0) AS active_rows,
-             COALESCE(stats.new_rows, 0) AS new_rows
-      FROM mis_client_import_batches b
-      JOIN mis_client_sources s ON s.id = b.source_id
-      LEFT JOIN app_users u ON u.id = b.uploaded_by
-      LEFT JOIN batch_stats stats ON stats.batch_id = b.batch_id
-      WHERE s.code = $1 AND b.status = 'completed'
-      ORDER BY b.created_at DESC
-      `,
-      [sourceCode.toLowerCase()]
-    );
-    return res.rows.map((row) => ({
-      batchId: row.batch_id,
-      fileName: row.file_name,
-      rowCount: row.row_count,
-      activeRows: row.active_rows ?? 0,
-      supersededRows: Math.max(0, row.row_count - (row.active_rows ?? 0)),
-      newRows: row.new_rows ?? 0,
-      uploadedAt: row.created_at.toISOString(),
-      uploadedByName: row.uploader_name,
-      storedFilePath: row.stored_file_path,
-    }));
+      UPDATE mis_client_import_batches b
+      SET
+        active_row_count = t.active_rows,
+        new_row_count = t.new_rows
+      FROM targets t
+      WHERE t.batch_id = b.batch_id
+    `;
+
+  if (client) {
+    await client.query(sql, [sourceId]);
+    return;
+  }
+  await withAppClient(async (c) => {
+    await c.query(sql, [sourceId]);
   });
 }
 
@@ -169,16 +199,99 @@ export function summarizeImportBatches(sources: SourceWithBatches[]): ImportAggr
   return { totalRowsInFiles, totalInUse, totalSuperseded, totalNew, batchCount };
 }
 
+/** Cheap SUM(row_count) — no row-window / active-stats work. */
+export async function sumCompletedBatchRowCounts(
+  sourceCodes?: string[] | null
+): Promise<number> {
+  return withAppClient(async (client) => {
+    const codes = sourceCodes?.length
+      ? sourceCodes.map((c) => c.toLowerCase())
+      : null;
+    if (codes) {
+      const res = await client.query<{ n: string | number }>(
+        `
+        SELECT COALESCE(SUM(b.row_count), 0)::bigint AS n
+        FROM mis_client_import_batches b
+        JOIN mis_client_sources s ON s.id = b.source_id
+        WHERE b.status = 'completed' AND s.code = ANY($1::text[])
+        `,
+        [codes]
+      );
+      return Number(res.rows[0]?.n ?? 0);
+    }
+    const res = await client.query<{ n: string | number }>(
+      `
+      SELECT COALESCE(SUM(row_count), 0)::bigint AS n
+      FROM mis_client_import_batches
+      WHERE status = 'completed'
+      `
+    );
+    return Number(res.rows[0]?.n ?? 0);
+  });
+}
+
 export async function listAllSourcesWithBatches(): Promise<SourceWithBatches[]> {
-  const sources = await listActiveSources();
-  return Promise.all(
-    sources.map(async (source) => ({
+  return withAppClient(async (client) => {
+    const sourcesRes = await client.query<MisClientSource>(
+      `SELECT id, code, name, file_kind, delimiter, header_row_index, call_key_column,
+              crm_account_filter, is_active
+       FROM mis_client_sources
+       WHERE is_active = true
+       ORDER BY name`
+    );
+    const sources = sourcesRes.rows;
+    if (sources.length === 0) return [];
+
+    const batchesRes = await client.query<{
+      source_code: string;
+      batch_id: string;
+      file_name: string;
+      row_count: number;
+      active_row_count: number;
+      new_row_count: number;
+      created_at: Date;
+      uploader_name: string;
+      stored_file_path: string | null;
+    }>(
+      `
+      SELECT s.code AS source_code,
+             b.batch_id, b.file_name, b.row_count, b.created_at,
+             COALESCE(u.name, 'Unknown') AS uploader_name,
+             b.stored_file_path,
+             COALESCE(b.active_row_count, 0) AS active_row_count,
+             COALESCE(b.new_row_count, 0) AS new_row_count
+      FROM mis_client_import_batches b
+      JOIN mis_client_sources s ON s.id = b.source_id
+      LEFT JOIN app_users u ON u.id = b.uploaded_by
+      WHERE s.is_active = true AND b.status = 'completed'
+      ORDER BY s.name, b.created_at DESC
+      `
+    );
+
+    const byCode = new Map<string, BatchMeta[]>();
+    for (const row of batchesRes.rows) {
+      const list = byCode.get(row.source_code) ?? [];
+      list.push({
+        batchId: row.batch_id,
+        fileName: row.file_name,
+        rowCount: row.row_count,
+        activeRows: row.active_row_count ?? 0,
+        supersededRows: Math.max(0, row.row_count - (row.active_row_count ?? 0)),
+        newRows: row.new_row_count ?? 0,
+        uploadedAt: row.created_at.toISOString(),
+        uploadedByName: row.uploader_name,
+        storedFilePath: row.stored_file_path,
+      });
+      byCode.set(row.source_code, list);
+    }
+
+    return sources.map((source) => ({
       sourceCode: source.code,
       sourceName: source.name,
       fileKind: source.file_kind,
-      batches: await listSourceBatches(source.code),
-    }))
-  );
+      batches: byCode.get(source.code) ?? [],
+    }));
+  });
 }
 
 export async function upsertSourceConfig(payload: SourceConfigPayload): Promise<MisClientSourceConfig> {

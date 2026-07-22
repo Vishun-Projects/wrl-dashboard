@@ -14,6 +14,7 @@ import { Collapse } from '@/components/motion';
 import { WarrantyMasterFgDetailTable } from '@/features/warranty-master/ui/WarrantyMasterFgDetailTable';
 import { TruncatedText } from '@/components/ui/TruncatedText';
 import { instantTransition, layoutSpring, usePrefersReducedMotion } from '@/lib/motion/presets';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 import {
   aggregateRowKey,
   fgDetailRowsForAggregateFromIndex,
@@ -22,6 +23,23 @@ import {
   type WarrantyMasterFgDetailIndex,
   type WarrantyMasterFgDetailRow,
 } from '@/features/warranty-master/lib';
+
+type WarrantySortKey = 'customer' | 'group' | 'warrantyMonths' | 'machines';
+
+function warrantySortValue(row: WarrantyMasterAggregateRow, key: WarrantySortKey): unknown {
+  switch (key) {
+    case 'customer':
+      return row.customerName;
+    case 'group':
+      return row.groupName;
+    case 'warrantyMonths':
+      return row.warrantyMonths;
+    case 'machines':
+      return row.machineCount;
+    default:
+      return '';
+  }
+}
 
 type WarrantyMasterTableProps = {
   rows: WarrantyMasterAggregateRow[];
@@ -113,6 +131,19 @@ export const WarrantyMasterTable = memo(function WarrantyMasterTable({
   expandedKey,
   onToggleExpand,
 }: WarrantyMasterTableProps) {
+  const [sort, setSort] = useState<TableSortState<WarrantySortKey> | null>(null);
+
+  const sortedRows = useMemo(() => {
+    if (!sort) return rows;
+    return sortRows(rows, (row) => warrantySortValue(row, sort.key), sort.dir);
+  }, [rows, sort]);
+
+  const handleSort = (key: WarrantySortKey) => {
+    setSort((p) =>
+      toggleSort(p, key, key === 'customer' || key === 'group' ? 'asc' : 'desc')
+    );
+  };
+
   const expandedDetail = useMemo(() => {
     if (!expandedKey) return null;
     const row = rows.find((r) => aggregateRowKey(r) === expandedKey);
@@ -134,14 +165,44 @@ export const WarrantyMasterTable = memo(function WarrantyMasterTable({
           <AdminTh className="w-8">
             <span className="sr-only">Expand</span>
           </AdminTh>
-          <AdminTh>Customer</AdminTh>
-          <AdminTh>Group</AdminTh>
-          <AdminTh>Warranty (months)</AdminTh>
-          <AdminTh className="text-right">Machines</AdminTh>
+          <AdminTh
+            sortable
+            sortKey="customer"
+            sort={sort}
+            onSort={(k) => handleSort(k as WarrantySortKey)}
+          >
+            Customer
+          </AdminTh>
+          <AdminTh
+            sortable
+            sortKey="group"
+            sort={sort}
+            onSort={(k) => handleSort(k as WarrantySortKey)}
+          >
+            Group
+          </AdminTh>
+          <AdminTh
+            sortable
+            sortKey="warrantyMonths"
+            sort={sort}
+            onSort={(k) => handleSort(k as WarrantySortKey)}
+          >
+            Warranty (months)
+          </AdminTh>
+          <AdminTh
+            className="text-right"
+            sortable
+            sortKey="machines"
+            sort={sort}
+            onSort={(k) => handleSort(k as WarrantySortKey)}
+            align="right"
+          >
+            Machines
+          </AdminTh>
         </tr>
       </AdminThead>
       <tbody>
-        {rows.map((row) => {
+        {sortedRows.map((row) => {
           const key = aggregateRowKey(row);
           const isExpanded = expandedKey === key;
           return (

@@ -6,6 +6,13 @@ export function isValidAvatarStoragePath(path: string): boolean {
   return AVATAR_PATH_RE.test(path.trim());
 }
 
+/** True when path was built for this user (`avatars/<userId>-…`). */
+export function isOwnAvatarStoragePath(path: string, userId: string): boolean {
+  const trimmed = path.trim();
+  if (!isValidAvatarStoragePath(trimmed) || !userId) return false;
+  return trimmed.startsWith(`avatars/${userId}-`);
+}
+
 export function extractAvatarStoragePath(urlOrPath: string | null | undefined): string | null {
   if (!urlOrPath?.trim()) return null;
   const raw = urlOrPath.trim();

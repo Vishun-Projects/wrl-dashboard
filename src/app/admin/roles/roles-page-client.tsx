@@ -37,6 +37,7 @@ import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 import { ModalPortal } from '@/components/ui/ModalPortal';
 import { accessLabelsForPermissions } from '@/lib/auth/rbac-catalog';
 import type { RolesUiPageRow } from '@/lib/auth/rbac-catalog';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 
 type PermissionRow = { id: string; name: string; description?: string | null };
 
@@ -101,6 +102,8 @@ function PermissionToggle({
   );
 }
 
+type RoleSortKey = 'role' | 'description' | 'access';
+
 export default function RolesPage() {
   const router = useRouter();
   const [roles, setRoles] = useState<any[]>([]);
@@ -112,6 +115,7 @@ export default function RolesPage() {
   });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<TableSortState<RoleSortKey> | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [editingRole, setEditingRole] = useState<any>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
@@ -259,6 +263,26 @@ export default function RolesPage() {
       r.description?.toLowerCase().includes(search.toLowerCase())
   );
 
+  const sortedRoles = useMemo(() => {
+    if (!sort) return filteredRoles;
+    return sortRows(filteredRoles, (role) => {
+      switch (sort.key) {
+        case 'role':
+          return role.name ?? '';
+        case 'description':
+          return role.description ?? '';
+        case 'access':
+          return accessLabelsForPermissions(role.permissions ?? []).join(', ');
+        default:
+          return '';
+      }
+    }, sort.dir);
+  }, [filteredRoles, sort]);
+
+  const handleSort = (key: RoleSortKey) => {
+    setSort((p) => toggleSort(p, key, 'asc'));
+  };
+
   return (
     <PageShell
       title="Roles & Access Control"
@@ -293,16 +317,40 @@ export default function RolesPage() {
             <AdminTable>
               <AdminThead>
                 <tr>
-                  <AdminTh className="w-[22%]">Role</AdminTh>
-                  <AdminTh className="w-[28%]">Description</AdminTh>
-                  <AdminTh className="w-[40%]">Access</AdminTh>
+                  <AdminTh
+                    className="w-[22%]"
+                    sortable
+                    sortKey="role"
+                    sort={sort}
+                    onSort={(k) => handleSort(k as RoleSortKey)}
+                  >
+                    Role
+                  </AdminTh>
+                  <AdminTh
+                    className="w-[28%]"
+                    sortable
+                    sortKey="description"
+                    sort={sort}
+                    onSort={(k) => handleSort(k as RoleSortKey)}
+                  >
+                    Description
+                  </AdminTh>
+                  <AdminTh
+                    className="w-[40%]"
+                    sortable
+                    sortKey="access"
+                    sort={sort}
+                    onSort={(k) => handleSort(k as RoleSortKey)}
+                  >
+                    Access
+                  </AdminTh>
                   <AdminTh align="right" className="w-[10%]">
                     Actions
                   </AdminTh>
                 </tr>
               </AdminThead>
               <tbody>
-                {filteredRoles.map((role) => {
+                {sortedRoles.map((role) => {
                   const pageLabels = accessLabelsForPermissions(role.permissions ?? []);
 
                   return (

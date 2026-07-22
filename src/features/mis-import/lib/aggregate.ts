@@ -247,7 +247,8 @@ function resolveSourceFilter(params: ClientAggregateParams): string[] | null {
 function buildDedupedRowsSql(
   sourceClause: string,
   snapshotParamIndex: number,
-  bdMisSnapshotMode: boolean
+  bdMisSnapshotMode: boolean,
+  opts?: { includeSourceCode?: boolean }
 ): string {
   const dateFilter = bdMisSnapshotMode
     ? `AND (
@@ -265,6 +266,15 @@ function buildDedupedRowsSql(
           OR (s.code <> ALL($${snapshotParamIndex}::text[]))
         )`;
 
+  const selectCols = opts?.includeSourceCode
+    ? `s.code AS source_code,
+        r.region,
+        COALESCE(NULLIF(TRIM(s.crm_account_filter), ''), s.name) AS account,
+        r.branch_label, r.logged_at, r.status_bucket, r.is_part_pending, r.engineer_name`
+    : `r.region,
+        COALESCE(NULLIF(TRIM(s.crm_account_filter), ''), s.name) AS account,
+        r.branch_label, r.logged_at, r.status_bucket, r.is_part_pending, r.engineer_name`;
+
   return `
       WITH latest_batch AS (
         SELECT DISTINCT ON (b.source_id)
@@ -275,9 +285,7 @@ function buildDedupedRowsSql(
         ORDER BY b.source_id, b.created_at DESC
       )
       SELECT DISTINCT ON (r.source_id, r.call_key)
-        r.region,
-        COALESCE(NULLIF(TRIM(s.crm_account_filter), ''), s.name) AS account,
-        r.branch_label, r.logged_at, r.status_bucket, r.is_part_pending, r.engineer_name
+        ${selectCols}
       FROM mis_client_import_rows r
       JOIN mis_client_import_batches b ON b.batch_id = r.batch_id
       JOIN mis_client_sources s ON s.id = r.source_id
@@ -290,34 +298,11 @@ function buildDedupedRowsSql(
     `;
 }
 
-async function queryDedupedRows(params: ClientAggregateParams): Promise<DbRow[]> {
-  const startDate = params.startDate ?? `${new Date().getFullYear()}-01-01`;
-  const endDate = params.endDate ?? new Date().toISOString().slice(0, 10);
-  const sourceCodes = resolveSourceFilter(params);
-  const bdMisSnapshotMode = params.bdMisSnapshotMode === true;
-
-  return withBulkReadClient(async (client) => {
-    const values: unknown[] = [startDate, endDate, [...SNAPSHOT_IMPORT_SOURCE_CODES]];
-    let sourceClause = '';
-    if (sourceCodes) {
-      values.push(sourceCodes);
-      sourceClause = `AND s.code = ANY($${values.length}::text[])`;
-    }
-
-    const res = await client.query<DbRow>(
-      buildDedupedRowsSql(sourceClause, 3, bdMisSnapshotMode),
-      values
-    );
-    return res.rows;
-  });
-}
-
 export async function queryClientBranchSummary(
   params: ClientAggregateParams
 ): Promise<BranchSummaryRow[]> {
-  const agingDate = resolveAgingDate(params);
-  const rows = await queryDedupedRows(params);
-  return aggregateRows(rows, agingDate);
+  const { branchSummary } = await queryClientAggregates(params);
+  return branchSummary;
 }
 
 export async function queryAllClientBranchSummary(
@@ -326,20 +311,206 @@ export async function queryAllClientBranchSummary(
   return queryClientBranchSummary({ ...params, sourceCode: 'all' });
 }
 
+/** One dedupe fetch → branch + account rollups + row count. */
+export function clientAggregatesFromRows(
+  rows: DbRow[],
+  agingDate: string
+): {
+  branchSummary: BranchSummaryRow[];
+  accountSummary: AccountSummaryRow[];
+  rowsInDateRange: number;
+} {
+  return {
+    branchSummary: aggregateRows(rows, agingDate),
+    accountSummary: aggregateAccountRows(rows, agingDate),
+    rowsInDateRange: rows.length,
+  };
+}
+
+type ClientAggregateQueryRow = {
+  branch_summary: BranchSummaryRow[];
+  account_summary: AccountSummaryRow[];
+  rows_in_date_range: number;
+};
+
+/**
+ * SQL mirror of aggregateRows/aggregateAccountRows.  The pure JS helper remains
+ * covered by aggregate-shared.test.ts; this query deliberately retains its
+ * cancellation, aging, and normalized engineer semantics while avoiding row transfer.
+ */
+function buildClientAggregatesSql(
+  sourceClause: string,
+  sourceParamIndex: number,
+  agingParamIndex: number,
+  bdMisSnapshotMode: boolean
+): string {
+  const agingDate = `$${agingParamIndex}::date`;
+  const age = (predicate: string) =>
+    `count(*) FILTER (
+      WHERE status_bucket IN ('open_unallocated', 'assigned')
+        AND logged_at IS NOT NULL
+        AND ${predicate}
+    )::int`;
+  const aggregateColumns = (solved: string, techSolved: string, prefix = '') => `
+      count(*) FILTER (WHERE status_bucket <> 'cancelled')::int AS ${prefix}total_calls,
+      count(*) FILTER (WHERE status_bucket IN ('solved', 'tech_solved'))::int AS ${solved},
+      count(*) FILTER (WHERE status_bucket = 'cancelled')::int AS ${prefix}cancelled_calls,
+      count(*) FILTER (WHERE status_bucket IN ('open_unallocated', 'assigned'))::int AS raw_open_calls,
+      ${age(`(${agingDate} - logged_at::date) <= 2`)} AS ${prefix}age_2,
+      ${age(`(${agingDate} - logged_at::date) BETWEEN 3 AND 7`)} AS ${prefix}age_3,
+      ${age(`(${agingDate} - logged_at::date) BETWEEN 8 AND 15`)} AS ${prefix}age_7,
+      ${age(`(${agingDate} - logged_at::date) > 15`)} AS ${prefix}age_15,
+      count(*) FILTER (WHERE status_bucket <> 'cancelled' AND is_part_pending)::int AS ${prefix}part_pending,
+      count(DISTINCT lower(trim(engineer_name))) FILTER (
+        WHERE status_bucket <> 'cancelled' AND engineer_name IS NOT NULL
+      )::int AS active_eng,
+      count(*) FILTER (WHERE status_bucket <> 'cancelled')::int AS population,
+      count(*) FILTER (WHERE status_bucket = 'tech_solved')::int AS ${techSolved}`;
+
+  return `
+    WITH deduped AS MATERIALIZED (
+      ${buildDedupedRowsSql(sourceClause, sourceParamIndex, bdMisSnapshotMode).trim()}
+    ),
+    normalized AS (
+      SELECT
+        upper(COALESCE(region, 'OTHER')) AS region,
+        COALESCE(NULLIF(trim(branch_label), ''), upper(COALESCE(region, 'OTHER'))) AS branch,
+        COALESCE(NULLIF(trim(account), ''), 'UNCLASSIFIED') AS account,
+        logged_at,
+        status_bucket,
+        is_part_pending,
+        engineer_name
+      FROM deduped
+    ),
+    branch_aggregate AS (
+      SELECT
+        region,
+        branch,
+        ${aggregateColumns('solved_calls', 'tech_solved_calls')},
+        count(*) FILTER (WHERE status_bucket <> 'cancelled')::int AS all_total,
+        count(*) FILTER (WHERE status_bucket IN ('solved', 'tech_solved'))::int AS all_solved,
+        count(*) FILTER (WHERE status_bucket = 'cancelled')::int AS all_cancelled,
+        count(*) FILTER (WHERE status_bucket <> 'cancelled' AND is_part_pending)::int AS all_part_pending,
+        count(*) FILTER (WHERE status_bucket = 'tech_solved')::int AS all_tech_solved
+      FROM normalized
+      GROUP BY region, branch
+    ),
+    branch_rows AS (
+      SELECT
+        -row_number() OVER (ORDER BY branch, region)::int AS "officeId",
+        0::int AS "parentId",
+        branch,
+        region,
+        total_calls,
+        solved_calls,
+        cancelled_calls,
+        CASE WHEN age_2 + age_3 + age_7 + age_15 > 0
+          THEN age_2 + age_3 + age_7 + age_15 ELSE raw_open_calls END AS open_calls,
+        age_2, age_3, age_7, age_15, part_pending,
+        all_total, all_solved, all_cancelled,
+        CASE WHEN age_2 + age_3 + age_7 + age_15 > 0
+          THEN age_2 + age_3 + age_7 + age_15 ELSE raw_open_calls END AS all_open,
+        0::int AS all_age_2,
+        0::int AS all_age_3,
+        0::int AS all_age_7,
+        0::int AS all_age_15,
+        all_part_pending, all_tech_solved,
+        tech_solved_calls,
+        0::int AS deployment_total,
+        0::int AS deployment_done,
+        0::int AS installation_total,
+        0::int AS installation_done,
+        active_eng,
+        population,
+        0::int AS headcount
+      FROM branch_aggregate
+    ),
+    account_aggregate AS (
+      SELECT
+        region,
+        account,
+        ${aggregateColumns('total_solved', 'total_tech_solved')}
+      FROM normalized
+      GROUP BY region, account
+    ),
+    account_rows AS (
+      SELECT
+        region,
+        account,
+        population,
+        total_calls,
+        total_solved,
+        cancelled_calls,
+        CASE WHEN age_2 + age_3 + age_7 + age_15 > 0
+          THEN age_2 + age_3 + age_7 + age_15 ELSE raw_open_calls END AS open_calls,
+        age_2, age_3, age_7, age_15, part_pending,
+        0::int AS deployment_total,
+        0::int AS deployment_done,
+        0::int AS installation_total,
+        0::int AS installation_done,
+        active_eng,
+        0::int AS headcount,
+        total_tech_solved
+      FROM account_aggregate
+    )
+    SELECT
+      COALESCE((SELECT jsonb_agg(to_jsonb(b) ORDER BY b.branch) FROM branch_rows b), '[]'::jsonb)
+        AS branch_summary,
+      COALESCE(
+        (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.account, a.region) FROM account_rows a),
+        '[]'::jsonb
+      ) AS account_summary,
+      (SELECT count(*)::int FROM deduped) AS rows_in_date_range
+  `;
+}
+
+export async function queryClientAggregates(params: ClientAggregateParams): Promise<{
+  branchSummary: BranchSummaryRow[];
+  accountSummary: AccountSummaryRow[];
+  rowsInDateRange: number;
+}> {
+  const startDate = params.startDate ?? `${new Date().getFullYear()}-01-01`;
+  const endDate = params.endDate ?? new Date().toISOString().slice(0, 10);
+  const sourceCodes = resolveSourceFilter(params);
+  const values: unknown[] = [startDate, endDate, [...SNAPSHOT_IMPORT_SOURCE_CODES]];
+  let sourceClause = '';
+  if (sourceCodes) {
+    values.push(sourceCodes);
+    sourceClause = `AND s.code = ANY($${values.length}::text[])`;
+  }
+  values.push(resolveAgingDate(params));
+
+  return withBulkReadClient(async (client) => {
+    const res = await client.query<ClientAggregateQueryRow>(
+      buildClientAggregatesSql(
+        sourceClause,
+        3,
+        values.length,
+        params.bdMisSnapshotMode === true
+      ),
+      values
+    );
+    const row = res.rows[0];
+    return {
+      branchSummary: row?.branch_summary ?? [],
+      accountSummary: row?.account_summary ?? [],
+      rowsInDateRange: Number(row?.rows_in_date_range) || 0,
+    };
+  });
+}
+
 export async function queryClientBranchSummaryFiltered(
   params: ClientAggregateParams
 ): Promise<BranchSummaryRow[]> {
-  const agingDate = resolveAgingDate(params);
-  const rows = await queryDedupedRows(params);
-  return aggregateRows(rows, agingDate);
+  const { branchSummary } = await queryClientAggregates(params);
+  return branchSummary;
 }
 
 export async function queryClientAccountSummaryFiltered(
   params: ClientAggregateParams
 ): Promise<AccountSummaryRow[]> {
-  const agingDate = resolveAgingDate(params);
-  const rows = await queryDedupedRows(params);
-  return aggregateAccountRows(rows, agingDate);
+  const { accountSummary } = await queryClientAggregates(params);
+  return accountSummary;
 }
 
 /** Client counts for BD MIS regional union — full snapshot file rows, not logged_at filtered. */
@@ -352,9 +523,8 @@ export async function queryClientAccountSummaryForBdMis(
 export async function queryClientAccountSummary(
   params: ClientAggregateParams
 ): Promise<AccountSummaryRow[]> {
-  const agingDate = resolveAgingDate(params);
-  const rows = await queryDedupedRows(params);
-  return aggregateAccountRows(rows, agingDate);
+  const { accountSummary } = await queryClientAggregates(params);
+  return accountSummary;
 }
 
 export async function queryAllClientAccountSummary(
@@ -386,6 +556,47 @@ export async function countClientRowsInRange(params: ClientAggregateParams): Pro
       values
     );
     return res.rows[0]?.n ?? 0;
+  });
+}
+
+/** Single dedupe pass grouped by source code (avoids N+1 counts on /meta). */
+export async function countClientRowsInRangeBySource(
+  params: ClientAggregateParams
+): Promise<{ total: number; bySource: Record<string, number> }> {
+  const startDate = params.startDate ?? `${new Date().getFullYear()}-01-01`;
+  const endDate = params.endDate ?? new Date().toISOString().slice(0, 10);
+  const sourceCodes = resolveSourceFilter(params);
+
+  return withBulkReadClient(async (client) => {
+    const values: unknown[] = [startDate, endDate, [...SNAPSHOT_IMPORT_SOURCE_CODES]];
+    let sourceClause = '';
+    if (sourceCodes) {
+      values.push(sourceCodes);
+      sourceClause = `AND s.code = ANY($${values.length}::text[])`;
+    }
+
+    const res = await client.query<{ source_code: string; n: number }>(
+      `
+      SELECT source_code, count(*)::int AS n
+      FROM (
+        ${buildDedupedRowsSql(sourceClause, 3, params.bdMisSnapshotMode === true, {
+          includeSourceCode: true,
+        }).trim()}
+      ) deduped
+      GROUP BY source_code
+      `,
+      values
+    );
+
+    const bySource: Record<string, number> = {};
+    let total = 0;
+    for (const row of res.rows) {
+      const code = String(row.source_code ?? '').toLowerCase();
+      const n = Number(row.n) || 0;
+      bySource[code] = n;
+      total += n;
+    }
+    return { total, bySource };
   });
 }
 

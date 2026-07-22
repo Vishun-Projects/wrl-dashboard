@@ -2,6 +2,7 @@
 
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { HorizontalScrollFade } from '@/components/ui/HorizontalScrollFade';
+import { SortableTh } from '@/components/ui/SortableTh';
 import { ReportErrorBoundary } from '@/features/report/ui/ReportErrorBoundary';
 import { ReportLoadingPanel } from '@/features/report/ui/ReportLoadingFeedback';
 import { RegisterColumnPicker } from '@/features/register';
@@ -10,6 +11,7 @@ import {
   type RegisterPageSize,
 } from '@/features/report/lib/filters';
 import type { RegisterTableColumnKey } from '@/features/register';
+import { toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 
 type ColumnDef = { key: RegisterTableColumnKey; label: string };
 
@@ -31,6 +33,8 @@ type Props = {
   handleRegisterPageSizeChange: (size: number) => void;
   setPage: (page: number) => void;
   fetchData: (page: number) => void;
+  sort: TableSortState<RegisterTableColumnKey> | null;
+  onSortChange: (sort: TableSortState<RegisterTableColumnKey>) => void;
 };
 
 export function ReportRegisterTabPanel({
@@ -51,6 +55,8 @@ export function ReportRegisterTabPanel({
   handleRegisterPageSizeChange,
   setPage,
   fetchData,
+  sort,
+  onSortChange,
 }: Props) {
   return (
     <ReportErrorBoundary label="Call Register">
@@ -83,12 +89,15 @@ export function ReportRegisterTabPanel({
                       #
                     </th>
                     {visibleRegisterColumnDefs.map((col, colIdx) => (
-                      <th
+                      <SortableTh
                         key={col.key}
                         className={`border-r border-slate-100 px-3 py-2.5 text-[11px] font-medium whitespace-nowrap text-slate-500 ${colIdx === 0 ? 'register-table-sticky-col register-table-sticky-col-2' : ''}`}
+                        active={sort?.key === col.key}
+                        dir={sort?.dir}
+                        onClick={() => onSortChange(toggleSort(sort, col.key, 'asc'))}
                       >
                         {col.label}
-                      </th>
+                      </SortableTh>
                     ))}
                   </tr>
                 </thead>

@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
-import {
-  countClientRowsInRange,
-  queryClientAccountSummaryFiltered,
-  queryClientBranchSummaryFiltered,
-} from '@/features/mis-import/lib/aggregate';
+import { queryClientAggregates } from '@/features/mis-import/lib/aggregate';
 import { parseSourceCodesParam } from '@/features/mis-import/lib/source-selection';
-import { listAllSourcesWithBatches } from '@/features/mis-import/lib/config';
+import { sumCompletedBatchRowCounts } from '@/features/mis-import/lib/config';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 export async function GET(req: NextRequest) {
@@ -34,22 +30,15 @@ export async function GET(req: NextRequest) {
       sourceCodes,
     };
 
-    const clientBranchSummary = await queryClientBranchSummaryFiltered(aggregateParams);
-    const clientAccountSummary = await queryClientAccountSummaryFiltered(aggregateParams);
-    const sources = await listAllSourcesWithBatches();
-    const rowsInDateRange = await countClientRowsInRange({
-      sourceCodes,
-      startDate,
-      endDate,
-    });
-    const totalRowsInFiles = sources.reduce(
-      (sum, s) => sum + s.batches.reduce((bSum, b) => bSum + b.rowCount, 0),
-      0
-    );
+    const [{ branchSummary, accountSummary, rowsInDateRange }, totalRowsInFiles] =
+      await Promise.all([
+        queryClientAggregates(aggregateParams),
+        sumCompletedBatchRowCounts(sourceCodes),
+      ]);
 
     return NextResponse.json({
-      clientBranchSummary,
-      clientAccountSummary,
+      clientBranchSummary: branchSummary,
+      clientAccountSummary: accountSummary,
       rowsInDateRange,
       totalRowsInFiles,
     });

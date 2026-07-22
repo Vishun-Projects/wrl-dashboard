@@ -1,19 +1,27 @@
+import { describe, expect, it } from 'vitest';
 import { parseCrmDaddedon, monthChunks, yearChunks, periodDays } from './shared';
 
-{
-  const d = parseCrmDaddedon('11/06/2026 01:22:09');
-  console.assert(d != null && d.toISOString().startsWith('2026-06-11'), 'parse daddedon');
-  const d2 = parseCrmDaddedon('20/07/2026 11:03:02');
-  console.assert(d2 != null && d2.toISOString().startsWith('2026-07-20'), 'parse jul 20 daddedon');
+describe('transaction-entry shared helpers', () => {
+  it('parses CRM daddedon dates', () => {
+    const d = parseCrmDaddedon('11/06/2026 01:22:09');
+    expect(d?.toISOString().startsWith('2026-06-11')).toBe(true);
+    const d2 = parseCrmDaddedon('20/07/2026 11:03:02');
+    expect(d2?.toISOString().startsWith('2026-07-20')).toBe(true);
+  });
 
-  const months = monthChunks('2026-01-15', '2026-03-10');
-  console.assert(months.length === 3, 'month chunks');
-  console.assert(months[0].from === '2026-01-15' && months[2].to === '2026-03-10');
+  it('chunks months and years', () => {
+    const months = monthChunks('2026-01-15', '2026-03-10');
+    expect(months).toHaveLength(3);
+    expect(months[0]?.from).toBe('2026-01-15');
+    expect(months[2]?.to).toBe('2026-03-10');
 
-  const years = yearChunks('2024-06-01', '2026-03-10');
-  console.assert(years.length === 3 && years[0].from === '2024-06-01' && years[2].to === '2026-03-10');
+    const years = yearChunks('2024-06-01', '2026-03-10');
+    expect(years).toHaveLength(3);
+    expect(years[0]?.from).toBe('2024-06-01');
+    expect(years[2]?.to).toBe('2026-03-10');
+  });
 
-  console.assert(periodDays('2024-01-01', '2024-01-07') === 7, 'period days');
-
-  console.log('ok: transaction-entry shared helpers');
-}
+  it('counts period days inclusively', () => {
+    expect(periodDays('2024-01-01', '2024-01-07')).toBe(7);
+  });
+});

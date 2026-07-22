@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ExternalLink } from 'lucide-react';
 import { TrnLink } from '@/components/calls/TrnLink';
+import { SortableTh } from '@/components/ui/SortableTh';
 import type { SerialAuditCallDetail } from '@/features/serial-audit/lib/complaint-audit';
 import { getRepeatedComplaintKeys } from '@/features/serial-audit/lib/complaint-audit';
 import { getCallTypeBadgeClass } from '@/features/report';
@@ -12,6 +13,7 @@ import {
   buildRegisterDeepLinkHref,
   type RegisterDeepLinkParams,
 } from '@/features/report';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 
 const STATUS_BADGE: Record<SerialAuditCallDetail['statusTone'], string> = {
   open: 'badge-open',
@@ -21,6 +23,57 @@ const STATUS_BADGE: Record<SerialAuditCallDetail['statusTone'], string> = {
   cancelled: 'badge-cancelled',
   transferred: 'badge-transferred',
 };
+
+type CallDetailSortKey =
+  | 'trn'
+  | 'callDate'
+  | 'callType'
+  | 'customer'
+  | 'branch'
+  | 'franchisee'
+  | 'pincode'
+  | 'product'
+  | 'complaint'
+  | 'repairDone'
+  | 'status'
+  | 'technician'
+  | 'solvedDate'
+  | 'remarks';
+
+function callDetailSortValue(call: SerialAuditCallDetail, key: CallDetailSortKey): unknown {
+  switch (key) {
+    case 'trn':
+      return call.trn;
+    case 'callDate':
+      return call.callDate ?? '';
+    case 'callType':
+      return call.callType;
+    case 'customer':
+      return call.customer;
+    case 'branch':
+      return call.branch;
+    case 'franchisee':
+      return call.franchisee;
+    case 'pincode':
+      return call.pincode;
+    case 'product':
+      return call.product;
+    case 'complaint':
+      return call.complaint;
+    case 'repairDone':
+      return call.repairDone;
+    case 'status':
+      return call.statusLabel;
+    case 'technician':
+      return call.technician;
+    case 'solvedDate':
+      return call.solvedDate ?? '';
+    case 'remarks':
+      return call.remarks;
+    default:
+      return '';
+  }
+}
 
 type SerialAuditCallsDetailTableProps = {
   calls: SerialAuditCallDetail[];
@@ -51,15 +104,32 @@ export function SerialAuditCallsDetailTable({
   registerLinkContext,
   scopeHint,
 }: SerialAuditCallsDetailTableProps) {
+  const [sort, setSort] = useState<TableSortState<CallDetailSortKey> | null>(null);
+
   const repeatedComplaints = useMemo(
     () => getRepeatedComplaintKeys(calls, { excludeCancelled: true }),
     [calls]
   );
 
+  const sortedCalls = useMemo(() => {
+    if (!sort) return calls;
+    return sortRows(calls, (call) => callDetailSortValue(call, sort.key), sort.dir);
+  }, [calls, sort]);
+
   const isRepeatedComplaint = (call: SerialAuditCallDetail) => {
     if (call.statusTone === 'cancelled') return false;
     const key = call.complaint.trim().toLowerCase().replace(/\s+/g, ' ');
     return repeatedComplaints.has(key);
+  };
+
+  const handleSort = (key: CallDetailSortKey) => {
+    setSort((p) =>
+      toggleSort(
+        p,
+        key,
+        key === 'callDate' || key === 'solvedDate' ? 'desc' : 'asc'
+      )
+    );
   };
 
   const showAllTimeToggle = onShowAllTimeChange != null && !scopeHint;
@@ -136,25 +206,109 @@ export function SerialAuditCallsDetailTable({
           <table className="serial-audit-detail-table">
             <thead>
               <tr>
-                <th>#</th>
-                <th>TRN</th>
-                <th>Raised</th>
-                <th>Type</th>
-                <th>Customer</th>
-                <th>Branch</th>
-                <th>Franchisee</th>
-                <th>Pincode</th>
-                <th>Product</th>
-                <th>Complaint</th>
-                <th>Repair done</th>
-                <th>Status</th>
-                <th>Technician</th>
-                <th>Solved</th>
-                <th>Remarks</th>
+                <SortableTh sortable={false}>#</SortableTh>
+                <SortableTh
+                  active={sort?.key === 'trn'}
+                  dir={sort?.dir}
+                  onClick={() => handleSort('trn')}
+                >
+                  TRN
+                </SortableTh>
+                <SortableTh
+                  active={sort?.key === 'callDate'}
+                  dir={sort?.dir}
+                  onClick={() => handleSort('callDate')}
+                >
+                  Raised
+                </SortableTh>
+                <SortableTh
+                  active={sort?.key === 'callType'}
+                  dir={sort?.dir}
+                  onClick={() => handleSort('callType')}
+                >
+                  Type
+                </SortableTh>
+                <SortableTh
+                  active={sort?.key === 'customer'}
+                  dir={sort?.dir}
+                  onClick={() => handleSort('customer')}
+                >
+                  Customer
+                </SortableTh>
+                <SortableTh
+                  active={sort?.key === 'branch'}
+                  dir={sort?.dir}
+                  onClick={() => handleSort('branch')}
+                >
+                  Branch
+                </SortableTh>
+                <SortableTh
+                  active={sort?.key === 'franchisee'}
+                  dir={sort?.dir}
+                  onClick={() => handleSort('franchisee')}
+                >
+                  Franchisee
+                </SortableTh>
+                <SortableTh
+                  active={sort?.key === 'pincode'}
+                  dir={sort?.dir}
+                  onClick={() => handleSort('pincode')}
+                >
+                  Pincode
+                </SortableTh>
+                <SortableTh
+                  active={sort?.key === 'product'}
+                  dir={sort?.dir}
+                  onClick={() => handleSort('product')}
+                >
+                  Product
+                </SortableTh>
+                <SortableTh
+                  active={sort?.key === 'complaint'}
+                  dir={sort?.dir}
+                  onClick={() => handleSort('complaint')}
+                >
+                  Complaint
+                </SortableTh>
+                <SortableTh
+                  active={sort?.key === 'repairDone'}
+                  dir={sort?.dir}
+                  onClick={() => handleSort('repairDone')}
+                >
+                  Repair done
+                </SortableTh>
+                <SortableTh
+                  active={sort?.key === 'status'}
+                  dir={sort?.dir}
+                  onClick={() => handleSort('status')}
+                >
+                  Status
+                </SortableTh>
+                <SortableTh
+                  active={sort?.key === 'technician'}
+                  dir={sort?.dir}
+                  onClick={() => handleSort('technician')}
+                >
+                  Technician
+                </SortableTh>
+                <SortableTh
+                  active={sort?.key === 'solvedDate'}
+                  dir={sort?.dir}
+                  onClick={() => handleSort('solvedDate')}
+                >
+                  Solved
+                </SortableTh>
+                <SortableTh
+                  active={sort?.key === 'remarks'}
+                  dir={sort?.dir}
+                  onClick={() => handleSort('remarks')}
+                >
+                  Remarks
+                </SortableTh>
               </tr>
             </thead>
             <tbody>
-              {calls.map((call, idx) => {
+              {sortedCalls.map((call, idx) => {
                 const repeated = isRepeatedComplaint(call);
                 return (
                   <tr

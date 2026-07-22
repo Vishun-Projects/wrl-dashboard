@@ -1,6 +1,9 @@
 'use client';
 
 import type { BdMisGrandRow, BdMisRegionalRow } from '@/features/report/lib/bd-mis-summary';
+import { useMemo, useState } from 'react';
+import { SortableTh } from '@/components/ui/SortableTh';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 
 function regionPerfRowClass(region: string): string {
   const key = region.toUpperCase();
@@ -16,13 +19,37 @@ function formatRegionLabel(region: string): string {
   return region.replace(/\s+ZONE$/i, '');
 }
 
+type BdMisSortKey = keyof BdMisRegionalRow;
+
 type Props = {
   rows: BdMisRegionalRow[];
   grand: BdMisGrandRow;
   loading?: boolean;
 };
 
+const TH =
+  'p-2 border border-slate-300 text-center';
+const TH_FIRST = 'p-2 border-r border-slate-300/30';
+
 export function BdMisSummaryPanel({ rows, grand, loading }: Props) {
+  const [sort, setSort] = useState<TableSortState<BdMisSortKey> | null>(null);
+  const sortedRows = useMemo(
+    () => (sort ? sortRows(rows, (r) => r[sort.key], sort.dir) : rows),
+    [rows, sort]
+  );
+
+  const th = (key: BdMisSortKey, label: string, first = false) => (
+    <SortableTh
+      className={first ? TH_FIRST : TH}
+      align={first ? 'left' : 'center'}
+      active={sort?.key === key}
+      dir={sort?.dir}
+      onClick={() => setSort((p) => toggleSort(p, key, key === 'region' ? 'asc' : 'desc'))}
+    >
+      {label}
+    </SortableTh>
+  );
+
   return (
     <section>
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 px-2">
@@ -37,19 +64,19 @@ export function BdMisSummaryPanel({ rows, grand, loading }: Props) {
         <table className="perf-dashboard-table w-full text-left border-collapse text-[11px]">
           <thead className="perf-table-header">
             <tr className="text-white text-[10px] ui-label border-b border-blue-800">
-              <th className="p-2 border-r border-slate-300/30">Region</th>
-              <th className="p-2 border border-slate-300 text-center">Total calls</th>
-              <th className="p-2 border border-slate-300 text-center">Total solved</th>
-              <th className="p-2 border border-slate-300 text-center"># open calls</th>
-              <th className="p-2 border border-slate-300 text-center">{'≤2 days'}</th>
-              <th className="p-2 border border-slate-300 text-center">{'3-7 days'}</th>
-              <th className="p-2 border border-slate-300 text-center">{'8-15 days'}</th>
-              <th className="p-2 border border-slate-300 text-center">{'>15 days'}</th>
-              <th className="p-2 border border-slate-300 text-center"># of active Eng.</th>
+              {th('region', 'Region', true)}
+              {th('total_calls', 'Total calls')}
+              {th('total_solved', 'Total solved')}
+              {th('open_calls', '# open calls')}
+              {th('age_2', '≤2 days')}
+              {th('age_3', '3-7 days')}
+              {th('age_7', '8-15 days')}
+              {th('age_15', '>15 days')}
+              {th('active_eng', '# of active Eng.')}
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {sortedRows.map((row) => (
               <tr
                 key={row.region}
                 className={`${regionPerfRowClass(row.region)} text-slate-900 ui-strong`}

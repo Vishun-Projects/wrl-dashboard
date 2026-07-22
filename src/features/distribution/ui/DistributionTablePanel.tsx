@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { CheckCircle } from 'lucide-react';
+import { SortIndicator } from '@/components/ui/SortableTh';
 
 export type DistributionTableColumn = {
   key: string;
@@ -104,15 +105,19 @@ export function DistributionTablePanel({
                     return (
                       <th
                         key={col.key}
-                        className={`${align} ${col.className ?? ''} ${sortable ? 'distribution-data-table__th--sortable' : ''}`}
+                        className={`${align} ${col.className ?? ''} ${sortable ? 'distribution-data-table__th--sortable table-th-sortable' : ''}`}
                         onClick={sortable ? () => onSort(col.key) : undefined}
+                        title={sortable ? 'Click to sort' : undefined}
                       >
                         <div
                           className={`flex items-center gap-1 ${col.align === 'center' ? 'justify-center' : col.align === 'right' ? 'justify-end' : ''}`}
                         >
                           <span>{col.label}</span>
-                          {sortable && sortField === col.key ? (
-                            sortAsc ? <ChevronUp size={12} aria-hidden /> : <ChevronDown size={12} aria-hidden />
+                          {sortable ? (
+                            <SortIndicator
+                              active={sortField === col.key}
+                              dir={sortAsc ? 'asc' : 'desc'}
+                            />
                           ) : null}
                         </div>
                       </th>

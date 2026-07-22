@@ -19,7 +19,8 @@ const CRM_TIMEOUT_MS = 45_000;
 const REPAIR_ENRICH_CHUNK = 150;
 const TARGET_REPAIRS = ['Motor Replaced', 'Compressor Replaced', 'Gas Charging Done'] as const;
 
-export const DEFAULT_MAJOR_REPAIR_REPEAT_TO = 'vishnu.vishwakarma@westernequipments.com';
+export const DEFAULT_MAJOR_REPAIR_REPEAT_TO = 'sunil.sawant@westernequipments.com';
+export const DEFAULT_MAJOR_REPAIR_REPEAT_CC = 'vishnu.vishwakarma@westernequipments.com';
 
 export function isMajorRepairRepeatAlertEnabled(): boolean {
   return process.env.MAJOR_REPAIR_REPEAT_ALERT_ENABLED !== 'false';
@@ -37,6 +38,10 @@ export function majorRepairRepeatMonths(): number {
 
 export function majorRepairRepeatToEmail(): string {
   return process.env.MAJOR_REPAIR_REPEAT_TO?.trim() || DEFAULT_MAJOR_REPAIR_REPEAT_TO;
+}
+
+export function majorRepairRepeatCcEmail(): string {
+  return process.env.MAJOR_REPAIR_REPEAT_CC?.trim() || DEFAULT_MAJOR_REPAIR_REPEAT_CC;
 }
 
 export function majorRepairRepeatDateWindow(
@@ -251,15 +256,18 @@ async function sendRepeatAlertEmail(params: {
   const transport = createMailTransport(smtp);
   const subject = `WRL Alert: Major repair repeat — ${params.serial} (${params.callCount} calls in ${params.months} months)`;
   const html = buildAlertEmailHtml(params);
+  const to = majorRepairRepeatToEmail();
+  const cc = majorRepairRepeatCcEmail();
   const info = await transport.sendMail({
     from: smtp.from,
-    to: majorRepairRepeatToEmail(),
+    to,
+    cc,
     subject,
     html,
     text: `Major repair repeat: serial ${params.serial}, ${params.callCount} calls. Trigger TRN ${params.triggerTrn}.`,
   });
   console.log(
-    `[sync-worker] major-repair-repeat-alert: sent email for ${params.triggerTrn} (serial ${params.serial}, count ${params.callCount}) messageId=${info.messageId}`
+    `[sync-worker] major-repair-repeat-alert: sent email for ${params.triggerTrn} (serial ${params.serial}, count ${params.callCount}) to=${to} cc=${cc} messageId=${info.messageId}`
   );
 }
 

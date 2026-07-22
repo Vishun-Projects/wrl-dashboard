@@ -45,6 +45,7 @@ import { usePageAlert } from '@/hooks/usePageAlert';
 import { ReportLoadingPanel } from '@/features/report/ui/ReportLoadingFeedback';
 import { DataTableLoading } from '@/components/ui/DataTableLoading';
 import { Loader2 } from 'lucide-react';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 
 type LocationAuditStatus = 'mismatch' | 'ok' | 'no_gps' | 'no_address';
 
@@ -84,6 +85,9 @@ type ByBranch = { branch: string; pincodeMismatch: number; total: number };
 
 const LIST_PAGE_SIZE = 15;
 
+type BranchSortKey = 'branch' | 'pincodeMismatch' | 'total';
+type ListSortKey = 'call' | 'branch' | 'installPin' | 'gpsPin';
+
 function rowKey(row: { vtrnno: string; ncode: string }) {
   return `${row.vtrnno}-${row.ncode}`;
 }
@@ -114,6 +118,8 @@ export default function LocationAuditPage() {
   const [exporting, setExporting] = useState(false);
   const [loadStage, setLoadStage] = useState<'idle' | 'summary' | 'list'>('idle');
   const [listPage, setListPage] = useState(1);
+  const [branchSort, setBranchSort] = useState<TableSortState<BranchSortKey> | null>(null);
+  const [listSort, setListSort] = useState<TableSortState<ListSortKey> | null>(null);
 
   const summaryAbortRef = useRef<AbortController | null>(null);
   const listAbortRef = useRef<AbortController | null>(null);
@@ -401,12 +407,43 @@ export default function LocationAuditPage() {
           ? 'Updating audit…'
           : 'Loading audit…';
 
-  const listTotalPages = Math.max(1, Math.ceil(rows.length / LIST_PAGE_SIZE));
+  const sortedByBranch = useMemo(() => {
+    if (!branchSort) return byBranch;
+    return sortRows(byBranch, (b) => {
+      if (branchSort.key === 'branch') return b.branch;
+      if (branchSort.key === 'pincodeMismatch') return b.pincodeMismatch;
+      return b.total;
+    }, branchSort.dir);
+  }, [byBranch, branchSort]);
+
+  const sortedRows = useMemo(() => {
+    if (!listSort) return rows;
+    return sortRows(rows, (row) => {
+      switch (listSort.key) {
+        case 'call':
+          return row.vtrnno;
+        case 'branch':
+          return row.branchName;
+        case 'installPin':
+          return row.pincode;
+        case 'gpsPin':
+          return row.storedGpsPincode ?? '';
+        default:
+          return '';
+      }
+    }, listSort.dir);
+  }, [rows, listSort]);
+
+  const listTotalPages = Math.max(1, Math.ceil(sortedRows.length / LIST_PAGE_SIZE));
   const listPageSafe = Math.min(listPage, listTotalPages);
   const pagedRows = useMemo(() => {
     const start = (listPageSafe - 1) * LIST_PAGE_SIZE;
-    return rows.slice(start, start + LIST_PAGE_SIZE);
-  }, [rows, listPageSafe]);
+    return sortedRows.slice(start, start + LIST_PAGE_SIZE);
+  }, [sortedRows, listPageSafe]);
+
+  useEffect(() => {
+    setListPage(1);
+  }, [listSort]);
 
   useEffect(() => {
     if (listPage > listTotalPages) setListPage(listTotalPages);
@@ -522,13 +559,44 @@ export default function LocationAuditPage() {
               <AdminTable>
                 <AdminThead>
                   <tr>
-                    <AdminTh>Branch</AdminTh>
-                    <AdminTh className="text-right">Mismatches</AdminTh>
-                    <AdminTh className="text-right">Total</AdminTh>
+                    <AdminTh
+                      sortable
+                      sortKey="branch"
+                      sort={branchSort}
+                      onSort={(k) =>
+                        setBranchSort((p) => toggleSort(p, k as BranchSortKey, 'asc'))
+                      }
+                    >
+                      Branch
+                    </AdminTh>
+                    <AdminTh
+                      className="text-right"
+                      align="right"
+                      sortable
+                      sortKey="pincodeMismatch"
+                      sort={branchSort}
+                      onSort={(k) =>
+                        setBranchSort((p) => toggleSort(p, k as BranchSortKey, 'desc'))
+                      }
+                    >
+                      Mismatches
+                    </AdminTh>
+                    <AdminTh
+                      className="text-right"
+                      align="right"
+                      sortable
+                      sortKey="total"
+                      sort={branchSort}
+                      onSort={(k) =>
+                        setBranchSort((p) => toggleSort(p, k as BranchSortKey, 'desc'))
+                      }
+                    >
+                      Total
+                    </AdminTh>
                   </tr>
                 </AdminThead>
                 <tbody>
-                  {byBranch.slice(0, 15).map((b) => (
+                  {sortedByBranch.slice(0, 15).map((b) => (
                     <AdminTr key={b.branch}>
                       <AdminTd>{b.branch}</AdminTd>
                       <AdminTd className="text-right font-medium text-rose-700">
@@ -573,10 +641,46 @@ export default function LocationAuditPage() {
                 <AdminTable>
                     <AdminThead>
                       <tr>
-                        <AdminTh>Call</AdminTh>
-                        <AdminTh>Branch</AdminTh>
-                        <AdminTh>Install pin</AdminTh>
-                        <AdminTh>GPS pin</AdminTh>
+                        <AdminTh
+                          sortable
+                          sortKey="call"
+                          sort={listSort}
+                          onSort={(k) =>
+                            setListSort((p) => toggleSort(p, k as ListSortKey, 'asc'))
+                          }
+                        >
+                          Call
+                        </AdminTh>
+                        <AdminTh
+                          sortable
+                          sortKey="branch"
+                          sort={listSort}
+                          onSort={(k) =>
+                            setListSort((p) => toggleSort(p, k as ListSortKey, 'asc'))
+                          }
+                        >
+                          Branch
+                        </AdminTh>
+                        <AdminTh
+                          sortable
+                          sortKey="installPin"
+                          sort={listSort}
+                          onSort={(k) =>
+                            setListSort((p) => toggleSort(p, k as ListSortKey, 'asc'))
+                          }
+                        >
+                          Install pin
+                        </AdminTh>
+                        <AdminTh
+                          sortable
+                          sortKey="gpsPin"
+                          sort={listSort}
+                          onSort={(k) =>
+                            setListSort((p) => toggleSort(p, k as ListSortKey, 'asc'))
+                          }
+                        >
+                          GPS pin
+                        </AdminTh>
                       </tr>
                     </AdminThead>
                     <tbody>
@@ -625,8 +729,8 @@ export default function LocationAuditPage() {
               <div className="flex shrink-0 items-center justify-between rounded-b-xl border border-t-0 border-slate-200 bg-bg-canvas px-3 py-2 shadow-sm">
                 <span className="text-[11px] text-slate-500">
                   {(listPageSafe - 1) * LIST_PAGE_SIZE + 1}–
-                  {Math.min(listPageSafe * LIST_PAGE_SIZE, rows.length)} of{' '}
-                  {rows.length.toLocaleString('en-IN')} mismatches
+                  {Math.min(listPageSafe * LIST_PAGE_SIZE, sortedRows.length)} of{' '}
+                  {sortedRows.length.toLocaleString('en-IN')} mismatches
                 </span>
                 <div className="flex items-center gap-1">
                   <button

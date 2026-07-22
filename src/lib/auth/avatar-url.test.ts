@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { avatarProxyUrl, extractAvatarStoragePath, resolveAvatarDisplayUrl } from './avatar-url';
+import { avatarProxyUrl, extractAvatarStoragePath, isOwnAvatarStoragePath, resolveAvatarDisplayUrl } from './avatar-url';
 
 describe('avatar-url', () => {
   it('extracts storage path from VPS public URL', () => {
@@ -16,5 +16,10 @@ describe('avatar-url', () => {
         'https://api.wrl-fsm.cloud/storage/v1/object/public/profiles/avatars/user-1.jpg'
       )
     ).toBe('/api/profile/avatar?path=avatars%2Fuser-1.jpg');
+  });
+
+  it('isOwnAvatarStoragePath matches userId prefix', () => {
+    expect(isOwnAvatarStoragePath('avatars/abc-123.jpg', 'abc')).toBe(true);
+    expect(isOwnAvatarStoragePath('avatars/other-123.jpg', 'abc')).toBe(false);
   });
 });

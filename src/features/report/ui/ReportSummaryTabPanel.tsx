@@ -1,6 +1,6 @@
 'use client';
 
-import React, { type Dispatch, type SetStateAction } from 'react';
+import React, { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { ChevronDown, ChevronRight, X, AlertCircle } from 'lucide-react';
 import { ReportErrorBoundary } from '@/features/report/ui/ReportErrorBoundary';
 import {
@@ -34,10 +34,14 @@ import {
   regionPerfAccountCellClass,
   regionPerfRowClass,
   resolveAccountMisTableRows,
+  mergeBranchRowsByName,
+  mergeBranchSummaryRowsByName,
 } from '@/features/report/lib/report-page-helpers';
 import { BdMisSummaryPanel } from '@/features/report/ui/BdMisSummaryPanel';
 import type { BdMisRegionalRow } from '@/features/report/lib/bd-mis-summary';
 import type { BranchSummaryRow } from '@/lib/summary/derive';
+import { SortableTh } from '@/components/ui/SortableTh';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 
 type Props = {
   accountsData: Array<Record<string, unknown>>;
@@ -74,6 +78,79 @@ export function ReportSummaryTabPanel({
   summaryTabLoading,
   useBdMisExcelUnion,
 }: Props) {
+  type SummarySortKey =
+    | 'region'
+    | 'branch'
+    | 'total_calls'
+    | 'total_solved'
+    | 'cancelled_calls'
+    | 'open_calls'
+    | 'age_2'
+    | 'age_3'
+    | 'age_7'
+    | 'age_15'
+    | 'part_pending'
+    | 'active_eng';
+  const [regionSort, setRegionSort] = useState<TableSortState<Exclude<SummarySortKey, 'branch'>> | null>(null);
+  const [branchSort, setBranchSort] = useState<TableSortState<Exclude<SummarySortKey, 'region'>> | null>(null);
+  const clientOnlyRegionalRows = useMemo(
+    () => buildClientOnlyRegionalRows(clientAccountSummaryData),
+    [clientAccountSummaryData]
+  );
+  const sortedExcelUnionRegionalRows = useMemo(
+    () =>
+      regionSort
+        ? sortRows(excelUnionRegionalRows, (row) => row[regionSort.key], regionSort.dir)
+        : excelUnionRegionalRows,
+    [excelUnionRegionalRows, regionSort]
+  );
+  const sortedClientOnlyRegionalRows = useMemo(
+    () =>
+      regionSort
+        ? sortRows(clientOnlyRegionalRows, (row) => row[regionSort.key], regionSort.dir)
+        : clientOnlyRegionalRows,
+    [clientOnlyRegionalRows, regionSort]
+  );
+  const crmRegionalRows = useMemo(() => {
+    const regions = Array.from(
+      new Set((alignCrmToAccounts ? mergedAccountRowsForTotals : summaryData).map((b) => String(b.region ?? '')))
+    );
+    const getTotals = (region: string) =>
+      alignCrmToAccounts
+        ? rollupCrmAccountsByRegion(accountsData, region)
+        : summaryData
+            .filter((b) => b.region === region)
+            .reduce(
+              (acc, b) => ({
+                total_calls: acc.total_calls + Number(b.total_calls || 0),
+                total_solved: acc.total_solved + Number(b.solved_calls || 0),
+                cancelled_calls: acc.cancelled_calls + Number(b.cancelled_calls || 0),
+                open_calls: acc.open_calls + Number(b.open_calls || 0),
+                age_2: acc.age_2 + Number(b.age_2 || 0),
+                age_3: acc.age_3 + Number(b.age_3 || 0),
+                age_7: acc.age_7 + Number(b.age_7 || 0),
+                age_15: acc.age_15 + Number(b.age_15 || 0),
+                part_pending: acc.part_pending + Number(b.part_pending || 0),
+                active_eng: acc.active_eng + Number(b.active_eng || 0),
+              }),
+              { total_calls: 0, total_solved: 0, cancelled_calls: 0, open_calls: 0, age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0, active_eng: 0 }
+            );
+    const rows = regions.map((region) => ({ region, ...getTotals(region) }));
+    return regionSort ? sortRows(rows, (row) => row[regionSort.key], regionSort.dir) : rows;
+  }, [accountsData, alignCrmToAccounts, mergedAccountRowsForTotals, regionSort, summaryData]);
+  const sortedClientBranches = useMemo(() => {
+    const rows = mergeBranchRowsByName(clientSummaryData);
+    if (!branchSort) return rows;
+    return sortRows(
+      rows,
+      (row) =>
+        branchSort.key === 'branch'
+          ? String(row.branch ?? row.region ?? '')
+          : Number(row[branchSort.key === 'total_solved' ? 'solved_calls' : branchSort.key] ?? 0),
+      branchSort.dir
+    );
+  }, [branchSort, clientSummaryData]);
+
   return (
     <>
           <ReportErrorBoundary label="Summary Dashboard">
@@ -92,22 +169,14 @@ export function ReportSummaryTabPanel({
                   <table className="perf-dashboard-table w-full text-left border-collapse text-[11px]">
                     <thead className="perf-table-header">
                       <tr className="text-white text-[10px] ui-label border-b border-blue-800">
-                        <th className="p-2 border-r border-slate-300/30">Region</th>
-                        <th className="p-2 border border-slate-300 text-center">Total calls</th>
-                        <th className="p-2 border border-slate-300 text-center">Total solved</th>
-                        <th className="p-2 border border-slate-300 text-center">Cancelled</th>
-                        <th className="p-2 border border-slate-300 text-center"># open calls</th>
-                        <th className="p-2 border border-slate-300 text-center">{'≤2 days'}</th>
-                        <th className="p-2 border border-slate-300 text-center">{'3-7 days'}</th>
-                        <th className="p-2 border border-slate-300 text-center">{'8-15 days'}</th>
-                        <th className="p-2 border border-slate-300 text-center">{'>15 days'}</th>
-                        <th className="p-2 border border-slate-300 text-center">Part pending</th>
-                        <th className="p-2 border border-slate-300 text-center"># of active Eng.</th>
+                        {([['region', 'Region', 'p-2 border-r border-slate-300/30', 'left'], ['total_calls', 'Total calls'], ['total_solved', 'Total solved'], ['cancelled_calls', 'Cancelled'], ['open_calls', '# open calls'], ['age_2', '≤2 days'], ['age_3', '3-7 days'], ['age_7', '8-15 days'], ['age_15', '>15 days'], ['part_pending', 'Part pending'], ['active_eng', '# of active Eng.']] as const).map(([key, label, className = 'p-2 border border-slate-300 text-center', align = 'center']) => (
+                          <SortableTh key={key} className={className} align={align as 'left' | 'center'} active={regionSort?.key === key} dir={regionSort?.dir} onClick={() => setRegionSort((prev) => toggleSort(prev, key, key === 'region' ? 'asc' : 'desc'))}>{label}</SortableTh>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
                       {useBdMisExcelUnion
-                        ? excelUnionRegionalRows.map((row) => (
+                        ? sortedExcelUnionRegionalRows.map((row) => (
                             <tr
                               key={row.region}
                               className={`${regionPerfRowClass(row.region)} text-slate-900 ui-strong`}
@@ -198,7 +267,7 @@ export function ReportSummaryTabPanel({
                             </tr>
                           ))
                         : clientOnlyMode
-                        ? buildClientOnlyRegionalRows(clientAccountSummaryData).map((row) => {
+                        ? sortedClientOnlyRegionalRows.map((row) => {
                             const open = row.open_calls;
                             return (
                               <tr
@@ -225,15 +294,7 @@ export function ReportSummaryTabPanel({
                               </tr>
                             );
                           })
-                        : Array.from(
-                            new Set(
-                              (alignCrmToAccounts ? mergedAccountRowsForTotals : summaryData).map((b) =>
-                                String(b.region ?? '')
-                              )
-                            )
-                          )
-                            .sort()
-                            .map((region) => {
+                        : crmRegionalRows.map(({ region }) => {
                         const totals = alignCrmToAccounts
                           ? (() => {
                               const r = rollupCrmAccountsByRegion(accountsData, region);
@@ -687,17 +748,9 @@ export function ReportSummaryTabPanel({
                   <table className="perf-dashboard-table w-full text-left border-collapse text-[11px]">
                     <thead className="perf-table-header sticky top-0 z-20 shadow-sm">
                       <tr className="text-white text-[10px] ui-label border-b border-blue-800">
-                        <th className="p-2 border-r border-slate-300/30 min-w-[200px]">Branches</th>
-                        <th className="p-2 border border-slate-300 text-center">Total calls</th>
-                        <th className="p-2 border border-slate-300 text-center">Total solved</th>
-                        <th className="p-2 border border-slate-300 text-center">Cancelled</th>
-                        <th className="p-2 border border-slate-300 text-center"># open calls</th>
-                        <th className="p-2 border border-slate-300 text-center">{'≤2 days'}</th>
-                        <th className="p-2 border border-slate-300 text-center">{'3-7 days'}</th>
-                        <th className="p-2 border border-slate-300 text-center">{'8-15 days'}</th>
-                        <th className="p-2 border border-slate-300 text-center">{'>15 days'}</th>
-                        <th className="p-2 border border-slate-300 text-center">Part pending</th>
-                        <th className="p-2 border border-slate-300 text-center"># of active Eng.</th>
+                        {([['branch', 'Branches', 'p-2 border-r border-slate-300/30 min-w-[200px]', 'left'], ['total_calls', 'Total calls'], ['total_solved', 'Total solved'], ['cancelled_calls', 'Cancelled'], ['open_calls', '# open calls'], ['age_2', '≤2 days'], ['age_3', '3-7 days'], ['age_7', '8-15 days'], ['age_15', '>15 days'], ['part_pending', 'Part pending'], ['active_eng', '# of active Eng.']] as const).map(([key, label, className = 'p-2 border border-slate-300 text-center', align = 'center']) => (
+                          <SortableTh key={key} className={className} align={align as 'left' | 'center'} active={branchSort?.key === key} dir={branchSort?.dir} onClick={() => setBranchSort((prev) => toggleSort(prev, key, key === 'branch' ? 'asc' : 'desc'))}>{label}</SortableTh>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
@@ -709,7 +762,7 @@ export function ReportSummaryTabPanel({
                             </td>
                           </tr>
                         ) : (
-                          clientSummaryData.map((branch, idx) => (
+                          sortedClientBranches.map((branch, idx) => (
                             <tr key={idx} className="hover:bg-bg-soft text-slate-900">
                               <td className="p-2 border border-slate-300">
                                 {String(branch.branch ?? branch.region ?? '')}
@@ -738,31 +791,39 @@ export function ReportSummaryTabPanel({
                         const regionBranches = summaryData.filter(b => b.region === region);
                         if (regionBranches.length === 0) return null;
 
-                        const topLevel = regionBranches.filter(b =>
-                          b.parentId === 0 || !regionBranches.find(p => p.officeId === b.parentId)
-                        ).sort((a, b) => Number(b.total_calls) - Number(a.total_calls));
+                        const topLevel = mergeBranchSummaryRowsByName(
+                          regionBranches.filter(
+                            (b) =>
+                              b.parentId === 0 ||
+                              !regionBranches.find((p) => p.officeId === b.parentId)
+                          )
+                        );
 
                         const bgClass = regionPerfRowClass(region);
+                        const getAggregate = (item: BranchSummaryRow, key: keyof BranchSummaryRow) => {
+                          const getAllChildren = (id: number): BranchSummaryRow[] => {
+                            const direct = regionBranches.filter((b) => b.parentId === id);
+                            return [...direct, ...direct.flatMap((child) => getAllChildren(child.officeId))];
+                          };
+                          return Number(item[key] || 0) + getAllChildren(item.officeId).reduce((sum, child) => sum + Number(child[key] || 0), 0);
+                        };
+                        const sortedTopLevel = branchSort
+                          ? sortRows(
+                              topLevel,
+                              (branch) =>
+                                branchSort.key === 'branch'
+                                  ? branch.branch
+                                  : getAggregate(branch, branchSort.key === 'total_solved' ? 'solved_calls' : branchSort.key),
+                              branchSort.dir
+                            )
+                          : topLevel;
 
                         return (
                           <React.Fragment key={region}>
-                            {topLevel.map(branch => {
+                            {sortedTopLevel.map(branch => {
                               const children = regionBranches.filter(b => b.parentId === branch.officeId);
                               const hasChildren = children.length > 0;
                               const isExpanded = expandedBranches[branch.officeId];
-
-                              const getAggregate = (item: BranchSummaryRow, key: keyof BranchSummaryRow) => {
-                                const getAllChildren = (id: number): BranchSummaryRow[] => {
-                                  const direct = regionBranches.filter((b) => b.parentId === id);
-                                  let all = [...direct];
-                                  direct.forEach((d) => {
-                                    all = [...all, ...getAllChildren(d.officeId)];
-                                  });
-                                  return all;
-                                };
-                                const allDescendants = getAllChildren(item.officeId);
-                                return Number(item[key] || 0) + allDescendants.reduce((sum, d) => sum + Number(d[key] || 0), 0);
-                              };
 
                               return (
                                 <React.Fragment key={`${region}::${branch.officeId}::${branch.branch}`}>

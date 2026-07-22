@@ -5,6 +5,7 @@ import { requireRequestUser } from '@/lib/auth/server-user';
 import {
   avatarProxyUrl,
   buildAvatarStoragePath,
+  isOwnAvatarStoragePath,
   isValidAvatarStoragePath,
 } from '@/lib/auth/avatar-url';
 import { supabaseAdmin } from '@/lib/supabase/admin';
@@ -23,6 +24,25 @@ export async function GET(request: Request) {
   const path = String(searchParams.get('path') ?? '').trim();
   if (!isValidAvatarStoragePath(path)) {
     return NextResponse.json({ error: 'Invalid avatar path' }, { status: 400 });
+  }
+
+  // Own avatar always OK. Others only if the path is someone's published avatar_url
+  // (admin list / comment authors) — blocks probing arbitrary storage objects.
+  if (!isOwnAvatarStoragePath(path, user.id)) {
+    const rows = await prisma.$queryRawUnsafe<Array<{ ok: number }>>(
+      `SELECT 1 AS ok FROM public.app_users
+       WHERE avatar_url IS NOT NULL
+         AND (
+           avatar_url = $1
+           OR avatar_url LIKE $2
+         )
+       LIMIT 1`,
+      path,
+      `%/${path}`
+    );
+    if (!rows.length) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
   }
 
   const { data, error } = await supabaseAdmin.storage.from('profiles').download(path);

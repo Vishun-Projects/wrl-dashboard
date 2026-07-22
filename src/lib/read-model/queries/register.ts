@@ -18,8 +18,36 @@ import {
   REGISTER_HOT_COLUMNS,
 } from '@/lib/read-model/queries/register-columns';
 import { REGISTER_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
+import { HOT_RESOLVED_REGION_SQL } from '@/lib/read-model/queries/hot-region';
 
 export { REGISTER_BULK_MAX_ROWS };
+
+/** Sortable register grid columns (whitelist; keep in sync with UI column keys). */
+const REGISTER_SORT_SQL = {
+  UniqueCallNo: 'h.vtrnno',
+  vcclid: 'h.vcclid',
+  calltype: 'h.call_type',
+  callsdtrndate: 'h.logged_at',
+  PartyName: 'h.party_name',
+  officename: 'h.branch_name',
+  region: HOT_RESOLVED_REGION_SQL,
+  account: 'h.account',
+  franchisee_name: 'h.franchisee_name',
+  Pincode: 'h.pincode',
+  itemname: 'h.item_name',
+  callsvserialno: 'h.serial',
+  WCO: 'h.wco',
+  serviceman: 'h.engineer_name',
+  vcomplaint: 'h.complaint',
+  Status: 'h.status_label',
+  callsolveddate: 'h.solved_at',
+  vsolveremarks: 'h.solve_remarks',
+  vpersoncalling: 'h.contact_person',
+  vinsttel1: 'h.phone',
+  vinstaddress: 'h.address',
+} as const;
+
+export type RegisterSortBy = keyof typeof REGISTER_SORT_SQL;
 
 const STATUS_LABEL_TO_BUCKET: Record<string, string> = {
   'Open Unallocated': 'open_unallocated',
@@ -59,6 +87,8 @@ export type RegisterPostgresParams = {
   cursorNcode?: number;
   /** Prefetched CRM (ncode, office) pairs for Repair done filter (Postgres path). */
   repairCallKeys?: Array<{ ncode: number; officeId: number }>;
+  sortBy?: RegisterSortBy;
+  sortDir?: 'asc' | 'desc';
 };
 
 export type RegisterHotDateField = 'logged_at' | 'solved_at';
@@ -81,8 +111,29 @@ export function registerHotOrderBy(column?: string | null): string {
     : REGISTER_HOT_ORDER_BY;
 }
 
+export function parseRegisterSortBy(value?: string | null): RegisterSortBy | undefined {
+  return value && Object.hasOwn(REGISTER_SORT_SQL, value)
+    ? (value as RegisterSortBy)
+    : undefined;
+}
+
+export function resolveRegisterHotOrderBy(
+  dateFilterColumn?: string | null,
+  sortBy?: string | null,
+  sortDir?: string | null
+): string {
+  const column =
+    sortBy && Object.hasOwn(REGISTER_SORT_SQL, sortBy)
+      ? REGISTER_SORT_SQL[sortBy as RegisterSortBy]
+      : undefined;
+  if (!column) return registerHotOrderBy(dateFilterColumn);
+  const direction = sortDir === 'asc' ? 'ASC' : 'DESC';
+  return `${column} ${direction} NULLS LAST, h.ncode DESC`;
+}
+
 export function hasRegisterKeysetCursor(params: RegisterPostgresParams): boolean {
   return (
+    !params.sortBy &&
     params.cursorNcode != null &&
     params.cursorNcode > 0 &&
     params.cursorLoggedAt != null &&
@@ -594,7 +645,11 @@ export async function queryRegisterFilterOptionsFromPostgres(
 export async function queryRegisterFromPostgres(params: RegisterPostgresParams) {
   const { sql: whereSql, values } = buildWhere(params);
   const useKeyset = hasRegisterKeysetCursor(params);
-  const orderBy = registerHotOrderBy(params.dateFilterColumn);
+  const orderBy = resolveRegisterHotOrderBy(
+    params.dateFilterColumn,
+    params.sortBy,
+    params.sortDir
+  );
   const { text, values: listValues } = buildRegisterListQuery(
     REGISTER_HOT_COLUMNS,
     whereSql,

@@ -384,6 +384,8 @@ export function buildRegisterListQueryKey(parts: {
   repairFilter: string[];
   agingAsOf: string;
   pageLimit: number;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
 }) {
   return JSON.stringify({
     ...parts,

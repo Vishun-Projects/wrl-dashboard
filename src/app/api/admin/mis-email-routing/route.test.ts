@@ -18,17 +18,21 @@ vi.mock('@/lib/auth/load-user-auth', () => ({
   loadUserAuth: (...args: unknown[]) => loadUserAuth(...args),
 }));
 
-vi.mock('@/features/mis-email/lib/routing-rules', async () => {
-  const actual = await vi.importActual<typeof import('@/features/mis-email/lib/routing-rules')>(
-    '@/features/mis-email/lib/routing-rules'
-  );
-  return {
-    ...actual,
-    listMisEmailRoutingRules: (...args: unknown[]) => listMisEmailRoutingRules(...args),
-    createMisEmailRoutingRule: (...args: unknown[]) => createMisEmailRoutingRule(...args),
-    updateMisEmailRoutingRule: (...args: unknown[]) => updateMisEmailRoutingRule(...args),
-  };
-});
+vi.mock('@/features/mis-email/lib/routing-rules', () => ({
+  canManageMisEmailRouting: (user: {
+    role?: string;
+    permissions?: string[];
+    office_ids?: string[];
+  }) =>
+    user.role === 'hod' ||
+    (user.permissions ?? []).includes('view_all_offices') ||
+    (user.permissions ?? []).includes('manage_users') ||
+    (user.permissions ?? []).includes('manage_roles'),
+  listMisEmailRoutingRules: (...args: unknown[]) => listMisEmailRoutingRules(...args),
+  createMisEmailRoutingRule: (...args: unknown[]) => createMisEmailRoutingRule(...args),
+  updateMisEmailRoutingRule: (...args: unknown[]) => updateMisEmailRoutingRule(...args),
+  deleteMisEmailRoutingRule: vi.fn(),
+}));
 
 describe('mis-email-routing API auth', () => {
   beforeEach(() => {

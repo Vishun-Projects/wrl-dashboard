@@ -2,6 +2,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { BarChart3, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { SortableTh } from '@/components/ui/SortableTh';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 import {
   buildInvolvementPairKey,
   SERIAL_AUDIT_INVOLVEMENT_PAGE_SIZES,
@@ -19,33 +21,23 @@ type SerialAuditAnalysisPanelProps = {
   onPairSelect?: (entry: RepeatInvolvementEntry | null) => void;
 };
 
-const INVOLVEMENT_COLUMN_HELP = {
-  asp: 'Authorised Service Provider',
-  machines: 'Distinct serial numbers with repeat calls handled by this pair',
-  compressor: 'Serials where this pair logged compressor work on a repeat call',
-  gas: 'Serials where this pair logged gas charging on a repeat call',
-  motor: 'Serials where this pair logged motor work on a repeat call',
-} as const;
+type InvolvementSortKey = 'asp' | 'machines' | 'compressor' | 'gas' | 'motor';
 
-function InvolvementColumnHeader({
-  label,
-  help,
-  align = 'left',
-}: {
-  label: string;
-  help?: string;
-  align?: 'left' | 'right';
-}) {
-  return (
-    <th
-      className={`px-1 py-2 text-[9px] font-semibold uppercase tracking-wide text-slate-500 ${
-        align === 'right' ? 'text-right' : 'text-left'
-      }`}
-      title={help}
-    >
-      {label}
-    </th>
-  );
+function involvementSortValue(entry: RepeatInvolvementEntry, key: InvolvementSortKey): unknown {
+  switch (key) {
+    case 'asp':
+      return `${entry.franchisee} ${entry.technician}`;
+    case 'machines':
+      return entry.serialCount;
+    case 'compressor':
+      return entry.compressor;
+    case 'gas':
+      return entry.gasCharging;
+    case 'motor':
+      return entry.motor;
+    default:
+      return '';
+  }
 }
 
 function InvolvementTable({
@@ -53,11 +45,15 @@ function InvolvementTable({
   rankOffset,
   selectedPairKey,
   onPairSelect,
+  sort,
+  onSort,
 }: {
   entries: SerialAuditRepeatInvolvement['entries'];
   rankOffset: number;
   selectedPairKey?: string | null;
   onPairSelect?: (entry: RepeatInvolvementEntry | null) => void;
+  sort: TableSortState<InvolvementSortKey> | null;
+  onSort: (key: InvolvementSortKey) => void;
 }) {
   if (entries.length === 0) {
     return (
@@ -78,19 +74,55 @@ function InvolvementTable({
       </colgroup>
       <thead>
         <tr className="border-b border-slate-200 bg-bg-soft">
-          <InvolvementColumnHeader label="ASP — Technician" help={INVOLVEMENT_COLUMN_HELP.asp} />
-          <InvolvementColumnHeader
-            label="M/C's"
-            help={INVOLVEMENT_COLUMN_HELP.machines}
+          <SortableTh
+            className="px-1 py-2 text-[9px] font-semibold uppercase tracking-wide text-slate-500"
+            title="Authorised Service Provider"
+            active={sort?.key === 'asp'}
+            dir={sort?.dir}
+            onClick={() => onSort('asp')}
+          >
+            ASP — Technician
+          </SortableTh>
+          <SortableTh
             align="right"
-          />
-          <InvolvementColumnHeader
-            label="Comp."
-            help={INVOLVEMENT_COLUMN_HELP.compressor}
+            className="px-1 py-2 text-[9px] font-semibold uppercase tracking-wide text-slate-500"
+            title="Distinct serial numbers with repeat calls handled by this pair"
+            active={sort?.key === 'machines'}
+            dir={sort?.dir}
+            onClick={() => onSort('machines')}
+          >
+            M/C&apos;s
+          </SortableTh>
+          <SortableTh
             align="right"
-          />
-          <InvolvementColumnHeader label="Gas" help={INVOLVEMENT_COLUMN_HELP.gas} align="right" />
-          <InvolvementColumnHeader label="Motor" help={INVOLVEMENT_COLUMN_HELP.motor} align="right" />
+            className="px-1 py-2 text-[9px] font-semibold uppercase tracking-wide text-slate-500"
+            title="Serials where this pair logged compressor work on a repeat call"
+            active={sort?.key === 'compressor'}
+            dir={sort?.dir}
+            onClick={() => onSort('compressor')}
+          >
+            Comp.
+          </SortableTh>
+          <SortableTh
+            align="right"
+            className="px-1 py-2 text-[9px] font-semibold uppercase tracking-wide text-slate-500"
+            title="Serials where this pair logged gas charging on a repeat call"
+            active={sort?.key === 'gas'}
+            dir={sort?.dir}
+            onClick={() => onSort('gas')}
+          >
+            Gas
+          </SortableTh>
+          <SortableTh
+            align="right"
+            className="px-1 py-2 text-[9px] font-semibold uppercase tracking-wide text-slate-500"
+            title="Serials where this pair logged motor work on a repeat call"
+            active={sort?.key === 'motor'}
+            dir={sort?.dir}
+            onClick={() => onSort('motor')}
+          >
+            Motor
+          </SortableTh>
         </tr>
       </thead>
       <tbody>
@@ -188,8 +220,18 @@ export function SerialAuditAnalysisPanel({
 }: SerialAuditAnalysisPanelProps) {
   const [pageSize, setPageSize] = useState<SerialAuditInvolvementPageSize>(10);
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<TableSortState<InvolvementSortKey> | null>(null);
 
-  const totalEntries = analysis.entries.length;
+  const sortedEntries = useMemo(() => {
+    if (!sort) return analysis.entries;
+    return sortRows(
+      analysis.entries,
+      (entry) => involvementSortValue(entry, sort.key),
+      sort.dir
+    );
+  }, [analysis.entries, sort]);
+
+  const totalEntries = sortedEntries.length;
   const totalPages = Math.max(1, Math.ceil(totalEntries / pageSize));
 
   const pageSizeOptions = useMemo(() => {
@@ -200,7 +242,7 @@ export function SerialAuditAnalysisPanel({
 
   useEffect(() => {
     setPage(1);
-  }, [pageSize, totalEntries, dateRangeLabel]);
+  }, [pageSize, totalEntries, dateRangeLabel, sort]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -208,10 +250,14 @@ export function SerialAuditAnalysisPanel({
 
   const pagedEntries = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return analysis.entries.slice(start, start + pageSize);
-  }, [analysis.entries, page, pageSize]);
+    return sortedEntries.slice(start, start + pageSize);
+  }, [sortedEntries, page, pageSize]);
 
   const rankOffset = (page - 1) * pageSize;
+
+  const handleSort = (key: InvolvementSortKey) => {
+    setSort((p) => toggleSort(p, key, key === 'asp' ? 'asc' : 'desc'));
+  };
 
   return (
     <section className="flex min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-bg-canvas shadow-sm lg:max-h-full">
@@ -260,6 +306,8 @@ export function SerialAuditAnalysisPanel({
             rankOffset={rankOffset}
             selectedPairKey={selectedPairKey}
             onPairSelect={onPairSelect}
+            sort={sort}
+            onSort={handleSort}
           />
         </div>
       )}

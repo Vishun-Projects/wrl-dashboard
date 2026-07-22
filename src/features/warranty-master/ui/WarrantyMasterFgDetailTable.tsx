@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import { SortableTh } from '@/components/ui/SortableTh';
 import { TruncatedText } from '@/components/ui/TruncatedText';
-import {
-  sortWarrantyMasterFgDetailRows,
-  type WarrantyMasterFgDetailRow,
-} from '@/features/warranty-master/lib';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
+import type { WarrantyMasterFgDetailRow } from '@/features/warranty-master/lib';
+
+type FgDetailSortKey = 'fgModel' | 'machineCount';
 
 type WarrantyMasterFgDetailTableProps = {
   rows: WarrantyMasterFgDetailRow[];
@@ -24,12 +25,27 @@ export function WarrantyMasterFgDetailTable({
   warrantyMonths,
   loading = false,
 }: WarrantyMasterFgDetailTableProps) {
-  const sortedRows = useMemo(() => sortWarrantyMasterFgDetailRows(rows), [rows]);
+  const [sort, setSort] = useState<TableSortState<FgDetailSortKey>>({
+    key: 'fgModel',
+    dir: 'asc',
+  });
+
+  const sortedRows = useMemo(() => {
+    return sortRows(
+      rows,
+      (row) => (sort.key === 'fgModel' ? row.fgModel : row.machineCount),
+      sort.dir
+    );
+  }, [rows, sort]);
 
   const subtotal = useMemo(
     () => sortedRows.reduce((sum, r) => sum + r.machineCount, 0),
     [sortedRows]
   );
+
+  const handleSort = (key: FgDetailSortKey) => {
+    setSort((p) => toggleSort(p, key, key === 'fgModel' ? 'asc' : 'desc'));
+  };
 
   if (loading && sortedRows.length === 0) {
     return (
@@ -71,8 +87,21 @@ export function WarrantyMasterFgDetailTable({
         </colgroup>
         <thead>
           <tr>
-            <th>FG model</th>
-            <th className="text-right">Count of M/c</th>
+            <SortableTh
+              active={sort.key === 'fgModel'}
+              dir={sort.dir}
+              onClick={() => handleSort('fgModel')}
+            >
+              FG model
+            </SortableTh>
+            <SortableTh
+              align="right"
+              active={sort.key === 'machineCount'}
+              dir={sort.dir}
+              onClick={() => handleSort('machineCount')}
+            >
+              Count of M/c
+            </SortableTh>
           </tr>
         </thead>
         <tbody>

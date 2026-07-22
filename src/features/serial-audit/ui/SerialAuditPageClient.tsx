@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   ExternalLink,
   RefreshCw,
+  Download,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { RegisterPageFilters } from '@/features/register';
@@ -41,6 +42,9 @@ import {
 } from '@/features/report';
 import { callCorpusStore } from '@/features/report';
 import { MAX_CLIENT_CORPUS_DAYS } from '@/lib/trhcalls/query';
+import { exportSerialAuditCsv } from '@/features/serial-audit/lib/export-csv';
+import { triggerBlobDownload } from '@/features/report';
+import { feedback } from '@/lib/ui/feedback';
 import {
   defaultSerialAuditRepairFilterValues,
   mergeRepairCountsIntoRows,
@@ -82,12 +86,45 @@ import type { ExtraActiveFilterChip } from '@/features/report';
 import { MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS } from '@/features/serial-audit/lib/constants';
 import { SerialAuditCallsDetailTable } from '@/features/serial-audit/ui/SerialAuditCallsDetailTable';
 import { SerialAuditAnalysisPanel } from '@/features/serial-audit/ui/SerialAuditAnalysisPanel';
-import { feedback } from '@/lib/ui/feedback';
 import { SerialRepairLegend } from '@/features/serial-audit/ui/SerialRepairLegend';
 import { repairSemantics } from '@/lib/ui/semantics';
+import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 
 const DEFAULT_RISK_THRESHOLD = 3;
 const SERIAL_PAGE_SIZE = 25;
+
+type SerialAuditSortKey =
+  | 'serial'
+  | 'complaints'
+  | 'open'
+  | 'solved'
+  | 'cancelled'
+  | 'branches'
+  | 'customers'
+  | 'lastDate';
+
+function serialAuditSortValue(row: SerialAuditRow, key: SerialAuditSortKey): unknown {
+  switch (key) {
+    case 'serial':
+      return row.serial;
+    case 'complaints':
+      return row.complaintCount;
+    case 'open':
+      return row.openCount;
+    case 'solved':
+      return row.solvedCount;
+    case 'cancelled':
+      return row.cancelledCount;
+    case 'branches':
+      return row.uniqueBranches.join(', ');
+    case 'customers':
+      return row.uniqueCustomers.join(', ');
+    case 'lastDate':
+      return row.lastComplaintDate ?? '';
+    default:
+      return '';
+  }
+}
 
 /** Survives tab navigation — in-flight loads keep running in the background. */
 const serialAuditBackgroundCache = new Map<
@@ -231,6 +268,7 @@ export default function SerialAuditPage() {
   const [showAspBreakdown, setShowAspBreakdown] = useState(false);
   const [selectedInvolvementPair, setSelectedInvolvementPair] =
     useState<RepeatInvolvementEntry | null>(null);
+  const [sort, setSort] = useState<TableSortState<SerialAuditSortKey> | null>(null);
   const loadInFlightRef = useRef<Promise<void> | null>(null);
   const loadGenerationRef = useRef(0);
   const lastPaintedKeyRef = useRef<string | null>(null);
@@ -981,7 +1019,7 @@ export default function SerialAuditPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [serialSearch, minCount, includeCancelled, filterParts, appliedRepairs]);
+  }, [serialSearch, minCount, includeCancelled, filterParts, appliedRepairs, sort]);
 
   useEffect(() => {
     setPage(1);
@@ -1054,10 +1092,15 @@ export default function SerialAuditPage() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
+  const sortedDisplayedRows = useMemo(() => {
+    if (!sort) return displayedRows;
+    return sortRows(displayedRows, (row) => serialAuditSortValue(row, sort.key), sort.dir);
+  }, [displayedRows, sort]);
+
   const pagedRows = useMemo(() => {
     const start = (page - 1) * SERIAL_PAGE_SIZE;
-    return displayedRows.slice(start, start + SERIAL_PAGE_SIZE);
-  }, [displayedRows, page]);
+    return sortedDisplayedRows.slice(start, start + SERIAL_PAGE_SIZE);
+  }, [sortedDisplayedRows, page]);
 
   useEffect(() => {
     if (loading || loadError || displayedRows.length === 0) return;
@@ -1115,6 +1158,16 @@ export default function SerialAuditPage() {
   const listBodyLayoutClass = showAspBreakdown
     ? 'grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_440px] lg:items-stretch [&>*]:min-h-0'
     : 'min-h-0 flex-1';
+
+  const handleSerialSort = (key: SerialAuditSortKey) => {
+    setSort((p) =>
+      toggleSort(
+        p,
+        key,
+        key === 'serial' || key === 'branches' || key === 'customers' ? 'asc' : 'desc'
+      )
+    );
+  };
 
   const toggleExpand = (serial: string) => {
     setExpandedSerial((prev) => {
@@ -1245,6 +1298,29 @@ export default function SerialAuditPage() {
           />
           ASP involvement panel
         </label>
+        <button
+          type="button"
+          disabled={loading || displayedRows.length === 0}
+          onClick={() => {
+            try {
+              const stamp = new Date().toISOString().slice(0, 10);
+              const csv = exportSerialAuditCsv(displayedRows);
+              void triggerBlobDownload(
+                new Blob([csv], { type: 'text/csv;charset=utf-8' }),
+                `serial-audit-${stamp}.csv`
+              );
+              feedback.actionSuccess('CSV download started');
+            } catch (err) {
+              console.error(err);
+              feedback.actionFailed('CSV export failed');
+            }
+          }}
+          className="inline-flex items-center gap-1.5 rounded border border-slate-200 bg-bg-canvas px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-bg-soft disabled:opacity-50"
+          title="Download filtered serial list as CSV"
+        >
+          <Download size={13} />
+          CSV
+        </button>
       </AdminToolbar>
       </div>
 
@@ -1350,8 +1426,21 @@ export default function SerialAuditPage() {
                   <AdminTh className="w-8">
                     <span className="sr-only">Expand</span>
                   </AdminTh>
-                  <AdminTh>Serial</AdminTh>
-                  <AdminTh align="right">
+                  <AdminTh
+                    sortable
+                    sortKey="serial"
+                    sort={sort}
+                    onSort={(k) => handleSerialSort(k as SerialAuditSortKey)}
+                  >
+                    Serial
+                  </AdminTh>
+                  <AdminTh
+                    align="right"
+                    sortable
+                    sortKey="complaints"
+                    sort={sort}
+                    onSort={(k) => handleSerialSort(k as SerialAuditSortKey)}
+                  >
                     <span
                       title={
                         selectedInvolvementPair
@@ -1362,12 +1451,59 @@ export default function SerialAuditPage() {
                       {selectedInvolvementPair ? 'Calls' : 'Complaints'}
                     </span>
                   </AdminTh>
-                  <AdminTh align="right">Open</AdminTh>
-                  <AdminTh align="right">Solved</AdminTh>
-                  {includeCancelled ? <AdminTh align="right">Cancelled</AdminTh> : null}
-                  <AdminTh>Branches</AdminTh>
-                  <AdminTh>Customers</AdminTh>
-                  <AdminTh>Last date</AdminTh>
+                  <AdminTh
+                    align="right"
+                    sortable
+                    sortKey="open"
+                    sort={sort}
+                    onSort={(k) => handleSerialSort(k as SerialAuditSortKey)}
+                  >
+                    Open
+                  </AdminTh>
+                  <AdminTh
+                    align="right"
+                    sortable
+                    sortKey="solved"
+                    sort={sort}
+                    onSort={(k) => handleSerialSort(k as SerialAuditSortKey)}
+                  >
+                    Solved
+                  </AdminTh>
+                  {includeCancelled ? (
+                    <AdminTh
+                      align="right"
+                      sortable
+                      sortKey="cancelled"
+                      sort={sort}
+                      onSort={(k) => handleSerialSort(k as SerialAuditSortKey)}
+                    >
+                      Cancelled
+                    </AdminTh>
+                  ) : null}
+                  <AdminTh
+                    sortable
+                    sortKey="branches"
+                    sort={sort}
+                    onSort={(k) => handleSerialSort(k as SerialAuditSortKey)}
+                  >
+                    Branches
+                  </AdminTh>
+                  <AdminTh
+                    sortable
+                    sortKey="customers"
+                    sort={sort}
+                    onSort={(k) => handleSerialSort(k as SerialAuditSortKey)}
+                  >
+                    Customers
+                  </AdminTh>
+                  <AdminTh
+                    sortable
+                    sortKey="lastDate"
+                    sort={sort}
+                    onSort={(k) => handleSerialSort(k as SerialAuditSortKey)}
+                  >
+                    Last date
+                  </AdminTh>
                 </tr>
               </AdminThead>
               <tbody>

@@ -3,12 +3,14 @@ import {
   adjustRegisterSummaryBucket,
   corpusSpanDays,
   formatRelativeTime,
+  mergeBranchSummaryRowsByName,
   registerPageCacheGet,
   registerPageCachePut,
   resolveAccountMisTableRows,
   type RegisterPageCacheEntry,
 } from '@/features/report/lib/report-page-helpers';
 import type { RegisterSummary } from '@/features/report/lib/search';
+import type { BranchSummaryRow } from '@/lib/summary/derive';
 
 describe('report-page-helpers', () => {
   it('corpusSpanDays inclusive', () => {
@@ -57,5 +59,49 @@ describe('report-page-helpers', () => {
 
   it('formatRelativeTime empty for null', () => {
     expect(formatRelativeTime(null)).toBe('');
+  });
+
+  it('mergeBranchSummaryRowsByName sums duplicate branch labels', () => {
+    const base = {
+      parentId: 0,
+      branch: '1150 - RANCHI BRANCH',
+      region: 'EAST ZONE',
+      solved_calls: 0,
+      cancelled_calls: 0,
+      open_calls: 0,
+      age_2: 0,
+      age_3: 0,
+      age_7: 0,
+      age_15: 0,
+      part_pending: 0,
+      all_total: 0,
+      all_solved: 0,
+      all_cancelled: 0,
+      all_open: 0,
+      all_age_2: 0,
+      all_age_3: 0,
+      all_age_7: 0,
+      all_age_15: 0,
+      all_part_pending: 0,
+      all_tech_solved: 0,
+      tech_solved_calls: 0,
+      deployment_total: 0,
+      deployment_done: 0,
+      installation_total: 0,
+      installation_done: 0,
+      population: 0,
+    } satisfies Omit<BranchSummaryRow, 'officeId' | 'total_calls' | 'active_eng' | 'headcount'>;
+
+    const rows: BranchSummaryRow[] = [
+      { ...base, officeId: 1, total_calls: 520, open_calls: 100, active_eng: 44, headcount: 26 },
+      { ...base, officeId: 2, total_calls: 47, open_calls: 5, active_eng: 3, headcount: 4 },
+    ];
+    const merged = mergeBranchSummaryRowsByName(rows);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].officeId).toBe(1);
+    expect(merged[0].total_calls).toBe(567);
+    expect(merged[0].open_calls).toBe(105);
+    expect(merged[0].active_eng).toBe(47);
+    expect(merged[0].headcount).toBe(26);
   });
 });

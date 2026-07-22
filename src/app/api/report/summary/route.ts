@@ -19,7 +19,10 @@ import {
 } from '@/lib/trhcalls/query';
 import { deriveSummaryDashboard } from '@/features/report/lib/summary-derive';
 import { queryAllClientBranchSummary, countClientRowsInRange } from '@/features/mis-import/lib/aggregate';
-import { listAllSourcesWithBatches } from '@/features/mis-import/lib/config';
+import {
+  listAllSourcesWithBatches,
+  sumCompletedBatchRowCounts,
+} from '@/features/mis-import/lib/config';
 
 export async function GET(req: NextRequest) {
   try {
@@ -60,16 +63,15 @@ export async function GET(req: NextRequest) {
           endDate,
           agingAsOf: agingAsOf || undefined,
         });
-        const sources = await listAllSourcesWithBatches();
-        const rowsInDateRange = await countClientRowsInRange({
-          sourceCode: 'all',
-          startDate,
-          endDate,
-        });
-        const totalRowsInFiles = sources.reduce(
-          (sum, s) => sum + s.batches.reduce((bSum, b) => bSum + b.rowCount, 0),
-          0
-        );
+        const [sources, rowsInDateRange, totalRowsInFiles] = await Promise.all([
+          listAllSourcesWithBatches(),
+          countClientRowsInRange({
+            sourceCode: 'all',
+            startDate,
+            endDate,
+          }),
+          sumCompletedBatchRowCounts(),
+        ]);
         clientMeta = {
           sources,
           rowsInDateRange,

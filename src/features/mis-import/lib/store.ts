@@ -1,6 +1,7 @@
 import { withAppClient, appDatabaseBulkStatementTimeoutMs } from '@/lib/read-model/db';
 import { deleteImportFile, saveImportFile } from '@/features/mis-import/lib/file-store';
 import { saveBatchFileBlob } from '@/features/mis-import/lib/batch-file';
+import { recomputeBatchRowStatsForSource } from '@/features/mis-import/lib/config';
 import type { ImportResult, NormalizedClientRow } from '@/features/mis-import/lib/types';
 
 const INSERT_BATCH_SIZE = 500;
@@ -110,6 +111,7 @@ export async function storeImportBatch(params: {
         );
       }
 
+      await recomputeBatchRowStatsForSource(sourceId, client);
       await client.query('COMMIT');
 
       try {
@@ -147,14 +149,19 @@ export async function deleteImportBatch(batchId: string): Promise<{
   storedFilePath: string | null;
 }> {
   return withAppClient(async (client) => {
-    const res = await client.query<{ stored_file_path: string | null }>(
-      `SELECT stored_file_path FROM mis_client_import_batches WHERE batch_id = $1::uuid`,
+    const res = await client.query<{ stored_file_path: string | null; source_id: string }>(
+      `SELECT stored_file_path, source_id FROM mis_client_import_batches WHERE batch_id = $1::uuid`,
       [batchId]
     );
     const row = res.rows[0];
     if (!row) return { deleted: false, storedFilePath: null };
 
     await client.query(`DELETE FROM mis_client_import_batches WHERE batch_id = $1::uuid`, [batchId]);
+    try {
+      await recomputeBatchRowStatsForSource(row.source_id, client);
+    } catch (err) {
+      console.warn('[mis-client-import] batch row stats recompute after delete failed:', err);
+    }
     return { deleted: true, storedFilePath: row.stored_file_path };
   });
 }
