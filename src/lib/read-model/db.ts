@@ -120,6 +120,11 @@ export function resolvePgSsl(connectionString: string): false | { rejectUnauthor
 
 export function loadEnv(): void {
   const root = path.join(process.cwd());
+  const opts = { override: false };
+
+  function mergeMisEmailEnv(): void {
+    dotenv.config({ path: path.join(root, '.env.mis-email'), ...opts });
+  }
 
   let existing = process.env.DATABASE_URL?.replace(/^["']|["']$/g, '') ?? '';
   if (existing.startsWith('prisma+postgres://')) {
@@ -127,10 +132,10 @@ export function loadEnv(): void {
     existing = '';
   }
   if (existing) {
+    mergeMisEmailEnv();
     return;
   }
 
-  const opts = { override: false };
   dotenv.config({ path: path.join(root, '.env.sync-worker'), ...opts });
 
   let afterSync = process.env.DATABASE_URL?.replace(/^["']|["']$/g, '') ?? '';
@@ -139,6 +144,7 @@ export function loadEnv(): void {
     afterSync = '';
   }
   if (afterSync) {
+    mergeMisEmailEnv();
     return;
   }
 

@@ -7,9 +7,24 @@ import {
   resolveMisUploadMaxBytes,
 } from '@/lib/mis-client-import/upload-limits';
 import {
-  MIS_UPLOAD_CHUNK_BYTES,
+  MIS_UPLOAD_CHUNK_CONCURRENCY,
+  MIS_UPLOAD_CHUNK_RETRIES,
+  resolveMisUploadChunkBytes,
+  resolveMisUploadChunkUrl,
   shouldUseChunkedMisUpload,
 } from '@/lib/mis-client-import/upload-chunk-constants';
+import {
+  gzipBlobForMisUpload,
+  isMisUploadCompressibleFileName,
+} from '@/lib/mis-client-import/upload-gzip';
+import {
+  clearMisUploadResumeState,
+  loadMisUploadResumeState,
+  missingMisUploadChunkIndexes,
+  misUploadFingerprint,
+  saveMisUploadResumeState,
+  type MisUploadResumeState,
+} from '@/lib/mis-client-import/upload-resume';
 import {
   peekAccessTokenMeta,
   reportMisUploadTrace,
@@ -57,10 +72,13 @@ export type MisUploadProgress = {
   total: number;
   chunkIndex: number;
   chunkTotal: number;
-  phase: 'uploading' | 'processing';
+  phase: 'uploading' | 'processing' | 'compressing';
   fileIndex?: number;
   fileTotal?: number;
   fileName?: string;
+  /** Uncompressed file size when wire payload is gzipped. */
+  originalTotal?: number;
+  resuming?: boolean;
 };
 
 export function formatMisUploadProgressLabel(progress: MisUploadProgress): string {
@@ -71,21 +89,29 @@ export function formatMisUploadProgressLabel(progress: MisUploadProgress): strin
     progress.fileTotal && progress.fileTotal > 1 && progress.fileIndex
       ? `File ${progress.fileIndex}/${progress.fileTotal}${progress.fileName ? ` (${progress.fileName})` : ''} · `
       : '';
+  const resumePrefix = progress.resuming ? 'Resuming · ' : '';
+  const originalNote =
+    progress.originalTotal && progress.originalTotal > progress.total
+      ? ` · was ${(progress.originalTotal / (1024 * 1024)).toFixed(1)} MB`
+      : '';
 
+  if (progress.phase === 'compressing') {
+    return `${filePrefix}Compressing…`;
+  }
   if (progress.phase === 'processing') {
-    return `${filePrefix}Importing rows… (${totalMb} MB uploaded)`;
+    return `${filePrefix}Importing rows… (${totalMb} MB uploaded${originalNote})`;
   }
   if (progress.chunkTotal > 1) {
-    return `${filePrefix}Uploading part ${progress.chunkIndex}/${progress.chunkTotal} · ${sentMb}/${totalMb} MB (${pct}%)`;
+    return `${filePrefix}${resumePrefix}Uploading part ${progress.chunkIndex}/${progress.chunkTotal} · ${sentMb}/${totalMb} MB (${pct}%)${originalNote}`;
   }
-  return `${filePrefix}Uploading ${sentMb} MB…`;
+  return `${filePrefix}${resumePrefix}Uploading ${sentMb} MB…${originalNote}`;
 }
 
 export function estimateMisUploadEtaSec(
   progress: MisUploadProgress,
   startedAtMs: number
 ): number | null {
-  if (progress.phase === 'processing' || progress.sent <= 0) return null;
+  if (progress.phase !== 'uploading' || progress.sent <= 0) return null;
   const elapsedSec = (Date.now() - startedAtMs) / 1000;
   if (elapsedSec < 2) return null;
   const rate = progress.sent / elapsedSec;
@@ -106,81 +132,110 @@ export function validateMisUploadFileSize(file: File): string | null {
   return `File is ${mb} MB. Maximum upload size is ${maxMb} MB.`;
 }
 
-async function postMisClientUploadChunked(params: {
-  sourceCode: string;
-  file: File;
-  onProgress?: (progress: MisUploadProgress) => void;
-  fileIndex?: number;
-  fileTotal?: number;
-}): Promise<Record<string, unknown>> {
-  const uploadId = crypto.randomUUID();
-  const chunkTotal = Math.max(1, Math.ceil(params.file.size / MIS_UPLOAD_CHUNK_BYTES));
-  let lastResponse: Record<string, unknown> = {};
-
-  for (let chunkIndex = 0; chunkIndex < chunkTotal; chunkIndex++) {
-    const start = chunkIndex * MIS_UPLOAD_CHUNK_BYTES;
-    const end = Math.min(params.file.size, start + MIS_UPLOAD_CHUNK_BYTES);
-    const blob = params.file.slice(start, end);
-    const isLast = chunkIndex === chunkTotal - 1;
-
-    params.onProgress?.({
-      sent: start,
-      total: params.file.size,
-      chunkIndex: chunkIndex + 1,
-      chunkTotal,
-      phase: 'uploading',
-      fileIndex: params.fileIndex,
-      fileTotal: params.fileTotal,
-      fileName: params.file.name,
-    });
-
-    const formData = new FormData();
-    formData.append('uploadId', uploadId);
-    formData.append('chunkIndex', String(chunkIndex));
-    formData.append('chunkTotal', String(chunkTotal));
-    formData.append('sourceCode', params.sourceCode);
-    formData.append('fileName', params.file.name);
-    formData.append('chunk', blob, params.file.name);
-
-    if (isLast) {
-      params.onProgress?.({
-        sent: params.file.size,
-        total: params.file.size,
-        chunkIndex: chunkTotal,
-        chunkTotal,
-        phase: 'processing',
-        fileIndex: params.fileIndex,
-        fileTotal: params.fileTotal,
-        fileName: params.file.name,
-      });
-    }
-
-    const res = await axios.post('/api/mis-client-import/upload-chunk', formData, {
-      withCredentials: true,
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity,
-      timeout: 300_000,
-    });
-    lastResponse = res.data as Record<string, unknown>;
-
-    if (!isLast) {
-      params.onProgress?.({
-        sent: end,
-        total: params.file.size,
-        chunkIndex: chunkIndex + 1,
-        chunkTotal,
-        phase: 'uploading',
-        fileIndex: params.fileIndex,
-        fileTotal: params.fileTotal,
-        fileName: params.file.name,
-      });
-    }
-  }
-
-  return lastResponse;
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function postMisClientUploadDirect(params: {
+function isRetryableChunkError(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) return false;
+  if (!err.response) {
+    return (
+      err.code === 'ERR_NETWORK' ||
+      err.code === 'ECONNABORTED' ||
+      /certificate|SSL|TLS|Failed to fetch|Network Error/i.test(err.message)
+    );
+  }
+  const status = err.response.status;
+  return status >= 500 || status === 429;
+}
+
+async function prepareMisUploadPayload(file: File): Promise<{
+  blob: Blob;
+  contentEncoding: 'gzip' | null;
+  originalSize: number;
+}> {
+  if (!isMisUploadCompressibleFileName(file.name)) {
+    return { blob: file, contentEncoding: null, originalSize: file.size };
+  }
+  const { blob, encoding } = await gzipBlobForMisUpload(file);
+  return { blob, contentEncoding: encoding, originalSize: file.size };
+}
+
+async function fetchChunkStatus(params: {
+  uploadId: string;
+  accessToken?: string | null;
+}): Promise<number[]> {
+  const url = `${resolveMisUploadChunkUrl()}?uploadId=${encodeURIComponent(params.uploadId)}`;
+  const external = misUploadUsesExternalHost();
+  const headers: Record<string, string> = {};
+  if (external && params.accessToken) {
+    headers.Authorization = `Bearer ${params.accessToken}`;
+  }
+  try {
+    const res = await axios.get(url, {
+      withCredentials: !external,
+      headers,
+      timeout: 60_000,
+    });
+    const received = res.data?.received;
+    return Array.isArray(received)
+      ? received.filter((n: unknown) => Number.isInteger(n)).map((n: number) => n)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+async function postChunkWithRetry(params: {
+  url: string;
+  formData: FormData;
+  accessToken?: string | null;
+  external: boolean;
+}): Promise<Record<string, unknown>> {
+  const headers: Record<string, string> = {};
+  if (params.external && params.accessToken) {
+    headers.Authorization = `Bearer ${params.accessToken}`;
+  }
+
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < MIS_UPLOAD_CHUNK_RETRIES; attempt++) {
+    try {
+      const res = await axios.post(params.url, params.formData, {
+        withCredentials: !params.external,
+        headers,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+        timeout: 300_000,
+      });
+      return res.data as Record<string, unknown>;
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryableChunkError(err) || attempt === MIS_UPLOAD_CHUNK_RETRIES - 1) {
+        throw err;
+      }
+      await sleep(1000 * 2 ** attempt);
+    }
+  }
+  throw lastErr;
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  let next = 0;
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (true) {
+      const idx = next++;
+      if (idx >= items.length) return;
+      await worker(items[idx]!);
+    }
+  });
+  await Promise.all(runners);
+}
+
+async function postMisClientUploadChunked(params: {
   sourceCode: string;
   file: File;
   accessToken?: string | null;
@@ -188,9 +243,172 @@ async function postMisClientUploadDirect(params: {
   fileIndex?: number;
   fileTotal?: number;
 }): Promise<Record<string, unknown>> {
+  params.onProgress?.({
+    sent: 0,
+    total: params.file.size,
+    chunkIndex: 0,
+    chunkTotal: 1,
+    phase: 'compressing',
+    fileIndex: params.fileIndex,
+    fileTotal: params.fileTotal,
+    fileName: params.file.name,
+    originalTotal: params.file.size,
+  });
+
+  const prepared = await prepareMisUploadPayload(params.file);
+  const transferBlob = prepared.blob;
+  const transferSize = transferBlob.size;
+  const contentEncoding = prepared.contentEncoding;
+  const chunkBytes = resolveMisUploadChunkBytes();
+  const chunkTotal = Math.max(1, Math.ceil(transferSize / chunkBytes));
+  const fingerprint = misUploadFingerprint({
+    fileName: params.file.name,
+    fileSize: params.file.size,
+    lastModified: params.file.lastModified,
+    sourceCode: params.sourceCode,
+  });
+
+  let resume = loadMisUploadResumeState(fingerprint);
+  if (resume && resume.chunkTotal !== chunkTotal) {
+    clearMisUploadResumeState();
+    resume = null;
+  }
+
+  const uploadId = resume?.uploadId ?? crypto.randomUUID();
+  const external = misUploadUsesExternalHost();
+  const url = resolveMisUploadChunkUrl();
+
+  if (external && !params.accessToken?.trim()) {
+    throw new Error('Sign in again to upload large files to the VPS.');
+  }
+
+  const serverReceived = resume
+    ? await fetchChunkStatus({ uploadId, accessToken: params.accessToken })
+    : [];
+  const missing = missingMisUploadChunkIndexes(
+    chunkTotal,
+    resume?.completed ?? [],
+    serverReceived
+  );
+  const completed = new Set<number>([
+    ...(resume?.completed ?? []),
+    ...serverReceived,
+  ]);
+  const resuming = completed.size > 0 && missing.length > 0;
+
+  const progressBase = {
+    fileIndex: params.fileIndex,
+    fileTotal: params.fileTotal,
+    fileName: params.file.name,
+    originalTotal: prepared.originalSize,
+    resuming,
+  };
+
+  const emitProgress = (sent: number, chunkIndex: number) => {
+    params.onProgress?.({
+      sent,
+      total: transferSize,
+      chunkIndex,
+      chunkTotal,
+      phase: 'uploading',
+      ...progressBase,
+    });
+  };
+
+  emitProgress(
+    Math.min(transferSize, completed.size * chunkBytes),
+    Math.max(1, completed.size)
+  );
+
+  const persist = () => {
+    const state: MisUploadResumeState = {
+      uploadId,
+      fingerprint,
+      chunkTotal,
+      completed: [...completed].sort((a, b) => a - b),
+      contentEncoding,
+      originalFileName: params.file.name,
+      transferSize,
+    };
+    saveMisUploadResumeState(state);
+  };
+  persist();
+
+  await runWithConcurrency(missing, MIS_UPLOAD_CHUNK_CONCURRENCY, async (chunkIndex) => {
+    const start = chunkIndex * chunkBytes;
+    const end = Math.min(transferSize, start + chunkBytes);
+    const blob = transferBlob.slice(start, end);
+
+    const formData = new FormData();
+    formData.append('uploadId', uploadId);
+    formData.append('chunkIndex', String(chunkIndex));
+    formData.append('chunkTotal', String(chunkTotal));
+    formData.append('sourceCode', params.sourceCode);
+    formData.append('fileName', params.file.name);
+    if (contentEncoding) formData.append('contentEncoding', contentEncoding);
+    formData.append('chunk', blob, params.file.name);
+    if (external && params.accessToken) {
+      formData.append('accessToken', params.accessToken);
+    }
+
+    await postChunkWithRetry({
+      url,
+      formData,
+      accessToken: params.accessToken,
+      external,
+    });
+
+    completed.add(chunkIndex);
+    persist();
+    emitProgress(Math.min(transferSize, completed.size * chunkBytes), completed.size);
+  });
+
+  params.onProgress?.({
+    sent: transferSize,
+    total: transferSize,
+    chunkIndex: chunkTotal,
+    chunkTotal,
+    phase: 'processing',
+    ...progressBase,
+  });
+
+  const finalizeData = new FormData();
+  finalizeData.append('uploadId', uploadId);
+  finalizeData.append('finalize', '1');
+  if (contentEncoding) finalizeData.append('contentEncoding', contentEncoding);
+  if (external && params.accessToken) {
+    finalizeData.append('accessToken', params.accessToken);
+  }
+
+  const result = await postChunkWithRetry({
+    url,
+    formData: finalizeData,
+    accessToken: params.accessToken,
+    external,
+  });
+
+  clearMisUploadResumeState();
+  return result;
+}
+
+async function postMisClientUploadDirect(params: {
+  sourceCode: string;
+  file: File;
+  payload: Blob;
+  contentEncoding: 'gzip' | null;
+  originalSize: number;
+  accessToken?: string | null;
+  onProgress?: (progress: MisUploadProgress) => void;
+  fileIndex?: number;
+  fileTotal?: number;
+}): Promise<Record<string, unknown>> {
   const formData = new FormData();
   formData.append('sourceCode', params.sourceCode);
-  formData.append('file', params.file);
+  formData.append('file', params.payload, params.file.name);
+  formData.append('fileName', params.file.name);
+  if (params.contentEncoding) {
+    formData.append('contentEncoding', params.contentEncoding);
+  }
 
   const external = misUploadUsesExternalHost();
   const url = external
@@ -221,14 +439,13 @@ async function postMisClientUploadDirect(params: {
   const headers: Record<string, string> = {};
   if (external && params.accessToken) {
     headers.Authorization = `Bearer ${params.accessToken}`;
-    // Backup if a proxy strips Authorization on multipart requests.
     formData.append('accessToken', params.accessToken);
   }
 
   reportMisUploadTrace({
     phase: 'direct_start',
     fileName: params.file.name,
-    fileSize: params.file.size,
+    fileSize: params.payload.size,
     sourceCode: params.sourceCode,
     uploadMode: 'direct',
     uploadUrlHost,
@@ -240,6 +457,7 @@ async function postMisClientUploadDirect(params: {
     fileIndex: params.fileIndex,
     fileTotal: params.fileTotal,
     fileName: params.file.name,
+    originalTotal: params.originalSize,
   };
 
   try {
@@ -250,7 +468,7 @@ async function postMisClientUploadDirect(params: {
       maxContentLength: Infinity,
       timeout: 300_000,
       onUploadProgress: (event) => {
-        const total = event.total && event.total > 0 ? event.total : params.file.size;
+        const total = event.total && event.total > 0 ? event.total : params.payload.size;
         const sent = Math.min(event.loaded, total);
         const uploadDone = total > 0 && sent >= total;
         params.onProgress?.({
@@ -266,7 +484,7 @@ async function postMisClientUploadDirect(params: {
     reportMisUploadTrace({
       phase: 'direct_ok',
       fileName: params.file.name,
-      fileSize: params.file.size,
+      fileSize: params.payload.size,
       sourceCode: params.sourceCode,
       uploadMode: 'direct',
       uploadUrlHost,
@@ -291,7 +509,7 @@ async function postMisClientUploadDirect(params: {
     reportMisUploadTrace({
       phase: 'direct_fail',
       fileName: params.file.name,
-      fileSize: params.file.size,
+      fileSize: params.payload.size,
       sourceCode: params.sourceCode,
       uploadMode: 'direct',
       uploadUrlHost,
@@ -335,10 +553,13 @@ export async function postMisClientUpload(params: {
     fileName: params.file.name,
   };
 
+  // Decide chunking on (possibly compressed) wire size after prep for small files;
+  // for large originals always chunk so resume works.
   if (shouldUseChunkedMisUpload(params.file.size)) {
     return postMisClientUploadChunked({
       sourceCode: params.sourceCode,
       file: params.file,
+      accessToken: params.accessToken,
       onProgress: params.onProgress,
       fileIndex: params.fileIndex,
       fileTotal: params.fileTotal,
@@ -350,12 +571,15 @@ export async function postMisClientUpload(params: {
     total: params.file.size,
     chunkIndex: 0,
     chunkTotal: 1,
-    phase: 'uploading',
+    phase: 'compressing',
     ...progressBase,
+    originalTotal: params.file.size,
   });
 
-  try {
-    const result = await postMisClientUploadDirect({
+  const prepared = await prepareMisUploadPayload(params.file);
+
+  if (shouldUseChunkedMisUpload(prepared.blob.size)) {
+    return postMisClientUploadChunked({
       sourceCode: params.sourceCode,
       file: params.file,
       accessToken: params.accessToken,
@@ -363,19 +587,43 @@ export async function postMisClientUpload(params: {
       fileIndex: params.fileIndex,
       fileTotal: params.fileTotal,
     });
+  }
+
+  params.onProgress?.({
+    sent: 0,
+    total: prepared.blob.size,
+    chunkIndex: 0,
+    chunkTotal: 1,
+    phase: 'uploading',
+    ...progressBase,
+    originalTotal: prepared.originalSize,
+  });
+
+  try {
+    const result = await postMisClientUploadDirect({
+      sourceCode: params.sourceCode,
+      file: params.file,
+      payload: prepared.blob,
+      contentEncoding: prepared.contentEncoding,
+      originalSize: prepared.originalSize,
+      accessToken: params.accessToken,
+      onProgress: params.onProgress,
+      fileIndex: params.fileIndex,
+      fileTotal: params.fileTotal,
+    });
 
     params.onProgress?.({
-      sent: params.file.size,
-      total: params.file.size,
+      sent: prepared.blob.size,
+      total: prepared.blob.size,
       chunkIndex: 1,
       chunkTotal: 1,
       phase: 'processing',
       ...progressBase,
+      originalTotal: prepared.originalSize,
     });
 
     return result;
   } catch (err) {
-    // Vercel + VPS URL: one-shot direct is preferred; fall back to same-origin chunks if TLS/network blocks the VPS.
     const canFallbackToChunks =
       misUploadUsesExternalHost() &&
       isBrowserOnVercel() &&
@@ -387,12 +635,13 @@ export async function postMisClientUpload(params: {
     }
 
     console.warn(
-      '[mis-client-import] Direct VPS upload failed; falling back to chunked same-origin upload',
+      '[mis-client-import] Direct VPS upload failed; falling back to chunked upload',
       err
     );
     return postMisClientUploadChunked({
       sourceCode: params.sourceCode,
       file: params.file,
+      accessToken: params.accessToken,
       onProgress: params.onProgress,
       fileIndex: params.fileIndex,
       fileTotal: params.fileTotal,

@@ -598,6 +598,41 @@ export async function fetchCrmRowsByTrns(
   return merged;
 }
 
+/**
+ * TRNs whose visit-fault rows changed recently (covers major/minor without trhcalls.editedon bump).
+ * Uses trdcalls2fault.editedon/addedon.
+ */
+export async function fetchCrmTrnsWithRecentFaultEdits(
+  sinceIso: string,
+  limit = 500
+): Promise<string[]> {
+  const safeSince = sinceIso.replace(/'/g, "''");
+  const top = Math.max(1, Math.min(2000, Math.trunc(limit)));
+  const rawSql = `
+    SELECT TOP ${top} vtrnno
+    FROM (
+      SELECT DISTINCT LTRIM(RTRIM(tc.vtrnno)) AS vtrnno
+      FROM trdcalls2fault tf (NOLOCK)
+      INNER JOIN trhcalls tc (NOLOCK)
+        ON tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid
+      WHERE ISNULL(tc.vtrnno, '') <> ''
+        AND ISNULL(tf.editedon, tf.addedon) >= '${safeSince}'
+    ) x
+    ORDER BY vtrnno
+  `;
+  const result = await postQuery({
+    rawSql,
+    timeoutMs: SYNC_INCREMENTAL_TIMEOUT_MS,
+  });
+  return [
+    ...new Set(
+      ((result.data || []) as Record<string, unknown>[])
+        .map((r) => String(r.vtrnno ?? '').trim())
+        .filter(Boolean)
+    ),
+  ];
+}
+
 export async function fetchDimOffices(): Promise<Record<string, string>[]> {
   return fetchDimQuery({
     fields: 'ncode, vcompanyname, nunder, nzone',

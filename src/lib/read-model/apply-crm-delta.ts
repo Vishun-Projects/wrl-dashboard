@@ -20,9 +20,9 @@ import type { getSyncState } from '@/lib/read-model/lock';
 const SYNC_TX_LOCK_TIMEOUT_MS = Number(process.env.PG_SYNC_LOCK_TIMEOUT_MS ?? 120_000);
 
 /**
- * When CRM editedon (or addedon for new calls) is at least as fresh as hot, replace the
- * whole row — not a partial status patch. Skips only strictly older CRM snapshots
- * (overlap-window duplicates).
+ * Replace hot from CRM when stamp is at least as fresh, OR when status/major/assignment
+ * content differs (CRM is source of truth — fault edits often don't bump editedon).
+ * Skips only strictly older CRM snapshots when content still matches (overlap dups).
  */
 export function shouldReplaceHotFromCrm(
   existing: HotRow | undefined,
@@ -31,13 +31,22 @@ export function shouldReplaceHotFromCrm(
   if (!existing) return true;
   const existingTs = existing.source_editedon?.getTime() ?? 0;
   const incomingTs = incoming.source_editedon?.getTime() ?? 0;
-  return incomingTs >= existingTs;
+  if (incomingTs >= existingTs) return true;
+
+  if (existing.status_bucket !== incoming.status_bucket) return true;
+  if (Boolean(existing.is_major) !== Boolean(incoming.is_major)) return true;
+  if (Number(existing.ncancelreason ?? 0) !== Number(incoming.ncancelreason ?? 0)) return true;
+  if (Boolean(existing.bsolved) !== Boolean(incoming.bsolved)) return true;
+  if (Boolean(existing.bfastclose) !== Boolean(incoming.bfastclose)) return true;
+  if ((existing.nengineer ?? null) !== (incoming.nengineer ?? null)) return true;
+  return false;
 }
 
 export type ApplyCrmDeltaResult = {
   rowsUpserted: number;
   rowsDeleted: number;
   rowsSkippedStale?: number;
+  upsertedRows: HotRow[];
   nextEdited: Date | null;
   nextAdded: Date | null;
 };
@@ -131,7 +140,7 @@ export async function applyCrmRowsToHot(
 
     await client.query('COMMIT');
 
-    return { rowsUpserted, rowsDeleted, rowsSkippedStale, nextEdited, nextAdded };
+    return { rowsUpserted, rowsDeleted, rowsSkippedStale, upsertedRows: upsertRows, nextEdited, nextAdded };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

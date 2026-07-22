@@ -74,9 +74,34 @@ describe('shouldReplaceHotFromCrm', () => {
     expect(shouldReplaceHotFromCrm(existing, incoming)).toBe(true);
   });
 
-  it('skips strictly older CRM snapshot from overlap window', () => {
+  it('skips strictly older CRM snapshot from overlap window when content matches', () => {
     const existing = hotRow({ source_editedon: new Date('2026-06-30') });
     const incoming = hotRow({ source_editedon: new Date('2026-06-26') });
     expect(shouldReplaceHotFromCrm(existing, incoming)).toBe(false);
+  });
+
+  it('replaces older CRM stamp when status differs (CRM is source of truth)', () => {
+    const existing = hotRow({
+      status_bucket: 'assigned',
+      source_editedon: new Date('2026-06-30'),
+    });
+    const incoming = hotRow({
+      status_bucket: 'cancelled',
+      ncancelreason: 9,
+      source_editedon: new Date('2026-06-26'),
+    });
+    expect(shouldReplaceHotFromCrm(existing, incoming)).toBe(true);
+  });
+
+  it('replaces older CRM stamp when is_major differs', () => {
+    const existing = hotRow({
+      is_major: false,
+      source_editedon: new Date('2026-06-30'),
+    });
+    const incoming = hotRow({
+      is_major: true,
+      source_editedon: new Date('2026-06-26'),
+    });
+    expect(shouldReplaceHotFromCrm(existing, incoming)).toBe(true);
   });
 });

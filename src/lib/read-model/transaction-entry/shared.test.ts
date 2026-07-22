@@ -3,6 +3,8 @@ import { parseCrmDaddedon, monthChunks, yearChunks, periodDays } from './shared'
 {
   const d = parseCrmDaddedon('11/06/2026 01:22:09');
   console.assert(d != null && d.toISOString().startsWith('2026-06-11'), 'parse daddedon');
+  const d2 = parseCrmDaddedon('20/07/2026 11:03:02');
+  console.assert(d2 != null && d2.toISOString().startsWith('2026-07-20'), 'parse jul 20 daddedon');
 
   const months = monthChunks('2026-01-15', '2026-03-10');
   console.assert(months.length === 3, 'month chunks');

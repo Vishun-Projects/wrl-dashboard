@@ -532,7 +532,7 @@ export function buildSyncFieldsSql(): string {
     ISNULL(UPPER(z.vname), 'OTHER') AS region,
     ISNULL(pprof.vname, 'UNCLASSIFIED') AS account,
     ISNULL(hc.branch_headcount, 0) AS branch_headcount,
-    0 AS has_visit,
+    CASE WHEN EXISTS (SELECT 1 FROM trdcalls1visit v (NOLOCK) WHERE v.ncalls = tc.ncode) THEN 1 ELSE 0 END AS has_visit,
     tc.editedon,
     tc.addedon,
     p.vinstpostalcode AS Pincode,
@@ -1046,6 +1046,70 @@ export function buildRegisterRepairDoneByCallKeysSql(
     WHERE LTRIM(RTRIM(r.vname)) IN ('Motor Replaced', 'Compressor Replaced', 'Gas Charging Done')
     GROUP BY tf.ncalls, tf.nofficeid
   `;
+}
+
+const MAJOR_REPAIR_REPEAT_MAJOR_EXISTS = `EXISTS (
+  SELECT 1 FROM trdcalls2fault tf (NOLOCK)
+  INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
+  WHERE tf.ncalls = trhcalls.ncode AND tf.nofficeid = trhcalls.nofficeid
+    AND r.bmajor = 'True'
+)`;
+
+const MAJOR_REPAIR_REPEAT_TARGET_REPAIR_EXISTS = `EXISTS (
+  SELECT 1 FROM trdcalls2fault tf (NOLOCK)
+  INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
+  WHERE tf.ncalls = trhcalls.ncode AND tf.nofficeid = trhcalls.nofficeid
+    AND LTRIM(RTRIM(r.vname)) IN ('Motor Replaced', 'Compressor Replaced', 'Gas Charging Done')
+)`;
+
+function buildMajorRepairRepeatWhere(
+  serial: string,
+  startDate: string,
+  endDate: string
+): string {
+  const serialSafe = serial.trim().replace(/'/g, "''").toUpperCase();
+  const startSafe = startDate.replace(/'/g, "''");
+  const endSafe = endDate.replace(/'/g, "''");
+  return `${SERIAL_AUDIT_VALID_SERIAL_WHERE}
+    AND vtrnno IS NOT NULL AND vtrnno <> ''
+    AND ${SERIAL_AUDIT_TRANSFER_EXCLUDE_WHERE}
+    AND ${SERIAL_AUDIT_SERIAL_KEY_EXPR} = '${serialSafe}'
+    AND dtrndate >= '${startSafe}'
+    AND dtrndate <= '${endSafe} 23:59:59'
+    AND ${MAJOR_REPAIR_REPEAT_MAJOR_EXISTS}
+    AND ${MAJOR_REPAIR_REPEAT_TARGET_REPAIR_EXISTS}`;
+}
+
+/** Count deduped major+repair calls for one serial in a date window. */
+export function buildMajorRepairRepeatCountSql(
+  serial: string,
+  startDate: string,
+  endDate: string
+): string {
+  const where = buildMajorRepairRepeatWhere(serial, startDate, endDate);
+  return `
+    SELECT COUNT(*) AS call_count
+    FROM (
+      SELECT *,
+        ROW_NUMBER() OVER (
+          PARTITION BY ${TRHCALLS_DEDUP_PARTITION}
+          ORDER BY ${TRHCALLS_DEDUP_ORDER}
+        ) AS rn
+      FROM trhcalls (NOLOCK)
+      WHERE ${where}
+    ) deduped
+    WHERE rn = 1
+  `;
+}
+
+/** List deduped major+repair calls for one serial in a date window (email body). */
+export function buildMajorRepairRepeatDetailSql(
+  serial: string,
+  startDate: string,
+  endDate: string
+): string {
+  const where = buildMajorRepairRepeatWhere(serial, startDate, endDate);
+  return buildSerialAuditDetailQuery(where, true);
 }
 
 /** Repeated serials in a date window — deduped rows with status counts.

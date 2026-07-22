@@ -12,8 +12,10 @@ import { runNightlyReconcile } from '@/lib/read-model/nightly';
 import { runPipelineReconcile } from '@/lib/read-model/pipeline-reconcile';
 import { runReconcileYtdOpen } from '@/lib/read-model/reconcile-ytd-open';
 import { runReconcileTechSolved } from '@/lib/read-model/reconcile-tech-solved';
+import { runReconcileMajor } from '@/lib/read-model/reconcile-major';
+import { runHotCrmMismatchSampleCheck } from '@/lib/read-model/check-hot-crm-mismatch';
 import { runEditedonCatchupRange, runEditedonCatchupStep } from '@/lib/read-model/editedon-catchup';
-import { todayLocalDate } from '@/lib/read-model/dates';
+import { todayLocalDate, daysAgoDate } from '@/lib/read-model/dates';
 import { runRetentionJobs } from '@/lib/read-model/retention';
 import { runBackfillCallsHotBmApproval } from '@/lib/read-model/backfill-bm-approval';
 import { runBackfillCallsHotWco } from '@/lib/read-model/backfill-wco';
@@ -115,6 +117,16 @@ async function main(): Promise<void> {
       console.log('[sync-worker] tech_solved reconcile:', result);
       break;
     }
+    case 'reconcile-major': {
+      const result = await runReconcileMajor();
+      console.log('[sync-worker] Major reconcile:', result);
+      break;
+    }
+    case 'hot-crm-mismatch-sample': {
+      const result = await runHotCrmMismatchSampleCheck();
+      if (result.mismatches > 0) process.exitCode = 1;
+      break;
+    }
     case 'editedon-catchup': {
       const args = process.argv.slice(3);
       const fromIdx = args.indexOf('--from');
@@ -184,6 +196,15 @@ async function main(): Promise<void> {
     case 'transaction-entry-incremental':
       await runTransactionEntryIncremental();
       break;
+    case 'transaction-entry-verify': {
+      const { healCallRegisterMismatches } = await import('@/lib/read-model/transaction-entry');
+      const toIdx = process.argv.indexOf('--to');
+      const dateTo = toIdx >= 0 ? process.argv[toIdx + 1]! : todayLocalDate();
+      // Heal uses TRANSACTION_ENTRY_VERIFY_DAYS lookback ending at dateTo
+      const healed = await healCallRegisterMismatches(dateTo);
+      console.log(`[transaction-entry] verify/heal upserted ${healed}`);
+      break;
+    }
     case 'daemon':
       await runDaemon();
       break;
@@ -207,6 +228,8 @@ Commands:
   pipeline-reconcile  Refresh stale open/assigned/tech_solved hot rows from CRM by TRN (incl. transferred)
   reconcile-ytd-open  Full YTD open/assigned/tech_solved scan vs CRM (--apply to fix)
   reconcile-tech-solved  Refresh stale tech_solved rows from CRM (--apply to fix)
+  reconcile-major       Refresh open TRNs for major/minor + recent fault edits
+  hot-crm-mismatch-sample  Sample open/terminal hot vs CRM (exit 1 on mismatch)
   editedon-catchup  Replay CRM edits by editedon day (addedon <> editedon)
                     --from YYYY-MM-DD --to YYYY-MM-DD  (default: one step from cursor)
   backfill-bm-approval  Fill calls_latest_hot.bapproval / bm_approved_at from CRM (no truncate)
@@ -218,6 +241,8 @@ Commands:
   arcp-nightly      ARCP incremental only (for Task Scheduler / cron)
   transaction-entry-backfill     Initial/resume CRM TransactionEntry → crm_transaction_entry
   transaction-entry-incremental  Re-sync last N months of TransactionEntry (default 2)
+  transaction-entry-verify       Compare CRM vs mirror for Deployment Completion clients; re-fetch mismatches
+                    --to YYYY-MM-DD  (default today; lookback = TRANSACTION_ENTRY_VERIFY_DAYS)
   dims              Refresh dimension tables only
   nightly           Calls nightly + ARCP + TransactionEntry when enabled
   retention         Purge old sync logs and ingest batches
@@ -233,11 +258,17 @@ Environment:
   SYNC_WORKER_ENABLED    Must be "true" for incremental/nightly/daemon
   SYNC_ARCP_ENABLED      Run ARCP incremental in daemon / API sync
   SYNC_TRANSACTION_ENTRY_ENABLED  TransactionEntry sync in daemon/nightly (default on; set false to disable)
+  TRANSACTION_ENTRY_RECENT_DAYS   Per-client refresh for Deployment Completion accounts (default 14)
+  TRANSACTION_ENTRY_VERIFY_ENABLED  After incremental: heal CRM vs mirror mismatches (default on)
+  TRANSACTION_ENTRY_VERIFY_DAYS   Days to verify/heal after each incremental (default 7)
   TRANSACTION_ENTRY_START_DATE    Backfill start (default 2024-01-01)
   TRANSACTION_ENTRY_OVERLAP_MONTHS  Incremental lookback months (default 2)
   SYNC_INTERVAL_MS       Daemon interval (default 180000)
   SYNC_PIPELINE_RECONCILE_ENABLED  Re-check open/assigned/tech_solved hot rows each incremental (default true)
-  SYNC_PIPELINE_RECONCILE_BATCH   Pipeline TRNs checked per run (default 400)
+  SYNC_PIPELINE_RECONCILE_BATCH   Pipeline TRNs checked per run (default 1000)
+  SYNC_MAJOR_RECONCILE_ENABLED    Major/minor + fault-edit reconcile each incremental (default true)
+  SYNC_MAJOR_RECONCILE_PER_RUN    Open TRNs checked per major reconcile (default 800)
+  SYNC_FAULT_EDIT_LOOKBACK_HOURS  Fault editedon lookback for major reconcile (default 48)
   SYNC_TECH_SOLVED_RECONCILE_ENABLED  Refresh stale tech_solved each incremental (default true)
   RECONCILE_TECH_SOLVED_PER_RUN   tech_solved TRNs checked per incremental (default 800)
   SYNC_EDITEDON_CATCHUP_ENABLED   Replay editedon day windows each incremental (default true)

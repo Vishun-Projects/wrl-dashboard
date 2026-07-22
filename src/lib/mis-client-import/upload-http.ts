@@ -1,5 +1,7 @@
+import { gunzipSync } from 'zlib';
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
 import { processClientMisUpload } from '@/lib/mis-client-import/process-upload';
+import { isGzipBuffer } from '@/lib/mis-client-import/upload-gzip';
 import {
   formatMisUploadTooLargeMessage,
   MIS_CLIENT_MAX_UPLOAD_BYTES,
@@ -11,11 +13,29 @@ export type MisUploadHttpResult = {
   body: Record<string, unknown>;
 };
 
+/** Inflate client-gzipped upload payloads (contentEncoding=gzip or gzip magic). */
+export function maybeGunzipMisUploadBuffer(
+  buffer: Buffer,
+  contentEncoding?: string | null
+): Buffer {
+  const encoding = (contentEncoding ?? '').trim().toLowerCase();
+  if (encoding !== 'gzip' && !isGzipBuffer(buffer)) return buffer;
+  try {
+    return gunzipSync(buffer);
+  } catch {
+    if (encoding === 'gzip') {
+      throw new Error('Uploaded file claimed gzip encoding but could not be decompressed');
+    }
+    return buffer;
+  }
+}
+
 export async function handleMisClientUploadBuffer(params: {
   userId: string;
   sourceCode: string;
   fileName: string;
   buffer: Buffer;
+  contentEncoding?: string | null;
 }): Promise<MisUploadHttpResult> {
   const userAuth = await queryUserAuth(params.userId);
   if (!canUploadClientMis(userAuth?.permissions ?? [])) {
@@ -26,17 +46,28 @@ export async function handleMisClientUploadBuffer(params: {
   if (!sourceCode) {
     return { status: 400, body: { error: 'sourceCode is required' } };
   }
-  if (params.buffer.length > MIS_CLIENT_MAX_UPLOAD_BYTES) {
+
+  let buffer: Buffer;
+  try {
+    buffer = maybeGunzipMisUploadBuffer(params.buffer, params.contentEncoding);
+  } catch (err) {
     return {
       status: 400,
-      body: { error: formatMisUploadTooLargeMessage(params.buffer.length) },
+      body: { error: err instanceof Error ? err.message : 'Invalid gzip payload' },
+    };
+  }
+
+  if (buffer.length > MIS_CLIENT_MAX_UPLOAD_BYTES) {
+    return {
+      status: 400,
+      body: { error: formatMisUploadTooLargeMessage(buffer.length) },
     };
   }
 
   const result = await processClientMisUpload({
     sourceCode,
     fileName: params.fileName,
-    buffer: params.buffer,
+    buffer,
     uploadedBy: params.userId,
   });
 
@@ -81,11 +112,16 @@ export async function handleMisClientUploadFormData(params: {
   }
 
   const uploadFile = file as File;
+  const contentEncoding = String(params.formData.get('contentEncoding') ?? '')
+    .trim()
+    .toLowerCase();
+  const originalFileName = String(params.formData.get('fileName') ?? '').trim();
   const buffer = Buffer.from(await uploadFile.arrayBuffer());
   return handleMisClientUploadBuffer({
     userId: params.userId,
     sourceCode,
-    fileName: uploadFile.name,
+    fileName: originalFileName || uploadFile.name,
     buffer,
+    contentEncoding: contentEncoding || null,
   });
 }

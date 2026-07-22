@@ -19,6 +19,7 @@ import {
 } from '@/lib/mis-client-import/upload-trace';
 import { createClient } from '@/lib/supabase/client';
 import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
+import { downloadMisBatchFile } from '@/lib/mis-client-import/batch-download-client';
 import { feedback } from '@/lib/ui/feedback';
 
 type BatchMeta = {
@@ -225,7 +226,14 @@ export default function MisClientImportToolbar({
         accessToken,
         onProgress: (progress) => {
           setUploadProgress(progress);
-          if (progress.phase === 'processing') {
+          if (progress.phase === 'compressing') {
+            feedback.loadingUpdate(
+              loadingId,
+              progress.fileName
+                ? `Compressing ${progress.fileName}…`
+                : 'Compressing…'
+            );
+          } else if (progress.phase === 'processing') {
             feedback.loadingUpdate(
               loadingId,
               progress.fileName
@@ -234,11 +242,12 @@ export default function MisClientImportToolbar({
             );
           } else if (progress.total > 0) {
             const pct = Math.min(100, Math.round((progress.sent / progress.total) * 100));
+            const label = progress.resuming ? 'Resuming' : 'Uploading';
             feedback.loadingUpdate(
               loadingId,
               progress.fileName
-                ? `Uploading ${progress.fileName}… ${pct}%`
-                : `Uploading… ${pct}%`
+                ? `${label} ${progress.fileName}… ${pct}%`
+                : `${label}… ${pct}%`
             );
           }
         },
@@ -309,33 +318,12 @@ export default function MisClientImportToolbar({
   const handleDownloadBatch = async (batchId: string, fileName: string) => {
     setDownloadingBatchId(batchId);
     try {
-      const res = await axios.get(`/api/mis-client-import/batches/${batchId}/download`, {
-        withCredentials: true,
-        responseType: 'blob',
-      });
-      const contentType = String(res.headers['content-type'] ?? '');
-      if (contentType.includes('application/json')) {
-        const errBody = JSON.parse(await res.data.text()) as { error?: string };
-        throw new Error(errBody.error || 'Download failed');
-      }
-      const resolvedName = fileName || 'import.dat';
-      await triggerBlobDownload(res.data, resolvedName);
+      const { blob, fileName: headerName } = await downloadMisBatchFile({ batchId });
+      const resolvedName = headerName || fileName || 'import.dat';
+      await triggerBlobDownload(blob, resolvedName);
       feedback.actionSuccess(`Downloaded ${resolvedName}`);
     } catch (err: unknown) {
-      let message = 'Download failed';
-      if (axios.isAxiosError(err) && err.response?.data) {
-        const data = err.response.data;
-        if (data instanceof Blob) {
-          try {
-            const parsed = JSON.parse(await data.text()) as { error?: string };
-            if (parsed.error) message = parsed.error;
-          } catch {
-            // keep default message
-          }
-        } else if (typeof data === 'object' && data && 'error' in data) {
-          message = String((data as { error: string }).error);
-        }
-      }
+      const message = err instanceof Error ? err.message : 'Download failed';
       setUploadMessage(message);
       feedback.actionFailed('Download failed', { description: message });
     } finally {

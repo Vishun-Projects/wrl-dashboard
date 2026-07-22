@@ -6,6 +6,7 @@ import {
   triggerBlobDownload,
   type PreparedFileExport,
 } from '@/lib/report/summary-excel-export';
+import { fetchWithRetry, withAxiosRetry } from '@/lib/net/fetch-with-retry';
 
 export function isRegisterExportAbortError(err: unknown): boolean {
   if (axios.isCancel(err)) return true;
@@ -178,7 +179,7 @@ export async function prepareRegisterCsvFromServer(opts: {
   const fallbackTotal = Math.max(0, opts.knownTotal ?? 0);
   opts.onProgress?.({ fetched: 0, total: fallbackTotal });
 
-  const res = await fetch(`/api/report?${params.toString()}`, {
+  const res = await fetchWithRetry(`/api/report?${params.toString()}`, {
     credentials: 'include',
     signal: opts.signal,
   });
@@ -269,7 +270,9 @@ async function fetchRegisterBulkForCache(opts: {
 
   let res;
   try {
-    res = await axios.get(url, { withCredentials: true, signal: opts.signal });
+    res = await withAxiosRetry(() =>
+      axios.get(url, { withCredentials: true, signal: opts.signal })
+    );
   } catch (err) {
     logRegisterBulk('bulk preload FAILED', {
       ms: Number((performance.now() - t0).toFixed(1)),

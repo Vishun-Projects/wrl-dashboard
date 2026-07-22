@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
+import { gzippedCsvPayload } from '@/lib/net/csv-gzip-response';
 import {
   fetchWarrantyMasterFgLines,
   fetchWarrantyMasterMeta,
@@ -25,12 +26,12 @@ export async function GET(req: NextRequest) {
     if (format === 'csv') {
       const csv = await runWarrantyMasterCsvExport(params);
       const stamp = new Date().toISOString().slice(0, 10);
-      return new NextResponse(csv, {
-        headers: {
-          'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': `attachment; filename="warranty-master-${stamp}.csv"`,
-        },
-      });
+      const { body, headers } = gzippedCsvPayload(
+        csv,
+        `warranty-master-${stamp}.csv`,
+        req.headers.get('accept-encoding')
+      );
+      return new NextResponse(body, { headers });
     }
 
     if (mode === 'meta') {

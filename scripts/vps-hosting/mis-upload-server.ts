@@ -4,12 +4,20 @@
  * Run behind Caddy with client_max_body_size 320m.
  *
  *   MIS_UPLOAD_PORT=3099 npx tsx scripts/vps-hosting/mis-upload-server.ts
+ *
+ * Routes:
+ *   POST /api/mis-client-import/upload
+ *   GET|POST /api/mis-client-import/upload-chunk
  */
 import { config } from 'dotenv';
 import { createServer } from 'http';
 import { Readable } from 'stream';
 import { resolve } from 'path';
 import { handleMisClientUploadFormData } from '@/lib/mis-client-import/upload-http';
+import {
+  handleMisClientUploadChunkFormData,
+  handleMisClientUploadChunkStatus,
+} from '@/lib/mis-client-import/upload-chunk-http';
 import {
   assertMisUploadAccess,
   resolveMisUploadUserId,
@@ -23,7 +31,8 @@ config({ path: resolve(root, '.env.mis-email') });
 config({ path: resolve(root, '.env.sync-worker') });
 
 const PORT = Number(process.env.MIS_UPLOAD_PORT ?? 3099);
-const PATH = '/api/mis-client-import/upload';
+const UPLOAD_PATH = '/api/mis-client-import/upload';
+const CHUNK_PATH = '/api/mis-client-import/upload-chunk';
 
 const ALLOWED_ORIGINS = new Set(
   (process.env.MIS_UPLOAD_CORS_ORIGINS ??
@@ -35,7 +44,7 @@ const ALLOWED_ORIGINS = new Set(
 
 function corsHeaders(origin: string | undefined): Record<string, string> {
   const headers: Record<string, string> = {
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     'Access-Control-Max-Age': '86400',
   };
@@ -46,13 +55,21 @@ function corsHeaders(origin: string | undefined): Record<string, string> {
   return headers;
 }
 
-async function readFormData(req: import('http').IncomingMessage): Promise<FormData> {
+function parseUrl(reqUrl: string | undefined): { pathname: string; searchParams: URLSearchParams } {
+  const u = new URL(reqUrl ?? '/', 'http://127.0.0.1');
+  return { pathname: u.pathname, searchParams: u.searchParams };
+}
+
+async function readFormData(
+  req: import('http').IncomingMessage,
+  pathname: string
+): Promise<FormData> {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
     if (!value) continue;
     headers.set(key, Array.isArray(value) ? value[0] : value);
   }
-  const request = new Request(`http://127.0.0.1${PATH}`, {
+  const request = new Request(`http://127.0.0.1${pathname}`, {
     method: 'POST',
     headers,
     body: Readable.toWeb(req) as ReadableStream<Uint8Array>,
@@ -62,62 +79,108 @@ async function readFormData(req: import('http').IncomingMessage): Promise<FormDa
   return request.formData();
 }
 
+async function resolveAuthedUserId(
+  req: import('http').IncomingMessage,
+  formData?: FormData
+): Promise<{ userId: string | null; error?: string }> {
+  const authHeader = req.headers.authorization;
+  let token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+
+  if (!token && formData) {
+    const fromForm = formData.get('accessToken');
+    if (typeof fromForm === 'string' && fromForm.trim()) {
+      token = fromForm.trim();
+    }
+  }
+
+  if (!token) {
+    return { userId: null, error: 'Unauthorized — missing session token' };
+  }
+
+  const userId = await resolveMisUploadUserId(token);
+  if (!userId) {
+    return { userId: null, error: 'Unauthorized — invalid or expired session' };
+  }
+
+  const allowed = await assertMisUploadAccess(userId);
+  if (!allowed) {
+    return { userId: null, error: 'Forbidden — missing client import permission' };
+  }
+
+  return { userId };
+}
+
 createServer(async (req, res) => {
   const origin = req.headers.origin;
   const baseHeaders = corsHeaders(origin);
+  const { pathname, searchParams } = parseUrl(req.url);
 
-  if (req.method === 'OPTIONS' && req.url === PATH) {
+  if (req.method === 'OPTIONS' && (pathname === UPLOAD_PATH || pathname === CHUNK_PATH)) {
     res.writeHead(204, baseHeaders);
     res.end();
     return;
   }
 
-  if (req.method !== 'POST' || req.url !== PATH) {
+  try {
+    if (req.method === 'GET' && pathname === CHUNK_PATH) {
+      const uploadId = searchParams.get('uploadId')?.trim() ?? '';
+      if (!uploadId) {
+        res.writeHead(400, { ...baseHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'uploadId is required' }));
+        return;
+      }
+      const auth = await resolveAuthedUserId(req);
+      if (!auth.userId) {
+        const status = auth.error?.startsWith('Forbidden') ? 403 : 401;
+        res.writeHead(status, { ...baseHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: auth.error ?? 'Unauthorized' }));
+        return;
+      }
+      const result = await handleMisClientUploadChunkStatus({
+        userId: auth.userId,
+        uploadId,
+      });
+      res.writeHead(result.status, { ...baseHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result.body));
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === CHUNK_PATH) {
+      const formData = await readFormData(req, CHUNK_PATH);
+      const auth = await resolveAuthedUserId(req, formData);
+      if (!auth.userId) {
+        const status = auth.error?.startsWith('Forbidden') ? 403 : 401;
+        res.writeHead(status, { ...baseHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: auth.error ?? 'Unauthorized' }));
+        return;
+      }
+      const result = await handleMisClientUploadChunkFormData({
+        userId: auth.userId,
+        formData,
+      });
+      res.writeHead(result.status, { ...baseHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result.body));
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === UPLOAD_PATH) {
+      const formData = await readFormData(req, UPLOAD_PATH);
+      const auth = await resolveAuthedUserId(req, formData);
+      if (!auth.userId) {
+        console.warn('[mis-upload-server] auth failed:', auth.error);
+        const status = auth.error?.startsWith('Forbidden') ? 403 : 401;
+        res.writeHead(status, { ...baseHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: auth.error ?? 'Unauthorized' }));
+        return;
+      }
+      const result = await handleMisClientUploadFormData({ userId: auth.userId, formData });
+      res.writeHead(result.status, { ...baseHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result.body));
+      return;
+    }
+
     res.writeHead(404, { ...baseHeaders, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
-    return;
-  }
-
-  try {
-    const authHeader = req.headers.authorization;
-    let token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-
-    // Multipart body may include accessToken if a proxy stripped Authorization.
-    const formData = await readFormData(req);
-    if (!token) {
-      const fromForm = formData.get('accessToken');
-      if (typeof fromForm === 'string' && fromForm.trim()) {
-        token = fromForm.trim();
-      }
-    }
-
-    if (!token) {
-      console.warn('[mis-upload-server] 401 — missing Bearer / accessToken');
-      res.writeHead(401, { ...baseHeaders, 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Unauthorized — missing session token' }));
-      return;
-    }
-
-    const userId = await resolveMisUploadUserId(token);
-    if (!userId) {
-      console.warn(
-        '[mis-upload-server] 401 — token rejected (check SUPABASE_JWT_SECRET / SERVICE_ROLE_KEY in .env.mis-upload)'
-      );
-      res.writeHead(401, { ...baseHeaders, 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Unauthorized — invalid or expired session' }));
-      return;
-    }
-
-    const allowed = await assertMisUploadAccess(userId);
-    if (!allowed) {
-      res.writeHead(403, { ...baseHeaders, 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Forbidden — missing client import permission' }));
-      return;
-    }
-
-    const result = await handleMisClientUploadFormData({ userId, formData });
-    res.writeHead(result.status, { ...baseHeaders, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(result.body));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[mis-upload-server] error:', err);
@@ -130,5 +193,7 @@ createServer(async (req, res) => {
     );
   }
 }).listen(PORT, '127.0.0.1', () => {
-  console.log(`[mis-upload-server] listening on http://127.0.0.1:${PORT}${PATH}`);
+  console.log(`[mis-upload-server] listening on http://127.0.0.1:${PORT}`);
+  console.log(`[mis-upload-server]   POST ${UPLOAD_PATH}`);
+  console.log(`[mis-upload-server]   GET|POST ${CHUNK_PATH}`);
 });

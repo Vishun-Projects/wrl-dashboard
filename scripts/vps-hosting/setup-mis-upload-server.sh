@@ -51,7 +51,7 @@ install_caddy_route() {
   if [[ ! -f "$caddyfile" ]]; then
     cat >"$caddyfile" <<EOF
 api.wrl-fsm.cloud {
-	handle /api/mis-client-import/upload {
+	handle /api/mis-client-import/upload* {
 		request_body {
 			max_size 320MB
 		}
@@ -63,15 +63,29 @@ api.wrl-fsm.cloud {
 	reverse_proxy localhost:8000
 }
 EOF
+  elif grep -Fq 'handle /api/mis-client-import/upload*' "$caddyfile"; then
+    echo "    upload+chunk route already present — leaving Caddyfile unchanged"
   elif grep -Fq 'handle /api/mis-client-import/upload' "$caddyfile"; then
-    echo "    upload route already present — leaving Caddyfile unchanged"
+    echo "    upgrading upload handle to cover /upload-chunk"
+    python3 - "$caddyfile" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+old = "handle /api/mis-client-import/upload {"
+new = "handle /api/mis-client-import/upload* {"
+if old in text:
+    path.write_text(text.replace(old, new, 1))
+    print("    upgraded upload handle → upload*")
+else:
+    print("    no exact upload handle to upgrade")
+PY
   else
     python3 - "$caddyfile" "$upload_port" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
 port = sys.argv[2]
 text = path.read_text()
-block = f"""\thandle /api/mis-client-import/upload {{
+block = f"""\thandle /api/mis-client-import/upload* {{
 \t\trequest_body {{
 \t\t\tmax_size 320MB
 \t\t}}
@@ -84,7 +98,7 @@ if idx < 0:
     raise SystemExit("api.wrl-fsm.cloud site block not found in Caddyfile")
 insert_at = idx + len(needle)
 path.write_text(text[:insert_at] + "\n" + block + text[insert_at:])
-print("    inserted upload handle into existing Caddyfile")
+print("    inserted upload* handle into existing Caddyfile")
 PY
   fi
 

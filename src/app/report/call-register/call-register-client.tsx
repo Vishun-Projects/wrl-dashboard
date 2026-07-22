@@ -12,6 +12,7 @@ import type { CallRegisterRow, CallRegisterSummary } from '@/lib/report/call-reg
 import { CALL_REGISTER_CLIENTS } from '@/lib/report/call-register/clients';
 import { usePageAlert } from '@/hooks/usePageAlert';
 import { triggerBlobDownload } from '@/lib/report/summary-excel-export';
+import { fetchWithRetry } from '@/lib/net/fetch-with-retry';
 
 function getDefaultDates() {
   const now = new Date();
@@ -120,7 +121,9 @@ export function CallRegisterClient() {
       if (appliedFrom) params.set('dateFrom', appliedFrom);
       if (appliedTo) params.set('dateTo', appliedTo);
 
-      const res = await fetch(`/api/report/call-register/export?${params.toString()}`);
+      const res = await fetchWithRetry(`/api/report/call-register/export?${params.toString()}`, {
+        credentials: 'include',
+      });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${res.status}`);

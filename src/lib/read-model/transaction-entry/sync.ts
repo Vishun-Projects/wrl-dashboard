@@ -1,11 +1,17 @@
 import type pg from 'pg';
 import { withTransaction, withClient } from '@/lib/read-model/db';
+import { CALL_REGISTER_CLIENTS } from '@/lib/report/call-register/clients';
 import { TRANSACTION_ENTRY_ENTITY, monthChunks, yearChunks } from './shared';
 import {
   fetchTransactionEntryClients,
   fetchTransactionEntryPeriod,
+  fetchTransactionEntryClientPeriod,
 } from './crm-fetch';
 import { upsertTransactionEntryRows } from './upsert';
+import {
+  mismatchedClients,
+  verifyCallRegisterTransactionEntry,
+} from './verify';
 
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
@@ -71,6 +77,85 @@ function subtractMonths(isoDate: string, months: number): string {
   const d = new Date(`${isoDate}T00:00:00Z`);
   d.setUTCMonth(d.getUTCMonth() - months);
   return d.toISOString().slice(0, 10);
+}
+
+function subtractDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+function recentDays(): number {
+  const n = Number(process.env.TRANSACTION_ENTRY_RECENT_DAYS ?? 14);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 14;
+}
+
+function verifyDays(): number {
+  const n = Number(process.env.TRANSACTION_ENTRY_VERIFY_DAYS ?? 7);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 7;
+}
+
+/** Per-client CRM fetch + upsert for the given clients and date window. */
+async function syncClientsPeriod(
+  clients: readonly string[],
+  from: string,
+  end: string,
+  label: string
+): Promise<number> {
+  let upserted = 0;
+  for (const client of clients) {
+    const rows = await fetchTransactionEntryClientPeriod(client, from, end);
+    upserted += await withTransaction(async (c) => upsertTransactionEntryRows(c, rows));
+  }
+  console.log(`[transaction-entry] ${label} ${from} → ${end} upserted ${upserted} (${clients.length} clients)`);
+  return upserted;
+}
+
+/** Deployment Completion accounts — per-client CRM fetch for recent uploads. */
+async function syncCallRegisterClientsRecent(end: string): Promise<number> {
+  const from = subtractDays(end, recentDays());
+  return syncClientsPeriod(CALL_REGISTER_CLIENTS, from, end, 'Call-register recent sync');
+}
+
+/**
+ * Compare CRM vs mirror for Deployment Completion accounts; re-fetch any mismatch.
+ * Returns extra rows upserted while healing.
+ */
+export async function healCallRegisterMismatches(end: string): Promise<number> {
+  if (process.env.TRANSACTION_ENTRY_VERIFY_ENABLED === 'false') return 0;
+
+  const verifyTo = end;
+  const verifyFrom = subtractDays(verifyTo, verifyDays());
+  const before = await verifyCallRegisterTransactionEntry({
+    dateFrom: verifyFrom,
+    dateTo: verifyTo,
+  });
+  const bad = mismatchedClients(before);
+  if (!bad.length) {
+    console.log(
+      `[transaction-entry] verify ${verifyFrom}..${verifyTo} — all ${before.length} clients in sync`
+    );
+    return 0;
+  }
+
+  console.log(
+    `[transaction-entry] healing ${bad.length} mismatch(es): ${bad.join(', ')} (${verifyFrom}..${verifyTo})`
+  );
+  const healed = await syncClientsPeriod(bad, verifyFrom, verifyTo, 'heal mismatch');
+
+  const after = await verifyCallRegisterTransactionEntry({
+    dateFrom: verifyFrom,
+    dateTo: verifyTo,
+  });
+  const stillBad = mismatchedClients(after);
+  if (stillBad.length) {
+    console.warn(
+      `[transaction-entry] still mismatched after heal: ${stillBad.join(', ')} — check CRM ERROR/null daddedon`
+    );
+  } else {
+    console.log(`[transaction-entry] heal complete — all clients in sync`);
+  }
+  return healed;
 }
 
 /**
@@ -169,12 +254,22 @@ export async function runTransactionEntryIncremental(): Promise<{
 
   try {
     await withClient(async (client) => markRunning(client));
-    const clients = await fetchTransactionEntryClients();
 
-    let upserted = 0;
+    let upserted = await syncCallRegisterClientsRecent(end);
+
+    const clients = await fetchTransactionEntryClients();
     for (const chunk of monthChunks(from, end)) {
       const rows = await fetchTransactionEntryPeriod(chunk.from, chunk.to, clients);
       upserted += await withTransaction(async (client) => upsertTransactionEntryRows(client, rows));
+    }
+
+    try {
+      upserted += await healCallRegisterMismatches(end);
+    } catch (healErr) {
+      console.warn(
+        '[transaction-entry] heal failed (incremental succeeded):',
+        healErr instanceof Error ? healErr.message : healErr
+      );
     }
 
     await withClient(async (client) => {

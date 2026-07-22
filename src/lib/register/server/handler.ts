@@ -191,6 +191,7 @@ export async function handleRegisterGet(req: NextRequest) {
 
     const exportMode = searchParams.get('export');
     const isRegisterExport = exportMode === 'bulk' || exportMode === 'csv';
+    const acceptEncoding = req.headers.get('accept-encoding');
     const security = isRegisterExport
       ? await resolveExportOfficeScope(userId)
       : await resolveReportSecurity(userId, {
@@ -280,6 +281,7 @@ export async function handleRegisterGet(req: NextRequest) {
           visibleStatuses,
           isHod,
           repairCallKeys,
+          acceptEncoding,
         });
       }
 
@@ -656,6 +658,7 @@ export async function handleRegisterGet(req: NextRequest) {
         condition,
         batchSize: Math.min(Math.max(parseInt(searchParams.get('batchSize') || '1000', 10) || 1000, 1), 1000),
         knownTotal: parseInt(searchParams.get('knownTotal') || '0', 10) || 0,
+        acceptEncoding,
         processRows: async (rows) =>
           enrichRegisterRowsRepairDone(
             await mergeAuditEnrichment(

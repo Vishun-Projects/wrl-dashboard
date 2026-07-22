@@ -51,7 +51,9 @@ Also copy from `.env.local`:
 
 ## Large MIS client imports (Coke / Cadbury)
 
-Vercel rejects single request bodies **larger than ~4.5 MB** (HTTP **413**). Large Cadbury/Coke files must go **direct to the VPS** upload service in one POST (same speed class as local).
+Vercel rejects single request bodies **larger than ~4.5 MB** (HTTP **413**). Large Cadbury/Coke files should go to the **VPS** upload service.
+
+Uploads above **~4 MB** are **chunked + resumable** (parallel parts, per-chunk retry). CSV/text payloads are **gzipped in the browser** first to cut wire bytes on bad links. With `NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL` set, chunks hit the VPS at **8 MB** each; without it, same-origin Vercel uses **3 MB** chunks.
 
 ### Required Vercel env (Production)
 
@@ -61,12 +63,12 @@ NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL=https://api.wrl-fsm.cloud/api/mis-client-impor
 
 `NEXT_PUBLIC_*` is **baked in at build time** — save the var, then **Redeploy**.
 
-Without this URL, the browser falls back to **3 MB chunked** uploads through Vercel (slow for ~100+ MB files). With the URL set, the app posts once to the VPS; if the browser cannot reach the VPS (TLS/network), it automatically falls back to chunked.
+Chunk status/upload also use `/api/mis-client-import/upload-chunk` on the same host (derived from the upload URL).
 
 ### VPS checklist
 
 1. `systemctl status fast-close-mis-upload` — running
-2. Caddy: `handle /api/mis-client-import/upload` → `127.0.0.1:3099` with `request_body { max_size 320MB }` — **do not wipe** existing `/internal/mail*` routes when editing Caddyfile
+2. Caddy: `handle /api/mis-client-import/upload*` → `127.0.0.1:3099` with `request_body { max_size 320MB }` (covers `/upload` and `/upload-chunk`) — **do not wipe** existing `/internal/mail*` routes when editing Caddyfile
 3. CORS in `/opt/fast-close-app/.env.mis-upload`:
    `MIS_UPLOAD_CORS_ORIGINS=https://wrl-dashboard.vercel.app,http://localhost:3000`
    (add any custom dashboard domain)

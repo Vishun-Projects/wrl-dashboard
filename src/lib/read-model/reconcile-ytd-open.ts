@@ -5,6 +5,7 @@ import { getSyncState, tryAcquireSyncLock, releaseSyncLock } from '@/lib/read-mo
 import { hotRowNeedsReconcileFromCrm } from '@/lib/read-model/pipeline-reconcile';
 import { repairHotCancelFromNcrReason } from '@/lib/read-model/repair-hot-cancel';
 import { registerHotRetentionStart } from '@/lib/read-model/hot-window';
+import { deleteHotRowsByTrn } from '@/lib/read-model/upsert-hot';
 import type { HotRow } from '@/lib/read-model/types';
 
 const BATCH = Math.max(20, Number(process.env.SYNC_PIPELINE_TRN_CHUNK ?? 40) || 40);
@@ -39,7 +40,7 @@ export async function runReconcileYtdOpen(opts?: {
   const candidates = await withAppClient(async (client) => {
     const res = await client.query<HotRow>(
       `SELECT vtrnno, status_bucket, ncancelreason, source_editedon,
-              bsolved, bfastclose, synced_at, region
+              bsolved, bfastclose, synced_at, region, is_major, nengineer
        FROM calls_latest_hot
        WHERE logged_at >= $1::timestamptz
          AND status_bucket IN ('assigned', 'open_unallocated', 'tech_solved')
@@ -86,35 +87,45 @@ export async function runReconcileYtdOpen(opts?: {
 
     const crmByTrn = new Map(crmRows.map((r) => [String(r.vtrnno ?? '').trim(), r]));
     const staleCrmRows: Record<string, unknown>[] = [];
+    const orphanTrns: string[] = [];
 
     for (const hot of chunk) {
       const crm = crmByTrn.get(hot.vtrnno);
-      if (!crm) continue;
+      if (!crm) {
+        orphanTrns.push(hot.vtrnno);
+        continue;
+      }
       if (hotRowNeedsReconcileFromCrm(hot, crm)) {
         staleFound++;
         staleCrmRows.push(crm);
         if (staleFound <= 15) {
           log(
-            `  stale: ${hot.vtrnno} hot=${hot.status_bucket}/ncr=${hot.ncancelreason ?? 0} crm_ncr=${crm.ncancelreason}`
+            `  stale: ${hot.vtrnno} hot=${hot.status_bucket}/ncr=${hot.ncancelreason ?? 0} major=${hot.is_major} crm_ncr=${crm.ncancelreason}`
           );
         }
       }
     }
 
-    if (apply && staleCrmRows.length) {
+    if (apply && (staleCrmRows.length || orphanTrns.length)) {
       await withAppClient(async (client) => {
         if (!(await tryAcquireSyncLock(client))) {
           throw new Error('sync lock not acquired');
         }
         try {
           const state = await getSyncState(client);
-          const result = await applyCrmRowsToHot(client, staleCrmRows, {
-            state,
-            advanceWatermarks: false,
-          });
-          await releaseSyncLock(client, 'ok', result.rowsUpserted);
-          rowsUpserted += result.rowsUpserted;
-          rowsDeleted += result.rowsDeleted;
+          if (staleCrmRows.length) {
+            const result = await applyCrmRowsToHot(client, staleCrmRows, {
+              state,
+              advanceWatermarks: false,
+            });
+            rowsUpserted += result.rowsUpserted;
+            rowsDeleted += result.rowsDeleted;
+          }
+          if (orphanTrns.length) {
+            rowsDeleted += await deleteHotRowsByTrn(client, orphanTrns);
+            staleFound += orphanTrns.length;
+          }
+          await releaseSyncLock(client, 'ok', rowsUpserted);
         } catch (err) {
           await releaseSyncLock(client, 'error', 0);
           throw err;

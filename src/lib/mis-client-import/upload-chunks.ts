@@ -107,9 +107,61 @@ export async function deleteUploadChunks(uploadId: string): Promise<void> {
   });
 }
 
+export async function getUploadChunkStatus(params: {
+  uploadId: string;
+  uploadedBy: string;
+}): Promise<{ status: number; body: Record<string, unknown> }> {
+  return withAppClient(async (client) => {
+    const metaRes = await client.query<{
+      chunk_total: number;
+      source_code: string;
+      file_name: string;
+      uploaded_by: string;
+    }>(
+      `
+      SELECT chunk_total, source_code, file_name, uploaded_by
+      FROM mis_client_import_upload_chunks
+      WHERE upload_id = $1::uuid
+      ORDER BY chunk_index
+      LIMIT 1
+      `,
+      [params.uploadId]
+    );
+    const meta = metaRes.rows[0];
+    if (!meta) {
+      return { status: 404, body: { error: 'Upload session not found', received: [], chunkTotal: 0 } };
+    }
+    if (meta.uploaded_by !== params.uploadedBy) {
+      return { status: 403, body: { error: 'Forbidden' } };
+    }
+
+    const chunksRes = await client.query<{ chunk_index: number }>(
+      `
+      SELECT chunk_index
+      FROM mis_client_import_upload_chunks
+      WHERE upload_id = $1::uuid
+      ORDER BY chunk_index
+      `,
+      [params.uploadId]
+    );
+
+    return {
+      status: 200,
+      body: {
+        uploadId: params.uploadId,
+        received: chunksRes.rows.map((row) => row.chunk_index),
+        chunkTotal: meta.chunk_total,
+        sourceCode: meta.source_code,
+        fileName: meta.file_name,
+      },
+    };
+  });
+}
+
 export async function assembleAndProcessUpload(
   uploadId: string,
-  uploadedBy: string
+  uploadedBy: string,
+  contentEncoding?: string | null
 ): Promise<MisUploadHttpResult> {
   const assembled = await readAssembledUpload(uploadId, uploadedBy);
   if ('status' in assembled) {
@@ -121,6 +173,7 @@ export async function assembleAndProcessUpload(
     sourceCode: assembled.sourceCode,
     fileName: assembled.fileName,
     buffer: assembled.buffer,
+    contentEncoding,
   });
 
   if (result.status === 200) {

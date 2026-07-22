@@ -40,6 +40,10 @@ echo "tech_solved -> closed/cancelled refresh"
 npm run sync-worker:reconcile-tech-solved -- --apply
 echo "Full YTD open/assigned reconcile (transferred + cancelled orphans)"
 npm run sync-worker:reconcile-ytd-open -- --apply
+echo "Major/minor reconcile (open pipeline + recent fault edits)"
+npm run sync-worker:reconcile-major
+echo "Sample hot vs CRM mismatch check"
+npm run sync-worker:hot-crm-mismatch-sample || echo "WARN: mismatch sample found differences (non-fatal for nightly)"
 # Keep WCO filled for the rolling window (day-chunk CRM pull; safe / no truncate).
 WCO_FROM="${WCO_BACKFILL_FROM:-${TODAY}}"
 # Default: last 3 calendar days (covers late CRM edits + gap days).

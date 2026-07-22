@@ -11,6 +11,7 @@ import {
   blobToPreparedExport,
   type PreparedFileExport,
 } from '@/lib/report/summary-excel-export';
+import { responseForCsvStream } from '@/lib/net/csv-gzip-response';
 
 const CSV_COLUMNS = REGISTER_EXPORT_COLUMNS;
 
@@ -85,7 +86,8 @@ export function buildRegisterCsvContent(rows: Record<string, unknown>[]): string
 
 export function createRegisterCsvResponse(
   rows: Record<string, unknown>[],
-  filename?: string
+  filename?: string,
+  acceptEncoding?: string | null
 ): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -103,13 +105,15 @@ export function createRegisterCsvResponse(
 
   const resolvedName =
     filename ?? `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
-  return new Response(stream, {
-    headers: {
+  return responseForCsvStream(
+    stream,
+    {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="${resolvedName}"`,
       'Cache-Control': 'no-store',
     },
-  });
+    acceptEncoding
+  );
 }
 
 /** Build a register CSV blob for queued export (caller saves via user click when needed). */
@@ -143,6 +147,7 @@ export type RegisterCsvExportOpts = {
   condition: string;
   batchSize?: number;
   knownTotal?: number;
+  acceptEncoding?: string | null;
   processRows: (rows: Record<string, unknown>[]) => Promise<Record<string, unknown>[]>;
 };
 
@@ -153,15 +158,26 @@ export async function buildRegisterCsvResponse(opts: RegisterCsvExportOpts): Pro
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      const closed = () => controller.desiredSize === null;
+      const enqueue = (bytes: Uint8Array): boolean => {
+        if (closed()) return false;
+        try {
+          controller.enqueue(bytes);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
       const headerLine = CSV_COLUMNS.map((c) => escapeCsvCell(c.header)).join(',') + '\r\n';
-      controller.enqueue(encoder.encode(headerLine));
+      if (!enqueue(encoder.encode(headerLine))) return;
 
       let cursorNcode: number | null = null;
       let fetched = 0;
       const targetTotal = Math.max(0, opts.knownTotal ?? 0);
 
       try {
-        while (true) {
+        while (!closed()) {
           let pageCondition = opts.condition;
           if (cursorNcode != null) {
             pageCondition += ` AND tc.ncode < ${cursorNcode}`;
@@ -179,7 +195,7 @@ export async function buildRegisterCsvResponse(opts: RegisterCsvExportOpts): Pro
 
           const processed = await opts.processRows(rawRows);
           for (const raw of processed) {
-            controller.enqueue(encoder.encode(`${registerRowToCsvLine(raw)}\r\n`));
+            if (!enqueue(encoder.encode(`${registerRowToCsvLine(raw)}\r\n`))) return;
           }
 
           fetched += processed.length;
@@ -191,19 +207,31 @@ export async function buildRegisterCsvResponse(opts: RegisterCsvExportOpts): Pro
           if (rawRows.length < batchSize) break;
         }
 
-        controller.close();
+        if (closed()) return;
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
       } catch (err) {
-        controller.error(err);
+        if (closed()) return;
+        try {
+          controller.error(err);
+        } catch {
+          // already closed
+        }
       }
     },
   });
 
   const filename = `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
-  return new Response(stream, {
-    headers: {
+  return responseForCsvStream(
+    stream,
+    {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="${filename}"`,
       'Cache-Control': 'no-store',
     },
-  });
+    opts.acceptEncoding
+  );
 }

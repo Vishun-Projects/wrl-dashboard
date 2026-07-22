@@ -119,4 +119,29 @@ describe('hotRowNeedsCrmRefresh', () => {
     );
     expect(needs).toBe(true);
   });
+
+  it('detects is_major drift when CRM editedon is not newer', () => {
+    const needs = hotRowNeedsCrmRefresh(
+      hot({
+        is_major: false,
+        source_editedon: new Date('2026-06-26T12:00:00Z'),
+      }),
+      {
+        vtrnno: '26F01029',
+        ncode: '736',
+        nofficeid: '1175',
+        ncancelreason: '0',
+        bsolved: '0',
+        bfastclose: '0',
+        nengineer: '0',
+        editedon: '26/06/2026 12:00:00',
+        addedon: '01/06/2026 10:04:53',
+        dtrndate: '01/06/2026 09:14:26',
+        region: 'WEST',
+        account: 'Pepsi',
+        is_major_repair: 'True',
+      }
+    );
+    expect(needs).toBe(true);
+  });
 });

@@ -29,6 +29,8 @@ import { runPipelineReconcile } from '@/lib/read-model/pipeline-reconcile';
 import { runReconcileTechSolved } from '@/lib/read-model/reconcile-tech-solved';
 import { runEditedonCatchupStep } from '@/lib/read-model/editedon-catchup';
 import { repairHotCancelFromNcrReason } from '@/lib/read-model/repair-hot-cancel';
+import { checkMajorRepairRepeatAlerts } from '@/lib/read-model/major-repair-repeat-alert';
+import { runReconcileMajor } from '@/lib/read-model/reconcile-major';
 
 const OVERLAP_MS = 2 * 60 * 1000;
 const MIN_HOT_FOR_INCREMENTAL = Math.floor(HOT_TARGET_ROWS * 0.95);
@@ -69,6 +71,7 @@ export type IncrementalSyncResult = {
   pipelineReconciled?: number;
   techSolvedReconciled?: number;
   editedonCatchup?: number;
+  majorReconciled?: number;
 };
 
 let inFlightSync: Promise<IncrementalSyncResult> | null = null;
@@ -235,6 +238,15 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
     rowsDeleted: writeResult.rowsDeleted,
   });
 
+  try {
+    await checkMajorRepairRepeatAlerts(writeResult.upsertedRows ?? []);
+  } catch (err) {
+    console.warn(
+      '[sync-worker] major-repair-repeat-alert failed (incremental succeeded):',
+      err instanceof Error ? err.message : err
+    );
+  }
+
   let pipelineReconciled = 0;
   let pipelineDeleted = 0;
   try {
@@ -288,6 +300,22 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
     );
   }
 
+  let majorReconciled = 0;
+  try {
+    const major = await runReconcileMajor();
+    majorReconciled = major.rowsUpserted ?? 0;
+    if ((major.refreshed ?? 0) > 0 || majorReconciled > 0) {
+      console.log(
+        `[sync-worker] Major reconcile — refreshed ${major.refreshed ?? 0}, upserted ${majorReconciled}`
+      );
+    }
+  } catch (err) {
+    console.warn(
+      '[sync-worker] Major reconcile failed (incremental succeeded):',
+      err instanceof Error ? err.message : err
+    );
+  }
+
   return {
     ok: true,
     rowsUpserted: writeResult.rowsUpserted,
@@ -296,6 +324,7 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
     pipelineReconciled,
     techSolvedReconciled,
     editedonCatchup,
+    majorReconciled,
   };
 }
 

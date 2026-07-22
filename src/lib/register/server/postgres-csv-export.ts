@@ -17,6 +17,7 @@ import { mergeArcpPickOntoHotExportRows } from '@/lib/register/arcp-approve-date
 import { enrichRegisterRowsRepairDone } from '@/lib/register/server/repair-done-enrich';
 import { escapeCsvCell } from '@/lib/utils/csv';
 import { REGISTER_EXPORT_COLUMNS } from '@/lib/register/table-columns';
+import { responseForCsvStream } from '@/lib/net/csv-gzip-response';
 
 const KEYSET_FETCH_SIZE = 12_000;
 
@@ -88,14 +89,15 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
 export type PostgresRegisterCsvStreamOptions = Omit<
   RegisterPostgresParams,
   'page' | 'limit' | 'fetchTotals' | 'fetchFilterOptions'
->;
+> & { acceptEncoding?: string | null };
 
 /** Stream register CSV from calls_latest_hot — composite keyset pages + batch ARCP enrichment per chunk. */
 export async function buildPostgresRegisterCsvStream(
   params: PostgresRegisterCsvStreamOptions
 ): Promise<Response> {
+  const { acceptEncoding, ...queryParams } = params;
   const fullParams: RegisterPostgresParams = {
-    ...params,
+    ...queryParams,
     page: 1,
     limit: KEYSET_FETCH_SIZE,
     fetchTotals: false,
@@ -107,20 +109,35 @@ export async function buildPostgresRegisterCsvStream(
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      const closed = () => controller.desiredSize === null;
+      const enqueue = (bytes: Uint8Array): boolean => {
+        if (closed()) return false;
+        try {
+          controller.enqueue(bytes);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
       try {
-        controller.enqueue(encoder.encode('\uFEFF'));
-        controller.enqueue(
-          encoder.encode(
-            `${REGISTER_EXPORT_COLUMNS.map((c) => escapeCsvCell(c.header)).join(',')}\r\n`
+        if (!enqueue(encoder.encode('\uFEFF'))) return;
+        if (
+          !enqueue(
+            encoder.encode(
+              `${REGISTER_EXPORT_COLUMNS.map((c) => escapeCsvCell(c.header)).join(',')}\r\n`
+            )
           )
-        );
+        ) {
+          return;
+        }
 
         let cursorLoggedAt: string | undefined;
         let cursorNcode: number | undefined;
         let exportedRows = 0;
 
         await withBulkReadClient(async (client) => {
-          while (true) {
+          while (!closed()) {
             const pageParams: RegisterPostgresParams = {
               ...fullParams,
               cursorLoggedAt,
@@ -153,7 +170,7 @@ export async function buildPostgresRegisterCsvStream(
             for (const row of rows) {
               chunk += `${hotPgRowToRegisterCsvLine(row)}\r\n`;
             }
-            controller.enqueue(encoder.encode(chunk));
+            if (!enqueue(encoder.encode(chunk))) return;
             exportedRows += rows.length;
 
             const cursor = registerKeysetCursorFromRow(
@@ -168,16 +185,27 @@ export async function buildPostgresRegisterCsvStream(
           }
         });
 
+        if (closed()) return;
+
         if (exportedRows !== dbCount) {
           throw new Error(
             `Export incomplete — server exported ${exportedRows.toLocaleString()} of ${dbCount.toLocaleString()} rows`
           );
         }
 
-        controller.close();
+        try {
+          controller.close();
+        } catch {
+          // already closed (client abort)
+        }
       } catch (err) {
+        if (closed()) return;
         console.error('[register-export] CSV stream failed:', err);
-        controller.error(err);
+        try {
+          controller.error(err);
+        } catch {
+          // already closed
+        }
       }
     },
   });
@@ -190,5 +218,5 @@ export async function buildPostgresRegisterCsvStream(
     'X-Register-Export-Total': String(dbCount),
   };
 
-  return new Response(stream, { headers });
+  return responseForCsvStream(stream, headers, acceptEncoding);
 }

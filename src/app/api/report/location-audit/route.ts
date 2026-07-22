@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { exportLocationAuditCsv } from '@/lib/location-audit';
+import { gzippedCsvPayload } from '@/lib/net/csv-gzip-response';
 import {
   fetchLocationAuditFull,
   fetchLocationAuditList,
@@ -59,12 +60,12 @@ export async function GET(req: NextRequest) {
     if (format === 'csv') {
       const rows = await runLocationAuditExport(params);
       const csv = exportLocationAuditCsv(rows);
-      return new NextResponse(csv, {
-        headers: {
-          'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': `attachment; filename="location-audit-${params.startDate}-${params.endDate}.csv"`,
-        },
-      });
+      const { body, headers } = gzippedCsvPayload(
+        csv,
+        `location-audit-${params.startDate}-${params.endDate}.csv`,
+        req.headers.get('accept-encoding')
+      );
+      return new NextResponse(body, { headers });
     }
 
     if (mode === 'full') {

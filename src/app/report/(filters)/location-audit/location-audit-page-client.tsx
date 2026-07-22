@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { cookieAuthRequestConfig } from '@/lib/api/cookie-auth';
+import { withAxiosRetry } from '@/lib/net/fetch-with-retry';
 import { TrnLink } from '@/components/calls/TrnLink';
 import {
   MapPin,
@@ -365,12 +366,14 @@ export default function LocationAuditPage() {
   const handleExportCsv = async () => {
     setExporting(true);
     try {
-      const res = await axios.get('/api/report/location-audit', {
-        ...cookieAuthRequestConfig,
-        timeout: 300_000,
-        params: { ...buildParams(), format: 'csv' },
-        responseType: 'blob',
-      });
+      const res = await withAxiosRetry(() =>
+        axios.get('/api/report/location-audit', {
+          ...cookieAuthRequestConfig,
+          timeout: 300_000,
+          params: { ...buildParams(), format: 'csv' },
+          responseType: 'blob',
+        })
+      );
       const contentType = String(res.headers['content-type'] ?? '');
       if (contentType.includes('application/json')) {
         const errBody = JSON.parse(await res.data.text()) as { error?: string };

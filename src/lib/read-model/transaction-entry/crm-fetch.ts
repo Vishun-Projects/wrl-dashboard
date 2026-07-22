@@ -134,6 +134,15 @@ async function fetchClientPeriod(
   return all;
 }
 
+/** Per-client fetch for Deployment Completion accounts (exported for incremental recent window). */
+export function fetchTransactionEntryClientPeriod(
+  client: string,
+  dateFrom: string,
+  dateTo: string
+): Promise<CrmTransactionEntryRow[]> {
+  return fetchClientPeriod(client, dateFrom, dateTo);
+}
+
 async function fetchClientsParallel(
   clients: string[],
   dateFrom: string,

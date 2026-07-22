@@ -14,11 +14,12 @@ import { applyCrmRowsToHot } from '@/lib/read-model/apply-crm-delta';
 import { hotRowCancelReasonMismatch, repairHotCancelFromNcrReason } from '@/lib/read-model/repair-hot-cancel';
 import { isHotEligibleRow, transformCrmRowToHot } from '@/lib/read-model/transform';
 import { isRealCancelReasonCode } from '@/lib/report/search';
+import { deleteHotRowsByTrn } from '@/lib/read-model/upsert-hot';
 import type { HotRow } from '@/lib/read-model/types';
 
 const PIPELINE_BATCH = Math.max(
   20,
-  Number(process.env.SYNC_PIPELINE_RECONCILE_BATCH ?? 400) || 400
+  Number(process.env.SYNC_PIPELINE_RECONCILE_BATCH ?? 1000) || 1000
 );
 const TRN_FETCH_CHUNK = Math.max(10, Number(process.env.SYNC_PIPELINE_TRN_CHUNK ?? 40) || 40);
 
@@ -36,11 +37,20 @@ export type PipelineReconcileResult = {
   ncrRepaired?: number;
 };
 
+type HotReconcileFields = Pick<
+  HotRow,
+  | 'status_bucket'
+  | 'ncancelreason'
+  | 'source_editedon'
+  | 'bsolved'
+  | 'bfastclose'
+  | 'region'
+  | 'is_major'
+  | 'nengineer'
+>;
+
 export function hotRowNeedsCrmRefresh(
-  hot: Pick<
-    HotRow,
-    'status_bucket' | 'ncancelreason' | 'source_editedon' | 'bsolved' | 'bfastclose' | 'region'
-  >,
+  hot: HotReconcileFields,
   crmRow: Record<string, unknown>
 ): boolean {
   const crmEdited = parseCrmDate(crmRow.editedon) ?? parseCrmDate(crmRow.addedon);
@@ -58,8 +68,14 @@ export function hotRowNeedsCrmRefresh(
   if (Number(hot.ncancelreason ?? 0) !== Number(fresh.ncancelreason ?? 0)) return true;
   if (Boolean(hot.bsolved) !== Boolean(fresh.bsolved)) return true;
   if (Boolean(hot.bfastclose) !== Boolean(fresh.bfastclose)) return true;
+  if (Boolean(hot.is_major) !== Boolean(fresh.is_major)) return true;
+  if ((hot.nengineer ?? null) !== (fresh.nengineer ?? null)) return true;
   if (hotRowCancelReasonMismatch(hot)) return true;
-  if (isRealCancelReasonCode(crmRow.ncancelreason) && fresh?.status_bucket === 'cancelled' && hot.status_bucket !== 'cancelled') {
+  if (
+    isRealCancelReasonCode(crmRow.ncancelreason) &&
+    fresh?.status_bucket === 'cancelled' &&
+    hot.status_bucket !== 'cancelled'
+  ) {
     return true;
   }
 
@@ -68,10 +84,7 @@ export function hotRowNeedsCrmRefresh(
 
 /** Whether a hot row should be refreshed or removed based on live CRM (incl. transferred). */
 export function hotRowNeedsReconcileFromCrm(
-  hot: Pick<
-    HotRow,
-    'status_bucket' | 'ncancelreason' | 'source_editedon' | 'bsolved' | 'bfastclose' | 'region'
-  >,
+  hot: HotReconcileFields,
   crmRow: Record<string, unknown>
 ): boolean {
   if (!isHotEligibleRow(crmRow)) return true;
@@ -86,7 +99,7 @@ async function listPipelineReconcileCandidates(limit: number): Promise<HotRow[]>
     const res = await client.query<HotRow>(
       `
       SELECT h.vtrnno, h.status_bucket, h.ncancelreason, h.source_editedon,
-             h.bsolved, h.bfastclose, h.synced_at, h.region
+             h.bsolved, h.bfastclose, h.synced_at, h.region, h.is_major, h.nengineer
       FROM calls_latest_hot h
       CROSS JOIN LATERAL (
         SELECT last_editedon FROM sync_state WHERE entity = 'calls_latest_hot' LIMIT 1
@@ -131,6 +144,7 @@ export async function runPipelineReconcile(): Promise<PipelineReconcileResult> {
   const trns = candidates.map((row) => row.vtrnno);
   const hotByTrn = new Map(candidates.map((row) => [row.vtrnno, row]));
   const staleTrns: string[] = [];
+  const orphanTrns: string[] = [];
 
   for (let i = 0; i < trns.length; i += TRN_FETCH_CHUNK) {
     const chunk = trns.slice(i, i + TRN_FETCH_CHUNK);
@@ -142,38 +156,60 @@ export async function runPipelineReconcile(): Promise<PipelineReconcileResult> {
     }
     for (const trn of chunk) {
       const hot = hotByTrn.get(trn);
+      if (!hot) continue;
       const crm = crmByTrn.get(trn);
-      if (!hot || !crm) continue;
+      if (!crm) {
+        orphanTrns.push(trn);
+        continue;
+      }
       if (hotRowNeedsReconcileFromCrm(hot, crm)) staleTrns.push(trn);
     }
   }
 
-  if (!staleTrns.length) {
+  if (!staleTrns.length && !orphanTrns.length) {
     return {
       ok: true,
       candidates: candidates.length,
       refreshed: 0,
       rowsUpserted: 0,
+      rowsDeleted: 0,
     };
   }
 
-  const crmRows = await fetchCrmRowsByTrns(staleTrns, { includeTransferred: true });
+  const crmRows = staleTrns.length
+    ? await fetchCrmRowsByTrns(staleTrns, { includeTransferred: true })
+    : [];
+
   const result = await withClient(async (client) => {
     const acquired = await tryAcquireSyncLock(client);
     if (!acquired) {
       return { kind: 'skipped' as const, reason: 'lock not acquired' };
     }
     const state = await getSyncState(client);
-    const applied = await applyCrmRowsToHot(client, crmRows, {
-      state,
-      advanceWatermarks: false,
-    });
+    let rowsUpserted = 0;
+    let rowsDeleted = 0;
+    if (crmRows.length) {
+      const applied = await applyCrmRowsToHot(client, crmRows, {
+        state,
+        advanceWatermarks: false,
+      });
+      rowsUpserted = applied.rowsUpserted;
+      rowsDeleted = applied.rowsDeleted;
+    }
+    if (orphanTrns.length) {
+      rowsDeleted += await deleteHotRowsByTrn(client, orphanTrns);
+    }
     const ncrRepaired = await repairHotCancelFromNcrReason(client);
     if (ncrRepaired > 0) {
       console.log(`[sync-worker] Pipeline reconcile — repaired ${ncrRepaired} ncancelreason row(s)`);
     }
-    await releaseSyncLock(client, 'ok', applied.rowsUpserted);
-    return { kind: 'applied' as const, ...applied, ncrRepaired };
+    await releaseSyncLock(client, 'ok', rowsUpserted);
+    return {
+      kind: 'applied' as const,
+      rowsUpserted,
+      rowsDeleted,
+      ncrRepaired,
+    };
   });
 
   if (result.kind === 'skipped') {
@@ -181,13 +217,13 @@ export async function runPipelineReconcile(): Promise<PipelineReconcileResult> {
   }
 
   console.log(
-    `[sync-worker] Pipeline reconcile — checked ${candidates.length}, refreshed ${staleTrns.length}, upserted ${result.rowsUpserted}, deleted ${result.rowsDeleted ?? 0}`
+    `[sync-worker] Pipeline reconcile — checked ${candidates.length}, refreshed ${staleTrns.length}, orphans ${orphanTrns.length}, upserted ${result.rowsUpserted}, deleted ${result.rowsDeleted ?? 0}`
   );
 
   return {
     ok: true,
     candidates: candidates.length,
-    refreshed: staleTrns.length,
+    refreshed: staleTrns.length + orphanTrns.length,
     rowsUpserted: result.rowsUpserted,
     rowsDeleted: result.rowsDeleted,
     ncrRepaired: result.ncrRepaired,
