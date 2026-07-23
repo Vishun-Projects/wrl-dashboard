@@ -854,11 +854,12 @@ export default function AdminUsersPage() {
                             <div>
                               <p className="text-[12px] font-medium text-slate-800 flex items-center gap-1.5">
                                 <Mail size={14} className="text-slate-400" />
-                                MIS email reports
+                                Morning MIS digest
                               </p>
                               <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">
-                                Allow this user to use Profile → Email reports and scheduled digests.
-                                Their role must include capability “MIS email reports”.
+                                Opt this user into the scheduled morning digest. Profile → Email
+                                reports appears when their role has “MIS email reports” (Mail
+                                access). They also need MIS Summary / Register / Accounts to compose.
                               </p>
                             </div>
                             <button

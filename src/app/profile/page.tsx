@@ -32,6 +32,8 @@ import type { MisEmailKeyAccountsByZone, MisEmailPreferences } from '@/features/
 
 type MisEmailSettings = {
   mis_email_enabled: boolean;
+  can_access_email_ui?: boolean;
+  has_report_access?: boolean;
   preferences: MisEmailPreferences;
   allowed: {
     includeSummary: boolean;
@@ -204,7 +206,7 @@ function ProfileContent() {
         tabs={[
           { id: 'general', label: 'General', icon: <User size={14} /> },
           { id: 'appearance', label: 'Appearance', icon: <Palette size={14} /> },
-          ...(emailSettings?.mis_email_enabled
+          ...(emailSettings?.can_access_email_ui
             ? [{ id: 'email', label: 'Email reports', icon: <Mail size={14} /> }]
             : []),
           { id: 'settings', label: 'Security', icon: <Shield size={14} /> },
@@ -277,13 +279,14 @@ function ProfileContent() {
               </div>
             </SettingsCard>
 
-            {!emailLoading && emailSettings && !emailSettings.mis_email_enabled ? (
+            {!emailLoading && emailSettings && !emailSettings.can_access_email_ui ? (
               <div className="mt-4 flex items-start gap-3 rounded-xl border border-slate-200 bg-bg-soft px-4 py-3">
                 <Mail size={18} className="mt-0.5 flex-shrink-0 text-slate-400" />
                 <div>
                   <p className="text-xs text-slate-800 ui-strong">MIS email reports</p>
                   <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
-                    Contact your administrator to enable scheduled MIS email reports for your account.
+                    Your roles do not include Mail access (MIS email reports capability). Ask an
+                    administrator to assign it.
                   </p>
                 </div>
               </div>
@@ -291,9 +294,21 @@ function ProfileContent() {
           </form>
         )}
 
-        {activeTab === 'email' && emailSettings?.mis_email_enabled ? (
+        {activeTab === 'email' && emailSettings?.can_access_email_ui ? (
           <div className="space-y-4">
-            {!emailLoading && user?.email ? (
+            {!emailLoading && !emailSettings.has_report_access ? (
+              <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <AlertCircle size={18} className="mt-0.5 flex-shrink-0 text-amber-600" />
+                <div>
+                  <p className="text-xs text-amber-900 ui-strong">Mail access is on — but nothing to send yet</p>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-amber-800">
+                    Add a role with MIS Summary, Call Register, or Key Account (or full MIS Reports).
+                    Serial Audit alone does not include email report data.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+            {!emailLoading && user?.email && emailSettings.has_report_access ? (
               <MisEmailComposer
                 settings={{
                   primaryEmail: user.email,

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
+import { hasMisEmailSendAccess } from '@/lib/auth/rbac-catalog';
 import { loadDigestRecipientById } from '@/features/mis-email/lib/recipients';
 import {
   mergeMisEmailPreferences,
@@ -55,21 +56,27 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     }
 
+    const permissions = recipient?.permissions ?? [];
+    const canAccessEmailUi = hasMisEmailSendAccess(permissions);
     const preferences = mergeMisEmailPreferences(row.mis_email_preferences);
     const allowed = {
       includeSummary: recipient?.includeSummary ?? false,
       includeDetailed: recipient?.includeDetailed ?? false,
       includeKeyAccount: recipient?.includeKeyAccount ?? false,
     };
+    const hasReportAccess =
+      allowed.includeSummary || allowed.includeDetailed || allowed.includeKeyAccount;
 
     let scopeLabel: string | null = null;
-    if (recipient) {
+    if (recipient && hasReportAccess) {
       const scope = await resolveUserDigestScopeWithLabel(recipient);
       scopeLabel = scope.scopeLabel;
     }
 
     return NextResponse.json({
       mis_email_enabled: Boolean(row.mis_email_enabled),
+      can_access_email_ui: canAccessEmailUi,
+      has_report_access: hasReportAccess,
       preferences,
       allowed,
       availableBodySections: resolveAvailableBodySections({
@@ -105,18 +112,25 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     }
 
+    if (!recipient || !hasMisEmailSendAccess(recipient.permissions)) {
+      return NextResponse.json(
+        { error: 'Your role is missing the “MIS email reports” capability.' },
+        { status: 403 }
+      );
+    }
+
     const current = mergeMisEmailPreferences(row.mis_email_preferences);
     const permissions = {
-      includeSummary: recipient?.includeSummary ?? false,
-      includeDetailed: recipient?.includeDetailed ?? false,
-      includeKeyAccount: recipient?.includeKeyAccount ?? false,
+      includeSummary: recipient.includeSummary,
+      includeDetailed: recipient.includeDetailed,
+      includeKeyAccount: recipient.includeKeyAccount,
     };
 
     const validated = validateMisEmailPreferencesPatch({
       patch: body,
       permissions,
       current,
-      misEmailEnabled: Boolean(row.mis_email_enabled),
+      misEmailEnabled: true,
     });
 
     if (!validated.ok) {

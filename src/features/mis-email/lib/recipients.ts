@@ -103,11 +103,10 @@ export async function loadDigestRecipientById(userId: string): Promise<DigestRec
   });
 }
 
-function rowToDigestRecipient(row: RecipientRow): DigestRecipient | null {
+function rowToDigestRecipient(row: RecipientRow): DigestRecipient {
   const permissions = expandPermissionList(row.permission_names ?? []);
   const { includeSummary, includeDetailed, includeKeyAccount } =
     resolveMisEmailReportIncludes(permissions);
-  if (!includeSummary && !includeDetailed && !includeKeyAccount) return null;
 
   return {
     id: row.id,

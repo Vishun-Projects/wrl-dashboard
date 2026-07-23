@@ -57,16 +57,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     }
 
-    if (!row.mis_email_enabled) {
+    if (!hasMisEmailSendAccess(recipient.permissions)) {
       return NextResponse.json(
-        { error: 'MIS email is not enabled for your account. Ask an administrator.' },
+        { error: 'Your role is missing the “MIS email reports” capability (Mail access).' },
         { status: 403 }
       );
     }
 
-    if (!hasMisEmailSendAccess(recipient.permissions)) {
+    if (!recipient.includeSummary && !recipient.includeDetailed && !recipient.includeKeyAccount) {
       return NextResponse.json(
-        { error: 'Your role is missing the “MIS email reports” capability.' },
+        {
+          error:
+            'Mail access alone is not enough — also assign a role with MIS Summary, Call Register, or Key Account (or full MIS Reports).',
+        },
         { status: 403 }
       );
     }
