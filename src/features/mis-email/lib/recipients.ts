@@ -4,6 +4,7 @@ import {
   hasMisEmailSendAccess,
   resolveMisEmailReportIncludes,
 } from '@/lib/auth/rbac-catalog';
+import { USER_ASSIGNED_ROLES_LATERAL } from '@/lib/auth/user-roles-sql';
 import {
   hasAnyEffectiveDigestInclude,
   isMisEmailSubscribed,
@@ -43,6 +44,11 @@ const RECIPIENT_SELECT = `SELECT u.id, u.name, u.email, u.role, u.office_ids, u.
   u.mis_email_enabled, u.mis_email_preferences,
   COALESCE(array_agg(DISTINCT ap.name) FILTER (WHERE ap.name IS NOT NULL), '{}') AS permission_names`;
 
+const RECIPIENT_FROM = `FROM public.app_users u
+       ${USER_ASSIGNED_ROLES_LATERAL}
+       LEFT JOIN public.app_role_permissions arp ON arp.role_id = assigned.role_id
+       LEFT JOIN public.app_permissions ap ON ap.id = arp.permission_id`;
+
 const RECIPIENT_GROUP_BY = `GROUP BY u.id, u.name, u.email, u.role, u.office_ids, u.visible_statuses,
   u.mis_email_enabled, u.mis_email_preferences`;
 
@@ -61,9 +67,7 @@ export async function loadDigestRecipients(): Promise<DigestRecipient[]> {
   return withAppClient(async (client) => {
     const res = await client.query<RecipientRow>(
       `${RECIPIENT_SELECT}
-       FROM public.app_users u
-       LEFT JOIN public.app_role_permissions arp ON arp.role_id = u.role_id
-       LEFT JOIN public.app_permissions ap ON ap.id = arp.permission_id
+       ${RECIPIENT_FROM}
        WHERE u.email IS NOT NULL AND btrim(u.email) <> ''
          AND u.mis_email_enabled = true
        ${RECIPIENT_GROUP_BY}
@@ -87,9 +91,7 @@ export async function loadDigestRecipientById(userId: string): Promise<DigestRec
   return withAppClient(async (client) => {
     const res = await client.query<RecipientRow>(
       `${RECIPIENT_SELECT}
-       FROM public.app_users u
-       LEFT JOIN public.app_role_permissions arp ON arp.role_id = u.role_id
-       LEFT JOIN public.app_permissions ap ON ap.id = arp.permission_id
+       ${RECIPIENT_FROM}
        WHERE u.id = $1
        ${RECIPIENT_GROUP_BY}
        LIMIT 1`,
@@ -131,9 +133,7 @@ export async function loadDigestRecipientByEmail(email: string): Promise<DigestR
   return withAppClient(async (client) => {
     const res = await client.query<RecipientRow>(
       `${RECIPIENT_SELECT}
-       FROM public.app_users u
-       LEFT JOIN public.app_role_permissions arp ON arp.role_id = u.role_id
-       LEFT JOIN public.app_permissions ap ON ap.id = arp.permission_id
+       ${RECIPIENT_FROM}
        WHERE lower(btrim(u.email)) = $1
        ${RECIPIENT_GROUP_BY}
        LIMIT 1`,

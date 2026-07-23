@@ -19,9 +19,17 @@ type MisEmailRow = {
 
 async function loadMisEmailRow(userId: string): Promise<MisEmailRow | null> {
   const rows = (await prisma.$queryRawUnsafe(
-    `SELECT u.mis_email_enabled, u.mis_email_preferences, r.name AS role_name
+    `SELECT u.mis_email_enabled, u.mis_email_preferences,
+            COALESCE(
+              (
+                SELECT string_agg(r.name, ', ' ORDER BY r.name)
+                FROM public.app_user_roles aur
+                JOIN public.app_roles r ON r.id = aur.role_id
+                WHERE aur.user_id = u.id
+              ),
+              (SELECT name FROM public.app_roles WHERE id = u.role_id)
+            ) AS role_name
      FROM public.app_users u
-     LEFT JOIN public.app_roles r ON r.id = u.role_id
      WHERE u.id = $1
      LIMIT 1`,
     userId

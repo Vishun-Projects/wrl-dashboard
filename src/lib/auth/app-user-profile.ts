@@ -11,6 +11,8 @@ export type AppUserAuthProfile = {
   visible_statuses: string[] | null;
   avatar_url: string | null;
   role_id: string | null;
+  /** All assigned roles (union of permissions). Primary display role is role_id. */
+  role_ids?: string[];
   theme: string;
 };
 

@@ -3,8 +3,16 @@ import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
+import { USER_ROLE_IDS_SUBSELECT } from '@/lib/auth/user-roles-sql';
 
-const USER_COLUMNS = `id, name, email, role, role_id, office_ids, visible_statuses, avatar_url, mis_email_enabled, mis_email_preferences, created_at`;
+const USER_LIST_SQL = `
+  SELECT u.id, u.name, u.email, u.role, u.role_id, u.office_ids, u.visible_statuses,
+         u.avatar_url, u.mis_email_enabled, u.mis_email_preferences, u.created_at,
+         (${USER_ROLE_IDS_SUBSELECT}) AS role_ids
+  FROM public.app_users u
+  ORDER BY u.created_at DESC
+  LIMIT $1 OFFSET $2
+`;
 const BOOTSTRAP_CACHE_TTL_MS = 15_000;
 const bootstrapCache = new Map<
   string,
@@ -41,11 +49,7 @@ export async function GET(request: Request) {
     }
 
     const [users, roles] = await Promise.all([
-      prisma.$queryRawUnsafe(
-        `SELECT ${USER_COLUMNS} FROM public.app_users ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
-        limit,
-        offset
-      ),
+      prisma.$queryRawUnsafe(USER_LIST_SQL, limit, offset),
       prisma.$queryRawUnsafe(
         `SELECT r.id, r.name, r.description,
                 COALESCE(json_agg(p.name) FILTER (WHERE p.name IS NOT NULL), '[]') AS permissions

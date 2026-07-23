@@ -11,12 +11,24 @@ import { isDbSignInAvailable } from '@/lib/auth/db-sign-in';
 import { isDevAuthBypass } from '@/lib/auth/verify-jwt';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
-import { expandPermissionList, canAssignMisEmail, resolveMisEmailReportIncludes } from '@/lib/auth/rbac-catalog';
+import { canAssignMisEmail, resolveMisEmailReportIncludes } from '@/lib/auth/rbac-catalog';
+import { defaultPreferencesForRecipient } from '@/features/mis-email/lib/preferences';
+import { USER_ROLE_IDS_SUBSELECT } from '@/lib/auth/user-roles-sql';
 import {
-  defaultPreferencesForRecipient,
-} from '@/features/mis-email/lib/preferences';
+  loadPermissionsForRoleIds,
+  loadRoleNamesByIds,
+  normalizeRoleIds,
+  replaceUserRoles,
+} from '@/lib/auth/user-roles';
 
-const USER_COLUMNS = `id, name, email, role, role_id, office_ids, visible_statuses, avatar_url, mis_email_enabled, mis_email_preferences, created_at`;
+const USER_LIST_SQL = `
+  SELECT u.id, u.name, u.email, u.role, u.role_id, u.office_ids, u.visible_statuses,
+         u.avatar_url, u.mis_email_enabled, u.mis_email_preferences, u.created_at,
+         (${USER_ROLE_IDS_SUBSELECT}) AS role_ids
+  FROM public.app_users u
+  ORDER BY u.created_at DESC
+  LIMIT $1 OFFSET $2
+`;
 
 function normalizeUuid(value: unknown): string | null {
   if (value == null) return null;
@@ -26,6 +38,10 @@ function normalizeUuid(value: unknown): string | null {
 
 function isDuplicateEmailMessage(message: string): boolean {
   return /already been registered|already registered|already exists|duplicate/i.test(message);
+}
+
+function slugRoleName(name: string): string {
+  return name.toLowerCase().replace(/\s+/g, '_');
 }
 
 async function findAuthUserByEmail(email: string) {
@@ -55,7 +71,8 @@ async function insertAppUser(params: {
   email: string;
   name: string;
   role: string;
-  roleId: string | null;
+  roleId: string;
+  roleIds: string[];
   officeIds: string[];
   visibleStatuses: string[];
 }) {
@@ -69,26 +86,19 @@ async function insertAppUser(params: {
     params.officeIds,
     params.visibleStatuses
   );
+  await replaceUserRoles(params.id, params.roleIds);
 }
 
-async function loadRoleMisIncludes(roleId: string): Promise<{
-  includeSummary: boolean;
-  includeDetailed: boolean;
-  includeKeyAccount: boolean;
-  canAssignEmail: boolean;
+async function resolvePrimaryRole(roleIds: string[]): Promise<{
+  primaryRoleId: string;
+  roleSlug: string;
 } | null> {
-  const rows = (await prisma.$queryRawUnsafe(
-    `SELECT COALESCE(array_agg(DISTINCT ap.name) FILTER (WHERE ap.name IS NOT NULL), '{}') AS permission_names
-     FROM public.app_role_permissions arp
-     JOIN public.app_permissions ap ON ap.id = arp.permission_id
-     WHERE arp.role_id = $1`,
-    roleId
-  )) as { permission_names: string[] }[];
-  const permissions = expandPermissionList(rows[0]?.permission_names ?? []);
-  return {
-    ...resolveMisEmailReportIncludes(permissions),
-    canAssignEmail: canAssignMisEmail(permissions),
-  };
+  if (roleIds.length === 0) return null;
+  const names = await loadRoleNamesByIds(roleIds);
+  const primaryRoleId = roleIds[0]!;
+  const primaryName = names.get(primaryRoleId);
+  if (!primaryName) return null;
+  return { primaryRoleId, roleSlug: slugRoleName(primaryName) };
 }
 
 export async function GET(request: Request) {
@@ -110,11 +120,7 @@ export async function GET(request: Request) {
     const limit = Math.min(200, Math.max(1, parseInt(searchParams.get('limit') || '500', 10) || 500));
     const offset = (page - 1) * limit;
 
-    const users = await prisma.$queryRawUnsafe(
-      `SELECT ${USER_COLUMNS} FROM public.app_users ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
-      limit,
-      offset
-    );
+    const users = await prisma.$queryRawUnsafe(USER_LIST_SQL, limit, offset);
     return NextResponse.json(users);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -141,21 +147,23 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { email, password, name, role, role_id, office_ids, visible_statuses } = body;
-    const roleId = normalizeUuid(role_id);
+    const { email, password, name, role, role_id, role_ids, office_ids, visible_statuses } = body;
+    const roleIds = normalizeRoleIds(role_ids, role_id);
+    const primary = await resolvePrimaryRole(roleIds);
 
     if (!email?.trim() || !password || !name?.trim()) {
       return NextResponse.json({ error: 'Name, email, and password are required.' }, { status: 400 });
     }
-    if (!roleId) {
-      return NextResponse.json({ error: 'Please select a system role.' }, { status: 400 });
+    if (!primary) {
+      return NextResponse.json({ error: 'Please select at least one system role.' }, { status: 400 });
     }
 
     const profileParams = {
       email: email.trim(),
       name: name.trim(),
-      role,
-      roleId,
+      role: typeof role === 'string' && role.trim() ? role : primary.roleSlug,
+      roleId: primary.primaryRoleId,
+      roleIds,
       officeIds: office_ids || [],
       visibleStatuses: visible_statuses || [],
     };
@@ -241,34 +249,33 @@ export async function PUT(request: Request) {
 
   try {
     const body = await request.json();
-    const { id, name, role, role_id, office_ids, visible_statuses, mis_email_enabled } = body;
-    const roleId = normalizeUuid(role_id);
+    const { id, name, role, role_id, role_ids, office_ids, visible_statuses, mis_email_enabled } =
+      body;
+    const roleIds = normalizeRoleIds(role_ids, role_id);
+    const primary = await resolvePrimaryRole(roleIds);
 
-    if (!roleId) {
-      return NextResponse.json({ error: 'Please select a system role.' }, { status: 400 });
+    if (!primary) {
+      return NextResponse.json({ error: 'Please select at least one system role.' }, { status: 400 });
     }
 
-    const misIncludes = await loadRoleMisIncludes(roleId);
+    const permissions = await loadPermissionsForRoleIds(roleIds);
+    const includes = resolveMisEmailReportIncludes(permissions);
+    const canEmail = canAssignMisEmail(permissions);
     const wantsEmail = Boolean(mis_email_enabled);
+    const roleSlug = typeof role === 'string' && role.trim() ? role : primary.roleSlug;
 
-    if (wantsEmail && (!misIncludes || !misIncludes.canAssignEmail)) {
+    if (wantsEmail && !canEmail) {
       return NextResponse.json(
         {
           error:
-            'Assign a role with “MIS email reports” plus at least one MIS report tab (or full MIS Reports) before enabling email digests.',
+            'Assign roles with “MIS email reports” plus at least one MIS report tab (or full MIS Reports) before enabling email digests.',
         },
         { status: 400 }
       );
     }
 
     if (wantsEmail) {
-      const defaultPrefs = JSON.stringify(
-        defaultPreferencesForRecipient({
-          includeSummary: misIncludes!.includeSummary,
-          includeDetailed: misIncludes!.includeDetailed,
-          includeKeyAccount: misIncludes!.includeKeyAccount,
-        })
-      );
+      const defaultPrefs = JSON.stringify(defaultPreferencesForRecipient(includes));
       await prisma.$queryRawUnsafe(
         `UPDATE public.app_users
          SET name = $1, role = $2, role_id = $3, office_ids = $4, visible_statuses = $5,
@@ -280,8 +287,8 @@ export async function PUT(request: Request) {
              END
          WHERE id = $7`,
         name,
-        role,
-        roleId,
+        roleSlug,
+        primary.primaryRoleId,
         office_ids,
         visible_statuses || [],
         defaultPrefs,
@@ -294,13 +301,15 @@ export async function PUT(request: Request) {
              mis_email_enabled = false
          WHERE id = $6`,
         name,
-        role,
-        roleId,
+        roleSlug,
+        primary.primaryRoleId,
         office_ids,
         visible_statuses || [],
         id
       );
     }
+
+    await replaceUserRoles(id, roleIds);
 
     return NextResponse.json({ success: true });
   } catch (err: any) {

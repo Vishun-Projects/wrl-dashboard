@@ -70,7 +70,7 @@ export default function AdminUsersPage() {
     name?: string;
     email?: string;
     password?: string;
-    role_id?: string;
+    role_ids?: string;
   };
 
   function validateUserForm(
@@ -94,8 +94,8 @@ export default function AdminUsersPage() {
         errors.password = 'Password must be at least 6 characters';
       }
     }
-    if (!data.role_id?.trim()) {
-      errors.role_id = 'Select a system role';
+    if (!data.role_ids?.length) {
+      errors.role_ids = 'Select at least one system role';
     }
     return errors;
   }
@@ -111,6 +111,7 @@ export default function AdminUsersPage() {
       password: '',
       role: roleSlug,
       role_id: first?.id ?? '',
+      role_ids: first?.id ? [String(first.id)] : ([] as string[]),
       office_ids: [] as string[],
       visible_statuses: [] as string[],
       mis_email_enabled: false,
@@ -189,7 +190,7 @@ export default function AdminUsersPage() {
     const errors = validateUserForm(formData, !!editingUser);
     if (Object.keys(errors).length > 0) {
       const needsProfile =
-        errors.name || errors.email || errors.password || errors.role_id;
+        errors.name || errors.email || errors.password || errors.role_ids;
       if (needsProfile) setActiveTab('profile');
       return;
     }
@@ -290,17 +291,68 @@ export default function AdminUsersPage() {
     u.email?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const getRoleInfo = (u: any) => {
-    const roleObj = roles.find((r) => r.id === u.role_id);
-    const rolePerms = roleObj?.permissions ?? [];
-    const isNational = seesAllOfficesForUser(rolePerms, u.role ?? '', u.office_ids ?? []);
-    const roleName = roleObj?.name || (u.role === 'hod' ? 'HOD' : 'Branch Manager');
-    const canMisEmail = canAssignMisEmail(rolePerms);
-    return { isHod: isNational, roleName, canMisEmail };
+  const userRoleIds = (u: { role_ids?: unknown; role_id?: unknown }): string[] => {
+    if (Array.isArray(u.role_ids) && u.role_ids.length > 0) {
+      return [...new Set(u.role_ids.map((id) => String(id)))];
+    }
+    if (u.role_id) return [String(u.role_id)];
+    return [];
   };
 
-  const selectedRole = roles.find((r) => r.id === formData.role_id);
-  const formRoleCanMisEmail = canAssignMisEmail(selectedRole?.permissions ?? []);
+  const unionRolePermissions = (roleIds: string[]): string[] => {
+    const set = new Set<string>();
+    for (const id of roleIds) {
+      const roleObj = roles.find((r) => r.id === id);
+      const perms = Array.isArray(roleObj?.permissions) ? roleObj.permissions : [];
+      for (const p of perms) set.add(String(p));
+    }
+    return [...set];
+  };
+
+  const getRoleInfo = (u: any) => {
+    const roleIds = userRoleIds(u);
+    const rolePerms = unionRolePermissions(roleIds);
+    const isNational = seesAllOfficesForUser(rolePerms, u.role ?? '', u.office_ids ?? []);
+    const roleNames = roleIds
+      .map((id) => roles.find((r) => r.id === id)?.name)
+      .filter(Boolean) as string[];
+    const roleName =
+      roleNames.length > 0
+        ? roleNames.join(', ')
+        : u.role === 'hod'
+          ? 'HOD'
+          : 'Branch Manager';
+    const canMisEmail = canAssignMisEmail(rolePerms);
+    return { isHod: isNational, roleName, roleNames, canMisEmail };
+  };
+
+  const formRolePerms = unionRolePermissions(formData.role_ids);
+  const formRoleCanMisEmail = canAssignMisEmail(formRolePerms);
+
+  const toggleFormRole = (role: { id: string; name: string; permissions?: string[] }) => {
+    setFormData((prev) => {
+      const selected = new Set(prev.role_ids);
+      if (selected.has(role.id)) {
+        if (selected.size <= 1) return prev;
+        selected.delete(role.id);
+      } else {
+        selected.add(role.id);
+      }
+      const role_ids = [...selected];
+      const primary = roles.find((r) => r.id === role_ids[0]);
+      const perms = unionRolePermissions(role_ids);
+      const canEmail = canAssignMisEmail(perms);
+      return {
+        ...prev,
+        role_ids,
+        role_id: role_ids[0] ?? '',
+        role: primary?.name
+          ? String(primary.name).toLowerCase().replace(/\s+/g, '_')
+          : prev.role,
+        mis_email_enabled: canEmail ? prev.mis_email_enabled : false,
+      };
+    });
+  };
 
   const branchLabelsForUser = (u: any) => {
     const ids = u.office_ids ?? [];
@@ -352,6 +404,7 @@ export default function AdminUsersPage() {
         password: '',
         role: user.role,
         role_id: user.role_id,
+        role_ids: userRoleIds(user),
         office_ids: user.office_ids || [],
         visible_statuses: user.visible_statuses || [],
         mis_email_enabled: Boolean(user.mis_email_enabled),
@@ -454,8 +507,9 @@ export default function AdminUsersPage() {
             </AdminThead>
             <tbody>
               {sortedUsers.map((u) => {
-                const { isHod, roleName, canMisEmail } = getRoleInfo(u);
+                const { isHod, roleName, roleNames, canMisEmail } = getRoleInfo(u);
                 const branchLabels = branchLabelsForUser(u);
+                const displayRoles = roleNames.length > 0 ? roleNames : [roleName];
 
                 return (
                   <AdminTr key={u.id}>
@@ -479,7 +533,11 @@ export default function AdminUsersPage() {
                       </div>
                     </AdminTd>
                     <AdminTd>
-                      <RoleBadge name={roleName} isHod={isHod} />
+                      <div className="flex flex-wrap gap-1">
+                        {displayRoles.map((name) => (
+                          <RoleBadge key={name} name={name} isHod={isHod} />
+                        ))}
+                      </div>
                     </AdminTd>
                     <AdminTd>
                       {isHod ? (
@@ -599,7 +657,7 @@ export default function AdminUsersPage() {
                         { key: 'name', label: 'Full name', ok: !formErrors.name },
                         { key: 'email', label: 'Email', ok: !formErrors.email },
                         { key: 'password', label: 'Password (6+ chars)', ok: !formErrors.password },
-                        { key: 'role', label: 'System role', ok: !formErrors.role_id },
+                        { key: 'role', label: 'System roles', ok: !formErrors.role_ids },
                       ].map((item) => (
                         <li
                           key={item.key}
@@ -715,37 +773,45 @@ export default function AdminUsersPage() {
 
                       <div className="space-y-1.5 pt-2">
                         <label className="text-[12px] font-medium text-slate-700">
-                          System Role <span className="text-rose-500">*</span>
+                          System roles <span className="text-rose-500">*</span>
                         </label>
+                        <p className="text-[11px] text-slate-400">
+                          Select one or more — permissions are combined.
+                        </p>
                         <div
                           className={`grid grid-cols-2 gap-2 rounded-lg p-0.5 ${
-                            showValidation && formErrors.role_id ? 'ring-1 ring-rose-300' : ''
+                            showValidation && formErrors.role_ids ? 'ring-1 ring-rose-300' : ''
                           }`}
                         >
-                          {roles.map(role => (
-                            <button
-                              key={role.id}
-                              type="button"
-                              onClick={() => {
-                                const canEmail = canAssignMisEmail(role.permissions ?? []);
-                                setFormData({
-                                  ...formData,
-                                  role: role.name.toLowerCase().replace(' ', '_'),
-                                  role_id: role.id,
-                                  mis_email_enabled: canEmail ? formData.mis_email_enabled : false,
-                                });
-                              }}
-                              className={`p-2.5 text-left border rounded-lg transition-all ${ formData.role_id === role.id ? 'border-indigo-600 bg-indigo-50/50' : 'border-slate-200 hover:border-slate-300' }`}
-                            >
-                              <div className={`text-[12px] font-medium ${formData.role_id === role.id ? 'text-indigo-600' : 'text-slate-700'}`}>
-                                {role.name}
-                              </div>
-                              <div className="text-[10px] text-slate-400 mt-0.5 truncate">{role.description}</div>
-                            </button>
-                          ))}
+                          {roles.map((role) => {
+                            const selected = formData.role_ids.includes(role.id);
+                            return (
+                              <button
+                                key={role.id}
+                                type="button"
+                                onClick={() => toggleFormRole(role)}
+                                className={`p-2.5 text-left border rounded-lg transition-all ${
+                                  selected
+                                    ? 'border-indigo-600 bg-indigo-50/50'
+                                    : 'border-slate-200 hover:border-slate-300'
+                                }`}
+                              >
+                                <div
+                                  className={`text-[12px] font-medium ${
+                                    selected ? 'text-indigo-600' : 'text-slate-700'
+                                  }`}
+                                >
+                                  {role.name}
+                                </div>
+                                <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                                  {role.description}
+                                </div>
+                              </button>
+                            );
+                          })}
                         </div>
-                        {showValidation && formErrors.role_id && (
-                          <p className="text-[11px] text-rose-600">{formErrors.role_id}</p>
+                        {showValidation && formErrors.role_ids && (
+                          <p className="text-[11px] text-rose-600">{formErrors.role_ids}</p>
                         )}
                       </div>
 
