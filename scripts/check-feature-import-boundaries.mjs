@@ -87,6 +87,8 @@ const hard = [];
 /** @type {string[]} */
 const featureDeepSoft = [];
 /** @type {string[]} */
+const featureDeepUiSoft = [];
+/** @type {string[]} */
 const softStale = [];
 /** @type {string[]} */
 const libDebtHits = [];
@@ -178,7 +180,13 @@ if (existsSync(featuresRoot)) {
       const m = line.match(deepImport);
       if (!m) continue;
       if (m[1] !== self) {
-        featureDeepSoft.push(`${rel} → features/${m[1]}/${m[2]}\n  ${line.trim()}`);
+        // UI deep imports are intentional: feature barrels stay lib-only so headless
+        // CLIs (MIS email, sync-worker) do not pull React/components.
+        if (m[2] === 'ui') {
+          featureDeepUiSoft.push(`${rel} → features/${m[1]}/ui\n  ${line.trim()}`);
+        } else {
+          featureDeepSoft.push(`${rel} → features/${m[1]}/${m[2]}\n  ${line.trim()}`);
+        }
       }
     }
   }
@@ -208,6 +216,15 @@ if (componentDeepSoft.length) {
   );
   for (const s of componentDeepSoft.slice(0, 4)) console.log(' ', s);
   if (componentDeepSoft.length > 4) console.log(`  … +${componentDeepSoft.length - 4} more`);
+  console.log('');
+}
+
+if (featureDeepUiSoft.length) {
+  console.log(
+    `Advisory: ${featureDeepUiSoft.length} deep cross-feature UI import(s) (barrels are lib-only). Sample:`
+  );
+  for (const s of featureDeepUiSoft.slice(0, 6)) console.log(' ', s);
+  if (featureDeepUiSoft.length > 6) console.log(`  … +${featureDeepUiSoft.length - 6} more`);
   console.log('');
 }
 

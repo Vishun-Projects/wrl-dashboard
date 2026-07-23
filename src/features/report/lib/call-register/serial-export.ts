@@ -3,7 +3,7 @@ import 'server-only';
 import { prisma } from '@/lib/db/prisma';
 import type { CallRegisterClient } from './clients';
 import type { CallRegisterQueryParams } from './types';
-import { isCallRegisterAllTime } from './dates';
+import { callRegisterDateSqlExpr, isCallRegisterAllTime, parseCallRegisterDateField } from './dates';
 import {
   formatSerialExportDate,
   shapeSerialExportRow,
@@ -18,6 +18,8 @@ type LocalTxnRow = {
   product_serial_no: string;
   daddedon: Date | string | null;
   daddedon_raw: string | null;
+  warranty_start: Date | string | null;
+  warranty_start_raw: string | null;
 };
 
 type HotCallRow = {
@@ -31,20 +33,24 @@ async function fetchLocalSerialRows(
   params: CallRegisterQueryParams
 ): Promise<LocalTxnRow[]> {
   const { dateFrom, dateTo } = params;
+  const dateField = parseCallRegisterDateField(params.dateField);
+  const dateExpr = callRegisterDateSqlExpr(dateField);
   if (dateFrom && dateTo) {
     return prisma.$queryRawUnsafeBulk<LocalTxnRow[]>(
-      `SELECT client, product_serial_no, daddedon, daddedon_raw
+      `SELECT client, product_serial_no, daddedon, daddedon_raw,
+              warranty_start, warranty_start_raw
        FROM crm_transaction_entry
        WHERE client = $1
-         AND daddedon >= $2::date
-         AND daddedon < ($3::date + interval '1 day')`,
+         AND ${dateExpr} >= $2::date
+         AND ${dateExpr} < ($3::date + interval '1 day')`,
       client,
       dateFrom,
       dateTo
     );
   }
   return prisma.$queryRawUnsafeBulk<LocalTxnRow[]>(
-    `SELECT client, product_serial_no, daddedon, daddedon_raw
+    `SELECT client, product_serial_no, daddedon, daddedon_raw,
+            warranty_start, warranty_start_raw
      FROM crm_transaction_entry
      WHERE client = $1`,
     client
@@ -103,14 +109,28 @@ export async function fetchCallRegisterSerialExportRows(
       shapeSerialExportRow({
         client: (row.client || client).trim(),
         serial,
-        qtyDate: row.daddedon ?? row.daddedon_raw,
+        qtyDate:
+          row.warranty_start ??
+          row.warranty_start_raw ??
+          row.daddedon ??
+          row.daddedon_raw,
+        importedDate: row.daddedon ?? row.daddedon_raw,
         installationDate: hot?.installationDate,
         deploymentDate: hot?.deploymentDate,
       })
     );
   }
 
-  out.sort((a, b) => a.serial.localeCompare(b.serial) || a.qtyDate.localeCompare(b.qtyDate));
+  out.sort((a, b) => {
+    const serialCmp = a.serial.localeCompare(b.serial);
+    if (serialCmp !== 0) return serialCmp;
+    // qtyDate is dd/mm/yyyy — compare as yyyy-mm-dd
+    const toIso = (s: string) => {
+      const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      return m ? `${m[3]}-${m[2]}-${m[1]}` : s;
+    };
+    return toIso(a.qtyDate).localeCompare(toIso(b.qtyDate));
+  });
   return out;
 }
 

@@ -8,10 +8,12 @@ describe('call-register serial export shape', () => {
       client: 'Reliance Campa Cola',
       serial: '32585260513937',
       qtyDate: '11/06/2026 01:22:09',
+      importedDate: '20/07/2026 11:03:02',
       installationDate: null,
       deploymentDate: undefined,
     });
-    expect(pending.qtyDate).toBe('2026-06-11');
+    expect(pending.qtyDate).toBe('11/06/2026');
+    expect(pending.importedDate).toBe('20/07/2026');
     expect(pending.installationDate).toBe('');
     expect(pending.deploymentDate).toBe('');
     expect(pending.pendingInstall).toBe('Yes');
@@ -23,11 +25,15 @@ describe('call-register serial export shape', () => {
       client: 'Reliance Campa Cola',
       serial: '32585260513937',
       qtyDate: '2026-02-06',
+      importedDate: '2026-07-20',
       installationDate: new Date('2026-03-15T10:00:00Z'),
       deploymentDate: '2026-04-01T12:00:00.000Z',
     });
-    expect(done.installationDate).toBe('2026-03-15');
-    expect(done.deploymentDate).toBe('2026-04-01');
+    expect(done.qtyDate).toBe('06/02/2026');
+    expect(done.importedDate).toBe('20/07/2026');
+    expect(done.installationDate).toBe('15/03/2026');
+    // 12:00 UTC → 17:30 IST → calendar day still 01/04/2026
+    expect(done.deploymentDate).toBe('01/04/2026');
     expect(done.pendingInstall).toBe('No');
     expect(done.pendingDeploy).toBe('No');
   });

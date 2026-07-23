@@ -15,9 +15,9 @@ export async function GET(req: NextRequest) {
     if (!auth.ok) return auth.response;
 
     const { searchParams } = new URL(req.url);
-    const { dateFrom, dateTo } = resolveCallRegisterDates(searchParams);
+    const { dateFrom, dateTo, dateField } = resolveCallRegisterDates(searchParams);
 
-    const { rows, summary } = await fetchCallRegisterRows({ dateFrom, dateTo });
+    const { rows, summary } = await fetchCallRegisterRows({ dateFrom, dateTo, dateField });
 
     return NextResponse.json({ rows, summary });
   } catch (err) {

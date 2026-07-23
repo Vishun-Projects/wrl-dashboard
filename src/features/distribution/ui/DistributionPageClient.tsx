@@ -23,11 +23,11 @@ import {
   DistributionLoadBadge,
   DistributionTablePanel,
 } from '@/features/distribution/ui/DistributionTablePanel';
-import { RegisterPageFilters } from '@/features/register';
-import { RegisterStatsBar } from '@/features/register';
+import { RegisterPageFilters } from '@/features/register/ui/RegisterPageFilters';
+import { RegisterStatsBar } from '@/features/register/ui/RegisterStatsBar';
 import { PageShell } from '@/components/layout/PageShell';
-import { ReportPageSkeleton } from '@/features/report';
-import { useReportFilters } from '@/features/report';
+import { ReportPageSkeleton } from '@/features/report/ui/ReportLoadingFeedback';
+import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
 import { createClient } from '@/lib/supabase/client';
 import {
   sortRows,
@@ -74,35 +74,7 @@ import {
   isRegisterRowSolvedBucket,
 } from '@/features/report';
 import type { RegisterSummary } from '@/features/report';
-
-// Helper to inject Leaflet CDN resources dynamically
-const loadLeaflet = () => {
-  return new Promise<boolean>((resolve) => {
-    if (typeof window === 'undefined') {
-      resolve(false);
-      return;
-    }
-
-    if (!document.getElementById('leaflet-css')) {
-      const link = document.createElement('link');
-      link.id = 'leaflet-css';
-      link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-      document.head.appendChild(link);
-    }
-
-    if ((window as any).L) {
-      resolve(true);
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.head.appendChild(script);
-  });
-};
+import { loadLeaflet } from '@/lib/geo/leaflet-cdn';
 
 export default function CallDistributionPage() {
   const {

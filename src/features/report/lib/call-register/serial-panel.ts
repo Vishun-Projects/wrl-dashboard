@@ -3,6 +3,7 @@ import type { CallRegisterSerialExportRow } from './shape';
 export type SerialPanelSortKey =
   | 'serial'
   | 'qtyDate'
+  | 'importedDate'
   | 'deploymentDate'
   | 'installationDate'
   | 'pendingDeploy'
@@ -27,15 +28,32 @@ export function filterSerialPanelRows(
   });
 }
 
+/** Normalize dd/mm/yyyy (or ISO) so string compare is chronological. */
+function sortableDate(value: string): string {
+  const m = value.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  return value;
+}
+
+const DATE_SORT_KEYS = new Set<SerialPanelSortKey>([
+  'qtyDate',
+  'importedDate',
+  'deploymentDate',
+  'installationDate',
+]);
+
 export function sortSerialPanelRows(
   rows: CallRegisterSerialExportRow[],
   sortKey: SerialPanelSortKey,
   sortDir: 'asc' | 'desc'
 ): CallRegisterSerialExportRow[] {
   const mul = sortDir === 'asc' ? 1 : -1;
+  const isDate = DATE_SORT_KEYS.has(sortKey);
   return [...rows].sort((a, b) => {
-    const av = a[sortKey] || '';
-    const bv = b[sortKey] || '';
+    const rawA = a[sortKey] || '';
+    const rawB = b[sortKey] || '';
+    const av = isDate ? sortableDate(rawA) : rawA;
+    const bv = isDate ? sortableDate(rawB) : rawB;
     if (av < bv) return -1 * mul;
     if (av > bv) return 1 * mul;
     return a.serial.localeCompare(b.serial);

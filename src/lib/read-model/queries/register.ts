@@ -866,6 +866,8 @@ export async function queryDistributionCompactFromPostgres(
     pincode: row.pincode,
     city: row.city,
     state: row.state,
+    calltype: row.call_type,
+    call_type: row.call_type,
     status_label: row.status_label,
     status_bucket: row.status_bucket,
     bsolved: row.bsolved,

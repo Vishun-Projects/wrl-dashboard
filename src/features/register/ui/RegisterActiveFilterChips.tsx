@@ -10,7 +10,7 @@ import {
   type ExtraActiveFilterChip,
 } from '@/features/report';
 import { AnimatedChipList } from '@/components/motion';
-import { useReportFilters } from '@/features/report';
+import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
 import { useRepairFilterOptions } from '@/features/report';
 
 type RegisterActiveFilterChipsProps = {

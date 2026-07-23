@@ -23,7 +23,7 @@ import {
 import { ArcpClaimsPdfViewer } from '@/features/arcp/ui/ArcpClaimsPdfViewer';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import { AdminTableCard } from '@/components/admin/AdminUi';
-import { useReportFilters } from '@/features/report';
+import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
 import {
   ARCP_DATE_FILTER_OPTIONS,
   ARCP_DEFAULT_DATE_FILTER_COLUMN,

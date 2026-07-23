@@ -21,8 +21,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Select a valid client.' }, { status: 400 });
     }
 
-    const { dateFrom, dateTo } = resolveCallRegisterDates(searchParams);
-    const rows = await fetchCallRegisterSerialExportRows(client, { dateFrom, dateTo });
+    const { dateFrom, dateTo, dateField } = resolveCallRegisterDates(searchParams);
+    const rows = await fetchCallRegisterSerialExportRows(client, { dateFrom, dateTo, dateField });
 
     const deployed = rows.filter((r) => r.pendingDeploy === 'No').length;
     const installed = rows.filter((r) => r.pendingInstall === 'No').length;

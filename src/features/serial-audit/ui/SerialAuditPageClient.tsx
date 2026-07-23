@@ -15,9 +15,10 @@ import {
   Download,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { RegisterPageFilters } from '@/features/register';
-import { RegisterMultiSelect } from '@/features/register';
-import { ReportLoadingPanel } from '@/features/report';
+import { RegisterPageFilters } from '@/features/register/ui/RegisterPageFilters';
+import { RegisterMultiSelect } from '@/features/register/ui/RegisterMultiSelect';
+import { ReportLoadingPanel } from '@/features/report/ui/ReportLoadingFeedback';
+import { formatUiDate } from '@/lib/dates/ui-date';
 import { DataTableLoading } from '@/components/ui/DataTableLoading';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import {
@@ -30,7 +31,7 @@ import {
   AdminToolbar,
   AdminTr,
 } from '@/components/admin/AdminUi';
-import { useReportFilters } from '@/features/report';
+import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
 import { buildCorpusCacheKey } from '@/features/report';
 import { sanitizeUserFacingMessage, toUserFacingError } from '@/lib/utils/user-facing-errors';
 import {
@@ -1771,7 +1772,7 @@ function SerialAuditTableRow({
             : '—'}
         </AdminTd>
         <AdminTd className={`whitespace-nowrap text-[11px] text-slate-600 ${rowBg}`}>
-          {lastComplaintDate ? lastComplaintDate.slice(0, 10) : '—'}
+          {lastComplaintDate ? formatUiDate(lastComplaintDate) || '—' : '—'}
         </AdminTd>
       </AdminTr>
       {expanded ? (

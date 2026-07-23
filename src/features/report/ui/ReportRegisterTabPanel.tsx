@@ -5,7 +5,7 @@ import { HorizontalScrollFade } from '@/components/ui/HorizontalScrollFade';
 import { SortableTh } from '@/components/ui/SortableTh';
 import { ReportErrorBoundary } from '@/features/report/ui/ReportErrorBoundary';
 import { ReportLoadingPanel } from '@/features/report/ui/ReportLoadingFeedback';
-import { RegisterColumnPicker } from '@/features/register';
+import { RegisterColumnPicker } from '@/features/register/ui/RegisterColumnPicker';
 import {
   REGISTER_PAGE_SIZE_OPTIONS,
   type RegisterPageSize,

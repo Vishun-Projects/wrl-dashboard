@@ -22,6 +22,7 @@ import {
   Shield,
   Gauge,
   Mail,
+  Bell,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -113,6 +114,8 @@ export function Sidebar({ user }: SidebarProps) {
                     ? Gauge
                   : path === '/admin/mis-email-routing'
                     ? Mail
+                    : path === '/admin/major-repair-alerts'
+                      ? Bell
                     : ShieldCheck;
 
   const filteredNavigation = pageNav.map((page) => ({

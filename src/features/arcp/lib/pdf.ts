@@ -9,6 +9,7 @@ import {
   type ArcpTallyDetailLevel,
 } from './table';
 import { triggerBlobDownload } from '@/features/report/download';
+import { formatUiDate } from '@/lib/dates/ui-date';
 
 export type ArcpClaimsPdfTableView = 'summary' | 'monthly' | 'both';
 
@@ -68,13 +69,7 @@ const PDF_TABLE_NUM_PAD_RIGHT = 2.5;
 const PDF_SUMMARY_VALUE_INSET = 2;
 
 function formatPdfDate(isoDate: string): string {
-  const parsed = new Date(`${isoDate}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return isoDate;
-  return parsed.toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  return formatUiDate(isoDate) || isoDate;
 }
 
 function statementRef(startDate: string, endDate: string): string {
@@ -567,11 +562,7 @@ async function createArcpClaimsPdfDoc(payload: ArcpClaimsPdfPayload) {
     align: 'right',
   });
 
-  const generatedOn = new Date().toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  const generatedOn = formatUiDate(new Date());
   doc.text(`Date ${generatedOn}`, pageWidth - marginX, headerTop + 13, { align: 'right' });
 
   cursorY = Math.max(cursorY, headerTop + 16) + 2;

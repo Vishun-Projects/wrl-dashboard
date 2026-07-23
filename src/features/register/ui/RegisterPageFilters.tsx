@@ -5,8 +5,8 @@ import { RegisterCompactToolbar } from '@/features/register/ui/RegisterCompactTo
 import { RegisterFilterDrawer } from '@/features/register/ui/RegisterFilterDrawer';
 import { RegisterActiveFilterChips } from '@/features/register/ui/RegisterActiveFilterChips';
 import { RegisterStatsBar } from '@/features/register/ui/RegisterStatsBar';
-import { ReportFetchingBar } from '@/features/report';
-import { useReportFilters } from '@/features/report';
+import { ReportFetchingBar } from '@/features/report/ui/ReportLoadingFeedback';
+import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
 import type { RegisterSummary } from '@/features/report';
 import type { ExtraActiveFilterChip } from '@/features/report';
 

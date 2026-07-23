@@ -1,5 +1,6 @@
 import {
   relayPostJson,
+  resolveVpsMailRelayBaseUrl,
   resolveVpsMailRelaySecret,
 } from '@/lib/mail/relay-client';
 
@@ -49,11 +50,21 @@ export async function sendPreparedMisEmailViaVpsRelay(
       ? payload.cc.join(', ')
       : payload.cc;
 
-  const result = await relayPostJson<{ error?: string; messageId?: string }>(
-    PREPARED_DIGEST_PATH,
-    { ...payload, to, ...(cc !== undefined ? { cc } : {}) },
-    relaySecret
-  );
-
-  return { messageId: String(result.data.messageId || '') };
+  try {
+    const result = await relayPostJson<{ error?: string; messageId?: string }>(
+      PREPARED_DIGEST_PATH,
+      { ...payload, to, ...(cc !== undefined ? { cc } : {}) },
+      relaySecret
+    );
+    return { messageId: String(result.data.messageId || '') };
+  } catch (err) {
+    console.error('[mis-email/relay] prepared digest failed', {
+      base: resolveVpsMailRelayBaseUrl(),
+      path: PREPARED_DIGEST_PATH,
+      secretConfigured: true,
+      secretLength: relaySecret.length,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 }

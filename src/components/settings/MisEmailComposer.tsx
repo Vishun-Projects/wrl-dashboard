@@ -34,6 +34,29 @@ import {
 import { settingsInputClass } from '@/components/admin/AdminUi';
 import { MisEmailBodyLayoutEditor } from '@/components/settings/MisEmailBodyLayoutEditor';
 import { Collapse } from '@/components/motion/Collapse';
+import { createClient } from '@/lib/supabase/client';
+import { getBearerAuthHeaders } from '@/lib/supabase/session';
+
+async function misEmailRequestAuth(): Promise<{
+  headers: Record<string, string>;
+  withCredentials: true;
+}> {
+  const supabase = createClient();
+  try {
+    const headers = await getBearerAuthHeaders(supabase);
+    return { headers, withCredentials: true };
+  } catch {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    return {
+      headers: session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {},
+      withCredentials: true,
+    };
+  }
+}
 
 type MisEmailComposeSettings = {
   primaryEmail: string;
@@ -393,7 +416,8 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
     setSaving(true);
     try {
       const payload = { ...draftPrefs };
-      await axios.patch('/api/profile/mis-email', payload, { withCredentials: true });
+      const auth = await misEmailRequestAuth();
+      await axios.patch('/api/profile/mis-email', payload, auth);
       onPrefsChange(payload);
       setSavedPrefsKey(JSON.stringify(payload));
       setLastSavedAt(new Date());
@@ -412,6 +436,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
   async function handleSend(saveFirst: boolean) {
     clearLastFinished();
     try {
+      const auth = await misEmailRequestAuth();
       const res = await axios.post(
         '/api/profile/mis-email/send',
         {
@@ -421,7 +446,11 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
           savePreferences: saveFirst,
             allowAutoSendDisabledOverride: allowAutoSendOverride,
         },
-        { withCredentials: true, timeout: 30_000, validateStatus: (status) => status === 202 || status === 200 }
+        {
+          ...auth,
+          timeout: 30_000,
+          validateStatus: (status) => status === 202 || status === 200,
+        }
       );
 
       const jobId = res.data.jobId as string | undefined;

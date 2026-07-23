@@ -135,12 +135,38 @@ AND arcp.dcalllogdatetime <= '${endTs}'
 `.trim();
 }
 
-function buildIncrementalCondition(watermark: Date): string {
-  const wm = formatCrmDateTime(watermark).replace(/'/g, "''");
+function buildIncrementalWindowCondition(from: Date, toExclusive: Date): string {
+  const a = formatCrmDateTime(from).replace(/'/g, "''");
+  const b = formatCrmDateTime(toExclusive).replace(/'/g, "''");
   return `
 arcp.nofficetype = '3'
-AND ISNULL(arcp.editedon, arcp.addedon) >= '${wm}'
+AND ISNULL(arcp.editedon, arcp.addedon) >= '${a}'
+AND ISNULL(arcp.editedon, arcp.addedon) < '${b}'
 `.trim();
+}
+
+/**
+ * Split open-ended incremental catch-up into local-day windows.
+ * Open `>= watermark` queries OOM CRM after a few days of edits ("Date range too large").
+ */
+export function arcpIncrementalWindows(
+  watermark: Date,
+  end: Date = new Date()
+): Array<{ from: Date; toExclusive: Date }> {
+  const endMs = end.getTime();
+  if (!(watermark instanceof Date) || Number.isNaN(watermark.getTime()) || !(endMs > watermark.getTime())) {
+    return [];
+  }
+  const windows: Array<{ from: Date; toExclusive: Date }> = [];
+  let cursor = new Date(watermark.getTime());
+  while (cursor.getTime() < endMs) {
+    const nextMidnight = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
+    const toExclusive = nextMidnight.getTime() > endMs ? new Date(endMs) : nextMidnight;
+    if (toExclusive.getTime() <= cursor.getTime()) break;
+    windows.push({ from: new Date(cursor.getTime()), toExclusive });
+    cursor = toExclusive;
+  }
+  return windows;
 }
 
 async function fetchArcpRawSql(
@@ -281,11 +307,92 @@ export async function fetchArcpRowsForRange(
   return allRows;
 }
 
+async function fetchIncrementalWindowSharded(
+  from: Date,
+  toExclusive: Date,
+  shardIndex: number,
+  shardCount: number
+): Promise<Record<string, unknown>[]> {
+  const where = `${buildIncrementalWindowCondition(from, toExclusive)} AND (arcp.ncode % ${shardCount}) = ${shardIndex}`;
+  try {
+    return await fetchArcpRawSql(where);
+  } catch (err) {
+    if (!isRetryableCrmError(err)) throw err;
+    if (shardCount >= ARCP_NCODE_SHARD_MAX) {
+      throw new Error(
+        `[arcp-sync] CRM failed on incremental ${formatCrmDateTime(from)}..${formatCrmDateTime(toExclusive)} shard ${shardIndex}/${shardCount}: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    }
+    const doubled = shardCount * 2;
+    console.log(
+      `[arcp-sync] Incremental window shard ${shardIndex}/${shardCount} OOM — splitting to ${doubled}`
+    );
+    const left = await fetchIncrementalWindowSharded(from, toExclusive, shardIndex, doubled);
+    const right = await fetchIncrementalWindowSharded(
+      from,
+      toExclusive,
+      shardIndex + shardCount,
+      doubled
+    );
+    return concatRows(left, right);
+  }
+}
+
+async function fetchIncrementalWindow(
+  from: Date,
+  toExclusive: Date
+): Promise<Record<string, unknown>[]> {
+  try {
+    return await fetchArcpRawSql(buildIncrementalWindowCondition(from, toExclusive));
+  } catch (err) {
+    if (!isRetryableCrmError(err)) throw err;
+    console.log(
+      `[arcp-sync] Incremental window OOM/timeout ${formatCrmDateTime(from)}..${formatCrmDateTime(toExclusive)} — ${ARCP_NCODE_SHARD_INITIAL} ncode shards`
+    );
+    const merged: Record<string, unknown>[] = [];
+    for (let i = 0; i < ARCP_NCODE_SHARD_INITIAL; i++) {
+      appendRows(
+        merged,
+        await fetchIncrementalWindowSharded(from, toExclusive, i, ARCP_NCODE_SHARD_INITIAL)
+      );
+      await sleep(FETCH_GAP_MS);
+    }
+    return merged;
+  }
+}
+
+/** Fetch ARCP rows changed since watermark. Day-chunks after downtime so CRM viewstate does not OOM. */
 export async function fetchArcpIncrementalRows(
   watermark: Date,
   onProgress?: (rows: number) => void
 ): Promise<Record<string, unknown>[]> {
-  const rows = await fetchArcpRawSql(buildIncrementalCondition(watermark));
-  onProgress?.(rows.length);
-  return rows;
+  // Pad end so clock skew / in-flight CRM edits near "now" are not clipped.
+  const end = new Date(Date.now() + 60_000);
+  const windows = arcpIncrementalWindows(watermark, end);
+  if (!windows.length) {
+    onProgress?.(0);
+    return [];
+  }
+
+  if (windows.length > 1) {
+    console.log(
+      `[arcp-sync] Incremental catch-up: ${windows.length} day window(s) from ${watermark.toISOString()}`
+    );
+  }
+
+  const allRows: Record<string, unknown>[] = [];
+  for (const window of windows) {
+    const rows = await fetchIncrementalWindow(window.from, window.toExclusive);
+    appendRows(allRows, rows);
+    if (windows.length > 1) {
+      console.log(
+        `[arcp-sync] Incremental ${formatCrmDateTime(window.from)}..${formatCrmDateTime(window.toExclusive)} → ${rows.length} rows`
+      );
+    }
+    onProgress?.(allRows.length);
+    await sleep(FETCH_GAP_MS);
+  }
+  return allRows;
 }

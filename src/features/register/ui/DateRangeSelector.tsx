@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { createPortal } from 'react-dom';
 import { Calendar, ChevronDown, Check } from 'lucide-react';
 import { formatLocalDate, parseLocalDateString, endOfLocalDay, startOfLocalDay } from '@/features/report';
+import { formatUiDate } from '@/lib/dates/ui-date';
+import { UiDateInput } from '@/components/ui/UiDateInput';
 
 export interface DateRange {
   start: Date;
@@ -142,8 +144,7 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
 
   let currentLabel = ranges.find(r => r.label === value || (value === '30' && r.label === 'Last 30 Days') || (value === '14' && r.label === 'Last 14 Days') || (value === '7' && r.label === 'Last 7 Days'))?.label || value || 'Select Range';
   if (value === 'Custom Range' && startDate && endDate) {
-    const formatDt = (d: Date) => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-    currentLabel = `${formatDt(startDate)} - ${formatDt(endDate)}`;
+    currentLabel = `${formatUiDate(startDate)} - ${formatUiDate(endDate)}`;
   }
 
   const panel =
@@ -181,13 +182,13 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
           <div className="p-3 bg-bg-soft border-t border-slate-100 space-y-2">
             <div className="space-y-1">
               <label className="text-[10px] text-slate-500 ui-label">Custom Start</label>
-              <input
-                type="date"
-                className="w-full h-8 px-2 bg-bg-canvas border border-slate-200 rounded text-[11px] outline-none focus:border-slate-400"
+              <UiDateInput
+                className="w-full border-slate-200"
                 value={value === 'Custom Range' && startDate ? formatLocalDate(startDate) : ''}
-                onChange={(e) => {
-                  if (!e.target.value) return;
-                  const d = parseLocalDateString(e.target.value);
+                aria-label="Custom start date"
+                onChange={(iso) => {
+                  if (!iso) return;
+                  const d = parseLocalDateString(iso);
                   if (!isNaN(d.getTime())) {
                     const activeEnd = endDate ? endOfLocalDay(endDate) : endOfLocalDay(new Date());
                     onChange({ start: d, end: activeEnd, label: 'Custom Range' });
@@ -197,13 +198,13 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
             </div>
             <div className="space-y-1">
               <label className="text-[10px] text-slate-500 ui-label">Custom End</label>
-              <input
-                type="date"
-                className="w-full h-8 px-2 bg-bg-canvas border border-slate-200 rounded text-[11px] outline-none focus:border-slate-400"
+              <UiDateInput
+                className="w-full border-slate-200"
                 value={value === 'Custom Range' && endDate ? formatLocalDate(endDate) : ''}
-                onChange={(e) => {
-                  if (!e.target.value) return;
-                  const d = parseLocalDateString(e.target.value);
+                aria-label="Custom end date"
+                onChange={(iso) => {
+                  if (!iso) return;
+                  const d = parseLocalDateString(iso);
                   if (!isNaN(d.getTime())) {
                     const activeStart = startDate
                       ? startOfLocalDay(startDate)

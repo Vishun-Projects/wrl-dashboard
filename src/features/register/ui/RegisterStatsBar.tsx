@@ -9,7 +9,7 @@ import {
   type DraftFilterOverrides,
 } from '@/features/report';
 import type { RegisterSummary } from '@/features/report';
-import { useReportFilters } from '@/features/report';
+import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
 
 type RegisterStatsBarProps = {
   summary: RegisterSummary | null;

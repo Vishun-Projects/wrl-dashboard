@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { parseCrmDaddedon, monthChunks, yearChunks, periodDays } from './shared';
 
 describe('transaction-entry shared helpers', () => {
-  it('parses CRM daddedon dates', () => {
+  it('parses CRM dd/mm/yyyy dates (daddedon / WarrantyStartDate)', () => {
     const d = parseCrmDaddedon('11/06/2026 01:22:09');
     expect(d?.toISOString().startsWith('2026-06-11')).toBe(true);
-    const d2 = parseCrmDaddedon('20/07/2026 11:03:02');
-    expect(d2?.toISOString().startsWith('2026-07-20')).toBe(true);
+    const d2 = parseCrmDaddedon('14/11/2025 00:00:00');
+    expect(d2?.toISOString().startsWith('2025-11-14')).toBe(true);
   });
 
   it('chunks months and years', () => {

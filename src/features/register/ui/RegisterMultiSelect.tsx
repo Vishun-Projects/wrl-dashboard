@@ -3,11 +3,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search } from 'lucide-react';
+import type { RegisterMultiSelectOption } from '@/features/register/lib/multi-select-types';
 
-export type RegisterMultiSelectOption = {
-  value: string;
-  label: string;
-};
+export type { RegisterMultiSelectOption } from '@/features/register/lib/multi-select-types';
 
 type RegisterMultiSelectProps = {
   label: string;

@@ -2,10 +2,10 @@
 
 import React from 'react';
 import { Filter, Loader2 } from 'lucide-react';
-import { DateRangeSelector } from '@/features/register';
-import { RegisterBranchFranchiseeFilters } from '@/features/register';
-import { RegisterMultiSelect } from '@/features/register';
-import { ReportProgressBar } from '@/features/report';
+import { DateRangeSelector } from '@/features/register/ui/DateRangeSelector';
+import { RegisterBranchFranchiseeFilters } from '@/features/register/ui/RegisterBranchFranchiseeFilters';
+import { RegisterMultiSelect } from '@/features/register/ui/RegisterMultiSelect';
+import { ReportProgressBar } from '@/features/report/ui/ReportLoadingFeedback';
 import {
   ARCP_DATE_FILTER_OPTIONS,
   type ArcpDateFilterColumn,

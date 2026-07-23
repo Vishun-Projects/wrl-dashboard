@@ -29,8 +29,8 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const { dateFrom, dateTo } = resolveCallRegisterDates(searchParams);
-    const params = { dateFrom, dateTo };
+    const { dateFrom, dateTo, dateField } = resolveCallRegisterDates(searchParams);
+    const params = { dateFrom, dateTo, dateField };
 
     const rows = await fetchCallRegisterSerialExportRows(client, params);
     const workbook = await buildCallRegisterSerialWorkbook(rows);

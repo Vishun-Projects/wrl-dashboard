@@ -1,11 +1,6 @@
-/** Public surface for @/features/register — cross-feature imports must use this entry. */
+/** Public surface for @/features/register — lib only (UI is deep-imported; keeps CLI free of React). */
 export * from './lib/arcp-approve-dates';
 export * from './lib/excel-export';
 export * from './lib/export-fetch';
+export * from './lib/multi-select-types';
 export * from './lib/table-columns';
-export * from './ui/DateRangeSelector';
-export * from './ui/RegisterBranchFranchiseeFilters';
-export * from './ui/RegisterColumnPicker';
-export * from './ui/RegisterMultiSelect';
-export * from './ui/RegisterPageFilters';
-export * from './ui/RegisterStatsBar';

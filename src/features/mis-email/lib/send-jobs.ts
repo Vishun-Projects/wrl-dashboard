@@ -244,6 +244,30 @@ export async function getMisEmailSendJob(jobId: string, userId: string): Promise
   return job;
 }
 
+/** Lookup by job id only (UUID entropy) — for status polls when session flakes. */
+export async function getMisEmailSendJobById(jobId: string): Promise<MisEmailSendJob | null> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(jobId)) {
+    return null;
+  }
+
+  if (await ensureMisEmailSendJobsSchema()) {
+    const rows = (await prisma.$queryRawUnsafe<DbMisEmailSendJobRow[]>(
+      `
+      SELECT job_id, user_id, status, message, sent, error_message, duration_ms, timing, created_at, updated_at
+      FROM public.mis_email_send_jobs
+      WHERE job_id = $1::uuid
+        AND updated_at >= now() - interval '30 minutes'
+      LIMIT 1
+      `,
+      jobId
+    )) as DbMisEmailSendJobRow[];
+    return rows[0] ? rowToJob(rows[0]) : null;
+  }
+
+  pruneMemoryJobs();
+  return memoryJobs.get(jobId) ?? null;
+}
+
 export function resetMisEmailSendJobsSchemaCache(): void {
   schemaReady = undefined;
 }

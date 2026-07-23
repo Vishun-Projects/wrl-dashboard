@@ -8,7 +8,7 @@ import {
   buildMainBranchOptions,
   countActiveFilters,
 } from '@/features/report';
-import { useReportFilters } from '@/features/report';
+import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
 
 type RegisterCompactToolbarProps = {
   onOpenFilters: () => void;

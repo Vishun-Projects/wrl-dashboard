@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildAlertEmailHtml,
+  buildAlertEmailText,
   filterMajorRepairAlertCandidates,
   hasTargetRepair,
   majorRepairRepeatDateWindow,
   meetsRepeatThreshold,
   repairDoneFromCrmFlags,
 } from './major-repair-repeat-alert';
+import {
+  normalizeBranchKey,
+  resolveAlertRecipients,
+} from './major-repair-repeat-recipients';
 import type { HotRow } from './types';
 
 function hotRow(overrides: Partial<HotRow> = {}): HotRow {
@@ -99,5 +105,84 @@ describe('major-repair-repeat-alert', () => {
     const candidates = filterMajorRepairAlertCandidates(rows, repairDoneByTrn);
     expect(candidates.map((c) => c.vtrnno)).toEqual(['26F00001']);
     expect(candidates[0]?.repair_done).toBe('Motor Replaced');
+  });
+
+  it('buildAlertEmailHtml features trigger call ID and omits dashboard link', () => {
+    const html = buildAlertEmailHtml({
+      serial: 'SER99',
+      triggerTrn: '26F09999',
+      branchName: 'PUNE',
+      callCount: 3,
+      months: 3,
+      startDate: '2026-04-22',
+      endDate: '2026-07-21',
+      details: [
+        {
+          vtrnno: '26F09999',
+          callsdtrndate: '2026-07-21',
+          PartyName: 'Acme',
+          repair_done: 'Motor Replaced',
+          callstatus: 'Open',
+          vcomplaint: 'Not cooling',
+        },
+      ],
+    });
+    expect(html).toContain('26F09999');
+    expect(html).toContain('Triggering open call ID');
+    expect(html).toContain('SER99');
+    expect(html).toContain('PUNE');
+    expect(html).toContain('SLA notification');
+    expect(html).not.toContain('Open WRL dashboard');
+    expect(html).not.toContain('href=');
+  });
+
+  it('buildAlertEmailText leads with triggering open call ID', () => {
+    const text = buildAlertEmailText({
+      serial: 'SER99',
+      triggerTrn: '26F09999',
+      branchName: 'PUNE',
+      callCount: 3,
+      months: 3,
+      startDate: '2026-04-22',
+      endDate: '2026-07-21',
+    });
+    expect(text).toContain('Triggering open call ID: 26F09999');
+    expect(text).not.toContain('dashboard');
+  });
+});
+
+describe('major-repair-repeat-recipients', () => {
+  it('normalizeBranchKey trims and uppercases', () => {
+    expect(normalizeBranchKey('  pune  ')).toBe('PUNE');
+    expect(normalizeBranchKey('Mumbai West')).toBe('MUMBAI WEST');
+  });
+
+  it('resolveAlertRecipients prefers branch To and keeps HQ on Cc', () => {
+    expect(
+      resolveAlertRecipients({
+        branchEmails: ['bm@example.com', ' BM@example.com '],
+        hqTo: 'sunil.sawant@westernequipments.com',
+        hqCc: 'vishnu.vishwakarma@westernequipments.com',
+      })
+    ).toEqual({
+      to: ['bm@example.com'],
+      cc: [
+        'sunil.sawant@westernequipments.com',
+        'vishnu.vishwakarma@westernequipments.com',
+      ],
+    });
+  });
+
+  it('resolveAlertRecipients falls back to HQ To when branch list empty', () => {
+    expect(
+      resolveAlertRecipients({
+        branchEmails: [],
+        hqTo: 'sunil.sawant@westernequipments.com',
+        hqCc: 'vishnu.vishwakarma@westernequipments.com',
+      })
+    ).toEqual({
+      to: ['sunil.sawant@westernequipments.com'],
+      cc: ['vishnu.vishwakarma@westernequipments.com'],
+    });
   });
 });

@@ -7,6 +7,7 @@ import {
   rollupAccountsByAccount,
   type ClientMergeWithCrmPrefs,
 } from '@/features/report/ui/SummaryMergedMetricCell';
+import { formatUiDate } from '@/lib/dates/ui-date';
 
 export type AccountMisGrouping = 'zone' | 'overview' | 'zone-top';
 
@@ -243,7 +244,7 @@ export function formatRelativeTime(date: Date | null): string {
   if (diffMin < 60) return `${diffMin}m ago`;
   const diffHr = Math.floor(diffMin / 60);
   if (diffHr < 24) return `${diffHr}h ago`;
-  return date.toLocaleDateString();
+  return formatUiDate(date);
 }
 
 export function adjustRegisterSummaryBucket(

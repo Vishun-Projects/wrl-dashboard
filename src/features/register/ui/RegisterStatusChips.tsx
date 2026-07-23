@@ -8,7 +8,7 @@ import {
   statusPresetMatches,
   type DraftFilterOverrides,
 } from '@/features/report';
-import { useReportFilters } from '@/features/report';
+import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
 
 export function RegisterStatusChips({ commitOnChange = false }: { commitOnChange?: boolean }) {
   const { selectedStatus, setSelectedStatus, applyFilters } = useReportFilters();

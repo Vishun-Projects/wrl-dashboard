@@ -8,6 +8,8 @@ import {
   reattachMisEmailSendToasts,
   updateMisEmailSendJobClient,
 } from '@/features/mis-email/lib/send-job-client';
+import { createClient } from '@/lib/supabase/client';
+import { getBearerAuthHeaders } from '@/lib/supabase/session';
 
 const POLL_MS = 2000;
 
@@ -18,16 +20,39 @@ type MisEmailSendJobResponse = {
   error?: string;
 };
 
+async function statusRequestAuth(): Promise<{
+  headers: Record<string, string>;
+  withCredentials: true;
+}> {
+  const supabase = createClient();
+  try {
+    const headers = await getBearerAuthHeaders(supabase);
+    return { headers, withCredentials: true };
+  } catch {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    return {
+      headers: session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {},
+      withCredentials: true,
+    };
+  }
+}
+
 async function pollMisEmailSendJobs(): Promise<void> {
   const { activeJobs } = getMisEmailSendJobsSnapshot();
   if (activeJobs.length === 0) return;
+
+  const auth = await statusRequestAuth();
 
   await Promise.all(
     activeJobs.map(async (job) => {
       try {
         const res = await axios.get<{ job: MisEmailSendJobResponse }>(
           `/api/profile/mis-email/send/status?jobId=${encodeURIComponent(job.jobId)}`,
-          { withCredentials: true }
+          auth
         );
 
         const remote = res.data.job;

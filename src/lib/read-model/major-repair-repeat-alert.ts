@@ -1,13 +1,12 @@
 import { postQuery } from '@/lib/db/proxy';
 import { daysAgoDate, todayLocalDate } from '@/lib/read-model/dates';
 import { withClient } from '@/lib/read-model/db';
-import {
-  createMailTransport,
-  isSmtpConfigured,
-  resolvePortalUrl,
-  resolveSmtpConfig,
-} from '@/lib/mail/smtp';
+import { createMailTransport, isSmtpConfigured, resolveSmtpConfig } from '@/lib/mail/smtp';
 import type { HotRow } from '@/lib/read-model/types';
+import {
+  listEnabledEmailsForBranch,
+  resolveAlertRecipients,
+} from '@/lib/read-model/major-repair-repeat-recipients';
 import { normalizeSerial } from '@/lib/serial/normalize';
 import {
   buildMajorRepairRepeatCountSql,
@@ -195,16 +194,17 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function buildAlertEmailHtml(params: {
+export function buildAlertEmailHtml(params: {
   serial: string;
   triggerTrn: string;
+  branchName: string;
   callCount: number;
   months: number;
   startDate: string;
   endDate: string;
   details: RepeatDetailRow[];
 }): string {
-  const portal = resolvePortalUrl();
+  const branch = params.branchName.trim() || 'Unknown';
   const rows = params.details
     .map(
       (d) => `<tr>
@@ -218,28 +218,56 @@ function buildAlertEmailHtml(params: {
     )
     .join('');
 
-  return `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;font-size:14px;color:#222;">
-    <p><strong>Major repair repeat alert</strong> — serial <strong>${escapeHtml(params.serial)}</strong></p>
-    <p>Triggering call: <strong>${escapeHtml(params.triggerTrn)}</strong></p>
-    <p>${params.callCount} major call(s) with Motor/Compressor/Gas repair on this serial between ${escapeHtml(params.startDate)} and ${escapeHtml(params.endDate)} (last ${params.months} months).</p>
+  return `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;font-size:14px;color:#222;line-height:1.45;">
+    <p style="margin:0 0 12px 0;"><strong>WRL SLA notification — major repair repeat</strong></p>
+    <p style="margin:0 0 8px 0;">A new major call with Motor Replaced / Compressor Replaced / Gas Charging Done has pushed this serial over the repeat threshold.</p>
+    <table style="border-collapse:collapse;margin:0 0 16px 0;">
+      <tr><td style="padding:4px 12px 4px 0;color:#555;">Triggering open call ID</td><td style="padding:4px 0;"><strong>${escapeHtml(params.triggerTrn)}</strong></td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#555;">Serial number</td><td style="padding:4px 0;"><strong>${escapeHtml(params.serial)}</strong></td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#555;">Branch</td><td style="padding:4px 0;">${escapeHtml(branch)}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#555;">Repeat count</td><td style="padding:4px 0;">${params.callCount} call(s) in the last ${params.months} months (${escapeHtml(params.startDate)} to ${escapeHtml(params.endDate)})</td></tr>
+    </table>
+    <p style="margin:0 0 8px 0;"><strong>History on this serial</strong> (major calls with Motor / Compressor / Gas in the window):</p>
     <table style="border-collapse:collapse;width:100%;max-width:960px;">
       <thead><tr style="background:#f4f4f4;">
-        <th style="padding:6px 8px;border:1px solid #ddd;text-align:left;">TRN</th>
+        <th style="padding:6px 8px;border:1px solid #ddd;text-align:left;">Call ID</th>
         <th style="padding:6px 8px;border:1px solid #ddd;text-align:left;">Logged</th>
         <th style="padding:6px 8px;border:1px solid #ddd;text-align:left;">Party</th>
         <th style="padding:6px 8px;border:1px solid #ddd;text-align:left;">Repairs</th>
         <th style="padding:6px 8px;border:1px solid #ddd;text-align:left;">Status</th>
         <th style="padding:6px 8px;border:1px solid #ddd;text-align:left;">Complaint</th>
       </tr></thead>
-      <tbody>${rows}</tbody>
+      <tbody>${rows || `<tr><td colspan="6" style="padding:6px 8px;border:1px solid #ddd;">No detail rows returned.</td></tr>`}</tbody>
     </table>
-    <p style="margin-top:16px;"><a href="${escapeHtml(portal)}">Open WRL dashboard</a></p>
   </body></html>`;
+}
+
+export function buildAlertEmailText(params: {
+  serial: string;
+  triggerTrn: string;
+  branchName: string;
+  callCount: number;
+  months: number;
+  startDate: string;
+  endDate: string;
+}): string {
+  const branch = params.branchName.trim() || 'Unknown';
+  return [
+    'WRL SLA notification — major repair repeat',
+    '',
+    `Triggering open call ID: ${params.triggerTrn}`,
+    `Serial number: ${params.serial}`,
+    `Branch: ${branch}`,
+    `Repeat count: ${params.callCount} call(s) in the last ${params.months} months (${params.startDate} to ${params.endDate})`,
+    '',
+    'This email is an SLA alert only (Motor / Compressor / Gas repeat on the same serial).',
+  ].join('\n');
 }
 
 async function sendRepeatAlertEmail(params: {
   serial: string;
   triggerTrn: string;
+  branchName: string;
   callCount: number;
   months: number;
   startDate: string;
@@ -252,22 +280,37 @@ async function sendRepeatAlertEmail(params: {
     );
     return;
   }
+
+  const branchPeople = await listEnabledEmailsForBranch(params.branchName);
+  const { to, cc } = resolveAlertRecipients({
+    branchEmails: branchPeople.map((p) => p.email),
+    hqTo: majorRepairRepeatToEmail(),
+    hqCc: majorRepairRepeatCcEmail(),
+  });
+  if (!to.length) {
+    throw new Error(
+      `no recipients for branch "${params.branchName || '(empty)'}" and HQ To/Cc empty`
+    );
+  }
+
   const smtp = resolveSmtpConfig();
   const transport = createMailTransport(smtp);
-  const subject = `WRL Alert: Major repair repeat — ${params.serial} (${params.callCount} calls in ${params.months} months)`;
+  const subject = `WRL SLA Alert: Major repair repeat — Call ${params.triggerTrn} — Serial ${params.serial}`;
   const html = buildAlertEmailHtml(params);
-  const to = majorRepairRepeatToEmail();
-  const cc = majorRepairRepeatCcEmail();
+  const text = buildAlertEmailText(params);
   const info = await transport.sendMail({
     from: smtp.from,
-    to,
-    cc,
+    to: to.join(', '),
+    ...(cc.length ? { cc: cc.join(', ') } : {}),
     subject,
     html,
-    text: `Major repair repeat: serial ${params.serial}, ${params.callCount} calls. Trigger TRN ${params.triggerTrn}.`,
+    text,
   });
+  const branchLabel = branchPeople.length
+    ? branchPeople.map((p) => `${p.name}<${p.email}>`).join('; ')
+    : '(HQ fallback)';
   console.log(
-    `[sync-worker] major-repair-repeat-alert: sent email for ${params.triggerTrn} (serial ${params.serial}, count ${params.callCount}) to=${to} cc=${cc} messageId=${info.messageId}`
+    `[sync-worker] major-repair-repeat-alert: sent email for ${params.triggerTrn} (serial ${params.serial}, branch ${params.branchName}, count ${params.callCount}) to=${to.join(',')} cc=${cc.join(',') || '-'} branchRecipients=${branchLabel} messageId=${info.messageId}`
   );
 }
 
@@ -337,6 +380,7 @@ export async function checkMajorRepairRepeatAlerts(upsertedRows: HotRow[]): Prom
       await sendRepeatAlertEmail({
         serial,
         triggerTrn: trigger.vtrnno,
+        branchName: trigger.branch_name ?? '',
         callCount,
         months,
         startDate,

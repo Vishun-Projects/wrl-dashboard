@@ -23,25 +23,32 @@ export async function upsertTransactionEntryRows(
     const placeholders: string[] = [];
 
     batch.forEach((row, idx) => {
-      const o = idx * 5;
-      placeholders.push(`($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, now())`);
+      const o = idx * 7;
+      placeholders.push(
+        `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}, now())`
+      );
       values.push(
         row.client,
         row.productSerialNo,
         row.daddedonRaw || null,
         row.daddedon,
-        row.uniqueId
+        row.uniqueId,
+        row.warrantyStartRaw || null,
+        row.warrantyStart
       );
     });
 
     await client.query(
       `INSERT INTO crm_transaction_entry
-         (client, product_serial_no, daddedon_raw, daddedon, unique_id, synced_at)
+         (client, product_serial_no, daddedon_raw, daddedon, unique_id,
+          warranty_start_raw, warranty_start, synced_at)
        VALUES ${placeholders.join(', ')}
        ON CONFLICT (client, product_serial_no) DO UPDATE SET
          daddedon_raw = EXCLUDED.daddedon_raw,
          daddedon = EXCLUDED.daddedon,
          unique_id = COALESCE(EXCLUDED.unique_id, crm_transaction_entry.unique_id),
+         warranty_start_raw = EXCLUDED.warranty_start_raw,
+         warranty_start = EXCLUDED.warranty_start,
          synced_at = now()`,
       values
     );

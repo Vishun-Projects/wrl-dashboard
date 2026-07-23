@@ -151,6 +151,14 @@ export const RBAC_PAGES: RbacPage[] = [
     group: 'Administration',
   },
   {
+    id: 'major_repair_alerts',
+    permission: 'page_major_repair_alerts',
+    path: '/admin/major-repair-alerts',
+    label: 'Major Repair Alerts',
+    description: 'Branch recipients for major repair repeat SLA email alerts',
+    group: 'Administration',
+  },
+  {
     id: 'performance_insights',
     permission: 'page_performance_insights',
     path: '/admin/performance-insights',
@@ -247,7 +255,7 @@ export function hasFullPageAccess(permissions: string[], pageId: string): boolea
 export function canAccessPage(permissions: string[], pageId: string): boolean {
   const page = PAGE_BY_ID.get(pageId);
   if (!page) return false;
-  if (pageId === 'mis_email_routing') {
+  if (pageId === 'mis_email_routing' || pageId === 'major_repair_alerts') {
     if (
       hasCapability(permissions, 'view_all_offices') ||
       hasPermission(permissions, 'manage_users') ||

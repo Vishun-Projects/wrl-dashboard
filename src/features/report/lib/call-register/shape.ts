@@ -1,24 +1,21 @@
+import { formatUiDate } from '@/lib/dates/ui-date';
+
 export type CallRegisterSerialExportRow = {
   client: string;
   serial: string;
+  /** CRM WarrantyStartDate — billing date shown in UI. */
   qtyDate: string;
+  /** CRM daddedon — import/upload date; date-range filter uses this. */
+  importedDate: string;
   installationDate: string;
   deploymentDate: string;
   pendingInstall: 'Yes' | 'No';
   pendingDeploy: 'Yes' | 'No';
 };
 
+/** Call Register serial dates shown in UI / Excel — dd/mm/yyyy. */
 export function formatSerialExportDate(value: unknown): string {
-  if (value == null || value === '') return '';
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10);
-  }
-  const s = String(value).trim();
-  // CRM daddedon: dd/mm/yyyy hh:mm:ss
-  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  return s;
+  return formatUiDate(value);
 }
 
 /** Pure row shaping for Excel export rows. */
@@ -26,6 +23,7 @@ export function shapeSerialExportRow(input: {
   client: string;
   serial: string;
   qtyDate: unknown;
+  importedDate?: unknown;
   installationDate: unknown;
   deploymentDate: unknown;
 }): CallRegisterSerialExportRow {
@@ -35,6 +33,7 @@ export function shapeSerialExportRow(input: {
     client: input.client,
     serial: input.serial,
     qtyDate: formatSerialExportDate(input.qtyDate),
+    importedDate: formatSerialExportDate(input.importedDate),
     installationDate,
     deploymentDate,
     pendingInstall: installationDate ? 'No' : 'Yes',

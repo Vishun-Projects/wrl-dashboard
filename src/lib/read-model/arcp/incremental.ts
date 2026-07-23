@@ -162,12 +162,13 @@ export async function runArcpIncrementalSync(): Promise<ArcpIncrementalResult> {
         if (deduped.length > 0) {
           await updateArcpSyncWatermarks(client, nextEdited, nextAdded, rowsUpserted);
         } else {
-          await updateArcpSyncWatermarks(
-            client,
-            state?.last_editedon ?? null,
-            state?.last_addedon ?? null,
-            0
-          );
+          // Empty but successful catch-up — advance past the scanned window so we do not re-OOM forever
+          const advanced = new Date();
+          const keepEdited =
+            state?.last_editedon && state.last_editedon.getTime() > advanced.getTime()
+              ? state.last_editedon
+              : advanced;
+          await updateArcpSyncWatermarks(client, keepEdited, state?.last_addedon ?? null, 0);
         }
 
         const checksum = createHash('sha256')

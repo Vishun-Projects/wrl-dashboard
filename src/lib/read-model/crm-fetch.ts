@@ -34,13 +34,17 @@ const SYNC_CATCHUP_CHUNK_DAYS = Math.max(
 const SYNC_INCREMENTAL_TIMEOUT_MS =
   Number(process.env.SYNC_CRM_INCREMENTAL_TIMEOUT_MS ?? 300_000) || 300_000;
 
-/** Wider CRM windows for YTD backfill (fewer round trips than 1-day incremental chunks). */
+/**
+ * Backfill CRM windows — keep modest so the first attempt usually succeeds.
+ * Wide windows (14d) time out on dense months and retry (extra CRM load).
+ */
 const SYNC_BACKFILL_CHUNK_DAYS = Math.max(
   1,
-  Number(process.env.SYNC_BACKFILL_CHUNK_DAYS ?? 14) || 14
+  Number(process.env.SYNC_BACKFILL_CHUNK_DAYS ?? 7) || 7
 );
+/** Pause between backfill chunk POSTs — CRM DBQUERY is shared / fragile under burst. */
 const SYNC_BACKFILL_FETCH_GAP_MS =
-  Number(process.env.SYNC_BACKFILL_FETCH_GAP_MS ?? 400) || 400;
+  Number(process.env.SYNC_BACKFILL_FETCH_GAP_MS ?? 3000) || 3000;
 const SYNC_BACKFILL_TIMEOUT_MS =
   Number(process.env.SYNC_BACKFILL_TIMEOUT_MS ?? 600_000) || 600_000;
 

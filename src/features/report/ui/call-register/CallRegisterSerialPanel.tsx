@@ -16,6 +16,8 @@ import {
   sortSerialPanelRows,
   type SerialPanelSortKey,
 } from '@/features/report/lib/call-register/serial-panel';
+import { formatUiDate } from '@/lib/dates/ui-date';
+import type { CallRegisterDateField } from '@/features/report/lib/call-register/dates';
 
 const PAGE_SIZE = 100;
 
@@ -32,6 +34,7 @@ type CallRegisterSerialPanelProps = {
   client: string | null;
   dateFrom: string;
   dateTo: string;
+  dateField: CallRegisterDateField;
   onClose: () => void;
 };
 
@@ -64,6 +67,7 @@ export function CallRegisterSerialPanel({
   client,
   dateFrom,
   dateTo,
+  dateField,
   onClose,
 }: CallRegisterSerialPanelProps) {
   const [rows, setRows] = useState<CallRegisterSerialExportRow[]>([]);
@@ -97,6 +101,7 @@ export function CallRegisterSerialPanel({
     params.set('client', client);
     if (dateFrom) params.set('dateFrom', dateFrom);
     if (dateTo) params.set('dateTo', dateTo);
+    params.set('dateField', dateField);
 
     fetch(`/api/report/call-register/serials?${params.toString()}`, { signal: abort.signal })
       .then(async (res) => {
@@ -120,7 +125,7 @@ export function CallRegisterSerialPanel({
       });
 
     return () => abort.abort();
-  }, [open, client, dateFrom, dateTo]);
+  }, [open, client, dateFrom, dateTo, dateField]);
 
   const filtered = useMemo(
     () => filterSerialPanelRows(rows, { search, pendingDeploy, pendingInstall }),
@@ -150,7 +155,7 @@ export function CallRegisterSerialPanel({
   };
 
   const dateLabel =
-    dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : 'All Time';
+    dateFrom && dateTo ? `${formatUiDate(dateFrom)} → ${formatUiDate(dateTo)}` : 'All Time';
 
   return (
     <ModalPortal open={open && !!client}>
@@ -241,6 +246,7 @@ export function CallRegisterSerialPanel({
                   <tr>
                     <SortTh label="Serial Number" active={sortKey === 'serial'} dir={sortDir} onClick={() => toggleSort('serial')} />
                     <SortTh label="Billing Date" active={sortKey === 'qtyDate'} dir={sortDir} onClick={() => toggleSort('qtyDate')} />
+                    <SortTh label="Imported Date" active={sortKey === 'importedDate'} dir={sortDir} onClick={() => toggleSort('importedDate')} />
                     <SortTh label="Deployment Date" active={sortKey === 'deploymentDate'} dir={sortDir} onClick={() => toggleSort('deploymentDate')} />
                     <SortTh label="Installation Date" active={sortKey === 'installationDate'} dir={sortDir} onClick={() => toggleSort('installationDate')} />
                     <SortTh label="Deploy" active={sortKey === 'pendingDeploy'} dir={sortDir} onClick={() => toggleSort('pendingDeploy')} className="text-center" />
@@ -249,9 +255,10 @@ export function CallRegisterSerialPanel({
                 </AdminThead>
                 <tbody>
                   {pageRows.map((row) => (
-                    <AdminTr key={`${row.serial}-${row.qtyDate}`} className="hover:bg-bg-soft/80">
+                    <AdminTr key={`${row.serial}-${row.importedDate}-${row.qtyDate}`} className="hover:bg-bg-soft/80">
                       <AdminTd className="font-mono text-[12px] text-slate-800">{row.serial}</AdminTd>
                       <AdminTd className="tabular-nums text-[12px] text-slate-600">{row.qtyDate || '—'}</AdminTd>
+                      <AdminTd className="tabular-nums text-[12px] text-slate-600">{row.importedDate || '—'}</AdminTd>
                       <AdminTd className="tabular-nums text-[12px] text-slate-600">{row.deploymentDate || '—'}</AdminTd>
                       <AdminTd className="tabular-nums text-[12px] text-slate-600">{row.installationDate || '—'}</AdminTd>
                       <AdminTd className="text-center"><PendingBadge pending={row.pendingDeploy} /></AdminTd>

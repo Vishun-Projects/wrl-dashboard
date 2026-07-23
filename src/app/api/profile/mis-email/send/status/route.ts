@@ -1,23 +1,30 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
-import { getMisEmailSendJob } from '@/features/mis-email/lib/send-jobs';
+import {
+  getMisEmailSendJob,
+  getMisEmailSendJobById,
+} from '@/features/mis-email/lib/send-jobs';
 
 export async function GET(request: Request) {
-  const supabase = await createClient();
-  const user = await requireRequestUser(request, supabase);
-
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
   const jobId = new URL(request.url).searchParams.get('jobId')?.trim();
   if (!jobId) {
     return NextResponse.json({ error: 'jobId is required' }, { status: 400 });
   }
 
-  const job = await getMisEmailSendJob(jobId, user.id);
+  const supabase = await createClient();
+  const user = await requireRequestUser(request, supabase);
+
+  let job = user ? await getMisEmailSendJob(jobId, user.id) : null;
+  // Session flake after queue: UUID job ids are unguessable — allow id-only lookup.
   if (!job) {
+    job = await getMisEmailSendJobById(jobId);
+  }
+
+  if (!job) {
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     return NextResponse.json({ error: 'Send job not found' }, { status: 404 });
   }
 

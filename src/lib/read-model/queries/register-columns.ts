@@ -89,6 +89,7 @@ export const DISTRIBUTION_COMPACT_COLUMNS = [
   'h.pincode',
   'h.city',
   'h.state',
+  'h.call_type',
   'h.status_bucket',
   'h.status_label',
   'h.bsolved',

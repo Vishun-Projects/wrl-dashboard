@@ -1,12 +1,16 @@
 'use client';
 
 import React from 'react';
+import { UiDateInput } from '@/components/ui/UiDateInput';
+import type { CallRegisterDateField } from '@/features/report/lib/call-register/dates';
 
 type CallRegisterToolbarProps = {
   dateFrom: string;
   dateTo: string;
   onDateFromChange: (val: string) => void;
   onDateToChange: (val: string) => void;
+  dateField: CallRegisterDateField;
+  onDateFieldChange: (val: CallRegisterDateField) => void;
   onApplyFilter: () => void;
   onAllTime: () => void;
   onRefresh: () => void;
@@ -24,6 +28,8 @@ export function CallRegisterToolbar({
   dateTo,
   onDateFromChange,
   onDateToChange,
+  dateField,
+  onDateFieldChange,
   onApplyFilter,
   onAllTime,
   onRefresh,
@@ -44,18 +50,28 @@ export function CallRegisterToolbar({
         <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
           Date Range
         </span>
-        <input
-          type="date"
+        <select
+          value={dateField}
+          onChange={(e) => onDateFieldChange(e.target.value as CallRegisterDateField)}
+          disabled={busy}
+          aria-label="Filter date field"
+          className="h-8 rounded-md border border-slate-200 bg-bg-canvas px-2 text-[12px] text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none disabled:opacity-50"
+        >
+          <option value="imported">Imported Date</option>
+          <option value="billing">Billing Date</option>
+        </select>
+        <UiDateInput
           value={dateFrom}
-          onChange={(e) => onDateFromChange(e.target.value)}
-          className="h-8 rounded-md border border-slate-200 bg-bg-canvas px-2 text-[12px] text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+          onChange={onDateFromChange}
+          aria-label="Date from"
+          disabled={busy}
         />
         <span className="text-slate-400 text-sm">–</span>
-        <input
-          type="date"
+        <UiDateInput
           value={dateTo}
-          onChange={(e) => onDateToChange(e.target.value)}
-          className="h-8 rounded-md border border-slate-200 bg-bg-canvas px-2 text-[12px] text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+          onChange={onDateToChange}
+          aria-label="Date to"
+          disabled={busy}
         />
       </div>
 

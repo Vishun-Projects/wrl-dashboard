@@ -4,7 +4,7 @@ import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { RegisterFilterBar } from '@/features/register/ui/RegisterFilterBar';
 import { countActiveFilters } from '@/features/report';
-import { useReportFilters } from '@/features/report';
+import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
 
 type RegisterFilterDrawerProps = {
   open: boolean;

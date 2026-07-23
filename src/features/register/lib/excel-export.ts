@@ -3,7 +3,7 @@ import { blobToPreparedExport, triggerBlobDownload } from '@/features/report/dow
 import { formatRegisterExportDate } from '@/features/register/lib/export-dates';
 import { formatRegisterMajorMinor } from '@/features/register/lib/major-minor';
 import { formatRegisterRepairDone } from '@/features/register/lib/format-repair-done';
-import { isRegisterRowCancelled } from '@/features/report';
+import { isRegisterRowCancelled } from '@/lib/call-status/register-row';
 
 /** Excel worksheet limit minus header row. */
 const EXCEL_MAX_DATA_ROWS = 1_048_575;

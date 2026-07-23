@@ -2,6 +2,7 @@ import 'server-only';
 
 import { prisma } from '@/lib/db/prisma';
 import { CALL_REGISTER_CLIENTS } from './clients';
+import { callRegisterDateSqlExpr, parseCallRegisterDateField } from './dates';
 import type { CallRegisterQueryParams, CallRegisterRow, CallRegisterSummary } from './types';
 
 const HOT_DONE = `(
@@ -34,9 +35,12 @@ type AggregateRow = {
 /** Count install/deploy on billed serials where the solved call is on the same account. */
 async function fetchAggregatedRows(params: CallRegisterQueryParams): Promise<AggregateRow[]> {
   const { dateFrom, dateTo } = params;
+  const dateField = parseCallRegisterDateField(params.dateField);
+  const dateExpr = callRegisterDateSqlExpr(dateField, 'b');
   const dateClause =
     dateFrom && dateTo
-      ? `AND b.daddedon >= $2::date AND b.daddedon < ($3::date + interval '1 day')`
+      ? `AND ${dateExpr} >= $2::date
+         AND ${dateExpr} < ($3::date + interval '1 day')`
       : '';
   const args: unknown[] =
     dateFrom && dateTo ? [CALL_REGISTER_CLIENTS, dateFrom, dateTo] : [CALL_REGISTER_CLIENTS];

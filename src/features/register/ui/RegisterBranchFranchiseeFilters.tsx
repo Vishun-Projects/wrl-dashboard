@@ -8,7 +8,7 @@ import {
   buildMainBranchOptions,
   type DraftFilterOverrides,
 } from '@/features/report';
-import { useReportFilters } from '@/features/report';
+import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
 
 type RegisterBranchFranchiseeFiltersProps = {
   applyMode?: 'instant' | 'confirm';

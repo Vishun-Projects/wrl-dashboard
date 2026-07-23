@@ -11,6 +11,7 @@ import {
   isSerialTrackedReplacementPart,
 } from '@/lib/calls/part-barcode-images';
 import { resolveAvatarDisplayUrl } from '@/lib/auth/avatar-url';
+import { formatUiDate, formatUiDateTime } from '@/lib/dates/ui-date';
 
 interface CallDetailProps {
   call: any;
@@ -397,7 +398,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                         <div className="text-[13px] mt-1 ui-label">{reasonText}</div>
                         {(call.crm_reject_at || call.rejected_at || call.dBMrejectdatetime) && (
                           <div className="text-[10px] text-rose-400 font-medium mt-1">
-                            Rejected on {new Date(call.crm_reject_at || call.rejected_at || call.dBMrejectdatetime).toLocaleDateString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                            Rejected on {formatUiDateTime(call.crm_reject_at || call.rejected_at || call.dBMrejectdatetime)}
                           </div>
                         )}
                       </div>
@@ -439,7 +440,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                         <div className="flex items-center justify-between mb-3">
                           <span className="text-[11px] text-slate-900 ui-label">Visit #{i + 1}</span>
                           <span className="text-[11px] text-slate-400 ui-label">
-                            {v.dvisitdatetime ? new Date(v.dvisitdatetime).toLocaleDateString() : 'N/A'}
+                            {v.dvisitdatetime ? formatUiDate(v.dvisitdatetime) || 'N/A' : 'N/A'}
                           </span>
                         </div>
                         <div className="text-[13px] text-slate-600 italic">
@@ -609,7 +610,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                               </span>
                               {eventDate && (
                                 <span className="text-[10px] text-slate-400 font-medium">
-                                  {new Date(eventDate).toLocaleString([], { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                  {formatUiDateTime(eventDate)}
                                 </span>
                               )}
                             </div>
@@ -750,15 +751,21 @@ function TimelineItem({ label, date, highlight, status }: { label: string; date:
     danger: 'text-rose-600',
     default: highlight ? 'text-indigo-600' : 'text-slate-900'
   };
+  const dateTime = date ? formatUiDateTime(date) : '';
+  const [dayPart, timePart] = dateTime.includes(' ')
+    ? (dateTime.split(' ') as [string, string])
+    : [dateTime, ''];
 
   return (
     <div className="flex justify-between items-start text-[12px] lg:text-[13px] py-0.5">
       <span className="text-slate-400 font-medium">{label}</span>
       <div className="text-right">
         <div className={`${colors[status || 'default']} leading-none ui-strong`}>
-          {date ? new Date(date).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '—'}
+          {dayPart || '—'}
         </div>
-        {date && <div className="text-[10px] text-slate-400 mt-0.5">{new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>}
+        {timePart ? (
+          <div className="text-[10px] text-slate-400 mt-0.5">{timePart}</div>
+        ) : null}
       </div>
     </div>
   );

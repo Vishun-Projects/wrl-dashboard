@@ -14,6 +14,9 @@ export type CrmTransactionEntryRow = {
   productSerialNo: string;
   daddedonRaw: string;
   daddedon: Date | null;
+  /** CRM WarrantyStartDate — Call Register billing date */
+  warrantyStartRaw: string;
+  warrantyStart: Date | null;
   uniqueId: string | null;
 };
 
@@ -27,11 +30,13 @@ function sleep(ms: number) {
 
 function buildSelect(client: string | null, dateFrom: string, dateTo: string): string {
   const clientFilter = client ? `AND Client = ${sqlLiteral(client)}` : '';
+  // Sync window uses daddedon (upload time). Billing date is WarrantyStartDate (stored separately).
   return `
     SELECT
       Client AS Client,
       ProductSerialNo AS ProductSerialNo,
       daddedon AS daddedon,
+      WarrantyStartDate AS WarrantyStartDate,
       UNIQUEID AS UNIQUEID
     FROM TransactionEntry
     WHERE ProductSerialNo IS NOT NULL
@@ -59,11 +64,14 @@ function mapRows(raw: Record<string, string>[]): CrmTransactionEntryRow[] {
     const productSerialNo = String(row.ProductSerialNo ?? '').trim();
     if (!client || !productSerialNo) continue;
     const daddedonRaw = String(row.daddedon ?? '').trim();
+    const warrantyStartRaw = String(row.WarrantyStartDate ?? '').trim();
     out.push({
       client,
       productSerialNo,
       daddedonRaw,
       daddedon: parseCrmDaddedon(daddedonRaw),
+      warrantyStartRaw,
+      warrantyStart: parseCrmDaddedon(warrantyStartRaw),
       uniqueId: String(row.UNIQUEID ?? '').trim() || null,
     });
   }

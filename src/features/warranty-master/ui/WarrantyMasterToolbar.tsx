@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { RegisterMultiSelect } from '@/features/register';
+import { RegisterMultiSelect } from '@/features/register/ui/RegisterMultiSelect';
+import { UiDateInput } from '@/components/ui/UiDateInput';
 import type { WarrantyMasterClientFilters } from '@/features/warranty-master/lib';
 
 type SelectOption = { value: string; label: string };
@@ -104,19 +105,17 @@ export function WarrantyMasterToolbar({
           <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">
             Ends
           </span>
-          <input
-            type="date"
+          <UiDateInput
             value={filters.warrEndFrom}
-            onChange={(e) => onWarrEndFromChange(e.target.value)}
-            className="h-7 rounded-md border border-slate-200 bg-bg-canvas px-2 text-[11px] text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+            onChange={onWarrEndFromChange}
+            className="h-7 min-w-[6.5rem] text-[11px]"
             aria-label="Warranty end from"
           />
           <span className="text-[10px] text-slate-300">–</span>
-          <input
-            type="date"
+          <UiDateInput
             value={filters.warrEndTo}
-            onChange={(e) => onWarrEndToChange(e.target.value)}
-            className="h-7 rounded-md border border-slate-200 bg-bg-canvas px-2 text-[11px] text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+            onChange={onWarrEndToChange}
+            className="h-7 min-w-[6.5rem] text-[11px]"
             aria-label="Warranty end to"
           />
         </div>

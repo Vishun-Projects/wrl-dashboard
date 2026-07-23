@@ -19,6 +19,4 @@ export * from './lib/search';
 export * from './lib/summary-derive';
 export * from './lib/summary-excel-export';
 export * from './lib/sync';
-export * from './ui/ReportFiltersContext';
-export * from './ui/ReportLoadingFeedback';
-export * from './ui/SummaryMergedMetricCell';
+/** UI is deep-imported — do not re-export here (MIS email CLI must not pull React/components). */

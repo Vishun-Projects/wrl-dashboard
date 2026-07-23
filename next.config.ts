@@ -35,14 +35,20 @@ function supabaseConnectOrigins(): string[] {
 
 function buildContentSecurityPolicy(): string {
   const vercelAnalytics = 'https://va.vercel-scripts.com';
+  const leafletCdn = 'https://unpkg.com';
   const scriptSrc = isDev
-    ? `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://vercel.live ${vercelAnalytics}`
-    : `script-src 'self' 'unsafe-inline' https://vercel.live ${vercelAnalytics}`;
+    ? `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://vercel.live ${vercelAnalytics} ${leafletCdn}`
+    : `script-src 'self' 'unsafe-inline' https://vercel.live ${vercelAnalytics} ${leafletCdn}`;
 
   const connectParts = ["connect-src 'self'", vercelAnalytics, ...supabaseConnectOrigins()];
   if (isDev) {
     // Turbopack HMR + local API during `next dev`
-    connectParts.push('ws://localhost:*', 'http://localhost:*', 'ws://127.0.0.1:*');
+    connectParts.push(
+      'ws://localhost:*',
+      'http://localhost:*',
+      'ws://127.0.0.1:*',
+      leafletCdn
+    );
   }
 
   return [
@@ -50,7 +56,7 @@ function buildContentSecurityPolicy(): string {
     scriptSrc,
     connectParts.join(' '),
     "img-src 'self' data: https: blob:",
-    "style-src 'self' 'unsafe-inline' https://unpkg.com",
+    `style-src 'self' 'unsafe-inline' ${leafletCdn}`,
     "font-src 'self' data:",
     "frame-src 'self' blob: https://vercel.live",
   ].join('; ');

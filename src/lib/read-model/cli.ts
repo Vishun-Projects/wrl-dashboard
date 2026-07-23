@@ -7,6 +7,7 @@ import { runArcpIncrementalSync } from '@/lib/read-model/arcp/incremental';
 import { runInitialBackfill, runDimsRefresh } from '@/lib/read-model/backfill';
 import { runFillYtdHot } from '@/lib/read-model/fill-ytd';
 import { runBackfillHistoricalHot } from '@/lib/read-model/backfill-historical';
+import { runFillHotGaps } from '@/lib/read-model/fill-hot-gaps';
 import { runIncrementalSync } from '@/lib/read-model/incremental';
 import { runNightlyReconcile } from '@/lib/read-model/nightly';
 import { runPipelineReconcile } from '@/lib/read-model/pipeline-reconcile';
@@ -65,8 +66,13 @@ async function runDaemon(): Promise<void> {
       } else if (!result.ok) {
         consecutiveFailures += 1;
       }
+      // Isolate ARCP / TE so one failing job cannot starve the others (Deployment Completion).
       if (process.env.SYNC_ARCP_ENABLED === 'true') {
-        await runArcpIncrementalSync();
+        try {
+          await runArcpIncrementalSync();
+        } catch (arcpErr) {
+          console.error('[arcp-sync] Daemon incremental failed:', formatSyncWorkerError(arcpErr));
+        }
       }
       if (process.env.SYNC_TRANSACTION_ENTRY_ENABLED !== 'false') {
         try {
@@ -170,6 +176,9 @@ async function main(): Promise<void> {
     case 'backfill-historical':
       await runBackfillHistoricalHot();
       break;
+    case 'fill-hot-gaps':
+      await runFillHotGaps();
+      break;
     case 'nightly':
       await runNightlyReconcile();
       break;
@@ -224,6 +233,9 @@ Commands:
   backfill          Full reload: TRUNCATE hot + YTD CRM load + facts (use once)
   fill-ytd          Upsert YTD + open-old only — no truncate (safe refresh)
   backfill-historical  Upsert pre-YTD CRM calls (default 2020-01-01 .. day before Jan 1) — no truncate
+  fill-hot-gaps        Missing INSTALLATION CALL TRNs (full joins) + short-day corpus refill
+                       --from YYYY-MM-DD --to YYYY-MM-DD | --serial S | --trn TRN
+                       --installations-only | --skip-installations
   incremental       Single calls incremental sync run (+ pipeline reconcile + editedon catch-up)
   pipeline-reconcile  Refresh stale open/assigned/tech_solved hot rows from CRM by TRN (incl. transferred)
   reconcile-ytd-open  Full YTD open/assigned/tech_solved scan vs CRM (--apply to fix)

@@ -43,13 +43,15 @@ import { ReportPageSkeleton, ReportLoadingPanel } from '@/features/report/ui/Rep
 import { useRegisterFilterOptions } from '@/features/report/lib/hooks/useRegisterFilterOptions';
 import { feedback } from '@/lib/ui/feedback';
 import { useUser } from '@/components/layout/DashboardLayout';
-import { DateRangeSelector } from '@/features/register';
+import { DateRangeSelector } from '@/features/register/ui/DateRangeSelector';
 import { useRouter, usePathname } from 'next/navigation';
 import { CallRegisterClient } from '@/app/report/call-register/call-register-client';
+import { formatUiDate } from '@/lib/dates/ui-date';
+import { UiDateInput } from '@/components/ui/UiDateInput';
 
-import { RegisterBranchFranchiseeFilters } from '@/features/register';
-import { RegisterMultiSelect } from '@/features/register';
-import { RegisterPageFilters } from '@/features/register';
+import { RegisterBranchFranchiseeFilters } from '@/features/register/ui/RegisterBranchFranchiseeFilters';
+import { RegisterMultiSelect } from '@/features/register/ui/RegisterMultiSelect';
+import { RegisterPageFilters } from '@/features/register/ui/RegisterPageFilters';
 import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
 import {
   buildRegisterListQueryKey,
@@ -953,25 +955,7 @@ export default function ReportPageClient() {
 
   // Client-side cascades computation removed in favor of server-side cascades
 
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '—';
-
-    // Handle DD/MM/YYYY with optional time
-    if (typeof dateStr === 'string' && dateStr.includes('/') && dateStr.split('/')[0].length <= 2) {
-      const parts = dateStr.split(' ')[0].split('/');
-      if (parts.length === 3) {
-        const [d, m, y] = parts;
-        const date = new Date(`${y}-${m}-${d}`);
-        if (!isNaN(date.getTime())) {
-          return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-        }
-      }
-    }
-
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr; // Return raw if still invalid, might be a string already
-    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  };
+  const formatDate = (dateStr: string) => formatUiDate(dateStr) || '—';
 
   const persistCurrentCache = async (
     calls: any[],
@@ -4275,12 +4259,12 @@ export default function ReportPageClient() {
             </div>
             <div className="report-toolbar-filters-aging report-shared-aging-group flex shrink-0 items-center gap-2">
               <span className="report-shared-aging-label text-[10px] whitespace-nowrap text-amber-600 ui-label">Aging As Of</span>
-              <input
-                type="date"
-                className="register-filter-select report-shared-aging-input h-8 w-auto bg-amber-50/80 text-amber-900"
+              <UiDateInput
+                className="register-filter-select report-shared-aging-input border-amber-200 bg-amber-50/80 text-amber-900"
                 value={agingAsOf}
                 max={new Date().toISOString().split('T')[0]}
-                onChange={(e) => setAgingAsOf(e.target.value)}
+                onChange={(iso) => setAgingAsOf(iso)}
+                aria-label="Aging as of"
               />
             </div>
             <button

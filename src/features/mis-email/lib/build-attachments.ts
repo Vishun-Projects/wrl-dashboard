@@ -9,16 +9,14 @@ import {
   keyAccountMisFilename,
   summaryDashboardFilename,
   workbookToBuffer,
-} from '@/features/report';
-import {
   bdMisOpenCallsFilename,
   buildBdMisOpenCallsWorkbook,
   buildBdMisTraceableWorkbook,
   bdMisTraceableFilename,
   type BdMisTraceableExportPayload,
 } from '@/features/report';
-import { isRegisterRowCancelled } from '@/features/report';
-import type { SummaryDashboard } from '@/features/report';
+import { isRegisterRowCancelled } from '@/lib/call-status/register-row';
+import type { SummaryDashboard } from '@/lib/summary/derive';
 import type { DigestRecipient } from '@/features/mis-email/lib/recipients';
 import type { EffectiveDigestIncludes } from '@/features/mis-email/lib/preferences';
 import { formatBytes } from '@/features/mis-email/lib/timing';

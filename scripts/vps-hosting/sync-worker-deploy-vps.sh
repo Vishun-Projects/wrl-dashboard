@@ -56,6 +56,9 @@ if command -v rsync >/dev/null 2>&1; then
   RSYNC_SSH="ssh ${SSH_OPTS[*]}"
   rsync -az -e "$RSYNC_SSH" \
     "${ROOT}/src/lib/" "${VPS_HOST}:${INSTALL_ROOT}/src/lib/"
+  # package.json scripts (e.g. mis-email:digest) point into src/features — keep them in sync
+  rsync -az -e "$RSYNC_SSH" \
+    "${ROOT}/src/features/" "${VPS_HOST}:${INSTALL_ROOT}/src/features/"
   rsync -az -e "$RSYNC_SSH" \
     "${ROOT}/package.json" "${ROOT}/package-lock.json" "${ROOT}/tsconfig.json" \
     "${VPS_HOST}:${INSTALL_ROOT}/"
@@ -65,9 +68,10 @@ if command -v rsync >/dev/null 2>&1; then
   rsync -az -e "$RSYNC_SSH" \
     "${ROOT}/scripts/" "${VPS_HOST}:${INSTALL_ROOT}/scripts/"
 else
-  echo "    (rsync not found — streaming src/lib + package/schema files via tar)"
+  echo "    (rsync not found — streaming src/lib + src/features + package/schema files via tar)"
   tar -C "${ROOT}" -czf - \
     src/lib \
+    src/features \
     package.json \
     package-lock.json \
     tsconfig.json \

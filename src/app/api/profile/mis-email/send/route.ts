@@ -55,9 +55,6 @@ export async function POST(request: Request) {
     if (!row || !recipient) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     }
-    if (!row.mis_email_enabled) {
-      return NextResponse.json({ error: 'MIS email is not enabled for your account' }, { status: 403 });
-    }
 
     const current = mergeMisEmailPreferences(row.mis_email_preferences);
     const permissions = {
