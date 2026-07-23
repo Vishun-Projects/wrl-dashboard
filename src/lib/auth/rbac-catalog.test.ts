@@ -4,10 +4,12 @@ import {
   RBAC_PAGES,
   canAccessMisTab,
   canAccessPath,
+  canAssignMisEmail,
   defaultLandingPath,
   defaultMisTab,
   expandPermissionList,
   resolveApiAccess,
+  resolveMisEmailReportIncludes,
   seesAllOfficesForUser,
 } from './rbac-catalog';
 
@@ -113,5 +115,27 @@ describe('ALL_PERMISSION_SEED', () => {
     const seeded = new Set(ALL_PERMISSION_SEED.map((p) => p.name));
     expect(seeded.has('mis_client_import_upload')).toBe(true);
     expect(seeded.has('mis_client_import_delete')).toBe(true);
+  });
+
+  it('includes mis_email_send capability', () => {
+    const seeded = new Set(ALL_PERMISSION_SEED.map((p) => p.name));
+    expect(seeded.has('mis_email_send')).toBe(true);
+  });
+});
+
+describe('mis email access helpers', () => {
+  it('page_mis_reports unlocks all core report includes', () => {
+    expect(resolveMisEmailReportIncludes(['page_mis_reports'])).toEqual({
+      includeSummary: true,
+      includeDetailed: true,
+      includeKeyAccount: true,
+    });
+  });
+
+  it('requires mis_email_send plus a report type to assign email', () => {
+    expect(canAssignMisEmail(['tab_mis_summary'])).toBe(false);
+    expect(canAssignMisEmail(['mis_email_send'])).toBe(false);
+    expect(canAssignMisEmail(['mis_email_send', 'tab_mis_summary'])).toBe(true);
+    expect(canAssignMisEmail(['mis_email_send', 'page_mis_reports'])).toBe(true);
   });
 });

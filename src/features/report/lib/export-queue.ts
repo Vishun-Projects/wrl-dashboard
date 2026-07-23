@@ -83,3 +83,25 @@ export function formatExportQueueProgress(progress: ExportQueueProgress): string
   }
   return base;
 }
+
+/**
+ * Linear ETA from row progress. Hide until the stream has warmed up —
+ * early samples (1 row after TTFB) extrapolate to multi-day nonsense.
+ */
+export function estimateExportEtaSeconds(opts: {
+  fetched: number;
+  total: number;
+  elapsedSec: number;
+  detail?: string;
+}): number | undefined {
+  const { fetched, total, elapsedSec, detail } = opts;
+  if (detail || fetched <= 0 || total <= fetched) return undefined;
+  if (elapsedSec < 5 || fetched < 2_000) return undefined;
+  if (fetched / total < 0.02 && fetched < 5_000) return undefined;
+  const rate = fetched / elapsedSec;
+  if (rate <= 0) return undefined;
+  const eta = Math.ceil((total - fetched) / rate);
+  // Still absurd after warmup → hide rather than scare users.
+  if (eta > 3 * 60 * 60) return undefined;
+  return Math.max(1, eta);
+}

@@ -1,5 +1,9 @@
 import { withAppClient } from '@/lib/read-model/db';
-import { expandPermissionList } from '@/lib/auth/rbac-catalog';
+import {
+  expandPermissionList,
+  hasMisEmailSendAccess,
+  resolveMisEmailReportIncludes,
+} from '@/lib/auth/rbac-catalog';
 import {
   hasAnyEffectiveDigestInclude,
   isMisEmailSubscribed,
@@ -47,6 +51,7 @@ export function passesDigestRecipientFilters(
 ): recipient is DigestRecipient {
   if (!recipient) return false;
   if (!recipient.mis_email_enabled) return false;
+  if (!hasMisEmailSendAccess(recipient.permissions)) return false;
   if (!isMisEmailSubscribed(recipient.mis_email_preferences)) return false;
   const effective = resolveEffectiveDigestIncludes(recipient, recipient.mis_email_preferences);
   return hasAnyEffectiveDigestInclude(effective);
@@ -98,9 +103,8 @@ export async function loadDigestRecipientById(userId: string): Promise<DigestRec
 
 function rowToDigestRecipient(row: RecipientRow): DigestRecipient | null {
   const permissions = expandPermissionList(row.permission_names ?? []);
-  const includeSummary = permissions.includes('tab_mis_summary');
-  const includeDetailed = permissions.includes('tab_mis_register');
-  const includeKeyAccount = permissions.includes('tab_mis_accounts');
+  const { includeSummary, includeDetailed, includeKeyAccount } =
+    resolveMisEmailReportIncludes(permissions);
   if (!includeSummary && !includeDetailed && !includeKeyAccount) return null;
 
   return {

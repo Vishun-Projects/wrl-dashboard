@@ -10,7 +10,7 @@ function baseRecipient(overrides: Partial<DigestRecipient> = {}): DigestRecipien
     role: 'branch_manager',
     office_ids: ['1'],
     visible_statuses: [],
-    permissions: ['tab_mis_summary'],
+    permissions: ['tab_mis_summary', 'mis_email_send'],
     includeSummary: true,
     includeDetailed: false,
     includeKeyAccount: false,
@@ -24,6 +24,12 @@ describe('passesDigestRecipientFilters', () => {
   it('rejects when admin has not enabled email', () => {
     expect(
       passesDigestRecipientFilters(baseRecipient({ mis_email_enabled: false }))
+    ).toBe(false);
+  });
+
+  it('rejects when role lacks mis_email_send', () => {
+    expect(
+      passesDigestRecipientFilters(baseRecipient({ permissions: ['tab_mis_summary'] }))
     ).toBe(false);
   });
 

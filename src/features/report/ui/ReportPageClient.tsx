@@ -30,7 +30,7 @@ import { ReportOrientationBanner } from '@/features/report/ui/ReportOrientationB
 import ReportExportQueuePanel from '@/features/report/ui/ReportExportQueuePanel';
 import { useReportExportQueue } from '@/features/report/ui/useReportExportQueue';
 import type { ExportQueueRunContext } from '@/features/report/lib/export-queue';
-import { isExportActiveForTab } from '@/features/report/lib/export-queue';
+import { estimateExportEtaSeconds, isExportActiveForTab } from '@/features/report/lib/export-queue';
 import { consumeExportInterruptedFlag, markExportInterrupted } from '@/features/report/lib/export-queue-session';
 import { exportLabelForMisTab } from '@/features/report/lib/export-labels';
 import { ReportErrorBoundary } from '@/features/report/ui/ReportErrorBoundary';
@@ -3864,11 +3864,12 @@ export default function ReportPageClient() {
                 onProgress: (progress) => {
                   const { fetched, total: exportTotal, detail } = progress;
                   const elapsed = (Date.now() - exportStartedAtRef.current) / 1000;
-                  const rate = fetched > 0 && elapsed >= 0.5 ? fetched / elapsed : 0;
-                  const etaSeconds =
-                    detail || rate <= 0 || exportTotal <= fetched
-                      ? undefined
-                      : Math.max(1, Math.ceil((exportTotal - fetched) / rate));
+                  const etaSeconds = estimateExportEtaSeconds({
+                    fetched,
+                    total: exportTotal,
+                    elapsedSec: elapsed,
+                    detail,
+                  });
                   onProgress({ fetched, total: exportTotal, etaSeconds, detail });
                 },
               });

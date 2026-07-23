@@ -19,7 +19,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { feedback } from '@/lib/ui/feedback';
 import { useUser } from '@/components/layout/DashboardLayout';
-import { seesAllOfficesForUser } from '@/lib/auth/rbac-catalog';
+import { seesAllOfficesForUser, canAssignMisEmail } from '@/lib/auth/rbac-catalog';
 import { PageShell } from '@/components/layout/PageShell';
 import { TableSkeleton } from '@/components/ui/DataTableLoading';
 import BranchTree from '@/components/shared/BranchTree';
@@ -40,15 +40,6 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 import { ModalPortal } from '@/components/ui/ModalPortal';
-
-function roleHasMisPermissions(permissions: string[] | undefined): boolean {
-  const perms = permissions ?? [];
-  return (
-    perms.includes('tab_mis_summary') ||
-    perms.includes('tab_mis_register') ||
-    perms.includes('tab_mis_accounts')
-  );
-}
 
 type UserSortKey = 'user' | 'role' | 'statuses' | 'branches' | 'misEmail';
 
@@ -304,12 +295,12 @@ export default function AdminUsersPage() {
     const rolePerms = roleObj?.permissions ?? [];
     const isNational = seesAllOfficesForUser(rolePerms, u.role ?? '', u.office_ids ?? []);
     const roleName = roleObj?.name || (u.role === 'hod' ? 'HOD' : 'Branch Manager');
-    const canMisEmail = roleHasMisPermissions(rolePerms);
+    const canMisEmail = canAssignMisEmail(rolePerms);
     return { isHod: isNational, roleName, canMisEmail };
   };
 
   const selectedRole = roles.find((r) => r.id === formData.role_id);
-  const formRoleCanMisEmail = roleHasMisPermissions(selectedRole?.permissions);
+  const formRoleCanMisEmail = canAssignMisEmail(selectedRole?.permissions ?? []);
 
   const branchLabelsForUser = (u: any) => {
     const ids = u.office_ids ?? [];
@@ -736,7 +727,7 @@ export default function AdminUsersPage() {
                               key={role.id}
                               type="button"
                               onClick={() => {
-                                const canEmail = roleHasMisPermissions(role.permissions);
+                                const canEmail = canAssignMisEmail(role.permissions ?? []);
                                 setFormData({
                                   ...formData,
                                   role: role.name.toLowerCase().replace(' ', '_'),
@@ -767,8 +758,8 @@ export default function AdminUsersPage() {
                                 MIS email reports
                               </p>
                               <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">
-                                Allow this user to receive scheduled MIS digests. They can fine-tune
-                                schedule and report types in Profile.
+                                Allow this user to use Profile → Email reports and scheduled digests.
+                                Their role must include capability “MIS email reports”.
                               </p>
                             </div>
                             <button
@@ -777,7 +768,7 @@ export default function AdminUsersPage() {
                               title={
                                 formRoleCanMisEmail
                                   ? undefined
-                                  : 'Assign a role with MIS report access first'
+                                  : 'Assign a role with “MIS email reports” plus MIS report access first'
                               }
                               onClick={() => {
                                 if (!formRoleCanMisEmail) return;
@@ -805,7 +796,8 @@ export default function AdminUsersPage() {
                           </div>
                           {!formRoleCanMisEmail ? (
                             <p className="text-[10px] text-amber-700">
-                              Select a role with Summary, Register, or Key Account access to enable email.
+                              Role needs capability “MIS email reports” plus at least one MIS report
+                              (or full MIS Reports page).
                             </p>
                           ) : null}
                         </div>

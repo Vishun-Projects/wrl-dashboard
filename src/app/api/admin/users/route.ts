@@ -11,10 +11,9 @@ import { isDbSignInAvailable } from '@/lib/auth/db-sign-in';
 import { isDevAuthBypass } from '@/lib/auth/verify-jwt';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
-import { expandPermissionList } from '@/lib/auth/rbac-catalog';
+import { expandPermissionList, canAssignMisEmail, resolveMisEmailReportIncludes } from '@/lib/auth/rbac-catalog';
 import {
   defaultPreferencesForRecipient,
-  userHasMisReportPermissions,
 } from '@/features/mis-email/lib/preferences';
 
 const USER_COLUMNS = `id, name, email, role, role_id, office_ids, visible_statuses, avatar_url, mis_email_enabled, mis_email_preferences, created_at`;
@@ -76,6 +75,7 @@ async function loadRoleMisIncludes(roleId: string): Promise<{
   includeSummary: boolean;
   includeDetailed: boolean;
   includeKeyAccount: boolean;
+  canAssignEmail: boolean;
 } | null> {
   const rows = (await prisma.$queryRawUnsafe(
     `SELECT COALESCE(array_agg(DISTINCT ap.name) FILTER (WHERE ap.name IS NOT NULL), '{}') AS permission_names
@@ -86,9 +86,8 @@ async function loadRoleMisIncludes(roleId: string): Promise<{
   )) as { permission_names: string[] }[];
   const permissions = expandPermissionList(rows[0]?.permission_names ?? []);
   return {
-    includeSummary: permissions.includes('tab_mis_summary'),
-    includeDetailed: permissions.includes('tab_mis_register'),
-    includeKeyAccount: permissions.includes('tab_mis_accounts'),
+    ...resolveMisEmailReportIncludes(permissions),
+    canAssignEmail: canAssignMisEmail(permissions),
   };
 }
 
@@ -252,15 +251,24 @@ export async function PUT(request: Request) {
     const misIncludes = await loadRoleMisIncludes(roleId);
     const wantsEmail = Boolean(mis_email_enabled);
 
-    if (wantsEmail && (!misIncludes || !userHasMisReportPermissions(misIncludes))) {
+    if (wantsEmail && (!misIncludes || !misIncludes.canAssignEmail)) {
       return NextResponse.json(
-        { error: 'Assign a role with MIS report access before enabling email digests.' },
+        {
+          error:
+            'Assign a role with “MIS email reports” plus at least one MIS report tab (or full MIS Reports) before enabling email digests.',
+        },
         { status: 400 }
       );
     }
 
     if (wantsEmail) {
-      const defaultPrefs = JSON.stringify(defaultPreferencesForRecipient(misIncludes!));
+      const defaultPrefs = JSON.stringify(
+        defaultPreferencesForRecipient({
+          includeSummary: misIncludes!.includeSummary,
+          includeDetailed: misIncludes!.includeDetailed,
+          includeKeyAccount: misIncludes!.includeKeyAccount,
+        })
+      );
       await prisma.$queryRawUnsafe(
         `UPDATE public.app_users
          SET name = $1, role = $2, role_id = $3, office_ids = $4, visible_statuses = $5,

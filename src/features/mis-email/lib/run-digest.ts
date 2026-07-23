@@ -1,4 +1,8 @@
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
+import {
+  hasMisEmailSendAccess,
+  resolveMisEmailReportIncludes,
+} from '@/lib/auth/rbac-catalog';
 import { buildMisEmailPayload } from '@/features/mis-email/lib/compose-digest';
 import type { DigestDateRange } from '@/features/mis-email/lib/fetch-digest-data';
 import {
@@ -175,6 +179,7 @@ export async function runMisEmailTestBatch(options: {
         throw new Error(`User not found: ${options.userId}`);
       }
       const permissions = auth.permissions;
+      const includes = resolveMisEmailReportIncludes(permissions);
       recipient = {
         id: auth.profile.id,
         name: auth.profile.name,
@@ -183,14 +188,17 @@ export async function runMisEmailTestBatch(options: {
         office_ids: auth.profile.office_ids ?? [],
         visible_statuses: auth.profile.visible_statuses ?? [],
         permissions,
-        includeSummary: permissions.includes('tab_mis_summary'),
-        includeDetailed: permissions.includes('tab_mis_register'),
-        includeKeyAccount: permissions.includes('tab_mis_accounts'),
+        includeSummary: includes.includeSummary,
+        includeDetailed: includes.includeDetailed,
+        includeKeyAccount: includes.includeKeyAccount,
         mis_email_enabled: true,
         mis_email_preferences: {},
       };
-      if (!recipient.includeSummary && !recipient.includeDetailed && !recipient.includeKeyAccount) {
-        throw new Error('Selected user has no MIS summary, register, or key account tab permissions');
+      if (!includes.includeSummary && !includes.includeDetailed && !includes.includeKeyAccount) {
+        throw new Error('Selected user has no MIS summary, register, or key account access');
+      }
+      if (!hasMisEmailSendAccess(permissions)) {
+        throw new Error('Selected user role is missing the “MIS email reports” capability');
       }
     }
   } else {

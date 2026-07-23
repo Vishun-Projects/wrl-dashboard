@@ -25,15 +25,22 @@ const ALL_PERMISSION_SEED = [
   { name: 'page_warranty_master', description: 'Active machines by customer, group, and warranty period' },
   { name: 'manage_users', description: 'Create and edit portal users' },
   { name: 'manage_roles', description: 'Define roles and page permissions' },
+  { name: 'page_mis_email_routing', description: 'Zone/branch/client-wise automail recipients and routing controls' },
+  { name: 'page_major_repair_alerts', description: 'Branch recipients for major repair repeat SLA email alerts' },
   { name: 'page_performance_insights', description: 'Client performance metrics and diagnostics' },
   { name: 'tab_mis_summary', description: 'Summary Dashboard tab on MIS Reports' },
   { name: 'tab_mis_register', description: 'Call Register tab on MIS Reports' },
   { name: 'tab_mis_accounts', description: 'Key Account MIS tab on MIS Reports' },
-  { name: 'tab_mis_client_import', description: 'Client file import tab on MIS Reports' },
-  { name: 'tab_mis_bd_mis_summary', description: 'CRM+Coke+Cadbury Summary tab (BD MIS Excel parity)' },
+  { name: 'tab_mis_client_import', description: 'Client Import tab on MIS Reports' },
+  { name: 'tab_mis_bd_mis_summary', description: 'Cadbury+Coke+CRM Summary Dashboard tab on MIS Reports' },
+  { name: 'tab_mis_deployment_completion', description: 'Deployment Completion tab on MIS Reports' },
   { name: 'view_all_offices', description: 'National data scope across all branches' },
-  { name: 'mis_client_import_upload', description: 'Upload client MIS import files' },
-  { name: 'mis_client_import_delete', description: 'Delete client MIS import batches' },
+  {
+    name: 'mis_email_send',
+    description: 'Compose, send, and receive scheduled MIS digests (admin still opts each user in)',
+  },
+  { name: 'mis_client_import_upload', description: 'Upload Coke, Cadbury, and other client import files' },
+  { name: 'mis_client_import_delete', description: 'Remove uploaded client import batches and their rows' },
 ];
 
 const databaseUrl = process.env.DATABASE_URL;

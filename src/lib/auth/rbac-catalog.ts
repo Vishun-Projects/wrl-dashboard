@@ -168,11 +168,18 @@ export const RBAC_PAGES: RbacPage[] = [
   },
 ];
 
+export const MIS_EMAIL_SEND_PERMISSION = 'mis_email_send';
+
 export const RBAC_CAPABILITIES: RbacCapability[] = [
   {
     permission: 'view_all_offices',
     label: 'View all offices',
     description: 'National data scope across all branches',
+  },
+  {
+    permission: MIS_EMAIL_SEND_PERMISSION,
+    label: 'MIS email reports',
+    description: 'Compose, send, and receive scheduled MIS digests (admin still opts each user in)',
   },
   {
     permission: 'mis_client_import_upload',
@@ -285,6 +292,34 @@ export function hasAnyMisAccess(permissions: string[]): boolean {
 
 export function canAccessMisTab(permissions: string[], tabId: MisTabId): boolean {
   return canAccessTab(permissions, 'mis_reports', tabId);
+}
+
+/** Role may use Profile email + digests when admin also sets mis_email_enabled. */
+export function hasMisEmailSendAccess(permissions: string[]): boolean {
+  return hasCapability(permissions, MIS_EMAIL_SEND_PERMISSION);
+}
+
+/**
+ * Which digest report types a role can include.
+ * page_mis_reports alone counts as all core MIS tabs (summary / register / accounts).
+ */
+export function resolveMisEmailReportIncludes(permissions: string[]): {
+  includeSummary: boolean;
+  includeDetailed: boolean;
+  includeKeyAccount: boolean;
+} {
+  return {
+    includeSummary: canAccessMisTab(permissions, 'summary'),
+    includeDetailed: canAccessMisTab(permissions, 'register'),
+    includeKeyAccount: canAccessMisTab(permissions, 'accounts'),
+  };
+}
+
+/** Roles UI / Users toggle: need mail capability + at least one MIS report type. */
+export function canAssignMisEmail(permissions: string[]): boolean {
+  if (!hasMisEmailSendAccess(permissions)) return false;
+  const includes = resolveMisEmailReportIncludes(permissions);
+  return includes.includeSummary || includes.includeDetailed || includes.includeKeyAccount;
 }
 
 export function canAccessMisShared(permissions: string[]): boolean {
