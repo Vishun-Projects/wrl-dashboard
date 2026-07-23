@@ -24,6 +24,7 @@
 .DS_Store
 *.pem
 *.docx
+*.zip
 
 # debug
 npm-debug.log*
