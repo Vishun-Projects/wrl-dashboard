@@ -3,7 +3,6 @@ import type { CallRegisterSerialExportRow } from './shape';
 export type SerialPanelSortKey =
   | 'serial'
   | 'qtyDate'
-  | 'importedDate'
   | 'deploymentDate'
   | 'installationDate'
   | 'pendingDeploy'
@@ -37,7 +36,6 @@ function sortableDate(value: string): string {
 
 const DATE_SORT_KEYS = new Set<SerialPanelSortKey>([
   'qtyDate',
-  'importedDate',
   'deploymentDate',
   'installationDate',
 ]);

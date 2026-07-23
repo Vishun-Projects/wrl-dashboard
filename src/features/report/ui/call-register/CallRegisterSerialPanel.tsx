@@ -246,7 +246,6 @@ export function CallRegisterSerialPanel({
                   <tr>
                     <SortTh label="Serial Number" active={sortKey === 'serial'} dir={sortDir} onClick={() => toggleSort('serial')} />
                     <SortTh label="Billing Date" active={sortKey === 'qtyDate'} dir={sortDir} onClick={() => toggleSort('qtyDate')} />
-                    <SortTh label="Imported Date" active={sortKey === 'importedDate'} dir={sortDir} onClick={() => toggleSort('importedDate')} />
                     <SortTh label="Deployment Date" active={sortKey === 'deploymentDate'} dir={sortDir} onClick={() => toggleSort('deploymentDate')} />
                     <SortTh label="Installation Date" active={sortKey === 'installationDate'} dir={sortDir} onClick={() => toggleSort('installationDate')} />
                     <SortTh label="Deploy" active={sortKey === 'pendingDeploy'} dir={sortDir} onClick={() => toggleSort('pendingDeploy')} className="text-center" />
@@ -255,10 +254,9 @@ export function CallRegisterSerialPanel({
                 </AdminThead>
                 <tbody>
                   {pageRows.map((row) => (
-                    <AdminTr key={`${row.serial}-${row.importedDate}-${row.qtyDate}`} className="hover:bg-bg-soft/80">
+                    <AdminTr key={`${row.serial}-${row.qtyDate}-${row.deploymentDate}`} className="hover:bg-bg-soft/80">
                       <AdminTd className="font-mono text-[12px] text-slate-800">{row.serial}</AdminTd>
                       <AdminTd className="tabular-nums text-[12px] text-slate-600">{row.qtyDate || '—'}</AdminTd>
-                      <AdminTd className="tabular-nums text-[12px] text-slate-600">{row.importedDate || '—'}</AdminTd>
                       <AdminTd className="tabular-nums text-[12px] text-slate-600">{row.deploymentDate || '—'}</AdminTd>
                       <AdminTd className="tabular-nums text-[12px] text-slate-600">{row.installationDate || '—'}</AdminTd>
                       <AdminTd className="text-center"><PendingBadge pending={row.pendingDeploy} /></AdminTd>

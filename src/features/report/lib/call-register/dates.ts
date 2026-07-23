@@ -2,8 +2,9 @@
 
 export type CallRegisterDateField = 'imported' | 'billing';
 
+/** Default is billing. `imported` remains for internal/API use only. */
 export function parseCallRegisterDateField(raw: string | null | undefined): CallRegisterDateField {
-  return raw === 'billing' ? 'billing' : 'imported';
+  return raw === 'imported' ? 'imported' : 'billing';
 }
 
 /** Postgres expression for the active date-range field. Pass alias e.g. `b`, or omit for bare columns. */

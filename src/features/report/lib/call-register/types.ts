@@ -4,7 +4,7 @@ export type CallRegisterQueryParams = {
   /** Omit both for All Time. */
   dateFrom?: string;
   dateTo?: string;
-  /** Date-range field: CRM import (`daddedon`) or billing (`warranty_start`). Default imported. */
+  /** Date-range field: billing (`warranty_start`) by default; `imported` for internal use. */
   dateField?: CallRegisterDateField;
   /** Optional single-client scope (CRM chunk fallback). */
   client?: string;

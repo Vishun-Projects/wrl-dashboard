@@ -8,7 +8,7 @@ export {
 /** @deprecated CRM live queries — sync worker uses crm-fetch instead. */
 export function buildCrmTransactionQuery(params: CallRegisterQueryParams): string {
   const { dateFrom, dateTo, client } = params;
-  const dateField = params.dateField === 'billing' ? 'billing' : 'imported';
+  const dateField = params.dateField === 'imported' ? 'imported' : 'billing';
   const sqlStringLiteral = (value: string) => `'${value.replace(/'/g, "''")}'`;
   const clientFilter = client ? `AND Client = ${sqlStringLiteral(client)}` : '';
   const dateCol =

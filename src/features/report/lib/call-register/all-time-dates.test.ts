@@ -10,7 +10,7 @@ describe('call-register All Time date resolution', () => {
   it('treats empty query as All Time', () => {
     const allTime = resolveCallRegisterDates(new URLSearchParams(''));
     expect(isCallRegisterAllTime(allTime)).toBe(true);
-    expect(allTime.dateField).toBe('imported');
+    expect(allTime.dateField).toBe('billing');
   });
 
   it('keeps explicit date range as dated (not All Time)', () => {
@@ -22,13 +22,13 @@ describe('call-register All Time date resolution', () => {
     expect(month.dateTo).toBe('2026-07-20');
   });
 
-  it('parses dateField billing vs imported', () => {
+  it('parses dateField billing vs imported (default billing)', () => {
     expect(parseCallRegisterDateField('billing')).toBe('billing');
     expect(parseCallRegisterDateField('imported')).toBe('imported');
-    expect(parseCallRegisterDateField(null)).toBe('imported');
+    expect(parseCallRegisterDateField(null)).toBe('billing');
     expect(
-      resolveCallRegisterDates(new URLSearchParams('dateField=billing')).dateField
-    ).toBe('billing');
+      resolveCallRegisterDates(new URLSearchParams('dateField=imported')).dateField
+    ).toBe('imported');
   });
 
   it('builds SQL date expressions', () => {

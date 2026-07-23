@@ -2,15 +2,12 @@
 
 import React from 'react';
 import { UiDateInput } from '@/components/ui/UiDateInput';
-import type { CallRegisterDateField } from '@/features/report/lib/call-register/dates';
 
 type CallRegisterToolbarProps = {
   dateFrom: string;
   dateTo: string;
   onDateFromChange: (val: string) => void;
   onDateToChange: (val: string) => void;
-  dateField: CallRegisterDateField;
-  onDateFieldChange: (val: CallRegisterDateField) => void;
   onApplyFilter: () => void;
   onAllTime: () => void;
   onRefresh: () => void;
@@ -28,8 +25,6 @@ export function CallRegisterToolbar({
   dateTo,
   onDateFromChange,
   onDateToChange,
-  dateField,
-  onDateFieldChange,
   onApplyFilter,
   onAllTime,
   onRefresh,
@@ -48,18 +43,8 @@ export function CallRegisterToolbar({
     <div className="relative z-20 shrink-0 border-b border-slate-200 bg-bg-canvas px-4 py-3 flex flex-wrap items-center gap-4">
       <div className="flex shrink-0 items-center gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-          Date Range
+          Billing date
         </span>
-        <select
-          value={dateField}
-          onChange={(e) => onDateFieldChange(e.target.value as CallRegisterDateField)}
-          disabled={busy}
-          aria-label="Filter date field"
-          className="h-8 rounded-md border border-slate-200 bg-bg-canvas px-2 text-[12px] text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none disabled:opacity-50"
-        >
-          <option value="imported">Imported Date</option>
-          <option value="billing">Billing Date</option>
-        </select>
         <UiDateInput
           value={dateFrom}
           onChange={onDateFromChange}

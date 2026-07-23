@@ -28,10 +28,9 @@ export function CallRegisterClient() {
   const defaultDates = getDefaultDates();
   const [draftFrom, setDraftFrom] = useState(defaultDates.from);
   const [draftTo, setDraftTo] = useState(defaultDates.to);
-  const [draftDateField, setDraftDateField] = useState<CallRegisterDateField>('imported');
   const [appliedFrom, setAppliedFrom] = useState(defaultDates.from);
   const [appliedTo, setAppliedTo] = useState(defaultDates.to);
-  const [appliedDateField, setAppliedDateField] = useState<CallRegisterDateField>('imported');
+  const dateField: CallRegisterDateField = 'billing';
   const [exportClient, setExportClient] = useState<string>(CALL_REGISTER_CLIENTS[0]);
   const [detailClient, setDetailClient] = useState<string | null>(null);
 
@@ -42,10 +41,7 @@ export function CallRegisterClient() {
   const { alert, setError, clear: clearAlert } = usePageAlert();
 
   const abortRef = useRef<AbortController | null>(null);
-  const filterDirty =
-    draftFrom !== appliedFrom ||
-    draftTo !== appliedTo ||
-    draftDateField !== appliedDateField;
+  const filterDirty = draftFrom !== appliedFrom || draftTo !== appliedTo;
 
   const fetchData = useCallback(
     async (dateFrom: string, dateTo: string, dateField: CallRegisterDateField) => {
@@ -91,11 +87,11 @@ export function CallRegisterClient() {
 
   // Initial load + when applied dates change (Apply / All Time)
   useEffect(() => {
-    fetchData(appliedFrom, appliedTo, appliedDateField);
+    fetchData(appliedFrom, appliedTo, dateField);
     return () => {
       if (abortRef.current) abortRef.current.abort();
     };
-  }, [appliedFrom, appliedTo, appliedDateField, fetchData]);
+  }, [appliedFrom, appliedTo, dateField, fetchData]);
 
   useEffect(() => {
     if (rows.length === 0) return;
@@ -106,20 +102,18 @@ export function CallRegisterClient() {
   const handleApplyFilter = useCallback(() => {
     setAppliedFrom(draftFrom);
     setAppliedTo(draftTo);
-    setAppliedDateField(draftDateField);
-  }, [draftFrom, draftTo, draftDateField]);
+  }, [draftFrom, draftTo]);
 
   const handleAllTime = useCallback(() => {
     setDraftFrom('');
     setDraftTo('');
     setAppliedFrom('');
     setAppliedTo('');
-    setAppliedDateField(draftDateField);
-  }, [draftDateField]);
+  }, []);
 
   const handleRefresh = useCallback(() => {
-    fetchData(appliedFrom, appliedTo, appliedDateField);
-  }, [fetchData, appliedFrom, appliedTo, appliedDateField]);
+    fetchData(appliedFrom, appliedTo, dateField);
+  }, [fetchData, appliedFrom, appliedTo, dateField]);
 
   const handleExport = useCallback(async () => {
     setExporting(true);
@@ -129,7 +123,7 @@ export function CallRegisterClient() {
       params.set('client', exportClient);
       if (appliedFrom) params.set('dateFrom', appliedFrom);
       if (appliedTo) params.set('dateTo', appliedTo);
-      params.set('dateField', appliedDateField);
+      params.set('dateField', dateField);
 
       const res = await fetchWithRetry(`/api/report/call-register/export?${params.toString()}`, {
         credentials: 'include',
@@ -151,7 +145,7 @@ export function CallRegisterClient() {
     } finally {
       setExporting(false);
     }
-  }, [exportClient, appliedFrom, appliedTo, appliedDateField, clearAlert, setError]);
+  }, [exportClient, appliedFrom, appliedTo, dateField, clearAlert, setError]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-slate-50">
@@ -201,8 +195,6 @@ export function CallRegisterClient() {
         dateTo={draftTo}
         onDateFromChange={setDraftFrom}
         onDateToChange={setDraftTo}
-        dateField={draftDateField}
-        onDateFieldChange={setDraftDateField}
         onApplyFilter={handleApplyFilter}
         onAllTime={handleAllTime}
         onRefresh={handleRefresh}
@@ -246,7 +238,7 @@ export function CallRegisterClient() {
         client={detailClient}
         dateFrom={appliedFrom}
         dateTo={appliedTo}
-        dateField={appliedDateField}
+        dateField={dateField}
         onClose={() => setDetailClient(null)}
       />
     </div>
