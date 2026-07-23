@@ -1,13 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionUserId, getUserInfoById } from '@/lib/auth/session';
-
-type CachedMe = {
-  expiresAt: number;
-  payload: Awaited<ReturnType<typeof getUserInfoById>>;
-};
-
-const meCache = new Map<string, CachedMe>();
-const ME_CACHE_TTL_MS = 15_000;
+import { getMeCache, setMeCache, ME_CACHE_TTL_MS } from '@/lib/auth/me-cache';
 
 export async function GET() {
   const startedAt = performance.now();
@@ -17,11 +10,14 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const cached = meCache.get(userId);
+    const cached = getMeCache(userId);
     const now = Date.now();
-    if (cached && cached.expiresAt > now && cached.payload) {
+    if (cached?.payload) {
       const elapsed = Math.max(0, Math.round(performance.now() - startedAt));
-      const cacheAgeSec = Math.max(0, Math.floor((now - (cached.expiresAt - ME_CACHE_TTL_MS)) / 1000));
+      const cacheAgeSec = Math.max(
+        0,
+        Math.floor((now - (cached.expiresAt - ME_CACHE_TTL_MS)) / 1000)
+      );
       return NextResponse.json(cached.payload, {
         headers: {
           'Cache-Control': 'private, max-age=15',
@@ -37,10 +33,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    meCache.set(userId, {
-      payload: userInfo,
-      expiresAt: now + ME_CACHE_TTL_MS,
-    });
+    setMeCache(userId, userInfo);
 
     const elapsed = Math.max(0, Math.round(performance.now() - startedAt));
     return NextResponse.json(userInfo, {
@@ -57,4 +50,3 @@ export async function GET() {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
- 

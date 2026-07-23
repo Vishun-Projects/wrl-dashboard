@@ -12,20 +12,24 @@ export function normalizeRoleIds(raw: unknown, fallbackRoleId?: unknown): string
   return single ? [single] : [];
 }
 
+/** Replace junction rows in one round-trip (delete + insert). */
 export async function replaceUserRoles(userId: string, roleIds: string[]): Promise<void> {
-  const unique = [...new Set(roleIds.map((id) => id.trim()).filter(Boolean))];
+  const unique = [...new Set(roleIds.map((id) => String(id).trim()).filter(Boolean))];
   if (unique.length === 0) {
     throw new Error('At least one role is required');
   }
 
-  await prisma.$queryRawUnsafe(`DELETE FROM public.app_user_roles WHERE user_id = $1`, userId);
-  for (const roleId of unique) {
-    await prisma.$queryRawUnsafe(
-      `INSERT INTO public.app_user_roles (user_id, role_id) VALUES ($1, $2)`,
-      userId,
-      roleId
-    );
-  }
+  await prisma.$executeRawUnsafe(
+    `DELETE FROM public.app_user_roles WHERE user_id = $1::uuid`,
+    userId
+  );
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO public.app_user_roles (user_id, role_id)
+     SELECT $1::uuid, x.role_id
+     FROM unnest($2::uuid[]) AS x(role_id)`,
+    userId,
+    unique
+  );
 }
 
 export async function loadPermissionsForRoleIds(roleIds: string[]): Promise<string[]> {

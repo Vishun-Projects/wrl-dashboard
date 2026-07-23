@@ -20,6 +20,8 @@ import {
   normalizeRoleIds,
   replaceUserRoles,
 } from '@/lib/auth/user-roles';
+import { clearAdminBootstrapCache } from '@/lib/auth/admin-bootstrap-cache';
+import { clearMeCache } from '@/lib/auth/me-cache';
 
 const USER_LIST_SQL = `
   SELECT u.id, u.name, u.email, u.role, u.role_id, u.office_ids, u.visible_statuses,
@@ -179,7 +181,13 @@ export async function POST(request: Request) {
           const existingId = await findAuthUserIdByEmail(profileParams.email);
           if (existingId && !(await profileExists(existingId))) {
             await insertAppUser({ id: existingId, ...profileParams });
-            return NextResponse.json({ success: true, id: existingId, recovered: true });
+            clearAdminBootstrapCache();
+            return NextResponse.json({
+              success: true,
+              id: existingId,
+              recovered: true,
+              role_ids: roleIds,
+            });
           }
         }
         return NextResponse.json({ error: dbResult.message }, { status: dbResult.status });
@@ -188,7 +196,8 @@ export async function POST(request: Request) {
       authUserId = dbResult.id;
       createdAuthThisRequest = true;
       await insertAppUser({ id: dbResult.id, ...profileParams });
-      return NextResponse.json({ success: true, id: dbResult.id });
+      clearAdminBootstrapCache();
+      return NextResponse.json({ success: true, id: dbResult.id, role_ids: roleIds });
     }
 
     const { data: authData, error: createError } = await supabaseAdmin.auth.admin.createUser({
@@ -204,7 +213,13 @@ export async function POST(request: Request) {
         if (existing && !(await profileExists(existing.id))) {
           authUserId = existing.id;
           await insertAppUser({ id: existing.id, ...profileParams });
-          return NextResponse.json({ success: true, id: existing.id, recovered: true });
+          clearAdminBootstrapCache();
+          return NextResponse.json({
+            success: true,
+            id: existing.id,
+            recovered: true,
+            role_ids: roleIds,
+          });
         }
         return NextResponse.json(
           { error: 'A user with this email address is already registered.' },
@@ -218,8 +233,9 @@ export async function POST(request: Request) {
     createdAuthThisRequest = true;
 
     await insertAppUser({ id: authData.user.id, ...profileParams });
+    clearAdminBootstrapCache();
 
-    return NextResponse.json({ success: true, id: authData.user.id });
+    return NextResponse.json({ success: true, id: authData.user.id, role_ids: roleIds });
   } catch (err: any) {
     if (authUserId && createdAuthThisRequest && !(await profileExists(authUserId))) {
       if (useDbAuthFallback) {
@@ -310,8 +326,10 @@ export async function PUT(request: Request) {
     }
 
     await replaceUserRoles(id, roleIds);
+    clearAdminBootstrapCache();
+    clearMeCache(String(id));
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, role_ids: roleIds, role_id: primary.primaryRoleId });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
@@ -339,6 +357,8 @@ export async function DELETE(request: Request) {
     if (userId === adminUser.id) throw new Error('Cannot delete your own account');
 
     await prisma.$queryRawUnsafe('DELETE FROM public.app_users WHERE id = $1', userId);
+    clearAdminBootstrapCache();
+    clearMeCache(userId);
 
     if (isDevAuthBypass()) {
       return NextResponse.json(

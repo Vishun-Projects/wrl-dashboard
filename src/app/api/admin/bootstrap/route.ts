@@ -4,6 +4,10 @@ import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { USER_ROLE_IDS_SUBSELECT } from '@/lib/auth/user-roles-sql';
+import {
+  getAdminBootstrapCache,
+  setAdminBootstrapCache,
+} from '@/lib/auth/admin-bootstrap-cache';
 
 const USER_LIST_SQL = `
   SELECT u.id, u.name, u.email, u.role, u.role_id, u.office_ids, u.visible_statuses,
@@ -13,11 +17,6 @@ const USER_LIST_SQL = `
   ORDER BY u.created_at DESC
   LIMIT $1 OFFSET $2
 `;
-const BOOTSTRAP_CACHE_TTL_MS = 15_000;
-const bootstrapCache = new Map<
-  string,
-  { expiresAt: number; payload: { users: unknown; roles: unknown; me: unknown; pagination: unknown } }
->();
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -39,13 +38,16 @@ export async function GET(request: Request) {
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(searchParams.get('limit') || '100', 10) || 100));
     const offset = (page - 1) * limit;
+    const fresh = searchParams.get('fresh') === '1';
     const cacheKey = `${user.id}:${page}:${limit}`;
-    const now = Date.now();
-    const cached = bootstrapCache.get(cacheKey);
-    if (cached && cached.expiresAt > now) {
-      return NextResponse.json(cached.payload, {
-        headers: { 'Cache-Control': 'private, max-age=15', 'X-Cache': 'HIT' },
-      });
+
+    if (!fresh) {
+      const cached = getAdminBootstrapCache(cacheKey);
+      if (cached) {
+        return NextResponse.json(cached, {
+          headers: { 'Cache-Control': 'private, max-age=15', 'X-Cache': 'HIT' },
+        });
+      }
     }
 
     const [users, roles] = await Promise.all([
@@ -73,10 +75,10 @@ export async function GET(request: Request) {
         : null,
       pagination: { page, limit, total },
     };
-    bootstrapCache.set(cacheKey, { payload, expiresAt: now + BOOTSTRAP_CACHE_TTL_MS });
+    setAdminBootstrapCache(cacheKey, payload);
 
     return NextResponse.json(payload, {
-      headers: { 'Cache-Control': 'private, max-age=15', 'X-Cache': 'MISS' },
+      headers: { 'Cache-Control': 'private, max-age=15', 'X-Cache': fresh ? 'BYPASS' : 'MISS' },
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Bootstrap failed';

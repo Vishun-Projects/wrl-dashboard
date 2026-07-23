@@ -160,7 +160,7 @@ export default function AdminUsersPage() {
     const run = (async () => {
     setLoading(true);
     try {
-      const res = await axios.get('/api/admin/bootstrap', apiOpts);
+      const res = await axios.get('/api/admin/bootstrap?fresh=1', apiOpts);
       setUsers(res.data.users);
       setRoles(res.data.roles);
     } catch (err) {
@@ -195,10 +195,30 @@ export default function AdminUsersPage() {
       return;
     }
     try {
+      const role_ids = [...new Set((formData.role_ids ?? []).map((id) => String(id)))];
+      const payload = {
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        role: formData.role,
+        role_id: role_ids[0] ?? formData.role_id,
+        role_ids,
+        office_ids: formData.office_ids,
+        visible_statuses: formData.visible_statuses,
+        mis_email_enabled: formData.mis_email_enabled,
+      };
       if (editingUser) {
-        await axios.put('/api/admin/users', { ...formData, id: editingUser.id }, apiOpts);
+        const res = await axios.put(
+          '/api/admin/users',
+          { ...payload, id: editingUser.id },
+          apiOpts
+        );
+        if (Array.isArray(res.data?.role_ids) && res.data.role_ids.length < 1) {
+          feedback.actionFailed('Roles did not save — try again');
+          return;
+        }
       } else {
-        const res = await axios.post('/api/admin/users', formData, apiOpts);
+        const res = await axios.post('/api/admin/users', payload, apiOpts);
         if (res.data?.recovered) {
           feedback.actionSuccess('User profile completed (login already existed)');
         } else {
@@ -301,9 +321,21 @@ export default function AdminUsersPage() {
 
   const unionRolePermissions = (roleIds: string[]): string[] => {
     const set = new Set<string>();
-    for (const id of roleIds) {
-      const roleObj = roles.find((r) => r.id === id);
-      const perms = Array.isArray(roleObj?.permissions) ? roleObj.permissions : [];
+    for (const id of roleIds.map(String)) {
+      const roleObj = roles.find((r) => String(r.id) === id);
+      const raw = roleObj?.permissions;
+      const perms = Array.isArray(raw)
+        ? raw
+        : typeof raw === 'string'
+          ? (() => {
+              try {
+                const parsed = JSON.parse(raw);
+                return Array.isArray(parsed) ? parsed : [];
+              } catch {
+                return [];
+              }
+            })()
+          : [];
       for (const p of perms) set.add(String(p));
     }
     return [...set];
@@ -314,7 +346,7 @@ export default function AdminUsersPage() {
     const rolePerms = unionRolePermissions(roleIds);
     const isNational = seesAllOfficesForUser(rolePerms, u.role ?? '', u.office_ids ?? []);
     const roleNames = roleIds
-      .map((id) => roles.find((r) => r.id === id)?.name)
+      .map((id) => roles.find((r) => String(r.id) === String(id))?.name)
       .filter(Boolean) as string[];
     const roleName =
       roleNames.length > 0
@@ -330,16 +362,17 @@ export default function AdminUsersPage() {
   const formRoleCanMisEmail = canAssignMisEmail(formRolePerms);
 
   const toggleFormRole = (role: { id: string; name: string; permissions?: string[] }) => {
+    const roleId = String(role.id);
     setFormData((prev) => {
-      const selected = new Set(prev.role_ids);
-      if (selected.has(role.id)) {
+      const selected = new Set((prev.role_ids ?? []).map(String));
+      if (selected.has(roleId)) {
         if (selected.size <= 1) return prev;
-        selected.delete(role.id);
+        selected.delete(roleId);
       } else {
-        selected.add(role.id);
+        selected.add(roleId);
       }
       const role_ids = [...selected];
-      const primary = roles.find((r) => r.id === role_ids[0]);
+      const primary = roles.find((r) => String(r.id) === role_ids[0]);
       const perms = unionRolePermissions(role_ids);
       const canEmail = canAssignMisEmail(perms);
       return {
@@ -784,7 +817,7 @@ export default function AdminUsersPage() {
                           }`}
                         >
                           {roles.map((role) => {
-                            const selected = formData.role_ids.includes(role.id);
+                            const selected = formData.role_ids.map(String).includes(String(role.id));
                             return (
                               <button
                                 key={role.id}
