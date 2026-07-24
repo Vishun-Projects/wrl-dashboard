@@ -191,15 +191,20 @@ export function assertRegisterCsvExportComplete(dataRows: number, exportTotal: n
   }
 }
 
-/** Prefer VPS host (same as MIS upload) so large CSV streams are not cut by Vercel maxDuration. */
+/**
+ * Prefer VPS host when explicitly enabled and MIS upload URL is set.
+ * Default stays same-origin — VPS needs Caddy `register-export` + mis-upload restart,
+ * otherwise api.wrl-fsm.cloud returns 401 from the wrong upstream.
+ */
 export function resolveRegisterCsvExportUrl(params: URLSearchParams): {
   url: string;
   external: boolean;
 } {
   const repair = params.get('repair') || '';
   const hasRepair = Boolean(repair && repair !== 'All');
+  const vpsEnabled = process.env.NEXT_PUBLIC_REGISTER_CSV_VPS === '1';
   const external = process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL?.trim();
-  if (external && !hasRepair) {
+  if (vpsEnabled && external && !hasRepair) {
     const base = external.replace(/\/api\/mis-client-import\/upload\/?$/i, '');
     return {
       url: `${base}/api/report/register-export?${params.toString()}`,
@@ -209,41 +214,20 @@ export function resolveRegisterCsvExportUrl(params: URLSearchParams): {
   return { url: `/api/report?${params.toString()}`, external: false };
 }
 
-/** Stream register CSV from server into a prepared export blob (single server path). */
-export async function prepareRegisterCsvFromServer(opts: {
-  query: RegisterExportQuery;
-  knownTotal?: number;
-  signal?: AbortSignal;
-  accessToken?: string | null;
-  onProgress?: (progress: RegisterExportProgress) => void;
-}): Promise<PreparedFileExport> {
-  const params = buildRegisterExportParams(opts.query, 1, REGISTER_EXPORT_BATCH_CRM, false);
-  params.set('export', 'csv');
+function sameOriginRegisterCsvUrl(params: URLSearchParams): string {
+  return `/api/report?${params.toString()}`;
+}
 
-  const fallbackTotal = Math.max(0, opts.knownTotal ?? 0);
-  opts.onProgress?.({ fetched: 0, total: fallbackTotal });
+/** Statuses that mean the VPS export host is unreachable / not wired — fall back to Vercel. */
+function shouldFallbackRegisterCsvToSameOrigin(status: number): boolean {
+  return status === 401 || status === 403 || status === 404 || status === 502 || status === 503;
+}
 
-  const { url, external } = resolveRegisterCsvExportUrl(params);
-  if (external && !opts.accessToken?.trim()) {
-    throw new Error('Session expired — sign in again to export');
-  }
-
-  const headers: Record<string, string> = {};
-  if (external && opts.accessToken) {
-    headers.Authorization = `Bearer ${opts.accessToken}`;
-  }
-
-  const res = await fetchWithRetry(url, {
-    credentials: external ? 'omit' : 'include',
-    signal: opts.signal,
-    headers,
-  });
-
-  if (!res.ok) {
-    const errBody = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(errBody.error || `Export failed (${res.status}). Retry in a moment.`);
-  }
-
+async function readRegisterCsvExportBody(
+  res: Response,
+  exportTotal: number,
+  onProgress?: (progress: RegisterExportProgress) => void
+): Promise<PreparedFileExport> {
   const contentType = String(res.headers.get('content-type') ?? '');
   if (contentType.includes('application/json')) {
     const errBody = (await res.json().catch(() => ({}))) as { error?: string };
@@ -251,7 +235,7 @@ export async function prepareRegisterCsvFromServer(opts: {
   }
 
   const headerTotal = Number(res.headers.get('X-Register-Export-Total') ?? 0);
-  const exportTotal = headerTotal > 0 ? headerTotal : fallbackTotal;
+  const total = headerTotal > 0 ? headerTotal : exportTotal;
 
   const reader = res.body?.getReader();
   if (!reader) {
@@ -269,23 +253,75 @@ export async function prepareRegisterCsvFromServer(opts: {
     chunks.push(value);
     newlines += countNewlinesInBytes(value);
 
-    if (exportTotal > 0) {
-      const fetched = Math.min(exportTotal, csvDataRowsFromNewlineCount(newlines));
-      opts.onProgress?.({ fetched, total: exportTotal });
+    if (total > 0) {
+      const fetched = Math.min(total, csvDataRowsFromNewlineCount(newlines));
+      onProgress?.({ fetched, total });
     }
   }
 
   const dataRows = csvDataRowsFromNewlineCount(newlines);
-  assertRegisterCsvExportComplete(dataRows, exportTotal);
+  assertRegisterCsvExportComplete(dataRows, total);
 
-  opts.onProgress?.({
-    fetched: exportTotal > 0 ? exportTotal : dataRows,
-    total: exportTotal > 0 ? exportTotal : dataRows,
+  onProgress?.({
+    fetched: total > 0 ? total : dataRows,
+    total: total > 0 ? total : dataRows,
   });
 
   const blob = new Blob(chunks as BlobPart[], { type: 'text/csv;charset=utf-8;' });
   const baseName = `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
   return blobToPreparedExport(blob, baseName);
+}
+
+/** Stream register CSV from server into a prepared export blob (single server path). */
+export async function prepareRegisterCsvFromServer(opts: {
+  query: RegisterExportQuery;
+  knownTotal?: number;
+  signal?: AbortSignal;
+  accessToken?: string | null;
+  onProgress?: (progress: RegisterExportProgress) => void;
+}): Promise<PreparedFileExport> {
+  const params = buildRegisterExportParams(opts.query, 1, REGISTER_EXPORT_BATCH_CRM, false);
+  params.set('export', 'csv');
+
+  const fallbackTotal = Math.max(0, opts.knownTotal ?? 0);
+  opts.onProgress?.({ fetched: 0, total: fallbackTotal });
+
+  const resolved = resolveRegisterCsvExportUrl(params);
+  // No bearer → stay on same-origin cookies (VPS path is not ready without a token).
+  const useExternal = resolved.external && Boolean(opts.accessToken?.trim());
+
+  const tryFetch = async (url: string, external: boolean): Promise<Response> => {
+    const headers: Record<string, string> = {};
+    if (external && opts.accessToken) {
+      headers.Authorization = `Bearer ${opts.accessToken}`;
+    }
+    return fetchWithRetry(url, {
+      credentials: external ? 'omit' : 'include',
+      signal: opts.signal,
+      headers,
+    });
+  };
+
+  let res = await tryFetch(
+    useExternal ? resolved.url : sameOriginRegisterCsvUrl(params),
+    useExternal
+  );
+
+  if (
+    useExternal &&
+    !res.ok &&
+    shouldFallbackRegisterCsvToSameOrigin(res.status)
+  ) {
+    // VPS route missing / JWT env not loaded / Caddy still proxying to the wrong app.
+    res = await tryFetch(sameOriginRegisterCsvUrl(params), false);
+  }
+
+  if (!res.ok) {
+    const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(errBody.error || `Export failed (${res.status}). Retry in a moment.`);
+  }
+
+  return readRegisterCsvExportBody(res, fallbackTotal, opts.onProgress);
 }
 
 /** One server request: streams CSV; reports row progress while bytes arrive. */

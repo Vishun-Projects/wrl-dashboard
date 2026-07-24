@@ -86,16 +86,54 @@ describe('register export client helpers', () => {
     expect(() => assertRegisterCsvExportComplete(37_091, 293_443)).toThrow(/Export incomplete/);
   });
 
-  it('routes large register CSV to the VPS host when MIS upload URL is set', () => {
-    const prev = process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL;
+  it('does not route to VPS unless NEXT_PUBLIC_REGISTER_CSV_VPS=1', () => {
+    const prevUrl = process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL;
+    const prevFlag = process.env.NEXT_PUBLIC_REGISTER_CSV_VPS;
     process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL =
       'https://api.wrl-fsm.cloud/api/mis-client-import/upload';
+    delete process.env.NEXT_PUBLIC_REGISTER_CSV_VPS;
+    try {
+      const params = new URLSearchParams({ export: 'csv', startDate: '2026-01-01' });
+      const { url, external } = resolveRegisterCsvExportUrl(params);
+      expect(external).toBe(false);
+      expect(url.startsWith('/api/report?')).toBe(true);
+    } finally {
+      if (prevUrl === undefined) delete process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL;
+      else process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL = prevUrl;
+      if (prevFlag === undefined) delete process.env.NEXT_PUBLIC_REGISTER_CSV_VPS;
+      else process.env.NEXT_PUBLIC_REGISTER_CSV_VPS = prevFlag;
+    }
+  });
+
+  it('routes large register CSV to the VPS host when flag + MIS upload URL are set', () => {
+    const prevUrl = process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL;
+    const prevFlag = process.env.NEXT_PUBLIC_REGISTER_CSV_VPS;
+    process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL =
+      'https://api.wrl-fsm.cloud/api/mis-client-import/upload';
+    process.env.NEXT_PUBLIC_REGISTER_CSV_VPS = '1';
     try {
       const params = new URLSearchParams({ export: 'csv', startDate: '2026-01-01' });
       const { url, external } = resolveRegisterCsvExportUrl(params);
       expect(external).toBe(true);
       expect(url).toContain('https://api.wrl-fsm.cloud/api/report/register-export?');
       expect(url).toContain('export=csv');
+    } finally {
+      if (prevUrl === undefined) delete process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL;
+      else process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL = prevUrl;
+      if (prevFlag === undefined) delete process.env.NEXT_PUBLIC_REGISTER_CSV_VPS;
+      else process.env.NEXT_PUBLIC_REGISTER_CSV_VPS = prevFlag;
+    }
+  });
+
+  it('keeps repair-filter exports on same-origin', () => {
+    const prev = process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL;
+    process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL =
+      'https://api.wrl-fsm.cloud/api/mis-client-import/upload';
+    try {
+      const params = new URLSearchParams({ export: 'csv', repair: '1,2' });
+      const { url, external } = resolveRegisterCsvExportUrl(params);
+      expect(external).toBe(false);
+      expect(url.startsWith('/api/report?')).toBe(true);
     } finally {
       if (prev === undefined) delete process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL;
       else process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL = prev;
