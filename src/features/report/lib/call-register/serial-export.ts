@@ -4,7 +4,6 @@ import { prisma } from '@/lib/db/prisma';
 import type { CallRegisterQueryParams } from './types';
 import { callRegisterDateSqlExpr, isCallRegisterAllTime, parseCallRegisterDateField } from './dates';
 import {
-  formatSerialExportDate,
   shapeSerialExportRow,
   type CallRegisterSerialExportRow,
 } from './shape';
@@ -12,85 +11,88 @@ import {
 export type { CallRegisterSerialExportRow };
 export { shapeSerialExportRow } from './shape';
 
-type LocalTxnRow = {
+type ExportJoinRow = {
   client: string;
   product_serial_no: string;
   daddedon: Date | string | null;
   daddedon_raw: string | null;
   warranty_start: Date | string | null;
   warranty_start_raw: string | null;
+  installation_done: Date | string | null;
+  deployment_done: Date | string | null;
 };
 
-type HotCallRow = {
-  serial: string | null;
-  account: string | null;
-  call_type: string | null;
-  done_at: Date | string | null;
-};
-
-async function fetchLocalSerialRows(
+/**
+ * One round-trip: billed serials + install/deploy dates only for those serials.
+ * (Previously pulled every solved install/deploy call for the account — huge for Nestle/etc.)
+ */
+async function fetchExportJoinRows(
   clients: string[],
   params: CallRegisterQueryParams
-): Promise<LocalTxnRow[]> {
+): Promise<ExportJoinRow[]> {
   const { dateFrom, dateTo } = params;
   const dateField = parseCallRegisterDateField(params.dateField);
-  const dateExpr = callRegisterDateSqlExpr(dateField);
-  if (dateFrom && dateTo) {
-    return prisma.$queryRawUnsafeBulk<LocalTxnRow[]>(
-      `SELECT client, product_serial_no, daddedon, daddedon_raw,
-              warranty_start, warranty_start_raw
-       FROM crm_transaction_entry
-       WHERE client = ANY($1::text[])
-         AND ${dateExpr} >= $2::date
-         AND ${dateExpr} < ($3::date + interval '1 day')`,
-      clients,
-      dateFrom,
-      dateTo
-    );
-  }
-  return prisma.$queryRawUnsafeBulk<LocalTxnRow[]>(
-    `SELECT client, product_serial_no, daddedon, daddedon_raw,
-            warranty_start, warranty_start_raw
-     FROM crm_transaction_entry
-     WHERE client = ANY($1::text[])`,
-    clients
-  );
-}
+  const dateExpr = callRegisterDateSqlExpr(dateField, 't');
 
-async function fetchHotDoneDates(
-  clients: string[]
-): Promise<Map<string, { installationDate?: string; deploymentDate?: string }>> {
-  const calls = await prisma.$queryRawUnsafeBulk<HotCallRow[]>(
-    `SELECT serial, account, call_type, COALESCE(solved_at, logged_at) AS done_at
-     FROM calls_latest_hot
-     WHERE account = ANY($1::text[])
-       AND serial IS NOT NULL AND serial <> ''
-       AND status_bucket = 'solved'
-       AND call_type IN (
-         'INSTALLATION CALL', 'INSTALLATION', 'Installation', 'Installation Call',
-         'DEPLOYMENT', 'Deployment', 'DEPLOYMENT CALL', 'Deployment Call'
-       )`,
-    clients
-  );
+  const dateClause =
+    dateFrom && dateTo
+      ? `AND ${dateExpr} >= $2::date
+         AND ${dateExpr} < ($3::date + interval '1 day')`
+      : '';
+  const args: unknown[] =
+    dateFrom && dateTo ? [clients, dateFrom, dateTo] : [clients];
 
-  const map = new Map<string, { installationDate?: string; deploymentDate?: string }>();
-  for (const call of calls) {
-    const serial = (call.serial || '').trim();
-    const account = (call.account || '').trim();
-    if (!serial || !account) continue;
-    const key = `${account}\0${serial}`;
-    const done = formatSerialExportDate(call.done_at);
-    if (!done) continue;
-    const callType = (call.call_type || '').toUpperCase();
-    const cur = map.get(key) || {};
-    if (callType === 'INSTALLATION' || callType === 'INSTALLATION CALL') {
-      if (!cur.installationDate || done < cur.installationDate) cur.installationDate = done;
-    } else if (callType === 'DEPLOYMENT' || callType === 'DEPLOYMENT CALL') {
-      if (!cur.deploymentDate || done < cur.deploymentDate) cur.deploymentDate = done;
-    }
-    map.set(key, cur);
-  }
-  return map;
+  return prisma.$queryRawUnsafeBulk<ExportJoinRow[]>(
+    `WITH billed AS (
+       SELECT
+         btrim(t.client) AS client,
+         btrim(t.product_serial_no) AS product_serial_no,
+         t.daddedon,
+         t.daddedon_raw,
+         t.warranty_start,
+         t.warranty_start_raw
+       FROM crm_transaction_entry t
+       WHERE t.client = ANY($1::text[])
+         AND NULLIF(btrim(t.product_serial_no), '') IS NOT NULL
+         ${dateClause}
+     ),
+     billed_keys AS (
+       SELECT DISTINCT client, product_serial_no AS serial FROM billed
+     ),
+     hot AS (
+       SELECT
+         btrim(h.account) AS account,
+         btrim(h.serial) AS serial,
+         MIN(COALESCE(h.solved_at, h.logged_at)) FILTER (
+           WHERE upper(btrim(h.call_type)) IN ('INSTALLATION', 'INSTALLATION CALL')
+         ) AS installation_done,
+         MIN(COALESCE(h.solved_at, h.logged_at)) FILTER (
+           WHERE upper(btrim(h.call_type)) IN ('DEPLOYMENT', 'DEPLOYMENT CALL')
+         ) AS deployment_done
+       FROM calls_latest_hot h
+       INNER JOIN billed_keys k
+         ON k.client = btrim(h.account)
+        AND k.serial = btrim(h.serial)
+       WHERE h.status_bucket = 'solved'
+         AND NULLIF(btrim(h.serial), '') IS NOT NULL
+       GROUP BY 1, 2
+     )
+     SELECT
+       b.client,
+       b.product_serial_no,
+       b.daddedon,
+       b.daddedon_raw,
+       b.warranty_start,
+       b.warranty_start_raw,
+       h.installation_done,
+       h.deployment_done
+     FROM billed b
+     LEFT JOIN hot h
+       ON h.account = b.client
+      AND h.serial = b.product_serial_no
+     ORDER BY b.client, b.product_serial_no`,
+    ...args
+  );
 }
 
 export async function fetchCallRegisterSerialExportRows(
@@ -102,17 +104,12 @@ export async function fetchCallRegisterSerialExportRows(
     .filter(Boolean);
   if (!list.length) return [];
 
-  const [crmRows, hotMap] = await Promise.all([
-    fetchLocalSerialRows(list, params),
-    fetchHotDoneDates(list),
-  ]);
-
+  const joined = await fetchExportJoinRows(list, params);
   const out: CallRegisterSerialExportRow[] = [];
-  for (const row of crmRows) {
+  for (const row of joined) {
     const serial = (row.product_serial_no || '').trim();
     const client = (row.client || '').trim();
     if (!serial || !client) continue;
-    const hot = hotMap.get(`${client}\0${serial}`);
     out.push(
       shapeSerialExportRow({
         client,
@@ -123,23 +120,11 @@ export async function fetchCallRegisterSerialExportRows(
           row.daddedon ??
           row.daddedon_raw,
         importedDate: row.daddedon ?? row.daddedon_raw,
-        installationDate: hot?.installationDate,
-        deploymentDate: hot?.deploymentDate,
+        installationDate: row.installation_done,
+        deploymentDate: row.deployment_done,
       })
     );
   }
-
-  out.sort((a, b) => {
-    const clientCmp = a.client.localeCompare(b.client);
-    if (clientCmp !== 0) return clientCmp;
-    const serialCmp = a.serial.localeCompare(b.serial);
-    if (serialCmp !== 0) return serialCmp;
-    const toIso = (s: string) => {
-      const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-      return m ? `${m[3]}-${m[2]}-${m[1]}` : s;
-    };
-    return toIso(a.qtyDate).localeCompare(toIso(b.qtyDate));
-  });
   return out;
 }
 

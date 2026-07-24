@@ -1,9 +1,4 @@
 import type { CallRegisterQueryParams } from './types';
-export {
-  CALL_REGISTER_CLIENTS,
-  isCallRegisterClient,
-  type CallRegisterClient,
-} from './clients';
 
 /** @deprecated CRM live queries — sync worker uses crm-fetch instead. */
 export function buildCrmTransactionQuery(params: CallRegisterQueryParams): string {

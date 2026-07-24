@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CALL_REGISTER_CLIENTS,
   CALL_REGISTER_FULL_CLIENTS_EMAIL,
   CALL_REGISTER_FULL_CLIENTS_EMAILS,
   canSeeAllCallRegisterClients,
@@ -35,12 +34,9 @@ describe('call-register client visibility', () => {
     expect(ok).toEqual({ ok: true, clients: ['UB', 'Nestle'] });
   });
 
-  it('defaults allowlist to curated constant when none passed', () => {
-    const ok = validateCallRegisterExportClients(
-      [CALL_REGISTER_CLIENTS[0]],
-      'ops@example.com'
-    );
-    expect(ok).toEqual({ ok: true, clients: [CALL_REGISTER_CLIENTS[0]] });
+  it('rejects normal users when no allowlist is passed', () => {
+    const bad = validateCallRegisterExportClients(['UB'], 'ops@example.com');
+    expect(bad.ok).toBe(false);
   });
 
   it('allows any non-empty client for the full-access email', () => {

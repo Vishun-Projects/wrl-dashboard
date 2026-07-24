@@ -22,14 +22,20 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const { dateFrom, dateTo, dateField } = resolveCallRegisterDates(searchParams);
 
-    const { rows, summary, sharedClients } = await fetchCallRegisterRows({
+    const { rows, summary, sharedClients, clientOptions } = await fetchCallRegisterRows({
       dateFrom,
       dateTo,
       dateField,
       allClients,
     });
 
-    return NextResponse.json({ rows, summary, allClients, sharedClients });
+    return NextResponse.json({
+      rows,
+      summary,
+      allClients,
+      sharedClients,
+      clientOptions,
+    });
   } catch (err) {
     console.error('[call-register]', err);
     return NextResponse.json({ error: toUserFacingError(err) }, { status: 500 });

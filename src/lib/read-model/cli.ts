@@ -253,7 +253,7 @@ Commands:
   arcp-nightly      ARCP incremental only (for Task Scheduler / cron)
   transaction-entry-backfill     Initial/resume CRM TransactionEntry → crm_transaction_entry
   transaction-entry-incremental  Re-sync last N months of TransactionEntry (default 2)
-  transaction-entry-verify       Compare CRM vs mirror for Deployment Completion clients; re-fetch mismatches
+  transaction-entry-verify       Compare CRM vs mirror for all TransactionEntry clients; re-fetch mismatches
                     --to YYYY-MM-DD  (default today; lookback = TRANSACTION_ENTRY_VERIFY_DAYS)
   dims              Refresh dimension tables only
   nightly           Calls nightly + ARCP + TransactionEntry when enabled
@@ -270,11 +270,16 @@ Environment:
   SYNC_WORKER_ENABLED    Must be "true" for incremental/nightly/daemon
   SYNC_ARCP_ENABLED      Run ARCP incremental in daemon / API sync
   SYNC_TRANSACTION_ENTRY_ENABLED  TransactionEntry sync in daemon/nightly (default on; set false to disable)
-  TRANSACTION_ENTRY_RECENT_DAYS   Per-client refresh for Deployment Completion accounts (default 14)
+  TRANSACTION_ENTRY_RECENT_DAYS   Recent-window bulk refresh for all CRM clients (default 14)
   TRANSACTION_ENTRY_VERIFY_ENABLED  After incremental: heal CRM vs mirror mismatches (default on)
   TRANSACTION_ENTRY_VERIFY_DAYS   Days to verify/heal after each incremental (default 7)
   TRANSACTION_ENTRY_START_DATE    Backfill start (default 2024-01-01)
   TRANSACTION_ENTRY_OVERLAP_MONTHS  Incremental lookback months (default 2)
+  TRANSACTION_ENTRY_BACKFILL_CHUNK  Backfill window: week (default) | month | year
+  TRANSACTION_ENTRY_PERIOD_PARALLEL Backfill periods in flight (default 1)
+  TRANSACTION_ENTRY_BACKFILL_GAP_MS Pause between backfill periods (default 1500)
+  TRANSACTION_ENTRY_FETCH_GAP_MS  Pause between CRM OOM-split slices (default 1000)
+  TRANSACTION_ENTRY_CLIENT_PARALLEL Per-client CRM fallback concurrency (default 2)
   SYNC_INTERVAL_MS       Daemon interval (default 180000)
   SYNC_PIPELINE_RECONCILE_ENABLED  Re-check open/assigned/tech_solved hot rows each incremental (default true)
   SYNC_PIPELINE_RECONCILE_BATCH   Pipeline TRNs checked per run (default 1000)

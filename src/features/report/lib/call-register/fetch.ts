@@ -35,51 +35,20 @@ type AggregateRow = {
   deployment: number;
 };
 
-const AGG_SELECT = `SELECT b.client,
-       COUNT(*)::int AS qty,
-       COUNT(*) FILTER (WHERE EXISTS (
-         SELECT 1 FROM calls_latest_hot h
-         WHERE h.serial = b.product_serial_no
-           AND h.account = b.client
-           AND UPPER(h.call_type) IN ('INSTALLATION', 'INSTALLATION CALL')
-           AND ${HOT_DONE}
-       ))::int AS installation,
-       COUNT(*) FILTER (WHERE EXISTS (
-         SELECT 1 FROM calls_latest_hot h
-         WHERE h.serial = b.product_serial_no
-           AND h.account = b.client
-           AND UPPER(h.call_type) IN ('DEPLOYMENT', 'DEPLOYMENT CALL')
-           AND ${HOT_DONE}
-       ))::int AS deployment
-     FROM crm_transaction_entry b`;
-
-/** Count install/deploy on billed serials where the solved call is on the same account. */
+/**
+ * Grid aggregates for a fixed client allowlist.
+ * Join-based (not per-serial correlated EXISTS) — same shape, much cheaper.
+ */
 async function fetchAggregatedRows(
   params: CallRegisterQueryParams,
-  allowlist: string[] | null
+  allowlist: string[]
 ): Promise<AggregateRow[]> {
+  if (!allowlist.length) return [];
+
   const { dateFrom, dateTo } = params;
   const dateField = parseCallRegisterDateField(params.dateField);
-  const dateExpr = callRegisterDateSqlExpr(dateField, 'b');
+  const dateExpr = callRegisterDateSqlExpr(dateField, 't');
   const dateClause =
-    dateFrom && dateTo
-      ? `AND ${dateExpr} >= $1::date
-         AND ${dateExpr} < ($2::date + interval '1 day')`
-      : '';
-
-  if (allowlist == null) {
-    const args: unknown[] = dateFrom && dateTo ? [dateFrom, dateTo] : [];
-    return prisma.$queryRawUnsafeBulk<AggregateRow[]>(
-      `${AGG_SELECT}
-     WHERE NULLIF(trim(b.client), '') IS NOT NULL
-     ${dateClause}
-     GROUP BY b.client
-     ORDER BY b.client`,
-      ...args
-    );
-  }
-
-  const curatedDateClause =
     dateFrom && dateTo
       ? `AND ${dateExpr} >= $2::date
          AND ${dateExpr} < ($3::date + interval '1 day')`
@@ -88,12 +57,81 @@ async function fetchAggregatedRows(
     dateFrom && dateTo ? [allowlist, dateFrom, dateTo] : [allowlist];
 
   return prisma.$queryRawUnsafeBulk<AggregateRow[]>(
-    `${AGG_SELECT}
-     WHERE b.client = ANY($1::text[])
-     ${curatedDateClause}
-     GROUP BY b.client`,
+    `WITH billed AS (
+       SELECT
+         btrim(t.client) AS client,
+         btrim(t.product_serial_no) AS serial
+       FROM crm_transaction_entry t
+       WHERE t.client = ANY($1::text[])
+         AND NULLIF(btrim(t.product_serial_no), '') IS NOT NULL
+         ${dateClause}
+     ),
+     billed_keys AS (
+       SELECT DISTINCT client, serial FROM billed
+     ),
+     hot AS (
+       SELECT
+         btrim(h.account) AS account,
+         btrim(h.serial) AS serial,
+         BOOL_OR(
+           UPPER(btrim(h.call_type)) IN ('INSTALLATION', 'INSTALLATION CALL')
+           AND ${HOT_DONE}
+         ) AS has_install,
+         BOOL_OR(
+           UPPER(btrim(h.call_type)) IN ('DEPLOYMENT', 'DEPLOYMENT CALL')
+           AND ${HOT_DONE}
+         ) AS has_deploy
+       FROM calls_latest_hot h
+       INNER JOIN billed_keys k
+         ON k.client = btrim(h.account)
+        AND k.serial = btrim(h.serial)
+       WHERE NULLIF(btrim(h.serial), '') IS NOT NULL
+       GROUP BY 1, 2
+     )
+     SELECT
+       b.client,
+       COUNT(*)::int AS qty,
+       COUNT(*) FILTER (WHERE COALESCE(h.has_install, false))::int AS installation,
+       COUNT(*) FILTER (WHERE COALESCE(h.has_deploy, false))::int AS deployment
+     FROM billed b
+     LEFT JOIN hot h
+       ON h.account = b.client
+      AND h.serial = b.serial
+     GROUP BY b.client
+     ORDER BY b.client`,
     ...args
   );
+}
+
+/** Cheap name list for editor dropdowns — no install/deploy counting. */
+async function listDistinctClientsInRange(
+  params: CallRegisterQueryParams
+): Promise<string[]> {
+  const { dateFrom, dateTo } = params;
+  const dateField = parseCallRegisterDateField(params.dateField);
+  const dateExpr = callRegisterDateSqlExpr(dateField, 't');
+
+  if (dateFrom && dateTo) {
+    const rows = await prisma.$queryRawUnsafeBulk<{ client: string }[]>(
+      `SELECT DISTINCT btrim(t.client) AS client
+       FROM crm_transaction_entry t
+       WHERE NULLIF(btrim(t.client), '') IS NOT NULL
+         AND ${dateExpr} >= $1::date
+         AND ${dateExpr} < ($2::date + interval '1 day')
+       ORDER BY 1`,
+      dateFrom,
+      dateTo
+    );
+    return rows.map((r) => r.client).filter(Boolean);
+  }
+
+  const rows = await prisma.$queryRawUnsafeBulk<{ client: string }[]>(
+    `SELECT DISTINCT btrim(t.client) AS client
+     FROM crm_transaction_entry t
+     WHERE NULLIF(btrim(t.client), '') IS NOT NULL
+     ORDER BY 1`
+  );
+  return rows.map((r) => r.client).filter(Boolean);
 }
 
 export async function listCallRegisterClients(): Promise<string[]> {
@@ -102,22 +140,25 @@ export async function listCallRegisterClients(): Promise<string[]> {
 
 export async function fetchCallRegisterRows(
   params: CallRegisterQueryParams & { allClients?: boolean }
-): Promise<{ rows: CallRegisterRow[]; summary: CallRegisterSummary; sharedClients: string[] }> {
-  const allClients = Boolean(params.allClients);
+): Promise<{
+  rows: CallRegisterRow[];
+  summary: CallRegisterSummary;
+  sharedClients: string[];
+  /** Full dynamic names for editor dropdowns only (no counts). */
+  clientOptions: string[] | null;
+}> {
+  const wantOptions = Boolean(params.allClients);
   const sharedClients = await listVisibleCallRegisterClients();
-  const aggregated = await fetchAggregatedRows(params, allClients ? null : sharedClients);
 
-  let totalQty = 0;
-  let totalInstallation = 0;
-  let totalDeployment = 0;
+  const [aggregated, clientOptions] = await Promise.all([
+    fetchAggregatedRows(params, sharedClients),
+    wantOptions ? listDistinctClientsInRange(params) : Promise.resolve(null),
+  ]);
 
   const mapped = aggregated.map((row) => {
     const qty = Number(row.qty || 0);
     const installation = Number(row.installation || 0);
     const deployment = Number(row.deployment || 0);
-    totalQty += qty;
-    totalInstallation += installation;
-    totalDeployment += deployment;
     return {
       client: row.client,
       qty,
@@ -128,24 +169,21 @@ export async function fetchCallRegisterRows(
     };
   });
 
-  const rows = allClients
-    ? mapped.sort((a, b) => a.client.localeCompare(b.client))
-    : ensureAllowlistGridRows(mapped, sharedClients);
+  const rows = ensureAllowlistGridRows(mapped, sharedClients);
 
-  if (!allClients) {
-    totalQty = 0;
-    totalInstallation = 0;
-    totalDeployment = 0;
-    for (const row of rows) {
-      totalQty += row.qty;
-      totalInstallation += row.installation;
-      totalDeployment += row.deployment;
-    }
+  let totalQty = 0;
+  let totalInstallation = 0;
+  let totalDeployment = 0;
+  for (const row of rows) {
+    totalQty += row.qty;
+    totalInstallation += row.installation;
+    totalDeployment += row.deployment;
   }
 
   return {
     rows,
     sharedClients,
+    clientOptions,
     summary: {
       totalQty,
       totalInstallation,

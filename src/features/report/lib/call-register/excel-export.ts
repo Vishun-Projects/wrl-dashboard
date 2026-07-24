@@ -34,16 +34,19 @@ export async function buildCallRegisterSerialWorkbook(
   const header = sheet.addRow([...HEADERS]);
   applySummaryHeaderStyle(header);
 
-  for (const row of rows) {
-    sheet.addRow([
-      row.client,
-      row.serial,
-      row.qtyDate,
-      row.deploymentDate,
-      row.installationDate,
-      row.pendingDeploy,
-      row.pendingInstall,
-    ]);
+  // Bulk add — far cheaper than addRow() per serial on large exports.
+  if (rows.length) {
+    sheet.addRows(
+      rows.map((row) => [
+        row.client,
+        row.serial,
+        row.qtyDate,
+        row.deploymentDate,
+        row.installationDate,
+        row.pendingDeploy,
+        row.pendingInstall,
+      ])
+    );
   }
 
   return workbook;

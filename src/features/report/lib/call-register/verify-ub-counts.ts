@@ -1,8 +1,17 @@
 import '@/lib/read-model/bootstrap-env';
 import { prisma } from '@/lib/db/prisma';
-import { CALL_REGISTER_CLIENTS } from './clients';
 
 const client = process.argv[2];
+
+async function listMirrorClients(): Promise<string[]> {
+  const rows = await prisma.$queryRawUnsafeBulk<{ client: string }[]>(
+    `SELECT DISTINCT btrim(client) AS client
+     FROM crm_transaction_entry
+     WHERE NULLIF(btrim(client), '') IS NOT NULL
+     ORDER BY 1`
+  );
+  return rows.map((r) => r.client).filter(Boolean);
+}
 
 async function countsFor(name: string) {
   const billed = await prisma.$queryRawUnsafeBulk<{ cnt: number }[]>(
@@ -39,10 +48,12 @@ async function main() {
   if (client) {
     const c = await countsFor(client);
     console.log(client, c);
-    console.assert(client === 'UB' && c.install === 11320, 'UB install should be 11320');
+    if (client === 'UB') {
+      console.assert(c.install === 11320, 'UB install should be 11320');
+    }
     return;
   }
-  for (const name of CALL_REGISTER_CLIENTS) {
+  for (const name of await listMirrorClients()) {
     console.log(name, await countsFor(name));
   }
 }

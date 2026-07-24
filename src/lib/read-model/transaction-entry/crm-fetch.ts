@@ -1,11 +1,11 @@
 import { postQuery, isCrmOutOfMemoryError } from '@/lib/db/proxy';
 import { parseCrmDaddedon, periodDays } from './shared';
 
-/** Gap between CRM calls when chunking after OOM (default 300ms). */
-const FETCH_GAP_MS = Number(process.env.TRANSACTION_ENTRY_FETCH_GAP_MS ?? 300) || 300;
+/** Gap between CRM calls when chunking after OOM / between slices (default 1000ms). */
+const FETCH_GAP_MS = Number(process.env.TRANSACTION_ENTRY_FETCH_GAP_MS ?? 1000) || 1000;
 
-/** Per-client parallel fallback when a week slice still OOMs (default 6). */
-const CLIENT_PARALLEL = Number(process.env.TRANSACTION_ENTRY_CLIENT_PARALLEL ?? 6) || 6;
+/** Per-client parallel fallback when a week slice still OOMs (default 2 — be kind to CRM). */
+const CLIENT_PARALLEL = Number(process.env.TRANSACTION_ENTRY_CLIENT_PARALLEL ?? 2) || 2;
 
 const CRM_TIMEOUT_MS = Number(process.env.TRANSACTION_ENTRY_CRM_TIMEOUT_MS ?? 180_000) || 180_000;
 

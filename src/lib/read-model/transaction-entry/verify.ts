@@ -1,7 +1,7 @@
 import { postQuery } from '@/lib/db/proxy';
 import { withClient } from '@/lib/read-model/db';
-import { CALL_REGISTER_CLIENTS } from '@/lib/call-register/clients';
 import { todayLocalDate } from '@/lib/read-model/dates';
+import { fetchTransactionEntryClients } from './crm-fetch';
 
 const CRM_TIMEOUT_MS = Number(process.env.TRANSACTION_ENTRY_CRM_TIMEOUT_MS ?? 180_000) || 180_000;
 
@@ -35,9 +35,10 @@ export async function verifyCallRegisterTransactionEntry(opts?: {
   const dateTo = opts?.dateTo ?? todayLocalDate();
   const dateFrom = opts?.dateFrom ?? dateTo;
 
+  const clients = await fetchTransactionEntryClients();
   const rows: TransactionEntryVerifyRow[] = [];
 
-  for (const client of CALL_REGISTER_CLIENTS) {
+  for (const client of clients) {
     let crmCount = 0;
     try {
       const res = await postQuery({ rawSql: crmCountSql(client, dateFrom, dateTo), timeoutMs: CRM_TIMEOUT_MS });

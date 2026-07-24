@@ -1,22 +1,9 @@
 /**
  * Deployment Completion client scope.
- * - Curated CALL_REGISTER_CLIENTS: CRM sync allowlist + DB seed fallback.
  * - Shared visible list: DB table call_register_visible_clients (what everyone else sees).
  * - Full dynamic list / editors: emails in CALL_REGISTER_FULL_CLIENTS_EMAILS.
+ * - CRM TransactionEntry sync: all clients from CRM (not gated here).
  */
-export const CALL_REGISTER_CLIENTS = [
-  'UB',
-  'Nestle',
-  'ABInBeV',
-  'MARS',
-  'Redbull',
-  'Carlsberg',
-  'Ferrero',
-  'Reliance',
-  'Reliance Campa Cola',
-] as const;
-
-export type CallRegisterClient = (typeof CALL_REGISTER_CLIENTS)[number];
 
 /** Who can see the full dynamic account list + “Accounts visible” dropdown. Add emails here later. */
 export const CALL_REGISTER_FULL_CLIENTS_EMAILS = [
@@ -31,10 +18,6 @@ export function canSeeAllCallRegisterClients(email: string | null | undefined): 
   return (CALL_REGISTER_FULL_CLIENTS_EMAILS as readonly string[]).some(
     (allowed) => allowed.toLowerCase() === normalized
   );
-}
-
-export function isCallRegisterClient(value: string): value is CallRegisterClient {
-  return (CALL_REGISTER_CLIENTS as readonly string[]).includes(value.trim());
 }
 
 /** Parse `clients=a,b,c` query param. */
@@ -76,7 +59,7 @@ export function normalizeVisibleClientNames(names: string[]): string[] {
 export function validateCallRegisterExportClients(
   clients: string[],
   email: string | null | undefined,
-  allowedClients: readonly string[] = CALL_REGISTER_CLIENTS
+  allowedClients: readonly string[] = []
 ): { ok: true; clients: string[] } | { ok: false; error: string } {
   if (!clients.length) {
     return { ok: false, error: 'Select at least one account to export.' };

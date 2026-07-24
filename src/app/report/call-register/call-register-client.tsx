@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { PageScrollRegion } from '@/components/layout/PageShell';
 import { useUser } from '@/components/layout/DashboardLayout';
 import { CallRegisterToolbar } from '@/features/report/ui/call-register/CallRegisterToolbar';
@@ -12,9 +13,17 @@ import { TableSkeleton } from '@/components/ui/DataTableLoading';
 import type { CallRegisterRow, CallRegisterSummary } from '@/features/report/lib/call-register/types';
 import type { CallRegisterDateField } from '@/features/report/lib/call-register/dates';
 import { usePageAlert } from '@/hooks/usePageAlert';
-import { triggerBlobDownload } from '@/features/report/lib/summary-excel-export';
+import {
+  triggerBlobDownload,
+  workbookToPreparedExport,
+  type PreparedFileExport,
+} from '@/features/report/lib/summary-excel-export';
+import type { ExportQueueProgress, ExportQueueRunContext } from '@/features/report/lib/export-queue';
+import type { MisTabId } from '@/lib/auth/rbac-catalog';
 import { fetchWithRetry } from '@/lib/net/fetch-with-retry';
 import { canSeeAllCallRegisterClients } from '@/lib/call-register/clients';
+import type { CallRegisterSerialExportRow } from '@/features/report/lib/call-register/shape';
+import { buildCallRegisterSerialWorkbook } from '@/features/report/lib/call-register/excel-export';
 
 function getDefaultDates() {
   const now = new Date();
@@ -49,7 +58,29 @@ function sameClientSet(a: string[], b: string[]): boolean {
   return b.every((c) => set.has(c));
 }
 
-export function CallRegisterClient() {
+function formatElapsed(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m ${s.toString().padStart(2, '0')}s`;
+}
+
+type EnqueueExport = (
+  label: string,
+  run: (ctx: ExportQueueRunContext) => Promise<PreparedFileExport>,
+  meta?: { sourceTab?: MisTabId; kind?: 'standard' | 'trace' }
+) => string;
+
+type CallRegisterClientProps = {
+  enqueueExport?: EnqueueExport;
+  /** When parent drives MIS export queue for this tab. */
+  isExporting?: boolean;
+};
+
+export function CallRegisterClient({
+  enqueueExport,
+  isExporting: isExportingFromParent = false,
+}: CallRegisterClientProps = {}) {
   const { userProfile } = useUser();
   const userEmail =
     typeof userProfile?.email === 'string' ? userProfile.email : undefined;
@@ -67,27 +98,44 @@ export function CallRegisterClient() {
   const [detailClient, setDetailClient] = useState<string | null>(null);
 
   const [rows, setRows] = useState<CallRegisterRow[]>([]);
+  const [clientOptions, setClientOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
+  const [localExporting, setLocalExporting] = useState(false);
+  const [exportDetail, setExportDetail] = useState<string | null>(null);
+  const [exportProgress, setExportProgress] = useState<{
+    fetched: number;
+    total: number;
+  } | null>(null);
+  const [exportElapsedSec, setExportElapsedSec] = useState(0);
   const [savingVisible, setSavingVisible] = useState(false);
   const { alert, setError, setInfo, clear: clearAlert } = usePageAlert();
 
   const abortRef = useRef<AbortController | null>(null);
+  const exportAbortRef = useRef<AbortController | null>(null);
+  const exportStartedAtRef = useRef<number | null>(null);
+
+  const exporting = localExporting || isExportingFromParent;
   const filterDirty = draftFrom !== appliedFrom || draftTo !== appliedTo;
   const visibilityDirty = !sameClientSet(visibleClients, savedClients);
 
   const allRowClients = useMemo(() => rows.map((r) => r.client), [rows]);
 
+  /** Editors: full dynamic names for dropdowns. Others: grid clients only. */
+  const dropdownUniverse = useMemo(() => {
+    if (showVisibilityFilter && clientOptions.length) return clientOptions;
+    return allRowClients;
+  }, [showVisibilityFilter, clientOptions, allRowClients]);
+
   const visibilityOptions = useMemo(() => {
-    const set = new Set([...allRowClients, ...savedClients, ...visibleClients]);
+    const set = new Set([...dropdownUniverse, ...savedClients, ...visibleClients]);
     return [...set].sort((a, b) => a.localeCompare(b));
-  }, [allRowClients, savedClients, visibleClients]);
+  }, [dropdownUniverse, savedClients, visibleClients]);
 
   const exportOptions = useMemo(() => {
     if (!showVisibilityFilter) return allRowClients;
-    const set = new Set([...allRowClients, ...savedClients]);
+    const set = new Set([...dropdownUniverse, ...savedClients]);
     return [...set].sort((a, b) => a.localeCompare(b));
-  }, [showVisibilityFilter, allRowClients, savedClients]);
+  }, [showVisibilityFilter, dropdownUniverse, allRowClients, savedClients]);
 
   const visibleRows = useMemo(() => {
     if (!showVisibilityFilter) return rows;
@@ -97,6 +145,26 @@ export function CallRegisterClient() {
   }, [rows, visibleClients, showVisibilityFilter]);
 
   const summary = useMemo(() => summaryFromRows(visibleRows), [visibleRows]);
+
+  useEffect(() => {
+    if (!exporting) {
+      exportStartedAtRef.current = null;
+      setExportElapsedSec(0);
+      setExportDetail(null);
+      setExportProgress(null);
+      return;
+    }
+    if (exportStartedAtRef.current == null) {
+      exportStartedAtRef.current = Date.now();
+    }
+    const tick = () => {
+      const started = exportStartedAtRef.current ?? Date.now();
+      setExportElapsedSec(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [exporting]);
 
   const fetchData = useCallback(
     async (dateFrom: string, dateTo: string, field: CallRegisterDateField) => {
@@ -127,12 +195,15 @@ export function CallRegisterClient() {
         const shared = Array.isArray(data.sharedClients)
           ? (data.sharedClients as string[])
           : nextRows.map((r) => r.client);
+        const options = Array.isArray(data.clientOptions)
+          ? (data.clientOptions as string[])
+          : [];
         const rowClients = nextRows.map((r) => r.client);
 
         setRows(nextRows);
+        setClientOptions(options);
         setSavedClients(shared);
         setVisibleClients(shared);
-        // Editors may export any account; default selection = shared allowlist.
         setExportClients(data.allClients ? shared : rowClients);
       } catch (err: unknown) {
         if ((err as Error).name === 'AbortError') return;
@@ -209,38 +280,136 @@ export function CallRegisterClient() {
     dateField,
   ]);
 
-  const handleExport = useCallback(async () => {
-    if (!exportClients.length) return;
-    setExporting(true);
-    clearAlert();
-    try {
-      const params = new URLSearchParams();
-      params.set('clients', exportClients.join(','));
-      if (appliedFrom) params.set('dateFrom', appliedFrom);
-      if (appliedTo) params.set('dateTo', appliedTo);
-      params.set('dateField', dateField);
+  const runExportJob = useCallback(
+    async (ctx: {
+      signal?: AbortSignal;
+      onProgress?: (progress: ExportQueueProgress) => void;
+    }): Promise<PreparedFileExport> => {
+      const clients = exportClients;
+      const total = clients.length;
+      let serialCount = 0;
+      const allRows: CallRegisterSerialExportRow[] = [];
 
-      const res = await fetchWithRetry(`/api/report/call-register/export?${params.toString()}`, {
-        credentials: 'include',
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `HTTP ${res.status}`);
+      const report = (fetched: number, detail: string) => {
+        const progress = { fetched, total, detail };
+        setExportProgress({ fetched, total });
+        setExportDetail(detail);
+        ctx.onProgress?.(progress);
+      };
+
+      report(0, `Starting · 0/${total} accounts · ${total} pending`);
+
+      for (let i = 0; i < clients.length; i++) {
+        if (ctx.signal?.aborted) {
+          throw new DOMException('Export cancelled', 'AbortError');
+        }
+        const client = clients[i]!;
+        const pending = total - i;
+        report(
+          i,
+          `${i}/${total} done · ${pending} pending · fetching ${client}…`
+        );
+
+        const params = new URLSearchParams();
+        params.set('client', client);
+        if (appliedFrom) params.set('dateFrom', appliedFrom);
+        if (appliedTo) params.set('dateTo', appliedTo);
+        params.set('dateField', dateField);
+
+        const res = await fetchWithRetry(
+          `/api/report/call-register/serials?${params.toString()}`,
+          { credentials: 'include', signal: ctx.signal }
+        );
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `HTTP ${res.status} (${client})`);
+        }
+        const data = (await res.json()) as { rows?: CallRegisterSerialExportRow[] };
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+        allRows.push(...rows);
+        serialCount += rows.length;
+
+        report(
+          i + 1,
+          `${i + 1}/${total} accounts done · ${total - (i + 1)} pending · ${serialCount.toLocaleString('en-IN')} serials`
+        );
       }
 
-      const blob = await res.blob();
-      const disposition = res.headers.get('Content-Disposition') || '';
-      const match = disposition.match(/filename="([^"]+)"/);
+      report(total, `Building Excel · ${serialCount.toLocaleString('en-IN')} serials…`);
+      const workbook = await buildCallRegisterSerialWorkbook(allRows);
+      const stamp = new Date().toISOString().slice(0, 10);
       const filename =
-        match?.[1] || `WRL_Call_Register_Serials_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      await triggerBlobDownload(blob, filename);
-    } catch (err: unknown) {
-      console.error('[call-register/export]', err);
-      setError(err instanceof Error ? err.message : 'Failed to export Excel. Please try again.');
-    } finally {
-      setExporting(false);
+        appliedFrom && appliedTo
+          ? `WRL_Call_Register_Serials_${appliedFrom}_${appliedTo}.xlsx`
+          : `WRL_Call_Register_Serials_AllTime_${stamp}.xlsx`;
+      report(total, `Saving file · ${serialCount.toLocaleString('en-IN')} serials…`);
+      return workbookToPreparedExport(workbook, filename);
+    },
+    [exportClients, appliedFrom, appliedTo, dateField]
+  );
+
+  const handleExport = useCallback(() => {
+    if (!exportClients.length || exporting) return;
+    clearAlert();
+
+    if (enqueueExport) {
+      const n = exportClients.length;
+      enqueueExport(
+        n === 1 ? 'Deployment Completion Excel' : `Deployment Completion Excel (${n})`,
+        async (ctx) => {
+          try {
+            return await runExportJob({
+              signal: ctx.signal,
+              onProgress: (progress) => {
+                setExportProgress({ fetched: progress.fetched, total: progress.total });
+                setExportDetail(progress.detail ?? null);
+                ctx.onProgress(progress);
+              },
+            });
+          } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') throw err;
+            const message = err instanceof Error ? err.message : 'Export failed';
+            setError(message);
+            throw err instanceof Error ? err : new Error(message);
+          }
+        },
+        { sourceTab: 'deployment_completion', kind: 'standard' }
+      );
+      return;
     }
-  }, [exportClients, appliedFrom, appliedTo, dateField, clearAlert, setError]);
+
+    void (async () => {
+      if (exportAbortRef.current) exportAbortRef.current.abort();
+      const abort = new AbortController();
+      exportAbortRef.current = abort;
+      setLocalExporting(true);
+      try {
+        const prepared = await runExportJob({
+          signal: abort.signal,
+          onProgress: (progress) => {
+            setExportProgress({ fetched: progress.fetched, total: progress.total });
+            setExportDetail(progress.detail ?? null);
+          },
+        });
+        await triggerBlobDownload(prepared.blob, prepared.filename, {
+          objectUrl: prepared.objectUrl,
+        });
+      } catch (err: unknown) {
+        if ((err as Error).name === 'AbortError') return;
+        console.error('[call-register/export]', err);
+        setError(err instanceof Error ? err.message : 'Failed to export Excel. Please try again.');
+      } finally {
+        if (exportAbortRef.current === abort) exportAbortRef.current = null;
+        setLocalExporting(false);
+        setExportDetail(null);
+        setExportProgress(null);
+      }
+    })();
+  }, [exportClients, exporting, enqueueExport, runExportJob, clearAlert, setError]);
+
+  const handleCancelLocalExport = useCallback(() => {
+    exportAbortRef.current?.abort();
+  }, []);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-slate-50">
@@ -306,6 +475,53 @@ export function CallRegisterClient() {
         exporting={exporting}
         filterDirty={filterDirty}
       />
+
+      {exporting ? (
+        <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-[12px] text-amber-950">
+          <div className="flex items-center gap-3">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-amber-700" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">{exportDetail || 'Export in progress…'}</p>
+              <p className="text-[11px] text-amber-800/80">
+                Elapsed {formatElapsed(exportElapsedSec)}
+                {exportProgress && exportProgress.total > 0
+                  ? ` · ${exportProgress.fetched} of ${exportProgress.total} accounts`
+                  : null}
+                {enqueueExport ? ' · Also in Recent exports (header)' : null}
+              </p>
+            </div>
+            {localExporting ? (
+              <button
+                type="button"
+                onClick={handleCancelLocalExport}
+                className="shrink-0 rounded border border-amber-300 bg-white px-2 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100"
+              >
+                Cancel
+              </button>
+            ) : null}
+          </div>
+          {exportProgress && exportProgress.total > 0 ? (
+            <div
+              className="mt-2 h-1.5 overflow-hidden rounded-full bg-amber-200/80"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={exportProgress.total}
+              aria-valuenow={exportProgress.fetched}
+              aria-label="Export account progress"
+            >
+              <div
+                className="h-full rounded-full bg-amber-600 transition-[width] duration-300"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    Math.round((exportProgress.fetched / exportProgress.total) * 100)
+                  )}%`,
+                }}
+              />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <PageScrollRegion className="p-4">
         {alert != null ? (

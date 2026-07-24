@@ -1,5 +1,26 @@
 export const TRANSACTION_ENTRY_ENTITY = 'crm_transaction_entry';
 
+/** Inclusive ~7-day windows from yyyy-mm-dd bounds (UTC). Keeps CRM + Node memory bounded. */
+export function weekChunks(dateFrom: string, dateTo: string): { from: string; to: string }[] {
+  const start = new Date(`${dateFrom}T00:00:00Z`);
+  const end = new Date(`${dateTo}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return [];
+
+  const chunks: { from: string; to: string }[] = [];
+  let cursor = start;
+  while (cursor <= end) {
+    const from = cursor.toISOString().slice(0, 10);
+    const weekEnd = new Date(cursor);
+    weekEnd.setUTCDate(weekEnd.getUTCDate() + 6);
+    const capped = weekEnd > end ? end : weekEnd;
+    const to = capped.toISOString().slice(0, 10);
+    chunks.push({ from, to });
+    cursor = new Date(capped);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return chunks;
+}
+
 /** Inclusive calendar months from yyyy-mm-dd bounds (UTC). */
 export function monthChunks(dateFrom: string, dateTo: string): { from: string; to: string }[] {
   const start = new Date(`${dateFrom}T00:00:00Z`);

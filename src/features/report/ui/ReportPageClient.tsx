@@ -4444,7 +4444,14 @@ export default function ReportPageClient() {
           </ReportErrorBoundary>
         ) : activeTab === 'deployment_completion' ? (
           <ReportErrorBoundary label="Deployment Completion">
-            <CallRegisterClient />
+            <CallRegisterClient
+              enqueueExport={enqueueExport}
+              isExporting={isExportActiveForTab(
+                exportQueueItems,
+                'deployment_completion',
+                'standard'
+              )}
+            />
           </ReportErrorBoundary>
         ) : null}
       </div>

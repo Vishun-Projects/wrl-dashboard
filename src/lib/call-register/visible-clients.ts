@@ -1,10 +1,7 @@
 import 'server-only';
 
 import { withAppClient } from '@/lib/read-model/db';
-import {
-  CALL_REGISTER_CLIENTS,
-  normalizeVisibleClientNames,
-} from '@/lib/call-register/clients';
+import { normalizeVisibleClientNames } from '@/lib/call-register/clients';
 
 let ensured = false;
 
@@ -28,37 +25,17 @@ export async function ensureCallRegisterVisibleClientsTable(): Promise<void> {
   ensured = true;
 }
 
-async function seedIfEmpty(): Promise<string[]> {
-  return withAppClient(async (client) => {
-    const countRes = await client.query<{ n: string }>(
-      `SELECT COUNT(*)::text AS n FROM public.call_register_visible_clients`
-    );
-    const n = Number(countRes.rows[0]?.n || 0);
-    if (n > 0) {
-      const res = await client.query<{ client_name: string }>(
-        `SELECT client_name
-         FROM public.call_register_visible_clients
-         ORDER BY sort_order ASC, lower(btrim(client_name)) ASC`
-      );
-      return res.rows.map((r) => String(r.client_name ?? '').trim()).filter(Boolean);
-    }
-
-    const seed = [...CALL_REGISTER_CLIENTS];
-    for (let i = 0; i < seed.length; i++) {
-      await client.query(
-        `INSERT INTO public.call_register_visible_clients (client_name, sort_order)
-         VALUES ($1, $2)`,
-        [seed[i], i]
-      );
-    }
-    return seed;
-  });
-}
-
-/** Shared allowlist everyone else sees. Seeds from curated 9 when empty. */
+/** Shared allowlist everyone else sees. Empty until an editor Saves. */
 export async function listVisibleCallRegisterClients(): Promise<string[]> {
   await ensureCallRegisterVisibleClientsTable();
-  return seedIfEmpty();
+  return withAppClient(async (client) => {
+    const res = await client.query<{ client_name: string }>(
+      `SELECT client_name
+       FROM public.call_register_visible_clients
+       ORDER BY sort_order ASC, lower(btrim(client_name)) ASC`
+    );
+    return res.rows.map((r) => String(r.client_name ?? '').trim()).filter(Boolean);
+  });
 }
 
 /** Replace-all shared allowlist. Rejects empty after normalize. */

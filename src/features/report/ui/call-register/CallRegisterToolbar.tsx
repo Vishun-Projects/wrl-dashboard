@@ -158,9 +158,11 @@ export function CallRegisterToolbar({
           type="button"
           disabled={busy || exportClients.length === 0}
           onClick={onExport}
-          className="h-8 shrink-0 rounded-md bg-teal-700 px-3 text-[12px] font-medium text-white shadow-sm hover:bg-teal-800 disabled:opacity-50"
+          className={`h-8 shrink-0 rounded-md bg-teal-700 px-3 text-[12px] font-medium text-white shadow-sm hover:bg-teal-800 disabled:opacity-50 ${
+            exporting ? 'animate-pulse' : ''
+          }`}
         >
-          {exporting ? 'Exporting...' : 'Export Excel'}
+          {exporting ? 'Exporting…' : 'Export Excel'}
         </button>
       </div>
     </div>

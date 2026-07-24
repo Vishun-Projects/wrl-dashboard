@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCrmDaddedon, monthChunks, yearChunks, periodDays } from './shared';
+import { parseCrmDaddedon, monthChunks, weekChunks, yearChunks, periodDays } from './shared';
 
 describe('transaction-entry shared helpers', () => {
   it('parses CRM dd/mm/yyyy dates (daddedon / WarrantyStartDate)', () => {
@@ -9,7 +9,14 @@ describe('transaction-entry shared helpers', () => {
     expect(d2?.toISOString().startsWith('2025-11-14')).toBe(true);
   });
 
-  it('chunks months and years', () => {
+  it('chunks weeks, months and years', () => {
+    const weeks = weekChunks('2026-01-01', '2026-01-20');
+    expect(weeks).toEqual([
+      { from: '2026-01-01', to: '2026-01-07' },
+      { from: '2026-01-08', to: '2026-01-14' },
+      { from: '2026-01-15', to: '2026-01-20' },
+    ]);
+
     const months = monthChunks('2026-01-15', '2026-03-10');
     expect(months).toHaveLength(3);
     expect(months[0]?.from).toBe('2026-01-15');

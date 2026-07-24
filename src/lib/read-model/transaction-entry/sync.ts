@@ -1,7 +1,6 @@
 import type pg from 'pg';
 import { withTransaction, withClient } from '@/lib/read-model/db';
-import { CALL_REGISTER_CLIENTS } from '@/lib/call-register/clients';
-import { TRANSACTION_ENTRY_ENTITY, monthChunks, yearChunks } from './shared';
+import { TRANSACTION_ENTRY_ENTITY, monthChunks, weekChunks, yearChunks } from './shared';
 import {
   fetchTransactionEntryClients,
   fetchTransactionEntryPeriod,
@@ -12,6 +11,16 @@ import {
   mismatchedClients,
   verifyCallRegisterTransactionEntry,
 } from './verify';
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Pause between backfill period fetches so we do not hammer CRM (default 1500ms). */
+function backfillGapMs(): number {
+  const n = Number(process.env.TRANSACTION_ENTRY_BACKFILL_GAP_MS ?? 1500);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 1500;
+}
 
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
@@ -95,7 +104,7 @@ function verifyDays(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 7;
 }
 
-/** Per-client CRM fetch + upsert for the given clients and date window. */
+/** Per-client CRM fetch + upsert for the given clients and date window (heal path). */
 async function syncClientsPeriod(
   clients: readonly string[],
   from: string,
@@ -111,14 +120,19 @@ async function syncClientsPeriod(
   return upserted;
 }
 
-/** Deployment Completion accounts — per-client CRM fetch for recent uploads. */
-async function syncCallRegisterClientsRecent(end: string): Promise<number> {
+/** Recent window for all CRM clients (bulk period fetch with OOM split). */
+async function syncAllClientsRecent(end: string, clients: string[]): Promise<number> {
   const from = subtractDays(end, recentDays());
-  return syncClientsPeriod(CALL_REGISTER_CLIENTS, from, end, 'Call-register recent sync');
+  const rows = await fetchTransactionEntryPeriod(from, end, clients);
+  const upserted = await withTransaction(async (c) => upsertTransactionEntryRows(c, rows));
+  console.log(
+    `[transaction-entry] Recent sync ${from} → ${end} upserted ${upserted} (${clients.length} clients)`
+  );
+  return upserted;
 }
 
 /**
- * Compare CRM vs mirror for Deployment Completion accounts; re-fetch any mismatch.
+ * Compare CRM vs mirror for all CRM clients; re-fetch any mismatch.
  * Returns extra rows upserted while healing.
  */
 export async function healCallRegisterMismatches(end: string): Promise<number> {
@@ -159,7 +173,8 @@ export async function healCallRegisterMismatches(end: string): Promise<number> {
 }
 
 /**
- * Full backfill: one CRM query per calendar month (all clients), OOM → week → parallel client.
+ * Full backfill: week-sized windows by default (all clients), one period at a time,
+ * with a pause between CRM fetches so we do not overload their server / OOM Node.
  */
 export async function runTransactionEntryBackfill(): Promise<{ rowsUpserted: number }> {
   const end = todayUtc();
@@ -178,18 +193,26 @@ export async function runTransactionEntryBackfill(): Promise<{ rowsUpserted: num
   });
 
   const clients = await fetchTransactionEntryClients();
-  const chunkMode = process.env.TRANSACTION_ENTRY_BACKFILL_CHUNK?.trim() || 'month';
+  const chunkMode = process.env.TRANSACTION_ENTRY_BACKFILL_CHUNK?.trim() || 'week';
   const chunks =
-    chunkMode === 'year' ? yearChunks(from, end) : monthChunks(from, end);
-  const parallel = Number(process.env.TRANSACTION_ENTRY_PERIOD_PARALLEL ?? 3) || 3;
+    chunkMode === 'year'
+      ? yearChunks(from, end)
+      : chunkMode === 'month'
+        ? monthChunks(from, end)
+        : weekChunks(from, end);
+  // Default 1 — never fan out months in parallel against CRM.
+  const parallel = Math.max(1, Number(process.env.TRANSACTION_ENTRY_PERIOD_PARALLEL ?? 1) || 1);
+  const gapMs = backfillGapMs();
   console.log(
-    `[transaction-entry] Backfill ${from} → ${end} (${chunkMode} chunks, ${chunks.length} periods, parallel ${parallel}, ${clients.length} CRM clients)`
+    `[transaction-entry] Backfill ${from} → ${end} (${chunkMode} chunks, ${chunks.length} periods, parallel ${parallel}, gap ${gapMs}ms, ${clients.length} CRM clients)`
   );
 
   let total = 0;
 
   try {
     for (let i = 0; i < chunks.length; i += parallel) {
+      if (i > 0 && gapMs > 0) await sleep(gapMs);
+
       const batch = chunks.slice(i, i + parallel);
       const fetched = await Promise.all(
         batch.map(async (chunk) => {
@@ -255,9 +278,9 @@ export async function runTransactionEntryIncremental(): Promise<{
   try {
     await withClient(async (client) => markRunning(client));
 
-    let upserted = await syncCallRegisterClientsRecent(end);
-
     const clients = await fetchTransactionEntryClients();
+    let upserted = await syncAllClientsRecent(end, clients);
+
     for (const chunk of monthChunks(from, end)) {
       const rows = await fetchTransactionEntryPeriod(chunk.from, chunk.to, clients);
       upserted += await withTransaction(async (client) => upsertTransactionEntryRows(client, rows));
