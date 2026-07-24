@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# VPS setup: large-file MIS upload server (bypasses Vercel 4.5 MB limit).
-# From Git Bash (repo root):
+# VPS setup: large-file MIS upload + register CSV export server.
+#
+# From Git Bash on your PC (repo root) — NOT on the VPS path itself:
 #   npm run mis-upload:setup:vps
+# That SSHs to the VPS and runs --local there.
+#
+# Already on the VPS shell:
+#   cd /opt/wrl/database/fast-close-app && bash scripts/vps-hosting/setup-mis-upload-server.sh --local
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -217,6 +222,10 @@ run_install_on_machine() {
 }
 
 if [[ "${1:-}" == "--local" ]]; then
+  # Windows scp can leave CRLF → `set: invalid option name`
+  if command -v sed >/dev/null 2>&1; then
+    sed -i 's/\r$//' "$0" 2>/dev/null || true
+  fi
   run_install_on_machine "${INSTALL_ROOT}"
   exit 0
 fi
@@ -228,13 +237,36 @@ fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 
-echo "==> Copying repo scripts to VPS"
-ssh "$VPS_HOST" "mkdir -p ${INSTALL_ROOT}/scripts/vps-hosting ${INSTALL_ROOT}/src/features/mis-import/lib ${INSTALL_ROOT}/src/lib/auth"
+echo "==> Syncing MIS upload + register CSV export code to VPS (${VPS_HOST})"
+ssh "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}'"
+
+# Prefer full tree via git when the VPS checkout exists (includes register-export).
+if ssh "$VPS_HOST" "test -d '${INSTALL_ROOT}/.git'"; then
+  echo "==> git pull on VPS"
+  ssh "$VPS_HOST" "git config --global --add safe.directory '${INSTALL_ROOT}' 2>/dev/null || true; cd '${INSTALL_ROOT}' && git fetch --all --prune && git pull --ff-only"
+else
+  echo "==> No .git on VPS — copying required paths"
+  ssh "$VPS_HOST" "mkdir -p ${INSTALL_ROOT}/scripts/vps-hosting ${INSTALL_ROOT}/src/features/mis-import/lib ${INSTALL_ROOT}/src/lib/auth ${INSTALL_ROOT}/src/features/register/lib/server"
+  scp "${ROOT}/scripts/vps-hosting/mis-upload-server.ts" "${ROOT}/scripts/vps-hosting/setup-mis-upload-server.sh" \
+    "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/"
+  scp -r "${ROOT}/src/features/mis-import/lib/"* "${VPS_HOST}:${INSTALL_ROOT}/src/features/mis-import/lib/" 2>/dev/null || true
+  scp "${ROOT}/src/lib/auth/user-auth-query.ts" "${ROOT}/src/lib/auth/rbac-catalog.ts" \
+    "${ROOT}/src/lib/auth/verify-jwt-core.ts" "${ROOT}/src/lib/auth/app-user-profile.ts" \
+    "${VPS_HOST}:${INSTALL_ROOT}/src/lib/auth/" 2>/dev/null || true
+fi
+
+# Always refresh the upload server entrypoints (even after git pull, in case of local edits).
 scp "${ROOT}/scripts/vps-hosting/mis-upload-server.ts" "${ROOT}/scripts/vps-hosting/setup-mis-upload-server.sh" \
   "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/"
-scp -r "${ROOT}/src/features/mis-import/lib/"* "${VPS_HOST}:${INSTALL_ROOT}/src/features/mis-import/lib/" 2>/dev/null || true
-scp "${ROOT}/src/lib/auth/user-auth-query.ts" "${ROOT}/src/lib/auth/rbac-catalog.ts" \
-  "${ROOT}/src/lib/auth/verify-jwt-core.ts" "${ROOT}/src/lib/auth/app-user-profile.ts" \
-  "${VPS_HOST}:${INSTALL_ROOT}/src/lib/auth/" 2>/dev/null || true
 
-ssh "$VPS_HOST" "MIS_UPLOAD_INSTALL_ROOT='${INSTALL_ROOT}' bash ${INSTALL_ROOT}/scripts/vps-hosting/setup-mis-upload-server.sh --local"
+ssh "$VPS_HOST" bash -s <<REMOTE
+set -euo pipefail
+ROOT='${INSTALL_ROOT}'
+sed -i 's/\r\$//' "\$ROOT/scripts/vps-hosting/setup-mis-upload-server.sh" || true
+# Register CSV export reads calls_latest_hot
+if [[ -f "\$ROOT/.env.mis-upload" ]] && ! grep -q '^READ_REGISTER_FROM=' "\$ROOT/.env.mis-upload"; then
+  echo 'READ_REGISTER_FROM=postgres' >> "\$ROOT/.env.mis-upload"
+  echo 'READ_CALLS_FROM=postgres' >> "\$ROOT/.env.mis-upload"
+fi
+MIS_UPLOAD_INSTALL_ROOT="\$ROOT" bash "\$ROOT/scripts/vps-hosting/setup-mis-upload-server.sh" --local
+REMOTE
