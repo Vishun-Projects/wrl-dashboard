@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Large-file MIS upload server for VPS (bypasses Vercel 4.5 MB body limit).
+ * Large-file MIS upload/download server for VPS (bypasses Vercel body/egress limits).
  * Run behind Caddy with client_max_body_size 320m.
  *
  *   MIS_UPLOAD_PORT=3099 npx tsx scripts/vps-hosting/mis-upload-server.ts
@@ -8,6 +8,7 @@
  * Routes:
  *   POST /api/mis-client-import/upload
  *   GET|POST /api/mis-client-import/upload-chunk
+ *   GET /api/mis-client-import/batches/:batchId/download
  */
 import { config } from 'dotenv';
 import { createServer } from 'http';
@@ -18,7 +19,9 @@ import {
   handleMisClientUploadChunkFormData,
   handleMisClientUploadChunkStatus,
 } from '@/features/mis-import/lib/upload-chunk-http';
+import { resolveMisBatchDownload } from '@/features/mis-import/lib/batch-download-http';
 import {
+  assertMisDownloadAccess,
   assertMisUploadAccess,
   resolveMisUploadUserId,
 } from '@/features/mis-import/lib/upload-standalone-auth';
@@ -33,10 +36,11 @@ config({ path: resolve(root, '.env.sync-worker') });
 const PORT = Number(process.env.MIS_UPLOAD_PORT ?? 3099);
 const UPLOAD_PATH = '/api/mis-client-import/upload';
 const CHUNK_PATH = '/api/mis-client-import/upload-chunk';
+const BATCH_DOWNLOAD_RE = /^\/api\/mis-client-import\/batches\/([^/]+)\/download\/?$/;
 
 const ALLOWED_ORIGINS = new Set(
   (process.env.MIS_UPLOAD_CORS_ORIGINS ??
-    'https://wrl-dashboard.vercel.app,http://localhost:3000')
+    'https://wrl-dashboard.vercel.app,https://www.wrl-fsm.cloud,https://wrl-fsm.cloud,http://localhost:3000')
     .split(',')
     .map((v) => v.trim())
     .filter(Boolean)
@@ -45,7 +49,9 @@ const ALLOWED_ORIGINS = new Set(
 function corsHeaders(origin: string | undefined): Record<string, string> {
   const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, Range',
+    'Access-Control-Expose-Headers':
+      'Content-Disposition, Content-Length, Accept-Ranges, Content-Range, Content-Type',
     'Access-Control-Max-Age': '86400',
   };
   if (origin && ALLOWED_ORIGINS.has(origin)) {
@@ -81,7 +87,8 @@ async function readFormData(
 
 async function resolveAuthedUserId(
   req: import('http').IncomingMessage,
-  formData?: FormData
+  formData?: FormData,
+  mode: 'upload' | 'download' = 'upload'
 ): Promise<{ userId: string | null; error?: string }> {
   const authHeader = req.headers.authorization;
   let token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
@@ -102,9 +109,18 @@ async function resolveAuthedUserId(
     return { userId: null, error: 'Unauthorized — invalid or expired session' };
   }
 
-  const allowed = await assertMisUploadAccess(userId);
+  const allowed =
+    mode === 'download'
+      ? await assertMisDownloadAccess(userId)
+      : await assertMisUploadAccess(userId);
   if (!allowed) {
-    return { userId: null, error: 'Forbidden — missing client import permission' };
+    return {
+      userId: null,
+      error:
+        mode === 'download'
+          ? 'Forbidden — missing MIS reports access'
+          : 'Forbidden — missing client import permission',
+    };
   }
 
   return { userId };
@@ -114,14 +130,50 @@ createServer(async (req, res) => {
   const origin = req.headers.origin;
   const baseHeaders = corsHeaders(origin);
   const { pathname, searchParams } = parseUrl(req.url);
+  const downloadMatch = BATCH_DOWNLOAD_RE.exec(pathname);
 
-  if (req.method === 'OPTIONS' && (pathname === UPLOAD_PATH || pathname === CHUNK_PATH)) {
+  if (
+    req.method === 'OPTIONS' &&
+    (pathname === UPLOAD_PATH || pathname === CHUNK_PATH || downloadMatch)
+  ) {
     res.writeHead(204, baseHeaders);
     res.end();
     return;
   }
 
   try {
+    if (req.method === 'GET' && downloadMatch) {
+      const batchId = decodeURIComponent(downloadMatch[1] ?? '').trim();
+      if (!batchId) {
+        res.writeHead(400, { ...baseHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'batchId is required' }));
+        return;
+      }
+      const auth = await resolveAuthedUserId(req, undefined, 'download');
+      if (!auth.userId) {
+        const status = auth.error?.startsWith('Forbidden') ? 403 : 401;
+        res.writeHead(status, { ...baseHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: auth.error ?? 'Unauthorized' }));
+        return;
+      }
+      const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : null;
+      const result = await resolveMisBatchDownload({ batchId, rangeHeader });
+      res.writeHead(result.status, { ...baseHeaders, ...result.headers });
+      if (result.kind === 'stream') {
+        result.stream.on('error', (err) => {
+          console.error('[mis-upload-server] download stream error:', err);
+          if (!res.headersSent) {
+            res.writeHead(500, { ...baseHeaders, 'Content-Type': 'application/json' });
+          }
+          res.end();
+        });
+        result.stream.pipe(res);
+        return;
+      }
+      res.end(result.buffer);
+      return;
+    }
+
     if (req.method === 'GET' && pathname === CHUNK_PATH) {
       const uploadId = searchParams.get('uploadId')?.trim() ?? '';
       if (!uploadId) {
@@ -184,16 +236,21 @@ createServer(async (req, res) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[mis-upload-server] error:', err);
-    res.writeHead(500, { ...baseHeaders, 'Content-Type': 'application/json' });
-    res.end(
-      JSON.stringify({
-        error: 'Upload failed',
-        detail: message.slice(0, 500),
-      })
-    );
+    if (!res.headersSent) {
+      res.writeHead(500, { ...baseHeaders, 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: 'Request failed',
+          detail: message.slice(0, 500),
+        })
+      );
+    } else {
+      res.end();
+    }
   }
 }).listen(PORT, '127.0.0.1', () => {
   console.log(`[mis-upload-server] listening on http://127.0.0.1:${PORT}`);
   console.log(`[mis-upload-server]   POST ${UPLOAD_PATH}`);
   console.log(`[mis-upload-server]   GET|POST ${CHUNK_PATH}`);
+  console.log(`[mis-upload-server]   GET /api/mis-client-import/batches/:id/download`);
 });

@@ -348,7 +348,15 @@ export default function MisClientImportToolbar({
   const handleDownloadBatch = async (batchId: string, fileName: string) => {
     setDownloadingBatchId(batchId);
     try {
-      const { blob, fileName: headerName } = await downloadMisBatchFile({ batchId });
+      const supabase = createClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token ?? null;
+      const { blob, fileName: headerName } = await downloadMisBatchFile({
+        batchId,
+        accessToken,
+      });
       const resolvedName = headerName || fileName || 'import.dat';
       await triggerBlobDownload(blob, resolvedName);
       feedback.actionSuccess(`Downloaded ${resolvedName}`);

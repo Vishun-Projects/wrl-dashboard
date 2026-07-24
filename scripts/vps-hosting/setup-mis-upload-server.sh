@@ -6,7 +6,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${ROOT}/.env.vps-setup"
-INSTALL_ROOT="${MIS_UPLOAD_INSTALL_ROOT:-/opt/fast-close-app}"
+INSTALL_ROOT="${MIS_UPLOAD_INSTALL_ROOT:-/opt/wrl/database/fast-close-app}"
 SERVICE_NAME="fast-close-mis-upload"
 UPLOAD_PORT="${MIS_UPLOAD_PORT:-3099}"
 
@@ -46,7 +46,7 @@ EOF
 install_caddy_route() {
   local caddyfile="/etc/caddy/Caddyfile"
   local upload_port="${UPLOAD_PORT}"
-  echo "==> Ensuring MIS upload route in ${caddyfile} (preserve mail relay / other handles)"
+  echo "==> Ensuring MIS upload/download routes in ${caddyfile}"
 
   if [[ ! -f "$caddyfile" ]]; then
     cat >"$caddyfile" <<EOF
@@ -57,17 +57,20 @@ api.wrl-fsm.cloud {
 		}
 		reverse_proxy 127.0.0.1:${upload_port}
 	}
+	handle /api/mis-client-import/batches/*/download {
+		reverse_proxy 127.0.0.1:${upload_port}
+	}
 	handle /internal/mail* {
 		reverse_proxy 127.0.0.1:8789
 	}
 	reverse_proxy localhost:8000
 }
 EOF
-  elif grep -Fq 'handle /api/mis-client-import/upload*' "$caddyfile"; then
-    echo "    upload+chunk route already present — leaving Caddyfile unchanged"
-  elif grep -Fq 'handle /api/mis-client-import/upload' "$caddyfile"; then
-    echo "    upgrading upload handle to cover /upload-chunk"
-    python3 - "$caddyfile" <<'PY'
+  else
+    if ! grep -Fq 'handle /api/mis-client-import/upload*' "$caddyfile"; then
+      if grep -Fq 'handle /api/mis-client-import/upload {' "$caddyfile"; then
+        echo "    upgrading upload handle to cover /upload-chunk"
+        python3 - "$caddyfile" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
 text = path.read_text()
@@ -76,19 +79,17 @@ new = "handle /api/mis-client-import/upload* {"
 if old in text:
     path.write_text(text.replace(old, new, 1))
     print("    upgraded upload handle → upload*")
-else:
-    print("    no exact upload handle to upgrade")
 PY
-  else
-    python3 - "$caddyfile" "$upload_port" <<'PY'
+      fi
+    fi
+    if ! grep -Fq 'handle /api/mis-client-import/batches/*/download' "$caddyfile"; then
+      echo "    inserting batch download handle"
+      python3 - "$caddyfile" "$upload_port" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
 port = sys.argv[2]
 text = path.read_text()
-block = f"""\thandle /api/mis-client-import/upload* {{
-\t\trequest_body {{
-\t\t\tmax_size 320MB
-\t\t}}
+block = f"""\thandle /api/mis-client-import/batches/*/download {{
 \t\treverse_proxy 127.0.0.1:{port}
 \t}}
 """
@@ -97,9 +98,28 @@ idx = text.find(needle)
 if idx < 0:
     raise SystemExit("api.wrl-fsm.cloud site block not found in Caddyfile")
 insert_at = idx + len(needle)
+# Prefer right after upload handle if present
+upload_idx = text.find("handle /api/mis-client-import/upload")
+if upload_idx > idx:
+    # find end of that handle block
+    brace = text.find("{", upload_idx)
+    depth = 0
+    i = brace
+    while i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                insert_at = i + 1
+                break
+        i += 1
 path.write_text(text[:insert_at] + "\n" + block + text[insert_at:])
-print("    inserted upload* handle into existing Caddyfile")
+print("    inserted batches/*/download handle")
 PY
+    else
+      echo "    batch download route already present"
+    fi
   fi
 
   if command -v caddy >/dev/null 2>&1; then
@@ -121,7 +141,7 @@ run_install_on_machine() {
     echo "==> Creating ${root}/.env.mis-upload"
     {
       echo "NEXT_PUBLIC_SUPABASE_URL=https://api.wrl-fsm.cloud"
-      echo "MIS_UPLOAD_CORS_ORIGINS=https://wrl-dashboard.vercel.app,http://localhost:3000"
+      echo "MIS_UPLOAD_CORS_ORIGINS=https://wrl-dashboard.vercel.app,https://www.wrl-fsm.cloud,https://wrl-fsm.cloud,http://localhost:3000"
       if [[ -f "${root}/.env.vps-setup" ]]; then
         # shellcheck disable=SC1090
         source "${root}/.env.vps-setup"
@@ -154,7 +174,7 @@ run_install_on_machine() {
   echo ""
   echo "==> Set on Vercel (Production):"
   echo "    NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL=https://api.wrl-fsm.cloud/api/mis-client-import/upload"
-  echo "    MIS_UPLOAD_CORS_ORIGINS=https://wrl-dashboard.vercel.app,http://localhost:3000"
+  echo "    MIS_UPLOAD_CORS_ORIGINS=https://wrl-dashboard.vercel.app,https://www.wrl-fsm.cloud,https://wrl-fsm.cloud,http://localhost:3000"
 }
 
 if [[ "${1:-}" == "--local" ]]; then

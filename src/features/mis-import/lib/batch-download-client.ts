@@ -1,14 +1,34 @@
 import { fetchWithRetry } from '@/lib/net/fetch-with-retry';
 
+/** Prefer VPS host (same as upload) so large files stream off api.wrl-fsm.cloud, not Vercel. */
+export function resolveMisBatchDownloadUrl(batchId: string): string {
+  const external = process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL?.trim();
+  if (external) {
+    const base = external.replace(/\/api\/mis-client-import\/upload\/?$/i, '');
+    return `${base}/api/mis-client-import/batches/${encodeURIComponent(batchId)}/download`;
+  }
+  return `/api/mis-client-import/batches/${encodeURIComponent(batchId)}/download`;
+}
+
+function misDownloadUsesExternalHost(): boolean {
+  return Boolean(process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL?.trim());
+}
+
 /**
  * Download a MIS batch file with retries. On mid-transfer failure, resumes
  * via Range when the server returns Accept-Ranges (stored files only).
  */
 export async function downloadMisBatchFile(params: {
   batchId: string;
+  accessToken?: string | null;
   signal?: AbortSignal;
 }): Promise<{ blob: Blob; fileName: string | null; contentType: string }> {
-  const url = `/api/mis-client-import/batches/${params.batchId}/download`;
+  const url = resolveMisBatchDownloadUrl(params.batchId);
+  const external = misDownloadUsesExternalHost();
+  if (external && !params.accessToken?.trim()) {
+    throw new Error('Session expired — sign in again to download from the VPS host');
+  }
+
   const parts: Uint8Array[] = [];
   let offset = 0;
   let fileName: string | null = null;
@@ -18,6 +38,9 @@ export async function downloadMisBatchFile(params: {
 
   for (let attempt = 0; attempt < 4; attempt++) {
     const headers: Record<string, string> = {};
+    if (external && params.accessToken) {
+      headers.Authorization = `Bearer ${params.accessToken}`;
+    }
     if (offset > 0 && acceptRanges) {
       headers.Range = `bytes=${offset}-`;
     }
@@ -25,7 +48,7 @@ export async function downloadMisBatchFile(params: {
     let res: Response;
     try {
       res = await fetchWithRetry(url, {
-        credentials: 'include',
+        credentials: external ? 'omit' : 'include',
         signal: params.signal,
         headers,
         retries: offset > 0 ? 2 : 3,

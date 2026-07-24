@@ -4,7 +4,7 @@
 export const MIS_UPLOAD_CHUNK_BYTES = 3 * 1024 * 1024;
 
 /** Larger chunks when posting to the VPS upload host. */
-export const MIS_UPLOAD_CHUNK_BYTES_VPS = 8 * 1024 * 1024;
+export const MIS_UPLOAD_CHUNK_BYTES_VPS = 12 * 1024 * 1024;
 
 /** Server accepts up to VPS chunk size (covers both paths). */
 export const MIS_UPLOAD_CHUNK_BYTES_MAX = MIS_UPLOAD_CHUNK_BYTES_VPS;
@@ -15,7 +15,7 @@ export const MIS_UPLOAD_CHUNK_THRESHOLD_BYTES = 4 * 1024 * 1024;
 /** @deprecated Use MIS_UPLOAD_CHUNK_THRESHOLD_BYTES */
 export const MIS_VERCEL_CHUNK_THRESHOLD_BYTES = MIS_UPLOAD_CHUNK_THRESHOLD_BYTES;
 
-export const MIS_UPLOAD_CHUNK_CONCURRENCY = 3;
+export const MIS_UPLOAD_CHUNK_CONCURRENCY = 6;
 export const MIS_UPLOAD_CHUNK_RETRIES = 3;
 
 export function resolveMisUploadChunkBytes(): number {

@@ -32,7 +32,7 @@ describe('shouldUseChunkedMisUpload', () => {
     expect(shouldUseChunkedMisUpload(120 * 1024 * 1024)).toBe(true);
   });
 
-  it('uses 8 MB chunks with VPS URL and 3 MB without', () => {
+  it('uses VPS chunk size with VPS URL and smaller without', () => {
     process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL =
       'https://api.wrl-fsm.cloud/api/mis-client-import/upload';
     expect(resolveMisUploadChunkBytes()).toBe(MIS_UPLOAD_CHUNK_BYTES_VPS);
