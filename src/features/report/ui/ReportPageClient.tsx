@@ -4216,7 +4216,7 @@ export default function ReportPageClient() {
         />
       ) : null}
 
-      {/* Control Bar */}
+      {/* Control Bar — shared filters only on summary / accounts / BD MIS (not client import / deployment). */}
       {activeTab === 'register' ? (
         <RegisterPageFilters
           summary={registerSummary}
@@ -4229,7 +4229,9 @@ export default function ReportPageClient() {
           onSearchEnter={() => void runRegisterFilterLoad({ force: true })}
           onPincodeEnter={() => void runRegisterFilterLoad({ force: true })}
         />
-      ) : (
+      ) : activeTab === 'summary' ||
+        activeTab === 'accounts' ||
+        activeTab === 'bd_mis_summary' ? (
         <>
           <div className="report-toolbar-filters-row report-shared-filters-surface border-b border-slate-200 bg-bg-canvas px-4 py-2">
             <RegisterMultiSelect
@@ -4282,9 +4284,8 @@ export default function ReportPageClient() {
               )}
               {summaryTabLoading || bdMisTabLoading ? 'Applying…' : 'Apply filters'}
             </button>
-            {(activeTab === 'summary' || activeTab === 'accounts' || activeTab === 'bd_mis_summary') &&
-              (clientImportActiveSources.length > 0 ||
-                sourceSelection.clientSourceCodes.includes('cadbury')) && (
+            {(clientImportActiveSources.length > 0 ||
+              sourceSelection.clientSourceCodes.includes('cadbury')) && (
                 <div className="report-toolbar-filters-sources report-shared-sources-group shrink-0 border-l border-slate-200 pl-2 flex flex-wrap items-center gap-2">
                   <MisSourceCheckboxes
                     selection={sourceSelection}
@@ -4303,7 +4304,7 @@ export default function ReportPageClient() {
               )}
           </div>
         </>
-      )}
+      ) : null}
 
       {/* Main Area */}
       <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-bg-canvas">
