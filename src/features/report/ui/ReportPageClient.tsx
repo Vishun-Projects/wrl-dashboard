@@ -4149,25 +4149,27 @@ export default function ReportPageClient() {
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M16 16h5v5" /></svg>
             </div>
           </button>
-          <button
-            onClick={() => handleExport('excel')}
-            className="flex items-center gap-2 bg-bg-canvas text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-bg-soft transition-all shadow-sm"
-            title={
-              activeTab === 'bd_mis_summary'
-                ? 'Export audit workbook — how regional counts were built'
-                : total > 500
-                  ? 'Export filtered register (large datasets download as CSV from server)'
-                  : 'Export filtered register to Excel (.xlsx)'
-            }
-          >
-            <FileSpreadsheet
-              size={14}
-              className={
-                isCurrentTabExcelExporting ? 'animate-pulse text-amber-600' : 'text-emerald-600'
+          {activeTab !== 'client_import' && activeTab !== 'deployment_completion' ? (
+            <button
+              onClick={() => handleExport('excel')}
+              className="flex items-center gap-2 bg-bg-canvas text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-bg-soft transition-all shadow-sm"
+              title={
+                activeTab === 'bd_mis_summary'
+                  ? 'Export audit workbook — how regional counts were built'
+                  : total > 500
+                    ? 'Export filtered register (large datasets download as CSV from server)'
+                    : 'Export filtered register to Excel (.xlsx)'
               }
-            />
-            {isCurrentTabExcelExporting ? 'Exporting…' : 'Export Excel'}
-          </button>
+            >
+              <FileSpreadsheet
+                size={14}
+                className={
+                  isCurrentTabExcelExporting ? 'animate-pulse text-amber-600' : 'text-emerald-600'
+                }
+              />
+              {isCurrentTabExcelExporting ? 'Exporting…' : 'Export Excel'}
+            </button>
+          ) : null}
           {activeTab === 'summary' || activeTab === 'bd_mis_summary' ? (
             <button
               type="button"

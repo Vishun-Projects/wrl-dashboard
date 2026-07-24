@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
+import { queryUserAuth } from '@/lib/auth/user-auth-query';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { resolveCallRegisterDates } from '@/features/report/lib/call-register/dates';
-import { isCallRegisterClient } from '@/features/report/lib/call-register/clients';
+import {
+  parseCallRegisterClientList,
+  validateCallRegisterExportClients,
+} from '@/features/report/lib/call-register/clients';
+import { listVisibleCallRegisterClients } from '@/lib/call-register/visible-clients';
 import {
   callRegisterSerialExportFilename,
   fetchCallRegisterSerialExportRows,
@@ -20,22 +25,26 @@ export async function GET(req: NextRequest) {
     });
     if (!auth.ok) return auth.response;
 
+    const userAuth = await queryUserAuth(auth.userId);
+    const email = userAuth?.profile?.email;
+
     const { searchParams } = new URL(req.url);
-    const client = (searchParams.get('client') || '').trim();
-    if (!isCallRegisterClient(client)) {
-      return NextResponse.json(
-        { error: 'Select a valid client to export.' },
-        { status: 400 }
-      );
+    const clientsParam =
+      searchParams.get('clients') || searchParams.get('client') || '';
+    const parsed = parseCallRegisterClientList(clientsParam);
+    const allowedClients = await listVisibleCallRegisterClients();
+    const validated = validateCallRegisterExportClients(parsed, email, allowedClients);
+    if (!validated.ok) {
+      return NextResponse.json({ error: validated.error }, { status: 400 });
     }
 
     const { dateFrom, dateTo, dateField } = resolveCallRegisterDates(searchParams);
     const params = { dateFrom, dateTo, dateField };
 
-    const rows = await fetchCallRegisterSerialExportRows(client, params);
+    const rows = await fetchCallRegisterSerialExportRows(validated.clients, params);
     const workbook = await buildCallRegisterSerialWorkbook(rows);
     const buffer = await workbookToBuffer(workbook);
-    const filename = callRegisterSerialExportFilename(client, params);
+    const filename = callRegisterSerialExportFilename(params);
 
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,

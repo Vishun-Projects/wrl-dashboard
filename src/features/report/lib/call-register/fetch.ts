@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { prisma } from '@/lib/db/prisma';
-import { CALL_REGISTER_CLIENTS } from './clients';
+import { listVisibleCallRegisterClients } from '@/lib/call-register/visible-clients';
 import { callRegisterDateSqlExpr, parseCallRegisterDateField } from './dates';
 import type { CallRegisterQueryParams, CallRegisterRow, CallRegisterSummary } from './types';
 
@@ -10,9 +10,12 @@ const HOT_DONE = `(
   OR LOWER(COALESCE(h.status_label, '')) IN ('solved', 'completed')
 )`;
 
-function ensureGridRows(rows: CallRegisterRow[]): CallRegisterRow[] {
+function ensureAllowlistGridRows(
+  rows: CallRegisterRow[],
+  allowlist: string[]
+): CallRegisterRow[] {
   const byClient = new Map(rows.map((r) => [r.client, r]));
-  return CALL_REGISTER_CLIENTS.map(
+  return allowlist.map(
     (client) =>
       byClient.get(client) ?? {
         client,
@@ -32,21 +35,7 @@ type AggregateRow = {
   deployment: number;
 };
 
-/** Count install/deploy on billed serials where the solved call is on the same account. */
-async function fetchAggregatedRows(params: CallRegisterQueryParams): Promise<AggregateRow[]> {
-  const { dateFrom, dateTo } = params;
-  const dateField = parseCallRegisterDateField(params.dateField);
-  const dateExpr = callRegisterDateSqlExpr(dateField, 'b');
-  const dateClause =
-    dateFrom && dateTo
-      ? `AND ${dateExpr} >= $2::date
-         AND ${dateExpr} < ($3::date + interval '1 day')`
-      : '';
-  const args: unknown[] =
-    dateFrom && dateTo ? [CALL_REGISTER_CLIENTS, dateFrom, dateTo] : [CALL_REGISTER_CLIENTS];
-
-  return prisma.$queryRawUnsafeBulk<AggregateRow[]>(
-    `SELECT b.client,
+const AGG_SELECT = `SELECT b.client,
        COUNT(*)::int AS qty,
        COUNT(*) FILTER (WHERE EXISTS (
          SELECT 1 FROM calls_latest_hot h
@@ -62,28 +51,67 @@ async function fetchAggregatedRows(params: CallRegisterQueryParams): Promise<Agg
            AND UPPER(h.call_type) IN ('DEPLOYMENT', 'DEPLOYMENT CALL')
            AND ${HOT_DONE}
        ))::int AS deployment
-     FROM crm_transaction_entry b
-     WHERE b.client = ANY($1::text[])
+     FROM crm_transaction_entry b`;
+
+/** Count install/deploy on billed serials where the solved call is on the same account. */
+async function fetchAggregatedRows(
+  params: CallRegisterQueryParams,
+  allowlist: string[] | null
+): Promise<AggregateRow[]> {
+  const { dateFrom, dateTo } = params;
+  const dateField = parseCallRegisterDateField(params.dateField);
+  const dateExpr = callRegisterDateSqlExpr(dateField, 'b');
+  const dateClause =
+    dateFrom && dateTo
+      ? `AND ${dateExpr} >= $1::date
+         AND ${dateExpr} < ($2::date + interval '1 day')`
+      : '';
+
+  if (allowlist == null) {
+    const args: unknown[] = dateFrom && dateTo ? [dateFrom, dateTo] : [];
+    return prisma.$queryRawUnsafeBulk<AggregateRow[]>(
+      `${AGG_SELECT}
+     WHERE NULLIF(trim(b.client), '') IS NOT NULL
      ${dateClause}
+     GROUP BY b.client
+     ORDER BY b.client`,
+      ...args
+    );
+  }
+
+  const curatedDateClause =
+    dateFrom && dateTo
+      ? `AND ${dateExpr} >= $2::date
+         AND ${dateExpr} < ($3::date + interval '1 day')`
+      : '';
+  const args: unknown[] =
+    dateFrom && dateTo ? [allowlist, dateFrom, dateTo] : [allowlist];
+
+  return prisma.$queryRawUnsafeBulk<AggregateRow[]>(
+    `${AGG_SELECT}
+     WHERE b.client = ANY($1::text[])
+     ${curatedDateClause}
      GROUP BY b.client`,
     ...args
   );
 }
 
-export function listCallRegisterClients(): string[] {
-  return [...CALL_REGISTER_CLIENTS];
+export async function listCallRegisterClients(): Promise<string[]> {
+  return listVisibleCallRegisterClients();
 }
 
 export async function fetchCallRegisterRows(
-  params: CallRegisterQueryParams
-): Promise<{ rows: CallRegisterRow[]; summary: CallRegisterSummary }> {
-  const aggregated = await fetchAggregatedRows(params);
+  params: CallRegisterQueryParams & { allClients?: boolean }
+): Promise<{ rows: CallRegisterRow[]; summary: CallRegisterSummary; sharedClients: string[] }> {
+  const allClients = Boolean(params.allClients);
+  const sharedClients = await listVisibleCallRegisterClients();
+  const aggregated = await fetchAggregatedRows(params, allClients ? null : sharedClients);
 
   let totalQty = 0;
   let totalInstallation = 0;
   let totalDeployment = 0;
 
-  const rows = aggregated.map((row) => {
+  const mapped = aggregated.map((row) => {
     const qty = Number(row.qty || 0);
     const installation = Number(row.installation || 0);
     const deployment = Number(row.deployment || 0);
@@ -100,8 +128,24 @@ export async function fetchCallRegisterRows(
     };
   });
 
+  const rows = allClients
+    ? mapped.sort((a, b) => a.client.localeCompare(b.client))
+    : ensureAllowlistGridRows(mapped, sharedClients);
+
+  if (!allClients) {
+    totalQty = 0;
+    totalInstallation = 0;
+    totalDeployment = 0;
+    for (const row of rows) {
+      totalQty += row.qty;
+      totalInstallation += row.installation;
+      totalDeployment += row.deployment;
+    }
+  }
+
   return {
-    rows: ensureGridRows(rows),
+    rows,
+    sharedClients,
     summary: {
       totalQty,
       totalInstallation,

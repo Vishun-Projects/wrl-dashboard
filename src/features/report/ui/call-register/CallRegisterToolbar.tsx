@@ -1,7 +1,8 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { UiDateInput } from '@/components/ui/UiDateInput';
+import { RegisterMultiSelect } from '@/features/register/ui/RegisterMultiSelect';
 
 type CallRegisterToolbarProps = {
   dateFrom: string;
@@ -12,9 +13,19 @@ type CallRegisterToolbarProps = {
   onAllTime: () => void;
   onRefresh: () => void;
   loading: boolean;
-  exportClient: string;
+  /** Options for Accounts visible (editors: full dynamic list). */
+  visibilityOptions: string[];
+  /** Shared allowlist draft — only shown when showVisibilityFilter is true. */
+  visibleClients: string[];
+  onVisibleClientsChange: (clients: string[]) => void;
+  showVisibilityFilter: boolean;
+  visibilityDirty: boolean;
+  onSaveVisibleClients: () => void;
+  savingVisible: boolean;
+  /** Options for Export accounts. */
+  exportOptions: string[];
   exportClients: string[];
-  onExportClientChange: (val: string) => void;
+  onExportClientsChange: (clients: string[]) => void;
   onExport: () => void;
   exporting: boolean;
   filterDirty: boolean;
@@ -29,18 +40,32 @@ export function CallRegisterToolbar({
   onAllTime,
   onRefresh,
   loading,
-  exportClient,
+  visibilityOptions,
+  visibleClients,
+  onVisibleClientsChange,
+  showVisibilityFilter,
+  visibilityDirty,
+  onSaveVisibleClients,
+  savingVisible,
+  exportOptions,
   exportClients,
-  onExportClientChange,
+  onExportClientsChange,
   onExport,
   exporting,
   filterDirty,
 }: CallRegisterToolbarProps) {
-  const busy = loading || exporting;
-  const clients = exportClients.length > 0 ? exportClients : exportClient ? [exportClient] : [];
+  const busy = loading || exporting || savingVisible;
+  const visibilitySelectOptions = useMemo(
+    () => visibilityOptions.map((c) => ({ value: c, label: c })),
+    [visibilityOptions]
+  );
+  const exportSelectOptions = useMemo(
+    () => exportOptions.map((c) => ({ value: c, label: c })),
+    [exportOptions]
+  );
 
   return (
-    <div className="relative z-20 shrink-0 border-b border-slate-200 bg-bg-canvas px-4 py-3 flex flex-wrap items-center gap-4">
+    <div className="relative z-20 shrink-0 border-b border-slate-200 bg-bg-canvas px-4 py-3 flex flex-wrap items-center gap-3">
       <div className="flex shrink-0 items-center gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
           Billing date
@@ -87,25 +112,51 @@ export function CallRegisterToolbar({
         All Time
       </button>
 
-      <div className="flex shrink-0 items-center gap-2 ml-auto">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-          Export Client
-        </span>
-        <select
-          value={exportClient}
-          onChange={(e) => onExportClientChange(e.target.value)}
-          disabled={busy || clients.length === 0}
-          className="h-8 min-w-[11rem] rounded-md border border-slate-200 bg-bg-canvas px-2 text-[12px] text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none disabled:opacity-50"
-        >
-          {clients.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
+      {showVisibilityFilter ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <div className={busy ? 'pointer-events-none opacity-50' : undefined}>
+            <RegisterMultiSelect
+              label="Accounts visible"
+              emptyLabel="Accounts visible"
+              options={visibilitySelectOptions}
+              selected={visibleClients}
+              onChange={onVisibleClientsChange}
+              layout="inline"
+              searchable
+              showSelectAll
+              selectAllLabel="Select all"
+              panelClassName="w-64"
+            />
+          </div>
+          <button
+            type="button"
+            disabled={busy || !visibilityDirty || visibleClients.length === 0}
+            onClick={onSaveVisibleClients}
+            className="h-8 shrink-0 rounded-md bg-slate-900 px-3 text-[12px] font-medium text-white shadow-sm hover:bg-slate-800 disabled:opacity-50"
+          >
+            {savingVisible ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      ) : null}
+
+      <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
+        <div className={busy ? 'pointer-events-none opacity-50' : undefined}>
+          <RegisterMultiSelect
+            label="Export accounts"
+            emptyLabel="Export accounts"
+            options={exportSelectOptions}
+            selected={exportClients}
+            onChange={onExportClientsChange}
+            layout="inline"
+            searchable
+            showSelectAll
+            selectAllLabel="Select all"
+            panelClassName="w-64"
+          />
+        </div>
         <button
           type="button"
-          disabled={busy || !exportClient}
+          disabled={busy || exportClients.length === 0}
           onClick={onExport}
           className="h-8 shrink-0 rounded-md bg-teal-700 px-3 text-[12px] font-medium text-white shadow-sm hover:bg-teal-800 disabled:opacity-50"
         >
