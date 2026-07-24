@@ -165,6 +165,32 @@ export async function downloadRegisterCsvFromRows(
   await downloadRegisterCsvInBrowser(rows, filename);
 }
 
+/** Count `\n` in a byte chunk (CSV rows end with `\r\n` or `\n`). */
+export function countNewlinesInBytes(bytes: Uint8Array): number {
+  let n = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] === 10) n++;
+  }
+  return n;
+}
+
+/**
+ * Data rows in a BOM + header + body CSV stream.
+ * newlines = 1 (header) + dataRows when every line ends with `\n`.
+ */
+export function csvDataRowsFromNewlineCount(newlines: number): number {
+  return Math.max(0, newlines - 1);
+}
+
+/** Throw when a truncated/proxy-cut stream delivered fewer rows than promised. */
+export function assertRegisterCsvExportComplete(dataRows: number, exportTotal: number): void {
+  if (exportTotal > 0 && dataRows < exportTotal) {
+    throw new Error(
+      `Export incomplete — got ${dataRows.toLocaleString()} of ${exportTotal.toLocaleString()} rows`
+    );
+  }
+}
+
 /** Stream register CSV from server into a prepared export blob (single server path). */
 export async function prepareRegisterCsvFromServer(opts: {
   query: RegisterExportQuery;
@@ -206,7 +232,7 @@ export async function prepareRegisterCsvFromServer(opts: {
   }
 
   const chunks: Uint8Array[] = [];
-  let receivedBytes = 0;
+  let newlines = 0;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -214,20 +240,20 @@ export async function prepareRegisterCsvFromServer(opts: {
     if (!value?.length) continue;
 
     chunks.push(value);
-    receivedBytes += value.length;
+    newlines += countNewlinesInBytes(value);
 
     if (exportTotal > 0) {
-      const estimatedRows = Math.min(exportTotal, Math.floor(receivedBytes / 200));
-      opts.onProgress?.({
-        fetched: estimatedRows,
-        total: exportTotal,
-      });
+      const fetched = Math.min(exportTotal, csvDataRowsFromNewlineCount(newlines));
+      opts.onProgress?.({ fetched, total: exportTotal });
     }
   }
 
+  const dataRows = csvDataRowsFromNewlineCount(newlines);
+  assertRegisterCsvExportComplete(dataRows, exportTotal);
+
   opts.onProgress?.({
-    fetched: exportTotal > 0 ? exportTotal : 0,
-    total: exportTotal > 0 ? exportTotal : 0,
+    fetched: exportTotal > 0 ? exportTotal : dataRows,
+    total: exportTotal > 0 ? exportTotal : dataRows,
   });
 
   const blob = new Blob(chunks as BlobPart[], { type: 'text/csv;charset=utf-8;' });

@@ -1,13 +1,14 @@
 /**
  * Gap-fill calls_latest_hot from CRM corpus — upsert only, no truncate.
  *
- * Phase 1: missing INSTALLATION CALL TRNs (full sync joins).
+ * Phase 1: CRM TRNs missing from hot (all call types, or --installations-only).
  * Phase 2: days where hot count is short vs CRM corpus (full day shard refetch).
  *
  *   npx tsx src/lib/read-model/cli.ts fill-hot-gaps
  *   npx tsx src/lib/read-model/cli.ts fill-hot-gaps --from 2025-11-01 --to 2025-12-31
  *   npx tsx src/lib/read-model/cli.ts fill-hot-gaps --serial 32614250700193
  *   npx tsx src/lib/read-model/cli.ts fill-hot-gaps --installations-only --from 2024-01-01 --to 2025-12-31
+ *   npx tsx src/lib/read-model/cli.ts fill-hot-gaps --skip-short-days --from 2025-09-01 --to 2025-12-31
  */
 import { forEachCrmBackfillChunk, fetchCrmRowsByTrns } from '@/lib/read-model/crm-fetch';
 import { dayBeforeDate, registerHotRetentionStart } from '@/lib/read-model/hot-window';
@@ -89,10 +90,10 @@ async function crmCorpusCount(day: string): Promise<number> {
   return Number(rows[0]?.cnt ?? 0);
 }
 
-async function crmInstallTrnsInRange(
+async function crmCorpusTrnsInRange(
   from: string,
   to: string,
-  callTypeCode: number
+  callTypeCode?: number
 ): Promise<string[]> {
   // One CRM round-trip per month — day-by-day was too slow across multi-year spans.
   const months: { start: string; end: string }[] = [];
@@ -110,6 +111,9 @@ async function crmInstallTrnsInRange(
     cursor.setMonth(m + 1, 1);
   }
 
+  const typeSql =
+    callTypeCode != null ? `AND tc.ncalltype = ${callTypeCode}` : '';
+  const label = callTypeCode != null ? `type=${callTypeCode}` : 'all-types';
   const all: string[] = [];
   const gapMs = Number(process.env.SYNC_CRM_FETCH_GAP_MS ?? 1500) || 1500;
   for (const { start, end } of months) {
@@ -121,12 +125,12 @@ async function crmInstallTrnsInRange(
           AND tc.vtrnno IS NOT NULL AND tc.vtrnno <> ''
           AND ISNULL(tc.vtransfercallno, '') = ''
           AND ISNULL(CAST(tc.ncancelreason AS INT), 0) <> 2
-          AND tc.ncalltype = ${callTypeCode}
+          ${typeSql}
       `,
     });
     const rows = (r.data ?? []) as { vtrnno: string }[];
     const trns = rows.map((row) => String(row.vtrnno ?? '').trim()).filter(Boolean);
-    console.log(`[fill-hot-gaps] install CRM ${start}..${end} trns=${trns.length}`);
+    console.log(`[fill-hot-gaps] CRM ${label} ${start}..${end} trns=${trns.length}`);
     all.push(...trns);
     await sleep(gapMs);
   }
@@ -241,15 +245,22 @@ async function refillDay(day: string): Promise<{ fetched: number; upserted: numb
   return { fetched, upserted };
 }
 
-/** Find CRM INSTALLATION CALL TRNs missing from hot; upsert with full joins. */
-async function fillMissingInstallations(from: string, to: string): Promise<number> {
-  const callTypeCode = await resolveInstallationCallTypeCode();
-  console.log(`[fill-hot-gaps] phase 1: missing INSTALLATION CALL TRNs ${from} .. ${to}`);
+/** Find CRM corpus TRNs missing from hot; upsert with full joins. */
+async function fillMissingCorpusTrns(
+  from: string,
+  to: string,
+  opts?: { installationsOnly?: boolean }
+): Promise<number> {
+  const installationsOnly = Boolean(opts?.installationsOnly);
+  const callTypeCode = installationsOnly ? await resolveInstallationCallTypeCode() : undefined;
+  console.log(
+    `[fill-hot-gaps] phase 1: missing ${installationsOnly ? 'INSTALLATION CALL' : 'ALL'} TRNs ${from} .. ${to}`
+  );
 
-  const crmTrns = await crmInstallTrnsInRange(from, to, callTypeCode);
-  console.log(`[fill-hot-gaps] install CRM unique TRNs=${crmTrns.length}`);
+  const crmTrns = await crmCorpusTrnsInRange(from, to, callTypeCode);
+  console.log(`[fill-hot-gaps] CRM unique TRNs=${crmTrns.length}`);
   const missing = await missingTrnsNotInHot(crmTrns);
-  console.log(`[fill-hot-gaps] install missing in hot=${missing.length}`);
+  console.log(`[fill-hot-gaps] missing in hot=${missing.length}`);
   if (!missing.length) {
     console.log('[fill-hot-gaps] phase 1 done — nothing missing');
     return 0;
@@ -316,12 +327,13 @@ export async function runFillHotGaps(opts?: {
   const from = opts?.from ?? parseArg('--from') ?? DEFAULT_START;
   const to = opts?.to ?? parseArg('--to') ?? dayBeforeDate(ytd);
   const installationsOnly = hasFlag('--installations-only');
-  const skipInstallations = hasFlag('--skip-installations');
+  const skipMissingTrns = hasFlag('--skip-installations') || hasFlag('--skip-missing-trns');
+  const skipShortDays = hasFlag('--skip-short-days');
 
-  if (!skipInstallations) {
-    await fillMissingInstallations(from, to);
+  if (!skipMissingTrns) {
+    await fillMissingCorpusTrns(from, to, { installationsOnly });
   }
-  if (!installationsOnly) {
+  if (!installationsOnly && !skipShortDays) {
     await fillShortDays(from, to);
   }
 

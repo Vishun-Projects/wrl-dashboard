@@ -30,7 +30,7 @@ import { ReportOrientationBanner } from '@/features/report/ui/ReportOrientationB
 import ReportExportQueuePanel from '@/features/report/ui/ReportExportQueuePanel';
 import { useReportExportQueue } from '@/features/report/ui/useReportExportQueue';
 import type { ExportQueueRunContext } from '@/features/report/lib/export-queue';
-import { estimateExportEtaSeconds, isExportActiveForTab } from '@/features/report/lib/export-queue';
+import { isExportActiveForTab } from '@/features/report/lib/export-queue';
 import { consumeExportInterruptedFlag, markExportInterrupted } from '@/features/report/lib/export-queue-session';
 import { exportLabelForMisTab } from '@/features/report/lib/export-labels';
 import { ReportErrorBoundary } from '@/features/report/ui/ReportErrorBoundary';
@@ -484,7 +484,6 @@ export default function ReportPageClient() {
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
   const [tempFilterRegion, setTempFilterRegion] = useState<string[]>([]);
   const [tempFilterAccount, setTempFilterAccount] = useState<string[]>([]);
-  const exportStartedAtRef = React.useRef<number>(0);
   const {
     items: exportQueueItems,
     enqueue: enqueueExport,
@@ -3855,22 +3854,17 @@ export default function ReportPageClient() {
 
           if (needsFullFetch && exportData.length < total) {
             if (shouldStreamRegisterExportFromServer(total, exportData.length)) {
-              exportStartedAtRef.current = Date.now();
               onProgress({ fetched: 0, total });
               const prepared = await prepareRegisterCsvFromServer({
                 query: exportQuery,
                 knownTotal: total,
                 signal,
                 onProgress: (progress) => {
-                  const { fetched, total: exportTotal, detail } = progress;
-                  const elapsed = (Date.now() - exportStartedAtRef.current) / 1000;
-                  const etaSeconds = estimateExportEtaSeconds({
-                    fetched,
-                    total: exportTotal,
-                    elapsedSec: elapsed,
-                    detail,
+                  onProgress({
+                    fetched: progress.fetched,
+                    total: progress.total,
+                    detail: progress.detail,
                   });
-                  onProgress({ fetched, total: exportTotal, etaSeconds, detail });
                 },
               });
               if (format === 'excel') {

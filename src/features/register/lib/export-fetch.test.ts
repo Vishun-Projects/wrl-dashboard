@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertRegisterCsvExportComplete,
   buildRegisterExportParams,
+  countNewlinesInBytes,
+  csvDataRowsFromNewlineCount,
   registerExportCursorFromRow,
   shouldStreamRegisterExportFromServer,
 } from '@/features/register/lib/export-fetch';
@@ -72,5 +75,13 @@ describe('register export client helpers', () => {
       cursorLoggedAt: '2026-06-15T14:30:00.000Z',
       cursorNcode: 12,
     });
+  });
+
+  it('counts CSV data rows from newlines and rejects incomplete exports', () => {
+    const chunk = new TextEncoder().encode('h1,h2\r\nr1,a\r\nr2,b\r\n');
+    expect(countNewlinesInBytes(chunk)).toBe(3);
+    expect(csvDataRowsFromNewlineCount(3)).toBe(2);
+    expect(() => assertRegisterCsvExportComplete(2, 2)).not.toThrow();
+    expect(() => assertRegisterCsvExportComplete(37_091, 293_443)).toThrow(/Export incomplete/);
   });
 });

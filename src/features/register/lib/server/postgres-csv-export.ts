@@ -14,12 +14,11 @@ import {
 } from '@/lib/read-model/queries/register';
 import { REGISTER_EXPORT_HOT_COLUMNS } from '@/lib/read-model/queries/register-columns';
 import { mergeArcpPickOntoHotExportRows } from '@/lib/register-sql/arcp-approve-dates-server';
-import { enrichRegisterRowsRepairDone } from '@/lib/register-sql/repair-done-enrich';
 import { escapeCsvCell } from '@/lib/utils/csv';
 import { REGISTER_EXPORT_COLUMNS } from '@/features/register/lib/table-columns';
 import { responseForCsvStream } from '@/lib/net/csv-gzip-response';
 
-const KEYSET_FETCH_SIZE = 12_000;
+const KEYSET_FETCH_SIZE = 50_000;
 
 function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
   const franchisee =
@@ -91,7 +90,7 @@ export type PostgresRegisterCsvStreamOptions = Omit<
   'page' | 'limit' | 'fetchTotals' | 'fetchFilterOptions'
 > & { acceptEncoding?: string | null };
 
-/** Stream register CSV from calls_latest_hot — composite keyset pages + batch ARCP enrichment per chunk. */
+/** Stream register CSV from calls_latest_hot — keyset pages + ARCP dates (no CRM repair enrich). */
 export async function buildPostgresRegisterCsvStream(
   params: PostgresRegisterCsvStreamOptions
 ): Promise<Response> {
@@ -164,7 +163,6 @@ export async function buildPostgresRegisterCsvStream(
             rows = await mergeArcpPickOntoHotExportRows(rows, (sql, queryParams) =>
               client.query(sql, queryParams)
             );
-            rows = await enrichRegisterRowsRepairDone(rows);
 
             let chunk = '';
             for (const row of rows) {
