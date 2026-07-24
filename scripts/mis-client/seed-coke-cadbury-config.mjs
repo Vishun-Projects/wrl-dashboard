@@ -112,7 +112,8 @@ try {
   ]);
 
   await seedStatusMappings(cokeId, [
-    // CDMS: Closed + Service Done → solved; engineer-assigned statuses → open
+    // CDMS: Open + engineer-assigned → open; Closed + Service Done → solved
+    { client_status: 'Open', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'S.Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'Service Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'Service Done', status_bucket: 'solved', status_label: 'Closed' },

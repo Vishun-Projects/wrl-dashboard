@@ -19,6 +19,7 @@ const cokeConfig: MisClientSourceConfig = {
     { client_column: 'Entity Name', crm_field: 'state', transform: null },
   ],
   statusMappings: [
+    { client_status: 'Open', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'S.Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'Service Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'Service Done', status_bucket: 'solved', status_label: 'Closed' },
@@ -39,7 +40,7 @@ describe('snapshot import sources', () => {
 });
 
 describe('coke status mappings', () => {
-  it('rejects plain Open status (not engineer-assigned)', () => {
+  it('maps plain Open status to assigned', () => {
     const { rows, errors } = normalizeClientRows(cokeConfig, [
       {
         'Call No': '9001',
@@ -48,9 +49,9 @@ describe('coke status mappings', () => {
         'Entity Name': 'Vijaywada Beverage',
       },
     ]);
-    expect(rows).toHaveLength(0);
-    expect(errors).toHaveLength(1);
-    expect(errors[0].message).toMatch(/Unknown status/i);
+    expect(errors).toHaveLength(0);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status_bucket).toBe('assigned');
   });
 
   it('counts Service Engg Assigned as open', () => {

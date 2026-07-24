@@ -3855,10 +3855,14 @@ export default function ReportPageClient() {
           if (needsFullFetch && exportData.length < total) {
             if (shouldStreamRegisterExportFromServer(total, exportData.length)) {
               onProgress({ fetched: 0, total });
+              const {
+                data: { session },
+              } = await supabase.auth.getSession();
               const prepared = await prepareRegisterCsvFromServer({
                 query: exportQuery,
                 knownTotal: total,
                 signal,
+                accessToken: session?.access_token,
                 onProgress: (progress) => {
                   onProgress({
                     fetched: progress.fetched,
@@ -4040,11 +4044,7 @@ export default function ReportPageClient() {
               throw err;
             }
             const message = err instanceof Error ? err.message : 'Export failed';
-            const hint =
-              sourceTab === 'register' && !message.includes('date range')
-                ? ' Try narrowing the date range and export again.'
-                : '';
-            feedback.actionFailed(`Failed to export: ${message}${hint}`);
+            feedback.actionFailed(`Failed to export: ${message}`);
             throw err instanceof Error ? err : new Error(message);
           }
         },

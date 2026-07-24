@@ -582,6 +582,7 @@ const cokeConfigFull: MisClientSourceConfig = {
   ...cokeConfig,
   header_row_index: 5,
   statusMappings: [
+    { client_status: 'Open', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'S.Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'Service Engg Assigned', status_bucket: 'assigned', status_label: 'Assigned' },
     { client_status: 'Service Done', status_bucket: 'solved', status_label: 'Closed' },
@@ -685,7 +686,7 @@ describe('detect-parse', () => {
       const rawRows = (await parseImportFile(buf, 'CDMS_CallStatus_Detailed (37).xlsx', cokeConfigFull))
         .rawRows;
       const { rows, errors } = normalizeClientRows(cokeConfigFull, rawRows);
-      expect(errors.every((e) => e.message.includes('Unknown status: Open'))).toBe(true);
+      expect(errors.filter((e) => e.message.includes('Unknown status: Open'))).toHaveLength(0);
       expect(errors.length).toBeLessThan(20);
       expect(rows.length).toBeGreaterThan(30_000);
       expect(rows.every((r) => r.region === 'SOUTH')).toBe(true);

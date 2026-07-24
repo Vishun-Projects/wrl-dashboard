@@ -60,6 +60,9 @@ api.wrl-fsm.cloud {
 	handle /api/mis-client-import/batches/*/download {
 		reverse_proxy 127.0.0.1:${upload_port}
 	}
+	handle /api/report/register-export {
+		reverse_proxy 127.0.0.1:${upload_port}
+	}
 	handle /internal/mail* {
 		reverse_proxy 127.0.0.1:8789
 	}
@@ -119,6 +122,42 @@ print("    inserted batches/*/download handle")
 PY
     else
       echo "    batch download route already present"
+    fi
+    if ! grep -Fq 'handle /api/report/register-export' "$caddyfile"; then
+      echo "    inserting register-export handle"
+      python3 - "$caddyfile" "$upload_port" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+port = sys.argv[2]
+text = path.read_text()
+block = f"""\thandle /api/report/register-export {{
+\t\treverse_proxy 127.0.0.1:{port}
+\t}}
+"""
+needle = "api.wrl-fsm.cloud {"
+idx = text.find(needle)
+if idx < 0:
+    raise SystemExit("api.wrl-fsm.cloud site block not found in Caddyfile")
+insert_at = idx + len(needle)
+dl_idx = text.find("handle /api/mis-client-import/batches")
+if dl_idx > idx:
+    brace = text.find("{", dl_idx)
+    depth = 0
+    i = brace
+    while i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                insert_at = i + 1
+                break
+        i += 1
+path.write_text(text[:insert_at] + "\n" + block + text[insert_at:])
+print("    inserted register-export handle")
+PY
+    else
+      echo "    register-export route already present"
     fi
   fi
 

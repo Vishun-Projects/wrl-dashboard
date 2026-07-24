@@ -1,5 +1,3 @@
-import 'server-only';
-
 import { withBulkReadClient } from '@/lib/read-model/db';
 import { formatRegisterExportDate } from '@/features/register/lib/export-dates';
 import { formatRegisterMajorMinor } from '@/features/register/lib/major-minor';
@@ -18,7 +16,8 @@ import { escapeCsvCell } from '@/lib/utils/csv';
 import { REGISTER_EXPORT_COLUMNS } from '@/features/register/lib/table-columns';
 import { responseForCsvStream } from '@/lib/net/csv-gzip-response';
 
-const KEYSET_FETCH_SIZE = 50_000;
+/** Large pages keep export under a handful of Postgres round-trips (VPS / long-lived hosts). */
+const KEYSET_FETCH_SIZE = 100_000;
 
 function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
   const franchisee =
@@ -164,11 +163,11 @@ export async function buildPostgresRegisterCsvStream(
               client.query(sql, queryParams)
             );
 
-            let chunk = '';
-            for (const row of rows) {
-              chunk += `${hotPgRowToRegisterCsvLine(row)}\r\n`;
+            const lines = new Array<string>(rows.length);
+            for (let i = 0; i < rows.length; i++) {
+              lines[i] = hotPgRowToRegisterCsvLine(rows[i]!);
             }
-            if (!enqueue(encoder.encode(chunk))) return;
+            if (!enqueue(encoder.encode(`${lines.join('\r\n')}\r\n`))) return;
             exportedRows += rows.length;
 
             const cursor = registerKeysetCursorFromRow(

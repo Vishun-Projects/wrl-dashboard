@@ -5,6 +5,7 @@ import {
   countNewlinesInBytes,
   csvDataRowsFromNewlineCount,
   registerExportCursorFromRow,
+  resolveRegisterCsvExportUrl,
   shouldStreamRegisterExportFromServer,
 } from '@/features/register/lib/export-fetch';
 
@@ -83,5 +84,21 @@ describe('register export client helpers', () => {
     expect(csvDataRowsFromNewlineCount(3)).toBe(2);
     expect(() => assertRegisterCsvExportComplete(2, 2)).not.toThrow();
     expect(() => assertRegisterCsvExportComplete(37_091, 293_443)).toThrow(/Export incomplete/);
+  });
+
+  it('routes large register CSV to the VPS host when MIS upload URL is set', () => {
+    const prev = process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL;
+    process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL =
+      'https://api.wrl-fsm.cloud/api/mis-client-import/upload';
+    try {
+      const params = new URLSearchParams({ export: 'csv', startDate: '2026-01-01' });
+      const { url, external } = resolveRegisterCsvExportUrl(params);
+      expect(external).toBe(true);
+      expect(url).toContain('https://api.wrl-fsm.cloud/api/report/register-export?');
+      expect(url).toContain('export=csv');
+    } finally {
+      if (prev === undefined) delete process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL;
+      else process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL = prev;
+    }
   });
 });

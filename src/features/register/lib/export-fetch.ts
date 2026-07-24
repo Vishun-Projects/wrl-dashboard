@@ -186,9 +186,27 @@ export function csvDataRowsFromNewlineCount(newlines: number): number {
 export function assertRegisterCsvExportComplete(dataRows: number, exportTotal: number): void {
   if (exportTotal > 0 && dataRows < exportTotal) {
     throw new Error(
-      `Export incomplete — got ${dataRows.toLocaleString()} of ${exportTotal.toLocaleString()} rows`
+      `Export incomplete — got ${dataRows.toLocaleString()} of ${exportTotal.toLocaleString()} rows. Retry the export.`
     );
   }
+}
+
+/** Prefer VPS host (same as MIS upload) so large CSV streams are not cut by Vercel maxDuration. */
+export function resolveRegisterCsvExportUrl(params: URLSearchParams): {
+  url: string;
+  external: boolean;
+} {
+  const repair = params.get('repair') || '';
+  const hasRepair = Boolean(repair && repair !== 'All');
+  const external = process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL?.trim();
+  if (external && !hasRepair) {
+    const base = external.replace(/\/api\/mis-client-import\/upload\/?$/i, '');
+    return {
+      url: `${base}/api/report/register-export?${params.toString()}`,
+      external: true,
+    };
+  }
+  return { url: `/api/report?${params.toString()}`, external: false };
 }
 
 /** Stream register CSV from server into a prepared export blob (single server path). */
@@ -196,6 +214,7 @@ export async function prepareRegisterCsvFromServer(opts: {
   query: RegisterExportQuery;
   knownTotal?: number;
   signal?: AbortSignal;
+  accessToken?: string | null;
   onProgress?: (progress: RegisterExportProgress) => void;
 }): Promise<PreparedFileExport> {
   const params = buildRegisterExportParams(opts.query, 1, REGISTER_EXPORT_BATCH_CRM, false);
@@ -204,17 +223,25 @@ export async function prepareRegisterCsvFromServer(opts: {
   const fallbackTotal = Math.max(0, opts.knownTotal ?? 0);
   opts.onProgress?.({ fetched: 0, total: fallbackTotal });
 
-  const res = await fetchWithRetry(`/api/report?${params.toString()}`, {
-    credentials: 'include',
+  const { url, external } = resolveRegisterCsvExportUrl(params);
+  if (external && !opts.accessToken?.trim()) {
+    throw new Error('Session expired — sign in again to export');
+  }
+
+  const headers: Record<string, string> = {};
+  if (external && opts.accessToken) {
+    headers.Authorization = `Bearer ${opts.accessToken}`;
+  }
+
+  const res = await fetchWithRetry(url, {
+    credentials: external ? 'omit' : 'include',
     signal: opts.signal,
+    headers,
   });
 
   if (!res.ok) {
     const errBody = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(
-      errBody.error ||
-        `Export failed (${res.status}). Try a shorter date range or retry in a moment.`
-    );
+    throw new Error(errBody.error || `Export failed (${res.status}). Retry in a moment.`);
   }
 
   const contentType = String(res.headers.get('content-type') ?? '');

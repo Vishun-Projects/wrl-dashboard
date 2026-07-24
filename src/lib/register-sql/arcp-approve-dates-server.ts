@@ -48,7 +48,8 @@ const ARCP_PICK_BY_CALL_NOS_FALLBACK_SQL = `
     ncode DESC
 `;
 
-const ARCP_CALL_ID_BATCH_SIZE = 2_000;
+/** One round-trip per register export page (was 2k → ~25 queries/page and multi-minute exports). */
+const ARCP_CALL_ID_BATCH_SIZE = 50_000;
 
 export function normalizeRegisterArcpCallKey(value: unknown): string {
   return String(value ?? '').trim().toUpperCase();

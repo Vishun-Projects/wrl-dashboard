@@ -9,6 +9,7 @@
  *   POST /api/mis-client-import/upload
  *   GET|POST /api/mis-client-import/upload-chunk
  *   GET /api/mis-client-import/batches/:batchId/download
+ *   GET /api/report/register-export
  */
 import { config } from 'dotenv';
 import { createServer } from 'http';
@@ -25,6 +26,7 @@ import {
   assertMisUploadAccess,
   resolveMisUploadUserId,
 } from '@/features/mis-import/lib/upload-standalone-auth';
+import { buildRegisterCsvExportResponse } from '@/features/register/lib/server/register-csv-export-auth';
 
 const root = resolve(__dirname, '../..');
 config({ path: resolve(root, '.env.mis-upload') });
@@ -36,6 +38,7 @@ config({ path: resolve(root, '.env.sync-worker') });
 const PORT = Number(process.env.MIS_UPLOAD_PORT ?? 3099);
 const UPLOAD_PATH = '/api/mis-client-import/upload';
 const CHUNK_PATH = '/api/mis-client-import/upload-chunk';
+const REGISTER_EXPORT_PATH = '/api/report/register-export';
 const BATCH_DOWNLOAD_RE = /^\/api\/mis-client-import\/batches\/([^/]+)\/download\/?$/;
 
 const ALLOWED_ORIGINS = new Set(
@@ -51,7 +54,7 @@ function corsHeaders(origin: string | undefined): Record<string, string> {
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type, Range',
     'Access-Control-Expose-Headers':
-      'Content-Disposition, Content-Length, Accept-Ranges, Content-Range, Content-Type',
+      'Content-Disposition, Content-Length, Accept-Ranges, Content-Range, Content-Type, X-Register-Export-Total',
     'Access-Control-Max-Age': '86400',
   };
   if (origin && ALLOWED_ORIGINS.has(origin)) {
@@ -126,6 +129,27 @@ async function resolveAuthedUserId(
   return { userId };
 }
 
+async function pipeWebStreamToNode(
+  web: ReadableStream<Uint8Array>,
+  res: import('http').ServerResponse
+): Promise<void> {
+  const reader = web.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.length) continue;
+      if (!res.write(Buffer.from(value))) {
+        await new Promise<void>((resolveWrite) => res.once('drain', resolveWrite));
+      }
+    }
+    res.end();
+  } catch (err) {
+    reader.releaseLock();
+    throw err;
+  }
+}
+
 createServer(async (req, res) => {
   const origin = req.headers.origin;
   const baseHeaders = corsHeaders(origin);
@@ -134,7 +158,10 @@ createServer(async (req, res) => {
 
   if (
     req.method === 'OPTIONS' &&
-    (pathname === UPLOAD_PATH || pathname === CHUNK_PATH || downloadMatch)
+    (pathname === UPLOAD_PATH ||
+      pathname === CHUNK_PATH ||
+      pathname === REGISTER_EXPORT_PATH ||
+      downloadMatch)
   ) {
     res.writeHead(204, baseHeaders);
     res.end();
@@ -142,6 +169,36 @@ createServer(async (req, res) => {
   }
 
   try {
+    if (req.method === 'GET' && pathname === REGISTER_EXPORT_PATH) {
+      const auth = await resolveAuthedUserId(req, undefined, 'download');
+      if (!auth.userId) {
+        const status = auth.error?.startsWith('Forbidden') ? 403 : 401;
+        res.writeHead(status, { ...baseHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: auth.error ?? 'Unauthorized' }));
+        return;
+      }
+      const acceptEncoding =
+        typeof req.headers['accept-encoding'] === 'string'
+          ? req.headers['accept-encoding']
+          : null;
+      const response = await buildRegisterCsvExportResponse({
+        userId: auth.userId,
+        searchParams,
+        acceptEncoding,
+      });
+      const outHeaders: Record<string, string> = { ...baseHeaders };
+      response.headers.forEach((value, key) => {
+        outHeaders[key] = value;
+      });
+      res.writeHead(response.status, outHeaders);
+      if (!response.body) {
+        res.end();
+        return;
+      }
+      await pipeWebStreamToNode(response.body, res);
+      return;
+    }
+
     if (req.method === 'GET' && downloadMatch) {
       const batchId = decodeURIComponent(downloadMatch[1] ?? '').trim();
       if (!batchId) {
@@ -253,4 +310,5 @@ createServer(async (req, res) => {
   console.log(`[mis-upload-server]   POST ${UPLOAD_PATH}`);
   console.log(`[mis-upload-server]   GET|POST ${CHUNK_PATH}`);
   console.log(`[mis-upload-server]   GET /api/mis-client-import/batches/:id/download`);
+  console.log(`[mis-upload-server]   GET ${REGISTER_EXPORT_PATH}`);
 });
