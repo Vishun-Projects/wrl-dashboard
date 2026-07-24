@@ -7,6 +7,8 @@ import {
   registerExportCursorFromRow,
   resolveRegisterCsvExportUrl,
   shouldStreamRegisterExportFromServer,
+  splitRegisterExportDateShards,
+  stripCsvBomAndHeader,
 } from '@/features/register/lib/export-fetch';
 
 describe('register export client helpers', () => {
@@ -127,8 +129,10 @@ describe('register export client helpers', () => {
 
   it('keeps repair-filter exports on same-origin', () => {
     const prev = process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL;
+    const prevFlag = process.env.NEXT_PUBLIC_REGISTER_CSV_VPS;
     process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL =
       'https://api.wrl-fsm.cloud/api/mis-client-import/upload';
+    process.env.NEXT_PUBLIC_REGISTER_CSV_VPS = '1';
     try {
       const params = new URLSearchParams({ export: 'csv', repair: '1,2' });
       const { url, external } = resolveRegisterCsvExportUrl(params);
@@ -137,6 +141,25 @@ describe('register export client helpers', () => {
     } finally {
       if (prev === undefined) delete process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL;
       else process.env.NEXT_PUBLIC_MIS_CLIENT_UPLOAD_URL = prev;
+      if (prevFlag === undefined) delete process.env.NEXT_PUBLIC_REGISTER_CSV_VPS;
+      else process.env.NEXT_PUBLIC_REGISTER_CSV_VPS = prevFlag;
     }
+  });
+
+  it('splits export dates into week-sized shards', () => {
+    const shards = splitRegisterExportDateShards('2026-01-01', '2026-01-20', {
+      maxDaysPerShard: 7,
+    });
+    expect(shards).toEqual([
+      { startDate: '2026-01-01', endDate: '2026-01-07' },
+      { startDate: '2026-01-08', endDate: '2026-01-14' },
+      { startDate: '2026-01-15', endDate: '2026-01-20' },
+    ]);
+  });
+
+  it('strips BOM and header from a CSV shard body', () => {
+    const raw = new TextEncoder().encode('\uFEFFh1,h2\r\nr1,a\r\nr2,b\r\n');
+    const stripped = stripCsvBomAndHeader(raw);
+    expect(new TextDecoder().decode(stripped)).toBe('r1,a\r\nr2,b\r\n');
   });
 });

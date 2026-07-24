@@ -193,8 +193,7 @@ export function assertRegisterCsvExportComplete(dataRows: number, exportTotal: n
 
 /**
  * Prefer VPS host when explicitly enabled and MIS upload URL is set.
- * Default stays same-origin — VPS needs Caddy `register-export` + mis-upload restart,
- * otherwise api.wrl-fsm.cloud returns 401 from the wrong upstream.
+ * Large exports use parallel same-origin date shards by default (avoids long-stream kills).
  */
 export function resolveRegisterCsvExportUrl(params: URLSearchParams): {
   url: string;
@@ -214,20 +213,83 @@ export function resolveRegisterCsvExportUrl(params: URLSearchParams): {
   return { url: `/api/report?${params.toString()}`, external: false };
 }
 
-function sameOriginRegisterCsvUrl(params: URLSearchParams): string {
-  return `/api/report?${params.toString()}`;
+/** Split a YYYY-MM-DD range into inclusive week-sized shards (Mon–Sun-ish by +6 days). */
+export function splitRegisterExportDateShards(
+  startDate: string,
+  endDate: string,
+  opts?: { maxDaysPerShard?: number }
+): Array<{ startDate: string; endDate: string }> {
+  const maxDays = Math.max(1, opts?.maxDaysPerShard ?? 7);
+  const start = parseYmd(startDate);
+  const end = parseYmd(endDate);
+  if (!start || !end || end < start) {
+    return [{ startDate, endDate }];
+  }
+
+  const shards: Array<{ startDate: string; endDate: string }> = [];
+  let cursor = start;
+  while (cursor <= end) {
+    const shardEnd = addDays(cursor, maxDays - 1);
+    const clamped = shardEnd > end ? end : shardEnd;
+    shards.push({ startDate: formatYmd(cursor), endDate: formatYmd(clamped) });
+    cursor = addDays(clamped, 1);
+  }
+  return shards.length ? shards : [{ startDate, endDate }];
 }
 
-/** Statuses that mean the VPS export host is unreachable / not wired — fall back to Vercel. */
-function shouldFallbackRegisterCsvToSameOrigin(status: number): boolean {
-  return status === 401 || status === 403 || status === 404 || status === 502 || status === 503;
+function parseYmd(value: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
-async function readRegisterCsvExportBody(
-  res: Response,
-  exportTotal: number,
-  onProgress?: (progress: RegisterExportProgress) => void
-): Promise<PreparedFileExport> {
+function formatYmd(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function addDays(d: Date, days: number): Date {
+  const next = new Date(d.getTime());
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+/** Skip UTF-8 BOM + first CSV line (header) so shards can be concatenated. */
+export function stripCsvBomAndHeader(bytes: Uint8Array): Uint8Array {
+  let offset = 0;
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    offset = 3;
+  }
+  let i = offset;
+  while (i < bytes.length && bytes[i] !== 10) i++;
+  if (i < bytes.length && bytes[i] === 10) i++;
+  return bytes.subarray(i);
+}
+
+const REGISTER_CSV_SHARD_ROW_THRESHOLD = 20_000;
+const REGISTER_CSV_SHARD_CONCURRENCY = 6;
+
+async function fetchOneRegisterCsvShard(opts: {
+  query: RegisterExportQuery;
+  signal?: AbortSignal;
+  onShardProgress?: (fetched: number, shardTotal: number) => void;
+}): Promise<{ bytes: Uint8Array; dataRows: number; headerTotal: number }> {
+  const params = buildRegisterExportParams(opts.query, 1, REGISTER_EXPORT_BATCH_CRM, false);
+  params.set('export', 'csv');
+
+  const res = await fetchWithRetry(`/api/report?${params.toString()}`, {
+    credentials: 'include',
+    signal: opts.signal,
+  });
+
+  if (!res.ok) {
+    const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(errBody.error || `Export failed (${res.status}). Retry in a moment.`);
+  }
+
   const contentType = String(res.headers.get('content-type') ?? '');
   if (contentType.includes('application/json')) {
     const errBody = (await res.json().catch(() => ({}))) as { error?: string };
@@ -235,44 +297,58 @@ async function readRegisterCsvExportBody(
   }
 
   const headerTotal = Number(res.headers.get('X-Register-Export-Total') ?? 0);
-  const total = headerTotal > 0 ? headerTotal : exportTotal;
-
   const reader = res.body?.getReader();
-  if (!reader) {
-    throw new Error('Export response has no body');
-  }
+  if (!reader) throw new Error('Export response has no body');
 
   const chunks: Uint8Array[] = [];
   let newlines = 0;
+  let received = 0;
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     if (!value?.length) continue;
-
     chunks.push(value);
+    received += value.length;
     newlines += countNewlinesInBytes(value);
-
-    if (total > 0) {
-      const fetched = Math.min(total, csvDataRowsFromNewlineCount(newlines));
-      onProgress?.({ fetched, total });
-    }
+    const fetched = csvDataRowsFromNewlineCount(newlines);
+    opts.onShardProgress?.(
+      headerTotal > 0 ? Math.min(headerTotal, fetched) : fetched,
+      headerTotal > 0 ? headerTotal : Math.max(fetched, 1)
+    );
   }
 
   const dataRows = csvDataRowsFromNewlineCount(newlines);
-  assertRegisterCsvExportComplete(dataRows, total);
+  assertRegisterCsvExportComplete(dataRows, headerTotal);
 
-  onProgress?.({
-    fetched: total > 0 ? total : dataRows,
-    total: total > 0 ? total : dataRows,
-  });
-
-  const blob = new Blob(chunks as BlobPart[], { type: 'text/csv;charset=utf-8;' });
-  const baseName = `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
-  return blobToPreparedExport(blob, baseName);
+  const bytes = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return { bytes, dataRows, headerTotal };
 }
 
-/** Stream register CSV from server into a prepared export blob (single server path). */
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function run(): Promise<void> {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await worker(items[i]!, i);
+    }
+  }
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, () => run());
+  await Promise.all(runners);
+  return results;
+}
+
+/** Stream register CSV from server into a prepared export blob. */
 export async function prepareRegisterCsvFromServer(opts: {
   query: RegisterExportQuery;
   knownTotal?: number;
@@ -280,48 +356,83 @@ export async function prepareRegisterCsvFromServer(opts: {
   accessToken?: string | null;
   onProgress?: (progress: RegisterExportProgress) => void;
 }): Promise<PreparedFileExport> {
-  const params = buildRegisterExportParams(opts.query, 1, REGISTER_EXPORT_BATCH_CRM, false);
-  params.set('export', 'csv');
-
   const fallbackTotal = Math.max(0, opts.knownTotal ?? 0);
   opts.onProgress?.({ fetched: 0, total: fallbackTotal });
 
-  const resolved = resolveRegisterCsvExportUrl(params);
-  // No bearer → stay on same-origin cookies (VPS path is not ready without a token).
-  const useExternal = resolved.external && Boolean(opts.accessToken?.trim());
+  const useShards =
+    fallbackTotal > REGISTER_CSV_SHARD_ROW_THRESHOLD &&
+    Boolean(opts.query.startDate && opts.query.endDate);
 
-  const tryFetch = async (url: string, external: boolean): Promise<Response> => {
-    const headers: Record<string, string> = {};
-    if (external && opts.accessToken) {
-      headers.Authorization = `Bearer ${opts.accessToken}`;
-    }
-    return fetchWithRetry(url, {
-      credentials: external ? 'omit' : 'include',
+  if (!useShards) {
+    const single = await fetchOneRegisterCsvShard({
+      query: opts.query,
       signal: opts.signal,
-      headers,
+      onShardProgress: (fetched, shardTotal) => {
+        opts.onProgress?.({
+          fetched,
+          total: fallbackTotal > 0 ? fallbackTotal : shardTotal,
+        });
+      },
     });
+    const total = fallbackTotal > 0 ? fallbackTotal : single.headerTotal;
+    assertRegisterCsvExportComplete(single.dataRows, total);
+    opts.onProgress?.({ fetched: total > 0 ? total : single.dataRows, total: total || single.dataRows });
+    const blob = new Blob([single.bytes as BlobPart], { type: 'text/csv;charset=utf-8;' });
+    return blobToPreparedExport(
+      blob,
+      `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`
+    );
+  }
+
+  // Keep each HTTP stream short — long single streams die around ~2 minutes on the edge.
+  const start = parseYmd(opts.query.startDate);
+  const end = parseYmd(opts.query.endDate);
+  if (!start || !end) {
+    throw new Error('Invalid export date range');
+  }
+  const days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86_400_000) + 1);
+  const rowsPerDay = fallbackTotal / days;
+  const maxDaysPerShard = rowsPerDay > 8_000 ? 3 : rowsPerDay > 3_000 ? 7 : 14;
+  const shards = splitRegisterExportDateShards(opts.query.startDate, opts.query.endDate, {
+    maxDaysPerShard,
+  });
+
+  const shardFetched = new Array(shards.length).fill(0);
+  const report = () => {
+    const fetched = shardFetched.reduce((a, b) => a + b, 0);
+    opts.onProgress?.({ fetched: Math.min(fallbackTotal, fetched), total: fallbackTotal });
   };
 
-  let res = await tryFetch(
-    useExternal ? resolved.url : sameOriginRegisterCsvUrl(params),
-    useExternal
+  const parts = await mapPool(shards, REGISTER_CSV_SHARD_CONCURRENCY, async (shard, index) => {
+    const result = await fetchOneRegisterCsvShard({
+      query: { ...opts.query, startDate: shard.startDate, endDate: shard.endDate },
+      signal: opts.signal,
+      onShardProgress: (fetched) => {
+        shardFetched[index] = fetched;
+        report();
+      },
+    });
+    shardFetched[index] = result.dataRows;
+    report();
+    return result;
+  });
+
+  const totalRows = parts.reduce((sum, p) => sum + p.dataRows, 0);
+  assertRegisterCsvExportComplete(totalRows, fallbackTotal);
+
+  const merged: BlobPart[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]!;
+    if (i === 0) merged.push(part.bytes as BlobPart);
+    else merged.push(stripCsvBomAndHeader(part.bytes) as BlobPart);
+  }
+
+  opts.onProgress?.({ fetched: fallbackTotal, total: fallbackTotal });
+  const blob = new Blob(merged, { type: 'text/csv;charset=utf-8;' });
+  return blobToPreparedExport(
+    blob,
+    `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`
   );
-
-  if (
-    useExternal &&
-    !res.ok &&
-    shouldFallbackRegisterCsvToSameOrigin(res.status)
-  ) {
-    // VPS route missing / JWT env not loaded / Caddy still proxying to the wrong app.
-    res = await tryFetch(sameOriginRegisterCsvUrl(params), false);
-  }
-
-  if (!res.ok) {
-    const errBody = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(errBody.error || `Export failed (${res.status}). Retry in a moment.`);
-  }
-
-  return readRegisterCsvExportBody(res, fallbackTotal, opts.onProgress);
 }
 
 /** One server request: streams CSV; reports row progress while bytes arrive. */

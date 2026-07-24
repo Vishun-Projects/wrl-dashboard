@@ -11,13 +11,12 @@ import {
   type RegisterPostgresParams,
 } from '@/lib/read-model/queries/register';
 import { REGISTER_EXPORT_HOT_COLUMNS } from '@/lib/read-model/queries/register-columns';
-import { mergeArcpPickOntoHotExportRows } from '@/lib/register-sql/arcp-approve-dates-server';
 import { escapeCsvCell } from '@/lib/utils/csv';
 import { REGISTER_EXPORT_COLUMNS } from '@/features/register/lib/table-columns';
 import { responseForCsvStream } from '@/lib/net/csv-gzip-response';
 
-/** Large pages keep export under a handful of Postgres round-trips (VPS / long-lived hosts). */
-const KEYSET_FETCH_SIZE = 100_000;
+/** Hot-only pages — no ARCP round-trips (BM/HO left blank on CSV for speed). */
+const KEYSET_FETCH_SIZE = 50_000;
 
 function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
   const franchisee =
@@ -89,7 +88,7 @@ export type PostgresRegisterCsvStreamOptions = Omit<
   'page' | 'limit' | 'fetchTotals' | 'fetchFilterOptions'
 > & { acceptEncoding?: string | null };
 
-/** Stream register CSV from calls_latest_hot — keyset pages + ARCP dates (no CRM repair enrich). */
+/** Stream register CSV from calls_latest_hot — keyset pages only (no ARCP / CRM enrich). */
 export async function buildPostgresRegisterCsvStream(
   params: PostgresRegisterCsvStreamOptions
 ): Promise<Response> {
@@ -158,10 +157,6 @@ export async function buildPostgresRegisterCsvStream(
 
             let rows = res.rows;
             if (!rows.length) break;
-
-            rows = await mergeArcpPickOntoHotExportRows(rows, (sql, queryParams) =>
-              client.query(sql, queryParams)
-            );
 
             const lines = new Array<string>(rows.length);
             for (let i = 0; i < rows.length; i++) {
