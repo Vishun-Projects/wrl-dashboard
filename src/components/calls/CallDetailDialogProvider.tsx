@@ -11,6 +11,7 @@ const CallDetail = dynamic(
   () => import('@/components/calls/CallDetail').then((m) => ({ default: m.CallDetail })),
   { ssr: false }
 );
+import type { CallDetailData } from '@/components/calls/CallDetail';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import { clearPortalAuditCache } from '@/features/report/lib/portal-cache';
 
@@ -36,21 +37,23 @@ export function useCallDetailDialog() {
   return context;
 }
 
-function buildInitialCall(params: OpenCallDetailParams) {
+function buildInitialCall(params: OpenCallDetailParams): CallDetailData {
   const { callId, trn, officeId, seed } = params;
   const lookupId = callId || trn || '';
   if (seed) {
     return {
       ...seed,
+      ncode: String(seed.ncode ?? seed.id ?? callId ?? lookupId),
       id: String(seed.id ?? callId ?? lookupId),
       office_id: seed.office_id || String(seed.nofficeid ?? officeId ?? ''),
       customer_name: seed.customer_name || seed.PartyName,
       branch_name: seed.branch_name || seed.officename,
       engineer_name: seed.engineer_name || seed.serviceman,
       vtrnno: seed.vtrnno || seed.UniqueCallNo || trn,
-    };
+    } as CallDetailData;
   }
   return {
+    ncode: lookupId,
     id: lookupId,
     office_id: officeId || '',
     vtrnno: trn || '',
@@ -61,7 +64,7 @@ export function CallDetailDialogProvider({ children }: { children: React.ReactNo
   const { userProfile } = useUser();
   const supabase = createClient();
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedCall, setSelectedCall] = useState<Record<string, unknown> | null>(null);
+  const [selectedCall, setSelectedCall] = useState<CallDetailData | null>(null);
 
   const closeCallDetail = useCallback(() => {
     setIsOpen(false);
@@ -89,10 +92,7 @@ export function CallDetailDialogProvider({ children }: { children: React.ReactNo
           `/api/calls/${encodeURIComponent(lookupId)}?${searchParams.toString()}`,
           { headers: { Authorization: `Bearer ${session?.access_token}` } }
         );
-        setSelectedCall((prev) => ({
-          ...(prev || {}),
-          ...res.data,
-        }));
+        setSelectedCall((prev) => (prev ? ({ ...prev, ...res.data } as CallDetailData) : prev));
       } catch (err: unknown) {
         const message =
           axios.isAxiosError(err) && err.response?.data?.error
@@ -140,7 +140,7 @@ export function CallDetailDialogProvider({ children }: { children: React.ReactNo
         author_name: userProfile?.name || 'User',
         comment: text,
         created_at: new Date().toISOString(),
-        author_avatar_url: userProfile?.avatar_url || null,
+        author_avatar_url: userProfile?.avatar_url || undefined,
       };
       setSelectedCall((prev) => {
         if (!prev || String(prev.id) !== String(id)) return prev;

@@ -32,15 +32,55 @@ type CallHistoryEvent = Record<string, unknown> & {
   nengineer?: string | number;
   vcomment?: string;
   vBMrejectreason?: string;
+  editedon?: string;
+  addedon?: string;
+  dtrndate?: string;
+  engineer_name?: string;
+  branch_name?: string;
+  addedby?: string;
 };
 
-type CallDetailData = Record<string, unknown> & {
+type CallVisit = {
+  dvisitdatetime?: string;
+  vvisitremark?: string;
+  vcustomerRemarks?: string;
+};
+
+type CallFault = {
+  is_solved?: boolean;
+  complaint?: string;
+  defect?: string;
+  repair?: string;
+};
+
+export type CallDetailData = Record<string, unknown> & {
   ncode: string;
+  vtrnno?: string;
+  vtransfercallno?: string;
+  status_label?: string;
+  customer_name?: string;
+  vserialno?: string;
+  vmanualjobno?: string;
+  engineer_name?: string;
+  vlocation?: string;
+  branch_name?: string;
+  vpersoncalling?: string;
+  complaint_label?: string;
+  logged_at?: string;
+  started_at?: string;
+  resolved_at?: string;
+  crm_reject?: boolean;
+  crm_reject_reason?: string;
+  crm_reject_at?: string;
+  reject_reason?: string;
+  rejected_at?: string;
+  dBMrejectdatetime?: string;
+  vBMrejectreason?: string;
   comments?: CallComment[];
   documents?: CallDocument[];
   parts?: CallPart[];
-  visits?: Record<string, unknown>[];
-  faults?: Record<string, unknown>[];
+  visits?: CallVisit[];
+  faults?: CallFault[];
   history?: CallHistoryEvent[];
 };
 
@@ -390,7 +430,7 @@ function CallDetailContent({ call, onClose, onFlagUpdate, onPostComment, onNext 
               ].map((t) => (
                 <button
                   key={t.id}
-                  onClick={() => setActiveTab(t.id)}
+                  onClick={() => setActiveTab(t.id as typeof activeTab)}
                   className={`call-detail-tab flex items-center gap-1 px-4 py-3.5 text-[13px] font-medium transition-all border-b-2 -mb-px whitespace-nowrap ${activeTab === t.id ? 'call-detail-tab--active text-slate-900 border-slate-900' : 'text-slate-400 border-transparent hover:text-slate-600'}`}
                 >
                   {t.label}
@@ -425,7 +465,7 @@ function CallDetailContent({ call, onClose, onFlagUpdate, onPostComment, onNext 
                     <Field label="Serial no." value={call.vserialno || '—'} muted={!call.vserialno} />
                     <Field label="Client ticket" value={call.vmanualjobno || '—'} muted={!call.vmanualjobno} />
                     <Field label="Technician" value={call.engineer_name || 'Unassigned'} muted={!call.engineer_name} />
-                    <Field label="Branch / Franchisee" value={call.vlocation || call.branch_name} />
+                    <Field label="Branch / Franchisee" value={call.vlocation || call.branch_name || ''} />
                     <Field label="Reported by" value={call.vpersoncalling || 'Not recorded'} muted={!call.vpersoncalling} />
                   </div>
 
@@ -451,7 +491,7 @@ function CallDetailContent({ call, onClose, onFlagUpdate, onPostComment, onNext 
               {activeTab === 'visits' && (
                 <div className="space-y-4">
                   {(call.visits || []).length > 0 ? (
-                    call.visits.map((v, i: number) => (
+                    (call.visits || []).map((v, i: number) => (
                       <div key={i} className="bg-bg-canvas p-4 rounded-xl border border-slate-100 shadow-sm">
                         <div className="flex items-center justify-between mb-3">
                           <span className="text-[11px] text-slate-900 ui-label">Visit #{i + 1}</span>
@@ -472,7 +512,7 @@ function CallDetailContent({ call, onClose, onFlagUpdate, onPostComment, onNext 
               {activeTab === 'faults' && (
                 <div className="space-y-4">
                   {(call.faults || []).length > 0 ? (
-                    call.faults.map((f, i: number) => (
+                    (call.faults || []).map((f, i: number) => (
                       <div key={i} className="bg-bg-canvas p-4 rounded-xl border border-slate-100 shadow-sm space-y-3">
                         <div className="flex items-center justify-between">
                           <span className="text-[11px] text-slate-900 ui-label">Fault #{i + 1}</span>
@@ -766,7 +806,7 @@ function ImageCard({ img, onPreview, onLoaded }: { img: { url: string; title: st
   );
 }
 
-function TimelineItem({ label, date, highlight, status }: { label: string; date: string; highlight?: boolean; status?: 'success' | 'danger' }) {
+function TimelineItem({ label, date, highlight, status }: { label: string; date?: string; highlight?: boolean; status?: 'success' | 'danger' }) {
   const colors = {
     success: 'text-emerald-600',
     danger: 'text-rose-600',

@@ -10,6 +10,7 @@ const CallDetail = dynamic(
   () => import('@/components/calls/CallDetail').then((m) => ({ default: m.CallDetail })),
   { ssr: false }
 );
+import type { CallDetailData } from '@/components/calls/CallDetail';
 
 export type ReportDrillDownState = {
   isOpen: boolean;
@@ -65,7 +66,7 @@ export function ReportPageOverlays({
           <div className="modal-backdrop fixed inset-0 animate-in fade-in duration-200" onClick={() => onCloseDrawer()} />
           <div className="relative bg-bg-canvas shadow rounded-lg w-full max-w-[900px] h-[min(760px,92vh)] flex flex-col animate-in zoom-in-95 duration-200 overflow-hidden border border-slate-200">
             <CallDetail
-              call={selectedCall}
+              call={selectedCall as CallDetailData}
               onClose={() => onCloseDrawer()}
               onFlagUpdate={onFlagUpdate}
               onPostComment={onPostComment}

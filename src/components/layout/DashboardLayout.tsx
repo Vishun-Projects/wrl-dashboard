@@ -21,6 +21,7 @@ type DashboardUser = {
   role?: string;
   avatar_url?: string | null;
   permissions: string[];
+  office_ids?: string[];
   theme?: string;
 };
 
@@ -130,7 +131,7 @@ export function DashboardLayout({
         <MisEmailSendTracker />
         {performanceLogEnabledClient() ? <PerformanceMetricsLogger /> : null}
         <div className="flex flex-col md:flex-row h-screen overflow-hidden w-screen bg-bg-soft text-slate-700 font-sans">
-          <Sidebar user={userProfile} />
+          <Sidebar user={userProfile ? { ...userProfile, avatar_url: userProfile.avatar_url ?? undefined } : null} />
           <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
             <PageAccessGuard>{children}</PageAccessGuard>
           </div>

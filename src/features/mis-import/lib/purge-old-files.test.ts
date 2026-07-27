@@ -13,20 +13,26 @@ import {
 
 describe('resolveImportFileRetentionDays', () => {
   it('defaults to one week', () => {
-    expect(resolveImportFileRetentionDays({})).toBe(DEFAULT_IMPORT_FILE_RETENTION_DAYS);
+    expect(resolveImportFileRetentionDays({} as NodeJS.ProcessEnv)).toBe(
+      DEFAULT_IMPORT_FILE_RETENTION_DAYS
+    );
     expect(DEFAULT_IMPORT_FILE_RETENTION_DAYS).toBe(IMPORT_FILE_RETENTION_DAYS);
     expect(IMPORT_FILE_RETENTION_DAYS).toBe(7);
   });
 
   it('reads positive env override', () => {
     expect(
-      resolveImportFileRetentionDays({ MIS_CLIENT_IMPORT_FILE_RETENTION_DAYS: '14' })
+      resolveImportFileRetentionDays({
+        MIS_CLIENT_IMPORT_FILE_RETENTION_DAYS: '14',
+      } as unknown as NodeJS.ProcessEnv)
     ).toBe(14);
   });
 
   it('falls back on garbage / non-positive', () => {
     expect(
-      resolveImportFileRetentionDays({ MIS_CLIENT_IMPORT_FILE_RETENTION_DAYS: '0' })
+      resolveImportFileRetentionDays({
+        MIS_CLIENT_IMPORT_FILE_RETENTION_DAYS: '0',
+      } as unknown as NodeJS.ProcessEnv)
     ).toBe(7);
   });
 });

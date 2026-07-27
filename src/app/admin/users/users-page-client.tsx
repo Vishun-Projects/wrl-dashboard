@@ -44,7 +44,7 @@ import { ModalPortal } from '@/components/ui/ModalPortal';
 
 type UserSortKey = 'user' | 'role' | 'statuses' | 'branches' | 'misEmail';
 type AdminRole = { id: string | number; name?: string; permissions?: string[] | string; description?: string };
-type AdminOffice = { ncode: string | number; vcompanyname?: string };
+type AdminOffice = { ncode: string | number; vcompanyname: string };
 type AdminUser = {
   id: string;
   name?: string;
@@ -388,7 +388,7 @@ export default function AdminUsersPage() {
   const formRolePerms = unionRolePermissions(formData.role_ids);
   const formRoleCanMisEmail = canAssignMisEmail(formRolePerms);
 
-  const toggleFormRole = (role: { id: string; name: string; permissions?: string[] }) => {
+  const toggleFormRole = (role: AdminRole) => {
     const roleId = String(role.id);
     setFormData((prev) => {
       const selected = new Set((prev.role_ids ?? []).map(String));
@@ -459,11 +459,11 @@ export default function AdminUsersPage() {
     if (user) {
       setEditingUser(user);
       setFormData({
-        name: user.name,
-        email: user.email,
+        name: user.name ?? '',
+        email: user.email ?? '',
         password: '',
-        role: user.role,
-        role_id: user.role_id,
+        role: user.role ?? '',
+        role_id: user.role_id ?? '',
         role_ids: userRoleIds(user),
         office_ids: user.office_ids || [],
         visible_statuses: user.visible_statuses || [],
@@ -662,7 +662,7 @@ export default function AdminUsersPage() {
                           <AdminIconButton
                             variant="danger"
                             title="Delete user"
-                            onClick={() => setDeleteTarget({ id: u.id, name: u.name || u.email })}
+                            onClick={() => setDeleteTarget({ id: u.id, name: u.name || u.email || '' })}
                           >
                             <Trash2 size={13} />
                           </AdminIconButton>
@@ -695,10 +695,10 @@ export default function AdminUsersPage() {
               </div>
               
               <nav className="flex-1 p-3 space-y-1">
-                {[
+                {([
                   { id: 'profile', label: 'Profile Details', icon: Users },
                   { id: 'access', label: 'Access Control', icon: Shield }
-                ].map((tab) => (
+                ] as const).map((tab) => (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}

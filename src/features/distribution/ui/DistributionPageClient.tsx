@@ -73,6 +73,37 @@ import {
 import type { RegisterSummary } from '@/features/report';
 import { loadLeaflet } from '@/lib/geo/leaflet-cdn';
 
+type LeafletMapRuntime = {
+  setView: (center: [number, number], zoom: number) => LeafletMapRuntime;
+  invalidateSize: () => void;
+  fitBounds: (bounds: unknown[], options?: { padding?: [number, number] }) => void;
+  remove: () => void;
+};
+
+type LeafletLayerRuntime = {
+  clearLayers: () => void;
+};
+
+type LeafletCircleRuntime = {
+  bindPopup: (content: string, options?: { className?: string }) => void;
+  on: (event: string, handler: () => void) => void;
+  addTo: (layer: LeafletLayerRuntime) => void;
+};
+
+type LeafletRuntime = {
+  map: (
+    element: HTMLDivElement,
+    options?: { zoomControl?: boolean; attributionControl?: boolean; preferCanvas?: boolean }
+  ) => LeafletMapRuntime;
+  tileLayer: (template: string, options?: { maxZoom?: number }) => { addTo: (map: LeafletMapRuntime) => void };
+  control: { zoom: (options?: { position?: string }) => { addTo: (map: LeafletMapRuntime) => void } };
+  layerGroup: () => { addTo: (map: LeafletMapRuntime) => LeafletLayerRuntime };
+  circleMarker: (
+    latLng: [number, number],
+    options?: { radius?: number; color?: string; fillColor?: string; fillOpacity?: number; weight?: number }
+  ) => LeafletCircleRuntime;
+};
+
 export default function CallDistributionPage() {
   const {
     dateRange,
@@ -120,8 +151,8 @@ export default function CallDistributionPage() {
 
   // Leaflet map refs
   const mapRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<unknown>(null);
-  const markersLayerRef = useRef<unknown>(null);
+  const mapInstanceRef = useRef<LeafletMapRuntime | null>(null);
+  const markersLayerRef = useRef<LeafletLayerRuntime | null>(null);
 
   const [selectedPincode, setSelectedPincode] = useState('All');
 
@@ -137,8 +168,8 @@ export default function CallDistributionPage() {
     activeTechniciansCount: 0,
     callToTechnicianRatio: 0,
   });
-  const [franchiseeSummary, setFranchiseeSummary] = useState<Record<string, unknown>[]>([]);
-  const [pincodeSummary, setPincodeSummary] = useState<Record<string, unknown>[]>([]);
+  const [franchiseeSummary, setFranchiseeSummary] = useState<FranchiseeRow[]>([]);
+  const [pincodeSummary, setPincodeSummary] = useState<PincodeSummaryRow[]>([]);
 
   // Idle assignees
   const [rosterTechnicians, setRosterTechnicians] = useState<RosterTechnician[]>([]);
@@ -207,8 +238,28 @@ export default function CallDistributionPage() {
     );
     queueMicrotask(() => setRegisterSummary(summary));
 
-    const franchiseeMap = new Map();
-    const pincodeMap = new Map();
+    type FranchiseeAcc = {
+      franchisee_code: string;
+      franchisee_name: string;
+      techs: Set<string | number>;
+      total_calls: number;
+      open_calls: number;
+      closed_calls: number;
+      tech_solved: number;
+    };
+    type PincodeAcc = {
+      pincode: string;
+      lat: number;
+      lng: number;
+      city_name: unknown;
+      state_name: unknown;
+      franchisee_name: string;
+      franchisee_code: string;
+      total_calls: number;
+      open_calls: number;
+    };
+    const franchiseeMap = new Map<string, FranchiseeAcc>();
+    const pincodeMap = new Map<string, PincodeAcc>();
     const activeTechsSet = new Set<string | number>();
     const activeFranchiseesSet = new Set<string>();
 
@@ -237,7 +288,7 @@ export default function CallDistributionPage() {
           tech_solved: 0,
         });
       }
-      const fObj = franchiseeMap.get(fCode);
+      const fObj = franchiseeMap.get(fCode)!;
       fObj.total_calls++;
       if (bucket === 'cancelled') {
         fObj.closed_calls++;
@@ -259,8 +310,8 @@ export default function CallDistributionPage() {
       if (!pincodeMap.has(pinKey)) {
         pincodeMap.set(pinKey, {
           pincode,
-          lat: c.lat,
-          lng: c.lng,
+          lat: c.lat as number,
+          lng: c.lng as number,
           city_name: c.city,
           state_name: c.state,
           franchisee_name: fName,
@@ -269,14 +320,14 @@ export default function CallDistributionPage() {
           open_calls: 0,
         });
       }
-      const pinObj = pincodeMap.get(pinKey);
+      const pinObj = pincodeMap.get(pinKey)!;
       pinObj.total_calls++;
       if (isRegisterRowOpenBucket(bucket)) {
         pinObj.open_calls++;
       }
     });
 
-    const franchiseeSummary = Array.from(franchiseeMap.values()).map((f: Record<string, unknown>) => {
+    const franchiseeSummary = Array.from(franchiseeMap.values()).map((f) => {
       const techCount = f.techs.size;
       const ratio = techCount > 0 ? parseFloat((f.open_calls / techCount).toFixed(2)) : f.open_calls;
       return {
@@ -293,8 +344,18 @@ export default function CallDistributionPage() {
 
     franchiseeSummary.sort((a, b) => b.ratio - a.ratio);
 
-    const pincodeFinalMap = new Map();
-    pincodeMap.forEach((pin: Record<string, unknown>) => {
+    type PincodeFinalAcc = {
+      pincode: string;
+      lat: number;
+      lng: number;
+      city_name: unknown;
+      state_name: unknown;
+      total_calls: number;
+      open_calls: number;
+      franchisees: { franchisee_name: string; franchisee_code: string; total_calls: number }[];
+    };
+    const pincodeFinalMap = new Map<string, PincodeFinalAcc>();
+    pincodeMap.forEach((pin) => {
       if (!pincodeFinalMap.has(pin.pincode)) {
         pincodeFinalMap.set(pin.pincode, {
           pincode: pin.pincode,
@@ -307,7 +368,7 @@ export default function CallDistributionPage() {
           franchisees: []
         });
       }
-      const pf = pincodeFinalMap.get(pin.pincode);
+      const pf = pincodeFinalMap.get(pin.pincode)!;
       pf.total_calls += pin.total_calls;
       pf.open_calls += pin.open_calls;
       pf.franchisees.push({
@@ -317,7 +378,7 @@ export default function CallDistributionPage() {
       });
     });
 
-    const pincodeSummary = Array.from(pincodeFinalMap.values()).map((pin: Record<string, unknown>) => {
+    const pincodeSummary = Array.from(pincodeFinalMap.values()).map((pin) => {
       return {
         pincode: pin.pincode,
         lat: pin.lat,
@@ -488,7 +549,7 @@ export default function CallDistributionPage() {
         setMapLoadError(true);
         return;
       }
-      const L = (window as unknown as { L?: unknown }).L;
+      const L = (window as unknown as { L?: LeafletRuntime }).L;
       if (!L || !mapRef.current) {
         return;
       }
@@ -534,7 +595,7 @@ export default function CallDistributionPage() {
 
   // Leaflet Map Markers Re-render
   useEffect(() => {
-    const L = (window as unknown as { L?: unknown }).L;
+    const L = (window as unknown as { L?: LeafletRuntime }).L;
     const map = mapInstanceRef.current;
     const layer = markersLayerRef.current;
     if (!L || !map || !layer || !pincodeSummary || !mapReady) return;
@@ -566,7 +627,7 @@ export default function CallDistributionPage() {
         return true;
       });
 
-      filteredPoints.forEach((pin: Record<string, unknown>) => {
+      filteredPoints.forEach((pin) => {
         // Metric logic: Health status by open calls backlog
         // Orange/Red for high backlog pincodes, Green for balanced
         let color = '#10b981'; // Green
@@ -598,7 +659,7 @@ export default function CallDistributionPage() {
               <p>Total Active Calls: <b class="text-slate-950 font-semibold">${pin.total_calls}</b></p>
               <p>Open Backlog: <b class="text-amber-600 font-bold">${pin.open_calls}</b></p>
               <div class="border-t border-slate-100 mt-1.5 pt-1.5 max-h-[90px] overflow-y-auto space-y-1">
-                ${pin.franchisees.map((f: Record<string, unknown>) => `
+                ${pin.franchisees.map((f) => `
                   <div class="flex justify-between items-center text-[10px] text-slate-500">
                     <span class="truncate pr-1 font-medium">${f.franchisee_name}</span>
                     <span class="font-bold text-slate-800">${f.total_calls}</span>
@@ -639,6 +700,15 @@ export default function CallDistributionPage() {
     total_calls: number;
     open_calls: number;
     ratio: number;
+  };
+
+  type PincodeSummaryRow = {
+    pincode: string;
+    lat: number;
+    lng: number;
+    total_calls: number;
+    open_calls: number;
+    franchisees: { franchisee_name: string; franchisee_code: string; total_calls: number }[];
   };
 
   const handleSort = (field: string) => {

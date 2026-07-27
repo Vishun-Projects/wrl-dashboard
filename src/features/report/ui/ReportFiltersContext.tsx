@@ -856,8 +856,9 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     const stateCounts: Record<string, { vname: string; call_count: number }> = {};
     statesFiltered.forEach((c) => {
       if (!c.state) return;
-      stateCounts[c.state] = stateCounts[c.state] || { vname: c.state, call_count: 0 };
-      stateCounts[c.state].call_count++;
+      const key = String(c.state);
+      stateCounts[key] = stateCounts[key] || { vname: key, call_count: 0 };
+      stateCounts[key].call_count++;
     });
     setStatesList(Object.values(stateCounts).sort((a, b) => a.vname.localeCompare(b.vname)));
 
@@ -865,8 +866,9 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     const cityCounts: Record<string, { ncode: string; vname: string; nstate: string; call_count: number }> = {};
     citiesFiltered.forEach((c) => {
       if (!c.city) return;
-      cityCounts[c.city] = cityCounts[c.city] || { ncode: c.city, vname: c.city, nstate: c.state || '', call_count: 0 };
-      cityCounts[c.city].call_count++;
+      const key = String(c.city);
+      cityCounts[key] = cityCounts[key] || { ncode: key, vname: key, nstate: String(c.state || ''), call_count: 0 };
+      cityCounts[key].call_count++;
     });
     setCitiesList(Object.values(cityCounts).sort((a, b) => a.vname.localeCompare(b.vname)));
 
@@ -874,8 +876,9 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     const regionCounts: Record<string, { vname: string; call_count: number }> = {};
     regionsFiltered.forEach((c) => {
       if (!c.region) return;
-      regionCounts[c.region] = regionCounts[c.region] || { vname: c.region, call_count: 0 };
-      regionCounts[c.region].call_count++;
+      const key = String(c.region);
+      regionCounts[key] = regionCounts[key] || { vname: key, call_count: 0 };
+      regionCounts[key].call_count++;
     });
     setRegionsList(Object.values(regionCounts).sort((a, b) => a.vname.localeCompare(b.vname)));
 
@@ -883,8 +886,9 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     const accountCounts: Record<string, { vname: string; call_count: number }> = {};
     accountsFiltered.forEach((c) => {
       if (!c.account) return;
-      accountCounts[c.account] = accountCounts[c.account] || { vname: c.account, call_count: 0 };
-      accountCounts[c.account].call_count++;
+      const key = String(c.account);
+      accountCounts[key] = accountCounts[key] || { vname: key, call_count: 0 };
+      accountCounts[key].call_count++;
     });
     setAccountsList(Object.values(accountCounts).sort((a, b) => a.vname.localeCompare(b.vname)));
 

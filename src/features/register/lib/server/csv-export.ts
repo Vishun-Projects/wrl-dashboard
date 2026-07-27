@@ -86,7 +86,7 @@ export function buildRegisterCsvContent(rows: Record<string, unknown>[]): string
 export function createRegisterCsvResponse(
   rows: Record<string, unknown>[],
   filename?: string,
-  acceptEncoding?: string | null
+  _acceptEncoding?: string | null
 ): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -104,15 +104,11 @@ export function createRegisterCsvResponse(
 
   const resolvedName =
     filename ?? `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
-  return responseForCsvStream(
-    stream,
-    {
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${resolvedName}"`,
-      'Cache-Control': 'no-store',
-    },
-    acceptEncoding
-  );
+  return responseForCsvStream(stream, {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="${resolvedName}"`,
+    'Cache-Control': 'no-store',
+  });
 }
 
 /** Build a register CSV blob for queued export (caller saves via user click when needed). */
@@ -224,13 +220,9 @@ export async function buildRegisterCsvResponse(opts: RegisterCsvExportOpts): Pro
   });
 
   const filename = `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
-  return responseForCsvStream(
-    stream,
-    {
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-      'Cache-Control': 'no-store',
-    },
-    opts.acceptEncoding
-  );
+  return responseForCsvStream(stream, {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="${filename}"`,
+    'Cache-Control': 'no-store',
+  });
 }

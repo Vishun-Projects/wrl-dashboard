@@ -125,7 +125,7 @@ export async function GET(
     const docs = docsRes.data || [];
 
     // 3. Smart-Merge Serial Numbers into Parts
-    const parts = rawParts.map((part: Record<string, string>) => {
+    const parts = rawParts.map((part: Record<string, string>): Record<string, string> => {
       // Find matching serial entry (by part_id OR item_code)
       const serialEntry = serials.find((serial: Record<string, string>) => 
         String(serial.ncalls3) === String(part.part_id) || 

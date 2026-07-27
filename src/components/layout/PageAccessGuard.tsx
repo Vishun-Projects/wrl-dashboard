@@ -30,7 +30,7 @@ export function PageAccessGuard({ children }: PageAccessGuardProps) {
 
   const accessAllowed = useMemo(() => {
     if (loadingProfile || !userProfile || !pathname) return null;
-    return canAccessPath(userProfile.permissions ?? [], pathname, { email: userProfile.email });
+    return canAccessPath(userProfile.permissions ?? [], pathname);
   }, [loadingProfile, userProfile, pathname]);
 
   useEffect(() => {

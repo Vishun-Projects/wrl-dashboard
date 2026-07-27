@@ -281,7 +281,7 @@ export function deriveSummaryDashboard(
     if (!branchMap.has(officeId)) {
       branchMap.set(officeId, {
         officeId,
-        parentId: rowParentId(row),
+        parentId: rowParentId(),
         branch: rowBranchName(row),
         region,
         total_calls: 0,

@@ -10,7 +10,7 @@ export async function requirePageAccess(pathname: string) {
   if (!userInfo) {
     redirect('/login');
   }
-  if (!canAccessPath(userInfo.permissions, pathname, { email: userInfo.email })) {
+  if (!canAccessPath(userInfo.permissions, pathname)) {
     notFound();
   }
   return userInfo;

@@ -595,8 +595,8 @@ export function resolveSummaryOfficeIdsParam(
 
 export function filterCallsCSR(calls: Array<Record<string, unknown>>, criteria: FilterCallsCriteria, exclude?: string) {
   return calls.filter((c) => {
-    if (exclude !== 'state' && !matchesFilterSelection(c.state || '', criteria.state)) return false;
-    if (exclude !== 'city' && !matchesFilterSelection(c.city || c.ncode || '', criteria.city)) return false;
+    if (exclude !== 'state' && !matchesFilterSelection(String(c.state || ''), criteria.state)) return false;
+    if (exclude !== 'city' && !matchesFilterSelection(String(c.city || c.ncode || ''), criteria.city)) return false;
 
     if (exclude !== 'region' && !matchesFilterSelection(String(c.region || ''), criteria.region)) {
       return false;

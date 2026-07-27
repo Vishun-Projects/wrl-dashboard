@@ -27,11 +27,7 @@ describe('csv gzip response helpers', () => {
         controller.close();
       },
     });
-    const res = responseForCsvStream(
-      stream,
-      { 'Content-Type': 'text/csv; charset=utf-8' },
-      'gzip'
-    );
+    const res = responseForCsvStream(stream, { 'Content-Type': 'text/csv; charset=utf-8' });
     expect(res.headers.get('Content-Encoding')).toBeNull();
     expect(await res.text()).toBe('a,b\n');
   });

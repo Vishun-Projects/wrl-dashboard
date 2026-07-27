@@ -92,7 +92,7 @@ export type PostgresRegisterCsvStreamOptions = Omit<
 export async function buildPostgresRegisterCsvStream(
   params: PostgresRegisterCsvStreamOptions
 ): Promise<Response> {
-  const { acceptEncoding, ...queryParams } = params;
+  const { acceptEncoding: _acceptEncoding, ...queryParams } = params;
   const fullParams: RegisterPostgresParams = {
     ...queryParams,
     page: 1,
@@ -210,5 +210,5 @@ export async function buildPostgresRegisterCsvStream(
     'X-Register-Export-Total': String(dbCount),
   };
 
-  return responseForCsvStream(stream, headers, acceptEncoding);
+  return responseForCsvStream(stream, headers);
 }

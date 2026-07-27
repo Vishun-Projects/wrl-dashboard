@@ -770,16 +770,19 @@ export async function handleRegisterGet(req: NextRequest) {
         `,
         });
 
-        [res, summaryRes, filterOptionsRes] = await Promise.all([
+        [res, summaryRes, filterOptionsRes] = (await Promise.all([
           dataQuery,
           summaryQuery,
           optionsQuery,
-        ]);
+        ])) as [typeof res, typeof summaryRes, typeof filterOptionsRes];
       } else {
-        [res, summaryRes] = await Promise.all([dataQuery, summaryQuery]);
+        [res, summaryRes] = (await Promise.all([dataQuery, summaryQuery])) as [
+          typeof res,
+          typeof summaryRes,
+        ];
       }
     } else {
-      res = await dataQuery;
+      res = (await dataQuery) as typeof res;
     }
 
     const summary = summaryRes.data?.[0] || {
@@ -792,7 +795,7 @@ export async function handleRegisterGet(req: NextRequest) {
       tech_solved: 0,
       closed: 0,
     };
-    const totalCount = parseInt(summary.total || "0");
+    const totalCount = parseInt(String(summary.total || "0"));
 
     const processedData = await enrichRegisterRowsRepairDone(
       await mergeAuditEnrichment(
@@ -807,14 +810,14 @@ export async function handleRegisterGet(req: NextRequest) {
     if (fetchTotals) {
       responsePayload.total = totalCount;
       responsePayload.summary = {
-        total: parseInt(summary.total || "0"),
-        cancelled: parseInt(summary.cancelled || "0"),
-        solved: parseInt(summary.solved || "0"),
-        open: parseInt(summary.open_calls || "0"),
-        openUnallocated: parseInt(summary.open_unallocated || "0"),
-        assigned: parseInt(summary.assigned || "0"),
-        techSolved: parseInt(summary.tech_solved || "0"),
-        closed: parseInt(summary.closed || "0"),
+        total: parseInt(String(summary.total || "0")),
+        cancelled: parseInt(String(summary.cancelled || "0")),
+        solved: parseInt(String(summary.solved || "0")),
+        open: parseInt(String(summary.open_calls || "0")),
+        openUnallocated: parseInt(String(summary.open_unallocated || "0")),
+        assigned: parseInt(String(summary.assigned || "0")),
+        techSolved: parseInt(String(summary.tech_solved || "0")),
+        closed: parseInt(String(summary.closed || "0")),
       };
 
       if (fetchFilterOptions) {

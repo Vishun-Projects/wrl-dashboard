@@ -1112,7 +1112,7 @@ export default function SerialAuditPage() {
   }, [loading, loadError, displayedRows, page, prefetchPagedWindowCalls]);
 
   const summary = useMemo(
-    () => summarizeSerialAudit(allSerialRows, DEFAULT_RISK_THRESHOLD),
+    () => summarizeSerialAudit(allSerialRows),
     [allSerialRows]
   );
   const summaryWithCancelled = useMemo(
