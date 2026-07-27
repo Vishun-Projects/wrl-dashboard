@@ -5,6 +5,7 @@
 export * from './lib/aggregate';
 export * from './lib/batch-file';
 export * from './lib/config';
+export * from './lib/purge-old-files';
 export * from './lib/store';
 export * from './lib/upload-chunks';
 export * from './lib/process-upload';

@@ -5,6 +5,7 @@ import {
   parseCallRegisterDateField,
   resolveCallRegisterDates,
 } from './dates';
+import { buildCrmTransactionQuery } from './sql';
 
 describe('call-register All Time date resolution', () => {
   it('treats empty query as All Time', () => {
@@ -37,5 +38,15 @@ describe('call-register All Time date resolution', () => {
       'COALESCE(b.warranty_start, b.daddedon)'
     );
     expect(callRegisterDateSqlExpr('imported')).toBe('daddedon');
+  });
+
+  it('CRM query requires PROCESSED = Y', () => {
+    const sql = buildCrmTransactionQuery({
+      dateFrom: '2026-07-01',
+      dateTo: '2026-07-24',
+      dateField: 'billing',
+    });
+    expect(sql).toMatch(/PROCESSED/);
+    expect(sql).toMatch(/=\s*'Y'/);
   });
 });

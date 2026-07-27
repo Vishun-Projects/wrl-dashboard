@@ -3,7 +3,7 @@
  *
  * Usage: npx tsx scripts/mis-client/compare-crm-coke-vs-hccb.ts [raw-dir]
  */
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 import XLSX from 'xlsx';
 import { parseClientDate } from '@/features/mis-import/lib/parse-dates';

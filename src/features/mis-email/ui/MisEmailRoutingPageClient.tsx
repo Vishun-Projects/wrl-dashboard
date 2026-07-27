@@ -66,7 +66,7 @@ type RoutingOptionsResponse = {
 const API_URL = '/api/admin/mis-email-routing';
 const OPTIONS_API_URL = '/api/admin/mis-email-routing/options';
 const TEMP_ID_PREFIX = 'tmp-';
-const ALL_VALUE = 'ALL';
+
 const DAY_OPTIONS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 const CLIENT_SOURCE_MODE_OPTIONS: Array<{ value: ClientSourceMode; label: string }> = [
   { value: 'mail', label: 'Mail data' },
@@ -120,13 +120,9 @@ function normalizeUnique(values: string[]): string[] {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
-function normalizeKey(value: string): string {
-  return value.trim().replace(/\s+/g, ' ').replace(/\s+ZONE$/i, '').toUpperCase();
-}
 
-function splitDimensionKeys(value: string): string[] {
-  return normalizeUnique(value.split(',').map((token) => normalizeKey(token)));
-}
+
+
 
 function intervalLabel(minutes: number): string {
   if (minutes >= 1440) return 'Daily';

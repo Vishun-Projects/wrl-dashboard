@@ -47,9 +47,9 @@ run_install_on_machine() {
   echo "==> MIS email digest ready at ${root}"
   echo "    Test: bash ${root}/scripts/vps-hosting/mis-email-digest.sh"
   echo "    Or:   cd ${root} && npm run mis-email:test"
-  echo "    Cron (once daily 09:30 IST):"
+  echo "    Cron (Mon–Sat 09:30 IST, skips Sunday):"
   echo "    CRON_TZ=Asia/Kolkata"
-  echo "    30 9 * * * ${root}/scripts/vps-hosting/mis-email-digest.sh >> ${root}/logs/mis-email-cron.log 2>&1"
+  echo "    30 9 * * 1-6 ${root}/scripts/vps-hosting/mis-email-digest.sh >> ${root}/logs/mis-email-cron.log 2>&1"
 }
 
 if [[ "${1:-}" == "--local" ]]; then

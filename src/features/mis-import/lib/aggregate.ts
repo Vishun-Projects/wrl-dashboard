@@ -754,5 +754,10 @@ export function dedupeClientRowsLatestBatchWins(rows: ClientRowWithBatchMeta[]):
       best.set(key, row);
     }
   }
-  return [...best.values()].map(({ source_id: _s, call_key: _c, batch_created_at: _b, ...dbRow }) => dbRow);
+  return [...best.values()].map(({ source_id, call_key, batch_created_at, ...dbRow }) => {
+    void source_id;
+    void call_key;
+    void batch_created_at;
+    return dbRow;
+  });
 }

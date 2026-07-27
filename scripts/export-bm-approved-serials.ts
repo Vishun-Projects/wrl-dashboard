@@ -315,8 +315,8 @@ async function enrichTrhcallsFromCrm(
   );
 
   const keys = [...byKey.keys()];
-  const callNos = keys.filter((k) => /[A-Za-z]/.test(k));
-  const ncodes = keys.filter((k) => !/[A-Za-z]/.test(k));
+  
+  
 
   for (let i = 0; i < keys.length; i += 30) {
     const batchKeys = keys.slice(i, i + 30);

@@ -85,7 +85,7 @@ export function resolvePgSsl(connectionString: string): false | { rejectUnauthor
   try {
     const url = new URL(connectionString.replace(/^postgresql:/, 'postgres:'));
     const host = url.hostname.toLowerCase();
-    const port = url.port || '5432';
+    
     const sslmode = url.searchParams.get('sslmode')?.toLowerCase();
 
     if (sslmode === 'disable' || sslmode === 'allow') return false;
@@ -212,13 +212,13 @@ function isConnectTimeoutError(err: unknown): boolean {
 }
 
 /** Direct Postgres for sync worker / VPS cron — not the default for Next.js API routes. */
-export function useDirectDatabaseForBulkReads(): boolean {
+export function isDirectDatabaseForBulkReads(): boolean {
   if (process.env.USE_DIRECT_DATABASE === 'true') return true;
   return Boolean(process.env.DIRECT_DATABASE_URL?.trim());
 }
 
 function bulkReadPool(forceDirect?: boolean): { pool: pg.Pool; label: 'direct' | 'pooler' } {
-  const useDirect = forceDirect ?? useDirectDatabaseForBulkReads();
+  const useDirect = forceDirect ?? isDirectDatabaseForBulkReads();
   return useDirect
     ? { pool: getPool(), label: 'direct' }
     : { pool: getAppPool(), label: 'pooler' };
@@ -245,12 +245,12 @@ export async function withBulkReadClient<T>(
     await client.query(`SET lock_timeout = '${lockMs}'`);
     return await fn(client);
   } catch (err) {
-    if (retries > 0 && isConnectTimeoutError(err) && (forceDirect ?? useDirectDatabaseForBulkReads())) {
+    if (retries > 0 && isConnectTimeoutError(err) && (forceDirect ?? isDirectDatabaseForBulkReads())) {
       console.warn('[db] direct bulk connect failed — retrying on pooler');
       return withBulkReadClient(fn, retries - 1, false);
     }
-    if (retries > 0 && isConnectionTerminatedError(err) && !(forceDirect ?? useDirectDatabaseForBulkReads())) {
-      if (useDirectDatabaseForBulkReads()) {
+    if (retries > 0 && isConnectionTerminatedError(err) && !(forceDirect ?? isDirectDatabaseForBulkReads())) {
+      if (isDirectDatabaseForBulkReads()) {
         console.warn('[db] bulk read on pooler lost — retrying on direct Postgres');
         return withBulkReadClient(fn, retries - 1, true);
       }

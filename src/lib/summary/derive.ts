@@ -170,7 +170,7 @@ function rowOfficeId(row: Record<string, unknown>): number {
   return resolveMainBranchOfficeId(row);
 }
 
-function rowParentId(_row: Record<string, unknown>): number {
+function rowParentId(): number {
   return 0;
 }
 

@@ -152,7 +152,7 @@ export function getGeographicDetails(
   const mapped = getPincodeMapData()[pin];
 
   let mappedState = mapped?.s || '';
-  let mappedCity = mapped?.d || '';
+  const mappedCity = mapped?.d || '';
 
   if (mappedState) {
     mappedState = correctStateName(mappedState.toUpperCase().trim());

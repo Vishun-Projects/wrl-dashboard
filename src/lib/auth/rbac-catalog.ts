@@ -367,8 +367,7 @@ export function isPublicAuthRoute(path: string | null | undefined): boolean {
 
 export function canAccessPath(
   permissions: string[],
-  path: string,
-  _options?: { email?: string | null }
+  path: string
 ): boolean {
   if (isPublicAuthRoute(path) || path.startsWith('/profile')) return true;
 

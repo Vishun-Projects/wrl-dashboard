@@ -57,3 +57,7 @@ next-env.d.ts
 .vercel
 # folders
 /warranty-pipeline
+eslint-report.json
+eslint-unused.json
+eslint-any.json
+eslint-hooks.json

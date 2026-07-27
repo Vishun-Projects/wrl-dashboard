@@ -27,7 +27,6 @@ import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
 import {
   ARCP_DATE_FILTER_OPTIONS,
   ARCP_DEFAULT_DATE_FILTER_COLUMN,
-  estimateArcpLoadPlan,
   resolveArcpClientLoadPlan,
   shouldUseClientSideArcpChunks,
   resolveArcpLoadConcurrency,
@@ -843,7 +842,7 @@ export default function ArcpClaimsPage() {
         jobPollDelayMs = ARCP_JOB_POLL_MS;
       };
 
-      let failedChunks = 0;
+      const failedChunks = 0;
 
       try {
       const jobStartRes = await axios.post<ArcpLoadJobStartResponse>(
@@ -875,6 +874,7 @@ export default function ArcpClaimsPage() {
         jobChunkStatus = new Map(
           (jobStart.chunks ?? []).map((c) => [`${c.chunkStart}|${c.chunkEnd}`, c.status])
         );
+        void jobChunkStatus; // ponytail: tracked for future resumable-chunk UI, unused for now
         cachedAtStart = jobStart.progress?.doneCount ?? 0;
         pendingAtStart = jobStart.progress?.pendingCount ?? chunkList.length;
         runningAggregates = mergeArcpAggregateRows(
@@ -1452,6 +1452,7 @@ export default function ArcpClaimsPage() {
       dateFilterColumn: appliedFilters.arcpDateFilterColumn,
       includeTravel: includeTravelReimbursement,
     };
+    void detailExportOptions; // ponytail: reserved for server-side export options wiring
 
     const reportDetailExportProgress = (
       done: number,
@@ -1495,7 +1496,8 @@ export default function ArcpClaimsPage() {
 
     const chunkTimings: number[] = [];
     let failedChunks = 0;
-    let completedChunks = 0;
+    const completedChunks = 0;
+    void completedChunks; // ponytail: placeholder counter, not yet wired to progress UI
     const exportStartedAt = Date.now();
 
     const detailJobRes = await axios.post<ArcpLoadJobStartResponse>(
@@ -1520,6 +1522,7 @@ export default function ArcpClaimsPage() {
       (detailJob.chunks ?? []).map((c) => [`${c.chunkStart}|${c.chunkEnd}`, c.status])
     );
     const detailCachedAtStart = detailJob.progress?.doneCount ?? 0;
+    void detailCachedAtStart; // ponytail: reserved for ETA calc parity with agg job path
     const detailChunkKey = (c: { start: string; end: string }) => `${c.start}|${c.end}`;
     const mergedDetailChunkKeys = new Set<string>();
     for (const c of detailJob.chunks ?? []) {

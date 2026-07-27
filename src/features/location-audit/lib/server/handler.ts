@@ -13,7 +13,6 @@ import {
   LOCATION_AUDIT_MAX_ROWS,
   summarizeLocationAuditListRows,
   type LocationAuditDetailRow,
-  type LocationAuditListRow,
   type LocationAuditQueryParams,
 } from './queries';
 import { analyzeListTierFromRaw } from './analyze';
@@ -103,8 +102,7 @@ export async function fetchLocationAuditFull(params: LocationAuditQueryParams) {
 
 /** Full list for the date/filter window (up to {@link LOCATION_AUDIT_MAX_ROWS}), pincode mismatches only. */
 export async function fetchLocationAuditList(
-  params: LocationAuditQueryParams,
-  _opts?: { mismatchesOnly?: boolean }
+  params: LocationAuditQueryParams
 ) {
   const rawRows = await fetchCrmSql(buildLocationAuditRawSql(params));
   const analyzed = analyzeListTierRows(rawRows);
@@ -134,8 +132,7 @@ export async function fetchLocationAuditRowDetail(
 }
 
 export async function runLocationAuditExport(
-  params: LocationAuditQueryParams,
-  _opts?: { mismatchesOnly?: boolean }
+  params: LocationAuditQueryParams
 ): Promise<LocationAuditDetailRow[]> {
   const rawRows = await fetchCrmSql(buildLocationAuditRawSql(params));
   const listRows = analyzeListTierRows(rawRows);

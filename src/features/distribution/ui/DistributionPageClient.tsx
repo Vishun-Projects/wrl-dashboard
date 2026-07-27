@@ -3,11 +3,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import {
-  MapPin,
-  Users,
   SlidersHorizontal,
   RefreshCw,
-  AlertTriangle,
   Map as LucideMap,
   FilterX,
   Download,
@@ -86,29 +83,25 @@ export default function CallDistributionPage() {
     selectedFranchisee,
     selectedTechnician,
     selectedCallTypes,
-    selectedOfficeIds,
     selectedStatus,
     priorityFilter,
     portalFilter,
-    pincodeSearch,
     debouncedPincodeSearch,
     syncCascadeOptionsFromCalls,
     resourcesLoaded,
     offices,
     appliedFilters,
     appliedRevision,
-    prefsReady,
   } = useReportFilters();
 
   const supabase = useMemo(() => createClient(), []);
   const {
     calls: distributionCalls,
     loading: distributionLoading,
-    error: distributionError,
     refetch: refetchDistribution,
   } = useDistributionSummary(supabase, appliedFilters, appliedRevision);
 
-  const [mounted, setMounted] = useState(false);
+  const mounted = typeof window !== 'undefined';
 
   const applied = appliedFilters;
   const startDateStr = useMemo(
@@ -127,22 +120,15 @@ export default function CallDistributionPage() {
 
   // Leaflet map refs
   const mapRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<any>(null);
-  const markersLayerRef = useRef<any>(null);
+  const mapInstanceRef = useRef<unknown>(null);
+  const markersLayerRef = useRef<unknown>(null);
 
   const [selectedPincode, setSelectedPincode] = useState('All');
 
   // Loading States
   const [mapReady, setMapReady] = useState(false);
   const [mapLoadError, setMapLoadError] = useState(false);
-  const [showMap, setShowMap] = useState(false);
-
-  // Invalidate map size when shown again
-  useEffect(() => {
-    if (showMap && mapInstanceRef.current) {
-      setTimeout(() => mapInstanceRef.current.invalidateSize(), 150);
-    }
-  }, [showMap]);
+  const showMap = false;
 
   // Aggregated API Data States
   const [registerSummary, setRegisterSummary] = useState<RegisterSummary | null>(null);
@@ -151,9 +137,8 @@ export default function CallDistributionPage() {
     activeTechniciansCount: 0,
     callToTechnicianRatio: 0,
   });
-  const [franchiseeSummary, setFranchiseeSummary] = useState<any[]>([]);
-  const [pincodeSummary, setPincodeSummary] = useState<any[]>([]);
-  const [periodFilteredCalls, setPeriodFilteredCalls] = useState<Record<string, unknown>[]>([]);
+  const [franchiseeSummary, setFranchiseeSummary] = useState<Record<string, unknown>[]>([]);
+  const [pincodeSummary, setPincodeSummary] = useState<Record<string, unknown>[]>([]);
 
   // Idle assignees
   const [rosterTechnicians, setRosterTechnicians] = useState<RosterTechnician[]>([]);
@@ -170,10 +155,6 @@ export default function CallDistributionPage() {
   // Loading & Sorting States
   const [franSort, setFranSort] = useState<TableSortState>({ key: 'ratio', dir: 'desc' });
   const [highlightedFranchisee, setHighlightedFranchisee] = useState<string | null>(null);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   useEffect(() => {
     if (distributionCalls.length > 0) {
@@ -206,15 +187,16 @@ export default function CallDistributionPage() {
   // CSR Metrics & Dashboard Aggregations Computation
   useEffect(() => {
     if (distributionCalls.length === 0) {
-      setRegisterSummary(null);
-      setDistributionMetrics({
-        franchiseesCount: 0,
-        activeTechniciansCount: 0,
-        callToTechnicianRatio: 0,
+      queueMicrotask(() => {
+        setRegisterSummary(null);
+        setDistributionMetrics({
+          franchiseesCount: 0,
+          activeTechniciansCount: 0,
+          callToTechnicianRatio: 0,
+        });
+        setFranchiseeSummary([]);
+        setPincodeSummary([]);
       });
-      setFranchiseeSummary([]);
-      setPincodeSummary([]);
-      setPeriodFilteredCalls([]);
       return;
     }
 
@@ -223,8 +205,7 @@ export default function CallDistributionPage() {
       distributionViewFilters,
       viewDateFilter
     );
-    setRegisterSummary(summary);
-    setPeriodFilteredCalls(filteredCalls);
+    queueMicrotask(() => setRegisterSummary(summary));
 
     const franchiseeMap = new Map();
     const pincodeMap = new Map();
@@ -295,7 +276,7 @@ export default function CallDistributionPage() {
       }
     });
 
-    const franchiseeSummary = Array.from(franchiseeMap.values()).map((f: any) => {
+    const franchiseeSummary = Array.from(franchiseeMap.values()).map((f: Record<string, unknown>) => {
       const techCount = f.techs.size;
       const ratio = techCount > 0 ? parseFloat((f.open_calls / techCount).toFixed(2)) : f.open_calls;
       return {
@@ -313,7 +294,7 @@ export default function CallDistributionPage() {
     franchiseeSummary.sort((a, b) => b.ratio - a.ratio);
 
     const pincodeFinalMap = new Map();
-    pincodeMap.forEach((pin: any) => {
+    pincodeMap.forEach((pin: Record<string, unknown>) => {
       if (!pincodeFinalMap.has(pin.pincode)) {
         pincodeFinalMap.set(pin.pincode, {
           pincode: pin.pincode,
@@ -336,7 +317,7 @@ export default function CallDistributionPage() {
       });
     });
 
-    const pincodeSummary = Array.from(pincodeFinalMap.values()).map((pin: any) => {
+    const pincodeSummary = Array.from(pincodeFinalMap.values()).map((pin: Record<string, unknown>) => {
       return {
         pincode: pin.pincode,
         lat: pin.lat,
@@ -347,16 +328,18 @@ export default function CallDistributionPage() {
       };
     });
 
-    setDistributionMetrics({
-      franchiseesCount: activeFranchiseesSet.size,
-      activeTechniciansCount: activeTechsSet.size,
-      callToTechnicianRatio:
-        activeTechsSet.size > 0
-          ? parseFloat((summary.open / activeTechsSet.size).toFixed(2))
-          : summary.open,
+    queueMicrotask(() => {
+      setDistributionMetrics({
+        franchiseesCount: activeFranchiseesSet.size,
+        activeTechniciansCount: activeTechsSet.size,
+        callToTechnicianRatio:
+          activeTechsSet.size > 0
+            ? parseFloat((summary.open / activeTechsSet.size).toFixed(2))
+            : summary.open,
+      });
+      setFranchiseeSummary(franchiseeSummary);
+      setPincodeSummary(pincodeSummary);
     });
-    setFranchiseeSummary(franchiseeSummary);
-    setPincodeSummary(pincodeSummary);
   }, [distributionCalls, distributionViewFilters, viewDateFilter]);
 
   const auditScopeFilterParts = useMemo(
@@ -377,18 +360,18 @@ export default function CallDistributionPage() {
 
   useEffect(() => {
     if (!rosterBranchId) {
-      setRosterTechnicians([]);
+      queueMicrotask(() => setRosterTechnicians([]));
       return;
     }
 
     const cached = getCachedEngineerRoster(rosterBranchId);
     if (cached) {
-      setRosterTechnicians(cached);
+      queueMicrotask(() => setRosterTechnicians(cached));
       return;
     }
 
     let cancelled = false;
-    setIdleRosterLoading(true);
+    queueMicrotask(() => setIdleRosterLoading(true));
     loadEngineerRosterForBranch(rosterBranchId, async () => {
       const { data: { session } } = await supabase.auth.getSession();
       const url = `/api/report/engineers?branchId=${encodeURIComponent(rosterBranchId)}&roster=1`;
@@ -447,9 +430,11 @@ export default function CallDistributionPage() {
   );
 
   useEffect(() => {
-    setIdleIssueFilter('assigned_no_completions');
-    setHighlightedIdleKey(null);
-    setHighlightedFranchisee(null);
+    queueMicrotask(() => {
+      setIdleIssueFilter('assigned_no_completions');
+      setHighlightedIdleKey(null);
+      setHighlightedFranchisee(null);
+    });
   }, [
     startDateStr,
     endDateStr,
@@ -503,7 +488,7 @@ export default function CallDistributionPage() {
         setMapLoadError(true);
         return;
       }
-      const L = (window as any).L;
+      const L = (window as unknown as { L?: unknown }).L;
       if (!L || !mapRef.current) {
         return;
       }
@@ -549,7 +534,7 @@ export default function CallDistributionPage() {
 
   // Leaflet Map Markers Re-render
   useEffect(() => {
-    const L = (window as any).L;
+    const L = (window as unknown as { L?: unknown }).L;
     const map = mapInstanceRef.current;
     const layer = markersLayerRef.current;
     if (!L || !map || !layer || !pincodeSummary || !mapReady) return;
@@ -561,7 +546,7 @@ export default function CallDistributionPage() {
       // Reset markers
       layer.clearLayers();
 
-      const bounds: any[] = [];
+      const bounds: unknown[] = [];
 
       // Filter points based on highlighted Franchisee, selected Pincode, or Pincode Search
       const filteredPoints = pincodeSummary.filter(pin => {
@@ -581,7 +566,7 @@ export default function CallDistributionPage() {
         return true;
       });
 
-      filteredPoints.forEach((pin: any) => {
+      filteredPoints.forEach((pin: Record<string, unknown>) => {
         // Metric logic: Health status by open calls backlog
         // Orange/Red for high backlog pincodes, Green for balanced
         let color = '#10b981'; // Green
@@ -613,7 +598,7 @@ export default function CallDistributionPage() {
               <p>Total Active Calls: <b class="text-slate-950 font-semibold">${pin.total_calls}</b></p>
               <p>Open Backlog: <b class="text-amber-600 font-bold">${pin.open_calls}</b></p>
               <div class="border-t border-slate-100 mt-1.5 pt-1.5 max-h-[90px] overflow-y-auto space-y-1">
-                ${pin.franchisees.map((f: any) => `
+                ${pin.franchisees.map((f: Record<string, unknown>) => `
                   <div class="flex justify-between items-center text-[10px] text-slate-500">
                     <span class="truncate pr-1 font-medium">${f.franchisee_name}</span>
                     <span class="font-bold text-slate-800">${f.total_calls}</span>
@@ -708,11 +693,11 @@ export default function CallDistributionPage() {
     return sortedIdleAssigneeRows.filter((row) => row.issue === idleIssueFilter);
   }, [sortedIdleAssigneeRows, idleIssueFilter]);
 
-  const idleRowLinkPriority = (row: IdleAssigneeRow): number => {
+  const idleRowLinkPriority = React.useCallback((row: IdleAssigneeRow): number => {
     if (highlightedIdleKey && idleRowKey(row) === highlightedIdleKey) return 0;
     if (highlightedFranchisee && idleRowMatchesFranchisee(row, highlightedFranchisee)) return 1;
     return 2;
-  };
+  }, [highlightedFranchisee, highlightedIdleKey]);
 
   const displayedIdleAssigneeRows = useMemo(() => {
     const rows = idleRowsByIssue;
@@ -728,7 +713,7 @@ export default function CallDistributionPage() {
         return a.index - b.index;
       })
       .map(({ row }) => row);
-  }, [idleRowsByIssue, highlightedFranchisee, highlightedIdleKey]);
+  }, [idleRowsByIssue, highlightedFranchisee, highlightedIdleKey, idleRowLinkPriority]);
 
   const linkedIdleCount = useMemo(() => {
     if (!highlightedFranchisee) return 0;

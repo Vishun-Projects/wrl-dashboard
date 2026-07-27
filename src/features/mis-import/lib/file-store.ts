@@ -1,4 +1,4 @@
-import { mkdir, unlink, writeFile } from 'fs/promises';
+import { mkdir, rmdir, unlink, writeFile } from 'fs/promises';
 import path from 'path';
 
 export function resolveImportDir(): string {
@@ -57,5 +57,18 @@ export async function deleteImportFile(storedFilePath: string | null | undefined
     await unlink(absolutePath);
   } catch {
     // file may already be gone
+  }
+  // Best-effort: remove empty batch/ and source/ dirs left behind.
+  const batchDir = path.dirname(absolutePath);
+  const sourceDir = path.dirname(batchDir);
+  try {
+    await rmdir(batchDir);
+  } catch {
+    /* not empty or already gone */
+  }
+  try {
+    await rmdir(sourceDir);
+  } catch {
+    /* not empty or already gone */
   }
 }

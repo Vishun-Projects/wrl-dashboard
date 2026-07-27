@@ -2,7 +2,10 @@ import 'server-only';
 
 import { prisma } from '@/lib/db/prisma';
 import type { CallRegisterQueryParams } from './types';
-import { callRegisterDateSqlExpr, isCallRegisterAllTime, parseCallRegisterDateField } from './dates';
+import {
+  callRegisterDateSqlExpr,
+  parseCallRegisterDateField,
+} from './dates';
 import {
   shapeSerialExportRow,
   type CallRegisterSerialExportRow,
@@ -10,6 +13,7 @@ import {
 
 export type { CallRegisterSerialExportRow };
 export { shapeSerialExportRow } from './shape';
+export { callRegisterSerialExportFilename } from './dates';
 
 type ExportJoinRow = {
   client: string;
@@ -126,15 +130,4 @@ export async function fetchCallRegisterSerialExportRows(
     );
   }
   return out;
-}
-
-export function callRegisterSerialExportFilename(
-  params: CallRegisterQueryParams,
-  date = new Date()
-): string {
-  const stamp = date.toISOString().slice(0, 10);
-  if (isCallRegisterAllTime(params)) {
-    return `WRL_Call_Register_Serials_AllTime_${stamp}.xlsx`;
-  }
-  return `WRL_Call_Register_Serials_${params.dateFrom}_${params.dateTo}.xlsx`;
 }

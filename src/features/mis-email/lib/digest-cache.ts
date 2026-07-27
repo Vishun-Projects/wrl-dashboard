@@ -1,7 +1,7 @@
 import type { DigestDateRange } from '@/features/mis-email/lib/fetch-digest-data';
 import { fetchDigestSummaryData } from '@/features/mis-email/lib/fetch-digest-data';
 import { fetchDigestClientAccountSummary } from '@/features/mis-email/lib/fetch-digest-accounts';
-import { useDirectDatabaseForBulkReads } from '@/lib/read-model/db';
+import { isDirectDatabaseForBulkReads } from '@/lib/read-model/db';
 import type { UserDigestScope } from '@/features/mis-email/lib/user-scope';
 import type { AccountSummaryRow, SummaryDashboard } from '@/features/report';
 
@@ -62,7 +62,7 @@ export async function fetchDigestClientAccountSummaryCached(
   }
 
   const started = Date.now();
-  const via = useDirectDatabaseForBulkReads() ? 'direct' : 'pooler';
+  const via = isDirectDatabaseForBulkReads() ? 'direct' : 'pooler';
   console.log(
     `${LOG_PREFIX} queryClientAccountSummary ${dateRange.startDate}→${dateRange.endDate} · ${via}`
   );

@@ -7,6 +7,8 @@ import { prisma } from '@/lib/db/prisma';
 import { postQuery } from '@/lib/db/proxy';
 import { buildCrmTransactionQuery } from '@/features/report/lib/call-register/sql';
 
+type QueryRow = Record<string, string>;
+
 async function main() {
   const params = { dateFrom: '2026-07-01', dateTo: '2026-07-20' };
   
@@ -45,11 +47,11 @@ async function main() {
   // 2. Let's find matches in Postgres using Prisma (to avoid Supabase helper dependencies)
   console.log('Querying Postgres read-model database for matches...');
   const CHUNK_SIZE = 500;
-  const postgresCalls: any[] = [];
+  const postgresCalls: QueryRow[] = [];
   
   for (let i = 0; i < allSerials.length; i += CHUNK_SIZE) {
     const chunk = allSerials.slice(i, i + CHUNK_SIZE);
-    const matches = await prisma.$queryRawUnsafe<any[]>(
+    const matches = await prisma.$queryRawUnsafe<QueryRow[]>(
       `SELECT serial, call_type, status_bucket, status_label
        FROM calls_latest_hot
        WHERE serial IN (${chunk.map((_, idx) => `$${idx + 1}`).join(', ')})
@@ -88,7 +90,7 @@ async function main() {
   console.log('Unique serials marked done in serialStatus map:', serialStatus.size);
 
   // Aggregate by Client
-  const rows: any[] = [];
+  const rows: QueryRow[] = [];
   for (const [client, data] of Array.from(clientMap.entries())) {
     let installation = 0;
     let deployment = 0;

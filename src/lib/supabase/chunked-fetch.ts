@@ -11,12 +11,14 @@ export type ChunkedFetchAuth = {
 };
 
 /** Cookie-auth helpers for long chunked API loops (no browser GoTrue refresh). */
-export function createChunkedFetchAuth(_supabase: SupabaseClient): ChunkedFetchAuth {
+export function createChunkedFetchAuth(supabase: SupabaseClient): ChunkedFetchAuth {
+  void supabase;
   const getWithAuthRetry = async <T>(
     url: string,
     config: Omit<AxiosRequestConfig, 'headers'> = {},
-    _options?: { chunkIndex?: number; refreshEveryN?: number }
+    options?: { chunkIndex?: number; refreshEveryN?: number }
   ): Promise<T> => {
+    void options;
     const res = await axios.get<T>(url, { ...config, ...cookieAuthRequestConfig });
     return res.data;
   };

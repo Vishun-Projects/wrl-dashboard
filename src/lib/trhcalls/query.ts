@@ -79,8 +79,8 @@ function isUsableFranchiseeName(candidate: string, officeName: string): boolean 
 }
 
 function inferFranchiseeFromRow(row: Record<string, unknown>, officeName: string, officeIsBranch: boolean) {
-  let franchiseeName = String(row.franchisee_name ?? 'Unallocated').trim();
-  let franchiseeCode =
+  const franchiseeName = String(row.franchisee_name ?? 'Unallocated').trim();
+  const franchiseeCode =
     row.franchisee_code != null && String(row.franchisee_code) !== '' && String(row.franchisee_code) !== 'null'
       ? String(row.franchisee_code)
       : 'UNASSIGNED';

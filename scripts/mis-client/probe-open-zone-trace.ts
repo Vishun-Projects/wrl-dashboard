@@ -20,8 +20,8 @@ import { formatDisplayRegion } from '@/features/mis-import/lib/region';
 
 const RAW = 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw';
 const CRM_CSV = `${RAW}/CRM_WRL_MIS_Register_2026-06-30.csv`;
-const CADBURY = `${RAW}/Cadbury.csv`;
-const HCCB = `${RAW}/HCCB.xlsx`;
+
+
 const EXCEL = `${RAW}/New_BD_MIS_30.06.2026.xlsx`;
 const END = '2026-06-29';
 
@@ -118,8 +118,6 @@ function loadExcelPendingByZone(): Map<string, number> | null {
 
 async function main() {
   const csvByZone = countCrmCsvByZone();
-  let csvOpenGrand = 0;
-  for (const z of ZONES) csvOpenGrand += csvByZone.get(z)?.open ?? 0;
 
   const p = {
     startDate: '2026-01-01',

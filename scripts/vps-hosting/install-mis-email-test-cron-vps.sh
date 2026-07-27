@@ -101,7 +101,9 @@ test -f "\$root/.env.mis-email"
 
 prod=\$(crontab -l 2>/dev/null | grep 'mis-email-digest.sh' | grep -v 'mis-email-test' | head -1 || true)
 if [[ -z "\$prod" ]]; then
-  prod="30 9 * * * \${root}/scripts/vps-hosting/mis-email-digest.sh >> \${root}/logs/mis-email-cron.log 2>&1"
+  prod="30 9 * * 1-6 \${root}/scripts/vps-hosting/mis-email-digest.sh >> \${root}/logs/mis-email-cron.log 2>&1"
+else
+  prod=\$(echo "\$prod" | sed -E 's/^([0-9]+) ([0-9]+) \* \* \*/\1 \2 * * 1-6/')
 fi
 
 {

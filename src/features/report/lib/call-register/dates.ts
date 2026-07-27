@@ -33,3 +33,14 @@ export function resolveCallRegisterDates(searchParams: URLSearchParams): {
 export function isCallRegisterAllTime(params: { dateFrom?: string; dateTo?: string }) {
   return !params.dateFrom && !params.dateTo;
 }
+
+export function callRegisterSerialExportFilename(
+  params: { dateFrom?: string; dateTo?: string },
+  date = new Date()
+): string {
+  const stamp = date.toISOString().slice(0, 10);
+  if (isCallRegisterAllTime(params)) {
+    return `WRL_Call_Register_Serials_AllTime_${stamp}.xlsx`;
+  }
+  return `WRL_Call_Register_Serials_${params.dateFrom}_${params.dateTo}.xlsx`;
+}

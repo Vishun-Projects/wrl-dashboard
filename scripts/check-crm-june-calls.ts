@@ -6,6 +6,8 @@ config({ path: join(process.cwd(), '.env') });
 import { prisma } from '@/lib/db/prisma';
 import { postQuery } from '@/lib/db/proxy';
 
+type QueryRow = Record<string, string>;
+
 async function main() {
   console.log('=== Checking June CRM records for Campa Cola ===');
 
@@ -32,13 +34,13 @@ async function main() {
         AND TRY_CONVERT(datetime, daddedon, 103) <= '2026-06-30 23:59:59'
     `
   });
-  const serials = (res2.data || []).map((r: any) => r.ProductSerialNo.trim()).filter(Boolean);
+  const serials = (res2.data || []).map((r: QueryRow) => r.ProductSerialNo.trim()).filter(Boolean);
   console.log('Total serials in June:', serials.length);
 
   if (serials.length === 0) return;
 
   // Let's check matches in calls_latest_hot
-  const dbCalls = await prisma.$queryRawUnsafe<any[]>(
+  const dbCalls = await prisma.$queryRawUnsafe<QueryRow[]>(
     `SELECT serial, call_type, status_bucket, status_label, logged_at
      FROM calls_latest_hot
      WHERE serial IN (${serials.map((_, idx) => `$${idx + 1}`).join(', ')})`,

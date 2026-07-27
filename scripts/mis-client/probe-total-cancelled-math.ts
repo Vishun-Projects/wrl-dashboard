@@ -1,6 +1,5 @@
 import { config } from 'dotenv';
 import { join } from 'path';
-import { readFileSync } from 'fs';
 config({ path: join(process.cwd(), '.env.local') });
 import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
 import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/lib/aggregate';
@@ -15,25 +14,7 @@ const p = {
   isHod: true,
 };
 
-function loadCsvTrns(): Set<string> {
-  const lines = readFileSync(
-    'C:/Users/Vishnu.Vishwakarma/Downloads/Raw/CRM_WRL_MIS_Register_2026-06-30.csv',
-    'utf8'
-  ).split(/\r?\n/).filter(Boolean);
-  const h = lines[0].split(',');
-  const idIdx = h.findIndex((x) => x.replace(/"/g, '').trim() === 'ID');
-  const ctIdx = h.findIndex((x) => x.replace(/"/g, '').trim() === 'Call Type');
-  const dateIdx = h.findIndex((x) => x.replace(/"/g, '').trim() === 'Date');
-  const set = new Set<string>();
-  for (let i = 1; i < lines.length; i++) {
-    const parts = lines[i].match(/("([^"]|"")*"|[^,]*)/g) ?? [];
-    const callType = (parts[ctIdx] ?? '').replace(/"/g, '').trim();
-    if (callType.toUpperCase() !== 'BREAKDOWN') continue;
-    const id = (parts[idIdx] ?? '').replace(/"/g, '').trim();
-    if (id) set.add(id);
-  }
-  return set;
-}
+
 
 async function main() {
   const crm = await queryBdMisCrmSummary(p);
@@ -82,7 +63,7 @@ async function main() {
   console.log(`All rows:      ${hot.all_n.toLocaleString()} (= non-cancelled + cancelled)`);
 
   for (const row of rows) {
-    const all = row.total_calls + row.cancelled_calls;
+    
     const check = row.total_solved + row.open_calls;
     if (check !== row.total_calls) {
       console.log(`ZONE MISMATCH ${row.region}: total=${row.total_calls} solved+open=${check}`);

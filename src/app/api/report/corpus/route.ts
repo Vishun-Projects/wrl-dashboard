@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { resolveRequestUserId } from '@/lib/auth/server-user';
 import { isCrmOutOfMemoryError, postQuery } from '@/lib/db/proxy';
-import { prisma } from '@/lib/db/prisma';
+
 import {
   appendCallTypeFilter,
   appendOfficeSecurityFilter,
@@ -236,7 +236,7 @@ async function mergeAdaptiveChunks(
       if (i < chunks.length - 1) {
         await sleep(CORPUS_CHUNK_FETCH_GAP_MS);
       }
-    } catch (subErr) {
+    } catch  {
       failed++;
       /* sub-range failed — continue with partial data */
     }
@@ -329,7 +329,7 @@ async function fetchCorpusFullMerged(
       mergeRowsIntoMap(merged, result.rows);
       if (result.topLimited) topLimited = true;
       if (merged.size >= CORPUS_MAX_ROWS) break;
-    } catch (err) {
+    } catch  {
       failedMonths++;
       /* month slice failed — continue with partial data */
     }

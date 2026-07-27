@@ -6,7 +6,6 @@ import { querySummaryDashboard } from '@/lib/read-model/queries/summary';
 import { queryClientAccountSummaryFiltered } from '@/features/mis-import/lib/aggregate';
 import {
   sumMergedAccountMetricByRegion,
-  DEFAULT_CLIENT_MERGE_WITH_CRM,
 } from '@/features/report/ui/SummaryMergedMetricCell';
 
 async function main() {

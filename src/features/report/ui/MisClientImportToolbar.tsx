@@ -8,6 +8,9 @@ import {
   formatMisUploadProgressLabel,
   runMisClientUploadQueue,
   type MisUploadProgress,
+  IMPORT_FILE_UNAVAILABLE_LABEL,
+  importFileRetentionTooltip,
+  canManageImportFile,
 } from '@/features/mis-import';
 import {
   isBrowserOnVercel,
@@ -34,6 +37,7 @@ type BatchMeta = {
   uploadedAt: string;
   uploadedByName: string;
   storedFilePath: string | null;
+  fileRetained?: boolean;
 };
 
 type SourceMeta = {
@@ -595,39 +599,50 @@ export default function MisClientImportToolbar({
                     </td>
                     <td className="p-1.5">
                       <div className="flex items-center justify-end gap-1">
-                        <button
-                          type="button"
-                          title={
-                            batch.storedFilePath
-                              ? 'Download original file'
-                              : 'Download original file (may be unavailable on serverless hosts)'
-                          }
-                          disabled={downloadingBatchId === batch.batchId}
-                          onClick={() => void handleDownloadBatch(batch.batchId, batch.fileName)}
-                          className="inline-flex items-center gap-0.5 rounded border border-indigo-200 bg-bg-canvas px-1.5 py-0.5 text-[9px] font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
-                        >
-                          {downloadingBatchId === batch.batchId ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Download className="h-3 w-3" />
-                          )}
-                          Download
-                        </button>
-                        {canDelete && (
-                          <button
-                            type="button"
-                            title="Delete import"
-                            disabled={deletingBatchId === batch.batchId}
-                            onClick={() => void handleDeleteBatch(batch.batchId, batch.fileName)}
-                            className="inline-flex items-center gap-0.5 rounded border border-rose-200 bg-bg-canvas px-1.5 py-0.5 text-[9px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-                          >
-                            {deletingBatchId === batch.batchId ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-3 w-3" />
+                        {canManageImportFile({
+                          uploadedAt: batch.uploadedAt,
+                          fileRetained: batch.fileRetained,
+                          storedFilePath: batch.storedFilePath,
+                        }) ? (
+                          <>
+                            <button
+                              type="button"
+                              title="Download original file"
+                              disabled={downloadingBatchId === batch.batchId}
+                              onClick={() => void handleDownloadBatch(batch.batchId, batch.fileName)}
+                              className="inline-flex items-center gap-0.5 rounded border border-indigo-200 bg-bg-canvas px-1.5 py-0.5 text-[9px] font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                            >
+                              {downloadingBatchId === batch.batchId ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Download className="h-3 w-3" />
+                              )}
+                              Download
+                            </button>
+                            {canDelete && (
+                              <button
+                                type="button"
+                                title="Delete import"
+                                disabled={deletingBatchId === batch.batchId}
+                                onClick={() => void handleDeleteBatch(batch.batchId, batch.fileName)}
+                                className="inline-flex items-center gap-0.5 rounded border border-rose-200 bg-bg-canvas px-1.5 py-0.5 text-[9px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                              >
+                                {deletingBatchId === batch.batchId ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-3 w-3" />
+                                )}
+                                Delete
+                              </button>
                             )}
-                            Delete
-                          </button>
+                          </>
+                        ) : (
+                          <span
+                            title={importFileRetentionTooltip()}
+                            className="inline-flex cursor-help items-center rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[9px] font-medium text-slate-500"
+                          >
+                            {IMPORT_FILE_UNAVAILABLE_LABEL}
+                          </span>
                         )}
                       </div>
                     </td>

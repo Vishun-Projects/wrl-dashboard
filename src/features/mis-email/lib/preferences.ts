@@ -446,7 +446,7 @@ export function validateMisEmailPreferencesPatch(params: {
     return { ok: false, error: 'Key account body section requires Key Account MIS access' };
   }
 
-  const effectiveIncludes = resolveEffectiveDigestIncludes(params.permissions, merged);
+  
   merged.bodyInEmail = resolveDigestBodySections(bodyPermissions, merged, {
     includeKeyAccountAttachment: false,
   });

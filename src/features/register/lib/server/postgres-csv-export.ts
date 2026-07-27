@@ -155,7 +155,7 @@ export async function buildPostgresRegisterCsvStream(
               values: queryValues,
             });
 
-            let rows = res.rows;
+            const rows = res.rows;
             if (!rows.length) break;
 
             const lines = new Array<string>(rows.length);

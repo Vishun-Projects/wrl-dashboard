@@ -226,7 +226,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
   const [allowAutoSendOverride, setAllowAutoSendOverride] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [activeContentTab, setActiveContentTab] = useState<'attachments' | 'sections'>('attachments');
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [, setLastSavedAt] = useState<Date | null>(null);
 
   const draftPrefs = useMemo(
     (): MisEmailPreferences => ({

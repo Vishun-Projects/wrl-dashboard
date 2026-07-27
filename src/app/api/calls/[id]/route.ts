@@ -81,7 +81,7 @@ export async function GET(
     });
 
     const historyData = historyRes.data || [];
-    const allNcodes = Array.from(new Set(historyData.map((h: any) => h.ncode).filter(Boolean)));
+    const allNcodes = Array.from(new Set(historyData.map((history) => history.ncode).filter(Boolean)));
     const ncodesStr = allNcodes.length > 0 ? allNcodes.join(',') : `'${realId}'`;
 
     const childCondition = `ncalls IN (${ncodesStr}) AND nofficeid = '${realOfficeId}'`;
@@ -125,15 +125,15 @@ export async function GET(
     const docs = docsRes.data || [];
 
     // 3. Smart-Merge Serial Numbers into Parts
-    const parts = rawParts.map((p: any) => {
+    const parts = rawParts.map((part: Record<string, string>) => {
       // Find matching serial entry (by part_id OR item_code)
-      const serialEntry = serials.find((s: any) => 
-        String(s.ncalls3) === String(p.part_id) || 
-        (String(s.nitem) === String(p.nitem))
+      const serialEntry = serials.find((serial: Record<string, string>) => 
+        String(serial.ncalls3) === String(part.part_id) || 
+        (String(serial.nitem) === String(part.nitem))
       );
 
-      let vnewbarcode = p.vnewbarcode || '';
-      let voldbarcode = p.voldbarcode || '';
+      let vnewbarcode = part.vnewbarcode || '';
+      let voldbarcode = part.voldbarcode || '';
 
       if (serialEntry) {
         vnewbarcode = serialEntry.vnewserialno || serialEntry.vserialno || vnewbarcode;
@@ -142,8 +142,8 @@ export async function GET(
 
       // Final fallback: Smart Extraction from visits
       if (!vnewbarcode || String(vnewbarcode).trim() === '') {
-        const partNameLower = (p.vpartname || '').toLowerCase();
-        const partCode = (p.vpartcode || '').toLowerCase();
+        const partNameLower = (part.vpartname || '').toLowerCase();
+        const partCode = (part.vpartcode || '').toLowerCase();
         
         for (const v of visits) {
           const remarkText = `${v.vvisitremark || ''} ${v.vPartsReplacedDetails || ''} ${v.vcustomerRemarks || ''}`;
@@ -163,13 +163,13 @@ export async function GET(
         }
       }
 
-      return { ...p, vnewbarcode, voldbarcode };
+      return { ...part, vnewbarcode, voldbarcode };
     });
 
     const bestRemark = parentData.vsolveremarks || (visits.length > 0 ? visits[0].vvisitremark : null);
 
     return NextResponse.json({
-      visits: visits.map((v: any) => ({
+      visits: visits.map((v) => ({
         vtrnno: v.vtrnno,
         dvisitdatetime: v.dvisitdatetime,
         vvisitremark: v.vvisitremark,
@@ -182,14 +182,14 @@ export async function GET(
         customer_sign: v.vcustomersignPath,
         engineer_sign: v.vengineersignPath
       })),
-      faults: faults.map((f: any) => ({
+      faults: faults.map((f) => ({
         visit_id: f.visit_id,
         complaint: f.complaint,
         defect: f.defect,
         repair: f.repair,
         is_solved: isCrmFlag(f.is_solved)
       })),
-      parts: parts.map((p: any) => ({
+      parts: parts.map((p) => ({
         vpartname: p.vpartname,
         vpartcode: p.vpartcode,
         nqty: p.nqty,
@@ -222,14 +222,14 @@ export async function GET(
       crm_reject: isCrmFlag(parentData.bBMreject),
       crm_reject_reason: parentData.vBMrejectreason,
       crm_reject_at: parentData.dBMrejectdatetime,
-      documents: docs.map((d: any) => ({
+      documents: docs.map((d) => ({
         filename: d.vnewfilename,
         original_name: d.vorigionalfilename,
         remarks: d.vremarks,
         office_id: d.nofficeid,
         uploaded_at: d.addedon
       })),
-      history: (historyRes.data || []).map((h: any) => ({
+      history: (historyRes.data || []).map((h) => ({
         ncode: h.ncode,
         vtrnno: h.vtrnno,
         vtransfercallno: h.vtransfercallno,
@@ -256,7 +256,10 @@ export async function GET(
       }))
     });
 
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to load call details' },
+      { status: 500 }
+    );
   }
 }

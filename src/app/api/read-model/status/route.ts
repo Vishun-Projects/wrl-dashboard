@@ -13,7 +13,7 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const permissions = await (prisma as any).getUserPermissions(user.id);
+  const permissions = await prisma.getUserPermissions(user.id);
   if (!hasAnyReportPageAccess(permissions) && !permissions.includes('manage_users')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }

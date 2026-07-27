@@ -13,7 +13,7 @@ const REF: Record<string, number> = {
   TOTAL: 195793,
 };
 
-const CLIENT_REPLACE = new Set(['mondelez', 'hccb']);
+
 
 function normRegion(r: string): string {
   const z = formatDisplayRegion(r);
@@ -25,7 +25,7 @@ const main = XLSX.utils.sheet_to_json(wb.Sheets['Main'], { header: 1, defval: ''
 const header = main[0] as string[];
 const clientIdx = header.indexOf('Client');
 const regionIdx = header.indexOf('Region');
-const statusIdx = header.indexOf('Call Status');
+
 const soIdx = header.indexOf('Service Order');
 const fileIdx = header.indexOf('File Name');
 
@@ -102,7 +102,7 @@ console.log('\n=== If we used full CRM branch + account swap (wrong) ===');
 for (const reg of ['NORTH', 'EAST', 'WEST', 'SOUTH']) {
   const crm = crmByRegion.get(reg) ?? 0;
   const md = mondelezByRegion.get(reg) ?? 0;
-  const hc = hccbByRegion.get(reg) ?? 0;
+  
   let total = crm;
   if (reg !== 'WEST') total = total + md; // add client cadbury without subtracting CRM cadbury
   if (reg === 'SOUTH') total = total + [...hccbByRegion.values()].reduce((a, b) => a + b, 0);

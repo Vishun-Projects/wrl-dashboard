@@ -9,7 +9,7 @@ async function main() {
   const wb = XLSX.readFile('C:/Users/Vishnu.Vishwakarma/Downloads/Raw/New_BD_MIS_30.06.2026.xlsx');
   const s2 = XLSX.utils.sheet_to_json(wb.Sheets['Sheet2'], { header: 1, defval: '' }) as unknown[][];
 
-  let west = { total: 0, solved: 0, open: 0 };
+  const west = { total: 0, solved: 0, open: 0 };
   for (let i = 2; i < s2.length; i++) {
     const r = s2[i] as unknown[];
     if (String(r[0]) !== 'West') continue;

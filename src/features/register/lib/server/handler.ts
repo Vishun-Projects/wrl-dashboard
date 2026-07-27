@@ -16,7 +16,6 @@ import {
   buildTrhcallsLookupCondition,
   buildTrhcallsLookupSubquery,
   enrichTrhcallBranchFranchisee,
-  normalizeExactTrnSearch,
   sqlFranchiseeCodeExpr,
   sqlFranchiseeNameExpr,
   buildFranchiseeFilterSqlCondition,
@@ -44,9 +43,7 @@ import { mergeAuditEnrichment } from '@/lib/register-sql/audit-enrichment';
 import { buildPortalFilterSqlForCrm } from '@/lib/register-sql/portal-filter-sql';
 import { REGISTER_MSTPRORG_JOIN_SQL, SQL_WCO_EXPR } from '@/lib/register-sql/wco';
 
-function getExactTrnQuery(search: string): string | null {
-  return normalizeExactTrnSearch(search);
-}
+
 
 function appendStatusFilter(
   condition: string,
@@ -134,19 +131,39 @@ function matchesFilterList(value: string, filterVal: string | undefined): boolea
   return list.includes(value);
 }
 
-function filterCallsCSR(calls: any[], criteria: any, exclude?: string) {
+type CsrFilterRow = {
+  state?: string;
+  city?: string;
+  nofficeid?: string | number;
+  franchisee_code?: string;
+  nengineer?: string | number;
+};
+
+type CsrFilterCriteria = {
+  state?: string;
+  city?: string;
+  branch?: string;
+  franchisee?: string;
+  technician?: string;
+};
+
+function filterCallsCSR<T extends CsrFilterRow>(
+  calls: T[],
+  criteria: CsrFilterCriteria,
+  exclude?: string
+) {
   return calls.filter((c) => {
     if (exclude !== 'state' && criteria.state && criteria.state !== 'All') {
-      if (!matchesFilterList(c.state, criteria.state)) return false;
+      if (!matchesFilterList(c.state ?? '', criteria.state)) return false;
     }
     if (exclude !== 'city' && criteria.city && criteria.city !== 'All') {
-      if (!matchesFilterList(c.city, criteria.city)) return false;
+      if (!matchesFilterList(c.city ?? '', criteria.city)) return false;
     }
     if (exclude !== 'branch' && criteria.branch && criteria.branch !== 'All') {
       if (!matchesFilterList(String(c.nofficeid), criteria.branch)) return false;
     }
     if (exclude !== 'franchisee' && criteria.franchisee && criteria.franchisee !== 'All') {
-      if (!matchesFilterList(c.franchisee_code, criteria.franchisee)) return false;
+      if (!matchesFilterList(c.franchisee_code ?? '', criteria.franchisee)) return false;
     }
     if (exclude !== 'technician' && criteria.technician && criteria.technician !== 'All') {
       if (!matchesFilterList(String(c.nengineer), criteria.technician)) return false;
@@ -191,8 +208,8 @@ export async function handleRegisterGet(req: NextRequest) {
     const userId = await resolveRequestUserId(req, supabase);
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const exportMode = searchParams.get('export');
-    const isRegisterExport = exportMode === 'bulk' || exportMode === 'csv';
+    
+    
     const acceptEncoding = req.headers.get('accept-encoding');
     const security = await resolveReportSecurity(userId, {
       pageId: 'mis_reports',
@@ -427,7 +444,7 @@ export async function handleRegisterGet(req: NextRequest) {
       const normalizedState = stateName.toUpperCase().trim();
       const pins: string[] = [];
       for (const [pin, val] of Object.entries(getPincodeMapData())) {
-        if (val && typeof val === 'object' && (val as any).s && (val as any).s.toUpperCase().trim() === normalizedState) {
+        if (val.s && val.s.toUpperCase().trim() === normalizedState) {
           pins.push(pin);
         }
       }
@@ -438,7 +455,7 @@ export async function handleRegisterGet(req: NextRequest) {
       const normalizedCity = cityName.toUpperCase().trim();
       const pins: string[] = [];
       for (const [pin, val] of Object.entries(getPincodeMapData())) {
-        if (val && typeof val === 'object' && (val as any).d && (val as any).d.toUpperCase().trim() === normalizedCity) {
+        if (val.d && val.d.toUpperCase().trim() === normalizedCity) {
           pins.push(pin);
         }
       }
@@ -448,8 +465,8 @@ export async function handleRegisterGet(req: NextRequest) {
     const buildSingleStateCondition = (stateName: string): string => {
       const stateSafe = stateName.replace(/'/g, "''");
       const mappedCities = Object.entries(CITY_TO_STATE_MAP)
-        .filter(([_, st]) => st.toUpperCase() === stateName.toUpperCase())
-        .map(([c]) => c.replace(/'/g, "''"));
+        .filter(([, state]) => state.toUpperCase() === stateName.toUpperCase())
+        .map(([city]) => city.replace(/'/g, "''"));
 
       const statePincodes = getPincodesForState(stateName);
 
@@ -682,7 +699,7 @@ export async function handleRegisterGet(req: NextRequest) {
     const dataCondition = useKeysetCursor ? `${condition} AND tc.ncode < ${cursorNcode}` : condition;
     const offset = useKeysetCursor ? 0 : (page - 1) * effectiveLimit;
 
-    let summaryRes: any = {
+    let summaryRes: { data: Array<Record<string, string | number>> } = {
       data: [{
         total: 0,
         cancelled: 0,
@@ -694,8 +711,8 @@ export async function handleRegisterGet(req: NextRequest) {
         closed: 0,
       }],
     };
-    let filterOptionsRes: any = { data: [] };
-    let res: any;
+    let filterOptionsRes: { data: Array<Record<string, string>> } = { data: [] };
+    let res!: { data: Array<Record<string, string>> };
 
     const dataQuery = postQuery({
       fields,
@@ -783,7 +800,7 @@ export async function handleRegisterGet(req: NextRequest) {
       )
     );
 
-    const responsePayload: any = {
+    const responsePayload: Record<string, unknown> = {
       data: processedData,
     };
 
@@ -803,7 +820,7 @@ export async function handleRegisterGet(req: NextRequest) {
       if (fetchFilterOptions) {
       // Process options
       const rawOptions = filterOptionsRes.data || [];
-      const processedOptions = rawOptions.map((row: any) => {
+      const processedOptions = rawOptions.map((row) => {
         const geo = getGeographicDetails(row.Pincode, row.dbCity, row.dbState);
         return enrichTrhcallBranchFranchisee({
           state: geo.state,

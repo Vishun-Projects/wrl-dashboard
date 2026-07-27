@@ -7,14 +7,11 @@ import {
 } from '@/features/report/lib/filters';
 import { getPortalAuditCache, matchesPortalFilter } from '@/features/report/lib/portal-cache';
 import { getCallIdentityKey } from '@/features/report/lib/sync';
-import { isRealCancelReasonCode } from '@/lib/call-status/cancel';
+
 import { mapCachedRowToRegisterRow } from '@/lib/register-sql/map-cached-row';
 import {
   classifyRegisterRowStatus,
   isMajorRepairRow,
-  isRegisterRowCancelled,
-  isRegisterRowTransferred,
-  truthyCrmFlag,
   type RegisterSummaryBucket,
 } from '@/lib/call-status/register-row';
 
@@ -187,7 +184,7 @@ export function registerRowMatchesViewFilters(
     }
   }
 
-  const csrMatches = filterCallsCSR([row as any], {
+  const csrMatches = filterCallsCSR([row], {
     state: parts.selectedState,
     city: parts.selectedCity,
     region: parts.selectedRegion,

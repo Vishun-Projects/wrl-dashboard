@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, AlertCircle, Send, Image, ExternalLink, Package, MessageSquare, ArrowRight, Wrench, Copy, CheckCircle, XCircle, Clock, UserCheck } from 'lucide-react';
+import NextImage from 'next/image';
+import { X, AlertCircle, Send, Image as ImageIcon, Wrench, CheckCircle, XCircle, Clock, UserCheck } from 'lucide-react';
 import { feedback } from '@/lib/ui/feedback';
 import { ImagePreviewViewer } from '@/components/shared/ImagePreviewViewer';
 import { PartBarcodeImages } from '@/components/calls/PartBarcodeImages';
@@ -10,23 +11,48 @@ import {
   buildReplacementPartViews,
   isSerialTrackedReplacementPart,
 } from '@/lib/calls/part-barcode-images';
+import type { CallDocument, CallPart } from '@/lib/calls/part-barcode-images';
 import { resolveAvatarDisplayUrl } from '@/lib/auth/avatar-url';
 import { formatUiDate, formatUiDateTime } from '@/lib/dates/ui-date';
 
+type CallComment = {
+  comment?: string;
+  author_name?: string;
+  author_avatar_url?: string;
+  created_at?: string;
+};
+
+type CallHistoryEvent = Record<string, unknown> & {
+  cancel_reason?: string;
+  cancel_reason_label?: string;
+  bsolved?: boolean;
+  bBMreject?: boolean;
+  bfastclose?: boolean;
+  baccepted?: boolean;
+  nengineer?: string | number;
+  vcomment?: string;
+  vBMrejectreason?: string;
+};
+
+type CallDetailData = Record<string, unknown> & {
+  ncode: string;
+  comments?: CallComment[];
+  documents?: CallDocument[];
+  parts?: CallPart[];
+  visits?: Record<string, unknown>[];
+  faults?: Record<string, unknown>[];
+  history?: CallHistoryEvent[];
+};
+
 interface CallDetailProps {
-  call: any;
+  call: CallDetailData;
   onClose: () => void;
   onFlagUpdate: (id: string, flag: string) => void | Promise<void>;
   onPostComment: (id: string, text: string) => void | Promise<void>;
   onNext?: () => void;
-  onPrev?: () => void;
-  hasNext?: boolean;
-  hasPrev?: boolean;
-  currentIndex?: number;
-  totalCount?: number;
 }
 
-const getHistoryEventMeta = (h: any) => {
+const getHistoryEventMeta = (h: CallHistoryEvent) => {
   let statusLabel = 'Open Unallocated';
   let color = 'text-amber-500 bg-amber-50 border-amber-200';
   let icon = <Clock className="w-4 h-4 text-amber-500" />;
@@ -68,15 +94,18 @@ const getHistoryEventMeta = (h: any) => {
   return { statusLabel, color, icon };
 };
 
-export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext, onPrev, hasNext, hasPrev, currentIndex, totalCount }: CallDetailProps) {
+export function CallDetail(props: CallDetailProps) {
+  return <CallDetailContent key={props.call.ncode} {...props} />;
+}
+
+function CallDetailContent({ call, onClose, onFlagUpdate, onPostComment, onNext }: CallDetailProps) {
 
   const [activeTab, setActiveTab] = useState<'details' | 'visits' | 'faults' | 'parts' | 'comments' | 'images' | 'history'>('details');
   const [note, setNote] = useState('');
   const [previewImage, setPreviewImage] = useState<{ url: string; title?: string } | null>(null);
-  const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
+  const [, setLoadedImages] = useState<Set<string>>(new Set());
   const [errorType, setErrorType] = useState<'none' | 'hold' | 'reject'>('none');
   const [lastCommentedAt, setLastCommentedAt] = useState(0);
-  const [showHelp, setShowHelp] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
   // Swipe & Reason Prompt State
@@ -85,8 +114,6 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [pendingAction, setPendingAction] = useState<'none' | 'reject' | 'hold'>('none');
   const [reason, setReason] = useState('');
-
-  if (!call) return null;
 
   // Detect mobile
   React.useEffect(() => {
@@ -98,9 +125,9 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
 
   // Synthesize comments from branch rejection if present
   const reasonText = call.crm_reject_reason || call.reject_reason || call.vBMrejectreason;
-  const displayComments: any[] = [...(call.comments || [])];
+  const displayComments: CallComment[] = [...(call.comments || [])];
   if ((call.crm_reject || call.rejected_at || call.bBMreject) && reasonText) {
-    const hasCrmComment = displayComments.some((c: any) => c.comment === reasonText || c.comment?.includes(reasonText));
+    const hasCrmComment = displayComments.some((c) => c.comment === reasonText || c.comment?.includes(String(reasonText)));
     if (!hasCrmComment) {
       displayComments.unshift({
         author_name: 'Branch Manager',
@@ -112,13 +139,13 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
 
   const allImages = buildCallImages(call.documents || []);
   const replacementPartViews = buildReplacementPartViews(call.parts || [], call.documents || []);
-  const regularParts = (call.parts || []).filter((p: any) => !isSerialTrackedReplacementPart(p));
+  const regularParts = (call.parts || []).filter((p) => !isSerialTrackedReplacementPart(p));
 
   const handleImageLoad = (url: string) => {
     setLoadedImages(prev => new Set(prev).add(url));
   };
 
-  const handleStatusUpdate = async (flag: string, customReason?: string) => {
+  const handleStatusUpdate = React.useCallback(async (flag: string, customReason?: string) => {
     const isMandatory = flag === 'query' || flag === 'escalate';
     const finalNote = customReason || note;
     const recentComment = (Date.now() - lastCommentedAt) < 120000;
@@ -158,7 +185,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
     } catch {
       feedback.actionFailed('Could not update ticket — please try again');
     }
-  };
+  }, [call, isMobile, lastCommentedAt, note, onClose, onFlagUpdate, onNext, onPostComment]);
 
   // Swipe Handlers
   const minSwipeDistance = 70;
@@ -211,18 +238,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [note, lastCommentedAt, call, previewImage]);
-
-  React.useEffect(() => {
-    setActiveTab('details');
-    setNote('');
-    setReason('');
-    setPendingAction('none');
-    setLoadedImages(new Set());
-    setErrorType('none');
-  }, [call?.ncode]);
-
-  const currentFlag = call.audit_flag || call.flag;
+  }, [note, lastCommentedAt, call, previewImage, handleStatusUpdate]);
 
   const handlePostComment = async () => {
     if (!note.trim()) return;
@@ -371,7 +387,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                 { id: 'images', label: 'Images', count: allImages.length },
                 { id: 'comments', label: 'Comments', count: displayComments.length },
                 // { id: 'history', label: 'History', count: call.history?.length || 0 },
-              ].map((t: any) => (
+              ].map((t) => (
                 <button
                   key={t.id}
                   onClick={() => setActiveTab(t.id)}
@@ -435,7 +451,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
               {activeTab === 'visits' && (
                 <div className="space-y-4">
                   {(call.visits || []).length > 0 ? (
-                    call.visits.map((v: any, i: number) => (
+                    call.visits.map((v, i: number) => (
                       <div key={i} className="bg-bg-canvas p-4 rounded-xl border border-slate-100 shadow-sm">
                         <div className="flex items-center justify-between mb-3">
                           <span className="text-[11px] text-slate-900 ui-label">Visit #{i + 1}</span>
@@ -456,7 +472,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
               {activeTab === 'faults' && (
                 <div className="space-y-4">
                   {(call.faults || []).length > 0 ? (
-                    call.faults.map((f: any, i: number) => (
+                    call.faults.map((f, i: number) => (
                       <div key={i} className="bg-bg-canvas p-4 rounded-xl border border-slate-100 shadow-sm space-y-3">
                         <div className="flex items-center justify-between">
                           <span className="text-[11px] text-slate-900 ui-label">Fault #{i + 1}</span>
@@ -503,7 +519,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
                         />
                       ) : null}
 
-                      {regularParts.map((p: any, i: number) => (
+                      {regularParts.map((p, i: number) => (
                         <div key={i} className="bg-bg-canvas rounded-xl border border-slate-100 shadow-sm overflow-hidden">
                           <div className="p-4 flex items-center justify-between border-b border-slate-50">
                             <div className="space-y-1">
@@ -543,13 +559,15 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
               {activeTab === 'comments' && (
                 <div className="space-y-4">
                   {displayComments.length > 0 ? (
-                    displayComments.map((c: any, i: number) => (
+                    displayComments.map((c, i: number) => (
                       <div key={i} className="flex gap-3">
-                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] ui-label overflow-hidden flex-shrink-0">
+                        <div className="relative w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] ui-label overflow-hidden flex-shrink-0">
                           {c.author_avatar_url ? (
-                            <img
+                            <NextImage
                               src={resolveAvatarDisplayUrl(c.author_avatar_url) ?? ''}
                               alt=""
+                              fill
+                              unoptimized
                               className="w-full h-full object-cover"
                             />
                           ) : (
@@ -592,7 +610,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
               {activeTab === 'history' && (
                 <div className="relative border-l border-slate-200 ml-4 pl-6 space-y-6">
                   {call.history && call.history.length > 0 ? (
-                    call.history.map((h: any, i: number) => {
+                    call.history.map((h, i: number) => {
                       const { statusLabel, color, icon } = getHistoryEventMeta(h);
                       const eventDate = h.editedon || h.addedon || h.dtrndate;
                       return (
@@ -726,7 +744,7 @@ export function CallDetail({ call, onClose, onFlagUpdate, onPostComment, onNext,
   );
 }
 
-function ImageCard({ img, onPreview, onLoaded }: { img: any; onPreview: () => void; onLoaded: () => void }) {
+function ImageCard({ img, onPreview, onLoaded }: { img: { url: string; title: string }; onPreview: () => void; onLoaded: () => void }) {
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -734,13 +752,16 @@ function ImageCard({ img, onPreview, onLoaded }: { img: any; onPreview: () => vo
 
   return (
     <div className="relative aspect-square cursor-pointer overflow-hidden rounded-xl border border-slate-100 bg-bg-soft" onClick={onPreview}>
-      <img
+      <NextImage
         src={img.url}
+        alt={img.title || 'Call attachment'}
+        fill
+        unoptimized
         className={`w-full h-full object-cover transition-opacity duration-300 ${loading ? 'opacity-0' : 'opacity-100'}`}
         onLoad={() => { setLoading(false); onLoaded(); }}
         onError={() => setError(true)}
       />
-      {loading && <div className="absolute inset-0 flex items-center justify-center bg-bg-soft animate-pulse"><Image size={20} className="text-slate-200" /></div>}
+      {loading && <div className="absolute inset-0 flex items-center justify-center bg-bg-soft animate-pulse"><ImageIcon size={20} className="text-slate-200" /></div>}
     </div>
   );
 }

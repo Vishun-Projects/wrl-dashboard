@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
-# MIS email digest scheduler — run via cron once daily (09:30 IST).
+# MIS email digest scheduler — run via cron Mon–Sat 09:30 IST (no Sunday).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_INSTALL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-$DEFAULT_INSTALL_ROOT}"
 cd "$INSTALL_ROOT"
+
+# Belt-and-suspenders if cron still has * * * (0=Sun in cron, %u=7 is Sunday).
+if [[ "$(TZ=Asia/Kolkata date +%u)" == "7" ]]; then
+  echo "=== mis-email-digest skipped — Sunday (IST) ==="
+  exit 0
+fi
 
 LOCK_FILE="${INSTALL_ROOT}/logs/mis-email.lock"
 mkdir -p "${INSTALL_ROOT}/logs"

@@ -290,9 +290,7 @@ export function normalizeComplaintKey(complaint: string): string {
   return complaint.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function complaintLabelFromRow(row: Record<string, unknown>): string {
-  return String(row.vcomplaint ?? row.complaint ?? '').trim();
-}
+
 
 export function filterCallsByRepairCallIds(
   calls: Record<string, unknown>[],
@@ -738,7 +736,7 @@ export function filterSerialAuditRows(
   });
 }
 
-export function summarizeSerialAudit(rows: SerialAuditRow[], riskThreshold = 3) {
+export function summarizeSerialAudit(rows: SerialAuditRow[]) {
   const known = rows.filter((r) => !r.isUnknownSerial && r.complaintCount >= MIN_REPEAT_COMPLAINTS);
   const flagged = known.filter((r) => r.riskFlag);
   const withCancelled = known.filter((r) => r.cancelledCount > 0);

@@ -1,6 +1,64 @@
 import type ExcelJS from 'exceljs';
 import type { AccountSummaryRow, BranchSummaryRow } from '@/features/report/lib/summary-derive';
 
+const BRANCH_SUM_KEYS = [
+  'total_calls',
+  'solved_calls',
+  'cancelled_calls',
+  'open_calls',
+  'age_2',
+  'age_3',
+  'age_7',
+  'age_15',
+  'part_pending',
+  'all_total',
+  'all_solved',
+  'all_cancelled',
+  'all_open',
+  'all_age_2',
+  'all_age_3',
+  'all_age_7',
+  'all_age_15',
+  'all_part_pending',
+  'all_tech_solved',
+  'tech_solved_calls',
+  'deployment_total',
+  'deployment_done',
+  'installation_total',
+  'installation_done',
+  'active_eng',
+  'population',
+] as const satisfies ReadonlyArray<keyof BranchSummaryRow>;
+
+function branchDisplayKey(region: unknown, branch: unknown): string {
+  return `${String(region ?? '').trim().toUpperCase()}::${String(branch ?? '').trim().toLowerCase()}`;
+}
+
+function mergeTopLevelBranchRowsByName(rows: BranchSummaryRow[]): BranchSummaryRow[] {
+  const map = new Map<string, BranchSummaryRow>();
+  for (const row of rows) {
+    const key = branchDisplayKey(row.region, row.branch);
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, { ...row });
+      continue;
+    }
+    const preferRow = Number(row.total_calls) > Number(prev.total_calls) ? row : prev;
+    const merged: BranchSummaryRow = {
+      ...preferRow,
+      branch: preferRow.branch || prev.branch || row.branch,
+      region: preferRow.region || prev.region || row.region,
+      headcount: Math.max(Number(prev.headcount) || 0, Number(row.headcount) || 0),
+    };
+    for (const k of BRANCH_SUM_KEYS) {
+      (merged as Record<(typeof BRANCH_SUM_KEYS)[number], number>)[k] =
+        (Number(prev[k]) || 0) + (Number(row[k]) || 0);
+    }
+    map.set(key, merged);
+  }
+  return [...map.values()].sort((a, b) => Number(b.total_calls) - Number(a.total_calls));
+}
+
 export function getRegionColor(region: string): string {
   const r = (region || '').toUpperCase();
   if (r.includes('NORTH')) return 'FFC6E0B4';
@@ -101,9 +159,18 @@ export async function buildSummaryDashboardWorkbook(
     : undefined;
 
   const regions = Array.from(new Set(summaryData.map((b) => b.region))).sort();
-  const topLevelBranches = summaryData.filter(
-    (b) => b.parentId === 0 || !summaryData.find((p) => p.officeId === b.parentId)
-  );
+  const topLevelBranches = Array.from(new Set(summaryData.map((b) => b.region)))
+    .sort()
+    .flatMap((region) => {
+      const regionBranches = summaryData.filter((b) => b.region === region);
+      const rawTopLevel = regionBranches.filter(
+        (b) => b.parentId === 0 || !regionBranches.some((p) => p.officeId === b.parentId)
+      );
+      return mergeTopLevelBranchRowsByName(rawTopLevel).map((branch) => ({
+        ...branch,
+        region,
+      }));
+    });
 
   sheet.addRow(['Regional Performance']).font = { bold: true, size: 12 };
   const regHeader = sheet.addRow(
@@ -246,9 +313,7 @@ export async function buildSummaryDashboardWorkbook(
   );
   applySummaryHeaderStyle(brHeader);
 
-  topLevelBranches
-    .sort((a, b) => a.region.localeCompare(b.region))
-    .forEach((b) => {
+  topLevelBranches.forEach((b) => {
       const rb = summaryData.filter((x) => x.region === b.region);
       const solved = getAggregate(b, 'solved_calls', rb);
       const open = getAggregate(b, 'open_calls', rb);

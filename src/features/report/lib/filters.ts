@@ -593,7 +593,7 @@ export function resolveSummaryOfficeIdsParam(
   return Array.from(ids).join(',');
 }
 
-export function filterCallsCSR(calls: any[], criteria: FilterCallsCriteria, exclude?: string) {
+export function filterCallsCSR(calls: Array<Record<string, unknown>>, criteria: FilterCallsCriteria, exclude?: string) {
   return calls.filter((c) => {
     if (exclude !== 'state' && !matchesFilterSelection(c.state || '', criteria.state)) return false;
     if (exclude !== 'city' && !matchesFilterSelection(c.city || c.ncode || '', criteria.city)) return false;

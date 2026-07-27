@@ -2,11 +2,12 @@
 
 import { ReportErrorBoundary } from '@/features/report/ui/ReportErrorBoundary';
 import { BdMisSummaryPanel } from '@/features/report/ui/BdMisSummaryPanel';
+import type { BdMisGrandRow, BdMisRegionalRow } from '@/features/report/lib/bd-mis-summary';
 
 type Props = {
-  bdMisGrand: any;
-  bdMisRegionalRows: any;
-  bdMisTabLoading: any;
+  bdMisGrand: BdMisGrandRow | null;
+  bdMisRegionalRows: BdMisRegionalRow[];
+  bdMisTabLoading: boolean;
 };
 
 export function ReportBdMisTabPanel({

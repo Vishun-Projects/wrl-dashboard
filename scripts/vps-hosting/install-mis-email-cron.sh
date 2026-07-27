@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install MIS email digest cron — once daily at 09:30 IST on VPS.
+# Install MIS email digest cron — Mon–Sat at 09:30 IST on VPS (no Sunday).
 #   npm run mis-email:install-cron:vps
 #   bash scripts/vps-hosting/install-mis-email-cron.sh --local   # on the VPS itself
 set -euo pipefail
@@ -7,18 +7,18 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${ROOT}/.env.vps-setup"
 INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-/opt/fast-close-app}"
-# Once per day at 09:30 Asia/Kolkata (matches default / profile sendTimeIst).
-CRON_LINE="30 9 * * * ${INSTALL_ROOT}/scripts/vps-hosting/mis-email-digest.sh >> ${INSTALL_ROOT}/logs/mis-email-cron.log 2>&1"
+# Mon–Sat 09:30 Asia/Kolkata (matches default / profile sendTimeIst). Cron DOW 1-6 = Mon–Sat.
+CRON_LINE="30 9 * * 1-6 ${INSTALL_ROOT}/scripts/vps-hosting/mis-email-digest.sh >> ${INSTALL_ROOT}/logs/mis-email-cron.log 2>&1"
 
 install_cron() {
   local root="${1}"
-  local line="30 9 * * * ${root}/scripts/vps-hosting/mis-email-digest.sh >> ${root}/logs/mis-email-cron.log 2>&1"
+  local line="30 9 * * 1-6 ${root}/scripts/vps-hosting/mis-email-digest.sh >> ${root}/logs/mis-email-cron.log 2>&1"
   (
     crontab -l 2>/dev/null | grep -v 'mis-email-digest.sh' | grep -v '^CRON_TZ=' || true
     echo "CRON_TZ=Asia/Kolkata"
     echo "$line"
   ) | crontab -
-  echo "==> Installed MIS email cron (once daily 09:30 IST)"
+  echo "==> Installed MIS email cron (Mon–Sat 09:30 IST, skips Sunday)"
   crontab -l | grep -E 'CRON_TZ|mis-email' || true
 }
 
@@ -43,8 +43,8 @@ mkdir -p "${root}/logs"
 (
   crontab -l 2>/dev/null | grep -v 'mis-email-digest.sh' | grep -v '^CRON_TZ=' || true
   echo "CRON_TZ=Asia/Kolkata"
-  echo "30 9 * * * ${root}/scripts/vps-hosting/mis-email-digest.sh >> ${root}/logs/mis-email-cron.log 2>&1"
+  echo "30 9 * * 1-6 ${root}/scripts/vps-hosting/mis-email-digest.sh >> ${root}/logs/mis-email-cron.log 2>&1"
 ) | crontab -
-echo "==> Installed MIS email cron (once daily 09:30 IST) at root: ${root}"
+echo "==> Installed MIS email cron (Mon–Sat 09:30 IST, skips Sunday) at root: ${root}"
 crontab -l | grep -E 'CRON_TZ|mis-email' || true
 REMOTE

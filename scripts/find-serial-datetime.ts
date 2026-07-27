@@ -137,10 +137,7 @@ async function probeTable(p: Probe, mode: 'serial' | 'date' | 'both') {
           const serialHit = SERIALS.some(
             (s) => v.toUpperCase().includes(s) || v === s
           );
-          const dateHit = DATE_PATTERNS.some((pat) => {
-            const core = pat.replace(/%/g, '').toLowerCase();
-            return v.toLowerCase().includes('15') && v.includes('2026') && v.includes('16:29');
-          });
+          
           if (serialHit || dateHit || ['ncode', 'vtrnno', 'vucnno', 'ncalls'].includes(k)) {
             hit[k] = r[k];
           }

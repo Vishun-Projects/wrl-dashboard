@@ -3,9 +3,9 @@ import type { RegisterDateFilterColumn } from '@/lib/trhcalls/query';
 import type { RegisterSummary } from '@/features/report/lib/search';
 
 export interface GlobalReportCacheType {
-  data: any[];
-  summaryData: any[];
-  accountsData: any[];
+  data: Array<Record<string, unknown>>;
+  summaryData: Array<Record<string, unknown>>;
+  accountsData: Array<Record<string, unknown>>;
   globalHeadcount: number;
   total: number;
   page: number;
@@ -35,8 +35,8 @@ export interface GlobalReportCacheType {
 }
 
 export interface DistributionDataCache {
-  allCalls: any[];
-  dbBranches: any[];
+  allCalls: Array<Record<string, unknown>>;
+  dbBranches: Array<Record<string, unknown>>;
   cacheKey: string;
   fetchedAt: number;
   lastSyncedAt: number;

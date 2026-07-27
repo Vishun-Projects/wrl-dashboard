@@ -60,13 +60,16 @@ echo "==> Installing watchdog cron 09:50 IST → \$alert_to"
 prod=\$(crontab -l 2>/dev/null | grep 'mis-email-digest.sh' | grep -v test | grep -v watchdog | head -1 || true)
 test=\$(crontab -l 2>/dev/null | grep 'mis-email-test-digest.sh' | head -1 || true)
 if [[ -z "\$prod" ]]; then
-  prod="30 9 * * * \${root}/scripts/vps-hosting/mis-email-digest.sh >> \${root}/logs/mis-email-cron.log 2>&1"
+  prod="30 9 * * 1-6 \${root}/scripts/vps-hosting/mis-email-digest.sh >> \${root}/logs/mis-email-cron.log 2>&1"
+else
+  # Ensure existing prod line skips Sunday even if older crontab said * * *
+  prod=\$(echo "\$prod" | sed -E 's/^([0-9]+) ([0-9]+) \* \* \*/\1 \2 * * 1-6/')
 fi
 {
   echo "CRON_TZ=Asia/Kolkata"
   echo "\$prod"
   [[ -n "\$test" ]] && echo "\$test"
-  echo "50 9 * * * MIS_EMAIL_WATCHDOG_TO=\${alert_to} \${root}/scripts/vps-hosting/mis-email-morning-watchdog.sh >> \${root}/logs/mis-email-watchdog.log 2>&1"
+  echo "50 9 * * 1-6 MIS_EMAIL_WATCHDOG_TO=\${alert_to} \${root}/scripts/vps-hosting/mis-email-morning-watchdog.sh >> \${root}/logs/mis-email-watchdog.log 2>&1"
 } | crontab -
 
 echo "==> Crontab now:"
@@ -75,6 +78,6 @@ REMOTE
 
 echo ""
 echo "Installed."
-echo "  09:30 IST — production MIS digest"
-echo "  09:50 IST — watchdog: emails ${ALERT_TO} ONLY if morning digest failed"
+echo "  09:30 IST Mon–Sat — production MIS digest (no Sunday)"
+echo "  09:50 IST Mon–Sat — watchdog: emails ${ALERT_TO} ONLY if morning digest failed"
 echo "  Postfix bounce loop cleared (those 'connection refused' lines were root@ junk, not MIS)."

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db/prisma';
+
 import { withAppClient } from '@/lib/read-model/db';
 import { commentPostSchema } from '@/lib/api/schemas/mutations';
 import { clearPortalAuditServerCache } from '@/features/report/lib/portal-audit-server';

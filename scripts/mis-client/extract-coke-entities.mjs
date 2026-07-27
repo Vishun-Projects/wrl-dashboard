@@ -9,11 +9,11 @@
  *   node scripts/mis-client/extract-coke-entities.mjs "CDMS_CallStatus_Detailed (37).xlsx" 5
  */
 import { readFileSync } from 'fs';
-import { dirname, join, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { resolve } from 'path';
+
 import XLSX from 'xlsx';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+
 const filePath = resolve(process.cwd(), process.argv[2] ?? 'CDMS_CallStatus_Detailed (37).xlsx');
 const headerRowIndex = Math.max(1, parseInt(process.argv[3] ?? '5', 10));
 

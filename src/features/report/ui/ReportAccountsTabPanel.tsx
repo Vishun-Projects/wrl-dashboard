@@ -1,43 +1,30 @@
 'use client';
 
 import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
-import { ChevronDown, ChevronRight, X } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { ReportErrorBoundary } from '@/features/report/ui/ReportErrorBoundary';
 import {
   SummaryMergedMetricCell,
   accountMergeFlags,
   accountOpenCallsFromAging,
   accountOpenCallsFromAgingByAccount,
-  buildClientOnlyRegionalRows,
-  displayLoggedCallCount,
   filterClientAccountSummary,
   findAccountMetric,
   findAccountMetricByAccount,
-  findBranchMetric,
-  findBranchRowMetric,
   matchesAccountFilter,
   matchesRegionFilter,
   mergeSelectedMetrics,
-  resolveSummaryRegionMetric,
-  resolveSummaryRegionOpenCalls,
-  sumAccountMetric,
-  sumAccountMetricByRegion,
   sumBranchLoggedCalls,
-  sumBranchMetric,
   sumMergedAccountMetric,
   sumMergedAccountOpenCalls,
-  isAccountExcludedFromZoneTop,
-  DEFAULT_ZONE_TOP_EXCLUDE_ACCOUNTS,
   type ClientMergeWithCrmPrefs,
   type MergeSelection,
 } from '@/features/report/ui/SummaryMergedMetricCell';
 import {
   regionPerfAccountCellClass,
-  regionPerfRowClass,
   resolveAccountMisTableRows,
   type AccountMisGrouping,
 } from '@/features/report/lib/report-page-helpers';
-import { BdMisSummaryPanel } from '@/features/report/ui/BdMisSummaryPanel';
 import type { BranchSummaryRow } from '@/lib/summary/derive';
 import { SortableTh } from '@/components/ui/SortableTh';
 import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';

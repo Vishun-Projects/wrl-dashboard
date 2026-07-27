@@ -14,9 +14,7 @@ const BD_MIS =
 const CRM_CSV =
   process.argv[4] ?? 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw/CRM_WRL_MIS_Register_2026-06-30.csv';
 
-function normKey(v: string): string {
-  return v.trim().replace(/^0+/, '').toLowerCase();
-}
+
 
 function parseCsvLine(line: string): string[] {
   const out: string[] = [];
@@ -67,7 +65,7 @@ function auditFormatMain(path: string) {
   const clientIdx = idx('Client');
   const regionIdx = idx('Region');
   const accountIdx = idx('Account');
-  const fileIdx = idx('File Name');
+  
 
   const crmCokeByZone = new Map<string, number>();
   const hccbByZone = new Map<string, number>();
@@ -78,7 +76,7 @@ function auditFormatMain(path: string) {
     const client = String(r[clientIdx] ?? '').trim().toLowerCase();
     const zone = formatDisplayRegion(String(r[regionIdx] ?? ''));
     const account = String(r[accountIdx] ?? '').trim().toLowerCase();
-    const file = String(r[fileIdx] ?? '').trim();
+    
 
     if (client === 'hccb') {
       hccbByZone.set(zone, (hccbByZone.get(zone) ?? 0) + 1);

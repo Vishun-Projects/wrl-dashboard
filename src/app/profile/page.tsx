@@ -6,7 +6,6 @@ import {
   Mail,
   Shield,
   Camera,
-  Lock,
   Save,
   Loader2,
   AlertCircle,
@@ -46,6 +45,11 @@ type MisEmailSettings = {
   roleName: string | null;
   scopeLabel: string | null;
 };
+
+function getRequestErrorMessage(error: unknown, fallback: string): string {
+  if (!axios.isAxiosError<{ error?: string }>(error)) return fallback;
+  return error.response?.data?.error ?? error.message ?? fallback;
+}
 
 function ProfileContent() {
   const { userProfile: user, loadingProfile: loading, refreshProfile: fetchProfile } = useUser();
@@ -106,8 +110,8 @@ function ProfileContent() {
       await axios.patch('/api/profile', { name });
       feedback.actionSuccess('Profile updated successfully');
       fetchProfile();
-    } catch (err: any) {
-      feedback.actionFailed(err.response?.data?.error || 'Update failed');
+    } catch (err: unknown) {
+      feedback.actionFailed(getRequestErrorMessage(err, 'Update failed'));
     } finally {
       setSaving(false);
     }
@@ -130,8 +134,8 @@ function ProfileContent() {
       feedback.actionSuccess('Password changed successfully');
       setNewPassword('');
       setConfirmPassword('');
-    } catch (err: any) {
-      feedback.actionFailed(err.response?.data?.error || 'Password change failed');
+    } catch (err: unknown) {
+      feedback.actionFailed(getRequestErrorMessage(err, 'Password change failed'));
     } finally {
       setSaving(false);
     }
@@ -161,8 +165,8 @@ function ProfileContent() {
       });
       feedback.actionSuccess('Profile image updated');
       fetchProfile();
-    } catch (err: any) {
-      feedback.actionFailed(err.message || 'Upload failed');
+    } catch (err: unknown) {
+      feedback.actionFailed(getRequestErrorMessage(err, 'Upload failed'));
     } finally {
       setUploadingImage(false);
     }

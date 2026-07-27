@@ -167,7 +167,7 @@ export function enrichArcpDetailRows(
 ): ArcpClaimsDetailRow[] {
   return rows.map((row) => {
     const callCode = row.call_type.trim();
-    const itemCode = row.item_category.trim();
+    
     const localCode = row.local_upcountry.trim();
 
     const call_type = resolveLabel(row.call_type, callCode, lookups.callTypeLabelsByCode);

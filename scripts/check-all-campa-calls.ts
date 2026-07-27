@@ -5,9 +5,11 @@ config({ path: join(process.cwd(), '.env') });
 
 import { prisma } from '@/lib/db/prisma';
 
+type QueryRow = Record<string, string>;
+
 async function main() {
   console.log('=== Checking all Campa Cola calls in calls_latest_hot ===');
-  const allCalls = await prisma.$queryRawUnsafe<any[]>(
+  const allCalls = await prisma.$queryRawUnsafe<QueryRow[]>(
     `SELECT serial, call_type, status_bucket, status_label, logged_at
      FROM calls_latest_hot
      WHERE account = 'Reliance Campa Cola'

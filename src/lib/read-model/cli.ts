@@ -16,7 +16,7 @@ import { runReconcileTechSolved } from '@/lib/read-model/reconcile-tech-solved';
 import { runReconcileMajor } from '@/lib/read-model/reconcile-major';
 import { runHotCrmMismatchSampleCheck } from '@/lib/read-model/check-hot-crm-mismatch';
 import { runEditedonCatchupRange, runEditedonCatchupStep } from '@/lib/read-model/editedon-catchup';
-import { todayLocalDate, daysAgoDate } from '@/lib/read-model/dates';
+import { todayLocalDate } from '@/lib/read-model/dates';
 import { runRetentionJobs } from '@/lib/read-model/retention';
 import { runBackfillCallsHotBmApproval } from '@/lib/read-model/backfill-bm-approval';
 import { runBackfillCallsHotWco } from '@/lib/read-model/backfill-wco';
@@ -205,6 +205,9 @@ async function main(): Promise<void> {
     case 'transaction-entry-incremental':
       await runTransactionEntryIncremental();
       break;
+    case 'transaction-entry-scrub':
+      await runTransactionEntryIncremental({ full: true });
+      break;
     case 'transaction-entry-verify': {
       const { healCallRegisterMismatches } = await import('@/lib/read-model/transaction-entry');
       const toIdx = process.argv.indexOf('--to');
@@ -253,6 +256,7 @@ Commands:
   arcp-nightly      ARCP incremental only (for Task Scheduler / cron)
   transaction-entry-backfill     Initial/resume CRM TransactionEntry → crm_transaction_entry
   transaction-entry-incremental  Re-sync last N months of TransactionEntry (default 2)
+  transaction-entry-scrub        Full-history replace sync (start date → today) — drops unprocessed orphans
   transaction-entry-verify       Compare CRM vs mirror for all TransactionEntry clients; re-fetch mismatches
                     --to YYYY-MM-DD  (default today; lookback = TRANSACTION_ENTRY_VERIFY_DAYS)
   dims              Refresh dimension tables only
@@ -273,8 +277,10 @@ Environment:
   TRANSACTION_ENTRY_RECENT_DAYS   Recent-window bulk refresh for all CRM clients (default 14)
   TRANSACTION_ENTRY_VERIFY_ENABLED  After incremental: heal CRM vs mirror mismatches (default on)
   TRANSACTION_ENTRY_VERIFY_DAYS   Days to verify/heal after each incremental (default 7)
-  TRANSACTION_ENTRY_START_DATE    Backfill start (default 2024-01-01)
+  TRANSACTION_ENTRY_START_DATE    Backfill/scrub start (default 2024-01-01)
   TRANSACTION_ENTRY_OVERLAP_MONTHS  Incremental lookback months (default 2)
+  TRANSACTION_ENTRY_FULL          If true, incremental = full scrub from start date
+  TRANSACTION_ENTRY_BACKFILL_GAP_MS Pause between scrub/backfill weeks (default 1500)
   TRANSACTION_ENTRY_BACKFILL_CHUNK  Backfill window: week (default) | month | year
   TRANSACTION_ENTRY_PERIOD_PARALLEL Backfill periods in flight (default 1)
   TRANSACTION_ENTRY_BACKFILL_GAP_MS Pause between backfill periods (default 1500)

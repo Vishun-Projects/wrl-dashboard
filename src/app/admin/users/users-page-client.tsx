@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import NextImage from 'next/image';
 import axios from 'axios';
 import { resolveAvatarDisplayUrl } from '@/lib/auth/avatar-url';
 import { 
@@ -42,23 +43,48 @@ import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 import { ModalPortal } from '@/components/ui/ModalPortal';
 
 type UserSortKey = 'user' | 'role' | 'statuses' | 'branches' | 'misEmail';
+type AdminRole = { id: string | number; name?: string; permissions?: string[] | string; description?: string };
+type AdminOffice = { ncode: string | number; vcompanyname?: string };
+type AdminUser = {
+  id: string;
+  name?: string;
+  email?: string;
+  role?: string;
+  role_id?: string | number;
+  role_ids?: unknown;
+  office_ids?: string[];
+  visible_statuses?: string[];
+  mis_email_enabled?: boolean;
+  avatar_url?: string;
+};
+type FormData = {
+  name: string;
+  email: string;
+  password: string;
+  role: string;
+  role_id: string | number;
+  role_ids: string[];
+  office_ids: string[];
+  visible_statuses: string[];
+  mis_email_enabled: boolean;
+};
 
 export default function AdminUsersPage() {
   const { userProfile } = useUser();
-  const apiOpts = { withCredentials: true as const };
-  const [users, setUsers] = useState<any[]>([]);
-  const [roles, setRoles] = useState<any[]>([]);
-  const [offices, setOffices] = useState<any[]>([]);
+  const apiOpts = useMemo(() => ({ withCredentials: true as const }), []);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [roles, setRoles] = useState<AdminRole[]>([]);
+  const [offices, setOffices] = useState<AdminOffice[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [editingUser, setEditingUser] = useState<any>(null);
+  const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<TableSortState<UserSortKey> | null>(null);
   const [branchSearch, setBranchSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'profile' | 'access'>('profile');
   const [showOnlySelectedBranches, setShowOnlySelectedBranches] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [selectedUserForPassword, setSelectedUserForPassword] = useState<any>(null);
+  const [selectedUserForPassword, setSelectedUserForPassword] = useState<AdminUser | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [updatingPassword, setUpdatingPassword] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
@@ -74,7 +100,7 @@ export default function AdminUsersPage() {
   };
 
   function validateUserForm(
-    data: ReturnType<typeof emptyFormData>,
+    data: FormData,
     isEdit: boolean
   ): UserFormErrors {
     const errors: UserFormErrors = {};
@@ -100,7 +126,7 @@ export default function AdminUsersPage() {
     return errors;
   }
 
-  const emptyFormData = (rolesList: typeof roles = roles) => {
+  const emptyFormData = (rolesList: AdminRole[] = roles): FormData => {
     const first = rolesList[0];
     const roleSlug = first?.name
       ? String(first.name).toLowerCase().replace(/\s+/g, '_')
@@ -134,12 +160,7 @@ export default function AdminUsersPage() {
         : 'border-slate-200 focus:ring-indigo-500/20 focus:border-indigo-500'
     }`;
 
-  useEffect(() => {
-    if (!userProfile?.id) return;
-    void fetchInitialData();
-  }, [userProfile?.id]);
-
-  async function ensureOfficesLoaded() {
+  const ensureOfficesLoaded = useCallback(async () => {
     if (offices.length > 0 || officesLoading) return;
     setOfficesLoading(true);
     try {
@@ -150,9 +171,9 @@ export default function AdminUsersPage() {
     } finally {
       setOfficesLoading(false);
     }
-  }
+  }, [apiOpts, offices.length, officesLoading]);
 
-  async function fetchInitialData() {
+  const fetchInitialData = useCallback(async () => {
     if (bootstrapInflightRef.current) {
       await bootstrapInflightRef.current;
       return;
@@ -182,7 +203,12 @@ export default function AdminUsersPage() {
     } finally {
       bootstrapInflightRef.current = null;
     }
-  }
+  }, [apiOpts, router]);
+
+  useEffect(() => {
+    if (!userProfile?.id) return;
+    void fetchInitialData();
+  }, [userProfile?.id, fetchInitialData]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -239,8 +265,10 @@ export default function AdminUsersPage() {
       setBranchSearch('');
       fetchInitialData();
       feedback.actionSuccess('User updated successfully');
-    } catch (err: any) {
-      feedback.actionFailed(err.response?.data?.error || 'Operation failed');
+    } catch (err: unknown) {
+      feedback.actionFailed(
+        axios.isAxiosError(err) ? String(err.response?.data?.error || 'Operation failed') : 'Operation failed'
+      );
     }
   };
 
@@ -252,8 +280,10 @@ export default function AdminUsersPage() {
       feedback.actionSuccess('User deleted successfully');
       setDeleteTarget(null);
       fetchInitialData();
-    } catch (err: any) {
-      feedback.actionFailed(err.response?.data?.error || 'Delete failed');
+    } catch (err: unknown) {
+      feedback.actionFailed(
+        axios.isAxiosError(err) ? String(err.response?.data?.error || 'Delete failed') : 'Delete failed'
+      );
     } finally {
       setDeleting(false);
     }
@@ -274,21 +304,18 @@ export default function AdminUsersPage() {
       setShowPasswordModal(false);
       setNewPassword('');
       setSelectedUserForPassword(null);
-    } catch (err: any) {
-      feedback.actionFailed(err.response?.data?.error || 'Password update failed');
+    } catch (err: unknown) {
+      feedback.actionFailed(
+        axios.isAxiosError(err)
+          ? String(err.response?.data?.error || 'Password update failed')
+          : 'Password update failed'
+      );
     } finally {
       setUpdatingPassword(false);
     }
   };
 
-  const toggleOffice = (officeId: string) => {
-    setFormData(prev => ({
-      ...prev,
-      office_ids: prev.office_ids.includes(officeId)
-        ? prev.office_ids.filter(id => id !== officeId)
-        : [...prev.office_ids, officeId]
-    }));
-  };
+  
 
   const toggleStatus = (status: string) => {
     setFormData(prev => ({
@@ -319,7 +346,7 @@ export default function AdminUsersPage() {
     return [];
   };
 
-  const unionRolePermissions = (roleIds: string[]): string[] => {
+  const unionRolePermissions = useCallback((roleIds: string[]): string[] => {
     const set = new Set<string>();
     for (const id of roleIds.map(String)) {
       const roleObj = roles.find((r) => String(r.id) === id);
@@ -339,9 +366,9 @@ export default function AdminUsersPage() {
       for (const p of perms) set.add(String(p));
     }
     return [...set];
-  };
+  }, [roles]);
 
-  const getRoleInfo = (u: any) => {
+  const getRoleInfo = useCallback((u: AdminUser) => {
     const roleIds = userRoleIds(u);
     const rolePerms = unionRolePermissions(roleIds);
     const isNational = seesAllOfficesForUser(rolePerms, u.role ?? '', u.office_ids ?? []);
@@ -356,7 +383,7 @@ export default function AdminUsersPage() {
           : 'Branch Manager';
     const canMisEmail = canAssignMisEmail(rolePerms);
     return { isHod: isNational, roleName, roleNames, canMisEmail };
-  };
+  }, [roles, unionRolePermissions]);
 
   const formRolePerms = unionRolePermissions(formData.role_ids);
   const formRoleCanMisEmail = canAssignMisEmail(formRolePerms);
@@ -387,7 +414,7 @@ export default function AdminUsersPage() {
     });
   };
 
-  const branchLabelsForUser = (u: any) => {
+  const branchLabelsForUser = useCallback((u: AdminUser) => {
     const ids = u.office_ids ?? [];
     if (seesAllOfficesForUser([], u.role ?? '', ids)) {
       return ['All branches'];
@@ -399,7 +426,7 @@ export default function AdminUsersPage() {
       const office = offices.find((o) => String(o.ncode) === id);
       return office?.vcompanyname || id;
     });
-  };
+  }, [offices]);
 
   const sortedUsers = useMemo(() => {
     if (!sort) return filteredUsers;
@@ -421,13 +448,13 @@ export default function AdminUsersPage() {
           return '';
       }
     }, sort.dir);
-  }, [filteredUsers, sort, roles, offices]);
+  }, [filteredUsers, sort, getRoleInfo, branchLabelsForUser]);
 
   const handleSort = (key: UserSortKey) => {
     setSort((p) => toggleSort(p, key, key === 'user' || key === 'role' ? 'asc' : 'desc'));
   };
 
-  const openUserModal = (user?: any) => {
+  const openUserModal = (user?: AdminUser) => {
     void ensureOfficesLoaded();
     if (user) {
       setEditingUser(user);
@@ -548,11 +575,13 @@ export default function AdminUsersPage() {
                   <AdminTr key={u.id}>
                     <AdminTd>
                       <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-[11px] font-semibold text-slate-500">
+                        <div className="relative flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-[11px] font-semibold text-slate-500">
                           {u.avatar_url ? (
-                            <img
+                            <NextImage
                               src={resolveAvatarDisplayUrl(u.avatar_url) ?? ''}
                               alt=""
+                              fill
+                              unoptimized
                               className="h-full w-full object-cover"
                             />
                           ) : (
@@ -672,7 +701,7 @@ export default function AdminUsersPage() {
                 ].map((tab) => (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveTab(tab.id as any)}
+                    onClick={() => setActiveTab(tab.id)}
                     className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-colors ${ activeTab === tab.id ? 'bg-bg-canvas text-indigo-600 shadow-sm border border-slate-200' : 'text-slate-600 hover:bg-slate-100' }`}
                   >
                     <tab.icon size={16} />

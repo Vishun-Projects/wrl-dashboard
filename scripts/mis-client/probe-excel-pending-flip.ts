@@ -4,7 +4,7 @@
  */
 import { config } from 'dotenv';
 import { join } from 'path';
-import { readFileSync, existsSync } from 'fs';
+import { existsSync } from 'fs';
 import XLSX from 'xlsx';
 import { withAppClient } from '@/lib/read-model/db';
 import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
@@ -12,7 +12,7 @@ import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/su
 config({ path: join(process.cwd(), '.env.local') });
 
 const EXCEL = 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw/New_BD_MIS_30.06.2026.xlsx';
-const CRM_CSV = 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw/CRM_WRL_MIS_Register_2026-06-30.csv';
+
 
 function normId(s: string): string {
   return s.trim().replace(/^0+/, '').toLowerCase();

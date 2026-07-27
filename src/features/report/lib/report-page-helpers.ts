@@ -157,7 +157,7 @@ export function resolveAccountMisTableRows(
 }
 
 /** IndexedDB helpers (same DB version as report-corpus-storage). */
-export const saveCallsToDB = async (calls: any[]) => {
+export const saveCallsToDB = async (calls: Array<Record<string, unknown>>) => {
   try {
     const db = await openReportsDb();
     const tx = db.transaction('calls', 'readwrite');
@@ -176,7 +176,7 @@ export const saveCallsToDB = async (calls: any[]) => {
   }
 };
 
-export const getCallsFromDB = async (): Promise<any[]> => {
+export const getCallsFromDB = async (): Promise<Array<Record<string, unknown>>> => {
   try {
     const db = await openReportsDb();
     const tx = db.transaction('calls', 'readonly');
@@ -192,7 +192,7 @@ export const getCallsFromDB = async (): Promise<any[]> => {
   }
 };
 
-export const saveMeta = async (key: string, val: any) => {
+export const saveMeta = async (key: string, val: unknown) => {
   try {
     const db = await openReportsDb();
     const tx = db.transaction('meta', 'readwrite');
@@ -202,13 +202,14 @@ export const saveMeta = async (key: string, val: any) => {
   }
 };
 
-export const getMeta = async (key: string): Promise<any> => {
+/** IndexedDB meta bag — shape varies by key; callers pass T. */
+export const getMeta = async <T = unknown>(key: string): Promise<T | null> => {
   try {
     const db = await openReportsDb();
     const tx = db.transaction('meta', 'readonly');
     const request = tx.objectStore('meta').get(key);
     return new Promise((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => resolve((request.result as T | undefined) ?? null);
       request.onerror = () => reject(request.error);
     });
   } catch {
@@ -228,12 +229,28 @@ export const clearCallsDB = async () => {
 };
 
 export type RegisterPageCacheEntry = {
-  data: any[];
+  data: Array<Record<string, unknown>>;
   total: number;
   registerSummary?: RegisterSummary | null;
-  summaryData?: any[];
-  accountsData?: any[];
+  summaryData?: Array<Record<string, unknown>>;
+  accountsData?: Array<Record<string, unknown>>;
   globalHeadcount?: number;
+};
+
+/** Shape stored under IndexedDB meta key `cacheParams`. */
+export type ReportIdbCacheParams = {
+  startDate?: string;
+  endDate?: string;
+  dateFilterColumn?: string;
+  officeIds?: string;
+  callTypes?: string;
+  lastRefreshed?: string;
+  total?: number;
+  registerSummary?: RegisterSummary | null;
+  summaryData?: Array<Record<string, unknown>>;
+  accountsData?: Array<Record<string, unknown>>;
+  globalHeadcount?: number;
+  summaryQueryKey?: string | null;
 };
 
 export function formatRelativeTime(date: Date | null): string {
@@ -297,7 +314,10 @@ export function registerPageCacheGet(
 }
 
 /** No-op — perf hooks kept so call sites stay stable without console noise. */
-export function logSummaryDebug(_label: string, _payload: Record<string, unknown>) {}
+export function logSummaryDebug(_label: string, _payload?: Record<string, unknown>) {
+  void _label;
+  void _payload;
+}
 
 export function corpusSpanDays(startDateStr: string, endDateStr: string): number {
   const spanStart = new Date(`${startDateStr}T00:00:00`);
@@ -316,5 +336,8 @@ export function reportPerf(
   _opStart: number,
   _extra?: Record<string, unknown>
 ) {
-  /* no-op */
+  void _phase;
+  void _action;
+  void _opStart;
+  void _extra;
 }

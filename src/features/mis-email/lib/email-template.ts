@@ -22,7 +22,9 @@ function escapeHtml(value: string): string {
 }
 
 /** Fixed greeting for Daily MIS Report distribution. */
-export function formatRecipientGreeting(_name?: string, _email?: string): string {
+export function formatRecipientGreeting(name?: string, email?: string): string {
+  void name;
+  void email;
   return 'Dear Zonal Heads,';
 }
 
@@ -212,6 +214,7 @@ export function buildDigestEmailHtml(params: {
   portalUrl: string;
   bodyHtml?: string;
 }, options?: { forPreview?: boolean }): string {
+  void options;
   const t = MIS_EMAIL_THEME;
   const reportUrl = `${params.portalUrl.replace(/\/$/, '')}/report`;
   const greeting = formatRecipientGreeting(params.recipientName, params.recipientEmail);
@@ -248,7 +251,7 @@ export function buildDigestEmailHtml(params: {
                         <td class="email-brand" style="padding:0 0 4px;font-family:${t.fontInline};font-size:11px;font-weight:bold;line-height:1.4;letter-spacing:0.6px;color:${t.fgMuted};">WESTERN REFRIGERATION</td>
                       </tr>
                       <tr>
-                        <td class="email-title" style="padding:0 0 24px;font-family:${t.fontInline};font-size:20px;font-weight:bold;line-height:1.25;color:${t.fgPrimary};">WRL Dashboard</td>
+                        <td class="email-title" style="padding:0 0 24px;font-family:${t.fontInline};font-size:20px;font-weight:bold;line-height:1.25;color:${t.fgPrimary};">WRL Dashboard (Revised)</td>
                       </tr>
                       <tr>
                         <td style="padding:0 0 24px;border-top:1px solid ${t.border};font-size:0;line-height:0;height:1px;">&nbsp;</td>

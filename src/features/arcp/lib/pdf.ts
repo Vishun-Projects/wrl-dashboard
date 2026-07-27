@@ -590,7 +590,7 @@ async function createArcpClaimsPdfDoc(payload: ArcpClaimsPdfPayload) {
   const leftBottom = branchY + 2.5;
 
   drawSectionLabel(doc, 'PERIOD', rightX, sectionTop);
-  let rightBottom = drawMetaRow(
+  const rightBottom = drawMetaRow(
     doc,
     'Billing period',
     `${formatPdfDate(meta.startDate)} – ${formatPdfDate(meta.endDate)}`,

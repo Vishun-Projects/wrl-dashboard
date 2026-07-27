@@ -136,11 +136,11 @@ describe('applyAge15CellStyle', () => {
       font: undefined,
     } as unknown as import('exceljs').Cell;
     applyAge15CellStyle(cell, 20);
-    expect((cell.fill as any).fgColor.argb).toBe('FFC6EFCE');
+    expect((cell.fill as import('exceljs').PatternFill).fgColor?.argb).toBe('FFC6EFCE');
     applyAge15CellStyle(cell, 50);
-    expect((cell.fill as any).fgColor.argb).toBe('FFFFEB9C');
+    expect((cell.fill as import('exceljs').PatternFill).fgColor?.argb).toBe('FFFFEB9C');
     applyAge15CellStyle(cell, 90);
-    expect((cell.fill as any).fgColor.argb).toBe('FFFFC7CE');
+    expect((cell.fill as import('exceljs').PatternFill).fgColor?.argb).toBe('FFFFC7CE');
   });
 });
 

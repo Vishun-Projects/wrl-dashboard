@@ -29,6 +29,8 @@ export function registerPostgresHotPathAvailable(
   _startDate?: string,
   _endDate?: string
 ): boolean {
+  void _startDate;
+  void _endDate;
   return readRegisterFromPostgresClient();
 }
 

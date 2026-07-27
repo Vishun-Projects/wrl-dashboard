@@ -5,7 +5,7 @@ import {
   blobToPreparedExport,
   triggerBlobDownload,
   type PreparedFileExport,
-} from '@/features/report/download';import { fetchWithRetry, withAxiosRetry } from '@/lib/net/fetch-with-retry';
+} from '@/features/report/download';import { fetchWithRetry } from '@/lib/net/fetch-with-retry';
 
 export function isRegisterExportAbortError(err: unknown): boolean {
   if (axios.isCancel(err)) return true;
@@ -46,7 +46,9 @@ export type RegisterExportKeysetCursor = {
   cursorNcode?: number;
 };
 
-export function logRegisterBulk(_message: string, _extra?: Record<string, unknown>) {
+export function logRegisterBulk(message: string, extra?: Record<string, unknown>) {
+  void message;
+  void extra;
   /* no-op — avoid leaking load paths in the browser console */
 }
 
@@ -128,7 +130,9 @@ export function registerExportCursorFromRow(
   return { cursorLoggedAt, cursorNcode: ncode };
 }
 
-export function resolveRegisterExportBatchSize(_startDate: string, _endDate: string): number {
+export function resolveRegisterExportBatchSize(startDate: string, endDate: string): number {
+  void startDate;
+  void endDate;
   if (readRegisterFromPostgresClient()) {
     return REGISTER_EXPORT_BATCH_POSTGRES;
   }
@@ -451,46 +455,7 @@ export async function downloadRegisterCsvFromServer(opts: {
   await triggerBlobDownload(prepared.blob, prepared.filename);
 }
 
-async function fetchRegisterBulkForCache(opts: {
-  query: RegisterExportQuery;
-  signal?: AbortSignal;
-  onProgress?: (fetched: number, total: number) => void;
-}): Promise<Record<string, unknown>[]> {
-  const t0 = performance.now();
-  logRegisterBulk('bulk preload START (single API request)', {
-    startDate: opts.query.startDate,
-    endDate: opts.query.endDate,
-    callType: opts.query.callType,
-  });
 
-  const params = buildRegisterExportParams(opts.query, 1, 1, false);
-  params.set('export', 'bulk');
-  const url = `/api/report?${params.toString()}`;
-
-  let res;
-  try {
-    res = await withAxiosRetry(() =>
-      axios.get(url, { withCredentials: true, signal: opts.signal })
-    );
-  } catch (err) {
-    logRegisterBulk('bulk preload FAILED', {
-      ms: Number((performance.now() - t0).toFixed(1)),
-      error: err instanceof Error ? err.message : String(err),
-    });
-    throw err;
-  }
-
-  const rows = (res.data?.data ?? []) as Record<string, unknown>[];
-  if (!Array.isArray(rows)) {
-    throw new Error('Invalid register bulk response from server');
-  }
-  opts.onProgress?.(rows.length, rows.length);
-  logRegisterBulk('bulk preload DONE (network)', {
-    rows: rows.length,
-    ms: Number((performance.now() - t0).toFixed(1)),
-  });
-  return rows;
-}
 
 async function fetchRegisterExportPage(
   query: RegisterExportQuery,

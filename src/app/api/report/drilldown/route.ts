@@ -8,7 +8,6 @@ import { appendOfficeSecurityFilter } from '@/lib/trhcalls/office-security';
 import {
   assertIsoDate,
   assertNumericId,
-  escapeSqlLiteral,
   sqlDateLiteral,
   sqlDateTimeEndLiteral,
 } from '@/lib/crm/sql-builder';
@@ -101,7 +100,7 @@ export async function POST(req: NextRequest) {
             condition: conditionString
           });
           if (pRes.data && pRes.data.length > 0) {
-            const partyIds = pRes.data.map((p: any) => p.ncode).join(',');
+            const partyIds = pRes.data.map((p) => p.ncode).join(',');
             condition += ` AND view_c.npartyprofile IN (${partyIds})`;
             innerCondition += ` AND npartyprofile IN (${partyIds})`;
           }
@@ -143,12 +142,6 @@ export async function POST(req: NextRequest) {
           condition += ` AND (view_c.callsolved = '0' OR view_c.callsolved = 'False') AND (view_c.bfastclose = 0 OR view_c.bfastclose IS NULL) AND ISNULL(view_c.callstatus,'') != 'Cancel' AND (view_c.vsolveremarks LIKE '%PART%' OR (view_c.vcomplaint LIKE '%PART%' AND (view_c.vcomplaint NOT LIKE 'Cut off, cooling, part problem%' OR EXISTS(SELECT 1 FROM trdcalls1visit v (NOLOCK) WHERE v.ncalls = view_c.call_ncode))))`;
           break;
         case 'discrepancy':
-          let discrepancyCondition = `1=1`;
-          if (startDate) discrepancyCondition += ` AND dtrndate >= '${startDate}'`;
-          if (endDate) discrepancyCondition += ` AND dtrndate <= '${endDate} 23:59:59'`;
-          if (callType && callType !== 'All' && callType !== '') {
-            discrepancyCondition = appendCallTypeFilter(discrepancyCondition, callType, 'ncalltype');
-          }
           condition += ` AND view_c.vtrnno IN (
             SELECT vtrnno 
             FROM (
@@ -211,7 +204,7 @@ export async function POST(req: NextRequest) {
               condition: conditionString
             });
             if (pRes.data && pRes.data.length > 0) {
-              const partyIds = pRes.data.map((p: any) => p.ncode).join(',');
+              const partyIds = pRes.data.map((p) => p.ncode).join(',');
               condition += ` AND tc.npartyprofile IN (${partyIds})`;
             }
           }
@@ -312,7 +305,10 @@ export async function POST(req: NextRequest) {
       data: res.data || [],
     });
 
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to load drilldown' },
+      { status: 500 }
+    );
   }
 }

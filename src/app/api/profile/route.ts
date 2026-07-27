@@ -26,7 +26,7 @@ export async function PATCH(request: Request) {
     }
 
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (name !== undefined) {
@@ -52,8 +52,11 @@ export async function PATCH(request: Request) {
     await prisma.$queryRawUnsafe(query, ...values);
 
     return NextResponse.json({ success: true });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Profile update error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Profile update failed' },
+      { status: 500 }
+    );
   }
 }

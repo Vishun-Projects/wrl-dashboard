@@ -120,7 +120,10 @@ export async function POST(request: Request) {
 
         const durationMs = Date.now() - jobStarted;
         const timing = results[0]?.timing;
-        const sent = results.map(({ timing: _timing, ...rest }) => rest);
+        const sent = results.map(({ timing: _timing, ...rest }) => {
+          void _timing;
+          return rest;
+        });
         const summary = sent.map((item) => item.sentTo).join(', ');
 
         console.log(

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Morning MIS watchdog — plain language fail/ok for non-techies.
-# Cron AFTER the 09:30 digest (default 09:50 IST). Emails YOU if morning mail failed.
+# Cron AFTER the 09:30 digest (default 09:50 IST Mon–Sat). Emails YOU if morning mail failed.
 #
 #   CRON_TZ=Asia/Kolkata
-#   50 9 * * * /opt/wrl/database/fast-close-app/scripts/vps-hosting/mis-email-morning-watchdog.sh \
+#   50 9 * * 1-6 /opt/wrl/database/fast-close-app/scripts/vps-hosting/mis-email-morning-watchdog.sh \
 #     >> /opt/wrl/database/fast-close-app/logs/mis-email-watchdog.log 2>&1
 #
 # From PC (asks SSH passphrase, installs cron line, keeps existing mis-email crons):
@@ -19,6 +19,12 @@ TODAY="$(TZ=Asia/Kolkata date +%F)"
 STAMP="$(TZ=Asia/Kolkata date -Iseconds)"
 
 mkdir -p "${INSTALL_ROOT}/logs"
+
+# Digest does not run Sundays — do not alert as a failure.
+if [[ "$(TZ=Asia/Kolkata date +%u)" == "7" ]]; then
+  echo "${STAMP} watchdog skipped — Sunday (IST), no morning digest expected"
+  exit 0
+fi
 
 ok=0
 reason=""

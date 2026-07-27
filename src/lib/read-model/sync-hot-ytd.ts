@@ -5,7 +5,7 @@ import {
   forEachCrmBackfillChunk,
 } from '@/lib/read-model/crm-fetch';
 import { todayLocalDate } from '@/lib/read-model/dates';
-import { dayBeforeDate, registerHotRetentionStart } from '@/lib/read-model/hot-window';
+import { registerHotRetentionStart } from '@/lib/read-model/hot-window';
 import { processCrmRows, processCrmRowsForYtdLoad } from '@/lib/read-model/transform';
 import { countHotRows, upsertHotRows } from '@/lib/read-model/upsert-hot';
 

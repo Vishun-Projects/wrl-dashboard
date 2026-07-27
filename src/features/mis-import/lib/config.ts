@@ -21,6 +21,8 @@ export type BatchMeta = {
   uploadedAt: string;
   uploadedByName: string;
   storedFilePath: string | null;
+  /** True when original upload file (disk or blob) is still retained. */
+  fileRetained: boolean;
 };
 
 export type SourceWithBatches = {
@@ -91,11 +93,16 @@ export async function listSourceBatches(sourceCode: string): Promise<BatchMeta[]
       created_at: Date;
       uploader_name: string;
       stored_file_path: string | null;
+      file_retained: boolean;
     }>(
       `
       SELECT b.batch_id, b.file_name, b.row_count, b.created_at,
              COALESCE(u.name, 'Unknown') AS uploader_name,
              b.stored_file_path,
+             (
+               NULLIF(btrim(COALESCE(b.stored_file_path, '')), '') IS NOT NULL
+               OR (b.stored_file_blob IS NOT NULL AND octet_length(b.stored_file_blob) > 0)
+             ) AS file_retained,
              COALESCE(b.active_row_count, 0) AS active_row_count,
              COALESCE(b.new_row_count, 0) AS new_row_count
       FROM mis_client_import_batches b
@@ -116,6 +123,7 @@ export async function listSourceBatches(sourceCode: string): Promise<BatchMeta[]
       uploadedAt: row.created_at.toISOString(),
       uploadedByName: row.uploader_name,
       storedFilePath: row.stored_file_path,
+      fileRetained: Boolean(row.file_retained),
     }));
   });
 }
@@ -252,12 +260,17 @@ export async function listAllSourcesWithBatches(): Promise<SourceWithBatches[]> 
       created_at: Date;
       uploader_name: string;
       stored_file_path: string | null;
+      file_retained: boolean;
     }>(
       `
       SELECT s.code AS source_code,
              b.batch_id, b.file_name, b.row_count, b.created_at,
              COALESCE(u.name, 'Unknown') AS uploader_name,
              b.stored_file_path,
+             (
+               NULLIF(btrim(COALESCE(b.stored_file_path, '')), '') IS NOT NULL
+               OR (b.stored_file_blob IS NOT NULL AND octet_length(b.stored_file_blob) > 0)
+             ) AS file_retained,
              COALESCE(b.active_row_count, 0) AS active_row_count,
              COALESCE(b.new_row_count, 0) AS new_row_count
       FROM mis_client_import_batches b
@@ -281,6 +294,7 @@ export async function listAllSourcesWithBatches(): Promise<SourceWithBatches[]> 
         uploadedAt: row.created_at.toISOString(),
         uploadedByName: row.uploader_name,
         storedFilePath: row.stored_file_path,
+        fileRetained: Boolean(row.file_retained),
       });
       byCode.set(row.source_code, list);
     }

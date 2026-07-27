@@ -1,29 +1,16 @@
 'use client';
 
-import type ExcelJS from 'exceljs';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { signOutAndGoToLogin } from '@/lib/auth/sign-out-client';
 import {
   canAccessMisTab,
   defaultMisTab,
-  hasCapability,
   visibleTabs,
   type MisTabId,
 } from '@/lib/auth/rbac-catalog';
 import axios from 'axios';
-import {
-  Download,
-  Filter,
-  Loader2,
-  Search,
-  ChevronRight,
-  ChevronDown,
-  FileSpreadsheet,
-  FileText,
-  AlertCircle,
-  X,
-} from 'lucide-react';
+import { Filter, Loader2, FileSpreadsheet } from 'lucide-react';
 import { PageAlert } from '@/components/ui/PageAlert';
 import { TruncatedText } from '@/components/ui/TruncatedText';
 import { ReportOrientationBanner } from '@/features/report/ui/ReportOrientationBanner';
@@ -39,12 +26,11 @@ import { ReportRegisterTabPanel } from '@/features/report/ui/ReportRegisterTabPa
 import { ReportSummaryTabPanel } from '@/features/report/ui/ReportSummaryTabPanel';
 import { ReportAccountsTabPanel } from '@/features/report/ui/ReportAccountsTabPanel';
 import { ReportBdMisTabPanel } from '@/features/report/ui/ReportBdMisTabPanel';
-import { ReportPageSkeleton, ReportLoadingPanel } from '@/features/report/ui/ReportLoadingFeedback';
+import { ReportPageSkeleton } from '@/features/report/ui/ReportLoadingFeedback';
 import { useRegisterFilterOptions } from '@/features/report/lib/hooks/useRegisterFilterOptions';
 import { feedback } from '@/lib/ui/feedback';
 import { useUser } from '@/components/layout/DashboardLayout';
 import { DateRangeSelector } from '@/features/register/ui/DateRangeSelector';
-import { useRouter, usePathname } from 'next/navigation';
 import { CallRegisterClient } from '@/app/report/call-register/call-register-client';
 import { formatUiDate } from '@/lib/dates/ui-date';
 import { UiDateInput } from '@/components/ui/UiDateInput';
@@ -60,9 +46,7 @@ import {
   resolveTechnicianDisplayName,
   type RegisterPageSize,
   buildSummaryQueryKey,
-  filtersEqual,
   joinFilterParam,
-  migrateStringFilter,
   resolveViewCallTypesParam,
   resolveSummaryOfficeIdsParam,
 } from '@/features/report/lib/filters';
@@ -85,10 +69,8 @@ import {
   summarizeRegisterRows,
   classifyRegisterRowStatus,
   isRegisterRowSolvedForMis,
-  isRegisterRowCancelled,
   normalizeRegisterSummary,
   type RegisterSummary,
-  type RegisterSummaryBucket,
   type RegisterViewFilterParts,
 } from '@/features/report/lib/search';
 import {
@@ -121,7 +103,6 @@ import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import { deriveRegisterPageFromCalls, deriveRegisterView } from '@/features/report/lib/register-view';
 import {
   collectRegisterRowsFromSessionCache,
-  downloadRegisterCsvFromRows,
   prepareRegisterCsvFromServer,
   fetchAllRegisterRowsForExport,
   isRegisterExportAbortError,
@@ -130,7 +111,6 @@ import {
 } from '@/features/register';
 import { clearPortalAuditCache, ensurePortalAuditCache } from '@/features/report/lib/portal-cache';
 import ClientImportTab from '@/features/report/ui/ClientImportTab';
-import { BdMisSummaryPanel } from '@/features/report/ui/BdMisSummaryPanel';
 import type { BdMisGrandRow, BdMisRegionalRow, BdMisSourceFlags } from '@/features/report/lib/bd-mis-summary';
 import type { AccountSummaryRow, BranchSummaryRow } from '@/features/report/lib/summary-derive';
 import MisSourceCheckboxes from '@/features/report/ui/MisSourceCheckboxes';
@@ -139,34 +119,12 @@ import {
   saveClientMergeWithCrmPrefs,
 } from '@/features/report/ui/MisClientMergeCheckbox';
 import {
-  SummaryMergedMetricCell,
-  accountOpenCallsFromAging,
-  accountOpenCallsFromAgingByAccount,
-  accountMergeFlags,
   buildAccountDisplayRows,
-  buildClientOnlyRegionalRows,
   type ClientMergeWithCrmPrefs,
-  displayLoggedCallCount,
-  filterClientAccountSummary,
-  findAccountMetric,
   DEFAULT_ZONE_TOP_EXCLUDE_ACCOUNTS,
-  isAccountExcludedFromZoneTop,
-  findAccountMetricByAccount,
-  findBranchMetric,
-  findBranchRowMetric,
   matchesAccountFilter,
   matchesRegionFilter,
   mergeFlagsFromSelection,
-  mergeSelectedMetrics,
-  rollupCrmAccountsByRegion,
-  sumAccountMetric,
-  sumMergedAccountMetric,
-  sumMergedAccountOpenCalls,
-  resolveSummaryRegionMetric,
-  resolveSummaryRegionOpenCalls,
-  sumAccountMetricByRegion,
-  sumBranchMetric,
-  sumBranchLoggedCalls,
 } from '@/features/report/ui/SummaryMergedMetricCell';
 import {
   isClientOnlyMode,
@@ -183,8 +141,6 @@ import {
   getCallsFromDB,
   getMeta,
   logSummaryDebug,
-  regionPerfAccountCellClass,
-  regionPerfRowClass,
   registerPageCacheGet,
   registerPageCachePut,
   reportPerf,
@@ -194,6 +150,7 @@ import {
   saveMeta,
   type AccountMisGrouping,
   type RegisterPageCacheEntry,
+  type ReportIdbCacheParams,
 } from '@/features/report/lib/report-page-helpers';
 
 /** Cadbury+Coke+CRM Summary tab — hidden until reconciliation is production-ready. */
@@ -238,15 +195,11 @@ export default function ReportPageClient() {
   }, [userProfile?.permissions, userPermissions, misTabs]);
 
   const supabase = createClient();
-  const router = useRouter();
-  const pathname = usePathname();
   const pageSessionStartRef = React.useRef<number>(typeof performance !== 'undefined' ? performance.now() : 0);
 
   const {
     search,
-    setSearch,
     pincodeSearch,
-    setPincodeSearch,
     debouncedSearch,
     debouncedPincodeSearch,
     dateRange,
@@ -255,29 +208,19 @@ export default function ReportPageClient() {
     setAgingAsOf,
     dateFilterColumn,
     selectedOfficeIds,
-    setSelectedOfficeIds,
     selectedCallTypes,
     setSelectedCallTypes,
     selectedStatus,
-    setSelectedStatus,
     priorityFilter,
-    setPriorityFilter,
     portalFilter,
-    setPortalFilter,
     repairFilter,
-    setRepairFilter,
     selectedState,
-    setSelectedState,
     selectedCity,
-    setSelectedCity,
     selectedRegion,
     selectedAccount,
     selectedBranch,
-    setSelectedBranch,
     selectedFranchisee,
-    setSelectedFranchisee,
     selectedTechnician,
-    setSelectedTechnician,
     setStatesList,
     setCitiesList,
     setRegionsList,
@@ -286,8 +229,6 @@ export default function ReportPageClient() {
     setTechniciansList,
     setBranchesList,
     setFranchiseesList,
-    branchesList,
-    franchiseesList,
     clearAllFilters,
     isAnyFilterActive: isAnyRegisterFilterActive,
     callTypeOptions,
@@ -305,7 +246,6 @@ export default function ReportPageClient() {
     applyFilters,
     getAppliedFiltersSnapshot,
     hasPendingFilterChanges,
-    prefsReady,
     reportBanner,
     setReportError,
     clearReportBanner,
@@ -370,7 +310,7 @@ export default function ReportPageClient() {
   );
   const clientOnlyMode = isClientOnlyMode(sourceSelection);
   const alignCrmToAccounts = mergeFlags.crm && mergeFlags.client;
-  const [clientImportMeta, setClientImportMeta] = useState<{
+  const [, setClientImportMeta] = useState<{
     rowsInDateRange: number;
     totalRowsInFiles: number;
   } | null>(null);
@@ -388,7 +328,7 @@ export default function ReportPageClient() {
   const [bdMisGrand, setBdMisGrand] = useState<BdMisGrandRow | null>(null);
   /** BD MIS Excel union uses full client snapshots (YTD); not used for date-filtered Summary Dashboard. */
   const [excelUnionRegionalRows, setExcelUnionRegionalRows] = useState<BdMisRegionalRow[]>([]);
-  const [excelUnionGrand, setExcelUnionGrand] = useState<BdMisGrandRow | null>(null);
+  const [, setExcelUnionGrand] = useState<BdMisGrandRow | null>(null);
   const useBdMisExcelUnion = false;
   const [bdMisExportData, setBdMisExportData] = useState<{
     regionalRows: BdMisRegionalRow[];
@@ -426,7 +366,7 @@ export default function ReportPageClient() {
       })),
     [techniciansList]
   );
-  const [loadingPage, setLoadingPage] = useState<number | null>(null);
+  const [, setLoadingPage] = useState<number | null>(null);
   const registerPagesCacheRef = React.useRef<Map<string, Map<number, RegisterPageCacheEntry>>>(new Map());
   const lastKnownRegisterTotalRef = React.useRef<number>(globalReportCache?.total || 0);
   const clearFiltersRef = React.useRef<boolean>(false);
@@ -602,7 +542,7 @@ export default function ReportPageClient() {
     prevRegisterExportScopeKeyRef.current = registerExportScopeKey;
   }, [registerExportScopeKey, cancelRegisterExportsOnScopeChange]);
 
-  const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
+  const [, setSelectedCallId] = useState<string | null>(null);
   const [selectedCall, setSelectedCall] = useState<any | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
@@ -2808,7 +2748,7 @@ export default function ReportPageClient() {
       });
       try {
         const tBeforeMeta = performance.now();
-        const cacheParams = await getMeta('cacheParams');
+        const cacheParams = await getMeta<ReportIdbCacheParams>('cacheParams');
         reportPerf('initDB', 'getMeta(cacheParams) done', i0, {
           hasMeta: !!cacheParams,
           getMetaMs: Number((performance.now() - tBeforeMeta).toFixed(1)),
@@ -2984,7 +2924,7 @@ export default function ReportPageClient() {
               setTotal(cacheParams.total || 0);
               setRegisterSummary(cacheParams.registerSummary || null);
               
-              const refreshedDate = new Date(cacheParams.lastRefreshed);
+              const refreshedDate = new Date(cacheParams.lastRefreshed ?? Date.now());
               setLastRefreshed(refreshedDate);
 
               setGlobalReportCache({
@@ -3014,7 +2954,7 @@ export default function ReportPageClient() {
                 selectedBranch: [],
                 selectedFranchisee: [],
                 selectedTechnician: [],
-                summaryQueryKey: cacheParams.summaryQueryKey,
+                summaryQueryKey: cacheParams.summaryQueryKey ?? undefined,
               });
 
               if (cacheParams.summaryQueryKey) {
@@ -3711,7 +3651,7 @@ export default function ReportPageClient() {
     misAccess.summary,
     misAccess.accounts,
     misAccess.client_import,
-    misAccess.deployment_completion,
+    misAccess.bd_mis_summary,
     loadClientImportSources,
     appliedRevision,
   ]);

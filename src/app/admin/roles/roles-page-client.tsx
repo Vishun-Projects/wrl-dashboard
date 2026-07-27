@@ -40,12 +40,23 @@ import type { RolesUiPageRow } from '@/lib/auth/rbac-catalog';
 import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 
 type PermissionRow = { id: string; name: string; description?: string | null };
+type RoleRow = {
+  id: string;
+  name: string;
+  description?: string | null;
+  permissions?: string[];
+};
 
 type PermissionGroups = {
   pages: RolesUiPageRow[];
   capabilities: PermissionRow[];
   other: PermissionRow[];
 };
+
+function getRequestErrorMessage(error: unknown, fallback: string): string {
+  if (!axios.isAxiosError<{ error?: string }>(error)) return fallback;
+  return error.response?.data?.error ?? error.message ?? fallback;
+}
 
 function PermissionToggle({
   selected,
@@ -106,7 +117,7 @@ type RoleSortKey = 'role' | 'description' | 'access';
 
 export default function RolesPage() {
   const router = useRouter();
-  const [roles, setRoles] = useState<any[]>([]);
+  const [roles, setRoles] = useState<RoleRow[]>([]);
   const [allPermissions, setAllPermissions] = useState<PermissionRow[]>([]);
   const [permissionGroups, setPermissionGroups] = useState<PermissionGroups>({
     pages: [],
@@ -117,7 +128,7 @@ export default function RolesPage() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<TableSortState<RoleSortKey> | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const [editingRole, setEditingRole] = useState<any>(null);
+  const [editingRole, setEditingRole] = useState<RoleRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -166,7 +177,7 @@ export default function RolesPage() {
     [allPermissions]
   );
 
-  const handleEdit = (role: any) => {
+  const handleEdit = (role: RoleRow) => {
     setEditingRole(role);
     setFormData({
       name: role.name,
@@ -184,8 +195,8 @@ export default function RolesPage() {
       feedback.actionSuccess('Role deleted successfully');
       setDeleteTarget(null);
       init();
-    } catch (err: any) {
-      feedback.actionFailed(err.response?.data?.error || 'Failed to delete role');
+    } catch (err: unknown) {
+      feedback.actionFailed(getRequestErrorMessage(err, 'Failed to delete role'));
     } finally {
       setDeleting(false);
     }
@@ -203,8 +214,8 @@ export default function RolesPage() {
       }
       setShowModal(false);
       init();
-    } catch (err: any) {
-      feedback.actionFailed(err.response?.data?.error || 'Operation failed');
+    } catch (err: unknown) {
+      feedback.actionFailed(getRequestErrorMessage(err, 'Operation failed'));
     }
   };
 

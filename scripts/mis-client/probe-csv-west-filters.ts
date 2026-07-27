@@ -37,7 +37,7 @@ function loadWestRows(): Row[] {
     .split(/\r?\n/)
     .filter(Boolean);
   const h = parseCsvLine(lines[0]);
-  const idx = (n: string) => h.indexOf(n);
+  
   const rows: Row[] = [];
   for (let i = 1; i < lines.length; i++) {
     const cols = parseCsvLine(lines[i]);
@@ -117,7 +117,7 @@ tryFilter('branch code prefix in Branch col', (r) =>
 for (const n of [1, 5, 10, 20, 30, 39, 40, 41, 50]) {
   const cutoff = new Date('2026-06-29T23:59:59');
   cutoff.setDate(cutoff.getDate() - 0);
-  const jun29 = rows.filter((r) => parseCrmDate(r.Date ?? '')?.toISOString().slice(0, 10) === '2026-06-29');
+  
   if (n === 39) {
     console.log(`exclude last ${n} jun29 rows: total ${rows.length - n} (Δ${rows.length - n - TARGET})`);
   }

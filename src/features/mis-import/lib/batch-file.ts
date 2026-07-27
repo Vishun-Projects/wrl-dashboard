@@ -1,13 +1,12 @@
 import * as XLSX from 'xlsx';
 import { readImportFile } from '@/features/mis-import/lib/file-store';
+import { IMPORT_FILE_RETENTION_DAYS } from '@/features/mis-import/lib/file-retention';
 import { withAppClient } from '@/lib/read-model/db';
 
 type BatchFileMeta = {
   file_name: string;
   stored_file_path: string | null;
   stored_file_blob: Buffer | null;
-  file_kind: 'csv' | 'xlsx';
-  delimiter: string | null;
 };
 
 function contentTypeForFileName(fileName: string): string {
@@ -68,14 +67,10 @@ async function loadBatchMeta(batchId: string): Promise<BatchFileMeta | null> {
       file_name: string;
       stored_file_path: string | null;
       stored_file_blob: Buffer | null;
-      file_kind: 'csv' | 'xlsx';
-      delimiter: string | null;
     }>(
       `
-      SELECT b.file_name, b.stored_file_path, b.stored_file_blob,
-             s.file_kind, s.delimiter
+      SELECT b.file_name, b.stored_file_path, b.stored_file_blob
       FROM mis_client_import_batches b
-      JOIN mis_client_sources s ON s.id = b.source_id
       WHERE b.batch_id = $1::uuid AND b.status = 'completed'
       LIMIT 1
       `,
@@ -83,34 +78,6 @@ async function loadBatchMeta(batchId: string): Promise<BatchFileMeta | null> {
     );
     return res.rows[0] ?? null;
   });
-}
-
-async function loadBatchRawRows(batchId: string): Promise<Record<string, string>[]> {
-  return withAppClient(async (client) => {
-    const res = await client.query<{ raw: Record<string, string> }>(
-      `
-      SELECT raw
-      FROM mis_client_import_rows
-      WHERE batch_id = $1::uuid
-      ORDER BY id
-      `,
-      [batchId]
-    );
-    return res.rows.map((row) => row.raw ?? {});
-  });
-}
-
-async function reconstructBatchFile(meta: BatchFileMeta, batchId: string): Promise<Buffer> {
-  const rawRows = await loadBatchRawRows(batchId);
-  if (rawRows.length === 0) {
-    throw new Error('No imported rows found for this batch');
-  }
-
-  const lower = meta.file_name.toLowerCase();
-  if (meta.file_kind === 'xlsx' || lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
-    return rawRowsToXlsxBuffer(rawRows);
-  }
-  return rawRowsToCsvBuffer(rawRows, meta.delimiter?.trim() || ',');
 }
 
 export async function saveBatchFileBlob(batchId: string, buffer: Buffer): Promise<void> {
@@ -155,6 +122,7 @@ export async function loadBatchFileBytes(batchId: string): Promise<{
     }
   }
 
-  const buffer = await reconstructBatchFile(meta, batchId);
-  return { buffer, fileName, contentType, reconstructed: true };
+  throw new Error(
+    `Original upload file is no longer retained (kept for ${IMPORT_FILE_RETENTION_DAYS} days only). Imported data remains in reports.`
+  );
 }

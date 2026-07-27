@@ -14,7 +14,6 @@ import {
   ChevronRight,
   ShieldCheck,
   User,
-  ExternalLink,
   Map,
   ScanBarcode,
   Receipt,

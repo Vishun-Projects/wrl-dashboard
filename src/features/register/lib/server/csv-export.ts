@@ -6,7 +6,6 @@ import { formatRegisterRepairDone } from '@/features/register/lib/format-repair-
 import { REGISTER_EXPORT_COLUMNS } from '@/features/register/lib/table-columns';
 import { escapeCsvCell } from '@/lib/utils/csv';
 import {
-  resolveUniqueDownloadFilename,
   triggerBlobDownload,
   blobToPreparedExport,
   type PreparedFileExport,

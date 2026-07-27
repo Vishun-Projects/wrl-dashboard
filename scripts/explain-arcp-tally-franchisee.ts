@@ -49,18 +49,12 @@ async function main() {
   }[] = [];
 
   let multiClaimCount = 0;
-  let inflatedBm = 0;
-
   for (const [claimKey, lines] of byClaim) {
     if (lines.length <= 1) continue;
     multiClaimCount += 1;
     const tallyByLine = new Map(
       exportRows.map((r) => [arcpDetailLineKey(r), Number(r.branch_approved) || 0])
     );
-    const rawSum = lines.reduce((s, r) => s + amt(r), 0);
-    const tallySum = lines.reduce((s, r) => s + (tallyByLine.get(arcpDetailLineKey(r)) ?? 0), 0);
-    inflatedBm += rawSum - tallySum;
-
     if (multiClaimExamples.length < 5) {
       multiClaimExamples.push({
         claimKey,

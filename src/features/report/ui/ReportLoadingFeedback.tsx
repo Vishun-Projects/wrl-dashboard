@@ -7,7 +7,6 @@ import {
   fadeSlideIn,
   instantTransition,
   motionTransition,
-  tapScale,
   usePrefersReducedMotion,
 } from '@/lib/motion/presets';
 

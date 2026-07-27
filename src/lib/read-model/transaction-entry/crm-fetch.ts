@@ -1,11 +1,11 @@
 import { postQuery, isCrmOutOfMemoryError } from '@/lib/db/proxy';
-import { parseCrmDaddedon, periodDays } from './shared';
+import { parseCrmDaddedon, periodDays, TRANSACTION_ENTRY_PROCESSED_SQL } from './shared';
 
 /** Gap between CRM calls when chunking after OOM / between slices (default 1000ms). */
 const FETCH_GAP_MS = Number(process.env.TRANSACTION_ENTRY_FETCH_GAP_MS ?? 1000) || 1000;
 
-/** Per-client parallel fallback when a week slice still OOMs (default 2 — be kind to CRM). */
-const CLIENT_PARALLEL = Number(process.env.TRANSACTION_ENTRY_CLIENT_PARALLEL ?? 2) || 2;
+/** Per-client parallel fallback when a week slice still OOMs (default 1 — be kind to CRM). */
+const CLIENT_PARALLEL = Number(process.env.TRANSACTION_ENTRY_CLIENT_PARALLEL ?? 1) || 1;
 
 const CRM_TIMEOUT_MS = Number(process.env.TRANSACTION_ENTRY_CRM_TIMEOUT_MS ?? 180_000) || 180_000;
 
@@ -18,6 +18,12 @@ export type CrmTransactionEntryRow = {
   warrantyStartRaw: string;
   warrantyStart: Date | null;
   uniqueId: string | null;
+};
+
+/** incomplete=true when a CRM OOM slice was skipped — do not mirror-delete for that window. */
+export type CrmTransactionEntryFetch = {
+  rows: CrmTransactionEntryRow[];
+  incomplete: boolean;
 };
 
 function sqlLiteral(value: string): string {
@@ -43,6 +49,7 @@ function buildSelect(client: string | null, dateFrom: string, dateTo: string): s
       AND ProductSerialNo <> ''
       AND Client IS NOT NULL
       AND LTRIM(RTRIM(Client)) <> ''
+      AND ${TRANSACTION_ENTRY_PROCESSED_SQL}
       ${clientFilter}
       AND TRY_CONVERT(DATETIME, daddedon, 103) >= TRY_CONVERT(DATETIME, '${dateFrom}', 120)
       AND TRY_CONVERT(DATETIME, daddedon, 103) <= TRY_CONVERT(DATETIME, '${dateTo} 23:59:59', 120)
@@ -112,9 +119,10 @@ async function fetchClientPeriod(
   client: string,
   dateFrom: string,
   dateTo: string
-): Promise<CrmTransactionEntryRow[]> {
+): Promise<CrmTransactionEntryFetch> {
   const pending: { from: string; to: string }[] = [{ from: dateFrom, to: dateTo }];
   const all: CrmTransactionEntryRow[] = [];
+  let incomplete = false;
 
   while (pending.length > 0) {
     const { from, to } = pending.pop()!;
@@ -127,19 +135,21 @@ async function fetchClientPeriod(
 
     if (periodDays(from, to) <= 1) {
       console.warn(`[transaction-entry] CRM OOM for ${client} on ${from}, skipping slice`);
+      incomplete = true;
       continue;
     }
 
     const split = splitPeriod(from, to);
     if (!split) {
       console.warn(`[transaction-entry] CRM OOM for ${client} on ${from}..${to}, skipping slice`);
+      incomplete = true;
       continue;
     }
     pending.push(split[1], split[0]);
     await sleep(FETCH_GAP_MS);
   }
 
-  return all;
+  return { rows: all, incomplete };
 }
 
 /** Per-client fetch for Deployment Completion accounts (exported for incremental recent window). */
@@ -147,7 +157,7 @@ export function fetchTransactionEntryClientPeriod(
   client: string,
   dateFrom: string,
   dateTo: string
-): Promise<CrmTransactionEntryRow[]> {
+): Promise<CrmTransactionEntryFetch> {
   return fetchClientPeriod(client, dateFrom, dateTo);
 }
 
@@ -155,25 +165,30 @@ async function fetchClientsParallel(
   clients: string[],
   dateFrom: string,
   dateTo: string
-): Promise<CrmTransactionEntryRow[]> {
+): Promise<CrmTransactionEntryFetch> {
   const all: CrmTransactionEntryRow[] = [];
+  let incomplete = false;
   for (let i = 0; i < clients.length; i += CLIENT_PARALLEL) {
     const batch = clients.slice(i, i + CLIENT_PARALLEL);
     const parts = await Promise.all(
       batch.map((client) => fetchClientPeriod(client, dateFrom, dateTo))
     );
-    for (const part of parts) appendRows(all, part);
+    for (const part of parts) {
+      appendRows(all, part.rows);
+      if (part.incomplete) incomplete = true;
+    }
   }
-  return all;
+  return { rows: all, incomplete };
 }
 
 async function fetchPeriodSplit(
   dateFrom: string,
   dateTo: string,
   clientsForFallback: string[]
-): Promise<CrmTransactionEntryRow[]> {
+): Promise<CrmTransactionEntryFetch> {
   const pending: { from: string; to: string }[] = [{ from: dateFrom, to: dateTo }];
   const all: CrmTransactionEntryRow[] = [];
+  let incomplete = false;
 
   while (pending.length > 0) {
     const { from, to } = pending.pop()!;
@@ -186,20 +201,24 @@ async function fetchPeriodSplit(
 
     const days = periodDays(from, to);
     if (days <= 7) {
-      appendRows(all, await fetchClientsParallel(clientsForFallback, from, to));
+      const part = await fetchClientsParallel(clientsForFallback, from, to);
+      appendRows(all, part.rows);
+      if (part.incomplete) incomplete = true;
       continue;
     }
 
     const split = splitPeriod(from, to);
     if (!split) {
-      appendRows(all, await fetchClientsParallel(clientsForFallback, from, to));
+      const part = await fetchClientsParallel(clientsForFallback, from, to);
+      appendRows(all, part.rows);
+      if (part.incomplete) incomplete = true;
       continue;
     }
     pending.push(split[1], split[0]);
     await sleep(FETCH_GAP_MS);
   }
 
-  return all;
+  return { rows: all, incomplete };
 }
 
 /**
@@ -210,7 +229,7 @@ export async function fetchTransactionEntryPeriod(
   dateFrom: string,
   dateTo: string,
   clientsForFallback?: string[]
-): Promise<CrmTransactionEntryRow[]> {
+): Promise<CrmTransactionEntryFetch> {
   const clients = clientsForFallback ?? (await fetchTransactionEntryClients());
   return fetchPeriodSplit(dateFrom, dateTo, clients);
 }
@@ -223,6 +242,7 @@ export async function fetchTransactionEntryClients(): Promise<string[]> {
       FROM TransactionEntry
       WHERE ProductSerialNo IS NOT NULL AND ProductSerialNo <> ''
         AND Client IS NOT NULL AND LTRIM(RTRIM(Client)) <> ''
+        AND ${TRANSACTION_ENTRY_PROCESSED_SQL}
       ORDER BY Client
     `,
     timeoutMs: CRM_TIMEOUT_MS,

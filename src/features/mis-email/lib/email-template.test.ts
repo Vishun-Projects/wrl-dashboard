@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildEmailBodySectionsHtml } from '@/features/mis-email/lib/body-sections';
 import {
-  MIS_EMAIL_THEME,
   buildDigestEmailHtml,
   formatRecipientGreeting,
   formatReportPeriod,

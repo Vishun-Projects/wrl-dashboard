@@ -24,11 +24,14 @@ export async function GET(req: NextRequest) {
       orderBy: "callType ASC"
     });
 
-    const types = (res.data || []).map((row: any) => row.callType);
+    const types = (res.data || []).map((row) => row.callType);
     return NextResponse.json(types);
 
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Call Types Fetch Error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to load call types' },
+      { status: 500 }
+    );
   }
 }

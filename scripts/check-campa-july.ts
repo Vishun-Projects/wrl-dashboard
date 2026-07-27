@@ -7,6 +7,8 @@ import { prisma } from '@/lib/db/prisma';
 import { postQuery } from '@/lib/db/proxy';
 import { buildCrmTransactionQuery } from '@/features/report/lib/call-register/sql';
 
+type QueryRow = Record<string, string>;
+
 async function main() {
   const params = { dateFrom: '2026-07-01', dateTo: '2026-07-20' };
   
@@ -26,10 +28,10 @@ async function main() {
 
   // Let's check if any of these serials exist in calls_latest_hot at all
   const CHUNK_SIZE = 500;
-  const matches: any[] = [];
+  const matches: QueryRow[] = [];
   for (let i = 0; i < campaColaSerials.length; i += CHUNK_SIZE) {
     const chunk = campaColaSerials.slice(i, i + CHUNK_SIZE);
-    const dbRows = await prisma.$queryRawUnsafe<any[]>(
+    const dbRows = await prisma.$queryRawUnsafe<QueryRow[]>(
       `SELECT serial, account, call_type, status_bucket, status_label, logged_at
        FROM calls_latest_hot
        WHERE serial IN (${chunk.map((_, idx) => `$${idx + 1}`).join(', ')})`,

@@ -90,7 +90,9 @@ export async function resolveRegisterPostgresRequest(
     officeId: parsed.officeId,
   });
 
+  // Strip repair (resolved separately into repairCallKeys); spread the rest into query params.
   const { repair: _repair, ...rest } = parsed;
+  void _repair;
 
   return {
     ok: true,

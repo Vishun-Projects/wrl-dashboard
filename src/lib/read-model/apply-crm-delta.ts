@@ -125,11 +125,11 @@ export async function applyCrmRowsToHot(
     await applyNetFactDeltas(client, netFacts);
 
     const watermarks = maxCrmWatermarks(deduped);
-    let nextEdited =
+    const nextEdited =
       watermarks.lastEditedon && state?.last_editedon && watermarks.lastEditedon < state.last_editedon
         ? state.last_editedon
         : watermarks.lastEditedon ?? state?.last_editedon ?? null;
-    let nextAdded =
+    const nextAdded =
       watermarks.lastAddedon && state?.last_addedon && watermarks.lastAddedon < state.last_addedon
         ? state.last_addedon
         : watermarks.lastAddedon ?? state?.last_addedon ?? null;

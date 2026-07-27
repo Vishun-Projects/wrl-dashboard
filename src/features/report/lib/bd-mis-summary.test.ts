@@ -8,12 +8,7 @@ import {
 } from '@/features/report/lib/bd-mis-summary';
 
 /** Golden totals from New_BD_MIS_30.06.2026.xlsx Summary sheet. */
-const EXCEL_REGIONAL = {
-  'NORTH ZONE': { total: 68355, solved: 65854, open: 2501 },
-  'EAST ZONE': { total: 30131, solved: 28635, open: 1496 },
-  'WEST ZONE': { total: 25089, solved: 23547, open: 1542 },
-  'SOUTH ZONE': { total: 74218, solved: 70984, open: 3234 },
-} as const;
+
 
 function branch(zone: string, total: number, solved = total): BranchSummaryRow {
   const open = Math.max(0, total - solved);

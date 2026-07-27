@@ -1,43 +1,31 @@
 'use client';
 
 import React, { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
-import { ChevronDown, ChevronRight, X, AlertCircle } from 'lucide-react';
+import { ChevronDown, ChevronRight, AlertCircle } from 'lucide-react';
 import { ReportErrorBoundary } from '@/features/report/ui/ReportErrorBoundary';
 import {
   SummaryMergedMetricCell,
-  accountOpenCallsFromAging,
-  accountOpenCallsFromAgingByAccount,
   buildClientOnlyRegionalRows,
   displayLoggedCallCount,
-  findAccountMetric,
-  findAccountMetricByAccount,
   findBranchMetric,
   findBranchRowMetric,
-  matchesAccountFilter,
-  matchesRegionFilter,
   mergeSelectedMetrics,
   resolveSummaryRegionMetric,
   resolveSummaryRegionOpenCalls,
   rollupCrmAccountsByRegion,
-  sumAccountMetric,
   sumAccountMetricByRegion,
   sumBranchLoggedCalls,
   sumBranchMetric,
   sumMergedAccountMetric,
   sumMergedAccountOpenCalls,
-  isAccountExcludedFromZoneTop,
-  DEFAULT_ZONE_TOP_EXCLUDE_ACCOUNTS,
   type ClientMergeWithCrmPrefs,
   type MergeSelection,
 } from '@/features/report/ui/SummaryMergedMetricCell';
 import {
-  regionPerfAccountCellClass,
   regionPerfRowClass,
-  resolveAccountMisTableRows,
   mergeBranchRowsByName,
   mergeBranchSummaryRowsByName,
 } from '@/features/report/lib/report-page-helpers';
-import { BdMisSummaryPanel } from '@/features/report/ui/BdMisSummaryPanel';
 import type { BdMisRegionalRow } from '@/features/report/lib/bd-mis-summary';
 import type { BranchSummaryRow } from '@/lib/summary/derive';
 import { SortableTh } from '@/components/ui/SortableTh';

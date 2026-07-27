@@ -345,7 +345,7 @@ function bucketAggregates(
 ) {
   const serviceBuckets = new Map<string, ServiceSection>();
 
-  let travelTotals = {
+  const travelTotals = {
     qty: 0,
     amountPayable: 0,
     branchApproved: 0,

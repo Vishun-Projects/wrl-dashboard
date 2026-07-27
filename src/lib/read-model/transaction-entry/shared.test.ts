@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { parseCrmDaddedon, monthChunks, weekChunks, yearChunks, periodDays } from './shared';
+import {
+  parseCrmDaddedon,
+  monthChunks,
+  weekChunks,
+  yearChunks,
+  periodDays,
+  TRANSACTION_ENTRY_PROCESSED_SQL,
+} from './shared';
 
 describe('transaction-entry shared helpers', () => {
   it('parses CRM dd/mm/yyyy dates (daddedon / WarrantyStartDate)', () => {
@@ -7,6 +14,20 @@ describe('transaction-entry shared helpers', () => {
     expect(d?.toISOString().startsWith('2026-06-11')).toBe(true);
     const d2 = parseCrmDaddedon('14/11/2025 00:00:00');
     expect(d2?.toISOString().startsWith('2025-11-14')).toBe(true);
+  });
+
+  it('returns null for empty or unparsable daddedon', () => {
+    expect(parseCrmDaddedon(null)).toBeNull();
+    expect(parseCrmDaddedon(undefined)).toBeNull();
+    expect(parseCrmDaddedon('')).toBeNull();
+    expect(parseCrmDaddedon('   ')).toBeNull();
+    expect(parseCrmDaddedon('not-a-date')).toBeNull();
+    expect(parseCrmDaddedon('2026-06-11')).toBeNull();
+  });
+
+  it('requires PROCESSED = Y for Deployment Completion billings', () => {
+    expect(TRANSACTION_ENTRY_PROCESSED_SQL).toMatch(/PROCESSED/);
+    expect(TRANSACTION_ENTRY_PROCESSED_SQL).toMatch(/=\s*'Y'/);
   });
 
   it('chunks weeks, months and years', () => {

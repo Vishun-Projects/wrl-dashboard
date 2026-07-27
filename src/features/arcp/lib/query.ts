@@ -674,7 +674,7 @@ function buildArcpClaimsLinesSubquery(
   `.trim();
 }
 
-function useCrmUiLightweightSql(opts: ArcpClaimsQueryOpts): boolean {
+function isCrmUiLightweightSql(opts: ArcpClaimsQueryOpts): boolean {
   return Boolean(opts.crmUiFast && ARCP_CRM_UI_LIGHTWEIGHT);
 }
 
@@ -772,7 +772,7 @@ function buildArcpClaimsSummarySql(opts: ArcpClaimsQueryOpts): string {
     condition,
     claimMonthExpr,
     isTravelExpr,
-    useCrmUiLightweightSql(opts) || sumAllApproved,
+    isCrmUiLightweightSql(opts) || sumAllApproved,
     dateColumn,
     trhcallsDateApply
   );
@@ -1046,7 +1046,7 @@ export function buildArcpClaimsGrandTotalSql(opts: ArcpClaimsQueryOpts): string 
     condition,
     claimMonthExpr,
     isTravelExpr,
-    useCrmUiLightweightSql(opts) || sumAllApproved,
+    isCrmUiLightweightSql(opts) || sumAllApproved,
     dateColumn,
     trhcallsDateApply
   );
@@ -1133,7 +1133,7 @@ export function deriveArcpGrandTotalsFromAggregates(
 
 export function buildArcpClaimsDetailSql(opts: ArcpClaimsQueryOpts): string {
   const { condition } = buildArcpClaimsFilterParts(opts);
-  const lineSelect = useCrmUiLightweightSql(opts)
+  const lineSelect = isCrmUiLightweightSql(opts)
     ? buildArcpClaimsLineSelectSqlFast(condition)
     : buildArcpClaimsLineSelectSql(condition);
 
@@ -1785,7 +1785,11 @@ export function mergeArcpAggregateRows(
       existing.rateQty > 0 ? existing.rateWeighted / existing.rateQty : existing.rate;
   }
 
-  return Array.from(map.values()).map(({ rateWeighted: _rw, rateQty: _rq, ...row }) => row);
+  return Array.from(map.values()).map(({ rateWeighted, rateQty, ...row }) => {
+    void rateWeighted;
+    void rateQty;
+    return row;
+  });
 }
 
 export function parseArcpAggregateRows(raw: Record<string, unknown>[]): ArcpClaimsAggregateRow[] {

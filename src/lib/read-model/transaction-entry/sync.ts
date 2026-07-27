@@ -6,7 +6,11 @@ import {
   fetchTransactionEntryPeriod,
   fetchTransactionEntryClientPeriod,
 } from './crm-fetch';
-import { upsertTransactionEntryRows } from './upsert';
+import {
+  upsertTransactionEntryRows,
+  replaceClientPeriodMirror,
+  replacePeriodMirror,
+} from './upsert';
 import {
   mismatchedClients,
   verifyCallRegisterTransactionEntry,
@@ -104,6 +108,44 @@ function verifyDays(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 7;
 }
 
+async function applyClientPeriod(
+  account: string,
+  from: string,
+  end: string
+): Promise<{ upserted: number; deleted: number }> {
+  const fetch = await fetchTransactionEntryClientPeriod(account, from, end);
+  if (fetch.incomplete) {
+    console.warn(
+      `[transaction-entry] incomplete CRM fetch for ${account} ${from}..${end} — upsert only (no stale delete)`
+    );
+    const upserted = await withTransaction(async (c) =>
+      upsertTransactionEntryRows(c, fetch.rows)
+    );
+    return { upserted, deleted: 0 };
+  }
+  return withTransaction(async (c) =>
+    replaceClientPeriodMirror(c, account, from, end, fetch.rows)
+  );
+}
+
+async function applyBulkPeriod(
+  from: string,
+  end: string,
+  clients: string[]
+): Promise<{ upserted: number; deleted: number }> {
+  const fetch = await fetchTransactionEntryPeriod(from, end, clients);
+  if (fetch.incomplete) {
+    console.warn(
+      `[transaction-entry] incomplete CRM fetch for ${from}..${end} — upsert only (no stale delete)`
+    );
+    const upserted = await withTransaction(async (c) =>
+      upsertTransactionEntryRows(c, fetch.rows)
+    );
+    return { upserted, deleted: 0 };
+  }
+  return withTransaction(async (c) => replacePeriodMirror(c, from, end, fetch.rows));
+}
+
 /** Per-client CRM fetch + upsert for the given clients and date window (heal path). */
 async function syncClientsPeriod(
   clients: readonly string[],
@@ -112,23 +154,26 @@ async function syncClientsPeriod(
   label: string
 ): Promise<number> {
   let upserted = 0;
-  for (const client of clients) {
-    const rows = await fetchTransactionEntryClientPeriod(client, from, end);
-    upserted += await withTransaction(async (c) => upsertTransactionEntryRows(c, rows));
+  let deleted = 0;
+  for (const account of clients) {
+    const result = await applyClientPeriod(account, from, end);
+    upserted += result.upserted;
+    deleted += result.deleted;
   }
-  console.log(`[transaction-entry] ${label} ${from} → ${end} upserted ${upserted} (${clients.length} clients)`);
+  console.log(
+    `[transaction-entry] ${label} ${from} → ${end} upserted ${upserted}, removed ${deleted} stale (${clients.length} clients)`
+  );
   return upserted;
 }
 
 /** Recent window for all CRM clients (bulk period fetch with OOM split). */
 async function syncAllClientsRecent(end: string, clients: string[]): Promise<number> {
   const from = subtractDays(end, recentDays());
-  const rows = await fetchTransactionEntryPeriod(from, end, clients);
-  const upserted = await withTransaction(async (c) => upsertTransactionEntryRows(c, rows));
+  const result = await applyBulkPeriod(from, end, clients);
   console.log(
-    `[transaction-entry] Recent sync ${from} → ${end} upserted ${upserted} (${clients.length} clients)`
+    `[transaction-entry] Recent sync ${from} → ${end} upserted ${result.upserted}, removed ${result.deleted} stale (${clients.length} clients)`
   );
-  return upserted;
+  return result.upserted;
 }
 
 /**
@@ -173,8 +218,10 @@ export async function healCallRegisterMismatches(end: string): Promise<number> {
 }
 
 /**
- * Full backfill: week-sized windows by default (all clients), one period at a time,
- * with a pause between CRM fetches so we do not overload their server / OOM Node.
+ * Full backfill: week-sized windows by default, one period at a time.
+ * Default = one CRM query per week for all clients (fast). On CRM/Node OOM the
+ * fetch layer splits the window and falls back to per-client.
+ * Set TRANSACTION_ENTRY_BACKFILL_PER_CLIENT=true for always-per-client (slow, gentler).
  */
 export async function runTransactionEntryBackfill(): Promise<{ rowsUpserted: number }> {
   const end = todayUtc();
@@ -203,8 +250,13 @@ export async function runTransactionEntryBackfill(): Promise<{ rowsUpserted: num
   // Default 1 — never fan out months in parallel against CRM.
   const parallel = Math.max(1, Number(process.env.TRANSACTION_ENTRY_PERIOD_PARALLEL ?? 1) || 1);
   const gapMs = backfillGapMs();
+  const perClient = process.env.TRANSACTION_ENTRY_BACKFILL_PER_CLIENT === 'true';
+  const clientGapMs = (() => {
+    const n = Number(process.env.TRANSACTION_ENTRY_CLIENT_GAP_MS ?? 400);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 400;
+  })();
   console.log(
-    `[transaction-entry] Backfill ${from} → ${end} (${chunkMode} chunks, ${chunks.length} periods, parallel ${parallel}, gap ${gapMs}ms, ${clients.length} CRM clients)`
+    `[transaction-entry] Backfill ${from} → ${end} (${chunkMode} chunks, ${chunks.length} periods, parallel ${parallel}, gap ${gapMs}ms, ${perClient ? `per-client gap ${clientGapMs}ms` : 'bulk-all-clients (OOM → split/per-client)'}, ${clients.length} CRM clients)`
   );
 
   let total = 0;
@@ -214,21 +266,36 @@ export async function runTransactionEntryBackfill(): Promise<{ rowsUpserted: num
       if (i > 0 && gapMs > 0) await sleep(gapMs);
 
       const batch = chunks.slice(i, i + parallel);
-      const fetched = await Promise.all(
-        batch.map(async (chunk) => {
-          const t0 = Date.now();
-          const rows = await fetchTransactionEntryPeriod(chunk.from, chunk.to, clients);
-          return { chunk, rows, fetchSec: Math.round((Date.now() - t0) / 1000) };
-        })
-      );
 
-      for (const { chunk, rows, fetchSec } of fetched) {
+      for (const chunk of batch) {
         const t0 = Date.now();
-        const upserted = await withTransaction(async (client) =>
-          upsertTransactionEntryRows(client, rows)
-        );
+        let upserted = 0;
+
+        if (perClient) {
+          let removed = 0;
+          for (let ci = 0; ci < clients.length; ci++) {
+            if (ci > 0 && clientGapMs > 0) await sleep(clientGapMs);
+            const result = await applyClientPeriod(clients[ci], chunk.from, chunk.to);
+            upserted += result.upserted;
+            removed += result.deleted;
+          }
+          if (removed > 0) {
+            console.log(
+              `[transaction-entry] Period ${chunk.from}..${chunk.to} removed ${removed} stale (unprocessed) rows`
+            );
+          }
+        } else {
+          const result = await applyBulkPeriod(chunk.from, chunk.to, clients);
+          upserted = result.upserted;
+          if (result.deleted > 0) {
+            console.log(
+              `[transaction-entry] Period ${chunk.from}..${chunk.to} removed ${result.deleted} stale (unprocessed) rows`
+            );
+          }
+        }
+
         total += upserted;
-        const sec = fetchSec + Math.round((Date.now() - t0) / 1000);
+        const sec = Math.round((Date.now() - t0) / 1000);
         console.log(
           `[transaction-entry] Period ${chunk.from}..${chunk.to} upserted ${upserted} in ${sec}s (total ${total})`
         );
@@ -249,8 +316,11 @@ export async function runTransactionEntryBackfill(): Promise<{ rowsUpserted: num
   }
 }
 
-/** Incremental: re-sync last OVERLAP_MONTHS through today (bulk month fetch). */
-export async function runTransactionEntryIncremental(): Promise<{
+/** Incremental: re-sync last OVERLAP_MONTHS (or full history when `full`). */
+export async function runTransactionEntryIncremental(opts?: {
+  /** From TRANSACTION_ENTRY_START_DATE → today, week chunks + replace (purge unprocessed orphans). */
+  full?: boolean;
+}): Promise<{
   skipped?: boolean;
   reason?: string;
   rowsUpserted: number;
@@ -259,8 +329,10 @@ export async function runTransactionEntryIncremental(): Promise<{
     return { skipped: true, reason: 'SYNC_TRANSACTION_ENTRY_ENABLED=false', rowsUpserted: 0 };
   }
 
+  const full =
+    opts?.full === true || process.env.TRANSACTION_ENTRY_FULL === 'true';
   const end = todayUtc();
-  let from = subtractMonths(end, overlapMonths());
+  let from = full ? startDate() : subtractMonths(end, overlapMonths());
 
   const state = await withClient(async (client) => readWatermark(client));
   if (state.status === 'pending_backfill') {
@@ -273,17 +345,58 @@ export async function runTransactionEntryIncremental(): Promise<{
 
   if (from < startDate()) from = startDate();
 
-  console.log(`[transaction-entry] Incremental ${from} → ${end}`);
+  console.log(
+    `[transaction-entry] ${full ? 'Full scrub' : 'Incremental'} ${from} → ${end}`
+  );
 
   try {
     await withClient(async (client) => markRunning(client));
 
     const clients = await fetchTransactionEntryClients();
-    let upserted = await syncAllClientsRecent(end, clients);
+    let upserted = 0;
+    let removed = 0;
 
-    for (const chunk of monthChunks(from, end)) {
-      const rows = await fetchTransactionEntryPeriod(chunk.from, chunk.to, clients);
-      upserted += await withTransaction(async (client) => upsertTransactionEntryRows(client, rows));
+    if (full) {
+      // Week-by-week replace so unprocessed orphans drop for the whole mirror.
+      const chunks = weekChunks(from, end);
+      const gapMs = backfillGapMs();
+      const clientGapMs = (() => {
+        const n = Number(process.env.TRANSACTION_ENTRY_CLIENT_GAP_MS ?? 200);
+        return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 200;
+      })();
+      console.log(
+        `[transaction-entry] Full scrub ${chunks.length} weeks, gap ${gapMs}ms, ${clients.length} clients (per-client gap ${clientGapMs}ms)`
+      );
+      for (let i = 0; i < chunks.length; i++) {
+        if (i > 0 && gapMs > 0) await sleep(gapMs);
+        const chunk = chunks[i]!;
+        const t0 = Date.now();
+        let weekUpserted = 0;
+        let weekRemoved = 0;
+        for (let ci = 0; ci < clients.length; ci++) {
+          if (ci > 0 && clientGapMs > 0) await sleep(clientGapMs);
+          const result = await applyClientPeriod(clients[ci]!, chunk.from, chunk.to);
+          weekUpserted += result.upserted;
+          weekRemoved += result.deleted;
+        }
+        upserted += weekUpserted;
+        removed += weekRemoved;
+        const sec = Math.round((Date.now() - t0) / 1000);
+        console.log(
+          `[transaction-entry] Scrub ${chunk.from}..${chunk.to} upserted ${weekUpserted}, removed ${weekRemoved} in ${sec}s (total upserted ${upserted}, removed ${removed})`
+        );
+        await withClient(async (client) => {
+          await markOk(client, new Date(`${chunk.to}T23:59:59Z`), upserted);
+        });
+      }
+    } else {
+      upserted = await syncAllClientsRecent(end, clients);
+
+      for (const chunk of monthChunks(from, end)) {
+        const result = await applyBulkPeriod(chunk.from, chunk.to, clients);
+        upserted += result.upserted;
+        removed += result.deleted;
+      }
     }
 
     try {
@@ -299,7 +412,9 @@ export async function runTransactionEntryIncremental(): Promise<{
       await markOk(client, new Date(`${end}T23:59:59Z`), upserted);
     });
 
-    console.log(`[transaction-entry] Incremental complete — upserted ${upserted}`);
+    console.log(
+      `[transaction-entry] ${full ? 'Full scrub' : 'Incremental'} complete — upserted ${upserted}, removed ${removed} stale`
+    );
     return { rowsUpserted: upserted };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

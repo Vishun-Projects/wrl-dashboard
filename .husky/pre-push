@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+set -e
+npm run check:feature-boundaries
+npm test
+# Turbopack may rewrite .next/dev/types while `next dev` runs; prefer stable generated types for tsc.
+if [ -f .next/types/routes.d.ts ]; then
+  mkdir -p .next/dev/types
+  cp -f .next/types/routes.d.ts .next/dev/types/routes.d.ts
+fi
+npm run typecheck
+npm run lint:ci

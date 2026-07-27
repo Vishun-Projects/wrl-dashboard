@@ -32,7 +32,7 @@ import {
 } from '@/features/report/ui/SummaryMergedMetricCell';
 import { parseClientDate } from '@/features/mis-import/lib/parse-dates';
 import { isCadburyExcludedServiceProvider } from '@/features/mis-import/lib/cadbury-filters';
-import { formatDisplayRegion } from '@/features/mis-import/lib/region';
+
 
 const DEFAULT_RAW = 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw';
 
@@ -363,7 +363,7 @@ async function main() {
   const portalEndJun30 = await portalMetrics('2026-06-30', '2026-06-30');
   const buckets29 = await bucketCounts('2026-06-29');
   const raw29 = countRawFiles(rawDir, '2026-06-29');
-  const raw30 = countRawFiles(rawDir, '2026-06-30');
+  
 
   console.log('=== Portal vs Excel MIS Reconciliation ===\n');
   console.log(`Excel:     ${excelPath}`);

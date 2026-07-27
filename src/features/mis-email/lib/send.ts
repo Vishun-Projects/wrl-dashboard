@@ -18,7 +18,6 @@ import {
   createMailTransport,
   resolvePortalUrl,
   resolveSmtpConfig,
-  type SmtpConfig,
 } from '@/lib/mail/smtp';
 
 function shouldSendViaPreparedRelay(): boolean {

@@ -7,6 +7,7 @@ import { groupPermissionsForRolesUi } from '@/lib/auth/page-access';
 
 const ROLES_CACHE_TTL_MS = 20_000;
 const rolesCache = new Map<string, { expiresAt: number; payload: unknown }>();
+type PermissionRow = { id: string; name: string; description?: string | null };
 
 function clearRolesCache(): void {
   rolesCache.clear();
@@ -58,10 +59,10 @@ export async function GET(request: Request) {
       ORDER BY r.name ASC
     `);
 
-    const allPermissions = await prisma.$queryRawUnsafe(
+    const allPermissions = await prisma.$queryRawUnsafe<PermissionRow[]>(
       'SELECT * FROM public.app_permissions ORDER BY name ASC'
     );
-    const permissionGroups = groupPermissionsForRolesUi(allPermissions as any[]);
+    const permissionGroups = groupPermissionsForRolesUi(allPermissions);
 
     const payload = { roles, allPermissions, permissionGroups };
     rolesCache.set(cacheKey, { payload, expiresAt: now + ROLES_CACHE_TTL_MS });
@@ -88,7 +89,7 @@ export async function POST(request: Request) {
   try {
     const { name, description, permissionIds } = await request.json();
 
-    const roleResult: any[] = await prisma.$queryRawUnsafe(
+    const roleResult = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
       'INSERT INTO public.app_roles (name, description) VALUES ($1, $2) RETURNING id',
       name, description
     );

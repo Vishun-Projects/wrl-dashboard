@@ -1,4 +1,5 @@
 import type { CallRegisterQueryParams } from './types';
+import { TRANSACTION_ENTRY_PROCESSED_SQL } from '@/lib/read-model/transaction-entry/shared';
 
 /** @deprecated CRM live queries — sync worker uses crm-fetch instead. */
 export function buildCrmTransactionQuery(params: CallRegisterQueryParams): string {
@@ -23,6 +24,7 @@ export function buildCrmTransactionQuery(params: CallRegisterQueryParams): strin
     FROM TransactionEntry
     WHERE ProductSerialNo IS NOT NULL AND ProductSerialNo <> ''
       AND Client IS NOT NULL AND LTRIM(RTRIM(Client)) <> ''
+      AND ${TRANSACTION_ENTRY_PROCESSED_SQL}
       ${clientFilter}
       ${dateFilter}
   `;

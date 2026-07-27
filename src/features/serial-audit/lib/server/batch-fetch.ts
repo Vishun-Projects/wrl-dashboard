@@ -49,7 +49,9 @@ export async function fetchSerialAuditCallsForSerials(
     ? MAX_SERIAL_AUDIT_INVOLVEMENT_BATCH_SERIALS
     : MAX_SERIAL_AUDIT_BATCH_SERIALS;
   const timeoutMs = opts.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS;
-  const { involvementRepairs: _ir, queryTimeoutMs: _qt, ...sqlOpts } = opts;
+  const { involvementRepairs, queryTimeoutMs, ...sqlOpts } = opts;
+  void involvementRepairs;
+  void queryTimeoutMs;
 
   const chunks = chunkSerials(uniqueSerials, chunkSize);
   const merged: Record<string, unknown>[] = [];

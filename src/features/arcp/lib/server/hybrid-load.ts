@@ -6,7 +6,6 @@ import {
 import {
   fetchArcpClaimsAggregates,
   fetchArcpClaimsDetailRows,
-  fetchArcpClaimsGrandTotals,
   type ArcpChunkLoadMeta,
   type ArcpFetchOpts,
 } from './fetch';
@@ -19,7 +18,6 @@ import {
 import {
   queryArcpClaimsAggregates,
   queryArcpClaimsDetailRows,
-  queryArcpClaimsGrandTotals,
 } from './postgres';
 import {
   deriveArcpGrandTotalsFromAggregates,
@@ -79,16 +77,7 @@ function toCoverageDateColumn(
   return column;
 }
 
-function emptyGrandTotals(): ArcpGrandTotals {
-  return {
-    lineCount: 0,
-    serviceLineCount: 0,
-    travelLineCount: 0,
-    amountPayable: 0,
-    branchApproved: 0,
-    hoApproved: 0,
-  };
-}
+
 
 async function enrichAggregatesForResponse(
   rows: ArcpClaimsAggregateRow[],
@@ -120,57 +109,9 @@ async function recordAggChunkForJob(
   await markChunkDone(opts.jobId, startDate, endDate);
 }
 
-function addGrandTotals(a: ArcpGrandTotals, b: ArcpGrandTotals): ArcpGrandTotals {
-  return {
-    lineCount: a.lineCount + b.lineCount,
-    serviceLineCount: a.serviceLineCount + b.serviceLineCount,
-    travelLineCount: a.travelLineCount + b.travelLineCount,
-    amountPayable: a.amountPayable + b.amountPayable,
-    branchApproved: a.branchApproved + b.branchApproved,
-    hoApproved: a.hoApproved + b.hoApproved,
-  };
-}
 
-async function loadArcpGrandTotalsCoverageAware(
-  opts: ArcpClaimsQueryOpts
-): Promise<ArcpGrandTotals> {
-  const startDate = opts.startDate;
-  const endDate = opts.endDate;
-  if (!startDate || !endDate) {
-    return queryArcpClaimsGrandTotals(opts);
-  }
 
-  if (readArcpFromPostgres()) {
-    return queryArcpClaimsGrandTotals(opts);
-  }
 
-  const coverage = await getArcpPostgresCoverage();
-  const dateColumn = toCoverageDateColumn(resolveArcpDateFilterColumn(opts.dateFilterColumn));
-
-  if (postgresCoversFullRange(startDate, endDate, coverage, dateColumn)) {
-    return queryArcpClaimsGrandTotals(opts);
-  }
-
-  const segments = planArcpCoverageSegments(startDate, endDate, coverage, dateColumn);
-
-  let totals = emptyGrandTotals();
-  for (const segment of segments) {
-    const segOpts: ArcpClaimsQueryOpts = {
-      ...opts,
-      startDate: segment.start,
-      endDate: segment.end,
-    };
-    if (segment.mode === 'postgres') {
-      totals = addGrandTotals(totals, await queryArcpClaimsGrandTotals(segOpts));
-    } else if (arcpCrmFallbackOnEmptyEnabled()) {
-      totals = addGrandTotals(
-        totals,
-        await fetchArcpClaimsGrandTotals({ ...segOpts, crmUiFast: true }, CRM_QUERY_TIMEOUT_MS)
-      );
-    }
-  }
-  return totals;
-}
 
 async function loadArcpAggregatesCoverageAware(
   opts: ArcpFetchOpts

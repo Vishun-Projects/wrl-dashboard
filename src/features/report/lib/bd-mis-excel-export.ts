@@ -443,77 +443,9 @@ const TRACE_DETAIL_COLUMNS = [
   'Counts Toward',
 ] as const;
 
-function addTraceSummarySheet(
-  workbook: ExcelJS.Workbook,
-  payload: BdMisTraceableExportPayload
-): void {
-  const summary = workbook.addWorksheet('Summary');
-  const sumHeader = summary.addRow([
-    'Region',
-    'Total calls',
-    'Total solved',
-    '# open calls',
-    '≤2 days',
-    '3-7 days',
-    '8-15 days',
-    '>15 days',
-    '# active Eng.',
-  ]);
-  applySummaryHeaderStyle(sumHeader);
 
-  for (const row of payload.regionalRows) {
-    const r = summary.addRow([
-      zoneShort(row.region),
-      row.total_calls,
-      row.total_solved,
-      row.open_calls,
-      row.age_2,
-      row.age_3,
-      row.age_7,
-      row.age_15,
-      row.active_eng,
-    ]);
-    applyRegionRowStyle(r, row.region, { solvedCol: 3, cancelledCol: null, openCol: 4 });
-    applyAge15CellStyle(r.getCell(8), Number(row.age_15 || 0));
-  }
 
-  const g = payload.grand;
-  const totalRow = summary.addRow([
-    'All',
-    g.total_calls,
-    g.total_solved,
-    g.open_calls,
-    g.age_2,
-    g.age_3,
-    g.age_7,
-    g.age_15,
-    g.active_eng,
-  ]);
-  totalRow.eachCell((cell) => {
-    cell.font = { bold: true };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
-  });
-}
 
-function addTraceCountSheet(
-  workbook: ExcelJS.Workbook,
-  payload: BdMisTraceableExportPayload
-): void {
-  const breakdown = buildBdMisRegionalBreakdown({
-    crmBranchSummary: payload.crmBranchSummary,
-    crmAccountSummary: payload.crmAccountSummary,
-    clientAccountSummary: payload.clientAccountSummary,
-    sources: payload.sources,
-  });
-
-  const recon = workbook.addWorksheet('Count Trace');
-  recon.addRow(['Regional total calls — how each zone is calculated']).font = {
-    bold: true,
-    size: 12,
-  };
-  recon.addRow([]);
-  addReconciliationMatrix(recon, breakdown);
-}
 
 function resolveTraceRowDetailRows(payload: BdMisTraceableExportPayload): BdMisTraceRow[] {
   if (payload.traceAlign === 'summary') {

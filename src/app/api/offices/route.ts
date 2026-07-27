@@ -9,7 +9,9 @@ import { isHodUser } from '@/lib/auth/report-security';
 import { resolveApiAccess } from '@/lib/auth/rbac-catalog';
 
 // Global cache to optimize mstoffice retrieval and avoid slow remote DB scans
-let cachedAllOffices: any[] | null = null;
+type OfficeRow = { ncode: string; nunder: string };
+
+let cachedAllOffices: OfficeRow[] | null = null;
 let lastCacheTime = 0;
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
@@ -48,7 +50,7 @@ export async function GET(request: Request) {
         orderBy: 'vcompanyname ASC'
       });
       if (officesRes && officesRes.data) {
-        cachedAllOffices = officesRes.data;
+        cachedAllOffices = officesRes.data as OfficeRow[];
         lastCacheTime = now;
       }
     }
@@ -57,10 +59,17 @@ export async function GET(request: Request) {
     const seeAllOffices = isHod || assignedOffices.length === 0;
     const filteredOffices = seeAllOffices
       ? allOffices
-      : allOffices.filter((o: any) => assignedOffices.includes(String(o.ncode)) || assignedOffices.includes(String(o.nunder)));
+      : allOffices.filter(
+          (office) =>
+            assignedOffices.includes(String(office.ncode)) ||
+            assignedOffices.includes(String(office.nunder))
+        );
 
     return NextResponse.json(filteredOffices);
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to load offices' },
+      { status: 500 }
+    );
   }
 }

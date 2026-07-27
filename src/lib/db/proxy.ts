@@ -1,5 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import type { Element } from 'domhandler';
 
 const DB_URL = 'https://westerncrm.com/wrl/OTHERS/DBQUERY.aspx';
 
@@ -89,10 +90,13 @@ function describeQuery(params: QueryParams): string {
 }
 
 function logCrmTiming(
-  _event: string,
-  _elapsedMs: number,
-  _detail: Record<string, unknown>
+  event: string,
+  elapsedMs: number,
+  detail: Record<string, unknown>
 ): void {
+  void event;
+  void elapsedMs;
+  void detail;
   /* no-op */
 }
 
@@ -377,7 +381,7 @@ export async function postQuery(
   }
 
   const parseStart = Date.now();
-  const { $ } = result as { $: any };
+  const { $ } = result as { $: ReturnType<typeof cheerio.load> };
   let resultTable = $('#ResultGrid');
   if (!resultTable.length) {
     resultTable = $('fieldset legend:contains("Result")').parent().find('table');
@@ -395,17 +399,19 @@ export async function postQuery(
 
   const data: Record<string, string>[] = [];
   const columns: string[] = [];
-  const rows = resultTable.find('tr').filter((i: number, el: any) => $(el).closest('table').is(resultTable));
+  const rows = resultTable
+    .find('tr')
+    .filter((i: number, el: Element) => $(el).closest('table').is(resultTable));
 
-  rows.each((i: number, row: any) => {
+  rows.each((i: number, row: Element) => {
     if (i === 0) {
-      $(row).find('td, th').each((j: number, cell: any) => {
+      $(row).find('td, th').each((j: number, cell: Element) => {
         const colName = $(cell).text().trim();
         if (colName) columns.push(colName);
       });
     } else {
       const rowData: Record<string, string> = {};
-      $(row).find('td').each((j: number, cell: any) => {
+      $(row).find('td').each((j: number, cell: Element) => {
         const colName = columns[j] || `Col${j}`;
         rowData[colName] = $(cell).text().trim();
       });

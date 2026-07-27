@@ -14,7 +14,7 @@ import {
   ChevronRight,
   ChevronUp,
 } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
+
 import { RegisterPageFilters } from '@/features/register/ui/RegisterPageFilters';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import {
@@ -101,7 +101,7 @@ export default function LocationAuditPage() {
     prefsReady,
   } = useReportFilters();
 
-  const supabase = createClient();
+  
   const [mounted, setMounted] = useState(false);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -138,11 +138,7 @@ export default function LocationAuditPage() {
     [applied]
   );
 
-  const callTypeParam = useMemo(() => {
-    if (!applied) return SUMMARY_DEFAULT_CALL_TYPE;
-    if (applied.selectedCallTypes.length > 0) return applied.selectedCallTypes.join(',');
-    return SUMMARY_DEFAULT_CALL_TYPE;
-  }, [applied]);
+  
 
   const scopeSubtitle = useMemo(() => {
     if (!applied) return 'Tech. solved · major · install pincode vs GPS pincode';

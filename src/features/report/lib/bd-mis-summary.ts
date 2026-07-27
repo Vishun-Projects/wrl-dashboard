@@ -81,10 +81,7 @@ function isCrmCadburyAccount(account: string): boolean {
 }
 
 /** CRM Coke/HCCB accounts — kept in branch base when Coke import is merged (both count). */
-function isCrmCokeAccountSouth(account: string): boolean {
-  const key = account.trim().toLowerCase();
-  return key === 'coke' || key === 'hccb';
-}
+
 
 function regionsMatch(zone: string, rowRegion: string): boolean {
   return formatDisplayRegion(rowRegion) === formatDisplayRegion(zone);

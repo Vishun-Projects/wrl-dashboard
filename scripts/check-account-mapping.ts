@@ -7,6 +7,8 @@ import { prisma } from '@/lib/db/prisma';
 import { postQuery } from '@/lib/db/proxy';
 import { buildCrmTransactionQuery } from '@/features/report/lib/call-register/sql';
 
+type QueryRow = Record<string, string>;
+
 async function main() {
   const params = { dateFrom: '2026-07-01', dateTo: '2026-07-20' };
   const rawSql = buildCrmTransactionQuery(params);
@@ -33,7 +35,7 @@ async function main() {
   const accounts: Record<string, number> = {};
 
   for (const chunk of chunks.slice(0, 50)) { // check first 10,000 serials
-    const dbMatches = await prisma.$queryRawUnsafe<any[]>(
+    const dbMatches = await prisma.$queryRawUnsafe<QueryRow[]>(
       `SELECT serial, account, call_type, status_bucket, status_label
        FROM calls_latest_hot
        WHERE serial IN (${chunk.map((_, idx) => `$${idx + 1}`).join(', ')})`,

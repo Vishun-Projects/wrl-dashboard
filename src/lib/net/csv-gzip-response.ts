@@ -41,8 +41,7 @@ export function clientAcceptsGzip(acceptEncoding: string | null | undefined): bo
  */
 export function responseForCsvStream(
   stream: ReadableStream<Uint8Array>,
-  headers: Record<string, string>,
-  _acceptEncoding?: string | null
+  headers: Record<string, string>
 ): Response {
   return new Response(stream, { headers: { ...headers, Vary: 'Accept-Encoding' } });
 }

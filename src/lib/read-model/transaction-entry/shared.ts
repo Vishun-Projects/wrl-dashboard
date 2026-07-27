@@ -1,5 +1,13 @@
 export const TRANSACTION_ENTRY_ENTITY = 'crm_transaction_entry';
 
+/**
+ * CRM TransactionEntry — Deployment Completion only counts finished billings.
+ * Matches PROCESSED = 'Y' (trim + case-insensitive).
+ */
+export const TRANSACTION_ENTRY_PROCESSED_SQL = `(
+  UPPER(LTRIM(RTRIM(CAST(PROCESSED AS NVARCHAR(20))))) = 'Y'
+)`;
+
 /** Inclusive ~7-day windows from yyyy-mm-dd bounds (UTC). Keeps CRM + Node memory bounded. */
 export function weekChunks(dateFrom: string, dateTo: string): { from: string; to: string }[] {
   const start = new Date(`${dateFrom}T00:00:00Z`);

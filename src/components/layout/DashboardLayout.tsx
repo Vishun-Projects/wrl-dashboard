@@ -14,8 +14,18 @@ import { MotionProvider } from '@/components/motion';
 import { ThemeProvider } from '@/components/theme/ThemeProvider';
 import { MisEmailSendTracker } from '@/features/mis-email/ui/MisEmailSendTracker';
 
+type DashboardUser = {
+  id?: string;
+  name: string;
+  email: string;
+  role?: string;
+  avatar_url?: string | null;
+  permissions: string[];
+  theme?: string;
+};
+
 interface UserContextType {
-  userProfile: any;
+  userProfile: DashboardUser | null;
   loadingProfile: boolean;
   refreshProfile: () => Promise<void>;
 }
@@ -35,11 +45,11 @@ export function DashboardLayout({
   initialUser = null,
 }: {
   children: React.ReactNode;
-  initialUser?: Record<string, unknown> | null;
+  initialUser?: DashboardUser | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [userProfile, setUserProfile] = useState<any>(initialUser);
+  const [userProfile, setUserProfile] = useState<DashboardUser | null>(initialUser);
   const [loadingProfile, setLoadingProfile] = useState(
     !isPublicAuthRoute(pathname) && !initialUser
   );
@@ -57,7 +67,7 @@ export function DashboardLayout({
     }
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const res = await axios.get('/api/auth/me', { withCredentials: true });
+        const res = await axios.get<DashboardUser>('/api/auth/me', { withCredentials: true });
         setUserProfile(res.data);
         authLoadedRef.current = true;
         setLoadingProfile(false);

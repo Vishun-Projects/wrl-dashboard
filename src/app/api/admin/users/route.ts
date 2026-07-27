@@ -32,11 +32,7 @@ const USER_LIST_SQL = `
   LIMIT $1 OFFSET $2
 `;
 
-function normalizeUuid(value: unknown): string | null {
-  if (value == null) return null;
-  const s = String(value).trim();
-  return s === '' ? null : s;
-}
+
 
 function isDuplicateEmailMessage(message: string): boolean {
   return /already been registered|already registered|already exists|duplicate/i.test(message);
@@ -124,8 +120,11 @@ export async function GET(request: Request) {
 
     const users = await prisma.$queryRawUnsafe(USER_LIST_SQL, limit, offset);
     return NextResponse.json(users);
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to load users' },
+      { status: 500 }
+    );
   }
 }
 
@@ -236,7 +235,7 @@ export async function POST(request: Request) {
     clearAdminBootstrapCache();
 
     return NextResponse.json({ success: true, id: authData.user.id, role_ids: roleIds });
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (authUserId && createdAuthThisRequest && !(await profileExists(authUserId))) {
       if (useDbAuthFallback) {
         await deleteAuthUserViaDatabase(authUserId).catch(() => {});
@@ -244,7 +243,7 @@ export async function POST(request: Request) {
         await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => {});
       }
     }
-    const message = err?.message || 'User creation failed';
+    const message = err instanceof Error ? err.message : 'User creation failed';
     const status = isDuplicateEmailMessage(message) ? 409 : 500;
     return NextResponse.json({ error: message }, { status });
   }
@@ -330,8 +329,11 @@ export async function PUT(request: Request) {
     clearMeCache(String(id));
 
     return NextResponse.json({ success: true, role_ids: roleIds, role_id: primary.primaryRoleId });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to update user' },
+      { status: 500 }
+    );
   }
 }
 
@@ -374,7 +376,10 @@ export async function DELETE(request: Request) {
     await supabaseAdmin.auth.admin.deleteUser(userId);
 
     return NextResponse.json({ success: true });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to delete user' },
+      { status: 500 }
+    );
   }
 }

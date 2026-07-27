@@ -6,9 +6,11 @@ config({ path: join(process.cwd(), '.env') });
 import { prisma } from '@/lib/db/prisma';
 import { postQuery } from '@/lib/db/proxy';
 
+type QueryRow = Record<string, string>;
+
 async function main() {
   // Let's get 50 serials from calls_latest_hot for Reliance Campa Cola
-  const hotRows = await prisma.$queryRawUnsafe<any[]>(
+  const hotRows = await prisma.$queryRawUnsafe<QueryRow[]>(
     `SELECT serial, call_type, logged_at
      FROM calls_latest_hot
      WHERE account = 'Reliance Campa Cola'
@@ -33,7 +35,7 @@ async function main() {
 
   // Let's also check if the serials in CRM match but maybe have formatting differences (e.g. leading zeros, spaces, length, etc.)
   // Let's check the length distribution of serials in both
-  const hotLen = await prisma.$queryRawUnsafe<any[]>(
+  const hotLen = await prisma.$queryRawUnsafe<QueryRow[]>(
     `SELECT length(trim(serial)) as len, count(*) as c
      FROM calls_latest_hot
      WHERE account = 'Reliance Campa Cola'

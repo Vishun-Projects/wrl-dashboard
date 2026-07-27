@@ -5,9 +5,11 @@ config({ path: join(process.cwd(), '.env') });
 
 import { prisma } from '@/lib/db/prisma';
 
+type QueryRow = Record<string, string>;
+
 async function main() {
   console.log('=== Reliance Campa Cola Call Types and Counts ===');
-  const counts = await prisma.$queryRawUnsafe<any[]>(
+  const counts = await prisma.$queryRawUnsafe<QueryRow[]>(
     `SELECT call_type, count(*)::int as c,
       count(*) filter (where status_bucket = 'solved')::int as solved,
       count(*) filter (where status_bucket = 'tech_solved')::int as tech_solved,
@@ -20,7 +22,7 @@ async function main() {
   console.log(counts);
 
   console.log('\n=== Sample Reliance Campa Cola Serials and Call Types ===');
-  const samples = await prisma.$queryRawUnsafe<any[]>(
+  const samples = await prisma.$queryRawUnsafe<QueryRow[]>(
     `SELECT serial, call_type, status_bucket, status_label
      FROM calls_latest_hot
      WHERE account = 'Reliance Campa Cola'
@@ -44,8 +46,8 @@ async function main() {
   console.log('CRM Serials:', crmSerials);
 
   if (crmSerials.length > 0) {
-    const serialList = crmSerials.map((s: any) => s.ProductSerialNo.trim());
-    const matches = await prisma.$queryRawUnsafe<any[]>(
+    const serialList = crmSerials.map((s: QueryRow) => s.ProductSerialNo.trim());
+    const matches = await prisma.$queryRawUnsafe<QueryRow[]>(
       `SELECT serial, account, call_type, status_bucket, status_label
        FROM calls_latest_hot
        WHERE serial IN (${serialList.map((_, i) => `$${i + 1}`).join(', ')})`,

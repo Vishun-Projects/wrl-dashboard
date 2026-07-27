@@ -2,11 +2,7 @@ import { formatExportDate } from '@/lib/utils/export-dates';
 import { escapeCsvCell } from '@/lib/utils/csv';
 import type { LocationAuditDetailRow } from '@/features/location-audit/lib/types';
 
-function formatFraudSignal(signal: string | undefined): string {
-  if (signal === 'pincode_mismatch') return 'Pincode mismatch';
-  if (!signal || signal === 'none') return '—';
-  return signal;
-}
+
 
 function formatAuditStatus(status: string): string {
   if (status === 'mismatch') return 'Pincode mismatch';

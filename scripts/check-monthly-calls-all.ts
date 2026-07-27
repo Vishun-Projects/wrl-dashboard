@@ -5,9 +5,11 @@ config({ path: join(process.cwd(), '.env') });
 
 import { prisma } from '@/lib/db/prisma';
 
+type QueryRow = Record<string, string>;
+
 async function main() {
   console.log('=== Checking monthly calls in calls_latest_hot for all accounts ===');
-  const res = await prisma.$queryRawUnsafe<any[]>(
+  const res = await prisma.$queryRawUnsafe<QueryRow[]>(
     `SELECT account, 
             TO_CHAR(logged_at, 'YYYY-MM') as month_yr, 
             count(*)::int as cnt

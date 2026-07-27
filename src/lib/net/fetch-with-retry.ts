@@ -19,7 +19,9 @@ export async function fetchWithRetry(
 ): Promise<Response> {
   const retries = init.retries ?? 3;
   const retryDelayMs = init.retryDelayMs ?? 1000;
-  const { retries: _r, retryDelayMs: _d, ...requestInit } = init;
+  const { retries: _retries, retryDelayMs: _retryDelayMs, ...requestInit } = init;
+  void _retries;
+  void _retryDelayMs;
 
   let lastErr: unknown;
   for (let attempt = 0; attempt < retries; attempt++) {

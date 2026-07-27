@@ -19,13 +19,13 @@ export function useRegisterFilterOptions(
   supabase: SupabaseClient,
   appliedFilters: ReportFilterSnapshot | null,
   setters: {
-    setStatesList: (v: any[]) => void;
-    setCitiesList: (v: any[]) => void;
+    setStatesList: (v: Array<Record<string, unknown>>) => void;
+    setCitiesList: (v: Array<Record<string, unknown>>) => void;
     setRegionsList: (v: Array<{ vname: string; call_count?: number }>) => void;
     setAccountsList: (v: Array<{ vname: string; call_count?: number }>) => void;
-    setBranchesList: (v: any[]) => void;
-    setFranchiseesList: (v: any[]) => void;
-    setTechniciansList: (v: any[]) => void;
+    setBranchesList: (v: Array<{ ncode: string; vcompanyname: string; call_count?: number }>) => void;
+    setFranchiseesList: (v: Array<{ ncode: string; vcompanyname: string; call_count?: number }>) => void;
+    setTechniciansList: (v: Array<Record<string, unknown>>) => void;
   }
 ) {
   const loadedRef = useRef(false);

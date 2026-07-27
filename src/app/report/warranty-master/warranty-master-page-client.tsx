@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, startTransition } from 'react';
-import { createClient } from '@/lib/supabase/client';
+
 import { Shield, X } from 'lucide-react';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import { WarrantyMasterToolbar } from '@/features/warranty-master/ui/WarrantyMasterToolbar';
@@ -89,7 +89,7 @@ function sortDimOptions(options: { value: string; label: string }[]) {
 }
 
 export default function WarrantyMasterPage() {
-  const supabase = createClient();
+  
   const [filters, setFilters] = useState<WarrantyMasterClientFilters>(() => cloneFilters(EMPTY_FILTERS));
   const deferredFilters = useDeferredValue(filters);
   const [allFgLines, setAllFgLines] = useState<WarrantyMasterFgLineRow[]>(() => {

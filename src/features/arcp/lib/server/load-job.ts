@@ -3,7 +3,6 @@ import { withAppClient } from '@/lib/read-model/db';
 import type { ArcpFetchOpts } from '@/features/arcp/lib/server/fetch';
 import {
   ARCP_CHUNK_CACHE_VERSION,
-  arcpChunkCacheFileExists,
   buildArcpChunkCacheKey,
   readArcpChunkRowsFromDisk,
   type ArcpChunkCacheKind,

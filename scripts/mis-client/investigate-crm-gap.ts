@@ -323,7 +323,7 @@ function analyzeDedup() {
   console.log('\nRow-level disjoint union on CSV (CRM − overlap + client):');
   let grand = 0;
   for (const z of zones) {
-    const crmZ = crm.byRegion.get(z)?.size ?? 0;
+    
     let crmKept = 0;
     for (const k of crm.byRegion.get(z) ?? []) {
       if (!clientUnion.has(k)) crmKept++;
@@ -383,7 +383,7 @@ function analyzeDedup() {
         cadAdd++;
       }
     }
-    let cokeAdd = z === 'SOUTH ZONE' ? hccb.size : 0;
+    const cokeAdd = z === 'SOUTH ZONE' ? hccb.size : 0;
     const total = crmZ - sub + cadAdd + cokeAdd;
     grand2 += total;
     const ref = REF[z as keyof typeof REF];

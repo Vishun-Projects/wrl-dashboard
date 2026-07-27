@@ -2,6 +2,7 @@ import { postQuery } from '@/lib/db/proxy';
 import { withClient } from '@/lib/read-model/db';
 import { todayLocalDate } from '@/lib/read-model/dates';
 import { fetchTransactionEntryClients } from './crm-fetch';
+import { TRANSACTION_ENTRY_PROCESSED_SQL } from './shared';
 
 const CRM_TIMEOUT_MS = Number(process.env.TRANSACTION_ENTRY_CRM_TIMEOUT_MS ?? 180_000) || 180_000;
 
@@ -15,6 +16,7 @@ function crmCountSql(client: string, dateFrom: string, dateTo: string): string {
     FROM TransactionEntry
     WHERE ProductSerialNo IS NOT NULL AND ProductSerialNo <> ''
       AND Client = ${sqlLiteral(client)}
+      AND ${TRANSACTION_ENTRY_PROCESSED_SQL}
       AND TRY_CONVERT(DATETIME, daddedon, 103) >= TRY_CONVERT(DATETIME, '${dateFrom}', 120)
       AND TRY_CONVERT(DATETIME, daddedon, 103) <= TRY_CONVERT(DATETIME, '${dateTo} 23:59:59', 120)
   `;

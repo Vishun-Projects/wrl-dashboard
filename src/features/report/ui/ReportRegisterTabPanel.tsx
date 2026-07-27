@@ -18,7 +18,7 @@ type ColumnDef = { key: RegisterTableColumnKey; label: string };
 type Props = {
   loading: boolean;
   data: unknown[];
-  displayedData: any[];
+  displayedData: Record<string, unknown>[];
   total: number;
   page: number;
   limit: RegisterPageSize;
@@ -26,7 +26,7 @@ type Props = {
   setVisibleRegisterColumns: (cols: RegisterTableColumnKey[]) => void;
   visibleRegisterColumnDefs: ColumnDef[];
   getRegisterCellClassName: (key: RegisterTableColumnKey) => string;
-  renderRegisterCell: (key: RegisterTableColumnKey, row: any) => React.ReactNode;
+  renderRegisterCell: (key: RegisterTableColumnKey, row: Record<string, unknown>) => React.ReactNode;
   isAnyRegisterFilterActive: boolean;
   clearAllFilters: () => void;
   runRegisterFilterLoad: (opts: { force: boolean }) => void | Promise<void>;

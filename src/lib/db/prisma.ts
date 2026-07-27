@@ -1,6 +1,5 @@
-import type pg from 'pg';
+
 import {
-  appDatabaseStatementTimeoutMs,
   withAppClient,
   withBulkReadClient,
 } from '@/lib/read-model/db';

@@ -14,7 +14,7 @@ if (!trn) {
 async function main() {
   const [crmRows, hotRows] = await Promise.all([
     fetchCrmRowsByTrns([trn], { includeTransferred: true }),
-    prisma.$queryRawUnsafeBulk<any[]>(
+    prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(
       `SELECT vtrnno, status_bucket, status_label, source_editedon, synced_at, ncancelreason,
               bsolved, bfastclose, region, account, serial, logged_at, solved_at, edited_at
        FROM calls_latest_hot

@@ -21,7 +21,7 @@ async function main() {
   const header = main[0] as string[];
   const fileIdx = header.indexOf('File Name');
   const soIdx = header.indexOf('Service Order');
-  const clientIdx = header.indexOf('Client');
+  
 
   const crmSo = new Set<string>();
   const mondelezSo = new Set<string>();
@@ -71,7 +71,7 @@ async function main() {
       row.vcclid ? normKey(row.vcclid) : '',
       normKey(String(row.ncode)),
     ].filter(Boolean);
-    const inCrm = keys.some((k) => crmSo.has(k));
+    
     if (keys.some((k) => crmSo.has(k))) {
       matchAny++;
       keys.forEach((k) => inCrmFiles.add(k));

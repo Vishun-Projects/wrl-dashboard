@@ -78,7 +78,7 @@ export type MisBatchDownloadResult =
     };
 
 /**
- * Prefer disk stream (fast on VPS). Fall back to blob/reconstruct buffer.
+ * Prefer disk stream (fast on VPS). Fall back to stored blob. No reconstruct after retention purge.
  */
 export async function resolveMisBatchDownload(params: {
   batchId: string;
