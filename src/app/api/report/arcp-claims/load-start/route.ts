@@ -6,8 +6,10 @@ import {
   startOrResumeLoadJob,
   type ArcpLoadJobView,
 } from '@/features/arcp/lib/server/load-job';
+import { loadArcpClaimsDetailRows } from '@/features/arcp/lib/server/detail-load';
 import { deriveArcpGrandTotalsFromAggregates } from '@/features/arcp/lib/query';
 import type { ArcpChunkCacheKind } from '@/features/arcp/lib/server/chunk-cache';
+import type { ArcpFetchOpts } from '@/features/arcp/lib/server/fetch';
 
 export const maxDuration = 60;
 
@@ -19,6 +21,24 @@ function jobProgress(job: ArcpLoadJobView) {
     failedCount: job.failedCount,
     cachedCount: job.doneCount,
   };
+}
+
+const runningDetailJobs = new Set<string>();
+
+function startDetailJobRunner(jobId: string, opts: ArcpFetchOpts): void {
+  if (runningDetailJobs.has(jobId)) return;
+  runningDetailJobs.add(jobId);
+  void loadArcpClaimsDetailRows({
+    ...opts,
+    jobId,
+    loadJobKind: 'detail',
+  })
+    .catch((err) => {
+      console.error('[ARCP Load Start] detail background runner error:', err);
+    })
+    .finally(() => {
+      runningDetailJobs.delete(jobId);
+    });
 }
 
 export async function POST(req: NextRequest) {
@@ -50,6 +70,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (kind === 'detail') {
+      startDetailJobRunner(job.jobId, auth.opts);
       const partialRows = await mergeJobDetailFromDisk(job);
       return NextResponse.json({
         jobId: job.jobId,

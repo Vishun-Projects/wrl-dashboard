@@ -20,6 +20,11 @@ type DateCols = {
   monthCol: string;
 };
 
+type OfficeNameMaps = {
+  branchNames: Record<string, string>;
+  franchiseeNames: Record<string, string>;
+};
+
 function calendarDateExpr(tsCol: string): string {
   return `(${tsCol} AT TIME ZONE '${ARCP_REPORT_TIMEZONE}')::date`;
 }
@@ -420,6 +425,103 @@ function resolveDetailOrderCol(dateColumn: ArcpDateFilterColumn): string {
   return 'call_at';
 }
 
+function mapArcpDetailRow(
+  row: Record<string, unknown>,
+  hasCallNo: boolean,
+  officeNames?: OfficeNameMaps
+): ArcpClaimsDetailRow {
+  const isTravel = Number(row.is_travel) === 1;
+  const callType = String(row.call_type_label ?? row.ncalltype ?? '');
+  const itemCat = String(row.item_category_label ?? '');
+  const localLabel =
+    String(row.local_upcountry_label ?? '') ||
+    LOCAL_UPCOUNTRY_NCODE_LABELS[String(row.nlocalupcountry ?? '').trim()] ||
+    '';
+
+  const amountPayable = row.amount_payable_val != null ? Number(row.amount_payable_val) : null;
+  const branchApproved =
+    row.branch_approved_val != null ? Number(row.branch_approved_val) : null;
+  const hoApproved = row.ho_approved_val != null ? Number(row.ho_approved_val) : null;
+
+  let summarySection = '';
+  if (isTravel) summarySection = 'Reimbursement of Travel Expenses';
+  else if (!itemCat) summarySection = '';
+  else if (!callType) summarySection = itemCat;
+  else summarySection = `${callType} – ${itemCat}`;
+
+  const subKey = `${localLabel || 'Unknown'} - ${row.major_minor || 'Minor'}`;
+
+  return {
+    ncode: String(row.ncode ?? ''),
+    vucnno: String(row.vucnno ?? ''),
+    calls2fault_code: String(row.calls2fault_code ?? ''),
+    call_no: hasCallNo ? String(row.call_no ?? '').trim() : '',
+    franchisee_code: String(row.franchisee_code ?? ''),
+    branch_name:
+      officeNames?.branchNames[String(row.branch_code ?? row.office_under ?? '').trim()] ??
+      String(row.branch_name ?? row.branch_code ?? row.office_under ?? ''),
+    franchisee_name:
+      officeNames?.franchiseeNames[String(row.franchisee_code ?? row.nofficeid ?? '').trim()] ??
+      String(row.franchisee_name ?? row.franchisee_code ?? row.nofficeid ?? ''),
+    call_date: formatArcpClaimsExportDate(row.call_at),
+    solve_date: formatArcpClaimsExportDate(row.solve_at),
+    bm_approved_date: formatArcpClaimsExportDate(row.bm_approved_at),
+    ho_approved_date: formatArcpClaimsExportDate(row.ho_approved_at),
+    call_type: callType,
+    item_category: itemCat,
+    local_upcountry: localLabel,
+    major_minor: String(row.major_minor ?? 'Minor'),
+    line_type: isTravel ? 'Travel' : 'Service',
+    rate: row.rate_val != null ? Number(row.rate_val) : null,
+    distance: null,
+    amount_payable: amountPayable,
+    branch_approved: branchApproved,
+    ho_approved: hoApproved,
+    raw_nchargespayable: amountPayable,
+    raw_nbmapprovedamt: branchApproved,
+    raw_nhoapprovedamt: hoApproved,
+    raw_napproval1amount: branchApproved,
+    raw_napproval2amount: hoApproved,
+    summary_section: summarySection,
+    summary_sub_row: subKey,
+    payable_minus_branch:
+      amountPayable != null && branchApproved != null ? amountPayable - branchApproved : null,
+    payable_minus_ho:
+      amountPayable != null && hoApproved != null ? amountPayable - hoApproved : null,
+  } satisfies ArcpClaimsDetailRow;
+}
+
+export async function loadArcpOfficeNameMaps(): Promise<OfficeNameMaps> {
+  return withAppClient(async (client) => {
+    const result = await client.query<{
+      ncode: string | number;
+      vcompanyname: string | null;
+      nunder: string | number | null;
+      is_branch: boolean | null;
+    }>(`
+      SELECT ncode, vcompanyname, nunder, is_branch
+      FROM dim_offices
+    `);
+    const officeNames: Record<string, string> = {};
+    const branchNames: Record<string, string> = {};
+    const franchiseeNames: Record<string, string> = {};
+    for (const row of result.rows) {
+      const code = String(row.ncode ?? '').trim();
+      if (!code) continue;
+      const name = String(row.vcompanyname ?? '').trim() || code;
+      officeNames[code] = name;
+    }
+    for (const row of result.rows) {
+      const code = String(row.ncode ?? '').trim();
+      if (!code) continue;
+      franchiseeNames[code] = officeNames[code] ?? code;
+      const parent = String(row.nunder ?? '').trim();
+      if (parent) branchNames[code] = officeNames[parent] ?? parent;
+    }
+    return { branchNames, franchiseeNames };
+  });
+}
+
 export async function queryArcpClaimsDetailRows(
   opts: ArcpClaimsQueryOpts
 ): Promise<ArcpClaimsDetailRow[]> {
@@ -428,6 +530,7 @@ export async function queryArcpClaimsDetailRows(
   const orderCol = resolveDetailOrderCol(dateColumn);
   const hasCallNo = await arcpLinesHotHasCallNo();
   const callNoSelect = hasCallNo ? 'h.call_no,' : '';
+  const officeNames = await loadArcpOfficeNameMaps();
 
   const query = `
 SELECT
@@ -435,8 +538,7 @@ SELECT
   h.vucnno,
   ${callNoSelect}
   h.calls2fault_code,
-  COALESCE(fr.vcompanyname, CAST(h.nofficeid AS text)) AS franchisee_name,
-  COALESCE(br.vcompanyname, CAST(h.office_under AS text)) AS branch_name,
+  h.office_under AS branch_code,
   h.nofficeid AS franchisee_code,
   h.call_at,
   h.solve_at,
@@ -458,70 +560,94 @@ SELECT
   h.branch_approved AS raw_nbmapprovedamt,
   h.ho_approved AS raw_nhoapprovedamt
 FROM arcp_lines_hot h
-LEFT JOIN dim_offices fr ON fr.ncode = h.nofficeid
-LEFT JOIN dim_offices br ON br.ncode = h.office_under
 WHERE ${whereSql}
 ORDER BY h.${orderCol} DESC NULLS LAST, h.ncode DESC
 `;
 
   return withAppClient(async (client) => {
     const result = await client.query(query, params);
-    return result.rows.map((row) => {
-      const isTravel = Number(row.is_travel) === 1;
-      const callType = String(row.call_type_label ?? row.ncalltype ?? '');
-      const itemCat = String(row.item_category_label ?? '');
-      const localLabel =
-        String(row.local_upcountry_label ?? '') ||
-        LOCAL_UPCOUNTRY_NCODE_LABELS[String(row.nlocalupcountry ?? '').trim()] ||
-        '';
+    return result.rows.map((row) =>
+      mapArcpDetailRow(row as Record<string, unknown>, hasCallNo, officeNames)
+    );
+  });
+}
 
-      const amountPayable = row.amount_payable_val != null ? Number(row.amount_payable_val) : null;
-      const branchApproved =
-        row.branch_approved_val != null ? Number(row.branch_approved_val) : null;
-      const hoApproved = row.ho_approved_val != null ? Number(row.ho_approved_val) : null;
+export async function queryArcpClaimsDetailRowsPage(
+  opts: ArcpClaimsQueryOpts,
+  page: {
+    cursorNcode?: number | null;
+    cursorSortAt?: string | null;
+    limit?: number;
+    officeNames?: OfficeNameMaps;
+  }
+): Promise<{ rows: ArcpClaimsDetailRow[]; nextCursor: { ncode: number; sortAt: string } | null }> {
+  const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
+  const { sql: whereSql, params } = buildArcpWhere(opts, dateColumn, 'h');
+  const orderCol = resolveDetailOrderCol(dateColumn);
+  const hasCallNo = await arcpLinesHotHasCallNo();
+  const callNoSelect = hasCallNo ? 'h.call_no,' : '';
+  const pageLimit = Math.min(Math.max(page.limit ?? 5000, 1), 10000);
+  const pageParams = [...params];
+  let cursorClause = '';
+  if (page.cursorSortAt && page.cursorNcode != null) {
+    cursorClause = ` AND (h.${orderCol} < $${pageParams.length + 1}::timestamptz OR (h.${orderCol} = $${pageParams.length + 1}::timestamptz AND h.ncode < $${pageParams.length + 2}))`;
+    pageParams.push(page.cursorSortAt);
+    pageParams.push(page.cursorNcode);
+  }
+  pageParams.push(pageLimit);
 
-      let summarySection = '';
-      if (isTravel) summarySection = 'Reimbursement of Travel Expenses';
-      else if (!itemCat) summarySection = '';
-      else if (!callType) summarySection = itemCat;
-      else summarySection = `${callType} – ${itemCat}`;
+  const query = `
+SELECT
+  h.ncode,
+  h.vucnno,
+  ${callNoSelect}
+  h.calls2fault_code,
+  h.office_under AS branch_code,
+  h.nofficeid AS franchisee_code,
+  h.call_at,
+  h.solve_at,
+  h.bm_approved_at,
+  h.${orderCol} AS page_sort_at,
+  h.ho_approved_at,
+  h.approve_at,
+  h.ncalltype,
+  h.call_type_label,
+  h.nitemcategory,
+  h.item_category_label,
+  h.local_upcountry_label,
+  CASE WHEN h.is_major THEN 'Major' ELSE 'Minor' END AS major_minor,
+  CASE WHEN h.is_travel THEN 1 ELSE 0 END AS is_travel,
+  h.rate AS rate_val,
+  h.amount_payable AS amount_payable_val,
+  h.branch_approved AS branch_approved_val,
+  h.ho_approved AS ho_approved_val,
+  h.amount_payable AS raw_nchargespayable,
+  h.branch_approved AS raw_nbmapprovedamt,
+  h.ho_approved AS raw_nhoapprovedamt
+FROM arcp_lines_hot h
+WHERE ${whereSql}${cursorClause}
+ORDER BY h.${orderCol} DESC NULLS LAST, h.ncode DESC
+LIMIT $${pageParams.length}
+`;
 
-      const subKey = `${localLabel || 'Unknown'} - ${row.major_minor || 'Minor'}`;
-
-      return {
-        ncode: String(row.ncode ?? ''),
-        vucnno: String(row.vucnno ?? ''),
-        calls2fault_code: String(row.calls2fault_code ?? ''),
-        call_no: hasCallNo ? String(row.call_no ?? '').trim() : '',
-        franchisee_code: String(row.franchisee_code ?? ''),
-        branch_name: String(row.branch_name ?? ''),
-        franchisee_name: String(row.franchisee_name ?? ''),
-        call_date: formatArcpClaimsExportDate(row.call_at),
-        solve_date: formatArcpClaimsExportDate(row.solve_at),
-        bm_approved_date: formatArcpClaimsExportDate(row.bm_approved_at),
-        ho_approved_date: formatArcpClaimsExportDate(row.ho_approved_at),
-        call_type: callType,
-        item_category: itemCat,
-        local_upcountry: localLabel,
-        major_minor: String(row.major_minor ?? 'Minor'),
-        line_type: isTravel ? 'Travel' : 'Service',
-        rate: row.rate_val != null ? Number(row.rate_val) : null,
-        distance: null,
-        amount_payable: amountPayable,
-        branch_approved: branchApproved,
-        ho_approved: hoApproved,
-        raw_nchargespayable: amountPayable,
-        raw_nbmapprovedamt: branchApproved,
-        raw_nhoapprovedamt: hoApproved,
-        raw_napproval1amount: branchApproved,
-        raw_napproval2amount: hoApproved,
-        summary_section: summarySection,
-        summary_sub_row: subKey,
-        payable_minus_branch:
-          amountPayable != null && branchApproved != null ? amountPayable - branchApproved : null,
-        payable_minus_ho:
-          amountPayable != null && hoApproved != null ? amountPayable - hoApproved : null,
-      } satisfies ArcpClaimsDetailRow;
-    });
+  return withAppClient(async (client) => {
+    const result = await client.query(query, pageParams);
+    const rows = result.rows.map((row) =>
+      mapArcpDetailRow(row as Record<string, unknown>, hasCallNo, page.officeNames)
+    );
+    const last = result.rows[result.rows.length - 1] as
+      | (Record<string, unknown> & { ncode?: unknown; page_sort_at?: unknown })
+      | undefined;
+    const nextCursor =
+      last && last.page_sort_at != null && last.ncode != null
+        ? {
+            ncode: Number(last.ncode),
+            sortAt:
+              last.page_sort_at instanceof Date
+                ? last.page_sort_at.toISOString()
+                : String(last.page_sort_at),
+          }
+        : null;
+    return { rows, nextCursor };
   });
 }

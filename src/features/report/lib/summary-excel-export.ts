@@ -611,8 +611,9 @@ export async function triggerBlobDownload(
     } else {
       link.click();
     }
+    // Don't await revoke delay — large CSVs waited 30s here while the file was already Done.
     if (autoRevoke) {
-      await scheduleDownloadCleanup(link, downloadUrl, filename, blob);
+      void scheduleDownloadCleanup(link, downloadUrl, filename, blob);
     } else {
       link.remove();
     }

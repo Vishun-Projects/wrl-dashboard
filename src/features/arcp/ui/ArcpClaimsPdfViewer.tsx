@@ -2,7 +2,7 @@
 
 import React, { useCallback, useMemo } from 'react';
 import { Download, X } from 'lucide-react';
-import { downloadPdfBlob, ARCP_PDF_PAGE_WIDTH_MM } from '@/features/arcp/lib/pdf';
+import { ARCP_PDF_PAGE_WIDTH_MM } from '@/features/arcp/lib/pdf';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 import { ModalPortal } from '@/components/ui/ModalPortal';
 
@@ -23,9 +23,18 @@ export function ArcpClaimsPdfViewer({ open, pdfUrl, fileName, onClose }: ArcpCla
 
   const handleDownload = useCallback(async () => {
     if (!pdfUrl) return;
-    const response = await fetch(pdfUrl);
-    const blob = await response.blob();
-    downloadPdfBlob(blob, fileName);
+    const link = document.createElement('a');
+    link.href = pdfUrl;
+    link.download = fileName;
+    link.rel = 'noopener';
+    link.style.position = 'fixed';
+    link.style.left = '-9999px';
+    document.body.appendChild(link);
+    try {
+      link.click();
+    } finally {
+      link.remove();
+    }
   }, [fileName, pdfUrl]);
 
   if (!open || !pdfUrl || !iframeSrc) return null;

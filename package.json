@@ -50,6 +50,8 @@
     "sync-worker:arcp-backfill": "npx tsx src/lib/read-model/cli.ts arcp-backfill",
     "sync-worker:arcp-incremental": "npx tsx src/lib/read-model/cli.ts arcp-incremental",
     "sync-worker:arcp-nightly": "npx tsx src/lib/read-model/cli.ts arcp-nightly",
+    "arcp:coverage:vps": "bash scripts/vps-hosting/arcp-coverage-vps.sh",
+    "arcp:detail-indexes:vps": "bash scripts/vps-hosting/arcp-detail-indexes-vps.sh",
     "sync-worker:transaction-entry-backfill": "npx tsx src/lib/read-model/cli.ts transaction-entry-backfill",
     "sync-worker:transaction-entry-incremental": "npx tsx src/lib/read-model/cli.ts transaction-entry-incremental",
     "sync-worker:transaction-entry-scrub": "npx tsx src/lib/read-model/cli.ts transaction-entry-scrub",

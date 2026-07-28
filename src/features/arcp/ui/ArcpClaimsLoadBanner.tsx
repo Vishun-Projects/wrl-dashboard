@@ -76,11 +76,11 @@ export function ArcpClaimsLoadBanner({
             ? 'Exporting detail CSV…'
             : 'Loading ARCP tally…'
       }
-      periodLabel="period"
+      periodLabel={isDetailExport ? 'row' : 'period'}
       previewApplyLabel="Apply filters"
       exportHint={
         isDetailExport
-          ? 'Full-year detail export can take several minutes. The CSV will download automatically when all periods finish — please keep this tab open.'
+          ? 'Full-year detail export can take several minutes. The CSV will download automatically when all rows finish loading — please keep this tab open.'
           : undefined
       }
       footer={footer}

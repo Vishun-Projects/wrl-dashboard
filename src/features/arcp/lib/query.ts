@@ -1459,11 +1459,24 @@ export function shouldUseClientSideArcpChunks(
  */
 export function planArcpLoadJobChunks(
   opts: ArcpClaimsQueryOpts,
-  hints?: ArcpLoadEstimateHints
+  hints?: ArcpLoadEstimateHints,
+  options?: { kind?: 'agg' | 'detail' }
 ): { start: string; end: string }[] {
   if (!opts.startDate || !opts.endDate) {
     return planArcpSummaryDateChunks(opts, hints);
   }
+
+  // Detail jobs stay chunked so progress can advance; aggregates can stay single-shot on Postgres.
+  if (options?.kind === 'detail') {
+    const summaryChunks = planArcpSummaryDateChunks(opts, hints);
+    const span = arcpDateSpanDays(opts.startDate ?? null, opts.endDate ?? null) ?? 0;
+    const summaryGranularity = inferArcpPlanGranularity(span, summaryChunks);
+    if (summaryGranularity === 'month' || summaryGranularity === 'week') {
+      return splitArcpDateRange(opts.startDate, opts.endDate, ARCP_WEEK_CHUNK_DAYS);
+    }
+    return summaryChunks;
+  }
+
   if (hints?.usePostgres && hints.coverage && hints.coverage.rowCount > 0) {
     return [{ start: opts.startDate, end: opts.endDate }];
   }
@@ -1503,9 +1516,17 @@ export function estimateArcpDetailLoadPlan(
   opts: ArcpClaimsQueryOpts,
   hints?: ArcpLoadEstimateHints
 ): ArcpLoadPlan {
-  const chunks = planArcpSummaryDateChunks(opts, hints);
+  const baseChunks = planArcpSummaryDateChunks(opts, hints);
   const span = arcpDateSpanDays(opts.startDate ?? null, opts.endDate ?? null) ?? 0;
-  const chunkGranularity = inferArcpPlanGranularity(span, chunks);
+  const baseGranularity = inferArcpPlanGranularity(span, baseChunks);
+  const chunks =
+    baseGranularity === 'month' && opts.startDate && opts.endDate
+      ? splitArcpDateRange(opts.startDate, opts.endDate, ARCP_WEEK_CHUNK_DAYS)
+      : baseChunks;
+  const chunkGranularity =
+    baseGranularity === 'month' && opts.startDate && opts.endDate
+      ? 'week'
+      : inferArcpPlanGranularity(span, chunks);
   const dateColumn = resolveArcpDateFilterColumn(opts.dateFilterColumn);
   const likelyCrm = countLikelyCrmFallbackChunks(chunks, opts, hints);
   const crmPerChunkMs = isArcpApproveDateColumn(dateColumn) ? 28000 : 15000;
@@ -1529,7 +1550,9 @@ export function estimateArcpDetailLoadPlan(
         })
       : 1;
   const estimateMs = postgresReady
-    ? 5000 + Math.ceil(likelyCrm / concurrency) * crmPerChunkMs
+    ? likelyCrm > 0
+      ? 5000 + Math.ceil(likelyCrm / concurrency) * crmPerChunkMs
+      : Math.max(8000, Math.ceil(chunks.length / concurrency) * perChunkMs)
     : Math.ceil(chunks.length / concurrency) * perChunkMs;
 
   return {
@@ -1546,28 +1569,12 @@ export function estimateArcpDetailLoadPlan(
   };
 }
 
-/** Detail export: one round-trip when tally does (same filters/date range). */
+/** Detail export keeps chunk granularity so progress can advance across long ranges. */
 export function resolveArcpClientDetailLoadPlan(
   opts: ArcpClaimsQueryOpts,
   hints?: ArcpLoadEstimateHints
 ): ArcpLoadPlan {
-  const plan = estimateArcpDetailLoadPlan(opts, hints);
-  if (shouldUseClientSideArcpChunks(opts, hints)) return plan;
-  const start = opts.startDate ?? '';
-  const end = opts.endDate ?? '';
-  const scoped =
-    Boolean(opts.franchisee?.trim()) ||
-    Boolean(opts.branch?.trim()) ||
-    (opts.callType && opts.callType !== 'All');
-  return {
-    ...plan,
-    chunkCount: 1,
-    chunkGranularity: 'single',
-    isLongLoad: false,
-    estimateMs: scoped ? 8000 : Math.min(plan.estimateMs, 180_000),
-    chunks: [{ start, end }],
-    crmChunkCount: plan.crmChunkCount,
-  };
+  return estimateArcpDetailLoadPlan(opts, hints);
 }
 
 /** One row per ARCP line — matches tally qty (COUNT DISTINCT ncode). */

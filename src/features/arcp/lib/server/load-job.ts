@@ -281,7 +281,7 @@ export async function startOrResumeLoadJob(
   const loadHints = readArcpFromPostgres()
     ? { usePostgres: true as const, coverage: await getArcpPostgresCoverage() }
     : undefined;
-  const planned = planArcpLoadJobChunks({ ...opts, crmUiFast: true }, loadHints);
+  const planned = planArcpLoadJobChunks({ ...opts, crmUiFast: true }, loadHints, { kind });
   const filters = filtersSnapshot(opts);
 
   return withAppClient(async (client) => {

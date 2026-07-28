@@ -52,6 +52,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ job: null });
     }
 
+    if (kind === 'detail' && progressOnly) {
+      // Chunk counts only — merging ~200k cached rows on every poll was the slow path.
+      return NextResponse.json({
+        jobId: job.jobId,
+        jobKey: job.jobKey,
+        kind: job.kind,
+        status: job.status,
+        filters: job.filters,
+        progress: jobProgress(job),
+        resumable: job.status === 'running' || job.pendingCount > 0 || job.failedCount > 0,
+      });
+    }
+
     if (kind === 'detail') {
       const partialRows = await mergeJobDetailFromDisk(job);
       return NextResponse.json({
@@ -64,6 +77,7 @@ export async function GET(req: NextRequest) {
         progress: jobProgress(job),
         partialRows,
         rowCount: partialRows.length,
+        rowCountSource: 'cache',
         resumable: job.status === 'running' || job.pendingCount > 0 || job.failedCount > 0,
       });
     }

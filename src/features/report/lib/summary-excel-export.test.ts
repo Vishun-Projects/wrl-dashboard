@@ -210,10 +210,10 @@ describe('downloadWorkbook', () => {
 
   it('dispatches click and revokes blob URL after cleanup delay', async () => {
     const blob = new Blob(['x'], { type: 'application/octet-stream' });
-    const downloadPromise = triggerBlobDownload(blob, 'test-export.xlsx');
-    await vi.advanceTimersByTimeAsync(250);
-    await downloadPromise;
+    await triggerBlobDownload(blob, 'test-export.xlsx');
     expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(revokeSpy).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(250);
     expect(revokeSpy).toHaveBeenCalledWith('blob:mock-url');
     expect(removeSpy).toHaveBeenCalledTimes(1);
     expect(rafSpy).toHaveBeenCalled();
@@ -229,18 +229,17 @@ describe('downloadWorkbook', () => {
   it('allows a second sequential download after cleanup', async () => {
     const workbook = createMockWorkbook();
     const firstPrepared = await workbookToPreparedExport(workbook as never, 'repeat.xlsx');
-    const first = triggerBlobDownload(firstPrepared.blob, firstPrepared.filename);
+    await triggerBlobDownload(firstPrepared.blob, firstPrepared.filename);
     await vi.advanceTimersByTimeAsync(250);
-    await first;
+    expect(revokeSpy).toHaveBeenCalledTimes(1);
 
     clickSpy.mockClear();
     revokeSpy.mockClear();
     removeSpy.mockClear();
 
     const secondPrepared = await workbookToPreparedExport(workbook as never, 'repeat.xlsx');
-    const second = triggerBlobDownload(secondPrepared.blob, secondPrepared.filename);
+    await triggerBlobDownload(secondPrepared.blob, secondPrepared.filename);
     await vi.advanceTimersByTimeAsync(250);
-    await second;
     expect(clickSpy).toHaveBeenCalledTimes(1);
     expect(revokeSpy).toHaveBeenCalledTimes(1);
     expect(removeSpy).toHaveBeenCalledTimes(1);

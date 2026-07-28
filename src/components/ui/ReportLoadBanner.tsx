@@ -12,6 +12,8 @@ export type ReportLoadStatus = {
   etaFinishLabel?: string | null;
   planMessage: string;
   rowsLoaded?: number;
+  totalRows?: number;
+  rowsProgressMode?: 'actual' | 'estimated';
   failedCount?: number;
 };
 
@@ -90,6 +92,10 @@ export function ReportLoadBanner({
     title ??
     (isPreview ? 'Large date range selected' : isExport ? 'Export in progress…' : 'Loading data…');
   const periodPlural = status.total === 1 ? periodLabel : `${periodLabel}s`;
+  const hasRowProgress = status.totalRows != null && status.totalRows > 0;
+  const rowsProgressMode = status.rowsProgressMode ?? 'actual';
+  // Export / row-driven loads should never show period/week/month counters.
+  const showPeriodProgress = !isExport && !hasRowProgress;
 
   return (
     <div
@@ -111,12 +117,17 @@ export function ReportLoadBanner({
                 <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 ${styles.sub}`}>
                   <span className="font-medium text-slate-800">{status.percent}% complete</span>
                   <span>
-                    {status.done} of {status.total} {periodPlural} loaded
+                    {hasRowProgress
+                      ? `${(status.rowsLoaded ?? 0).toLocaleString('en-IN')} of ${status.totalRows?.toLocaleString('en-IN')} rows loaded${
+                          rowsProgressMode === 'estimated' ? ' (estimated)' : ''
+                        }`
+                      : showPeriodProgress
+                        ? `${status.done} of ${status.total} ${periodPlural} loaded`
+                        : `${(status.rowsLoaded ?? 0).toLocaleString('en-IN')} rows loaded`}
                     {status.failedCount ? ` · ${status.failedCount} timed out` : ''}
                   </span>
-                  {status.currentRange ? <span>({status.currentRange})</span> : null}
-                  {status.rowsLoaded != null ? (
-                    <span>{status.rowsLoaded.toLocaleString('en-IN')} rows so far</span>
+                  {status.currentRange && showPeriodProgress ? (
+                    <span>({status.currentRange})</span>
                   ) : null}
                 </div>
               ) : null}

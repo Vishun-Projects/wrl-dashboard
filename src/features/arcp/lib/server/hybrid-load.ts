@@ -22,10 +22,13 @@ import {
 import {
   deriveArcpGrandTotalsFromAggregates,
   ARCP_MERGE_ACROSS_CHUNKS,
+  arcpDateSpanDays,
   mergeArcpAggregateRows,
   mergeArcpDetailRows,
+  planArcpLoadJobChunks,
   planArcpSummaryDateChunks,
   resolveArcpDateFilterColumn,
+  resolveArcpLoadConcurrency,
   type ArcpClaimsAggregateRow,
   type ArcpClaimsDetailRow,
   type ArcpClaimsQueryOpts,
@@ -39,6 +42,7 @@ import {
 } from '@/lib/read-model/arcp/coverage-shared';
 import { getArcpReadiness } from '@/lib/read-model/arcp/readiness';
 import { readArcpFromPostgres } from '@/lib/read-model/flags';
+import { runPool } from '@/lib/utils/run-pool';
 
 const CRM_QUERY_TIMEOUT_MS = Number(process.env.ARCP_CRM_LOAD_TIMEOUT_MS ?? 300_000) || 300_000;
 
@@ -109,9 +113,30 @@ async function recordAggChunkForJob(
   await markChunkDone(opts.jobId, startDate, endDate);
 }
 
+async function recordDetailChunkForJob(
+  opts: ArcpFetchOpts,
+  rows: ArcpClaimsDetailRow[]
+): Promise<void> {
+  const startDate = opts.startDate;
+  const endDate = opts.endDate;
+  if (!opts.jobId || !startDate || !endDate) return;
 
-
-
+  const cacheKey = buildArcpChunkCacheKey(opts, { start: startDate, end: endDate }, 'detail');
+  try {
+    await writeArcpChunkCache(cacheKey, 'detail', rows);
+    const { markChunkDone } = await import('./load-job');
+    await markChunkDone(opts.jobId, startDate, endDate);
+  } catch (err) {
+    const { markChunkFailed } = await import('./load-job');
+    await markChunkFailed(
+      opts.jobId,
+      startDate,
+      endDate,
+      err instanceof Error ? err.message : 'Detail chunk cache write failed'
+    );
+    throw err;
+  }
+}
 
 async function loadArcpAggregatesCoverageAware(
   opts: ArcpFetchOpts
@@ -231,8 +256,46 @@ async function loadArcpDetailCoverageAware(
   }
 
   if (readArcpFromPostgres()) {
-    const rows = await queryArcpClaimsDetailRows(opts);
-    return { rows, source: 'postgres', chunkMeta: { cachedChunks: 0, fetchedChunks: 1, totalChunks: 1 } };
+    const coverage = await getArcpPostgresCoverage();
+    const hints = { usePostgres: true as const, coverage };
+    // Must match startOrResumeLoadJob / planArcpLoadJobChunks(detail) or markChunkDone
+    // never hits weekly job rows and the export UI stays at 0%.
+    const chunks = opts.jobId
+      ? planArcpLoadJobChunks(opts, hints, { kind: 'detail' })
+      : planArcpSummaryDateChunks(opts, hints);
+    if (!opts.jobId || chunks.length <= 1) {
+      const rows = await queryArcpClaimsDetailRows(opts);
+      if (opts.jobId) {
+        await recordDetailChunkForJob(opts, rows);
+      }
+      return {
+        rows,
+        source: 'postgres',
+        chunkMeta: { cachedChunks: 0, fetchedChunks: 1, totalChunks: 1 },
+      };
+    }
+
+    const mergedParts = await runPool(
+      chunks,
+      resolveArcpLoadConcurrency(opts, {
+        chunkCount: chunks.length,
+        spanDays: arcpDateSpanDays(startDate, endDate) ?? 0,
+        chunkGranularity: 'week',
+        usePostgres: true,
+      }),
+      async (chunk) => {
+        const chunkOpts: ArcpFetchOpts = { ...opts, startDate: chunk.start, endDate: chunk.end };
+        const chunkRows = await queryArcpClaimsDetailRows(chunkOpts);
+        await recordDetailChunkForJob(chunkOpts, chunkRows);
+        return chunkRows;
+      }
+    );
+
+    return {
+      rows: mergeArcpDetailRows(mergedParts.flat()),
+      source: 'postgres',
+      chunkMeta: { cachedChunks: 0, fetchedChunks: chunks.length, totalChunks: chunks.length },
+    };
   }
 
   const coverage = await getArcpPostgresCoverage();

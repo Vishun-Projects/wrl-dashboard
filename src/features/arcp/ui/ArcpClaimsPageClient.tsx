@@ -44,14 +44,17 @@ import {
 } from '@/features/arcp/lib/query';
 import { runPool } from '@/lib/utils/run-pool';
 import { readArcpFromPostgresClient } from '@/lib/read-model/client-flags';
-import type { ArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-shared';
+import {
+  postgresCoversFullRange,
+  type ArcpPostgresCoverage,
+} from '@/lib/read-model/arcp/coverage-shared';
 import { fetchReadModelStatus } from '@/lib/read-model/trigger-sync-client';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import {
+  buildArcpClaimsDetailCsvFileName,
   downloadArcpClaimsCsv,
-  downloadArcpClaimsDetailCsv,
-  prepareArcpDetailExportRows,
 } from '@/features/arcp/lib/export';
+import { triggerBlobDownload } from '@/features/report/download';
 import {
   buildArcpClaimsPdfBlob,
   buildArcpClaimsPdfFileName,
@@ -122,6 +125,7 @@ type ArcpLoadJobStatusResponse = {
   status?: string;
   filters?: Record<string, unknown>;
   partialAggregates?: ArcpClaimsAggregateRow[];
+  rowCount?: number;
   progress?: {
     totalChunks: number;
     doneCount: number;
@@ -197,26 +201,29 @@ function buildArcpPlanMessage(
     ARCP_DATE_FILTER_OPTIONS.find((option) => option.value === dateFilterColumn)?.label ??
     'Call Date';
   const periodLabel = arcpChunkPeriodLabel(plan.chunkGranularity, false);
+  const periodCountLabel = plan.chunkCount === 1 ? periodLabel : `${periodLabel}s`;
   const parallelNote =
     resolveArcpLoadConcurrency({ dateFilterColumn }, plan) > 1
       ? ` (up to ${resolveArcpLoadConcurrency({ dateFilterColumn }, plan)} in parallel)`
       : '';
 
-  return `${plan.spanDays}-day range on ${basis} loads in ${plan.chunkCount} ${periodLabel}(s)${parallelNote}. Est. ${eta}. Tally updates as each completes.`;
+  return `${plan.spanDays}-day range on ${basis} loads in ${plan.chunkCount} ${periodCountLabel}${parallelNote}. Est. ${eta}. Tally updates as each completes.`;
 }
 
-function buildArcpDetailPlanMessage(plan: ArcpLoadPlan, dateFilterColumn: ArcpDateFilterColumn): string {
-  if (plan.chunkCount <= 1) {
-    return `Fetching line-level detail for ${plan.spanDays} days.`;
-  }
-
+function buildArcpDetailPlanMessage(
+  plan: ArcpLoadPlan,
+  dateFilterColumn: ArcpDateFilterColumn,
+  totalRows?: number
+): string {
   const basis =
     ARCP_DATE_FILTER_OPTIONS.find((option) => option.value === dateFilterColumn)?.label ??
     'Call Date';
   const eta = formatArcpDurationMs(plan.estimateMs);
-  const periodLabel = arcpChunkPeriodLabel(plan.chunkGranularity, false);
-
-  return `${plan.spanDays}-day detail on ${basis} exports in ${plan.chunkCount} ${periodLabel}(s) (est. ${eta}).`;
+  const rowsLabel =
+    totalRows != null && totalRows > 0
+      ? `${totalRows.toLocaleString('en-IN')} rows`
+      : 'line-level detail';
+  return `Exporting ${rowsLabel} for ${plan.spanDays}-day ${basis} range (est. ${eta}).`;
 }
 
 function toLoadStatus(
@@ -227,9 +234,13 @@ function toLoadStatus(
   options?: {
     planMessage?: string;
     rowsLoaded?: number;
+    totalRows?: number;
+    rowsProgressMode?: 'actual' | 'estimated';
     scopedFilters?: boolean;
     failedCount?: number;
     processedCount?: number;
+    /** When true, progress bar/percent are driven by rows, never periods. */
+    rowDriven?: boolean;
   }
 ): ArcpLoadStatus {
   const total = plan.chunkCount;
@@ -242,22 +253,36 @@ function toLoadStatus(
     options?.processedCount ?? loadedCount + (failedCount ?? 0)
   );
   const done = Math.min(loadedCount, total);
-  const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
+  const totalRows = options?.totalRows;
+  const rowsLoaded = options?.rowsLoaded ?? 0;
+  const rowDriven = Boolean(options?.rowDriven || (totalRows != null && totalRows > 0));
+  const percent = rowDriven
+    ? totalRows && totalRows > 0
+      ? Math.min(100, Math.round((rowsLoaded / totalRows) * 100))
+      : 0
+    : total > 0
+      ? Math.round((processed / total) * 100)
+      : 0;
   const concurrency = resolveArcpLoadConcurrency({ dateFilterColumn }, plan);
-  const inFlight = processed < total && total > 1;
+  const inFlight = rowDriven
+    ? totalRows != null && rowsLoaded < totalRows
+    : processed < total && total > 1;
 
   return {
-    done,
-    total,
+    done: rowDriven ? rowsLoaded : done,
+    total: rowDriven ? totalRows ?? 0 : total,
     percent,
     failedCount,
-    currentRange: inFlight
-      ? concurrency > 1
-        ? `up to ${concurrency} in parallel`
-        : arcpChunkLoadingHint(plan)
-      : null,
-    etaRemainingLabel: processed < total ? formatArcpDurationMs(etaMs) : null,
-    etaFinishLabel: processed < total ? formatArcpFinishTime(Date.now() + etaMs) : null,
+    currentRange:
+      rowDriven
+        ? null
+        : inFlight
+          ? concurrency > 1
+            ? `up to ${concurrency} in parallel`
+            : arcpChunkLoadingHint(plan)
+          : null,
+    etaRemainingLabel: inFlight ? formatArcpDurationMs(etaMs) : null,
+    etaFinishLabel: inFlight ? formatArcpFinishTime(Date.now() + etaMs) : null,
     planMessage:
       options?.planMessage ??
       buildArcpPlanMessage(
@@ -267,6 +292,8 @@ function toLoadStatus(
         options?.scopedFilters
       ),
     rowsLoaded: options?.rowsLoaded,
+    totalRows: options?.totalRows,
+    rowsProgressMode: options?.rowsProgressMode,
   };
 }
 
@@ -1350,19 +1377,36 @@ export default function ArcpClaimsPage() {
     }
   }, [appliedFilters, displayModel, tableModel, tallyDetailLevel]);
 
-  const downloadPreparedDetailCsv = useCallback(
-    async (rows: ArcpClaimsDetailRow[]) => {
-      if (!appliedFilters || !tableModel) return;
-      const prepared = prepareArcpDetailExportRows(rows, {
-        dateFilterColumn: appliedFilters.arcpDateFilterColumn,
-        includeTravel: includeTravelReimbursement,
-      });
-      if (prepared.length === 0) throw new Error('No detail rows to export');
-      const fileName = `ARCP_Claims_Detail_${appliedFilters.startDateStr}_${appliedFilters.endDateStr}.csv`;
-      await downloadArcpClaimsDetailCsv(prepared, fileName, { totals: tableModel.totals });
+  const triggerDetailExportDownload = useCallback(
+    async (filters: AppliedArcpFilters, detailJobId?: string) => {
+      const url = new URL('/api/report/arcp-claims/detail/export', window.location.origin);
+      for (const [key, value] of Object.entries(arcpFilterParams(filters))) {
+        url.searchParams.set(key, value);
+      }
+      url.searchParams.set('includeTravel', includeTravelReimbursement ? 'true' : 'false');
+      if (detailJobId) {
+        url.searchParams.set('jobId', detailJobId);
+      }
+      const fileName = buildArcpClaimsDetailCsvFileName(
+        filters.startDateStr,
+        filters.endDateStr
+      );
+      const response = await fetch(url.toString(), { credentials: 'same-origin' });
+      if (!response.ok) {
+        let message = `Failed to export detail CSV (${response.status})`;
+        try {
+          const data = (await response.json()) as { error?: string };
+          if (data.error) message = data.error;
+        } catch {
+          // non-JSON error response
+        }
+        throw new Error(message);
+      }
+      const blob = await response.blob();
+      await triggerBlobDownload(blob, fileName);
       feedback.actionSuccess(`Downloading ${fileName}`);
     },
-    [appliedFilters, tableModel, includeTravelReimbursement]
+    [includeTravelReimbursement]
   );
 
   const handleViewPdf = useCallback(async () => {
@@ -1433,31 +1477,74 @@ export default function ArcpClaimsPage() {
   const handleExportDetailCsv = useCallback(async () => {
     if (!appliedFilters || !tableModel || loading) return;
 
+    let exportFilters = appliedFilters;
+    let activeCoverage = arcpCoverage;
+    if (readArcpFromPostgresClient() && !activeCoverage) {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const progress = await fetchReadModelStatus(session?.access_token);
+        if (progress.arcp) {
+          activeCoverage = progress.arcp;
+          setArcpCoverage(progress.arcp);
+        }
+      } catch {
+        /* export still works; server decides source */
+      }
+    }
+
+    if (
+      appliedFilters.arcpDateFilterColumn === 'bm_approved_at' &&
+      activeCoverage?.bmApprovedAt.max &&
+      appliedFilters.endDateStr > activeCoverage.bmApprovedAt.max
+    ) {
+      if (appliedFilters.startDateStr > activeCoverage.bmApprovedAt.max) {
+        feedback.actionFailed(
+          `BM Approved coverage currently ends at ${activeCoverage.bmApprovedAt.max}. Choose an earlier date range.`
+        );
+        return;
+      }
+      exportFilters = {
+        ...appliedFilters,
+        endDateStr: activeCoverage.bmApprovedAt.max,
+      };
+      setPageWarning(
+        `BM Approved coverage currently ends at ${activeCoverage.bmApprovedAt.max}. Exporting the covered range only.`
+      );
+    }
+
     const queryOpts = {
-      startDate: appliedFilters.startDateStr,
-      endDate: appliedFilters.endDateStr,
-      dateFilterColumn: appliedFilters.arcpDateFilterColumn,
-      callType: appliedFilters.callTypeParam,
-      branch: appliedFilters.branchParam || undefined,
-      franchisee: appliedFilters.franchiseeParam || undefined,
+      startDate: exportFilters.startDateStr,
+      endDate: exportFilters.endDateStr,
+      dateFilterColumn: exportFilters.arcpDateFilterColumn,
+      callType: exportFilters.callTypeParam,
+      branch: exportFilters.branchParam || undefined,
+      franchisee: exportFilters.franchiseeParam || undefined,
     };
-    const exportPlan = resolveArcpClientDetailLoadPlan(queryOpts, loadEstimateHints);
+    const exportPlan = resolveArcpClientDetailLoadPlan(queryOpts, {
+      usePostgres: readArcpFromPostgresClient(),
+      coverage: activeCoverage,
+    });
     let detailChunkList = exportPlan.chunks;
-    const useSingleDetailRequest = exportPlan.chunkCount <= 1;
+    const estimatedDetailRows =
+      summaryTotals.serviceLineCount +
+      (includeTravelReimbursement ? summaryTotals.travelLineCount : 0);
     const detailPlanMessage = buildArcpDetailPlanMessage(
       exportPlan,
-      appliedFilters.arcpDateFilterColumn
+      exportFilters.arcpDateFilterColumn,
+      estimatedDetailRows > 0 ? estimatedDetailRows : undefined
     );
-    const detailExportOptions = {
-      dateFilterColumn: appliedFilters.arcpDateFilterColumn,
-      includeTravel: includeTravelReimbursement,
-    };
-    void detailExportOptions; // ponytail: reserved for server-side export options wiring
 
     const reportDetailExportProgress = (
       done: number,
       etaMs: number,
-      extra?: { failedCount?: number }
+      extra?: {
+        failedCount?: number;
+        processedCount?: number;
+        rowsLoaded?: number;
+        rowsProgressMode?: 'actual' | 'estimated';
+      }
     ) => {
       setDetailExportRunningTotals({
         amountPayable: tableModel.totals.amountPayable,
@@ -1467,13 +1554,17 @@ export default function ArcpClaimsPage() {
       setDetailExportStatus(
         toLoadStatus(
           { ...exportPlan, chunkCount: detailChunkList.length, chunks: detailChunkList },
-          appliedFilters.arcpDateFilterColumn,
+          exportFilters.arcpDateFilterColumn,
           done,
           etaMs,
           {
             planMessage: detailPlanMessage,
-            rowsLoaded: runningDetailRows.length,
             failedCount: extra?.failedCount,
+            processedCount: extra?.processedCount,
+            rowsLoaded: extra?.rowsLoaded ?? 0,
+            totalRows: estimatedDetailRows > 0 ? estimatedDetailRows : undefined,
+            rowsProgressMode: extra?.rowsProgressMode,
+            rowDriven: true,
           }
         )
       );
@@ -1484,182 +1575,185 @@ export default function ArcpClaimsPage() {
     setDetailExportStatus(
       toLoadStatus(
         { ...exportPlan, chunkCount: detailChunkList.length, chunks: detailChunkList },
-        appliedFilters.arcpDateFilterColumn,
+        exportFilters.arcpDateFilterColumn,
         0,
         exportPlan.estimateMs,
         {
           planMessage: detailPlanMessage,
           rowsLoaded: 0,
+          totalRows: estimatedDetailRows > 0 ? estimatedDetailRows : undefined,
+          rowsProgressMode: estimatedDetailRows > 0 ? 'estimated' : 'actual',
+          rowDriven: true,
         }
       )
     );
 
-    const chunkTimings: number[] = [];
-    let failedChunks = 0;
-    const completedChunks = 0;
-    void completedChunks; // ponytail: placeholder counter, not yet wired to progress UI
     const exportStartedAt = Date.now();
+    let downloaded = false;
 
-    const detailJobRes = await axios.post<ArcpLoadJobStartResponse>(
-      '/api/report/arcp-claims/load-start',
-      null,
-      {
-        ...cookieAuthRequestConfig,
-        params: { kind: 'detail', ...arcpFilterParams(appliedFilters) },
-      }
-    );
-    const detailJob = detailJobRes.data;
-    if (detailJob.error) throw new Error(detailJob.error);
-    if (detailJob.chunks?.length) {
-      detailChunkList = detailJob.chunks.map((c) => ({
-        start: c.chunkStart,
-        end: c.chunkEnd,
-      }));
-    }
-    const detailJobId =
-      detailJob.jobId && detailJob.jobsEnabled !== false ? detailJob.jobId : undefined;
-    const detailChunkStatus = new Map(
-      (detailJob.chunks ?? []).map((c) => [`${c.chunkStart}|${c.chunkEnd}`, c.status])
-    );
-    const detailCachedAtStart = detailJob.progress?.doneCount ?? 0;
-    void detailCachedAtStart; // ponytail: reserved for ETA calc parity with agg job path
-    const detailChunkKey = (c: { start: string; end: string }) => `${c.start}|${c.end}`;
-    const mergedDetailChunkKeys = new Set<string>();
-    for (const c of detailJob.chunks ?? []) {
-      if (c.status === 'done') {
-        mergedDetailChunkKeys.add(detailChunkKey({ start: c.chunkStart, end: c.chunkEnd }));
-      }
-    }
-    let runningDetailRows = mergeArcpDetailRows(detailJob.partialRows ?? []);
-    failedChunks = detailJob.progress?.failedCount ?? 0;
-
-    const countDetailChunksDone = () =>
-      Math.min(
-        detailChunkList.filter((c) => mergedDetailChunkKeys.has(detailChunkKey(c))).length,
-        detailChunkList.length
+    // Covered BM range on Postgres: one indexed query. Skip weekly job prefetch+poll
+    // (that was re-loading the same rows and stuck exports around ~4 minutes).
+    const postgresDirectExport =
+      readArcpFromPostgresClient() &&
+      exportFilters.arcpDateFilterColumn === 'bm_approved_at' &&
+      activeCoverage != null &&
+      postgresCoversFullRange(
+        exportFilters.startDateStr,
+        exportFilters.endDateStr,
+        activeCoverage,
+        'bm_approved_at'
       );
 
-    const detailRequestParams = {
-      ...arcpFilterParams(appliedFilters),
-      ...(detailJobId ? { jobId: detailJobId } : {}),
-    };
-
     try {
-      if (useSingleDetailRequest) {
-        const pendingDetail =
-          (detailJob.progress?.pendingCount ?? 0) > 0 || failedChunks > 0;
-        if (!pendingDetail) {
-          if (runningDetailRows.length === 0) throw new Error('No detail rows to export');
-          downloadPreparedDetailCsv(runningDetailRows);
-          return;
+      if (postgresDirectExport) {
+        const directEstimateMs =
+          estimatedDetailRows > 0
+            ? Math.max(15_000, Math.ceil(estimatedDetailRows / 1500) * 1000)
+            : Math.max(exportPlan.estimateMs, 30_000);
+        const tick = () => {
+          const elapsed = Date.now() - exportStartedAt;
+          const ratio = Math.min(0.95, elapsed / directEstimateMs);
+          const rowsGuess =
+            estimatedDetailRows > 0
+              ? Math.min(estimatedDetailRows, Math.round(ratio * estimatedDetailRows))
+              : 0;
+          reportDetailExportProgress(0, Math.max(directEstimateMs - elapsed, 0), {
+            processedCount: 1,
+            rowsLoaded: rowsGuess,
+            rowsProgressMode: 'estimated',
+          });
+        };
+        tick();
+        const progressTimer = window.setInterval(tick, 500);
+        try {
+          await triggerDetailExportDownload(exportFilters);
+          downloaded = true;
+          reportDetailExportProgress(0, 0, {
+            processedCount: 1,
+            rowsLoaded: estimatedDetailRows > 0 ? estimatedDetailRows : undefined,
+            rowsProgressMode: 'actual',
+          });
+        } finally {
+          window.clearInterval(progressTimer);
         }
-
-        const data = await chunkedAuth.getWithAuthRetry<{
-          rows?: ArcpClaimsDetailRow[];
-          meta?: { rowCount?: number; cachedChunks?: number };
-          error?: string;
-        }>('/api/report/arcp-claims/detail', {
-          timeout: Math.max(exportPlan.estimateMs + 60_000, 300_000),
-          params: detailRequestParams,
-        });
-
-        if (data.error) throw new Error(data.error);
-        const fetched = mergeArcpDetailRows(data.rows ?? []);
-        const rows =
-          fetched.length > 0
-            ? fetched
-            : runningDetailRows.length > 0
-              ? runningDetailRows
-              : [];
-        if (rows.length === 0) throw new Error('No detail rows to export');
-        downloadPreparedDetailCsv(rows);
         return;
       }
 
-      const detailChunksToFetch = detailJobId
-        ? detailChunkList.filter((c) => detailChunkStatus.get(detailChunkKey(c)) !== 'done')
-        : detailChunkList;
-
-      await runPool(detailChunksToFetch, resolveArcpLoadConcurrency(queryOpts, exportPlan), async (chunk) => {
-        const chunkStartedAt = Date.now();
-        const key = detailChunkKey(chunk);
-
-        try {
-          const data = await chunkedAuth.getWithAuthRetry<{
-            rows?: ArcpClaimsDetailRow[];
-            meta?: { cachedChunks?: number };
-            error?: string;
-          }>(
-            '/api/report/arcp-claims/detail',
-            {
-              timeout: 300000,
-              params: {
-                startDate: chunk.start,
-                endDate: chunk.end,
-                dateFilterColumn: appliedFilters.arcpDateFilterColumn,
-                callType: appliedFilters.callTypeParam,
-                ...(detailJobId ? { jobId: detailJobId } : {}),
-                ...(appliedFilters.branchParam ? { branch: appliedFilters.branchParam } : {}),
-                ...(appliedFilters.franchiseeParam
-                  ? { franchisee: appliedFilters.franchiseeParam }
-                  : {}),
-              },
-            },
-            { chunkIndex: countDetailChunksDone() }
-          );
-
-          if (data.error) throw new Error(data.error);
-
-          if (!mergedDetailChunkKeys.has(key)) {
-            mergedDetailChunkKeys.add(key);
-            runningDetailRows = mergeArcpDetailRows([
-              ...runningDetailRows,
-              ...(data.rows ?? []),
-            ]);
-          }
-        } catch (chunkErr: unknown) {
-          if (isChunkedFetchAbortError(chunkErr)) {
-            return;
-          }
-          if (isChunkedFetchAuthError(chunkErr)) {
-            throw chunkErr;
-          }
-          if (axios.isAxiosError(chunkErr) && chunkErr.response?.status === 401) {
-            throw new Error('Session expired during export — please retry.');
-          }
-          failedChunks += 1;
+      const detailJobRes = await axios.post<ArcpLoadJobStartResponse>(
+        '/api/report/arcp-claims/load-start',
+        null,
+        {
+          ...cookieAuthRequestConfig,
+          params: { kind: 'detail', ...arcpFilterParams(exportFilters) },
         }
+      );
+      const detailJob = detailJobRes.data;
+      if (detailJob.error) throw new Error(detailJob.error);
+      if (detailJob.chunks?.length) {
+        detailChunkList = detailJob.chunks.map((c) => ({
+          start: c.chunkStart,
+          end: c.chunkEnd,
+        }));
+      }
 
-        chunkTimings.push(Math.max(Date.now() - chunkStartedAt, 1));
-        const done = countDetailChunksDone();
+      const detailJobId =
+        detailJob.jobId && detailJob.jobsEnabled !== false ? detailJob.jobId : undefined;
+      const initialDone = detailJob.progress?.doneCount ?? 0;
+      const initialFailed = detailJob.progress?.failedCount ?? 0;
+      const initialProcessed = Math.min(detailChunkList.length, initialDone + initialFailed);
+
+      const updateFromProgress = (
+        progress?: ArcpLoadJobStatusResponse['progress'],
+        fallbackFailedCount?: number,
+        rowsLoaded?: number
+      ) => {
+        const done = Math.min(progress?.doneCount ?? initialDone, detailChunkList.length);
+        const failed = progress?.failedCount ?? fallbackFailedCount ?? initialFailed;
+        const processed = Math.min(
+          detailChunkList.length,
+          progress?.totalChunks
+            ? done + failed
+            : initialProcessed
+        );
         const elapsedMs = Date.now() - exportStartedAt;
         const etaMs =
-          done > 0
-            ? (elapsedMs / done) * Math.max(detailChunkList.length - done, 0)
+          processed > 0
+            ? (elapsedMs / processed) * Math.max(detailChunkList.length - processed, 0)
             : exportPlan.estimateMs;
-
+        const hasActualRows = typeof rowsLoaded === 'number' && rowsLoaded > 0;
+        const estimatedRowsLoaded =
+          estimatedDetailRows > 0
+            ? Math.min(
+                estimatedDetailRows,
+                Math.max(
+                  hasActualRows ? rowsLoaded : 0,
+                  Math.round((processed / Math.max(detailChunkList.length, 1)) * estimatedDetailRows)
+                )
+              )
+            : undefined;
         reportDetailExportProgress(done, etaMs, {
-          failedCount: failedChunks > 0 ? failedChunks : undefined,
+          failedCount: failed > 0 ? failed : undefined,
+          processedCount: processed,
+          rowsLoaded: hasActualRows ? rowsLoaded : estimatedRowsLoaded,
+          rowsProgressMode: hasActualRows ? 'actual' : 'estimated',
         });
-      });
+      };
 
-      if (detailChunksToFetch.length === 0 && runningDetailRows.length > 0) {
-        downloadPreparedDetailCsv(runningDetailRows);
+      const finishDownload = () => {
+        if (downloaded) return;
+        downloaded = true;
+        triggerDetailExportDownload(exportFilters, detailJobId);
+      };
+
+      const syncDetailJob = async (): Promise<ArcpLoadJobStatusResponse | null> => {
+        if (!detailJobId) return null;
+        try {
+          const status = await chunkedAuth.getWithAuthRetry<ArcpLoadJobStatusResponse>(
+            '/api/report/arcp-claims/load-status',
+            {
+              params: { kind: 'detail', jobId: detailJobId, progressOnly: 'true' },
+            }
+          );
+          updateFromProgress(status.progress, undefined, status.rowCount);
+          return status;
+        } catch {
+          return null;
+        }
+      };
+
+      updateFromProgress(detailJob.progress, initialFailed, detailJob.partialRows?.length);
+
+      if (!detailJobId) {
+        finishDownload();
         return;
       }
 
-      if (failedChunks > 0) {
-        throw new Error(
-          `Export incomplete — ${failedChunks} of ${detailChunkList.length} period(s) failed to load. Narrow the date range or retry.`
-        );
+      if ((detailJob.progress?.pendingCount ?? 0) === 0) {
+        if ((detailJob.progress?.failedCount ?? 0) > 0) {
+          throw new Error(
+            `Export incomplete — ${detailJob.progress?.failedCount ?? 0} of ${detailChunkList.length} sections failed to load. Narrow the date range or retry.`
+          );
+        }
+        finishDownload();
+        return;
       }
-
-      const rows = runningDetailRows;
-      if (rows.length === 0) {
-        throw new Error('No detail rows to export');
+      while (!downloaded) {
+        const status = await syncDetailJob();
+        if (!status) {
+          await new Promise((resolve) => window.setTimeout(resolve, ARCP_JOB_POLL_MS));
+          continue;
+        }
+        if (status.resumable === false) {
+          if ((status.progress?.failedCount ?? 0) > 0) {
+            throw new Error(
+              `Export incomplete — ${status.progress?.failedCount ?? 0} of ${detailChunkList.length} sections failed to load. Narrow the date range or retry.`
+            );
+          }
+          finishDownload();
+          break;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, ARCP_JOB_POLL_MS));
       }
-
-      downloadPreparedDetailCsv(rows);
     } catch (err: unknown) {
       const message = isChunkedFetchNetworkError(err)
         ? 'Network error during export — sign in again if needed, then retry (localhost skips GoTrue token refresh).'
@@ -1678,11 +1772,13 @@ export default function ArcpClaimsPage() {
     }
   }, [
     appliedFilters,
+    arcpCoverage,
     chunkedAuth,
-    downloadPreparedDetailCsv,
+    setPageWarning,
+    triggerDetailExportDownload,
     includeTravelReimbursement,
-    loadEstimateHints,
     loading,
+    supabase,
     tableModel,
   ]);
 

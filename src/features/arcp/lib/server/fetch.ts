@@ -10,6 +10,7 @@ import {
   arcpDetailLineKey,
   parseArcpDetailRows,
   parseArcpGrandTotals,
+  planArcpLoadJobChunks,
   planArcpSummaryDateChunks,
   isArcpApproveDateColumn,
   resolveArcpDateFilterColumn,
@@ -443,7 +444,11 @@ export async function fetchArcpClaimsDetailRows(
   }
 
   const uiOpts = crmUiOpts(opts);
-  const chunks = planArcpSummaryDateChunks(uiOpts);
+  const trackDetailJob = Boolean(opts.jobId && (!opts.loadJobKind || opts.loadJobKind === 'detail'));
+  // Job rows are weekly for long detail exports — summary months would never mark done.
+  const chunks = trackDetailJob
+    ? planArcpLoadJobChunks(uiOpts, undefined, { kind: 'detail' })
+    : planArcpSummaryDateChunks(uiOpts);
   const span = arcpDateSpanDays(uiOpts.startDate ?? null, uiOpts.endDate ?? null) ?? 0;
   const chunkGranularity = resolveArcpChunkGranularity(span);
   const concurrency =
