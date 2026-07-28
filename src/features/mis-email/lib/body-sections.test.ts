@@ -187,6 +187,15 @@ describe('buildEmailBodySectionsHtml', () => {
     expect(html).toContain('>98<');
   });
 
+  it('allows empty regional rows (scoped user / no data) without throwing', () => {
+    const html = buildEmailBodySectionsHtml(['regional_performance'], {
+      summary: sampleData,
+      regionalPerformanceRows: [],
+    });
+    expect(html).toContain('Regional Performance');
+    expect(html).toContain('All');
+  });
+
   it('renders key account breakdown for selected accounts', () => {
     const context: MisEmailBodyContext = {
       summary: sampleData,

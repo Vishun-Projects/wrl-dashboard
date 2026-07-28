@@ -213,6 +213,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
   const { activeJobs, lastFinished, hasActiveSend, clearLastFinished } = useMisEmailSendJobs();
   const [livePreview, setLivePreview] = useState<MisEmailComposePreview | null>(null);
   const [livePreviewLoading, setLivePreviewLoading] = useState(false);
+  const [livePreviewError, setLivePreviewError] = useState<string | null>(null);
   const [availableKeyAccountsByZone, setAvailableKeyAccountsByZone] = useState<MisEmailKeyAccountsByZone>(
     settings.availableKeyAccountsByZone ?? emptyZoneSelections()
   );
@@ -326,10 +327,12 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
     if (layoutPreview === null) {
       setLivePreview(null);
       setLivePreviewLoading(false);
+      setLivePreviewError(null);
       return;
     }
 
     setLivePreview(null);
+    setLivePreviewError(null);
 
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
@@ -342,9 +345,16 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
         )
         .then((res) => {
           setLivePreview(res.data.preview as MisEmailComposePreview);
+          setLivePreviewError(null);
         })
         .catch((err: unknown) => {
           if (axios.isCancel(err)) return;
+          const message = axios.isAxiosError<{ error?: string }>(err)
+            ? err.response?.data?.error || err.message
+            : err instanceof Error
+              ? err.message
+              : 'Failed to load live figures';
+          setLivePreviewError(message || 'Failed to load live figures');
         })
         .finally(() => {
           if (!controller.signal.aborted) {
@@ -922,7 +932,9 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                 ? 'Live figures from your reports'
                 : livePreviewLoading
                   ? 'Loading real figures in the background…'
-                  : 'Layout loads instantly — figures fill in shortly'}
+                  : livePreviewError
+                    ? 'Layout only — live figures failed'
+                    : 'Layout loads instantly — figures fill in shortly'}
             </p>
           </div>
           {displayPreview?.attachments?.length ? (
@@ -935,6 +947,10 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
               ) : livePreview ? (
                 <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">
                   Live
+                </span>
+              ) : livePreviewError ? (
+                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800">
+                  Layout only
                 </span>
               ) : null}
               {displayPreview.attachments.map((file) => (
@@ -960,6 +976,11 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                 {livePreview.keyAccountRowsTotal} — full list is in the attached Excel.
               </p>
             ) : null}
+          </div>
+        ) : null}
+        {livePreviewError ? (
+          <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-[11px] text-amber-900">
+            Could not load live figures: {livePreviewError}
           </div>
         ) : null}
 

@@ -402,7 +402,8 @@ function resolveRegionalPerformanceRows(
   data: SummaryDashboard,
   bodyContext: MisEmailBodyContext
 ): RegionalPerformanceRow[] {
-  if (bodyContext.regionalPerformanceRows?.length) {
+  // Empty array is valid (scoped user / no rows in range) — do not treat as "missing".
+  if (bodyContext.regionalPerformanceRows !== undefined) {
     return bodyContext.regionalPerformanceRows;
   }
   throw new Error(

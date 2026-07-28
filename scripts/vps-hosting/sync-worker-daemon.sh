@@ -89,4 +89,5 @@ fi
 interval_ms="${SYNC_INTERVAL_MS:-180000}"
 echo "=== sync-worker-daemon $(date -Iseconds) TZ=${TZ:-system} interval=${interval_ms}ms node=$(node -v) env=${ENV_FILE} ==="
 
+export NODE_OPTIONS="--max-old-space-size=4096 ${NODE_OPTIONS:-}"
 exec npm run sync-worker:daemon
