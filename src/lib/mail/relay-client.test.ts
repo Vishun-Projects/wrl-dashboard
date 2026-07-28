@@ -72,6 +72,28 @@ describe('mail relay local vs live URL order', () => {
       `https://api.wrl-fsm.cloud${PREPARED}`,
     ]);
   });
+
+  it('production ignores tunnel flag — never tries 127.0.0.1', () => {
+    stashEnv();
+    env.NODE_ENV = 'production';
+    env.VPS_MAIL_RELAY_TUNNEL = 'true';
+    delete env.VPS_MAIL_RELAY_URL;
+    delete env.VPS_MAIL_RELAY_DEV_URL;
+    expect(resolveRelayTryUrls(PREPARED)).toEqual([`https://api.wrl-fsm.cloud${PREPARED}`]);
+  });
+
+  it('development prefers DEV_URL then tunnel then production', () => {
+    stashEnv();
+    env.NODE_ENV = 'development';
+    env.VPS_MAIL_RELAY_DEV_URL = 'http://127.0.0.1:9999';
+    env.VPS_MAIL_RELAY_TUNNEL = 'true';
+    delete env.VPS_MAIL_RELAY_URL;
+    expect(resolveRelayTryUrls(PREPARED)).toEqual([
+      `http://127.0.0.1:9999${PREPARED}`,
+      `http://127.0.0.1:8789${PREPARED}`,
+      `https://api.wrl-fsm.cloud${PREPARED}`,
+    ]);
+  });
 });
 
 describe('mail relay transient HTTP handling', () => {

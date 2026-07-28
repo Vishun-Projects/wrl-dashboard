@@ -653,21 +653,21 @@ export default function CallDistributionPage() {
           <div class="p-2.5 text-slate-800 font-sans min-w-[220px] bg-bg-canvas rounded-xl border border-slate-200/80 shadow-xl">
             <h4 class="font-bold border-b border-slate-100 pb-1.5 mb-1.5 flex justify-between items-center text-xs text-slate-900">
               <span>Pincode: <b class="text-teal-650">${pin.pincode}</b></span>
-              <span class="px-1.5 py-0.5 rounded-full text-[9px] bg-slate-100 text-slate-650 font-bold">Cluster</span>
+              <span class="ui-chip px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold">Cluster</span>
             </h4>
-            <div class="space-y-1 text-[11px] text-slate-600">
+            <div class="space-y-1 ui-help text-slate-700">
               <p>Total Active Calls: <b class="text-slate-950 font-semibold">${pin.total_calls}</b></p>
               <p>Open Backlog: <b class="text-amber-600 font-bold">${pin.open_calls}</b></p>
               <div class="border-t border-slate-100 mt-1.5 pt-1.5 max-h-[90px] overflow-y-auto space-y-1">
                 ${pin.franchisees.map((f) => `
-                  <div class="flex justify-between items-center text-[10px] text-slate-500">
+                  <div class="flex justify-between items-center ui-micro text-slate-600">
                     <span class="truncate pr-1 font-medium">${f.franchisee_name}</span>
                     <span class="font-bold text-slate-800">${f.total_calls}</span>
                   </div>
                 `).join('')}
               </div>
             </div>
-            <p class="mt-2 text-[9px] text-teal-600 italic font-semibold cursor-pointer">Click to focus details table</p>
+            <p class="mt-2 ui-micro text-teal-700 italic font-semibold cursor-pointer">Click to focus details table</p>
           </div>
         `;
 
@@ -971,7 +971,7 @@ export default function CallDistributionPage() {
                 <p className="text-xs font-bold text-slate-700">
                   {mapLoadError ? "Map Load Failed (CDN Blocked)" : "Loading Call Distribution Map..."}
                 </p>
-                <p className="text-[10px] text-slate-400">
+                <p className="ui-micro">
                   {mapLoadError ? "Please check your internet connection or browser settings." : "Connecting to leaflet.js..."}
                 </p>
               </div>
@@ -980,18 +980,18 @@ export default function CallDistributionPage() {
 
           {/* Floating Map Indicators */}
           <div className="absolute bottom-4 left-4 z-[500] p-3 rounded-xl bg-bg-canvas border border-slate-200/80 backdrop-blur shadow-lg flex flex-col gap-2 pointer-events-none">
-            <span className="text-[9px] uppercase tracking-wider text-slate-500 font-extrabold">Capacity Health Index</span>
+            <span className="ui-micro uppercase tracking-wider text-slate-600 font-extrabold">Capacity Health Index</span>
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/20" />
-              <span className="text-[10px] text-slate-700 font-medium">&lt; 8 open calls (Balanced)</span>
+              <span className="ui-micro text-slate-700 font-medium">&lt; 8 open calls (Balanced)</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-sm shadow-amber-500/20" />
-              <span className="text-[10px] text-slate-700 font-medium">8 - 15 open calls (Overallocated)</span>
+              <span className="ui-micro text-slate-700 font-medium">8 - 15 open calls (Overallocated)</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-sm shadow-rose-500/20" />
-              <span className="text-[10px] text-slate-700 font-medium">&gt; 15 open calls (Critical Skew)</span>
+              <span className="ui-micro text-slate-700 font-medium">&gt; 15 open calls (Critical Skew)</span>
             </div>
           </div>
         </div>
@@ -1069,7 +1069,7 @@ export default function CallDistributionPage() {
             onClearTableLink={clearTableLink}
           />
           {highlightedFranchisee && linkedIdleCount === 0 && !distributionLoading ? (
-            <p className="shrink-0 border-b border-amber-100 bg-amber-50/80 px-4 py-1.5 text-[10px] text-amber-800">
+            <p className="ui-help shrink-0 border-b border-amber-100 bg-amber-50/80 px-4 py-1.5 text-amber-900">
               Linked ASP has no rows in the idle list for &quot;{idleIssueFilter ? IDLE_ISSUE_LABELS[idleIssueFilter] : 'all statuses'}&quot; — try clearing the idle status pill or pick another ASP.
             </p>
           ) : null}
@@ -1210,7 +1210,7 @@ export default function CallDistributionPage() {
                       </span>
                       {row.franchiseeName ? (
                         <span
-                          className="block truncate text-[9px] font-medium text-slate-400"
+                          className="block truncate ui-micro text-slate-500"
                           title={`ASP: ${row.franchiseeName}`}
                         >
                           ASP: {row.franchiseeName}

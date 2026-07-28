@@ -359,11 +359,11 @@ export function ReportAccountsTabPanel({
                         <thead className="sticky top-0 z-20 outline outline-1 outline-slate-800 shadow-sm">
                           {/* Category Headers */}
                           <tr className="account-mis-cat-header bg-slate-800 text-white ui-strong">
-                            <th className="p-1.5 border-r border-slate-600/50" colSpan={accountMisGrouping === 'overview' ? 2 : 3}>Basics</th>
-                            <th className="p-1.5 border-r border-slate-600/50 text-center" colSpan={4}>Calls Summary (Breakdown)</th>
-                            <th className="p-1.5 border-r border-slate-600/50 text-center account-mis-cat-header--aging" colSpan={7}>Breakdown (Aging)</th>
-                            <th className="p-1.5 border-r border-slate-600/50 text-center account-mis-cat-header--deploy" colSpan={3}>Deployment</th>
-                            <th className="p-1.5 text-center account-mis-cat-header--install" colSpan={2}>Installation</th>
+                            <th className="ui-field-label p-1.5 border-r border-slate-600/50 text-white" colSpan={accountMisGrouping === 'overview' ? 2 : 3}>Basics</th>
+                            <th className="ui-field-label p-1.5 border-r border-slate-600/50 text-center text-white" colSpan={4}>Calls Summary (Breakdown)</th>
+                            <th className="ui-field-label p-1.5 border-r border-slate-600/50 text-center text-white account-mis-cat-header--aging" colSpan={7}>Breakdown (Aging)</th>
+                            <th className="ui-field-label p-1.5 border-r border-slate-600/50 text-center text-white account-mis-cat-header--deploy" colSpan={3}>Deployment</th>
+                            <th className="ui-field-label p-1.5 text-center text-white account-mis-cat-header--install" colSpan={2}>Installation</th>
                           </tr>
                           <tr className="account-mis-col-header bg-slate-100 text-slate-700 ui-strong">
                             {accountMisGrouping !== 'overview' ? (

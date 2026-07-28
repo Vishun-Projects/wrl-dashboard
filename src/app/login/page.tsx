@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Image from 'next/image';
 import { defaultLandingPath } from '@/lib/auth/rbac-catalog';
 
 export default function LoginPage() {
@@ -57,7 +58,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f8fafc] p-6 font-sans">
+    <div className="flex min-h-screen items-center justify-center bg-bg-soft p-6 font-sans">
       {/* Background decoration */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-100 blur-[120px]" />
@@ -68,18 +69,21 @@ export default function LoginPage() {
         <div className="flex flex-col items-center text-center">
           {/* Logo Section */}
           <div className="mb-8">
-            <img
+            <Image
               src="/western-head-logo-2025.png"
               alt="Western Logo"
+              width={160}
+              height={64}
               className="w-40 h-auto object-contain"
+              priority
             />
           </div>
 
           <div className="space-y-1 mb-10">
-            <h1 className="text-2xl text-[#0f172a] ui-strong">
+            <h1 className="ui-page-title">
               WRL Dashboard
             </h1>
-            <p className="text-[13px] font-medium text-slate-400">
+            <p className="ui-help">
               Western Refrigeration Pvt. Ltd.
             </p>
           </div>
@@ -88,7 +92,7 @@ export default function LoginPage() {
         <form onSubmit={handleLogin} className="space-y-6">
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-[11px] text-slate-400 ml-1 ui-label">
+              <label className="ui-field-label ml-1">
                 Email Address
               </label>
               <input
@@ -103,10 +107,10 @@ export default function LoginPage() {
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between ml-1">
-                <label className="text-[11px] text-slate-400 ui-label">Password</label>
+                <label className="ui-field-label">Password</label>
                 <a
                   href="/forgot-password"
-                  className="text-[11px] font-medium text-slate-500 hover:text-slate-800 transition-colors"
+                  className="ui-help text-slate-600 hover:text-slate-900 transition-colors"
                 >
                   Forgot password?
                 </a>
@@ -123,23 +127,23 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <div className="flex items-center gap-2 p-4 bg-rose-50 rounded-2xl border border-rose-100 animate-in fade-in slide-in-from-top-1">
+            <div className="ui-help flex items-center gap-2 p-4 bg-rose-50 rounded-2xl border border-rose-100 animate-in fade-in slide-in-from-top-1 text-rose-700">
               <div className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
-              <p className="text-[12px] text-rose-600 ui-label">{error}</p>
+              <p>{error}</p>
             </div>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full h-14 bg-[#0f172a] text-white rounded-2xl text-[15px] shadow-[0_20px_40px_-12px_rgba(15,23,42,0.3)] hover:bg-slate-800 transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 ui-strong"
+            className="w-full h-14 bg-slate-900 text-white rounded-2xl text-[15px] shadow-[0_20px_40px_-12px_rgba(15,23,42,0.3)] hover:bg-slate-800 transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 ui-strong"
           >
             {loading ? 'Authenticating...' : 'Login'}
           </button>
         </form>
 
         <div className="mt-10 pt-8 border-t border-slate-50 text-center">
-          <p className="text-[10px] text-slate-300 tracking-[0.2em] ui-label">
+          <p className="ui-micro tracking-[0.2em]">
             Internal Access Only
           </p>
         </div>

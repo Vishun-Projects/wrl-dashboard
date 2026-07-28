@@ -349,7 +349,7 @@ export default function ReportPageClient() {
           if (parsed.data) setData(parsed.data);
           if (parsed.total) setTotal(parsed.total);
         }
-      } catch(e) {}
+      } catch { /* ignore */ }
     }
     setMounted(true);
   }, []);
@@ -385,9 +385,9 @@ export default function ReportPageClient() {
     });
   }, []);
 
-  const [selectedBranchEngs, setSelectedBranchEngs] = useState<string[]>([]);
+  const [selectedBranchEngs] = useState<string[]>([]);
   const [showEngPopup, setShowEngPopup] = useState<string | null>(null);
-  const [fetchingEngs, setFetchingEngs] = useState(false);
+  const [fetchingEngs] = useState(false);
   const [expandedBranches, setExpandedBranches] = useState<Record<string, boolean>>({});
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(globalReportCache?.lastRefreshed || null);
   const [filterRegion, setFilterRegion] = useState<string[]>(globalReportCache?.filterRegion || []); // Array for multiselect
@@ -689,7 +689,7 @@ export default function ReportPageClient() {
           <span className="inline-flex items-center gap-1.5">
             {row.PartyName}
             {priorityFilter.length === 0 && row.is_major_repair === 'True' && (
-              <span className="report-major-badge rounded bg-rose-500 px-1 py-0.5 text-[8px] text-white ui-strong">MAJOR</span>
+              <span className="report-major-badge rounded bg-rose-500 px-1 py-0.5 ui-micro text-white ui-strong">MAJOR</span>
             )}
           </span>
         );
@@ -738,7 +738,7 @@ export default function ReportPageClient() {
             {chips.map((c) => (
               <span
                 key={c.label}
-                className={`rounded border px-1.5 py-0.5 text-[9px] ui-label ${c.className}`}
+                className={`rounded border px-1.5 py-0.5 ui-chip ${c.className}`}
               >
                 {c.label}
               </span>
@@ -769,9 +769,9 @@ export default function ReportPageClient() {
           const commentCount = row.comment_count ?? row.comments?.length ?? 0;
           return (
             <div className="flex flex-col items-start gap-1">
-              <span className={`text-[10px] px-2 py-0.5 rounded ui-label ${badgeClass}`}>{label}</span>
+              <span className={`ui-chip px-2 py-0.5 rounded ${badgeClass}`}>{label}</span>
               {commentCount > 0 && (
-                <span className="text-[9px] text-slate-400 font-medium">{commentCount} comment{commentCount !== 1 ? 's' : ''}</span>
+                <span className="ui-micro">{commentCount} comment{commentCount !== 1 ? 's' : ''}</span>
               )}
             </div>
           );
@@ -789,7 +789,7 @@ export default function ReportPageClient() {
           if (rejectionRemark) {
             return <span className="font-medium text-rose-600">⚑ {rejectionRemark}</span>;
           }
-          return <span className="text-slate-400">{solveRemark || '—'}</span>;
+          return <span className="ui-help">{solveRemark || '—'}</span>;
         })();
       case 'vpersoncalling':
         return row.vpersoncalling;
@@ -821,7 +821,6 @@ export default function ReportPageClient() {
   const fetchControllerRef = React.useRef<AbortController | null>(null);
   const registerAuthFailedRef = React.useRef(false);
   const drillDownControllerRef = React.useRef<AbortController | null>(null);
-  const sentinelRef = React.useRef<HTMLDivElement | null>(null);
   const lastSummaryQueryKeyRef = React.useRef<string | null>(globalReportCache?.summaryQueryKey ?? null);
   const lastRegisterListQueryKeyRef = React.useRef<string | null>(null);
   const lastAppliedFilterSnapshotRef = React.useRef<string | null>(null);
@@ -931,7 +930,7 @@ export default function ReportPageClient() {
             accountsData,
             globalHeadcount
           }));
-        } catch(e) {}
+        } catch { /* ignore */ }
           
         const officeIdsParam = summaryOfficeIdsParam;
         const startDateStr = toDateString(dateRange.start);
@@ -958,9 +957,6 @@ export default function ReportPageClient() {
     }
   };
 
-  const getEffectiveViewFilters = useCallback((): RegisterViewFilterParts => {
-    return registerViewFilterRef.current;
-  }, []);
 
   /** Summary/Accounts rows must include region hierarchy and headcount. */
   const isApiShapedSummary = (rows: unknown[]): boolean =>
@@ -1401,25 +1397,6 @@ export default function ReportPageClient() {
       setClientImportActiveSources([]);
     }
   }, []);
-
-  const fetchSummaryFromApi = useCallback(async (): Promise<boolean> => {
-    const payload = await loadSummaryFromApiPayload();
-    if (!payload) return false;
-    commitSummaryResult(
-      payload.branchSummary,
-      payload.accountSummary,
-      payload.globalHeadcount,
-      payload.startDateStr,
-      payload.endDateStr,
-      payload.agingStr
-    );
-    void refreshClientImportOverlayRef.current({
-      startDate: payload.startDateStr,
-      endDate: payload.endDateStr,
-      agingAsOf: payload.agingStr,
-    });
-    return payload.branchSummary.length > 0 || payload.accountSummary.length > 0;
-  }, [loadSummaryFromApiPayload, commitSummaryResult]);
 
   const applyRegisterFromCorpus = useCallback(
     (pageNum = 1, pageLimit: RegisterPageSize = limit): boolean => {
@@ -2446,17 +2423,6 @@ export default function ReportPageClient() {
     [fetchData]
   );
 
-  const formatSQLDate = (date: Date) => {
-    const pad = (num: number) => String(num).padStart(2, '0');
-    const yyyy = date.getFullYear();
-    const MM = pad(date.getMonth() + 1);
-    const dd = pad(date.getDate());
-    const hh = pad(date.getHours());
-    const mm = pad(date.getMinutes());
-    const ss = pad(date.getSeconds());
-    return `${yyyy}-${MM}-${dd} ${hh}:${mm}:${ss}`;
-  };
-
   const isTransferred = (rec: any) => {
     return (rec.vtransfercallno && String(rec.vtransfercallno).trim() !== '') || String(rec.ncancelreason) === '2';
   };
@@ -2714,28 +2680,6 @@ export default function ReportPageClient() {
       if (axios.isCancel(err)) return;
       feedback.actionFailed('Failed to fetch details');
       setDrillDown(prev => ({ ...prev, loading: false }));
-    }
-  };
-
-  const fetchEngineers = async (branch: string) => {
-    setFetchingEngs(true);
-    setShowEngPopup(branch);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const startDateStr = toDateString(dateRange.start);
-      const endDateStr = toDateString(dateRange.end);
-      let url = `/api/report/engineers?branch=${encodeURIComponent(branch)}`;
-      if (startDateStr) url += `&startDate=${startDateStr}`;
-      if (endDateStr) url += `&endDate=${endDateStr}`;
-
-      const res = await axios.get(url, {
-        headers: { 'Authorization': `Bearer ${session?.access_token}` }
-      });
-      setSelectedBranchEngs(res.data);
-    } catch (err) {
-      feedback.actionFailed('Failed to fetch engineer names');
-    } finally {
-      setFetchingEngs(false);
     }
   };
 
@@ -3157,7 +3101,6 @@ export default function ReportPageClient() {
     if (debouncedSearch?.trim() || debouncedPincodeSearch?.trim()) return;
     if (!globalReportCache) return;
 
-    const officeIdsParam = summaryOfficeIdsParam;
     const startDateStr =
       toDateString(dateRange.start);
     const endDateStr =
@@ -3663,19 +3606,6 @@ export default function ReportPageClient() {
     };
   }, []);
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const t0 = performance.now();
-    reportPerf('searchForm', 'submit (skipCache, raw search+pincode)', t0, {
-      why: 'Bypasses debounce and session cache for explicit search.',
-    });
-    fetchData(1, {
-      searchOverride: search,
-      pincodeOverride: pincodeSearch,
-      skipCache: true,
-    });
-  };
-
   const buildCurrentRegisterQueryKey = useCallback(() => {
     const startDateStr = toDateString(dateRange.start);
     const endDateStr = toDateString(dateRange.end);
@@ -3994,35 +3924,11 @@ export default function ReportPageClient() {
     [activeTab, enqueueExport, executeExport]
   );
 
-  const totalPages = Math.ceil(total / limit);
-
   const localFilteredData = React.useMemo(() => {
     return data;
   }, [data]);
 
   const displayedData = localFilteredData;
-
-  const liveStats = React.useMemo(() => {
-    let total = 0;
-    let solved = 0;
-    let open = 0;
-    let cancelled = 0;
-
-    localFilteredData.forEach(row => {
-      const isTransferred = (row.vtransfercallno && row.vtransfercallno !== '') || row.cancel_reason?.includes('Transfer');
-      if (isTransferred) return;
-
-      total++;
-      const bucket = classifyRegisterRowStatus(row);
-      if (bucket === 'transferred') return;
-
-      if (bucket === 'cancelled') cancelled++;
-      else if (bucket === 'closed' || bucket === 'techSolved') solved++;
-      else open++;
-    });
-
-    return { total, solved, open, cancelled };
-  }, [localFilteredData]);
 
 
   if (!mounted) {
@@ -4041,7 +3947,7 @@ export default function ReportPageClient() {
                 onClick={() => {
                   setActiveTab(tab.id);
                 }}
-                className={`relative flex h-14 items-center px-3 text-xs font-medium transition-all ${activeTab === tab.id ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600' }`}
+                className={`relative flex h-14 items-center px-3 ui-help font-medium transition-all ${activeTab === tab.id ? 'text-slate-900' : 'text-slate-500 hover:text-slate-700' }`}
               >
                 {tab.label}
                 {activeTab === tab.id && (
@@ -4055,14 +3961,14 @@ export default function ReportPageClient() {
         <div className="flex items-center gap-2">
           {lastRefreshed && (
             <span
-              className="text-[10px] text-slate-400 font-medium"
+              className="ui-micro"
               title={`Last refreshed: ${lastRefreshed.toLocaleString()}`}
             >
               {formatRelativeTime(lastRefreshed)}
             </span>
           )}
           {filterUpdating && (
-            <span className="text-[10px] font-medium text-blue-600 animate-pulse">
+            <span className="ui-micro text-blue-600 animate-pulse">
               Updating filters…
             </span>
           )}
@@ -4197,7 +4103,7 @@ export default function ReportPageClient() {
               />
             </div>
             <div className="report-toolbar-filters-aging report-shared-aging-group flex shrink-0 items-center gap-2">
-              <span className="report-shared-aging-label text-[10px] whitespace-nowrap text-amber-600 ui-label">Aging As Of</span>
+              <span className="report-shared-aging-label ui-micro whitespace-nowrap text-amber-600">Aging As Of</span>
               <UiDateInput
                 className="register-filter-select report-shared-aging-input border-amber-200 bg-amber-50/80 text-amber-900"
                 value={agingAsOf}

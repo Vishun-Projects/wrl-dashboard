@@ -21,11 +21,22 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-/** Fixed greeting for Daily MIS Report distribution. */
-export function formatRecipientGreeting(name?: string, email?: string): string {
+export type MisEmailTemplateBranding = {
+  greeting?: string;
+  brandTitle?: string;
+  brandSubtitle?: string;
+  subjectTemplate?: string;
+};
+
+/** Fixed greeting for Daily MIS Report distribution (overridable via org settings). */
+export function formatRecipientGreeting(
+  name?: string,
+  email?: string,
+  greeting = 'Dear Zonal Heads,'
+): string {
   void name;
   void email;
-  return 'Dear Zonal Heads,';
+  return greeting;
 }
 
 /** e.g. "July 2026" from date range end date */
@@ -52,9 +63,17 @@ export function formatSubjectAsOnDate(isoDate?: string, fallback = new Date()): 
   return `${day}-${month}-${year}`;
 }
 
-/** Subject: Daily MIS Report as on DD-MM-YYYY */
-export function formatDigestSubject(endDate?: string, fallback = new Date()): string {
-  return `Daily MIS Report as on ${formatSubjectAsOnDate(endDate, fallback)}`;
+/** Subject: Daily MIS Report as on DD-MM-YYYY (`{asOn}` placeholder in template). */
+export function formatDigestSubject(
+  endDate?: string,
+  fallback = new Date(),
+  subjectTemplate = 'Daily MIS Report as on {asOn}'
+): string {
+  const asOn = formatSubjectAsOnDate(endDate, fallback);
+  if (subjectTemplate.includes('{asOn}')) {
+    return subjectTemplate.replaceAll('{asOn}', asOn);
+  }
+  return subjectTemplate.trim() || `Daily MIS Report as on ${asOn}`;
 }
 
 function buildCtaLink(href: string, label: string): string {
@@ -181,14 +200,23 @@ export function buildDigestEmailPlainText(params: {
   scopeLabel: string;
   portalUrl: string;
   bodyPlainText?: string;
+  branding?: MisEmailTemplateBranding;
 }): string {
   const reportUrl = `${params.portalUrl.replace(/\/$/, '')}/report`;
-  const greeting = formatRecipientGreeting(params.recipientName, params.recipientEmail);
+  const greeting = formatRecipientGreeting(
+    params.recipientName,
+    params.recipientEmail,
+    params.branding?.greeting
+  );
   const period = formatReportPeriod(params.dateRange);
   const bodyPreview = params.bodyPlainText?.trim();
+  const brandLine =
+    params.branding?.brandSubtitle?.trim() ||
+    params.branding?.brandTitle?.trim() ||
+    'WRL Dashboard — Western Refrigeration Pvt. Ltd.';
 
   const lines = [
-    'WRL Dashboard — Western Refrigeration Pvt. Ltd.',
+    brandLine,
     '',
     greeting,
     '',
@@ -213,13 +241,20 @@ export function buildDigestEmailHtml(params: {
   scopeLabel: string;
   portalUrl: string;
   bodyHtml?: string;
+  branding?: MisEmailTemplateBranding;
 }, options?: { forPreview?: boolean }): string {
   void options;
   const t = MIS_EMAIL_THEME;
   const reportUrl = `${params.portalUrl.replace(/\/$/, '')}/report`;
-  const greeting = formatRecipientGreeting(params.recipientName, params.recipientEmail);
+  const greeting = formatRecipientGreeting(
+    params.recipientName,
+    params.recipientEmail,
+    params.branding?.greeting
+  );
   const period = formatReportPeriod(params.dateRange);
-  const preheader = `Daily MIS Report as on ${formatSubjectAsOnDate(params.dateRange.endDate)} — ${params.scopeLabel}`;
+  const brandTitle = params.branding?.brandTitle?.trim() || 'WESTERN REFRIGERATION';
+  const brandSubtitle = params.branding?.brandSubtitle?.trim() || 'WRL Dashboard (Revised)';
+  const preheader = `${formatDigestSubject(params.dateRange.endDate, undefined, params.branding?.subjectTemplate)} — ${params.scopeLabel}`;
   const cta = buildCtaLink(reportUrl, 'Open WRL Dashboard');
   const bodyHtml = params.bodyHtml?.trim() ?? '';
   const introText = 'Please find enclosed daily MIS Report.';
@@ -248,10 +283,10 @@ export function buildDigestEmailHtml(params: {
                   <td class="email-panel" bgcolor="${t.bgCanvas}" style="padding:32px 36px 24px;background-color:${t.bgCanvas};">
                     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                       <tr>
-                        <td class="email-brand" style="padding:0 0 4px;font-family:${t.fontInline};font-size:11px;font-weight:bold;line-height:1.4;letter-spacing:0.6px;color:${t.fgMuted};">WESTERN REFRIGERATION</td>
+                        <td class="email-brand" style="padding:0 0 4px;font-family:${t.fontInline};font-size:11px;font-weight:bold;line-height:1.4;letter-spacing:0.6px;color:${t.fgMuted};">${escapeHtml(brandTitle)}</td>
                       </tr>
                       <tr>
-                        <td class="email-title" style="padding:0 0 24px;font-family:${t.fontInline};font-size:20px;font-weight:bold;line-height:1.25;color:${t.fgPrimary};">WRL Dashboard (Revised)</td>
+                        <td class="email-title" style="padding:0 0 24px;font-family:${t.fontInline};font-size:20px;font-weight:bold;line-height:1.25;color:${t.fgPrimary};">${escapeHtml(brandSubtitle)}</td>
                       </tr>
                       <tr>
                         <td style="padding:0 0 24px;border-top:1px solid ${t.border};font-size:0;line-height:0;height:1px;">&nbsp;</td>

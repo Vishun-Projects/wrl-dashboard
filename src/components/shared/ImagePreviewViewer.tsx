@@ -245,6 +245,8 @@ export function ImagePreviewViewer({ src, title, onClose }: ImagePreviewViewerPr
         aria-label="Image viewport. Use arrow keys to pan when zoomed."
       >
         <div className="flex h-full w-full items-center justify-center p-4 sm:p-8">
+          {/* Pan/zoom/rotate needs a raw img; next/image fights transform. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={src}
             alt={title || 'Call attachment preview'}

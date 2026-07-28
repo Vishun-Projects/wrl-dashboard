@@ -126,11 +126,14 @@ export async function PATCH(request: Request) {
       includeKeyAccount: recipient.includeKeyAccount,
     };
 
+    const { getMisEmailOrgSettings } = await import('@/features/mis-email/lib/org-settings');
+    const org = await getMisEmailOrgSettings();
     const validated = validateMisEmailPreferencesPatch({
       patch: body,
       permissions,
       current,
       misEmailEnabled: true,
+      allowedEmailDomains: org.allowedEmailDomains,
     });
 
     if (!validated.ok) {

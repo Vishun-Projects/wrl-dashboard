@@ -1,4 +1,6 @@
 import { seesAllOfficesForUser } from '@/lib/auth/rbac-catalog';
+import { assertAllowedEmailDomains } from '@/features/mis-email/lib/allowed-domains';
+import { getMisEmailOrgSettings } from '@/features/mis-email/lib/org-settings';
 import { resolveDigestDateRangeForPreferences } from '@/features/mis-email/lib/preferences';
 import {
   queryDigestAccountNames,
@@ -197,7 +199,7 @@ export async function ensureMisEmailRoutingRulesTable(): Promise<void> {
         schedule_window_end_ist text NULL,
         to_emails text[] NOT NULL DEFAULT '{}',
         cc_emails text[] NOT NULL DEFAULT '{}',
-        auto_send_enabled boolean NOT NULL DEFAULT true,
+        auto_send_enabled boolean NOT NULL DEFAULT false,
         created_at timestamptz NOT NULL DEFAULT now(),
         updated_at timestamptz NOT NULL DEFAULT now()
       );
@@ -214,6 +216,10 @@ export async function ensureMisEmailRoutingRulesTable(): Promise<void> {
         ADD COLUMN IF NOT EXISTS schedule_days_of_week text[] NOT NULL DEFAULT ARRAY['MON','TUE','WED','THU','FRI','SAT','SUN']::text[],
         ADD COLUMN IF NOT EXISTS schedule_window_start_ist text,
         ADD COLUMN IF NOT EXISTS schedule_window_end_ist text;
+    `);
+    await client.query(`
+      ALTER TABLE public.mis_email_routing_rules
+        ALTER COLUMN auto_send_enabled SET DEFAULT false;
     `);
     await client.query(`
       CREATE TABLE IF NOT EXISTS public.mis_email_routing_send_log (
@@ -359,6 +365,8 @@ export async function createMisEmailRoutingRule(input: {
   if (toEmails.length === 0) {
     throw new Error('At least one To email is required');
   }
+  const org = await getMisEmailOrgSettings();
+  assertAllowedEmailDomains([...toEmails, ...ccEmails], org.allowedEmailDomains);
 
   return withAppClient(async (client) => {
     const duplicate = await client.query<{ id: string }>(
@@ -392,7 +400,7 @@ export async function createMisEmailRoutingRule(input: {
         scheduleWindowEndIst,
         toEmails,
         ccEmails,
-        input.autoSendEnabled !== false,
+        input.autoSendEnabled === true,
       ]
     );
     return rowToRule(res.rows[0]);
@@ -434,6 +442,8 @@ export async function updateMisEmailRoutingRule(input: {
   if (toEmails.length === 0) {
     throw new Error('At least one To email is required');
   }
+  const org = await getMisEmailOrgSettings();
+  assertAllowedEmailDomains([...toEmails, ...ccEmails], org.allowedEmailDomains);
 
   return withAppClient(async (client) => {
     const duplicate = await client.query<{ id: string }>(
@@ -481,7 +491,7 @@ export async function updateMisEmailRoutingRule(input: {
         scheduleWindowEndIst,
         toEmails,
         ccEmails,
-        input.autoSendEnabled !== false,
+        input.autoSendEnabled === true,
       ]
     );
     if (!res.rows[0]) throw new Error('Rule not found');

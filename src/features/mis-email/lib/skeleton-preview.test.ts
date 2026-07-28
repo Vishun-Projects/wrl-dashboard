@@ -24,6 +24,19 @@ describe('buildMisEmailSkeletonPreview', () => {
     ).toBeNull();
   });
 
+  it('empty prefs + summary permission yield non-null skeleton with default attachments', () => {
+    const preview = buildMisEmailSkeletonPreview({
+      preferences: {},
+      permissions: basePermissions,
+      scopeLabel: 'All branches',
+      recipientName: 'Test User',
+      recipientEmail: 'test@example.com',
+    });
+    expect(preview).not.toBeNull();
+    expect(preview?.attachments.length).toBeGreaterThan(0);
+    expect(preview?.attachments.some((name) => /summary/i.test(name))).toBe(true);
+  });
+
   it('builds layout preview with skeleton tables for enabled body sections', () => {
     const preview = buildMisEmailSkeletonPreview({
       preferences: {

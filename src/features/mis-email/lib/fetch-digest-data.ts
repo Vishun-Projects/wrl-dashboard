@@ -8,6 +8,7 @@ import type { SummaryDashboard } from '@/features/report';
 import type { DigestRecipient } from '@/features/mis-email/lib/recipients';
 import type { UserDigestScope } from '@/features/mis-email/lib/user-scope';
 import { SUMMARY_DEFAULT_CALL_TYPE } from '@/features/report';
+import { getMisEmailOrgSettings } from '@/features/mis-email/lib/org-settings';
 
 export type DigestDateRange = {
   startDate: string;
@@ -20,6 +21,15 @@ export function resolveDigestDateRange(): DigestDateRange {
   return resolveDigestDateRangeForPreferences({ dateRange: 'month_to_date' });
 }
 
+async function resolveDigestCallType(): Promise<string> {
+  try {
+    const org = await getMisEmailOrgSettings();
+    return org.digestCallType || SUMMARY_DEFAULT_CALL_TYPE;
+  } catch {
+    return SUMMARY_DEFAULT_CALL_TYPE;
+  }
+}
+
 export async function fetchDigestSummaryData(
   scope: UserDigestScope,
   dateRange: DigestDateRange = resolveDigestDateRange()
@@ -30,13 +40,14 @@ export async function fetchDigestSummaryData(
     );
   }
 
+  const callType = await resolveDigestCallType();
   const started = Date.now();
   const data = await querySummaryDashboard({
     startDate: dateRange.startDate,
     endDate: dateRange.endDate,
     agingAsOf: dateRange.endDate,
     officeIds: [],
-    callTypes: [SUMMARY_DEFAULT_CALL_TYPE],
+    callTypes: [callType],
     assignedOffices: scope.assignedOffices,
     isHod: scope.isHod,
   });
@@ -55,6 +66,7 @@ export async function fetchDigestRegisterRows(
     throw new Error('MIS email detailed export requires READ_CALLS_FROM=postgres');
   }
 
+  const callType = await resolveDigestCallType();
   const started = Date.now();
   console.log(
     `[mis-email/timing] queryDigestRegisterExport ${dateRange.startDate}→${dateRange.endDate} · direct Postgres`
@@ -64,7 +76,7 @@ export async function fetchDigestRegisterRows(
     limit: 1,
     search: '',
     officeId: 'All',
-    callType: SUMMARY_DEFAULT_CALL_TYPE,
+    callType,
     startDate: dateRange.startDate,
     endDate: dateRange.endDate,
     status: '',

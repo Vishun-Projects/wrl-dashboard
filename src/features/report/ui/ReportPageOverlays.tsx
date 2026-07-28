@@ -143,7 +143,7 @@ export function ReportPageOverlays({
                 <div className="flex items-center justify-between">
                   <h4 className="text-[11px] text-slate-700 flex items-center gap-2 ui-label">
                     Detail Records
-                    <span className="px-2 py-0.5 bg-slate-100 rounded-full text-[9px] ui-strong">{drillDown.data.length} Results</span>
+                    <span className="ui-chip px-2 py-0.5 bg-slate-100 rounded-full ui-strong">{drillDown.data.length} Results</span>
                   </h4>
                 </div>
 
@@ -155,7 +155,7 @@ export function ReportPageOverlays({
                           {drillKeys.map((key) => (
                             <SortableTh
                               key={key}
-                              className="p-3 text-slate-500 border-r border-slate-100 whitespace-nowrap ui-strong"
+                              className="p-3 border-r border-slate-100 whitespace-nowrap"
                               active={drillSort?.key === key}
                               dir={drillSort?.dir}
                               onClick={() => setDrillSort((p) => toggleSort(p, key, 'asc'))}

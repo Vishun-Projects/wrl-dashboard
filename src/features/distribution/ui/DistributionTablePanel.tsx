@@ -112,7 +112,7 @@ export function DistributionTablePanel({
                         <div
                           className={`flex items-center gap-1 ${col.align === 'center' ? 'justify-center' : col.align === 'right' ? 'justify-end' : ''}`}
                         >
-                          <span>{col.label}</span>
+                          <span className="ui-field-label text-slate-700">{col.label}</span>
                           {sortable ? (
                             <SortIndicator
                               active={sortField === col.key}

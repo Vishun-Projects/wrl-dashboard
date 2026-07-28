@@ -79,9 +79,11 @@ export function createMailTransport(smtp: SmtpConfig) {
   });
 }
 
-export function resolvePortalUrl(): string {
+export function resolvePortalUrl(orgPortalBaseUrl?: string | null): string {
   const explicit = process.env.MIS_EMAIL_PORTAL_URL?.trim();
   if (explicit) return explicit.replace(/\/$/, '');
+  const fromOrg = orgPortalBaseUrl?.trim();
+  if (fromOrg) return fromOrg.replace(/\/$/, '');
   const vercel = process.env.VERCEL_URL?.trim();
   if (vercel) return `https://${vercel}`;
   return 'https://wrl-dashboard.vercel.app';

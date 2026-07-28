@@ -290,7 +290,16 @@ export async function PUT(request: Request) {
     }
 
     if (wantsEmail) {
-      const defaultPrefs = JSON.stringify(defaultPreferencesForRecipient(includes));
+      const { getMisEmailOrgSettings } = await import('@/features/mis-email/lib/org-settings');
+      const org = await getMisEmailOrgSettings();
+      const defaultPrefs = JSON.stringify(
+        defaultPreferencesForRecipient(includes, {
+          toEmails: org.defaultToEmails,
+          ccEmails: org.defaultCcEmails,
+          sendTimeIst: org.defaultSendTimeIst,
+          dateRange: org.defaultDateRange,
+        })
+      );
       await prisma.$queryRawUnsafe(
         `UPDATE public.app_users
          SET name = $1, role = $2, role_id = $3, office_ids = $4, visible_statuses = $5,

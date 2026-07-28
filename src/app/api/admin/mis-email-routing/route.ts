@@ -62,7 +62,7 @@ export async function POST(request: Request) {
       scheduleWindowEndIst: body.scheduleWindowEndIst,
       toEmailsCsv: String(body.toEmailsCsv ?? ''),
       ccEmailsCsv: String(body.ccEmailsCsv ?? ''),
-      autoSendEnabled: body.autoSendEnabled !== false,
+      autoSendEnabled: body.autoSendEnabled === true,
     });
     return NextResponse.json({ rule }, { status: 201 });
   } catch (err: unknown) {
@@ -90,7 +90,7 @@ export async function PUT(request: Request) {
       scheduleWindowEndIst: body.scheduleWindowEndIst,
       toEmailsCsv: String(body.toEmailsCsv ?? ''),
       ccEmailsCsv: String(body.ccEmailsCsv ?? ''),
-      autoSendEnabled: body.autoSendEnabled !== false,
+      autoSendEnabled: body.autoSendEnabled === true,
     });
     return NextResponse.json({ rule });
   } catch (err: unknown) {

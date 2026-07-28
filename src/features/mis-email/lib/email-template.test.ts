@@ -33,6 +33,11 @@ describe('formatDigestSubject', () => {
     const { formatDigestSubject } = await import('@/features/mis-email/lib/email-template');
     expect(formatDigestSubject('2026-07-03')).toBe('Daily MIS Report as on 03-07-2026');
   });
+
+  it('applies org subject template with {asOn}', async () => {
+    const { formatDigestSubject } = await import('@/features/mis-email/lib/email-template');
+    expect(formatDigestSubject('2026-07-03', undefined, 'MIS {asOn}')).toBe('MIS 03-07-2026');
+  });
 });
 
 describe('buildDigestEmailHtml', () => {

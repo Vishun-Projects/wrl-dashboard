@@ -13,6 +13,10 @@ import {
   buildMajorRepairRepeatDetailSql,
   buildRegisterRepairDoneByCallKeysSql,
 } from '@/lib/trhcalls/query';
+import {
+  assertOrgOutboundMailEnabled,
+  getMisEmailOrgSettings,
+} from '@/lib/org-settings/mis-email';
 
 const CRM_TIMEOUT_MS = 45_000;
 const REPAIR_ENRICH_CHUNK = 150;
@@ -281,11 +285,12 @@ async function sendRepeatAlertEmail(params: {
     return;
   }
 
+  const org = await getMisEmailOrgSettings();
   const branchPeople = await listEnabledEmailsForBranch(params.branchName);
   const { to, cc } = resolveAlertRecipients({
     branchEmails: branchPeople.map((p) => p.email),
-    hqTo: majorRepairRepeatToEmail(),
-    hqCc: majorRepairRepeatCcEmail(),
+    hqTo: process.env.MAJOR_REPAIR_REPEAT_TO?.trim() || org.majorRepairDefaultTo,
+    hqCc: process.env.MAJOR_REPAIR_REPEAT_CC?.trim() || org.majorRepairDefaultCc,
   });
   if (!to.length) {
     throw new Error(
@@ -319,6 +324,13 @@ export async function checkMajorRepairRepeatAlerts(upsertedRows: HotRow[]): Prom
   if (!isMajorRepairRepeatAlertEnabled()) return;
   if (!upsertedRows.length) return;
 
+  try {
+    await assertOrgOutboundMailEnabled();
+  } catch {
+    return;
+  }
+
+  const org = await getMisEmailOrgSettings();
   const majorRows = upsertedRows.filter((r) => r.is_major && normalizeSerial(r.serial));
   if (!majorRows.length) return;
 
@@ -330,8 +342,12 @@ export async function checkMajorRepairRepeatAlerts(upsertedRows: HotRow[]): Prom
   const pending = candidates.filter((c) => !alreadySent.has(c.vtrnno));
   if (!pending.length) return;
 
-  const minCount = majorRepairRepeatMinCount();
-  const months = majorRepairRepeatMonths();
+  const minCount = process.env.MAJOR_REPAIR_REPEAT_MIN_COUNT
+    ? majorRepairRepeatMinCount()
+    : org.majorRepairMinCount;
+  const months = process.env.MAJOR_REPAIR_REPEAT_MONTHS
+    ? majorRepairRepeatMonths()
+    : org.majorRepairMonths;
   const { startDate, endDate } = majorRepairRepeatDateWindow(months);
 
   const bySerial = new Map<string, MajorRepairAlertCandidate[]>();

@@ -31,8 +31,8 @@ export function Badge({
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold',
-        titleCase ? 'tracking-normal' : 'font-bold uppercase tracking-wider',
+        'ui-chip inline-flex items-center rounded-md border px-2 py-0.5 font-semibold',
+        titleCase ? 'tracking-normal' : 'font-bold uppercase tracking-wide',
         variantClasses[variant],
         className
       )}

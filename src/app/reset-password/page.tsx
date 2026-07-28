@@ -118,19 +118,19 @@ export default function ResetPasswordPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f8fafc] p-6 font-sans">
+    <div className="flex min-h-screen items-center justify-center bg-bg-soft p-6 font-sans">
       <div className="relative w-full max-w-[400px] rounded-[32px] border border-slate-100 bg-bg-canvas p-10 shadow-[0_32px_64px_-12px_rgba(0,0,0,0.08)]">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl text-[#0f172a] ui-strong">Choose a new password</h1>
-          <p className="mt-2 text-[13px] text-slate-500">Use at least 6 characters.</p>
+          <h1 className="ui-page-title">Choose a new password</h1>
+          <p className="mt-2 ui-help">Use at least 6 characters.</p>
         </div>
 
         {loading ? (
-          <p className="text-center text-[13px] text-slate-500">Verifying reset link…</p>
+          <p className="text-center ui-help">Verifying reset link…</p>
         ) : ready ? (
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-1.5">
-              <label className="ml-1 text-[11px] text-slate-400 ui-label">New password</label>
+              <label className="ml-1 ui-field-label">New password</label>
               <input
                 type="password"
                 required
@@ -141,7 +141,7 @@ export default function ResetPasswordPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <label className="ml-1 text-[11px] text-slate-400 ui-label">Confirm password</label>
+              <label className="ml-1 ui-field-label">Confirm password</label>
               <input
                 type="password"
                 required
@@ -153,7 +153,7 @@ export default function ResetPasswordPage() {
             </div>
 
             {error ? (
-              <div className="rounded-2xl border border-rose-100 bg-rose-50 p-4 text-[12px] text-rose-600">
+              <div className="ui-help rounded-2xl border border-rose-100 bg-rose-50 p-4 text-rose-700">
                 {error}
               </div>
             ) : null}
@@ -161,24 +161,24 @@ export default function ResetPasswordPage() {
             <button
               type="submit"
               disabled={saving}
-              className="h-14 w-full rounded-2xl bg-[#0f172a] text-[15px] text-white shadow-[0_20px_40px_-12px_rgba(15,23,42,0.3)] transition-all hover:bg-slate-800 active:scale-[0.98] disabled:opacity-50 ui-strong"
+              className="h-14 w-full rounded-2xl bg-slate-900 text-[15px] text-white shadow-[0_20px_40px_-12px_rgba(15,23,42,0.3)] transition-all hover:bg-slate-800 active:scale-[0.98] disabled:opacity-50 ui-strong"
             >
               {saving ? 'Saving…' : 'Update password'}
             </button>
           </form>
         ) : (
           <div className="space-y-4 text-center">
-            <p className="text-[13px] text-rose-600">{error || 'Reset link is invalid or expired.'}</p>
+            <p className="ui-help text-rose-700">{error || 'Reset link is invalid or expired.'}</p>
             <Link
               href="/forgot-password"
-              className="text-[13px] font-medium text-slate-700 hover:text-slate-900"
+              className="ui-help font-medium text-slate-700 hover:text-slate-900"
             >
               Request a new link
             </Link>
           </div>
         )}
 
-        <p className="mt-8 text-center text-[12px] text-slate-500">
+        <p className="mt-8 text-center ui-help">
           <Link href="/login" className="font-medium text-slate-700 hover:text-slate-900">
             Back to login
           </Link>

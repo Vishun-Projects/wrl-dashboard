@@ -4,6 +4,7 @@ import {
   DEFAULT_MIS_EMAIL_CC_EMAILS,
   DEFAULT_MIS_EMAIL_TO_EMAILS,
 } from '@/features/mis-email/lib/default-recipients';
+import { assertAllowedEmailDomains } from '@/features/mis-email/lib/allowed-domains';
 import { normalizeEmailList } from '@/features/mis-email/lib/parse-outlook-emails';
 import {
   parseMisEmailBodySectionIds,
@@ -17,6 +18,7 @@ import {
   resolveMisEmailBodyLayout,
   type MisEmailBodyLayout,
 } from '@/features/mis-email/lib/email-body-layout';
+import { DEFAULT_ALLOWED_EMAIL_DOMAINS } from '@/features/mis-email/lib/org-settings-defaults';
 
 export type { MisEmailBodyLayout } from '@/features/mis-email/lib/email-body-layout';
 
@@ -287,10 +289,15 @@ export function mergeMisEmailPreferences(
 }
 
 /** Defaults when admin first enables MIS email for a user. */
-export function defaultPreferencesForRecipient(recipient: Pick<
-  DigestRecipient,
-  'includeSummary' | 'includeDetailed' | 'includeKeyAccount'
->): MisEmailPreferences {
+export function defaultPreferencesForRecipient(
+  recipient: Pick<DigestRecipient, 'includeSummary' | 'includeDetailed' | 'includeKeyAccount'>,
+  orgDefaults?: {
+    toEmails?: string[];
+    ccEmails?: string[];
+    sendTimeIst?: string;
+    dateRange?: MisEmailDateRangeMode;
+  }
+): MisEmailPreferences {
   const bodyInEmail: MisEmailBodySectionId[] = [];
   if (recipient.includeSummary) {
     bodyInEmail.push('regional_performance', 'branch_performance');
@@ -301,13 +308,14 @@ export function defaultPreferencesForRecipient(recipient: Pick<
 
   return {
     subscribed: true,
-    dateRange: 'month_to_date',
+    sendTimeIst: orgDefaults?.sendTimeIst ?? DEFAULT_MIS_EMAIL_PREFERENCES.sendTimeIst,
+    dateRange: orgDefaults?.dateRange ?? 'month_to_date',
     includeSummary: recipient.includeSummary,
     includeDetailed: recipient.includeDetailed,
     includeKeyAccount: recipient.includeKeyAccount,
     includeOpenCallsExport: false,
-    toEmails: [...DEFAULT_MIS_EMAIL_TO_EMAILS],
-    ccEmails: [...DEFAULT_MIS_EMAIL_CC_EMAILS],
+    toEmails: [...(orgDefaults?.toEmails ?? DEFAULT_MIS_EMAIL_TO_EMAILS)],
+    ccEmails: [...(orgDefaults?.ccEmails ?? DEFAULT_MIS_EMAIL_CC_EMAILS)],
     bodyInEmail,
     keyAccountsInBody: [],
     keyAccountsByZone: {},
@@ -391,6 +399,7 @@ export function validateMisEmailPreferencesPatch(params: {
   current: MisEmailPreferences;
   misEmailEnabled: boolean;
   forPreview?: boolean;
+  allowedEmailDomains?: string[];
 }): { ok: true; merged: MisEmailPreferences } | { ok: false; error: string } {
   if (!params.misEmailEnabled) {
     return { ok: false, error: 'MIS email is not enabled for your account' };
@@ -446,7 +455,23 @@ export function validateMisEmailPreferencesPatch(params: {
     return { ok: false, error: 'Key account body section requires Key Account MIS access' };
   }
 
-  
+  try {
+    const domains = params.allowedEmailDomains ?? [...DEFAULT_ALLOWED_EMAIL_DOMAINS];
+    assertAllowedEmailDomains(
+      [
+        ...resolveMisEmailToEmails(merged),
+        ...resolveMisEmailCcEmails(merged),
+        ...(merged.extraEmails ?? []),
+      ],
+      domains
+    );
+  } catch (err: unknown) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Invalid recipient email domain',
+    };
+  }
+
   merged.bodyInEmail = resolveDigestBodySections(bodyPermissions, merged, {
     includeKeyAccountAttachment: false,
   });

@@ -535,7 +535,7 @@ export default function MisClientImportToolbar({
       {showHistory && allBatches.length > 0 && (
         <div className="mt-2 max-h-56 overflow-auto rounded border border-slate-100 bg-bg-soft/50">
           <table className="w-full min-w-[760px] text-left text-[10px]">
-            <thead className="sticky top-0 z-10 bg-slate-100 text-slate-600">
+            <thead className="sticky top-0 z-10 bg-slate-100 text-slate-700">
               <tr>
                 {(
                   [
@@ -564,7 +564,7 @@ export default function MisClientImportToolbar({
                     {label}
                   </SortableTh>
                 ))}
-                <th className="p-1.5 text-right">Actions</th>
+                <th className="ui-field-label p-1.5 text-right text-slate-700">Actions</th>
               </tr>
             </thead>
             <tbody>

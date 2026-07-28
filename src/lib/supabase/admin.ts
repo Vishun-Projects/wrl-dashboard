@@ -8,7 +8,6 @@ function resolveRealtimeTransport(): unknown {
   if (typeof WebSocket !== 'undefined') return undefined;
   try {
     // Node < 22: supabase-js realtime requires an explicit WebSocket implementation.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     return require('ws');
   } catch {
     return undefined;

@@ -43,8 +43,8 @@ export function AdminToolbar({
 
 export function AdminStatPill({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-bg-canvas px-3 py-1.5 text-[11px] shadow-sm">
-      <span className="text-slate-400">{label}</span>
+    <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-bg-canvas px-3 py-1.5 shadow-sm">
+      <span className="ui-help">{label}</span>
       <span className="font-semibold text-slate-800">{value}</span>
     </div>
   );
@@ -76,7 +76,7 @@ export function AdminTableCard({
           {empty ?? (
             <>
               <p className="text-sm font-medium text-slate-600">No records found</p>
-              <p className="text-[11px] text-slate-400">Try adjusting your search.</p>
+              <p className="ui-micro">Try adjusting your search.</p>
             </>
           )}
         </motion.div>
@@ -146,7 +146,7 @@ export function AdminTh({
 
   return (
     <th
-      className={`px-4 py-2.5 text-[10px] font-semibold text-slate-500 ${alignClass} ${
+      className={`ui-field-label px-4 py-2.5 font-semibold text-slate-600 ${alignClass} ${
         clickable ? 'table-th-sortable' : ''
       } ${className}`}
       onClick={
@@ -213,7 +213,7 @@ export function AdminTd({
 export function RoleBadge({ name, isHod }: { name: string; isHod?: boolean }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold ${
+      className={`ui-chip inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-semibold ${
         isHod
           ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
           : 'border-slate-200 bg-bg-soft text-slate-600'
@@ -238,7 +238,7 @@ export function ChipList({
   const [expanded, setExpanded] = useState(false);
 
   if (!items.length) {
-    return <span className="text-[11px] text-slate-400">{emptyLabel}</span>;
+    return <span className="ui-help">{emptyLabel}</span>;
   }
 
   const chipClass =
@@ -253,7 +253,7 @@ export function ChipList({
           <span
             key={item}
             title={item}
-            className={`max-w-[200px] truncate rounded border px-1.5 py-0.5 text-[10px] font-medium ${chipClass}`}
+            className={`ui-chip max-w-[200px] truncate rounded border px-1.5 py-0.5 ${chipClass}`}
           >
             {item}
           </span>
@@ -262,7 +262,7 @@ export function ChipList({
           <button
             type="button"
             onClick={() => setExpanded(false)}
-            className="text-[10px] font-semibold text-slate-500 hover:text-slate-800"
+            className="ui-chip font-semibold text-slate-500 hover:text-slate-800"
           >
             Less
           </button>
@@ -280,7 +280,7 @@ export function ChipList({
         <span
           key={item}
           title={item}
-          className={`max-w-[100px] truncate rounded border px-1.5 py-0.5 text-[10px] font-medium ${chipClass}`}
+          className={`ui-chip max-w-[100px] truncate rounded border px-1.5 py-0.5 ${chipClass}`}
         >
           {item}
         </span>
@@ -288,7 +288,7 @@ export function ChipList({
       <button
         type="button"
         onClick={() => setExpanded(true)}
-        className="rounded border border-slate-200 bg-bg-canvas px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-bg-soft"
+        className="ui-chip rounded border border-slate-200 bg-bg-canvas px-1.5 py-0.5 font-semibold text-slate-600 hover:bg-bg-soft"
       >
         +{rest} more
       </button>
@@ -381,8 +381,8 @@ export function SettingsCard({
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-bg-canvas shadow-sm">
       <div className="border-b border-slate-100 px-6 py-4">
-        <h2 className="text-sm text-fg-primary ui-strong">{title}</h2>
-        {description ? <p className="mt-0.5 text-[11px] text-fg-muted">{description}</p> : null}
+        <h2 className="ui-section-title">{title}</h2>
+        {description ? <p className="mt-0.5 ui-help">{description}</p> : null}
       </div>
       <div className="px-6 py-5">{children}</div>
       {footer ? (
@@ -403,14 +403,14 @@ export function SettingsField({
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="text-[11px] font-medium text-slate-500">{label}</label>
+      <label className="ui-field-label">{label}</label>
       {children}
     </div>
   );
 }
 
 export function settingsInputClass(disabled = false) {
-  return `h-9 w-full rounded-md border border-slate-200 bg-bg-canvas px-3 text-[13px] text-fg-primary outline-none transition-colors focus:border-slate-400 focus:ring-1 focus:ring-slate-200 ${
+  return `ui-body h-9 w-full rounded-md border border-slate-200 bg-bg-canvas px-3 outline-none transition-colors focus:border-slate-400 focus:ring-1 focus:ring-slate-200 ${
     disabled ? 'cursor-not-allowed bg-bg-soft text-slate-400' : ''
   }`;
 }

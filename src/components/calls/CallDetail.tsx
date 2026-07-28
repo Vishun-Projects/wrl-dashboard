@@ -364,7 +364,7 @@ function CallDetailContent({ call, onClose, onFlagUpdate, onPostComment, onNext 
         <div className="flex items-start justify-between">
           <div className="flex flex-col">
             <div className="flex items-center gap-3 mb-1">
-              <div className="text-[12px] text-slate-400 font-medium">
+              <div className="ui-help text-slate-500 font-medium">
                 {call.vtrnno || call.vtransfercallno} · {call.status_label || 'Service Call'}
               </div>
               {/* <div className="flex items-center bg-slate-900 text-white rounded-full px-2 py-0.5 border border-slate-800 shadow-lg">
@@ -431,11 +431,11 @@ function CallDetailContent({ call, onClose, onFlagUpdate, onPostComment, onNext 
                 <button
                   key={t.id}
                   onClick={() => setActiveTab(t.id as typeof activeTab)}
-                  className={`call-detail-tab flex items-center gap-1 px-4 py-3.5 text-[13px] font-medium transition-all border-b-2 -mb-px whitespace-nowrap ${activeTab === t.id ? 'call-detail-tab--active text-slate-900 border-slate-900' : 'text-slate-400 border-transparent hover:text-slate-600'}`}
+                  className={`call-detail-tab flex items-center gap-1 px-4 py-3.5 ui-help font-medium transition-all border-b-2 -mb-px whitespace-nowrap ${activeTab === t.id ? 'call-detail-tab--active text-slate-900 border-slate-900' : 'text-slate-500 border-transparent hover:text-slate-700'}`}
                 >
                   {t.label}
                   {t.count !== undefined && (
-                    <span className={`text-[10px] rounded-md px-1.5 py-0.5 min-w-[20px] text-center ${activeTab === t.id ? 'bg-slate-100 text-slate-900' : 'bg-bg-soft text-slate-400'} border border-slate-200 ui-label`}>
+                    <span className={`ui-chip rounded-md px-1.5 py-0.5 min-w-[20px] text-center ${activeTab === t.id ? 'bg-slate-100 text-slate-900' : 'bg-bg-soft text-slate-500'} border border-slate-200`}>
                       {t.count}
                     </span>
                   )}
@@ -470,8 +470,8 @@ function CallDetailContent({ call, onClose, onFlagUpdate, onPostComment, onNext 
                   </div>
 
                   <div className="space-y-2">
-                    <div className="text-[11px] text-slate-400 ui-label">Complaint</div>
-                    <div className="p-3.5 bg-bg-soft rounded-lg text-[13px] text-slate-500 italic border border-slate-100">
+                    <div className="ui-field-label">Complaint</div>
+                    <div className="p-3.5 bg-bg-soft rounded-lg ui-body text-slate-700 italic border border-slate-100">
                       {call.complaint_label || 'No description provided'}
                     </div>
                   </div>
@@ -505,7 +505,7 @@ function CallDetailContent({ call, onClose, onFlagUpdate, onPostComment, onNext 
                       </div>
                     ))
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-[13px]">No visits recorded</div>
+                    <div className="flex flex-col items-center justify-center py-16 ui-help">No visits recorded</div>
                   )}
                 </div>
               )}
@@ -543,7 +543,7 @@ function CallDetailContent({ call, onClose, onFlagUpdate, onPostComment, onNext 
                       </div>
                     ))
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-[13px]">No faults recorded</div>
+                    <div className="flex flex-col items-center justify-center py-16 ui-help">No faults recorded</div>
                   )}
                 </div>
               )}
@@ -578,7 +578,7 @@ function CallDetailContent({ call, onClose, onFlagUpdate, onPostComment, onNext 
                       ))}
                     </>
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-[13px]">No parts recorded</div>
+                    <div className="flex flex-col items-center justify-center py-16 ui-help">No parts recorded</div>
                   )}
                 </div>
               )}
@@ -621,7 +621,7 @@ function CallDetailContent({ call, onClose, onFlagUpdate, onPostComment, onNext 
                       </div>
                     ))
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-[13px]">No comments recorded</div>
+                    <div className="flex flex-col items-center justify-center py-16 ui-help">No comments recorded</div>
                   )}
 
                   {isMobile && (
@@ -730,7 +730,7 @@ function CallDetailContent({ call, onClose, onFlagUpdate, onPostComment, onNext 
               </div>
 
               <div className="flex-1 flex flex-col space-y-2">
-                <div className="text-[11px] text-slate-400 ui-label">Notes / query</div>
+                <div className="ui-field-label">Notes / query</div>
                 <textarea
                   value={note}
                   onChange={(e) => {
@@ -819,13 +819,13 @@ function TimelineItem({ label, date, highlight, status }: { label: string; date?
 
   return (
     <div className="flex justify-between items-start text-[12px] lg:text-[13px] py-0.5">
-      <span className="text-slate-400 font-medium">{label}</span>
+      <span className="ui-help font-medium">{label}</span>
       <div className="text-right">
         <div className={`${colors[status || 'default']} leading-none ui-strong`}>
           {dayPart || '—'}
         </div>
         {timePart ? (
-          <div className="text-[10px] text-slate-400 mt-0.5">{timePart}</div>
+          <div className="ui-micro mt-0.5">{timePart}</div>
         ) : null}
       </div>
     </div>
@@ -835,8 +835,8 @@ function TimelineItem({ label, date, highlight, status }: { label: string; date?
 function Field({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
   return (
     <div className="w-full">
-      <div className="text-[10px] text-slate-400 mb-1 ui-label">{label}</div>
-      <div className={`text-[13px] leading-tight ${muted ? 'text-slate-300' : 'text-slate-900'} ui-label`}>
+      <div className="ui-micro mb-1">{label}</div>
+      <div className={`ui-body leading-tight ${muted ? 'text-slate-400' : 'text-slate-900'}`}>
         {value}
       </div>
     </div>

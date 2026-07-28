@@ -4,6 +4,11 @@ const listMisEmailRoutingRules = vi.fn();
 const resolveRoutingClientNamesForScope = vi.fn();
 const resolveRoutingScopeForOfficeIds = vi.fn();
 const listMatchingMisEmailRoutingRulesForResolvedClients = vi.fn();
+const fetchDigestSummaryDataCached = vi.fn();
+const fetchDigestClientAccountSummaryCached = vi.fn();
+const fetchDigestRegisterRows = vi.fn();
+const buildDigestAttachments = vi.fn();
+const buildDigestTraceableExportPayload = vi.fn();
 
 vi.mock('@/features/mis-email/lib/routing-rules', () => ({
   listMisEmailRoutingRules: (...args: unknown[]) => listMisEmailRoutingRules(...args),
@@ -15,8 +20,30 @@ vi.mock('@/features/mis-email/lib/routing-rules', () => ({
 }));
 
 vi.mock('@/features/mis-email/lib/send', () => ({
-  resolvePortalUrl: vi.fn(() => 'http://localhost/report'),
+  resolvePortalUrl: vi.fn((u?: string) => u || 'http://localhost/report'),
   sendPreparedDigestEmail: vi.fn(),
+}));
+
+vi.mock('@/features/mis-email/lib/org-settings', () => ({
+  getMisEmailOrgSettings: vi.fn(async () => ({
+    portalBaseUrl: 'http://localhost',
+    greeting: 'Dear Zonal Heads,',
+    brandTitle: 'WESTERN REFRIGERATION',
+    brandSubtitle: 'WRL Dashboard (Revised)',
+    subjectTemplate: 'Daily MIS Report as on {asOn}',
+    digestCallType: 'BREAKDOWN',
+    allowedEmailDomains: ['westernequipments.com'],
+    outboundMailEnabled: true,
+    defaultToEmails: [],
+    defaultCcEmails: [],
+    defaultSendTimeIst: '09:30',
+    defaultDateRange: 'month_to_date',
+    majorRepairMinCount: 3,
+    majorRepairMonths: 3,
+    majorRepairDefaultTo: 'sunil.sawant@westernequipments.com',
+    majorRepairDefaultCc: 'vishnu.vishwakarma@westernequipments.com',
+  })),
+  assertOrgOutboundMailEnabled: vi.fn(),
 }));
 
 vi.mock('@/features/mis-email/lib/user-scope', () => ({
@@ -32,28 +59,71 @@ vi.mock('@/features/mis-email/lib/user-scope', () => ({
   })),
 }));
 
-// Static import after mocks — avoids cold dynamic-import eating the test timeout.
-const { sendMisEmailComposeBatch } = await import('@/features/mis-email/lib/compose-digest');
+vi.mock('@/features/mis-email/lib/digest-cache', () => ({
+  fetchDigestSummaryDataCached: (...args: unknown[]) => fetchDigestSummaryDataCached(...args),
+  fetchDigestClientAccountSummaryCached: (...args: unknown[]) =>
+    fetchDigestClientAccountSummaryCached(...args),
+}));
 
-const recipient = {
+vi.mock('@/features/mis-email/lib/fetch-digest-data', () => ({
+  fetchDigestRegisterRows: (...args: unknown[]) => fetchDigestRegisterRows(...args),
+}));
+
+vi.mock('@/features/mis-email/lib/build-attachments', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/mis-email/lib/build-attachments')>();
+  return {
+    ...actual,
+    buildDigestAttachments: (...args: unknown[]) => buildDigestAttachments(...args),
+  };
+});
+
+vi.mock('@/features/mis-email/lib/fetch-digest-trace', () => ({
+  buildDigestTraceableExportPayload: (...args: unknown[]) =>
+    buildDigestTraceableExportPayload(...args),
+}));
+
+// Static import after mocks — avoids cold dynamic-import eating the test timeout.
+const {
+  buildMisEmailPayload,
+  resolveMisEmailSendTargets,
+  sendMisEmailComposeBatch,
+} = await import('@/features/mis-email/lib/compose-digest');
+
+const emptyRecipient = {
   id: 'u1',
   name: 'User',
   email: 'user@example.com',
   role: 'branch_manager',
   office_ids: ['1'],
+  visible_statuses: [],
   permissions: ['view_all_offices'],
   includeSummary: false,
   includeDetailed: false,
   includeKeyAccount: false,
+  mis_email_enabled: true,
   mis_email_preferences: {
     includeSummary: false,
     includeDetailed: false,
     includeKeyAccount: false,
     includeTraceableExport: false,
     includeOpenCallsExport: false,
-    bodySections: [],
+    bodyInEmail: [],
   },
-} as never;
+} as const;
+
+const summaryRecipient = {
+  ...emptyRecipient,
+  includeSummary: true,
+  includeDetailed: true,
+  mis_email_preferences: {
+    includeSummary: true,
+    includeDetailed: true,
+    includeKeyAccount: false,
+    includeTraceableExport: false,
+    includeOpenCallsExport: false,
+    bodyInEmail: [],
+  },
+} as const;
 
 describe('sendMisEmailComposeBatch auto-send override', () => {
   beforeEach(() => {
@@ -61,6 +131,11 @@ describe('sendMisEmailComposeBatch auto-send override', () => {
     resolveRoutingClientNamesForScope.mockReset();
     resolveRoutingScopeForOfficeIds.mockReset();
     listMatchingMisEmailRoutingRulesForResolvedClients.mockReset();
+    fetchDigestSummaryDataCached.mockReset();
+    fetchDigestClientAccountSummaryCached.mockReset();
+    fetchDigestRegisterRows.mockReset();
+    buildDigestAttachments.mockReset();
+    buildDigestTraceableExportPayload.mockReset();
 
     listMisEmailRoutingRules.mockResolvedValue([{ id: 'r1' }]);
     resolveRoutingClientNamesForScope.mockResolvedValue({ mail: [], crm: [] });
@@ -80,7 +155,7 @@ describe('sendMisEmailComposeBatch auto-send override', () => {
 
   it('blocks manual send when routing disables auto-send and override is false', async () => {
     await expect(
-      sendMisEmailComposeBatch(recipient, {
+      sendMisEmailComposeBatch(emptyRecipient as never, {
         sendTo: ['manual@example.com'],
         allowAutoSendDisabledOverride: false,
       })
@@ -89,10 +164,86 @@ describe('sendMisEmailComposeBatch auto-send override', () => {
 
   it('allows override path to proceed past auto-send block', async () => {
     await expect(
-      sendMisEmailComposeBatch(recipient, {
+      sendMisEmailComposeBatch(emptyRecipient as never, {
         sendTo: ['manual@example.com'],
         allowAutoSendDisabledOverride: true,
       })
     ).rejects.toThrow(/Select at least one report attachment/);
+  });
+
+  it('no matching routing rule does not throw auto-send disabled', async () => {
+    listMatchingMisEmailRoutingRulesForResolvedClients.mockReturnValue([]);
+    await expect(
+      sendMisEmailComposeBatch(emptyRecipient as never, {
+        sendTo: ['manual@example.com'],
+      })
+    ).rejects.toThrow(/Select at least one report attachment/);
+  });
+});
+
+describe('buildMisEmailPayload early exits', () => {
+  beforeEach(() => {
+    fetchDigestSummaryDataCached.mockReset();
+    fetchDigestClientAccountSummaryCached.mockReset();
+    fetchDigestRegisterRows.mockReset();
+    buildDigestAttachments.mockReset();
+    buildDigestTraceableExportPayload.mockReset();
+  });
+
+  it('rejects with no includes before fetching summary', async () => {
+    await expect(
+      buildMisEmailPayload(emptyRecipient as never, {
+        sentTo: 'user@example.com',
+        displayName: 'User',
+      })
+    ).rejects.toThrow(/Select at least one report attachment/);
+    expect(fetchDigestSummaryDataCached).not.toHaveBeenCalled();
+    expect(fetchDigestRegisterRows).not.toHaveBeenCalled();
+  });
+
+  it('forPreview skips register fetch and Excel builders', async () => {
+    fetchDigestSummaryDataCached.mockResolvedValue({
+      branchSummary: [],
+      accountSummary: [],
+      totals: {},
+    });
+
+    const result = await buildMisEmailPayload(summaryRecipient as never, {
+      sentTo: 'user@example.com',
+      displayName: 'User',
+      forPreview: true,
+    });
+
+    expect(result.emailAttachments).toEqual([]);
+    expect(result.preview.attachments.length).toBeGreaterThan(0);
+    expect(fetchDigestSummaryDataCached).toHaveBeenCalledOnce();
+    expect(fetchDigestRegisterRows).not.toHaveBeenCalled();
+    expect(buildDigestAttachments).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveMisEmailSendTargets', () => {
+  it('uses sendTo override when provided', () => {
+    expect(
+      resolveMisEmailSendTargets(
+        emptyRecipient as never,
+        { toEmails: ['stored@example.com'] },
+        ['Override@Example.com']
+      )
+    ).toEqual(['override@example.com']);
+  });
+
+  it('uses preference toEmails when no override', () => {
+    expect(
+      resolveMisEmailSendTargets(emptyRecipient as never, {
+        toEmails: ['a@example.com', 'b@example.com'],
+      })
+    ).toEqual(['a@example.com', 'b@example.com']);
+  });
+
+  it('falls back to recipient email when toEmails empty', () => {
+    expect(resolveMisEmailSendTargets(emptyRecipient as never, { toEmails: [] })).toEqual([
+      'user@example.com',
+    ]);
   });
 });

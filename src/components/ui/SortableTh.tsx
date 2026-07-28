@@ -53,7 +53,7 @@ export function SortableTh({
 
   if (!sortable) {
     return (
-      <th className={`${alignClass} ${className}`.trim()} title={title}>
+      <th className={`ui-field-label text-slate-600 ${alignClass} ${className}`.trim()} title={title}>
         {children}
       </th>
     );
@@ -61,7 +61,7 @@ export function SortableTh({
 
   return (
     <th
-      className={`table-th-sortable ${alignClass} ${className}`.trim()}
+      className={`table-th-sortable ui-field-label text-slate-600 ${alignClass} ${className}`.trim()}
       onClick={onClick}
       title={title ?? 'Click to sort'}
       aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}

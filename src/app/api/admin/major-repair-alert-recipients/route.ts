@@ -54,7 +54,7 @@ export async function POST(request: Request) {
       branch: String(body.branch ?? ''),
       recipientName: String(body.recipientName ?? ''),
       email: String(body.email ?? ''),
-      enabled: body.enabled !== false,
+      enabled: body.enabled === true,
     });
     return NextResponse.json({ recipient }, { status: 201 });
   } catch (err: unknown) {

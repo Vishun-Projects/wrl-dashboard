@@ -24,7 +24,6 @@ import {
   resolveMisEmailCcEmails,
   resolveMisEmailToEmails,
 } from '@/features/mis-email/lib/preferences';
-import { parseOutlookEmailList } from '@/features/mis-email/lib/parse-outlook-emails';
 import { buildMisEmailSkeletonPreview } from '@/features/mis-email/lib/skeleton-preview';
 import { trackMisEmailSendJob, useMisEmailSendJobs } from '@/features/mis-email/lib/send-job-client';
 import {
@@ -34,6 +33,7 @@ import {
 import { settingsInputClass } from '@/components/admin/AdminUi';
 import { MisEmailBodyLayoutEditor } from '@/components/settings/MisEmailBodyLayoutEditor';
 import { Collapse } from '@/components/motion/Collapse';
+import { EmailChipsInput } from '@/features/mis-email/ui/TagChipsInput';
 import { createClient } from '@/lib/supabase/client';
 import { getBearerAuthHeaders } from '@/lib/supabase/session';
 
@@ -87,7 +87,6 @@ function formatDateRangeLabel(dateRange: MisEmailPreferences['dateRange'] | unde
 }
 
 const LIVE_PREVIEW_DEBOUNCE_MS = 800;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type AttachmentPrefKey =
   | 'includeSummary'
@@ -106,106 +105,6 @@ function isAttachmentEnabled(prefs: MisEmailPreferences, key: AttachmentPrefKey)
   const value = prefs[key];
   if (value !== undefined) return value;
   return DEFAULT_MIS_EMAIL_PREFERENCES[key];
-}
-
-function RecipientChipsInput({
-  label,
-  hint,
-  values,
-  onChange,
-}: {
-  label: string;
-  hint: string;
-  values: string[];
-  onChange: (next: string[]) => void;
-}) {
-  const [draft, setDraft] = useState('');
-  const [error, setError] = useState('');
-
-  function addFromRaw(raw: string) {
-    const parsed = parseOutlookEmailList(raw);
-    if (parsed.length === 0) {
-      const single = raw.trim().toLowerCase();
-      if (!single) return;
-      if (!EMAIL_RE.test(single)) {
-        setError(`Invalid email: ${single}`);
-        return;
-      }
-      if (values.includes(single)) {
-        setDraft('');
-        setError('');
-        return;
-      }
-      onChange([...values, single]);
-      setDraft('');
-      setError('');
-      return;
-    }
-    const next = [...values];
-    for (const email of parsed) {
-      if (!next.includes(email)) next.push(email);
-    }
-    onChange(next);
-    setDraft('');
-    setError('');
-  }
-
-  return (
-    <div className="space-y-1.5">
-      <label className="text-[11px] font-medium text-stone-500">{label}</label>
-      <div className="rounded-md border border-stone-200 bg-stone-50 p-2">
-        <div className="mb-2 flex flex-wrap gap-1">
-          {values.map((email) => (
-            <span
-              key={email}
-              className="inline-flex items-center gap-1 rounded-full border border-stone-200 bg-white px-2 py-0.5 text-[11px] text-stone-700"
-            >
-              {email}
-              <button
-                type="button"
-                onClick={() => onChange(values.filter((item) => item !== email))}
-                className="text-stone-400 hover:text-stone-800"
-                aria-label={`Remove ${email}`}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-          {values.length === 0 ? (
-            <span className="text-[11px] text-stone-400">No recipients</span>
-          ) : null}
-        </div>
-        <input
-          type="text"
-          value={draft}
-          onChange={(e) => {
-            setDraft(e.target.value);
-            setError('');
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ';' || e.key === ',') {
-              e.preventDefault();
-              addFromRaw(draft);
-            }
-          }}
-          onPaste={(e) => {
-            const text = e.clipboardData.getData('text');
-            if (text && /[;,]|<[^>]+@/.test(text)) {
-              e.preventDefault();
-              addFromRaw(text);
-            }
-          }}
-          onBlur={() => {
-            if (draft.trim()) addFromRaw(draft);
-          }}
-          placeholder="Paste Outlook list or type email + Enter"
-          className={settingsInputClass()}
-        />
-      </div>
-      {error ? <p className="text-[10.5px] text-rose-600">{error}</p> : null}
-      <p className="text-[10.5px] text-stone-500">{hint}</p>
-    </div>
-  );
 }
 
 export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Props) {
@@ -527,8 +426,8 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                 <Mail size={15} />
               </div>
               <div>
-                <h2 className="text-[16px] font-semibold tracking-tight text-stone-900">Email reports</h2>
-                <p className="text-[11px] text-stone-500">
+                <h2 className="ui-page-title text-stone-900">Email reports</h2>
+                <p className="ui-help text-stone-500">
                   <span className="font-semibold text-stone-700">{settings.roleName ?? 'Your role'}</span>
                   {' · '}
                   {settings.scopeLabel ?? 'All branches'}
@@ -538,7 +437,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
               </div>
             </div>
             <span
-              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+              className={`ui-label inline-flex items-center rounded-full border px-2.5 py-1 font-semibold ${
                 hasUnsavedChanges
                   ? 'border-amber-200 bg-amber-50 text-amber-700'
                   : 'border-emerald-200 bg-emerald-50 text-emerald-700'
@@ -559,7 +458,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                   checked={subscribed}
                   onChange={(e) => onPrefsChange({ ...prefs, subscribed: e.target.checked })}
                 />
-                <span className="text-[12px] font-semibold text-stone-800">Scheduled digest</span>
+                <span className="ui-section-title text-stone-800">Scheduled digest</span>
               </label>
               <input
                 type="time"
@@ -567,13 +466,13 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                 value={sendTimeIst}
                 disabled={!subscribed}
                 onChange={(e) => onPrefsChange({ ...prefs, sendTimeIst: e.target.value })}
-                className="h-8 rounded-md border border-stone-300 bg-white px-2 text-[12px] text-stone-700 disabled:opacity-50"
+                className="h-8 rounded-md border border-stone-300 bg-white px-2 ui-help text-stone-700 disabled:opacity-50"
               />
-              <span className="text-[11px] text-stone-500">IST</span>
+              <span className="ui-help text-stone-500">IST</span>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <label className="inline-flex items-center gap-1.5 text-[11px] text-stone-500">
+              <label className="ui-help inline-flex items-center gap-1.5 text-stone-500">
                 <input
                   type="checkbox"
                   checked={allowAutoSendOverride}
@@ -586,7 +485,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                 type="button"
                 onClick={() => void handleSave()}
                 disabled={saving || sendInProgress}
-                className="inline-flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-3 py-2 text-[12px] font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-3 py-2 ui-label font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-50"
               >
                 {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
                 Save defaults
@@ -595,7 +494,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                 type="button"
                 onClick={() => void handleSend(true)}
                 disabled={sendInProgress || sendTargets.length === 0}
-                className="inline-flex items-center gap-1.5 rounded-md bg-stone-900 px-3 py-2 text-[12px] font-semibold text-white hover:bg-black disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-md bg-stone-900 px-3 py-2 ui-label font-semibold text-white hover:bg-black disabled:opacity-50"
               >
                 {sendInProgress ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
                 Send now
@@ -609,19 +508,21 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
         <div className="space-y-3">
           <section className="rounded-xl border border-stone-200 bg-white">
             <div className="border-b border-stone-200 px-3.5 py-3">
-              <p className="text-[12.5px] font-semibold text-stone-900">Recipients</p>
-              <p className="text-[10.5px] text-stone-500">To and Cc for this Daily MIS Report</p>
+                <p className="ui-section-title text-stone-900">Recipients</p>
+                <p className="ui-help text-stone-500">To and Cc for this Daily MIS Report</p>
             </div>
             <div className="space-y-3 px-3.5 py-3">
-              <RecipientChipsInput
+              <EmailChipsInput
                 label="To"
                 hint="Paste an Outlook To line, or add emails one by one."
+                compact
                 values={sendTargets}
                 onChange={(toEmails) => onPrefsChange({ ...prefs, toEmails })}
               />
-              <RecipientChipsInput
+              <EmailChipsInput
                 label="Cc"
                 hint="Paste an Outlook Cc line, or add emails one by one."
+                compact
                 values={sendCcTargets}
                 onChange={(ccEmails) => onPrefsChange({ ...prefs, ccEmails })}
               />
@@ -630,11 +531,11 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
 
           <section className="rounded-xl border border-stone-200 bg-white">
             <div className="border-b border-stone-200 px-3.5 py-3">
-              <p className="text-[12.5px] font-semibold text-stone-900">Report period</p>
-              <p className="text-[10.5px] text-stone-500">Date range this send covers</p>
+                <p className="ui-section-title text-stone-900">Report period</p>
+                <p className="ui-help text-stone-500">Date range this send covers</p>
             </div>
             <div className="space-y-2.5 px-3.5 py-3">
-              <div className="rounded-md border border-dashed border-stone-300 bg-stone-50 px-3 py-2 font-mono text-[11px] text-stone-700">
+              <div className="rounded-md border border-dashed border-stone-300 bg-stone-50 px-3 py-2 font-mono text-[12px] font-medium text-stone-800">
                 {displayPreview?.subject ?? 'Daily MIS Report as on ...'}
               </div>
               <div className="grid grid-cols-3 gap-1.5">
@@ -647,7 +548,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                     key={opt.id}
                     type="button"
                     onClick={() => handlePeriodChange(opt.id as MisEmailPreferences['dateRange'])}
-                    className={`rounded-md border px-2 py-2 text-[11.5px] font-semibold ${
+                    className={`rounded-md border px-2 py-2 ui-label font-semibold ${
                       (prefs.dateRange ?? 'month_to_date') === opt.id
                         ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
                         : 'border-stone-300 bg-white text-stone-600 hover:bg-stone-50'
@@ -662,36 +563,36 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
 
           <section className="rounded-xl border border-stone-200 bg-white">
             <div className="border-b border-stone-200 px-3.5 py-3">
-              <p className="text-[12.5px] font-semibold text-stone-900">Report content</p>
-              <p className="text-[10.5px] text-stone-500">Attachments and what shows inside email body</p>
+                <p className="ui-section-title text-stone-900">Report content</p>
+                <p className="ui-help text-stone-500">Attachments and what shows inside email body</p>
             </div>
             <div className="px-2 pt-2">
               <div className="flex gap-1">
                 <button
                   type="button"
                   onClick={() => setActiveContentTab('attachments')}
-                  className={`flex-1 border-b-2 px-2 py-2 text-[11.5px] font-semibold ${
+                  className={`flex-1 border-b-2 px-2 py-2 ui-label font-semibold ${
                     activeContentTab === 'attachments'
                       ? 'border-indigo-600 text-indigo-700'
                       : 'border-transparent text-stone-500'
                   }`}
                 >
                   Attachments{' '}
-                  <span className="ml-1 rounded-full bg-stone-100 px-1.5 py-0.5 text-[10px]">
+                  <span className="ui-chip ml-1 rounded-full bg-stone-100 px-1.5 py-0.5">
                     {enabledAttachmentCount}
                   </span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveContentTab('sections')}
-                  className={`flex-1 border-b-2 px-2 py-2 text-[11.5px] font-semibold ${
+                  className={`flex-1 border-b-2 px-2 py-2 ui-label font-semibold ${
                     activeContentTab === 'sections'
                       ? 'border-indigo-600 text-indigo-700'
                       : 'border-transparent text-stone-500'
                   }`}
                 >
                   Body sections{' '}
-                  <span className="ml-1 rounded-full bg-stone-100 px-1.5 py-0.5 text-[10px]">
+                  <span className="ui-chip ml-1 rounded-full bg-stone-100 px-1.5 py-0.5">
                     {selectedBodyIds.length}
                   </span>
                 </button>
@@ -716,9 +617,9 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                           onChange={(e) => toggleAttachment(opt.key, e.target.checked)}
                         />
                         <div className="min-w-0">
-                          <p className="text-[12px] font-semibold text-stone-800">{opt.label}</p>
+                          <p className="ui-label font-semibold text-stone-800">{opt.label}</p>
                           {'hint' in opt && opt.hint ? (
-                            <p className="text-[10.5px] leading-relaxed text-stone-500">{opt.hint}</p>
+                            <p className="ui-help text-stone-500">{opt.hint}</p>
                           ) : null}
                         </div>
                       </label>
@@ -743,8 +644,8 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                             onChange={(e) => toggleBodySection(section.id, e.target.checked)}
                           />
                           <div className="min-w-0 flex-1">
-                            <p className="text-[12px] font-semibold text-stone-800">{section.label}</p>
-                            <p className="text-[10.5px] text-stone-600">{section.description}</p>
+                            <p className="ui-label font-semibold text-stone-800">{section.label}</p>
+                            <p className="ui-help text-stone-600">{section.description}</p>
                           </div>
                           {selected ? (
                             <div className="flex flex-col gap-1">
@@ -780,7 +681,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
               <button
                 type="button"
                 onClick={() => setShowAdvanced((prev) => !prev)}
-                className="flex w-full items-center justify-between px-3.5 py-3 text-left text-[12px] font-semibold text-stone-700"
+                className="flex w-full items-center justify-between px-3.5 py-3 text-left ui-label font-semibold text-stone-700"
               >
                 <span>Advanced options — layout and account filters</span>
                 {showAdvanced ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -789,7 +690,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                 <div className="space-y-3 px-3.5 pb-3">
                   {selectedBodyIds.length > 0 ? (
                     <div className="space-y-1">
-                      <p className="text-[10px] uppercase tracking-wide text-stone-500">Body layout</p>
+                      <p className="ui-micro uppercase tracking-wide text-stone-500">Body layout</p>
                       <MisEmailBodyLayoutEditor
                         selectedSectionIds={selectedBodyIds}
                         bodySections={bodySections}
@@ -800,8 +701,8 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                   ) : null}
                   {keyAccountBodyEnabled ? (
                     <div className="space-y-2">
-                      <p className="text-[10px] uppercase tracking-wide text-stone-500">Account filters</p>
-                      <p className="text-[10px] text-stone-500">
+                      <p className="ui-micro uppercase tracking-wide text-stone-500">Account filters</p>
+                      <p className="ui-micro text-stone-500">
                         Each zone only shows the accounts you pick for that zone. The same account can be selected in multiple zones.
                       </p>
                       {ZONES.map((zone) => {
@@ -814,8 +715,8 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                         return (
                           <div key={zone} className="rounded-lg border border-stone-200 p-2.5">
                             <div className="mb-2 flex items-center justify-between gap-2">
-                              <p className="text-[11px] font-semibold text-stone-700">{zone}</p>
-                              <span className="text-[10px] text-stone-400">
+                              <p className="ui-label font-semibold text-stone-700">{zone}</p>
+                              <span className="ui-micro text-stone-400">
                                 {selected.length
                                   ? `${selected.length} selected`
                                   : anyZonePicked
@@ -838,7 +739,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                                 type="button"
                                 onClick={() => selectAllZoneKeyAccounts(zone)}
                                 disabled={accountsLoading || all.length === 0}
-                                className="rounded-md border border-stone-300 px-2 py-1 text-[10px] text-stone-600 disabled:opacity-50"
+                                className="ui-chip rounded-md border border-stone-300 px-2 py-1 text-stone-700 disabled:opacity-50"
                               >
                                 Select all
                               </button>
@@ -846,16 +747,16 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                                 type="button"
                                 onClick={() => clearZoneKeyAccounts(zone)}
                                 disabled={selected.length === 0}
-                                className="rounded-md border border-stone-300 px-2 py-1 text-[10px] text-stone-600 disabled:opacity-50"
+                                className="ui-chip rounded-md border border-stone-300 px-2 py-1 text-stone-700 disabled:opacity-50"
                               >
                                 Clear
                               </button>
                             </div>
                             <div className="max-h-36 overflow-y-auto rounded border border-stone-200 p-1.5">
                               {accountsLoading ? (
-                                <p className="px-2 py-2 text-[10px] text-stone-400">Loading...</p>
+                                <p className="ui-micro px-2 py-2">Loading...</p>
                               ) : filtered.length === 0 ? (
-                                <p className="px-2 py-2 text-[10px] text-stone-400">No clients</p>
+                                <p className="ui-micro px-2 py-2">No clients</p>
                               ) : (
                                 filtered.map((account) => {
                                   const checked = selected.some((item) =>
@@ -871,7 +772,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
                                         checked={checked}
                                         onChange={(e) => toggleZoneKeyAccount(zone, account, e.target.checked)}
                                       />
-                                      <span className="text-[10px] text-stone-700">
+                                      <span className="ui-micro text-stone-700">
                                         {clientAccountDisplayName(account)}
                                       </span>
                                     </label>
@@ -890,14 +791,14 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
           ) : null}
 
           <section className="rounded-xl border border-stone-200 bg-white p-3">
-            <p className="mb-1 text-[11px] font-semibold text-stone-700">Scope summary</p>
-            <p className="text-[11px] text-stone-600">
+            <p className="ui-field-label mb-1 text-stone-700">Scope summary</p>
+            <p className="ui-help text-stone-600">
               {settings.roleName ?? 'Your role'} · {settings.scopeLabel ?? 'All branches'}
             </p>
           </section>
 
           {sendStatus ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+            <div className="ui-help rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
               <div className="flex items-center gap-2">
                 <Loader2 size={12} className="shrink-0 animate-spin" />
                 <span>{sendStatus}</span>
@@ -905,17 +806,17 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
             </div>
           ) : null}
           {sendError ? (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-800">
+            <div className="ui-help rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-rose-800">
               {sendError}
             </div>
           ) : null}
           {sendResult ? (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-800">
+            <div className="ui-help rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-800">
               {sendResult}
             </div>
           ) : null}
 
-          <p className="px-1 text-[10.5px] leading-relaxed text-stone-500">
+          <p className="ui-help px-1 text-stone-500">
             Send now queues this draft immediately. Save defaults keeps these settings for future scheduled digests.
           </p>
         </div>

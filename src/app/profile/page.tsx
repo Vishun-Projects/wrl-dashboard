@@ -232,6 +232,8 @@ function ProfileContent() {
                 <div className="relative flex-shrink-0">
                   <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-100 text-2xl text-slate-400 ui-strong">
                     {user?.avatar_url && !avatarBroken ? (
+                      // User-uploaded avatar URLs vary by host — skip next/image remote config.
+                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={resolveAvatarDisplayUrl(user.avatar_url) ?? ''}
                         alt=""

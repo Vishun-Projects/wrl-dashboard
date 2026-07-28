@@ -170,13 +170,13 @@ export function RegisterMultiSelect({
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-bg-soft px-2.5 py-2">
-            <span className="shrink-0 text-[10px] font-medium text-slate-600">{label}</span>
+            <span className="ui-field-label shrink-0 text-slate-700">{label}</span>
             <div className="flex shrink-0 items-center gap-2">
               {showSelectAll && selectAllTargets.length > 0 && (
                 <button
                   type="button"
                   onClick={handleSelectAll}
-                  className="text-[10px] text-slate-500 hover:text-slate-900"
+                  className="ui-micro text-slate-600 hover:text-slate-900"
                 >
                   {selectAllLabel}
                 </button>
@@ -184,7 +184,7 @@ export function RegisterMultiSelect({
               <button
                 type="button"
                 onClick={handleClear}
-                className="text-[10px] text-slate-400 hover:text-slate-900"
+                className="ui-micro text-slate-500 hover:text-slate-900"
               >
                 Clear
               </button>
@@ -197,7 +197,7 @@ export function RegisterMultiSelect({
                 <input
                   type="text"
                   placeholder={searchPlaceholder}
-                  className="w-full rounded border border-slate-200 py-1.5 pl-7 pr-2 text-[11px] outline-none focus:border-slate-400"
+                  className="ui-help w-full rounded border border-slate-200 py-1.5 pl-7 pr-2 outline-none focus:border-slate-400"
                   value={search}
                   onChange={(e) => {
                     const next = e.target.value;
@@ -210,7 +210,7 @@ export function RegisterMultiSelect({
           )}
           <div className="custom-scrollbar max-h-52 overflow-y-auto p-1.5">
             {filteredOptions.length === 0 ? (
-              <p className="px-2 py-3 text-center text-[11px] text-slate-400">No options</p>
+              <p className="ui-help px-2 py-3 text-center text-slate-500">No options</p>
             ) : (
               filteredOptions.map((option) => {
                 const isSelected = selected.includes(option.value);
@@ -238,11 +238,7 @@ export function RegisterMultiSelect({
                     >
                       {isSelected ? <Check size={11} strokeWidth={3} /> : null}
                     </span>
-                    <span
-                      className={`text-[11px] leading-snug ${
-                        isSelected ? 'font-medium text-slate-900' : 'text-slate-700'
-                      }`}
-                    >
+                    <span className={`ui-help leading-snug ${isSelected ? 'font-semibold text-slate-900' : 'text-slate-700'}`}>
                       {option.label}
                     </span>
                   </button>

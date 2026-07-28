@@ -32,7 +32,6 @@ import {
   findBreakdownCallType,
   isAnyFilterActive,
   migrateStringFilter,
-  joinFilterParam,
   mergeBranchFilterListEntry,
   normalizeAgingAsOfDate,
   parseRegisterDeepLinkSearchParams,
@@ -83,16 +82,12 @@ import {
 } from '@/lib/read-model/client-flags';
 import {
   routeNeedsCorpusPreload,
-  routeNeedsDistributionPreload,
   routeNeedsSharedResources,
 } from '@/features/report/lib/route-scope';
-import { fetchAllRegisterRowsForExport, logRegisterBulk } from '@/features/register';
+import { logRegisterBulk } from '@/features/register';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
-import { persistSharedRegisterCache, readSharedRegisterCache, SHARED_REGISTER_CACHE_VERSION } from '@/features/report/lib/corpus-storage';
 import {
   buildDefaultFilterSnapshot,
-  buildRoleDefaultShared,
-  storedSharedToSnapshot,
   type RestoreFilterContext,
 } from '@/features/report/lib/preferences';
 
@@ -412,7 +407,6 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
   const [corpusTick, setCorpusTick] = useState(0);
   const syncInFlightRef = useRef(false);
   const corpusLoadInFlightRef = useRef<Promise<void> | null>(null);
-  const sharedRegisterLoadInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
   /** Date windows bulk-loaded for Postgres register/distribution this session. */
   const sharedRegisterSatisfiedKeysRef = useRef<Set<string>>(new Set());
   const corpusAbortRef = useRef<AbortController | null>(null);
@@ -696,21 +690,6 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     };
   }, [supabase, needsSharedResources]);
 
-  const buildRestoreContextFromLoaded = useCallback((): RestoreFilterContext => {
-    const { role, officeIds, permissions } = userRoleRef.current;
-    const visibleOfficeIds = seesAllOfficesForUser(permissions, role, officeIds)
-      ? offices
-          .map((o: { ncode?: string | number }) => String(o.ncode ?? ''))
-          .filter(Boolean)
-      : officeIds;
-    return {
-      role,
-      officeIds,
-      callTypes,
-      visibleOfficeIds,
-    };
-  }, [offices, callTypes]);
-
   const syncUserRoleFromProfile = useCallback(() => {
     if (!userProfile) return false;
     userRoleRef.current = {
@@ -930,28 +909,6 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     });
     setFranchiseesList(Object.values(franchiseeCounts).sort((a, b) => a.vcompanyname.localeCompare(b.vcompanyname)));
   }, [pincodeSearch, selectedAccount, selectedBranch, selectedCity, selectedFranchisee, selectedRegion, selectedState, selectedTechnician]);
-
-  const getDateStrings = useCallback(() => {
-    const applied = appliedFiltersRef.current;
-    if (applied) {
-      return {
-        startDateStr: toDateString(applied.dateRange.start),
-        endDateStr: toDateString(applied.dateRange.end),
-      };
-    }
-    return {
-      startDateStr: toDateString(dateRange.start),
-      endDateStr: toDateString(dateRange.end),
-    };
-  }, [dateRange.end, dateRange.start]);
-
-  const getSharedCacheKey = useCallback(() => {
-    const applied = appliedFiltersRef.current;
-    if (!applied) return null;
-    const startDateStr = toDateString(applied.dateRange.start);
-    const endDateStr = toDateString(applied.dateRange.end);
-    return buildCorpusCacheKey(startDateStr, endDateStr, applied.dateFilterColumn);
-  }, []);
 
   const restoreCorpusDeduped = useCallback(async (cacheKey: string): Promise<CallCorpusStore | null> => {
     const inflight = corpusIdbRestoreInflightRef.current.get(cacheKey);
@@ -1378,184 +1335,6 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     ]
   );
 
-  const fetchDistributionFromRegister = useCallback(
-    async (force = false, silent = false) => {
-      const cacheKey = getSharedCacheKey();
-      if (!cacheKey) return;
-
-      const applySharedCalls = (calls: Record<string, unknown>[], fetchedAt: number) => {
-        const branches = distributionDataCache?.dbBranches || [];
-        setDistributionCalls(calls);
-        setDistributionBranches(branches);
-        setLastSyncedAt(new Date(fetchedAt));
-        setDistributionDataCache({
-          allCalls: calls,
-          dbBranches: branches,
-          lastSyncedAt: fetchedAt,
-          fetchedAt,
-          cacheKey,
-        });
-        syncCascadeOptionsFromCalls(calls);
-        sharedRegisterSatisfiedKeysRef.current.add(cacheKey);
-      };
-
-      if (!force) {
-        if (
-          sharedRegisterSatisfiedKeysRef.current.has(cacheKey) &&
-          distributionDataCache?.cacheKey === cacheKey &&
-          (distributionDataCache.allCalls?.length ?? 0) > 0
-        ) {
-          logRegisterBulk('bulk CACHE HIT (memory)', {
-            cacheKey,
-            rows: distributionDataCache.allCalls.length,
-            ageMs: Date.now() - (distributionDataCache.fetchedAt ?? 0),
-          });
-          if (distributionCalls.length === 0) {
-            setDistributionCalls(distributionDataCache.allCalls);
-          }
-          return;
-        }
-
-        const inflight = sharedRegisterLoadInFlightRef.current.get(cacheKey);
-        if (inflight) {
-          logRegisterBulk('bulk WAIT (in-flight dedupe)', { cacheKey });
-          await inflight;
-          return;
-        }
-      } else {
-        sharedRegisterSatisfiedKeysRef.current.delete(cacheKey);
-      }
-
-      let resolveInflight!: () => void;
-      let rejectInflight!: (reason?: unknown) => void;
-      const inflightGate = new Promise<void>((resolve, reject) => {
-        resolveInflight = resolve;
-        rejectInflight = reject;
-      });
-      sharedRegisterLoadInFlightRef.current.set(cacheKey, inflightGate);
-
-      const run = (async () => {
-        if (!force && !readRegisterFromPostgresClient()) {
-          const idbStart = performance.now();
-          const idbCache = await readSharedRegisterCache(cacheKey);
-          if (
-            idbCache?.calls?.length &&
-            idbCache.schemaVersion === SHARED_REGISTER_CACHE_VERSION
-          ) {
-            logRegisterBulk('bulk CACHE HIT (IndexedDB)', {
-              cacheKey,
-              rows: idbCache.callCount,
-              restoreMs: Number((performance.now() - idbStart).toFixed(1)),
-              ageMs: Date.now() - idbCache.fetchedAt,
-            });
-            applySharedCalls(idbCache.calls, idbCache.lastSyncedAt);
-            await ensurePortalAuditCache();
-            return;
-          }
-        }
-
-        if (!silent) setDistributionLoading(true);
-        const networkStart = performance.now();
-        logRegisterBulk('bulk LOAD (network)', { cacheKey, force });
-
-        try {
-          const applied = appliedFiltersRef.current;
-          if (!applied) return;
-          const startDateStr = toDateString(applied.dateRange.start);
-          const endDateStr = toDateString(applied.dateRange.end);
-          if (readRegisterFromPostgresClient()) {
-            const calls = await fetchAllRegisterRowsForExport({
-              query: {
-                officeId: 'All',
-                callType: 'All',
-                startDate: startDateStr,
-                endDate: endDateStr,
-                dateFilterColumn: applied.dateFilterColumn,
-              },
-              onProgress: (fetched, total) => {
-                if (fetched === total || fetched % 5000 === 0) {
-                  logRegisterBulk('bulk LOAD progress', { fetched, total });
-                }
-              },
-            });
-            const now = Date.now();
-            applySharedCalls(calls, now);
-            logRegisterBulk('bulk LOAD stored (register hot columns)', {
-              cacheKey,
-              rows: calls.length,
-              networkMs: Number((performance.now() - networkStart).toFixed(1)),
-            });
-            await ensurePortalAuditCache();
-            return;
-          }
-
-          const calls = await fetchAllRegisterRowsForExport({
-            query: {
-              officeId: 'All',
-              callType: 'All',
-              startDate: startDateStr,
-              endDate: endDateStr,
-              dateFilterColumn: applied.dateFilterColumn,
-            },
-            onProgress: (fetched, total) => {
-              if (fetched === total || fetched % 5000 === 0) {
-                logRegisterBulk('bulk LOAD progress', { fetched, total });
-              }
-            },
-          });
-          const now = Date.now();
-          applySharedCalls(calls, now);
-          if (!readRegisterFromPostgresClient()) {
-            void persistSharedRegisterCache({
-              cacheKey,
-              calls,
-              fetchedAt: now,
-              lastSyncedAt: now,
-              callCount: calls.length,
-              schemaVersion: SHARED_REGISTER_CACHE_VERSION,
-            });
-          }
-          logRegisterBulk('bulk LOAD stored', {
-            cacheKey,
-            rows: calls.length,
-            networkMs: Number((performance.now() - networkStart).toFixed(1)),
-          });
-          await ensurePortalAuditCache();
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Distribution load failed';
-          logRegisterBulk('bulk LOAD failed', {
-            cacheKey,
-            networkMs: Number((performance.now() - networkStart).toFixed(1)),
-            error: message,
-          });
-          if (!silent) {
-            const userMessage = sanitizeUserFacingMessage(message);
-            setReportError(
-              userMessage
-                ? `Could not load distribution data: ${userMessage}`
-                : 'Could not load distribution data'
-            );
-          }
-        } finally {
-          if (!silent) setDistributionLoading(false);
-        }
-      })();
-
-      try {
-        await run;
-        resolveInflight();
-      } catch (err) {
-        rejectInflight(err);
-        throw err;
-      } finally {
-        if (sharedRegisterLoadInFlightRef.current.get(cacheKey) === inflightGate) {
-          sharedRegisterLoadInFlightRef.current.delete(cacheKey);
-        }
-      }
-    },
-    [getSharedCacheKey, distributionCalls.length, setReportError, supabase, syncCascadeOptionsFromCalls]
-  );
-
   const ensureSharedCallsLoaded = useCallback(
     async (force = false) => {
       if (readRegisterFromPostgresClient()) {
@@ -1719,7 +1498,6 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     applyCorpusToUi,
     ensureCorpusLoaded,
     ensureSharedCallsLoaded,
-    getSharedCacheKey,
     lastSyncedAt,
     pathname,
     supabase,

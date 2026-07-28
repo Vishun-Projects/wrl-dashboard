@@ -24,7 +24,17 @@
   --theme-bg-muted: #f3f1ec;
   --theme-border: #e7e3db;
   --theme-fg-primary: #0f172a;
+  --theme-fg-secondary: #334155;
   --theme-fg-muted: #64748b;
+  --theme-fg-tertiary: #94a3b8;
+  --theme-success: #0f766e;
+  --theme-danger: #be123c;
+  --theme-info: #1d4ed8;
+  --theme-warning: #b45309;
+  --theme-success-bg: #ecfdf5;
+  --theme-danger-bg: #fff1f2;
+  --theme-info-bg: #eff6ff;
+  --theme-warning-bg: #fffbeb;
 }
 
 [data-theme="white"] {
@@ -33,7 +43,17 @@
   --theme-bg-muted: #f1f5f9;
   --theme-border: #e2e8f0;
   --theme-fg-primary: #0f172a;
+  --theme-fg-secondary: #334155;
   --theme-fg-muted: #64748b;
+  --theme-fg-tertiary: #94a3b8;
+  --theme-success: #0f766e;
+  --theme-danger: #be123c;
+  --theme-info: #1d4ed8;
+  --theme-warning: #b45309;
+  --theme-success-bg: #ecfdf5;
+  --theme-danger-bg: #fff1f2;
+  --theme-info-bg: #eff6ff;
+  --theme-warning-bg: #fffbeb;
 }
 
 [data-theme="dark"] {
@@ -44,14 +64,19 @@
   --theme-border: rgba(255, 255, 255, 0.12);
   --theme-fg-primary: #f5f5f5;
   --theme-fg-secondary: rgba(255, 255, 255, 0.82);
-  --theme-fg-muted: rgba(255, 255, 255, 0.58);
-  --theme-fg-dim: rgba(255, 255, 255, 0.4);
+  --theme-fg-muted: rgba(255, 255, 255, 0.66);
+  --theme-fg-tertiary: rgba(255, 255, 255, 0.5);
+  --theme-fg-dim: rgba(255, 255, 255, 0.45);
   --theme-accent-surface: #242424;
   --theme-link: #8eb4e8;
   --theme-success: #94c4a8;
   --theme-danger: #d4a0a0;
   --theme-info: #94b4d4;
   --theme-warning: #d4c094;
+  --theme-success-bg: color-mix(in oklab, var(--theme-success) 12%, var(--theme-bg-muted));
+  --theme-danger-bg: color-mix(in oklab, var(--theme-danger) 12%, var(--theme-bg-muted));
+  --theme-info-bg: color-mix(in oklab, var(--theme-info) 12%, var(--theme-bg-muted));
+  --theme-warning-bg: color-mix(in oklab, var(--theme-warning) 12%, var(--theme-bg-muted));
   --theme-hairline: rgba(255, 255, 255, 0.12);
   --theme-control-border: rgba(255, 255, 255, 0.18);
 }
@@ -64,7 +89,17 @@
   --color-bg-canvas: var(--theme-bg-canvas);
   --color-bg-soft: var(--theme-bg-soft);
   --color-fg-primary: var(--theme-fg-primary);
+  --color-fg-secondary: var(--theme-fg-secondary);
   --color-fg-muted: var(--theme-fg-muted);
+  --color-fg-tertiary: var(--theme-fg-tertiary);
+  --color-success: var(--theme-success);
+  --color-danger: var(--theme-danger);
+  --color-info: var(--theme-info);
+  --color-warning: var(--theme-warning);
+  --color-success-bg: var(--theme-success-bg);
+  --color-danger-bg: var(--theme-danger-bg);
+  --color-info-bg: var(--theme-info-bg);
+  --color-warning-bg: var(--theme-warning-bg);
   --font-sans: var(--font-dm-sans), 'Inter', system-ui, sans-serif;
   --font-mono: var(--font-jetbrains-mono), monospace;
   
@@ -75,6 +110,20 @@
 @layer base {
   body {
     @apply bg-bg-soft text-fg-primary antialiased font-sans text-[13px] selection:bg-slate-900 selection:text-white;
+  }
+
+  /* Interactive controls: finger cursor so hover signals “clickable” */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href],
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
   }
 
   [data-theme="dark"] body ::selection {
@@ -149,15 +198,6 @@
 [data-theme="dark"] .bg-slate-900.text-white,
 [data-theme="dark"] .bg-slate-900 .text-white {
   background-color: rgba(255, 255, 255, 0.9);
-  color: #101010;
-}
-
-[data-theme="dark"] .text-white {
-  color: var(--theme-fg-primary);
-}
-
-[data-theme="dark"] .bg-slate-900.text-white .text-white,
-[data-theme="dark"] .bg-slate-900.text-white.text-white {
   color: #101010;
 }
 
@@ -289,24 +329,25 @@
 }
 
 [data-theme="dark"] .badge-open,
-[data-theme="dark"] .badge-pending {
-  background-color: color-mix(in oklab, var(--theme-success) 15%, var(--theme-bg-muted));
-  color: var(--theme-success);
+[data-theme="dark"] .badge-calltype-default {
+  background-color: var(--theme-info-bg);
+  color: var(--theme-info);
+  border-color: transparent;
+}
+
+[data-theme="dark"] .badge-pending,
+[data-theme="dark"] .badge-assigned,
+[data-theme="dark"] .badge-allocated {
+  background-color: var(--theme-warning-bg);
+  color: var(--theme-warning);
   border-color: transparent;
 }
 
 [data-theme="dark"] .badge-cancelled,
 [data-theme="dark"] .badge-rejected,
 [data-theme="dark"] .badge-calltype-breakdown {
-  background-color: color-mix(in oklab, var(--theme-danger) 14%, var(--theme-bg-muted));
+  background-color: var(--theme-danger-bg);
   color: var(--theme-danger);
-  border-color: transparent;
-}
-
-[data-theme="dark"] .badge-assigned,
-[data-theme="dark"] .badge-allocated {
-  background-color: color-mix(in oklab, var(--theme-warning) 14%, var(--theme-bg-muted));
-  color: var(--theme-warning);
   border-color: transparent;
 }
 
@@ -317,7 +358,6 @@
   border-color: transparent;
 }
 
-[data-theme="dark"] .badge-calltype-default,
 [data-theme="dark"] .badge-unseen {
   background-color: var(--theme-bg-muted);
   color: var(--theme-fg-muted);
@@ -1050,6 +1090,24 @@
   }
 
   /* Semantic typography utilities */
+  .ui-page-title {
+    @apply text-[16px] font-semibold tracking-tight text-fg-primary;
+  }
+  .ui-section-title {
+    @apply text-[14px] font-semibold text-fg-primary;
+  }
+  .ui-field-label {
+    @apply text-[11px] font-medium text-fg-secondary;
+  }
+  .ui-help {
+    @apply text-[12px] leading-relaxed text-fg-muted;
+  }
+  .ui-micro {
+    @apply text-[10px] font-medium text-fg-tertiary;
+  }
+  .ui-chip {
+    @apply text-[10px] font-medium;
+  }
   .ui-body {
     @apply text-[13px] font-normal text-fg-primary;
   }
@@ -1057,7 +1115,7 @@
     @apply font-medium text-fg-primary;
   }
   .ui-muted {
-    @apply text-sm text-fg-muted font-normal;
+    @apply text-[11px] text-fg-muted font-normal;
   }
   .ui-label {
     @apply text-[11px] text-fg-muted font-medium;
@@ -1100,7 +1158,7 @@
   }
 
   .register-filter-group-label {
-    @apply text-[9px] font-semibold uppercase tracking-wider text-slate-400 leading-none;
+    @apply text-[10px] font-semibold uppercase tracking-wider text-slate-400 leading-none;
   }
 
   .register-filter-group-controls {
@@ -1228,7 +1286,7 @@
   }
 
   .register-section-label {
-    @apply text-[10px] font-semibold uppercase tracking-wider text-slate-400 shrink-0;
+    @apply text-[11px] font-semibold uppercase tracking-wider text-slate-400 shrink-0;
   }
 
   .register-stats-bar {
@@ -1453,7 +1511,7 @@
   }
 
   .distribution-data-table thead {
-    @apply sticky top-0 z-20 border-b border-slate-200 bg-bg-soft font-extrabold text-slate-600;
+    @apply sticky top-0 z-20 border-b border-slate-200 bg-bg-soft text-[11px] font-semibold text-slate-700;
   }
 
   .distribution-data-table th {
@@ -1531,7 +1589,7 @@
   }
 
   .distribution-active-filters__label {
-    @apply shrink-0 text-[9px] font-extrabold uppercase tracking-wider text-slate-500;
+    @apply shrink-0 text-[10px] font-extrabold uppercase tracking-wider text-slate-500;
   }
 
   .distribution-active-filters__chips {
@@ -1551,7 +1609,7 @@
   }
 
   .distribution-filter-chip__label {
-    @apply text-[9px] font-bold uppercase tracking-wide opacity-80;
+    @apply text-[10px] font-bold uppercase tracking-wide opacity-80;
   }
 
   .distribution-filter-chip__detail {
@@ -1583,7 +1641,7 @@
   }
 
   .distribution-status-badge {
-    @apply inline-block rounded-full border px-2 py-0.5 text-[9px] font-bold whitespace-nowrap;
+    @apply inline-block rounded-full border px-2 py-0.5 text-[10px] font-bold whitespace-nowrap;
   }
 
   .distribution-status-badge--ok {
@@ -1603,7 +1661,7 @@
   }
 
   .distribution-type-pill {
-    @apply inline-flex rounded-md border border-slate-200 bg-bg-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-600;
+    @apply inline-flex rounded-md border border-slate-200 bg-bg-soft px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600;
   }
 
   .distribution-type-pill--sf {
@@ -1888,7 +1946,7 @@
   }
 
   .serial-audit-detail-table th {
-    @apply whitespace-nowrap border-b border-slate-200 px-2 py-2 text-[10px] font-semibold text-slate-500;
+    @apply whitespace-nowrap border-b border-slate-200 px-2 py-2 text-[11px] font-semibold text-slate-600;
   }
 
   .serial-audit-detail-table td {
@@ -1950,7 +2008,7 @@
   }
 
   .warranty-master-detail-table th {
-    @apply border-b border-slate-200 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500;
+    @apply border-b border-slate-200 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600;
   }
 
   .warranty-master-detail-table td {

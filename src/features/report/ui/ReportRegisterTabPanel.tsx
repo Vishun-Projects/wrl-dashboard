@@ -85,13 +85,13 @@ export function ReportRegisterTabPanel({
                 </colgroup>
                 <thead className="sticky top-0 z-20 border-b border-slate-200 bg-bg-soft">
                   <tr>
-                    <th className="register-table-sticky-col register-table-sticky-col-1 border-r border-slate-100 px-2 py-2.5 text-center text-[11px] font-medium whitespace-nowrap text-slate-500">
+                    <th className="register-table-sticky-col register-table-sticky-col-1 border-r border-slate-100 px-2 py-2.5 text-center ui-field-label font-semibold whitespace-nowrap text-slate-600">
                       #
                     </th>
                     {visibleRegisterColumnDefs.map((col, colIdx) => (
                       <SortableTh
                         key={col.key}
-                        className={`border-r border-slate-100 px-3 py-2.5 text-[11px] font-medium whitespace-nowrap text-slate-500 ${colIdx === 0 ? 'register-table-sticky-col register-table-sticky-col-2' : ''}`}
+                        className={`border-r border-slate-100 px-3 py-2.5 ui-field-label font-semibold whitespace-nowrap text-slate-600 ${colIdx === 0 ? 'register-table-sticky-col register-table-sticky-col-2' : ''}`}
                         active={sort?.key === col.key}
                         dir={sort?.dir}
                         onClick={() => onSortChange(toggleSort(sort, col.key, 'asc'))}

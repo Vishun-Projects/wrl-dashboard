@@ -21,6 +21,8 @@ export type RbacPage = {
   exactPath?: boolean;
   group: RbacPageGroup;
   tabs?: RbacTab[];
+  /** When false, omitted from sidebar (still used for Roles / path access). */
+  nav?: boolean;
 };
 
 export type RbacCapability = {
@@ -143,20 +145,30 @@ export const RBAC_PAGES: RbacPage[] = [
     group: 'Administration',
   },
   {
+    id: 'mis_email_settings',
+    permission: 'page_mis_email_settings',
+    path: '/admin/mis-email-settings',
+    label: 'Mail & Alerts',
+    description: 'Org settings, MIS email routing, and major repair alerts',
+    group: 'Administration',
+  },
+  {
     id: 'mis_email_routing',
     permission: 'page_mis_email_routing',
     path: '/admin/mis-email-routing',
     label: 'MIS Email Routing',
-    description: 'Zone/branch/client-wise automail recipients and routing controls',
+    description: 'Legacy path — use Mail & Alerts hub',
     group: 'Administration',
+    nav: false,
   },
   {
     id: 'major_repair_alerts',
     permission: 'page_major_repair_alerts',
     path: '/admin/major-repair-alerts',
     label: 'Major Repair Alerts',
-    description: 'Branch recipients for major repair repeat SLA email alerts',
+    description: 'Legacy path — use Mail & Alerts hub',
     group: 'Administration',
+    nav: false,
   },
   {
     id: 'performance_insights',
@@ -262,11 +274,18 @@ export function hasFullPageAccess(permissions: string[], pageId: string): boolea
 export function canAccessPage(permissions: string[], pageId: string): boolean {
   const page = PAGE_BY_ID.get(pageId);
   if (!page) return false;
-  if (pageId === 'mis_email_routing' || pageId === 'major_repair_alerts') {
+  if (
+    pageId === 'mis_email_routing' ||
+    pageId === 'major_repair_alerts' ||
+    pageId === 'mis_email_settings'
+  ) {
     if (
       hasCapability(permissions, 'view_all_offices') ||
       hasPermission(permissions, 'manage_users') ||
-      hasPermission(permissions, 'manage_roles')
+      hasPermission(permissions, 'manage_roles') ||
+      hasPermission(permissions, 'page_mis_email_settings') ||
+      hasPermission(permissions, 'page_mis_email_routing') ||
+      hasPermission(permissions, 'page_major_repair_alerts')
     ) {
       return true;
     }
@@ -340,7 +359,9 @@ export function resolveApiAccess(
 }
 
 export function visiblePages(permissions: string[]): RbacPage[] {
-  return RBAC_PAGES.filter((page) => canAccessPage(permissions, page.id));
+  return RBAC_PAGES.filter(
+    (page) => page.nav !== false && canAccessPage(permissions, page.id)
+  );
 }
 
 export function visibleTabs(permissions: string[], pageId: string): RbacTab[] {
@@ -553,6 +574,7 @@ export function groupPermissionsForRolesUi(
   const pages: RolesUiPageRow[] = [];
 
   for (const page of RBAC_PAGES) {
+    if (page.nav === false) continue;
     const row = allPermissions.find((p) => p.name === page.permission);
     if (!row) continue;
 

@@ -5,10 +5,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildRegisterExportParams,
+  detailedMisRegisterFilename,
   shouldStreamRegisterExportFromServer,
   REGISTER_SERVER_STREAM_MIN_ROWS,
 } from '@/features/register';
 import { buildCorpusCacheKey } from '@/features/report/lib/corpus';
+import { buildDistributionCacheKey } from '@/features/report/lib/filters';
 import { isExportActiveForTab, type ExportQueueItem } from '@/features/report/lib/export-queue';
 
 const baseQuery = {
@@ -60,6 +62,14 @@ describe('report characterization — filter / corpus key', () => {
     expect(a).not.toBe(c);
     expect(a.split('|')).toHaveLength(3);
   });
+
+  it('buildDistributionCacheKey is order-insensitive for call types', () => {
+    const a = buildDistributionCacheKey('2026-07-01', '2026-07-22', ['BREAKDOWN', 'INSTALLATION']);
+    const b = buildDistributionCacheKey('2026-07-01', '2026-07-22', ['INSTALLATION', 'BREAKDOWN']);
+    const c = buildDistributionCacheKey('2026-07-01', '2026-07-22', ['BREAKDOWN']);
+    expect(a).toBe(b);
+    expect(a).not.toBe(c);
+  });
 });
 
 describe('report characterization — export kickoff contracts', () => {
@@ -69,6 +79,13 @@ describe('report characterization — export kickoff contracts', () => {
     );
     expect(shouldStreamRegisterExportFromServer(10, 0)).toBe(false);
     expect(shouldStreamRegisterExportFromServer(1000, 1000)).toBe(false);
+  });
+
+  it('small totals stay on Excel row path (not server CSV stream)', () => {
+    expect(shouldStreamRegisterExportFromServer(50, 0)).toBe(false);
+    expect(detailedMisRegisterFilename(new Date('2026-07-27T00:00:00.000Z'))).toBe(
+      'WRL Detailed MIS Register — 2026-07-27.xlsx'
+    );
   });
 
   it('export queue active flag is tab-scoped', () => {

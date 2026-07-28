@@ -20,6 +20,12 @@ import {
   settingsInputClass,
 } from '@/components/admin/AdminUi';
 import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
+import {
+  MAIL_ALERTS_CONTENT,
+  MAIL_ALERTS_PANEL,
+  MAIL_ALERTS_PRIMARY_BTN,
+} from '@/features/mis-email/ui/mail-alerts-ui';
+import { EmailChipsInput } from '@/features/mis-email/ui/TagChipsInput';
 
 type ClientSourceMode = 'mail' | 'crm';
 
@@ -229,83 +235,11 @@ function ToggleSwitch({
   );
 }
 
-function EmailChipsInput({
-  label,
-  values,
-  onChange,
+export default function MisEmailRoutingPageClient({
+  embedded = false,
 }: {
-  label: string;
-  values: string[];
-  onChange: (next: string[]) => void;
+  embedded?: boolean;
 }) {
-  const [draft, setDraft] = useState('');
-  const [error, setError] = useState('');
-
-  function addEmail(raw: string) {
-    const email = raw.trim().toLowerCase();
-    if (!email) return;
-    if (!EMAIL_RE.test(email)) {
-      setError(`Invalid email: ${email}`);
-      return;
-    }
-    if (values.includes(email)) {
-      setDraft('');
-      setError('');
-      return;
-    }
-    onChange([...values, email]);
-    setDraft('');
-    setError('');
-  }
-
-  return (
-    <div className="space-y-1.5">
-      <label className="text-[11px] font-medium text-slate-500">{label}</label>
-      <div className="rounded-md border border-slate-200 bg-bg-canvas p-2">
-        <div className="mb-2 flex flex-wrap gap-1">
-          {values.map((email) => (
-            <span
-              key={email}
-              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[11px] text-slate-700"
-            >
-              {email}
-              <button
-                type="button"
-                onClick={() => onChange(values.filter((item) => item !== email))}
-                className="text-slate-500 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-400"
-                aria-label={`Remove ${email}`}
-              >
-                <X size={12} />
-              </button>
-            </span>
-          ))}
-        </div>
-        <input
-          value={draft}
-          onChange={(event) => {
-            setDraft(event.target.value);
-            if (error) setError('');
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ',') {
-              event.preventDefault();
-              addEmail(draft);
-            }
-            if (event.key === 'Backspace' && !draft && values.length > 0) {
-              onChange(values.slice(0, -1));
-            }
-          }}
-          onBlur={() => addEmail(draft)}
-          placeholder="Type email and press Enter"
-          className="h-8 w-full bg-transparent text-[12px] text-slate-800 outline-none"
-        />
-      </div>
-      {error ? <p className="text-[11px] text-rose-600">{error}</p> : null}
-    </div>
-  );
-}
-
-export default function MisEmailRoutingPageClient() {
   const [rows, setRows] = useState<EditableRuleRow[]>([]);
   const [zoneOptions, setZoneOptions] = useState<string[]>([]);
   const [globalBranchOptions, setGlobalBranchOptions] = useState<string[]>([]);
@@ -536,7 +470,7 @@ export default function MisEmailRoutingPageClient() {
       clientSourceMode: 'mail',
       toEmailsCsv: '',
       ccEmailsCsv: '',
-      autoSendEnabled: true,
+      autoSendEnabled: false,
       scheduleAnchorTimeIst: '07:00',
       scheduleIntervalMinutes: 1440,
       scheduleDaysOfWeek: [...DAY_OPTIONS],
@@ -632,33 +566,26 @@ export default function MisEmailRoutingPageClient() {
     setActiveRowId(null);
   }
 
-  return (
-    <PageShell
-      title="MIS Email Routing"
-      subtitle="Scan rules quickly in the table, then edit full details in the side panel."
-      icon={<Mail size={16} />}
-      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-soft"
-      toolbar={
-        <AdminToolbar
-          search={search}
-          onSearchChange={setSearch}
-          searchPlaceholder="Search zones, branches, clients, or recipients..."
-        >
-          <button
-            type="button"
-            onClick={addRuleAndOpenDrawer}
-            className="flex h-9 items-center gap-2 rounded-md bg-slate-900 px-3 text-xs font-medium text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
-          >
-            <Plus size={14} />
-            Add Rule
-          </button>
-        </AdminToolbar>
-      }
+  const toolbar = (
+    <AdminToolbar
+      search={search}
+      onSearchChange={setSearch}
+      searchPlaceholder="Search zones, branches, clients, or recipients..."
     >
-      <div className="flex min-h-0 flex-1 flex-col p-4">
+      <button type="button" onClick={addRuleAndOpenDrawer} className={MAIL_ALERTS_PRIMARY_BTN}>
+        <Plus size={14} />
+        Add rule
+      </button>
+    </AdminToolbar>
+  );
+
+  const body = (
+    <div className={embedded ? MAIL_ALERTS_PANEL : undefined}>
+      {embedded ? toolbar : null}
+      <div className={embedded ? MAIL_ALERTS_CONTENT : 'flex min-h-0 flex-1 flex-col p-4'}>
         <AdminTableCard isEmpty={!loading && filteredRows.length === 0}>
           {loading ? (
-            <div className="p-6 text-[12px] text-slate-500">Loading routing rules...</div>
+            <div className="ui-body p-6 text-slate-500">Loading routing rules...</div>
           ) : (
             <>
               <AdminTable className="w-full min-w-[1180px] border-collapse text-left">
@@ -764,36 +691,36 @@ export default function MisEmailRoutingPageClient() {
                         onClick={() => setActiveRowId(row.id)}
                       >
                         <AdminTd>
-                          <span className="inline-flex rounded-md border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                          <span className="ui-chip inline-flex rounded-md border border-slate-200 bg-bg-soft px-2 py-0.5 font-semibold text-slate-700">
                             #{index}
                           </span>
                         </AdminTd>
                         <AdminTd>
                           <span
                             title={row.zone.join(', ') || 'All zones'}
-                            className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700"
+                            className="ui-chip inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-slate-700"
                           >
                             {formatScopeCount(row.zone, 'zones', zoneOptions.length)}
                           </span>
-                          <p className="mt-1 text-[10px] text-slate-500">
+                          <p className="mt-1 ui-micro">
                             {summarizeSelected(row.zone, 'All zones')}
                           </p>
                         </AdminTd>
                         <AdminTd>
                           <span
                             title={row.branch.join(', ') || 'All branches'}
-                            className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700"
+                            className="ui-chip inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-slate-700"
                           >
                             {formatScopeCount(row.branch, 'branches', globalBranchOptions.length)}
                           </span>
-                          <p className="mt-1 text-[10px] text-slate-500">
+                          <p className="mt-1 ui-micro">
                             {summarizeSelected(row.branch, 'All branches')}
                           </p>
                         </AdminTd>
                         <AdminTd>
                           <span
                             title={row.client.join(', ') || 'All clients'}
-                            className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700"
+                            className="ui-chip inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-slate-700"
                           >
                             {formatScopeCount(
                               row.client,
@@ -801,40 +728,40 @@ export default function MisEmailRoutingPageClient() {
                               globalClientOptionsByMode[row.clientSourceMode]?.length ?? 0
                             )}
                           </span>
-                          <p className="mt-1 text-[10px] text-slate-500">
+                          <p className="mt-1 ui-micro">
                             {summarizeSelected(row.client, 'All clients')}
                           </p>
                         </AdminTd>
                         <AdminTd>
-                          <span className="text-[11px] font-medium text-slate-700">
+                          <span className="ui-label text-slate-700">
                             {row.clientSourceMode === 'crm' ? 'CRM only' : 'Mail data'}
                           </span>
                         </AdminTd>
                         <AdminTd>
                           <span
                             title={parseEmailsCsv(row.toEmailsCsv).join(', ') || 'No recipients'}
-                            className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700"
+                            className="ui-chip inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-slate-700"
                           >
                             {parseEmailsCsv(row.toEmailsCsv).length} recipients
                           </span>
-                          <p className="mt-1 text-[10px] text-slate-500">
+                          <p className="mt-1 ui-micro">
                             {summarizeSelected(parseEmailsCsv(row.toEmailsCsv), 'None')}
                           </p>
                         </AdminTd>
                         <AdminTd>
                           <span
                             title={parseEmailsCsv(row.ccEmailsCsv).join(', ') || 'No recipients'}
-                            className="inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-[10px] font-medium text-slate-700"
+                            className="ui-chip inline-flex rounded-full border border-slate-200 bg-bg-soft px-2 py-0.5 text-slate-700"
                           >
                             {parseEmailsCsv(row.ccEmailsCsv).length} recipients
                           </span>
-                          <p className="mt-1 text-[10px] text-slate-500">
+                          <p className="mt-1 ui-micro">
                             {summarizeSelected(parseEmailsCsv(row.ccEmailsCsv), 'None')}
                           </p>
                         </AdminTd>
                         <AdminTd>
-                          <span className="text-[11px] text-slate-700">{scheduleSummary(row)}</span>
-                          <p className="mt-1 text-[10px] text-slate-500">
+                          <span className="ui-help text-slate-700">{scheduleSummary(row)}</span>
+                          <p className="mt-1 ui-micro">
                             {row.scheduleDaysOfWeek.length === DAY_OPTIONS.length
                               ? 'All days'
                               : summarizeSelected(
@@ -861,7 +788,7 @@ export default function MisEmailRoutingPageClient() {
                               event.stopPropagation();
                               setConfirmDeleteId(row.id);
                             }}
-                            className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 px-2 text-[11px] font-medium text-slate-600 transition-colors hover:bg-bg-soft disabled:opacity-50"
+                            className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 px-2 ui-label font-medium text-slate-700 transition-colors hover:bg-bg-soft disabled:opacity-50"
                           >
                             <Trash2 size={12} />
                             Delete
@@ -873,7 +800,7 @@ export default function MisEmailRoutingPageClient() {
                 </tbody>
               </AdminTable>
 
-              <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-[11px] text-slate-600">
+              <div className="ui-help flex items-center justify-between border-t border-slate-100 px-4 py-3 text-slate-600">
                 <div>
                   Showing {sortedFilteredRows.length === 0 ? 0 : (safePage - 1) * pageSize + 1}-
                   {Math.min(safePage * pageSize, sortedFilteredRows.length)} of {sortedFilteredRows.length}
@@ -882,7 +809,7 @@ export default function MisEmailRoutingPageClient() {
                   <select
                     value={String(pageSize)}
                     onChange={(event) => setPageSize(Number(event.target.value))}
-                    className={`${settingsInputClass()} h-8 w-[88px] px-2 text-[11px]`}
+                    className={`${settingsInputClass()} h-8 w-[88px] px-2 ui-label`}
                   >
                     {PAGE_SIZE_OPTIONS.map((size) => (
                       <option key={size} value={String(size)}>
@@ -894,18 +821,18 @@ export default function MisEmailRoutingPageClient() {
                     type="button"
                     disabled={safePage <= 1}
                     onClick={() => setPage((current) => Math.max(1, current - 1))}
-                    className="h-8 rounded-md border border-slate-200 px-2 text-[11px] disabled:opacity-40"
+                    className="h-8 rounded-md border border-slate-200 px-2 ui-label disabled:opacity-40"
                   >
                     Prev
                   </button>
-                  <span className="px-1 text-[11px]">
+                  <span className="ui-help px-1">
                     {safePage}/{totalPages}
                   </span>
                   <button
                     type="button"
                     disabled={safePage >= totalPages}
                     onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-                    className="h-8 rounded-md border border-slate-200 px-2 text-[11px] disabled:opacity-40"
+                    className="h-8 rounded-md border border-slate-200 px-2 ui-label disabled:opacity-40"
                   >
                     Next
                   </button>
@@ -966,8 +893,8 @@ export default function MisEmailRoutingPageClient() {
             <div className="absolute right-0 top-0 z-[191] flex h-full w-full max-w-[760px] flex-col border-l border-slate-200 bg-bg-canvas shadow-2xl">
               <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-900">Edit routing rule</h2>
-                  <p className="text-[11px] text-slate-500">
+                  <h2 className="ui-section-title">Edit routing rule</h2>
+                  <p className="ui-help">
                     Configure scope, recipients, and schedule.
                   </p>
                 </div>
@@ -982,13 +909,13 @@ export default function MisEmailRoutingPageClient() {
               </div>
 
               <div className="custom-scrollbar flex-1 space-y-4 overflow-y-auto px-5 py-4">
-                <div className="rounded-lg border border-slate-200 bg-bg-soft/50 px-3 py-2 text-[11px] text-slate-600">
+                <div className="ui-help rounded-lg border border-slate-200 bg-bg-soft/50 px-3 py-2 text-slate-600">
                   Scope dependencies: selected zones filter branches, and zones + branches filter
                   clients. Existing valid selections are preserved.
                 </div>
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-medium text-slate-500">Client basis</label>
+                    <label className="ui-field-label">Client basis</label>
                     <select
                       className={settingsInputClass()}
                       value={activeRow.clientSourceMode}
@@ -1008,7 +935,7 @@ export default function MisEmailRoutingPageClient() {
 
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-medium text-slate-500">Zones</label>
+                    <label className="ui-field-label">Zones</label>
                     <RegisterMultiSelect
                       label="Zones"
                       emptyLabel={`All zones (${zoneOptions.length})`}
@@ -1046,7 +973,7 @@ export default function MisEmailRoutingPageClient() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-medium text-slate-500">Branches</label>
+                    <label className="ui-field-label">Branches</label>
                     <RegisterMultiSelect
                       label="Branches"
                       emptyLabel={`All branches (${globalBranchOptions.length})`}
@@ -1083,7 +1010,7 @@ export default function MisEmailRoutingPageClient() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-medium text-slate-500">Clients</label>
+                    <label className="ui-field-label">Clients</label>
                     <RegisterMultiSelect
                       label="Clients"
                       emptyLabel={`All clients (${globalClientOptionsByMode[activeRow.clientSourceMode]?.length ?? 0})`}
@@ -1114,10 +1041,10 @@ export default function MisEmailRoutingPageClient() {
                 </div>
 
                 <div className="rounded-lg border border-slate-200 bg-bg-soft/60 p-4">
-                  <p className="mb-3 text-[11px] font-medium text-slate-600">Schedule</p>
+                  <p className="mb-3 ui-field-label text-slate-600">Schedule</p>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                     <div>
-                      <label className="mb-1 block text-[11px] text-slate-500">Start time (IST)</label>
+                      <label className="ui-field-label mb-1 block">Start time (IST)</label>
                       <input
                         type="time"
                         className={settingsInputClass()}
@@ -1128,7 +1055,7 @@ export default function MisEmailRoutingPageClient() {
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-[11px] text-slate-500">Repeat</label>
+                      <label className="ui-field-label mb-1 block">Repeat</label>
                       <select
                         className={settingsInputClass()}
                         value={String(activeRow.scheduleIntervalMinutes)}
@@ -1146,7 +1073,7 @@ export default function MisEmailRoutingPageClient() {
                       </select>
                     </div>
                     <div>
-                      <label className="mb-1 block text-[11px] text-slate-500">On days</label>
+                      <label className="ui-field-label mb-1 block">On days</label>
                       <RegisterMultiSelect
                         label="Days"
                         emptyLabel="All days"
@@ -1163,7 +1090,7 @@ export default function MisEmailRoutingPageClient() {
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-[11px] text-slate-500">
+                      <label className="ui-field-label mb-1 block">
                         Allowed time range (optional)
                       </label>
                       <div className="grid grid-cols-2 gap-2">
@@ -1191,7 +1118,7 @@ export default function MisEmailRoutingPageClient() {
 
               <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-slate-200 bg-bg-canvas px-5 py-3">
                 {drawerDirty ? (
-                  <p className="mr-auto text-[11px] text-amber-700">Unsaved changes</p>
+                  <p className="ui-help mr-auto text-amber-700">Unsaved changes</p>
                 ) : null}
                 <button
                   type="button"
@@ -1213,6 +1140,22 @@ export default function MisEmailRoutingPageClient() {
           </div>
         ) : null}
       </ModalPortal>
+    </div>
+  );
+
+  if (embedded) {
+    return body;
+  }
+
+  return (
+    <PageShell
+      title="MIS Email Routing"
+      subtitle="Scan rules quickly in the table, then edit full details in the side panel. New rules default auto-send OFF."
+      icon={<Mail size={16} />}
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-soft"
+      toolbar={toolbar}
+    >
+      {body}
     </PageShell>
   );
 }

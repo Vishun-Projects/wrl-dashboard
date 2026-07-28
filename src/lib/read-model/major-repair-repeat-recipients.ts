@@ -1,4 +1,6 @@
 import { withAppClient } from '@/lib/read-model/db';
+import { assertAllowedEmailDomains } from '@/lib/mail/allowed-domains';
+import { getMisEmailOrgSettings } from '@/lib/org-settings/mis-email';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -53,7 +55,7 @@ export async function ensureMajorRepairRepeatRecipientsTable(): Promise<void> {
         branch text NOT NULL,
         recipient_name text NOT NULL,
         email text NOT NULL,
-        enabled boolean NOT NULL DEFAULT true,
+        enabled boolean NOT NULL DEFAULT false,
         created_at timestamptz NOT NULL DEFAULT now(),
         updated_at timestamptz NOT NULL DEFAULT now()
       );
@@ -163,7 +165,10 @@ export async function createMajorRepairRepeatRecipient(input: {
   enabled?: boolean;
 }): Promise<MajorRepairRepeatRecipient> {
   const { branch, recipientName, email } = validateInput(input);
-  const enabled = input.enabled !== false;
+  const org = await getMisEmailOrgSettings();
+  assertAllowedEmailDomains([email], org.allowedEmailDomains);
+  // Safe default: new rows do not alert until HOD enables.
+  const enabled = input.enabled === true;
   await ensureMajorRepairRepeatRecipientsTable();
   return withAppClient(async (client) => {
     try {
@@ -196,6 +201,8 @@ export async function updateMajorRepairRepeatRecipient(input: {
   const id = String(input.id ?? '').trim();
   if (!id) throw new Error('id is required');
   const { branch, recipientName, email } = validateInput(input);
+  const org = await getMisEmailOrgSettings();
+  assertAllowedEmailDomains([email], org.allowedEmailDomains);
   await ensureMajorRepairRepeatRecipientsTable();
   return withAppClient(async (client) => {
     try {

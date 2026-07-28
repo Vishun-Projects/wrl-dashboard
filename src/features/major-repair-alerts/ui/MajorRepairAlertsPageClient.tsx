@@ -19,6 +19,11 @@ import {
   AdminTr,
   settingsInputClass,
 } from '@/components/admin/AdminUi';
+import {
+  MAIL_ALERTS_CONTENT,
+  MAIL_ALERTS_PANEL,
+  MAIL_ALERTS_PRIMARY_BTN,
+} from '@/features/mis-email/ui/mail-alerts-ui';
 
 type Recipient = {
   id: string;
@@ -41,10 +46,14 @@ const emptyForm = (): FormState => ({
   branch: '',
   recipientName: '',
   email: '',
-  enabled: true,
+  enabled: false,
 });
 
-export default function MajorRepairAlertsPageClient() {
+export default function MajorRepairAlertsPageClient({
+  embedded = false,
+}: {
+  embedded?: boolean;
+}) {
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [branches, setBranches] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -153,28 +162,27 @@ export default function MajorRepairAlertsPageClient() {
     }
   }
 
-  return (
-    <PageShell
-      title="Major Repair Alerts"
-      subtitle="Branch recipients for major repair repeat SLA emails (routed by call branch)."
-      icon={<Mail className="h-5 w-5" />}
-      toolbar={
-        <AdminToolbar
-          search={search}
-          onSearchChange={setSearch}
-          searchPlaceholder="Search branch, name, email…"
-        >
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-slate-800"
-            onClick={() => setForm(emptyForm())}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add recipient
-          </button>
-        </AdminToolbar>
-      }
+  const toolbar = (
+    <AdminToolbar
+      search={search}
+      onSearchChange={setSearch}
+      searchPlaceholder="Search branch, name, email…"
     >
+      <button
+        type="button"
+        className={MAIL_ALERTS_PRIMARY_BTN}
+        onClick={() => setForm(emptyForm())}
+      >
+        <Plus className="h-3.5 w-3.5" />
+        Add recipient
+      </button>
+    </AdminToolbar>
+  );
+
+  const body = (
+    <div className={embedded ? MAIL_ALERTS_PANEL : undefined}>
+      {embedded ? toolbar : null}
+      <div className={embedded ? MAIL_ALERTS_CONTENT : 'p-4'}>
       <AdminTableCard
         isEmpty={!loading && filtered.length === 0}
         empty={<p className="p-6 text-sm text-slate-500">No recipients configured yet.</p>}
@@ -234,6 +242,7 @@ export default function MajorRepairAlertsPageClient() {
           </tbody>
         </AdminTable>
       </AdminTableCard>
+      </div>
 
       <ModalPortal open={!!form}>
         {form ? (
@@ -337,6 +346,21 @@ export default function MajorRepairAlertsPageClient() {
         onConfirm={() => void confirmDelete()}
         onCancel={() => !deleting && setDeleteTarget(null)}
       />
+    </div>
+  );
+
+  if (embedded) {
+    return body;
+  }
+
+  return (
+    <PageShell
+      title="Major Repair Alerts"
+      subtitle="Branch recipients for major repair repeat SLA emails (routed by call branch)."
+      icon={<Mail className="h-5 w-5" />}
+      toolbar={toolbar}
+    >
+      {body}
     </PageShell>
   );
 }

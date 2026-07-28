@@ -45,6 +45,7 @@ import {
 } from '@/features/mis-email/lib/preferences';
 import type { DigestRecipient } from '@/features/mis-email/lib/recipients';
 import { resolvePortalUrl, sendPreparedDigestEmail } from '@/features/mis-email/lib/send';
+import { getMisEmailOrgSettings } from '@/features/mis-email/lib/org-settings';
 import { resolveUserDigestScope } from '@/features/mis-email/lib/user-scope';
 import {
   listMatchingMisEmailRoutingRulesForResolvedClients,
@@ -173,6 +174,12 @@ function buildDigestEmailContent(params: {
   bodyContext: MisEmailBodyContext;
   bodyLayout: MisEmailBodyLayout;
   forPreview?: boolean;
+  branding?: {
+    greeting?: string;
+    brandTitle?: string;
+    brandSubtitle?: string;
+    subjectTemplate?: string;
+  };
 }): {
   bodyHtml?: string;
   bodyPlainText?: string;
@@ -208,6 +215,7 @@ function buildDigestEmailContent(params: {
       portalUrl: params.portalUrl,
       bodyHtml,
       bodyPlainText,
+      branding: params.branding,
     };
     return {
       bodyHtml,
@@ -378,7 +386,14 @@ export async function buildMisEmailPayload(
   );
 
   const bodyLayout = resolveMisEmailBodyLayoutFromPrefs(prefs);
-  const portalUrl = resolvePortalUrl();
+  const org = await getMisEmailOrgSettings();
+  const portalUrl = resolvePortalUrl(org.portalBaseUrl);
+  const branding = {
+    greeting: org.greeting,
+    brandTitle: org.brandTitle,
+    brandSubtitle: org.brandSubtitle,
+    subjectTemplate: org.subjectTemplate,
+  };
   const emailContent = buildDigestEmailContent({
     recipientName: options.displayName,
     recipientEmail: options.sentTo,
@@ -389,6 +404,7 @@ export async function buildMisEmailPayload(
     bodyContext,
     bodyLayout,
     forPreview: options.forPreview,
+    branding,
   });
 
   timer.step(
@@ -402,7 +418,7 @@ export async function buildMisEmailPayload(
 
   return {
     preview: {
-      subject: formatDigestSubject(dateRange.endDate),
+      subject: formatDigestSubject(dateRange.endDate, undefined, org.subjectTemplate),
       scopeLabel: scope.scopeLabel,
       dateRange,
       dateRangeLabel: formatReportPeriod(dateRange),
@@ -457,7 +473,14 @@ export async function sendMisEmailCompose(
       displayName,
     });
 
-  const portalUrl = resolvePortalUrl();
+  const org = await getMisEmailOrgSettings();
+  const portalUrl = resolvePortalUrl(org.portalBaseUrl);
+  const branding = {
+    greeting: org.greeting,
+    brandTitle: org.brandTitle,
+    brandSubtitle: org.brandSubtitle,
+    subjectTemplate: org.subjectTemplate,
+  };
   const emailBody = {
     recipientName: displayName,
     recipientEmail: sentTo,
@@ -466,6 +489,7 @@ export async function sendMisEmailCompose(
     portalUrl,
     bodyHtml,
     bodyPlainText,
+    branding,
   };
 
   const { messageId } = await sendPreparedDigestEmail({
@@ -579,7 +603,14 @@ export async function sendMisEmailComposeBatch(
     timer: batchTimer,
   });
 
-  const portalUrl = resolvePortalUrl();
+  const org = await getMisEmailOrgSettings();
+  const portalUrl = resolvePortalUrl(org.portalBaseUrl);
+  const branding = {
+    greeting: org.greeting,
+    brandTitle: org.brandTitle,
+    brandSubtitle: org.brandSubtitle,
+    subjectTemplate: org.subjectTemplate,
+  };
   const emailBody = {
     recipientName: options.displayName?.trim() || recipient.name,
     recipientEmail: primaryTarget,
@@ -588,6 +619,7 @@ export async function sendMisEmailComposeBatch(
     portalUrl,
     bodyHtml,
     bodyPlainText,
+    branding,
   };
 
   const sentToLabel = targets.join(', ');

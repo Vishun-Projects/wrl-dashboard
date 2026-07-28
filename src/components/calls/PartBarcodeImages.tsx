@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Image } from 'lucide-react';
+import { Image as ImageIcon } from 'lucide-react';
 import type { CallImage, ReplacementPartView } from '@/lib/calls/part-barcode-images';
 import { repairSemantics } from '@/lib/ui/semantics';
 
@@ -140,6 +140,8 @@ function Thumbnail({ img, onPreview }: { img: CallImage; onPreview: () => void }
       className="relative aspect-square overflow-hidden rounded-xl border border-slate-100 bg-bg-canvas text-left"
       title={img.title || img.filename}
     >
+      {/* Dynamic barcode URLs — next/image remote allowlist not practical here. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={img.url}
         alt={img.title || img.filename}
@@ -149,7 +151,7 @@ function Thumbnail({ img, onPreview }: { img: CallImage; onPreview: () => void }
       />
       {loading ? (
         <div className="absolute inset-0 flex items-center justify-center bg-bg-soft animate-pulse">
-          <Image size={18} className="text-slate-200" />
+          <ImageIcon size={18} className="text-slate-200" />
         </div>
       ) : null}
       {img.title ? (

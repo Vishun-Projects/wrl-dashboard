@@ -81,15 +81,34 @@ export async function POST(request: Request) {
       includeKeyAccount: recipient.includeKeyAccount,
     };
 
+    const { getMisEmailOrgSettings } = await import('@/features/mis-email/lib/org-settings');
+    const org = await getMisEmailOrgSettings();
     const validated = validateMisEmailPreferencesPatch({
       patch: body.preferences ?? {},
       permissions,
       current,
       misEmailEnabled: true,
+      allowedEmailDomains: org.allowedEmailDomains,
     });
 
     if (!validated.ok) {
       return NextResponse.json({ error: validated.error }, { status: 400 });
+    }
+
+    // Also validate explicit sendTo/sendCc when provided
+    try {
+      const { assertAllowedEmailDomains } = await import(
+        '@/features/mis-email/lib/allowed-domains'
+      );
+      assertAllowedEmailDomains(
+        [...(body.sendTo ?? []), ...(body.sendCc ?? [])],
+        org.allowedEmailDomains
+      );
+    } catch (err: unknown) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : 'Invalid recipient domain' },
+        { status: 400 }
+      );
     }
 
     if (body.savePreferences) {

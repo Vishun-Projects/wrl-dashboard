@@ -12,6 +12,7 @@ import {
   resolveDigestDateRangeForPreferences,
   resolveEffectiveDigestIncludes,
   resolveExtraDigestEmails,
+  defaultPreferencesForRecipient,
   shouldSendMisEmailNow,
   validateMisEmailPreferencesPatch,
 } from '@/features/mis-email/lib/preferences';
@@ -195,6 +196,16 @@ describe('resolveEffectiveDigestIncludes', () => {
       includeOpenCallsExport: false,
     });
   });
+
+  it('empty prefs merge defaults so allowed report types stay on', () => {
+    expect(resolveEffectiveDigestIncludes(perms, {})).toEqual({
+      includeSummary: true,
+      includeDetailed: true,
+      includeKeyAccount: false,
+      includeTraceableExport: false,
+      includeOpenCallsExport: false,
+    });
+  });
 });
 
 describe('resolveDigestDateRangeForPreferences', () => {
@@ -248,6 +259,55 @@ describe('validateMisEmailPreferencesPatch', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('forPreview allows all-false includes; non-preview still rejects', () => {
+    const allOff = {
+      includeSummary: false,
+      includeDetailed: false,
+      includeKeyAccount: false,
+      includeTraceableExport: false,
+      includeOpenCallsExport: false,
+    };
+    const preview = validateMisEmailPreferencesPatch({
+      patch: allOff,
+      permissions: perms,
+      current: DEFAULT_MIS_EMAIL_PREFERENCES,
+      misEmailEnabled: true,
+      forPreview: true,
+    });
+    expect(preview.ok).toBe(true);
+
+    const save = validateMisEmailPreferencesPatch({
+      patch: allOff,
+      permissions: perms,
+      current: DEFAULT_MIS_EMAIL_PREFERENCES,
+      misEmailEnabled: true,
+    });
+    expect(save.ok).toBe(false);
+    if (!save.ok) {
+      expect(save.error).toMatch(/Select at least one report type/i);
+    }
+  });
+
+  it('rejects non-allowed email domains', () => {
+    const result = validateMisEmailPreferencesPatch({
+      patch: {
+        includeSummary: true,
+        includeDetailed: false,
+        includeKeyAccount: false,
+        toEmails: ['someone@gmail.com'],
+        ccEmails: [],
+      },
+      permissions: { includeSummary: true, includeDetailed: true, includeKeyAccount: false },
+      current: { ...DEFAULT_MIS_EMAIL_PREFERENCES, includeKeyAccount: false },
+      misEmailEnabled: true,
+      allowedEmailDomains: ['westernequipments.com'],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/Only @westernequipments.com/);
+    }
+  });
+
   it('allows key account body section with key account permission', () => {
     const result = validateMisEmailPreferencesPatch({
       patch: {
@@ -288,5 +348,27 @@ describe('hasAnyEffectiveDigestInclude', () => {
         includeOpenCallsExport: false,
       })
     ).toBe(false);
+  });
+});
+
+describe('defaultPreferencesForRecipient', () => {
+  it('seeds regional + branch body when summary allowed', () => {
+    const prefs = defaultPreferencesForRecipient({
+      includeSummary: true,
+      includeDetailed: false,
+      includeKeyAccount: false,
+    });
+    expect(prefs.includeSummary).toBe(true);
+    expect(prefs.bodyInEmail).toEqual(['regional_performance', 'branch_performance']);
+    expect(prefs.bodyInEmail).not.toContain('key_account_performance');
+  });
+
+  it('adds key-account body section when key account allowed', () => {
+    const prefs = defaultPreferencesForRecipient({
+      includeSummary: true,
+      includeDetailed: false,
+      includeKeyAccount: true,
+    });
+    expect(prefs.bodyInEmail).toContain('key_account_performance');
   });
 });

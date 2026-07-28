@@ -37,9 +37,9 @@ export function PageShell({
           </div>
         ) : null}
         <div className="min-w-0">
-          {title ? <h1 className="truncate text-xs text-slate-900 ui-label">{title}</h1> : null}
+          {title ? <h1 className="ui-page-title truncate">{title}</h1> : null}
           {subtitle ? (
-            <p className="truncate text-[10px] font-medium text-slate-500">{subtitle}</p>
+            <p className="ui-micro truncate">{subtitle}</p>
           ) : null}
         </div>
       </div>
@@ -81,7 +81,7 @@ export function PageLoadingState({ label = 'Loading...' }: { label?: string }) {
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center bg-bg-canvas">
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-900" />
-      <p className="mt-3 text-[11px] font-medium text-slate-500">{label}</p>
+      <p className="mt-3 ui-help">{label}</p>
     </div>
   );
 }

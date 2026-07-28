@@ -36,18 +36,18 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f8fafc] p-6 font-sans">
+    <div className="flex min-h-screen items-center justify-center bg-bg-soft p-6 font-sans">
       <div className="relative w-full max-w-[400px] rounded-[32px] border border-slate-100 bg-bg-canvas p-10 shadow-[0_32px_64px_-12px_rgba(0,0,0,0.08)]">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl text-[#0f172a] ui-strong">Reset password</h1>
-          <p className="mt-2 text-[13px] text-slate-500">
+          <h1 className="ui-page-title">Reset password</h1>
+          <p className="mt-2 ui-help">
             Enter your work email and we will send a reset link.
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-1.5">
-            <label className="ml-1 text-[11px] text-slate-400 ui-label">Email address</label>
+            <label className="ml-1 ui-field-label">Email address</label>
             <input
               type="email"
               required
@@ -59,13 +59,13 @@ export default function ForgotPasswordPage() {
           </div>
 
           {error ? (
-            <div className="rounded-2xl border border-rose-100 bg-rose-50 p-4 text-[12px] text-rose-600">
+            <div className="ui-help rounded-2xl border border-rose-100 bg-rose-50 p-4 text-rose-700">
               {error}
             </div>
           ) : null}
 
           {message ? (
-            <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-[12px] text-emerald-700">
+            <div className="ui-help rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-emerald-800">
               {message}
             </div>
           ) : null}
@@ -73,13 +73,13 @@ export default function ForgotPasswordPage() {
           <button
             type="submit"
             disabled={loading}
-            className="h-14 w-full rounded-2xl bg-[#0f172a] text-[15px] text-white shadow-[0_20px_40px_-12px_rgba(15,23,42,0.3)] transition-all hover:bg-slate-800 active:scale-[0.98] disabled:opacity-50 ui-strong"
+            className="h-14 w-full rounded-2xl bg-slate-900 text-[15px] text-white shadow-[0_20px_40px_-12px_rgba(15,23,42,0.3)] transition-all hover:bg-slate-800 active:scale-[0.98] disabled:opacity-50 ui-strong"
           >
             {loading ? 'Sending…' : 'Send reset link'}
           </button>
         </form>
 
-        <p className="mt-8 text-center text-[12px] text-slate-500">
+        <p className="mt-8 text-center ui-help">
           <Link href="/login" className="font-medium text-slate-700 hover:text-slate-900">
             Back to login
           </Link>
