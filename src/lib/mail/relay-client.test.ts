@@ -8,6 +8,9 @@ import {
 
 const PREPARED = '/internal/mail/mis-digest-prepared';
 
+/** NODE_ENV is typed read-only; tests still need to flip local vs live. */
+const env = process.env as Record<string, string | undefined>;
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -26,21 +29,21 @@ describe('mail relay local vs live URL order', () => {
 
   afterEach(() => {
     for (const key of envKeys) {
-      if (saved[key] === undefined) delete process.env[key];
-      else process.env[key] = saved[key];
+      if (saved[key] === undefined) delete env[key];
+      else env[key] = saved[key];
     }
   });
 
   function stashEnv() {
-    for (const key of envKeys) saved[key] = process.env[key];
+    for (const key of envKeys) saved[key] = env[key];
   }
 
   it('live/production uses api.wrl-fsm.cloud by default', () => {
     stashEnv();
-    process.env.NODE_ENV = 'production';
-    delete process.env.VPS_MAIL_RELAY_URL;
-    delete process.env.VPS_MAIL_RELAY_DEV_URL;
-    delete process.env.VPS_MAIL_RELAY_TUNNEL;
+    env.NODE_ENV = 'production';
+    delete env.VPS_MAIL_RELAY_URL;
+    delete env.VPS_MAIL_RELAY_DEV_URL;
+    delete env.VPS_MAIL_RELAY_TUNNEL;
     expect(resolveRelayTryUrls(PREPARED)).toEqual([
       `https://api.wrl-fsm.cloud${PREPARED}`,
     ]);
@@ -48,10 +51,10 @@ describe('mail relay local vs live URL order', () => {
 
   it('local development tries tunnel then live when tunnel enabled', () => {
     stashEnv();
-    process.env.NODE_ENV = 'development';
-    process.env.VPS_MAIL_RELAY_TUNNEL = 'true';
-    delete process.env.VPS_MAIL_RELAY_URL;
-    delete process.env.VPS_MAIL_RELAY_DEV_URL;
+    env.NODE_ENV = 'development';
+    env.VPS_MAIL_RELAY_TUNNEL = 'true';
+    delete env.VPS_MAIL_RELAY_URL;
+    delete env.VPS_MAIL_RELAY_DEV_URL;
     expect(resolveRelayTryUrls(PREPARED)).toEqual([
       `http://127.0.0.1:8789${PREPARED}`,
       `https://api.wrl-fsm.cloud${PREPARED}`,
@@ -60,10 +63,10 @@ describe('mail relay local vs live URL order', () => {
 
   it('local development with explicit relay URL still falls back to live', () => {
     stashEnv();
-    process.env.NODE_ENV = 'development';
-    process.env.VPS_MAIL_RELAY_URL = 'http://127.0.0.1:8789';
-    delete process.env.VPS_MAIL_RELAY_TUNNEL;
-    delete process.env.VPS_MAIL_RELAY_DEV_URL;
+    env.NODE_ENV = 'development';
+    env.VPS_MAIL_RELAY_URL = 'http://127.0.0.1:8789';
+    delete env.VPS_MAIL_RELAY_TUNNEL;
+    delete env.VPS_MAIL_RELAY_DEV_URL;
     expect(resolveRelayTryUrls(PREPARED)).toEqual([
       `http://127.0.0.1:8789${PREPARED}`,
       `https://api.wrl-fsm.cloud${PREPARED}`,
@@ -72,6 +75,19 @@ describe('mail relay local vs live URL order', () => {
 });
 
 describe('mail relay transient HTTP handling', () => {
+  const savedNodeEnv = env.NODE_ENV;
+  const savedTunnel = env.VPS_MAIL_RELAY_TUNNEL;
+  const savedUrl = env.VPS_MAIL_RELAY_URL;
+
+  afterEach(() => {
+    if (savedNodeEnv === undefined) delete env.NODE_ENV;
+    else env.NODE_ENV = savedNodeEnv;
+    if (savedTunnel === undefined) delete env.VPS_MAIL_RELAY_TUNNEL;
+    else env.VPS_MAIL_RELAY_TUNNEL = savedTunnel;
+    if (savedUrl === undefined) delete env.VPS_MAIL_RELAY_URL;
+    else env.VPS_MAIL_RELAY_URL = savedUrl;
+  });
+
   it('treats 500/502/503/504 as transient', () => {
     expect(isTransientRelayStatus(500)).toBe(true);
     expect(isTransientRelayStatus(502)).toBe(true);
@@ -83,9 +99,9 @@ describe('mail relay transient HTTP handling', () => {
   });
 
   it('retries 502 on local then succeeds on live', async () => {
-    process.env.NODE_ENV = 'development';
-    process.env.VPS_MAIL_RELAY_TUNNEL = 'true';
-    delete process.env.VPS_MAIL_RELAY_URL;
+    env.NODE_ENV = 'development';
+    env.VPS_MAIL_RELAY_TUNNEL = 'true';
+    delete env.VPS_MAIL_RELAY_URL;
 
     const calls: string[] = [];
     const fetchImpl = vi.fn(async (url: string) => {
@@ -116,8 +132,8 @@ describe('mail relay transient HTTP handling', () => {
   });
 
   it('does not retry forever on 401 — fails with clear secret guidance', async () => {
-    process.env.NODE_ENV = 'production';
-    delete process.env.VPS_MAIL_RELAY_URL;
+    env.NODE_ENV = 'production';
+    delete env.VPS_MAIL_RELAY_URL;
 
     const fetchImpl = vi.fn(async () => jsonResponse(401, { error: 'Unauthorized' }));
     await expect(
