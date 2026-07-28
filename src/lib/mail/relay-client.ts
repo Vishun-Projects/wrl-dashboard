@@ -98,8 +98,27 @@ function isCorporateProxyBlock(status: number, bodyText: string): boolean {
   return (
     lower.includes('blocked site') ||
     lower.includes('<!doctype html') ||
-    lower.includes('<html') && lower.includes('blocked')
+    (lower.includes('<html') && lower.includes('blocked'))
   );
+}
+
+/** Transient upstream/proxy failures — retry before giving up or trying the next URL. */
+export function isTransientRelayStatus(status: number): boolean {
+  return status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+export function resolveRelayRetryCount(): number {
+  const n = Number(process.env.VPS_MAIL_RELAY_RETRIES ?? 3);
+  return Number.isFinite(n) && n >= 1 ? Math.min(Math.floor(n), 6) : 3;
+}
+
+export function resolveRelayRetryDelayMs(): number {
+  const n = Number(process.env.VPS_MAIL_RELAY_RETRY_DELAY_MS ?? 400);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 400;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export type RelayPostResult<T> = {
@@ -144,69 +163,100 @@ async function relayFetchOnce(
   } as Parameters<typeof undiciFetch>[1]) as unknown as Response;
 }
 
-/** POST JSON to mail relay; tries each URL in order until one succeeds. */
+/** POST JSON to mail relay; retries transient 5xx, then tries each URL in order. */
 export async function relayPostJson<T extends Record<string, unknown>>(
   relayPath: string,
   body: unknown,
-  secret: string
+  secret: string,
+  opts?: {
+    fetchImpl?: typeof relayFetchOnce;
+    retries?: number;
+    retryDelayMs?: number;
+    sleepImpl?: (ms: number) => Promise<void>;
+  }
 ): Promise<RelayPostResult<T>> {
   const urls = resolveRelayTryUrls(relayPath);
   const payload = JSON.stringify(body);
+  const retries = opts?.retries ?? resolveRelayRetryCount();
+  const retryDelayMs = opts?.retryDelayMs ?? resolveRelayRetryDelayMs();
+  const fetchImpl = opts?.fetchImpl ?? relayFetchOnce;
+  const sleepImpl = opts?.sleepImpl ?? sleep;
   let lastError: RelayPostError | null = null;
 
   for (const url of urls) {
-    try {
-      const res = await relayFetchOnce(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Mail-Relay-Secret': secret,
-        },
-        body: payload,
-      });
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const res = await fetchImpl(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Mail-Relay-Secret': secret,
+          },
+          body: payload,
+        });
 
-      const text = await res.text();
-      let data = {} as T;
-      if (text.trim()) {
-        try {
-          data = JSON.parse(text) as T;
-        } catch {
-          data = { error: text.slice(0, 500) } as unknown as T;
+        const text = await res.text();
+        let data = {} as T;
+        if (text.trim()) {
+          try {
+            data = JSON.parse(text) as T;
+          } catch {
+            data = { error: text.slice(0, 500) } as unknown as T;
+          }
         }
-      }
 
-      if (!res.ok) {
-        const proxyBlock = isCorporateProxyBlock(res.status, text);
-        const errMsg =
-          (data as { error?: string }).error ||
-          (proxyBlock
-            ? 'Corporate network blocked api.wrl-fsm.cloud — run `npm run mail-relay:tunnel` and set VPS_MAIL_RELAY_TUNNEL=true'
-            : `Mail relay failed (${res.status})`);
+        if (!res.ok) {
+          const proxyBlock = isCorporateProxyBlock(res.status, text);
+          const errMsg =
+            (data as { error?: string }).error ||
+            (proxyBlock
+              ? 'Corporate network blocked api.wrl-fsm.cloud — run `npm run mail-relay:tunnel` and set VPS_MAIL_RELAY_TUNNEL=true'
+              : `Mail relay failed (${res.status})`);
+          lastError = {
+            ok: false,
+            status: res.status,
+            error: errMsg,
+            url,
+            isProxyBlock: proxyBlock,
+          };
+
+          const transient = isTransientRelayStatus(res.status);
+          if (transient && attempt < retries) {
+            console.warn(
+              `[mis-email/relay] ${url} failed (${res.status}) attempt ${attempt}/${retries}, retrying`
+            );
+            await sleepImpl(retryDelayMs * attempt);
+            continue;
+          }
+
+          if (url !== urls[urls.length - 1]) {
+            console.warn(`[mis-email/relay] ${url} failed (${res.status}), trying next`);
+          }
+          break;
+        }
+
+        return { ok: true, status: res.status, data, url };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         lastError = {
           ok: false,
-          status: res.status,
-          error: errMsg,
+          status: 0,
+          error: message,
           url,
-          isProxyBlock: proxyBlock,
+          isProxyBlock: false,
         };
-        if (url !== urls[urls.length - 1]) {
-          console.warn(`[mis-email/relay] ${url} failed (${res.status}), trying next`);
+        if (attempt < retries) {
+          console.warn(
+            `[mis-email/relay] ${url} error attempt ${attempt}/${retries}, retrying:`,
+            message
+          );
+          await sleepImpl(retryDelayMs * attempt);
+          continue;
         }
-        continue;
-      }
-
-      return { ok: true, status: res.status, data, url };
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      lastError = {
-        ok: false,
-        status: 0,
-        error: message,
-        url,
-        isProxyBlock: false,
-      };
-      if (url !== urls[urls.length - 1]) {
-        console.warn(`[mis-email/relay] ${url} failed, trying next:`, message);
+        if (url !== urls[urls.length - 1]) {
+          console.warn(`[mis-email/relay] ${url} failed, trying next:`, message);
+        }
+        break;
       }
     }
   }
@@ -240,7 +290,8 @@ export function formatRelayFailure(
   if (lastError?.status === 401) {
     return (
       `Mail relay rejected the request (401 Unauthorized). ` +
-      `Check VPS_MAIL_RELAY_SECRET matches VPS /opt/fast-close-app/.env.mis-email. ` +
+      `Check VPS_MAIL_RELAY_SECRET matches VPS .env.mis-email ` +
+      `(install root is usually /opt/wrl/database/fast-close-app). ` +
       `Underlying error: ${message}`
     );
   }
@@ -251,6 +302,14 @@ export function formatRelayFailure(
       `If on local dev, use SSH tunnel (npm run mail-relay:tunnel). ` +
       `On production, verify VPS_MAIL_RELAY_SECRET on Vercel. Tried: ${tried}. ` +
       `Underlying error: ${message}`
+    );
+  }
+
+  if (isTransientRelayStatus(lastError?.status ?? 0)) {
+    return (
+      `Mail relay was temporarily unavailable (${lastError?.status}). ` +
+      `The VPS wrl-mail-relay service may be restarting — retry in a minute. ` +
+      `Tried: ${tried}. Underlying error: ${message}`
     );
   }
 

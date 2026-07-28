@@ -5,7 +5,16 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${ROOT}/.env.vps-setup"
-INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-/opt/fast-close-app}"
+# Prefer the live WRL install when present (old default /opt/fast-close-app is often empty).
+if [[ -z "${MIS_EMAIL_INSTALL_ROOT:-}" ]]; then
+  if [[ -f /opt/wrl/database/fast-close-app/scripts/vps-hosting/mail-relay-server.ts ]]; then
+    INSTALL_ROOT=/opt/wrl/database/fast-close-app
+  else
+    INSTALL_ROOT=/opt/fast-close-app
+  fi
+else
+  INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT}"
+fi
 API_DOMAIN="${API_DOMAIN:-api.wrl-fsm.cloud}"
 SERVICE_NAME="wrl-mail-relay"
 RELAY_PORT="${MAIL_RELAY_PORT:-8789}"
