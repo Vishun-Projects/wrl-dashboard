@@ -98,7 +98,6 @@ const SCHEDULE_INTERVAL_OPTIONS = [
   { value: 1440, label: 'Daily' },
 ];
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type RoutingSortKey =
   | 'priority'

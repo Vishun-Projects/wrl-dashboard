@@ -36,7 +36,6 @@ import {
   ARCP_MERGE_ACROSS_CHUNKS,
   mergeArcpAggregateRows,
   mergeArcpChunkAggregateRows,
-  mergeArcpDetailRows,
   type ArcpClaimsAggregateRow,
   type ArcpDateFilterColumn,
   type ArcpClaimsDetailRow,
