@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import {
   ChevronDown,
@@ -25,6 +25,9 @@ import {
   resolveMisEmailToEmails,
 } from '@/features/mis-email/lib/preferences';
 import { buildMisEmailSkeletonPreview } from '@/features/mis-email/lib/skeleton-preview';
+import {
+  type MisEmailIntroPreset,
+} from '@/features/mis-email/lib/email-template';
 import { trackMisEmailSendJob, useMisEmailSendJobs } from '@/features/mis-email/lib/send-job-client';
 import {
   accountsMatchDisplayOrKey,
@@ -79,13 +82,6 @@ type Props = {
   onSaved?: () => void;
 };
 
-function formatDateRangeLabel(dateRange: MisEmailPreferences['dateRange'] | undefined): string {
-  const value = dateRange ?? 'month_to_date';
-  if (value === 'yesterday') return 'Yesterday';
-  if (value === 'year_to_yesterday') return 'Year to yesterday';
-  return 'Month to yesterday';
-}
-
 const LIVE_PREVIEW_DEBOUNCE_MS = 800;
 
 type AttachmentPrefKey =
@@ -126,7 +122,26 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
   const [allowAutoSendOverride, setAllowAutoSendOverride] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [activeContentTab, setActiveContentTab] = useState<'attachments' | 'sections'>('attachments');
+  const [optionsOpen, setOptionsOpen] = useState<'content' | 'schedule' | null>(null);
+  const [introPreset, setIntroPreset] = useState<MisEmailIntroPreset>('normal');
   const [, setLastSavedAt] = useState<Date | null>(null);
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
+  const [previewIframeHeight, setPreviewIframeHeight] = useState(600);
+
+  const resizePreviewIframe = useCallback(() => {
+    const iframe = previewIframeRef.current;
+    const doc = iframe?.contentDocument;
+    if (!iframe || !doc?.body) return;
+
+    // Shrink first so scrollHeight is content size, not the previous iframe size.
+    iframe.style.height = '1px';
+    const outer = doc.querySelector('.email-outer');
+    const contentHeight =
+      outer instanceof HTMLElement ? outer.scrollHeight : doc.body.scrollHeight;
+    const height = Math.ceil(Math.max(contentHeight, 200));
+    iframe.style.height = `${height}px`;
+    setPreviewIframeHeight(height);
+  }, []);
 
   const draftPrefs = useMemo(
     (): MisEmailPreferences => ({
@@ -201,8 +216,9 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
       recipientName: settings.recipientName?.trim() || settings.primaryEmail.split('@')[0] || 'Colleague',
       recipientEmail: settings.primaryEmail,
       portalUrl,
+      introPreset,
     });
-  }, [draftPrefs, settings.allowed, settings.scopeLabel, settings.recipientName, settings.primaryEmail]);
+  }, [draftPrefs, introPreset, settings.allowed, settings.scopeLabel, settings.recipientName, settings.primaryEmail]);
 
   const previewWarning =
     layoutPreview === null ? 'Select at least one attachment or body section to preview the layout.' : null;
@@ -215,6 +231,11 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
   const sendStatus = activeJobs[0]?.message ?? null;
   const sendResult = lastFinished?.ok ? lastFinished.message : null;
   const sendError = lastFinished && !lastFinished.ok ? lastFinished.message : null;
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => resizePreviewIframe(), 80);
+    return () => window.clearTimeout(timer);
+  }, [displayPreview?.html, resizePreviewIframe]);
 
   useEffect(() => {
     if (!lastFinished) return;
@@ -239,7 +260,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
       void axios
         .post(
           '/api/profile/mis-email/preview',
-          { preferences: draftPrefs },
+          { preferences: draftPrefs, introPreset },
           { withCredentials: true, signal: controller.signal, timeout: 300_000 }
         )
         .then((res) => {
@@ -266,7 +287,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [previewPrefsKey, layoutPreview, draftPrefs]);
+  }, [previewPrefsKey, layoutPreview, draftPrefs, introPreset]);
 
   function handlePeriodChange(dateRange: MisEmailPreferences['dateRange']) {
     onPrefsChange({ ...prefs, dateRange });
@@ -353,7 +374,8 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
           sendTo: sendTargets,
           sendCc: sendCcTargets,
           savePreferences: saveFirst,
-            allowAutoSendDisabledOverride: allowAutoSendOverride,
+          allowAutoSendDisabledOverride: allowAutoSendOverride,
+          introPreset,
         },
         {
           ...auth,
@@ -416,448 +438,514 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
     (opt) => opt && isAttachmentEnabled(draftPrefs, opt.key)
   ).length;
 
+  function toggleOptions(panel: 'content' | 'schedule') {
+    setOptionsOpen((prev) => (prev === panel ? null : panel));
+  }
+
+  const addressLabelClass =
+    'inline-flex h-7 w-12 shrink-0 items-center justify-center rounded border border-stone-300 bg-stone-50 text-[12px] font-semibold text-stone-700';
+
   return (
-    <div className="space-y-3">
-      <div className="overflow-hidden rounded-xl border border-stone-200 bg-bg-canvas shadow-sm">
-        <div className="px-5 py-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="flex items-start gap-2.5">
-              <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-md bg-indigo-50 text-indigo-700">
-                <Mail size={15} />
-              </div>
-              <div>
-                <h2 className="ui-page-title text-stone-900">Email reports</h2>
-                <p className="ui-help text-stone-500">
-                  <span className="font-semibold text-stone-700">{settings.roleName ?? 'Your role'}</span>
-                  {' · '}
-                  {settings.scopeLabel ?? 'All branches'}
-                  {' · '}
-                  Report period: {formatDateRangeLabel(draftPrefs.dateRange)}
-                </p>
-              </div>
-            </div>
-            <span
-              className={`ui-label inline-flex items-center rounded-full border px-2.5 py-1 font-semibold ${
-                hasUnsavedChanges
-                  ? 'border-amber-200 bg-amber-50 text-amber-700'
-                  : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-              }`}
-            >
-              {hasUnsavedChanges ? 'Unsaved changes' : 'Matches saved defaults'}
-            </span>
+    <div className="rounded-xl border border-stone-200 bg-white shadow-sm">
+      {/* Outlook-style address header — To/Cc left as-is */}
+      <div className="flex flex-col gap-2 border-b border-stone-200 p-2 sm:flex-row sm:gap-0">
+        <div className="flex shrink-0 items-center sm:w-[56px] sm:items-start sm:justify-center sm:border-r sm:border-stone-200 sm:pr-2 sm:pt-0.5">
+          <button
+            type="button"
+            onClick={() => void handleSend(true)}
+            disabled={sendInProgress || sendTargets.length === 0}
+            className="flex h-[52px] w-[52px] flex-col items-center justify-center gap-0.5 rounded-md bg-[#0f6cbd] text-white hover:bg-[#115ea3] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {sendInProgress ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+            <span className="text-[11px] font-semibold leading-none">Send</span>
+          </button>
+        </div>
+
+        <div className="min-w-0 flex-1 sm:pl-2">
+          <div className="flex items-start gap-2 border-b border-stone-200 py-1">
+            <span className={`${addressLabelClass} mt-0.5`}>To</span>
+            <EmailChipsInput
+              label="To"
+              variant="outlook"
+              compact
+              values={sendTargets}
+              onChange={(toEmails) => onPrefsChange({ ...prefs, toEmails })}
+            />
           </div>
-
-          <div className="my-3 h-px bg-stone-200" />
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="inline-flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 accent-emerald-600"
-                  checked={subscribed}
-                  onChange={(e) => onPrefsChange({ ...prefs, subscribed: e.target.checked })}
-                />
-                <span className="ui-section-title text-stone-800">Scheduled digest</span>
-              </label>
-              <input
-                type="time"
-                step={300}
-                value={sendTimeIst}
-                disabled={!subscribed}
-                onChange={(e) => onPrefsChange({ ...prefs, sendTimeIst: e.target.value })}
-                className="h-8 rounded-md border border-stone-300 bg-white px-2 ui-help text-stone-700 disabled:opacity-50"
-              />
-              <span className="ui-help text-stone-500">IST</span>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="ui-help inline-flex items-center gap-1.5 text-stone-500">
-                <input
-                  type="checkbox"
-                  checked={allowAutoSendOverride}
-                  onChange={(e) => setAllowAutoSendOverride(e.target.checked)}
-                  className="h-3.5 w-3.5"
-                />
-                Override HOD auto-send block
-              </label>
-              <button
-                type="button"
-                onClick={() => void handleSave()}
-                disabled={saving || sendInProgress}
-                className="inline-flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-3 py-2 ui-label font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-50"
-              >
-                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                Save defaults
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleSend(true)}
-                disabled={sendInProgress || sendTargets.length === 0}
-                className="inline-flex items-center gap-1.5 rounded-md bg-stone-900 px-3 py-2 ui-label font-semibold text-white hover:bg-black disabled:opacity-50"
-              >
-                {sendInProgress ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-                Send now
-              </button>
+          <div className="flex items-start gap-2 border-b border-stone-200 py-1">
+            <span className={`${addressLabelClass} mt-0.5`}>Cc</span>
+            <EmailChipsInput
+              label="Cc"
+              variant="outlook"
+              compact
+              values={sendCcTargets}
+              onChange={(ccEmails) => onPrefsChange({ ...prefs, ccEmails })}
+            />
+          </div>
+          <div className="flex items-center gap-2 py-0.5">
+            <span className="w-12 shrink-0 text-[11px] font-semibold text-stone-600">Subject</span>
+            <div className="min-w-0 flex-1 truncate font-mono text-[12px] text-stone-800">
+              {displayPreview?.subject ?? 'Daily MIS Report as on ...'}
             </div>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[460px_minmax(0,1fr)]">
-        <div className="space-y-3">
-          <section className="rounded-xl border border-stone-200 bg-white">
-            <div className="border-b border-stone-200 px-3.5 py-3">
-                <p className="ui-section-title text-stone-900">Recipients</p>
-                <p className="ui-help text-stone-500">To and Cc for this Daily MIS Report</p>
-            </div>
-            <div className="space-y-3 px-3.5 py-3">
-              <EmailChipsInput
-                label="To"
-                hint="Paste an Outlook To line, or add emails one by one."
-                compact
-                values={sendTargets}
-                onChange={(toEmails) => onPrefsChange({ ...prefs, toEmails })}
-              />
-              <EmailChipsInput
-                label="Cc"
-                hint="Paste an Outlook Cc line, or add emails one by one."
-                compact
-                values={sendCcTargets}
-                onChange={(ccEmails) => onPrefsChange({ ...prefs, ccEmails })}
-              />
-            </div>
-          </section>
+      {/* Options strip */}
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-stone-200 bg-stone-50 px-2 py-1.5">
+        <div
+          className="inline-flex rounded border border-stone-300 bg-white p-0.5"
+          role="group"
+          aria-label="Body intro preset"
+        >
+          {(
+            [
+              { id: 'normal' as const, label: 'Normal' },
+              { id: 'revised' as const, label: 'Revised' },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setIntroPreset(opt.id)}
+              title={
+                opt.id === 'revised'
+                  ? 'Resend after late import — subject and body say Revised'
+                  : 'Same intro as the scheduled 9:30 digest'
+              }
+              className={`rounded px-2 py-0.5 text-[11px] font-semibold ${
+                introPreset === opt.id
+                  ? 'bg-stone-900 text-white'
+                  : 'text-stone-600 hover:bg-stone-50'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
 
-          <section className="rounded-xl border border-stone-200 bg-white">
-            <div className="border-b border-stone-200 px-3.5 py-3">
-                <p className="ui-section-title text-stone-900">Report period</p>
-                <p className="ui-help text-stone-500">Date range this send covers</p>
-            </div>
-            <div className="space-y-2.5 px-3.5 py-3">
-              <div className="rounded-md border border-dashed border-stone-300 bg-stone-50 px-3 py-2 font-mono text-[12px] font-medium text-stone-800">
-                {displayPreview?.subject ?? 'Daily MIS Report as on ...'}
-              </div>
-              <div className="grid grid-cols-3 gap-1.5">
-                {[
-                  { id: 'yesterday', label: 'Yesterday' },
-                  { id: 'month_to_date', label: 'Month to yesterday' },
-                  { id: 'year_to_yesterday', label: 'Year to yesterday' },
-                ].map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => handlePeriodChange(opt.id as MisEmailPreferences['dateRange'])}
-                    className={`rounded-md border px-2 py-2 ui-label font-semibold ${
-                      (prefs.dateRange ?? 'month_to_date') === opt.id
-                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                        : 'border-stone-300 bg-white text-stone-600 hover:bg-stone-50'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </section>
+        <div className="inline-flex rounded border border-stone-300 bg-white p-0.5">
+          {[
+            { id: 'yesterday' as const, label: 'Yday' },
+            { id: 'month_to_date' as const, label: 'Month' },
+            { id: 'year_to_yesterday' as const, label: 'Year' },
+          ].map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => handlePeriodChange(opt.id)}
+              title={
+                opt.id === 'month_to_date'
+                  ? 'Month to yesterday'
+                  : opt.id === 'year_to_yesterday'
+                    ? 'Year to yesterday'
+                    : 'Yesterday'
+              }
+              className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${
+                (prefs.dateRange ?? 'month_to_date') === opt.id
+                  ? 'bg-stone-900 text-white'
+                  : 'text-stone-600 hover:bg-stone-50'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
 
-          <section className="rounded-xl border border-stone-200 bg-white">
-            <div className="border-b border-stone-200 px-3.5 py-3">
-                <p className="ui-section-title text-stone-900">Report content</p>
-                <p className="ui-help text-stone-500">Attachments and what shows inside email body</p>
-            </div>
-            <div className="px-2 pt-2">
-              <div className="flex gap-1">
-                <button
-                  type="button"
-                  onClick={() => setActiveContentTab('attachments')}
-                  className={`flex-1 border-b-2 px-2 py-2 ui-label font-semibold ${
-                    activeContentTab === 'attachments'
-                      ? 'border-indigo-600 text-indigo-700'
-                      : 'border-transparent text-stone-500'
-                  }`}
-                >
-                  Attachments{' '}
-                  <span className="ui-chip ml-1 rounded-full bg-stone-100 px-1.5 py-0.5">
-                    {enabledAttachmentCount}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveContentTab('sections')}
-                  className={`flex-1 border-b-2 px-2 py-2 ui-label font-semibold ${
-                    activeContentTab === 'sections'
-                      ? 'border-indigo-600 text-indigo-700'
-                      : 'border-transparent text-stone-500'
-                  }`}
-                >
-                  Body sections{' '}
-                  <span className="ui-chip ml-1 rounded-full bg-stone-100 px-1.5 py-0.5">
-                    {selectedBodyIds.length}
-                  </span>
-                </button>
-              </div>
-            </div>
-            <div className="space-y-2 p-3">
-              {activeContentTab === 'attachments'
-                ? attachmentOptions.map((opt) =>
-                    opt ? (
-                      <label
-                        key={opt.key}
-                        className={`flex cursor-pointer items-start gap-2.5 rounded-lg border p-2.5 ${
-                          isAttachmentEnabled(draftPrefs, opt.key)
-                            ? 'border-indigo-200 bg-indigo-50'
-                            : 'border-stone-200 bg-white'
-                        }`}
-                      >
+        <button
+          type="button"
+          onClick={() => {
+            if (optionsOpen === 'content' && activeContentTab === 'attachments') {
+              setOptionsOpen(null);
+            } else {
+              setActiveContentTab('attachments');
+              setOptionsOpen('content');
+            }
+          }}
+          className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-[11px] font-semibold ${
+            optionsOpen === 'content' && activeContentTab === 'attachments'
+              ? 'border-stone-900 bg-stone-900 text-white'
+              : 'border-stone-300 bg-white text-stone-700 hover:bg-stone-50'
+          }`}
+        >
+          <FileSpreadsheet size={11} />
+          Attach
+          <span className="text-[10px] opacity-80">{enabledAttachmentCount}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (optionsOpen === 'content' && activeContentTab === 'sections') {
+              setOptionsOpen(null);
+            } else {
+              setActiveContentTab('sections');
+              setOptionsOpen('content');
+            }
+          }}
+          className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-[11px] font-semibold ${
+            optionsOpen === 'content' && activeContentTab === 'sections'
+              ? 'border-stone-900 bg-stone-900 text-white'
+              : 'border-stone-300 bg-white text-stone-700 hover:bg-stone-50'
+          }`}
+        >
+          Body
+          <span className="text-[10px] opacity-80">{selectedBodyIds.length}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => toggleOptions('schedule')}
+          className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-[11px] font-semibold ${
+            optionsOpen === 'schedule'
+              ? 'border-stone-900 bg-stone-900 text-white'
+              : 'border-stone-300 bg-white text-stone-700 hover:bg-stone-50'
+          }`}
+        >
+          <Mail size={11} />
+          Schedule
+        </button>
+
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={saving || sendInProgress}
+          className="inline-flex items-center gap-1 rounded border border-stone-300 bg-white px-2 py-1 text-[11px] font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+        >
+          {saving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+          Save
+        </button>
+
+        <span
+          className={`ml-auto inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold ${
+            hasUnsavedChanges
+              ? 'border-amber-200 bg-amber-50 text-amber-700'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+          }`}
+        >
+          {hasUnsavedChanges ? 'Unsaved' : 'Saved'}
+        </span>
+      </div>
+
+      {/* Expandable options */}
+      <Collapse open={optionsOpen === 'content'}>
+        <div className="border-b border-stone-200 bg-white px-2 py-2">
+          <div className="mb-1.5 flex gap-1">
+            <button
+              type="button"
+              onClick={() => setActiveContentTab('attachments')}
+              className={`border-b-2 px-2 py-1 text-[11px] font-semibold ${
+                activeContentTab === 'attachments'
+                  ? 'border-stone-900 text-stone-900'
+                  : 'border-transparent text-stone-500'
+              }`}
+            >
+              Attachments
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveContentTab('sections')}
+              className={`border-b-2 px-2 py-1 text-[11px] font-semibold ${
+                activeContentTab === 'sections'
+                  ? 'border-stone-900 text-stone-900'
+                  : 'border-transparent text-stone-500'
+              }`}
+            >
+              Body sections
+            </button>
+          </div>
+          <div className="grid gap-1.5 sm:grid-cols-2">
+            {activeContentTab === 'attachments'
+              ? attachmentOptions.map((opt) =>
+                  opt ? (
+                    <label
+                      key={opt.key}
+                      className={`flex cursor-pointer items-start gap-2 rounded border px-2 py-1.5 ${
+                        isAttachmentEnabled(draftPrefs, opt.key)
+                          ? 'border-stone-400 bg-stone-50'
+                          : 'border-stone-200 bg-white'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={isAttachmentEnabled(draftPrefs, opt.key)}
+                        onChange={(e) => toggleAttachment(opt.key, e.target.checked)}
+                      />
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold text-stone-800">{opt.label}</p>
+                        {'hint' in opt && opt.hint ? (
+                          <p className="text-[10px] leading-snug text-stone-500">{opt.hint}</p>
+                        ) : null}
+                      </div>
+                    </label>
+                  ) : null
+                )
+              : bodySections.map((section) => {
+                  const selected = selectedBodyIds.includes(section.id);
+                  const orderIndex = selectedBodyIds.indexOf(section.id);
+                  return (
+                    <div
+                      key={section.id}
+                      className={`rounded border px-2 py-1.5 ${
+                        selected ? 'border-stone-400 bg-stone-50' : 'border-stone-200 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
                         <input
                           type="checkbox"
                           className="mt-0.5"
-                          checked={isAttachmentEnabled(draftPrefs, opt.key)}
-                          onChange={(e) => toggleAttachment(opt.key, e.target.checked)}
+                          checked={selected}
+                          disabled={isBodySectionDisabled(section)}
+                          onChange={(e) => toggleBodySection(section.id, e.target.checked)}
                         />
-                        <div className="min-w-0">
-                          <p className="ui-label font-semibold text-stone-800">{opt.label}</p>
-                          {'hint' in opt && opt.hint ? (
-                            <p className="ui-help text-stone-500">{opt.hint}</p>
-                          ) : null}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] font-semibold text-stone-800">{section.label}</p>
+                          <p className="text-[10px] leading-snug text-stone-600">{section.description}</p>
                         </div>
-                      </label>
-                    ) : null
-                  )
-                : bodySections.map((section) => {
-                    const selected = selectedBodyIds.includes(section.id);
-                    const orderIndex = selectedBodyIds.indexOf(section.id);
-                    return (
-                      <div
-                        key={section.id}
-                        className={`rounded-lg border p-2.5 ${
-                          selected ? 'border-indigo-200 bg-indigo-50/70' : 'border-stone-200 bg-white'
-                        }`}
-                      >
-                        <div className="flex items-start gap-2">
-                          <input
-                            type="checkbox"
-                            className="mt-0.5"
-                            checked={selected}
-                            disabled={isBodySectionDisabled(section)}
-                            onChange={(e) => toggleBodySection(section.id, e.target.checked)}
-                          />
-                          <div className="min-w-0 flex-1">
-                            <p className="ui-label font-semibold text-stone-800">{section.label}</p>
-                            <p className="ui-help text-stone-600">{section.description}</p>
+                        {selected ? (
+                          <div className="flex flex-col gap-0.5">
+                            <button
+                              type="button"
+                              aria-label="Move up"
+                              disabled={orderIndex <= 0}
+                              onClick={() => moveBodySection(section.id, -1)}
+                              className="rounded border border-stone-300 bg-white p-0.5 text-stone-500 disabled:opacity-30"
+                            >
+                              <ChevronUp size={11} />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label="Move down"
+                              disabled={orderIndex < 0 || orderIndex >= selectedBodyIds.length - 1}
+                              onClick={() => moveBodySection(section.id, 1)}
+                              className="rounded border border-stone-300 bg-white p-0.5 text-stone-500 disabled:opacity-30"
+                            >
+                              <ChevronDown size={11} />
+                            </button>
                           </div>
-                          {selected ? (
-                            <div className="flex flex-col gap-1">
-                              <button
-                                type="button"
-                                aria-label="Move up"
-                                disabled={orderIndex <= 0}
-                                onClick={() => moveBodySection(section.id, -1)}
-                                className="rounded border border-stone-300 bg-white p-0.5 text-stone-500 disabled:opacity-30"
-                              >
-                                <ChevronUp size={12} />
-                              </button>
-                              <button
-                                type="button"
-                                aria-label="Move down"
-                                disabled={orderIndex < 0 || orderIndex >= selectedBodyIds.length - 1}
-                                onClick={() => moveBodySection(section.id, 1)}
-                                className="rounded border border-stone-300 bg-white p-0.5 text-stone-500 disabled:opacity-30"
-                              >
-                                <ChevronDown size={12} />
-                              </button>
-                            </div>
-                          ) : null}
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+          </div>
+        </div>
+      </Collapse>
+
+      <Collapse open={optionsOpen === 'schedule'}>
+        <div className="flex flex-wrap items-center gap-2 border-b border-stone-200 bg-white px-2 py-2">
+          <label className="inline-flex items-center gap-1.5">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 accent-emerald-600"
+              checked={subscribed}
+              onChange={(e) => onPrefsChange({ ...prefs, subscribed: e.target.checked })}
+            />
+            <span className="text-[11px] font-semibold text-stone-800">Scheduled digest</span>
+          </label>
+          <input
+            type="time"
+            step={300}
+            value={sendTimeIst}
+            disabled={!subscribed}
+            onChange={(e) => onPrefsChange({ ...prefs, sendTimeIst: e.target.value })}
+            className="h-7 rounded border border-stone-300 bg-white px-1.5 text-[11px] text-stone-700 disabled:opacity-50"
+          />
+          <span className="text-[10px] text-stone-500">IST</span>
+          <label className="inline-flex items-center gap-1 text-[10px] text-stone-500">
+            <input
+              type="checkbox"
+              checked={allowAutoSendOverride}
+              onChange={(e) => setAllowAutoSendOverride(e.target.checked)}
+              className="h-3 w-3"
+            />
+            Override HOD block
+          </label>
+          <span className="text-[10px] text-stone-500">
+            {settings.roleName ?? 'Your role'} · {settings.scopeLabel ?? 'All branches'}
+          </span>
+        </div>
+      </Collapse>
+
+      {(selectedBodyIds.length > 0 || keyAccountBodyEnabled) ? (
+        <div className="border-b border-stone-200">
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((prev) => !prev)}
+            className="flex w-full items-center justify-between px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wide text-stone-500 hover:bg-stone-50"
+          >
+            <span>Advanced</span>
+            {showAdvanced ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          </button>
+          <Collapse open={showAdvanced}>
+            <div className="space-y-2 px-2 pb-2">
+              {selectedBodyIds.length > 0 ? (
+                <div className="space-y-1">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">
+                    Body layout
+                  </p>
+                  <MisEmailBodyLayoutEditor
+                    selectedSectionIds={selectedBodyIds}
+                    bodySections={bodySections}
+                    layout={draftPrefs.bodyLayout}
+                    onLayoutChange={(bodyLayout) => onPrefsChange({ ...prefs, bodyLayout })}
+                  />
+                </div>
+              ) : null}
+              {keyAccountBodyEnabled ? (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">
+                    Account filters
+                  </p>
+                  <p className="text-[11px] text-stone-500">
+                    Each zone only shows the accounts you pick for that zone. The same account can be
+                    selected in multiple zones.
+                  </p>
+                  {ZONES.map((zone) => {
+                    const all = availableKeyAccountsByZone[zone] ?? [];
+                    const filtered = filteredKeyAccountsByZone[zone] ?? [];
+                    const selected = selectedKeyAccountsByZone[zone] ?? [];
+                    const anyZonePicked = ZONES.some(
+                      (z) => (selectedKeyAccountsByZone[z] ?? []).length > 0
+                    );
+                    return (
+                      <div key={zone} className="rounded-lg border border-stone-200 p-2.5">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <p className="text-[12px] font-semibold text-stone-700">{zone}</p>
+                          <span className="text-[10px] text-stone-400">
+                            {selected.length
+                              ? `${selected.length} selected`
+                              : anyZonePicked
+                                ? 'None'
+                                : 'All clients'}
+                          </span>
+                        </div>
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <input
+                            type="text"
+                            value={zoneAccountSearch[zone]}
+                            onChange={(e) =>
+                              setZoneAccountSearch((prev) => ({ ...prev, [zone]: e.target.value }))
+                            }
+                            placeholder={`Search ${zone} clients...`}
+                            disabled={accountsLoading}
+                            className={settingsInputClass()}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => selectAllZoneKeyAccounts(zone)}
+                            disabled={accountsLoading || all.length === 0}
+                            className="rounded-md border border-stone-300 px-2 py-1 text-[11px] text-stone-700 disabled:opacity-50"
+                          >
+                            Select all
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => clearZoneKeyAccounts(zone)}
+                            disabled={selected.length === 0}
+                            className="rounded-md border border-stone-300 px-2 py-1 text-[11px] text-stone-700 disabled:opacity-50"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                        <div className="max-h-36 overflow-y-auto rounded border border-stone-200 p-1.5">
+                          {accountsLoading ? (
+                            <p className="px-2 py-2 text-[11px]">Loading...</p>
+                          ) : filtered.length === 0 ? (
+                            <p className="px-2 py-2 text-[11px]">No clients</p>
+                          ) : (
+                            filtered.map((account) => {
+                              const checked = selected.some((item) =>
+                                accountsMatchDisplayOrKey(item, account)
+                              );
+                              return (
+                                <label
+                                  key={`${zone}-${account}`}
+                                  className="flex items-center gap-2 rounded px-1.5 py-1 hover:bg-stone-50"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(e) =>
+                                      toggleZoneKeyAccount(zone, account, e.target.checked)
+                                    }
+                                  />
+                                  <span className="text-[11px] text-stone-700">
+                                    {clientAccountDisplayName(account)}
+                                  </span>
+                                </label>
+                              );
+                            })
+                          )}
                         </div>
                       </div>
                     );
                   })}
-            </div>
-          </section>
-
-          {(selectedBodyIds.length > 0 || keyAccountBodyEnabled) ? (
-            <section className="rounded-xl border border-stone-200 bg-white">
-              <button
-                type="button"
-                onClick={() => setShowAdvanced((prev) => !prev)}
-                className="flex w-full items-center justify-between px-3.5 py-3 text-left ui-label font-semibold text-stone-700"
-              >
-                <span>Advanced options — layout and account filters</span>
-                {showAdvanced ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </button>
-              <Collapse open={showAdvanced}>
-                <div className="space-y-3 px-3.5 pb-3">
-                  {selectedBodyIds.length > 0 ? (
-                    <div className="space-y-1">
-                      <p className="ui-micro uppercase tracking-wide text-stone-500">Body layout</p>
-                      <MisEmailBodyLayoutEditor
-                        selectedSectionIds={selectedBodyIds}
-                        bodySections={bodySections}
-                        layout={draftPrefs.bodyLayout}
-                        onLayoutChange={(bodyLayout) => onPrefsChange({ ...prefs, bodyLayout })}
-                      />
-                    </div>
-                  ) : null}
-                  {keyAccountBodyEnabled ? (
-                    <div className="space-y-2">
-                      <p className="ui-micro uppercase tracking-wide text-stone-500">Account filters</p>
-                      <p className="ui-micro text-stone-500">
-                        Each zone only shows the accounts you pick for that zone. The same account can be selected in multiple zones.
-                      </p>
-                      {ZONES.map((zone) => {
-                        const all = availableKeyAccountsByZone[zone] ?? [];
-                        const filtered = filteredKeyAccountsByZone[zone] ?? [];
-                        const selected = selectedKeyAccountsByZone[zone] ?? [];
-                        const anyZonePicked = ZONES.some(
-                          (z) => (selectedKeyAccountsByZone[z] ?? []).length > 0
-                        );
-                        return (
-                          <div key={zone} className="rounded-lg border border-stone-200 p-2.5">
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                              <p className="ui-label font-semibold text-stone-700">{zone}</p>
-                              <span className="ui-micro text-stone-400">
-                                {selected.length
-                                  ? `${selected.length} selected`
-                                  : anyZonePicked
-                                    ? 'None'
-                                    : 'All clients'}
-                              </span>
-                            </div>
-                            <div className="mb-2 flex flex-wrap items-center gap-2">
-                              <input
-                                type="text"
-                                value={zoneAccountSearch[zone]}
-                                onChange={(e) =>
-                                  setZoneAccountSearch((prev) => ({ ...prev, [zone]: e.target.value }))
-                                }
-                                placeholder={`Search ${zone} clients...`}
-                                disabled={accountsLoading}
-                                className={settingsInputClass()}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => selectAllZoneKeyAccounts(zone)}
-                                disabled={accountsLoading || all.length === 0}
-                                className="ui-chip rounded-md border border-stone-300 px-2 py-1 text-stone-700 disabled:opacity-50"
-                              >
-                                Select all
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => clearZoneKeyAccounts(zone)}
-                                disabled={selected.length === 0}
-                                className="ui-chip rounded-md border border-stone-300 px-2 py-1 text-stone-700 disabled:opacity-50"
-                              >
-                                Clear
-                              </button>
-                            </div>
-                            <div className="max-h-36 overflow-y-auto rounded border border-stone-200 p-1.5">
-                              {accountsLoading ? (
-                                <p className="ui-micro px-2 py-2">Loading...</p>
-                              ) : filtered.length === 0 ? (
-                                <p className="ui-micro px-2 py-2">No clients</p>
-                              ) : (
-                                filtered.map((account) => {
-                                  const checked = selected.some((item) =>
-                                    accountsMatchDisplayOrKey(item, account)
-                                  );
-                                  return (
-                                    <label
-                                      key={`${zone}-${account}`}
-                                      className="flex items-center gap-2 rounded px-1.5 py-1 hover:bg-stone-50"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        onChange={(e) => toggleZoneKeyAccount(zone, account, e.target.checked)}
-                                      />
-                                      <span className="ui-micro text-stone-700">
-                                        {clientAccountDisplayName(account)}
-                                      </span>
-                                    </label>
-                                  );
-                                })
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
                 </div>
-              </Collapse>
-            </section>
-          ) : null}
-
-          <section className="rounded-xl border border-stone-200 bg-white p-3">
-            <p className="ui-field-label mb-1 text-stone-700">Scope summary</p>
-            <p className="ui-help text-stone-600">
-              {settings.roleName ?? 'Your role'} · {settings.scopeLabel ?? 'All branches'}
-            </p>
-          </section>
-
-          {sendStatus ? (
-            <div className="ui-help rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-              <div className="flex items-center gap-2">
-                <Loader2 size={12} className="shrink-0 animate-spin" />
-                <span>{sendStatus}</span>
-              </div>
+              ) : null}
             </div>
-          ) : null}
-          {sendError ? (
-            <div className="ui-help rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-rose-800">
-              {sendError}
-            </div>
-          ) : null}
-          {sendResult ? (
-            <div className="ui-help rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-800">
-              {sendResult}
-            </div>
-          ) : null}
-
-          <p className="ui-help px-1 text-stone-500">
-            Send now queues this draft immediately. Save defaults keeps these settings for future scheduled digests.
-          </p>
+          </Collapse>
         </div>
+      ) : null}
 
-        <div className="flex min-h-[480px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-bg-canvas shadow-sm">
-        <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-bg-soft/70 px-4 py-3">
-          <div className="flex flex-col gap-0.5">
-            <div className="flex items-center gap-2 text-[12px] font-medium text-slate-800">
-              <FileSpreadsheet size={14} className="text-slate-400" />
-              Layout preview
-            </div>
-            <p className="text-[10px] text-slate-400">
+      {sendStatus ? (
+        <div className="border-b border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
+          <div className="flex items-center gap-1.5">
+            <Loader2 size={11} className="shrink-0 animate-spin" />
+            <span>{sendStatus}</span>
+          </div>
+        </div>
+      ) : null}
+      {sendError ? (
+        <div className="border-b border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] text-rose-800">
+          {sendError}
+        </div>
+      ) : null}
+      {sendResult ? (
+        <div className="border-b border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-800">
+          {sendResult}
+        </div>
+      ) : null}
+
+      {/* Message body = email preview (grows with content; page scrolls) */}
+      <div>
+        <div className="flex items-center justify-between gap-2 border-b border-stone-200 bg-stone-50/80 px-2 py-1">
+          <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-stone-600">
+            <FileSpreadsheet size={12} className="shrink-0 text-stone-400" />
+            <span className="font-medium text-stone-800">Preview</span>
+            <span className="truncate text-stone-400">
+              ·{' '}
               {livePreview
-                ? 'Live figures from your reports'
+                ? 'Live figures'
                 : livePreviewLoading
-                  ? 'Loading real figures in the background…'
+                  ? 'Loading figures…'
                   : livePreviewError
-                    ? 'Layout only — live figures failed'
-                    : 'Layout loads instantly — figures fill in shortly'}
-            </p>
+                    ? 'Layout only'
+                    : 'Layout first, figures next'}
+            </span>
           </div>
           {displayPreview?.attachments?.length ? (
             <div className="flex flex-wrap items-center gap-1">
               {livePreviewLoading ? (
-                <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500">
-                  <Loader2 size={10} className="animate-spin" />
+                <span className="inline-flex items-center gap-1 rounded border border-stone-200 bg-white px-1.5 py-0.5 text-[10px] text-stone-500">
+                  <Loader2 size={9} className="animate-spin" />
                   Loading
                 </span>
               ) : livePreview ? (
-                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">
+                <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700">
                   Live
                 </span>
               ) : livePreviewError ? (
-                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800">
-                  Layout only
+                <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800">
+                  Layout
                 </span>
               ) : null}
               {displayPreview.attachments.map((file) => (
                 <span
                   key={file}
-                  className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500"
+                  className="max-w-[9rem] truncate rounded border border-stone-200 bg-white px-1.5 py-0.5 text-[10px] text-stone-500"
+                  title={file}
                 >
                   {file}
                 </span>
@@ -867,38 +955,41 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
         </div>
 
         {livePreview?.gmailClipWarning ? (
-          <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-[11px] text-amber-900">
+          <div className="border-b border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] leading-snug text-amber-900">
             <p>{livePreview.gmailClipWarning}</p>
             {livePreview.keyAccountRowsTotal != null &&
             livePreview.keyAccountRowsInBody != null &&
             livePreview.keyAccountRowsInBody < livePreview.keyAccountRowsTotal ? (
               <p className="mt-0.5 text-amber-700">
-                Key accounts in email body: {livePreview.keyAccountRowsInBody} of{' '}
-                {livePreview.keyAccountRowsTotal} — full list is in the attached Excel.
+                Key accounts in body: {livePreview.keyAccountRowsInBody} of{' '}
+                {livePreview.keyAccountRowsTotal} — full list in Excel.
               </p>
             ) : null}
           </div>
         ) : null}
         {livePreviewError ? (
-          <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-[11px] text-amber-900">
+          <div className="border-b border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-900">
             Could not load live figures: {livePreviewError}
           </div>
         ) : null}
 
-        <div className="relative min-h-0 flex-1 bg-slate-100">
+        <div className="bg-stone-100">
           {previewWarning ? (
-            <div className="p-4 text-[12px] text-amber-700">{previewWarning}</div>
+            <div className="p-3 text-[12px] text-amber-700">{previewWarning}</div>
           ) : displayPreview?.html ? (
             <iframe
+              ref={previewIframeRef}
               title="MIS email layout preview"
               srcDoc={displayPreview.html}
-              className="h-full min-h-[480px] w-full border-0 bg-white"
-              sandbox=""
+              onLoad={resizePreviewIframe}
+              scrolling="no"
+              style={{ height: previewIframeHeight, minHeight: 200 }}
+              className="block w-full border-0 bg-white"
+              sandbox="allow-same-origin"
             />
           ) : null}
         </div>
       </div>
     </div>
-  </div>
   );
 }

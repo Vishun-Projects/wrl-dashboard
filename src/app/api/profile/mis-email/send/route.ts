@@ -5,6 +5,7 @@ import { requireRequestUser } from '@/lib/auth/server-user';
 import { hasMisEmailSendAccess } from '@/lib/auth/rbac-catalog';
 import { loadDigestRecipientById } from '@/features/mis-email/lib/recipients';
 import { sendMisEmailComposeBatch } from '@/features/mis-email/lib/compose-digest';
+import { parseMisEmailIntroPreset } from '@/features/mis-email/lib/email-template';
 import {
   createMisEmailSendJob,
   updateMisEmailSendJob,
@@ -46,7 +47,17 @@ export async function POST(request: Request) {
       sendCc?: string[];
       savePreferences?: boolean;
       allowAutoSendDisabledOverride?: boolean;
+      introPreset?: unknown;
     };
+
+    const introPreset =
+      body.introPreset === undefined ? undefined : parseMisEmailIntroPreset(body.introPreset);
+    if (body.introPreset !== undefined && introPreset === null) {
+      return NextResponse.json(
+        { error: 'introPreset must be "normal" or "revised"' },
+        { status: 400 }
+      );
+    }
 
     const [row, recipient] = await Promise.all([
       loadMisEmailRow(user.id),
@@ -135,6 +146,7 @@ export async function POST(request: Request) {
           sendCc: body.sendCc,
           allowAutoSendDisabledOverride: body.allowAutoSendDisabledOverride === true,
           displayName: recipient.name,
+          introPreset: introPreset ?? undefined,
         });
 
         const durationMs = Date.now() - jobStarted;

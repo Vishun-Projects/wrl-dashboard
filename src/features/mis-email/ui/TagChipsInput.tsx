@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ChangeEvent, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { Plus, X } from 'lucide-react';
 import { parseOutlookEmailList } from '@/features/mis-email/lib/parse-outlook-emails';
 
@@ -43,6 +43,7 @@ export function TagChipsInput({
   placeholder = 'Type and press Enter',
   hint,
   compact = false,
+  variant = 'default',
   normalize = (v) => v.trim().toLowerCase(),
   validate,
   invalidMessage = (v) => `Invalid value: ${v}`,
@@ -54,6 +55,8 @@ export function TagChipsInput({
   placeholder?: string;
   hint?: string;
   compact?: boolean;
+  /** `outlook` = single-line chips + input for compose To/Cc rows. */
+  variant?: 'default' | 'outlook';
   normalize?: (raw: string) => string;
   validate?: (value: string) => boolean;
   invalidMessage?: (value: string) => string;
@@ -87,6 +90,82 @@ export function TagChipsInput({
     setError('');
   }
 
+  const chipClass =
+    variant === 'outlook'
+      ? 'group inline-flex max-w-[11rem] cursor-pointer items-center gap-0.5 rounded border border-stone-200 bg-stone-50 py-0 pl-1.5 pr-0 text-left text-[11px] leading-5 text-stone-700 transition-colors hover:border-stone-300 hover:bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400'
+      : `group inline-flex max-w-full cursor-pointer items-center gap-0.5 rounded-full border border-stone-200 bg-stone-50 text-left text-[11px] text-stone-700 transition-colors hover:border-stone-300 hover:bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 ${
+          compact ? 'py-0 pl-2 pr-0.5' : 'py-0.5 pl-2.5 pr-0.5'
+        }`;
+  const removeClass =
+    variant === 'outlook'
+      ? 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-stone-500 group-hover:bg-stone-200/80'
+      : `inline-flex shrink-0 items-center justify-center rounded-full text-stone-500 group-hover:bg-stone-200/80 ${
+          compact ? 'h-6 w-6' : 'h-7 w-7'
+        }`;
+
+  const chips = values.map((item) => (
+    <button
+      key={item}
+      type="button"
+      onClick={() => onChange(values.filter((v) => v !== item))}
+      title={`Remove ${item}`}
+      aria-label={`Remove ${item}`}
+      className={chipClass}
+    >
+      <span className="truncate">{item}</span>
+      <span className={removeClass} aria-hidden>
+        <X size={14} />
+      </span>
+    </button>
+  ));
+
+  const inputProps = {
+    value: draft,
+    onChange: (event: ChangeEvent<HTMLInputElement>) => {
+      setDraft(event.target.value);
+      if (error) setError('');
+    },
+    onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === 'Enter' || event.key === ',') {
+        event.preventDefault();
+        commitTokens(draft);
+      }
+      if (event.key === 'Backspace' && !draft && values.length > 0) {
+        onChange(values.slice(0, -1));
+      }
+    },
+    onPaste: (event: ClipboardEvent<HTMLInputElement>) => {
+      const text = event.clipboardData.getData('text');
+      if (!text || (!text.includes(',') && !text.includes(';') && !text.includes('\n'))) {
+        return;
+      }
+      event.preventDefault();
+      commitTokens(text);
+    },
+    onBlur: () => {
+      if (draft.trim()) commitTokens(draft);
+    },
+    placeholder,
+  };
+
+  if (variant === 'outlook') {
+    return (
+      <div className="min-w-0 flex-1">
+        <div className="max-h-[52px] overflow-y-auto overscroll-contain py-0.5 [scrollbar-width:thin]">
+          <div className="flex flex-wrap items-center gap-1">
+            {chips}
+            <input
+              {...inputProps}
+              aria-label={label}
+              className="h-6 min-w-[120px] flex-1 bg-transparent text-[12px] text-stone-800 outline-none placeholder:text-stone-400"
+            />
+          </div>
+        </div>
+        {error ? <p className="pb-1 text-[11px] text-rose-600">{error}</p> : null}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between gap-2">
@@ -101,58 +180,12 @@ export function TagChipsInput({
           {values.length === 0 ? (
             <span className="px-1 text-[11px] text-slate-400">Nothing added yet</span>
           ) : (
-            values.map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => onChange(values.filter((v) => v !== item))}
-                title={`Remove ${item}`}
-                aria-label={`Remove ${item}`}
-                className={`group inline-flex max-w-full cursor-pointer items-center gap-0.5 rounded-full border border-slate-200 bg-bg-soft text-left text-[11px] text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 ${
-                  compact ? 'py-0 pl-2 pr-0.5' : 'py-0.5 pl-2.5 pr-0.5'
-                }`}
-              >
-                <span className="truncate">{item}</span>
-                <span
-                  className={`inline-flex shrink-0 items-center justify-center rounded-full text-slate-500 group-hover:bg-slate-200/80 ${
-                    compact ? 'h-6 w-6' : 'h-7 w-7'
-                  }`}
-                  aria-hidden
-                >
-                  <X size={14} />
-                </span>
-              </button>
-            ))
+            chips
           )}
         </div>
         <div className="flex items-center gap-2">
           <input
-            value={draft}
-            onChange={(event) => {
-              setDraft(event.target.value);
-              if (error) setError('');
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ',') {
-                event.preventDefault();
-                commitTokens(draft);
-              }
-              if (event.key === 'Backspace' && !draft && values.length > 0) {
-                onChange(values.slice(0, -1));
-              }
-            }}
-            onPaste={(event) => {
-              const text = event.clipboardData.getData('text');
-              if (!text || (!text.includes(',') && !text.includes(';') && !text.includes('\n'))) {
-                return;
-              }
-              event.preventDefault();
-              commitTokens(text);
-            }}
-            onBlur={() => {
-              if (draft.trim()) commitTokens(draft);
-            }}
-            placeholder={placeholder}
+            {...inputProps}
             className="h-8 min-w-0 flex-1 bg-transparent text-[12px] text-slate-800 outline-none placeholder:text-slate-400"
           />
           <button
@@ -177,12 +210,14 @@ export function EmailChipsInput({
   onChange,
   hint = 'Enter, comma, or paste a list',
   compact = false,
+  variant = 'default',
 }: {
   label: string;
   values: string[];
   onChange: (next: string[]) => void;
   hint?: string;
   compact?: boolean;
+  variant?: 'default' | 'outlook';
 }) {
   return (
     <TagChipsInput
@@ -191,6 +226,7 @@ export function EmailChipsInput({
       onChange={onChange}
       hint={hint}
       compact={compact}
+      variant={variant}
       placeholder="name@westernequipments.com"
       normalize={normalizeChipEmail}
       validate={isValidChipEmail}

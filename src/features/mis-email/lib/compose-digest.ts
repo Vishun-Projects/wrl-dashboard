@@ -27,6 +27,9 @@ import {
   buildDigestEmailPlainText,
   formatDigestSubject,
   formatReportPeriod,
+  resolveMisEmailBrandSubtitle,
+  resolveMisEmailIntroText,
+  type MisEmailIntroPreset,
 } from '@/features/mis-email/lib/email-template';
 import {
   DEFAULT_MIS_EMAIL_PREFERENCES,
@@ -179,6 +182,8 @@ function buildDigestEmailContent(params: {
     brandTitle?: string;
     brandSubtitle?: string;
     subjectTemplate?: string;
+    introText?: string;
+    introPreset?: MisEmailIntroPreset;
   };
 }): {
   bodyHtml?: string;
@@ -249,6 +254,8 @@ export async function buildMisEmailPayload(
     dateRange?: DigestDateRange;
     /** Skip register fetch and Excel generation — preview only needs HTML + filenames. */
     forPreview?: boolean;
+    /** Manual compose intro preset; cron omits this and stays on normal. */
+    introPreset?: MisEmailIntroPreset;
     timer?: MisEmailTimer;
   }
 ): Promise<{
@@ -391,8 +398,10 @@ export async function buildMisEmailPayload(
   const branding = {
     greeting: org.greeting,
     brandTitle: org.brandTitle,
-    brandSubtitle: org.brandSubtitle,
+    brandSubtitle: resolveMisEmailBrandSubtitle(org.brandSubtitle, options.introPreset),
     subjectTemplate: org.subjectTemplate,
+    introText: resolveMisEmailIntroText(options.introPreset),
+    introPreset: options.introPreset === 'revised' ? ('revised' as const) : ('normal' as const),
   };
   const emailContent = buildDigestEmailContent({
     recipientName: options.displayName,
@@ -418,7 +427,12 @@ export async function buildMisEmailPayload(
 
   return {
     preview: {
-      subject: formatDigestSubject(dateRange.endDate, undefined, org.subjectTemplate),
+      subject: formatDigestSubject(
+        dateRange.endDate,
+        undefined,
+        org.subjectTemplate,
+        options.introPreset
+      ),
       scopeLabel: scope.scopeLabel,
       dateRange,
       dateRangeLabel: formatReportPeriod(dateRange),
@@ -444,6 +458,7 @@ export async function previewMisEmailCompose(
   options: {
     preferences?: MisEmailPreferences;
     displayName?: string;
+    introPreset?: MisEmailIntroPreset;
   }
 ): Promise<MisEmailComposePreview> {
   const sentTo = recipient.email.trim().toLowerCase();
@@ -452,6 +467,7 @@ export async function previewMisEmailCompose(
     sentTo,
     displayName: options.displayName?.trim() || recipient.name,
     forPreview: true,
+    introPreset: options.introPreset,
   });
   return preview;
 }
@@ -462,6 +478,7 @@ export async function sendMisEmailCompose(
     preferences?: MisEmailPreferences;
     sentTo: string;
     displayName?: string;
+    introPreset?: MisEmailIntroPreset;
   }
 ): Promise<MisEmailSendResult> {
   const sentTo = options.sentTo.trim().toLowerCase();
@@ -471,6 +488,7 @@ export async function sendMisEmailCompose(
       preferences: options.preferences,
       sentTo,
       displayName,
+      introPreset: options.introPreset,
     });
 
   const org = await getMisEmailOrgSettings();
@@ -478,8 +496,10 @@ export async function sendMisEmailCompose(
   const branding = {
     greeting: org.greeting,
     brandTitle: org.brandTitle,
-    brandSubtitle: org.brandSubtitle,
+    brandSubtitle: resolveMisEmailBrandSubtitle(org.brandSubtitle, options.introPreset),
     subjectTemplate: org.subjectTemplate,
+    introText: resolveMisEmailIntroText(options.introPreset),
+    introPreset: options.introPreset === 'revised' ? ('revised' as const) : ('normal' as const),
   };
   const emailBody = {
     recipientName: displayName,
@@ -517,6 +537,7 @@ export async function sendMisEmailComposeBatch(
     sendCc?: string[];
     allowAutoSendDisabledOverride?: boolean;
     displayName?: string;
+    introPreset?: MisEmailIntroPreset;
   }
 ): Promise<MisEmailSendResult[]> {
   const batchTimer = new MisEmailTimer('send-batch');
@@ -600,6 +621,7 @@ export async function sendMisEmailComposeBatch(
     preferences: options.preferences,
     sentTo: primaryTarget,
     displayName: options.displayName?.trim() || recipient.name,
+    introPreset: options.introPreset,
     timer: batchTimer,
   });
 
@@ -608,8 +630,10 @@ export async function sendMisEmailComposeBatch(
   const branding = {
     greeting: org.greeting,
     brandTitle: org.brandTitle,
-    brandSubtitle: org.brandSubtitle,
+    brandSubtitle: resolveMisEmailBrandSubtitle(org.brandSubtitle, options.introPreset),
     subjectTemplate: org.subjectTemplate,
+    introText: resolveMisEmailIntroText(options.introPreset),
+    introPreset: options.introPreset === 'revised' ? ('revised' as const) : ('normal' as const),
   };
   const emailBody = {
     recipientName: options.displayName?.trim() || recipient.name,

@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db/prisma';
 import { normalizeAllowedEmailDomains } from '@/features/mis-email/lib/allowed-domains';
 import { normalizeEmailList } from '@/features/mis-email/lib/parse-outlook-emails';
 import { normalizeMisEmailSendTime } from '@/features/mis-email/lib/preferences';
+import { resolveMisEmailBrandSubtitle } from '@/features/mis-email/lib/email-template';
 import {
   MIS_EMAIL_ORG_SETTINGS_FALLBACKS,
   MIS_EMAIL_ORG_SETTINGS_KEY,
@@ -60,10 +61,12 @@ export function mergeMisEmailOrgSettings(raw: unknown): MisEmailOrgSettings {
       typeof raw.brandTitle === 'string' && raw.brandTitle.trim()
         ? raw.brandTitle.trim()
         : base.brandTitle,
-    brandSubtitle:
+    brandSubtitle: resolveMisEmailBrandSubtitle(
       typeof raw.brandSubtitle === 'string' && raw.brandSubtitle.trim()
         ? raw.brandSubtitle.trim()
         : base.brandSubtitle,
+      'normal'
+    ),
     portalBaseUrl:
       typeof raw.portalBaseUrl === 'string' && raw.portalBaseUrl.trim()
         ? raw.portalBaseUrl.trim().replace(/\/$/, '')

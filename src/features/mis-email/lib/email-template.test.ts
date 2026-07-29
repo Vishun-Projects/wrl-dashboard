@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { buildEmailBodySectionsHtml } from '@/features/mis-email/lib/body-sections';
 import {
   buildDigestEmailHtml,
+  buildDigestEmailPlainText,
   formatRecipientGreeting,
   formatReportPeriod,
+  MIS_EMAIL_INTRO_BY_PRESET,
+  resolveMisEmailIntroText,
 } from '@/features/mis-email/lib/email-template';
 import type { DigestDateRange } from '@/features/mis-email/lib/fetch-digest-data';
 import type { SummaryDashboard } from '@/features/report';
@@ -38,16 +41,57 @@ describe('formatDigestSubject', () => {
     const { formatDigestSubject } = await import('@/features/mis-email/lib/email-template');
     expect(formatDigestSubject('2026-07-03', undefined, 'MIS {asOn}')).toBe('MIS 03-07-2026');
   });
+
+  it('appends (Revised) for revised preset only', async () => {
+    const { formatDigestSubject } = await import('@/features/mis-email/lib/email-template');
+    expect(formatDigestSubject('2026-07-03', undefined, undefined, 'normal')).toBe(
+      'Daily MIS Report as on 03-07-2026'
+    );
+    expect(formatDigestSubject('2026-07-03', undefined, undefined, 'revised')).toBe(
+      'Daily MIS Report as on 03-07-2026 (Revised)'
+    );
+  });
+});
+
+describe('resolveMisEmailIntroText', () => {
+  it('defaults to normal and resolves revised', () => {
+    expect(resolveMisEmailIntroText()).toBe(MIS_EMAIL_INTRO_BY_PRESET.normal);
+    expect(resolveMisEmailIntroText('normal')).toBe(MIS_EMAIL_INTRO_BY_PRESET.normal);
+    expect(resolveMisEmailIntroText('revised')).toBe(MIS_EMAIL_INTRO_BY_PRESET.revised);
+  });
+});
+
+describe('resolveMisEmailBrandSubtitle', () => {
+  it('strips Revised for normal and adds it for revised', async () => {
+    const { resolveMisEmailBrandSubtitle } = await import('@/features/mis-email/lib/email-template');
+    expect(resolveMisEmailBrandSubtitle('WRL Dashboard (Revised)')).toBe('WRL Dashboard');
+    expect(resolveMisEmailBrandSubtitle('WRL Dashboard (Revised)', 'normal')).toBe('WRL Dashboard');
+    expect(resolveMisEmailBrandSubtitle('WRL Dashboard', 'revised')).toBe('WRL Dashboard (Revised)');
+    expect(resolveMisEmailBrandSubtitle('WRL Dashboard (Revised)', 'revised')).toBe(
+      'WRL Dashboard (Revised)'
+    );
+  });
+});
+
+describe('mergeMisEmailOrgSettings strips Revised from stored subtitle', () => {
+  it('normalizes legacy WRL Dashboard (Revised)', async () => {
+    const { mergeMisEmailOrgSettings } = await import('@/features/mis-email/lib/org-settings');
+    expect(mergeMisEmailOrgSettings({ brandSubtitle: 'WRL Dashboard (Revised)' }).brandSubtitle).toBe(
+      'WRL Dashboard'
+    );
+  });
 });
 
 describe('buildDigestEmailHtml', () => {
-  const html = buildDigestEmailHtml({
+  const baseParams = {
     recipientName: 'Vishnu Vishwakarma',
     recipientEmail: 'vishnu@wrl.com',
     dateRange: sampleRange,
     scopeLabel: 'All branches',
     portalUrl: 'https://wrl-dashboard.vercel.app',
-  });
+  };
+
+  const html = buildDigestEmailHtml(baseParams);
 
   it('uses professional layout with left stripe and meta grid', () => {
     expect(html).toContain('class="email-stripe"');
@@ -70,10 +114,26 @@ describe('buildDigestEmailHtml', () => {
 
   it('includes greeting, period, and scope', () => {
     expect(html).toContain('Dear Zonal Heads,');
-    expect(html).toContain('Please find enclosed daily MIS Report.');
+    expect(html).toContain(MIS_EMAIL_INTRO_BY_PRESET.normal);
     expect(html).toContain('July 2026');
     expect(html).toContain('All branches');
     expect(html).toContain('href="https://wrl-dashboard.vercel.app/report"');
+  });
+
+  it('uses revised intro when branding.introText is set', () => {
+    const revised = buildDigestEmailHtml({
+      ...baseParams,
+      branding: { introText: MIS_EMAIL_INTRO_BY_PRESET.revised },
+    });
+    expect(revised).toContain(MIS_EMAIL_INTRO_BY_PRESET.revised);
+    expect(revised).not.toContain(MIS_EMAIL_INTRO_BY_PRESET.normal);
+
+    const plain = buildDigestEmailPlainText({
+      ...baseParams,
+      branding: { introText: MIS_EMAIL_INTRO_BY_PRESET.revised },
+    });
+    expect(plain).toContain(MIS_EMAIL_INTRO_BY_PRESET.revised);
+    expect(plain).not.toContain(MIS_EMAIL_INTRO_BY_PRESET.normal);
   });
 
   it('preserves body table cell background colors when wrapping digest html', () => {

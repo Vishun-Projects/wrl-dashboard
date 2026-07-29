@@ -18,7 +18,7 @@ describe('mergeMisEmailOrgSettings', () => {
     expect(settings.subjectTemplate).toBe('Daily MIS Report as on {asOn}');
     expect(settings.greeting).toBe('Dear Zonal Heads,');
     expect(settings.brandTitle).toBe('WESTERN REFRIGERATION');
-    expect(settings.brandSubtitle).toBe('WRL Dashboard (Revised)');
+    expect(settings.brandSubtitle).toBe('WRL Dashboard');
     expect(settings.portalBaseUrl).toBe('https://wrl-dashboard.vercel.app');
     expect(settings.digestCallType).toBe('BREAKDOWN');
     expect(settings.allowedEmailDomains).toEqual(['westernequipments.com']);

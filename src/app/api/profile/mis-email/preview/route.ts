@@ -5,6 +5,7 @@ import { requireRequestUser } from '@/lib/auth/server-user';
 import { hasMisEmailSendAccess } from '@/lib/auth/rbac-catalog';
 import { loadDigestRecipientById } from '@/features/mis-email/lib/recipients';
 import { previewMisEmailCompose } from '@/features/mis-email/lib/compose-digest';
+import { parseMisEmailIntroPreset } from '@/features/mis-email/lib/email-template';
 import {
   mergeMisEmailPreferences,
   validateMisEmailPreferencesPatch,
@@ -35,7 +36,19 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body = (await request.json()) as { preferences?: MisEmailPreferences };
+    const body = (await request.json()) as {
+      preferences?: MisEmailPreferences;
+      introPreset?: unknown;
+    };
+    const introPreset =
+      body.introPreset === undefined ? undefined : parseMisEmailIntroPreset(body.introPreset);
+    if (body.introPreset !== undefined && introPreset === null) {
+      return NextResponse.json(
+        { error: 'introPreset must be "normal" or "revised"' },
+        { status: 400 }
+      );
+    }
+
     const [row, recipient] = await Promise.all([
       loadMisEmailRow(user.id),
       loadDigestRecipientById(user.id),
@@ -82,6 +95,7 @@ export async function POST(request: Request) {
     const preview = await previewMisEmailCompose(recipient, {
       preferences: validated.merged,
       displayName: recipient.name,
+      introPreset: introPreset ?? undefined,
     });
 
     return NextResponse.json({ ok: true, preview });

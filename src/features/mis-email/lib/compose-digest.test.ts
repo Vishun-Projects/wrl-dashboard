@@ -29,7 +29,7 @@ vi.mock('@/features/mis-email/lib/org-settings', () => ({
     portalBaseUrl: 'http://localhost',
     greeting: 'Dear Zonal Heads,',
     brandTitle: 'WESTERN REFRIGERATION',
-    brandSubtitle: 'WRL Dashboard (Revised)',
+    brandSubtitle: 'WRL Dashboard',
     subjectTemplate: 'Daily MIS Report as on {asOn}',
     digestCallType: 'BREAKDOWN',
     allowedEmailDomains: ['westernequipments.com'],

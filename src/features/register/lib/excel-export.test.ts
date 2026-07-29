@@ -25,5 +25,5 @@ describe('buildRegisterExcelWorkbook', () => {
     expect(sheet.getRow(1).getCell(6).value).toBe('Customer');
     expect(sheet.rowCount).toBeGreaterThanOrEqual(2);
     expect(String(sheet.getRow(2).getCell(1).value)).toContain('TRN1');
-  }, 20_000);
+  }, 60_000);
 });

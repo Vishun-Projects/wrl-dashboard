@@ -1,5 +1,10 @@
 import type { EmailAttachment } from '@/features/mis-email/lib/build-attachments';
-import { buildDigestEmailHtml, buildDigestEmailPlainText, formatDigestSubject } from '@/features/mis-email/lib/email-template';
+import {
+  buildDigestEmailHtml,
+  buildDigestEmailPlainText,
+  formatDigestSubject,
+  resolveMisEmailBrandSubtitle,
+} from '@/features/mis-email/lib/email-template';
 import type { DigestDateRange } from '@/features/mis-email/lib/fetch-digest-data';
 import {
   assertOrgOutboundMailEnabled,
@@ -133,8 +138,9 @@ export async function sendDigestEmail(params: {
   const branding = {
     greeting: org.greeting,
     brandTitle: org.brandTitle,
-    brandSubtitle: org.brandSubtitle,
+    brandSubtitle: resolveMisEmailBrandSubtitle(org.brandSubtitle, 'normal'),
     subjectTemplate: org.subjectTemplate,
+    introPreset: 'normal' as const,
   };
 
   const emailBody = {
@@ -155,7 +161,8 @@ export async function sendDigestEmail(params: {
     subject: formatDigestSubject(
       params.dateRange.endDate,
       params.subjectDate,
-      org.subjectTemplate
+      org.subjectTemplate,
+      'normal'
     ),
     text: buildDigestEmailPlainText(emailBody),
     html: buildDigestEmailHtml(emailBody),

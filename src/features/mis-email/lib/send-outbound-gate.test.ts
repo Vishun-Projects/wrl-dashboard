@@ -7,7 +7,7 @@ vi.mock('@/features/mis-email/lib/org-settings', () => ({
     portalBaseUrl: 'https://example.test',
     greeting: 'Dear Zonal Heads,',
     brandTitle: 'WESTERN REFRIGERATION',
-    brandSubtitle: 'WRL Dashboard (Revised)',
+    brandSubtitle: 'WRL Dashboard',
     subjectTemplate: 'Daily MIS Report as on {asOn}',
   })),
   OutboundMailDisabledError: class OutboundMailDisabledError extends Error {

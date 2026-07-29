@@ -11,7 +11,10 @@ import {
   buildDigestEmailHtml,
   formatDigestSubject,
   formatReportPeriod,
+  resolveMisEmailBrandSubtitle,
+  resolveMisEmailIntroText,
   MIS_EMAIL_THEME,
+  type MisEmailIntroPreset,
 } from '@/features/mis-email/lib/email-template';
 import type { DigestDateRange } from '@/features/mis-email/lib/fetch-digest-data';
 import { clientAccountDisplayName } from '@/features/report';
@@ -345,6 +348,7 @@ export function buildMisEmailSkeletonPreview(params: {
   recipientName: string;
   recipientEmail: string;
   portalUrl?: string;
+  introPreset?: MisEmailIntroPreset;
 }): MisEmailSkeletonPreview | null {
   const effectiveIncludes = resolveEffectiveDigestIncludes(params.permissions, params.preferences);
   const bodyPermissions: MisEmailBodyPermissions = {
@@ -376,10 +380,15 @@ export function buildMisEmailSkeletonPreview(params: {
     scopeLabel: params.scopeLabel,
     portalUrl,
     bodyHtml,
+    branding: {
+      introText: resolveMisEmailIntroText(params.introPreset),
+      brandSubtitle: resolveMisEmailBrandSubtitle(undefined, params.introPreset),
+      introPreset: params.introPreset === 'revised' ? 'revised' : 'normal',
+    },
   }, { forPreview: true });
 
   return {
-    subject: formatDigestSubject(dateRange.endDate),
+    subject: formatDigestSubject(dateRange.endDate, undefined, undefined, params.introPreset),
     scopeLabel: params.scopeLabel,
     dateRange,
     dateRangeLabel: formatReportPeriod(dateRange),

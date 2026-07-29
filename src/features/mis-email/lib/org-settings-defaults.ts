@@ -40,7 +40,7 @@ export const MIS_EMAIL_ORG_SETTINGS_FALLBACKS: MisEmailOrgSettings = {
   subjectTemplate: 'Daily MIS Report as on {asOn}',
   greeting: 'Dear Zonal Heads,',
   brandTitle: 'WESTERN REFRIGERATION',
-  brandSubtitle: 'WRL Dashboard (Revised)',
+  brandSubtitle: 'WRL Dashboard',
   portalBaseUrl: 'https://wrl-dashboard.vercel.app',
   digestCallType: 'BREAKDOWN',
   allowedEmailDomains: [...DEFAULT_ALLOWED_EMAIL_DOMAINS],

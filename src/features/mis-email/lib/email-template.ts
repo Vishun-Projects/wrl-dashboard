@@ -21,11 +21,42 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
+export type MisEmailIntroPreset = 'normal' | 'revised';
+
+export const MIS_EMAIL_INTRO_BY_PRESET = {
+  normal: 'Please find enclosed daily MIS Report.',
+  revised: 'Please find the revised report for Daily MIS Report.',
+} as const;
+
+export function resolveMisEmailIntroText(preset?: MisEmailIntroPreset | null): string {
+  return MIS_EMAIL_INTRO_BY_PRESET[preset === 'revised' ? 'revised' : 'normal'];
+}
+
+/** Normal = no "(Revised)"; revised appends it. Cron / omitted preset = normal. */
+export function resolveMisEmailBrandSubtitle(
+  orgSubtitle?: string | null,
+  preset?: MisEmailIntroPreset | null
+): string {
+  const base =
+    (orgSubtitle?.trim() || 'WRL Dashboard').replace(/\s*\(Revised\)\s*$/i, '').trim() ||
+    'WRL Dashboard';
+  return preset === 'revised' ? `${base} (Revised)` : base;
+}
+
+export function parseMisEmailIntroPreset(value: unknown): MisEmailIntroPreset | null {
+  if (value === 'normal' || value === 'revised') return value;
+  return null;
+}
+
 export type MisEmailTemplateBranding = {
   greeting?: string;
   brandTitle?: string;
   brandSubtitle?: string;
   subjectTemplate?: string;
+  /** Body intro under the greeting; defaults to the normal preset. */
+  introText?: string;
+  /** Drives subject / subtitle Revised labeling when set. */
+  introPreset?: MisEmailIntroPreset;
 };
 
 /** Fixed greeting for Daily MIS Report distribution (overridable via org settings). */
@@ -67,13 +98,18 @@ export function formatSubjectAsOnDate(isoDate?: string, fallback = new Date()): 
 export function formatDigestSubject(
   endDate?: string,
   fallback = new Date(),
-  subjectTemplate = 'Daily MIS Report as on {asOn}'
+  subjectTemplate = 'Daily MIS Report as on {asOn}',
+  introPreset?: MisEmailIntroPreset | null
 ): string {
   const asOn = formatSubjectAsOnDate(endDate, fallback);
+  let subject: string;
   if (subjectTemplate.includes('{asOn}')) {
-    return subjectTemplate.replaceAll('{asOn}', asOn);
+    subject = subjectTemplate.replaceAll('{asOn}', asOn);
+  } else {
+    subject = subjectTemplate.trim() || `Daily MIS Report as on ${asOn}`;
   }
-  return subjectTemplate.trim() || `Daily MIS Report as on ${asOn}`;
+  subject = subject.replace(/\s*\(Revised\)\s*$/i, '').trim() || subject;
+  return introPreset === 'revised' ? `${subject} (Revised)` : subject;
 }
 
 function buildCtaLink(href: string, label: string): string {
@@ -215,12 +251,15 @@ export function buildDigestEmailPlainText(params: {
     params.branding?.brandTitle?.trim() ||
     'WRL Dashboard — Western Refrigeration Pvt. Ltd.';
 
+  const introText =
+    params.branding?.introText?.trim() || MIS_EMAIL_INTRO_BY_PRESET.normal;
+
   const lines = [
     brandLine,
     '',
     greeting,
     '',
-    'Please find enclosed daily MIS Report.',
+    introText,
     `Report period: ${period}`,
     `Branch scope: ${params.scopeLabel}`,
   ];
@@ -253,11 +292,12 @@ export function buildDigestEmailHtml(params: {
   );
   const period = formatReportPeriod(params.dateRange);
   const brandTitle = params.branding?.brandTitle?.trim() || 'WESTERN REFRIGERATION';
-  const brandSubtitle = params.branding?.brandSubtitle?.trim() || 'WRL Dashboard (Revised)';
-  const preheader = `${formatDigestSubject(params.dateRange.endDate, undefined, params.branding?.subjectTemplate)} — ${params.scopeLabel}`;
+  const brandSubtitle = params.branding?.brandSubtitle?.trim() || 'WRL Dashboard';
+  const preheader = `${formatDigestSubject(params.dateRange.endDate, undefined, params.branding?.subjectTemplate, params.branding?.introPreset)} — ${params.scopeLabel}`;
   const cta = buildCtaLink(reportUrl, 'Open WRL Dashboard');
   const bodyHtml = params.bodyHtml?.trim() ?? '';
-  const introText = 'Please find enclosed daily MIS Report.';
+  const introText =
+    params.branding?.introText?.trim() || MIS_EMAIL_INTRO_BY_PRESET.normal;
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -295,7 +335,7 @@ export function buildDigestEmailHtml(params: {
                         <td class="email-text" style="padding:0 0 12px;font-family:${t.fontInline};font-size:14px;line-height:1.7;color:${t.fgPrimary};">${escapeHtml(greeting)}</td>
                       </tr>
                       <tr>
-                        <td class="email-text" style="padding:0 0 28px;font-family:${t.fontInline};font-size:14px;line-height:1.7;color:${t.fgPrimary};">${introText}</td>
+                        <td class="email-text" style="padding:0 0 28px;font-family:${t.fontInline};font-size:14px;line-height:1.7;color:${t.fgPrimary};">${escapeHtml(introText)}</td>
                       </tr>
                     </table>
                   </td>
