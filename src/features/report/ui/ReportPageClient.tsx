@@ -10,11 +10,10 @@ import {
   type MisTabId,
 } from '@/lib/auth/rbac-catalog';
 import axios from 'axios';
-import { Filter, Loader2, FileSpreadsheet } from 'lucide-react';
-import { PageAlert } from '@/components/ui/PageAlert';
-import { TruncatedText } from '@/components/ui/TruncatedText';
-import { ReportOrientationBanner } from '@/features/report/ui/ReportOrientationBanner';
-import ReportExportQueuePanel from '@/features/report/ui/ReportExportQueuePanel';
+import {
+  getRegisterCellClassName,
+  renderRegisterCell as renderRegisterCellBase,
+} from '@/features/report/ui/RegisterTableCells';
 import { useReportExportQueue } from '@/features/report/ui/useReportExportQueue';
 import type { ExportQueueRunContext } from '@/features/report/lib/export-queue';
 import { isExportActiveForTab } from '@/features/report/lib/export-queue';
@@ -22,6 +21,8 @@ import { consumeExportInterruptedFlag, markExportInterrupted } from '@/features/
 import { exportLabelForMisTab } from '@/features/report/lib/export-labels';
 import { ReportErrorBoundary } from '@/features/report/ui/ReportErrorBoundary';
 import { ReportPageOverlays } from '@/features/report/ui/ReportPageOverlays';
+import { ReportPageHeaderBar } from '@/features/report/ui/ReportPageHeaderBar';
+import { ReportSharedFiltersBar } from '@/features/report/ui/ReportSharedFiltersBar';
 import { ReportRegisterTabPanel } from '@/features/report/ui/ReportRegisterTabPanel';
 import { ReportSummaryTabPanel } from '@/features/report/ui/ReportSummaryTabPanel';
 import { ReportAccountsTabPanel } from '@/features/report/ui/ReportAccountsTabPanel';
@@ -30,25 +31,26 @@ import { ReportPageSkeleton } from '@/features/report/ui/ReportLoadingFeedback';
 import { useRegisterFilterOptions } from '@/features/report/lib/hooks/useRegisterFilterOptions';
 import { feedback } from '@/lib/ui/feedback';
 import { useUser } from '@/components/layout/DashboardLayout';
-import { DateRangeSelector } from '@/features/register/ui/DateRangeSelector';
 import { CallRegisterClient } from '@/app/report/call-register/call-register-client';
-import { formatUiDate } from '@/lib/dates/ui-date';
-import { UiDateInput } from '@/components/ui/UiDateInput';
 
-import { RegisterBranchFranchiseeFilters } from '@/features/register/ui/RegisterBranchFranchiseeFilters';
-import { RegisterMultiSelect } from '@/features/register/ui/RegisterMultiSelect';
 import { RegisterPageFilters } from '@/features/register/ui/RegisterPageFilters';
 import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
 import {
+  appendRegisterListFilters,
+  appliedFilterPartsFromSnapshot,
+  buildRegisterExportQuery,
   buildRegisterListQueryKey,
+  emptyRegisterViewFilterParts,
+  isBaseRegisterPersistFilter,
+  normalizeAgingAsOfDate,
   normalizeRegisterPageSize,
   readStoredRegisterPageSize,
-  resolveTechnicianDisplayName,
   type RegisterPageSize,
   buildSummaryQueryKey,
   joinFilterParam,
   resolveViewCallTypesParam,
   resolveSummaryOfficeIdsParam,
+  toDateString,
 } from '@/features/report/lib/filters';
 import {
   loadVisibleRegisterColumns,
@@ -57,28 +59,18 @@ import {
   type RegisterTableColumnKey,
 } from '@/features/register';
 import type { TableSortState } from '@/lib/ui/table-sort';
-import { getCallTypeBadgeClass } from '@/features/report/lib/call-type-badge';
-import { repairSemantics } from '@/lib/ui/semantics';
 import { MAX_CLIENT_CORPUS_DAYS, resolveRegisterDateSqlColumn } from '@/lib/trhcalls/query';
 import {
   findCallsInIndexedDb,
   findCallsInMemoryCaches,
   isIdentifierLookupSearch,
   isTrnLikeSearch,
-  registerRowMatchesViewFilters,
   summarizeRegisterRows,
-  classifyRegisterRowStatus,
-  isRegisterRowSolvedForMis,
   normalizeRegisterSummary,
   type RegisterSummary,
   type RegisterViewFilterParts,
 } from '@/features/report/lib/search';
-import {
-  appliedFilterPartsFromSnapshot,
-  isAnyFilterActive,
-  normalizeAgingAsOfDate,
-  toDateString,
-} from '@/features/report/lib/filters';
+import { mergeRegisterDeltaRecords } from '@/features/report/lib/register-delta';
 import { globalReportCache, setGlobalReportCache, distributionDataCache, setDistributionDataCache, callCorpusStore } from '@/features/report/lib/data-store';
 import { indexRegisterRowsWithSerial, subscribeRegisterDelta } from '@/features/report/lib/sync';
 import {
@@ -113,11 +105,7 @@ import { clearPortalAuditCache, ensurePortalAuditCache } from '@/features/report
 import ClientImportTab from '@/features/report/ui/ClientImportTab';
 import type { BdMisGrandRow, BdMisRegionalRow, BdMisSourceFlags } from '@/features/report/lib/bd-mis-summary';
 import type { AccountSummaryRow, BranchSummaryRow } from '@/features/report/lib/summary-derive';
-import MisSourceCheckboxes from '@/features/report/ui/MisSourceCheckboxes';
-import {
-  loadClientMergeWithCrmPrefs,
-  saveClientMergeWithCrmPrefs,
-} from '@/features/report/ui/MisClientMergeCheckbox';
+import { loadClientMergeWithCrmPrefs } from '@/features/report/ui/MisClientMergeCheckbox';
 import {
   buildAccountDisplayRows,
   type ClientMergeWithCrmPrefs,
@@ -135,9 +123,7 @@ import {
 } from '@/features/mis-import';
 
 import {
-  adjustRegisterSummaryBucket,
   corpusSpanDays,
-  formatRelativeTime,
   getCallsFromDB,
   getMeta,
   logSummaryDebug,
@@ -310,10 +296,6 @@ export default function ReportPageClient() {
   );
   const clientOnlyMode = isClientOnlyMode(sourceSelection);
   const alignCrmToAccounts = mergeFlags.crm && mergeFlags.client;
-  const [, setClientImportMeta] = useState<{
-    rowsInDateRange: number;
-    totalRowsInFiles: number;
-  } | null>(null);
   const [accountsData, setAccountsData] = useState<any[]>(globalReportCache?.accountsData || []);
   const mergedAccountRowsForTotals = useMemo(
     () => buildAccountDisplayRows(accountsData, clientAccountSummaryData, mergeFlags),
@@ -326,10 +308,6 @@ export default function ReportPageClient() {
   const [bdMisTabLoading, setBdMisTabLoading] = useState(false);
   const [bdMisRegionalRows, setBdMisRegionalRows] = useState<BdMisRegionalRow[]>([]);
   const [bdMisGrand, setBdMisGrand] = useState<BdMisGrandRow | null>(null);
-  /** BD MIS Excel union uses full client snapshots (YTD); not used for date-filtered Summary Dashboard. */
-  const [excelUnionRegionalRows, setExcelUnionRegionalRows] = useState<BdMisRegionalRow[]>([]);
-  const [, setExcelUnionGrand] = useState<BdMisGrandRow | null>(null);
-  const useBdMisExcelUnion = false;
   const [bdMisExportData, setBdMisExportData] = useState<{
     regionalRows: BdMisRegionalRow[];
     grand: BdMisGrandRow;
@@ -385,9 +363,6 @@ export default function ReportPageClient() {
     });
   }, []);
 
-  const [selectedBranchEngs] = useState<string[]>([]);
-  const [showEngPopup, setShowEngPopup] = useState<string | null>(null);
-  const [fetchingEngs] = useState(false);
   const [expandedBranches, setExpandedBranches] = useState<Record<string, boolean>>({});
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(globalReportCache?.lastRefreshed || null);
   const [filterRegion, setFilterRegion] = useState<string[]>(globalReportCache?.filterRegion || []); // Array for multiselect
@@ -662,161 +637,12 @@ export default function ReportPageClient() {
     [visibleRegisterColumns]
   );
 
-  const renderRegisterCell = (key: RegisterTableColumnKey, row: any) => {
-    switch (key) {
-      case 'UniqueCallNo':
-        return (
-          <button onClick={() => handleSelectCall(String(row.id), row)} className="text-slate-700 underline hover:text-slate-900">
-            {row.UniqueCallNo}
-          </button>
-        );
-      case 'vcclid':
-        return (
-          <button onClick={() => handleSelectCall(String(row.id), row)} className="underline hover:text-slate-700">
-            {row.vcclid ?? '—'}
-          </button>
-        );
-      case 'calltype':
-        return (
-          <span className={`ui-strong ${getCallTypeBadgeClass(row.calltype)}`}>
-            {row.calltype || 'N/A'}
-          </span>
-        );
-      case 'callsdtrndate':
-        return formatDate(row.callsdtrndate);
-      case 'PartyName':
-        return (
-          <span className="inline-flex items-center gap-1.5">
-            {row.PartyName}
-            {priorityFilter.length === 0 && row.is_major_repair === 'True' && (
-              <span className="report-major-badge rounded bg-rose-500 px-1 py-0.5 ui-micro text-white ui-strong">MAJOR</span>
-            )}
-          </span>
-        );
-      case 'officename':
-        return row.officename && row.officename !== 'UNKNOWN' ? row.officename : '—';
-      case 'region':
-        return row.region ?? '—';
-      case 'account':
-        return row.account ?? '—';
-      case 'franchisee_name':
-        return row.franchisee_name && row.franchisee_name !== 'Unallocated'
-          ? row.franchisee_name
-          : '—';
-      case 'Pincode':
-        return row.Pincode ?? row.pincode ?? '—';
-      case 'itemname':
-        return row.itemname;
-      case 'callsvserialno': {
-        const serial = row.callsvserialno != null ? String(row.callsvserialno) : '';
-        return serial ? <TruncatedText text={serial} className="font-mono" /> : '—';
-      }
-      case 'WCO': {
-        const wco = row.WCO != null ? String(row.WCO).trim().toUpperCase() : '';
-        return wco === 'W' || wco === 'C' || wco === 'O' || wco === 'V' ? wco : '—';
-      }
-      case 'serviceman':
-        return resolveTechnicianDisplayName(row, technicianRoster);
-      case 'vcomplaint':
-        return row.vcomplaint;
-      case 'repair_done': {
-        const raw = String(row.repair_done ?? '');
-        const chips = [
-          raw.includes('Motor Replaced')
-            ? { label: 'Motor', className: repairSemantics.motor }
-            : null,
-          raw.includes('Compressor Replaced')
-            ? { label: 'Compressor', className: repairSemantics.compressor }
-            : null,
-          raw.includes('Gas Charging Done')
-            ? { label: 'Gas', className: repairSemantics.gas }
-            : null,
-        ].flatMap((c) => (c ? [c] : []));
-        if (!chips.length) return '—';
-        return (
-          <span className="inline-flex flex-wrap gap-1">
-            {chips.map((c) => (
-              <span
-                key={c.label}
-                className={`rounded border px-1.5 py-0.5 ui-chip ${c.className}`}
-              >
-                {c.label}
-              </span>
-            ))}
-          </span>
-        );
-      }
-      case 'Status':
-        return (() => {
-          const bucket = classifyRegisterRowStatus(row);
-          const isRejected =
-            bucket === 'closed' &&
-            (row.bmreject === 'Yes' ||
-              String(row.rejectionstatus) === '1' ||
-              String(row.rejectionstatus) === '2');
-          if (isRejected) return <span className="badge-cancelled">Closed - Rejected</span>;
-          if (bucket === 'cancelled') return <span className="badge-cancelled">Cancelled</span>;
-          if (bucket === 'closed') return <span className="badge-solved">Solved</span>;
-          if (bucket === 'techSolved') return <span className="badge-solved">Tech. Solved</span>;
-          if (bucket === 'assigned') return <span className="badge-assigned">Assigned</span>;
-          return <span className="badge-open">Open</span>;
-        })();
-      case 'portal_action':
-        return (() => {
-          const flag = row.audit_flag || 'unseen';
-          const label = flag === 'noted' ? 'Verified' : flag === 'query' ? 'Hold' : flag === 'escalate' ? 'Rejected' : 'Unseen';
-          const badgeClass = flag === 'noted' ? 'badge-solved' : flag === 'query' ? 'badge-assigned' : flag === 'escalate' ? 'badge-cancelled' : 'badge-unseen';
-          const commentCount = row.comment_count ?? row.comments?.length ?? 0;
-          return (
-            <div className="flex flex-col items-start gap-1">
-              <span className={`ui-chip px-2 py-0.5 rounded ${badgeClass}`}>{label}</span>
-              {commentCount > 0 && (
-                <span className="ui-micro">{commentCount} comment{commentCount !== 1 ? 's' : ''}</span>
-              )}
-            </div>
-          );
-        })();
-      case 'callsolveddate':
-        return formatDate(row.callsolveddate);
-      case 'bm_approved_date':
-        return row.bm_approved_date ? String(row.bm_approved_date) : '—';
-      case 'ho_approved_date':
-        return row.ho_approved_date ? String(row.ho_approved_date) : '—';
-      case 'vsolveremarks':
-        return (() => {
-          const rejectionRemark = row.vcomment || null;
-          const solveRemark = row.vsolveremarks || row.cancel_reason || null;
-          if (rejectionRemark) {
-            return <span className="font-medium text-rose-600">⚑ {rejectionRemark}</span>;
-          }
-          return <span className="ui-help">{solveRemark || '—'}</span>;
-        })();
-      case 'vpersoncalling':
-        return row.vpersoncalling;
-      case 'vinsttel1':
-        return row.vinsttel1;
-      case 'vinstaddress':
-        return row.vinstaddress;
-      default:
-        return '—';
-    }
-  };
-
-  const getRegisterCellClassName = (key: RegisterTableColumnKey) => {
-    if (key === 'UniqueCallNo') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] font-mono text-slate-400';
-    if (key === 'vcclid') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] font-medium text-slate-900';
-    if (key === 'PartyName') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] font-medium text-slate-800';
-    if (key === 'Pincode' || key === 'callsvserialno' || key === 'WCO') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 font-mono text-[11px] text-slate-700';
-    if (key === 'officename' || key === 'region' || key === 'account' || key === 'franchisee_name' || key === 'itemname') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-700';
-    if (key === 'serviceman' || key === 'vinsttel1') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-900';
-    if (key === 'vpersoncalling') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-600';
-    if (key === 'bm_approved_date' || key === 'ho_approved_date') {
-      return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-600';
-    }
-    if (key === 'vsolveremarks') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px]';
-    if (key === 'vinstaddress') return 'whitespace-nowrap px-3 py-2 text-[11px] text-slate-500';
-    return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-500';
-  };
+  const renderRegisterCell = (key: RegisterTableColumnKey, row: any) =>
+    renderRegisterCellBase(key, row, {
+      onSelectCall: handleSelectCall,
+      priorityFilter,
+      technicianRoster,
+    });
 
   const fetchControllerRef = React.useRef<AbortController | null>(null);
   const registerAuthFailedRef = React.useRef(false);
@@ -838,7 +664,6 @@ export default function ReportPageClient() {
   const refreshClientImportOverlayRef = React.useRef<
     (scope: { startDate: string; endDate: string; agingAsOf: string }) => Promise<void>
   >(async () => {});
-  const loadExcelUnionSummaryRef = React.useRef<() => Promise<void>>(async () => {});
   const resolveClientImportScopeRef = React.useRef<
     () => { startDate: string; endDate: string; agingAsOf: string } | null
   >(() => null);
@@ -893,8 +718,6 @@ export default function ReportPageClient() {
 
   // Client-side cascades computation removed in favor of server-side cascades
 
-  const formatDate = (dateStr: string) => formatUiDate(dateStr) || '—';
-
   const persistCurrentCache = async (
     calls: any[],
     summaryData: any[],
@@ -905,21 +728,25 @@ export default function ReportPageClient() {
     lastRefreshedDate: Date
   ) => {
     try {
-      const isBaseFilter = 
-        selectedState.length === 0 &&
-        selectedCity.length === 0 &&
-        selectedBranch.length === 0 &&
-        selectedFranchisee.length === 0 &&
-        selectedTechnician.length === 0 &&
-        search === '' &&
-        pincodeSearch === '' &&
-        selectedStatus.length === 0 &&
-        priorityFilter.length === 0 &&
-        portalFilter.length === 0 &&
-        repairFilter.length === 0 &&
-        selectedOfficeIds.length === 0 &&
-        selectedCallTypes.length === 0 &&
-        !filterAccount && filterRegion.length === 0;
+      const isBaseFilter = isBaseRegisterPersistFilter({
+        search,
+        pincodeSearch,
+        selectedState,
+        selectedCity,
+        selectedRegion,
+        selectedAccount,
+        selectedBranch,
+        selectedFranchisee,
+        selectedTechnician,
+        selectedCallTypes,
+        selectedOfficeIds,
+        selectedStatus,
+        priorityFilter,
+        portalFilter,
+        repairFilter,
+        filterAccount: Array.isArray(filterAccount) ? filterAccount : [],
+        filterRegion,
+      });
 
       if (isBaseFilter) {
         try {
@@ -1197,10 +1024,6 @@ export default function ReportPageClient() {
     }) => {
       setClientSummaryData(client.clientBranchSummary);
       setClientAccountSummaryData(client.clientAccountSummary);
-      setClientImportMeta({
-        rowsInDateRange: client.rowsInDateRange,
-        totalRowsInFiles: client.totalRowsInFiles,
-      });
     },
     []
   );
@@ -2038,42 +1861,27 @@ export default function ReportPageClient() {
     }
 
     const appendRegisterFilters = (basePath: string) => {
-      let u = basePath;
-      if (searchForUrl) u += `&search=${encodeURIComponent(searchForUrl)}`;
-      if (pincodeForUrl) u += `&pincode=${encodeURIComponent(pincodeForUrl)}`;
-      if (startDateStr) u += `&startDate=${startDateStr}`;
-      if (endDateStr) u += `&endDate=${endDateStr}`;
-      u += `&dateFilterColumn=${encodeURIComponent(dateFilterColumn)}`;
-      if (activeSort) {
-        u += `&sortBy=${encodeURIComponent(activeSort.key)}&sortDir=${activeSort.dir}`;
-      }
-      const stateParam = joinFilterParam(selectedState);
-      const cityParam = joinFilterParam(selectedCity);
-      const regionParam = joinFilterParam(selectedRegion);
-      const accountParam = joinFilterParam(selectedAccount);
-      const technicianParam = joinFilterParam(selectedTechnician);
-      const statusParam = joinFilterParam(selectedStatus);
-      const priorityParam = joinFilterParam(priorityFilter);
-      const portalParam = joinFilterParam(portalFilter);
-      if (stateParam) u += `&state=${encodeURIComponent(stateParam)}`;
-      if (cityParam) u += `&city=${encodeURIComponent(cityParam)}`;
-      if (regionParam) u += `&region=${encodeURIComponent(regionParam)}`;
-      if (accountParam) u += `&account=${encodeURIComponent(accountParam)}`;
-      const branchParam = joinFilterParam(selectedBranch);
-      const franchiseeParam = joinFilterParam(selectedFranchisee);
-      if (branchParam) u += `&branch=${encodeURIComponent(branchParam)}`;
-      if (franchiseeParam) u += `&franchisee=${encodeURIComponent(franchiseeParam)}`;
-      if (technicianParam) u += `&technician=${encodeURIComponent(technicianParam)}`;
-      if (statusParam) u += `&status=${encodeURIComponent(statusParam)}`;
-      if (priorityParam) u += `&priority=${encodeURIComponent(priorityParam)}`;
-      if (portalParam) u += `&portalFilter=${encodeURIComponent(portalParam)}`;
       const appliedRepair = getAppliedFiltersSnapshot()?.repairFilter;
-      const repairParam = joinFilterParam(
-        appliedRepair?.length ? appliedRepair : repairFilter
-      );
-      if (repairParam) u += `&repair=${encodeURIComponent(repairParam)}`;
-      u += '&fetchFilterOptions=false';
-      return u;
+      return appendRegisterListFilters(basePath, {
+        searchForUrl,
+        pincodeForUrl,
+        startDateStr,
+        endDateStr,
+        dateFilterColumn,
+        sortBy: activeSort?.key,
+        sortDir: activeSort?.dir,
+        selectedState,
+        selectedCity,
+        selectedRegion,
+        selectedAccount,
+        selectedBranch,
+        selectedFranchisee,
+        selectedTechnician,
+        selectedStatus,
+        priorityFilter,
+        portalFilter,
+        repairFilter: appliedRepair?.length ? appliedRepair : repairFilter,
+      });
     };
 
     try {
@@ -2117,23 +1925,6 @@ export default function ReportPageClient() {
           );
           if (fromCorpus) {
             storePrefetched(nextPage, { data: fromCorpus.rows, total: fromCorpus.total });
-            return;
-          }
-          if (readRegisterFromPostgresClient()) {
-            const nextUrl = appendRegisterFilters(
-              `/api/report?page=${nextPage}&limit=${pageSize}&fetchTotals=false&officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
-            );
-            axios
-              .get(nextUrl, requestConfig)
-              .then((res) => {
-                storePrefetched(nextPage, res.data);
-                reportPerf('prefetch', `page ${nextPage} response stored`, prefetchSessionStart, {
-                  opId,
-                  rows: (res.data?.data || []).length,
-                  sincePrefetchScheduleMs: Number((performance.now() - prefetchSessionStart).toFixed(1)),
-                });
-              })
-              .catch(() => {});
             return;
           }
           const nextUrl = appendRegisterFilters(
@@ -2423,22 +2214,6 @@ export default function ReportPageClient() {
     [fetchData]
   );
 
-  const isTransferred = (rec: any) => {
-    return (rec.vtransfercallno && String(rec.vtransfercallno).trim() !== '') || String(rec.ncancelreason) === '2';
-  };
-
-  const isSolved = (rec: any) => isRegisterRowSolvedForMis(rec);
-
-  const isCancelled = (rec: any) => {
-    if (isTransferred(rec)) return false;
-    return classifyRegisterRowStatus(rec) === 'cancelled';
-  };
-
-  const isOpen = (rec: any) => {
-    const bucket = classifyRegisterRowStatus(rec);
-    return bucket === 'openUnallocated' || bucket === 'assigned';
-  };
-
   const fetchDelta = async () => {
     if (readRegisterFromPostgresClient()) {
       registerPagesCacheRef.current.clear();
@@ -2462,146 +2237,32 @@ export default function ReportPageClient() {
     }
     if (newRecords.length === 0) return;
 
-    const filterCtx = registerViewFilterRef.current;
-    const viewFiltered = isAnyFilterActive(filterCtx);
-    const findRowIndex = (rows: any[], rec: any) =>
-      rows.findIndex(
-        (r) =>
-          String(r.UniqueCallNo) === String(rec.UniqueCallNo) ||
-          String(r.vcclid) === String(rec.vcclid)
-      );
-
-    const currentData = dataRef.current;
-    const currentTotal = totalRef.current;
-    const currentRegisterSummary = registerSummaryRef.current;
-    const currentSummaryData = summaryDataRef.current;
-    const currentAccountsData = accountsDataRef.current;
     const currentGlobalHeadcount = globalHeadcountRef.current;
-
-    const updatedData = [...currentData];
-    let newAddedCount = 0;
-    let dataChanged = false;
-
-    newRecords.forEach((newRec: any) => {
-      const idx = findRowIndex(updatedData, newRec);
-      if (idx > -1) {
-        updatedData[idx] = newRec;
-        dataChanged = true;
-        return;
-      }
-
-      if (viewFiltered) {
-        if (registerRowMatchesViewFilters(newRec, filterCtx)) {
-          updatedData.unshift(newRec);
-          newAddedCount++;
-          dataChanged = true;
-        }
-        return;
-      }
-
-      updatedData.unshift(newRec);
-      newAddedCount++;
-      dataChanged = true;
+    const merged = mergeRegisterDeltaRecords({
+      currentData: dataRef.current,
+      currentTotal: totalRef.current,
+      currentRegisterSummary: registerSummaryRef.current,
+      currentSummaryData: summaryDataRef.current,
+      currentAccountsData: accountsDataRef.current,
+      newRecords,
+      filterCtx: registerViewFilterRef.current,
     });
 
-    if (!dataChanged) return;
+    if (merged.kind === 'noop') return;
 
-    if (!viewFiltered) {
-      updatedData.sort((a, b) => {
-        const dateA = new Date(a.callsdtrndate || 0).getTime();
-        const dateB = new Date(b.callsdtrndate || 0).getTime();
-        return dateB - dateA;
-      });
-    }
-
-    const recordsForSummary = viewFiltered
-      ? newRecords.filter((rec) => findRowIndex(currentData, rec) > -1)
-      : newRecords;
-
-    if (viewFiltered) {
-      setData(updatedData);
+    if (merged.kind === 'viewFiltered') {
+      setData(merged.updatedData);
       return;
     }
 
-    const nextSummaryData = [...currentSummaryData];
-    recordsForSummary.forEach((newRec: any) => {
-      if (isTransferred(newRec)) return;
-      const branchRowIdx = nextSummaryData.findIndex(
-        (b) =>
-          b.officeId === newRec.nofficeid ||
-          b.branch?.toLowerCase() === newRec.officename?.toLowerCase()
-      );
-      if (branchRowIdx > -1) {
-        const row = { ...nextSummaryData[branchRowIdx] };
-        const oldRec = currentData.find(
-          (r) =>
-            String(r.UniqueCallNo) === String(newRec.UniqueCallNo) ||
-            String(r.vcclid) === String(newRec.vcclid)
-        );
-        if (oldRec) {
-          if (isSolved(oldRec)) row.solved_calls = Math.max(0, (row.solved_calls || 0) - 1);
-          else if (isCancelled(oldRec)) row.cancelled_calls = Math.max(0, (row.cancelled_calls || 0) - 1);
-          else if (isOpen(oldRec)) row.open_calls = Math.max(0, (row.open_calls || 0) - 1);
-        }
-        if (isSolved(newRec)) row.solved_calls = (row.solved_calls || 0) + 1;
-        else if (isCancelled(newRec)) row.cancelled_calls = (row.cancelled_calls || 0) + 1;
-        else if (isOpen(newRec)) row.open_calls = (row.open_calls || 0) + 1;
-        nextSummaryData[branchRowIdx] = row;
-      }
-    });
+    const {
+      updatedData,
+      nextTotal,
+      nextSummary,
+      nextSummaryData,
+      nextAccountsData,
+    } = merged;
 
-    const nextAccountsData = [...currentAccountsData];
-    recordsForSummary.forEach((newRec: any) => {
-      if (isTransferred(newRec)) return;
-      const accRowIdx = nextAccountsData.findIndex(
-        (a) => a.account?.toLowerCase() === newRec.PartyName?.toLowerCase()
-      );
-      if (accRowIdx > -1) {
-        const row = { ...nextAccountsData[accRowIdx] };
-        const oldRec = currentData.find(
-          (r) =>
-            String(r.UniqueCallNo) === String(newRec.UniqueCallNo) ||
-            String(r.vcclid) === String(newRec.vcclid)
-        );
-        if (oldRec) {
-          if (isSolved(oldRec)) row.total_solved = Math.max(0, (row.total_solved || 0) - 1);
-          else if (isCancelled(oldRec)) row.cancelled_calls = Math.max(0, (row.cancelled_calls || 0) - 1);
-          else if (isOpen(oldRec)) row.open_calls = Math.max(0, (row.open_calls || 0) - 1);
-        }
-        if (isSolved(newRec)) row.total_solved = (row.total_solved || 0) + 1;
-        else if (isCancelled(newRec)) row.cancelled_calls = (row.cancelled_calls || 0) + 1;
-        else if (isOpen(newRec)) row.open_calls = (row.open_calls || 0) + 1;
-        nextAccountsData[accRowIdx] = row;
-      }
-    });
-
-    let nextSummary = currentRegisterSummary ? { ...currentRegisterSummary } : null;
-    if (nextSummary) {
-      let newTotal = nextSummary.total;
-
-      recordsForSummary.forEach((newRec: any) => {
-        if (classifyRegisterRowStatus(newRec) === 'transferred') return;
-        const oldRec = currentData.find(
-          (r) =>
-            String(r.UniqueCallNo) === String(newRec.UniqueCallNo) ||
-            String(r.vcclid) === String(newRec.vcclid)
-        );
-        if (oldRec) {
-          adjustRegisterSummaryBucket(nextSummary!, classifyRegisterRowStatus(oldRec), -1);
-        } else {
-          newTotal++;
-        }
-
-        adjustRegisterSummaryBucket(nextSummary!, classifyRegisterRowStatus(newRec), 1);
-      });
-
-      nextSummary = {
-        ...nextSummary!,
-        total: newTotal,
-      };
-    }
-
-    const nextTotal = currentTotal + newAddedCount;
     setData(updatedData);
     setTotal(nextTotal);
     setRegisterSummary(nextSummary);
@@ -2713,55 +2374,24 @@ export default function ReportPageClient() {
             });
             if (restored) {
               const viewDateFilter = buildCorpusViewDateFilter(startDateStr, endDateStr, dateFilterColumn);
+              const clearView = emptyRegisterViewFilterParts({
+                selectedCallTypes,
+                selectedOfficeIds,
+              });
               const derived = deriveRegisterPageFromCorpus(
                 restored,
                 corpusKey,
-                {
-                  search: '',
-                  pincodeSearch: '',
-                  selectedState: [],
-                  selectedCity: [],
-                  selectedRegion: [],
-                  selectedAccount: [],
-                  selectedBranch: [],
-                  selectedFranchisee: [],
-                  selectedTechnician: [],
-                  selectedCallTypes,
-                  selectedOfficeIds,
-                  selectedStatus: [],
-                  priorityFilter: [],
-                  portalFilter: [],
-                  repairFilter: [],
-                },
+                clearView,
                 1,
                 10,
                 viewDateFilter
               );
               if (derived) {
-                const allFiltered = getFilteredCorpusCalls(
-                  {
-                    search: '',
-                    pincodeSearch: '',
-                    selectedState: [],
-                    selectedCity: [],
-                    selectedRegion: [],
-                    selectedAccount: [],
-                    selectedBranch: [],
-                    selectedFranchisee: [],
-                    selectedTechnician: [],
-                    selectedCallTypes,
-                    selectedOfficeIds,
-                    selectedStatus: [],
-                    priorityFilter: [],
-                    portalFilter: [],
-                  repairFilter: [],
-                  },
-                  restored,
-                  viewDateFilter
-                );
+                const allFiltered = getFilteredCorpusCalls(clearView, restored, viewDateFilter);
+                const registerSummaryRows = summarizeRegisterRows(allFiltered);
                 setData(derived.rows);
                 setTotal(derived.total);
-                setRegisterSummary(summarizeRegisterRows(allFiltered));
+                setRegisterSummary(registerSummaryRows);
                 setLastRefreshed(new Date(restored.lastSyncedAt));
                 lastKnownRegisterTotalRef.current = derived.total;
                 lastRegisterListQueryKeyRef.current = buildRegisterListQueryKey({
@@ -2772,17 +2402,17 @@ export default function ReportPageClient() {
                   startDateStr,
                   endDateStr,
                   dateFilterColumn,
-                  selectedState: [],
-                  selectedCity: [],
-                  selectedRegion: [],
-                  selectedAccount: [],
-                  selectedBranch: [],
-                  selectedFranchisee: [],
-                  selectedTechnician: [],
-                  selectedStatus: [],
-                  priorityFilter: [],
-                  portalFilter: [],
-                  repairFilter: [],
+                  selectedState: clearView.selectedState,
+                  selectedCity: clearView.selectedCity,
+                  selectedRegion: clearView.selectedRegion,
+                  selectedAccount: clearView.selectedAccount,
+                  selectedBranch: clearView.selectedBranch,
+                  selectedFranchisee: clearView.selectedFranchisee,
+                  selectedTechnician: clearView.selectedTechnician,
+                  selectedStatus: clearView.selectedStatus,
+                  priorityFilter: clearView.priorityFilter,
+                  portalFilter: clearView.portalFilter,
+                  repairFilter: clearView.repairFilter,
                   agingAsOf: agingAsOf || '',
                   pageLimit: limit,
                 });
@@ -2792,17 +2422,17 @@ export default function ReportPageClient() {
                   dateFilterColumn,
                   selectedCallTypes,
                   selectedOfficeIds,
-                  selectedState: [],
-                  selectedCity: [],
-                  selectedRegion: [],
-                  selectedAccount: [],
-                  selectedBranch: [],
-                  selectedFranchisee: [],
-                  selectedTechnician: [],
-                  selectedStatus: [],
-                  priorityFilter: [],
-                  portalFilter: [],
-                  repairFilter: [],
+                  selectedState: clearView.selectedState,
+                  selectedCity: clearView.selectedCity,
+                  selectedRegion: clearView.selectedRegion,
+                  selectedAccount: clearView.selectedAccount,
+                  selectedBranch: clearView.selectedBranch,
+                  selectedFranchisee: clearView.selectedFranchisee,
+                  selectedTechnician: clearView.selectedTechnician,
+                  selectedStatus: clearView.selectedStatus,
+                  priorityFilter: clearView.priorityFilter,
+                  portalFilter: clearView.portalFilter,
+                  repairFilter: clearView.repairFilter,
                   agingAsOf,
                   debouncedSearch: '',
                   debouncedPincodeSearch: '',
@@ -2822,20 +2452,20 @@ export default function ReportPageClient() {
                   filterRegion,
                   filterAccount,
                   selectedCallTypes,
-                  registerSummary: summarizeRegisterRows(allFiltered),
+                  registerSummary: registerSummaryRows,
                   lastRefreshed: new Date(restored.lastSyncedAt),
                   agingAsOf,
-                  selectedStatus: [],
-                  priorityFilter: [],
-                  portalFilter: [],
-                  repairFilter: [],
-                  selectedState: [],
-                  selectedCity: [],
-                  selectedRegion: [],
-                  selectedAccount: [],
-                  selectedBranch: [],
-                  selectedFranchisee: [],
-                  selectedTechnician: [],
+                  selectedStatus: clearView.selectedStatus,
+                  priorityFilter: clearView.priorityFilter,
+                  portalFilter: clearView.portalFilter,
+                  repairFilter: clearView.repairFilter,
+                  selectedState: clearView.selectedState,
+                  selectedCity: clearView.selectedCity,
+                  selectedRegion: clearView.selectedRegion,
+                  selectedAccount: clearView.selectedAccount,
+                  selectedBranch: clearView.selectedBranch,
+                  selectedFranchisee: clearView.selectedFranchisee,
+                  selectedTechnician: clearView.selectedTechnician,
                 });
               }
             }
@@ -2871,6 +2501,10 @@ export default function ReportPageClient() {
               const refreshedDate = new Date(cacheParams.lastRefreshed ?? Date.now());
               setLastRefreshed(refreshedDate);
 
+              const clearView = emptyRegisterViewFilterParts({
+                selectedCallTypes,
+                selectedOfficeIds,
+              });
               setGlobalReportCache({
                 data: cachedCalls,
                 summaryData: cacheParams.summaryData || [],
@@ -2889,15 +2523,15 @@ export default function ReportPageClient() {
                 registerSummary: cacheParams.registerSummary || null,
                 lastRefreshed: refreshedDate,
                 agingAsOf,
-                selectedStatus: [],
-                priorityFilter: [],
-                portalFilter: [],
-                  repairFilter: [],
-                selectedState: [],
-                selectedCity: [],
-                selectedBranch: [],
-                selectedFranchisee: [],
-                selectedTechnician: [],
+                selectedStatus: clearView.selectedStatus,
+                priorityFilter: clearView.priorityFilter,
+                portalFilter: clearView.portalFilter,
+                repairFilter: clearView.repairFilter,
+                selectedState: clearView.selectedState,
+                selectedCity: clearView.selectedCity,
+                selectedBranch: clearView.selectedBranch,
+                selectedFranchisee: clearView.selectedFranchisee,
+                selectedTechnician: clearView.selectedTechnician,
                 summaryQueryKey: cacheParams.summaryQueryKey ?? undefined,
               });
 
@@ -2922,17 +2556,17 @@ export default function ReportPageClient() {
                 startDateStr,
                 endDateStr,
                 dateFilterColumn,
-                selectedState: [],
-                selectedCity: [],
-                selectedRegion: [],
-                selectedAccount: [],
-                selectedBranch: [],
-                selectedFranchisee: [],
-                selectedTechnician: [],
-                selectedStatus: [],
-                priorityFilter: [],
-                portalFilter: [],
-                  repairFilter: [],
+                selectedState: clearView.selectedState,
+                selectedCity: clearView.selectedCity,
+                selectedRegion: clearView.selectedRegion,
+                selectedAccount: clearView.selectedAccount,
+                selectedBranch: clearView.selectedBranch,
+                selectedFranchisee: clearView.selectedFranchisee,
+                selectedTechnician: clearView.selectedTechnician,
+                selectedStatus: clearView.selectedStatus,
+                priorityFilter: clearView.priorityFilter,
+                portalFilter: clearView.portalFilter,
+                repairFilter: clearView.repairFilter,
                 agingAsOf: agingAsOf || '',
                 pageLimit: limit,
               });
@@ -3315,26 +2949,6 @@ export default function ReportPageClient() {
     return res.data;
   }, [getAppliedFiltersSnapshot, offices, sourceSelection]);
 
-  const loadExcelUnionSummary = useCallback(async () => {
-    if (!sourceSelection.crm || sourceSelection.clientSourceCodes.length === 0) {
-      setExcelUnionRegionalRows([]);
-      setExcelUnionGrand(null);
-      return;
-    }
-    try {
-      const data = await fetchBdMisSummaryPayload();
-      if (!data) return;
-      setExcelUnionRegionalRows(data.regionalRows ?? []);
-      setExcelUnionGrand(data.grand ?? null);
-    } catch (err) {
-      console.warn('Excel union summary fetch failed:', err);
-      setExcelUnionRegionalRows([]);
-      setExcelUnionGrand(null);
-    }
-  }, [fetchBdMisSummaryPayload, sourceSelection.crm, sourceSelection.clientSourceCodes.length]);
-
-  loadExcelUnionSummaryRef.current = loadExcelUnionSummary;
-
   const loadBdMisSummary = useCallback(async () => {
     const data = await fetchBdMisSummaryPayload();
     if (!data) return;
@@ -3667,7 +3281,7 @@ export default function ReportPageClient() {
           const startDateStr = toDateString(dateRange.start);
           const endDateStr = toDateString(dateRange.end);
           const queryKey = buildCurrentRegisterQueryKey();
-          const exportQuery = {
+          const exportQuery = buildRegisterExportQuery({
             officeId: summaryOfficeIdsParam,
             callType: viewCallTypesParam,
             startDate: startDateStr,
@@ -3675,18 +3289,18 @@ export default function ReportPageClient() {
             dateFilterColumn,
             search: debouncedSearch || undefined,
             pincode: debouncedPincodeSearch || undefined,
-            state: joinFilterParam(selectedState),
-            city: joinFilterParam(selectedCity),
-            region: joinFilterParam(selectedRegion),
-            account: joinFilterParam(selectedAccount),
-            branch: joinFilterParam(selectedBranch),
-            franchisee: joinFilterParam(selectedFranchisee),
-            technician: joinFilterParam(selectedTechnician),
-            status: joinFilterParam(selectedStatus),
-            priority: joinFilterParam(priorityFilter),
-            portalFilter: joinFilterParam(portalFilter),
-            repair: joinFilterParam(repairFilter),
-          };
+            selectedState,
+            selectedCity,
+            selectedRegion,
+            selectedAccount,
+            selectedBranch,
+            selectedFranchisee,
+            selectedTechnician,
+            selectedStatus,
+            priorityFilter,
+            portalFilter,
+            repairFilter,
+          });
 
           let exportData: Record<string, unknown>[] = data;
           const needsFullFetch = total > limit || data.length < total;
@@ -3924,145 +3538,42 @@ export default function ReportPageClient() {
     [activeTab, enqueueExport, executeExport]
   );
 
-  const localFilteredData = React.useMemo(() => {
-    return data;
-  }, [data]);
-
-  const displayedData = localFilteredData;
-
-
   if (!mounted) {
     return <ReportPageSkeleton className="bg-bg-canvas" />;
   }
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg-canvas text-slate-900">
-      {/* Page Header / Controls — h-14 matches sidebar header */}
-      <div className="sticky top-0 z-30 flex h-14 flex-shrink-0 items-center justify-between border-b border-slate-200 bg-bg-canvas px-4">
-        <div className="flex items-center gap-6">
-          <div className="flex">
-            {misTabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  setActiveTab(tab.id);
-                }}
-                className={`relative flex h-14 items-center px-3 ui-help font-medium transition-all ${activeTab === tab.id ? 'text-slate-900' : 'text-slate-500 hover:text-slate-700' }`}
-              >
-                {tab.label}
-                {activeTab === tab.id && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-slate-900" />
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {lastRefreshed && (
-            <span
-              className="ui-micro"
-              title={`Last refreshed: ${lastRefreshed.toLocaleString()}`}
-            >
-              {formatRelativeTime(lastRefreshed)}
-            </span>
-          )}
-          {filterUpdating && (
-            <span className="ui-micro text-blue-600 animate-pulse">
-              Updating filters…
-            </span>
-          )}
-          {(activeTab === 'summary' || activeTab === 'accounts' || activeTab === 'bd_mis_summary') &&
-            (syncInProgress || corpusLoading || filterUpdating || summaryTabLoading || bdMisTabLoading) && (
-            <span
-              className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-400 border-t-transparent"
-              title="Updating summary…"
-            />
-          )}
-          <button
-            onClick={() => {
-              const t0 = performance.now();
-              reportPerf('ui', 'Sync button → fetchDelta()', t0, {
-                why: 'Incremental lastSync poll; see fetchDelta logs.',
-              });
-              fetchDelta();
-            }}
-            disabled={syncInProgress}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-bg-canvas text-slate-700 shadow-sm transition-all hover:bg-bg-soft disabled:opacity-50"
-            title="Refresh report data"
-          >
-            <div className={`${syncInProgress ? 'animate-spin' : ''}`}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M16 16h5v5" /></svg>
-            </div>
-          </button>
-          {activeTab !== 'client_import' && activeTab !== 'deployment_completion' ? (
-            <button
-              onClick={() => handleExport('excel')}
-              className="flex items-center gap-2 bg-bg-canvas text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-bg-soft transition-all shadow-sm"
-              title={
-                activeTab === 'bd_mis_summary'
-                  ? 'Export audit workbook — how regional counts were built'
-                  : total > 500
-                    ? 'Export filtered register (large datasets download as CSV from server)'
-                    : 'Export filtered register to Excel (.xlsx)'
-              }
-            >
-              <FileSpreadsheet
-                size={14}
-                className={
-                  isCurrentTabExcelExporting ? 'animate-pulse text-amber-600' : 'text-emerald-600'
-                }
-              />
-              {isCurrentTabExcelExporting ? 'Exporting…' : 'Export Excel'}
-            </button>
-          ) : null}
-          {activeTab === 'summary' || activeTab === 'bd_mis_summary' ? (
-            <button
-              type="button"
-              onClick={() => handleBdMisTraceExport()}
-              className="flex items-center gap-2 bg-bg-canvas text-slate-900 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-200 hover:bg-bg-soft transition-all shadow-sm"
-              title="Export summary dashboard + full row-by-row trace (CRM, Cadbury, Coke)"
-            >
-              <FileSpreadsheet
-                size={14}
-                className={
-                  isCurrentTabTraceExporting ? 'animate-pulse text-amber-600' : 'text-blue-600'
-                }
-              />
-              {isCurrentTabTraceExporting ? 'Trace export…' : 'Export Trace'}
-            </button>
-          ) : null}
-          <ReportExportQueuePanel
-            items={exportQueueItems}
-            onClearFinished={clearFinishedExports}
-            onCancelItem={(id) => {
-              cancelExportJob(id);
-              feedback.cancelled('Export cancelled');
-            }}
-          />
-        </div>
-      </div>
-
-      {reportBanner ? (
-        <PageAlert
-          variant={reportBanner.variant}
-          message={reportBanner.message}
-          onDismiss={clearReportBanner}
-        />
-      ) : null}
-
-      {activeTab === 'register' && !orientationDismissed ? (
-        <ReportOrientationBanner
-          userName={userProfile?.name}
-          added={refreshDelta?.added}
-          updated={refreshDelta?.updated}
-          onDismiss={() => {
-            setOrientationDismissed(true);
-            sessionStorage.setItem('report-orientation-dismissed', '1');
-            clearRefreshDelta();
-          }}
-        />
-      ) : null}
+      <ReportPageHeaderBar
+        misTabs={misTabs}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        lastRefreshed={lastRefreshed}
+        filterUpdating={filterUpdating}
+        syncInProgress={syncInProgress}
+        corpusLoading={corpusLoading}
+        summaryTabLoading={summaryTabLoading}
+        bdMisTabLoading={bdMisTabLoading}
+        total={total}
+        isCurrentTabExcelExporting={isCurrentTabExcelExporting}
+        isCurrentTabTraceExporting={isCurrentTabTraceExporting}
+        onSync={() => void fetchDelta()}
+        onExportExcel={() => handleExport('excel')}
+        onExportTrace={() => handleBdMisTraceExport()}
+        exportQueueItems={exportQueueItems}
+        onClearFinishedExports={clearFinishedExports}
+        onCancelExportJob={cancelExportJob}
+        reportBanner={reportBanner}
+        onDismissBanner={clearReportBanner}
+        orientationDismissed={orientationDismissed}
+        userName={userProfile?.name}
+        refreshDelta={refreshDelta}
+        onDismissOrientation={() => {
+          setOrientationDismissed(true);
+          sessionStorage.setItem('report-orientation-dismissed', '1');
+          clearRefreshDelta();
+        }}
+      />
 
       {/* Control Bar — shared filters only on summary / accounts / BD MIS (not client import / deployment). */}
       {activeTab === 'register' ? (
@@ -4080,117 +3591,33 @@ export default function ReportPageClient() {
       ) : activeTab === 'summary' ||
         activeTab === 'accounts' ||
         activeTab === 'bd_mis_summary' ? (
-        <>
-          <div className="report-toolbar-filters-row report-shared-filters-surface border-b border-slate-200 bg-bg-canvas px-4 py-2">
-            <RegisterMultiSelect
-              label="Call Type"
-              emptyLabel="All Call Types"
-              options={callTypeOptions}
-              selected={selectedCallTypes}
-              onChange={setSelectedCallTypes}
-              applyMode="confirm"
-              layout="inline"
-              searchable
-              panelClassName="w-64"
-            />
-            <RegisterBranchFranchiseeFilters applyMode="confirm" layout="inline" />
-            <div className="report-toolbar-filters-date report-shared-date-field shrink-0">
-              <DateRangeSelector
-                value={dateRange.label}
-                startDate={dateRange.start}
-                endDate={dateRange.end}
-                onChange={(range) => setDateRange(range)}
-              />
-            </div>
-            <div className="report-toolbar-filters-aging report-shared-aging-group flex shrink-0 items-center gap-2">
-              <span className="report-shared-aging-label ui-micro whitespace-nowrap text-amber-600">Aging As Of</span>
-              <UiDateInput
-                className="register-filter-select report-shared-aging-input border-amber-200 bg-amber-50/80 text-amber-900"
-                value={agingAsOf}
-                max={new Date().toISOString().split('T')[0]}
-                onChange={(iso) => setAgingAsOf(iso)}
-                aria-label="Aging as of"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleApplySummaryFilters}
-              disabled={summaryTabLoading || bdMisTabLoading}
-              aria-busy={summaryTabLoading || bdMisTabLoading}
-          className={`filter-apply-btn report-shared-apply-btn ${
-                summaryTabLoading || bdMisTabLoading
-                  ? 'border border-blue-300 bg-blue-50 text-blue-800'
-                  : hasPendingFilterChanges
-                    ? 'filter-apply-btn--pending'
-                    : ''
-              }`}
-            >
-              {summaryTabLoading || bdMisTabLoading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : (
-                <Filter className="h-3.5 w-3.5" aria-hidden />
-              )}
-              {summaryTabLoading || bdMisTabLoading ? 'Applying…' : 'Apply filters'}
-            </button>
-            {(clientImportActiveSources.length > 0 ||
-              sourceSelection.clientSourceCodes.includes('cadbury')) && (
-                <div className="report-toolbar-filters-sources report-shared-sources-group shrink-0 border-l border-slate-200 pl-2 flex flex-wrap items-center gap-2">
-                  <MisSourceCheckboxes
-                    selection={sourceSelection}
-                    activeSources={clientImportActiveSources}
-                    onChange={(selection) => {
-                      saveMisSourceSelection(selection);
-                      setSourceSelection(selection);
-                    }}
-                    mergePrefs={clientMergeWithCrm}
-                    onMergePrefsChange={(prefs) => {
-                      setClientMergeWithCrm(prefs);
-                      saveClientMergeWithCrmPrefs(prefs);
-                    }}
-                  />
-                </div>
-              )}
-          </div>
-        </>
+        <ReportSharedFiltersBar
+          callTypeOptions={callTypeOptions}
+          selectedCallTypes={selectedCallTypes}
+          setSelectedCallTypes={setSelectedCallTypes}
+          dateRange={dateRange}
+          setDateRange={setDateRange}
+          agingAsOf={agingAsOf}
+          setAgingAsOf={setAgingAsOf}
+          onApply={handleApplySummaryFilters}
+          summaryTabLoading={summaryTabLoading}
+          bdMisTabLoading={bdMisTabLoading}
+          hasPendingFilterChanges={hasPendingFilterChanges}
+          clientImportActiveSources={clientImportActiveSources}
+          sourceSelection={sourceSelection}
+          setSourceSelection={setSourceSelection}
+          clientMergeWithCrm={clientMergeWithCrm}
+          setClientMergeWithCrm={setClientMergeWithCrm}
+        />
       ) : null}
 
       {/* Main Area */}
       <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-bg-canvas">
-        <style jsx global>{`
-          @keyframes loading {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(333%); }
-          }
-          .custom-scrollbar::-webkit-scrollbar {
-            width: 0px;
-            height: 0px;
-            display: none;
-          }
-          .custom-scrollbar {
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-          }
-          .inner-scrollbar::-webkit-scrollbar {
-            width: 4px;
-            height: 4px;
-          }
-          .inner-scrollbar::-webkit-scrollbar-track {
-            background: transparent;
-          }
-          .inner-scrollbar::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 10px;
-          }
-          .inner-scrollbar:hover::-webkit-scrollbar-thumb {
-            background: #94a3b8;
-          }
-        `}</style>
-
         {activeTab === 'register' ? (
           <ReportRegisterTabPanel
             loading={loading}
             data={data}
-            displayedData={displayedData}
+            displayedData={data}
             total={total}
             page={page}
             limit={limit}
@@ -4216,7 +3643,6 @@ export default function ReportPageClient() {
             clientMergeWithCrm={clientMergeWithCrm}
             clientOnlyMode={clientOnlyMode}
             clientSummaryData={clientSummaryData}
-            excelUnionRegionalRows={excelUnionRegionalRows}
             expandedBranches={expandedBranches}
             handleDrillDown={handleDrillDown}
             mergeFlags={mergeFlags}
@@ -4224,7 +3650,6 @@ export default function ReportPageClient() {
             setExpandedBranches={setExpandedBranches}
             summaryData={summaryData}
             summaryTabLoading={summaryTabLoading}
-            useBdMisExcelUnion={useBdMisExcelUnion}
           />
         ) : activeTab === 'accounts' ? (
           <ReportAccountsTabPanel
@@ -4302,22 +3727,16 @@ export default function ReportPageClient() {
         ) : null}
       </div>
 
-
       <ReportPageOverlays
         isDrawerOpen={isDrawerOpen}
         selectedCall={selectedCall}
         onCloseDrawer={() => setIsDrawerOpen(false)}
         onFlagUpdate={handleFlagUpdate}
         onPostComment={handlePostComment}
-        showEngPopup={showEngPopup}
-        setShowEngPopup={setShowEngPopup}
-        fetchingEngs={fetchingEngs}
-        selectedBranchEngs={selectedBranchEngs}
         drillDown={drillDown}
         setDrillDown={setDrillDown}
         handleSelectCall={handleSelectCall}
       />
-
     </div>
   );
 }

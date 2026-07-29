@@ -126,8 +126,8 @@ export function ReportLoadBanner({
                         : `${(status.rowsLoaded ?? 0).toLocaleString('en-IN')} rows loaded`}
                     {status.failedCount ? ` · ${status.failedCount} timed out` : ''}
                   </span>
-                  {status.currentRange && showPeriodProgress ? (
-                    <span>({status.currentRange})</span>
+                  {status.currentRange ? (
+                    <span>· {status.currentRange}</span>
                   ) : null}
                 </div>
               ) : null}

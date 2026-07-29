@@ -198,6 +198,12 @@ export function registerRowDateValue(
   row: Record<string, unknown>,
   column: RegisterDateFilterColumn
 ): string | null {
+  if (column === 'bm_approved_at') {
+    // Match Call Register "BM Approved Date" column (ARCP pick), not call-level bapproval/editedon.
+    const raw = row.bm_approved_at ?? row.bm_approved_date;
+    if (raw == null || String(raw).trim() === '') return null;
+    return String(raw);
+  }
   const raw =
     column === 'dsolvedatetime'
       ? row.callsolveddate ?? row.dsolvedatetime

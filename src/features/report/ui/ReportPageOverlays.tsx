@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
-import { ChevronLeft, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { SortableTh } from '@/components/ui/SortableTh';
 import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
@@ -27,10 +27,6 @@ type Props = {
   onCloseDrawer: () => void;
   onFlagUpdate: (id: string, flag: string) => void | Promise<void>;
   onPostComment: (id: string, text: string) => void | Promise<void>;
-  showEngPopup: string | null;
-  setShowEngPopup: (v: string | null) => void;
-  fetchingEngs: boolean;
-  selectedBranchEngs: string[];
   drillDown: ReportDrillDownState;
   setDrillDown: Dispatch<SetStateAction<ReportDrillDownState>>;
   handleSelectCall: (callId: string, row?: Record<string, unknown>) => void | Promise<void>;
@@ -42,10 +38,6 @@ export function ReportPageOverlays({
   onCloseDrawer,
   onFlagUpdate,
   onPostComment,
-  showEngPopup,
-  setShowEngPopup,
-  fetchingEngs,
-  selectedBranchEngs,
   drillDown,
   setDrillDown,
   handleSelectCall,
@@ -71,53 +63,6 @@ export function ReportPageOverlays({
               onFlagUpdate={onFlagUpdate}
               onPostComment={onPostComment}
             />
-          </div>
-        </div>
-      )}
-
-      {showEngPopup && (
-        <div className="modal-backdrop modal-backdrop--soft fixed inset-0 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-bg-canvas rounded-xl shadow-2xl border border-slate-200 w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-bg-soft/50">
-              <div>
-                <h3 className="text-sm text-slate-900 ui-label">Engineer List</h3>
-                <p className="text-[10px] text-slate-400 font-medium mt-0.5">{showEngPopup}</p>
-              </div>
-              <button
-                onClick={() => setShowEngPopup(null)}
-                className="text-slate-400 hover:text-slate-600 p-1"
-              >
-                <ChevronLeft className="rotate-180" size={18} />
-              </button>
-            </div>
-            <div className="max-h-[300px] overflow-y-auto p-2">
-              {fetchingEngs ? (
-                <div className="py-10 flex flex-col items-center justify-center gap-3">
-                  <div className="w-5 h-5 border-2 border-slate-200 border-t-slate-800 rounded-full animate-spin" />
-                  <p className="text-[10px] text-slate-400 ui-label">Fetching Names...</p>
-                </div>
-              ) : selectedBranchEngs.length > 0 ? (
-                <div className="grid grid-cols-1 gap-1">
-                  {selectedBranchEngs.map((name, i) => (
-                    <div key={i} className="px-3 py-2 text-[11px] font-medium text-slate-700 bg-bg-soft/50 rounded-lg border border-slate-100/50 hover:border-slate-200 hover:bg-bg-canvas transition-all">
-                      {name}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="py-10 text-center text-[10px] text-slate-400 ui-label">
-                  No engineers found
-                </div>
-              )}
-            </div>
-            <div className="px-5 py-3 bg-bg-soft border-t border-slate-100 flex justify-end">
-              <button
-                onClick={() => setShowEngPopup(null)}
-                className="px-4 py-1.5 bg-slate-900 text-white text-[10px] rounded-lg hover:bg-slate-800 transition-all ui-label"
-              >
-                Close
-              </button>
-            </div>
           </div>
         </div>
       )}

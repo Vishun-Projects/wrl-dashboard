@@ -693,6 +693,27 @@
   color: #fff;
 }
 
+/* SortableTh bakes ui-field-label / slate text — force white on blue perf headers. */
+.perf-table-header th,
+.perf-table-header .ui-field-label,
+.perf-table-header .table-th-sortable {
+  color: #fff !important;
+}
+
+.perf-table-header .table-sort-icon--idle,
+.perf-table-header .table-sort-icon--active {
+  color: rgba(255, 255, 255, 0.85) !important;
+  opacity: 1;
+}
+
+.perf-table-header .table-th-sortable:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.perf-table-header .table-th-sortable:hover .table-sort-icon--idle {
+  color: #fff !important;
+}
+
 .perf-region-row--north {
   background-color: #c6e0b4;
 }
@@ -791,6 +812,17 @@
 [data-theme="dark"] .perf-dashboard-table .perf-table-header tr {
   color: rgba(255, 255, 255, 0.72);
   border-color: var(--theme-hairline);
+}
+
+[data-theme="dark"] .perf-dashboard-table .perf-table-header th,
+[data-theme="dark"] .perf-dashboard-table .perf-table-header .ui-field-label,
+[data-theme="dark"] .perf-dashboard-table .perf-table-header .table-th-sortable {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+[data-theme="dark"] .perf-dashboard-table .perf-table-header .table-sort-icon--idle,
+[data-theme="dark"] .perf-dashboard-table .perf-table-header .table-sort-icon--active {
+  color: rgba(255, 255, 255, 0.7) !important;
 }
 
 [data-theme="dark"] .perf-dashboard-table .perf-region-row {
@@ -2038,6 +2070,22 @@
 }
 .custom-scrollbar::-webkit-scrollbar-track {
   @apply bg-transparent;
+}
+
+/* Report summary/accounts tables — thin internal scrollbars */
+.inner-scrollbar::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.inner-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.inner-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+}
+.inner-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: #94a3b8;
 }
 
 .scrollbar-hide::-webkit-scrollbar {

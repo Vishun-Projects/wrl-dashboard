@@ -256,6 +256,12 @@ export function normalizeHotRowFromDb(row: Record<string, unknown>): HotRow {
         : row.bm_approved_at instanceof Date
           ? row.bm_approved_at
           : new Date(String(row.bm_approved_at)),
+    arcp_bm_approved_at:
+      row.arcp_bm_approved_at == null
+        ? null
+        : row.arcp_bm_approved_at instanceof Date
+          ? row.arcp_bm_approved_at
+          : new Date(String(row.arcp_bm_approved_at)),
     ncancelreason: normalizeInteger(row.ncancelreason),
     lat: row.lat == null ? null : Number(row.lat),
     lng: row.lng == null ? null : Number(row.lng),

@@ -26,7 +26,6 @@ import {
   mergeBranchRowsByName,
   mergeBranchSummaryRowsByName,
 } from '@/features/report/lib/report-page-helpers';
-import type { BdMisRegionalRow } from '@/features/report/lib/bd-mis-summary';
 import type { BranchSummaryRow } from '@/lib/summary/derive';
 import { SortableTh } from '@/components/ui/SortableTh';
 import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
@@ -38,7 +37,6 @@ type Props = {
   clientMergeWithCrm: ClientMergeWithCrmPrefs;
   clientOnlyMode: boolean;
   clientSummaryData: Array<Record<string, unknown>>;
-  excelUnionRegionalRows: BdMisRegionalRow[];
   expandedBranches: Record<string, boolean>;
   handleDrillDown: (type: string, title: string, params: Record<string, unknown>) => void | Promise<void>;
   mergeFlags: MergeSelection;
@@ -46,7 +44,6 @@ type Props = {
   setExpandedBranches: Dispatch<SetStateAction<Record<string, boolean>>>;
   summaryData: BranchSummaryRow[];
   summaryTabLoading: boolean;
-  useBdMisExcelUnion: boolean;
 };
 
 export function ReportSummaryTabPanel({
@@ -56,7 +53,6 @@ export function ReportSummaryTabPanel({
   clientMergeWithCrm,
   clientOnlyMode,
   clientSummaryData,
-  excelUnionRegionalRows,
   expandedBranches,
   handleDrillDown,
   mergeFlags,
@@ -64,7 +60,6 @@ export function ReportSummaryTabPanel({
   setExpandedBranches,
   summaryData,
   summaryTabLoading,
-  useBdMisExcelUnion,
 }: Props) {
   type SummarySortKey =
     | 'region'
@@ -84,13 +79,6 @@ export function ReportSummaryTabPanel({
   const clientOnlyRegionalRows = useMemo(
     () => buildClientOnlyRegionalRows(clientAccountSummaryData),
     [clientAccountSummaryData]
-  );
-  const sortedExcelUnionRegionalRows = useMemo(
-    () =>
-      regionSort
-        ? sortRows(excelUnionRegionalRows, (row) => row[regionSort.key], regionSort.dir)
-        : excelUnionRegionalRows,
-    [excelUnionRegionalRows, regionSort]
   );
   const sortedClientOnlyRegionalRows = useMemo(
     () =>
@@ -163,98 +151,7 @@ export function ReportSummaryTabPanel({
                       </tr>
                     </thead>
                     <tbody>
-                      {useBdMisExcelUnion
-                        ? sortedExcelUnionRegionalRows.map((row) => (
-                            <tr
-                              key={row.region}
-                              className={`${regionPerfRowClass(row.region)} text-slate-900 ui-strong`}
-                            >
-                              <td className="p-2 border border-slate-300">{row.region}</td>
-                              <td
-                                className="p-2 border border-slate-300 text-center tabular-nums cursor-pointer hover:bg-black/5"
-                                onClick={() =>
-                                  handleDrillDown('total_calls', `${row.region} - Total Calls`, {
-                                    region: row.region,
-                                  })
-                                }
-                              >
-                                {displayLoggedCallCount(
-                                  row.total_calls,
-                                  row.cancelled_calls,
-                                  false
-                                ).toLocaleString()}
-                              </td>
-                              <td
-                                className="p-2 border border-slate-300 text-center tabular-nums text-emerald-600 cursor-pointer hover:bg-black/5"
-                                onClick={() =>
-                                  handleDrillDown('solved_calls', `${row.region} - Solved Calls`, {
-                                    region: row.region,
-                                  })
-                                }
-                              >
-                                {row.total_solved.toLocaleString()}
-                              </td>
-                              <td className="p-2 border border-slate-300 text-center tabular-nums text-rose-600">
-                                {row.cancelled_calls.toLocaleString()}
-                              </td>
-                              <td
-                                className="p-2 border border-slate-300 text-center tabular-nums perf-metric-open ui-strong cursor-pointer hover:bg-black/5"
-                                onClick={() =>
-                                  handleDrillDown('open_calls', `${row.region} - Open Calls`, {
-                                    region: row.region,
-                                  })
-                                }
-                              >
-                                {row.open_calls.toLocaleString()}
-                              </td>
-                              <td
-                                className="p-2 border border-slate-300 text-center tabular-nums cursor-pointer hover:bg-black/5"
-                                onClick={() =>
-                                  handleDrillDown('age_2', `${row.region} - <2 Days`, { region: row.region })
-                                }
-                              >
-                                {row.age_2.toLocaleString()}
-                              </td>
-                              <td
-                                className="p-2 border border-slate-300 text-center tabular-nums cursor-pointer hover:bg-black/5"
-                                onClick={() =>
-                                  handleDrillDown('age_3', `${row.region} - 2-7 Days`, { region: row.region })
-                                }
-                              >
-                                {row.age_3.toLocaleString()}
-                              </td>
-                              <td
-                                className="p-2 border border-slate-300 text-center tabular-nums cursor-pointer hover:bg-black/5"
-                                onClick={() =>
-                                  handleDrillDown('age_7', `${row.region} - 7-15 Days`, { region: row.region })
-                                }
-                              >
-                                {row.age_7.toLocaleString()}
-                              </td>
-                              <td
-                                className="p-2 border border-slate-300 text-center tabular-nums cursor-pointer hover:bg-black/5"
-                                onClick={() =>
-                                  handleDrillDown('age_15', `${row.region} - >15 Days`, { region: row.region })
-                                }
-                              >
-                                {row.age_15.toLocaleString()}
-                              </td>
-                              <td
-                                className="p-2 border border-slate-300 text-center tabular-nums cursor-pointer hover:bg-black/5"
-                                onClick={() =>
-                                  handleDrillDown('part_pending', `${row.region} - Part Pending`, {
-                                    region: row.region,
-                                  })
-                                }
-                              >
-                                {row.part_pending.toLocaleString()}
-                              </td>
-                              <td className="p-2 border border-slate-300 text-center tabular-nums">
-                                {row.active_eng.toLocaleString()}
-                              </td>
-                            </tr>
-                          ))
-                        : clientOnlyMode
+                      {clientOnlyMode
                         ? sortedClientOnlyRegionalRows.map((row) => {
                             const open = row.open_calls;
                             return (

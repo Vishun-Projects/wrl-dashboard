@@ -29,6 +29,7 @@ import {
   upsertFactRows,
 } from '@/lib/read-model/upsert-facts';
 import { runArcpIncrementalSync } from '@/lib/read-model/arcp/incremental';
+import { runBackfillArcpBmApproved } from '@/lib/read-model/backfill-arcp-bm-approved';
 import { runTransactionEntryIncremental } from '@/lib/read-model/transaction-entry';
 
 const ENTITY = 'calls_latest_hot';
@@ -122,6 +123,8 @@ export async function runNightlyReconcile(): Promise<void> {
           `[arcp-sync] Nightly incremental complete — upserted ${arcp.rowsUpserted}, CRM rows ${arcp.crmRowsFetched ?? 0}`
         );
       }
+      const bmResult = await runBackfillArcpBmApproved({ onlyMissing: true });
+      console.log(`[arcp-sync] arcp_bm_approved_at refresh: ${bmResult.rowsUpdated} rows`);
     } catch (err) {
       console.error(
         '[arcp-sync] Nightly incremental failed:',

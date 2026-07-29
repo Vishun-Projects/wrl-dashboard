@@ -149,4 +149,51 @@ describe('register composite keyset', () => {
       cursorNcode: 99,
     });
   });
+
+  it('filters BM-approved date range on h.arcp_bm_approved_at', () => {
+    const { sql, values } = buildWhere(
+      baseParams({
+        dateFilterColumn: 'bm_approved_at',
+        startDate: '2026-07-01',
+        endDate: '2026-07-31',
+      })
+    );
+    expect(sql).toContain('h.arcp_bm_approved_at >=');
+    expect(sql).toContain('h.arcp_bm_approved_at <=');
+    expect(sql).not.toContain('h.logged_at >=');
+    expect(values).toContain('2026-07-01T00:00:00');
+    expect(values).toContain('2026-07-31T23:59:59');
+  });
+
+  it('orders by arcp_bm_approved_at when BM-approved date mode', () => {
+    expect(registerHotOrderBy('bm_approved_at')).toBe(
+      'h.arcp_bm_approved_at DESC NULLS LAST, h.ncode DESC'
+    );
+  });
+
+  it('derives BM-approved cursor preferring ARCP pick on row', () => {
+    const cursor = registerKeysetCursorFromRow(
+      {
+        bm_approved_at: new Date('2026-07-15T14:30:00.000Z'),
+        ncode: 99,
+      },
+      'bm_approved_at'
+    );
+    expect(cursor).toEqual({
+      cursorLoggedAt: '2026-07-15T14:30:00.000Z',
+      cursorNcode: 99,
+    });
+  });
+
+  it('maps Closed status filter to tech solved + BM approved', () => {
+    const { sql } = buildWhere(baseParams({ status: 'Closed' }));
+    expect(sql).toContain('COALESCE(h.bfastclose, false) = true');
+    expect(sql).toContain('COALESCE(h.bapproval, false) = true');
+  });
+
+  it('maps Tech. Solve Call status filter to tech solved only', () => {
+    const { sql } = buildWhere(baseParams({ status: 'Tech. Solve Call' }));
+    expect(sql).toContain('COALESCE(h.bfastclose, false) = true');
+    expect(sql).toContain('COALESCE(h.bapproval, false) = false');
+  });
 });

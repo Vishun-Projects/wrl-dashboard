@@ -39,13 +39,14 @@ export function classifyRegisterRowStatus(row: Record<string, unknown>): Registe
   if (isRegisterRowTransferred(row)) return 'transferred';
 
   const isCancelled = isRegisterRowCancelled(row);
-  const isClosed =
-    !isCancelled &&
-    (row.Status === 'Closed' ||
-      row.callstatus === 'Solved' ||
-      truthyCrmFlag(row.callsolved) ||
-      truthyCrmFlag(row.bsolved));
-  const isTechSolved = truthyCrmFlag(row.bfastclose) && !isClosed && !isCancelled;
+  const hasBmApproval =
+    truthyCrmFlag(row.bapproval) ||
+    row.bm_approved_at != null ||
+    (row.bm_approved_date != null && String(row.bm_approved_date).trim() !== '');
+  const isTechSolvedStage =
+    truthyCrmFlag(row.bfastclose) || truthyCrmFlag(row.bsolved) || truthyCrmFlag(row.callsolved);
+  const isClosed = !isCancelled && isTechSolvedStage && hasBmApproval;
+  const isTechSolved = !isCancelled && isTechSolvedStage && !hasBmApproval;
   const isAssigned =
     Boolean(row.nengineer && String(row.nengineer) !== '0') &&
     !isClosed &&

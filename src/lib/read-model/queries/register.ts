@@ -49,12 +49,16 @@ const REGISTER_SORT_SQL = {
 
 export type RegisterSortBy = keyof typeof REGISTER_SORT_SQL;
 
-const STATUS_LABEL_TO_BUCKET: Record<string, string> = {
-  'Open Unallocated': 'open_unallocated',
-  Assigned: 'assigned',
-  'Tech. Solve Call': 'tech_solved',
-  Closed: 'solved',
-  Cancelled: 'cancelled',
+const POSTGRES_REGISTER_STATUS_SQL: Record<string, string> = {
+  'Open Unallocated':
+    "(COALESCE(h.ncancelreason, 0) = 0) AND COALESCE(h.bfastclose, false) = false AND COALESCE(h.nengineer, 0) = 0",
+  Assigned:
+    "(COALESCE(h.ncancelreason, 0) = 0) AND COALESCE(h.bfastclose, false) = false AND COALESCE(h.nengineer, 0) <> 0",
+  'Tech. Solve Call':
+    "(COALESCE(h.ncancelreason, 0) = 0) AND COALESCE(h.bfastclose, false) = true AND COALESCE(h.bapproval, false) = false",
+  Closed:
+    "(COALESCE(h.ncancelreason, 0) = 0) AND COALESCE(h.bfastclose, false) = true AND COALESCE(h.bapproval, false) = true",
+  Cancelled: 'COALESCE(h.ncancelreason, 0) NOT IN (0, 2)',
 };
 
 export type RegisterPostgresParams = {
@@ -91,12 +95,14 @@ export type RegisterPostgresParams = {
   sortDir?: 'asc' | 'desc';
 };
 
-export type RegisterHotDateField = 'logged_at' | 'solved_at';
+export type RegisterHotDateField = 'logged_at' | 'solved_at' | 'arcp_bm_approved_at';
 
 export function resolveRegisterHotDateField(
   column?: string | null
 ): RegisterHotDateField {
-  return column === 'dsolvedatetime' ? 'solved_at' : 'logged_at';
+  if (column === 'dsolvedatetime') return 'solved_at';
+  if (column === 'bm_approved_at') return 'arcp_bm_approved_at';
+  return 'logged_at';
 }
 
 export function registerHotDateSql(column?: string | null): `h.${RegisterHotDateField}` {
@@ -106,9 +112,10 @@ export function registerHotDateSql(column?: string | null): `h.${RegisterHotDate
 export const REGISTER_HOT_ORDER_BY = 'h.logged_at DESC, h.ncode DESC';
 
 export function registerHotOrderBy(column?: string | null): string {
-  return resolveRegisterHotDateField(column) === 'solved_at'
-    ? 'h.solved_at DESC NULLS LAST, h.ncode DESC'
-    : REGISTER_HOT_ORDER_BY;
+  const field = resolveRegisterHotDateField(column);
+  if (field === 'solved_at') return 'h.solved_at DESC NULLS LAST, h.ncode DESC';
+  if (field === 'arcp_bm_approved_at') return 'h.arcp_bm_approved_at DESC NULLS LAST, h.ncode DESC';
+  return REGISTER_HOT_ORDER_BY;
 }
 
 export function parseRegisterSortBy(value?: string | null): RegisterSortBy | undefined {
@@ -145,10 +152,13 @@ export function registerKeysetCursorFromRow(
   row: Record<string, unknown>,
   dateFilterColumn?: string | null
 ): { cursorLoggedAt: string; cursorNcode: number } | null {
-  const useSolved = resolveRegisterHotDateField(dateFilterColumn) === 'solved_at';
-  const dateVal = useSolved
-    ? row.solved_at ?? row.callsolveddate
-    : row.logged_at ?? row.callsdtrndate;
+  const field = resolveRegisterHotDateField(dateFilterColumn);
+  const dateVal =
+    field === 'solved_at'
+      ? row.solved_at ?? row.callsolveddate
+      : field === 'arcp_bm_approved_at'
+        ? row.bm_approved_at ?? row.bm_approved_date
+        : row.logged_at ?? row.callsdtrndate;
   const ncode = Number(row.ncode ?? row.id);
   if (dateVal == null || !Number.isFinite(ncode) || ncode <= 0) return null;
   const cursorLoggedAt =
@@ -231,6 +241,8 @@ export function hotRowToRegisterRow(row: Record<string, unknown>): Record<string
     callsolved: row.bsolved,
     callsdtrndate: row.logged_at,
     callsolveddate: row.solved_at,
+    bm_approved_at: row.bm_approved_at,
+    bapproval: row.bapproval,
     vsolveremarks: row.solve_remarks,
     vpersoncalling: row.contact_person,
     vinsttel1: row.phone,
@@ -376,15 +388,13 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
         : [];
 
   if (statuses.length > 0) {
-    const buckets = statuses
-      .map((s) => STATUS_LABEL_TO_BUCKET[s])
+    const statusPredicates = statuses
+      .map((s) => POSTGRES_REGISTER_STATUS_SQL[s])
       .filter(Boolean);
-    if (buckets.length === 0) {
+    if (statusPredicates.length === 0) {
       clauses.push('1=0');
     } else {
-      clauses.push(`h.status_bucket = ANY($${idx}::status_bucket_type[])`);
-      values.push(buckets);
-      idx++;
+      clauses.push(`(${statusPredicates.join(' OR ')})`);
     }
   }
 
@@ -472,13 +482,41 @@ export async function queryRegisterTotalsFromPostgres(
     `
     SELECT
       count(*)::int AS total,
-      count(*) FILTER (WHERE h.status_bucket = 'cancelled')::int AS cancelled,
-      count(*) FILTER (WHERE h.status_bucket IN ('solved', 'tech_solved'))::int AS solved,
-      count(*) FILTER (WHERE h.status_bucket IN ('open_unallocated', 'assigned'))::int AS open_calls,
-      count(*) FILTER (WHERE h.status_bucket = 'open_unallocated')::int AS open_unallocated,
-      count(*) FILTER (WHERE h.status_bucket = 'assigned')::int AS assigned,
-      count(*) FILTER (WHERE h.status_bucket = 'tech_solved')::int AS tech_solved,
-      count(*) FILTER (WHERE h.status_bucket = 'solved')::int AS closed
+      count(*) FILTER (WHERE COALESCE(h.ncancelreason, 0) NOT IN (0, 2))::int AS cancelled,
+      count(*) FILTER (
+        WHERE
+          COALESCE(h.ncancelreason, 0) = 0
+          AND COALESCE(h.bfastclose, false) = true
+      )::int AS solved,
+      count(*) FILTER (
+        WHERE
+          COALESCE(h.ncancelreason, 0) = 0
+          AND COALESCE(h.bfastclose, false) = false
+      )::int AS open_calls,
+      count(*) FILTER (
+        WHERE
+          COALESCE(h.ncancelreason, 0) = 0
+          AND COALESCE(h.bfastclose, false) = false
+          AND COALESCE(h.nengineer, 0) = 0
+      )::int AS open_unallocated,
+      count(*) FILTER (
+        WHERE
+          COALESCE(h.ncancelreason, 0) = 0
+          AND COALESCE(h.bfastclose, false) = false
+          AND COALESCE(h.nengineer, 0) <> 0
+      )::int AS assigned,
+      count(*) FILTER (
+        WHERE
+          COALESCE(h.ncancelreason, 0) = 0
+          AND COALESCE(h.bfastclose, false) = true
+          AND COALESCE(h.bapproval, false) = false
+      )::int AS tech_solved,
+      count(*) FILTER (
+        WHERE
+          COALESCE(h.ncancelreason, 0) = 0
+          AND COALESCE(h.bfastclose, false) = true
+          AND COALESCE(h.bapproval, false) = true
+      )::int AS closed
     FROM calls_latest_hot h
     ${HOT_OFFICE_JOINS_SQL}
     WHERE ${whereSql}

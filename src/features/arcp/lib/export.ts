@@ -259,11 +259,15 @@ export function createArcpClaimsDetailCsvResponse(
   options: ArcpDetailExportOptions
 ): Response {
   const encoder = new TextEncoder();
-  const lines = buildArcpClaimsDetailCsvLines(rows, options);
+  // Stream row-by-row — do not materialize 200k+ lines before the first byte.
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(encoder.encode('\uFEFF'));
-      for (const line of lines) {
+      controller.enqueue(encoder.encode(`${buildArcpClaimsDetailHeaderLine()}\r\n`));
+      for (const row of rows) {
+        controller.enqueue(encoder.encode(`${buildArcpClaimsDetailRowCsvLine(row)}\r\n`));
+      }
+      for (const line of buildArcpClaimsDetailFooterLines(options)) {
         controller.enqueue(encoder.encode(`${line}\r\n`));
       }
       controller.close();

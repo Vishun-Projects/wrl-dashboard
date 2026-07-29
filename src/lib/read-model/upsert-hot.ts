@@ -42,6 +42,7 @@ const HOT_COLUMNS = [
   'bfastclose',
   'bapproval',
   'bm_approved_at',
+  'arcp_bm_approved_at',
   'ncancelreason',
   'lat',
   'lng',
@@ -89,6 +90,7 @@ function hotRowToValues(row: HotRow): unknown[] {
     row.bfastclose,
     row.bapproval,
     row.bm_approved_at,
+    row.arcp_bm_approved_at,
     row.ncancelreason,
     row.lat,
     row.lng,
@@ -96,7 +98,7 @@ function hotRowToValues(row: HotRow): unknown[] {
 }
 
 /** Keep existing BM fields when an incremental row has not repopulated them yet. */
-const PRESERVE_ON_NULL_UPDATE = new Set(['bapproval', 'bm_approved_at']);
+const PRESERVE_ON_NULL_UPDATE = new Set(['bapproval', 'bm_approved_at', 'arcp_bm_approved_at']);
 
 const UPDATE_SET = HOT_COLUMNS.filter((c) => c !== 'vtrnno')
   .map((c) =>

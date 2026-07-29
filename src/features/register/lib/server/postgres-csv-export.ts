@@ -15,7 +15,6 @@ import { escapeCsvCell } from '@/lib/utils/csv';
 import { REGISTER_EXPORT_COLUMNS } from '@/features/register/lib/table-columns';
 import { responseForCsvStream } from '@/lib/net/csv-gzip-response';
 
-/** Hot-only pages — no ARCP round-trips (BM/HO left blank on CSV for speed). */
 const KEYSET_FETCH_SIZE = 50_000;
 
 function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
@@ -41,15 +40,10 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
         : String(row.status_label || 'Solved')
       : String(row.status_label || 'OPEN');
 
-  const bmAt = row.bm_approved_at;
-  const hoAt = row.ho_approved_at;
+  const bmAt = row.arcp_bm_approved_at;
   const bmDate =
     bmAt instanceof Date || (bmAt != null && bmAt !== '')
       ? formatRegisterExportDate(bmAt as Date | string)
-      : '';
-  const hoDate =
-    hoAt instanceof Date || (hoAt != null && hoAt !== '')
-      ? formatRegisterExportDate(hoAt as Date | string)
       : '';
 
   const cells: unknown[] = [
@@ -73,7 +67,6 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
     statusText,
     isSolved ? formatRegisterExportDate(row.solved_at) : '',
     bmDate,
-    hoDate,
     row.solve_remarks || '',
     row.contact_person,
     row.phone,

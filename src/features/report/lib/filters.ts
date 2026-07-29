@@ -886,6 +886,12 @@ export function buildActiveFilterChips(input: RegisterActiveFilterInput): Active
       label: 'Date column: Solved Date',
       removeKey: 'dateFilterColumn',
     });
+  } else if (input.dateFilterColumn === 'bm_approved_at') {
+    chips.push({
+      id: 'dateFilterColumn',
+      label: 'Date column: BM Approved Date',
+      removeKey: 'dateFilterColumn',
+    });
   }
 
   pushArrayChips(chips, 'selectedStatus', 'Status', input.selectedStatus, resolveLabel);
@@ -945,6 +951,146 @@ export function isAnyFilterActive(parts: RegisterViewFilterParts): boolean {
     parts.portalFilter.length > 0 ||
     parts.repairFilter.length > 0
   );
+}
+
+/** True when register + accounts chrome filters are clear — safe to persist fortnight IDB cache. */
+export function isBaseRegisterPersistFilter(
+  parts: RegisterViewFilterParts & { filterAccount: string[]; filterRegion: string[] }
+): boolean {
+  return (
+    !isAnyFilterActive(parts) &&
+    parts.filterAccount.length === 0 &&
+    parts.filterRegion.length === 0
+  );
+}
+
+/** Cleared register view filters; keep call-type / office scope for corpus hydrate. */
+export function emptyRegisterViewFilterParts(
+  scope: Pick<RegisterViewFilterParts, 'selectedCallTypes' | 'selectedOfficeIds'>
+): RegisterViewFilterParts {
+  return {
+    search: '',
+    pincodeSearch: '',
+    selectedState: [],
+    selectedCity: [],
+    selectedRegion: [],
+    selectedAccount: [],
+    selectedBranch: [],
+    selectedFranchisee: [],
+    selectedTechnician: [],
+    selectedCallTypes: scope.selectedCallTypes,
+    selectedOfficeIds: scope.selectedOfficeIds,
+    selectedStatus: [],
+    priorityFilter: [],
+    portalFilter: [],
+    repairFilter: [],
+  };
+}
+
+export type RegisterListFilterUrlParts = {
+  searchForUrl?: string;
+  pincodeForUrl?: string;
+  startDateStr?: string;
+  endDateStr?: string;
+  dateFilterColumn: string;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
+  selectedState: string[];
+  selectedCity: string[];
+  selectedRegion: string[];
+  selectedAccount: string[];
+  selectedBranch: string[];
+  selectedFranchisee: string[];
+  selectedTechnician: string[];
+  selectedStatus: string[];
+  priorityFilter: string[];
+  portalFilter: string[];
+  repairFilter: string[];
+};
+
+/** Append shared register list/filter query params to a `/api/report…` URL. */
+export function appendRegisterListFilters(
+  basePath: string,
+  parts: RegisterListFilterUrlParts
+): string {
+  let u = basePath;
+  if (parts.searchForUrl) u += `&search=${encodeURIComponent(parts.searchForUrl)}`;
+  if (parts.pincodeForUrl) u += `&pincode=${encodeURIComponent(parts.pincodeForUrl)}`;
+  if (parts.startDateStr) u += `&startDate=${parts.startDateStr}`;
+  if (parts.endDateStr) u += `&endDate=${parts.endDateStr}`;
+  u += `&dateFilterColumn=${encodeURIComponent(parts.dateFilterColumn)}`;
+  if (parts.sortBy && parts.sortDir) {
+    u += `&sortBy=${encodeURIComponent(parts.sortBy)}&sortDir=${parts.sortDir}`;
+  }
+  const stateParam = joinFilterParam(parts.selectedState);
+  const cityParam = joinFilterParam(parts.selectedCity);
+  const regionParam = joinFilterParam(parts.selectedRegion);
+  const accountParam = joinFilterParam(parts.selectedAccount);
+  const branchParam = joinFilterParam(parts.selectedBranch);
+  const franchiseeParam = joinFilterParam(parts.selectedFranchisee);
+  const technicianParam = joinFilterParam(parts.selectedTechnician);
+  const statusParam = joinFilterParam(parts.selectedStatus);
+  const priorityParam = joinFilterParam(parts.priorityFilter);
+  const portalParam = joinFilterParam(parts.portalFilter);
+  const repairParam = joinFilterParam(parts.repairFilter);
+  if (stateParam) u += `&state=${encodeURIComponent(stateParam)}`;
+  if (cityParam) u += `&city=${encodeURIComponent(cityParam)}`;
+  if (regionParam) u += `&region=${encodeURIComponent(regionParam)}`;
+  if (accountParam) u += `&account=${encodeURIComponent(accountParam)}`;
+  if (branchParam) u += `&branch=${encodeURIComponent(branchParam)}`;
+  if (franchiseeParam) u += `&franchisee=${encodeURIComponent(franchiseeParam)}`;
+  if (technicianParam) u += `&technician=${encodeURIComponent(technicianParam)}`;
+  if (statusParam) u += `&status=${encodeURIComponent(statusParam)}`;
+  if (priorityParam) u += `&priority=${encodeURIComponent(priorityParam)}`;
+  if (portalParam) u += `&portalFilter=${encodeURIComponent(portalParam)}`;
+  if (repairParam) u += `&repair=${encodeURIComponent(repairParam)}`;
+  u += '&fetchFilterOptions=false';
+  return u;
+}
+
+export type RegisterExportQueryParts = {
+  officeId: string;
+  callType: string;
+  startDate: string;
+  endDate: string;
+  dateFilterColumn: string;
+  search?: string;
+  pincode?: string;
+  selectedState: string[];
+  selectedCity: string[];
+  selectedRegion: string[];
+  selectedAccount: string[];
+  selectedBranch: string[];
+  selectedFranchisee: string[];
+  selectedTechnician: string[];
+  selectedStatus: string[];
+  priorityFilter: string[];
+  portalFilter: string[];
+  repairFilter: string[];
+};
+
+/** Flat query object for register CSV/Excel export fetch. */
+export function buildRegisterExportQuery(parts: RegisterExportQueryParts) {
+  return {
+    officeId: parts.officeId,
+    callType: parts.callType,
+    startDate: parts.startDate,
+    endDate: parts.endDate,
+    dateFilterColumn: parts.dateFilterColumn,
+    search: parts.search || undefined,
+    pincode: parts.pincode || undefined,
+    state: joinFilterParam(parts.selectedState),
+    city: joinFilterParam(parts.selectedCity),
+    region: joinFilterParam(parts.selectedRegion),
+    account: joinFilterParam(parts.selectedAccount),
+    branch: joinFilterParam(parts.selectedBranch),
+    franchisee: joinFilterParam(parts.selectedFranchisee),
+    technician: joinFilterParam(parts.selectedTechnician),
+    status: joinFilterParam(parts.selectedStatus),
+    priority: joinFilterParam(parts.priorityFilter),
+    portalFilter: joinFilterParam(parts.portalFilter),
+    repair: joinFilterParam(parts.repairFilter),
+  };
 }
 
 export type RegisterViewFilterContextInput = {

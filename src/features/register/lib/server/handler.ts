@@ -21,6 +21,7 @@ import {
   buildFranchiseeFilterSqlCondition,
   resolveRegisterDateSqlColumn,
   sqlRegisterDateColumn,
+  sqlRegisterDateColumnBare,
   buildRegisterRepairNcodeExistsWhere,
 } from '@/lib/trhcalls/query';
 import { enrichRegisterRowsRepairDone } from '@/lib/register-sql/repair-done-enrich';
@@ -81,16 +82,16 @@ function appendStatusFilter(
 
 function buildSingleStatusCondition(statusFilter: string): string {
   if (statusFilter === 'Open Unallocated') {
-    return " AND (tc.nengineer = 0 OR tc.nengineer IS NULL OR CAST(tc.nengineer AS NVARCHAR(50)) = '0') AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
+    return " AND (tc.nengineer = 0 OR tc.nengineer IS NULL OR CAST(tc.nengineer AS NVARCHAR(50)) = '0') AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
   }
   if (statusFilter === 'Assigned') {
-    return " AND (tc.nengineer > 0 OR (tc.nengineer IS NOT NULL AND CAST(tc.nengineer AS NVARCHAR(50)) <> '0')) AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
+    return " AND (tc.nengineer > 0 OR (tc.nengineer IS NOT NULL AND CAST(tc.nengineer AS NVARCHAR(50)) <> '0')) AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
   }
   if (statusFilter === 'Tech. Solve Call') {
-    return " AND (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
+    return " AND (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND (tc.bapproval = 'False' OR tc.bapproval IS NULL OR tc.bapproval = '0' OR tc.bapproval = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
   }
   if (statusFilter === 'Closed') {
-    return " AND (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed')";
+    return " AND (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND (tc.bapproval = 'True' OR tc.bapproval = '1' OR tc.bapproval = 1) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
   }
   if (statusFilter === 'Cancelled') {
     return " AND (tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 AND tc.ncancelreason <> 2)";
@@ -348,10 +349,16 @@ export async function handleRegisterGet(req: NextRequest) {
     const isLookupSearch = !!(search && search.trim());
     const registerDateCol = resolveRegisterDateSqlColumn(dateFilterColumnParam);
     const registerDateSql = sqlRegisterDateColumn(registerDateCol);
+    const registerDateBare = sqlRegisterDateColumnBare(registerDateCol);
+    const bmPredAliased =
+      registerDateCol === 'bm_approved_at' ? ` AND (ISNULL(tc.bapproval, '0') IN ('1', 'True', 'true'))` : '';
+    const bmPredBare =
+      registerDateCol === 'bm_approved_at' ? ` AND (ISNULL(bapproval, '0') IN ('1', 'True', 'true'))` : '';
 
     let baseCondition: string;
     if (isLookupSearch) {
       baseCondition = buildTrhcallsLookupCondition(search);
+      baseCondition += bmPredAliased;
       if (startDate) {
         baseCondition += ` AND ${registerDateSql} >= '${startDate.replace(/'/g, "''")}'`;
       }
@@ -569,7 +576,12 @@ export async function handleRegisterGet(req: NextRequest) {
       transferoffice.vcompanyname as transfer_office_name,
       tc.vcomplaint as vcomplaint,
       tc.callStatus as Status,
-      case when tc.ncancelreason Is not null and tc.ncancelreason <> 0 and tc.ncancelreason <> 2 then 'Cancel' when tc.bsolved=1 then 'Solved' else case when (tc.bsolved=0 or tc.bsolved is null) and (tc.ncancelreason IS null or tc.ncancelreason = 0) then 'Open' end end as callstatus,
+      case
+        when tc.ncancelreason is not null and tc.ncancelreason <> 0 and tc.ncancelreason <> 2 then 'Cancel'
+        when (tc.bfastclose in ('True','true','1') or tc.bfastclose = 1) and (tc.bapproval in ('True','true','1') or tc.bapproval = 1) then 'Closed'
+        when (tc.bfastclose in ('True','true','1') or tc.bfastclose = 1) then 'TechSolved'
+        else 'Open'
+      end as callstatus,
       tc.bsolved as callsolved,
       priority_fs.vdisplayvalue as Priority,
       CONVERT(varchar(30), tc.dsolvedatetime, 126) as callsolveddate,
@@ -602,13 +614,17 @@ export async function handleRegisterGet(req: NextRequest) {
     let subqueryCondition = "";
     if (lastSync) {
       subqueryCondition = `WHERE ISNULL(editedon, addedon) >= '${lastSync.replace(/'/g, "''")}'`;
+      subqueryCondition += bmPredBare;
       if (startDate) {
-        subqueryCondition += ` AND ${registerDateCol} >= '${startDate.replace(/'/g, "''")}'`;
+        subqueryCondition += ` AND ${registerDateBare} >= '${startDate.replace(/'/g, "''")}'`;
       }
     } else if (!isLookupSearch && (startDate || endDate)) {
       const dateParts: string[] = [];
-      if (startDate) dateParts.push(`${registerDateCol} >= '${startDate.replace(/'/g, "''")}'`);
-      if (endDate) dateParts.push(`${registerDateCol} <= '${endDate.replace(/'/g, "''")} 23:59:59'`);
+      if (registerDateCol === 'bm_approved_at') {
+        dateParts.push(`ISNULL(bapproval, '0') IN ('1', 'True', 'true')`);
+      }
+      if (startDate) dateParts.push(`${registerDateBare} >= '${startDate.replace(/'/g, "''")}'`);
+      if (endDate) dateParts.push(`${registerDateBare} <= '${endDate.replace(/'/g, "''")} 23:59:59'`);
       subqueryCondition = `WHERE ${dateParts.join(' AND ')}`;
     }
 
@@ -726,12 +742,12 @@ export async function handleRegisterGet(req: NextRequest) {
         fields: `
             COUNT(*) as total,
             SUM(CASE WHEN tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 AND tc.ncancelreason <> 2 THEN 1 ELSE 0 END) as cancelled,
-            SUM(CASE WHEN ${notCancelledSql} AND (tc.bsolved = 1 OR tc.bfastclose = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed') THEN 1 ELSE 0 END) as solved,
-            SUM(CASE WHEN (tc.bsolved = 0 OR tc.bsolved IS NULL) AND (tc.bfastclose = 0 OR tc.bfastclose IS NULL) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls,
-            SUM(CASE WHEN (tc.nengineer = 0 OR tc.nengineer IS NULL OR CAST(tc.nengineer AS NVARCHAR(50)) = '0') AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_unallocated,
-            SUM(CASE WHEN (tc.nengineer > 0 OR (tc.nengineer IS NOT NULL AND CAST(tc.nengineer AS NVARCHAR(50)) <> '0')) AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as assigned,
-            SUM(CASE WHEN (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND (tc.bsolved = 'False' OR tc.bsolved IS NULL OR tc.bsolved = '0' OR tc.bsolved = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as tech_solved,
-            SUM(CASE WHEN ${notCancelledSql} AND (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1 OR CAST(tc.callStatus AS NVARCHAR(MAX)) = 'Closed') THEN 1 ELSE 0 END) as closed
+            SUM(CASE WHEN ${notCancelledSql} AND (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) THEN 1 ELSE 0 END) as solved,
+            SUM(CASE WHEN (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls,
+            SUM(CASE WHEN (tc.nengineer = 0 OR tc.nengineer IS NULL OR CAST(tc.nengineer AS NVARCHAR(50)) = '0') AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_unallocated,
+            SUM(CASE WHEN (tc.nengineer > 0 OR (tc.nengineer IS NOT NULL AND CAST(tc.nengineer AS NVARCHAR(50)) <> '0')) AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as assigned,
+            SUM(CASE WHEN (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND (tc.bapproval = 'False' OR tc.bapproval IS NULL OR tc.bapproval = '0' OR tc.bapproval = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as tech_solved,
+            SUM(CASE WHEN (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND (tc.bapproval = 'True' OR tc.bapproval = '1' OR tc.bapproval = 1) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as closed
           `,
         tableName,
         condition,

@@ -19,6 +19,7 @@ import { runEditedonCatchupRange, runEditedonCatchupStep } from '@/lib/read-mode
 import { todayLocalDate } from '@/lib/read-model/dates';
 import { runRetentionJobs } from '@/lib/read-model/retention';
 import { runBackfillCallsHotBmApproval } from '@/lib/read-model/backfill-bm-approval';
+import { runBackfillArcpBmApproved } from '@/lib/read-model/backfill-arcp-bm-approved';
 import { runBackfillCallsHotWco } from '@/lib/read-model/backfill-wco';
 import {
   runTransactionEntryBackfill,
@@ -156,6 +157,13 @@ async function main(): Promise<void> {
       console.log('[backfill-bm] Done:', result);
       break;
     }
+    case 'backfill-arcp-bm': {
+      const result = await runBackfillArcpBmApproved({
+        onlyMissing: process.env.ARCP_BM_BACKFILL_ALL !== 'true',
+      });
+      console.log('[backfill-arcp-bm] Done:', result);
+      break;
+    }
     case 'backfill-wco': {
       const args = process.argv.slice(3);
       const fromIdx = args.indexOf('--from');
@@ -248,6 +256,7 @@ Commands:
   editedon-catchup  Replay CRM edits by editedon day (addedon <> editedon)
                     --from YYYY-MM-DD --to YYYY-MM-DD  (default: one step from cursor)
   backfill-bm-approval  Fill calls_latest_hot.bapproval / bm_approved_at from CRM (no truncate)
+  backfill-arcp-bm      Fill calls_latest_hot.arcp_bm_approved_at from arcp_lines_hot (no truncate)
   backfill-wco          Fill calls_latest_hot.wco from CRM mstprorg (no truncate)
                     --from YYYY-MM-DD --to YYYY-MM-DD  (optional hot logged_at window)
   arcp-reset        Truncate arcp_lines_hot + reset sync_state (fresh start)

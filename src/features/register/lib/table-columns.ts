@@ -22,8 +22,7 @@ export type RegisterTableColumnKey =
   | 'vpersoncalling'
   | 'vinsttel1'
   | 'vinstaddress'
-  | 'bm_approved_date'
-  | 'ho_approved_date';
+  | 'bm_approved_date';
 
 export type RegisterTableColumnDef = {
   key: RegisterTableColumnKey;
@@ -51,7 +50,6 @@ export const REGISTER_TABLE_COLUMNS: RegisterTableColumnDef[] = [
   { key: 'portal_action', label: 'Portal Action' },
   { key: 'callsolveddate', label: 'Solved' },
   { key: 'bm_approved_date', label: 'BM Approved Date' },
-  { key: 'ho_approved_date', label: 'HO Approved Date' },
   { key: 'vsolveremarks', label: 'Remarks' },
   { key: 'vpersoncalling', label: 'Contact Person' },
   { key: 'vinsttel1', label: 'Phone' },
@@ -82,7 +80,6 @@ export const REGISTER_EXPORT_COLUMNS: { key: string; header: string }[] = [
   { key: 'display_status', header: 'Status' },
   { key: 'solvedDate', header: 'Solved Date' },
   { key: 'bm_approved_date', header: 'BM Approved Date' },
-  { key: 'ho_approved_date', header: 'HO Approved Date' },
   { key: 'remarks', header: 'Remarks' },
   { key: 'vpersoncalling', header: 'Contact Person' },
   { key: 'vinsttel1', header: 'Phone' },

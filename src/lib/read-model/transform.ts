@@ -165,6 +165,7 @@ export function transformCrmRowToHot(row: Record<string, unknown>): HotRow | nul
           : false,
     bapproval: enriched.bapproval == null ? null : bapproval,
     bm_approved_at: bmApprovedAt,
+    arcp_bm_approved_at: null,
     bfastclose:
       enriched.bfastclose === true ||
       enriched.bfastclose === 1 ||

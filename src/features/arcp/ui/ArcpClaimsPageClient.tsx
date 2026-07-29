@@ -44,7 +44,6 @@ import {
 import { runPool } from '@/lib/utils/run-pool';
 import { readArcpFromPostgresClient } from '@/lib/read-model/client-flags';
 import {
-  postgresCoversFullRange,
   type ArcpPostgresCoverage,
 } from '@/lib/read-model/arcp/coverage-shared';
 import { fetchReadModelStatus } from '@/lib/read-model/trigger-sync-client';
@@ -240,6 +239,8 @@ function toLoadStatus(
     processedCount?: number;
     /** When true, progress bar/percent are driven by rows, never periods. */
     rowDriven?: boolean;
+    /** Short phase shown beside the row counter (e.g. Receiving CSV). */
+    phaseLabel?: string | null;
   }
 ): ArcpLoadStatus {
   const total = plan.chunkCount;
@@ -273,13 +274,15 @@ function toLoadStatus(
     percent,
     failedCount,
     currentRange:
-      rowDriven
-        ? null
-        : inFlight
-          ? concurrency > 1
-            ? `up to ${concurrency} in parallel`
-            : arcpChunkLoadingHint(plan)
-          : null,
+      options?.phaseLabel !== undefined
+        ? options.phaseLabel
+        : rowDriven
+          ? null
+          : inFlight
+            ? concurrency > 1
+              ? `up to ${concurrency} in parallel`
+              : arcpChunkLoadingHint(plan)
+            : null,
     etaRemainingLabel: inFlight ? formatArcpDurationMs(etaMs) : null,
     etaFinishLabel: inFlight ? formatArcpFinishTime(Date.now() + etaMs) : null,
     planMessage:
@@ -1377,7 +1380,15 @@ export default function ArcpClaimsPage() {
   }, [appliedFilters, displayModel, tableModel, tallyDetailLevel]);
 
   const triggerDetailExportDownload = useCallback(
-    async (filters: AppliedArcpFilters, detailJobId?: string) => {
+    async (
+      filters: AppliedArcpFilters,
+      detailJobId?: string,
+      onProgress?: (update: {
+        phase: 'querying' | 'receiving' | 'saving';
+        receivedBytes: number;
+        totalBytes: number | null;
+      }) => void
+    ) => {
       const url = new URL('/api/report/arcp-claims/detail/export', window.location.origin);
       for (const [key, value] of Object.entries(arcpFilterParams(filters))) {
         url.searchParams.set(key, value);
@@ -1390,6 +1401,7 @@ export default function ArcpClaimsPage() {
         filters.startDateStr,
         filters.endDateStr
       );
+      onProgress?.({ phase: 'querying', receivedBytes: 0, totalBytes: null });
       const response = await fetch(url.toString(), { credentials: 'same-origin' });
       if (!response.ok) {
         let message = `Failed to export detail CSV (${response.status})`;
@@ -1401,9 +1413,35 @@ export default function ArcpClaimsPage() {
         }
         throw new Error(message);
       }
-      const blob = await response.blob();
+
+      const declaredLength = Number(response.headers.get('Content-Length') || 0);
+      const totalBytes = declaredLength > 0 ? declaredLength : null;
+      let blob: Blob;
+      if (!response.body) {
+        blob = await response.blob();
+      } else {
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let receivedBytes = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value?.byteLength) {
+            chunks.push(value);
+            receivedBytes += value.byteLength;
+            onProgress?.({ phase: 'receiving', receivedBytes, totalBytes });
+          }
+        }
+        blob = new Blob(chunks as BlobPart[], { type: 'text/csv;charset=utf-8' });
+      }
+
+      onProgress?.({
+        phase: 'saving',
+        receivedBytes: blob.size,
+        totalBytes: totalBytes ?? blob.size,
+      });
       await triggerBlobDownload(blob, fileName);
-      feedback.actionSuccess(`Downloading ${fileName}`);
+      feedback.actionSuccess(`Saved ${fileName} to Downloads`);
     },
     [includeTravelReimbursement]
   );
@@ -1543,6 +1581,8 @@ export default function ArcpClaimsPage() {
         processedCount?: number;
         rowsLoaded?: number;
         rowsProgressMode?: 'actual' | 'estimated';
+        phaseLabel?: string | null;
+        planMessage?: string;
       }
     ) => {
       setDetailExportRunningTotals({
@@ -1557,13 +1597,14 @@ export default function ArcpClaimsPage() {
           done,
           etaMs,
           {
-            planMessage: detailPlanMessage,
+            planMessage: extra?.planMessage ?? detailPlanMessage,
             failedCount: extra?.failedCount,
             processedCount: extra?.processedCount,
             rowsLoaded: extra?.rowsLoaded ?? 0,
             totalRows: estimatedDetailRows > 0 ? estimatedDetailRows : undefined,
             rowsProgressMode: extra?.rowsProgressMode,
             rowDriven: true,
+            phaseLabel: extra?.phaseLabel,
           }
         )
       );
@@ -1583,6 +1624,7 @@ export default function ArcpClaimsPage() {
           totalRows: estimatedDetailRows > 0 ? estimatedDetailRows : undefined,
           rowsProgressMode: estimatedDetailRows > 0 ? 'estimated' : 'actual',
           rowDriven: true,
+          phaseLabel: 'Starting export…',
         }
       )
     );
@@ -1590,18 +1632,9 @@ export default function ArcpClaimsPage() {
     const exportStartedAt = Date.now();
     let downloaded = false;
 
-    // Covered BM range on Postgres: one indexed query. Skip weekly job prefetch+poll
-    // (that was re-loading the same rows and stuck exports around ~4 minutes).
-    const postgresDirectExport =
-      readArcpFromPostgresClient() &&
-      exportFilters.arcpDateFilterColumn === 'bm_approved_at' &&
-      activeCoverage != null &&
-      postgresCoversFullRange(
-        exportFilters.startDateStr,
-        exportFilters.endDateStr,
-        activeCoverage,
-        'bm_approved_at'
-      );
+    // Postgres mode: one query + live receive progress. Job polling felt idle for the
+    // first chunk and silent again while the CSV body buffered after the query.
+    const postgresDirectExport = readArcpFromPostgresClient();
 
     try {
       if (postgresDirectExport) {
@@ -1609,28 +1642,73 @@ export default function ArcpClaimsPage() {
           estimatedDetailRows > 0
             ? Math.max(15_000, Math.ceil(estimatedDetailRows / 1500) * 1000)
             : Math.max(exportPlan.estimateMs, 30_000);
+        const estimatedBytes =
+          estimatedDetailRows > 0 ? Math.max(estimatedDetailRows * 180, 1) : null;
+        let phase: 'querying' | 'receiving' | 'saving' = 'querying';
+
         const tick = () => {
+          if (phase !== 'querying') return;
           const elapsed = Date.now() - exportStartedAt;
-          const ratio = Math.min(0.95, elapsed / directEstimateMs);
+          const ratio = Math.min(0.35, elapsed / directEstimateMs);
           const rowsGuess =
             estimatedDetailRows > 0
               ? Math.min(estimatedDetailRows, Math.round(ratio * estimatedDetailRows))
               : 0;
           reportDetailExportProgress(0, Math.max(directEstimateMs - elapsed, 0), {
             processedCount: 1,
-            rowsLoaded: rowsGuess,
+            rowsLoaded: Math.max(rowsGuess, estimatedDetailRows > 0 ? 1 : 0),
             rowsProgressMode: 'estimated',
+            phaseLabel: 'Querying database…',
           });
         };
         tick();
-        const progressTimer = window.setInterval(tick, 500);
+        const progressTimer = window.setInterval(tick, 400);
         try {
-          await triggerDetailExportDownload(exportFilters);
+          await triggerDetailExportDownload(exportFilters, undefined, (update) => {
+            phase = update.phase;
+            if (update.phase === 'querying') {
+              tick();
+              return;
+            }
+            if (update.phase === 'saving') {
+              reportDetailExportProgress(0, 0, {
+                processedCount: 1,
+                rowsLoaded: estimatedDetailRows > 0 ? estimatedDetailRows : undefined,
+                rowsProgressMode: 'actual',
+                phaseLabel: 'Saving to Downloads…',
+              });
+              return;
+            }
+            const byteTotal = update.totalBytes ?? estimatedBytes;
+            const byteRatio =
+              byteTotal && byteTotal > 0
+                ? Math.min(1, update.receivedBytes / byteTotal)
+                : 0;
+            // Querying used 0–35%; receiving fills 35–95%.
+            const rowsGuess =
+              estimatedDetailRows > 0
+                ? Math.min(
+                    estimatedDetailRows,
+                    Math.round(estimatedDetailRows * (0.35 + byteRatio * 0.6))
+                  )
+                : 0;
+            const mb = update.receivedBytes / (1024 * 1024);
+            reportDetailExportProgress(0, Math.max(directEstimateMs * (1 - byteRatio) * 0.65, 0), {
+              processedCount: 1,
+              rowsLoaded: rowsGuess,
+              rowsProgressMode: 'estimated',
+              phaseLabel:
+                mb >= 0.1
+                  ? `Receiving CSV… ${mb.toFixed(1)} MB`
+                  : 'Receiving CSV…',
+            });
+          });
           downloaded = true;
           reportDetailExportProgress(0, 0, {
             processedCount: 1,
             rowsLoaded: estimatedDetailRows > 0 ? estimatedDetailRows : undefined,
             rowsProgressMode: 'actual',
+            phaseLabel: 'Done',
           });
         } finally {
           window.clearInterval(progressTimer);
@@ -1678,30 +1756,86 @@ export default function ArcpClaimsPage() {
         const etaMs =
           processed > 0
             ? (elapsedMs / processed) * Math.max(detailChunkList.length - processed, 0)
-            : exportPlan.estimateMs;
+            : Math.max(exportPlan.estimateMs - elapsedMs, 0);
         const hasActualRows = typeof rowsLoaded === 'number' && rowsLoaded > 0;
+        // Soft progress while the first section is still loading — avoids a dead 0% bar.
+        const softRows =
+          processed === 0 && estimatedDetailRows > 0
+            ? Math.max(
+                1,
+                Math.min(
+                  Math.round(estimatedDetailRows * 0.2),
+                  Math.round(
+                    (elapsedMs / Math.max(exportPlan.estimateMs, 1)) * estimatedDetailRows * 0.35
+                  )
+                )
+              )
+            : 0;
         const estimatedRowsLoaded =
           estimatedDetailRows > 0
             ? Math.min(
                 estimatedDetailRows,
                 Math.max(
                   hasActualRows ? rowsLoaded : 0,
+                  softRows,
                   Math.round((processed / Math.max(detailChunkList.length, 1)) * estimatedDetailRows)
                 )
               )
             : undefined;
         reportDetailExportProgress(done, etaMs, {
           failedCount: failed > 0 ? failed : undefined,
-          processedCount: processed,
+          processedCount: Math.max(processed, processed === 0 && softRows > 0 ? 1 : processed),
           rowsLoaded: hasActualRows ? rowsLoaded : estimatedRowsLoaded,
           rowsProgressMode: hasActualRows ? 'actual' : 'estimated',
+          phaseLabel:
+            processed === 0
+              ? 'Loading first section…'
+              : `Loaded ${processed} of ${detailChunkList.length} sections`,
         });
       };
 
-      const finishDownload = () => {
+      const finishDownload = async () => {
         if (downloaded) return;
         downloaded = true;
-        triggerDetailExportDownload(exportFilters, detailJobId);
+        const estimatedBytes =
+          estimatedDetailRows > 0 ? Math.max(estimatedDetailRows * 180, 1) : null;
+        await triggerDetailExportDownload(exportFilters, detailJobId, (update) => {
+          if (update.phase === 'querying') {
+            reportDetailExportProgress(detailChunkList.length, 0, {
+              processedCount: detailChunkList.length,
+              rowsLoaded: estimatedDetailRows > 0 ? Math.round(estimatedDetailRows * 0.9) : undefined,
+              rowsProgressMode: 'estimated',
+              phaseLabel: 'Preparing CSV…',
+            });
+            return;
+          }
+          if (update.phase === 'saving') {
+            reportDetailExportProgress(detailChunkList.length, 0, {
+              processedCount: detailChunkList.length,
+              rowsLoaded: estimatedDetailRows > 0 ? estimatedDetailRows : undefined,
+              rowsProgressMode: 'actual',
+              phaseLabel: 'Saving to Downloads…',
+            });
+            return;
+          }
+          const byteTotal = update.totalBytes ?? estimatedBytes;
+          const byteRatio =
+            byteTotal && byteTotal > 0 ? Math.min(1, update.receivedBytes / byteTotal) : 0;
+          const mb = update.receivedBytes / (1024 * 1024);
+          reportDetailExportProgress(detailChunkList.length, 0, {
+            processedCount: detailChunkList.length,
+            rowsLoaded:
+              estimatedDetailRows > 0
+                ? Math.min(
+                    estimatedDetailRows,
+                    Math.round(estimatedDetailRows * (0.9 + byteRatio * 0.1))
+                  )
+                : undefined,
+            rowsProgressMode: 'estimated',
+            phaseLabel:
+              mb >= 0.1 ? `Receiving CSV… ${mb.toFixed(1)} MB` : 'Receiving CSV…',
+          });
+        });
       };
 
       const syncDetailJob = async (): Promise<ArcpLoadJobStatusResponse | null> => {
@@ -1723,7 +1857,7 @@ export default function ArcpClaimsPage() {
       updateFromProgress(detailJob.progress, initialFailed, detailJob.partialRows?.length);
 
       if (!detailJobId) {
-        finishDownload();
+        await finishDownload();
         return;
       }
 
@@ -1733,12 +1867,13 @@ export default function ArcpClaimsPage() {
             `Export incomplete — ${detailJob.progress?.failedCount ?? 0} of ${detailChunkList.length} sections failed to load. Narrow the date range or retry.`
           );
         }
-        finishDownload();
+        await finishDownload();
         return;
       }
       while (!downloaded) {
         const status = await syncDetailJob();
         if (!status) {
+          updateFromProgress(undefined, initialFailed);
           await new Promise((resolve) => window.setTimeout(resolve, ARCP_JOB_POLL_MS));
           continue;
         }
@@ -1748,7 +1883,7 @@ export default function ArcpClaimsPage() {
               `Export incomplete — ${status.progress?.failedCount ?? 0} of ${detailChunkList.length} sections failed to load. Narrow the date range or retry.`
             );
           }
-          finishDownload();
+          await finishDownload();
           break;
         }
         await new Promise((resolve) => window.setTimeout(resolve, ARCP_JOB_POLL_MS));

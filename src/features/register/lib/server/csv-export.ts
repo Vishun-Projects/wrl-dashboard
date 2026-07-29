@@ -62,7 +62,6 @@ export function rowForCsv(raw: Record<string, unknown>): Record<string, unknown>
     solvedDate: isSolved ? formatRegisterExportDate(row.callsolveddate) : '',
     remarks: row.vsolveremarks || row.cancel_reason || '',
     bm_approved_date: formatRegisterExportDate(row.bm_approved_date) || '',
-    ho_approved_date: formatRegisterExportDate(row.ho_approved_date) || '',
     vpersoncalling: row.vpersoncalling,
     vinsttel1: row.vinsttel1,
     vinstaddress: row.vinstaddress,

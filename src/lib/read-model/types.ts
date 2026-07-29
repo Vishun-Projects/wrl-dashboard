@@ -49,6 +49,8 @@ export type HotRow = {
   bapproval: boolean | null;
   /** trhcalls.editedon when bapproval is true (BM Call Approved basis). */
   bm_approved_at: Date | null;
+  /** BM approved date from matched ARCP claim line. */
+  arcp_bm_approved_at: Date | null;
   ncancelreason: number | null;
   lat: number | null;
   lng: number | null;

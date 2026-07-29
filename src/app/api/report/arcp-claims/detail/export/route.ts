@@ -44,9 +44,8 @@ export async function GET(req: NextRequest) {
         endDate &&
         postgresCoversFullRange(startDate, endDate, coverage, dateColumn));
 
-    // One indexed Postgres scan — never re-run weekly job chunks on export.
-    // jobId used to skip this path and re-load for minutes after the prefetch already finished.
-    if (postgresOnly && dateColumn === 'bm_approved_at') {
+    // One indexed Postgres scan for any date basis — never re-run weekly job chunks on export.
+    if (postgresOnly) {
       let rows: ArcpClaimsDetailRow[] | null = null;
       if (auth.opts.jobId) {
         const job = await getLoadJobById(auth.userId, auth.opts.jobId, {
@@ -60,9 +59,15 @@ export async function GET(req: NextRequest) {
       if (!rows) {
         rows = await queryArcpClaimsDetailRows(auth.opts);
       }
-      const preparedRows = includeTravel
-        ? rows
-        : rows.filter((row) => row.line_type !== 'Travel');
+      const preparedRows =
+        dateColumn === 'bm_approved_at'
+          ? includeTravel
+            ? rows
+            : rows.filter((row) => row.line_type !== 'Travel')
+          : finalizeArcpDetailExportRows(rows, {
+              dateFilterColumn: dateColumn,
+              includeTravel,
+            });
       const totals = sumArcpDetailExportTotals(preparedRows);
       return createArcpClaimsDetailCsvResponse(preparedRows, fileName, { totals });
     }

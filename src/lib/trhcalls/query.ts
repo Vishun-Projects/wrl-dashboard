@@ -352,12 +352,18 @@ export function buildTrhcallsDateRangeWhere(opts: {
   column?: TrhcallsDateColumn;
   fallbackDays?: number;
 }): string {
-  return buildTrhcallsDateRangePredicates({
+  const column =
+    opts.column === 'bm_approved_at' ? 'editedon' : opts.column || 'dtrndate';
+  const parts = buildTrhcallsDateRangePredicates({
     startDate: opts.startDate,
     endDate: opts.endDate,
-    column: opts.column || 'dtrndate',
+    column,
     fallbackDays: opts.fallbackDays,
-  }).join(' AND ');
+  });
+  if (opts.column === 'bm_approved_at') {
+    parts.unshift(sqlTruthyCrmFlag('bapproval'));
+  }
+  return parts.join(' AND ');
 }
 
 /** Truthy CRM bit flags stored as NVARCHAR. */
@@ -830,11 +836,14 @@ export function buildRegisterCallIdsWithRepairSql(opts: {
   if (!ncodeIn) return null;
 
   const dateCol = resolveRegisterDateSqlColumn(opts.dateFilterColumn);
-  const dateSql = `tc.${dateCol}`;
+  const dateSql = sqlRegisterDateColumn(dateCol);
   let where = `tf.nrepair IN (${ncodeIn})
     AND ${trhcallsRepairFilterStatusPred('tc')}
     AND tc.vtrnno IS NOT NULL AND tc.vtrnno <> ''
     ${TRHCALLS_EXCLUDE_TRANSFERRED}`;
+  if (dateCol === 'bm_approved_at') {
+    where += ` AND ${sqlRegisterBmApprovalPredicate('tc')}`;
+  }
   if (opts.startDate) {
     where += ` AND ${dateSql} >= '${opts.startDate.replace(/'/g, "''")}'`;
   }
@@ -1342,11 +1351,15 @@ export function buildTrhcallsLookupSubquery(
 ): string {
   let lookupWhere = buildIdentifierLookupWhere(search, false);
   const dateCol = resolveRegisterDateSqlColumn(opts?.dateFilterColumn);
+  const dateSql = sqlRegisterDateColumnBare(dateCol);
+  if (dateCol === 'bm_approved_at') {
+    lookupWhere += ` AND ${sqlRegisterBmApprovalPredicate()}`;
+  }
   if (opts?.startDate) {
-    lookupWhere += ` AND ${dateCol} >= '${opts.startDate.replace(/'/g, "''")}'`;
+    lookupWhere += ` AND ${dateSql} >= '${opts.startDate.replace(/'/g, "''")}'`;
   }
   if (opts?.endDate) {
-    lookupWhere += ` AND ${dateCol} <= '${opts.endDate.replace(/'/g, "''")} 23:59:59'`;
+    lookupWhere += ` AND ${dateSql} <= '${opts.endDate.replace(/'/g, "''")} 23:59:59'`;
   }
 
   return `(
@@ -1373,7 +1386,7 @@ export function buildTrhcallsLookupCondition(search: string): string {
   return `(${buildAliasedTrnLikeMatch(searchSafe)} OR p.vname LIKE '%${searchSafe}%' OR mstitems.vname LIKE '%${searchSafe}%' OR tc.vserialno LIKE '%${searchSafe}%' OR p.vinstpostalcode LIKE '%${searchSafe}%')`;
 }
 
-export type RegisterDateFilterColumn = 'dtrndate' | 'dsolvedatetime';
+export type RegisterDateFilterColumn = 'dtrndate' | 'dsolvedatetime' | 'bm_approved_at';
 
 /** Raw trhcalls column names used in date-range WHERE (no alias). */
 export type TrhcallsDateColumn = RegisterDateFilterColumn | 'editedon';
@@ -1381,10 +1394,38 @@ export type TrhcallsDateColumn = RegisterDateFilterColumn | 'editedon';
 export const REGISTER_DATE_FILTER_OPTIONS: { value: RegisterDateFilterColumn; label: string }[] = [
   { value: 'dtrndate', label: 'Call Date' },
   { value: 'dsolvedatetime', label: 'Solved Date' },
+  { value: 'bm_approved_at', label: 'BM Approved Date' },
 ];
 
 export function resolveRegisterDateSqlColumn(column: string | null | undefined): RegisterDateFilterColumn {
-  return column === 'dsolvedatetime' ? 'dsolvedatetime' : 'dtrndate';
+  if (column === 'dsolvedatetime') return 'dsolvedatetime';
+  if (column === 'bm_approved_at') return 'bm_approved_at';
+  return 'dtrndate';
+}
+
+export function isRegisterBmApprovedDateColumn(column?: string | null): boolean {
+  return column === 'bm_approved_at';
+}
+
+/**
+ * CRM date column for register filters.
+ * BM Approved Date uses trhcalls.editedon while bapproval is true (same as ARCP Claims).
+ */
+export function sqlRegisterDateColumn(column: RegisterDateFilterColumn, alias = 'tc'): string {
+  if (column === 'bm_approved_at') return `${alias}.editedon`;
+  if (column === 'dsolvedatetime') return `${alias}.dsolvedatetime`;
+  return `${alias}.dtrndate`;
+}
+
+/** Unaliased CRM column name for dedup subquery WHERE clauses. */
+export function sqlRegisterDateColumnBare(column: RegisterDateFilterColumn): string {
+  if (column === 'bm_approved_at') return 'editedon';
+  if (column === 'dsolvedatetime') return 'dsolvedatetime';
+  return 'dtrndate';
+}
+
+export function sqlRegisterBmApprovalPredicate(alias?: string): string {
+  return sqlTruthyCrmFlag(alias ? `${alias}.bapproval` : 'bapproval');
 }
 
 /** CRM NVARCHAR date comparisons — `column` may be qualified (e.g. `tc.dtrndate`). */
@@ -1405,10 +1446,6 @@ export function buildTrhcallsDateRangePredicates(opts: {
     parts.push(`${col} <= '${opts.endDate.replace(/'/g, "''")} 23:59:59'`);
   }
   return parts;
-}
-
-export function sqlRegisterDateColumn(column: RegisterDateFilterColumn, alias = 'tc'): string {
-  return `${alias}.${column}`;
 }
 
 /** All ncodes for the given display labels — one label can map to multiple ncode rows. */
@@ -1450,6 +1487,9 @@ export function buildTrhcallsBaseCondition(opts: {
   condition = appendCallTypeFilter(condition, opts.callType);
   if (!opts.datesInSubquery) {
     const dateCol = sqlRegisterDateColumn(opts.dateColumn || 'dtrndate');
+    if (opts.dateColumn === 'bm_approved_at') {
+      condition += ` AND ${sqlRegisterBmApprovalPredicate('tc')}`;
+    }
     if (opts.startDate) {
       condition += ` AND ${dateCol} >= '${opts.startDate.replace(/'/g, "''")}'`;
     }

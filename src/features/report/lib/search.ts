@@ -241,6 +241,12 @@ export function isRegisterRowSolvedForMis(row: Record<string, unknown>): boolean
   return bucket === 'closed' || bucket === 'techSolved';
 }
 
+/** Open buckets that count toward branch/account open_calls on live delta. */
+export function isRegisterRowOpenForMis(row: Record<string, unknown>): boolean {
+  const bucket = classifyRegisterRowStatus(row);
+  return bucket === 'openUnallocated' || bucket === 'assigned';
+}
+
 const STATUS_LABEL_BY_BUCKET: Record<RegisterSummaryBucket, string | null> = {
   openUnallocated: 'Open Unallocated',
   assigned: 'Assigned',

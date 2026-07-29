@@ -179,14 +179,12 @@ export async function mergeArcpApproveDatesFromHot(
   return rows.map((row) => {
     const hit = pickForRow(row, byCall);
     if (!hit) {
-      return {
-        ...enrichRegisterRowArcpApproveDates(row),
-        bm_approved_date: '',
-        ho_approved_date: '',
-      };
+      return enrichRegisterRowArcpApproveDates(row);
     }
     return {
       ...row,
+      bm_approved_at: hit.bm_approved_at,
+      ho_approved_at: hit.ho_approved_at,
       bm_approved_date: hit.bm_approved_at
         ? formatArcpClaimsExportDate(hit.bm_approved_at)
         : '',
