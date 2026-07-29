@@ -10,6 +10,7 @@ import { deleteImportBatch } from '@/features/mis-import/lib/store';
 import { canDeleteClientMis } from '@/features/mis-import/lib/upload-access';
 import { withAppClient } from '@/lib/read-model/db';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
+import { logAction } from '@/lib/security/audit';
 
 type RouteContext = { params: Promise<{ batchId: string }> };
 
@@ -48,6 +49,20 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
     }
 
     await deleteImportFile(result.storedFilePath);
+
+    await logAction({
+      request: req,
+      action: 'import.mis_client.delete',
+      actor: {
+        userId: auth.userId,
+        email: userAuth?.profile?.email ?? null,
+        name: userAuth?.profile?.name ?? null,
+      },
+      result: 'success',
+      statusCode: 200,
+      target: { type: 'mis_client_import_batch', id: batchId },
+      summary: `Deleted MIS client import batch ${batchId}`,
+    });
 
     return NextResponse.json({ deleted: true, batchId });
   } catch (err: unknown) {

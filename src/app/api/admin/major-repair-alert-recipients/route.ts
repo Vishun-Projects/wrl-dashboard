@@ -10,20 +10,48 @@ import {
   listMajorRepairRepeatRecipients,
   updateMajorRepairRepeatRecipient,
 } from '@/lib/read-model/major-repair-repeat-recipients';
+import { logAccessDenied, logAction } from '@/lib/security/audit';
 
 async function requireAccess(request: Request) {
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
-  if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  if (!user) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'major_repair_recipients_unauthorized' });
+    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  }
 
   const auth = await loadUserAuth(user.id);
-  if (!auth) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  if (!auth) {
+    await logAccessDenied({
+      request,
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      statusCode: 401,
+      reason: 'major_repair_recipients_unauthorized',
+    });
+    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  }
 
   if (!canAccessPage(auth.permissions, 'major_repair_alerts')) {
+    await logAccessDenied({
+      request,
+      actorUserId: user.id,
+      actorEmail: auth.profile.email ?? null,
+      statusCode: 403,
+      reason: 'major_repair_recipients_forbidden',
+    });
     return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
   }
 
-  return { auth };
+  return {
+    auth,
+    user,
+    actor: {
+      userId: user.id,
+      email: auth.profile.email ?? user.email ?? null,
+      name: auth.profile.name ?? null,
+    },
+  };
 }
 
 export async function GET(request: Request) {
@@ -56,9 +84,32 @@ export async function POST(request: Request) {
       email: String(body.email ?? ''),
       enabled: body.enabled === true,
     });
+    await logAction({
+      request,
+      action: 'admin.major_repair_recipient.create',
+      actor: access.actor,
+      result: 'success',
+      statusCode: 201,
+      target: {
+        type: 'major_repair_recipient',
+        id: String((recipient as { id?: string }).id ?? ''),
+        label: String(body.email ?? ''),
+      },
+      summary: `Created major-repair recipient ${String(body.email ?? '')}`,
+      metadata: { branch: body.branch ?? null },
+    });
     return NextResponse.json({ recipient }, { status: 201 });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to create recipient';
+    await logAction({
+      request,
+      action: 'admin.major_repair_recipient.create',
+      actor: access.actor,
+      result: 'failure',
+      statusCode: 400,
+      summary: 'Failed to create major-repair recipient',
+      metadata: { message },
+    });
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
@@ -76,9 +127,31 @@ export async function PUT(request: Request) {
       email: String(body.email ?? ''),
       enabled: body.enabled === true,
     });
+    await logAction({
+      request,
+      action: 'admin.major_repair_recipient.update',
+      actor: access.actor,
+      result: 'success',
+      statusCode: 200,
+      target: {
+        type: 'major_repair_recipient',
+        id: String(body.id ?? ''),
+        label: String(body.email ?? ''),
+      },
+      summary: `Updated major-repair recipient ${String(body.email ?? '')}`,
+    });
     return NextResponse.json({ recipient });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to update recipient';
+    await logAction({
+      request,
+      action: 'admin.major_repair_recipient.update',
+      actor: access.actor,
+      result: 'failure',
+      statusCode: 400,
+      summary: 'Failed to update major-repair recipient',
+      metadata: { message },
+    });
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
@@ -89,10 +162,29 @@ export async function DELETE(request: Request) {
 
   try {
     const { searchParams } = new URL(request.url);
-    await deleteMajorRepairRepeatRecipient(searchParams.get('id') ?? '');
+    const id = searchParams.get('id') ?? '';
+    await deleteMajorRepairRepeatRecipient(id);
+    await logAction({
+      request,
+      action: 'admin.major_repair_recipient.delete',
+      actor: access.actor,
+      result: 'success',
+      statusCode: 200,
+      target: { type: 'major_repair_recipient', id },
+      summary: `Deleted major-repair recipient ${id}`,
+    });
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to delete recipient';
+    await logAction({
+      request,
+      action: 'admin.major_repair_recipient.delete',
+      actor: access.actor,
+      result: 'failure',
+      statusCode: 400,
+      summary: 'Failed to delete major-repair recipient',
+      metadata: { message },
+    });
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

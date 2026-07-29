@@ -8,6 +8,12 @@ import {
 } from '@/lib/auth/db-sign-in';
 import { persistSessionCookies } from '@/lib/auth/persist-session-cookies';
 import { isDevAuthBypass } from '@/lib/auth/verify-jwt';
+import {
+  logSecurityEventBestEffort,
+  requestAuditContext,
+  setAuditSessionCookie,
+  startSessionAudit,
+} from '@/lib/security/audit';
 
 type SignInBody = {
   email?: string;
@@ -149,26 +155,58 @@ async function persistSession(sessionPayload: SessionPayload) {
 
 export async function POST(request: Request) {
   try {
+    const audit = requestAuditContext(request);
     const body = (await request.json()) as SignInBody;
     const email = body.email?.trim();
     const password = body.password ?? '';
 
     if (!email || !password) {
+      await logSecurityEventBestEffort({
+        eventType: 'auth.sign_in.failure',
+        result: 'failure',
+        route: audit.route,
+        method: audit.method,
+        ip: audit.ip,
+        userAgent: audit.userAgent,
+        statusCode: 400,
+        metadata: { email, reason: 'missing_credentials' },
+      });
       return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
     }
 
     let sessionPayload: SessionPayload | null = null;
     let proxyBlocked = false;
+    const usedDbAuthFallback = isDevAuthBypass() && isDbSignInAvailable();
 
     // Dev-only: DB auth when GoTrue HTTPS is blocked on localhost.
-    if (isDevAuthBypass() && isDbSignInAvailable()) {
+    if (usedDbAuthFallback) {
       try {
         sessionPayload = await signInViaDatabase(email, password);
         if (!sessionPayload) {
+          await logSecurityEventBestEffort({
+            eventType: 'auth.sign_in.failure',
+            result: 'failure',
+            route: audit.route,
+            method: audit.method,
+            ip: audit.ip,
+            userAgent: audit.userAgent,
+            statusCode: 401,
+            metadata: { email, reason: 'invalid_credentials' },
+          });
           return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
         }
       } catch (dbErr: unknown) {
         const message = dbErr instanceof Error ? dbErr.message : 'Database sign-in failed';
+        await logSecurityEventBestEffort({
+          eventType: 'auth.sign_in.failure',
+          result: 'failure',
+          route: audit.route,
+          method: audit.method,
+          ip: audit.ip,
+          userAgent: audit.userAgent,
+          statusCode: 500,
+          metadata: { email, reason: 'db_sign_in_failed', message },
+        });
         return NextResponse.json({ error: message }, { status: 500 });
       }
     }
@@ -181,6 +219,16 @@ export async function POST(request: Request) {
         } else if (proxy.ok === false) {
           proxyBlocked = proxy.blocked;
           if (proxy.message !== 'network_blocked') {
+            await logSecurityEventBestEffort({
+              eventType: 'auth.sign_in.failure',
+              result: 'failure',
+              route: audit.route,
+              method: audit.method,
+              ip: audit.ip,
+              userAgent: audit.userAgent,
+              statusCode: proxy.status === 401 ? 401 : 502,
+              metadata: { email, reason: 'proxy_sign_in_failed', blocked: proxy.blocked, message: proxy.message },
+            });
             return NextResponse.json(
               { error: proxy.message },
               { status: proxy.status === 401 ? 401 : 502 }
@@ -193,6 +241,16 @@ export async function POST(request: Request) {
     }
 
     if (!sessionPayload) {
+      await logSecurityEventBestEffort({
+        eventType: 'auth.sign_in.failure',
+        result: 'failure',
+        route: audit.route,
+        method: audit.method,
+        ip: audit.ip,
+        userAgent: audit.userAgent,
+        statusCode: 502,
+        metadata: { email, reason: proxyBlocked ? 'network_blocked' : 'sign_in_failed' },
+      });
       return NextResponse.json(
         {
           error: proxyBlocked
@@ -204,9 +262,43 @@ export async function POST(request: Request) {
     }
 
     await persistSession(sessionPayload);
+    const sessionUser = sessionUserFromPayload(sessionPayload.user);
+    const sessionId = await startSessionAudit({
+      userId: sessionUser?.id ?? null,
+      userEmail: sessionUser?.email ?? email,
+      authMethod: usedDbAuthFallback ? 'database_fallback' : 'password',
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      metadata: { route: audit.route },
+    });
+    await setAuditSessionCookie(sessionId);
+    await logSecurityEventBestEffort({
+      eventType: 'auth.sign_in.success',
+      result: 'success',
+      actorUserId: sessionUser?.id ?? null,
+      actorEmail: sessionUser?.email ?? email,
+      sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 200,
+      metadata: { authMethod: usedDbAuthFallback ? 'database_fallback' : 'password' },
+    });
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Sign-in failed';
+    const audit = requestAuditContext(request);
+    await logSecurityEventBestEffort({
+      eventType: 'auth.sign_in.failure',
+      result: 'failure',
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 500,
+      metadata: { reason: 'exception', message },
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

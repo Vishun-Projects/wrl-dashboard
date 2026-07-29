@@ -7,6 +7,7 @@ import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { canAccessOffice, seesAllOffices } from '@/lib/trhcalls/office-security';
 import { isHodUser } from '@/lib/auth/report-security';
+import { logAction } from '@/lib/security/audit';
 
 type CommentRow = {
   id: string;
@@ -136,6 +137,21 @@ export async function POST(request: Request) {
     });
 
     clearPortalAuditServerCache();
+
+    await logAction({
+      request,
+      action: 'register.comment.create',
+      actor: {
+        userId: auth.userId,
+        email: profile?.email ?? null,
+        name: profile?.name ?? null,
+      },
+      result: 'success',
+      statusCode: 200,
+      target: { type: 'call', id: String(callId), label: String(callId) },
+      summary: 'Added call comment',
+      metadata: { office_id: String(office_id), commentId: comment?.id ?? null },
+    });
 
     return NextResponse.json(comment);
   } catch (err: unknown) {

@@ -6,6 +6,7 @@ import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { isHodUser } from '@/lib/auth/report-security';
 import { createClient } from '@/lib/supabase/server';
 import type { ArcpFetchOpts } from '@/features/arcp/lib/server/fetch';
+import { logAccessDenied } from '@/lib/security/audit';
 
 export type ArcpClaimsAuthContext = {
   userId: string;
@@ -21,12 +22,25 @@ export async function authenticateArcpClaimsRequest(
   const supabase = await createClient();
   const userId = await resolveRequestUserId(req, supabase);
   if (!userId) {
+    await logAccessDenied({
+      request: req,
+      statusCode: 401,
+      reason: 'arcp_route_unauthorized',
+      metadata: { kind: options?.kind ?? 'agg' },
+    });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const auth = await loadUserAuth(userId);
   const permissions = auth?.permissions ?? [];
   if (!hasPagePermission(permissions, 'page_arcp_claims')) {
+    await logAccessDenied({
+      request: req,
+      actorUserId: userId,
+      statusCode: 403,
+      reason: 'arcp_route_forbidden',
+      metadata: { kind: options?.kind ?? 'agg' },
+    });
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 

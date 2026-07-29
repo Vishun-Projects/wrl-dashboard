@@ -27,6 +27,8 @@ import {
   resolveMisUploadUserId,
 } from '@/features/mis-import/lib/upload-standalone-auth';
 import { buildRegisterCsvExportResponse } from '@/features/register/lib/server/register-csv-export-auth';
+import { logAction } from '@/lib/security/audit';
+import { queryUserAuth } from '@/lib/auth/user-auth-query';
 
 const root = resolve(__dirname, '../..');
 config({ path: resolve(root, '.env.mis-upload') });
@@ -68,6 +70,47 @@ function parseUrl(reqUrl: string | undefined): { pathname: string; searchParams:
   const u = new URL(reqUrl ?? '/', 'http://127.0.0.1');
   return { pathname: u.pathname, searchParams: u.searchParams };
 }
+
+function auditFromNodeReq(
+  req: import('http').IncomingMessage,
+  pathname: string
+): {
+  route: string;
+  method: string;
+  ip: string | null;
+  userAgent: string | null;
+} {
+  const forwarded = req.headers['x-forwarded-for'];
+  const ip =
+    (typeof forwarded === 'string' ? forwarded.split(',')[0]?.trim() : null) ||
+    (typeof req.headers['x-real-ip'] === 'string' ? req.headers['x-real-ip'] : null) ||
+    req.socket.remoteAddress ||
+    null;
+  const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : null;
+  return {
+    route: pathname,
+    method: req.method || 'POST',
+    ip,
+    userAgent,
+  };
+}
+
+function webRequestFromNode(
+  req: import('http').IncomingMessage,
+  pathname: string,
+  search = ''
+): Request {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (!value) continue;
+    headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+  }
+  return new Request(`http://127.0.0.1${pathname}${search}`, {
+    method: req.method || 'GET',
+    headers,
+  });
+}
+
 
 async function readFormData(
   req: import('http').IncomingMessage,
@@ -185,6 +228,7 @@ createServer(async (req, res) => {
         userId: auth.userId,
         searchParams,
         acceptEncoding,
+        request: webRequestFromNode(req, pathname, req.url?.includes('?') ? `?${req.url.split('?')[1]}` : ''),
       });
       const outHeaders: Record<string, string> = { ...baseHeaders };
       response.headers.forEach((value, key) => {
@@ -215,6 +259,23 @@ createServer(async (req, res) => {
       }
       const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : null;
       const result = await resolveMisBatchDownload({ batchId, rangeHeader });
+      if (result.status >= 200 && result.status < 300 && !rangeHeader) {
+        const userAuth = await queryUserAuth(auth.userId);
+        const audit = auditFromNodeReq(req, pathname);
+        await logAction({
+          ...audit,
+          action: 'import.mis_client.download',
+          actor: {
+            userId: auth.userId,
+            email: userAuth?.profile?.email ?? null,
+            name: userAuth?.profile?.name ?? null,
+          },
+          result: 'success',
+          statusCode: result.status,
+          target: { type: 'mis_client_import_batch', id: batchId },
+          summary: 'Downloaded MIS client import file',
+        });
+      }
       res.writeHead(result.status, { ...baseHeaders, ...result.headers });
       if (result.kind === 'stream') {
         result.stream.on('error', (err) => {
@@ -266,6 +327,7 @@ createServer(async (req, res) => {
       const result = await handleMisClientUploadChunkFormData({
         userId: auth.userId,
         formData,
+        audit: auditFromNodeReq(req, CHUNK_PATH),
       });
       res.writeHead(result.status, { ...baseHeaders, 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result.body));
@@ -282,7 +344,11 @@ createServer(async (req, res) => {
         res.end(JSON.stringify({ error: auth.error ?? 'Unauthorized' }));
         return;
       }
-      const result = await handleMisClientUploadFormData({ userId: auth.userId, formData });
+      const result = await handleMisClientUploadFormData({
+        userId: auth.userId,
+        formData,
+        audit: auditFromNodeReq(req, UPLOAD_PATH),
+      });
       res.writeHead(result.status, { ...baseHeaders, 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result.body));
       return;

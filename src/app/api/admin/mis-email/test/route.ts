@@ -5,17 +5,31 @@ import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { isSmtpConfigured } from '@/features/mis-email/lib/send';
 import { runMisEmailTest } from '@/features/mis-email/lib/run-digest';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
+import { logAccessDenied, logAction } from '@/lib/security/audit';
 
 export async function POST(request: Request) {
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
 
   if (!user) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'mis_email_test_unauthorized' });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const auth = await loadUserAuth(user.id);
+  const actor = {
+    userId: user.id,
+    email: auth?.profile?.email ?? user.email ?? null,
+    name: auth?.profile?.name ?? null,
+  };
   if (!auth?.permissions.includes('manage_users')) {
+    await logAccessDenied({
+      request,
+      actorUserId: user.id,
+      actorEmail: actor.email,
+      statusCode: 403,
+      reason: 'mis_email_test_forbidden',
+    });
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -27,10 +41,26 @@ export async function POST(request: Request) {
   }
 
   const started = Date.now();
+  const targetUserId = body.userId || user.id;
 
   try {
     const result = await runMisEmailTest({
-      userId: body.userId || user.id,
+      userId: targetUserId,
+    });
+
+    await logAction({
+      request,
+      action: 'admin.mis_email.test',
+      actor,
+      result: 'success',
+      statusCode: 200,
+      target: { type: 'app_user', id: targetUserId },
+      summary: `Sent MIS email test to ${Array.isArray(result.sentTo) ? result.sentTo.join(', ') : String(result.sentTo ?? '')}`,
+      metadata: {
+        scopeLabel: result.scopeLabel,
+        attachmentCount: Array.isArray(result.attachments) ? result.attachments.length : null,
+        durationMs: Date.now() - started,
+      },
     });
 
     return NextResponse.json({
@@ -43,6 +73,16 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     console.error('[mis-email/test]', err);
+    await logAction({
+      request,
+      action: 'admin.mis_email.test',
+      actor,
+      result: 'failure',
+      statusCode: 500,
+      target: { type: 'app_user', id: targetUserId },
+      summary: 'MIS email test failed',
+      metadata: { message: toUserFacingError(err) },
+    });
     return NextResponse.json(
       { error: toUserFacingError(err) || 'Failed to send test MIS email' },
       { status: 500 }

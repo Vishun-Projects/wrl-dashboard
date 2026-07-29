@@ -400,6 +400,11 @@ export function canAccessPath(
     return hasPermission(permissions, 'manage_users');
   }
 
+  // Email allowlist is enforced on the page/API; path gate only needs manage_users.
+  if (path === '/admin/security-audit' || path.startsWith('/admin/security-audit/')) {
+    return hasPermission(permissions, 'manage_users');
+  }
+
   const page = pageByPath(path);
   if (!page) return false;
   return canAccessPage(permissions, page.id);

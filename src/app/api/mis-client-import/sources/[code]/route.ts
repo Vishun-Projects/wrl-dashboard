@@ -5,6 +5,7 @@ import { loadSourceConfigByCode, upsertSourceConfig } from '@/features/mis-impor
 import type { SourceConfigPayload } from '@/features/mis-import/lib/config';
 import { canUploadClientMis } from '@/features/mis-import/lib/upload-access';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
+import { logAction } from '@/lib/security/audit';
 
 type RouteContext = { params: Promise<{ code: string }> };
 
@@ -29,6 +30,11 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     if (!auth.ok) return auth.response;
 
     const userAuth = await loadUserAuth(auth.userId);
+    const actor = {
+      userId: auth.userId,
+      email: userAuth?.profile?.email ?? null,
+      name: userAuth?.profile?.name ?? null,
+    };
     if (!canUploadClientMis(userAuth?.permissions ?? [])) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
@@ -36,6 +42,15 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     const { code } = await context.params;
     const body = (await req.json()) as Omit<SourceConfigPayload, 'code'>;
     const config = await upsertSourceConfig({ ...body, code });
+    await logAction({
+      request: req,
+      action: 'import.mis_client.source.update',
+      actor,
+      result: 'success',
+      statusCode: 200,
+      target: { type: 'mis_client_source', id: config.code, label: config.name ?? config.code },
+      summary: `Updated MIS import source (${config.code})`,
+    });
     return NextResponse.json({ config });
   } catch (err: unknown) {
     console.error('MIS client source PUT error:', err);

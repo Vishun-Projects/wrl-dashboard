@@ -22,6 +22,7 @@ import {
 } from '@/lib/auth/user-roles';
 import { clearAdminBootstrapCache } from '@/lib/auth/admin-bootstrap-cache';
 import { clearMeCache } from '@/lib/auth/me-cache';
+import { logAccessDenied, logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
 
 const USER_LIST_SQL = `
   SELECT u.id, u.name, u.email, u.role, u.role_id, u.office_ids, u.visible_statuses,
@@ -104,11 +105,19 @@ export async function GET(request: Request) {
   const user = await requireRequestUser(request, supabase);
 
   if (!user) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'admin_users_unauthorized' });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const auth = await loadUserAuth(user.id);
   if (!auth?.permissions.includes('manage_users')) {
+    await logAccessDenied({
+      request,
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      statusCode: 403,
+      reason: 'admin_users_forbidden',
+    });
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -131,13 +140,22 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const supabase = await createClient();
   const adminUser = await requireRequestUser(request, supabase);
+  const audit = requestAuditContext(request);
 
   if (!adminUser) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'admin_users_unauthorized' });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const auth = await loadUserAuth(adminUser.id);
   if (!auth?.permissions.includes('manage_users')) {
+    await logAccessDenied({
+      request,
+      actorUserId: adminUser.id,
+      actorEmail: adminUser.email ?? null,
+      statusCode: 403,
+      reason: 'admin_users_forbidden',
+    });
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -181,6 +199,22 @@ export async function POST(request: Request) {
           if (existingId && !(await profileExists(existingId))) {
             await insertAppUser({ id: existingId, ...profileParams });
             clearAdminBootstrapCache();
+            await logSecurityEventBestEffort({
+              eventType: 'admin.user.create',
+              result: 'success',
+              actorUserId: adminUser.id,
+              actorEmail: adminUser.email ?? null,
+              sessionId: audit.sessionId,
+              route: audit.route,
+              method: audit.method,
+              ip: audit.ip,
+              userAgent: audit.userAgent,
+              statusCode: 200,
+              targetType: 'app_user',
+              targetId: existingId,
+              targetLabel: profileParams.email,
+              metadata: { recovered: true, roleIds, officeIds: profileParams.officeIds },
+            });
             return NextResponse.json({
               success: true,
               id: existingId,
@@ -196,6 +230,22 @@ export async function POST(request: Request) {
       createdAuthThisRequest = true;
       await insertAppUser({ id: dbResult.id, ...profileParams });
       clearAdminBootstrapCache();
+      await logSecurityEventBestEffort({
+        eventType: 'admin.user.create',
+        result: 'success',
+        actorUserId: adminUser.id,
+        actorEmail: adminUser.email ?? null,
+        sessionId: audit.sessionId,
+        route: audit.route,
+        method: audit.method,
+        ip: audit.ip,
+        userAgent: audit.userAgent,
+        statusCode: 200,
+        targetType: 'app_user',
+        targetId: dbResult.id,
+        targetLabel: profileParams.email,
+        metadata: { roleIds, officeIds: profileParams.officeIds },
+      });
       return NextResponse.json({ success: true, id: dbResult.id, role_ids: roleIds });
     }
 
@@ -213,6 +263,22 @@ export async function POST(request: Request) {
           authUserId = existing.id;
           await insertAppUser({ id: existing.id, ...profileParams });
           clearAdminBootstrapCache();
+          await logSecurityEventBestEffort({
+            eventType: 'admin.user.create',
+            result: 'success',
+            actorUserId: adminUser.id,
+            actorEmail: adminUser.email ?? null,
+            sessionId: audit.sessionId,
+            route: audit.route,
+            method: audit.method,
+            ip: audit.ip,
+            userAgent: audit.userAgent,
+            statusCode: 200,
+            targetType: 'app_user',
+            targetId: existing.id,
+            targetLabel: profileParams.email,
+            metadata: { recovered: true, roleIds, officeIds: profileParams.officeIds },
+          });
           return NextResponse.json({
             success: true,
             id: existing.id,
@@ -233,6 +299,22 @@ export async function POST(request: Request) {
 
     await insertAppUser({ id: authData.user.id, ...profileParams });
     clearAdminBootstrapCache();
+    await logSecurityEventBestEffort({
+      eventType: 'admin.user.create',
+      result: 'success',
+      actorUserId: adminUser.id,
+      actorEmail: adminUser.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 200,
+      targetType: 'app_user',
+      targetId: authData.user.id,
+      targetLabel: profileParams.email,
+      metadata: { roleIds, officeIds: profileParams.officeIds },
+    });
 
     return NextResponse.json({ success: true, id: authData.user.id, role_ids: roleIds });
   } catch (err: unknown) {
@@ -245,6 +327,19 @@ export async function POST(request: Request) {
     }
     const message = err instanceof Error ? err.message : 'User creation failed';
     const status = isDuplicateEmailMessage(message) ? 409 : 500;
+    await logSecurityEventBestEffort({
+      eventType: 'admin.user.create',
+      result: 'failure',
+      actorUserId: adminUser.id,
+      actorEmail: adminUser.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: status,
+      metadata: { message },
+    });
     return NextResponse.json({ error: message }, { status });
   }
 }
@@ -252,13 +347,22 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   const supabase = await createClient();
   const adminUser = await requireRequestUser(request, supabase);
+  const audit = requestAuditContext(request);
 
   if (!adminUser) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'admin_users_unauthorized' });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const auth = await loadUserAuth(adminUser.id);
   if (!auth?.permissions.includes('manage_users')) {
+    await logAccessDenied({
+      request,
+      actorUserId: adminUser.id,
+      actorEmail: adminUser.email ?? null,
+      statusCode: 403,
+      reason: 'admin_users_forbidden',
+    });
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -336,9 +440,37 @@ export async function PUT(request: Request) {
     await replaceUserRoles(id, roleIds);
     clearAdminBootstrapCache();
     clearMeCache(String(id));
+    await logSecurityEventBestEffort({
+      eventType: 'admin.user.update',
+      result: 'success',
+      actorUserId: adminUser.id,
+      actorEmail: adminUser.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 200,
+      targetType: 'app_user',
+      targetId: String(id),
+      metadata: { roleIds, officeIds: office_ids, visibleStatuses: visible_statuses, misEmailEnabled: wantsEmail },
+    });
 
     return NextResponse.json({ success: true, role_ids: roleIds, role_id: primary.primaryRoleId });
   } catch (err: unknown) {
+    await logSecurityEventBestEffort({
+      eventType: 'admin.user.update',
+      result: 'failure',
+      actorUserId: adminUser.id,
+      actorEmail: adminUser.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 500,
+      metadata: { message: err instanceof Error ? err.message : 'Failed to update user' },
+    });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Failed to update user' },
       { status: 500 }
@@ -349,13 +481,22 @@ export async function PUT(request: Request) {
 export async function DELETE(request: Request) {
   const supabase = await createClient();
   const adminUser = await requireRequestUser(request, supabase);
+  const audit = requestAuditContext(request);
 
   if (!adminUser) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'admin_users_unauthorized' });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const auth = await loadUserAuth(adminUser.id);
   if (!auth?.permissions.includes('manage_users')) {
+    await logAccessDenied({
+      request,
+      actorUserId: adminUser.id,
+      actorEmail: adminUser.email ?? null,
+      statusCode: 403,
+      reason: 'admin_users_forbidden',
+    });
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -383,9 +524,36 @@ export async function DELETE(request: Request) {
     }
 
     await supabaseAdmin.auth.admin.deleteUser(userId);
+    await logSecurityEventBestEffort({
+      eventType: 'admin.user.delete',
+      result: 'success',
+      actorUserId: adminUser.id,
+      actorEmail: adminUser.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 200,
+      targetType: 'app_user',
+      targetId: userId,
+    });
 
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
+    await logSecurityEventBestEffort({
+      eventType: 'admin.user.delete',
+      result: 'failure',
+      actorUserId: adminUser.id,
+      actorEmail: adminUser.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 500,
+      metadata: { message: err instanceof Error ? err.message : 'Failed to delete user' },
+    });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Failed to delete user' },
       { status: 500 }

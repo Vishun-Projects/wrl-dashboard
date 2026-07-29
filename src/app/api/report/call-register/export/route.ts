@@ -14,6 +14,7 @@ import {
 } from '@/features/report/lib/call-register/serial-export';
 import { buildCallRegisterSerialWorkbook } from '@/features/report/lib/call-register/excel-export';
 import { workbookToBuffer } from '@/features/report/lib/summary-excel-export';
+import { logAction } from '@/lib/security/audit';
 
 export const maxDuration = 300;
 
@@ -27,6 +28,11 @@ export async function GET(req: NextRequest) {
 
     const userAuth = await queryUserAuth(auth.userId);
     const email = userAuth?.profile?.email;
+    const actor = {
+      userId: auth.userId,
+      email: email ?? null,
+      name: userAuth?.profile?.name ?? null,
+    };
 
     const { searchParams } = new URL(req.url);
     const clientsParam =
@@ -45,6 +51,16 @@ export async function GET(req: NextRequest) {
     const workbook = await buildCallRegisterSerialWorkbook(rows);
     const buffer = await workbookToBuffer(workbook);
     const filename = callRegisterSerialExportFilename(params);
+    await logAction({
+      request: req,
+      action: 'report.export.complete',
+      actor,
+      result: 'completed',
+      statusCode: 200,
+      target: { type: 'call_register_export', label: filename },
+      summary: `Exported Call Register (${rows.length} rows)`,
+      metadata: { clientCount: validated.clients.length, rowCount: rows.length, ...params },
+    });
 
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,
@@ -56,6 +72,16 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     console.error('[call-register/export]', err);
+    await logAction({
+      request: req,
+      action: 'report.export.failure',
+      actor: { userId: null, email: null, name: null },
+      result: 'failure',
+      statusCode: 500,
+      target: { type: 'call_register_export' },
+      summary: 'Call Register export failed',
+      metadata: { message: err instanceof Error ? err.message : String(err) },
+    });
     return NextResponse.json({ error: toUserFacingError(err) }, { status: 500 });
   }
 }

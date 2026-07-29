@@ -61,6 +61,18 @@ vi.mock('@/features/mis-email/lib/org-settings', () => ({
   })),
 }));
 
+vi.mock('@/lib/security/audit', () => ({
+  logAccessDenied: vi.fn(async () => {}),
+  logAction: vi.fn(async () => {}),
+}));
+
+vi.mock('@/lib/auth/user-auth-query', () => ({
+  queryUserAuth: vi.fn(async () => ({
+    profile: { email: 'user@example.com', name: 'User' },
+    permissions: [],
+  })),
+}));
+
 const { POST } = await import('@/app/api/profile/mis-email/send/route');
 
 function mailOnlyRecipient() {

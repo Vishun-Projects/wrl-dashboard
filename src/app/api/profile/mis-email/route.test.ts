@@ -28,6 +28,11 @@ vi.mock('@/features/mis-email/lib/user-scope', () => ({
     resolveUserDigestScopeWithLabel(...args),
 }));
 
+vi.mock('@/lib/security/audit', () => ({
+  logAccessDenied: vi.fn(async () => {}),
+  logAction: vi.fn(async () => {}),
+}));
+
 const { GET } = await import('@/app/api/profile/mis-email/route');
 
 function baseRow() {

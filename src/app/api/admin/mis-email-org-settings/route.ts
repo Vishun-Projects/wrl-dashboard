@@ -9,14 +9,27 @@ import {
   type MisEmailOrgSettings,
 } from '@/features/mis-email/lib/org-settings';
 import { assertAllowedEmailDomains } from '@/features/mis-email/lib/allowed-domains';
+import { logAccessDenied, logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
 
 async function requireAccess(request: Request) {
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
-  if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  if (!user) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'mis_email_org_settings_unauthorized' });
+    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  }
 
   const auth = await loadUserAuth(user.id);
-  if (!auth) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  if (!auth) {
+    await logAccessDenied({
+      request,
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      statusCode: 401,
+      reason: 'mis_email_org_settings_unauthorized',
+    });
+    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  }
 
   if (
     !canManageMisEmailRouting({
@@ -25,6 +38,13 @@ async function requireAccess(request: Request) {
       permissions: auth.permissions,
     })
   ) {
+    await logAccessDenied({
+      request,
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      statusCode: 403,
+      reason: 'mis_email_org_settings_forbidden',
+    });
     return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
   }
 
@@ -47,6 +67,7 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   const access = await requireAccess(request);
   if (access.error) return access.error;
+  const audit = requestAuditContext(request);
 
   try {
     const body = (await request.json()) as { settings?: Partial<MisEmailOrgSettings> };
@@ -64,10 +85,38 @@ export async function PUT(request: Request) {
     }
 
     const settings = await saveMisEmailOrgSettings(patch, access.user.id);
+    await logSecurityEventBestEffort({
+      eventType: 'admin.mis_email_org_settings.update',
+      result: 'success',
+      actorUserId: access.user.id,
+      actorEmail: access.user.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 200,
+      targetType: 'mis_email_org_settings',
+      targetId: 'global',
+      metadata: { keys: Object.keys(patch).sort() },
+    });
     // Config save never sends mail.
     return NextResponse.json({ settings });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to save org settings';
+    await logSecurityEventBestEffort({
+      eventType: 'admin.mis_email_org_settings.update',
+      result: 'failure',
+      actorUserId: access.user.id,
+      actorEmail: access.user.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 400,
+      metadata: { message },
+    });
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

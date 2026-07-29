@@ -16,6 +16,8 @@ import {
   type MisEmailPreferences,
 } from '@/features/mis-email/lib/preferences';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
+import { queryUserAuth } from '@/lib/auth/user-auth-query';
+import { logAccessDenied, logAction } from '@/lib/security/audit';
 
 export const maxDuration = 300;
 
@@ -37,8 +39,16 @@ export async function POST(request: Request) {
   const user = await requireRequestUser(request, supabase);
 
   if (!user) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'profile_mis_email_send_unauthorized' });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const auth = await queryUserAuth(user.id);
+  const actor = {
+    userId: user.id,
+    email: auth?.profile?.email ?? user.email ?? null,
+    name: auth?.profile?.name ?? null,
+  };
 
   try {
     const body = (await request.json()) as {
@@ -133,6 +143,21 @@ export async function POST(request: Request) {
     const job = await createMisEmailSendJob(user.id);
     const jobStarted = Date.now();
 
+    await logAction({
+      request,
+      action: 'profile.mis_email.send',
+      actor,
+      result: 'started',
+      statusCode: 202,
+      target: { type: 'mis_email_send_job', id: job.id },
+      summary: 'Queued MIS email digest send',
+      metadata: {
+        dateRange: validated.merged.dateRange ?? null,
+        toCount: (body.sendTo ?? []).length,
+        ccCount: (body.sendCc ?? []).length,
+      },
+    });
+
     after(async () => {
       await updateMisEmailSendJob(job.id, {
         status: 'running',
@@ -168,6 +193,17 @@ export async function POST(request: Request) {
           durationMs,
           timing,
         });
+
+        await logAction({
+          request,
+          action: 'profile.mis_email.send',
+          actor,
+          result: 'completed',
+          statusCode: 200,
+          target: { type: 'mis_email_send_job', id: job.id },
+          summary: `Sent MIS email digest to ${summary}`,
+          metadata: { durationMs, recipientCount: results.length },
+        });
       } catch (sendErr: unknown) {
         console.error(`[mis-email/send] job ${job.id}`, sendErr);
         await updateMisEmailSendJob(job.id, {
@@ -175,6 +211,16 @@ export async function POST(request: Request) {
           message: toUserFacingError(sendErr) || 'Failed to send MIS email',
           error: sendErr instanceof Error ? sendErr.message : String(sendErr),
           durationMs: Date.now() - jobStarted,
+        });
+        await logAction({
+          request,
+          action: 'profile.mis_email.send',
+          actor,
+          result: 'failure',
+          statusCode: 500,
+          target: { type: 'mis_email_send_job', id: job.id },
+          summary: 'MIS email digest send failed',
+          metadata: { message: toUserFacingError(sendErr) },
         });
       }
     });
@@ -191,6 +237,15 @@ export async function POST(request: Request) {
     );
   } catch (err: unknown) {
     console.error('[mis-email/send]', err);
+    await logAction({
+      request,
+      action: 'profile.mis_email.send',
+      actor,
+      result: 'failure',
+      statusCode: 500,
+      summary: 'Failed to queue MIS email send',
+      metadata: { message: toUserFacingError(err) },
+    });
     return NextResponse.json(
       { error: toUserFacingError(err) || 'Failed to queue MIS email send' },
       { status: 500 }

@@ -1,6 +1,9 @@
 import { withAppClient } from '@/lib/read-model/db';
-import { handleMisClientUploadBuffer } from '@/features/mis-import/lib/upload-http';
-import type { MisUploadHttpResult } from '@/features/mis-import/lib/upload-http';
+import {
+  handleMisClientUploadBuffer,
+  type MisUploadAuditContext,
+  type MisUploadHttpResult,
+} from '@/features/mis-import/lib/upload-http';
 
 export async function storeUploadChunk(params: {
   uploadId: string;
@@ -21,8 +24,7 @@ export async function storeUploadChunk(params: {
         data = EXCLUDED.data,
         chunk_total = EXCLUDED.chunk_total,
         source_code = EXCLUDED.source_code,
-        file_name = EXCLUDED.file_name,
-        created_at = now()
+        file_name = EXCLUDED.file_name
       `,
       [
         params.uploadId,
@@ -41,6 +43,7 @@ type AssembledUpload = {
   sourceCode: string;
   fileName: string;
   buffer: Buffer;
+  startedAt: Date;
 };
 
 async function readAssembledUpload(
@@ -53,12 +56,14 @@ async function readAssembledUpload(
       source_code: string;
       file_name: string;
       uploaded_by: string;
+      started_at: Date;
     }>(
       `
-      SELECT chunk_total, source_code, file_name, uploaded_by
+      SELECT chunk_total, source_code, file_name, uploaded_by,
+             MIN(created_at) AS started_at
       FROM mis_client_import_upload_chunks
       WHERE upload_id = $1::uuid
-      ORDER BY chunk_index
+      GROUP BY chunk_total, source_code, file_name, uploaded_by
       LIMIT 1
       `,
       [uploadId]
@@ -95,6 +100,7 @@ async function readAssembledUpload(
       sourceCode: meta.source_code,
       fileName: meta.file_name,
       buffer,
+      startedAt: meta.started_at,
     };
   });
 }
@@ -161,7 +167,8 @@ export async function getUploadChunkStatus(params: {
 export async function assembleAndProcessUpload(
   uploadId: string,
   uploadedBy: string,
-  contentEncoding?: string | null
+  contentEncoding?: string | null,
+  audit?: MisUploadAuditContext | null
 ): Promise<MisUploadHttpResult> {
   const assembled = await readAssembledUpload(uploadId, uploadedBy);
   if ('status' in assembled) {
@@ -174,6 +181,10 @@ export async function assembleAndProcessUpload(
     fileName: assembled.fileName,
     buffer: assembled.buffer,
     contentEncoding,
+    audit,
+    skipStartLog: true,
+    startedAtMs: assembled.startedAt.getTime(),
+    uploadId,
   });
 
   if (result.status === 200) {

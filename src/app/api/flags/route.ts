@@ -4,6 +4,8 @@ import { clearPortalAuditServerCache } from '@/features/report/lib/portal-audit-
 import { requireBearerUser } from '@/lib/api/security';
 import { flagPostSchema } from '@/lib/api/schemas/mutations';
 import { canAccessOffice } from '@/lib/trhcalls/office-security';
+import { logAction } from '@/lib/security/audit';
+import { queryUserAuth } from '@/lib/auth/user-auth-query';
 
 export async function POST(request: NextRequest) {
   const auth = await requireBearerUser(request, {
@@ -60,6 +62,22 @@ export async function POST(request: NextRequest) {
     }
 
     clearPortalAuditServerCache();
+
+    const userAuth = await queryUserAuth(userId);
+    await logAction({
+      request,
+      action: 'register.flag.set',
+      actor: {
+        userId,
+        email: userAuth?.profile?.email ?? null,
+        name: userAuth?.profile?.name ?? null,
+      },
+      result: 'success',
+      statusCode: 200,
+      target: { type: 'call', id: String(call_id), label: vtrnno || String(call_id) },
+      summary: `Set call flag (${flag_type})`,
+      metadata: { office_id: String(office_id), flag_type },
+    });
 
     return NextResponse.json({ success: true });
   } catch (err: unknown) {

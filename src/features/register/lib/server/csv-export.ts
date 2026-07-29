@@ -143,12 +143,43 @@ export type RegisterCsvExportOpts = {
   knownTotal?: number;
   acceptEncoding?: string | null;
   processRows: (rows: Record<string, unknown>[]) => Promise<Record<string, unknown>[]>;
+  /** Server-only hooks — keep audit imports out of this module (used by browser export-fetch). */
+  onComplete?: (info: { filename: string; rowCount: number }) => void | Promise<void>;
+  onFailure?: (info: {
+    filename: string;
+    rowCount: number;
+    reason: 'error' | 'aborted';
+    message?: string;
+  }) => void | Promise<void>;
 };
 
 /** Stream register rows as CSV using keyset pagination on tc.ncode (avoids slow OFFSET). */
 export async function buildRegisterCsvResponse(opts: RegisterCsvExportOpts): Promise<Response> {
   const batchSize = Math.min(Math.max(opts.batchSize ?? 1000, 1), 1000);
   const encoder = new TextEncoder();
+  const filename = `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
+
+  let fetched = 0;
+  let finishedOk = false;
+  let terminalLogged = false;
+
+  const logTerminal = async (
+    kind: 'complete' | 'aborted' | 'error',
+    message?: string
+  ) => {
+    if (terminalLogged) return;
+    terminalLogged = true;
+    if (kind === 'complete') {
+      await opts.onComplete?.({ filename, rowCount: fetched });
+      return;
+    }
+    await opts.onFailure?.({
+      filename,
+      rowCount: fetched,
+      reason: kind === 'aborted' ? 'aborted' : 'error',
+      message,
+    });
+  };
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -164,13 +195,15 @@ export async function buildRegisterCsvResponse(opts: RegisterCsvExportOpts): Pro
       };
 
       const headerLine = CSV_COLUMNS.map((c) => escapeCsvCell(c.header)).join(',') + '\r\n';
-      if (!enqueue(encoder.encode(headerLine))) return;
+      if (!enqueue(encoder.encode(headerLine))) {
+        await logTerminal('aborted');
+        return;
+      }
 
-      let cursorNcode: number | null = null;
-      let fetched = 0;
       const targetTotal = Math.max(0, opts.knownTotal ?? 0);
 
       try {
+        let cursorNcode: number | null = null;
         while (!closed()) {
           let pageCondition = opts.condition;
           if (cursorNcode != null) {
@@ -189,7 +222,10 @@ export async function buildRegisterCsvResponse(opts: RegisterCsvExportOpts): Pro
 
           const processed = await opts.processRows(rawRows);
           for (const raw of processed) {
-            if (!enqueue(encoder.encode(`${registerRowToCsvLine(raw)}\r\n`))) return;
+            if (!enqueue(encoder.encode(`${registerRowToCsvLine(raw)}\r\n`))) {
+              await logTerminal('aborted');
+              return;
+            }
           }
 
           fetched += processed.length;
@@ -201,24 +237,45 @@ export async function buildRegisterCsvResponse(opts: RegisterCsvExportOpts): Pro
           if (rawRows.length < batchSize) break;
         }
 
-        if (closed()) return;
+        if (closed() && !(targetTotal > 0 && fetched >= targetTotal) && fetched === 0) {
+          await logTerminal('aborted');
+          return;
+        }
+
+        finishedOk = true;
         try {
           controller.close();
         } catch {
           // already closed
         }
       } catch (err) {
-        if (closed()) return;
+        if (closed()) {
+          await logTerminal('aborted');
+          return;
+        }
+        await logTerminal(
+          'error',
+          err instanceof Error ? err.message : String(err)
+        );
         try {
           controller.error(err);
         } catch {
           // already closed
         }
+        return;
+      } finally {
+        if (finishedOk) {
+          await logTerminal('complete');
+        } else {
+          await logTerminal('aborted');
+        }
       }
+    },
+    async cancel() {
+      await logTerminal('aborted');
     },
   });
 
-  const filename = `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`;
   return responseForCsvStream(stream, {
     'Content-Type': 'text/csv; charset=utf-8',
     'Content-Disposition': `attachment; filename="${filename}"`,

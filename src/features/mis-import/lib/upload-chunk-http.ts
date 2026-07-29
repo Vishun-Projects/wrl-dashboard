@@ -4,13 +4,18 @@ import {
   purgeStaleUploadChunks,
   storeUploadChunk,
 } from '@/features/mis-import/lib/upload-chunks';
-import type { MisUploadHttpResult } from '@/features/mis-import/lib/upload-http';
+import {
+  logMisUploadStart,
+  type MisUploadAuditContext,
+  type MisUploadHttpResult,
+} from '@/features/mis-import/lib/upload-http';
 import { MIS_UPLOAD_CHUNK_BYTES_MAX } from '@/features/mis-import/lib/upload-chunk-constants';
 
 /** Shared chunk POST handler for Next route + VPS upload server. */
 export async function handleMisClientUploadChunkFormData(params: {
   userId: string;
   formData: FormData;
+  audit?: MisUploadAuditContext | null;
 }): Promise<MisUploadHttpResult> {
   void purgeStaleUploadChunks().catch(() => {});
 
@@ -27,7 +32,8 @@ export async function handleMisClientUploadChunkFormData(params: {
     const result = await assembleAndProcessUpload(
       uploadId,
       params.userId,
-      contentEncoding || null
+      contentEncoding || null,
+      params.audit
     );
     return { status: result.status, body: { ...result.body, complete: true } };
   }
@@ -57,6 +63,20 @@ export async function handleMisClientUploadChunkFormData(params: {
   }
 
   const buffer = Buffer.from(await chunkFile.arrayBuffer());
+
+  // First chunk = upload began (covers transfer + later import in duration).
+  if (chunkIndex === 0) {
+    await logMisUploadStart({
+      userId: params.userId,
+      sourceCode,
+      fileName,
+      audit: params.audit,
+      uploadId,
+      chunkTotal,
+      byteLength: null,
+    });
+  }
+
   await storeUploadChunk({
     uploadId,
     chunkIndex,

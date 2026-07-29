@@ -25,6 +25,7 @@ import {
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { defaultLandingPath, visiblePages } from '@/lib/auth/rbac-catalog';
+import { canViewSecurityAudit } from '@/lib/security/audit-access';
 
 interface SidebarProps {
   user: {
@@ -93,6 +94,8 @@ export function Sidebar({ user }: SidebarProps) {
   };
 
   const pageNav = visiblePages(user?.permissions ?? []);
+  const canSeeSecurityAudit =
+    (user?.permissions ?? []).includes('manage_users') && canViewSecurityAudit(user?.email);
   const iconForPath = (path: string) =>
     path === '/report'
       ? FileSpreadsheet
@@ -112,14 +115,21 @@ export function Sidebar({ user }: SidebarProps) {
                     ? Gauge
                   : path === '/admin/mis-email-settings'
                     ? Mail
+                    : path === '/admin/security-audit'
+                      ? Shield
                     : ShieldCheck;
 
-  const filteredNavigation = pageNav.map((page) => ({
-    name: page.label,
-    href: page.path,
-    exactPath: page.exactPath ?? false,
-    icon: iconForPath(page.path),
-  }));
+  const filteredNavigation = [
+    ...pageNav.map((page) => ({
+      name: page.label,
+      href: page.path,
+      exactPath: page.exactPath ?? false,
+      icon: iconForPath(page.path),
+    })),
+    ...(canSeeSecurityAudit
+      ? [{ name: 'Activity Log', href: '/admin/security-audit', exactPath: true, icon: Shield }]
+      : []),
+  ];
 
   const sidebarContent = (
     <div className="flex h-full flex-col border-r border-slate-200 bg-bg-canvas text-slate-600 select-none">

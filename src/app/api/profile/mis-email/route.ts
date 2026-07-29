@@ -11,6 +11,8 @@ import {
 } from '@/features/mis-email/lib/preferences';
 import { resolveAvailableBodySections } from '@/features/mis-email/lib/body-sections';
 import { resolveUserDigestScopeWithLabel } from '@/features/mis-email/lib/user-scope';
+import { logAccessDenied, logAction } from '@/lib/security/audit';
+import { queryUserAuth } from '@/lib/auth/user-auth-query';
 
 type MisEmailRow = {
   mis_email_enabled: boolean;
@@ -98,8 +100,16 @@ export async function PATCH(request: Request) {
   const user = await requireRequestUser(request, supabase);
 
   if (!user) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'profile_mis_email_unauthorized' });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const auth = await queryUserAuth(user.id);
+  const actor = {
+    userId: user.id,
+    email: auth?.profile?.email ?? user.email ?? null,
+    name: auth?.profile?.name ?? null,
+  };
 
   try {
     const body = (await request.json()) as MisEmailPreferences;
@@ -146,12 +156,35 @@ export async function PATCH(request: Request) {
       user.id
     );
 
+    await logAction({
+      request,
+      action: 'profile.mis_email.update',
+      actor,
+      result: 'success',
+      statusCode: 200,
+      target: { type: 'app_user', id: user.id, label: actor.email },
+      summary: 'Updated MIS email preferences',
+      metadata: {
+        dateRange: validated.merged.dateRange ?? null,
+        sendTimeIst: validated.merged.sendTimeIst ?? null,
+      },
+    });
+
     return NextResponse.json({
       success: true,
       preferences: validated.merged,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to update email preferences';
+    await logAction({
+      request,
+      action: 'profile.mis_email.update',
+      actor,
+      result: 'failure',
+      statusCode: 500,
+      summary: 'Failed to update MIS email preferences',
+      metadata: { message },
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { groupPermissionsForRolesUi } from '@/lib/auth/page-access';
+import { logAccessDenied, logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
 
 const ROLES_CACHE_TTL_MS = 20_000;
 const rolesCache = new Map<string, { expiresAt: number; payload: unknown }>();
@@ -17,12 +18,22 @@ export async function GET(request: Request) {
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
 
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!user) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'admin_roles_unauthorized' });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const auth = await loadUserAuth(user.id);
   const permissions = auth?.permissions ?? [];
 
   if (!permissions.includes('manage_roles')) {
+    await logAccessDenied({
+      request,
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      statusCode: 403,
+      reason: 'admin_roles_forbidden',
+    });
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -78,11 +89,22 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
+  const audit = requestAuditContext(request);
 
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!user) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'admin_roles_unauthorized' });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const auth = await loadUserAuth(user.id);
   if (!auth?.permissions.includes('manage_roles')) {
+    await logAccessDenied({
+      request,
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      statusCode: 403,
+      reason: 'admin_roles_forbidden',
+    });
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -105,9 +127,38 @@ export async function POST(request: Request) {
     }
 
     clearRolesCache();
+    await logSecurityEventBestEffort({
+      eventType: 'admin.role.create',
+      result: 'success',
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 200,
+      targetType: 'app_role',
+      targetId: roleId,
+      targetLabel: String(name ?? ''),
+      metadata: { permissionCount: Array.isArray(permissionIds) ? permissionIds.length : 0 },
+    });
     return NextResponse.json({ success: true, id: roleId });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Create role failed';
+    await logSecurityEventBestEffort({
+      eventType: 'admin.role.create',
+      result: 'failure',
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 500,
+      metadata: { message },
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -115,11 +166,22 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
+  const audit = requestAuditContext(request);
 
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!user) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'admin_roles_unauthorized' });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const auth = await loadUserAuth(user.id);
   if (!auth?.permissions.includes('manage_roles')) {
+    await logAccessDenied({
+      request,
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      statusCode: 403,
+      reason: 'admin_roles_forbidden',
+    });
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -143,9 +205,38 @@ export async function PUT(request: Request) {
     }
 
     clearRolesCache();
+    await logSecurityEventBestEffort({
+      eventType: 'admin.role.update',
+      result: 'success',
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 200,
+      targetType: 'app_role',
+      targetId: String(id),
+      targetLabel: String(name ?? ''),
+      metadata: { permissionCount: Array.isArray(permissionIds) ? permissionIds.length : 0 },
+    });
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Update role failed';
+    await logSecurityEventBestEffort({
+      eventType: 'admin.role.update',
+      result: 'failure',
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 500,
+      metadata: { message },
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -153,11 +244,22 @@ export async function PUT(request: Request) {
 export async function DELETE(request: Request) {
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
+  const audit = requestAuditContext(request);
 
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!user) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'admin_roles_unauthorized' });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const auth = await loadUserAuth(user.id);
   if (!auth?.permissions.includes('manage_roles')) {
+    await logAccessDenied({
+      request,
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      statusCode: 403,
+      reason: 'admin_roles_forbidden',
+    });
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -170,9 +272,36 @@ export async function DELETE(request: Request) {
     await prisma.$queryRawUnsafe('DELETE FROM public.app_roles WHERE id = $1', id);
 
     clearRolesCache();
+    await logSecurityEventBestEffort({
+      eventType: 'admin.role.delete',
+      result: 'success',
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 200,
+      targetType: 'app_role',
+      targetId: String(id),
+    });
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Delete role failed';
+    await logSecurityEventBestEffort({
+      eventType: 'admin.role.delete',
+      result: 'failure',
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 500,
+      metadata: { message },
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

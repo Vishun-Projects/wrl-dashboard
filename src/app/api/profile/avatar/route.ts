@@ -9,6 +9,8 @@ import {
   isValidAvatarStoragePath,
 } from '@/lib/auth/avatar-url';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { logAction } from '@/lib/security/audit';
+import { queryUserAuth } from '@/lib/auth/user-auth-query';
 
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -116,6 +118,21 @@ export async function POST(request: Request) {
       publicUrl,
       user.id
     );
+
+    const userAuth = await queryUserAuth(user.id);
+    await logAction({
+      request,
+      action: 'profile.avatar.upload',
+      actor: {
+        userId: user.id,
+        email: userAuth?.profile?.email ?? user.email ?? null,
+        name: userAuth?.profile?.name ?? null,
+      },
+      result: 'success',
+      statusCode: 200,
+      target: { type: 'avatar', id: user.id, label: storagePath },
+      summary: 'Uploaded profile avatar',
+    });
 
     return NextResponse.json({
       avatar_url: publicUrl,

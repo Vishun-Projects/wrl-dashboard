@@ -6,6 +6,7 @@ import { resolveReportSecurity, type ReportSecurity } from '@/lib/auth/report-se
 import { resolveRequestUserId, resolveUserIdFromAccessToken } from '@/lib/auth/server-user';
 import { createClient } from '@/lib/supabase/server';
 import type { RbacApiSpec } from '@/lib/auth/rbac-catalog';
+import { logAccessDenied } from '@/lib/security/audit';
 
 export type BearerAuthResult =
   | { ok: true; userId: string; security: ReportSecurity }
@@ -51,6 +52,12 @@ export async function requireRbac(
   const supabase = await createClient();
   const userId = await resolveRequestUserId(req, supabase);
   if (!userId) {
+    await logAccessDenied({
+      request: req,
+      statusCode: 401,
+      reason: 'report_route_unauthorized',
+      metadata: { spec },
+    });
     return {
       ok: false,
       response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
@@ -59,6 +66,13 @@ export async function requireRbac(
 
   const security = await resolveReportSecurity(userId, spec);
   if (security.forbidden) {
+    await logAccessDenied({
+      request: req,
+      actorUserId: userId,
+      statusCode: 403,
+      reason: 'report_route_forbidden',
+      metadata: { spec },
+    });
     return {
       ok: false,
       response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),

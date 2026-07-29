@@ -43,6 +43,7 @@ import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { mergeAuditEnrichment } from '@/lib/register-sql/audit-enrichment';
 import { buildPortalFilterSqlForCrm } from '@/lib/register-sql/portal-filter-sql';
 import { REGISTER_MSTPRORG_JOIN_SQL, SQL_WCO_EXPR } from '@/lib/register-sql/wco';
+import { logAccessDenied, logAction } from '@/lib/security/audit';
 
 
 
@@ -81,17 +82,19 @@ function appendStatusFilter(
 }
 
 function buildSingleStatusCondition(statusFilter: string): string {
+  const solvedStage =
+    "((tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) OR (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1) OR (tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1))";
   if (statusFilter === 'Open Unallocated') {
-    return " AND (tc.nengineer = 0 OR tc.nengineer IS NULL OR CAST(tc.nengineer AS NVARCHAR(50)) = '0') AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
+    return ` AND (tc.nengineer = 0 OR tc.nengineer IS NULL OR CAST(tc.nengineer AS NVARCHAR(50)) = '0') AND NOT ${solvedStage} AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)`;
   }
   if (statusFilter === 'Assigned') {
-    return " AND (tc.nengineer > 0 OR (tc.nengineer IS NOT NULL AND CAST(tc.nengineer AS NVARCHAR(50)) <> '0')) AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
+    return ` AND (tc.nengineer > 0 OR (tc.nengineer IS NOT NULL AND CAST(tc.nengineer AS NVARCHAR(50)) <> '0')) AND NOT ${solvedStage} AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)`;
   }
   if (statusFilter === 'Tech. Solve Call') {
-    return " AND (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND (tc.bapproval = 'False' OR tc.bapproval IS NULL OR tc.bapproval = '0' OR tc.bapproval = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
+    return ` AND ${solvedStage} AND (tc.bapproval = 'False' OR tc.bapproval IS NULL OR tc.bapproval = '0' OR tc.bapproval = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)`;
   }
   if (statusFilter === 'Closed') {
-    return " AND (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND (tc.bapproval = 'True' OR tc.bapproval = '1' OR tc.bapproval = 1) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)";
+    return ` AND ${solvedStage} AND (tc.bapproval = 'True' OR tc.bapproval = '1' OR tc.bapproval = 1) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)`;
   }
   if (statusFilter === 'Cancelled') {
     return " AND (tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 AND tc.ncancelreason <> 2)";
@@ -207,7 +210,10 @@ export async function handleRegisterGet(req: NextRequest) {
 
     const supabase = await createClient();
     const userId = await resolveRequestUserId(req, supabase);
-    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!userId) {
+      await logAccessDenied({ request: req, statusCode: 401, reason: 'register_unauthorized' });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     
     
@@ -217,6 +223,12 @@ export async function handleRegisterGet(req: NextRequest) {
       tabId: 'register',
     });
     if (security.forbidden) {
+      await logAccessDenied({
+        request: req,
+        actorUserId: userId,
+        statusCode: 403,
+        reason: 'register_forbidden',
+      });
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -277,6 +289,29 @@ export async function handleRegisterGet(req: NextRequest) {
       }
 
       if (searchParams.get('export') === 'csv') {
+        const exportActor = {
+          userId,
+          email: profile?.email ?? null,
+          name: profile?.name ?? null,
+        };
+        const exportMeta = {
+          startDate,
+          endDate,
+          dateFilterColumn: registerDateCol,
+          status,
+          callType,
+          officeId,
+        };
+        await logAction({
+          request: req,
+          action: 'report.export.start',
+          actor: exportActor,
+          result: 'started',
+          statusCode: 202,
+          target: { type: 'register_csv_export' },
+          summary: 'Started Call Register CSV export',
+          metadata: exportMeta,
+        });
         return buildPostgresRegisterCsvStream({
           search,
           officeId,
@@ -300,6 +335,7 @@ export async function handleRegisterGet(req: NextRequest) {
           isHod,
           repairCallKeys,
           acceptEncoding,
+          audit: { request: req, actor: exportActor, metadata: exportMeta },
         });
       }
 
@@ -687,6 +723,29 @@ export async function handleRegisterGet(req: NextRequest) {
     }
 
     if (searchParams.get('export') === 'csv') {
+      const exportActor = {
+        userId,
+        email: profile?.email ?? null,
+        name: profile?.name ?? null,
+      };
+      const exportMeta = {
+        startDate,
+        endDate,
+        dateFilterColumn: registerDateCol,
+        status,
+        callType,
+        officeId,
+      };
+      await logAction({
+        request: req,
+        action: 'report.export.start',
+        actor: exportActor,
+        result: 'started',
+        statusCode: 202,
+        target: { type: 'register_csv_export' },
+        summary: 'Started Call Register CSV export',
+        metadata: exportMeta,
+      });
       return buildRegisterCsvResponse({
         fields,
         tableName,
@@ -700,6 +759,38 @@ export async function handleRegisterGet(req: NextRequest) {
               rows.map((row: Record<string, unknown>) => mapCrmRegisterRow(row))
             )
           ),
+        onComplete: async ({ filename, rowCount }) => {
+          await logAction({
+            request: req,
+            action: 'report.export.complete',
+            actor: exportActor,
+            result: 'completed',
+            statusCode: 200,
+            target: { type: 'register_csv_export', label: filename },
+            summary: `Exported Call Register CSV (${rowCount.toLocaleString()} rows)`,
+            metadata: { ...exportMeta, rowCount },
+          });
+        },
+        onFailure: async ({ filename, rowCount, reason, message }) => {
+          await logAction({
+            request: req,
+            action: reason === 'aborted' ? 'report.export.cancelled' : 'report.export.failure',
+            actor: exportActor,
+            result: reason === 'aborted' ? 'cancelled' : 'failure',
+            statusCode: reason === 'aborted' ? 499 : 500,
+            target: { type: 'register_csv_export', label: filename },
+            summary:
+              reason === 'aborted'
+                ? 'Call Register CSV export cancelled'
+                : 'Call Register CSV export failed',
+            metadata: {
+              ...exportMeta,
+              rowCount,
+              ...(reason === 'aborted' ? { reason: 'client_aborted' } : {}),
+              ...(message ? { message } : {}),
+            },
+          });
+        },
       });
     }
 
@@ -742,12 +833,12 @@ export async function handleRegisterGet(req: NextRequest) {
         fields: `
             COUNT(*) as total,
             SUM(CASE WHEN tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 AND tc.ncancelreason <> 2 THEN 1 ELSE 0 END) as cancelled,
-            SUM(CASE WHEN ${notCancelledSql} AND (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) THEN 1 ELSE 0 END) as solved,
-            SUM(CASE WHEN (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls,
-            SUM(CASE WHEN (tc.nengineer = 0 OR tc.nengineer IS NULL OR CAST(tc.nengineer AS NVARCHAR(50)) = '0') AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_unallocated,
-            SUM(CASE WHEN (tc.nengineer > 0 OR (tc.nengineer IS NOT NULL AND CAST(tc.nengineer AS NVARCHAR(50)) <> '0')) AND (tc.bfastclose = 'False' OR tc.bfastclose IS NULL OR tc.bfastclose = '0' OR tc.bfastclose = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as assigned,
-            SUM(CASE WHEN (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND (tc.bapproval = 'False' OR tc.bapproval IS NULL OR tc.bapproval = '0' OR tc.bapproval = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as tech_solved,
-            SUM(CASE WHEN (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND (tc.bapproval = 'True' OR tc.bapproval = '1' OR tc.bapproval = 1) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as closed
+            SUM(CASE WHEN ${notCancelledSql} AND (((tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) OR (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1) OR (tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1))) THEN 1 ELSE 0 END) as solved,
+            SUM(CASE WHEN NOT (((tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) OR (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1) OR (tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1))) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls,
+            SUM(CASE WHEN (tc.nengineer = 0 OR tc.nengineer IS NULL OR CAST(tc.nengineer AS NVARCHAR(50)) = '0') AND NOT (((tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) OR (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1) OR (tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1))) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_unallocated,
+            SUM(CASE WHEN (tc.nengineer > 0 OR (tc.nengineer IS NOT NULL AND CAST(tc.nengineer AS NVARCHAR(50)) <> '0')) AND NOT (((tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) OR (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1) OR (tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1))) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as assigned,
+            SUM(CASE WHEN (((tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) OR (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1) OR (tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1))) AND (tc.bapproval = 'False' OR tc.bapproval IS NULL OR tc.bapproval = '0' OR tc.bapproval = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as tech_solved,
+            SUM(CASE WHEN (((tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) OR (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1) OR (tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1))) AND (tc.bapproval = 'True' OR tc.bapproval = '1' OR tc.bapproval = 1) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as closed
           `,
         tableName,
         condition,

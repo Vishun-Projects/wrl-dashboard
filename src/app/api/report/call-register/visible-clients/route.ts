@@ -7,6 +7,7 @@ import {
   listVisibleCallRegisterClients,
   replaceVisibleCallRegisterClients,
 } from '@/lib/call-register/visible-clients';
+import { logAction } from '@/lib/security/audit';
 
 export async function GET(req: NextRequest) {
   try {
@@ -47,6 +48,20 @@ export async function PUT(req: NextRequest) {
 
     try {
       const clients = await replaceVisibleCallRegisterClients(names);
+      await logAction({
+        request: req,
+        action: 'admin.call_register.visible_clients.update',
+        actor: {
+          userId: auth.userId,
+          email: email ?? null,
+          name: userAuth?.profile?.name ?? null,
+        },
+        result: 'success',
+        statusCode: 200,
+        target: { type: 'call_register_visible_clients' },
+        summary: `Updated Call Register visible accounts (${clients.length})`,
+        metadata: { clientCount: clients.length },
+      });
       return NextResponse.json({ clients });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save';

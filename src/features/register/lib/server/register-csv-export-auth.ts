@@ -14,6 +14,7 @@ import { readRegisterFromPostgres } from '@/lib/read-model/flags';
 import { buildPostgresRegisterCsvStream } from '@/features/register/lib/server/postgres-csv-export';
 import { REGISTER_EXPORT_COLUMNS } from '@/features/register/lib/table-columns';
 import { escapeCsvCell } from '@/lib/utils/csv';
+import { logAction } from '@/lib/security/audit';
 
 function isHodUser(
   profile: { role?: string } | undefined,
@@ -46,6 +47,8 @@ export async function buildRegisterCsvExportResponse(opts: {
   userId: string;
   searchParams: URLSearchParams;
   acceptEncoding?: string | null;
+  /** When set, start/complete/failure are written to the activity log. */
+  request?: Request;
 }): Promise<Response> {
   if (!readRegisterFromPostgres()) {
     return Response.json(
@@ -101,6 +104,33 @@ export async function buildRegisterCsvExportResponse(opts: {
 
   const registerDateCol = resolveRegisterDateSqlColumn(dateFilterColumnParam);
 
+  const exportActor = {
+    userId: opts.userId,
+    email: profile?.email ?? null,
+    name: profile?.name ?? null,
+  };
+  const exportMeta = {
+    startDate,
+    endDate,
+    dateFilterColumn: registerDateCol,
+    status,
+    callType,
+    officeId,
+  };
+
+  if (opts.request) {
+    await logAction({
+      request: opts.request,
+      action: 'report.export.start',
+      actor: exportActor,
+      result: 'started',
+      statusCode: 202,
+      target: { type: 'register_csv_export' },
+      summary: 'Started Call Register CSV export',
+      metadata: exportMeta,
+    });
+  }
+
   return buildPostgresRegisterCsvStream({
     search,
     officeId,
@@ -123,5 +153,8 @@ export async function buildRegisterCsvExportResponse(opts: {
     visibleStatuses,
     isHod,
     acceptEncoding: opts.acceptEncoding,
+    audit: opts.request
+      ? { request: opts.request, actor: exportActor, metadata: exportMeta }
+      : undefined,
   });
 }

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { loadBatchFileBytes } from '@/features/mis-import/lib/batch-file';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
+import { logAction } from '@/lib/security/audit';
 
 type RouteContext = { params: Promise<{ batchId: string }> };
 
@@ -34,6 +36,13 @@ export async function GET(req: NextRequest, context: RouteContext) {
     const auth = await requireRbac(req, { pageId: 'mis_reports', shared: true });
     if (!auth.ok) return auth.response;
 
+    const userAuth = await loadUserAuth(auth.userId);
+    const actor = {
+      userId: auth.userId,
+      email: userAuth?.profile?.email ?? null,
+      name: userAuth?.profile?.name ?? null,
+    };
+
     const { batchId } = await context.params;
     if (!batchId?.trim()) {
       return NextResponse.json({ error: 'batchId is required' }, { status: 400 });
@@ -46,6 +55,17 @@ export async function GET(req: NextRequest, context: RouteContext) {
       'Content-Disposition': `attachment; filename="${fileName.replace(/"/g, '')}"`,
       ...(reconstructed ? { 'X-Import-File-Reconstructed': '1' } : {}),
     };
+
+    await logAction({
+      request: req,
+      action: 'import.mis_client.download',
+      actor,
+      result: 'success',
+      statusCode: 200,
+      target: { type: 'mis_client_import_batch', id: batchId, label: fileName },
+      summary: `Downloaded MIS client import ${fileName}`,
+      metadata: { byteLength: total, reconstructed },
+    });
 
     // Range resume only for stored bytes (not reconstructed on the fly).
     if (!reconstructed) {

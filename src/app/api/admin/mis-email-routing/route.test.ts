@@ -34,6 +34,18 @@ vi.mock('@/features/mis-email/lib/routing-rules', () => ({
   deleteMisEmailRoutingRule: vi.fn(),
 }));
 
+vi.mock('@/lib/security/audit', () => ({
+  logAccessDenied: vi.fn(async () => {}),
+  logSecurityEventBestEffort: vi.fn(async () => {}),
+  requestAuditContext: () => ({
+    route: '/api/admin/mis-email-routing',
+    method: 'GET',
+    ip: null,
+    userAgent: null,
+    sessionId: null,
+  }),
+}));
+
 describe('mis-email-routing API auth', () => {
   beforeEach(() => {
     requireRequestUser.mockReset();

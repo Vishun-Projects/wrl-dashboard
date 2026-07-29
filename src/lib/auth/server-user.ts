@@ -9,6 +9,7 @@ import {
   isDevAuthBypass,
   verifyLocalAccessToken,
 } from '@/lib/auth/verify-jwt-core';
+import { logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
 
 export type ServerAuthUser = {
   id: string;
@@ -73,6 +74,18 @@ export async function resolveRequestUserId(
   if (authHeader?.startsWith('Bearer ')) {
     const userId = await resolveUserIdFromAccessToken(authHeader.slice(7));
     if (userId) return userId;
+    const audit = requestAuditContext(request);
+    await logSecurityEventBestEffort({
+      eventType: 'auth.token.invalid',
+      result: 'failure',
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 401,
+      metadata: { reason: 'invalid_bearer_token' },
+    });
   }
 
   const user = await requireSupabaseUser(supabase);
@@ -89,6 +102,18 @@ export async function requireRequestUser(
     if (bearer && bearer !== 'undefined') {
       const userId = await resolveUserIdFromAccessToken(bearer);
       if (userId) return { id: userId };
+      const audit = requestAuditContext(request);
+      await logSecurityEventBestEffort({
+        eventType: 'auth.token.invalid',
+        result: 'failure',
+        sessionId: audit.sessionId,
+        route: audit.route,
+        method: audit.method,
+        ip: audit.ip,
+        userAgent: audit.userAgent,
+        statusCode: 401,
+        metadata: { reason: 'invalid_bearer_token' },
+      });
     }
   }
 

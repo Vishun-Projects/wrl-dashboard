@@ -71,7 +71,8 @@ fi
 echo "==> DATABASE_URL resolved (pooler @ 127.0.0.1:6543)"
 
 echo "==> npm install (for pg + dotenv)"
-npm install --omit=dev 2>&1 | tail -5
+# VPS has no git hooks checkout — husky prepare fails with exit 127.
+npm install --omit=dev --ignore-scripts 2>&1 | tail -5
 
 echo "==> Applying read-model schema"
 DATABASE_URL="${db_url}" npm run db:apply-read-model

@@ -49,15 +49,18 @@ const REGISTER_SORT_SQL = {
 
 export type RegisterSortBy = keyof typeof REGISTER_SORT_SQL;
 
+const POSTGRES_SOLVED_STAGE_SQL =
+  '(COALESCE(h.bfastclose, false) = true OR COALESCE(h.bsolved, false) = true)';
+
 const POSTGRES_REGISTER_STATUS_SQL: Record<string, string> = {
   'Open Unallocated':
-    "(COALESCE(h.ncancelreason, 0) = 0) AND COALESCE(h.bfastclose, false) = false AND COALESCE(h.nengineer, 0) = 0",
+    `(COALESCE(h.ncancelreason, 0) = 0) AND ${POSTGRES_SOLVED_STAGE_SQL} = false AND COALESCE(h.nengineer, 0) = 0`,
   Assigned:
-    "(COALESCE(h.ncancelreason, 0) = 0) AND COALESCE(h.bfastclose, false) = false AND COALESCE(h.nengineer, 0) <> 0",
+    `(COALESCE(h.ncancelreason, 0) = 0) AND ${POSTGRES_SOLVED_STAGE_SQL} = false AND COALESCE(h.nengineer, 0) <> 0`,
   'Tech. Solve Call':
-    "(COALESCE(h.ncancelreason, 0) = 0) AND COALESCE(h.bfastclose, false) = true AND COALESCE(h.bapproval, false) = false",
+    `(COALESCE(h.ncancelreason, 0) = 0) AND ${POSTGRES_SOLVED_STAGE_SQL} = true AND COALESCE(h.bapproval, false) = false`,
   Closed:
-    "(COALESCE(h.ncancelreason, 0) = 0) AND COALESCE(h.bfastclose, false) = true AND COALESCE(h.bapproval, false) = true",
+    `(COALESCE(h.ncancelreason, 0) = 0) AND ${POSTGRES_SOLVED_STAGE_SQL} = true AND COALESCE(h.bapproval, false) = true`,
   Cancelled: 'COALESCE(h.ncancelreason, 0) NOT IN (0, 2)',
 };
 
@@ -486,35 +489,35 @@ export async function queryRegisterTotalsFromPostgres(
       count(*) FILTER (
         WHERE
           COALESCE(h.ncancelreason, 0) = 0
-          AND COALESCE(h.bfastclose, false) = true
+          AND ${POSTGRES_SOLVED_STAGE_SQL}
       )::int AS solved,
       count(*) FILTER (
         WHERE
           COALESCE(h.ncancelreason, 0) = 0
-          AND COALESCE(h.bfastclose, false) = false
+          AND NOT ${POSTGRES_SOLVED_STAGE_SQL}
       )::int AS open_calls,
       count(*) FILTER (
         WHERE
           COALESCE(h.ncancelreason, 0) = 0
-          AND COALESCE(h.bfastclose, false) = false
+          AND NOT ${POSTGRES_SOLVED_STAGE_SQL}
           AND COALESCE(h.nengineer, 0) = 0
       )::int AS open_unallocated,
       count(*) FILTER (
         WHERE
           COALESCE(h.ncancelreason, 0) = 0
-          AND COALESCE(h.bfastclose, false) = false
+          AND NOT ${POSTGRES_SOLVED_STAGE_SQL}
           AND COALESCE(h.nengineer, 0) <> 0
       )::int AS assigned,
       count(*) FILTER (
         WHERE
           COALESCE(h.ncancelreason, 0) = 0
-          AND COALESCE(h.bfastclose, false) = true
+          AND ${POSTGRES_SOLVED_STAGE_SQL}
           AND COALESCE(h.bapproval, false) = false
       )::int AS tech_solved,
       count(*) FILTER (
         WHERE
           COALESCE(h.ncancelreason, 0) = 0
-          AND COALESCE(h.bfastclose, false) = true
+          AND ${POSTGRES_SOLVED_STAGE_SQL}
           AND COALESCE(h.bapproval, false) = true
       )::int AS closed
     FROM calls_latest_hot h

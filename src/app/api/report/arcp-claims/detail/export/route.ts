@@ -23,6 +23,8 @@ import { getArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-server';
 import { postgresCoversFullRange } from '@/lib/read-model/arcp/coverage-shared';
 import { readArcpFromPostgres } from '@/lib/read-model/flags';
 import type { ArcpClaimsDetailRow } from '@/features/arcp/lib/query';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
+import { logAction } from '@/lib/security/audit';
 
 export const maxDuration = 300;
 
@@ -30,6 +32,13 @@ export async function GET(req: NextRequest) {
   try {
     const auth = await authenticateArcpClaimsRequest(req, { kind: 'detail' });
     if (auth instanceof NextResponse) return auth;
+
+    const userAuth = await loadUserAuth(auth.userId);
+    const actor = {
+      userId: auth.userId,
+      email: userAuth?.profile?.email ?? null,
+      name: userAuth?.profile?.name ?? null,
+    };
 
     const { searchParams } = new URL(req.url);
     const includeTravel = searchParams.get('includeTravel') !== 'false';
@@ -69,6 +78,16 @@ export async function GET(req: NextRequest) {
               includeTravel,
             });
       const totals = sumArcpDetailExportTotals(preparedRows);
+      await logAction({
+        request: req,
+        action: 'report.export.complete',
+        actor,
+        result: 'completed',
+        statusCode: 200,
+        target: { type: 'arcp_claims_detail_export', label: fileName },
+        summary: `Exported ARCP claims detail (${preparedRows.length} rows)`,
+        metadata: { rowCount: preparedRows.length, startDate, endDate, dateColumn, postgresOnly: true },
+      });
       return createArcpClaimsDetailCsvResponse(preparedRows, fileName, { totals });
     }
 
@@ -82,10 +101,30 @@ export async function GET(req: NextRequest) {
       includeTravel,
     });
     const totals = sumArcpDetailExportTotals(preparedRows);
+    await logAction({
+      request: req,
+      action: 'report.export.complete',
+      actor,
+      result: 'completed',
+      statusCode: 200,
+      target: { type: 'arcp_claims_detail_export', label: fileName },
+      summary: `Exported ARCP claims detail (${preparedRows.length} rows)`,
+      metadata: { rowCount: preparedRows.length, startDate, endDate, dateColumn, postgresOnly: false },
+    });
 
     return createArcpClaimsDetailCsvResponse(preparedRows, fileName, { totals });
   } catch (err: unknown) {
     console.error('[ARCP Claims Detail Export] export error:', err);
+    await logAction({
+      request: req,
+      action: 'report.export.failure',
+      actor: { userId: null, email: null, name: null },
+      result: 'failure',
+      statusCode: 500,
+      target: { type: 'arcp_claims_detail_export' },
+      summary: 'ARCP claims detail export failed',
+      metadata: { message: err instanceof Error ? err.message : String(err) },
+    });
     if (isCrmOutOfMemoryError(err)) {
       return NextResponse.json(
         {

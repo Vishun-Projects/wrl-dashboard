@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
     const result = await handleMisClientUploadFormData({
       userId: auth.userId,
       formData,
+      audit: { request: req },
     });
     return NextResponse.json(result.body, { status: result.status });
   } catch (err: unknown) {

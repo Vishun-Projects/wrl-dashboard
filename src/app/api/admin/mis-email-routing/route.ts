@@ -9,14 +9,27 @@ import {
   listMisEmailRoutingRules,
   updateMisEmailRoutingRule,
 } from '@/features/mis-email/lib/routing-rules';
+import { logAccessDenied, logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
 
 async function requireHodRoutingAccess(request: Request) {
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
-  if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  if (!user) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'mis_email_routing_unauthorized' });
+    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  }
 
   const auth = await loadUserAuth(user.id);
-  if (!auth) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  if (!auth) {
+    await logAccessDenied({
+      request,
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      statusCode: 401,
+      reason: 'mis_email_routing_unauthorized',
+    });
+    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  }
 
   if (
     !canManageMisEmailRouting({
@@ -25,10 +38,17 @@ async function requireHodRoutingAccess(request: Request) {
       permissions: auth.permissions,
     })
   ) {
+    await logAccessDenied({
+      request,
+      actorUserId: user.id,
+      actorEmail: user.email ?? null,
+      statusCode: 403,
+      reason: 'mis_email_routing_forbidden',
+    });
     return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
   }
 
-  return { auth };
+  return { auth, user };
 }
 
 export async function GET(request: Request) {
@@ -47,6 +67,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const access = await requireHodRoutingAccess(request);
   if (access.error) return access.error;
+  const audit = requestAuditContext(request);
 
   try {
     const body = await request.json();
@@ -64,9 +85,36 @@ export async function POST(request: Request) {
       ccEmailsCsv: String(body.ccEmailsCsv ?? ''),
       autoSendEnabled: body.autoSendEnabled === true,
     });
+    await logSecurityEventBestEffort({
+      eventType: 'admin.mis_email_routing.create',
+      result: 'success',
+      actorUserId: access.user.id,
+      actorEmail: access.user.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 201,
+      targetType: 'mis_email_routing_rule',
+      targetId: String((rule as { id?: string }).id ?? ''),
+    });
     return NextResponse.json({ rule }, { status: 201 });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to create routing rule';
+    await logSecurityEventBestEffort({
+      eventType: 'admin.mis_email_routing.create',
+      result: 'failure',
+      actorUserId: access.user.id,
+      actorEmail: access.user.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 400,
+      metadata: { message },
+    });
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
@@ -74,6 +122,7 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   const access = await requireHodRoutingAccess(request);
   if (access.error) return access.error;
+  const audit = requestAuditContext(request);
 
   try {
     const body = await request.json();
@@ -92,9 +141,36 @@ export async function PUT(request: Request) {
       ccEmailsCsv: String(body.ccEmailsCsv ?? ''),
       autoSendEnabled: body.autoSendEnabled === true,
     });
+    await logSecurityEventBestEffort({
+      eventType: 'admin.mis_email_routing.update',
+      result: 'success',
+      actorUserId: access.user.id,
+      actorEmail: access.user.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 200,
+      targetType: 'mis_email_routing_rule',
+      targetId: String(body.id ?? ''),
+    });
     return NextResponse.json({ rule });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to update routing rule';
+    await logSecurityEventBestEffort({
+      eventType: 'admin.mis_email_routing.update',
+      result: 'failure',
+      actorUserId: access.user.id,
+      actorEmail: access.user.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 400,
+      metadata: { message },
+    });
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
@@ -102,14 +178,42 @@ export async function PUT(request: Request) {
 export async function DELETE(request: Request) {
   const access = await requireHodRoutingAccess(request);
   if (access.error) return access.error;
+  const audit = requestAuditContext(request);
 
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id') ?? '';
     await deleteMisEmailRoutingRule(id);
+    await logSecurityEventBestEffort({
+      eventType: 'admin.mis_email_routing.delete',
+      result: 'success',
+      actorUserId: access.user.id,
+      actorEmail: access.user.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 200,
+      targetType: 'mis_email_routing_rule',
+      targetId: id,
+    });
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to delete routing rule';
+    await logSecurityEventBestEffort({
+      eventType: 'admin.mis_email_routing.delete',
+      result: 'failure',
+      actorUserId: access.user.id,
+      actorEmail: access.user.email ?? null,
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 400,
+      metadata: { message },
+    });
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

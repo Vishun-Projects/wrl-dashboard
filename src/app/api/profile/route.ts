@@ -3,14 +3,24 @@ import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { isAllowedAvatarUrl, profilePatchSchema } from '@/lib/api/schemas/mutations';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
+import { logAccessDenied, logAction } from '@/lib/security/audit';
 
 export async function PATCH(request: Request) {
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
 
   if (!user) {
+    await logAccessDenied({ request, statusCode: 401, reason: 'profile_update_unauthorized' });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const auth = await loadUserAuth(user.id);
+  const actor = {
+    userId: user.id,
+    email: auth?.profile?.email ?? user.email ?? null,
+    name: auth?.profile?.name ?? null,
+  };
 
   try {
     const body = await request.json();
@@ -28,18 +38,22 @@ export async function PATCH(request: Request) {
     const updates: string[] = [];
     const values: unknown[] = [];
     let paramIndex = 1;
+    const changed: string[] = [];
 
     if (name !== undefined) {
       updates.push(`name = $${paramIndex++}`);
       values.push(name);
+      changed.push('name');
     }
     if (avatar_url !== undefined) {
       updates.push(`avatar_url = $${paramIndex++}`);
       values.push(avatar_url);
+      changed.push('avatar_url');
     }
     if (theme !== undefined) {
       updates.push(`theme = $${paramIndex++}`);
       values.push(theme);
+      changed.push('theme');
     }
 
     if (updates.length === 0) {
@@ -51,9 +65,29 @@ export async function PATCH(request: Request) {
     
     await prisma.$queryRawUnsafe(query, ...values);
 
+    await logAction({
+      request,
+      action: 'profile.update',
+      actor,
+      result: 'success',
+      statusCode: 200,
+      target: { type: 'app_user', id: user.id, label: actor.email },
+      summary: `Updated profile fields: ${changed.join(', ')}`,
+      metadata: { changed, theme: theme ?? null },
+    });
+
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
     console.error('Profile update error:', err);
+    await logAction({
+      request,
+      action: 'profile.update',
+      actor,
+      result: 'failure',
+      statusCode: 500,
+      summary: 'Profile update failed',
+      metadata: { message: err instanceof Error ? err.message : 'Profile update failed' },
+    });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Profile update failed' },
       { status: 500 }
