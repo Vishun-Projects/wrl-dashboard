@@ -377,6 +377,24 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Please select at least one system role.' }, { status: 400 });
     }
 
+    const beforeRows = (await prisma.$queryRawUnsafe(
+      `SELECT u.name, u.role, u.role_id, u.office_ids, u.visible_statuses, u.mis_email_enabled,
+              (${USER_ROLE_IDS_SUBSELECT}) AS role_ids
+       FROM public.app_users u
+       WHERE u.id = $1
+       LIMIT 1`,
+      id
+    )) as Array<{
+      name: string | null;
+      role: string | null;
+      role_id: string | null;
+      office_ids: string[] | null;
+      visible_statuses: string[] | null;
+      mis_email_enabled: boolean | null;
+      role_ids: string[] | null;
+    }>;
+    const before = beforeRows[0] ?? null;
+
     const permissions = await loadPermissionsForRoleIds(roleIds);
     const includes = resolveMisEmailReportIncludes(permissions);
     const canEmail = canAssignMisEmail(permissions);
@@ -453,7 +471,27 @@ export async function PUT(request: Request) {
       statusCode: 200,
       targetType: 'app_user',
       targetId: String(id),
-      metadata: { roleIds, officeIds: office_ids, visibleStatuses: visible_statuses, misEmailEnabled: wantsEmail },
+      metadata: {
+        summary: `Updated user ${String(id)}`,
+        actionLabel: 'Updated user',
+        roleIds,
+        officeIds: office_ids,
+        visibleStatuses: visible_statuses,
+        misEmailEnabled: wantsEmail,
+        changes: {
+          name: { old: before?.name ?? null, new: name },
+          roleIds: { old: before?.role_ids ?? [], new: roleIds },
+          office_ids: { old: before?.office_ids ?? [], new: office_ids },
+          visible_statuses: {
+            old: before?.visible_statuses ?? [],
+            new: visible_statuses || [],
+          },
+          mis_email_enabled: {
+            old: Boolean(before?.mis_email_enabled),
+            new: wantsEmail,
+          },
+        },
+      },
     });
 
     return NextResponse.json({ success: true, role_ids: roleIds, role_id: primary.primaryRoleId });

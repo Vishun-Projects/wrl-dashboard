@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { forgotPasswordStatusMessage, validateForgotPasswordEmail } from '@/lib/auth/forgot-password-core';
+import {
+  forgotPasswordAuditReason,
+  FORGOT_PASSWORD_GENERIC_MESSAGE,
+  validateForgotPasswordEmail,
+} from '@/lib/auth/forgot-password-core';
 import { hasCapability, LEGACY_HOD_ROLE_NAMES } from '@/lib/auth/rbac-catalog';
 
 describe('validateForgotPasswordEmail', () => {
@@ -15,27 +19,34 @@ describe('validateForgotPasswordEmail', () => {
   });
 });
 
-describe('forgotPasswordStatusMessage', () => {
-  it('reports when email is not registered', () => {
+describe('forgotPasswordAuditReason', () => {
+  it('classifies unknown email for audit only', () => {
     expect(
-      forgotPasswordStatusMessage({
+      forgotPasswordAuditReason({
         email: 'nobody@example.com',
         inAuth: false,
         inAppUsers: false,
         appUserName: null,
       })
-    ).toMatch(/No account found/i);
+    ).toBe('account_not_found');
   });
 
-  it('reports when auth login exists', () => {
+  it('classifies ready account for audit only', () => {
     expect(
-      forgotPasswordStatusMessage({
+      forgotPasswordAuditReason({
         email: 'user@example.com',
         inAuth: true,
         inAppUsers: true,
         appUserName: 'Test User',
       })
-    ).toMatch(/Account found/i);
+    ).toBe('account_ready');
+  });
+});
+
+describe('FORGOT_PASSWORD_GENERIC_MESSAGE', () => {
+  it('stays vague (no account enumeration)', () => {
+    expect(FORGOT_PASSWORD_GENERIC_MESSAGE).toMatch(/if an account exists/i);
+    expect(FORGOT_PASSWORD_GENERIC_MESSAGE).not.toMatch(/no account found/i);
   });
 });
 

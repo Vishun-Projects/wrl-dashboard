@@ -31,6 +31,47 @@ import {
   resolveRoutingScheduleSlotStart,
   shouldTriggerRoutingRuleNow,
 } from '@/features/mis-email/lib/routing-rules';
+import { logAction } from '@/lib/security/audit';
+
+const DIGEST_SYSTEM_ACTOR = {
+  userId: null,
+  email: 'system:mis-email-digest',
+  name: 'MIS email digest',
+};
+
+async function auditDigestSend(opts: {
+  ok: boolean;
+  sentTo: string;
+  recipientId: string;
+  attachmentCount?: number;
+  dateRangeLabel?: string;
+  ruleId?: string | null;
+  error?: string;
+}): Promise<void> {
+  await logAction({
+    action: opts.ok
+      ? 'notification.mis_email.digest.sent'
+      : 'notification.mis_email.digest.failed',
+    actor: DIGEST_SYSTEM_ACTOR,
+    result: opts.ok ? 'success' : 'failure',
+    statusCode: opts.ok ? 200 : 500,
+    target: {
+      type: 'mis_email_digest',
+      id: opts.recipientId,
+      label: opts.sentTo,
+    },
+    summary: opts.ok
+      ? `Sent MIS digest to ${opts.sentTo}`
+      : `MIS digest failed for ${opts.sentTo}`,
+    metadata: {
+      recipientCount: 1,
+      attachmentCount: opts.attachmentCount ?? null,
+      dateRangeLabel: opts.dateRangeLabel ?? null,
+      ruleId: opts.ruleId ?? null,
+      error: opts.error ?? null,
+    },
+  });
+}
 
 export type DigestSendResult = {
   recipientId: string;
@@ -272,12 +313,25 @@ export async function runMisEmailDigest(): Promise<DigestRunResult> {
             testTo: sendTo === recipient.email ? undefined : sendTo,
           });
           sent.push(result);
+          await auditDigestSend({
+            ok: true,
+            sentTo: sendTo,
+            recipientId: recipient.id,
+            attachmentCount: result.attachments.length,
+            dateRangeLabel: result.dateRange.label,
+          });
           console.log(
             `[mis-email] Sent to ${sendTo} (${result.attachments.length} attachments, ${result.dateRange.label})`
           );
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           failed.push({ recipientId: recipient.id, email: sendTo, error: message });
+          await auditDigestSend({
+            ok: false,
+            sentTo: sendTo,
+            recipientId: recipient.id,
+            error: message,
+          });
           console.error(`[mis-email] Failed for ${sendTo}:`, message);
         }
       }
@@ -358,6 +412,14 @@ export async function runMisEmailDigest(): Promise<DigestRunResult> {
                 sentTo: sentToLabel,
                 status: 'sent',
               });
+              await auditDigestSend({
+                ok: true,
+                sentTo: sentToLabel,
+                recipientId: recipient.id,
+                attachmentCount: result.attachments.length,
+                dateRangeLabel: result.dateRange.label,
+                ruleId: rule.id,
+              });
               console.log(
                 `[mis-email] Sent to ${sentToLabel}${ccEmails.length ? ` cc ${ccEmails.join(', ')}` : ''} (${result.attachments.length} attachments, ${result.dateRange.label})`
               );
@@ -370,6 +432,13 @@ export async function runMisEmailDigest(): Promise<DigestRunResult> {
                 recipientEmail: recipient.email,
                 sentTo: sentToLabel,
                 status: 'failed',
+                error: message,
+              });
+              await auditDigestSend({
+                ok: false,
+                sentTo: sentToLabel,
+                recipientId: recipient.id,
+                ruleId: rule.id,
                 error: message,
               });
               console.error(`[mis-email] Failed for ${sentToLabel}:`, message);

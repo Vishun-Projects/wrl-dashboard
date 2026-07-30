@@ -3,6 +3,8 @@ import 'server-only';
 import { kv } from '@vercel/kv';
 import { checkRateLimit as checkRateLimitMemory } from '@/lib/security/rate-limit';
 
+export { rateLimitClassForPath } from '@/lib/security/rate-limit-class';
+
 const hasKv = Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
 
 export async function checkRateLimitKv(
@@ -29,23 +31,4 @@ export async function checkRateLimitKv(
   } catch {
     return checkRateLimitMemory(key, limit, windowMs);
   }
-}
-
-export function rateLimitClassForPath(pathname: string): {
-  limit: number;
-  windowMs: number;
-  keySuffix: string;
-} {
-  if (pathname.startsWith('/api/auth/')) {
-    return { limit: 30, windowMs: 60_000, keySuffix: 'auth' };
-  }
-  if (
-    pathname.includes('/read-model/sync') ||
-    pathname.includes('/report/corpus') ||
-    pathname.includes('/report/drilldown') ||
-    pathname.includes('export=bulk')
-  ) {
-    return { limit: 10, windowMs: 60_000, keySuffix: 'heavy' };
-  }
-  return { limit: 120, windowMs: 60_000, keySuffix: 'default' };
 }

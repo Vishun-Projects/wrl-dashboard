@@ -240,19 +240,22 @@ source "$ENV_FILE"
 echo "==> Syncing MIS upload + register CSV export code to VPS (${VPS_HOST})"
 ssh "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}'"
 
-# Prefer full tree via git when the VPS checkout exists (includes register-export).
+# Prefer full tree via git when the VPS checkout exists (includes register-export + audit).
+# Deploy checkout only: discard local VPS edits / untracked clutter that block pull. Keeps .env*.
 if ssh "$VPS_HOST" "test -d '${INSTALL_ROOT}/.git'"; then
-  echo "==> git pull on VPS"
-  ssh "$VPS_HOST" "git config --global --add safe.directory '${INSTALL_ROOT}' 2>/dev/null || true; cd '${INSTALL_ROOT}' && git fetch --all --prune && git pull --ff-only"
+  echo "==> Syncing VPS checkout to origin/main (discards local VPS edits; keeps .env*)"
+  ssh "$VPS_HOST" "git config --global --add safe.directory '${INSTALL_ROOT}' 2>/dev/null || true; cd '${INSTALL_ROOT}' && git fetch --all --prune && git reset --hard origin/main && git clean -fd -e '.env*' -e 'node_modules' -e '.cache' -e 'logs' -e '.next'"
 else
   echo "==> No .git on VPS — copying required paths"
-  ssh "$VPS_HOST" "mkdir -p ${INSTALL_ROOT}/scripts/vps-hosting ${INSTALL_ROOT}/src/features/mis-import/lib ${INSTALL_ROOT}/src/lib/auth ${INSTALL_ROOT}/src/features/register/lib/server"
+  ssh "$VPS_HOST" "mkdir -p ${INSTALL_ROOT}/scripts/vps-hosting ${INSTALL_ROOT}/src/features/mis-import/lib ${INSTALL_ROOT}/src/lib/auth ${INSTALL_ROOT}/src/features/register/lib/server ${INSTALL_ROOT}/src/lib/security"
   scp "${ROOT}/scripts/vps-hosting/mis-upload-server.ts" "${ROOT}/scripts/vps-hosting/setup-mis-upload-server.sh" \
     "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/"
   scp -r "${ROOT}/src/features/mis-import/lib/"* "${VPS_HOST}:${INSTALL_ROOT}/src/features/mis-import/lib/" 2>/dev/null || true
   scp "${ROOT}/src/lib/auth/user-auth-query.ts" "${ROOT}/src/lib/auth/rbac-catalog.ts" \
     "${ROOT}/src/lib/auth/verify-jwt-core.ts" "${ROOT}/src/lib/auth/app-user-profile.ts" \
     "${VPS_HOST}:${INSTALL_ROOT}/src/lib/auth/" 2>/dev/null || true
+  scp "${ROOT}/src/lib/security/audit.ts" "${ROOT}/src/lib/security/audit-labels.ts" \
+    "${VPS_HOST}:${INSTALL_ROOT}/src/lib/security/" 2>/dev/null || true
 fi
 
 # Always refresh the upload server entrypoints (even after git pull, in case of local edits).

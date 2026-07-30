@@ -16,24 +16,13 @@ export async function GET(request: Request) {
 
   const auth = await loadUserAuth(user.id);
   const actorEmail = auth?.profile?.email ?? user.email ?? null;
-  if (!auth?.permissions.includes('manage_users')) {
+  if (!canViewSecurityAudit(auth?.permissions)) {
     await logAccessDenied({
       request,
       actorUserId: user.id,
       actorEmail,
       statusCode: 403,
       reason: 'security_audit_forbidden',
-    });
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
-  // Use app_users profile email — bearer/cookie auth often has no email on the user object.
-  if (!canViewSecurityAudit(actorEmail)) {
-    await logAccessDenied({
-      request,
-      actorUserId: user.id,
-      actorEmail,
-      statusCode: 403,
-      reason: 'security_audit_email_forbidden',
       metadata: { actorEmail },
     });
     return NextResponse.json(

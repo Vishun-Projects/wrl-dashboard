@@ -1,6 +1,8 @@
 import { createClient } from '../supabase/server';
 import { requireSupabaseUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
+import { cookies } from 'next/headers';
+import { evaluatePortalSession } from '@/lib/auth/session-policy-server';
 
 /** Permission lookup via Postgres (works with self-hosted VPS; avoids PostgREST). */
 export async function getUserPermissions(userId: string): Promise<string[]> {
@@ -15,11 +17,37 @@ export async function getUserInfo() {
   return getUserInfoById(userId);
 }
 
-/** Resolve only authenticated user id (no app_users/permissions query). */
+/**
+ * Resolve only authenticated user id (no app_users/permissions query).
+ * Cookie sessions must also pass absolute 3-day portal TTL.
+ */
 export async function getSessionUserId(): Promise<string | null> {
   const supabase = await createClient();
   const user = await requireSupabaseUser(supabase);
-  return user?.id ?? null;
+  if (!user) return null;
+  try {
+    const cookieStore = await cookies();
+    const portal = evaluatePortalSession(cookieStore.getAll());
+    if (!portal.ok) return null;
+  } catch {
+    return null;
+  }
+  return user.id;
+}
+
+/** Absolute portal session status for cookie-based sessions. */
+export async function getPortalSessionExpiry(): Promise<{
+  ok: boolean;
+  sessionExpiresAt: string | null;
+}> {
+  try {
+    const cookieStore = await cookies();
+    const portal = evaluatePortalSession(cookieStore.getAll());
+    if (!portal.ok) return { ok: false, sessionExpiresAt: null };
+    return { ok: true, sessionExpiresAt: portal.expiresAtIso };
+  } catch {
+    return { ok: false, sessionExpiresAt: null };
+  }
 }
 
 /** Resolve full app profile + permissions for a known user id. */

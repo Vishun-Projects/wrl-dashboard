@@ -15,6 +15,7 @@ async function sendViaVpsMailRelay(params: {
   to: string;
   resetLink: string;
   recipientName?: string | null;
+  portalUrl: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const relaySecret = resolveVpsMailRelaySecret();
   if (!relaySecret) {
@@ -34,7 +35,8 @@ export async function sendRecoveryEmailForAccount(params: {
   email: string;
   recipientName?: string | null;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const redirectTo = `${resolveAppOrigin()}/reset-password`;
+  const portalUrl = resolveAppOrigin();
+  const redirectTo = `${portalUrl}/reset-password`;
 
   const { data, error } = await supabaseAdmin.auth.admin.generateLink({
     type: 'recovery',
@@ -56,6 +58,7 @@ export async function sendRecoveryEmailForAccount(params: {
       to: params.email,
       resetLink,
       recipientName: params.recipientName,
+      portalUrl,
     });
     if (!relay.ok) return relay;
     return { ok: true };
@@ -76,6 +79,7 @@ export async function sendRecoveryEmailForAccount(params: {
       to: params.email,
       resetLink,
       recipientName: params.recipientName,
+      portalUrl,
     });
     return { ok: true };
   } catch (err: unknown) {

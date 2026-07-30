@@ -1,23 +1,17 @@
 /**
  * Deployment Completion client scope.
  * - Shared visible list: DB table call_register_visible_clients (what everyone else sees).
- * - Full dynamic list / editors: emails in CALL_REGISTER_FULL_CLIENTS_EMAILS.
+ * - Full dynamic list / editors: Super Admin (`super_admin` permission).
  * - CRM TransactionEntry sync: all clients from CRM (not gated here).
  */
 
-/** Who can see the full dynamic account list + “Accounts visible” dropdown. Add emails here later. */
-export const CALL_REGISTER_FULL_CLIENTS_EMAILS = [
-  'vishunvishwakarma90211@gmail.com',
-] as const;
+import { isSuperAdmin } from '@/lib/auth/rbac-catalog';
 
-export const CALL_REGISTER_FULL_CLIENTS_EMAIL = CALL_REGISTER_FULL_CLIENTS_EMAILS[0];
-
-export function canSeeAllCallRegisterClients(email: string | null | undefined): boolean {
-  const normalized = (email ?? '').trim().toLowerCase();
-  if (!normalized) return false;
-  return (CALL_REGISTER_FULL_CLIENTS_EMAILS as readonly string[]).some(
-    (allowed) => allowed.toLowerCase() === normalized
-  );
+/** Who can see the full dynamic account list + “Accounts visible” dropdown. */
+export function canSeeAllCallRegisterClients(
+  permissions: string[] | null | undefined
+): boolean {
+  return isSuperAdmin(permissions);
 }
 
 /** Parse `clients=a,b,c` query param. */
@@ -54,17 +48,17 @@ export function normalizeVisibleClientNames(names: string[]): string[] {
 /**
  * Validate export/serial client list for the viewer.
  * Normal users must be within `allowedClients` (shared DB allowlist).
- * Full-access editors may export any non-empty selection.
+ * Super Admins may export any non-empty selection.
  */
 export function validateCallRegisterExportClients(
   clients: string[],
-  email: string | null | undefined,
+  permissions: string[] | null | undefined,
   allowedClients: readonly string[] = []
 ): { ok: true; clients: string[] } | { ok: false; error: string } {
   if (!clients.length) {
     return { ok: false, error: 'Select at least one account to export.' };
   }
-  if (canSeeAllCallRegisterClients(email)) {
+  if (canSeeAllCallRegisterClients(permissions)) {
     return { ok: true, clients };
   }
   const allowed = new Set(allowedClients.map((c) => c.trim()).filter(Boolean));

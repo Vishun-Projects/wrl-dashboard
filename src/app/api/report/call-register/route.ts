@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     if (!auth.ok) return auth.response;
 
     const userAuth = await queryUserAuth(auth.userId);
-    const allClients = canSeeAllCallRegisterClients(userAuth?.profile?.email);
+    const allClients = canSeeAllCallRegisterClients(userAuth?.permissions);
 
     const { searchParams } = new URL(req.url);
     const { dateFrom, dateTo, dateField } = resolveCallRegisterDates(searchParams);

@@ -18,15 +18,10 @@ export function validateForgotPasswordEmail(
   return { ok: true, email };
 }
 
-export function forgotPasswordStatusMessage(status: ForgotPasswordAccountStatus): string {
-  if (!status.inAuth && !status.inAppUsers) {
-    return 'No account found for this email. Contact your administrator to get portal access.';
-  }
-  if (!status.inAuth && status.inAppUsers) {
-    return 'This email is in the user list but has no login yet. Ask an administrator to complete account setup.';
-  }
-  if (status.inAuth && !status.inAppUsers) {
-    return 'Login exists but the portal profile is missing. Contact your administrator.';
-  }
-  return `Account found (${status.appUserName || status.email}). Sending password reset link…`;
+/** Audit / admin-facing reason only — never show to the requester. */
+export function forgotPasswordAuditReason(status: ForgotPasswordAccountStatus): string {
+  if (!status.inAuth && !status.inAppUsers) return 'account_not_found';
+  if (!status.inAuth && status.inAppUsers) return 'app_user_without_auth';
+  if (status.inAuth && !status.inAppUsers) return 'auth_without_app_user';
+  return 'account_ready';
 }

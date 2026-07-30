@@ -705,6 +705,14 @@ export async function buildArcpClaimsPdfBlob(
 
 export async function downloadPdfBlob(blob: Blob, fileName: string): Promise<void> {
   await triggerBlobDownload(blob, fileName);
+  const { logClientExportAction } = await import('@/lib/security/client-export-audit');
+  logClientExportAction({
+    action: 'report.export.complete',
+    reportName: 'arcp_claims',
+    format: 'pdf',
+    filename: fileName,
+    summary: `Exported ARCP claims PDF (${fileName})`,
+  });
 }
 
 export async function downloadArcpClaimsPdf(

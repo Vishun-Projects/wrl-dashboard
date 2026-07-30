@@ -5,37 +5,53 @@ Mutations, exports, and operational actions (who / what / when / result).
 Page navigations and routine report GETs are **not** logged.
 
 ### Auth / session
-- `auth.sign_in.success|failure`
+- `auth.sign_in.success|failure` — public errors stay vague (`Invalid email or password`); audit metadata keeps the real reason
 - `auth.sign_out`
+- `auth.session.expired` — absolute 3-day portal TTL (`wrl_session_started_at`)
 - `auth.token.invalid`
 - `auth.access.denied`
-- `auth.password_reset.request|complete`
+- `auth.password_reset.request` — `actor_email` = requested address; `result` + `metadata.reason` (`sent` | `account_not_found` | `send_failed` | …). UI always shows a generic “if an account exists…” message (no enumeration)
+- `auth.password_reset.complete` — profile password change **or** recovery link via `POST /api/auth/complete-password-reset`
+
+Portal sessions last **3 days from sign-in** (absolute, not idle). Expired page navigations redirect to `/login?reason=session_expired`; in-app APIs return `401` with `code: SESSION_EXPIRED` and the client shows a blocking dialog.
 
 ### Admin
-- `admin.user.create|update|delete|password_reset`
-- `admin.role.create|update|delete`
-- `admin.mis_email_org_settings.update`
+- `admin.user.create|update|delete|password_reset` — user update stores structured `metadata.changes` (roles, offices, statuses, mis_email_enabled)
+- `admin.role.create|update|delete` — role update stores `metadata.changes.permissionIds` (+ added/removed)
+- `admin.mis_email_org_settings.update` — field-level `metadata.changes`
 - `admin.mis_email_routing.create|update|delete`
 - `admin.major_repair_recipient.create|update|delete`
 - `admin.mis_email.test`
+- `admin.call_register.visible_clients.update` — `metadata.changes.added|removed`
 
 ### Profile / mail
 - `profile.update`
 - `profile.mis_email.update`
 - `profile.mis_email.send`
 
+### Notifications (system actors)
+- `notification.mis_email.digest.sent|failed` — cron digest (`actor_email` `system:mis-email-digest`)
+- `notification.major_repair.sent|failed` — post-sync alerts (`system:major-repair-alert`)
+
 ### Imports / exports / sync
 - `import.mis_client.upload.start` then `import.mis_client.upload` (finish) with `durationMs` / `processDurationMs` in metadata — chunked uploads start on first chunk, finish after import
 - `import.mis_client.delete|download`
 - `import.mis_client.source.create|update`
-- `report.export.start|complete|cancelled|failure` (CSV streams log the terminal event when the download finishes, fails, or is aborted — not when headers are sent)
+- `report.export.start|complete|cancelled|failure` — server CSV/XLSX streams; browser Excel/CSV/PDF via `POST /api/security-audit/client-action` (allowlisted). Prefer metadata: `reportName`, `format`, `rowCount`, `filters`, `durationMs`
 - `sync.manual.start|complete|failure`
+- `sync.schedule.start|complete|failure` — CLI incremental/nightly (+ daemon complete/failure; skips coalesced runs)
+
+### Security
+- `security.rate_limit.triggered` — proxy 429 denials (`rateClass`, `limit`, `retryAfterSec`)
+  - `/api/auth/forgot-password`: 5 / 15 min per IP
+  - `/api/auth/sign-in`: 10 / 15 min per IP
+  - other `/api/auth/*`: 20 / min per IP
+  - heavy report/sync routes: 10 / min; default APIs: 120 / min
 
 ### Register / profile extras
 - `register.flag.set`
 - `register.comment.create`
 - `profile.avatar.upload`
-- `admin.call_register.visible_clients.update`
 
 ## Data model
 - `public.security_audit_events` — append-only activity log
@@ -45,7 +61,7 @@ Each event stores:
 - **When:** `created_at`
 - **Who:** `actor_user_id`, `actor_email`, `metadata.actorName`
 - **What:** `event_type`, `metadata.actionLabel`, `metadata.summary`, `target_*`
-- **Result:** `result`, `status_code`, `route`, `ip`, `metadata`
+- **Result:** `result`, `status_code`, `route`, `ip`, `metadata` (may include `changes` old→new)
 
 ## Redaction
 Never persist passwords, tokens, cookies, API keys, or authorization headers.  
@@ -53,13 +69,14 @@ Matching metadata keys are stored as `[REDACTED]`.
 
 ## Review UI
 - Page: `/admin/security-audit` (sidebar: **Activity Log**)
-- Requires `manage_users` + email allowlist
+- Requires `super_admin` permission (Super Admin role)
 - Filters: action key, actor email, result, date range
 - Click a row to expand metadata
 
 ## API
 - `GET /api/admin/security-audit`
 - Query params: `eventType`, `actorUserId`, `actorEmail`, `result`, `from`, `to`, `limit`
+- `POST /api/security-audit/client-action` — authenticated beacon for client-side exports (`report.export.*` only)
 
 ## Retention
 - Recommended: 180 days

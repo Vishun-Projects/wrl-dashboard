@@ -18,14 +18,13 @@ export async function GET(req: NextRequest) {
     if (!auth.ok) return auth.response;
 
     const userAuth = await queryUserAuth(auth.userId);
-    const email = userAuth?.profile?.email;
 
     const { searchParams } = new URL(req.url);
     const client = (searchParams.get('client') || '').trim();
     const allowedClients = await listVisibleCallRegisterClients();
     const validated = validateCallRegisterExportClients(
       client ? [client] : [],
-      email,
+      userAuth?.permissions,
       allowedClients
     );
     if (!validated.ok) {

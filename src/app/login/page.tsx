@@ -1,12 +1,39 @@
 'use client';
 
-import React, { useState } from 'react';
-import Image from 'next/image';
+import React, { Suspense, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { defaultLandingPath } from '@/lib/auth/rbac-catalog';
+import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-policy';
+import {
+  AuthAlert,
+  AuthSplitShell,
+  authButtonClassName,
+  authInputClassName,
+  authLabelClassName,
+} from '@/components/auth/AuthSplitShell';
 
-export default function LoginPage() {
+function humanizeSignInError(raw: string): string {
+  const text = raw.trim();
+  if (/temporarily unavailable|could not reach|network/i.test(text)) {
+    return 'Sign-in is temporarily unavailable. Try again later.';
+  }
+  if (/required/i.test(text)) {
+    return 'Email and password are required';
+  }
+  return 'Invalid email or password';
+}
+
+function LoginForm() {
+  const searchParams = useSearchParams();
+  const sessionExpiredBanner = useMemo(
+    () => searchParams.get('reason') === SESSION_EXPIRED_REASON,
+    [searchParams]
+  );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,7 +58,9 @@ export default function LoginPage() {
 
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(payload.error || 'Failed to sign in');
+        throw new Error(
+          typeof payload.error === 'string' ? payload.error : 'Failed to sign in'
+        );
       }
 
       let landing = '/login';
@@ -45,109 +74,137 @@ export default function LoginPage() {
         /* use login fallback */
       }
 
-      // Full page load so the new session cookie is included (soft router nav can miss it).
       window.location.assign(landing);
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === 'AbortError') {
-        setError('Sign-in timed out — check DATABASE_URL / network and retry.');
+        setError('Sign-in timed out. Check your connection and try again.');
       } else {
-        setError(err instanceof Error ? err.message : 'Failed to sign in');
+        setError(
+          humanizeSignInError(err instanceof Error ? err.message : 'Failed to sign in')
+        );
       }
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-bg-soft p-6 font-sans">
-      {/* Background decoration */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-100 blur-[120px]" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-slate-200 blur-[120px]" />
+    <>
+      <div className="mb-6">
+        <h2 className="text-[1.5rem] font-semibold tracking-[-0.025em] text-slate-900">
+          Welcome back
+        </h2>
+        <p className="mt-1.5 text-[13px] leading-relaxed text-slate-500">
+          Enter your credentials to open the reports portal
+        </p>
       </div>
 
-      <div className="relative w-full max-w-[400px] bg-bg-canvas rounded-[32px] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.08)] border border-slate-100 p-10">
-        <div className="flex flex-col items-center text-center">
-          {/* Logo Section */}
-          <div className="mb-8">
-            <Image
-              src="/western-head-logo-2025.png"
-              alt="Western Logo"
-              width={160}
-              height={64}
-              className="w-40 h-auto object-contain"
-              priority
-            />
-          </div>
-
-          <div className="space-y-1 mb-10">
-            <h1 className="ui-page-title">
-              WRL Dashboard
-            </h1>
-            <p className="ui-help">
-              Western Refrigeration Pvt. Ltd.
-            </p>
-          </div>
+      {sessionExpiredBanner ? (
+        <div className="mb-5">
+          <AuthAlert variant="info">
+            Your session lasted 3 days and expired. Sign in again to continue.
+          </AuthAlert>
         </div>
+      ) : null}
 
-        <form onSubmit={handleLogin} className="space-y-6">
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="ui-field-label ml-1">
-                Email Address
-              </label>
-              <input
-                type="email"
-                required
-                className="w-full h-13 bg-bg-soft/50 border border-slate-100 rounded-2xl px-5 py-3 text-[14px] font-medium text-slate-900 placeholder:text-slate-300 outline-none focus:ring-2 focus:ring-slate-900/5 focus:border-slate-400 transition-all"
-                placeholder="name@westernequipments.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between ml-1">
-                <label className="ui-field-label">Password</label>
-                <a
-                  href="/forgot-password"
-                  className="ui-help text-slate-600 hover:text-slate-900 transition-colors"
-                >
-                  Forgot password?
-                </a>
-              </div>
-              <input
-                type="password"
-                required
-                className="w-full h-13 bg-bg-soft/50 border border-slate-100 rounded-2xl px-5 py-3 text-[14px] font-medium text-slate-900 placeholder:text-slate-300 outline-none focus:ring-2 focus:ring-slate-900/5 focus:border-slate-400 transition-all"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {error && (
-            <div className="ui-help flex items-center gap-2 p-4 bg-rose-50 rounded-2xl border border-rose-100 animate-in fade-in slide-in-from-top-1 text-rose-700">
-              <div className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
-              <p>{error}</p>
-            </div>
-          )}
-
-          <button
-            type="submit"
+      <form onSubmit={handleLogin} className="space-y-4">
+        <div className="space-y-1.5">
+          <label htmlFor="login-email" className={authLabelClassName()}>
+            Email
+          </label>
+          <input
+            id="login-email"
+            type="email"
+            required
+            autoComplete="email"
             disabled={loading}
-            className="w-full h-14 bg-slate-900 text-white rounded-2xl text-[15px] shadow-[0_20px_40px_-12px_rgba(15,23,42,0.3)] hover:bg-slate-800 transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 ui-strong"
-          >
-            {loading ? 'Authenticating...' : 'Login'}
-          </button>
-        </form>
-
-        <div className="mt-10 pt-8 border-t border-slate-50 text-center">
-          <p className="ui-micro tracking-[0.2em]">
-            Internal Access Only
-          </p>
+            className={authInputClassName()}
+            placeholder="name@westernequipments.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
         </div>
-      </div>
-    </div>
+
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <label htmlFor="login-password" className={authLabelClassName()}>
+              Password
+            </label>
+            <button
+              type="button"
+              className="text-[12px] font-semibold text-slate-600 transition-colors hover:text-slate-900 disabled:opacity-50"
+              onClick={() => setShowPassword((v) => !v)}
+              disabled={loading}
+            >
+              {showPassword ? (
+                <span className="inline-flex items-center gap-1">
+                  <EyeOff size={12} aria-hidden /> Hide
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1">
+                  <Eye size={12} aria-hidden /> Show
+                </span>
+              )}
+            </button>
+          </div>
+          <input
+            id="login-password"
+            type={showPassword ? 'text' : 'password'}
+            required
+            autoComplete="current-password"
+            disabled={loading}
+            className={authInputClassName()}
+            placeholder="Enter your password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+
+        {error ? <AuthAlert variant="error">{error}</AuthAlert> : null}
+
+        <div className="pt-1">
+          <button type="submit" disabled={loading} className={authButtonClassName()}>
+            <span
+              className="pointer-events-none absolute inset-0 opacity-50"
+              aria-hidden
+              style={{
+                background:
+                  'linear-gradient(180deg, rgba(255,255,255,0.14) 0%, transparent 45%)',
+              }}
+            />
+            {loading ? (
+              'Signing in…'
+            ) : (
+              <>
+                Sign in
+                <ArrowRight
+                  size={15}
+                  className="relative transition-transform duration-150 group-hover:translate-x-0.5"
+                  aria-hidden
+                />
+              </>
+            )}
+          </button>
+        </div>
+      </form>
+
+      <p className="mt-5 text-center text-[13px]">
+        <Link
+          href="/forgot-password"
+          className="font-medium text-slate-500 transition-colors hover:text-slate-900"
+        >
+          Forgot password?
+        </Link>
+      </p>
+    </>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <AuthSplitShell>
+      <Suspense fallback={<p className="py-8 text-center text-[13px] text-slate-500">Loading…</p>}>
+        <LoginForm />
+      </Suspense>
+    </AuthSplitShell>
   );
 }

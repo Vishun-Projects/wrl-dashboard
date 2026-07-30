@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { clearSessionCookies } from '@/lib/auth/persist-session-cookies';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
+import { clearSessionStartedAtCookie } from '@/lib/auth/session-policy-server';
 import {
   clearAuditSessionCookie,
   finishSessionAudit,
@@ -30,6 +31,7 @@ export async function POST(request: Request) {
   // Always clear httpOnly cookies first — GoTrue signOut can fail (TLS / key mismatch).
   try {
     clearSessionCookies(cookieWriter);
+    await clearSessionStartedAtCookie();
     await clearAuditSessionCookie();
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Sign-out failed';

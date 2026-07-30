@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { updateSession } from '@/lib/supabase/middleware';
 import { getClientIp } from '@/lib/security/rate-limit';
 import { checkRateLimitKv, rateLimitClassForPath } from '@/lib/security/rate-limit-kv';
+import { logSecurityEventBestEffort } from '@/lib/security/audit';
 
 /** Next.js 16 proxy entry — replaces deprecated middleware convention. */
 export async function proxy(request: NextRequest) {
@@ -15,6 +16,23 @@ export async function proxy(request: NextRequest) {
     const key = `${keySuffix}:${userKey}:${pathname.split('/').slice(0, 4).join('/')}`;
     const result = await checkRateLimitKv(key, limit, windowMs);
     if (!result.allowed) {
+      void logSecurityEventBestEffort({
+        eventType: 'security.rate_limit.triggered',
+        result: 'denied',
+        route: pathname,
+        method: request.method,
+        ip,
+        userAgent: request.headers.get('user-agent'),
+        statusCode: 429,
+        metadata: {
+          summary: `Rate limit triggered (${keySuffix})`,
+          actionLabel: 'Rate limit triggered',
+          rateClass: keySuffix,
+          limit,
+          windowMs,
+          retryAfterSec: result.retryAfterSec,
+        },
+      });
       return NextResponse.json(
         { error: 'Too many requests' },
         {

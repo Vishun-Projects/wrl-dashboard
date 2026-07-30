@@ -3,7 +3,6 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import {
   isDbSignInAvailable,
-  networkBlockedHint,
   signInViaDatabase,
 } from '@/lib/auth/db-sign-in';
 import { persistSessionCookies } from '@/lib/auth/persist-session-cookies';
@@ -14,6 +13,7 @@ import {
   setAuditSessionCookie,
   startSessionAudit,
 } from '@/lib/security/audit';
+import { setSessionStartedAtCookie } from '@/lib/auth/session-policy-server';
 
 type SignInBody = {
   email?: string;
@@ -207,7 +207,7 @@ export async function POST(request: Request) {
           statusCode: 500,
           metadata: { email, reason: 'db_sign_in_failed', message },
         });
-        return NextResponse.json({ error: message }, { status: 500 });
+        return NextResponse.json({ error: 'Invalid email or password' }, { status: 500 });
       }
     }
 
@@ -230,8 +230,8 @@ export async function POST(request: Request) {
               metadata: { email, reason: 'proxy_sign_in_failed', blocked: proxy.blocked, message: proxy.message },
             });
             return NextResponse.json(
-              { error: proxy.message },
-              { status: proxy.status === 401 ? 401 : 502 }
+              { error: 'Invalid email or password' },
+              { status: 401 }
             );
           }
         }
@@ -248,20 +248,21 @@ export async function POST(request: Request) {
         method: audit.method,
         ip: audit.ip,
         userAgent: audit.userAgent,
-        statusCode: 502,
+        statusCode: proxyBlocked ? 503 : 401,
         metadata: { email, reason: proxyBlocked ? 'network_blocked' : 'sign_in_failed' },
       });
       return NextResponse.json(
         {
           error: proxyBlocked
-            ? networkBlockedHint()
-            : 'Sign-in failed. Check email/password or Supabase configuration.',
+            ? 'Sign-in is temporarily unavailable. Try again later.'
+            : 'Invalid email or password',
         },
-        { status: 502 }
+        { status: proxyBlocked ? 503 : 401 }
       );
     }
 
     await persistSession(sessionPayload);
+    await setSessionStartedAtCookie();
     const sessionUser = sessionUserFromPayload(sessionPayload.user);
     const sessionId = await startSessionAudit({
       userId: sessionUser?.id ?? null,
@@ -299,6 +300,6 @@ export async function POST(request: Request) {
       statusCode: 500,
       metadata: { reason: 'exception', message },
     });
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: 'Sign-in is temporarily unavailable. Try again later.' }, { status: 500 });
   }
 }

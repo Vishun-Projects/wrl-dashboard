@@ -4,6 +4,10 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { useRouter, usePathname } from 'next/navigation';
 import axios from 'axios';
 import { signOutAndGoToLogin } from '@/lib/auth/sign-out-client';
+import {
+  isSessionExpiredResponse,
+  showSessionExpired,
+} from '@/lib/auth/session-expired-client';
 import { isPublicAuthRoute } from '@/lib/auth/rbac-catalog';
 import { Sidebar } from './Sidebar';
 import { PageAccessGuard } from './PageAccessGuard';
@@ -13,6 +17,7 @@ import { performanceLogEnabledClient } from '@/lib/performance/log-config';
 import { MotionProvider } from '@/components/motion';
 import { ThemeProvider } from '@/components/theme/ThemeProvider';
 import { MisEmailSendTracker } from '@/features/mis-email/ui/MisEmailSendTracker';
+import { SessionExpiredDialog } from '@/components/auth/SessionExpiredDialog';
 
 type DashboardUser = {
   id?: string;
@@ -23,6 +28,7 @@ type DashboardUser = {
   permissions: string[];
   office_ids?: string[];
   theme?: string;
+  sessionExpiresAt?: string | null;
 };
 
 interface UserContextType {
@@ -56,6 +62,21 @@ export function DashboardLayout({
   );
   const authLoadedRef = useRef(!!initialUser);
   const profileRequestRef = useRef<Promise<void> | null>(null);
+  const expiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleSessionExpiry = useCallback((expiresAtIso: string | null | undefined) => {
+    if (expiryTimerRef.current) {
+      clearTimeout(expiryTimerRef.current);
+      expiryTimerRef.current = null;
+    }
+    if (!expiresAtIso) return;
+    const expiresMs = Date.parse(expiresAtIso);
+    if (!Number.isFinite(expiresMs)) return;
+    const delay = Math.max(0, expiresMs - Date.now());
+    expiryTimerRef.current = setTimeout(() => {
+      showSessionExpired();
+    }, delay);
+  }, []);
 
   const fetchProfile = useCallback(async () => {
     if (profileRequestRef.current) {
@@ -72,6 +93,7 @@ export function DashboardLayout({
         setUserProfile(res.data);
         authLoadedRef.current = true;
         setLoadingProfile(false);
+        scheduleSessionExpiry(res.data.sessionExpiresAt);
         return;
       } catch (err: unknown) {
         const unauthorized =
@@ -81,7 +103,14 @@ export function DashboardLayout({
           setUserProfile(null);
           authLoadedRef.current = false;
           if (!isPublicAuthRoute(pathname)) {
-            void signOutAndGoToLogin();
+            if (
+              axios.isAxiosError(err) &&
+              isSessionExpiredResponse(err.response?.status ?? 0, err.response?.data)
+            ) {
+              showSessionExpired();
+            } else {
+              void signOutAndGoToLogin();
+            }
           }
           setLoadingProfile(false);
           return;
@@ -103,13 +132,17 @@ export function DashboardLayout({
     });
     profileRequestRef.current = req;
     return req;
-  }, [pathname, router]);
+  }, [pathname, router, scheduleSessionExpiry]);
 
   useEffect(() => {
     if (isPublicAuthRoute(pathname)) {
       setUserProfile(null);
       authLoadedRef.current = false;
       setLoadingProfile(false);
+      if (expiryTimerRef.current) {
+        clearTimeout(expiryTimerRef.current);
+        expiryTimerRef.current = null;
+      }
       return;
     }
     if (authLoadedRef.current && userProfile) {
@@ -118,6 +151,12 @@ export function DashboardLayout({
     }
     void fetchProfile();
   }, [pathname, fetchProfile, userProfile]);
+
+  useEffect(() => {
+    return () => {
+      if (expiryTimerRef.current) clearTimeout(expiryTimerRef.current);
+    };
+  }, []);
 
   if (isPublicAuthRoute(pathname)) {
     return <>{children}</>;
@@ -128,6 +167,7 @@ export function DashboardLayout({
       <ThemeProvider serverTheme={initialUser?.theme}>
       <MotionProvider>
       <CallDetailDialogProvider>
+        <SessionExpiredDialog />
         <MisEmailSendTracker />
         {performanceLogEnabledClient() ? <PerformanceMetricsLogger /> : null}
         <div className="flex flex-col md:flex-row h-screen overflow-hidden w-screen bg-bg-soft text-slate-700 font-sans">

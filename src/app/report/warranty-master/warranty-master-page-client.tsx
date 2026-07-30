@@ -32,6 +32,7 @@ import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import { PageAlert } from '@/components/ui/PageAlert';
 import { feedback } from '@/lib/ui/feedback';
 import { triggerBlobDownload } from '@/features/report/lib/summary-excel-export';
+import { logClientExportAction } from '@/lib/security/client-export-audit';
 import { usePageAlert } from '@/hooks/usePageAlert';
 import { DataTableLoading } from '@/components/ui/DataTableLoading';
 
@@ -309,8 +310,23 @@ export default function WarrantyMasterPage() {
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
       const fileName = `warranty-master-${new Date().toISOString().slice(0, 10)}.csv`;
       await triggerBlobDownload(blob, fileName);
+      logClientExportAction({
+        action: 'report.export.complete',
+        reportName: 'warranty_master',
+        format: 'csv',
+        filename: fileName,
+        rowCount: displayRows.length,
+        summary: `Exported warranty master (${displayRows.length} rows)`,
+      });
       feedback.actionSuccess(`Downloading ${fileName}`);
     } catch (err: unknown) {
+      logClientExportAction({
+        action: 'report.export.failure',
+        reportName: 'warranty_master',
+        format: 'csv',
+        summary: 'Warranty master export failed',
+        metadata: { message: err instanceof Error ? err.message : String(err) },
+      });
       feedback.actionFailed(
         sanitizeUserFacingMessage(err instanceof Error ? err.message : 'Export failed')
       );

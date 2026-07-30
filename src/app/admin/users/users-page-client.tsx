@@ -185,9 +185,17 @@ export default function AdminUsersPage() {
       setUsers(res.data.users);
       setRoles(res.data.roles);
     } catch (err) {
-      const status = (err as { response?: { status?: number } }).response?.status;
+      const status = (err as { response?: { status?: number; data?: unknown } }).response?.status;
+      const data = (err as { response?: { data?: unknown } }).response?.data;
       if (status === 401) {
-        router.push('/login');
+        const { isSessionExpiredResponse, showSessionExpired } = await import(
+          '@/lib/auth/session-expired-client'
+        );
+        if (isSessionExpiredResponse(status, data)) {
+          showSessionExpired();
+        } else {
+          router.push('/login');
+        }
         return;
       }
       if (status === 403) {

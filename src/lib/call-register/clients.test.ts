@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CALL_REGISTER_FULL_CLIENTS_EMAIL,
-  CALL_REGISTER_FULL_CLIENTS_EMAILS,
   canSeeAllCallRegisterClients,
   normalizeVisibleClientNames,
   parseCallRegisterClientList,
@@ -9,11 +7,10 @@ import {
 } from '@/lib/call-register/clients';
 
 describe('call-register client visibility', () => {
-  it('gates full dynamic list to allowlisted emails', () => {
-    expect(CALL_REGISTER_FULL_CLIENTS_EMAILS).toContain(CALL_REGISTER_FULL_CLIENTS_EMAIL);
-    expect(canSeeAllCallRegisterClients(CALL_REGISTER_FULL_CLIENTS_EMAIL)).toBe(true);
-    expect(canSeeAllCallRegisterClients('VishunVishwakarma90211@gmail.com')).toBe(true);
-    expect(canSeeAllCallRegisterClients('other@example.com')).toBe(false);
+  it('gates full dynamic list to super_admin', () => {
+    expect(canSeeAllCallRegisterClients(['super_admin'])).toBe(true);
+    expect(canSeeAllCallRegisterClients(['view_all_offices', 'manage_users'])).toBe(false);
+    expect(canSeeAllCallRegisterClients([])).toBe(false);
     expect(canSeeAllCallRegisterClients(null)).toBe(false);
   });
 
@@ -26,25 +23,25 @@ describe('call-register client visibility', () => {
     const allowed = ['UB', 'Nestle'];
     const bad = validateCallRegisterExportClients(
       ['UB', 'UnknownCo'],
-      'ops@example.com',
+      ['tab_mis_deployment_completion'],
       allowed
     );
     expect(bad.ok).toBe(false);
-    const ok = validateCallRegisterExportClients(['UB', 'Nestle'], 'ops@example.com', allowed);
+    const ok = validateCallRegisterExportClients(
+      ['UB', 'Nestle'],
+      ['tab_mis_deployment_completion'],
+      allowed
+    );
     expect(ok).toEqual({ ok: true, clients: ['UB', 'Nestle'] });
   });
 
   it('rejects normal users when no allowlist is passed', () => {
-    const bad = validateCallRegisterExportClients(['UB'], 'ops@example.com');
+    const bad = validateCallRegisterExportClients(['UB'], ['tab_mis_deployment_completion']);
     expect(bad.ok).toBe(false);
   });
 
-  it('allows any non-empty client for the full-access email', () => {
-    const ok = validateCallRegisterExportClients(
-      ['Custom Account'],
-      CALL_REGISTER_FULL_CLIENTS_EMAIL,
-      ['UB']
-    );
+  it('allows any non-empty client for super_admin', () => {
+    const ok = validateCallRegisterExportClients(['Custom Account'], ['super_admin'], ['UB']);
     expect(ok).toEqual({ ok: true, clients: ['Custom Account'] });
   });
 });

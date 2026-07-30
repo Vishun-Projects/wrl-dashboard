@@ -4,6 +4,10 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { signOutAndGoToLogin } from '@/lib/auth/sign-out-client';
 import {
+  isSessionExpiredResponse,
+  showSessionExpired,
+} from '@/lib/auth/session-expired-client';
+import {
   canAccessMisTab,
   defaultMisTab,
   visibleTabs,
@@ -2145,7 +2149,14 @@ export default function ReportPageClient() {
       if (unauthorized) {
         registerAuthFailedRef.current = true;
         fetchControllerRef.current?.abort();
-        void signOutAndGoToLogin();
+        if (
+          axios.isAxiosError(err) &&
+          isSessionExpiredResponse(err.response?.status ?? 0, err.response?.data)
+        ) {
+          showSessionExpired();
+        } else {
+          void signOutAndGoToLogin();
+        }
         return false;
       }
       reportPerf('fetchData', 'request failed (error toast)', opStart, {

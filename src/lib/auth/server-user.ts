@@ -10,6 +10,7 @@ import {
   verifyLocalAccessToken,
 } from '@/lib/auth/verify-jwt-core';
 import { logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
+import { evaluatePortalSession } from '@/lib/auth/session-policy-server';
 
 export type ServerAuthUser = {
   id: string;
@@ -120,7 +121,11 @@ export async function requireRequestUser(
   try {
     const cookieStore = await cookies();
     const fromCookies = await resolveSupabaseUserFromCookies(cookieStore.getAll());
-    if (fromCookies) return fromCookies;
+    if (fromCookies) {
+      const portal = evaluatePortalSession(cookieStore.getAll());
+      if (!portal.ok) return null;
+      return fromCookies;
+    }
   } catch {
     /* cookies() unavailable outside request scope */
   }

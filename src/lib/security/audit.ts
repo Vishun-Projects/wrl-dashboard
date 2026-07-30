@@ -109,13 +109,14 @@ export function requestAuditContext(request: Request): RequestAuditContext {
 export async function setAuditSessionCookie(sessionId: string): Promise<void> {
   // Dynamic import keeps next/headers out of the audit module graph for Vitest/route tests.
   const { cookies } = await import('next/headers');
+  const { SESSION_MAX_AGE_SEC } = await import('@/lib/auth/session-policy');
   const cookieStore = await cookies();
   cookieStore.set(AUDIT_SESSION_COOKIE, sessionId, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     path: '/',
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: SESSION_MAX_AGE_SEC,
   });
 }
 

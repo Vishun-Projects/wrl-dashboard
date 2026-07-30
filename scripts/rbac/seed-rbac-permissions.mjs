@@ -36,6 +36,11 @@ const ALL_PERMISSION_SEED = [
   { name: 'tab_mis_deployment_completion', description: 'Deployment Completion tab on MIS Reports' },
   { name: 'view_all_offices', description: 'National data scope across all branches' },
   {
+    name: 'super_admin',
+    description:
+      'Privileged portal controls (Activity Log, Call Register account visibility). Do not grant to HOD.',
+  },
+  {
     name: 'mis_email_send',
     description: 'Compose, send, and receive scheduled MIS digests (admin still opts each user in)',
   },

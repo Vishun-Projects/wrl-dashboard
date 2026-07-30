@@ -36,6 +36,7 @@ import {
   exportDistributionIdleCsv,
 } from '@/features/distribution/lib/export-csv';
 import { triggerBlobDownload } from '@/features/report';
+import { logClientExportAction } from '@/lib/security/client-export-audit';
 import { feedback } from '@/lib/ui/feedback';
 import { buildCorpusViewDateFilter, filterCorpusCallsByViewDate } from '@/features/report';
 import { loadEngineerRosterForBranch, getCachedEngineerRoster } from '@/features/distribution/lib/engineer-roster-cache';
@@ -913,23 +914,55 @@ export default function CallDistributionPage() {
             onClick={() => {
               try {
                 const stamp = new Date().toISOString().slice(0, 10);
+                let rowCount = 0;
                 if (displayedFranchiseeList.length > 0) {
                   const csv = exportDistributionFranchiseeCsv(displayedFranchiseeList);
+                  const filename = `distribution-franchisees-${stamp}.csv`;
                   void triggerBlobDownload(
                     new Blob([csv], { type: 'text/csv;charset=utf-8' }),
-                    `distribution-franchisees-${stamp}.csv`
+                    filename
                   );
+                  rowCount += displayedFranchiseeList.length;
+                  logClientExportAction({
+                    action: 'report.export.complete',
+                    reportName: 'distribution',
+                    format: 'csv',
+                    filename,
+                    rowCount: displayedFranchiseeList.length,
+                    summary: `Exported distribution franchisees (${displayedFranchiseeList.length} rows)`,
+                  });
                 }
                 if (displayedIdleAssigneeRows.length > 0) {
                   const csv = exportDistributionIdleCsv(displayedIdleAssigneeRows);
+                  const filename = `distribution-idle-techs-${stamp}.csv`;
                   void triggerBlobDownload(
                     new Blob([csv], { type: 'text/csv;charset=utf-8' }),
-                    `distribution-idle-techs-${stamp}.csv`
+                    filename
                   );
+                  rowCount += displayedIdleAssigneeRows.length;
+                  logClientExportAction({
+                    action: 'report.export.complete',
+                    reportName: 'distribution',
+                    format: 'csv',
+                    filename,
+                    rowCount: displayedIdleAssigneeRows.length,
+                    summary: `Exported distribution idle techs (${displayedIdleAssigneeRows.length} rows)`,
+                  });
+                }
+                if (rowCount === 0) {
+                  feedback.actionFailed('Nothing to export');
+                  return;
                 }
                 feedback.actionSuccess('CSV download started');
               } catch (err) {
                 console.error(err);
+                logClientExportAction({
+                  action: 'report.export.failure',
+                  reportName: 'distribution',
+                  format: 'csv',
+                  summary: 'Distribution CSV export failed',
+                  metadata: { message: err instanceof Error ? err.message : String(err) },
+                });
                 feedback.actionFailed('CSV export failed');
               }
             }}

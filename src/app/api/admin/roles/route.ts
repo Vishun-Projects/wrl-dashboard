@@ -188,6 +188,20 @@ export async function PUT(request: Request) {
   try {
     const { id, name, description, permissionIds } = await request.json();
 
+    const beforePermRows = (await prisma.$queryRawUnsafe(
+      'SELECT permission_id FROM public.app_role_permissions WHERE role_id = $1',
+      id
+    )) as Array<{ permission_id: string }>;
+    const beforePermissionIds = beforePermRows.map((r) => String(r.permission_id)).sort();
+    const nextPermissionIds = Array.isArray(permissionIds)
+      ? permissionIds.map((p: unknown) => String(p)).sort()
+      : [];
+    const beforeRoleRows = (await prisma.$queryRawUnsafe(
+      'SELECT name, description FROM public.app_roles WHERE id = $1 LIMIT 1',
+      id
+    )) as Array<{ name: string | null; description: string | null }>;
+    const beforeRole = beforeRoleRows[0] ?? null;
+
     await prisma.$queryRawUnsafe(
       'UPDATE public.app_roles SET name = $1, description = $2 WHERE id = $3',
       name, description, id
@@ -205,6 +219,8 @@ export async function PUT(request: Request) {
     }
 
     clearRolesCache();
+    const added = nextPermissionIds.filter((p) => !beforePermissionIds.includes(p));
+    const removed = beforePermissionIds.filter((p) => !nextPermissionIds.includes(p));
     await logSecurityEventBestEffort({
       eventType: 'admin.role.update',
       result: 'success',
@@ -219,7 +235,18 @@ export async function PUT(request: Request) {
       targetType: 'app_role',
       targetId: String(id),
       targetLabel: String(name ?? ''),
-      metadata: { permissionCount: Array.isArray(permissionIds) ? permissionIds.length : 0 },
+      metadata: {
+        summary: `Updated role ${String(name ?? id)}`,
+        actionLabel: 'Updated role',
+        permissionCount: nextPermissionIds.length,
+        changes: {
+          name: { old: beforeRole?.name ?? null, new: name },
+          description: { old: beforeRole?.description ?? null, new: description },
+          permissionIds: { old: beforePermissionIds, new: nextPermissionIds },
+          permissionIdsAdded: added,
+          permissionIdsRemoved: removed,
+        },
+      },
     });
     return NextResponse.json({ success: true });
   } catch (err: unknown) {

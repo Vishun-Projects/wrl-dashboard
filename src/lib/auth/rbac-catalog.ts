@@ -182,11 +182,19 @@ export const RBAC_PAGES: RbacPage[] = [
 
 export const MIS_EMAIL_SEND_PERMISSION = 'mis_email_send';
 
+export const SUPER_ADMIN_PERMISSION = 'super_admin';
+
 export const RBAC_CAPABILITIES: RbacCapability[] = [
   {
     permission: 'view_all_offices',
     label: 'View all offices',
     description: 'National data scope across all branches',
+  },
+  {
+    permission: SUPER_ADMIN_PERMISSION,
+    label: 'Super Admin',
+    description:
+      'Privileged portal controls (Activity Log, Call Register account visibility). Do not grant to HOD.',
   },
   {
     permission: MIS_EMAIL_SEND_PERMISSION,
@@ -242,9 +250,7 @@ export function expandPermissionList(permissions: string[]): string[] {
 
 /** Legacy role column values that imply national office scope (prefer view_all_offices). */
 export const LEGACY_HOD_ROLE_NAMES = [
-  'super_admin',
   'hod',
-  'Super Admin',
   'Office Administrator',
   'Account Auditor',
 ] as const;
@@ -400,9 +406,8 @@ export function canAccessPath(
     return hasPermission(permissions, 'manage_users');
   }
 
-  // Email allowlist is enforced on the page/API; path gate only needs manage_users.
   if (path === '/admin/security-audit' || path.startsWith('/admin/security-audit/')) {
-    return hasPermission(permissions, 'manage_users');
+    return hasPermission(permissions, SUPER_ADMIN_PERMISSION);
   }
 
   const page = pageByPath(path);
@@ -443,6 +448,11 @@ export function hasAnyReportPageAccess(permissions: string[]): boolean {
 
 export function hasCapability(permissions: string[], permission: string): boolean {
   return hasPermission(permissions, permission);
+}
+
+/** Privileged portal controls — above HOD (view_all_offices alone is not enough). */
+export function isSuperAdmin(permissions: string[] | null | undefined): boolean {
+  return hasCapability(permissions ?? [], SUPER_ADMIN_PERMISSION);
 }
 
 /** Client-safe office scope: empty office_ids = all branches; non-empty = restrict. */

@@ -29,12 +29,18 @@ import { logAction } from '@/lib/security/audit';
 export const maxDuration = 300;
 
 export async function GET(req: NextRequest) {
+  const startedAt = Date.now();
+  let actor: { userId: string | null; email: string | null; name: string | null } = {
+    userId: null,
+    email: null,
+    name: null,
+  };
   try {
     const auth = await authenticateArcpClaimsRequest(req, { kind: 'detail' });
     if (auth instanceof NextResponse) return auth;
 
     const userAuth = await loadUserAuth(auth.userId);
-    const actor = {
+    actor = {
       userId: auth.userId,
       email: userAuth?.profile?.email ?? null,
       name: userAuth?.profile?.name ?? null,
@@ -52,6 +58,29 @@ export async function GET(req: NextRequest) {
       (startDate &&
         endDate &&
         postgresCoversFullRange(startDate, endDate, coverage, dateColumn));
+
+    const filters = {
+      startDate,
+      endDate,
+      dateColumn,
+      includeTravel,
+      postgresOnly,
+    };
+
+    await logAction({
+      request: req,
+      action: 'report.export.start',
+      actor,
+      result: 'started',
+      statusCode: 202,
+      target: { type: 'arcp_claims_detail_export', label: fileName },
+      summary: 'Started ARCP claims detail export',
+      metadata: {
+        reportName: 'arcp_claims_detail',
+        format: 'csv',
+        filters,
+      },
+    });
 
     // One indexed Postgres scan for any date basis — never re-run weekly job chunks on export.
     if (postgresOnly) {
@@ -86,7 +115,13 @@ export async function GET(req: NextRequest) {
         statusCode: 200,
         target: { type: 'arcp_claims_detail_export', label: fileName },
         summary: `Exported ARCP claims detail (${preparedRows.length} rows)`,
-        metadata: { rowCount: preparedRows.length, startDate, endDate, dateColumn, postgresOnly: true },
+        metadata: {
+          reportName: 'arcp_claims_detail',
+          format: 'csv',
+          rowCount: preparedRows.length,
+          filters,
+          durationMs: Date.now() - startedAt,
+        },
       });
       return createArcpClaimsDetailCsvResponse(preparedRows, fileName, { totals });
     }
@@ -109,7 +144,13 @@ export async function GET(req: NextRequest) {
       statusCode: 200,
       target: { type: 'arcp_claims_detail_export', label: fileName },
       summary: `Exported ARCP claims detail (${preparedRows.length} rows)`,
-      metadata: { rowCount: preparedRows.length, startDate, endDate, dateColumn, postgresOnly: false },
+      metadata: {
+        reportName: 'arcp_claims_detail',
+        format: 'csv',
+        rowCount: preparedRows.length,
+        filters,
+        durationMs: Date.now() - startedAt,
+      },
     });
 
     return createArcpClaimsDetailCsvResponse(preparedRows, fileName, { totals });
@@ -118,12 +159,17 @@ export async function GET(req: NextRequest) {
     await logAction({
       request: req,
       action: 'report.export.failure',
-      actor: { userId: null, email: null, name: null },
+      actor,
       result: 'failure',
       statusCode: 500,
       target: { type: 'arcp_claims_detail_export' },
       summary: 'ARCP claims detail export failed',
-      metadata: { message: err instanceof Error ? err.message : String(err) },
+      metadata: {
+        reportName: 'arcp_claims_detail',
+        format: 'csv',
+        durationMs: Date.now() - startedAt,
+        message: err instanceof Error ? err.message : String(err),
+      },
     });
     if (isCrmOutOfMemoryError(err)) {
       return NextResponse.json(

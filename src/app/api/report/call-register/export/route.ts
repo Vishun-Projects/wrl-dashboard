@@ -19,6 +19,12 @@ import { logAction } from '@/lib/security/audit';
 export const maxDuration = 300;
 
 export async function GET(req: NextRequest) {
+  const startedAt = Date.now();
+  let actor: { userId: string | null; email: string | null; name: string | null } = {
+    userId: null,
+    email: null,
+    name: null,
+  };
   try {
     const auth = await resolveRequestReportSecurity(req, {
       pageId: 'mis_reports',
@@ -28,7 +34,7 @@ export async function GET(req: NextRequest) {
 
     const userAuth = await queryUserAuth(auth.userId);
     const email = userAuth?.profile?.email;
-    const actor = {
+    actor = {
       userId: auth.userId,
       email: email ?? null,
       name: userAuth?.profile?.name ?? null,
@@ -39,13 +45,33 @@ export async function GET(req: NextRequest) {
       searchParams.get('clients') || searchParams.get('client') || '';
     const parsed = parseCallRegisterClientList(clientsParam);
     const allowedClients = await listVisibleCallRegisterClients();
-    const validated = validateCallRegisterExportClients(parsed, email, allowedClients);
+    const validated = validateCallRegisterExportClients(
+      parsed,
+      userAuth?.permissions,
+      allowedClients
+    );
     if (!validated.ok) {
       return NextResponse.json({ error: validated.error }, { status: 400 });
     }
 
     const { dateFrom, dateTo, dateField } = resolveCallRegisterDates(searchParams);
     const params = { dateFrom, dateTo, dateField };
+    const filters = { clients: validated.clients, ...params };
+
+    await logAction({
+      request: req,
+      action: 'report.export.start',
+      actor,
+      result: 'started',
+      statusCode: 202,
+      target: { type: 'call_register_export' },
+      summary: 'Started Call Register export',
+      metadata: {
+        reportName: 'call_register',
+        format: 'xlsx',
+        filters,
+      },
+    });
 
     const rows = await fetchCallRegisterSerialExportRows(validated.clients, params);
     const workbook = await buildCallRegisterSerialWorkbook(rows);
@@ -59,7 +85,14 @@ export async function GET(req: NextRequest) {
       statusCode: 200,
       target: { type: 'call_register_export', label: filename },
       summary: `Exported Call Register (${rows.length} rows)`,
-      metadata: { clientCount: validated.clients.length, rowCount: rows.length, ...params },
+      metadata: {
+        reportName: 'call_register',
+        format: 'xlsx',
+        rowCount: rows.length,
+        clientCount: validated.clients.length,
+        filters,
+        durationMs: Date.now() - startedAt,
+      },
     });
 
     return new NextResponse(new Uint8Array(buffer), {
@@ -75,12 +108,17 @@ export async function GET(req: NextRequest) {
     await logAction({
       request: req,
       action: 'report.export.failure',
-      actor: { userId: null, email: null, name: null },
+      actor,
       result: 'failure',
       statusCode: 500,
       target: { type: 'call_register_export' },
       summary: 'Call Register export failed',
-      metadata: { message: err instanceof Error ? err.message : String(err) },
+      metadata: {
+        reportName: 'call_register',
+        format: 'xlsx',
+        durationMs: Date.now() - startedAt,
+        message: err instanceof Error ? err.message : String(err),
+      },
     });
     return NextResponse.json({ error: toUserFacingError(err) }, { status: 500 });
   }

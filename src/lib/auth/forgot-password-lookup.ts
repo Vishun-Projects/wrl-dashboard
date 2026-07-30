@@ -2,9 +2,9 @@ import 'server-only';
 
 import { withAppClient } from '@/lib/read-model/db';
 import { findAuthUserIdByEmail } from '@/lib/auth/db-create-user';
-import { forgotPasswordStatusMessage, type ForgotPasswordAccountStatus } from '@/lib/auth/forgot-password-core';
+import type { ForgotPasswordAccountStatus } from '@/lib/auth/forgot-password-core';
 
-/** Internal portal — explicit account lookup for forgot-password UX. */
+/** Internal portal — explicit account lookup for forgot-password (audit + send gate). */
 export async function lookupForgotPasswordAccount(
   email: string
 ): Promise<ForgotPasswordAccountStatus> {
@@ -27,5 +27,3 @@ export async function lookupForgotPasswordAccount(
     appUserName: appRow?.name ?? null,
   };
 }
-
-export { forgotPasswordStatusMessage };

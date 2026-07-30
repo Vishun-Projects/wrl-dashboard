@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { resolveAppOrigin } from '@/lib/auth/site-url';
+import { resolvePortalUrlForResetEmail } from '@/lib/auth/portal-url-from-reset-link';
 import { resolveSmtpConfig } from '@/lib/mail/smtp';
 
 function createTransport() {
@@ -37,9 +37,13 @@ export async function sendPasswordResetEmail(params: {
   to: string;
   resetLink: string;
   recipientName?: string | null;
+  portalUrl?: string | null;
 }): Promise<{ messageId: string }> {
   const { smtp, transport } = createTransport();
-  const portalUrl = resolveAppOrigin();
+  const portalUrl = resolvePortalUrlForResetEmail({
+    resetLink: params.resetLink,
+    portalUrl: params.portalUrl,
+  });
   const greeting = params.recipientName?.trim() || params.to;
 
   const html = `<!DOCTYPE html>
@@ -48,7 +52,7 @@ export async function sendPasswordResetEmail(params: {
     <p style="margin:0 0 8px;font-size:11px;letter-spacing:.08em;color:#64748b">WESTERN REFRIGERATION</p>
     <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Reset your WRL Dashboard password</h1>
     <p style="margin:0 0 20px;font-size:14px;color:#334155;line-height:1.5">Hello ${greeting},</p>
-    <p style="margin:0 0 20px;font-size:14px;color:#334155;line-height:1.5">Use the link below to choose a new password. This link expires after a short time.</p>
+    <p style="margin:0 0 20px;font-size:14px;color:#334155;line-height:1.5">Use the link below to choose a new password. This link can only be used once and expires after a short time.</p>
     <p style="margin:0 0 24px"><a href="${params.resetLink}" style="font-size:15px;font-weight:600;color:#0f172a">Reset password</a></p>
     <p style="margin:0;font-size:12px;color:#94a3b8">If you did not request this, you can ignore this email.<br>Portal: <a href="${portalUrl}">${portalUrl}</a></p>
   </div>
@@ -56,7 +60,7 @@ export async function sendPasswordResetEmail(params: {
 
   const text = `Hello ${greeting},
 
-Reset your WRL Dashboard password:
+Reset your WRL Dashboard password (one-time link):
 ${params.resetLink}
 
 If you did not request this, ignore this email.

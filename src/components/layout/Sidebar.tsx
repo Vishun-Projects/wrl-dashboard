@@ -94,8 +94,7 @@ export function Sidebar({ user }: SidebarProps) {
   };
 
   const pageNav = visiblePages(user?.permissions ?? []);
-  const canSeeSecurityAudit =
-    (user?.permissions ?? []).includes('manage_users') && canViewSecurityAudit(user?.email);
+  const canSeeSecurityAudit = canViewSecurityAudit(user?.permissions);
   const iconForPath = (path: string) =>
     path === '/report'
       ? FileSpreadsheet

@@ -248,6 +248,7 @@ const server = createServer(async (req, res) => {
       to?: string;
       resetLink?: string;
       recipientName?: string | null;
+      portalUrl?: string | null;
     };
 
     if (!body.to?.trim() || !body.resetLink?.trim()) {
@@ -260,6 +261,7 @@ const server = createServer(async (req, res) => {
       to: body.to.trim(),
       resetLink: body.resetLink.trim(),
       recipientName: body.recipientName,
+      portalUrl: body.portalUrl,
     });
 
     res.writeHead(200, { 'Content-Type': 'application/json' });

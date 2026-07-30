@@ -13,11 +13,20 @@ import {
   triggerBlobDownload,
   type PreparedFileExport,
 } from '@/features/report/lib/summary-excel-export';
+import { logClientExportAction } from '@/lib/security/client-export-audit';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+function formatFromFilename(filename: string): string {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.xlsx')) return 'xlsx';
+  if (lower.endsWith('.csv')) return 'csv';
+  if (lower.endsWith('.pdf')) return 'pdf';
+  return 'file';
 }
 
 export type UseReportExportQueueOptions = {
@@ -53,6 +62,14 @@ export function useReportExportQueue(options: UseReportExportQueueOptions = {}) 
         abortCurrentRef.current = () => controller.abort();
         patchItem(job.id, { status: 'running', progress: undefined });
 
+        const reportName = job.sourceTab ?? job.label;
+        logClientExportAction({
+          action: 'report.export.start',
+          reportName,
+          summary: `Started export (${job.label})`,
+          metadata: { kind: job.kind ?? 'standard', label: job.label },
+        });
+
         const ctx: ExportQueueRunContext = {
           signal: controller.signal,
           onProgress: (progress) => patchItem(job.id, { progress }),
@@ -78,6 +95,14 @@ export function useReportExportQueue(options: UseReportExportQueueOptions = {}) 
             progress: undefined,
             warning: result.warning,
           });
+          logClientExportAction({
+            action: 'report.export.complete',
+            reportName,
+            format: formatFromFilename(result.filename),
+            filename: result.filename,
+            summary: `Exported ${result.filename}`,
+            metadata: { kind: job.kind ?? 'standard', label: job.label },
+          });
           onDownloadStartedRef.current?.(result.filename);
           onExportCompleteRef.current?.({
             filename: result.filename,
@@ -92,6 +117,18 @@ export function useReportExportQueue(options: UseReportExportQueueOptions = {}) 
             status: cancelled ? 'cancelled' : 'failed',
             error: cancelled ? undefined : err instanceof Error ? err.message : 'Export failed',
             progress: undefined,
+          });
+          logClientExportAction({
+            action: cancelled ? 'report.export.cancelled' : 'report.export.failure',
+            reportName,
+            summary: cancelled
+              ? `Cancelled export (${job.label})`
+              : `Export failed (${job.label})`,
+            metadata: {
+              kind: job.kind ?? 'standard',
+              label: job.label,
+              message: err instanceof Error ? err.message : String(err),
+            },
           });
         }
 

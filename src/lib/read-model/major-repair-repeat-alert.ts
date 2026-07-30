@@ -17,10 +17,16 @@ import {
   assertOrgOutboundMailEnabled,
   getMisEmailOrgSettings,
 } from '@/lib/org-settings/mis-email';
+import { logAction } from '@/lib/security/audit';
 
 const CRM_TIMEOUT_MS = 45_000;
 const REPAIR_ENRICH_CHUNK = 150;
 const TARGET_REPAIRS = ['Motor Replaced', 'Compressor Replaced', 'Gas Charging Done'] as const;
+const MAJOR_REPAIR_SYSTEM_ACTOR = {
+  userId: null,
+  email: 'system:major-repair-alert',
+  name: 'Major repair alert',
+};
 
 export const DEFAULT_MAJOR_REPAIR_REPEAT_TO = 'sunil.sawant@westernequipments.com';
 export const DEFAULT_MAJOR_REPAIR_REPEAT_CC = 'vishnu.vishwakarma@westernequipments.com';
@@ -317,6 +323,25 @@ async function sendRepeatAlertEmail(params: {
   console.log(
     `[sync-worker] major-repair-repeat-alert: sent email for ${params.triggerTrn} (serial ${params.serial}, branch ${params.branchName}, count ${params.callCount}) to=${to.join(',')} cc=${cc.join(',') || '-'} branchRecipients=${branchLabel} messageId=${info.messageId}`
   );
+  await logAction({
+    action: 'notification.major_repair.sent',
+    actor: MAJOR_REPAIR_SYSTEM_ACTOR,
+    result: 'success',
+    statusCode: 200,
+    target: {
+      type: 'major_repair_alert',
+      id: params.triggerTrn,
+      label: params.serial,
+    },
+    summary: `Sent major-repair alert for ${params.triggerTrn}`,
+    metadata: {
+      serial: params.serial,
+      branchName: params.branchName,
+      callCount: params.callCount,
+      recipientCount: to.length + cc.length,
+      messageId: info.messageId ?? null,
+    },
+  });
 }
 
 /** Post-sync hook: email when a newly synced major+repair call exceeds repeat threshold. */
@@ -407,10 +432,29 @@ export async function checkMajorRepairRepeatAlerts(upsertedRows: HotRow[]): Prom
         await recordAlertSent(row.vtrnno, serial, callCount);
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       console.warn(
         `[sync-worker] major-repair-repeat-alert: send/record failed for ${trigger.vtrnno}:`,
-        err instanceof Error ? err.message : err
+        message
       );
+      await logAction({
+        action: 'notification.major_repair.failed',
+        actor: MAJOR_REPAIR_SYSTEM_ACTOR,
+        result: 'failure',
+        statusCode: 500,
+        target: {
+          type: 'major_repair_alert',
+          id: trigger.vtrnno,
+          label: serial,
+        },
+        summary: `Major-repair alert failed for ${trigger.vtrnno}`,
+        metadata: {
+          serial,
+          branchName: trigger.branch_name ?? '',
+          callCount,
+          error: message,
+        },
+      });
     }
   }
 }

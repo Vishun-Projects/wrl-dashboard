@@ -7,6 +7,7 @@ import {
   stringToBase64URL,
 } from '@supabase/ssr';
 import { getSupabaseAuthStorageKey } from '@/lib/auth/supabase-cookie';
+import { SESSION_MAX_AGE_SEC } from '@/lib/auth/session-policy';
 
 type SessionUser = {
   id: string;
@@ -93,7 +94,8 @@ export function persistSessionCookies(
   };
   const setCookieOptions = {
     path: DEFAULT_COOKIE_OPTIONS.path,
-    maxAge: DEFAULT_COOKIE_OPTIONS.maxAge,
+    // Cap portal session below @supabase/ssr 400-day default.
+    maxAge: SESSION_MAX_AGE_SEC,
     sameSite: 'lax' as const,
     httpOnly: DEFAULT_COOKIE_OPTIONS.httpOnly,
   };

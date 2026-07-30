@@ -34,7 +34,8 @@ describe('canAccessPath', () => {
   it('requires manage_users for admin sync', () => {
     expect(canAccessPath(['manage_users'], '/admin/sync')).toBe(true);
     expect(canAccessPath(['manage_roles'], '/admin/sync')).toBe(false);
-    expect(canAccessPath(['manage_users'], '/admin/security-audit')).toBe(true);
+    expect(canAccessPath(['super_admin'], '/admin/security-audit')).toBe(true);
+    expect(canAccessPath(['manage_users'], '/admin/security-audit')).toBe(false);
     expect(canAccessPath(['manage_roles'], '/admin/security-audit')).toBe(false);
   });
 

@@ -16,8 +16,16 @@ function csvRow(cells: (string | number | null | undefined)[]): string {
 
 async function downloadCsv(csv: string, fileName: string): Promise<void> {
   const { triggerBlobDownload } = await import('@/features/report/download');
+  const { logClientExportAction } = await import('@/lib/security/client-export-audit');
   const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' });
   await triggerBlobDownload(blob, fileName);
+  logClientExportAction({
+    action: 'report.export.complete',
+    reportName: 'arcp_claims',
+    format: 'csv',
+    filename: fileName,
+    summary: `Exported ARCP claims CSV (${fileName})`,
+  });
 }
 
 export function buildArcpClaimsCsv(model: ArcpClaimsTableModel): string {

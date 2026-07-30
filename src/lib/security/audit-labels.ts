@@ -3,6 +3,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'auth.sign_in.success': 'Signed in',
   'auth.sign_in.failure': 'Sign-in failed',
   'auth.sign_out': 'Signed out',
+  'auth.session.expired': 'Session expired',
   'auth.token.invalid': 'Invalid token',
   'auth.access.denied': 'Access denied',
   'auth.password_reset.request': 'Requested password reset',
@@ -42,6 +43,14 @@ export const ACTION_LABELS: Record<string, string> = {
   'sync.manual.start': 'Started manual sync',
   'sync.manual.complete': 'Completed manual sync',
   'sync.manual.failure': 'Manual sync failed',
+  'sync.schedule.start': 'Started scheduled sync',
+  'sync.schedule.complete': 'Completed scheduled sync',
+  'sync.schedule.failure': 'Scheduled sync failed',
+  'security.rate_limit.triggered': 'Rate limit triggered',
+  'notification.mis_email.digest.sent': 'Sent MIS digest email',
+  'notification.mis_email.digest.failed': 'MIS digest email failed',
+  'notification.major_repair.sent': 'Sent major-repair alert',
+  'notification.major_repair.failed': 'Major-repair alert failed',
 };
 
 export function actionLabelFor(eventType: string): string {

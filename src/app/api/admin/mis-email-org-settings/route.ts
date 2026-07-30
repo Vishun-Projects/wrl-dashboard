@@ -85,6 +85,14 @@ export async function PUT(request: Request) {
     }
 
     const settings = await saveMisEmailOrgSettings(patch, access.user.id);
+    const changes: Record<string, { old: unknown; new: unknown }> = {};
+    for (const key of Object.keys(patch) as (keyof MisEmailOrgSettings)[]) {
+      if (!(key in current)) continue;
+      changes[key] = {
+        old: current[key],
+        new: settings[key],
+      };
+    }
     await logSecurityEventBestEffort({
       eventType: 'admin.mis_email_org_settings.update',
       result: 'success',
@@ -98,7 +106,12 @@ export async function PUT(request: Request) {
       statusCode: 200,
       targetType: 'mis_email_org_settings',
       targetId: 'global',
-      metadata: { keys: Object.keys(patch).sort() },
+      metadata: {
+        summary: 'Updated MIS email org settings',
+        actionLabel: 'Updated MIS email org settings',
+        keys: Object.keys(patch).sort(),
+        changes,
+      },
     });
     // Config save never sends mail.
     return NextResponse.json({ settings });

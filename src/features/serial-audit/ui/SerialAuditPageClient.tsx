@@ -45,6 +45,7 @@ import { callCorpusStore } from '@/features/report';
 import { MAX_CLIENT_CORPUS_DAYS } from '@/lib/trhcalls/query';
 import { exportSerialAuditCsv } from '@/features/serial-audit/lib/export-csv';
 import { triggerBlobDownload } from '@/features/report';
+import { logClientExportAction } from '@/lib/security/client-export-audit';
 import { feedback } from '@/lib/ui/feedback';
 import {
   defaultSerialAuditRepairFilterValues,
@@ -1306,10 +1307,19 @@ export default function SerialAuditPage() {
             try {
               const stamp = new Date().toISOString().slice(0, 10);
               const csv = exportSerialAuditCsv(displayedRows);
+              const filename = `serial-audit-${stamp}.csv`;
               void triggerBlobDownload(
                 new Blob([csv], { type: 'text/csv;charset=utf-8' }),
-                `serial-audit-${stamp}.csv`
+                filename
               );
+              logClientExportAction({
+                action: 'report.export.complete',
+                reportName: 'serial_audit',
+                format: 'csv',
+                filename,
+                rowCount: displayedRows.length,
+                summary: `Exported serial audit (${displayedRows.length} rows)`,
+              });
               feedback.actionSuccess('CSV download started');
             } catch (err) {
               console.error(err);

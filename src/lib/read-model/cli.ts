@@ -30,9 +30,109 @@ import {
   parseAuditCliArgs,
   runFullReadModelAudit,
 } from '@/lib/read-model/audit/run-full-audit';
+import { logAction } from '@/lib/security/audit';
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
 const DAEMON_MAX_CONSECUTIVE_FAILURES = Number(process.env.SYNC_DAEMON_MAX_FAILURES ?? 5) || 5;
+
+const SYNC_SCHEDULE_ACTOR = {
+  userId: null,
+  email: 'system:sync-schedule',
+  name: 'Sync schedule',
+};
+
+/** ponytail: skip audit when coalesced/skipped; daemon omits start to avoid ~480 noise rows/day. */
+async function auditScheduledSync<T extends { ok?: boolean; skipped?: boolean; reason?: string }>(
+  mode: string,
+  run: () => Promise<T>,
+  opts?: { logStart?: boolean }
+): Promise<T> {
+  const startedAt = Date.now();
+  const logStart = opts?.logStart !== false;
+  if (logStart) {
+    await logAction({
+      action: 'sync.schedule.start',
+      actor: SYNC_SCHEDULE_ACTOR,
+      result: 'started',
+      statusCode: 202,
+      summary: `Started scheduled sync (${mode})`,
+      metadata: { mode },
+    });
+  }
+  try {
+    const result = await run();
+    const durationMs = Date.now() - startedAt;
+    if (result?.skipped) {
+      return result;
+    }
+    if (result && 'ok' in result && result.ok === false) {
+      await logAction({
+        action: 'sync.schedule.failure',
+        actor: SYNC_SCHEDULE_ACTOR,
+        result: 'failure',
+        statusCode: 500,
+        summary: `Scheduled sync failed (${mode})`,
+        metadata: { mode, durationMs, reason: result.reason ?? null, result },
+      });
+      return result;
+    }
+    await logAction({
+      action: 'sync.schedule.complete',
+      actor: SYNC_SCHEDULE_ACTOR,
+      result: 'completed',
+      statusCode: 200,
+      summary: `Completed scheduled sync (${mode})`,
+      metadata: { mode, durationMs, result },
+    });
+    return result;
+  } catch (err) {
+    const durationMs = Date.now() - startedAt;
+    const message = err instanceof Error ? err.message : String(err);
+    await logAction({
+      action: 'sync.schedule.failure',
+      actor: SYNC_SCHEDULE_ACTOR,
+      result: 'failure',
+      statusCode: 500,
+      summary: `Scheduled sync failed (${mode})`,
+      metadata: { mode, durationMs, message },
+    });
+    throw err;
+  }
+}
+
+async function auditScheduledNightly(run: () => Promise<void>): Promise<void> {
+  const startedAt = Date.now();
+  await logAction({
+    action: 'sync.schedule.start',
+    actor: SYNC_SCHEDULE_ACTOR,
+    result: 'started',
+    statusCode: 202,
+    summary: 'Started scheduled sync (nightly)',
+    metadata: { mode: 'nightly' },
+  });
+  try {
+    await run();
+    await logAction({
+      action: 'sync.schedule.complete',
+      actor: SYNC_SCHEDULE_ACTOR,
+      result: 'completed',
+      statusCode: 200,
+      summary: 'Completed scheduled sync (nightly)',
+      metadata: { mode: 'nightly', durationMs: Date.now() - startedAt },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await logAction({
+      action: 'sync.schedule.failure',
+      actor: SYNC_SCHEDULE_ACTOR,
+      result: 'failure',
+      statusCode: 500,
+      summary: 'Scheduled sync failed (nightly)',
+      metadata: { mode: 'nightly', durationMs: Date.now() - startedAt, message },
+    });
+    throw err;
+  }
+}
 
 function formatSyncWorkerError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
@@ -61,7 +161,11 @@ async function runDaemon(): Promise<void> {
   let consecutiveFailures = 0;
   for (;;) {
     try {
-      const result = await runIncrementalSync();
+      const result = await auditScheduledSync(
+        'daemon-incremental',
+        () => runIncrementalSync(),
+        { logStart: false }
+      );
       if (result.ok && !result.skipped) {
         consecutiveFailures = 0;
       } else if (!result.ok) {
@@ -107,7 +211,7 @@ async function main(): Promise<void> {
       await runInitialBackfill({ resume: process.env.SYNC_BACKFILL_RESUME === 'true' });
       break;
     case 'incremental':
-      await runIncrementalSync();
+      await auditScheduledSync('incremental', () => runIncrementalSync());
       break;
     case 'pipeline-reconcile': {
       const result = await runPipelineReconcile();
@@ -188,7 +292,7 @@ async function main(): Promise<void> {
       await runFillHotGaps();
       break;
     case 'nightly':
-      await runNightlyReconcile();
+      await auditScheduledNightly(() => runNightlyReconcile());
       break;
     case 'retention':
       await runRetentionJobs();

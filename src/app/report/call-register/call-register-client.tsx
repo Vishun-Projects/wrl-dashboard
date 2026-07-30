@@ -24,6 +24,7 @@ import { fetchWithRetry } from '@/lib/net/fetch-with-retry';
 import { canSeeAllCallRegisterClients } from '@/lib/call-register/clients';
 import type { CallRegisterSerialExportRow } from '@/features/report/lib/call-register/shape';
 import { buildCallRegisterSerialWorkbook } from '@/features/report/lib/call-register/excel-export';
+import { logClientExportAction } from '@/lib/security/client-export-audit';
 
 function getDefaultDates() {
   const now = new Date();
@@ -82,9 +83,7 @@ export function CallRegisterClient({
   isExporting: isExportingFromParent = false,
 }: CallRegisterClientProps = {}) {
   const { userProfile } = useUser();
-  const userEmail =
-    typeof userProfile?.email === 'string' ? userProfile.email : undefined;
-  const showVisibilityFilter = canSeeAllCallRegisterClients(userEmail);
+  const showVisibilityFilter = canSeeAllCallRegisterClients(userProfile?.permissions);
 
   const defaultDates = getDefaultDates();
   const [draftFrom, setDraftFrom] = useState(defaultDates.from);
@@ -394,9 +393,31 @@ export function CallRegisterClient({
         await triggerBlobDownload(prepared.blob, prepared.filename, {
           objectUrl: prepared.objectUrl,
         });
+        logClientExportAction({
+          action: 'report.export.complete',
+          reportName: 'call_register',
+          format: 'xlsx',
+          filename: prepared.filename,
+          summary: `Exported Call Register (${prepared.filename})`,
+        });
       } catch (err: unknown) {
-        if ((err as Error).name === 'AbortError') return;
+        if ((err as Error).name === 'AbortError') {
+          logClientExportAction({
+            action: 'report.export.cancelled',
+            reportName: 'call_register',
+            format: 'xlsx',
+            summary: 'Cancelled Call Register export',
+          });
+          return;
+        }
         console.error('[call-register/export]', err);
+        logClientExportAction({
+          action: 'report.export.failure',
+          reportName: 'call_register',
+          format: 'xlsx',
+          summary: 'Call Register export failed',
+          metadata: { message: err instanceof Error ? err.message : String(err) },
+        });
         setError(err instanceof Error ? err.message : 'Failed to export Excel. Please try again.');
       } finally {
         if (exportAbortRef.current === abort) exportAbortRef.current = null;

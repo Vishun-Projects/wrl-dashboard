@@ -13,6 +13,8 @@ import {
   resolveLocationAuditSecurity,
   runLocationAuditExport,
 } from '@/features/location-audit/lib/server';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
+import { logAction } from '@/lib/security/audit';
 
 export async function GET(req: NextRequest) {
   try {
@@ -58,11 +60,37 @@ export async function GET(req: NextRequest) {
     const format = searchParams.get('format');
 
     if (format === 'csv') {
+      const startedAt = Date.now();
       const rows = await runLocationAuditExport(params);
       const csv = exportLocationAuditCsv(rows);
+      const filename = `location-audit-${params.startDate}-${params.endDate}.csv`;
+      const userAuth = await loadUserAuth(user.id);
+      await logAction({
+        request: req,
+        action: 'report.export.complete',
+        actor: {
+          userId: user.id,
+          email: userAuth?.profile?.email ?? user.email ?? null,
+          name: userAuth?.profile?.name ?? null,
+        },
+        result: 'completed',
+        statusCode: 200,
+        target: { type: 'location_audit_export', label: filename },
+        summary: `Exported location audit (${rows.length} rows)`,
+        metadata: {
+          reportName: 'location_audit',
+          format: 'csv',
+          rowCount: rows.length,
+          filters: {
+            startDate: params.startDate,
+            endDate: params.endDate,
+          },
+          durationMs: Date.now() - startedAt,
+        },
+      });
       const { body, headers } = gzippedCsvPayload(
         csv,
-        `location-audit-${params.startDate}-${params.endDate}.csv`,
+        filename,
         req.headers.get('accept-encoding')
       );
       return new NextResponse(body, { headers });
