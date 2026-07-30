@@ -23,7 +23,7 @@ const PIPELINE_BATCH = Math.max(
 );
 const TRN_FETCH_CHUNK = Math.max(10, Number(process.env.SYNC_PIPELINE_TRN_CHUNK ?? 40) || 40);
 
-// tech_solved: engineer closed (bfastclose) but BM approval / bsolved may still be pending
+// tech_solved: engineer fast-close (bfastclose) while bsolved still pending
 const ACTIVE_PIPELINE_BUCKETS = ['assigned', 'open_unallocated', 'tech_solved'] as const;
 
 export type PipelineReconcileResult = {

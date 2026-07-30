@@ -91,10 +91,10 @@ function buildSingleStatusCondition(statusFilter: string): string {
     return ` AND (tc.nengineer > 0 OR (tc.nengineer IS NOT NULL AND CAST(tc.nengineer AS NVARCHAR(50)) <> '0')) AND NOT ${solvedStage} AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)`;
   }
   if (statusFilter === 'Tech. Solve Call') {
-    return ` AND ${solvedStage} AND (tc.bapproval = 'False' OR tc.bapproval IS NULL OR tc.bapproval = '0' OR tc.bapproval = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)`;
+    return ` AND (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND NOT (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1 OR tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)`;
   }
   if (statusFilter === 'Closed') {
-    return ` AND ${solvedStage} AND (tc.bapproval = 'True' OR tc.bapproval = '1' OR tc.bapproval = 1) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)`;
+    return ` AND (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1 OR tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0)`;
   }
   if (statusFilter === 'Cancelled') {
     return " AND (tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 AND tc.ncancelreason <> 2)";
@@ -614,7 +614,7 @@ export async function handleRegisterGet(req: NextRequest) {
       tc.callStatus as Status,
       case
         when tc.ncancelreason is not null and tc.ncancelreason <> 0 and tc.ncancelreason <> 2 then 'Cancel'
-        when (tc.bfastclose in ('True','true','1') or tc.bfastclose = 1) and (tc.bapproval in ('True','true','1') or tc.bapproval = 1) then 'Closed'
+        when (tc.bsolved in ('True','true','1') or tc.bsolved = 1) then 'Closed'
         when (tc.bfastclose in ('True','true','1') or tc.bfastclose = 1) then 'TechSolved'
         else 'Open'
       end as callstatus,
@@ -837,8 +837,8 @@ export async function handleRegisterGet(req: NextRequest) {
             SUM(CASE WHEN NOT (((tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) OR (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1) OR (tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1))) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_calls,
             SUM(CASE WHEN (tc.nengineer = 0 OR tc.nengineer IS NULL OR CAST(tc.nengineer AS NVARCHAR(50)) = '0') AND NOT (((tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) OR (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1) OR (tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1))) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as open_unallocated,
             SUM(CASE WHEN (tc.nengineer > 0 OR (tc.nengineer IS NOT NULL AND CAST(tc.nengineer AS NVARCHAR(50)) <> '0')) AND NOT (((tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) OR (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1) OR (tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1))) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as assigned,
-            SUM(CASE WHEN (((tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) OR (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1) OR (tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1))) AND (tc.bapproval = 'False' OR tc.bapproval IS NULL OR tc.bapproval = '0' OR tc.bapproval = 0) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as tech_solved,
-            SUM(CASE WHEN (((tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) OR (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1) OR (tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1))) AND (tc.bapproval = 'True' OR tc.bapproval = '1' OR tc.bapproval = 1) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as closed
+            SUM(CASE WHEN (tc.bfastclose = 'True' OR tc.bfastclose = '1' OR tc.bfastclose = 1) AND NOT (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1 OR tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as tech_solved,
+            SUM(CASE WHEN (tc.bsolved = 'True' OR tc.bsolved = '1' OR tc.bsolved = 1 OR tc.callsolved = 'True' OR tc.callsolved = '1' OR tc.callsolved = 1) AND (tc.ncancelreason IS NULL OR tc.ncancelreason = 0) THEN 1 ELSE 0 END) as closed
           `,
         tableName,
         condition,

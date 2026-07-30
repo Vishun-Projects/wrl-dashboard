@@ -51,16 +51,19 @@ export type RegisterSortBy = keyof typeof REGISTER_SORT_SQL;
 
 const POSTGRES_SOLVED_STAGE_SQL =
   '(COALESCE(h.bfastclose, false) = true OR COALESCE(h.bsolved, false) = true)';
+/** Engineer fast-close, not yet CRM/BM solved — matches CallDetail + location-audit. */
+const POSTGRES_TECH_SOLVED_SQL =
+  '(COALESCE(h.ncancelreason, 0) = 0 AND COALESCE(h.bfastclose, false) = true AND COALESCE(h.bsolved, false) = false)';
+const POSTGRES_CLOSED_SQL =
+  '(COALESCE(h.ncancelreason, 0) = 0 AND COALESCE(h.bsolved, false) = true)';
 
 const POSTGRES_REGISTER_STATUS_SQL: Record<string, string> = {
   'Open Unallocated':
     `(COALESCE(h.ncancelreason, 0) = 0) AND ${POSTGRES_SOLVED_STAGE_SQL} = false AND COALESCE(h.nengineer, 0) = 0`,
   Assigned:
     `(COALESCE(h.ncancelreason, 0) = 0) AND ${POSTGRES_SOLVED_STAGE_SQL} = false AND COALESCE(h.nengineer, 0) <> 0`,
-  'Tech. Solve Call':
-    `(COALESCE(h.ncancelreason, 0) = 0) AND ${POSTGRES_SOLVED_STAGE_SQL} = true AND COALESCE(h.bapproval, false) = false`,
-  Closed:
-    `(COALESCE(h.ncancelreason, 0) = 0) AND ${POSTGRES_SOLVED_STAGE_SQL} = true AND COALESCE(h.bapproval, false) = true`,
+  'Tech. Solve Call': POSTGRES_TECH_SOLVED_SQL,
+  Closed: POSTGRES_CLOSED_SQL,
   Cancelled: 'COALESCE(h.ncancelreason, 0) NOT IN (0, 2)',
 };
 
@@ -511,14 +514,13 @@ export async function queryRegisterTotalsFromPostgres(
       count(*) FILTER (
         WHERE
           COALESCE(h.ncancelreason, 0) = 0
-          AND ${POSTGRES_SOLVED_STAGE_SQL}
-          AND COALESCE(h.bapproval, false) = false
+          AND COALESCE(h.bfastclose, false) = true
+          AND COALESCE(h.bsolved, false) = false
       )::int AS tech_solved,
       count(*) FILTER (
         WHERE
           COALESCE(h.ncancelreason, 0) = 0
-          AND ${POSTGRES_SOLVED_STAGE_SQL}
-          AND COALESCE(h.bapproval, false) = true
+          AND COALESCE(h.bsolved, false) = true
       )::int AS closed
     FROM calls_latest_hot h
     ${HOT_OFFICE_JOINS_SQL}

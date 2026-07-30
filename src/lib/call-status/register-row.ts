@@ -39,14 +39,11 @@ export function classifyRegisterRowStatus(row: Record<string, unknown>): Registe
   if (isRegisterRowTransferred(row)) return 'transferred';
 
   const isCancelled = isRegisterRowCancelled(row);
-  const hasBmApproval =
-    truthyCrmFlag(row.bapproval) ||
-    row.bm_approved_at != null ||
-    (row.bm_approved_date != null && String(row.bm_approved_date).trim() !== '');
-  const isTechSolvedStage =
-    truthyCrmFlag(row.bfastclose) || truthyCrmFlag(row.bsolved) || truthyCrmFlag(row.callsolved);
-  const isClosed = !isCancelled && isTechSolvedStage && hasBmApproval;
-  const isTechSolved = !isCancelled && isTechSolvedStage && !hasBmApproval;
+  // Closed = BM/CRM solved (bsolved). Tech. Solve = engineer fast-close still pending bsolved.
+  // Do NOT use bapproval here — CRM sets bapproval=1 on most open calls too.
+  const isClosed =
+    !isCancelled && (truthyCrmFlag(row.bsolved) || truthyCrmFlag(row.callsolved));
+  const isTechSolved = !isCancelled && !isClosed && truthyCrmFlag(row.bfastclose);
   const isAssigned =
     Boolean(row.nengineer && String(row.nengineer) !== '0') &&
     !isClosed &&

@@ -185,15 +185,15 @@ describe('register composite keyset', () => {
     });
   });
 
-  it('maps Closed status filter to tech solved + BM approved', () => {
+  it('maps Closed status filter to bsolved', () => {
     const { sql } = buildWhere(baseParams({ status: 'Closed' }));
-    expect(sql).toContain('COALESCE(h.bfastclose, false) = true');
-    expect(sql).toContain('COALESCE(h.bapproval, false) = true');
+    expect(sql).toContain('COALESCE(h.bsolved, false) = true');
   });
 
-  it('maps Tech. Solve Call status filter to tech solved only', () => {
+  it('maps Tech. Solve Call status filter to bfastclose without bsolved', () => {
     const { sql } = buildWhere(baseParams({ status: 'Tech. Solve Call' }));
     expect(sql).toContain('COALESCE(h.bfastclose, false) = true');
-    expect(sql).toContain('COALESCE(h.bapproval, false) = false');
+    expect(sql).toContain('COALESCE(h.bsolved, false) = false');
   });
 });
+
