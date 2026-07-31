@@ -134,9 +134,11 @@ describe('buildSummaryDashboardWorkbook excludeCancelled', () => {
   });
 });
 
-function findAiTotalCell(sheet: { eachRow: Function }): number {
+function findAiTotalCell(sheet: {
+  eachRow: (cb: (row: { getCell: (n: number) => { value: unknown } }) => void) => void;
+}): number {
   let total = -1;
-  sheet.eachRow((row: { getCell: (n: number) => { value: unknown } }) => {
+  sheet.eachRow((row) => {
     if (String(row.getCell(1).value ?? '') === 'AI TOTAL') {
       total = Number(row.getCell(2).value ?? 0);
     }
