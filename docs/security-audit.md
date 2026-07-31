@@ -19,6 +19,7 @@ Portal sessions last **3 days from sign-in** (absolute, not idle). Expired page 
 - `admin.user.create|update|delete|password_reset` — user update stores structured `metadata.changes` (roles, offices, statuses, mis_email_enabled)
 - `admin.role.create|update|delete` — role update stores `metadata.changes.permissionIds` (+ added/removed)
 - `admin.mis_email_org_settings.update` — field-level `metadata.changes`
+- `admin.vps_cron.pause|resume` — Super Admin pause map for managed VPS jobs
 - `admin.mis_email_routing.create|update|delete`
 - `admin.major_repair_recipient.create|update|delete`
 - `admin.mis_email.test`
@@ -81,6 +82,11 @@ Matching metadata keys are stored as `[REDACTED]`.
 ## Retention
 - Recommended: 180 days
 - Cleanup helper: `deleteExpiredSecurityAuditData(180)`
+
+## API hardening (P0)
+- **Safe errors:** API catch handlers use `jsonSafeError` / `safeErrorMessage` (`src/lib/api/safe-error.ts`) so clients never get raw stack/DB internals.
+- **CSRF:** Cookie-authenticated mutations call `assertSameOriginMutation` (`src/lib/api/same-origin.ts`). Bearer-token requests skip the check.
+- **TLS (Postgres):** `resolvePgSsl` verifies for `sslmode=verify-ca|verify-full`. Cloud pooler still uses TLS without hostname verify unless `PG_SSL_REJECT_UNAUTHORIZED=true`.
 
 ## Deploy
 1. Ensure `docs/read-model-phase1-schema/25-security-audit.sql` is applied

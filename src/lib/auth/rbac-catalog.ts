@@ -194,7 +194,7 @@ export const RBAC_CAPABILITIES: RbacCapability[] = [
     permission: SUPER_ADMIN_PERMISSION,
     label: 'Super Admin',
     description:
-      'Privileged portal controls (Activity Log, Call Register account visibility). Do not grant to HOD.',
+      'Privileged portal controls (Activity Log, VPS Cron, Call Register account visibility). Do not grant to HOD.',
   },
   {
     permission: MIS_EMAIL_SEND_PERMISSION,
@@ -407,6 +407,10 @@ export function canAccessPath(
   }
 
   if (path === '/admin/security-audit' || path.startsWith('/admin/security-audit/')) {
+    return hasPermission(permissions, SUPER_ADMIN_PERMISSION);
+  }
+
+  if (path === '/admin/vps-cron' || path.startsWith('/admin/vps-cron/')) {
     return hasPermission(permissions, SUPER_ADMIN_PERMISSION);
   }
 

@@ -18,7 +18,7 @@ vi.mock('@/lib/auth/load-user-auth', () => ({
   loadUserAuth: (...args: unknown[]) => loadUserAuth(...args),
 }));
 
-vi.mock('@/features/mis-email/lib/routing-rules', () => ({
+vi.mock('@/features/mis-email/services/routing-rules', () => ({
   canManageMisEmailRouting: (user: {
     role?: string;
     permissions?: string[];

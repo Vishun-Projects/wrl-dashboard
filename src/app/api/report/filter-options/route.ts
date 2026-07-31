@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'crypto';
-import { resolveRegisterPostgresRequest } from '@/features/register/lib/server/postgres-request';
+import { resolveRegisterPostgresRequest } from '@/features/register/server/postgres-request';
 import { queryRegisterFilterOptionsFromPostgres } from '@/lib/read-model/queries/register';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 

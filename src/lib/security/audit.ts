@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { withAppClient } from '@/lib/read-model/db';
 import { actionLabelFor } from '@/lib/security/audit-labels';
+import { REQUEST_ID_HEADER } from '@/lib/observability/request-id';
 
 export { ACTION_LABELS, actionLabelFor } from '@/lib/security/audit-labels';
 
@@ -47,6 +48,7 @@ export type RequestAuditContext = {
   ip: string | null;
   userAgent: string | null;
   sessionId: string | null;
+  requestId: string | null;
 };
 
 function sanitizeText(value: unknown): string | null {
@@ -96,6 +98,7 @@ export function requestAuditContext(request: Request): RequestAuditContext {
   const forwardedFor = request.headers.get('x-forwarded-for');
   const ip = sanitizeText(forwardedFor?.split(',')[0] ?? request.headers.get('x-real-ip'));
   const userAgent = sanitizeText(request.headers.get('user-agent'));
+  const requestId = sanitizeText(request.headers.get(REQUEST_ID_HEADER));
   const cookieMap = parseCookieHeader(request.headers.get('cookie'));
   return {
     route: sanitizeText(url.pathname),
@@ -103,6 +106,7 @@ export function requestAuditContext(request: Request): RequestAuditContext {
     ip,
     userAgent,
     sessionId: validSessionId(cookieMap[AUDIT_SESSION_COOKIE]),
+    requestId,
   };
 }
 
@@ -246,6 +250,7 @@ export async function logAccessDenied(opts: {
     userAgent: ctx.userAgent,
     statusCode: opts.statusCode,
     metadata: {
+      requestId: ctx.requestId,
       reason: opts.reason,
       ...(opts.metadata ?? {}),
     },
@@ -290,6 +295,7 @@ export async function logAction(input: LogActionInput): Promise<void> {
         ip: sanitizeText(input.ip) ?? null,
         userAgent: sanitizeText(input.userAgent) ?? null,
         sessionId: null as string | null,
+        requestId: null as string | null,
       };
   const summary =
     sanitizeText(input.summary) ??
@@ -309,6 +315,7 @@ export async function logAction(input: LogActionInput): Promise<void> {
     targetLabel: input.target?.label ?? null,
     statusCode: input.statusCode ?? null,
     metadata: {
+      requestId: ctx.requestId,
       summary,
       actorName: input.actor.name ?? null,
       actionLabel: actionLabelFor(input.action),

@@ -41,20 +41,20 @@ vi.mock('@/lib/db/prisma', () => ({
   },
 }));
 
-vi.mock('@/features/mis-email/lib/recipients', () => ({
+vi.mock('@/features/mis-email/services/recipients', () => ({
   loadDigestRecipientById: (...args: unknown[]) => loadDigestRecipientById(...args),
 }));
 
-vi.mock('@/features/mis-email/lib/send-jobs', () => ({
+vi.mock('@/features/mis-email/services/send-jobs', () => ({
   createMisEmailSendJob: (...args: unknown[]) => createMisEmailSendJob(...args),
   updateMisEmailSendJob: vi.fn(),
 }));
 
-vi.mock('@/features/mis-email/lib/compose-digest', () => ({
+vi.mock('@/features/mis-email/services/compose-digest', () => ({
   sendMisEmailComposeBatch: vi.fn(),
 }));
 
-vi.mock('@/features/mis-email/lib/org-settings', () => ({
+vi.mock('@/features/mis-email/services/org-settings', () => ({
   getMisEmailOrgSettings: vi.fn(async () => ({
     allowedEmailDomains: ['westernequipments.com'],
     outboundMailEnabled: true,

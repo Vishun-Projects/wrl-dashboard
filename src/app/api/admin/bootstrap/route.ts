@@ -8,6 +8,7 @@ import {
   getAdminBootstrapCache,
   setAdminBootstrapCache,
 } from '@/lib/auth/admin-bootstrap-cache';
+import { jsonSafeError } from '@/lib/api/safe-error';
 
 const USER_LIST_SQL = `
   SELECT u.id, u.name, u.email, u.role, u.role_id, u.office_ids, u.visible_statuses,
@@ -81,7 +82,6 @@ export async function GET(request: Request) {
       headers: { 'Cache-Control': 'private, max-age=15', 'X-Cache': fresh ? 'BYPASS' : 'MISS' },
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Bootstrap failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Bootstrap failed');
   }
 }

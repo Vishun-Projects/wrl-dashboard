@@ -8,7 +8,8 @@ import {
   canManageMisEmailRouting,
   listMisEmailRoutingOptions,
   normalizeMisEmailRoutingClientSourceMode,
-} from '@/features/mis-email/lib/routing-rules';
+} from '@/features/mis-email/services/routing-rules';
+import { jsonSafeError } from '@/lib/api/safe-error';
 
 const TTL_MS = 5 * 60 * 1000;
 const cache = new Map<string, { expiresAt: number; payload: unknown }>();
@@ -75,7 +76,6 @@ export async function GET(request: NextRequest) {
     cache.set(key, { expiresAt: Date.now() + TTL_MS, payload: response });
     return NextResponse.json(response);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to load routing options';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to load routing options');
   }
 }

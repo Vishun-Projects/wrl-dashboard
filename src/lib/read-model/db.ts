@@ -74,28 +74,43 @@ export function appDatabaseBulkStatementTimeoutMs(): number {
   return 300_000;
 }
 
-/** Supabase cloud requires TLS; loopback and self-hosted VPS pooler use plain TCP. */
-export function resolvePgSsl(connectionString: string): false | { rejectUnauthorized: false } {
+function pgSslRejectUnauthorized(): boolean {
+  const v = process.env.PG_SSL_REJECT_UNAUTHORIZED?.trim().toLowerCase();
+  return v === 'true' || v === '1' || v === 'yes';
+}
+
+/**
+ * Supabase cloud requires TLS; loopback and self-hosted VPS pooler use plain TCP.
+ * ponytail: cloud pooler defaults to TLS without hostname verify (Supabase cert mismatch).
+ * Upgrade: set PG_SSL_REJECT_UNAUTHORIZED=true + NODE_EXTRA_CA_CERTS / PG_SSL_CA when CA is trusted.
+ */
+export function resolvePgSsl(
+  connectionString: string
+): false | { rejectUnauthorized: boolean } {
+  const forceVerify = pgSslRejectUnauthorized();
+  const insecureTls = (): { rejectUnauthorized: boolean } => ({
+    rejectUnauthorized: forceVerify ? true : false,
+  });
+  const verifiedTls = (): { rejectUnauthorized: true } => ({ rejectUnauthorized: true });
+
   const override = process.env.PG_SSL?.trim().toLowerCase();
   if (override === 'false' || override === '0' || override === 'disable') return false;
   if (override === 'true' || override === '1' || override === 'require') {
-    return { rejectUnauthorized: false };
+    return forceVerify ? verifiedTls() : insecureTls();
   }
 
   try {
     const url = new URL(connectionString.replace(/^postgresql:/, 'postgres:'));
     const host = url.hostname.toLowerCase();
-    
+
     const sslmode = url.searchParams.get('sslmode')?.toLowerCase();
 
     if (sslmode === 'disable' || sslmode === 'allow') return false;
-    if (
-      sslmode === 'require' ||
-      sslmode === 'verify-ca' ||
-      sslmode === 'verify-full' ||
-      sslmode === 'prefer'
-    ) {
-      return { rejectUnauthorized: false };
+    if (sslmode === 'verify-ca' || sslmode === 'verify-full') {
+      return verifiedTls();
+    }
+    if (sslmode === 'require' || sslmode === 'prefer') {
+      return insecureTls();
     }
 
     // VPS MIS cron / sync on same host: Supavisor on loopback is plain TCP
@@ -110,7 +125,7 @@ export function resolvePgSsl(connectionString: string): false | { rejectUnauthor
 
     // Supabase Cloud pooler
     if (host.endsWith('.supabase.co') || host.includes('pooler.supabase.com')) {
-      return { rejectUnauthorized: false };
+      return insecureTls();
     }
   } catch {
     /* fall through */

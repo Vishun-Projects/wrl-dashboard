@@ -5,8 +5,12 @@ import { requireRequestUser } from '@/lib/auth/server-user';
 import { isAllowedAvatarUrl, profilePatchSchema } from '@/lib/api/schemas/mutations';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { logAccessDenied, logAction } from '@/lib/security/audit';
+import { safeErrorMessage } from '@/lib/api/safe-error';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 
 export async function PATCH(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
 
@@ -89,7 +93,7 @@ export async function PATCH(request: Request) {
       metadata: { message: err instanceof Error ? err.message : 'Profile update failed' },
     });
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Profile update failed' },
+      { error: safeErrorMessage(err, 'Profile update failed') },
       { status: 500 }
     );
   }

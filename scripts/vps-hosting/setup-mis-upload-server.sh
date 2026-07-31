@@ -247,10 +247,10 @@ if ssh "$VPS_HOST" "test -d '${INSTALL_ROOT}/.git'"; then
   ssh "$VPS_HOST" "git config --global --add safe.directory '${INSTALL_ROOT}' 2>/dev/null || true; cd '${INSTALL_ROOT}' && git fetch --all --prune && git reset --hard origin/main && git clean -fd -e '.env*' -e 'node_modules' -e '.cache' -e 'logs' -e '.next'"
 else
   echo "==> No .git on VPS — copying required paths"
-  ssh "$VPS_HOST" "mkdir -p ${INSTALL_ROOT}/scripts/vps-hosting ${INSTALL_ROOT}/src/features/mis-import/lib ${INSTALL_ROOT}/src/lib/auth ${INSTALL_ROOT}/src/features/register/lib/server ${INSTALL_ROOT}/src/lib/security"
+  ssh "$VPS_HOST" "mkdir -p ${INSTALL_ROOT}/scripts/vps-hosting ${INSTALL_ROOT}/src/features/mis-import/services ${INSTALL_ROOT}/src/lib/auth ${INSTALL_ROOT}/src/features/register/server ${INSTALL_ROOT}/src/lib/security"
   scp "${ROOT}/scripts/vps-hosting/mis-upload-server.ts" "${ROOT}/scripts/vps-hosting/setup-mis-upload-server.sh" \
     "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/"
-  scp -r "${ROOT}/src/features/mis-import/lib/"* "${VPS_HOST}:${INSTALL_ROOT}/src/features/mis-import/lib/" 2>/dev/null || true
+  scp -r "${ROOT}/src/features/mis-import/services/"* "${VPS_HOST}:${INSTALL_ROOT}/src/features/mis-import/services/" 2>/dev/null || true
   scp "${ROOT}/src/lib/auth/user-auth-query.ts" "${ROOT}/src/lib/auth/rbac-catalog.ts" \
     "${ROOT}/src/lib/auth/verify-jwt-core.ts" "${ROOT}/src/lib/auth/app-user-profile.ts" \
     "${VPS_HOST}:${INSTALL_ROOT}/src/lib/auth/" 2>/dev/null || true

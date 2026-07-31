@@ -4,6 +4,7 @@ import { getSessionUserId } from '@/lib/auth/session';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { canAccessPerformanceInsights } from '@/lib/auth/insights-access';
 import { getReadModelProgress } from '@/lib/read-model/sync-meta';
+import { safeErrorMessage } from '@/lib/api/safe-error';
 
 const SNAPSHOT_CACHE_TTL_MS = 60_000;
 let snapshotCache:
@@ -43,7 +44,7 @@ export async function GET() {
   try {
     syncProgress = await getCachedReadModelProgress();
   } catch (err: unknown) {
-    syncError = err instanceof Error ? err.message : 'Failed to load sync status';
+    syncError = safeErrorMessage(err, 'Failed to load sync status');
   }
 
   const payload = {

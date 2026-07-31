@@ -3,6 +3,7 @@ import { postQuery } from '@/lib/db/proxy';
 import { readDimsFromPostgres } from '@/lib/read-model/flags';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { queryCallTypesFromPostgres } from '@/lib/read-model/queries/dims';
+import { safeErrorMessage } from '@/lib/api/safe-error';
 
 export async function GET(req: NextRequest) {
   try {
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
   } catch (err: unknown) {
     console.error('Call Types Fetch Error:', err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load call types' },
+      { error: safeErrorMessage(err, 'Failed to load call types') },
       { status: 500 }
     );
   }

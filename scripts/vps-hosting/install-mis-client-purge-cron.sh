@@ -36,7 +36,7 @@ fi
 source "$ENV_FILE"
 VPS_HOST="${VPS_HOST:?Set VPS_HOST in .env.vps-setup}"
 
-ssh "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}/scripts/vps-hosting' '${INSTALL_ROOT}/scripts/mis-client' '${INSTALL_ROOT}/src/features/mis-import/lib' '${INSTALL_ROOT}/logs'"
+ssh "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}/scripts/vps-hosting' '${INSTALL_ROOT}/scripts/mis-client' '${INSTALL_ROOT}/src/features/mis-import/services' '${INSTALL_ROOT}/logs'"
 
 scp \
   "${ROOT}/scripts/vps-hosting/mis-client-purge-old-files.sh" \
@@ -45,8 +45,8 @@ scp \
   "${ROOT}/scripts/mis-client/purge-old-import-files.ts" \
   "${VPS_HOST}:${INSTALL_ROOT}/scripts/mis-client/purge-old-import-files.ts"
 scp \
-  "${ROOT}/src/features/mis-import/lib/purge-old-files.ts" \
-  "${ROOT}/src/features/mis-import/lib/file-store.ts" \
+  "${ROOT}/src/features/mis-import/services/purge-old-files.ts" \
+  "${ROOT}/src/features/mis-import/services/file-store.ts" \
   "${ROOT}/src/features/mis-import/server.ts" \
   "${VPS_HOST}:${INSTALL_ROOT}/src/features/mis-import/"
 
@@ -59,8 +59,8 @@ if [[ -n "\$detected" ]]; then root="\$detected"; fi
 
 # Fix scp target: files may be under feature root if path was truncated — ensure lib has them
 for f in purge-old-files.ts file-store.ts; do
-  if [[ -f "\${root}/src/features/mis-import/\$f" && ! -f "\${root}/src/features/mis-import/lib/\$f" ]]; then
-    mv "\${root}/src/features/mis-import/\$f" "\${root}/src/features/mis-import/lib/\$f"
+  if [[ -f "\${root}/src/features/mis-import/\$f" && ! -f "\${root}/src/features/mis-import/services/\$f" ]]; then
+    mv "\${root}/src/features/mis-import/\$f" "\${root}/src/features/mis-import/services/\$f"
   fi
 done
 # Prefer explicit lib paths from a second copy if needed
@@ -68,9 +68,9 @@ REMOTE
 
 # Re-scp lib files to the correct lib/ path (avoid the mv dance)
 scp \
-  "${ROOT}/src/features/mis-import/lib/purge-old-files.ts" \
-  "${ROOT}/src/features/mis-import/lib/file-store.ts" \
-  "${VPS_HOST}:${INSTALL_ROOT}/src/features/mis-import/lib/"
+  "${ROOT}/src/features/mis-import/services/purge-old-files.ts" \
+  "${ROOT}/src/features/mis-import/services/file-store.ts" \
+  "${VPS_HOST}:${INSTALL_ROOT}/src/features/mis-import/services/"
 scp \
   "${ROOT}/src/features/mis-import/server.ts" \
   "${VPS_HOST}:${INSTALL_ROOT}/src/features/mis-import/server.ts"

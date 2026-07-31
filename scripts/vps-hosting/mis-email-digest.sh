@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# MIS email digest scheduler — run via cron Mon–Sat 09:30 IST (no Sunday).
+# MIS email digest scheduler — run via cron every 15 min Mon–Sat IST (no Sunday).
+# Who/when to send is decided in the portal (prefs + routing); this only polls.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,6 +44,10 @@ export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=8192}"
 # USE_DIRECT_DATABASE comes from .env.mis-email (false for VPS pooler)
 
 echo "=== mis-email-digest $(date -Iseconds) TZ=${TZ:-system} ==="
+
+# shellcheck source=vps-cron-gate.sh
+source "${SCRIPT_DIR}/vps-cron-gate.sh"
+vps_cron_gate_allow mis_email_digest || exit 0
 
 if ! command -v npm >/dev/null 2>&1; then
   echo "FATAL: npm not found on PATH" >&2

@@ -11,14 +11,14 @@ config({ path: join(process.cwd(), '.env.local') });
 
 import { prisma } from '@/lib/db/prisma';
 import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryFiltered } from '@/features/mis-import/lib/aggregate';
+import { queryClientAccountSummaryFiltered } from '@/features/mis-import/services/aggregate';
 import {
   buildBdMisRegionalRows,
   sumBdMisRegionalGrand,
-} from '@/features/report/lib/bd-mis-summary';
-import { parseClientDate } from '@/features/mis-import/lib/parse-dates';
-import { isCadburyExcludedServiceProvider } from '@/features/mis-import/lib/cadbury-filters';
-import { formatDisplayRegion } from '@/features/mis-import/lib/region';
+} from '@/features/report/services/bd-mis-summary';
+import { parseClientDate } from '@/features/mis-import/services/parse-dates';
+import { isCadburyExcludedServiceProvider } from '@/features/mis-import/services/cadbury-filters';
+import { formatDisplayRegion } from '@/features/mis-import/services/region';
 
 const TESTING = 'C:/Users/Vishnu.Vishwakarma/Downloads/Testing';
 const FORMAT = join(TESTING, 'Format.xlsx');

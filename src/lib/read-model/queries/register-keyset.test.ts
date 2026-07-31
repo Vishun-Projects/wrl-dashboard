@@ -188,12 +188,16 @@ describe('register composite keyset', () => {
   it('maps Closed status filter to bsolved', () => {
     const { sql } = buildWhere(baseParams({ status: 'Closed' }));
     expect(sql).toContain('COALESCE(h.bsolved, false) = true');
+    // DEVELOPER: do not bring bapproval back — Jul 2026 Tech. Solve = 0 outage
+    expect(sql).not.toContain('bapproval');
   });
 
   it('maps Tech. Solve Call status filter to bfastclose without bsolved', () => {
     const { sql } = buildWhere(baseParams({ status: 'Tech. Solve Call' }));
     expect(sql).toContain('COALESCE(h.bfastclose, false) = true');
     expect(sql).toContain('COALESCE(h.bsolved, false) = false');
+    // DEVELOPER: do not bring bapproval back — Jul 2026 Tech. Solve = 0 outage
+    expect(sql).not.toContain('bapproval');
   });
 });
 

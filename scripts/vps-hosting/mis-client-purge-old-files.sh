@@ -11,6 +11,9 @@ cd "$INSTALL_ROOT"
 mkdir -p "${INSTALL_ROOT}/logs"
 echo "=== mis-client-purge-old-files $(TZ=Asia/Kolkata date -Iseconds) ==="
 
+# shellcheck source=vps-cron-gate.sh
+source "${SCRIPT_DIR}/vps-cron-gate.sh"
+
 if [[ -f "${INSTALL_ROOT}/.env.mis-upload" ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -22,6 +25,8 @@ elif [[ -f "${INSTALL_ROOT}/.env.mis-email" ]]; then
   source "${INSTALL_ROOT}/.env.mis-email"
   set +a
 fi
+
+vps_cron_gate_allow mis_client_purge || exit 0
 
 export NODE_ENV=production
 npm run mis-client:purge-old-files

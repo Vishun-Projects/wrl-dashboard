@@ -15,7 +15,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 
-import { RegisterPageFilters } from '@/features/register/ui/RegisterPageFilters';
+import { RegisterPageFilters } from '@/features/register/components/RegisterPageFilters';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import {
   AdminStatPill,
@@ -26,23 +26,23 @@ import {
   AdminThead,
   AdminTr,
 } from '@/components/admin/AdminUi';
-import { useReportFilters } from '@/features/report/ui/ReportFiltersContext';
+import { useReportFilters } from '@/features/report/components/ReportFiltersContext';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import {
   SUMMARY_DEFAULT_CALL_TYPE,
   formatReportScopeSubtitle,
   toDateString,
-} from '@/features/report/lib/filters';
+} from '@/features/report/services/filters';
 import {
   LocationAuditMapPlaceholder,
   LocationAuditRowDetail,
   type LocationAuditDetailRow,
-} from '@/features/location-audit/ui/LocationAuditRowDetail';
+} from '@/features/location-audit/components/LocationAuditRowDetail';
 import { PageAlert } from '@/components/ui/PageAlert';
 import { feedback } from '@/lib/ui/feedback';
-import { triggerBlobDownload } from '@/features/report/lib/summary-excel-export';
+import { triggerBlobDownload } from '@/features/report/services/summary-excel-export';
 import { usePageAlert } from '@/hooks/usePageAlert';
-import { ReportLoadingPanel } from '@/features/report/ui/ReportLoadingFeedback';
+import { ReportLoadingPanel } from '@/features/report/components/ReportLoadingFeedback';
 import { DataTableLoading } from '@/components/ui/DataTableLoading';
 import { Loader2 } from 'lucide-react';
 import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';

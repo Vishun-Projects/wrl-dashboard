@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import { toBigInt } from '@/lib/read-model/coerce';
+import { toBigInt } from '@/lib/read-model/transform';
 import {
   fetchDimCallTypes,
   fetchDimEngineers,

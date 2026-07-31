@@ -2,22 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   isCrmOutOfMemoryError,
   isCrmSqlTimeoutError,
-} from '@/features/arcp/lib/server/fetch';
-import { loadArcpClaimsAggregates } from '@/features/arcp/lib/server/load';
+} from '@/features/arcp/server/fetch';
+import { loadArcpClaimsAggregatesHybrid as loadArcpClaimsAggregates } from '@/features/arcp/server/hybrid-load';
 import {
   ARCP_CHUNK_CACHE_VERSION,
   clearArcpChunkCaches,
   clearArcpChunkDiskCache,
   type ArcpChunkLoadMeta,
-} from '@/features/arcp/lib/server/chunk-cache';
-import { clearArcpLoadJobs } from '@/features/arcp/lib/server/load-job';
-import { authenticateArcpClaimsRequest } from '@/features/arcp/lib/server/route-auth';
+} from '@/features/arcp/server/chunk-cache';
+import { clearArcpLoadJobs } from '@/features/arcp/server/load-job';
+import { authenticateArcpClaimsRequest } from '@/features/arcp/server/route-auth';
+import { safeErrorMessage } from '@/lib/api/safe-error';
 import {
   deriveArcpGrandTotalsFromAggregates,
   resolveArcpDateFilterColumn,
   type ArcpGrandTotals,
-} from '@/features/arcp/lib/query';
-import { buildArcpClaimsTableModel } from '@/features/arcp/lib/table';
+} from '@/features/arcp/services/query';
+import { buildArcpClaimsTableModel } from '@/features/arcp/services/table';
 
 export const maxDuration = 300;
 
@@ -235,8 +236,11 @@ export async function GET(req: NextRequest) {
         { status: 504 }
       );
     }
-    const message = err instanceof Error ? err.message : 'Failed to load ARCP claims';
     const statusCode = (err as Error & { statusCode?: number }).statusCode;
-    return NextResponse.json({ error: message }, { status: statusCode ?? 500 });
+    console.error('[arcp-claims]', err);
+    return NextResponse.json(
+      { error: safeErrorMessage(err, 'Failed to load ARCP claims') },
+      { status: statusCode ?? 500 }
+    );
   }
 }

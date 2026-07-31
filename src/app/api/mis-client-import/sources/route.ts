@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
-import { listActiveSources, loadSourceConfigByCode, upsertSourceConfig } from '@/features/mis-import/lib/config';
-import { canUploadClientMis } from '@/features/mis-import/lib/upload-access';
-import type { SourceConfigPayload } from '@/features/mis-import/lib/config';
+import { listActiveSources, loadSourceConfigByCode, upsertSourceConfig } from '@/features/mis-import/services/config';
+import { canUploadClientMis } from '@/features/mis-import/services/upload-access';
+import type { SourceConfigPayload } from '@/features/mis-import/services/config';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { logAction } from '@/lib/security/audit';
 

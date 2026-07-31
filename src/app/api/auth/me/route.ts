@@ -4,6 +4,7 @@ import {
   getSessionUserId,
   getUserInfoById,
 } from '@/lib/auth/session';
+import { safeErrorMessage } from '@/lib/api/safe-error';
 import { getMeCache, setMeCache, ME_CACHE_TTL_MS } from '@/lib/auth/me-cache';
 import { sessionExpiredJsonBody } from '@/lib/auth/session-policy';
 import { cookies } from 'next/headers';
@@ -80,6 +81,6 @@ export async function GET() {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to load profile';
     console.error('[api/auth/me]', message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed to load profile') }, { status: 500 });
   }
 }

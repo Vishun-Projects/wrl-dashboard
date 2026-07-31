@@ -126,7 +126,7 @@ Tripwires for:
 - Filter → query / corpus key  
 - Export kickoff contracts  
 
-☑ Done — `src/features/report/lib/report-characterization.test.ts` (+ `report-page-helpers.test.ts`)
+☑ Done — `src/features/report/services/report-characterization.test.ts` (+ `report-page-helpers.test.ts`)
 
 ---
 

@@ -12,7 +12,6 @@ import type { HotRow, StatusBucket } from '@/lib/read-model/types';
 import { parseCrmDate } from '@/lib/read-model/dates';
 import { registerHotRetentionStart } from '@/lib/read-model/hot-window';
 import { isTruthyCrmRowFlag, resolveTrhcallsBmApprovedAt } from '@/lib/trhcalls/bm-approval';
-import { toBigInt } from '@/lib/read-model/coerce';
 
 const STATUS_LABEL_BY_BUCKET: Record<Exclude<RegisterSummaryBucket, 'transferred'>, string> = {
   openUnallocated: 'Open Unallocated',
@@ -222,4 +221,11 @@ export function processCrmRowsForYtdLoad(rows: Record<string, unknown>[]): HotRo
     if (hot) hotRows.push(hot);
   }
   return hotRows;
+}
+
+export function toBigInt(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const n = Number(String(value).trim());
+  if (Number.isNaN(n)) return null;
+  return Math.trunc(n);
 }

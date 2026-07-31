@@ -94,13 +94,8 @@ const nextConfig: NextConfig = {
     proxyClientMaxBodySize: '320mb',
   },
   serverExternalPackages: [
-    '@zxing/library',
     'india-pincode',
-    'jimp',
     'sharp',
-    'tesseract.js',
-    'tesseract.js-core',
-    'wasm-feature-detect',
   ],
   /** india-pincode is externalized (loads data via __dirname); Vercel must ship dist + dataset. */
   outputFileTracingIncludes: {
@@ -115,11 +110,6 @@ const nextConfig: NextConfig = {
       './node_modules/india-pincode/dist/index.js',
       './node_modules/india-pincode/dist/index.mjs',
       './node_modules/india-pincode/data/pincodes.json.gz',
-    ],
-    '/api/barcode-scan/read-image': [
-      './node_modules/tesseract.js/src/worker-script/node/index.js',
-      './node_modules/tesseract.js-core/tesseract-core-lstm.wasm.js',
-      './node_modules/tesseract.js-core/tesseract-core-lstm.wasm',
     ],
   },
   async headers() {

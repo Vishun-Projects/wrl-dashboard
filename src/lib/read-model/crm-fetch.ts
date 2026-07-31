@@ -13,10 +13,14 @@ import {
   todayLocalDate,
 } from '@/lib/read-model/dates';
 import { formatLocalDate } from '@/lib/dates/local-date';
-import {
-  SYNC_CRM_NCODE_SHARD_INITIAL,
-  SYNC_CRM_NCODE_SHARD_MAX,
-} from '@/lib/read-model/constants';
+/** Initial ncode shards per day — lighter sync query than ARCP; default 8 (ARCP uses 16 on a simpler table). */
+export const SYNC_CRM_NCODE_SHARD_INITIAL =
+  Number(process.env.SYNC_CRM_NCODE_SHARD_INITIAL ?? 8) || 8;
+
+/** Max ncode shard splits before failing a calls CRM fetch window. */
+export const SYNC_CRM_NCODE_SHARD_MAX =
+  Number(process.env.SYNC_CRM_NCODE_SHARD_MAX ?? 32) || 32;
+
 
 const FETCH_GAP_MS = Number(process.env.SYNC_CRM_FETCH_GAP_MS ?? 1500) || 1500;
 const RETRY_DELAYS_MS = [3000, 10000, 30000];

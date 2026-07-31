@@ -3,8 +3,12 @@ import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { isDevAuthBypass } from '@/lib/auth/verify-jwt';
 import { logAccessDenied, logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
+import { safeErrorMessage } from '@/lib/api/safe-error';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 
 export async function POST(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
   const audit = requestAuditContext(request);
@@ -92,7 +96,7 @@ export async function POST(request: Request) {
       metadata: { reason: 'exception', message: err instanceof Error ? err.message : 'Password update failed' },
     });
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Password update failed' },
+      { error: safeErrorMessage(err, 'Password update failed') },
       { status: 500 }
     );
   }

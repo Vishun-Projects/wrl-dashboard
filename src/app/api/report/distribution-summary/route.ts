@@ -3,6 +3,7 @@ import { fetchAppUserAuthProfile } from '@/lib/auth/app-user-profile';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { readRegisterFromPostgres } from '@/lib/read-model/flags';
 import { queryDistributionCompactFromPostgres } from '@/lib/read-model/queries/register';
+import { jsonSafeError } from '@/lib/api/safe-error';
 
 export async function GET(req: NextRequest) {
   try {
@@ -65,7 +66,6 @@ export async function GET(req: NextRequest) {
       compact: true,
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Distribution summary failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Distribution summary failed');
   }
 }

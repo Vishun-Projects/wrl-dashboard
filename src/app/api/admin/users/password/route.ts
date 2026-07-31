@@ -5,6 +5,8 @@ import { requireRequestUser } from '@/lib/auth/server-user';
 import { isDevAuthBypass } from '@/lib/auth/verify-jwt';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { logAccessDenied, logAction } from '@/lib/security/audit';
+import { safeErrorMessage } from '@/lib/api/safe-error';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 
 const supabaseAdmin = createSupabaseClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -12,6 +14,8 @@ const supabaseAdmin = createSupabaseClient(
 );
 
 export async function POST(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const adminUser = await requireRequestUser(request, supabase);
 
@@ -92,6 +96,6 @@ export async function POST(request: Request) {
       summary: 'Admin password reset failed',
       metadata: { message },
     });
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Password update failed') }, { status: 500 });
   }
 }

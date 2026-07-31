@@ -1,2 +1,2 @@
-/** Public surface for @/features/arcp — cross-feature imports must use this entry. */
-export {};
+/** Public surface for @/features/arcp — client-safe domain exports. */
+export * from './services';

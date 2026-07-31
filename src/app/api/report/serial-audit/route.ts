@@ -3,12 +3,12 @@ import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { postQuery } from '@/lib/db/proxy';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
-import { enrichCallRowForReport } from '@/features/report/lib/geo';
+import { enrichCallRowForReport } from '@/lib/geo/pincode-geo';
 import {
   fetchSerialAuditCallsForSerials,
   flaggedSerialsFromListRows,
-} from '@/features/serial-audit/lib/server/batch-fetch';
-import { resolveSerialAuditSqlOpts } from '@/features/serial-audit/lib/server/sql-scope';
+} from '@/features/serial-audit/server/batch-fetch';
+import { resolveSerialAuditSqlOpts } from '@/features/serial-audit/server/sql-scope';
 import {
   buildSerialAuditDetailRawSql,
   buildSerialAuditListRawSql,

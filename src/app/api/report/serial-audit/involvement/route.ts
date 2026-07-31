@@ -5,8 +5,8 @@ import { resolveReportSecurity } from '@/lib/auth/report-security';
 import {
   fetchSerialAuditCallsForSerials,
   MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS,
-} from '@/features/serial-audit/lib/server/batch-fetch';
-import { resolveSerialAuditSqlOpts } from '@/features/serial-audit/lib/server/sql-scope';
+} from '@/features/serial-audit/server/batch-fetch';
+import { resolveSerialAuditSqlOpts } from '@/features/serial-audit/server/sql-scope';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 const INVOLVEMENT_CACHE_TTL = 15 * 60 * 1000;

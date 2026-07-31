@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
-import { handleMisClientUploadFormData } from '@/features/mis-import/lib/upload-http';
+import { handleMisClientUploadFormData } from '@/features/mis-import/services/upload-http';
 import {
   formatMisVercelUploadTooLargeMessage,
   MIS_CLIENT_VERCEL_MAX_UPLOAD_BYTES,
-} from '@/features/mis-import/lib/upload-limits';
+} from '@/features/mis-import/services/upload-limits';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 export const runtime = 'nodejs';

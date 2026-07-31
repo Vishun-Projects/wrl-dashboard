@@ -3,8 +3,8 @@ import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import {
   handleMisClientUploadChunkFormData,
   handleMisClientUploadChunkStatus,
-} from '@/features/mis-import/lib/upload-chunk-http';
-import { MIS_UPLOAD_CHUNK_BYTES_MAX } from '@/features/mis-import/lib/upload-chunk-constants';
+} from '@/features/mis-import/services/upload-chunk-http';
+import { MIS_UPLOAD_CHUNK_BYTES_MAX } from '@/features/mis-import/services/upload-chunk-constants';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 export const runtime = 'nodejs';

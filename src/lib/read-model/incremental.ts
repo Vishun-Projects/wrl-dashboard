@@ -24,7 +24,7 @@ import { buildNetFactDeltas, serializeFactKey } from '@/lib/read-model/metrics';
 import { applyCrmRowsToHot } from '@/lib/read-model/apply-crm-delta';
 import { processCrmRows } from '@/lib/read-model/transform';
 import { countHotRows } from '@/lib/read-model/upsert-hot';
-import { HOT_TARGET_ROWS } from '@/lib/read-model/constants';
+import { HOT_TARGET_ROWS } from '@/lib/read-model/sync-meta';
 import { runPipelineReconcile } from '@/lib/read-model/pipeline-reconcile';
 import { runReconcileTechSolved } from '@/lib/read-model/reconcile-tech-solved';
 import { runEditedonCatchupStep } from '@/lib/read-model/editedon-catchup';

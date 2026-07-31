@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
 import { canAccessOffice } from '@/lib/trhcalls/office-security';
+import { safeErrorMessage } from '@/lib/api/safe-error';
 
 function isCrmFlag(value: unknown): boolean {
   if (value === true || value === 1) return true;
@@ -258,7 +259,7 @@ export async function GET(
 
   } catch (err: unknown) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load call details' },
+      { error: safeErrorMessage(err, 'Failed to load call details') },
       { status: 500 }
     );
   }

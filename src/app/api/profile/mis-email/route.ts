@@ -3,14 +3,16 @@ import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { hasMisEmailSendAccess } from '@/lib/auth/rbac-catalog';
-import { loadDigestRecipientById } from '@/features/mis-email/lib/recipients';
+import { loadDigestRecipientById } from '@/features/mis-email/services/recipients';
 import {
   mergeMisEmailPreferences,
   validateMisEmailPreferencesPatch,
   type MisEmailPreferences,
-} from '@/features/mis-email/lib/preferences';
-import { resolveAvailableBodySections } from '@/features/mis-email/lib/body-sections';
-import { resolveUserDigestScopeWithLabel } from '@/features/mis-email/lib/user-scope';
+} from '@/features/mis-email/services/preferences';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
+import { jsonSafeError, safeErrorMessage } from '@/lib/api/safe-error';
+import { resolveAvailableBodySections } from '@/features/mis-email/services/body-sections';
+import { resolveUserDigestScopeWithLabel } from '@/features/mis-email/services/user-scope';
 import { logAccessDenied, logAction } from '@/lib/security/audit';
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
 
@@ -75,6 +77,12 @@ export async function GET(request: Request) {
       scopeLabel = scope.scopeLabel;
     }
 
+    const { getMisEmailOrgSettings } = await import('@/features/mis-email/services/org-settings');
+    const { toMisEmailLetterCopy } = await import(
+      '@/features/mis-email/services/org-settings-defaults'
+    );
+    const letterCopy = toMisEmailLetterCopy(await getMisEmailOrgSettings());
+
     return NextResponse.json({
       mis_email_enabled: Boolean(row.mis_email_enabled),
       can_access_email_ui: canAccessEmailUi,
@@ -88,14 +96,16 @@ export async function GET(request: Request) {
       availableKeyAccounts: [],
       roleName: row.role_name,
       scopeLabel,
+      letterCopy,
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to load email preferences';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to load email preferences');
   }
 }
 
 export async function PATCH(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
 
@@ -136,7 +146,7 @@ export async function PATCH(request: Request) {
       includeKeyAccount: recipient.includeKeyAccount,
     };
 
-    const { getMisEmailOrgSettings } = await import('@/features/mis-email/lib/org-settings');
+    const { getMisEmailOrgSettings } = await import('@/features/mis-email/services/org-settings');
     const org = await getMisEmailOrgSettings();
     const validated = validateMisEmailPreferencesPatch({
       patch: body,
@@ -151,9 +161,17 @@ export async function PATCH(request: Request) {
     }
 
     await prisma.$queryRawUnsafe(
-      `UPDATE public.app_users SET mis_email_preferences = $1::jsonb WHERE id = $2`,
+      `UPDATE public.app_users
+       SET mis_email_preferences = $1::jsonb,
+           mis_email_enabled = CASE
+             WHEN $3::boolean THEN true
+             ELSE mis_email_enabled
+           END
+       WHERE id = $2`,
       JSON.stringify(validated.merged),
-      user.id
+      user.id,
+      // Saving an active schedule opts the account into the digest cron (admin list + runner).
+      validated.merged.subscribed !== false
     );
 
     await logAction({
@@ -185,6 +203,6 @@ export async function PATCH(request: Request) {
       summary: 'Failed to update MIS email preferences',
       metadata: { message },
     });
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed to update email preferences') }, { status: 500 });
   }
 }

@@ -6,11 +6,15 @@ import { runArcpIncrementalSync } from '@/lib/read-model/arcp/incremental';
 import { runIncrementalSync, isPostgresLockError } from '@/lib/read-model/incremental';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
 import { logAccessDenied, logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
+import { safeErrorMessage } from '@/lib/api/safe-error';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 
 /** Large CRM deltas can take several minutes (hot upsert + metric batches). */
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const user = await requireSupabaseUser(supabase);
   const audit = requestAuditContext(request);
@@ -105,11 +109,10 @@ export async function POST(request: Request) {
         {
           error: 'Sync is already running — please wait a minute and try again',
           skipped: true,
-          reason: message,
         },
         { status: 409 }
       );
     }
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Incremental sync failed') }, { status: 500 });
   }
 }

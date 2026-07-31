@@ -19,11 +19,11 @@ vi.mock('@/lib/db/prisma', () => ({
   },
 }));
 
-vi.mock('@/features/mis-email/lib/recipients', () => ({
+vi.mock('@/features/mis-email/services/recipients', () => ({
   loadDigestRecipientById: (...args: unknown[]) => loadDigestRecipientById(...args),
 }));
 
-vi.mock('@/features/mis-email/lib/compose-digest', () => ({
+vi.mock('@/features/mis-email/services/compose-digest', () => ({
   previewMisEmailCompose: (...args: unknown[]) => previewMisEmailCompose(...args),
 }));
 

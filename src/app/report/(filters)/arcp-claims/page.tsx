@@ -1,9 +1,9 @@
 import dynamic from 'next/dynamic';
 import { requirePageAccess } from '@/lib/auth/require-page-access';
-import { ReportPageSkeleton } from '@/features/report/ui/ReportLoadingFeedback';
+import { ReportPageSkeleton } from '@/features/report/components/ReportLoadingFeedback';
 
 const ArcpClaimsPageClient = dynamic(
-  () => import('@/features/arcp/ui/ArcpClaimsPageClient'),
+  () => import('@/features/arcp/components/ArcpClaimsPageClient'),
   { loading: () => <ReportPageSkeleton /> }
 );
 

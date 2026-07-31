@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { clearPortalAuditServerCache } from '@/features/report/lib/portal-audit-server';
+import { clearPortalAuditServerCache } from '@/features/report/server/portal-audit-server';
 import { requireBearerUser } from '@/lib/api/security';
 import { flagPostSchema } from '@/lib/api/schemas/mutations';
 import { canAccessOffice } from '@/lib/trhcalls/office-security';
 import { logAction } from '@/lib/security/audit';
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
+import { jsonSafeError } from '@/lib/api/safe-error';
 
 export async function POST(request: NextRequest) {
   const auth = await requireBearerUser(request, {
@@ -81,7 +82,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to set flag';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to set flag');
   }
 }

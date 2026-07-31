@@ -3,9 +3,10 @@ import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { postQuery } from '@/lib/db/proxy';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
-import { mapRepairCountsFromApiRow } from '@/features/serial-audit/lib/repair-options';
-import { resolveSerialAuditSqlOpts } from '@/features/serial-audit/lib/server/sql-scope';
+import { mapRepairCountsFromApiRow } from '@/lib/repair/options';
+import { resolveSerialAuditSqlOpts } from '@/features/serial-audit/server/sql-scope';
 import { buildSerialAuditRepairCountsBySerialSql } from '@/lib/trhcalls/query';
+import { jsonSafeError } from '@/lib/api/safe-error';
 
 const QUERY_TIMEOUT_MS = 120000;
 
@@ -55,7 +56,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ bySerial });
   } catch (err: unknown) {
     console.error('Serial Audit repair-counts API Error:', err);
-    const message = err instanceof Error ? err.message : 'Failed to load repair counts';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to load repair counts');
   }
 }

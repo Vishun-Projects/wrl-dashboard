@@ -3,10 +3,10 @@ import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 import { withAppClient } from '@/lib/read-model/db';
 import { querySummaryDashboard } from '@/lib/read-model/queries/summary';
-import { queryClientAccountSummaryFiltered } from '@/features/mis-import/lib/aggregate';
+import { queryClientAccountSummaryFiltered } from '@/features/mis-import/services/aggregate';
 import {
   sumMergedAccountMetricByRegion,
-} from '@/features/report/ui/SummaryMergedMetricCell';
+} from '@/features/report/components/SummaryMergedMetricCell';
 
 async function main() {
   const start = '2026-07-01';

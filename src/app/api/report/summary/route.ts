@@ -17,12 +17,12 @@ import {
   enrichTrhcallBranchFranchisee,
   TRHCALLS_EXCLUDE_TRANSFERRED,
 } from '@/lib/trhcalls/query';
-import { deriveSummaryDashboard } from '@/features/report/lib/summary-derive';
-import { queryAllClientBranchSummary, countClientRowsInRange } from '@/features/mis-import/lib/aggregate';
+import { deriveSummaryDashboard } from '@/lib/summary/derive';
+import { queryAllClientBranchSummary, countClientRowsInRange } from '@/features/mis-import/services/aggregate';
 import {
   listAllSourcesWithBatches,
   sumCompletedBatchRowCounts,
-} from '@/features/mis-import/lib/config';
+} from '@/features/mis-import/services/config';
 
 export async function GET(req: NextRequest) {
   try {

@@ -2,12 +2,14 @@ import { NextResponse } from 'next/server';
 
 import { withAppClient } from '@/lib/read-model/db';
 import { commentPostSchema } from '@/lib/api/schemas/mutations';
-import { clearPortalAuditServerCache } from '@/features/report/lib/portal-audit-server';
+import { clearPortalAuditServerCache } from '@/features/report/server/portal-audit-server';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { canAccessOffice, seesAllOffices } from '@/lib/trhcalls/office-security';
 import { isHodUser } from '@/lib/auth/report-security';
 import { logAction } from '@/lib/security/audit';
+import { jsonSafeError } from '@/lib/api/safe-error';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 
 type CommentRow = {
   id: string;
@@ -86,12 +88,13 @@ export async function GET(request: Request) {
 
     return NextResponse.json(commentsWithAvatars);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to load comments';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to load comments');
   }
 }
 
 export async function POST(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const auth = await requireRbac(request as import('next/server').NextRequest, {
     pageId: 'mis_reports',
     tabId: 'register',
@@ -155,7 +158,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json(comment);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to save comment';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to save comment');
   }
 }

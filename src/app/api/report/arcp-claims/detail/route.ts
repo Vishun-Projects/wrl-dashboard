@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   isCrmOutOfMemoryError,
   isCrmSqlTimeoutError,
-} from '@/features/arcp/lib/server/fetch';
-import { loadArcpClaimsDetailRows } from '@/features/arcp/lib/server/detail-load';
-import { buildArcpChunkCacheKey } from '@/features/arcp/lib/server/chunk-cache';
-import { resolveArcpDateFilterColumn } from '@/features/arcp/lib/query';
-import { authenticateArcpClaimsRequest } from '@/features/arcp/lib/server/route-auth';
+} from '@/features/arcp/server/fetch';
+import { loadArcpClaimsDetailRowsHybrid as loadArcpClaimsDetailRows } from '@/features/arcp/server/hybrid-load';
+import { buildArcpChunkCacheKey } from '@/features/arcp/server/chunk-cache';
+import { resolveArcpDateFilterColumn } from '@/features/arcp/services/query';
+import { authenticateArcpClaimsRequest } from '@/features/arcp/server/route-auth';
+import { safeErrorMessage } from '@/lib/api/safe-error';
 
 export const maxDuration = 300;
 
@@ -170,8 +171,11 @@ export async function GET(req: NextRequest) {
         { status: 504 }
       );
     }
-    const message = err instanceof Error ? err.message : 'Failed to load ARCP claim detail';
     const statusCode = (err as Error & { statusCode?: number }).statusCode;
-    return NextResponse.json({ error: message }, { status: statusCode ?? 500 });
+    console.error('[arcp-claims/detail]', err);
+    return NextResponse.json(
+      { error: safeErrorMessage(err, 'Failed to load ARCP claim detail') },
+      { status: statusCode ?? 500 }
+    );
   }
 }

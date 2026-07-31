@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy MIS email code to VPS so 09:30 cron can find cli.ts.
+# Deploy MIS email code to VPS so the */15 digest cron can find cli.ts.
 # Syncs full src/features + src/lib (CLI import graph). Asks for SSH passphrase.
 # Does NOT touch .env.mis-email.
 #
@@ -66,6 +66,7 @@ if command -v rsync >/dev/null 2>&1; then
   rsync -az -e "$RSYNC_SSH" \
     "${ROOT}/scripts/vps-hosting/mis-email-digest.sh" \
     "${ROOT}/scripts/vps-hosting/mis-email-test-digest.sh" \
+    "${ROOT}/scripts/vps-hosting/vps-cron-gate.sh" \
     "${ROOT}/scripts/vps-hosting/check-backfill-and-email-vps.sh" \
     "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/"
 else
@@ -77,18 +78,19 @@ else
   scp "${SSH_OPTS[@]}" \
     "${ROOT}/scripts/vps-hosting/mis-email-digest.sh" \
     "${ROOT}/scripts/vps-hosting/mis-email-test-digest.sh" \
+    "${ROOT}/scripts/vps-hosting/vps-cron-gate.sh" \
     "${ROOT}/scripts/vps-hosting/check-backfill-and-email-vps.sh" \
     "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/"
 fi
 
 ssh "${SSH_OPTS[@]}" "$VPS_HOST" \
-  "chmod +x '${INSTALL_ROOT}/scripts/vps-hosting/mis-email-digest.sh' '${INSTALL_ROOT}/scripts/vps-hosting/mis-email-test-digest.sh'"
+  "chmod +x '${INSTALL_ROOT}/scripts/vps-hosting/mis-email-digest.sh' '${INSTALL_ROOT}/scripts/vps-hosting/mis-email-test-digest.sh' '${INSTALL_ROOT}/scripts/vps-hosting/vps-cron-gate.sh'"
 
 echo "==> Verifying cli path on VPS…"
 ssh "${SSH_OPTS[@]}" "$VPS_HOST" bash -s <<REMOTE
 set -euo pipefail
 root='${INSTALL_ROOT}'
-test -f "\$root/src/features/mis-email/lib/cli.ts"
+test -f "\$root/src/features/mis-email/services/cli.ts"
 grep -n 'mis-email:digest' "\$root/package.json" | head -3
 # Barrels must stay lib-only (no UI re-exports) so cron does not need src/components.
 ! grep -q "export \* from './ui/" "\$root/src/features/register/index.ts"
@@ -105,5 +107,5 @@ if [[ "$RUN_DIGEST" == "1" ]]; then
 fi
 
 echo ""
-echo "Deployed. Tomorrow 09:30 IST cron should work."
+echo "Deployed. Next */15 Mon–Sat IST cron tick should use this code."
 echo "Send now: RUN_DIGEST=1 npm run mis-email:deploy:vps"

@@ -4,6 +4,7 @@ import { requireSupabaseUser } from '@/lib/auth/server-user';
 import { prisma } from '@/lib/db/prisma';
 import { hasAnyReportPageAccess } from '@/lib/auth/rbac-catalog';
 import { getReadModelProgress } from '@/lib/read-model/sync-meta';
+import { jsonSafeError } from '@/lib/api/safe-error';
 
 export async function GET() {
   const supabase = await createClient();
@@ -22,7 +23,6 @@ export async function GET() {
     const progress = await getReadModelProgress();
     return NextResponse.json(progress);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to load sync status';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to load sync status');
   }
 }

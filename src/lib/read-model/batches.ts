@@ -1,5 +1,8 @@
 import { randomUUID } from 'crypto';
 import type pg from 'pg';
+import { withClient } from '@/lib/read-model/db';
+import { currentYearStart } from '@/lib/read-model/dates';
+import { deleteFactsBeforeYearStart } from '@/lib/read-model/upsert-facts';
 
 export type BatchHandle = {
   batchId: string;
@@ -125,4 +128,15 @@ export async function repairStaleIngestBatches(
     [String(staleMinutes)]
   );
   return result.rowCount ?? 0;
+}
+
+export async function runRetentionJobs(): Promise<void> {
+  await withClient(async (client) => {
+    const logs = await purgeOldSyncLogs(client, 30);
+    const batchesRemoved = await purgeOldIngestBatches(client, 90);
+    const facts = await deleteFactsBeforeYearStart(client, currentYearStart());
+    console.log(
+      `[sync-worker] Retention — removed ${logs} sync logs, ${batchesRemoved} ingest batches, ${facts} pre-YTD fact rows`
+    );
+  });
 }

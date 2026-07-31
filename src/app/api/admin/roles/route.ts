@@ -3,8 +3,10 @@ import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
-import { groupPermissionsForRolesUi } from '@/lib/auth/page-access';
+import { groupPermissionsForRolesUi } from '@/lib/auth/rbac-catalog';
 import { logAccessDenied, logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
+import { jsonSafeError, safeErrorMessage } from '@/lib/api/safe-error';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 
 const ROLES_CACHE_TTL_MS = 20_000;
 const rolesCache = new Map<string, { expiresAt: number; payload: unknown }>();
@@ -81,12 +83,13 @@ export async function GET(request: Request) {
       headers: { 'Cache-Control': 'private, max-age=20', 'X-Cache': 'MISS' },
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to load roles';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to load roles');
   }
 }
 
 export async function POST(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
   const audit = requestAuditContext(request);
@@ -159,11 +162,13 @@ export async function POST(request: Request) {
       statusCode: 500,
       metadata: { message },
     });
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Create role failed') }, { status: 500 });
   }
 }
 
 export async function PUT(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
   const audit = requestAuditContext(request);
@@ -264,11 +269,13 @@ export async function PUT(request: Request) {
       statusCode: 500,
       metadata: { message },
     });
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Update role failed') }, { status: 500 });
   }
 }
 
 export async function DELETE(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
   const audit = requestAuditContext(request);
@@ -329,6 +336,6 @@ export async function DELETE(request: Request) {
       statusCode: 500,
       metadata: { message },
     });
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Delete role failed') }, { status: 500 });
   }
 }

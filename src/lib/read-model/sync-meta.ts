@@ -1,5 +1,4 @@
 import { prisma } from '@/lib/db/prisma';
-import { HOT_TARGET_ROWS } from '@/lib/read-model/constants';
 import { releaseStaleArcpSyncLock } from '@/lib/read-model/arcp/lock';
 import { arcpBackfillStartDate } from '@/lib/read-model/arcp/dates';
 import { withClient } from '@/lib/read-model/db';
@@ -14,7 +13,8 @@ import {
   readSummaryFromPostgres,
 } from '@/lib/read-model/flags';
 
-export { HOT_TARGET_ROWS };
+/** Target row count for calls_latest_hot backfill progress. */
+export const HOT_TARGET_ROWS = 139_509;
 
 export type SyncMeta = {
   lastSyncedAt: string | null;

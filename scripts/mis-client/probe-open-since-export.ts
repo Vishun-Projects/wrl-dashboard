@@ -7,8 +7,8 @@ import { readFileSync } from 'fs';
 config({ path: join(process.cwd(), '.env.local') });
 import { withAppClient } from '@/lib/read-model/db';
 import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/lib/aggregate';
-import { buildBdMisRegionalRows, sumBdMisRegionalGrand } from '@/features/report/lib/bd-mis-summary';
+import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/services/aggregate';
+import { buildBdMisRegionalRows, sumBdMisRegionalGrand } from '@/features/report/services/bd-mis-summary';
 
 const CSV =
   'C:/Users/Vishnu.Vishwakarma/Downloads/Raw/CRM_WRL_MIS_Register_2026-06-30.csv';

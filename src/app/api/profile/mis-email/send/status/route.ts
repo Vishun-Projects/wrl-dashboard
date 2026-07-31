@@ -4,7 +4,7 @@ import { requireRequestUser } from '@/lib/auth/server-user';
 import {
   getMisEmailSendJob,
   getMisEmailSendJobById,
-} from '@/features/mis-email/lib/send-jobs';
+} from '@/features/mis-email/services/send-jobs';
 
 export async function GET(request: Request) {
   const jobId = new URL(request.url).searchParams.get('jobId')?.trim();

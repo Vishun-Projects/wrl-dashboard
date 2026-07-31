@@ -51,7 +51,12 @@ export type RegisterSortBy = keyof typeof REGISTER_SORT_SQL;
 
 const POSTGRES_SOLVED_STAGE_SQL =
   '(COALESCE(h.bfastclose, false) = true OR COALESCE(h.bsolved, false) = true)';
-/** Engineer fast-close, not yet CRM/BM solved — matches CallDetail + location-audit. */
+/**
+ * DEVELOPER — READ THIS. DO NOT SWITCH THESE BACK TO bapproval.
+ * Tech. Solve = bfastclose && !bsolved. Closed = bsolved.
+ * Using !bapproval / bapproval zeroed Tech. Solve Call in production (Jul 2026).
+ * Users do not read this; register-keyset + register-row tests will fail if you "fix" it.
+ */
 const POSTGRES_TECH_SOLVED_SQL =
   '(COALESCE(h.ncancelreason, 0) = 0 AND COALESCE(h.bfastclose, false) = true AND COALESCE(h.bsolved, false) = false)';
 const POSTGRES_CLOSED_SQL =

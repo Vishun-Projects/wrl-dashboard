@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateArcpClaimsRequest } from '@/features/arcp/lib/server/route-auth';
+import { authenticateArcpClaimsRequest } from '@/features/arcp/server/route-auth';
 import {
   getLatestLoadJob,
   getLatestResumableLoadJob,
@@ -8,9 +8,10 @@ import {
   mergeJobAggregatesFromDisk,
   mergeJobDetailFromDisk,
   type ArcpLoadJobView,
-} from '@/features/arcp/lib/server/load-job';
-import { deriveArcpGrandTotalsFromAggregates } from '@/features/arcp/lib/query';
-import type { ArcpChunkCacheKind } from '@/features/arcp/lib/server/chunk-cache';
+} from '@/features/arcp/server/load-job';
+import { jsonSafeError } from '@/lib/api/safe-error';
+import { deriveArcpGrandTotalsFromAggregates } from '@/features/arcp/services/query';
+import type { ArcpChunkCacheKind } from '@/features/arcp/server/chunk-cache';
 
 export const maxDuration = 60;
 
@@ -115,7 +116,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (err: unknown) {
     console.error('[ARCP Load Status] error:', err);
-    const message = err instanceof Error ? err.message : 'Failed to read load job status';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to read load job status');
   }
 }

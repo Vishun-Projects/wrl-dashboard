@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
-import { fetchCallRegisterRows } from '@/features/report/lib/call-register';
-import { canSeeAllCallRegisterClients } from '@/features/report/lib/call-register/clients';
-import { resolveCallRegisterDates } from '@/features/report/lib/call-register/dates';
+import { fetchCallRegisterRows } from '@/features/report/services/call-register';
+import { canSeeAllCallRegisterClients } from '@/lib/call-register/clients';
+import { resolveCallRegisterDates } from '@/features/report/services/call-register/dates';
 
 export const maxDuration = 300;
 

@@ -8,23 +8,23 @@ vi.mock('@/lib/auth/server-user', () => ({
 vi.mock('@/lib/auth/load-user-auth', () => ({
   loadUserAuth: vi.fn(),
 }));
-vi.mock('@/features/mis-email/lib/routing-rules', () => ({
+vi.mock('@/features/mis-email/services/routing-rules', () => ({
   canManageMisEmailRouting: vi.fn(),
 }));
-vi.mock('@/features/mis-email/lib/org-settings', () => ({
+vi.mock('@/features/mis-email/services/org-settings', () => ({
   getMisEmailOrgSettings: vi.fn(),
   saveMisEmailOrgSettings: vi.fn(),
 }));
 
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
-import { canManageMisEmailRouting } from '@/features/mis-email/lib/routing-rules';
+import { canManageMisEmailRouting } from '@/features/mis-email/services/routing-rules';
 import {
   getMisEmailOrgSettings,
   saveMisEmailOrgSettings,
-} from '@/features/mis-email/lib/org-settings';
+} from '@/features/mis-email/services/org-settings';
 import { GET, PUT } from '@/app/api/admin/mis-email-org-settings/route';
-import { MIS_EMAIL_ORG_SETTINGS_FALLBACKS } from '@/features/mis-email/lib/org-settings-defaults';
+import { MIS_EMAIL_ORG_SETTINGS_FALLBACKS } from '@/features/mis-email/services/org-settings-defaults';
 
 const requireRequestUserMock = vi.mocked(requireRequestUser);
 const loadUserAuthMock = vi.mocked(loadUserAuth);
@@ -80,9 +80,15 @@ describe('/api/admin/mis-email-org-settings', () => {
     } as never);
     canManageMock.mockReturnValue(true);
 
+    const putHeaders = {
+      'content-type': 'application/json',
+      origin: 'http://localhost',
+    };
+
     const bad = await PUT(
       new NextRequest('http://localhost/api/admin/mis-email-org-settings', {
         method: 'PUT',
+        headers: putHeaders,
         body: JSON.stringify({
           settings: { defaultToEmails: ['someone@gmail.com'] },
         }),
@@ -94,6 +100,7 @@ describe('/api/admin/mis-email-org-settings', () => {
     const ok = await PUT(
       new NextRequest('http://localhost/api/admin/mis-email-org-settings', {
         method: 'PUT',
+        headers: putHeaders,
         body: JSON.stringify({
           settings: {
             defaultToEmails: ['mis.service@westernequipments.com'],

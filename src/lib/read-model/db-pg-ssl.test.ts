@@ -11,6 +11,7 @@ const CLOUD_POOLER =
 describe('resolvePgSsl', () => {
   afterEach(() => {
     delete process.env.PG_SSL;
+    delete process.env.PG_SSL_REJECT_UNAUTHORIZED;
   });
 
   it('uses plain TCP for loopback Supavisor (VPS MIS cron)', () => {
@@ -21,7 +22,7 @@ describe('resolvePgSsl', () => {
     expect(resolvePgSsl(REMOTE_VPS_POOLER)).toBe(false);
   });
 
-  it('accepts self-signed TLS for Supabase Cloud pooler', () => {
+  it('accepts TLS without hostname verify for Supabase Cloud pooler by default', () => {
     expect(resolvePgSsl(CLOUD_POOLER)).toEqual({ rejectUnauthorized: false });
   });
 
@@ -36,8 +37,25 @@ describe('resolvePgSsl', () => {
     expect(resolvePgSsl(url)).toEqual({ rejectUnauthorized: false });
   });
 
+  it('verifies certificates for sslmode=verify-full', () => {
+    const url =
+      'postgresql://postgres:secret@db.example.com:5432/postgres?sslmode=verify-full';
+    expect(resolvePgSsl(url)).toEqual({ rejectUnauthorized: true });
+  });
+
+  it('verifies certificates for sslmode=verify-ca', () => {
+    const url =
+      'postgresql://postgres:secret@db.example.com:5432/postgres?sslmode=verify-ca';
+    expect(resolvePgSsl(url)).toEqual({ rejectUnauthorized: true });
+  });
+
   it('honours PG_SSL=true override', () => {
     process.env.PG_SSL = 'true';
     expect(resolvePgSsl(LOOPBACK_POOLER)).toEqual({ rejectUnauthorized: false });
+  });
+
+  it('PG_SSL_REJECT_UNAUTHORIZED forces verify on cloud pooler', () => {
+    process.env.PG_SSL_REJECT_UNAUTHORIZED = 'true';
+    expect(resolvePgSsl(CLOUD_POOLER)).toEqual({ rejectUnauthorized: true });
   });
 });

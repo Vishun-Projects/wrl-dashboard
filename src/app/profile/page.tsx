@@ -25,9 +25,10 @@ import { feedback } from '@/lib/ui/feedback';
 import { resolveAvatarDisplayUrl } from '@/lib/auth/avatar-url';
 import { useSearchParams } from 'next/navigation';
 import { ThemePicker } from '@/components/settings/ThemePicker';
-import { MisEmailComposer } from '@/components/settings/MisEmailComposer';
-import type { MisEmailBodySectionDef } from '@/features/mis-email/lib/body-sections';
-import type { MisEmailKeyAccountsByZone, MisEmailPreferences } from '@/features/mis-email/lib/preferences';
+import { MisEmailComposer } from '@/features/mis-email/components/MisEmailComposer';
+import type { MisEmailBodySectionDef } from '@/features/mis-email/services/body-sections';
+import type { MisEmailKeyAccountsByZone, MisEmailPreferences } from '@/features/mis-email/services/preferences';
+import type { MisEmailLetterCopy } from '@/features/mis-email/services/org-settings-defaults';
 
 type MisEmailSettings = {
   mis_email_enabled: boolean;
@@ -44,6 +45,7 @@ type MisEmailSettings = {
   availableKeyAccountsByZone?: MisEmailKeyAccountsByZone;
   roleName: string | null;
   scopeLabel: string | null;
+  letterCopy?: MisEmailLetterCopy | null;
 };
 
 function getRequestErrorMessage(error: unknown, fallback: string): string {
@@ -324,6 +326,7 @@ function ProfileContent() {
                   allowed: emailSettings.allowed,
                   availableBodySections: emailSettings.availableBodySections ?? [],
                   availableKeyAccountsByZone: emailSettings.availableKeyAccountsByZone,
+                  letterCopy: emailSettings.letterCopy,
                 }}
                 prefs={emailPrefs}
                 onPrefsChange={setEmailPrefs}

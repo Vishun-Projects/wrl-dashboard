@@ -3,8 +3,8 @@ import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 
 import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/lib/aggregate';
-import { openCallsFromTotals } from '@/features/report/lib/bd-mis-summary';
+import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/services/aggregate';
+import { openCallsFromTotals } from '@/features/report/services/bd-mis-summary';
 
 const p = {
   startDate: '2026-01-01',

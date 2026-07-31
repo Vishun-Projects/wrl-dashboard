@@ -19,11 +19,11 @@ vi.mock('@/lib/db/prisma', () => ({
   },
 }));
 
-vi.mock('@/features/mis-email/lib/recipients', () => ({
+vi.mock('@/features/mis-email/services/recipients', () => ({
   loadDigestRecipientById: (...args: unknown[]) => loadDigestRecipientById(...args),
 }));
 
-vi.mock('@/features/mis-email/lib/user-scope', () => ({
+vi.mock('@/features/mis-email/services/user-scope', () => ({
   resolveUserDigestScopeWithLabel: (...args: unknown[]) =>
     resolveUserDigestScopeWithLabel(...args),
 }));

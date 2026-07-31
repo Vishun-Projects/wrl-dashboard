@@ -13,6 +13,10 @@ assert.equal(actionLabelFor('sync.schedule.complete'), 'Completed scheduled sync
 assert.equal(actionLabelFor('notification.mis_email.digest.sent'), 'Sent MIS digest email');
 assert.equal(actionLabelFor('notification.major_repair.failed'), 'Major-repair alert failed');
 assert.equal(actionLabelFor('unknown.event'), 'unknown.event');
+assert.equal(actionLabelFor('admin.vps_cron.pause'), 'Paused VPS cron job');
+assert.equal(actionLabelFor('admin.vps_cron.resume'), 'Resumed VPS cron job');
+assert.ok(ACTION_LABELS['admin.vps_cron.pause']);
+assert.ok(ACTION_LABELS['admin.vps_cron.resume']);
 assert.ok(ACTION_LABELS['auth.sign_in.success']);
 assert.ok(ACTION_LABELS['auth.session.expired']);
 assert.ok(ACTION_LABELS['sync.schedule.start']);

@@ -37,6 +37,8 @@ describe('canAccessPath', () => {
     expect(canAccessPath(['super_admin'], '/admin/security-audit')).toBe(true);
     expect(canAccessPath(['manage_users'], '/admin/security-audit')).toBe(false);
     expect(canAccessPath(['manage_roles'], '/admin/security-audit')).toBe(false);
+    expect(canAccessPath(['super_admin'], '/admin/vps-cron')).toBe(true);
+    expect(canAccessPath(['manage_users'], '/admin/vps-cron')).toBe(false);
   });
 
   it('allows MIS report with page or tab permission', () => {

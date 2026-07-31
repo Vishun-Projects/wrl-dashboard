@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   getPortalAuditPayload,
   portalAuditEtag,
-} from '@/features/report/lib/portal-audit-server';
+} from '@/features/report/server/portal-audit-server';
+import { jsonSafeError } from '@/lib/api/safe-error';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { seesAllOffices } from '@/lib/trhcalls/office-security';
 
@@ -28,7 +29,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(payload, { headers: { ETag: etag } });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Portal audit fetch failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Portal audit fetch failed');
   }
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Quick VPS status: historical / transaction-entry backfill + MIS 09:30 email cron.
+# Quick VPS status: historical / transaction-entry backfill + MIS digest email cron.
 # Asks for SSH passphrase. Run from Git Bash:
 #   bash scripts/vps-hosting/check-backfill-and-email-vps.sh
 set -euo pipefail

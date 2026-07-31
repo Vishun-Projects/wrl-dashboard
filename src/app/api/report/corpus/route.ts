@@ -14,10 +14,11 @@ import {
   type RegisterDateFilterColumn,
   TRHCALLS_EXCLUDE_TRANSFERRED,
 } from '@/lib/trhcalls/query';
-import { enrichCallRowForReport } from '@/features/report/lib/geo';
-import { CORPUS_SERVER_CACHE_TTL_MS, splitCalendarMonths } from '@/features/report/lib/corpus';
-import { formatLocalDate } from '@/features/report/lib/filters';
-import { readCorpusDiskCache, writeCorpusDiskCache } from '@/features/report/lib/server-cache';
+import { safeErrorMessage } from '@/lib/api/safe-error';
+import { enrichCallRowForReport } from '@/lib/geo/pincode-geo';
+import { CORPUS_SERVER_CACHE_TTL_MS, splitCalendarMonths } from '@/features/report/services/corpus';
+import { formatLocalDate } from '@/features/report/services/filters';
+import { readCorpusDiskCache, writeCorpusDiskCache } from '@/features/report/server/server-cache';
 import { readCallsFromPostgres } from '@/lib/read-model/flags';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
 
@@ -527,7 +528,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (err: unknown) {
     console.error('Corpus API Error:', err);
-    const message = err instanceof Error ? err.message : 'Corpus query failed';
 
     if (staleCacheKey && fullCache.has(staleCacheKey)) {
       const cached = fullCache.get(staleCacheKey)!;
@@ -541,6 +541,6 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Corpus query failed') }, { status: 500 });
   }
 }

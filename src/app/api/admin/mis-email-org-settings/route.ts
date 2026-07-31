@@ -2,13 +2,15 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
-import { canManageMisEmailRouting } from '@/features/mis-email/lib/routing-rules';
+import { canManageMisEmailRouting } from '@/features/mis-email/services/routing-rules';
 import {
   getMisEmailOrgSettings,
   saveMisEmailOrgSettings,
   type MisEmailOrgSettings,
-} from '@/features/mis-email/lib/org-settings';
-import { assertAllowedEmailDomains } from '@/features/mis-email/lib/allowed-domains';
+} from '@/features/mis-email/services/org-settings';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
+import { jsonSafeError, safeErrorMessage } from '@/lib/api/safe-error';
+import { assertAllowedEmailDomains } from '@/features/mis-email/services/allowed-domains';
 import { logAccessDenied, logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
 
 async function requireAccess(request: Request) {
@@ -59,12 +61,13 @@ export async function GET(request: Request) {
     const settings = await getMisEmailOrgSettings();
     return NextResponse.json({ settings });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to load org settings';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to load org settings');
   }
 }
 
 export async function PUT(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const access = await requireAccess(request);
   if (access.error) return access.error;
   const audit = requestAuditContext(request);
@@ -79,6 +82,7 @@ export async function PUT(request: Request) {
       ...(patch.defaultCcEmails ?? []),
       ...(patch.majorRepairDefaultTo ? [patch.majorRepairDefaultTo] : []),
       ...(patch.majorRepairDefaultCc ? [patch.majorRepairDefaultCc] : []),
+      ...(patch.watchdogToEmail ? [patch.watchdogToEmail] : []),
     ];
     if (emails.length > 0) {
       assertAllowedEmailDomains(emails, mergedDomains);
@@ -130,6 +134,6 @@ export async function PUT(request: Request) {
       statusCode: 400,
       metadata: { message },
     });
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed to save org settings') }, { status: 400 });
   }
 }

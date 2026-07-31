@@ -2,18 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
-import { resolveCallRegisterDates } from '@/features/report/lib/call-register/dates';
+import { resolveCallRegisterDates } from '@/features/report/services/call-register/dates';
 import {
   parseCallRegisterClientList,
   validateCallRegisterExportClients,
-} from '@/features/report/lib/call-register/clients';
+} from '@/lib/call-register/clients';
 import { listVisibleCallRegisterClients } from '@/lib/call-register/visible-clients';
 import {
   callRegisterSerialExportFilename,
   fetchCallRegisterSerialExportRows,
-} from '@/features/report/lib/call-register/serial-export';
-import { buildCallRegisterSerialWorkbook } from '@/features/report/lib/call-register/excel-export';
-import { workbookToBuffer } from '@/features/report/lib/summary-excel-export';
+} from '@/features/report/services/call-register/serial-export';
+import { buildCallRegisterSerialWorkbook } from '@/features/report/services/call-register/excel-export';
+import { workbookToBuffer } from '@/features/report/services/summary-excel-export';
 import { logAction } from '@/lib/security/audit';
 
 export const maxDuration = 300;

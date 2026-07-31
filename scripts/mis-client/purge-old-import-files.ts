@@ -15,9 +15,20 @@ dotenv.config({ path: path.join(root, '.env.mis-email') });
 dotenv.config({ path: path.join(root, '.env.local') });
 dotenv.config({ path: path.join(root, '.env') });
 
-import { purgeExpiredImportStoredFiles } from '@/features/mis-import/lib/purge-old-files';
+import { isVpsCronPaused } from '@/lib/vps-cron/settings';
+import { purgeExpiredImportStoredFiles } from '@/features/mis-import/services/purge-old-files';
 
 async function main() {
+  if (await isVpsCronPaused('mis_client_purge')) {
+    console.log(
+      JSON.stringify({
+        skipped: true,
+        reason: 'paused in portal (Super Admin → VPS Cron)',
+      })
+    );
+    return;
+  }
+
   const dryRun = process.argv.includes('--dry-run');
   const result = await purgeExpiredImportStoredFiles({ dryRun });
   console.log(

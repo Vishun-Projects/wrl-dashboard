@@ -6,7 +6,6 @@ import {
   resolveArcpBmApprovedAt,
   resolveArcpHoApprovedAt,
 } from '@/lib/read-model/arcp/dates';
-import type { ArcpHotRow } from '@/lib/read-model/arcp/types';
 
 function parseAmount(value: unknown): number | null {
   if (value == null || value === '') return null;
@@ -126,3 +125,36 @@ export function processArcpRows(rows: Record<string, unknown>[]): ArcpHotRow[] {
 
 /** @deprecated Use maxCrmWatermarks from @/lib/read-model/dates */
 export const maxArcpWatermarks = maxCrmWatermarks;
+
+export type ArcpHotRow = {
+  ncode: number;
+  vucnno: string | null;
+  /** WRL call id (trdcalls2fault.ncalls) — SAP posts one amount per call. */
+  call_no: string | null;
+  calls2fault_code: number | null;
+  nofficeid: number;
+  office_under: number | null;
+  call_at: Date | null;
+  solve_at: Date | null;
+  bm_approved_at: Date | null;
+  ho_approved_at: Date | null;
+  approve_at: Date | null;
+  claim_month_call: string | null;
+  claim_month_solve: string | null;
+  claim_month_approve: string | null;
+  ncalltype: string | null;
+  nitemcategory: string | null;
+  nlocalupcountry: string | null;
+  call_type_label: string | null;
+  item_category_label: string | null;
+  local_upcountry_label: string | null;
+  is_travel: boolean;
+  is_major: boolean;
+  rate: number | null;
+  amount_payable: number | null;
+  branch_approved: number | null;
+  ho_approved: number | null;
+  is_rejected: boolean;
+  source_editedon: Date | null;
+  added_at: Date | null;
+};

@@ -4,6 +4,7 @@ import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { actionLabelFor, listSecurityAuditEvents, logAccessDenied } from '@/lib/security/audit';
 import { canViewSecurityAudit } from '@/lib/security/audit-access';
+import { jsonSafeError } from '@/lib/api/safe-error';
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -25,10 +26,7 @@ export async function GET(request: Request) {
       reason: 'security_audit_forbidden',
       metadata: { actorEmail },
     });
-    return NextResponse.json(
-      { error: `Forbidden for email: ${actorEmail ?? 'unknown'}` },
-      { status: 403 }
-    );
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   try {
@@ -59,7 +57,6 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ events: enriched });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to load security audit log';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to load security audit log');
   }
 }

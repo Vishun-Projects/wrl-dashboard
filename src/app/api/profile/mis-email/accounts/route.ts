@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
-import { loadDigestRecipientById } from '@/features/mis-email/lib/recipients';
+import { loadDigestRecipientById } from '@/features/mis-email/services/recipients';
 import {
   resolveDigestDateRangeForPreferences,
   type MisEmailDateRangeMode,
-} from '@/features/mis-email/lib/preferences';
+} from '@/features/mis-email/services/preferences';
+import { jsonSafeError } from '@/lib/api/safe-error';
 import {
   queryDigestAccountNamesByZone,
-} from '@/features/mis-email/lib/query-digest-account-names';
-import { resolveUserDigestScopeWithLabel } from '@/features/mis-email/lib/user-scope';
+} from '@/features/mis-email/services/query-digest-account-names';
+import { resolveUserDigestScopeWithLabel } from '@/features/mis-email/services/user-scope';
 
 /** Fast key-account name list for the email composer (no full MIS aggregation). */
 export async function GET(request: Request) {
@@ -55,7 +56,6 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ availableKeyAccounts, accountsByZone });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to load key accounts';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to load key accounts');
   }
 }

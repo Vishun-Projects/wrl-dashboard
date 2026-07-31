@@ -8,7 +8,8 @@ import {
   repairMasterToPicker,
   type RepairMasterItem,
   type RepairPickerItem,
-} from '@/features/serial-audit/lib/repair-options';
+} from '@/lib/repair/options';
+import { jsonSafeError } from '@/lib/api/safe-error';
 import { buildMstRepairMasterListSql } from '@/lib/trhcalls/query';
 
 const REPAIR_CACHE_TTL = 60 * 60 * 1000;
@@ -88,7 +89,6 @@ export async function GET(req: NextRequest) {
   } catch (err: unknown) {
     repairInflight = null;
     console.error('Serial Audit repairs API Error:', err);
-    const message = err instanceof Error ? err.message : 'Failed to load repair types';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to load repair types');
   }
 }

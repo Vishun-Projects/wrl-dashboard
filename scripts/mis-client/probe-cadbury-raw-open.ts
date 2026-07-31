@@ -3,11 +3,11 @@ import { join } from 'path';
 import { readFileSync } from 'fs';
 config({ path: join(process.cwd(), '.env.local') });
 
-import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/lib/aggregate';
-import { parseClientDate } from '@/features/mis-import/lib/parse-dates';
-import { isCadburyExcludedServiceProvider } from '@/features/mis-import/lib/cadbury-filters';
-import { formatDisplayRegion } from '@/features/mis-import/lib/region';
-import { openCallsFromTotals } from '@/features/report/lib/bd-mis-summary';
+import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/services/aggregate';
+import { parseClientDate } from '@/features/mis-import/services/parse-dates';
+import { isCadburyExcludedServiceProvider } from '@/features/mis-import/services/cadbury-filters';
+import { formatDisplayRegion } from '@/features/mis-import/services/region';
+import { openCallsFromTotals } from '@/features/report/services/bd-mis-summary';
 import { withAppClient } from '@/lib/read-model/db';
 
 const END = '2026-06-29';

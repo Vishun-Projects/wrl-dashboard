@@ -7,12 +7,14 @@ import {
   deleteAuthUserViaDatabase,
   findAuthUserIdByEmail,
 } from '@/lib/auth/db-create-user';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
+import { safeErrorMessage } from '@/lib/api/safe-error';
 import { isDbSignInAvailable } from '@/lib/auth/db-sign-in';
 import { isDevAuthBypass } from '@/lib/auth/verify-jwt';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { canAssignMisEmail, resolveMisEmailReportIncludes } from '@/lib/auth/rbac-catalog';
-import { defaultPreferencesForRecipient } from '@/features/mis-email/lib/preferences';
+import { defaultPreferencesForRecipient } from '@/features/mis-email/services/preferences';
 import { USER_ROLE_IDS_SUBSELECT } from '@/lib/auth/user-roles-sql';
 import {
   loadPermissionsForRoleIds,
@@ -131,13 +133,15 @@ export async function GET(request: Request) {
     return NextResponse.json(users);
   } catch (err: unknown) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load users' },
+      { error: safeErrorMessage(err, 'Failed to load users') },
       { status: 500 }
     );
   }
 }
 
 export async function POST(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const adminUser = await requireRequestUser(request, supabase);
   const audit = requestAuditContext(request);
@@ -340,11 +344,16 @@ export async function POST(request: Request) {
       statusCode: status,
       metadata: { message },
     });
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json(
+      { error: safeErrorMessage(err, status === 409 ? 'Email already in use' : 'User creation failed') },
+      { status }
+    );
   }
 }
 
 export async function PUT(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const adminUser = await requireRequestUser(request, supabase);
   const audit = requestAuditContext(request);
@@ -412,7 +421,7 @@ export async function PUT(request: Request) {
     }
 
     if (wantsEmail) {
-      const { getMisEmailOrgSettings } = await import('@/features/mis-email/lib/org-settings');
+      const { getMisEmailOrgSettings } = await import('@/features/mis-email/services/org-settings');
       const org = await getMisEmailOrgSettings();
       const defaultPrefs = JSON.stringify(
         defaultPreferencesForRecipient(includes, {
@@ -510,13 +519,15 @@ export async function PUT(request: Request) {
       metadata: { message: err instanceof Error ? err.message : 'Failed to update user' },
     });
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to update user' },
+      { error: safeErrorMessage(err, 'Failed to update user') },
       { status: 500 }
     );
   }
 }
 
 export async function DELETE(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const adminUser = await requireRequestUser(request, supabase);
   const audit = requestAuditContext(request);
@@ -593,7 +604,7 @@ export async function DELETE(request: Request) {
       metadata: { message: err instanceof Error ? err.message : 'Failed to delete user' },
     });
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to delete user' },
+      { error: safeErrorMessage(err, 'Failed to delete user') },
       { status: 500 }
     );
   }

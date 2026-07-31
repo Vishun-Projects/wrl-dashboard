@@ -47,9 +47,9 @@ run_install_on_machine() {
   echo "==> MIS email digest ready at ${root}"
   echo "    Test: bash ${root}/scripts/vps-hosting/mis-email-digest.sh"
   echo "    Or:   cd ${root} && npm run mis-email:test"
-  echo "    Cron (Mon–Sat 09:30 IST, skips Sunday):"
+  echo "    Cron (every 15 min Mon–Sat IST; schedule from portal):"
   echo "    CRON_TZ=Asia/Kolkata"
-  echo "    30 9 * * 1-6 ${root}/scripts/vps-hosting/mis-email-digest.sh >> ${root}/logs/mis-email-cron.log 2>&1"
+  echo "    */15 * * * 1-6 ${root}/scripts/vps-hosting/mis-email-digest.sh >> ${root}/logs/mis-email-cron.log 2>&1"
 }
 
 if [[ "${1:-}" == "--local" ]]; then
@@ -105,4 +105,4 @@ echo "Next steps:"
 echo "  1. ssh ${VPS_HOST}"
 echo "  2. nano ${INSTALL_ROOT}/.env.mis-email   # SMTP_PASS, DATABASE_URL"
 echo "  3. cd ${INSTALL_ROOT} && npm run mis-email:test"
-echo "  4. npm run mis-email:install-cron:vps   # once daily 09:30 IST"
+echo "  4. npm run mis-email:install-cron:vps   # every 15 min; schedule from portal"

@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
-import { canSeeAllCallRegisterClients } from '@/features/report/lib/call-register/clients';
+import { canSeeAllCallRegisterClients } from '@/lib/call-register/clients';
 import {
   listVisibleCallRegisterClients,
   replaceVisibleCallRegisterClients,
 } from '@/lib/call-register/visible-clients';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
+import { safeErrorMessage } from '@/lib/api/safe-error';
 import { logAction } from '@/lib/security/audit';
 
 export async function GET(req: NextRequest) {
@@ -26,6 +28,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  const originDenied = assertSameOriginMutation(req);
+  if (originDenied) return originDenied;
   try {
     const auth = await resolveRequestReportSecurity(req, {
       pageId: 'mis_reports',
@@ -78,7 +82,7 @@ export async function PUT(req: NextRequest) {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save';
       if (message.includes('Select at least one')) {
-        return NextResponse.json({ error: message }, { status: 400 });
+        return NextResponse.json({ error: safeErrorMessage(err, 'Failed to save') }, { status: 400 });
       }
       throw err;
     }

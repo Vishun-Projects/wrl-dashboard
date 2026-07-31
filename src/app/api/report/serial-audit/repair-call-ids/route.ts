@@ -3,8 +3,9 @@ import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { postQuery } from '@/lib/db/proxy';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
-import { serializeRepairFilterParam } from '@/features/serial-audit/lib/repair-options';
+import { serializeRepairFilterParam } from '@/lib/repair/options';
 import { buildSerialAuditCallIdsWithRepairSql } from '@/lib/trhcalls/query';
+import { jsonSafeError } from '@/lib/api/safe-error';
 
 const QUERY_TIMEOUT_MS = 120000;
 
@@ -55,7 +56,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (err: unknown) {
     console.error('Serial Audit repair-call-ids API Error:', err);
-    const message = err instanceof Error ? err.message : 'Failed to resolve repair calls';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to resolve repair calls');
   }
 }

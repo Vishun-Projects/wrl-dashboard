@@ -156,7 +156,8 @@ SMTP_SECURE=false
 SMTP_FROM="WRL MIS Reports <${MAIL_FROM_LOCAL}@${MAIL_DOMAIN}>"
 
 MIS_EMAIL_TEST_TO=vishnu.vishwakarma@westernequipments.com
-MIS_EMAIL_PORTAL_URL=https://wrl-dashboard.vercel.app
+# Portal URL: leave unset → org Mail & Alerts portalBaseUrl. Uncomment to override:
+# MIS_EMAIL_PORTAL_URL=https://wrl-dashboard.vercel.app
 
 READ_SUMMARY_FROM=postgres
 READ_CALLS_FROM=postgres

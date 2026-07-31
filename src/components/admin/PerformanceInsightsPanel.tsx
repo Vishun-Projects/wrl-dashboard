@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import axios from 'axios';
 import { onCLS, onFCP, onINP, onLCP, onTTFB, type Metric } from 'web-vitals';
 import { Copy, ExternalLink, RefreshCw } from 'lucide-react';
-import { ReportFetchingBar } from '@/features/report/ui/ReportLoadingFeedback';
+import { ReportFetchingBar } from '@/features/report/components/ReportLoadingFeedback';
 import { logInsightsSnapshot } from '@/components/performance/PerformanceMetricsLogger';
 
 type VitalName = 'CLS' | 'FCP' | 'INP' | 'LCP' | 'TTFB';

@@ -3,14 +3,15 @@ import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { hasMisEmailSendAccess } from '@/lib/auth/rbac-catalog';
-import { loadDigestRecipientById } from '@/features/mis-email/lib/recipients';
-import { previewMisEmailCompose } from '@/features/mis-email/lib/compose-digest';
-import { parseMisEmailIntroPreset } from '@/features/mis-email/lib/email-template';
+import { loadDigestRecipientById } from '@/features/mis-email/services/recipients';
+import { previewMisEmailCompose } from '@/features/mis-email/services/compose-digest';
+import { parseMisEmailIntroPreset } from '@/features/mis-email/services/email-template';
 import {
   mergeMisEmailPreferences,
   validateMisEmailPreferencesPatch,
   type MisEmailPreferences,
-} from '@/features/mis-email/lib/preferences';
+} from '@/features/mis-email/services/preferences';
+import { jsonSafeError } from '@/lib/api/safe-error';
 
 export const maxDuration = 300;
 
@@ -100,7 +101,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, preview });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to build email preview';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to build email preview');
   }
 }

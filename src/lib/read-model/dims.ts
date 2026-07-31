@@ -6,7 +6,7 @@ import {
   looksLikeBranchOffice,
 } from '@/lib/read-model/crm-fetch';
 
-import { toBigInt } from '@/lib/read-model/coerce';
+import { toBigInt } from '@/lib/read-model/transform';
 
 async function batchInsert(
   client: pg.PoolClient,

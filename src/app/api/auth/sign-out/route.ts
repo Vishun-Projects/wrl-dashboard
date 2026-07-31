@@ -11,8 +11,12 @@ import {
   logSecurityEventBestEffort,
   requestAuditContext,
 } from '@/lib/security/audit';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
+import { jsonSafeError } from '@/lib/api/safe-error';
 
 export async function POST(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const audit = requestAuditContext(request);
   const cookieStore = await cookies();
   const supabaseAuth = await createClient();
@@ -34,8 +38,7 @@ export async function POST(request: Request) {
     await clearSessionStartedAtCookie();
     await clearAuditSessionCookie();
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Sign-out failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Sign-out failed');
   }
 
   try {

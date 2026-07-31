@@ -4,10 +4,10 @@ import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useSt
 
 import { Shield, X } from 'lucide-react';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
-import { WarrantyMasterToolbar } from '@/features/warranty-master/ui/WarrantyMasterToolbar';
-import { WarrantyMasterHeaderActions } from '@/features/warranty-master/ui/WarrantyMasterHeaderActions';
-import { WarrantyMasterSummaryPanel } from '@/features/warranty-master/ui/WarrantyMasterSummaryPanel';
-import { WarrantyMasterTable } from '@/features/warranty-master/ui/WarrantyMasterTable';
+import { WarrantyMasterToolbar } from '@/features/warranty-master/components/WarrantyMasterToolbar';
+import { WarrantyMasterHeaderActions } from '@/features/warranty-master/components/WarrantyMasterHeaderActions';
+import { WarrantyMasterSummaryPanel } from '@/features/warranty-master/components/WarrantyMasterSummaryPanel';
+import { WarrantyMasterTable } from '@/features/warranty-master/components/WarrantyMasterTable';
 import { AdminTableCard } from '@/components/admin/AdminUi';
 import { AnimatedChipList } from '@/components/motion';
 import {
@@ -22,16 +22,16 @@ import {
   type WarrantyMasterAggregateRow,
   type WarrantyMasterClientFilters,
   type WarrantyMasterFgLineRow,
-} from '@/features/warranty-master/lib';
+} from '@/features/warranty-master/services';
 import {
   clearWarrantyMasterCache,
   readWarrantyMasterCache,
   writeWarrantyMasterCache,
-} from '@/features/warranty-master/lib/client-cache';
+} from '@/features/warranty-master/services/client-cache';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import { PageAlert } from '@/components/ui/PageAlert';
 import { feedback } from '@/lib/ui/feedback';
-import { triggerBlobDownload } from '@/features/report/lib/summary-excel-export';
+import { triggerBlobDownload } from '@/features/report/services/summary-excel-export';
 import { logClientExportAction } from '@/lib/security/client-export-audit';
 import { usePageAlert } from '@/hooks/usePageAlert';
 import { DataTableLoading } from '@/components/ui/DataTableLoading';

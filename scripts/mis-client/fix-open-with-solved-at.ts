@@ -2,8 +2,8 @@ import { config } from 'dotenv';
 import { join } from 'path';
 import { withAppClient } from '@/lib/read-model/db';
 import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/lib/aggregate';
-import { buildBdMisRegionalRows, sumBdMisRegionalGrand } from '@/features/report/lib/bd-mis-summary';
+import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/services/aggregate';
+import { buildBdMisRegionalRows, sumBdMisRegionalGrand } from '@/features/report/services/bd-mis-summary';
 
 config({ path: join(process.cwd(), '.env.local') });
 

@@ -3,7 +3,7 @@ import { join } from 'path';
 
 config({ path: join(process.cwd(), '.env.local') });
 
-import { queryClientAccountSummaryFiltered } from '@/features/mis-import/lib/aggregate';
+import { queryClientAccountSummaryFiltered } from '@/features/mis-import/services/aggregate';
 import { prisma } from '@/lib/db/prisma';
 
 async function main() {

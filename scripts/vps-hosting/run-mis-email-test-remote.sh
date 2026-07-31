@@ -129,7 +129,7 @@ $(write_smtp_block)
 
 MIS_EMAIL_TEST_TO=${TEST_TO}
 MIS_EMAIL_TEST_CC=${TEST_CC}
-MIS_EMAIL_PORTAL_URL=https://wrl-dashboard.vercel.app
+# Portal links use org Mail & Alerts portalBaseUrl unless you set MIS_EMAIL_PORTAL_URL
 
 READ_SUMMARY_FROM=postgres
 READ_REGISTER_FROM=postgres

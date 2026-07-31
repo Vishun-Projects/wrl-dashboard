@@ -35,12 +35,24 @@ export function isRegisterRowCancelled(row: Record<string, unknown>): boolean {
   return false;
 }
 
+/**
+ * Call Register status buckets (UI Tech. Solve / Closed / Assigned / …).
+ *
+ * DEVELOPER — READ THIS AND DO NOT “FIX” IT WITH bapproval:
+ * Western CRM sets bapproval=1 on almost every call (including open/assigned).
+ * Splitting Tech. Solve vs Closed on !bapproval / bapproval made Tech. Solve Call
+ * show 0 while Closed ate all fast-closes (incident Jul 2026). Users do not read
+ * this comment; the regression tests below will fail if you change the rule.
+ *
+ * Canonical rule (same as CallDetail + location-audit):
+ *   Closed     = bsolved (or callsolved)
+ *   Tech. Solve = bfastclose && !bsolved
+ * bapproval is only for BM-approved *date* filters, not this bucket split.
+ */
 export function classifyRegisterRowStatus(row: Record<string, unknown>): RegisterSummaryBucket {
   if (isRegisterRowTransferred(row)) return 'transferred';
 
   const isCancelled = isRegisterRowCancelled(row);
-  // Closed = BM/CRM solved (bsolved). Tech. Solve = engineer fast-close still pending bsolved.
-  // Do NOT use bapproval here — CRM sets bapproval=1 on most open calls too.
   const isClosed =
     !isCancelled && (truthyCrmFlag(row.bsolved) || truthyCrmFlag(row.callsolved));
   const isTechSolved = !isCancelled && !isClosed && truthyCrmFlag(row.bfastclose);

@@ -1,4 +1,4 @@
-import { toBigInt } from '@/lib/read-model/coerce';
+import { toBigInt } from '@/lib/read-model/transform';
 import type { HotRow } from '@/lib/read-model/types';
 import type { ColumnMismatch } from '@/lib/read-model/audit/types';
 

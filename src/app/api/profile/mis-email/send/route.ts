@@ -3,18 +3,20 @@ import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { hasMisEmailSendAccess } from '@/lib/auth/rbac-catalog';
-import { loadDigestRecipientById } from '@/features/mis-email/lib/recipients';
-import { sendMisEmailComposeBatch } from '@/features/mis-email/lib/compose-digest';
-import { parseMisEmailIntroPreset } from '@/features/mis-email/lib/email-template';
+import { loadDigestRecipientById } from '@/features/mis-email/services/recipients';
+import { sendMisEmailComposeBatch } from '@/features/mis-email/services/compose-digest';
+import { parseMisEmailIntroPreset } from '@/features/mis-email/services/email-template';
 import {
   createMisEmailSendJob,
   updateMisEmailSendJob,
-} from '@/features/mis-email/lib/send-jobs';
+} from '@/features/mis-email/services/send-jobs';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
+import { safeErrorMessage } from '@/lib/api/safe-error';
 import {
   mergeMisEmailPreferences,
   validateMisEmailPreferencesPatch,
   type MisEmailPreferences,
-} from '@/features/mis-email/lib/preferences';
+} from '@/features/mis-email/services/preferences';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
 import { logAccessDenied, logAction } from '@/lib/security/audit';
@@ -35,6 +37,8 @@ async function loadMisEmailRow(userId: string): Promise<MisEmailRow | null> {
 }
 
 export async function POST(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
 
@@ -56,7 +60,6 @@ export async function POST(request: Request) {
       sendTo?: string[];
       sendCc?: string[];
       savePreferences?: boolean;
-      allowAutoSendDisabledOverride?: boolean;
       introPreset?: unknown;
     };
 
@@ -102,7 +105,7 @@ export async function POST(request: Request) {
       includeKeyAccount: recipient.includeKeyAccount,
     };
 
-    const { getMisEmailOrgSettings } = await import('@/features/mis-email/lib/org-settings');
+    const { getMisEmailOrgSettings } = await import('@/features/mis-email/services/org-settings');
     const org = await getMisEmailOrgSettings();
     const validated = validateMisEmailPreferencesPatch({
       patch: body.preferences ?? {},
@@ -119,7 +122,7 @@ export async function POST(request: Request) {
     // Also validate explicit sendTo/sendCc when provided
     try {
       const { assertAllowedEmailDomains } = await import(
-        '@/features/mis-email/lib/allowed-domains'
+        '@/features/mis-email/services/allowed-domains'
       );
       assertAllowedEmailDomains(
         [...(body.sendTo ?? []), ...(body.sendCc ?? [])],
@@ -127,7 +130,7 @@ export async function POST(request: Request) {
       );
     } catch (err: unknown) {
       return NextResponse.json(
-        { error: err instanceof Error ? err.message : 'Invalid recipient domain' },
+        { error: safeErrorMessage(err, 'Invalid recipient domain') },
         { status: 400 }
       );
     }
@@ -169,7 +172,6 @@ export async function POST(request: Request) {
           preferences: validated.merged,
           sendTo: body.sendTo,
           sendCc: body.sendCc,
-          allowAutoSendDisabledOverride: body.allowAutoSendDisabledOverride === true,
           displayName: recipient.name,
           introPreset: introPreset ?? undefined,
         });

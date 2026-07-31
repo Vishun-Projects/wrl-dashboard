@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateArcpClaimsRequest } from '@/features/arcp/lib/server/route-auth';
-import { loadArcpCrmLabelLookups } from '@/features/arcp/lib/server/crm-labels';
+import { authenticateArcpClaimsRequest } from '@/features/arcp/server/route-auth';
+import { loadArcpCrmLabelLookups } from '@/features/arcp/server/crm-labels';
+import { jsonSafeError } from '@/lib/api/safe-error';
 
 export const maxDuration = 60;
 
@@ -22,7 +23,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(cachedLookups);
   } catch (err: unknown) {
     console.error('[ARCP Label Lookups] error:', err);
-    const message = err instanceof Error ? err.message : 'Failed to load label lookups';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to load label lookups');
   }
 }

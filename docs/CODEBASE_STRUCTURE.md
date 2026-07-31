@@ -42,12 +42,12 @@ src/
 ├── app/                 # Next.js routes (thin pages + API route handlers)
 ├── features/            # Vertical domain slices (preferred home for domain code)
 ├── components/          # Cross-page UI shells (layout, calls, admin chrome, ui kit)
-├── lib/                 # Shared infra: auth, db, supabase, read-model sync, net, …
-├── shared/              # Placeholder only today (README) — auth/db/read-model still in lib/
-├── hooks/
-├── contexts/
-└── styles/
+├── lib/                 # Shared infra: auth, db, supabase, read-model sync, net, … (real shared layer)
+├── shared/              # Placeholder only (README) — bulk rename lib → shared deferred
+└── hooks/               # Cross-cutting React hooks (e.g. usePageAlert)
 ```
+
+Report filters context lives in-feature: `features/report/components/ReportFiltersContext.tsx`. Theme tokens live in `app/globals.css` `@theme` (no `src/styles/`).
 
 ### Import conventions
 
@@ -56,7 +56,7 @@ src/
 | App / other features (client-safe) | `@/features/<domain>` (`index.ts`) |
 | MIS import server/pg helpers | `@/features/mis-import/server` |
 | Report download helpers only | `@/features/report/download` |
-| Same feature internals | `@/features/<domain>/lib/...` or `/ui/...` |
+| Same feature internals | `@/features/<domain>/components|services|server|hooks|lib/...` |
 | Infra | `@/lib/...` |
 
 Gate: `npm run check:feature-boundaries` (also in CI + husky pre-commit).
@@ -75,23 +75,29 @@ Each domain roughly:
 ```text
 src/features/<domain>/
 ├── index.ts          # Public barrel (client-safe where split exists)
-├── server.ts         # Optional server-only barrel (mis-import)
+├── server.ts         # Optional server-only barrel (mis-import; avoids server/ folder clash)
 ├── download.ts       # Optional thin client entry (report)
-├── lib/              # Domain logic (+ lib/server for CRM/SQL handlers)
-└── ui/               # Client components
+├── components/       # React UI
+├── services/         # Domain business logic
+├── server/           # API/CRM/Postgres-only (when present)
+├── hooks/            # React hooks (report)
+└── lib/              # Tiny pure helpers only (report); prefer services/ elsewhere
 ```
+
+**Placement rule:** React → `components/` or `hooks/`. Domain logic → `services/`. Next/Prisma/CRM/cookies → `server/` (or `server.ts` barrel). Pure no-I/O helpers → `lib/` only when tiny.
 
 | Domain | Role | Notes |
 |--------|------|--------|
-| `report` | MIS report shell, filters, summary/accounts, corpus | `download.ts`; tab panels under `ui/` |
-| `register` | Call register table/filters/export | |
-| `arcp` | ARCP claims UI + server load | `ui/ArcpClaimsPageClient`; `lib/server/` |
-| `mis-email` | Digest compose/send | `ui/MisEmailRoutingPageClient`; Large `lib/` + CLI |
-| `serial-audit` | Serial / complaint audit | `ui/SerialAuditPageClient` |
-| `distribution` | Call distribution | `ui/DistributionPageClient` |
-| `mis-import` | Client file import / upload | `index.ts` client-safe; `server.ts` = pg |
-| `location-audit` | Location audit | `lib/server/` |
-| `warranty-master` | Warranty master | `lib/server/` |
+| `report` | MIS report shell, filters, summary/accounts, corpus | `components/` + `services/` + `server/` + thin `lib/`; `download.ts` |
+| `register` | Call register table/filters/export | `components/` + `services/` + `server/` |
+| `arcp` | ARCP claims UI + server load | `components/` + `services/` + `server/` |
+| `mis-email` | Digest compose/send | `components/` + `services/` |
+| `serial-audit` | Serial / complaint audit | `components/` + `services/` + `server/` |
+| `distribution` | Call distribution | `components/` + `services/` |
+| `mis-import` | Client file import / upload | `services/`; `index.ts` client-safe; `server.ts` = pg |
+| `location-audit` | Location audit | `components/` + `services/` + `server/` |
+| `warranty-master` | Warranty master | `components/` + `services/` + `server/` |
+| `major-repair-alerts` | Major repair alerts UI | `components/` only |
 
 ---
 
@@ -113,8 +119,7 @@ src/app/
 │   │   ├── location-audit/
 │   │   └── serial-audit/
 │   ├── call-register/
-│   ├── warranty-master/
-│   └── part-barcode-verification/
+│   └── warranty-master/
 └── api/
     ├── auth/                   # sign-in, sign-out, me, forgot-password
     ├── admin/                  # users, roles, mis-email, performance, …
@@ -124,7 +129,6 @@ src/app/
     ├── read-model/             # sync status / cron
     ├── sync/ + sync-proxy/     # legacy sync helpers
     ├── distribution / calls / comments / flags / offices
-    ├── barcode-scan/
     └── cache/
 ```
 
@@ -144,7 +148,6 @@ src/lib/
 ├── trhcalls/        # Call SQL helpers
 ├── register-sql/    # WCO / ARCP pick / register enrich leaves (shared with features)
 ├── dates/ call-display/ call-status/ aging/ summary/ mail/ serial/ call-register/
-├── barcode-scan/    # Tesseract / scan pipeline
 ├── call-row/ crm/ geo/ http/ net/ security/ performance/ ui/ utils/ …
 └── api/schemas/     # Shared API zod (where present)
 ```
@@ -162,7 +165,7 @@ src/components/
 └── README.md
 ```
 
-(Domain panels that used to live under `components/<domain>` moved into `features/*/ui`.)
+(`settings/` holds cross-cutting chrome like `ThemePicker`; domain settings UI such as MIS email composer lives under `features/mis-email/components/`.)
 
 ---
 
@@ -208,8 +211,7 @@ dump/
 ├── README.md
 ├── requirements-crm-mirror.txt
 ├── requirements-sync.txt
-├── warranty-pipeline/          # Moved here from repo root
-├── root/                       # zip, leftovers, eng.traineddata, …
+├── root/                       # zip, leftovers, …
 ├── scripts/                    # One-off remediation codemods
 ├── docs/                       # BRD/FSD binaries, git-audit, sample data
 ├── exports-data/
@@ -243,7 +245,7 @@ Hot tables are **server SQL only**; PostgREST roles revoked (`21-revoke-hot-anon
 
 | Want to change… | Look in… |
 |-----------------|----------|
-| MIS report tabs / filters UI | `src/features/report/ui/` |
+| MIS report tabs / filters UI | `src/features/report/components/` |
 | Register grid / export client | `src/features/register/` |
 | ARCP claims | `src/features/arcp/` |
 | Client Excel/CSV import | `src/features/mis-import/` (+ `server.ts` for DB) |

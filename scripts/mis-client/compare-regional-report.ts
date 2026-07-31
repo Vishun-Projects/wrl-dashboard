@@ -17,11 +17,11 @@ import XLSX from 'xlsx';
 config({ path: join(process.cwd(), '.env.local') });
 
 import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/lib/aggregate';
+import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/services/aggregate';
 import {
   buildBdMisRegionalRows,
   sumBdMisRegionalGrand,
-} from '@/features/report/lib/bd-mis-summary';
+} from '@/features/report/services/bd-mis-summary';
 
 const DEFAULT_XLSX =
   'C:/Users/Vishnu.Vishwakarma/Downloads/Raw/New_BD_MIS_30.06.2026.xlsx';

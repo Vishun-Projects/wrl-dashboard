@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
-import { loadBatchFileBytes } from '@/features/mis-import/lib/batch-file';
+import { loadBatchFileBytes } from '@/features/mis-import/services/batch-file';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { logAction } from '@/lib/security/audit';

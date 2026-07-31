@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
-import { queryClientAggregates } from '@/features/mis-import/lib/aggregate';
-import { parseSourceCodesParam } from '@/features/mis-import/lib/source-selection';
-import { sumCompletedBatchRowCounts } from '@/features/mis-import/lib/config';
+import { queryClientAggregates } from '@/features/mis-import/services/aggregate';
+import { parseSourceCodesParam } from '@/features/mis-import/services/source-selection';
+import { sumCompletedBatchRowCounts } from '@/features/mis-import/services/config';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 export async function GET(req: NextRequest) {

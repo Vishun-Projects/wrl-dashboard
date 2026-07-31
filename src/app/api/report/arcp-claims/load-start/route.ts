@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateArcpClaimsRequest } from '@/features/arcp/lib/server/route-auth';
+import { authenticateArcpClaimsRequest } from '@/features/arcp/server/route-auth';
 import {
   mergeJobAggregatesFromDisk,
   mergeJobDetailFromDisk,
   startOrResumeLoadJob,
   type ArcpLoadJobView,
-} from '@/features/arcp/lib/server/load-job';
-import { loadArcpClaimsDetailRows } from '@/features/arcp/lib/server/detail-load';
-import { deriveArcpGrandTotalsFromAggregates } from '@/features/arcp/lib/query';
-import type { ArcpChunkCacheKind } from '@/features/arcp/lib/server/chunk-cache';
-import type { ArcpFetchOpts } from '@/features/arcp/lib/server/fetch';
+} from '@/features/arcp/server/load-job';
+import { jsonSafeError } from '@/lib/api/safe-error';
+import { loadArcpClaimsDetailRowsHybrid as loadArcpClaimsDetailRows } from '@/features/arcp/server/hybrid-load';
+import { deriveArcpGrandTotalsFromAggregates } from '@/features/arcp/services/query';
+import type { ArcpChunkCacheKind } from '@/features/arcp/server/chunk-cache';
+import type { ArcpFetchOpts } from '@/features/arcp/server/fetch';
 
 export const maxDuration = 60;
 
@@ -99,7 +100,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: unknown) {
     console.error('[ARCP Load Start] error:', err);
-    const message = err instanceof Error ? err.message : 'Failed to start load job';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to start load job');
   }
 }

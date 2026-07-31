@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Morning MIS watchdog — plain language fail/ok for non-techies.
-# Cron AFTER the 09:30 digest (default 09:50 IST Mon–Sat). Emails YOU if morning mail failed.
+# Morning MIS watchdog — polite internal notice if the morning digest did not complete.
+# Cron AFTER the morning digest window (default 09:50 IST Mon–Sat).
+# Pause via Mail & Alerts → VPS Cron → "MIS morning watchdog" when not needed.
 #
 #   CRON_TZ=Asia/Kolkata
 #   50 9 * * 1-6 /opt/wrl/database/fast-close-app/scripts/vps-hosting/mis-email-morning-watchdog.sh \
@@ -13,12 +14,22 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_INSTALL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-$DEFAULT_INSTALL_ROOT}"
-ALERT_TO="${MIS_EMAIL_WATCHDOG_TO:-vishnu.vishwakarma@westernequipments.com}"
 LOG="${INSTALL_ROOT}/logs/mis-email-cron.log"
 TODAY="$(TZ=Asia/Kolkata date +%F)"
 STAMP="$(TZ=Asia/Kolkata date -Iseconds)"
 
 mkdir -p "${INSTALL_ROOT}/logs"
+
+# shellcheck source=vps-cron-gate.sh
+source "${SCRIPT_DIR}/vps-cron-gate.sh"
+# Prefer .env.mis-email for DATABASE_URL when gating
+if [[ -f "${INSTALL_ROOT}/.env.mis-email" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${INSTALL_ROOT}/.env.mis-email"
+  set +a
+fi
+vps_cron_gate_allow mis_email_watchdog || exit 0
 
 # Digest does not run Sundays — do not alert as a failure.
 if [[ "$(TZ=Asia/Kolkata date +%u)" == "7" ]]; then
@@ -32,7 +43,7 @@ reason=""
 if [[ ! -f "$LOG" ]]; then
   reason="Morning MIS log missing (${LOG}). Cron may not have run or path wrong."
 elif ! grep -F "$TODAY" "$LOG" >/dev/null 2>&1; then
-  reason="No MIS digest log lines for today (${TODAY}). 09:30 cron likely did not run."
+  reason="No MIS digest log lines for today (${TODAY}). Digest cron likely did not run."
 elif grep -E "FATAL|Cannot find module|Error:|mis-email-digest.*exit" "$LOG" \
   | grep -F "$TODAY" >/dev/null 2>&1; then
   # Fall through: also require a clean complete today
@@ -70,38 +81,9 @@ fi
 
 echo "[${STAMP}] FAIL — ${reason}"
 
-body="Morning MIS Report FAILED (${TODAY}).
-
-What non-techies need to know:
-  The automated 09:30 report did not finish successfully.
-
-Why (ops):
-  ${reason}
-
-What to do:
-  1) ssh to VPS and: tail -n 80 ${LOG}
-  2) Re-send: bash ${INSTALL_ROOT}/scripts/vps-hosting/mis-email-digest.sh
-  3) If that fails: npm run mis-email:diagnose:vps
-
-This alert is from mis-email-morning-watchdog.sh — not the customer digest.
-"
-
-# Prefer mailx/sendmail via local Postfix (works to Gmail from this host).
-if command -v sendmail >/dev/null 2>&1; then
-  {
-    echo "To: ${ALERT_TO}"
-    echo "From: reports@wrl-fsm.cloud"
-    echo "Subject: ALERT: Morning MIS Report FAILED ${TODAY}"
-    echo "Content-Type: text/plain; charset=UTF-8"
-    echo
-    echo "$body"
-  } | sendmail -t
-  echo "[${STAMP}] alert mailed to ${ALERT_TO}"
-elif command -v mail >/dev/null 2>&1; then
-  echo "$body" | mail -s "ALERT: Morning MIS Report FAILED ${TODAY}" "$ALERT_TO"
-  echo "[${STAMP}] alert mailed to ${ALERT_TO}"
-else
-  echo "[${STAMP}] could not send alert mail (no sendmail/mail)" >&2
-fi
+# Send via Node so subject/body/To come from Mail & Alerts org settings (DB).
+# Env MIS_EMAIL_WATCHDOG_TO still overrides the org recipient.
+MIS_EMAIL_WATCHDOG_DATE="${TODAY}" MIS_EMAIL_WATCHDOG_REASON="${reason}" \
+  npx tsx "${INSTALL_ROOT}/scripts/vps-hosting/send-mis-email-watchdog-alert.ts"
 
 exit 1

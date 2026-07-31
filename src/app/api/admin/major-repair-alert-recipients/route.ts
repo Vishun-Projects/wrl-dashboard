@@ -10,6 +10,8 @@ import {
   listMajorRepairRepeatRecipients,
   updateMajorRepairRepeatRecipient,
 } from '@/lib/read-model/major-repair-repeat-recipients';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
+import { jsonSafeError, safeErrorMessage } from '@/lib/api/safe-error';
 import { logAccessDenied, logAction } from '@/lib/security/audit';
 
 async function requireAccess(request: Request) {
@@ -67,12 +69,13 @@ export async function GET(request: Request) {
     const recipients = await listMajorRepairRepeatRecipients();
     return NextResponse.json({ recipients });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to load recipients';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to load recipients');
   }
 }
 
 export async function POST(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const access = await requireAccess(request);
   if (access.error) return access.error;
 
@@ -110,11 +113,13 @@ export async function POST(request: Request) {
       summary: 'Failed to create major-repair recipient',
       metadata: { message },
     });
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed to create recipient') }, { status: 400 });
   }
 }
 
 export async function PUT(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const access = await requireAccess(request);
   if (access.error) return access.error;
 
@@ -152,11 +157,13 @@ export async function PUT(request: Request) {
       summary: 'Failed to update major-repair recipient',
       metadata: { message },
     });
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed to update recipient') }, { status: 400 });
   }
 }
 
 export async function DELETE(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const access = await requireAccess(request);
   if (access.error) return access.error;
 
@@ -185,6 +192,6 @@ export async function DELETE(request: Request) {
       summary: 'Failed to delete major-repair recipient',
       metadata: { message },
     });
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed to delete recipient') }, { status: 400 });
   }
 }

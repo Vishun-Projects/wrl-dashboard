@@ -15,18 +15,18 @@ import { config } from 'dotenv';
 import { createServer } from 'http';
 import { Readable } from 'stream';
 import { resolve } from 'path';
-import { handleMisClientUploadFormData } from '@/features/mis-import/lib/upload-http';
+import { handleMisClientUploadFormData } from '@/features/mis-import/services/upload-http';
 import {
   handleMisClientUploadChunkFormData,
   handleMisClientUploadChunkStatus,
-} from '@/features/mis-import/lib/upload-chunk-http';
-import { resolveMisBatchDownload } from '@/features/mis-import/lib/batch-download-http';
+} from '@/features/mis-import/services/upload-chunk-http';
+import { resolveMisBatchDownload } from '@/features/mis-import/services/batch-download-http';
 import {
   assertMisDownloadAccess,
   assertMisUploadAccess,
   resolveMisUploadUserId,
-} from '@/features/mis-import/lib/upload-standalone-auth';
-import { buildRegisterCsvExportResponse } from '@/features/register/lib/server/register-csv-export-auth';
+} from '@/features/mis-import/services/upload-standalone-auth';
+import { buildRegisterCsvExportResponse } from '@/features/register/server/register-csv-export-auth';
 import { logAction } from '@/lib/security/audit';
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
 

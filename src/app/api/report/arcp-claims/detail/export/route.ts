@@ -1,28 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateArcpClaimsRequest } from '@/features/arcp/lib/server/route-auth';
-import { loadArcpClaimsDetailRows } from '@/features/arcp/lib/server/detail-load';
+import { authenticateArcpClaimsRequest } from '@/features/arcp/server/route-auth';
+import { loadArcpClaimsDetailRowsHybrid as loadArcpClaimsDetailRows } from '@/features/arcp/server/hybrid-load';
 import {
   buildArcpClaimsDetailCsvFileName,
   createArcpClaimsDetailCsvResponse,
   finalizeArcpDetailExportRows,
   sumArcpDetailExportTotals,
-} from '@/features/arcp/lib/export';
-import { resolveArcpDateFilterColumn } from '@/features/arcp/lib/query';
+} from '@/features/arcp/services/export';
+import { resolveArcpDateFilterColumn } from '@/features/arcp/services/query';
 import {
   queryArcpClaimsDetailRows,
-} from '@/features/arcp/lib/server/postgres';
+} from '@/features/arcp/server/postgres';
 import {
   isCrmOutOfMemoryError,
   isCrmSqlTimeoutError,
-} from '@/features/arcp/lib/server/fetch';
+} from '@/features/arcp/server/fetch';
+import { safeErrorMessage } from '@/lib/api/safe-error';
 import {
   getLoadJobById,
   mergeJobDetailFromDisk,
-} from '@/features/arcp/lib/server/load-job';
+} from '@/features/arcp/server/load-job';
 import { getArcpPostgresCoverage } from '@/lib/read-model/arcp/coverage-server';
 import { postgresCoversFullRange } from '@/lib/read-model/arcp/coverage-shared';
 import { readArcpFromPostgres } from '@/lib/read-model/flags';
-import type { ArcpClaimsDetailRow } from '@/features/arcp/lib/query';
+import type { ArcpClaimsDetailRow } from '@/features/arcp/services/query';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { logAction } from '@/lib/security/audit';
 
@@ -189,8 +190,11 @@ export async function GET(req: NextRequest) {
         { status: 504 }
       );
     }
-    const message = err instanceof Error ? err.message : 'Failed to export ARCP claim detail';
     const statusCode = (err as Error & { statusCode?: number }).statusCode;
-    return NextResponse.json({ error: message }, { status: statusCode ?? 500 });
+    console.error('[arcp-claims/detail/export]', err);
+    return NextResponse.json(
+      { error: safeErrorMessage(err, 'Failed to export ARCP claim detail') },
+      { status: statusCode ?? 500 }
+    );
   }
 }

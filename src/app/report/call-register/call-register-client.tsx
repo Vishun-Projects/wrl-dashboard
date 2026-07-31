@@ -4,26 +4,26 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react';
 import { PageScrollRegion } from '@/components/layout/PageShell';
 import { useUser } from '@/components/layout/DashboardLayout';
-import { CallRegisterToolbar } from '@/features/report/ui/call-register/CallRegisterToolbar';
-import { CallRegisterGrid } from '@/features/report/ui/call-register/CallRegisterGrid';
-import { CallRegisterSerialPanel } from '@/features/report/ui/call-register/CallRegisterSerialPanel';
+import { CallRegisterToolbar } from '@/features/report/components/call-register/CallRegisterToolbar';
+import { CallRegisterGrid } from '@/features/report/components/call-register/CallRegisterGrid';
+import { CallRegisterSerialPanel } from '@/features/report/components/call-register/CallRegisterSerialPanel';
 import { AdminTableCard } from '@/components/admin/AdminUi';
 import { PageAlert } from '@/components/ui/PageAlert';
 import { TableSkeleton } from '@/components/ui/DataTableLoading';
-import type { CallRegisterRow, CallRegisterSummary } from '@/features/report/lib/call-register/types';
-import type { CallRegisterDateField } from '@/features/report/lib/call-register/dates';
+import type { CallRegisterRow, CallRegisterSummary } from '@/features/report/services/call-register/types';
+import type { CallRegisterDateField } from '@/features/report/services/call-register/dates';
 import { usePageAlert } from '@/hooks/usePageAlert';
 import {
   triggerBlobDownload,
   workbookToPreparedExport,
   type PreparedFileExport,
-} from '@/features/report/lib/summary-excel-export';
-import type { ExportQueueProgress, ExportQueueRunContext } from '@/features/report/lib/export-queue';
+} from '@/features/report/services/summary-excel-export';
+import type { ExportQueueProgress, ExportQueueRunContext } from '@/features/report/services/export-queue';
 import type { MisTabId } from '@/lib/auth/rbac-catalog';
 import { fetchWithRetry } from '@/lib/net/fetch-with-retry';
 import { canSeeAllCallRegisterClients } from '@/lib/call-register/clients';
-import type { CallRegisterSerialExportRow } from '@/features/report/lib/call-register/shape';
-import { buildCallRegisterSerialWorkbook } from '@/features/report/lib/call-register/excel-export';
+import type { CallRegisterSerialExportRow } from '@/features/report/services/call-register/shape';
+import { buildCallRegisterSerialWorkbook } from '@/features/report/services/call-register/excel-export';
 import { logClientExportAction } from '@/lib/security/client-export-audit';
 
 function getDefaultDates() {

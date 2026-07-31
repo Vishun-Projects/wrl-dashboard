@@ -40,12 +40,11 @@ function isLocalRelayHost(hostname: string): boolean {
   return host === '127.0.0.1' || host === 'localhost';
 }
 
+/** Insecure TLS only for explicit env or loopback relays (never remote by default). */
 function shouldAllowInsecureRelayTls(url: string): boolean {
   if (process.env.VPS_MAIL_RELAY_INSECURE_TLS === 'true') return true;
-  if (process.env.NODE_ENV !== 'development') return false;
   try {
-    const host = new URL(url).hostname.toLowerCase();
-    return host === 'api.wrl-fsm.cloud' || isLocalRelayHost(host);
+    return isLocalRelayHost(new URL(url).hostname);
   } catch {
     return false;
   }

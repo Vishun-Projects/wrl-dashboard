@@ -11,6 +11,7 @@ import {
   sqlDateLiteral,
   sqlDateTimeEndLiteral,
 } from '@/lib/crm/sql-builder';
+import { safeErrorMessage } from '@/lib/api/safe-error';
 import { drilldownBodySchema } from '@/lib/api/schemas/report-query';
 
 export async function POST(req: NextRequest) {
@@ -307,7 +308,7 @@ export async function POST(req: NextRequest) {
 
   } catch (err: unknown) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load drilldown' },
+      { error: safeErrorMessage(err, 'Failed to load drilldown') },
       { status: 500 }
     );
   }

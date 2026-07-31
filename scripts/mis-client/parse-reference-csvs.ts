@@ -3,9 +3,9 @@
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { parseClientDate } from '../../src/features/mis-import/lib/parse-dates';
-import { isCadburyExcludedServiceProvider } from '../../src/features/mis-import/lib/cadbury-filters';
-import { formatDisplayRegion } from '../../src/features/mis-import/lib/region';
+import { parseClientDate } from '../../src/features/mis-import/services/parse-dates';
+import { isCadburyExcludedServiceProvider } from '../../src/features/mis-import/services/cadbury-filters';
+import { formatDisplayRegion } from '../../src/features/mis-import/services/region';
 
 const TESTING = 'C:/Users/Vishnu.Vishwakarma/Downloads/Testing';
 const START = new Date('2026-01-01T00:00:00');

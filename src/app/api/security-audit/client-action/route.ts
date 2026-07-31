@@ -7,6 +7,7 @@ import {
   logAction,
   type SecurityAuditResult,
 } from '@/lib/security/audit';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 
 const ALLOWED_ACTIONS = new Set([
   'report.export.start',
@@ -25,6 +26,8 @@ const ALLOWED_RESULTS = new Set<SecurityAuditResult>([
 
 /** Authenticated beacon for browser-side exports that never hit a server export route. */
 export async function POST(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
   if (!user) {

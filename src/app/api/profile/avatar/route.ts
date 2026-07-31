@@ -8,6 +8,8 @@ import {
   isOwnAvatarStoragePath,
   isValidAvatarStoragePath,
 } from '@/lib/auth/avatar-url';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
+import { safeErrorMessage } from '@/lib/api/safe-error';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { logAction } from '@/lib/security/audit';
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
@@ -73,6 +75,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
   if (!user) {
@@ -139,8 +143,7 @@ export async function POST(request: Request) {
       display_url: avatarProxyUrl(storagePath),
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Upload failed';
     console.error('Profile avatar upload error:', err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Upload failed') }, { status: 500 });
   }
 }

@@ -6,6 +6,7 @@ import {
   queryEngineerRowsFromPostgres,
   queryEngineersFromPostgres,
 } from '@/lib/read-model/queries/dims';
+import { jsonSafeError } from '@/lib/api/safe-error';
 
 export type EngineerRosterEntry = {
   ncode: string;
@@ -144,7 +145,6 @@ export async function GET(req: NextRequest) {
     });
     return NextResponse.json(engineers.map((e) => e.vname));
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Engineers query failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Engineers query failed');
   }
 }

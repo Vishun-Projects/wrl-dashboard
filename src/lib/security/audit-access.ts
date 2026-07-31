@@ -4,3 +4,8 @@ import { isSuperAdmin } from '@/lib/auth/rbac-catalog';
 export function canViewSecurityAudit(permissions: string[] | null | undefined): boolean {
   return isSuperAdmin(permissions);
 }
+
+/** VPS Cron pause/resume — Super Admin only. */
+export function canManageVpsCron(permissions: string[] | null | undefined): boolean {
+  return isSuperAdmin(permissions);
+}

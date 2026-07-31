@@ -12,14 +12,14 @@
 
 ## Perceived performance
 
-Respond within **~400ms (Doherty threshold)** on every user action. Use shared primitives from `@/hooks/useRaceSafeLoad`, `@/components/report/ReportLoadingFeedback`, `@/components/ui/ReportLoadBanner`, and `@/components/ui/DataTableLoading`.
+Respond within **~400ms (Doherty threshold)** on every user action. Use shared primitives from `@/components/report/ReportLoadingFeedback`, `@/components/ui/ReportLoadBanner`, and `@/components/ui/DataTableLoading`.
 
 | Law | Rule | Anti-pattern |
 |-----|------|--------------|
 | **Doherty (~400ms)** | Immediate feedback: button spinner, progress bar, or optimistic status | Blank screen; disabled UI with no indicator |
 | **Stale-while-revalidate** | `loading` = no data (skeleton); `updating` = keep rows + progress bar/overlay | Clearing table on refetch; full-page block when cache exists |
 | **Feedback hierarchy** | Progress → banner or `ReportFetchingBar`; errors → `PageAlert`; success → `feedback.actionSuccess` | Toasts for in-progress loads |
-| **Race safety** | `useRaceSafeLoad` or `loadGenerationRef` + `AbortController` + `isStale()` | Stale responses overwriting newer filters |
+| **Race safety** | `loadGenerationRef` + `AbortController` + `isStale()` (per page / feature) | Stale responses overwriting newer filters |
 | **Hick's Law** | Equal-weight stats (see below) | Hero metrics or collapsed sub-stats |
 | **Fitts's Law** | Page shell stays visible; progress inline | Entire page replaced by spinner |
 

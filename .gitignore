@@ -55,8 +55,6 @@ next-env.d.ts
 /src/generated/prisma
 
 .vercel
-# folders
-/warranty-pipeline
 eslint-report.json
 eslint-unused.json
 eslint-any.json

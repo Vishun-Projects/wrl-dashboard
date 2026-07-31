@@ -41,33 +41,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 import { ModalPortal } from '@/components/ui/ModalPortal';
-
-type UserSortKey = 'user' | 'role' | 'statuses' | 'branches' | 'misEmail';
-type AdminRole = { id: string | number; name?: string; permissions?: string[] | string; description?: string };
-type AdminOffice = { ncode: string | number; vcompanyname: string };
-type AdminUser = {
-  id: string;
-  name?: string;
-  email?: string;
-  role?: string;
-  role_id?: string | number;
-  role_ids?: unknown;
-  office_ids?: string[];
-  visible_statuses?: string[];
-  mis_email_enabled?: boolean;
-  avatar_url?: string;
-};
-type FormData = {
-  name: string;
-  email: string;
-  password: string;
-  role: string;
-  role_id: string | number;
-  role_ids: string[];
-  office_ids: string[];
-  visible_statuses: string[];
-  mis_email_enabled: boolean;
-};
+import type { AdminOffice, AdminRole, AdminUser, FormData, UserSortKey } from './users-page.types';
 
 export default function AdminUsersPage() {
   const { userProfile } = useUser();
@@ -891,10 +865,11 @@ export default function AdminUsersPage() {
                             <div>
                               <p className="text-[12px] font-medium text-slate-800 flex items-center gap-1.5">
                                 <Mail size={14} className="text-slate-400" />
-                                Morning MIS digest
+                                Scheduled MIS digest
                               </p>
                               <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">
-                                Opt this user into the scheduled morning digest. Profile → Email
+                                Opt this user into the scheduled digest (send time from their profile,
+                                seeded from org defaults on first enable). Profile → Email
                                 reports appears when their role has “MIS email reports” (Mail
                                 access). They also need MIS Summary / Register / Accounts to compose.
                               </p>

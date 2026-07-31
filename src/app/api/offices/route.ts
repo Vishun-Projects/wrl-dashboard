@@ -7,6 +7,7 @@ import { resolveRequestUserId } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { isHodUser } from '@/lib/auth/report-security';
 import { resolveApiAccess } from '@/lib/auth/rbac-catalog';
+import { safeErrorMessage } from '@/lib/api/safe-error';
 
 // Global cache to optimize mstoffice retrieval and avoid slow remote DB scans
 type OfficeRow = { ncode: string; nunder: string };
@@ -68,7 +69,7 @@ export async function GET(request: Request) {
     return NextResponse.json(filteredOffices);
   } catch (err: unknown) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load offices' },
+      { error: safeErrorMessage(err, 'Failed to load offices') },
       { status: 500 }
     );
   }

@@ -1,10 +1,10 @@
 # `src/shared`
 
-Cross-cutting code only (auth primitives, db pool wrappers, UI kit leaves, net helpers).
+**Placeholder only.** Shared infrastructure lives in `src/lib/` today. A bulk `lib` → `shared` rename is deferred — do not add new code here until that migration happens.
 
-**Import rule (enforced by `npm run check:feature-boundaries`):**
+When the rename lands:
 
-- `features/A` may import `shared/*` and other features’ **`index.ts`** (or `@/features/<b>` package root) only — not deep `@/features/<b>/lib/...` from another feature.
+- `features/A` may import `shared/*` and other features’ **`index.ts`** only — not deep `@/features/<b>/…` paths.
 - `shared/*` must not import `features/*`.
 
-Until more infra is extracted from `src/lib`, prefer leaving true shared pieces here when they have **two or more** feature consumers; do not create speculative folders.
+Until then: put cross-cutting infra in `src/lib/`. Prefer extracting a leaf into `lib/` when **two or more** features need it; do not create speculative folders.

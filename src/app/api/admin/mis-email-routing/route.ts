@@ -8,7 +8,9 @@ import {
   deleteMisEmailRoutingRule,
   listMisEmailRoutingRules,
   updateMisEmailRoutingRule,
-} from '@/features/mis-email/lib/routing-rules';
+} from '@/features/mis-email/services/routing-rules';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
+import { jsonSafeError, safeErrorMessage } from '@/lib/api/safe-error';
 import { logAccessDenied, logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
 
 async function requireHodRoutingAccess(request: Request) {
@@ -59,12 +61,13 @@ export async function GET(request: Request) {
     const rules = await listMisEmailRoutingRules();
     return NextResponse.json({ rules });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to load routing rules';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonSafeError(err, 500, 'Failed to load routing rules');
   }
 }
 
 export async function POST(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const access = await requireHodRoutingAccess(request);
   if (access.error) return access.error;
   const audit = requestAuditContext(request);
@@ -115,11 +118,13 @@ export async function POST(request: Request) {
       statusCode: 400,
       metadata: { message },
     });
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed to create routing rule') }, { status: 400 });
   }
 }
 
 export async function PUT(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const access = await requireHodRoutingAccess(request);
   if (access.error) return access.error;
   const audit = requestAuditContext(request);
@@ -171,11 +176,13 @@ export async function PUT(request: Request) {
       statusCode: 400,
       metadata: { message },
     });
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed to update routing rule') }, { status: 400 });
   }
 }
 
 export async function DELETE(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const access = await requireHodRoutingAccess(request);
   if (access.error) return access.error;
   const audit = requestAuditContext(request);
@@ -214,6 +221,6 @@ export async function DELETE(request: Request) {
       statusCode: 400,
       metadata: { message },
     });
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed to delete routing rule') }, { status: 400 });
   }
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install a TEST-only MIS email cron at 14:00 IST → Vishnu only.
 # Also syncs src/features/mis-email so the VPS has the cli path the cron needs.
-# Does NOT change / remove the production 09:30 digest cron.
+# Does NOT change / remove the production digest cron (*/15 Mon–Sat).
 #
 #   npm run mis-email:install-test-cron:vps
 #
@@ -93,7 +93,7 @@ root='${INSTALL_ROOT}'
 test_to='${TEST_TO}'
 hour='${CRON_HOUR}'
 min='${CRON_MIN}'
-test -f "\$root/src/features/mis-email/lib/cli.ts"
+test -f "\$root/src/features/mis-email/services/cli.ts"
 test -f "\$root/.env.mis-email"
 # Barrels must stay lib-only (no UI re-exports) so cron does not need src/components.
 ! grep -q "export \* from './ui/" "\$root/src/features/register/index.ts"
@@ -101,7 +101,7 @@ test -f "\$root/.env.mis-email"
 
 prod=\$(crontab -l 2>/dev/null | grep 'mis-email-digest.sh' | grep -v 'mis-email-test' | head -1 || true)
 if [[ -z "\$prod" ]]; then
-  prod="30 9 * * 1-6 \${root}/scripts/vps-hosting/mis-email-digest.sh >> \${root}/logs/mis-email-cron.log 2>&1"
+  prod="*/15 * * * 1-6 \${root}/scripts/vps-hosting/mis-email-digest.sh >> \${root}/logs/mis-email-cron.log 2>&1"
 else
   prod=\$(echo "\$prod" | sed -E 's/^([0-9]+) ([0-9]+) \* \* \*/\1 \2 * * 1-6/')
 fi
@@ -131,7 +131,7 @@ REMOTE
 
 echo ""
 echo "Installed. Test mail goes only to ${TEST_TO} at ${CRON_HOUR}:$(printf '%02d' "$CRON_MIN") IST."
-echo "Production 09:30 digest unchanged."
+echo "Production digest cron unchanged."
 if [[ "${RUN_NOW:-1}" == "1" ]]; then
   echo "A send was also triggered immediately (RUN_NOW=1). Check inbox + log:"
 else

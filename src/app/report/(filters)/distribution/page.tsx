@@ -1,9 +1,9 @@
 import dynamic from 'next/dynamic';
 import { requirePageAccess } from '@/lib/auth/require-page-access';
-import { ReportPageSkeleton } from '@/features/report/ui/ReportLoadingFeedback';
+import { ReportPageSkeleton } from '@/features/report/components/ReportLoadingFeedback';
 
 const DistributionPageClient = dynamic(
-  () => import('@/features/distribution/ui/DistributionPageClient'),
+  () => import('@/features/distribution/components/DistributionPageClient'),
   { loading: () => <ReportPageSkeleton /> }
 );
 

@@ -47,7 +47,7 @@ const retiredLibRe = new RegExp(
 const retiredCompRe = new RegExp(
   String.raw`from\s+['"]@/components/(location-audit|warranty-master|distribution|report)(/|['"])`
 );
-const deepImport = /from\s+['"]@\/features\/([a-z0-9-]+)\/(lib|ui|server|hooks)\//;
+const deepImport = /from\s+['"]@\/features\/([a-z0-9-]+)\/(lib|ui|components|services|server|hooks)\//;
 const anyFeatureImport = /from\s+['"]@\/features\//;
 
 function walk(dir) {
@@ -180,10 +180,10 @@ if (existsSync(featuresRoot)) {
       const m = line.match(deepImport);
       if (!m) continue;
       if (m[1] !== self) {
-        // UI deep imports are intentional: feature barrels stay lib-only so headless
+        // UI deep imports are intentional: feature barrels stay services-only so headless
         // CLIs (MIS email, sync-worker) do not pull React/components.
-        if (m[2] === 'ui') {
-          featureDeepUiSoft.push(`${rel} → features/${m[1]}/ui\n  ${line.trim()}`);
+        if (m[2] === 'ui' || m[2] === 'components') {
+          featureDeepUiSoft.push(`${rel} → features/${m[1]}/${m[2]}\n  ${line.trim()}`);
         } else {
           featureDeepSoft.push(`${rel} → features/${m[1]}/${m[2]}\n  ${line.trim()}`);
         }
@@ -221,7 +221,7 @@ if (componentDeepSoft.length) {
 
 if (featureDeepUiSoft.length) {
   console.log(
-    `Advisory: ${featureDeepUiSoft.length} deep cross-feature UI import(s) (barrels are lib-only). Sample:`
+    `Advisory: ${featureDeepUiSoft.length} deep cross-feature UI import(s) (barrels prefer services, not components). Sample:`
   );
   for (const s of featureDeepUiSoft.slice(0, 6)) console.log(' ', s);
   if (featureDeepUiSoft.length > 6) console.log(`  … +${featureDeepUiSoft.length - 6} more`);

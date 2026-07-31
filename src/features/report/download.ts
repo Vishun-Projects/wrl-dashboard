@@ -4,4 +4,4 @@ export {
   resolveUniqueDownloadFilename,
   triggerBlobDownload,
   type PreparedFileExport,
-} from './lib/summary-excel-export';
+} from './services/summary-excel-export';
