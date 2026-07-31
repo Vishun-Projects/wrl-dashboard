@@ -693,10 +693,16 @@
   color: #fff;
 }
 
-/* SortableTh bakes ui-field-label / slate text — force white on blue perf headers. */
+/*
+ * SortableTh bakes ui-field-label / slate text + hover bg.
+ * Paint each th blue so a single column cannot end up white-on-white
+ * (seen on the 3-7 days header when only thead bg was set).
+ */
+.perf-dashboard-table .perf-table-header th,
 .perf-table-header th,
 .perf-table-header .ui-field-label,
 .perf-table-header .table-th-sortable {
+  background-color: #0070c0 !important;
   color: #fff !important;
 }
 
@@ -707,7 +713,7 @@
 }
 
 .perf-table-header .table-th-sortable:hover {
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: #0062a8 !important;
 }
 
 .perf-table-header .table-th-sortable:hover .table-sort-icon--idle {
@@ -817,12 +823,17 @@
 [data-theme="dark"] .perf-dashboard-table .perf-table-header th,
 [data-theme="dark"] .perf-dashboard-table .perf-table-header .ui-field-label,
 [data-theme="dark"] .perf-dashboard-table .perf-table-header .table-th-sortable {
+  background-color: color-mix(in oklab, var(--theme-bg-muted) 86%, #000) !important;
   color: rgba(255, 255, 255, 0.85) !important;
 }
 
 [data-theme="dark"] .perf-dashboard-table .perf-table-header .table-sort-icon--idle,
 [data-theme="dark"] .perf-dashboard-table .perf-table-header .table-sort-icon--active {
   color: rgba(255, 255, 255, 0.7) !important;
+}
+
+[data-theme="dark"] .perf-dashboard-table .perf-table-header .table-th-sortable:hover {
+  background-color: color-mix(in oklab, var(--theme-bg-muted) 70%, #000) !important;
 }
 
 [data-theme="dark"] .perf-dashboard-table .perf-region-row {

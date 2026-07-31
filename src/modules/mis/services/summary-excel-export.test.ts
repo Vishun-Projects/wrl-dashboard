@@ -7,6 +7,11 @@ import {
   triggerBlobDownload,
   workbookToPreparedExport,
 } from '@/modules/mis/services/summary-excel-export';
+import {
+  buildAccountDisplayRows,
+  sumMergedAccountMetric,
+} from '@/modules/mis/components/SummaryMergedMetricCell';
+import { buildSummaryDashboardExportAlign } from '@/modules/mis/services/summary-trace-export';
 import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/summary/derive';
 
 function createMockWorkbook() {
@@ -126,6 +131,82 @@ describe('buildSummaryDashboardWorkbook excludeCancelled', () => {
     ]);
     const sheet = wb.worksheets[0];
     expect(sheet.getRow(3).getCell(9).fill).toBeDefined();
+  });
+});
+
+function findAiTotalCell(sheet: { eachRow: Function }): number {
+  let total = -1;
+  sheet.eachRow((row: { getCell: (n: number) => { value: unknown } }) => {
+    if (String(row.getCell(1).value ?? '') === 'AI TOTAL') {
+      total = Number(row.getCell(2).value ?? 0);
+    }
+  });
+  return total;
+}
+
+describe('buildSummaryDashboardWorkbook uiAlign matches dashboard AI', () => {
+  it('CRM-only excel AI TOTAL equals CRM branch Σ total_calls', async () => {
+    const branches: BranchSummaryRow[] = [
+      { ...sampleBranch, total_calls: 100 },
+      { ...sampleBranch, officeId: 2, region: 'SOUTH ZONE', branch: 'Chennai', total_calls: 50 },
+    ];
+    const crmSum = branches.reduce((s, b) => s + Number(b.total_calls), 0);
+    const uiAlign = buildSummaryDashboardExportAlign({
+      summaryData: branches,
+      mergedAccountRows: [],
+      mergeFlags: { crm: true, client: false },
+      clientMergeWithCrm: { cadbury: false, coke: false },
+      clientOnlyMode: false,
+    });
+    expect(uiAlign.aiRow.total_calls).toBe(crmSum);
+
+    const wb = await buildSummaryDashboardWorkbook(branches, undefined, { uiAlign });
+    expect(findAiTotalCell(wb.worksheets[0])).toBe(crmSum);
+  });
+
+  it('CRM+Cadbury merge-off excel AI TOTAL equals sumMergedAccountMetric', async () => {
+    const branches: BranchSummaryRow[] = [
+      { ...sampleBranch, region: 'SOUTH ZONE', total_calls: 200 },
+    ];
+    const crmAccounts = [
+      { region: 'SOUTH ZONE', account: 'Nestle', total_calls: 150, total_solved: 100, cancelled_calls: 10, open_calls: 40, age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0, active_eng: 0 },
+      { region: 'SOUTH ZONE', account: 'Cadbury', total_calls: 50, total_solved: 40, cancelled_calls: 0, open_calls: 10, age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0, active_eng: 0 },
+    ];
+    const clientAccounts = [
+      { region: 'SOUTH ZONE', account: 'Cadbury', total_calls: 80, total_solved: 70, cancelled_calls: 0, open_calls: 10, age_2: 0, age_3: 0, age_7: 0, age_15: 0, part_pending: 0, active_eng: 0 },
+    ];
+    const mergeFlags = { crm: true, client: true };
+    const clientMergeWithCrm = { cadbury: false, coke: false };
+    const mergedAccountRows = buildAccountDisplayRows(crmAccounts, clientAccounts, mergeFlags);
+    const expected = sumMergedAccountMetric(
+      mergedAccountRows,
+      clientAccounts,
+      'total_calls',
+      mergeFlags,
+      clientMergeWithCrm
+    );
+    // Nestle CRM 150 + Cadbury import-only 80 (CRM Cadbury dropped)
+    expect(expected).toBe(230);
+
+    const uiAlign = buildSummaryDashboardExportAlign({
+      summaryData: branches,
+      clientAccountSummaryData: clientAccounts,
+      mergedAccountRows,
+      mergeFlags,
+      clientMergeWithCrm,
+      clientOnlyMode: false,
+    });
+    expect(uiAlign.aiRow.total_calls).toBe(expected);
+    // Regional Total uses displayLoggedCallCount (total + cancelled) like the UI.
+    expect(uiAlign.regionalRows.find((r) => r.region === 'SOUTH ZONE')?.total_calls).toBe(
+      expected + 10
+    );
+
+    const wb = await buildSummaryDashboardWorkbook(branches, undefined, { uiAlign });
+    expect(findAiTotalCell(wb.worksheets[0])).toBe(expected);
+    // Without uiAlign, excel would still be CRM branch-only (200)
+    const legacy = await buildSummaryDashboardWorkbook(branches);
+    expect(findAiTotalCell(legacy.worksheets[0])).toBe(200);
   });
 });
 

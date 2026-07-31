@@ -1,5 +1,6 @@
 import type ExcelJS from 'exceljs';
 import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/summary/derive';
+import type { SummaryDashboardExportAlign } from '@/modules/mis/services/summary-trace-export';
 
 const BRANCH_SUM_KEYS = [
   'total_calls',
@@ -143,6 +144,8 @@ function getAggregate(
 
 export type SummaryExcelExcludeCancelledOpts = {
   excludeCancelled?: boolean;
+  /** When set, Regional / AI TOTAL / Branch rows match Summary Dashboard merge math. */
+  uiAlign?: SummaryDashboardExportAlign;
 };
 
 export async function buildSummaryDashboardWorkbook(
@@ -154,23 +157,28 @@ export async function buildSummaryDashboardWorkbook(
   const workbook = new ExcelJSRuntime.Workbook();
   const sheet = workbook.addWorksheet(sheetName);
   const excludeCancelled = opts?.excludeCancelled === true;
+  const uiAlign = opts?.uiAlign;
   const metricStyle = excludeCancelled
     ? { solvedCol: 3, cancelledCol: null as number | null, openCol: 4 }
     : undefined;
 
-  const regions = Array.from(new Set(summaryData.map((b) => b.region))).sort();
-  const topLevelBranches = Array.from(new Set(summaryData.map((b) => b.region)))
-    .sort()
-    .flatMap((region) => {
-      const regionBranches = summaryData.filter((b) => b.region === region);
-      const rawTopLevel = regionBranches.filter(
-        (b) => b.parentId === 0 || !regionBranches.some((p) => p.officeId === b.parentId)
-      );
-      return mergeTopLevelBranchRowsByName(rawTopLevel).map((branch) => ({
-        ...branch,
-        region,
-      }));
-    });
+  const regions = uiAlign
+    ? uiAlign.regionalRows.map((r) => r.region)
+    : Array.from(new Set(summaryData.map((b) => b.region))).sort();
+  const topLevelBranches = uiAlign
+    ? []
+    : Array.from(new Set(summaryData.map((b) => b.region)))
+        .sort()
+        .flatMap((region) => {
+          const regionBranches = summaryData.filter((b) => b.region === region);
+          const rawTopLevel = regionBranches.filter(
+            (b) => b.parentId === 0 || !regionBranches.some((p) => p.officeId === b.parentId)
+          );
+          return mergeTopLevelBranchRowsByName(rawTopLevel).map((branch) => ({
+            ...branch,
+            region,
+          }));
+        });
 
   sheet.addRow(['Regional Performance']).font = { bold: true, size: 12 };
   const regHeader = sheet.addRow(
@@ -203,41 +211,87 @@ export async function buildSummaryDashboardWorkbook(
   );
   applySummaryHeaderStyle(regHeader);
 
-  regions.forEach((region) => {
-    const rb = summaryData.filter((b) => b.region === region);
-    const t = rb.reduce(
-      (acc, b) => ({
-        t: acc.t + Number(b.total_calls || 0),
-        s: acc.s + Number(b.solved_calls || 0),
-        c: acc.c + Number(b.cancelled_calls || 0),
-        o: acc.o + Number(b.open_calls || 0),
-        a2: acc.a2 + Number(b.age_2 || 0),
-        a3: acc.a3 + Number(b.age_3 || 0),
-        a7: acc.a7 + Number(b.age_7 || 0),
-        a15: acc.a15 + Number(b.age_15 || 0),
-        p: acc.p + Number(b.part_pending || 0),
-        e: acc.e + Number(b.active_eng || 0),
-      }),
-      { t: 0, s: 0, c: 0, o: 0, a2: 0, a3: 0, a7: 0, a15: 0, p: 0, e: 0 }
-    );
+  if (uiAlign) {
+    for (const row of uiAlign.regionalRows) {
+      const total = excludeCancelled ? row.solved_calls + row.open_calls : row.total_calls;
+      const r = sheet.addRow(
+        excludeCancelled
+          ? [
+              row.region,
+              total,
+              row.solved_calls,
+              row.open_calls,
+              row.age_2,
+              row.age_3,
+              row.age_7,
+              row.age_15,
+              row.part_pending,
+              row.active_eng,
+            ]
+          : [
+              row.region,
+              total,
+              row.solved_calls,
+              row.cancelled_calls,
+              row.open_calls,
+              row.age_2,
+              row.age_3,
+              row.age_7,
+              row.age_15,
+              row.part_pending,
+              row.active_eng,
+            ]
+      );
+      applyRegionRowStyle(r, row.region, metricStyle);
+      const age15Col = excludeCancelled ? 8 : 9;
+      applyAge15CellStyle(r.getCell(age15Col), Number(row.age_15 || 0));
+    }
+  } else {
+    regions.forEach((region) => {
+      const rb = summaryData.filter((b) => b.region === region);
+      const t = rb.reduce(
+        (acc, b) => ({
+          t: acc.t + Number(b.total_calls || 0),
+          s: acc.s + Number(b.solved_calls || 0),
+          c: acc.c + Number(b.cancelled_calls || 0),
+          o: acc.o + Number(b.open_calls || 0),
+          a2: acc.a2 + Number(b.age_2 || 0),
+          a3: acc.a3 + Number(b.age_3 || 0),
+          a7: acc.a7 + Number(b.age_7 || 0),
+          a15: acc.a15 + Number(b.age_15 || 0),
+          p: acc.p + Number(b.part_pending || 0),
+          e: acc.e + Number(b.active_eng || 0),
+        }),
+        { t: 0, s: 0, c: 0, o: 0, a2: 0, a3: 0, a7: 0, a15: 0, p: 0, e: 0 }
+      );
 
-    const total = excludeCancelled ? t.s + t.o : t.t;
-    const r = sheet.addRow(
-      excludeCancelled
-        ? [region, total, t.s, t.o, t.a2, t.a3, t.a7, t.a15, t.p, t.e]
-        : [region, total, t.s, t.c, t.o, t.a2, t.a3, t.a7, t.a15, t.p, t.e]
-    );
-    applyRegionRowStyle(r, region, metricStyle);
-    const age15Col = excludeCancelled ? 8 : 9;
-    applyAge15CellStyle(r.getCell(age15Col), Number(t.a15 || 0));
-  });
+      const total = excludeCancelled ? t.s + t.o : t.t;
+      const r = sheet.addRow(
+        excludeCancelled
+          ? [region, total, t.s, t.o, t.a2, t.a3, t.a7, t.a15, t.p, t.e]
+          : [region, total, t.s, t.c, t.o, t.a2, t.a3, t.a7, t.a15, t.p, t.e]
+      );
+      applyRegionRowStyle(r, region, metricStyle);
+      const age15Col = excludeCancelled ? 8 : 9;
+      applyAge15CellStyle(r.getCell(age15Col), Number(t.a15 || 0));
+    });
+  }
 
-  const allSolved = summaryData.reduce((s, b) => s + Number(b.solved_calls || 0), 0);
-  const allOpen = summaryData.reduce((s, b) => s + Number(b.open_calls || 0), 0);
-  const allCancelled = summaryData.reduce((s, b) => s + Number(b.cancelled_calls || 0), 0);
+  const aiSource = uiAlign?.aiRow;
+  const allSolved = aiSource
+    ? aiSource.solved_calls
+    : summaryData.reduce((s, b) => s + Number(b.solved_calls || 0), 0);
+  const allOpen = aiSource
+    ? aiSource.open_calls
+    : summaryData.reduce((s, b) => s + Number(b.open_calls || 0), 0);
+  const allCancelled = aiSource
+    ? aiSource.cancelled_calls
+    : summaryData.reduce((s, b) => s + Number(b.cancelled_calls || 0), 0);
   const allTotal = excludeCancelled
     ? allSolved + allOpen
-    : summaryData.reduce((s, b) => s + Number(b.total_calls || 0), 0);
+    : aiSource
+      ? aiSource.total_calls
+      : summaryData.reduce((s, b) => s + Number(b.total_calls || 0), 0);
 
   const aiRow = sheet.addRow(
     excludeCancelled
@@ -246,12 +300,24 @@ export async function buildSummaryDashboardWorkbook(
           allTotal,
           allSolved,
           allOpen,
-          summaryData.reduce((s, b) => s + Number(b.age_2 || 0), 0),
-          summaryData.reduce((s, b) => s + Number(b.age_3 || 0), 0),
-          summaryData.reduce((s, b) => s + Number(b.age_7 || 0), 0),
-          summaryData.reduce((s, b) => s + Number(b.age_15 || 0), 0),
-          summaryData.reduce((s, b) => s + Number(b.part_pending || 0), 0),
-          summaryData.reduce((s, b) => s + Number(b.active_eng || 0), 0),
+          aiSource
+            ? aiSource.age_2
+            : summaryData.reduce((s, b) => s + Number(b.age_2 || 0), 0),
+          aiSource
+            ? aiSource.age_3
+            : summaryData.reduce((s, b) => s + Number(b.age_3 || 0), 0),
+          aiSource
+            ? aiSource.age_7
+            : summaryData.reduce((s, b) => s + Number(b.age_7 || 0), 0),
+          aiSource
+            ? aiSource.age_15
+            : summaryData.reduce((s, b) => s + Number(b.age_15 || 0), 0),
+          aiSource
+            ? aiSource.part_pending
+            : summaryData.reduce((s, b) => s + Number(b.part_pending || 0), 0),
+          aiSource
+            ? aiSource.active_eng
+            : summaryData.reduce((s, b) => s + Number(b.active_eng || 0), 0),
         ]
       : [
           'AI TOTAL',
@@ -259,12 +325,24 @@ export async function buildSummaryDashboardWorkbook(
           allSolved,
           allCancelled,
           allOpen,
-          summaryData.reduce((s, b) => s + Number(b.age_2 || 0), 0),
-          summaryData.reduce((s, b) => s + Number(b.age_3 || 0), 0),
-          summaryData.reduce((s, b) => s + Number(b.age_7 || 0), 0),
-          summaryData.reduce((s, b) => s + Number(b.age_15 || 0), 0),
-          summaryData.reduce((s, b) => s + Number(b.part_pending || 0), 0),
-          summaryData.reduce((s, b) => s + Number(b.active_eng || 0), 0),
+          aiSource
+            ? aiSource.age_2
+            : summaryData.reduce((s, b) => s + Number(b.age_2 || 0), 0),
+          aiSource
+            ? aiSource.age_3
+            : summaryData.reduce((s, b) => s + Number(b.age_3 || 0), 0),
+          aiSource
+            ? aiSource.age_7
+            : summaryData.reduce((s, b) => s + Number(b.age_7 || 0), 0),
+          aiSource
+            ? aiSource.age_15
+            : summaryData.reduce((s, b) => s + Number(b.age_15 || 0), 0),
+          aiSource
+            ? aiSource.part_pending
+            : summaryData.reduce((s, b) => s + Number(b.part_pending || 0), 0),
+          aiSource
+            ? aiSource.active_eng
+            : summaryData.reduce((s, b) => s + Number(b.active_eng || 0), 0),
         ]
   );
   aiRow.eachCell((cell) => {
@@ -313,7 +391,43 @@ export async function buildSummaryDashboardWorkbook(
   );
   applySummaryHeaderStyle(brHeader);
 
-  topLevelBranches.forEach((b) => {
+  if (uiAlign) {
+    for (const b of uiAlign.branchRows) {
+      const total = excludeCancelled ? b.solved_calls + b.open_calls : b.total_calls;
+      const r = sheet.addRow(
+        excludeCancelled
+          ? [
+              b.branch,
+              total,
+              b.solved_calls,
+              b.open_calls,
+              b.age_2,
+              b.age_3,
+              b.age_7,
+              b.age_15,
+              b.part_pending,
+              b.active_eng,
+            ]
+          : [
+              b.branch,
+              total,
+              b.solved_calls,
+              b.cancelled_calls,
+              b.open_calls,
+              b.age_2,
+              b.age_3,
+              b.age_7,
+              b.age_15,
+              b.part_pending,
+              b.active_eng,
+            ]
+      );
+      applyRegionRowStyle(r, b.region, metricStyle);
+      const age15Col = excludeCancelled ? 8 : 9;
+      applyAge15CellStyle(r.getCell(age15Col), Number(b.age_15 || 0));
+    }
+  } else {
+    topLevelBranches.forEach((b) => {
       const rb = summaryData.filter((x) => x.region === b.region);
       const solved = getAggregate(b, 'solved_calls', rb);
       const open = getAggregate(b, 'open_calls', rb);
@@ -350,6 +464,7 @@ export async function buildSummaryDashboardWorkbook(
       const age15Col = excludeCancelled ? 8 : 9;
       applyAge15CellStyle(r.getCell(age15Col), Number(getAggregate(b, 'age_15', rb) || 0));
     });
+  }
 
   return workbook;
 }

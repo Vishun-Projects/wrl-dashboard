@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { signOutAndGoToLogin } from '@/lib/auth/sign-out-client';
 import {
@@ -296,6 +296,16 @@ export default function ReportPageClient() {
     () => buildAccountDisplayRows(accountsData, clientAccountSummaryData, mergeFlags),
     [accountsData, clientAccountSummaryData, mergeFlags]
   );
+  /** Always-latest inputs for Summary Excel — export queue must not use a stale closure. */
+  const summaryExcelExportRef = useRef<{
+    summaryData: typeof summaryData;
+    clientSummaryData: typeof clientSummaryData;
+    clientAccountSummaryData: typeof clientAccountSummaryData;
+    mergedAccountRowsForTotals: ReturnType<typeof buildAccountDisplayRows>;
+    mergeFlags: ReturnType<typeof mergeFlagsFromSelection>;
+    clientMergeWithCrm: ClientMergeWithCrmPrefs;
+    clientOnlyMode: boolean;
+  } | null>(null);
   const [globalHeadcount, setGlobalHeadcount] = useState<number>(globalReportCache?.globalHeadcount || 0);
   const [loading, setLoading] = useState(!globalReportCache);
   const [filterUpdating, setFilterUpdating] = useState(false);
@@ -443,6 +453,15 @@ export default function ReportPageClient() {
       feedback.actionSuccess(`Export ready — save ${filename} from the queue.`);
     },
   });
+  summaryExcelExportRef.current = {
+    summaryData,
+    clientSummaryData,
+    clientAccountSummaryData,
+    mergedAccountRowsForTotals,
+    mergeFlags,
+    clientMergeWithCrm,
+    clientOnlyMode,
+  };
 
   const resolveSummaryAgingStr = useCallback(
     (applied?: ReturnType<typeof getAppliedFiltersSnapshot>) => {
@@ -3321,7 +3340,25 @@ export default function ReportPageClient() {
           buildSummaryDashboardWorkbook,
           workbookToPreparedExport,
         } = await import('@/modules/mis/services/summary-excel-export');
-        const workbook = await buildSummaryDashboardWorkbook(summaryData);
+        const { buildSummaryDashboardExportAlign } = await import(
+          '@/modules/mis/services/summary-trace-export'
+        );
+        const snap = summaryExcelExportRef.current;
+        if (!snap) {
+          throw new Error('Summary export state not ready. Wait for the dashboard to load.');
+        }
+        const uiAlign = buildSummaryDashboardExportAlign({
+          summaryData: snap.summaryData,
+          clientSummaryData: snap.clientSummaryData,
+          clientAccountSummaryData: snap.clientAccountSummaryData,
+          mergedAccountRows: snap.mergedAccountRowsForTotals,
+          mergeFlags: snap.mergeFlags,
+          clientMergeWithCrm: snap.clientMergeWithCrm,
+          clientOnlyMode: snap.clientOnlyMode,
+        });
+        const workbook = await buildSummaryDashboardWorkbook(snap.summaryData, undefined, {
+          uiAlign,
+        });
         return workbookToPreparedExport(workbook, fileName);
       }
 
@@ -3373,8 +3410,11 @@ export default function ReportPageClient() {
       buildBdMisExportFilterMeta,
       summaryData,
       accountsData,
+      clientSummaryData,
       clientAccountSummaryData,
+      mergedAccountRowsForTotals,
       mergeFlags,
+      clientOnlyMode,
       filterRegion,
       filterAccount,
       accountMisGrouping,
