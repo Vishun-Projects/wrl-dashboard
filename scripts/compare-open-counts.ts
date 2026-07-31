@@ -3,7 +3,7 @@ import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 
 import { prisma } from '@/lib/db/prisma';
-import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
+import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/sql/read-model/summary-call-filters';
 
 const PERIOD_START = '2026-01-01T00:00:00';
 const PERIOD_END = '2026-06-30T23:59:59';

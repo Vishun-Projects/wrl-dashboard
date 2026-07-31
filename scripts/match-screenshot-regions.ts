@@ -1,7 +1,7 @@
 import { config } from 'dotenv';
 import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
-import { querySummaryDashboard } from '@/lib/read-model/queries/summary';
+import { querySummaryDashboard } from '@/sql/read-model/summary';
 
 const targets = {
   'NORTH ZONE': 12088,

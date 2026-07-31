@@ -8,7 +8,7 @@
  */
 import { readFileSync, writeFileSync } from 'fs';
 import { basename, dirname, join, resolve } from 'path';
-import { packCsvBufferToWrlmis } from '@/features/mis-import/services/wrlmis-pack';
+import { packCsvBufferToWrlmis } from '@/modules/mis/client-import/services/wrlmis-pack';
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;

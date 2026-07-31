@@ -15,4 +15,4 @@ Cross-page chrome and UI kit only. Domain UI lives under `src/features/<domain>/
 | `shared/` | `BranchTree`, `ImagePreviewViewer` (UI widgets — not `src/shared/`) |
 | `performance/` | Client metrics logger |
 
-Import examples: `@/components/ui/Button`, `@/features/register/components/RegisterPageFilters`.
+Import examples: `@/components/ui/Button`, `@/modules/mis/register/components/RegisterPageFilters`.

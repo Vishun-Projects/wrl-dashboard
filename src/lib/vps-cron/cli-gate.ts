@@ -3,7 +3,7 @@
  * Exit 0 = run job. Exit 2 = paused in portal (wrappers treat as soft skip).
  * Usage: npx tsx src/lib/vps-cron/cli-gate.ts <jobId>
  */
-import '@/features/mis-email/services/bootstrap-env';
+import '@/modules/mail-alerts/services/bootstrap-env';
 import { isVpsCronJobId } from '@/lib/vps-cron/catalog';
 import { isVpsCronPaused } from '@/lib/vps-cron/settings';
 import { closePool } from '@/lib/read-model/db';

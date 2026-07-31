@@ -2,8 +2,8 @@ import { config } from 'dotenv';
 import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 
-import { querySummaryDashboard } from '@/lib/read-model/queries/summary';
-import { queryRegisterTotalsFromPostgres } from '@/lib/read-model/queries/register';
+import { querySummaryDashboard } from '@/sql/read-model/summary';
+import { queryRegisterTotalsFromPostgres } from '@/sql/read-model/register';
 import { prisma } from '@/lib/db/prisma';
 
 async function main() {

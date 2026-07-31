@@ -16,7 +16,7 @@ What remains here is **shared infrastructure**:
 | `utils/` | CSV, async sleep, run pool, user-facing errors |
 | `call-row/` | Shared call row normalization |
 
-Feature imports: `@/features/warranty-master/server`, `@/features/report/services/filters`, etc.  
+Feature imports: `@/modules/warranty/server`, `@/modules/mis/services/filters`, etc.  
 Infra: `@/lib/db/proxy`, `@/lib/read-model/...`.
 
 Cross-cutting extracts that are truly shared may move to `src/shared/` over time (auth/db/ui leaves only).

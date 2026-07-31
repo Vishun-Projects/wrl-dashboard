@@ -2,11 +2,11 @@ import { config } from 'dotenv';
 import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 
-import { querySummaryDashboard } from '@/lib/read-model/queries/summary';
+import { querySummaryDashboard } from '@/sql/read-model/summary';
 import {
   queryAllClientBranchSummary,
   queryClientAccountSummaryFiltered,
-} from '@/features/mis-import/services/aggregate';
+} from '@/modules/mis/client-import/services/aggregate';
 import { prisma } from '@/lib/db/prisma';
 
 async function main() {

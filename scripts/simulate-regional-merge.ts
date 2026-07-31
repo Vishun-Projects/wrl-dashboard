@@ -2,11 +2,11 @@ import { config } from 'dotenv';
 import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 import { withAppClient } from '@/lib/read-model/db';
-import { querySummaryDashboard } from '@/lib/read-model/queries/summary';
-import { queryClientAccountSummaryFiltered } from '@/features/mis-import/services/aggregate';
+import { querySummaryDashboard } from '@/sql/read-model/summary';
+import { queryClientAccountSummaryFiltered } from '@/modules/mis/client-import/services/aggregate';
 import {
   sumMergedAccountMetricByRegion,
-} from '@/features/report/components/SummaryMergedMetricCell';
+} from '@/modules/mis/components/SummaryMergedMetricCell';
 
 async function main() {
   const start = '2026-07-01';

@@ -5,7 +5,7 @@ import {
   looksLikeBranchOffice,
   TRHCALLS_EXCLUDE_TRANSFERRED,
   type TrhcallsNcodeShard,
-} from '@/lib/trhcalls/query';
+} from '@/sql/trhcalls/query';
 import {
   splitDateRangeByDays,
   splitDayByHours,

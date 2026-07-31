@@ -21,6 +21,7 @@ import {
   Shield,
   Gauge,
   Mail,
+  History,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -115,7 +116,7 @@ export function Sidebar({ user }: SidebarProps) {
                   : path === '/admin/mis-email-settings'
                     ? Mail
                     : path === '/admin/security-audit'
-                      ? Shield
+                      ? History
                     : ShieldCheck;
 
   const filteredNavigation = [
@@ -126,7 +127,7 @@ export function Sidebar({ user }: SidebarProps) {
       icon: iconForPath(page.path),
     })),
     ...(canSeeSecurityAudit
-      ? [{ name: 'Activity Log', href: '/admin/security-audit', exactPath: true, icon: Shield }]
+      ? [{ name: 'Activity Log', href: '/admin/security-audit', exactPath: true, icon: History }]
       : []),
   ];
 
@@ -170,7 +171,7 @@ export function Sidebar({ user }: SidebarProps) {
                 router.push(item.href);
                 setIsMobileOpen(false);
               }}
-              className={`sidebar-nav-button w-full flex items-center gap-3 py-3 rounded-xl text-xs transition-colors relative ${isActive ? 'is-active bg-slate-950 text-white' : 'text-slate-500 hover:bg-bg-soft hover:text-slate-900'} ${isCollapsed ? 'justify-center px-0' : 'px-3'} ui-label`}
+              className={`sidebar-nav-button group w-full flex items-center gap-3 py-3 rounded-xl text-xs transition-colors relative ${isActive ? 'is-active bg-slate-950 text-white' : 'text-slate-500 hover:bg-bg-soft hover:text-slate-900'} ${isCollapsed ? 'justify-center px-0' : 'px-3'} ui-label`}
             >
               <item.icon
                 size={18}

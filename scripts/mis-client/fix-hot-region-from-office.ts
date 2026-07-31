@@ -9,7 +9,7 @@ import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 
 import { withAppClient } from '@/lib/read-model/db';
-import { HOT_OFFICE_ZONE_NAME_SQL } from '@/lib/read-model/queries/hot-region';
+import { HOT_OFFICE_ZONE_NAME_SQL } from '@/sql/read-model/hot-region';
 
 const dryRun = process.argv.includes('--dry-run');
 

@@ -3,7 +3,7 @@ import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 import { withAppClient, closePool } from '@/lib/read-model/db';
 import { fetchCrmRowsByTrns } from '@/lib/read-model/crm-fetch';
-import { isRegisterRowCancelled } from '@/features/report/services/search';
+import { isRegisterRowCancelled } from '@/modules/mis/services/search';
 import { transformCrmRowToHot } from '@/lib/read-model/transform';
 
 const YTD = '2026-01-01';

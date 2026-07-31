@@ -1,6 +1,6 @@
 import { withClient } from '@/lib/read-model/db';
 import { postQuery } from '@/lib/db/proxy';
-import { SQL_WCO_EXPR } from '@/lib/register-sql/wco';
+import { SQL_WCO_EXPR } from '@/sql/register/wco';
 
 const CRM_TIMEOUT_MS = Number(process.env.WCO_BACKFILL_TIMEOUT_MS ?? 240_000) || 240_000;
 /** CRM day chunk size in hours when a full-day query times out. */

@@ -3,12 +3,12 @@
  * Mirrors aggregation in /api/report/summary (Node rollup section).
  */
 
-import { matchesCallTypeFilter, normalizeCallTypeDisplay } from '@/lib/call-display/call-type';
+import { matchesCallTypeFilter, normalizeCallTypeDisplay } from '@/lib/call/display/call-type';
 import { resolveAgingAsOfDate } from '@/lib/dates/aging-as-of';
 import {
   resolveMainBranchDisplayName,
   resolveMainBranchOfficeId,
-} from '@/lib/read-model/queries/main-branch-resolve';
+} from '@/sql/read-model/main-branch-resolve';
 import { incrementAgingBucket, openCallsFromAging } from '@/lib/aging/buckets';
 
 export type BranchSummaryRow = {

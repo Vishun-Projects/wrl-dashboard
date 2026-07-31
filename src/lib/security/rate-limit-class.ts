@@ -15,7 +15,6 @@ export function rateLimitClassForPath(pathname: string): {
     return { limit: 20, windowMs: 60_000, keySuffix: 'auth' };
   }
   if (
-    pathname.includes('/read-model/sync') ||
     pathname.includes('/report/corpus') ||
     pathname.includes('/report/drilldown') ||
     pathname.includes('export=bulk')

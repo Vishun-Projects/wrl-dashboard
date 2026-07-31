@@ -3,7 +3,7 @@ import { postQuery } from '@/lib/db/proxy';
 import {
   isTruthyCrmRowFlag,
   resolveTrhcallsBmApprovedAt,
-} from '@/lib/trhcalls/bm-approval';
+} from '@/sql/trhcalls/bm-approval';
 import { callsHotHasBmApprovalColumns } from '@/lib/read-model/calls-hot-schema';
 
 const BATCH_SIZE = Number(process.env.BM_APPROVAL_BACKFILL_BATCH ?? 50) || 50;

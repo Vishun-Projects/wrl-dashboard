@@ -5,7 +5,7 @@
  */
 import { readFileSync, existsSync } from 'fs';
 import XLSX from 'xlsx';
-import { formatDisplayRegion } from '@/features/mis-import/services/region';
+import { formatDisplayRegion } from '@/modules/mis/client-import/services/region';
 
 const FORMAT =
   process.argv[2] ?? 'C:/Users/Vishnu.Vishwakarma/Downloads/Testing/Format.xlsx';

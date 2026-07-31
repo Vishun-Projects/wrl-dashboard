@@ -1,9 +1,9 @@
 import { config } from 'dotenv';
 import { join } from 'path';
 import { withAppClient } from '@/lib/read-model/db';
-import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/services/aggregate';
-import { buildBdMisRegionalRows, sumBdMisRegionalGrand } from '@/features/report/services/bd-mis-summary';
+import { queryBdMisCrmSummary } from '@/sql/read-model/bd-mis-summary';
+import { queryClientAccountSummaryForBdMis } from '@/modules/mis/client-import/services/aggregate';
+import { buildBdMisRegionalRows, sumBdMisRegionalGrand } from '@/modules/mis/services/bd-mis-summary';
 
 config({ path: join(process.cwd(), '.env.local') });
 

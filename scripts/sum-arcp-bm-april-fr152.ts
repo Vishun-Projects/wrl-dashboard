@@ -9,7 +9,7 @@ import {
   parseArcpGrandTotals,
   planArcpSummaryDateChunks,
   type ArcpGrandTotals,
-} from '../src/features/arcp/services/query';
+} from '../src/sql/arcp/query';
 
 const opts = {
   startDate: '2026-04-01',

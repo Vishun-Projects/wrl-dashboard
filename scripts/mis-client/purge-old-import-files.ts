@@ -16,7 +16,7 @@ dotenv.config({ path: path.join(root, '.env.local') });
 dotenv.config({ path: path.join(root, '.env') });
 
 import { isVpsCronPaused } from '@/lib/vps-cron/settings';
-import { purgeExpiredImportStoredFiles } from '@/features/mis-import/services/purge-old-files';
+import { purgeExpiredImportStoredFiles } from '@/modules/mis/client-import/services/purge-old-files';
 
 async function main() {
   if (await isVpsCronPaused('mis_client_purge')) {

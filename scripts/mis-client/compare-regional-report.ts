@@ -16,12 +16,12 @@ import XLSX from 'xlsx';
 
 config({ path: join(process.cwd(), '.env.local') });
 
-import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/services/aggregate';
+import { queryBdMisCrmSummary } from '@/sql/read-model/bd-mis-summary';
+import { queryClientAccountSummaryForBdMis } from '@/modules/mis/client-import/services/aggregate';
 import {
   buildBdMisRegionalRows,
   sumBdMisRegionalGrand,
-} from '@/features/report/services/bd-mis-summary';
+} from '@/modules/mis/services/bd-mis-summary';
 
 const DEFAULT_XLSX =
   'C:/Users/Vishnu.Vishwakarma/Downloads/Raw/New_BD_MIS_30.06.2026.xlsx';

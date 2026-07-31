@@ -137,7 +137,7 @@ flowchart LR
 | File | Change |
 |------|--------|
 | ~~`src/app/api/distribution/route.ts`~~ | **Removed** — distribution uses corpus bulk via `ReportFiltersContext` |
-| [`src/features/report/components/ReportFiltersContext.tsx`](../src/features/report/components/ReportFiltersContext.tsx) | Remove distribution hydration from corpus when on postgres |
+| [`src/modules/mis/components/ReportFiltersContext.tsx`](../src/modules/mis/components/ReportFiltersContext.tsx) | Remove distribution hydration from corpus when on postgres |
 | [`src/app/report/distribution/page.tsx`](../src/app/report/distribution/page.tsx) | Cap pins at 2,000; show sync timestamp |
 
 **Delete in same PR when verified:**
@@ -181,7 +181,7 @@ flowchart LR
 |-----------|------|
 | Corpus API (if unused) | [`src/app/api/report/corpus/route.ts`](../src/app/api/report/corpus/route.ts) |
 | Corpus client store | [`src/lib/report-corpus.ts`](../src/lib/report-corpus.ts), IndexedDB storage |
-| Corpus preload | [`src/features/report/components/ReportFiltersContext.tsx`](../src/features/report/components/ReportFiltersContext.tsx) — corpus fetch loops |
+| Corpus preload | [`src/modules/mis/components/ReportFiltersContext.tsx`](../src/modules/mis/components/ReportFiltersContext.tsx) — corpus fetch loops |
 | Global corpus store | [`src/lib/report-data-store.ts`](../src/lib/report-data-store.ts) — `callCorpusStore` for reporting |
 | ~~Legacy cache / sync stubs~~ | **Removed** (`clear-cache`, `/api/sync/*`); `calls_cache` Prisma model dropped |
 

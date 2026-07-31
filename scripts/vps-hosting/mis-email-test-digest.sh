@@ -46,8 +46,8 @@ echo "=== mis-email-test $(date -Iseconds) TZ=${TZ:-system} to=${TEST_TO} ==="
 source "${SCRIPT_DIR}/vps-cron-gate.sh"
 vps_cron_gate_allow mis_email_test || exit 0
 
-if [[ ! -f "${INSTALL_ROOT}/src/features/mis-email/services/cli.ts" ]]; then
-  echo "FATAL: missing ${INSTALL_ROOT}/src/features/mis-email/services/cli.ts — deploy features first" >&2
+if [[ ! -f "${INSTALL_ROOT}/src/modules/mail-alerts/services/cli.ts" ]]; then
+  echo "FATAL: missing ${INSTALL_ROOT}/src/modules/mail-alerts/services/cli.ts — deploy modules first" >&2
   exit 1
 fi
 

@@ -5,7 +5,7 @@ config({ path: join(process.cwd(), '.env') });
 
 import { prisma } from '@/lib/db/prisma';
 import { postQuery } from '@/lib/db/proxy';
-import { buildCrmTransactionQuery } from '@/features/report/services/call-register/sql';
+import { buildCrmTransactionQuery } from '@/modules/mis/services/call-register/sql';
 
 type QueryRow = Record<string, string>;
 

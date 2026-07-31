@@ -4,9 +4,9 @@ import { join } from 'path';
 
 config({ path: join(process.cwd(), '.env.local') });
 
-import { parseImportFile } from '@/features/mis-import/services/detect-parse';
-import { normalizeClientRows } from '@/features/mis-import/services/normalize';
-import { loadSourceConfigByCode } from '@/features/mis-import/services/config';
+import { parseImportFile } from '@/modules/mis/client-import/services/detect-parse';
+import { normalizeClientRows } from '@/modules/mis/client-import/services/normalize';
+import { loadSourceConfigByCode } from '@/modules/mis/client-import/services/config';
 
 const path = process.argv[2] ?? 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw/HCCB.xlsx';
 

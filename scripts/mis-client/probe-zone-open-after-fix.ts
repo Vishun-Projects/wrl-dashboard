@@ -5,7 +5,7 @@ import { withAppClient } from '@/lib/read-model/db';
 import {
   HOT_OFFICE_JOINS_SQL,
   HOT_RESOLVED_REGION_SQL,
-} from '@/lib/read-model/queries/hot-region';
+} from '@/sql/read-model/hot-region';
 
 async function main() {
   await withAppClient(async (c) => {

@@ -3,9 +3,9 @@ import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 
 import { withAppClient } from '@/lib/read-model/db';
-import { queryClientAccountSummaryFiltered } from '@/features/mis-import/services/aggregate';
-import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { formatDisplayRegion } from '@/features/mis-import/services/region';
+import { queryClientAccountSummaryFiltered } from '@/modules/mis/client-import/services/aggregate';
+import { queryBdMisCrmSummary } from '@/sql/read-model/bd-mis-summary';
+import { formatDisplayRegion } from '@/modules/mis/client-import/services/region';
 
 const START = '2026-01-01';
 const END = '2026-06-29';

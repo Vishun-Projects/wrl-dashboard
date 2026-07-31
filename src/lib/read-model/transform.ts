@@ -5,13 +5,13 @@ import {
   isMajorRepairRow,
   isRegisterRowTransferred,
   type RegisterSummaryBucket,
-} from '@/lib/call-status/register-row';
+} from '@/lib/call/status/register-row';
 import { parseLatLngFromRow } from '@/lib/geo/parse-latlong';
-import { enrichTrhcallBranchFranchisee } from '@/lib/trhcalls/query';
+import { enrichTrhcallBranchFranchisee } from '@/sql/trhcalls/query';
 import type { HotRow, StatusBucket } from '@/lib/read-model/types';
 import { parseCrmDate } from '@/lib/read-model/dates';
 import { registerHotRetentionStart } from '@/lib/read-model/hot-window';
-import { isTruthyCrmRowFlag, resolveTrhcallsBmApprovedAt } from '@/lib/trhcalls/bm-approval';
+import { isTruthyCrmRowFlag, resolveTrhcallsBmApprovedAt } from '@/sql/trhcalls/bm-approval';
 
 const STATUS_LABEL_BY_BUCKET: Record<Exclude<RegisterSummaryBucket, 'transferred'>, string> = {
   openUnallocated: 'Open Unallocated',

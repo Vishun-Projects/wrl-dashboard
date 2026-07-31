@@ -3,7 +3,7 @@ import { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import { getUserInfo } from '@/lib/auth/session';
 import { canAccessMisTab } from '@/lib/auth/rbac-catalog';
-import { CallRegisterClient } from './call-register-client';
+import { CallRegisterClient } from '@/modules/mis/pages/CallRegisterPageClient';
 
 export const metadata: Metadata = {
   title: 'Call Register | Reports',

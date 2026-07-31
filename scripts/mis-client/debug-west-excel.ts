@@ -3,7 +3,7 @@ import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 
 import XLSX from 'xlsx';
-import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
+import { queryBdMisCrmSummary } from '@/sql/read-model/bd-mis-summary';
 
 async function main() {
   const wb = XLSX.readFile('C:/Users/Vishnu.Vishwakarma/Downloads/Raw/New_BD_MIS_30.06.2026.xlsx');

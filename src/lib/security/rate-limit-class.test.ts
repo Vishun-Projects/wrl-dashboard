@@ -27,7 +27,7 @@ describe('rateLimitClassForPath', () => {
   });
 
   it('keeps heavy and default classes', () => {
-    expect(rateLimitClassForPath('/api/read-model/sync').keySuffix).toBe('heavy');
+    expect(rateLimitClassForPath('/api/report/corpus').keySuffix).toBe('heavy');
     expect(rateLimitClassForPath('/api/report/summary').keySuffix).toBe('default');
   });
 });

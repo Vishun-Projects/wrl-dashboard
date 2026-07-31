@@ -1,7 +1,7 @@
 import { config } from 'dotenv';
 import { join } from 'path';
 import { withAppClient } from '@/lib/read-model/db';
-import { TRHCALLS_PARENT_OFFICE_EXCLUDE } from '@/lib/trhcalls/query';
+import { TRHCALLS_PARENT_OFFICE_EXCLUDE } from '@/sql/trhcalls/query';
 
 config({ path: join(process.cwd(), '.env.local') });
 

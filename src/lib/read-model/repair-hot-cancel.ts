@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import { isRealCancelReasonCode } from '@/lib/call-status/cancel';
+import { isRealCancelReasonCode } from '@/lib/call/status/cancel';
 
 /** Fix hot rows where ncancelreason indicates cancel but status_bucket is still open/assigned. */
 export async function repairHotCancelFromNcrReason(

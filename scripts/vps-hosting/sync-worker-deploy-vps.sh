@@ -37,7 +37,7 @@ fi
 
 echo "==> Deploying sync-worker code to ${VPS_HOST}:${INSTALL_ROOT}"
 
-ssh "${SSH_OPTS[@]}" "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}/src/lib' '${INSTALL_ROOT}/scripts/vps-hosting' '${INSTALL_ROOT}/docs/read-model-phase1-schema' '${INSTALL_ROOT}/logs'"
+ssh "${SSH_OPTS[@]}" "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}/src/lib' '${INSTALL_ROOT}/src/modules' '${INSTALL_ROOT}/src/sql' '${INSTALL_ROOT}/scripts/vps-hosting' '${INSTALL_ROOT}/docs/read-model-phase1-schema' '${INSTALL_ROOT}/logs'"
 
 # Upload .env.sync-worker if VPS is missing it (never overwrite an existing remote file)
 if [[ -f "${ROOT}/.env.sync-worker" ]]; then
@@ -56,9 +56,11 @@ if command -v rsync >/dev/null 2>&1; then
   RSYNC_SSH="ssh ${SSH_OPTS[*]}"
   rsync -az -e "$RSYNC_SSH" \
     "${ROOT}/src/lib/" "${VPS_HOST}:${INSTALL_ROOT}/src/lib/"
-  # package.json scripts (e.g. mis-email:digest) point into src/features — keep them in sync
+  # sync CLI imports @/modules/arcp + @/sql — keep them in sync with package.json scripts
   rsync -az -e "$RSYNC_SSH" \
-    "${ROOT}/src/features/" "${VPS_HOST}:${INSTALL_ROOT}/src/features/"
+    "${ROOT}/src/modules/" "${VPS_HOST}:${INSTALL_ROOT}/src/modules/"
+  rsync -az -e "$RSYNC_SSH" \
+    "${ROOT}/src/sql/" "${VPS_HOST}:${INSTALL_ROOT}/src/sql/"
   rsync -az -e "$RSYNC_SSH" \
     "${ROOT}/package.json" "${ROOT}/package-lock.json" "${ROOT}/tsconfig.json" \
     "${VPS_HOST}:${INSTALL_ROOT}/"
@@ -68,10 +70,11 @@ if command -v rsync >/dev/null 2>&1; then
   rsync -az -e "$RSYNC_SSH" \
     "${ROOT}/scripts/" "${VPS_HOST}:${INSTALL_ROOT}/scripts/"
 else
-  echo "    (rsync not found — streaming src/lib + src/features + package/schema files via tar)"
+  echo "    (rsync not found — streaming src/lib + src/modules + src/sql + package/schema files via tar)"
   tar -C "${ROOT}" -czf - \
     src/lib \
-    src/features \
+    src/modules \
+    src/sql \
     package.json \
     package-lock.json \
     tsconfig.json \

@@ -1,5 +1,5 @@
 import { getPincodeMapData } from '@/lib/geo/pincode-map';
-import { enrichTrhcallBranchFranchisee } from '@/lib/trhcalls/query';
+import { enrichTrhcallBranchFranchisee } from '@/sql/trhcalls/query';
 
 export const UNASSIGNED_FRANCHISEE_CODE = 'UNASSIGNED';
 export const UNALLOCATED_FRANCHISEE_NAME = 'Unallocated';

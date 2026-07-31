@@ -12,11 +12,11 @@ import { isPublicAuthRoute } from '@/lib/auth/rbac-catalog';
 import { Sidebar } from './Sidebar';
 import { PageAccessGuard } from './PageAccessGuard';
 import { CallDetailDialogProvider } from '@/components/calls/CallDetailDialogProvider';
-import { PerformanceMetricsLogger } from '@/components/performance/PerformanceMetricsLogger';
-import { performanceLogEnabledClient } from '@/lib/performance/log-config';
+import { PerformanceMetricsLogger } from '@/modules/performance/components/PerformanceMetricsLogger';
+import { performanceLogEnabledClient } from '@/modules/performance/lib/log-config';
 import { MotionProvider } from '@/components/motion';
 import { ThemeProvider } from '@/components/theme/ThemeProvider';
-import { MisEmailSendTracker } from '@/features/mis-email/components/MisEmailSendTracker';
+import { MisEmailSendTracker } from '@/modules/mail-alerts/components/MisEmailSendTracker';
 import { SessionExpiredDialog } from '@/components/auth/SessionExpiredDialog';
 
 type DashboardUser = {

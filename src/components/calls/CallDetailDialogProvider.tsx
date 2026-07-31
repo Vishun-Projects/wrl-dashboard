@@ -13,7 +13,7 @@ const CallDetail = dynamic(
 );
 import type { CallDetailData } from '@/components/calls/CallDetail';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
-import { clearPortalAuditCache } from '@/features/report/services/portal-cache';
+import { clearPortalAuditCache } from '@/modules/mis/services/portal-cache';
 
 export type OpenCallDetailParams = {
   callId?: string;

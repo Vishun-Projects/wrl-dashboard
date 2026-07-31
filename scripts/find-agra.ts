@@ -2,7 +2,7 @@ import { config } from 'dotenv';
 import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 import { prisma } from '@/lib/db/prisma';
-import { querySummaryDashboard } from '@/lib/read-model/queries/summary';
+import { querySummaryDashboard } from '@/sql/read-model/summary';
 
 async function main() {
   const data = await querySummaryDashboard({

@@ -1,7 +1,7 @@
 import { config } from 'dotenv';
 import { join } from 'path';
 import XLSX from 'xlsx';
-import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
+import { queryBdMisCrmSummary } from '@/sql/read-model/bd-mis-summary';
 import { prisma } from '@/lib/db/prisma';
 
 config({ path: join(process.cwd(), '.env.local') });

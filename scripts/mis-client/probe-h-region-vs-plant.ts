@@ -2,8 +2,8 @@ import { config } from 'dotenv';
 import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 import { withAppClient } from '@/lib/read-model/db';
-import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
+import { queryBdMisCrmSummary } from '@/sql/read-model/bd-mis-summary';
+import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/sql/read-model/summary-call-filters';
 
 async function main() {
   const crm = await queryBdMisCrmSummary({

@@ -4,11 +4,11 @@
  * Usage:
  *   npx tsx scripts/compare-arcp-branch-totals.ts 2026-04-01 2026-04-30 bm_approved_at [franchiseeNcode]
  */
-import { queryArcpClaimsDetailRows } from '../src/features/arcp/server/postgres';
+import { queryArcpClaimsDetailRows } from '../src/sql/arcp/postgres';
 import {
   arcpDetailDedupeKey,
   type ArcpClaimsDetailRow,
-} from '../src/features/arcp/services/query';
+} from '../src/sql/arcp/query';
 
 const startDate = process.argv[2] || '2026-04-01';
 const endDate = process.argv[3] || '2026-04-30';

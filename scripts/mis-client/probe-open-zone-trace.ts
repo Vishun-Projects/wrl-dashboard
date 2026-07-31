@@ -9,14 +9,14 @@ import XLSX from 'xlsx';
 config({ path: join(process.cwd(), '.env.local') });
 
 import { withAppClient } from '@/lib/read-model/db';
-import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
-import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/services/aggregate';
+import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/sql/read-model/summary-call-filters';
+import { queryBdMisCrmSummary } from '@/sql/read-model/bd-mis-summary';
+import { queryClientAccountSummaryForBdMis } from '@/modules/mis/client-import/services/aggregate';
 import {
   buildBdMisRegionalBreakdown,
   openCallsFromTotals,
-} from '@/features/report/services/bd-mis-summary';
-import { formatDisplayRegion } from '@/features/mis-import/services/region';
+} from '@/modules/mis/services/bd-mis-summary';
+import { formatDisplayRegion } from '@/modules/mis/client-import/services/region';
 
 const RAW = 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw';
 const CRM_CSV = `${RAW}/CRM_WRL_MIS_Register_2026-06-30.csv`;

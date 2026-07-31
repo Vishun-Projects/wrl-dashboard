@@ -2,7 +2,7 @@ import { config } from 'dotenv';
 import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 import { withAppClient } from '@/lib/read-model/db';
-import { queryClientAccountSummaryFiltered } from '@/features/mis-import/services/aggregate';
+import { queryClientAccountSummaryFiltered } from '@/modules/mis/client-import/services/aggregate';
 
 async function main() {
   const jul = await queryClientAccountSummaryFiltered({
@@ -42,10 +42,10 @@ async function main() {
   console.log('\nCoke SOUTH snapshot logged_at distribution (latest 15 days):');
   console.log(dates);
 
-  const { querySummaryDashboard } = await import('@/lib/read-model/queries/summary');
+  const { querySummaryDashboard } = await import('@/sql/read-model/summary');
   const {
     sumMergedAccountMetricByRegion,
-  } = await import('@/features/report/components/SummaryMergedMetricCell');
+  } = await import('@/modules/mis/components/SummaryMergedMetricCell');
 
   const crmJul = await querySummaryDashboard({
     startDate: '2026-07-01',

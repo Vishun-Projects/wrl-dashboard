@@ -3,7 +3,7 @@
 Living checklist for structure + audit safety work.  
 **Do not** treat the Jun 2026 [`CODEBASE_AUDIT.md`](./CODEBASE_AUDIT.md) orphan cleanup as current architecture guidance — see Phase 9 verdict below.
 
-**Updated:** 2026-07-22
+**Updated:** 2026-07-31
 
 ---
 
@@ -20,39 +20,31 @@ Living checklist for structure + audit safety work.
 ## Target tree
 
 ```text
-src/features/<domain>/
-  ui/           # client components
-  server/       # route-handler bodies / domain DB (when owned here)
-  lib/          # domain helpers
-  hooks/        # optional
-  index.ts      # public API (other features import this only)
+src/modules/<name>/     # All product domains
+  pages/ components/ services/ server/ …
+  index.ts
 
-src/shared/     # auth primitives, db pool, ui kit, domain leaf helpers, net/
-src/app/        # thin Next routes → @/features/...
+src/features/           # Empty — do not add code
+src/lib/                # Platform today → src/shared/ later
+src/app/                # Thin Next routes → @/modules/...
 ```
 
-**Import rule:** `features/A` → `shared` + other features’ `index.ts` only.  
-`shared/read-model` must **not** import `features/report`.
+**Import rule:** domains → `@/lib` (platform) + other domains’ barrels / advisory UI deep imports.  
+Retired: all former `@/features/<domain>` product paths; `@/lib/arcp`, `@/lib/read-model/arcp`, `@/lib/performance`.
 
-Enforced by `npm run check:feature-boundaries`:
-
-- Hard: retired `@/lib/<domain>` paths; `shared` → features; **`src/lib` → features** (allowlist empty — CI runs `BOUNDARY_LIB_FEATURES=strict`).
-- Hard (STRICT): deep feature→feature imports (`FEATURE_BOUNDARIES_STRICT=0` to warn only).
-- Soft: `components` → features (prefer barrels).
-
+Enforced by `npm run check:feature-boundaries`.
 
 ### Migrate order
 
 | # | Domain | Status |
 |---|--------|--------|
-| 1 | `mis-email` (dry-run) | ☑ lib/ui + `MisEmailRoutingPageClient` under `features/mis-email/ui/` |
-| 2 | `serial-audit` | ☑ lib/ui + `SerialAuditPageClient` under `features/serial-audit/ui/` |
-| 3 | Characterization tests (report gate) | ☑ `report-characterization.test.ts` (logic-only; no `.test.tsx`) |
-| 4 | `report` (split god UI) | ☑ moved + tab panels; orchestrator still large (~4.5k) |
-| 5 | `register` | ☑ under features |
-| 6 | `arcp` | ☑ lib/ui + `ArcpClaimsPageClient` under `features/arcp/ui/` |
-| 7 | `mis-import` (+ SheetJS review) | ☑ + CDN 0.20.3; client/server barrels split |
-| 8 | Remaining (`location-audit`, `warranty-master`, `distribution`) | ☑ lib/ui + `DistributionPageClient` under `features/distribution/ui/` |
+| 1–8 | Feature-slice era | ☑ historical under `features/` |
+| 9 | `arcp` modules pilot | ☑ `src/modules/arcp/` |
+| 10 | Leaf report siblings | ☑ warranty, call-distribution, location-audit, serial-history |
+| 11 | `mail-alerts` | ☑ mis-email + major-repair |
+| 12 | `mis` hub | ☑ report + register + mis-import |
+| 13 | Admin modules | ☑ users, roles, performance, activity-log |
+| 14 | `lib` → `shared` rename | ☐ deferred |
 
 ---
 
@@ -126,7 +118,7 @@ Tripwires for:
 - Filter → query / corpus key  
 - Export kickoff contracts  
 
-☑ Done — `src/features/report/services/report-characterization.test.ts` (+ `report-page-helpers.test.ts`)
+☑ Done — `src/modules/mis/services/report-characterization.test.ts` (+ `report-page-helpers.test.ts`)
 
 ---
 

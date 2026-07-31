@@ -29,7 +29,7 @@ import { runPipelineReconcile } from '@/lib/read-model/pipeline-reconcile';
 import { runReconcileTechSolved } from '@/lib/read-model/reconcile-tech-solved';
 import { runEditedonCatchupStep } from '@/lib/read-model/editedon-catchup';
 import { repairHotCancelFromNcrReason } from '@/lib/read-model/repair-hot-cancel';
-import { checkMajorRepairRepeatAlerts } from '@/lib/read-model/major-repair-repeat-alert';
+import { checkMajorRepairRepeatAlerts } from '@/modules/mail-alerts/server/sync/major-repair-repeat-alert';
 import { runReconcileMajor } from '@/lib/read-model/reconcile-major';
 
 const OVERLAP_MS = 2 * 60 * 1000;

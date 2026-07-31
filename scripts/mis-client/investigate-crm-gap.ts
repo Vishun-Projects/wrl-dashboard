@@ -10,15 +10,15 @@ import XLSX from 'xlsx';
 config({ path: join(process.cwd(), '.env.local') });
 
 import { prisma } from '@/lib/db/prisma';
-import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryFiltered } from '@/features/mis-import/services/aggregate';
+import { queryBdMisCrmSummary } from '@/sql/read-model/bd-mis-summary';
+import { queryClientAccountSummaryFiltered } from '@/modules/mis/client-import/services/aggregate';
 import {
   buildBdMisRegionalRows,
   sumBdMisRegionalGrand,
-} from '@/features/report/services/bd-mis-summary';
-import { parseClientDate } from '@/features/mis-import/services/parse-dates';
-import { isCadburyExcludedServiceProvider } from '@/features/mis-import/services/cadbury-filters';
-import { formatDisplayRegion } from '@/features/mis-import/services/region';
+} from '@/modules/mis/services/bd-mis-summary';
+import { parseClientDate } from '@/modules/mis/client-import/services/parse-dates';
+import { isCadburyExcludedServiceProvider } from '@/modules/mis/client-import/services/cadbury-filters';
+import { formatDisplayRegion } from '@/modules/mis/client-import/services/region';
 
 const TESTING = 'C:/Users/Vishnu.Vishwakarma/Downloads/Testing';
 const FORMAT = join(TESTING, 'Format.xlsx');

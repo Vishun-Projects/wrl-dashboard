@@ -1,6 +1,6 @@
 import { requirePageAccess } from '@/lib/auth/require-page-access';
 import { canViewSecurityAudit } from '@/lib/security/audit-access';
-import SecurityAuditPageClient from './security-audit-page-client';
+import SecurityAuditPageClient from '@/modules/activity-log/pages/ActivityLogPageClient';
 
 export default async function SecurityAuditPage() {
   const user = await requirePageAccess('/admin/security-audit');

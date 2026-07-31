@@ -2,12 +2,12 @@ import { config } from 'dotenv';
 import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 
-import { querySummaryDashboard } from '@/lib/read-model/queries/summary';
-import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/services/aggregate';
+import { querySummaryDashboard } from '@/sql/read-model/summary';
+import { queryClientAccountSummaryForBdMis } from '@/modules/mis/client-import/services/aggregate';
 import {
   buildBdMisRegionalRows,
   sumBdMisRegionalGrand,
-} from '@/features/report/services/bd-mis-summary';
+} from '@/modules/mis/services/bd-mis-summary';
 
 const params = {
   startDate: '2026-01-01',

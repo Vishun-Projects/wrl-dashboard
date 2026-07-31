@@ -8,8 +8,8 @@ import {
   HOT_MAIN_BRANCH_OFFICE_ID_SQL,
   HOT_OFFICE_JOINS_SQL,
   HOT_RESOLVED_REGION_SQL,
-} from '@/lib/read-model/queries/hot-region';
-import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
+} from '@/sql/read-model/hot-region';
+import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/sql/read-model/summary-call-filters';
 
 async function main() {
   const periodStart = '2026-01-01T00:00:00';

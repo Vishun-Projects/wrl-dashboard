@@ -2,7 +2,7 @@ import { config } from 'dotenv';
 import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 import { prisma } from '@/lib/db/prisma';
-import { querySummaryDrilldown } from '@/lib/read-model/queries/drilldown';
+import { querySummaryDrilldown } from '@/sql/read-model/drilldown';
 
 async function main() {
   const accounts = await prisma.$queryRawUnsafe<Array<{ account: string; region: string; c: number }>>(

@@ -10,12 +10,12 @@
 import fs from 'fs';
 import path from 'path';
 import '@/lib/read-model/bootstrap-env';
-import { arcpBackfillStartDate } from '@/lib/read-model/arcp/dates';
-import { fetchArcpClaimsAggregates } from '@/features/arcp/server/fetch';
+import { arcpBackfillStartDate } from '@/modules/arcp/server/sync/dates';
+import { fetchArcpClaimsAggregates } from '@/modules/arcp/server/fetch';
 import {
   type ArcpClaimsAggregateRow,
   type ArcpClaimsQueryOpts,
-} from '@/features/arcp/services/query';
+} from '@/sql/arcp/query';
 
 type MonthMetrics = {
   month: string;

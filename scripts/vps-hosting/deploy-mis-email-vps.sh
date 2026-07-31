@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deploy MIS email code to VPS so the */15 digest cron can find cli.ts.
-# Syncs full src/features + src/lib (CLI import graph). Asks for SSH passphrase.
+# Syncs src/modules + src/lib + src/sql (CLI import graph). Asks for SSH passphrase.
 # Does NOT touch .env.mis-email.
 #
 #   npm run mis-email:deploy:vps
@@ -48,9 +48,9 @@ if [[ -n "$detected_root" ]]; then
 fi
 echo "    ${VPS_HOST}:${INSTALL_ROOT}"
 
-echo "==> Syncing package.json + src/features + src/lib + digest scripts"
+echo "==> Syncing package.json + src/modules + src/lib + src/sql + digest scripts"
 ssh "${SSH_OPTS[@]}" "$VPS_HOST" \
-  "mkdir -p '${INSTALL_ROOT}/src/features' '${INSTALL_ROOT}/scripts/vps-hosting'"
+  "mkdir -p '${INSTALL_ROOT}/src/modules' '${INSTALL_ROOT}/src/lib' '${INSTALL_ROOT}/src/sql' '${INSTALL_ROOT}/scripts/vps-hosting'"
 
 if command -v rsync >/dev/null 2>&1; then
   RSYNC_SSH="ssh ${SSH_OPTS[*]}"
@@ -58,11 +58,14 @@ if command -v rsync >/dev/null 2>&1; then
     "${ROOT}/package.json" "${ROOT}/package-lock.json" "${ROOT}/tsconfig.json" \
     "${VPS_HOST}:${INSTALL_ROOT}/"
   rsync -az -e "$RSYNC_SSH" \
-    "${ROOT}/src/features/" \
-    "${VPS_HOST}:${INSTALL_ROOT}/src/features/"
+    "${ROOT}/src/modules/" \
+    "${VPS_HOST}:${INSTALL_ROOT}/src/modules/"
   rsync -az -e "$RSYNC_SSH" \
     "${ROOT}/src/lib/" \
     "${VPS_HOST}:${INSTALL_ROOT}/src/lib/"
+  rsync -az -e "$RSYNC_SSH" \
+    "${ROOT}/src/sql/" \
+    "${VPS_HOST}:${INSTALL_ROOT}/src/sql/"
   rsync -az -e "$RSYNC_SSH" \
     "${ROOT}/scripts/vps-hosting/mis-email-digest.sh" \
     "${ROOT}/scripts/vps-hosting/mis-email-test-digest.sh" \
@@ -73,7 +76,7 @@ else
   scp "${SSH_OPTS[@]}" \
     "${ROOT}/package.json" "${ROOT}/package-lock.json" "${ROOT}/tsconfig.json" \
     "${VPS_HOST}:${INSTALL_ROOT}/"
-  tar -C "${ROOT}" -czf - src/features src/lib \
+  tar -C "${ROOT}" -czf - src/modules src/lib src/sql \
     | ssh "${SSH_OPTS[@]}" "$VPS_HOST" "tar -xzf - -C '${INSTALL_ROOT}'"
   scp "${SSH_OPTS[@]}" \
     "${ROOT}/scripts/vps-hosting/mis-email-digest.sh" \
@@ -90,11 +93,11 @@ echo "==> Verifying cli path on VPS…"
 ssh "${SSH_OPTS[@]}" "$VPS_HOST" bash -s <<REMOTE
 set -euo pipefail
 root='${INSTALL_ROOT}'
-test -f "\$root/src/features/mis-email/services/cli.ts"
+test -f "\$root/src/modules/mail-alerts/services/cli.ts"
 grep -n 'mis-email:digest' "\$root/package.json" | head -3
-# Barrels must stay lib-only (no UI re-exports) so cron does not need src/components.
-! grep -q "export \* from './ui/" "\$root/src/features/register/index.ts"
-! grep -q "export \* from './ui/" "\$root/src/features/report/index.ts"
+# Register barrel must stay services-only (no UI re-exports) so cron does not need src/components.
+! grep -q "export \* from './ui/" "\$root/src/modules/mis/register/index.ts"
+! grep -q "export \* from './components/" "\$root/src/modules/mis/index.ts"
 ls -la "\$root/.env.mis-email" >/dev/null
 echo "OK: cli.ts + package.json + .env.mis-email + lib-only barrels"
 REMOTE

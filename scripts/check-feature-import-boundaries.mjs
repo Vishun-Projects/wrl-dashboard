@@ -1,19 +1,21 @@
 #!/usr/bin/env node
 /**
- * Feature layout guards (remediation roadmap).
+ * Feature/module layout guards (remediation roadmap + modules pilot).
  *
  * Hard fail:
  *  - retired @/lib/<domain> / @/components/<domain> paths
- *  - src/shared → @/features
+ *  - retired ARCP paths: @/features/arcp, @/lib/arcp, @/lib/read-model/arcp
+ *  - src/shared → @/features or @/modules
  *  - src/lib → @/features unless listed in scripts/boundary-lib-features-debt.txt
- *  - deep feature→feature imports (STRICT, default on)
+ *  - deep feature→feature / module→module imports (STRICT, default on)
  *
  * Soft (never fail alone):
  *  - allowlisted lib→features debt (inventory)
- *  - src/components → @/features (UI may compose features; prefer barrels)
+ *  - src/lib → @/modules (platform orchestrators call module sync; prefer barrels)
+ *  - src/components → @/features or @/modules (UI may compose; prefer barrels)
  *
- * FEATURE_BOUNDARIES_STRICT=0 — feature→feature deep is advisory only
- * BOUNDARY_LIB_FEATURES=strict — also fail on allowlisted lib debt
+ * FEATURE_BOUNDARIES_STRICT=0 — cross-domain deep is advisory only
+ * BOUNDARY_LIB_FEATURES=strict — also fail on allowlisted lib→features debt
  */
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -21,6 +23,7 @@ import { join, relative } from 'node:path';
 const root = process.cwd();
 const srcRoot = join(root, 'src');
 const featuresRoot = join(srcRoot, 'features');
+const modulesRoot = join(srcRoot, 'modules');
 const sharedRoot = join(srcRoot, 'shared');
 const libRoot = join(srcRoot, 'lib');
 const componentsRoot = join(srcRoot, 'components');
@@ -35,10 +38,12 @@ const retired = [
   'report',
   'register',
   'arcp-claims',
+  'arcp',
   'mis-client-import',
   'location-audit',
   'warranty-master',
   'distribution',
+  'performance',
 ];
 
 const retiredLibRe = new RegExp(
@@ -47,8 +52,38 @@ const retiredLibRe = new RegExp(
 const retiredCompRe = new RegExp(
   String.raw`from\s+['"]@/components/(location-audit|warranty-master|distribution|report)(/|['"])`
 );
-const deepImport = /from\s+['"]@\/features\/([a-z0-9-]+)\/(lib|ui|components|services|server|hooks)\//;
+/** Migrated feature packages → modules (hard-fail old import paths). Add entries only after move. */
+const retiredFeatureToModule = {
+  arcp: 'modules/arcp',
+  'warranty-master': 'modules/warranty',
+  distribution: 'modules/call-distribution',
+  'location-audit': 'modules/location-audit',
+  'serial-audit': 'modules/serial-history',
+  'mis-email': 'modules/mail-alerts',
+  'major-repair-alerts': 'modules/mail-alerts',
+  report: 'modules/mis',
+  register: 'modules/mis/register',
+  'mis-import': 'modules/mis/client-import',
+};
+const retiredFeatureRe = new RegExp(
+  String.raw`from\s+['"]@/features/(${Object.keys(retiredFeatureToModule).join('|')})(/|['"])`
+);
+const retiredArcpReadModelRe = /from\s+['"]@\/lib\/read-model\/arcp(\/|['"])/;
+/** Flat call-* leaves nested under lib/call/{display,register,row,status}. */
+const retiredCallLibRe =
+  /from\s+['"]@\/lib\/call-(display|register|row|status)(\/|['"])/;
+/** SQL leaves moved to src/sql/<domain>. */
+const retiredSqlLibRe = /from\s+['"]@\/lib\/(register-sql|trhcalls|repair)(\/|['"])/;
+const retiredSqlReadModelQueriesRe = /from\s+['"]@\/lib\/read-model\/queries(\/|['"])/;
+const retiredSqlModuleRe =
+  /from\s+['"]@\/modules\/(warranty\/services\/sql|arcp\/services\/query|arcp\/server\/postgres|location-audit\/server\/queries|serial-history\/server\/sql-scope)(\/|['"])/;
+
+const deepFeatureImport =
+  /from\s+['"]@\/features\/([a-z0-9-]+)\/(lib|ui|components|services|server|hooks|pages|constants)\//;
+const deepModuleImport =
+  /from\s+['"]@\/modules\/([a-z0-9-]+)\/(lib|ui|components|services|server|hooks|pages|constants)\//;
 const anyFeatureImport = /from\s+['"]@\/features\//;
+const anyModuleImport = /from\s+['"]@\/modules\//;
 
 function walk(dir) {
   if (!existsSync(dir)) return [];
@@ -65,8 +100,8 @@ function walk(dir) {
   return out;
 }
 
-function featureOf(file) {
-  const rel = relative(featuresRoot, file).split('\\').join('/');
+function domainOf(file, domainRoot) {
+  const rel = relative(domainRoot, file).split('\\').join('/');
   if (rel.startsWith('..')) return null;
   return rel.split('/')[0] || null;
 }
@@ -85,13 +120,15 @@ function loadDebtSet() {
 /** @type {string[]} */
 const hard = [];
 /** @type {string[]} */
-const featureDeepSoft = [];
+const domainDeepSoft = [];
 /** @type {string[]} */
-const featureDeepUiSoft = [];
+const domainDeepUiSoft = [];
 /** @type {string[]} */
 const softStale = [];
 /** @type {string[]} */
 const libDebtHits = [];
+/** @type {string[]} */
+const libModuleHits = [];
 /** @type {string[]} */
 const componentHits = [];
 /** @type {string[]} */
@@ -107,6 +144,36 @@ for (const file of walk(srcRoot)) {
     if (retiredLibRe.test(line) || retiredCompRe.test(line)) {
       hard.push(`${rel}: retired path\n  ${line.trim()}`);
     }
+    const retiredFeat = line.match(retiredFeatureRe);
+    if (retiredFeat) {
+      const dest = retiredFeatureToModule[retiredFeat[1]];
+      hard.push(
+        `${rel}: retired @/features/${retiredFeat[1]} (use @/${dest})\n  ${line.trim()}`
+      );
+    }
+    if (retiredArcpReadModelRe.test(line)) {
+      hard.push(
+        `${rel}: retired @/lib/read-model/arcp (use @/modules/arcp/server/sync)\n  ${line.trim()}`
+      );
+    }
+    if (retiredCallLibRe.test(line)) {
+      hard.push(
+        `${rel}: retired @/lib/call-* (use @/lib/call/{display,register,row,status})\n  ${line.trim()}`
+      );
+    }
+    if (retiredSqlLibRe.test(line)) {
+      hard.push(
+        `${rel}: retired @/lib/{register-sql,trhcalls,repair} (use @/sql/...)\n  ${line.trim()}`
+      );
+    }
+    if (retiredSqlReadModelQueriesRe.test(line)) {
+      hard.push(
+        `${rel}: retired @/lib/read-model/queries (use @/sql/read-model)\n  ${line.trim()}`
+      );
+    }
+    if (retiredSqlModuleRe.test(line)) {
+      hard.push(`${rel}: retired module SQL path (use @/sql/<domain>)\n  ${line.trim()}`);
+    }
   }
 }
 
@@ -118,6 +185,9 @@ if (existsSync(sharedRoot)) {
       if (anyFeatureImport.test(line)) {
         hard.push(`${rel}: shared must not import features/\n  ${line.trim()}`);
       }
+      if (anyModuleImport.test(line)) {
+        hard.push(`${rel}: shared must not import modules/\n  ${line.trim()}`);
+      }
     }
   }
 }
@@ -126,23 +196,29 @@ if (existsSync(libRoot)) {
   for (const file of walk(libRoot)) {
     const text = readFileSync(file, 'utf8');
     const rel = relative(root, file).split('\\').join('/');
-    const lines = text.split(/\r?\n/).filter((l) => anyFeatureImport.test(l));
-    if (!lines.length) continue;
+    const featureLines = text.split(/\r?\n/).filter((l) => anyFeatureImport.test(l));
+    const moduleLines = text.split(/\r?\n/).filter((l) => anyModuleImport.test(l));
 
-    if (debt.has(rel)) {
-      debtHitPaths.add(rel);
-      for (const line of lines) libDebtHits.push(`${rel}\n  ${line.trim()}`);
-      if (libFeaturesStrict) {
-        for (const line of lines) {
-          hard.push(`${rel}: lib→features (BOUNDARY_LIB_FEATURES=strict)\n  ${line.trim()}`);
+    if (featureLines.length) {
+      if (debt.has(rel)) {
+        debtHitPaths.add(rel);
+        for (const line of featureLines) libDebtHits.push(`${rel}\n  ${line.trim()}`);
+        if (libFeaturesStrict) {
+          for (const line of featureLines) {
+            hard.push(`${rel}: lib→features (BOUNDARY_LIB_FEATURES=strict)\n  ${line.trim()}`);
+          }
+        }
+      } else {
+        for (const line of featureLines) {
+          hard.push(
+            `${rel}: lib must not import features/ (not in scripts/boundary-lib-features-debt.txt)\n  ${line.trim()}`
+          );
         }
       }
-    } else {
-      for (const line of lines) {
-        hard.push(
-          `${rel}: lib must not import features/ (not in scripts/boundary-lib-features-debt.txt)\n  ${line.trim()}`
-        );
-      }
+    }
+
+    for (const line of moduleLines) {
+      libModuleHits.push(`${rel}\n  ${line.trim()}`);
     }
   }
 }
@@ -158,35 +234,84 @@ if (existsSync(componentsRoot)) {
     const text = readFileSync(file, 'utf8');
     const rel = relative(root, file).split('\\').join('/');
     for (const line of text.split(/\r?\n/)) {
-      if (!anyFeatureImport.test(line)) continue;
+      const hitsFeature = anyFeatureImport.test(line);
+      const hitsModule = anyModuleImport.test(line);
+      if (!hitsFeature && !hitsModule) continue;
       componentHits.push(`${rel}\n  ${line.trim()}`);
-      const deep = line.match(deepImport);
-      if (deep) {
+      const deepF = line.match(deepFeatureImport);
+      if (deepF) {
         componentDeepSoft.push(
-          `${rel}: components deep→features/${deep[1]}/${deep[2]} (prefer barrel)\n  ${line.trim()}`
+          `${rel}: components deep→features/${deepF[1]}/${deepF[2]} (prefer barrel)\n  ${line.trim()}`
+        );
+      }
+      const deepM = line.match(deepModuleImport);
+      if (deepM) {
+        componentDeepSoft.push(
+          `${rel}: components deep→modules/${deepM[1]}/${deepM[2]} (prefer barrel)\n  ${line.trim()}`
         );
       }
     }
   }
 }
 
-if (existsSync(featuresRoot)) {
-  for (const file of walk(featuresRoot)) {
-    const self = featureOf(file);
+/**
+ * @param {string} domainRoot
+ * @param {'features' | 'modules'} kind
+ * @param {RegExp} deepRe
+ */
+function scanDomainCrossImports(domainRoot, kind, deepRe) {
+  if (!existsSync(domainRoot)) return;
+  for (const file of walk(domainRoot)) {
+    const self = domainOf(file, domainRoot);
     if (!self) continue;
     const text = readFileSync(file, 'utf8');
     const rel = relative(root, file).split('\\').join('/');
     for (const line of text.split(/\r?\n/)) {
-      const m = line.match(deepImport);
+      const m = line.match(deepRe);
       if (!m) continue;
       if (m[1] !== self) {
-        // UI deep imports are intentional: feature barrels stay services-only so headless
+        // UI deep imports are intentional: barrels stay services-only so headless
         // CLIs (MIS email, sync-worker) do not pull React/components.
-        if (m[2] === 'ui' || m[2] === 'components') {
-          featureDeepUiSoft.push(`${rel} → features/${m[1]}/${m[2]}\n  ${line.trim()}`);
+        if (m[2] === 'ui' || m[2] === 'components' || m[2] === 'pages') {
+          domainDeepUiSoft.push(`${rel} → ${kind}/${m[1]}/${m[2]}\n  ${line.trim()}`);
         } else {
-          featureDeepSoft.push(`${rel} → features/${m[1]}/${m[2]}\n  ${line.trim()}`);
+          domainDeepSoft.push(`${rel} → ${kind}/${m[1]}/${m[2]}\n  ${line.trim()}`);
         }
+      }
+    }
+  }
+}
+
+scanDomainCrossImports(featuresRoot, 'features', deepFeatureImport);
+scanDomainCrossImports(modulesRoot, 'modules', deepModuleImport);
+
+// Cross-layer deep: features ↔ modules
+if (existsSync(featuresRoot)) {
+  for (const file of walk(featuresRoot)) {
+    const text = readFileSync(file, 'utf8');
+    const rel = relative(root, file).split('\\').join('/');
+    for (const line of text.split(/\r?\n/)) {
+      const m = line.match(deepModuleImport);
+      if (!m) continue;
+      if (m[2] === 'ui' || m[2] === 'components' || m[2] === 'pages') {
+        domainDeepUiSoft.push(`${rel} → modules/${m[1]}/${m[2]}\n  ${line.trim()}`);
+      } else {
+        domainDeepSoft.push(`${rel} → modules/${m[1]}/${m[2]}\n  ${line.trim()}`);
+      }
+    }
+  }
+}
+if (existsSync(modulesRoot)) {
+  for (const file of walk(modulesRoot)) {
+    const text = readFileSync(file, 'utf8');
+    const rel = relative(root, file).split('\\').join('/');
+    for (const line of text.split(/\r?\n/)) {
+      const m = line.match(deepFeatureImport);
+      if (!m) continue;
+      if (m[2] === 'ui' || m[2] === 'components' || m[2] === 'pages') {
+        domainDeepUiSoft.push(`${rel} → features/${m[1]}/${m[2]}\n  ${line.trim()}`);
+      } else {
+        domainDeepSoft.push(`${rel} → features/${m[1]}/${m[2]}\n  ${line.trim()}`);
       }
     }
   }
@@ -201,9 +326,18 @@ if (libDebtHits.length) {
   console.log('  Clear with BOUNDARY_LIB_FEATURES=strict once inverted.\n');
 }
 
+if (libModuleHits.length) {
+  console.log(
+    `lib→modules: ${libModuleHits.length} import(s) (allowed for sync/orchestrators; prefer barrels). Sample:`
+  );
+  for (const s of libModuleHits.slice(0, 4)) console.log(' ', s);
+  if (libModuleHits.length > 4) console.log(`  … +${libModuleHits.length - 4} more`);
+  console.log('');
+}
+
 if (componentHits.length) {
   console.log(
-    `components→features: ${componentHits.length} import(s) (allowed; prefer barrels). Sample:`
+    `components→features/modules: ${componentHits.length} import(s) (allowed; prefer barrels). Sample:`
   );
   for (const s of componentHits.slice(0, 4)) console.log(' ', s);
   if (componentHits.length > 4) console.log(`  … +${componentHits.length - 4} more`);
@@ -212,28 +346,28 @@ if (componentHits.length) {
 
 if (componentDeepSoft.length) {
   console.log(
-    `Advisory: ${componentDeepSoft.length} components deep→features (prefer @/features/<domain>).`
+    `Advisory: ${componentDeepSoft.length} components deep→domain (prefer barrel).`
   );
   for (const s of componentDeepSoft.slice(0, 4)) console.log(' ', s);
   if (componentDeepSoft.length > 4) console.log(`  … +${componentDeepSoft.length - 4} more`);
   console.log('');
 }
 
-if (featureDeepUiSoft.length) {
+if (domainDeepUiSoft.length) {
   console.log(
-    `Advisory: ${featureDeepUiSoft.length} deep cross-feature UI import(s) (barrels prefer services, not components). Sample:`
+    `Advisory: ${domainDeepUiSoft.length} deep cross-domain UI import(s) (barrels prefer services, not components). Sample:`
   );
-  for (const s of featureDeepUiSoft.slice(0, 6)) console.log(' ', s);
-  if (featureDeepUiSoft.length > 6) console.log(`  … +${featureDeepUiSoft.length - 6} more`);
+  for (const s of domainDeepUiSoft.slice(0, 6)) console.log(' ', s);
+  if (domainDeepUiSoft.length > 6) console.log(`  … +${domainDeepUiSoft.length - 6} more`);
   console.log('');
 }
 
-if (featureDeepSoft.length) {
+if (domainDeepSoft.length) {
   console.log(
-    `Advisory: ${featureDeepSoft.length} deep cross-feature import(s) (target: index.ts only). Sample:`
+    `Advisory: ${domainDeepSoft.length} deep cross-domain import(s) (target: index.ts only). Sample:`
   );
-  for (const s of featureDeepSoft.slice(0, 8)) console.log(' ', s);
-  if (featureDeepSoft.length > 8) console.log(`  … +${featureDeepSoft.length - 8} more`);
+  for (const s of domainDeepSoft.slice(0, 8)) console.log(' ', s);
+  if (domainDeepSoft.length > 8) console.log(`  … +${domainDeepSoft.length - 8} more`);
   console.log('');
 }
 
@@ -249,9 +383,9 @@ if (hard.length) {
   process.exit(1);
 }
 
-if (strict && featureDeepSoft.length) {
+if (strict && domainDeepSoft.length) {
   console.error(
-    'Deep cross-feature imports are errors (set FEATURE_BOUNDARIES_STRICT=0 to warn only).'
+    'Deep cross-domain imports are errors (set FEATURE_BOUNDARIES_STRICT=0 to warn only).'
   );
   process.exit(1);
 }

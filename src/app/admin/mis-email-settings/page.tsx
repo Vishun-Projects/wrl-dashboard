@@ -1,6 +1,6 @@
 import { requirePageAccess } from '@/lib/auth/require-page-access';
-import MailAlertsHubPageClient from '@/features/mis-email/components/MailAlertsHubPageClient';
-import type { MailAlertsTab } from '@/features/mis-email/components/MailAlertsSubnav';
+import MailAlertsHubPageClient from '@/modules/mail-alerts/pages/MailAlertsHubPageClient';
+import type { MailAlertsTab } from '@/modules/mail-alerts/components/MailAlertsSubnav';
 
 function parseTab(raw: string | string[] | undefined): MailAlertsTab {
   const value = Array.isArray(raw) ? raw[0] : raw;

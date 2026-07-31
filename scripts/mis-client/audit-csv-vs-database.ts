@@ -11,7 +11,7 @@ import { readFileSync, existsSync } from 'fs';
 config({ path: join(process.cwd(), '.env.local') });
 
 import { withAppClient } from '@/lib/read-model/db';
-import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
+import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/sql/read-model/summary-call-filters';
 
 const CSV =
   process.argv[2] ??

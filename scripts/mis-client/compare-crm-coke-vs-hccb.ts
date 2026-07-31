@@ -6,8 +6,8 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import XLSX from 'xlsx';
-import { parseClientDate } from '@/features/mis-import/services/parse-dates';
-import { formatDisplayRegion } from '@/features/mis-import/services/region';
+import { parseClientDate } from '@/modules/mis/client-import/services/parse-dates';
+import { formatDisplayRegion } from '@/modules/mis/client-import/services/region';
 
 const RAW = process.argv[2] ?? 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw';
 const START = new Date('2026-01-01T00:00:00');

@@ -1,9 +1,9 @@
 import dynamic from 'next/dynamic';
 import { requirePageAccess } from '@/lib/auth/require-page-access';
-import { ReportPageSkeleton } from '@/features/report/components/ReportLoadingFeedback';
+import { ReportPageSkeleton } from '@/modules/mis/components/ReportLoadingFeedback';
 
 const WarrantyMasterPageClient = dynamic(
-  () => import('./warranty-master-page-client'),
+  () => import('@/modules/warranty/pages/WarrantyMasterPageClient'),
   { loading: () => <ReportPageSkeleton /> }
 );
 

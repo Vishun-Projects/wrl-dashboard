@@ -19,19 +19,19 @@ import XLSX from 'xlsx';
 config({ path: join(process.cwd(), '.env.local') });
 
 import { prisma } from '@/lib/db/prisma';
-import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryFiltered } from '@/features/mis-import/services/aggregate';
+import { queryBdMisCrmSummary } from '@/sql/read-model/bd-mis-summary';
+import { queryClientAccountSummaryFiltered } from '@/modules/mis/client-import/services/aggregate';
 import {
   buildBdMisRegionalRows,
   sumBdMisRegionalGrand,
-} from '@/features/report/services/bd-mis-summary';
+} from '@/modules/mis/services/bd-mis-summary';
 import {
   DEFAULT_CLIENT_MERGE_WITH_CRM,
   sumMergedAccountMetric,
   sumMergedAccountOpenCalls,
-} from '@/features/report/components/SummaryMergedMetricCell';
-import { parseClientDate } from '@/features/mis-import/services/parse-dates';
-import { isCadburyExcludedServiceProvider } from '@/features/mis-import/services/cadbury-filters';
+} from '@/modules/mis/components/SummaryMergedMetricCell';
+import { parseClientDate } from '@/modules/mis/client-import/services/parse-dates';
+import { isCadburyExcludedServiceProvider } from '@/modules/mis/client-import/services/cadbury-filters';
 
 
 const DEFAULT_RAW = 'C:/Users/Vishnu.Vishwakarma/Downloads/Raw';

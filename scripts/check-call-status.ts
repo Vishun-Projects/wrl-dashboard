@@ -7,7 +7,7 @@ import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 import { withAppClient } from '@/lib/read-model/db';
 import { postQuery } from '@/lib/db/proxy';
-import { classifyRegisterRowStatus } from '@/features/report/services/search';
+import { classifyRegisterRowStatus } from '@/modules/mis/services/search';
 import { transformCrmRowToHot } from '@/lib/read-model/transform';
 
 const id = (process.argv[2] ?? '26F01029').trim();

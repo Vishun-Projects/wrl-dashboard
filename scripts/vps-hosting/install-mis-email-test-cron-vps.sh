@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install a TEST-only MIS email cron at 14:00 IST → Vishnu only.
-# Also syncs src/features/mis-email so the VPS has the cli path the cron needs.
+# Also syncs src/modules/mail-alerts so the VPS has the cli path the cron needs.
 # Does NOT change / remove the production digest cron (*/15 Mon–Sat).
 #
 #   npm run mis-email:install-test-cron:vps
@@ -52,9 +52,9 @@ if [[ -n "$detected_root" ]]; then
 fi
 echo "    host=${VPS_HOST}  root=${INSTALL_ROOT}"
 
-echo "==> Syncing package.json + src/features + src/lib + tsconfig (CLI must not need src/components)"
+echo "==> Syncing package.json + src/modules + src/lib + src/sql + tsconfig (CLI must not need src/components)"
 ssh "${SSH_OPTS[@]}" "$VPS_HOST" \
-  "mkdir -p '${INSTALL_ROOT}/src/features' '${INSTALL_ROOT}/scripts/vps-hosting' '${INSTALL_ROOT}/logs'"
+  "mkdir -p '${INSTALL_ROOT}/src/modules' '${INSTALL_ROOT}/src/lib' '${INSTALL_ROOT}/src/sql' '${INSTALL_ROOT}/scripts/vps-hosting' '${INSTALL_ROOT}/logs'"
 
 if command -v rsync >/dev/null 2>&1; then
   RSYNC_SSH="ssh ${SSH_OPTS[*]}"
@@ -62,11 +62,14 @@ if command -v rsync >/dev/null 2>&1; then
     "${ROOT}/package.json" "${ROOT}/package-lock.json" "${ROOT}/tsconfig.json" \
     "${VPS_HOST}:${INSTALL_ROOT}/"
   rsync -az -e "$RSYNC_SSH" \
-    "${ROOT}/src/features/" \
-    "${VPS_HOST}:${INSTALL_ROOT}/src/features/"
+    "${ROOT}/src/modules/" \
+    "${VPS_HOST}:${INSTALL_ROOT}/src/modules/"
   rsync -az -e "$RSYNC_SSH" \
     "${ROOT}/src/lib/" \
     "${VPS_HOST}:${INSTALL_ROOT}/src/lib/"
+  rsync -az -e "$RSYNC_SSH" \
+    "${ROOT}/src/sql/" \
+    "${VPS_HOST}:${INSTALL_ROOT}/src/sql/"
   rsync -az -e "$RSYNC_SSH" \
     "${ROOT}/scripts/vps-hosting/mis-email-test-digest.sh" \
     "${ROOT}/scripts/vps-hosting/mis-email-digest.sh" \
@@ -75,7 +78,7 @@ else
   scp "${SSH_OPTS[@]}" \
     "${ROOT}/package.json" "${ROOT}/package-lock.json" "${ROOT}/tsconfig.json" \
     "${VPS_HOST}:${INSTALL_ROOT}/"
-  tar -C "${ROOT}" -czf - src/features src/lib \
+  tar -C "${ROOT}" -czf - src/modules src/lib src/sql \
     | ssh "${SSH_OPTS[@]}" "$VPS_HOST" "tar -xzf - -C '${INSTALL_ROOT}'"
   scp "${SSH_OPTS[@]}" \
     "${ROOT}/scripts/vps-hosting/mis-email-test-digest.sh" \
@@ -93,11 +96,11 @@ root='${INSTALL_ROOT}'
 test_to='${TEST_TO}'
 hour='${CRON_HOUR}'
 min='${CRON_MIN}'
-test -f "\$root/src/features/mis-email/services/cli.ts"
+test -f "\$root/src/modules/mail-alerts/services/cli.ts"
 test -f "\$root/.env.mis-email"
-# Barrels must stay lib-only (no UI re-exports) so cron does not need src/components.
-! grep -q "export \* from './ui/" "\$root/src/features/register/index.ts"
-! grep -q "export \* from './ui/" "\$root/src/features/report/index.ts"
+# Register barrel must stay services-only (no UI re-exports) so cron does not need src/components.
+! grep -q "export \* from './ui/" "\$root/src/modules/mis/register/index.ts"
+! grep -q "export \* from './components/" "\$root/src/modules/mis/index.ts"
 
 prod=\$(crontab -l 2>/dev/null | grep 'mis-email-digest.sh' | grep -v 'mis-email-test' | head -1 || true)
 if [[ -z "\$prod" ]]; then

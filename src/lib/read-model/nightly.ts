@@ -28,8 +28,8 @@ import {
   truncateCurrentYearFacts,
   upsertFactRows,
 } from '@/lib/read-model/upsert-facts';
-import { runArcpIncrementalSync } from '@/lib/read-model/arcp/incremental';
-import { runBackfillArcpBmApproved } from '@/lib/read-model/backfill-arcp-bm-approved';
+import { runArcpIncrementalSync } from '@/modules/arcp/server/sync/incremental';
+import { runBackfillArcpBmApproved } from '@/modules/arcp/server/sync/backfill-arcp-bm-approved';
 import { runTransactionEntryIncremental } from '@/lib/read-model/transaction-entry';
 
 const ENTITY = 'calls_latest_hot';

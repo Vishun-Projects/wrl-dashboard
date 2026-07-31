@@ -6,10 +6,10 @@ import { join } from 'path';
 import { readFileSync } from 'fs';
 config({ path: join(process.cwd(), '.env.local') });
 import { withAppClient } from '@/lib/read-model/db';
-import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
-import { queryBdMisCrmSummary } from '@/lib/read-model/queries/bd-mis-summary';
-import { queryClientAccountSummaryForBdMis } from '@/features/mis-import/services/aggregate';
-import { buildBdMisRegionalRows, sumBdMisRegionalGrand } from '@/features/report/services/bd-mis-summary';
+import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/sql/read-model/summary-call-filters';
+import { queryBdMisCrmSummary } from '@/sql/read-model/bd-mis-summary';
+import { queryClientAccountSummaryForBdMis } from '@/modules/mis/client-import/services/aggregate';
+import { buildBdMisRegionalRows, sumBdMisRegionalGrand } from '@/modules/mis/services/bd-mis-summary';
 
 const END = '2026-06-29';
 const EXCEL = { total: 197793, solved: 189020, open: 8773 };

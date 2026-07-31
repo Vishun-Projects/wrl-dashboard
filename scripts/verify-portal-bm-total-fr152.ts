@@ -1,5 +1,5 @@
 import { postQuery } from '../src/lib/db/proxy';
-import { buildArcpClaimsGrandTotalSql, parseArcpGrandTotals } from '../src/features/arcp/services/query';
+import { buildArcpClaimsGrandTotalSql, parseArcpGrandTotals } from '../src/sql/arcp/query';
 
 async function main() {
   const opts = {

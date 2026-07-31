@@ -1,10 +1,10 @@
 # Codebase structure
 
-Snapshot of the repo layout after feature-slice remediation and `dump/` cleanup  
-**(re-scanned 2026-07-22).**
+Snapshot of the repo layout after **module-first** migration  
+**(re-scanned 2026-07-31).**
 
 Runtime app lives under `src/`. Non-runtime archives sit in `dump/` (gitignored).  
-Domain UI/logic prefers `src/features/<domain>/`; shared infra stays in `src/lib/`.
+**Module-first:** all product domains live in `src/modules/<name>/`. `src/features/` is empty. Platform infra stays in `src/lib/` until a later bulk rename to `src/shared/`. `src/app/` is a URL → module mapper only.
 
 ---
 
@@ -39,65 +39,75 @@ Local-only (not for commit): `.env*`, `.next/`, `node_modules/`, `.cache/`, `.ve
 
 ```text
 src/
-├── app/                 # Next.js routes (thin pages + API route handlers)
-├── features/            # Vertical domain slices (preferred home for domain code)
-├── components/          # Cross-page UI shells (layout, calls, admin chrome, ui kit)
-├── lib/                 # Shared infra: auth, db, supabase, read-model sync, net, … (real shared layer)
-├── shared/              # Placeholder only (README) — bulk rename lib → shared deferred
+├── app/                 # Next.js routes only (thin URL → module mapper)
+├── modules/             # Product domains (module-first)
+├── sql/                 # Central SQL builders / query leaves (by domain)
+├── features/            # Empty (legacy placeholder; do not add code)
+├── components/          # Cross-page chrome / UI kit (temporary until shared/ui)
+├── lib/                 # Platform infra (auth, db, supabase, read-model shell, …)
+├── shared/              # Placeholder — bulk lib → shared rename deferred
 └── hooks/               # Cross-cutting React hooks (e.g. usePageAlert)
 ```
 
-Report filters context lives in-feature: `features/report/components/ReportFiltersContext.tsx`. Theme tokens live in `app/globals.css` `@theme` (no `src/styles/`).
+Report filters context: `modules/mis/components/ReportFiltersContext.tsx`. Theme tokens live in `app/globals.css` `@theme` (no `src/styles/`).
 
 ### Import conventions
 
 | From | Import |
 |------|--------|
-| App / other features (client-safe) | `@/features/<domain>` (`index.ts`) |
-| MIS import server/pg helpers | `@/features/mis-import/server` |
-| Report download helpers only | `@/features/report/download` |
-| Same feature internals | `@/features/<domain>/components|services|server|hooks|lib/...` |
+| App / other domains (client-safe) | `@/modules/<name>` (`index.ts` where present) |
+| Same module internals | deep `@/modules/<name>/…` |
+| SQL builders | `@/sql/<domain>/…` |
+| MIS download helpers | `@/modules/mis/download` |
+| MIS client-import server | `@/modules/mis/client-import/server` |
 | Infra | `@/lib/...` |
 
 Gate: `npm run check:feature-boundaries` (also in CI + husky pre-commit).
 
-- **Hard:** `src/lib` → `@/features` — debt allowlist empty; CI sets `BOUNDARY_LIB_FEATURES=strict`.
-- **Hard (STRICT):** deep feature→feature imports.
-- **Soft:** `components` → features (prefer barrels).
-- **`src/shared/`** is empty of code; leaf helpers inverted into neutral `src/lib/*` paths (`register-sql`, `dates`, `call-status`, `aging`, `mail`, `summary`, …). Bulk rename `lib` → `shared` still deferred.
+- **Hard:** retired `@/features/<old-domain>` paths; retired `@/lib/arcp`, `@/lib/read-model/arcp`, `@/lib/performance`, `@/lib/call-{display,register,row,status}` (use `@/lib/call/…`); `src/lib` → `@/features`; `shared` → features/modules.
+- **Hard (STRICT):** deep cross-module imports into non-UI segments.
+- **Soft:** `components` → modules; `lib` → `@/modules` (orchestrators).
+- **`src/shared/`** is empty of code; platform stays in `src/lib/*` until rename.
+- **`src/app/api`:** thin re-exports only — handler bodies live in `modules/*/server/routes`.
 
 ---
 
-## `src/features/` — domains
-
-Each domain roughly:
+## `src/modules/` — product domains
 
 ```text
-src/features/<domain>/
-├── index.ts          # Public barrel (client-safe where split exists)
-├── server.ts         # Optional server-only barrel (mis-import; avoids server/ folder clash)
-├── download.ts       # Optional thin client entry (report)
-├── components/       # React UI
-├── services/         # Domain business logic
-├── server/           # API/CRM/Postgres-only (when present)
-├── hooks/            # React hooks (report)
-└── lib/              # Tiny pure helpers only (report); prefer services/ elsewhere
+src/modules/<name>/
+├── pages/            # Page-level UI
+├── components/       # React UI pieces
+├── services/         # Domain logic (when present)
+├── server/           # Loaders + API route bodies
+│   ├── routes/       # Bodies re-exported by src/app/api/…
+│   └── sync/         # Optional worker/sync leaves
+├── hooks/ | lib/ | constants/ | register/ | client-import/  # as needed
+└── index.ts          # Public barrel when useful
 ```
 
-**Placement rule:** React → `components/` or `hooks/`. Domain logic → `services/`. Next/Prisma/CRM/cookies → `server/` (or `server.ts` barrel). Pure no-I/O helpers → `lib/` only when tiny.
+| Module | Role |
+|--------|------|
+| `mis` | MIS Reports + register + client import |
+| `arcp` | ARCP claims UI + load + hot sync |
+| `call-distribution` | Call distribution |
+| `serial-history` | Serial wise history |
+| `location-audit` | Location audit |
+| `warranty` | Warranty master |
+| `mail-alerts` | MIS email + major repair alerts |
+| `users` | User management |
+| `roles` | Roles & access |
+| `performance` | Performance insights |
+| `activity-log` | Activity / security audit UI |
+| `auth` | Sign-in / sign-out / me / password-reset API |
+| `calls` | Call-by-id / comments / flags / offices API |
+| `sync` | Read-model status + VPS cron API |
 
-| Domain | Role | Notes |
-|--------|------|--------|
-| `report` | MIS report shell, filters, summary/accounts, corpus | `components/` + `services/` + `server/` + thin `lib/`; `download.ts` |
-| `register` | Call register table/filters/export | `components/` + `services/` + `server/` |
-| `arcp` | ARCP claims UI + server load | `components/` + `services/` + `server/` |
-| `mis-email` | Digest compose/send | `components/` + `services/` |
-| `serial-audit` | Serial / complaint audit | `components/` + `services/` + `server/` |
-| `distribution` | Call distribution | `components/` + `services/` |
-| `mis-import` | Client file import / upload | `services/`; `index.ts` client-safe; `server.ts` = pg |
-| `location-audit` | Location audit | `components/` + `services/` + `server/` |
-| `warranty-master` | Warranty master | `components/` + `services/` + `server/` |
-| `major-repair-alerts` | Major repair alerts UI | `components/` only |
+---
+
+## `src/features/`
+
+Empty placeholder — see `src/features/README.md`. Do not add domain code here.
 
 ---
 
@@ -106,33 +116,13 @@ src/features/<domain>/
 ```text
 src/app/
 ├── login / forgot-password / reset-password / profile
-├── admin/
-│   ├── users / roles / sync
-│   ├── mis-email-routing
-│   └── performance-insights
+├── admin/                   # Thin pages → @/modules/{users,roles,performance,activity-log,mail-alerts,…}
 ├── calls/
-├── report/
-│   ├── (filters)/              # Shared report filter layout
-│   │   ├── page.tsx            # Main MIS report
-│   │   ├── arcp-claims/
-│   │   ├── distribution/
-│   │   ├── location-audit/
-│   │   └── serial-audit/
-│   ├── call-register/
-│   └── warranty-master/
-└── api/
-    ├── auth/                   # sign-in, sign-out, me, forgot-password
-    ├── admin/                  # users, roles, mis-email, performance, …
-    ├── report/                 # register, summary, arcp, serial-audit, …
-    ├── mis-client-import/      # upload, chunks, sources, batches, summary
-    ├── profile/                # avatar, mis-email prefs, password
-    ├── read-model/             # sync status / cron
-    ├── sync/ + sync-proxy/     # legacy sync helpers
-    ├── distribution / calls / comments / flags / offices
-    └── cache/
+├── report/                  # Thin pages → @/modules/{mis,arcp,call-distribution,…}
+└── api/                     # Thin re-exports → @/modules/*/server/routes
 ```
 
-Pages stay thin; domain work is imported from `@/features/...`.
+Pages stay thin; domain work is imported from `@/modules/...`.
 
 ---
 
@@ -143,14 +133,15 @@ src/lib/
 ├── auth/            # Session, RBAC, avatar URLs, password mail
 ├── supabase/        # Browser/server clients; admin is server-only
 ├── db/              # Prisma + CRM postQuery proxy
-├── read-model/      # Hot-table sync worker (CLI, queries, ARCP, metrics)
-├── sync/            # Sync-proxy route helpers (+ proxy-limit)
-├── trhcalls/        # Call SQL helpers
-├── register-sql/    # WCO / ARCP pick / register enrich leaves (shared with features)
-├── dates/ call-display/ call-status/ aging/ summary/ mail/ serial/ call-register/
-├── call-row/ crm/ geo/ http/ net/ security/ performance/ ui/ utils/ …
+├── read-model/      # Hot-table sync worker shell (CLI/nightly; domain sync in modules/*/server/sync)
+├── call/            # Nested call helpers (display/register/row/status)
+├── dates/ aging/ summary/ mail/ serial/ crm/ geo/ net/ security/ ui/ utils/ …
 └── api/schemas/     # Shared API zod (where present)
 ```
+
+**SQL builders** live in [`src/sql/`](../src/sql/) (not under `lib/`). See [`src/sql/README.md`](../src/sql/README.md).
+
+**API rule:** Next discovers routes only under `src/app/api/**/route.ts`. Those files are one-line re-exports. All handler logic lives in `src/modules/<name>/server/routes/`.
 
 ---
 
@@ -165,7 +156,7 @@ src/components/
 └── README.md
 ```
 
-(`settings/` holds cross-cutting chrome like `ThemePicker`; domain settings UI such as MIS email composer lives under `features/mis-email/components/`.)
+(`settings/` holds cross-cutting chrome like `ThemePicker`; domain settings UI such as MIS email composer lives under `modules/mail-alerts/components/`.)
 
 ---
 
@@ -179,7 +170,7 @@ docs/
 ├── read-model-phase1-*.md      # Architecture / cutover / worker specs
 ├── read-model-phase1-schema/   # Versioned SQL 01…21 (incl. revoke-hot-anon)
 ├── old-crm-schema/
-├── WesternCRM Schema Architect.txt   # Served by sync-proxy
+├── WesternCRM Schema Architect.txt   # Legacy CRM schema notes
 ├── WesternCRM_Schema_Blueprint.sql
 └── app-users-*.sql / drop-report-preferences.sql / …
 ```
@@ -245,13 +236,20 @@ Hot tables are **server SQL only**; PostgREST roles revoked (`21-revoke-hot-anon
 
 | Want to change… | Look in… |
 |-----------------|----------|
-| MIS report tabs / filters UI | `src/features/report/components/` |
-| Register grid / export client | `src/features/register/` |
-| ARCP claims | `src/features/arcp/` |
-| Client Excel/CSV import | `src/features/mis-import/` (+ `server.ts` for DB) |
-| Email digests | `src/features/mis-email/` |
-| Nightly hot sync | `src/lib/read-model/` |
+| MIS report tabs / filters UI | `src/modules/mis/` |
+| Call register | `src/modules/mis/register/` |
+| Client Excel/CSV import | `src/modules/mis/client-import/` |
+| ARCP claims | `src/modules/arcp/` |
+| Call distribution | `src/modules/call-distribution/` |
+| Serial wise history | `src/modules/serial-history/` |
+| Location audit | `src/modules/location-audit/` |
+| Warranty master | `src/modules/warranty/` |
+| Mail & alerts | `src/modules/mail-alerts/` |
+| Users / roles | `src/modules/users/`, `src/modules/roles/` |
+| Performance insights | `src/modules/performance/` |
+| Activity log | `src/modules/activity-log/` |
+| Nightly hot sync | `src/lib/read-model/` (+ `modules/*/server/sync/`) |
 | Auth / RBAC | `src/lib/auth/`, `src/lib/supabase/` |
-| Route URL / API surface | `src/app/...` |
+| Route URL / API surface | `src/app/...` (thin) |
 | VPS deploy / workers | `scripts/vps-hosting/` |
 | Schema migrations (read model) | `docs/read-model-phase1-schema/` |

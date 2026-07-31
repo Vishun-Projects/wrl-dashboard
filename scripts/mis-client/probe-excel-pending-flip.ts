@@ -7,7 +7,7 @@ import { join } from 'path';
 import { existsSync } from 'fs';
 import XLSX from 'xlsx';
 import { withAppClient } from '@/lib/read-model/db';
-import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/lib/read-model/queries/summary-call-filters';
+import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/sql/read-model/summary-call-filters';
 
 config({ path: join(process.cwd(), '.env.local') });
 

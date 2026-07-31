@@ -10,11 +10,11 @@ import { join } from 'path';
 
 config({ path: join(process.cwd(), '.env.local') });
 
-import { loadSourceConfigByCode } from '@/features/mis-import/services/config';
-import { parseImportFile } from '@/features/mis-import/services/detect-parse';
-import { normalizeClientRows } from '@/features/mis-import/services/normalize';
-import { storeImportBatch } from '@/features/mis-import/services/store';
-import { queryClientAccountSummaryFiltered } from '@/features/mis-import/services/aggregate';
+import { loadSourceConfigByCode } from '@/modules/mis/client-import/services/config';
+import { parseImportFile } from '@/modules/mis/client-import/services/detect-parse';
+import { normalizeClientRows } from '@/modules/mis/client-import/services/normalize';
+import { storeImportBatch } from '@/modules/mis/client-import/services/store';
+import { queryClientAccountSummaryFiltered } from '@/modules/mis/client-import/services/aggregate';
 import { withAppClient } from '@/lib/read-model/db';
 
 async function main() {
