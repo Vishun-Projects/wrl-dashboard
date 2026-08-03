@@ -28,6 +28,7 @@ export type BdMisCrmCallTraceInput = {
   status_bucket: StatusBucket;
   ncancelreason?: unknown;
   account: string;
+  wco?: string | null;
 };
 
 export type BdMisClientCallTraceInput = {
@@ -54,6 +55,8 @@ export type BdMisTraceRow = {
   call_date_time: string;
   service_order: string;
   client: string;
+  /** W / C / O / V, or — when unknown / client import. */
+  wco: string;
   call_status: string;
   aging: string;
   file_name: string;
@@ -62,6 +65,11 @@ export type BdMisTraceRow = {
   included_in_final_count: boolean;
   counts_toward: BdMisTraceCountsToward;
 };
+
+function formatTraceWco(raw: string | null | undefined): string {
+  const wco = raw != null ? String(raw).trim().toUpperCase() : '';
+  return wco === 'W' || wco === 'C' || wco === 'O' || wco === 'V' ? wco : '—';
+}
 
 function looksLikeRegionLabel(value: string): boolean {
   const v = value.trim().toUpperCase();
@@ -337,6 +345,7 @@ export function mapCrmCallToTraceRow(
     call_date_time: formatTraceCallDate(row.logged_at),
     service_order: row.service_order.trim() || '—',
     client: traceClientDisplayName(source, row.client),
+    wco: formatTraceWco(row.wco),
     call_status: displayCallStatus(row.call_status, row.status_bucket, row.ncancelreason),
     aging: formatAgingLabel(dayDiff, row.status_bucket),
     file_name: traceFileDisplayName(source),
@@ -365,6 +374,7 @@ export function mapClientCallToTraceRow(
     call_date_time: formatTraceCallDate(row.logged_at),
     service_order: row.service_order.trim() || '—',
     client: traceClientDisplayName(source, row.client),
+    wco: '—',
     call_status: displayCallStatus(row.call_status, row.status_bucket),
     aging: formatAgingLabel(dayDiff, row.status_bucket),
     file_name: traceFileDisplayName(source, row.file_name),

@@ -61,6 +61,7 @@ describe('bd-mis-excel-export trace row detail', () => {
         call_date_time: '30.06.2026 10:30',
         service_order: '26F301654',
         client: 'Sarvaraya sugars',
+        wco: 'W',
         call_status: 'ASSIGNED',
         aging: '<2 days',
         file_name: 'CRM Files',
@@ -76,12 +77,14 @@ describe('bd-mis-excel-export trace row detail', () => {
     const rowDetail = workbook.getWorksheet('Row Detail');
     expect(rowDetail).toBeDefined();
 
-    const dataCell = rowDetail!.getRow(2).getCell(14);
+    expect(rowDetail!.getRow(1).getCell(9).value).toBe('WCO');
+    expect(rowDetail!.getRow(2).getCell(9).value).toBe('W');
+    const dataCell = rowDetail!.getRow(2).getCell(15);
     expect(dataCell.value).toBe('open');
     expect(dataCell.formula).toBeUndefined();
   }, 30000);
 
-  it('builds open-calls workbook with Unsolved status labels', async () => {
+  it('builds open-calls workbook with Unsolved status labels and WCO', async () => {
     const traceRows: BdMisTraceRow[] = [
       {
         region: 'NORTH ZONE',
@@ -92,6 +95,7 @@ describe('bd-mis-excel-export trace row detail', () => {
         call_date_time: '2026-06-30',
         service_order: 'SO-OPEN',
         client: 'Dealer',
+        wco: 'O',
         call_status: 'ASSIGNED',
         aging: '<2 days',
         file_name: 'CRM Files',
@@ -103,6 +107,8 @@ describe('bd-mis-excel-export trace row detail', () => {
     ];
     const workbook = await buildBdMisOpenCallsWorkbook({ ...basePayload, traceRows });
     const rowDetail = workbook.getWorksheet('Row Detail');
-    expect(rowDetail?.getRow(2).getCell(9).value).toBe('Unsolved');
+    expect(rowDetail?.getRow(1).getCell(9).value).toBe('WCO');
+    expect(rowDetail?.getRow(2).getCell(9).value).toBe('O');
+    expect(rowDetail?.getRow(2).getCell(10).value).toBe('Unsolved');
   });
 });

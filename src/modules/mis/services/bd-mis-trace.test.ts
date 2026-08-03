@@ -138,6 +138,49 @@ describe('bd-mis-trace', () => {
     expect(row.included_in_final_count).toBe(true);
   });
 
+  it('maps CRM WCO and leaves client import blank', () => {
+    const crm = mapCrmCallToTraceRow(
+      {
+        region: 'NORTH ZONE',
+        plant: 'Plant A',
+        technician_name: 'Tech 1',
+        office_under_branch: 'Delhi Branch',
+        customer_name: 'Customer',
+        logged_at: '2026-03-01T10:00:00Z',
+        service_order: 'SO-W',
+        client: 'Nestle',
+        call_status: 'Assigned',
+        status_bucket: 'assigned',
+        ncancelreason: null,
+        account: 'Nestle',
+        wco: 'w',
+      },
+      { crm: true, cadbury: true, coke: true },
+      '2026-06-29'
+    );
+    const client = mapClientCallToTraceRow(
+      {
+        source_code: 'cadbury',
+        region: 'EAST',
+        plant: 'Kolkata',
+        technician_name: 'Tech 2',
+        office_under_branch: 'West Bengal',
+        customer_name: 'Customer B',
+        logged_at: '2026-02-15T08:30:00Z',
+        service_order: 'T-99',
+        client: 'Cadbury',
+        call_status: 'Open',
+        status_bucket: 'assigned',
+        file_name: 'cad.csv',
+      },
+      { crm: true, cadbury: true, coke: true },
+      '2026-06-29'
+    );
+
+    expect(crm.wco).toBe('W');
+    expect(client.wco).toBe('—');
+  });
+
   it('formats aging buckets for open calls', () => {
     expect(formatAgingLabel(1, 'assigned')).toBe('<2 days');
     expect(formatAgingLabel(5, 'assigned')).toBe('3-7 days');
@@ -448,6 +491,7 @@ describe('bd-mis-trace', () => {
         call_date_time: '2026-07-01',
         service_order: 'OPEN-1',
         client: 'Nestle',
+        wco: 'W',
         call_status: 'Assigned',
         aging: '<2 days',
         file_name: 'CRM Files',
@@ -465,6 +509,7 @@ describe('bd-mis-trace', () => {
         call_date_time: '2026-07-01',
         service_order: 'SOLVED-1',
         client: 'Nestle',
+        wco: 'O',
         call_status: 'Closed',
         aging: '',
         file_name: 'CRM Files',
@@ -488,6 +533,7 @@ describe('bd-mis-trace', () => {
         call_date_time: '2026-07-01',
         service_order: 'HO-OPEN-1',
         client: 'Nestle',
+        wco: 'W',
         call_status: 'Assigned',
         aging: '<2 days',
         file_name: 'CRM Files',
@@ -505,6 +551,7 @@ describe('bd-mis-trace', () => {
         call_date_time: '2026-07-01',
         service_order: 'NORMAL-OPEN-1',
         client: 'Nestle',
+        wco: 'C',
         call_status: 'Assigned',
         aging: '<2 days',
         file_name: 'CRM Files',

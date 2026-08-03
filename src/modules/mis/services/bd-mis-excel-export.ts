@@ -435,6 +435,7 @@ const TRACE_DETAIL_COLUMNS = [
   'Call Date & Time',
   'Service Order/ Call ID',
   'Client',
+  'WCO',
   'Call Status',
   'Aging',
   'File Name',
@@ -483,6 +484,7 @@ function addTraceRowDetailSheet(
         row.call_date_time,
         row.service_order,
         row.client,
+        row.wco,
         opts?.statusLabel ?? row.call_status,
         row.aging,
         row.file_name,
@@ -494,7 +496,7 @@ function addTraceRowDetailSheet(
 
     const lastRow = detail.rowCount;
     if (lastRow >= 2) {
-      detail.autoFilter = 'A1:N1';
+      detail.autoFilter = 'A1:O1';
     }
   }
 }
