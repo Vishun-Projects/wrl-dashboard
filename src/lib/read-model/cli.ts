@@ -375,7 +375,7 @@ Commands:
   dims              Refresh dimension tables only
   nightly           Calls nightly + ARCP + TransactionEntry when enabled
   retention         Purge old sync logs and ingest batches
-  full-audit        Full read-model audit vs live CRM (see scripts/audit-read-model-full.ts)
+  full-audit        Full read-model audit vs live CRM (see scripts/ops/audit-read-model-full.ts)
                     --apply  refresh stale rows; --only hot,dims,facts; --resume-from-trn TRN
   daemon            Loop calls + ARCP + TransactionEntry incremental
 
