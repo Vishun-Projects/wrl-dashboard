@@ -57,6 +57,26 @@ export function filterDigestKeyAccountRows(
   return filterKeyAccountRows(rows, selectedAccounts);
 }
 
+/** True when account matches any picker/body selection (aliases included). */
+export function accountMatchesDigestSelection(
+  account: string,
+  selectedAccounts: string[]
+): boolean {
+  if (!selectedAccounts.length) return true;
+  return selectedAccounts.some((selected) => accountsMatchDisplayOrKey(selected, account));
+}
+
+/** Narrow account-summary / row lists to selected clients. Empty selection = no filter. */
+export function filterRowsByDigestAccounts<T extends { account?: string | null }>(
+  rows: T[],
+  selectedAccounts: string[]
+): T[] {
+  if (!selectedAccounts.length) return rows;
+  return rows.filter((row) =>
+    accountMatchesDigestSelection(String(row.account ?? ''), selectedAccounts)
+  );
+}
+
 /** When no accounts are explicitly selected, include all merged accounts (same as Key Account MIS tab). */
 export function resolveDigestKeyAccountNames(
   crmAccounts: AccountSummaryRow[],

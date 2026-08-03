@@ -848,7 +848,8 @@ export default function MisEmailRoutingPageClient({
                 <div>
                   <h2 className="ui-section-title">Edit routing rule</h2>
                   <p className="ui-help">
-                    Configure scope, recipients, and schedule.
+                    Zone/Branch/Client filter the report. To/Cc receive the mail at Start time. No
+                    user office assignment required.
                   </p>
                 </div>
                 <button
@@ -863,8 +864,10 @@ export default function MisEmailRoutingPageClient({
 
               <div className="custom-scrollbar flex-1 space-y-4 overflow-y-auto px-5 py-4">
                 <div className="ui-help rounded-lg border border-slate-200 bg-bg-soft/50 px-3 py-2 text-slate-600">
-                  Scope dependencies: selected zones filter branches, and zones + branches filter
-                  clients. Existing valid selections are preserved.
+                  Zone/Branch (and client) filter which data is in the digest. Leave them empty for
+                  all branches. Selected zones filter branch options; zones + branches filter
+                  clients. To/Cc are who get the email — cron fires at Start time when Auto-send is
+                  on.
                 </div>
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div className="space-y-1.5">
@@ -996,9 +999,10 @@ export default function MisEmailRoutingPageClient({
                 <div className="rounded-lg border border-slate-200 bg-bg-soft/60 p-4">
                   <p className="mb-1 ui-field-label text-slate-600">Schedule</p>
                   <p className="mb-3 ui-help text-slate-500">
-                    Digests to this rule’s To/Cc fire at the rule’s schedule time below. A user’s
-                    Profile send time only affects their personal digest (themselves), never this
-                    routing blast.
+                    To/Cc receive this rule&apos;s digest at Start time below when Auto-send is on.
+                    Zone/Branch/Client filter report content (empty client = all in scope). Body uses
+                    the legacy dashboard layout with all four attachments. Profile send time only
+                    affects personal digests.
                   </p>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                     <div>

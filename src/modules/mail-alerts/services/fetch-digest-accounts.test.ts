@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  accountMatchesDigestSelection,
   buildDigestAccountDisplayRows,
   filterDigestKeyAccountRows,
+  filterRowsByDigestAccounts,
   listDigestAvailableKeyAccounts,
   resolveDigestKeyAccountBodyRows,
   resolveDigestKeyAccountNames,
@@ -201,5 +203,24 @@ describe('resolveDigestKeyAccountBodyRows', () => {
       'EAST ZONE:CADBURY',
       'SOUTH ZONE:COKE',
     ]);
+  });
+});
+
+describe('filterRowsByDigestAccounts', () => {
+  it('keeps only selected accounts (aliases)', () => {
+    const filtered = filterRowsByDigestAccounts(clientAccounts, ['HCCB']);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].account).toBe('COKE');
+  });
+
+  it('passes through when selection is empty', () => {
+    expect(filterRowsByDigestAccounts(crmAccounts, [])).toEqual(crmAccounts);
+  });
+});
+
+describe('accountMatchesDigestSelection', () => {
+  it('matches Mondelez to Cadbury', () => {
+    expect(accountMatchesDigestSelection('Cadbury', ['Mondelez'])).toBe(true);
+    expect(accountMatchesDigestSelection('Nestle', ['Mondelez'])).toBe(false);
   });
 });

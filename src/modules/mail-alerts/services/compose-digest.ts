@@ -7,6 +7,8 @@ import {
   type MisEmailBodyContext,
 } from '@/modules/mail-alerts/services/body-sections';
 import {
+  accountMatchesDigestSelection,
+  filterRowsByDigestAccounts,
   resolveDigestKeyAccountBodyRows,
 } from '@/modules/mail-alerts/services/fetch-digest-accounts';
 import {
@@ -316,9 +318,22 @@ export async function buildMisEmailPayload(
     `sections=${bodySectionIds.join(',') || 'none'} · clientAccounts=${needsClientAccountData} · register=${includeDetailed} · trace=${includeTraceableExport || includeOpenCallsExport || needsTraceForBody}`
   );
 
-  const data = await timer.measure('fetch summary', () => fetchDigestSummaryDataCached(scope, dateRange), (result) =>
+  const dataRaw = await timer.measure('fetch summary', () => fetchDigestSummaryDataCached(scope, dateRange), (result) =>
     `branches=${result.branchSummary.length} accounts=${result.accountSummary.length}`
   );
+
+  const selectedAccounts = parseMisEmailKeyAccountsInBody(prefs.keyAccountsInBody);
+  let data = dataRaw;
+  if (selectedAccounts.length) {
+    data = {
+      ...dataRaw,
+      accountSummary: filterRowsByDigestAccounts(dataRaw.accountSummary, selectedAccounts),
+    };
+    timer.step(
+      'filter accounts',
+      `selected=${selectedAccounts.length} · accounts=${data.accountSummary.length}/${dataRaw.accountSummary.length}`
+    );
+  }
 
   let clientAccountSummary: Awaited<ReturnType<typeof fetchDigestClientAccountSummaryCached>> | undefined;
   if (needsClientAccountData) {
@@ -337,15 +352,32 @@ export async function buildMisEmailPayload(
         throw err;
       }
     }
+    if (selectedAccounts.length && clientAccountSummary) {
+      clientAccountSummary = filterRowsByDigestAccounts(clientAccountSummary, selectedAccounts);
+    }
   }
 
-  const registerRows = includeDetailed
+  let registerRows = includeDetailed
     ? await timer.measure('fetch register rows', () =>
         fetchDigestRegisterRows(effectiveRecipient, scope, dateRange), (rows) => `rows=${rows.length}`
       )
     : undefined;
+  if (selectedAccounts.length && registerRows) {
+    const before = registerRows.length;
+    registerRows = registerRows.filter((row) =>
+      accountMatchesDigestSelection(String(row.account ?? ''), selectedAccounts)
+    );
+    timer.step('filter register', `rows=${registerRows.length}/${before}`);
+  }
 
-  const tracePayload = includeTraceableExport || includeOpenCallsExport || needsTraceForBody
+  let attachmentIncludes = effectiveIncludes;
+  if (includeDetailed && registerRows !== undefined && registerRows.length === 0) {
+    // No matching client rows — skip detailed workbook instead of failing the send.
+    registerRows = undefined;
+    attachmentIncludes = { ...effectiveIncludes, includeDetailed: false };
+  }
+
+  let tracePayload = includeTraceableExport || includeOpenCallsExport || needsTraceForBody
     ? await timer.measure('build trace export', () =>
         buildDigestTraceableExportPayload(
           scope,
@@ -355,19 +387,38 @@ export async function buildMisEmailPayload(
         ), (payload) => `traceRows=${payload.traceRows.length}`
       )
     : undefined;
+  if (selectedAccounts.length && tracePayload) {
+    const before = tracePayload.traceRows.length;
+    const traceRows = tracePayload.traceRows.filter((row) =>
+      accountMatchesDigestSelection(String(row.client ?? ''), selectedAccounts)
+    );
+    tracePayload = {
+      ...tracePayload,
+      traceRows,
+      crmAccountSummary: filterRowsByDigestAccounts(
+        tracePayload.crmAccountSummary,
+        selectedAccounts
+      ),
+      clientAccountSummary: filterRowsByDigestAccounts(
+        tracePayload.clientAccountSummary,
+        selectedAccounts
+      ),
+    };
+    timer.step('filter trace', `rows=${traceRows.length}/${before}`);
+  }
 
   let emailAttachments: EmailAttachment[];
   let attachmentFilenames: string[];
 
   if (options.forPreview) {
-    attachmentFilenames = resolveDigestAttachmentFilenames(effectiveIncludes);
+    attachmentFilenames = resolveDigestAttachmentFilenames(attachmentIncludes);
     emailAttachments = [];
     timer.step('preview filenames only', `${attachmentFilenames.length} files`);
   } else {
     emailAttachments = await timer.measure('build attachments', () =>
       buildDigestAttachments(effectiveRecipient, data, {
         registerRows,
-        effectiveIncludes,
+        effectiveIncludes: attachmentIncludes,
         tracePayload,
       }), (attachments) =>
         attachments

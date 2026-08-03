@@ -38,6 +38,8 @@ export type MajorReconcileResult = {
   refreshed?: number;
   rowsUpserted?: number;
   rowsDeleted?: number;
+  /** Hot rows written this run — for post-reconcile major-repair alerts. */
+  upsertedRows?: HotRow[];
 };
 
 function faultEditSinceIso(): string {
@@ -170,6 +172,7 @@ export async function runReconcileMajor(): Promise<MajorReconcileResult> {
       const state = await getSyncState(client);
       let rowsUpserted = 0;
       let rowsDeleted = 0;
+      let upsertedRows: HotRow[] = [];
       if (crmRows.length) {
         const applied = await applyCrmRowsToHot(client, crmRows, {
           state,
@@ -177,12 +180,13 @@ export async function runReconcileMajor(): Promise<MajorReconcileResult> {
         });
         rowsUpserted = applied.rowsUpserted;
         rowsDeleted = applied.rowsDeleted;
+        upsertedRows = applied.upsertedRows ?? [];
       }
       if (orphanTrns.length) {
         rowsDeleted += await deleteHotRowsByTrn(client, orphanTrns);
       }
       await releaseSyncLock(client, 'ok', rowsUpserted);
-      return { kind: 'applied' as const, rowsUpserted, rowsDeleted };
+      return { kind: 'applied' as const, rowsUpserted, rowsDeleted, upsertedRows };
     } catch (err) {
       await releaseSyncLock(client, 'error', 0);
       throw err;
@@ -203,5 +207,6 @@ export async function runReconcileMajor(): Promise<MajorReconcileResult> {
     refreshed: staleTrns.length + orphanTrns.length,
     rowsUpserted: result.rowsUpserted,
     rowsDeleted: result.rowsDeleted,
+    upsertedRows: result.upsertedRows,
   };
 }

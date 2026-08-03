@@ -309,6 +309,17 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
         `[sync-worker] Major reconcile — refreshed ${major.refreshed ?? 0}, upserted ${majorReconciled}`
       );
     }
+    // Fault edits often skip call editedon — alert on reconcile upserts too.
+    if ((major.upsertedRows?.length ?? 0) > 0) {
+      try {
+        await checkMajorRepairRepeatAlerts(major.upsertedRows ?? []);
+      } catch (err) {
+        console.warn(
+          '[sync-worker] major-repair-repeat-alert failed (major reconcile succeeded):',
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
   } catch (err) {
     console.warn(
       '[sync-worker] Major reconcile failed (incremental succeeded):',

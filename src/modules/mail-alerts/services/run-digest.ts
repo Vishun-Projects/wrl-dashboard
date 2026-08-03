@@ -1,12 +1,16 @@
 import { queryUserAuth } from '@/lib/auth/user-auth-query';
 import {
   hasMisEmailSendAccess,
+  MIS_EMAIL_SEND_PERMISSION,
   resolveMisEmailReportIncludes,
 } from '@/lib/auth/rbac-catalog';
 import { buildMisEmailPayload } from '@/modules/mail-alerts/services/compose-digest';
 import type { DigestDateRange } from '@/modules/mail-alerts/services/fetch-digest-data';
+import { MIS_EMAIL_BODY_LAYOUT_PRESETS } from '@/modules/mail-alerts/services/email-body-layout';
 import {
   DEFAULT_MIS_EMAIL_PREFERENCES,
+  defaultPreferencesForRecipient,
+  parseMisEmailKeyAccountsInBody,
   resolveMisEmailSendTimeIst,
   resolveDigestDateRangeForPreferences,
   resolvePersonalDigestTargets,
@@ -20,24 +24,77 @@ import {
   type DigestRecipient,
 } from '@/modules/mail-alerts/services/recipients';
 import { sendDigestEmail } from '@/modules/mail-alerts/services/send';
-import { resolveUserDigestScope } from '@/modules/mail-alerts/services/user-scope';
+import { getMisEmailOrgSettings } from '@/modules/mail-alerts/services/org-settings';
 import {
   hasSuccessfulRoutingSendInSlot,
-  listMatchingMisEmailRoutingRulesForResolvedClients,
   listMisEmailRoutingRules,
   logMisEmailRoutingSendAttempt,
-  resolveRoutingClientNamesForScope,
-  resolveRoutingScopeForOfficeIds,
+  resolveOfficeIdsForRoutingRule,
   resolveRoutingScheduleSlotStart,
   shouldTriggerRoutingRuleNow,
+  type MisEmailRoutingRule,
 } from '@/modules/mail-alerts/services/routing-rules';
 import { logAction } from '@/lib/security/audit';
+
+/** Stable UUID for routing compose/log rows (not a real app_users id). */
+const ROUTING_COMPOSER_USER_ID = '00000000-0000-4000-8000-000000000001';
 
 const DIGEST_SYSTEM_ACTOR = {
   userId: null,
   email: 'system:mis-email-digest',
   name: 'MIS email digest',
 };
+
+function clientsFromRoutingRule(clientCsv: string): string[] {
+  return parseMisEmailKeyAccountsInBody(
+    clientCsv
+      .split(',')
+      .map((token) => token.trim())
+      .filter(Boolean)
+  );
+}
+
+function buildRoutingComposerRecipient(
+  officeIds: string[],
+  dateRange: DigestRecipient['mis_email_preferences']['dateRange'],
+  clientCsv = ''
+): DigestRecipient {
+  const seesAll = officeIds.length === 0;
+  const clients = clientsFromRoutingRule(clientCsv);
+  // Same body defaults as enabling MIS email for a user (regional + branch + key account tables).
+  const prefs = defaultPreferencesForRecipient(
+    { includeSummary: true, includeDetailed: true, includeKeyAccount: true },
+    { dateRange: dateRange ?? DEFAULT_MIS_EMAIL_PREFERENCES.dateRange }
+  );
+  return {
+    id: ROUTING_COMPOSER_USER_ID,
+    name: 'MIS routing',
+    email: 'system:mis-email-routing@internal',
+    role: seesAll ? 'hod' : 'branch_manager',
+    office_ids: officeIds,
+    visible_statuses: [],
+    permissions: [
+      MIS_EMAIL_SEND_PERMISSION,
+      'tab_mis_summary',
+      'tab_mis_register',
+      'tab_mis_accounts',
+      ...(seesAll ? (['view_all_offices'] as const) : []),
+    ],
+    includeSummary: true,
+    includeDetailed: true,
+    includeKeyAccount: true,
+    mis_email_enabled: true,
+    mis_email_preferences: {
+      ...prefs,
+      // All four company digest workbooks.
+      includeOpenCallsExport: true,
+      // Custom grid (regional+branch left, key accounts right) — not stacked default.
+      bodyLayout: MIS_EMAIL_BODY_LAYOUT_PRESETS.legacy_dashboard.layout,
+      // Empty = all clients in branch/zone scope; otherwise only these accounts.
+      keyAccountsInBody: clients,
+    },
+  };
+}
 
 async function auditDigestSend(opts: {
   ok: boolean;
@@ -121,6 +178,8 @@ async function sendForRecipient(
     to?: string[];
     cc?: string[];
     dateRange?: DigestDateRange;
+    /** Always compose as this recipient (rule-driven scope); do not swap in To-user profile. */
+    composeAs?: DigestRecipient;
   }
 ): Promise<DigestSendResult> {
   const toList = (
@@ -136,7 +195,9 @@ async function sendForRecipient(
     .map((email) => email.trim())
     .filter((email) => email && !toLower.has(email.toLowerCase()));
   const primaryTo = toList[0];
-  const { effectiveRecipient, displayName } = await resolveSendContext(recipient, primaryTo);
+  const { effectiveRecipient, displayName } = options.composeAs
+    ? { effectiveRecipient: options.composeAs, displayName: options.composeAs.name }
+    : await resolveSendContext(recipient, primaryTo);
   const dateRange =
     options.dateRange ??
     resolveDigestDateRangeForPreferences(effectiveRecipient.mis_email_preferences);
@@ -281,6 +342,7 @@ export async function runMisEmailDigest(): Promise<DigestRunResult> {
     Number(process.env.MIS_EMAIL_SCHEDULE_WINDOW_MINUTES ?? 15)
   );
   const routingRules = await listMisEmailRoutingRules();
+  const org = await getMisEmailOrgSettings();
 
   async function sendPersonalForRecipient(recipient: DigestRecipient): Promise<void> {
     if (
@@ -333,140 +395,120 @@ export async function runMisEmailDigest(): Promise<DigestRunResult> {
     }
   }
 
+  // Personal digests — user Profile schedule only.
   for (let i = 0; i < recipients.length; i++) {
-    const recipient = recipients[i];
-    // Personal schedule is always for this account only — never blocked by HOD routing auto-send.
-    await sendPersonalForRecipient(recipient);
+    await sendPersonalForRecipient(recipients[i]);
+    if (i < recipients.length - 1) await delay(SEND_DELAY_MS);
+  }
 
-    const digestScope = resolveUserDigestScope(recipient);
-    const [scope, clientNames] = await Promise.all([
-      resolveRoutingScopeForOfficeIds(recipient.office_ids ?? []),
-      resolveRoutingClientNamesForScope({
-        officeIds: recipient.office_ids ?? [],
-        isHod: digestScope.isHod,
-        dateRangeMode:
-          recipient.mis_email_preferences.dateRange ?? DEFAULT_MIS_EMAIL_PREFERENCES.dateRange,
-      }),
-    ]);
-    const matchingRules = listMatchingMisEmailRoutingRulesForResolvedClients({
-      rules: routingRules,
-      zones: scope.zones,
-      branches: scope.branches,
-      mailClients: clientNames.mail,
-      crmClients: clientNames.crm,
-    });
-
-    // Prefer the best-scoring match only — avoid duplicate SMTP when catch-all + zone rules match.
-    const rule = matchingRules[0];
-    if (!rule) {
-      if (i < recipients.length - 1) await delay(SEND_DELAY_MS);
-      continue;
-    }
-
+  // Routing digests — rule schedule + rule To/Cc. Zone/Branch = report filter only.
+  async function sendRoutingRule(rule: MisEmailRoutingRule): Promise<void> {
+    const ruleLabel = `${rule.zone || '*'} / ${rule.branch || '*'} / ${rule.client || '*'}`;
     if (!rule.autoSendEnabled) {
       skipped.push({
-        recipientId: recipient.id,
-        reason: `Routing auto-send off (${rule.zone || '*'} / ${rule.branch || '*'} / ${rule.client || '*'}) — personal digest still independent`,
+        recipientId: ROUTING_COMPOSER_USER_ID,
+        reason: `Routing auto-send off (${ruleLabel})`,
+      });
+      return;
+    }
+    if (
+      !shouldTriggerRoutingRuleNow(rule, {
+        windowMinutes: scheduleWindowMinutes,
+      })
+    ) {
+      skipped.push({
+        recipientId: ROUTING_COMPOSER_USER_ID,
+        reason: `Routing rule not due now (rule anchor ${rule.scheduleAnchorTimeIst} · every ${rule.scheduleIntervalMinutes}m)`,
+      });
+      return;
+    }
+    const slotStart = resolveRoutingScheduleSlotStart(rule);
+    if (
+      await hasSuccessfulRoutingSendInSlot({
+        ruleId: rule.id,
+        since: slotStart,
+      })
+    ) {
+      skipped.push({
+        recipientId: ROUTING_COMPOSER_USER_ID,
+        reason: `Routing already sent for this schedule slot (since ${slotStart.toISOString()} · rule ${rule.scheduleAnchorTimeIst} IST)`,
+      });
+      return;
+    }
+    const toEmails = [...new Set(rule.toEmails.map((email) => email.trim()).filter(Boolean))];
+    if (toEmails.length === 0) {
+      skipped.push({
+        recipientId: ROUTING_COMPOSER_USER_ID,
+        reason: `Routing rule has no To recipients (${ruleLabel})`,
+      });
+      return;
+    }
+    const ccEmails = [...new Set(rule.ccEmails.map((email) => email.trim()).filter(Boolean))];
+    const sentToLabel = toEmails.join(', ');
+    const officeIds = await resolveOfficeIdsForRoutingRule(rule);
+    const composer = buildRoutingComposerRecipient(
+      officeIds,
+      org.defaultDateRange,
+      rule.client
+    );
+    try {
+      const result = await sendForRecipient(composer, {
+        to: toEmails,
+        cc: ccEmails,
+        composeAs: composer,
+      });
+      sent.push(result);
+      await logMisEmailRoutingSendAttempt({
+        ruleId: rule.id,
+        recipientId: ROUTING_COMPOSER_USER_ID,
+        recipientEmail: toEmails[0],
+        sentTo: sentToLabel,
+        status: 'sent',
+      });
+      await auditDigestSend({
+        ok: true,
+        sentTo: sentToLabel,
+        recipientId: ROUTING_COMPOSER_USER_ID,
+        attachmentCount: result.attachments.length,
+        dateRangeLabel: result.dateRange.label,
+        ruleId: rule.id,
+      });
+      console.log(
+        `[mis-email] Routing digest to ${sentToLabel}${ccEmails.length ? ` cc ${ccEmails.join(', ')}` : ''} (${result.attachments.length} attachments, ${result.dateRange.label})`
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      failed.push({
+        recipientId: ROUTING_COMPOSER_USER_ID,
+        email: sentToLabel,
+        error: message,
       });
       await logMisEmailRoutingSendAttempt({
         ruleId: rule.id,
-        recipientId: recipient.id,
-        recipientEmail: recipient.email,
-        sentTo: recipient.email,
-        status: 'skipped',
-        error: 'Auto-send disabled',
+        recipientId: ROUTING_COMPOSER_USER_ID,
+        recipientEmail: toEmails[0],
+        sentTo: sentToLabel,
+        status: 'failed',
+        error: message,
       });
-    } else {
-      // Routing uses the RULE schedule only — never the user's personal Profile send time.
-      // Changing Profile time must only affect personal digests (self), not HOD To/Cc blasts.
-      if (
-        !shouldTriggerRoutingRuleNow(rule, {
-          windowMinutes: scheduleWindowMinutes,
-        })
-      ) {
-        skipped.push({
-          recipientId: recipient.id,
-          reason: `Routing rule not due now (rule anchor ${rule.scheduleAnchorTimeIst} · every ${rule.scheduleIntervalMinutes}m)`,
-        });
-      } else {
-        const slotStart = resolveRoutingScheduleSlotStart(rule);
-        if (
-          await hasSuccessfulRoutingSendInSlot({
-            ruleId: rule.id,
-            recipientId: recipient.id,
-            since: slotStart,
-          })
-        ) {
-          skipped.push({
-            recipientId: recipient.id,
-            reason: `Routing already sent for this schedule slot (since ${slotStart.toISOString()} · rule ${rule.scheduleAnchorTimeIst} IST)`,
-          });
-        } else {
-          const toEmails = [...new Set(rule.toEmails.map((email) => email.trim()).filter(Boolean))];
-          if (toEmails.length === 0) {
-            skipped.push({
-              recipientId: recipient.id,
-              reason: `Routing rule has no To recipients (${rule.zone || '*'} / ${rule.branch || '*'} / ${rule.client || '*'})`,
-            });
-          } else {
-            const ccEmails = [...new Set(rule.ccEmails.map((email) => email.trim()).filter(Boolean))];
-            const sentToLabel = toEmails.join(', ');
-            try {
-              const result = await sendForRecipient(recipient, {
-                to: toEmails,
-                cc: ccEmails,
-              });
-              sent.push(result);
-              await logMisEmailRoutingSendAttempt({
-                ruleId: rule.id,
-                recipientId: recipient.id,
-                recipientEmail: recipient.email,
-                sentTo: sentToLabel,
-                status: 'sent',
-              });
-              await auditDigestSend({
-                ok: true,
-                sentTo: sentToLabel,
-                recipientId: recipient.id,
-                attachmentCount: result.attachments.length,
-                dateRangeLabel: result.dateRange.label,
-                ruleId: rule.id,
-              });
-              console.log(
-                `[mis-email] Routing digest to ${sentToLabel}${ccEmails.length ? ` cc ${ccEmails.join(', ')}` : ''} (${result.attachments.length} attachments, ${result.dateRange.label})`
-              );
-            } catch (err) {
-              const message = err instanceof Error ? err.message : String(err);
-              failed.push({ recipientId: recipient.id, email: sentToLabel, error: message });
-              await logMisEmailRoutingSendAttempt({
-                ruleId: rule.id,
-                recipientId: recipient.id,
-                recipientEmail: recipient.email,
-                sentTo: sentToLabel,
-                status: 'failed',
-                error: message,
-              });
-              await auditDigestSend({
-                ok: false,
-                sentTo: sentToLabel,
-                recipientId: recipient.id,
-                ruleId: rule.id,
-                error: message,
-              });
-              console.error(`[mis-email] Routing digest failed for ${sentToLabel}:`, message);
-            }
-          }
-        }
-      }
-    }
-
-    if (i < recipients.length - 1) {
-      await delay(SEND_DELAY_MS);
+      await auditDigestSend({
+        ok: false,
+        sentTo: sentToLabel,
+        recipientId: ROUTING_COMPOSER_USER_ID,
+        ruleId: rule.id,
+        error: message,
+      });
+      console.error(`[mis-email] Routing digest failed for ${sentToLabel}:`, message);
     }
   }
 
-  if (recipients.length === 0) {
-    skipped.push({ recipientId: '-', reason: 'No eligible recipients' });
+  for (let i = 0; i < routingRules.length; i++) {
+    await sendRoutingRule(routingRules[i]);
+    if (i < routingRules.length - 1) await delay(SEND_DELAY_MS);
+  }
+
+  if (recipients.length === 0 && routingRules.length === 0) {
+    skipped.push({ recipientId: '-', reason: 'No eligible recipients or routing rules' });
   }
 
   return {

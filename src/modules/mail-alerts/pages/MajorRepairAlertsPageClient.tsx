@@ -183,9 +183,20 @@ export default function MajorRepairAlertsPageClient({
     <div className={embedded ? MAIL_ALERTS_PANEL : undefined}>
       {embedded ? toolbar : null}
       <div className={embedded ? MAIL_ALERTS_CONTENT : 'p-4'}>
+      <p className="mb-3 text-[12px] leading-relaxed text-slate-600">
+        Enabled branch rows become the alert <span className="font-medium">To</span> for that
+        call&apos;s branch. If no enabled row matches, mail goes to Org → Major repair HQ To/Cc
+        only. Saving here never sends mail — the sync worker fires when a major+repair call
+        crosses the repeat threshold.
+      </p>
       <AdminTableCard
         isEmpty={!loading && filtered.length === 0}
-        empty={<p className="p-6 text-sm text-slate-500">No recipients configured yet.</p>}
+        empty={
+          <p className="p-6 text-sm text-slate-500">
+            No branch recipients yet — all alerts use Org HQ To/Cc fallback until you add enabled
+            rows.
+          </p>
+        }
       >
         <AdminTable>
           <AdminThead>
@@ -356,7 +367,7 @@ export default function MajorRepairAlertsPageClient({
   return (
     <PageShell
       title="Major Repair Alerts"
-      subtitle="Branch recipients for major repair repeat SLA emails (routed by call branch)."
+      subtitle="Branch To overlays for SLA alerts. No match → Org HQ To/Cc. Sync worker sends; Save does not."
       icon={<Mail className="h-5 w-5" />}
       toolbar={toolbar}
     >

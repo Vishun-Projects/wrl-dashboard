@@ -535,6 +535,44 @@ export async function resolveRoutingScopeForOfficeIds(officeIdsRaw: string[]): P
   };
 }
 
+/**
+ * Office ncodes for composing a routing digest from the rule's Zone/Branch filters.
+ * Empty array = all offices (catch-all rule).
+ */
+export async function resolveOfficeIdsForRoutingRule(
+  rule: Pick<MisEmailRoutingRule, 'zone' | 'branch'>
+): Promise<string[]> {
+  const branchKeys = splitDimensionKeys(rule.branch);
+  const zoneKeys = splitDimensionKeys(rule.zone);
+  if (branchKeys.length === 0 && zoneKeys.length === 0) return [];
+
+  return withAppClient(async (client) => {
+    if (branchKeys.length > 0) {
+      const res = await client.query<{ ncode: string }>(
+        `SELECT ncode::text AS ncode
+         FROM dim_offices
+         WHERE upper(btrim(regexp_replace(coalesce(vcompanyname, ''), '\\s+', ' ', 'g'))) = ANY($1::text[])
+         ORDER BY ncode`,
+        [branchKeys]
+      );
+      return res.rows.map((r) => String(r.ncode)).filter(Boolean);
+    }
+
+    const res = await client.query<{ ncode: string }>(
+      `SELECT ncode::text AS ncode
+       FROM dim_offices
+       WHERE upper(btrim(regexp_replace(coalesce(region, ''), '\\s+', ' ', 'g'))) = ANY($1::text[])
+          OR upper(btrim(regexp_replace(
+               regexp_replace(coalesce(region, ''), '\\s+', ' ', 'g'),
+               '\\s+ZONE$', '', 'i'
+             ))) = ANY($1::text[])
+       ORDER BY ncode`,
+      [zoneKeys]
+    );
+    return res.rows.map((r) => String(r.ncode)).filter(Boolean);
+  });
+}
+
 function ruleMatchScore(
   rule: MisEmailRoutingRule,
   zones: Set<string>,
@@ -730,10 +768,11 @@ export function resolveRoutingScheduleSlotStart(
   return new Date(`${istDate}T${hh}:${mm}:00+05:30`);
 }
 
-/** True when this rule+recipient already had a successful SMTP send in the current slot. */
+/** True when this rule already had a successful SMTP send in the current slot (any trigger user). */
 export async function hasSuccessfulRoutingSendInSlot(params: {
   ruleId: string;
-  recipientId: string;
+  /** @deprecated Ignored — one rule blast per slot, not per digest recipient. */
+  recipientId?: string;
   since: Date;
 }): Promise<boolean> {
   await ensureMisEmailRoutingRulesTable();
@@ -742,11 +781,10 @@ export async function hasSuccessfulRoutingSendInSlot(params: {
       `SELECT 1 AS ok
        FROM public.mis_email_routing_send_log
        WHERE rule_id = $1::uuid
-         AND recipient_id = $2::uuid
          AND status = 'sent'
-         AND triggered_at >= $3::timestamptz
+         AND triggered_at >= $2::timestamptz
        LIMIT 1`,
-      [params.ruleId, params.recipientId, params.since.toISOString()]
+      [params.ruleId, params.since.toISOString()]
     );
     return res.rows.length > 0;
   });
