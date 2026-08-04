@@ -1333,3 +1333,36 @@ export function appliedFilterPartsFromSnapshot(
     repairFilter: snapshot.repairFilter,
   });
 }
+
+export interface ResolvedFilterParams {
+  startDateStr: string;
+  endDateStr: string;
+  officeIdsParam: string;
+  viewCallTypesParam: string;
+  agingStr: string;
+  applied: ReportFilterSnapshot;
+}
+
+export function resolveAppliedFilterParams(
+  applied: ReportFilterSnapshot,
+  offices: Array<{ ncode: number | string; nunder?: number | string }>
+): ResolvedFilterParams {
+  const startDateStr = toDateString(applied.dateRange.start);
+  const endDateStr = toDateString(applied.dateRange.end);
+  const officeIdsParam = resolveSummaryOfficeIdsParam(
+    offices,
+    applied.selectedBranch,
+    applied.selectedFranchisee
+  );
+  const viewCallTypesParam = resolveViewCallTypesParam(applied.selectedCallTypes);
+  const agingStr = normalizeAgingAsOfDate(applied.agingAsOf);
+
+  return {
+    startDateStr,
+    endDateStr,
+    officeIdsParam,
+    viewCallTypesParam,
+    agingStr,
+    applied,
+  };
+}

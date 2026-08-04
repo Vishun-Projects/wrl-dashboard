@@ -1,7 +1,10 @@
 import {
   LOCAL_UPCOUNTRY_NCODE_LABELS,
   type ArcpClaimsAggregateRow,
+  ARCP_DATE_FILTER_OPTIONS,
+  type ArcpDateFilterColumn,
 } from '@/sql/arcp-claims/query';
+import { buildMainBranchOptions, buildFranchiseeOptions } from '@/modules/mis';
 
 export type ArcpClientLabelLookups = {
   callTypeLabelsByCode: Record<string, string>;
@@ -65,4 +68,54 @@ export function resolveArcpItemCategoryDisplay(
   const fromCode = labelsByCode?.[code];
   if (fromCode && !isBareNumericArcpLabel(fromCode)) return fromCode;
   return trimmed || code;
+}
+
+export function getBranchLabel(
+  selectedBranch: string[],
+  appliedBranch: string[] | undefined,
+  offices: any[],
+  branchesList: any[]
+): string {
+  const branchIds = appliedBranch ?? selectedBranch;
+  if (branchIds.length === 0) return 'All Branches';
+  const options = buildMainBranchOptions(offices, branchesList);
+  return branchIds
+    .map((id) => options.find((option) => option.value === id)?.label ?? id)
+    .join(', ');
+}
+
+export function getFranchiseeLabel(
+  selectedFranchisee: string[],
+  appliedFranchisee: string[] | undefined,
+  selectedBranch: string[],
+  appliedBranch: string[] | undefined,
+  offices: any[],
+  franchiseesList: any[]
+): string {
+  const franchiseeIds = appliedFranchisee ?? selectedFranchisee;
+  const branchIds = appliedBranch ?? selectedBranch;
+  if (franchiseeIds.length === 0) return 'All Franchisees';
+  const options = buildFranchiseeOptions(offices, branchIds, franchiseesList);
+  return franchiseeIds
+    .map((id) => options.find((option) => option.value === id)?.label ?? id)
+    .join(', ');
+}
+
+export function getCallTypeLabel(
+  selectedCallTypes: string[],
+  appliedCallTypes: string[] | undefined
+): string {
+  const callTypes = appliedCallTypes ?? selectedCallTypes;
+  if (callTypes.length === 0) return 'All Call Types';
+  return callTypes.join(', ');
+}
+
+export function getDateBasisLabel(
+  arcpDateFilterColumn: ArcpDateFilterColumn,
+  appliedDateColumn: ArcpDateFilterColumn | undefined
+): string {
+  const dateColumn = appliedDateColumn ?? arcpDateFilterColumn;
+  return (
+    ARCP_DATE_FILTER_OPTIONS.find((option) => option.value === dateColumn)?.label ?? 'Call Date'
+  );
 }
