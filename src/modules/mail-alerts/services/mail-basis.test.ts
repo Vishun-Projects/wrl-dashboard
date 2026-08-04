@@ -3,10 +3,11 @@ import type { AccountSummaryRow, BranchSummaryRow, SummaryDashboard } from '@/mo
 import {
   buildMisEmailBranchPerformanceRowsFromTrace,
   buildMisEmailBdMisRegionalPayload,
+  buildMisEmailRegionalPerformanceRowsFromTrace,
   misEmailBdMisSources,
   reconcileMisEmailOpenCounts,
 } from '@/modules/mail-alerts/services/mail-basis';
-import { buildBdMisTraceRows } from '@/modules/mis';
+import { buildBdMisTraceRows, countTraceOpenCalls, filterTraceRowsForOpenExport } from '@/modules/mis';
 
 function branch(zone: string, open: number): BranchSummaryRow {
   return {
@@ -170,6 +171,80 @@ describe('buildMisEmailBdMisRegionalPayload', () => {
     expect(reconciliation.matches).toBe(true);
     expect(reconciliation.summaryOpen).toBe(2);
     expect(reconciliation.traceOpenIncluded).toBe(2);
+  });
+});
+
+describe('buildMisEmailRegionalPerformanceRowsFromTrace', () => {
+  it('open total matches filtered open-export / reconcile basis', () => {
+    const traceRows = buildBdMisTraceRows({
+      crmRows: [
+        {
+          region: 'NORTH ZONE',
+          plant: 'P1',
+          technician_name: 'T1',
+          office_under_branch: 'B1',
+          customer_name: 'C1',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'CRM-OTH',
+          client: 'Nestle',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+        {
+          region: 'EAST ZONE',
+          plant: 'P2',
+          technician_name: 'T2',
+          office_under_branch: 'B2',
+          customer_name: 'C2',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'CRM-SOLVED',
+          client: 'Nestle',
+          call_status: 'Solved',
+          status_bucket: 'solved',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+        {
+          region: 'WEST ZONE',
+          plant: 'P3',
+          technician_name: 'T3',
+          office_under_branch: 'B3',
+          customer_name: 'C3',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'CRM-CAD',
+          client: 'Cadbury',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Cadbury',
+        },
+      ],
+      clientRows: [
+        {
+          source_code: 'cadbury',
+          region: 'NORTH',
+          plant: 'P4',
+          technician_name: 'T4',
+          office_under_branch: 'B4',
+          customer_name: 'C4',
+          logged_at: '2026-07-02T00:00:00Z',
+          service_order: 'IMP-CAD',
+          client: 'Cadbury',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          file_name: 'cad.csv',
+        },
+      ],
+      sources: misEmailBdMisSources(),
+      agingDate: '2026-07-09',
+    });
+
+    const regional = buildMisEmailRegionalPerformanceRowsFromTrace(traceRows);
+    const bodyOpen = regional.reduce((sum, row) => sum + row.open_calls, 0);
+    expect(bodyOpen).toBe(countTraceOpenCalls(filterTraceRowsForOpenExport(traceRows)));
+    expect(bodyOpen).toBe(2); // Nestle CRM open + Mondelez import; CRM Cadbury dropped
   });
 });
 

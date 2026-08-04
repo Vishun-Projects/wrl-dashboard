@@ -198,24 +198,46 @@ describe('buildMisEmailPayload early exits', () => {
     expect(fetchDigestRegisterRows).not.toHaveBeenCalled();
   });
 
-  it('forPreview skips register fetch and Excel builders', async () => {
+  it('forPreview skips register fetch and Excel builders but loads trace for body', async () => {
     fetchDigestSummaryDataCached.mockResolvedValue({
       branchSummary: [],
       accountSummary: [],
       totals: {},
     });
-
-    const result = await buildMisEmailPayload(summaryRecipient as never, {
-      sentTo: 'user@example.com',
-      displayName: 'User',
-      forPreview: true,
+    fetchDigestClientAccountSummaryCached.mockResolvedValue([]);
+    buildDigestTraceableExportPayload.mockResolvedValue({
+      regionalRows: [],
+      grand: { region: 'ALL', open_calls: 0 },
+      crmBranchSummary: [],
+      crmAccountSummary: [],
+      clientAccountSummary: [],
+      sources: {},
+      traceRows: [],
+      traceAlign: 'summary',
+      filterMeta: {},
     });
+
+    const result = await buildMisEmailPayload(
+      {
+        ...summaryRecipient,
+        mis_email_preferences: {
+          ...summaryRecipient.mis_email_preferences,
+          bodyInEmail: ['regional_performance', 'branch_performance'],
+        },
+      } as never,
+      {
+        sentTo: 'user@example.com',
+        displayName: 'User',
+        forPreview: true,
+      }
+    );
 
     expect(result.emailAttachments).toEqual([]);
     expect(result.preview.attachments.length).toBeGreaterThan(0);
     expect(fetchDigestSummaryDataCached).toHaveBeenCalledOnce();
     expect(fetchDigestRegisterRows).not.toHaveBeenCalled();
     expect(buildDigestAttachments).not.toHaveBeenCalled();
+    expect(buildDigestTraceableExportPayload).toHaveBeenCalledOnce();
   });
 });
 

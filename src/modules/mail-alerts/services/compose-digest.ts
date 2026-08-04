@@ -14,6 +14,7 @@ import {
 import {
   buildMisEmailBranchPerformanceRowsFromTrace,
   buildMisEmailRegionalPerformanceRows,
+  buildMisEmailRegionalPerformanceRowsFromTrace,
 } from '@/modules/mail-alerts/services/mail-basis';
 import { buildDigestTraceableExportPayload } from '@/modules/mail-alerts/services/fetch-digest-trace';
 import {
@@ -146,10 +147,11 @@ async function buildMisEmailBodyContext(
         : await fetchDigestClientAccountSummaryCached(dateRange);
     context.clientAccountSummary = clientRows as Array<Record<string, unknown>>;
     if (bodySectionIds.includes('regional_performance')) {
-      context.regionalPerformanceRows = buildMisEmailRegionalPerformanceRows(
-        data,
-        clientRows
-      );
+      // Same call-level basis as open-calls Excel when trace is available; summary
+      // aggregates can diverge (e.g. 4831 body vs 4682 Excel rows).
+      context.regionalPerformanceRows = traceRows?.length
+        ? buildMisEmailRegionalPerformanceRowsFromTrace(traceRows)
+        : buildMisEmailRegionalPerformanceRows(data, clientRows);
     }
     if (bodySectionIds.includes('key_account_performance')) {
       const accountRows = resolveDigestKeyAccountBodyRows(
@@ -302,11 +304,11 @@ export async function buildMisEmailPayload(
     !options.forPreview && effectiveIncludes.includeTraceableExport;
   const includeOpenCallsExport =
     !options.forPreview && effectiveIncludes.includeOpenCallsExport;
-  // Send: branch body uses Cadbury-safe call-level trace (CRM Cadbury out, Mondelez import in).
-  // Preview: skip that path — Year-to-yesterday pulls ~250k call rows and takes minutes.
-  // Preview falls back to CRM branchSummary; send still builds the accurate trace.
+  // Regional/branch body use Cadbury-safe call-level trace (CRM Cadbury out, Mondelez in)
+  // so open totals match the open-calls Excel — including HTML preview.
   const needsTraceForBody =
-    !options.forPreview && bodySectionIds.includes('branch_performance');
+    bodySectionIds.includes('branch_performance') ||
+    bodySectionIds.includes('regional_performance');
   const needsClientAccountData =
     needsClientAccounts ||
     includeTraceableExport ||

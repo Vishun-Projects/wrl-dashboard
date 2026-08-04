@@ -100,6 +100,73 @@ function isRealTechnicianName(value: string): boolean {
   return v !== '—' && v !== '-' && v.toLowerCase() !== 'unassigned';
 }
 
+function accumulateTracePerformanceMetrics<
+  T extends {
+    total_calls: number;
+    solved_calls: number;
+    cancelled_calls: number;
+    open_calls: number;
+    age_2: number;
+    age_3: number;
+    age_7: number;
+    age_15: number;
+    engineers: Set<string>;
+  },
+>(agg: T, row: BdMisTraceRow): void {
+  agg.total_calls += 1;
+  if (row.counts_toward === 'solved') {
+    agg.solved_calls += 1;
+  } else if (row.counts_toward === 'open') {
+    agg.open_calls += 1;
+    const aging = String(row.aging ?? '').trim().toLowerCase();
+    if (aging === '<2 days') agg.age_2 += 1;
+    else if (aging === '>3 days' || aging === '3-7 days') agg.age_3 += 1;
+    else if (aging === '>7 days' || aging === '8-15 days') agg.age_7 += 1;
+    else if (aging === '>15 days') agg.age_15 += 1;
+  }
+
+  const technician = row.technician_name?.trim() ?? '';
+  if (isRealTechnicianName(technician)) {
+    agg.engineers.add(technician.toLowerCase());
+  }
+}
+
+/**
+ * Regional body metrics from the same filtered trace rows as open-calls Excel.
+ * Prefer this over summary aggregates whenever digests build a trace payload.
+ */
+export function buildMisEmailRegionalPerformanceRowsFromTrace(
+  traceRows: BdMisTraceRow[]
+): RegionalPerformanceRow[] {
+  const includedRows = filterTraceRowsForSummaryExport(traceRows);
+  const regionMap = new Map<string, RegionalPerformanceRow & { engineers: Set<string> }>();
+
+  for (const row of includedRows) {
+    const region = String(row.region ?? 'OTHER').toUpperCase();
+    if (!regionMap.has(region)) {
+      regionMap.set(region, {
+        region,
+        total_calls: 0,
+        solved_calls: 0,
+        cancelled_calls: 0,
+        open_calls: 0,
+        age_2: 0,
+        age_3: 0,
+        age_7: 0,
+        age_15: 0,
+        part_pending: 0,
+        active_eng: 0,
+        engineers: new Set<string>(),
+      });
+    }
+    accumulateTracePerformanceMetrics(regionMap.get(region)!, row);
+  }
+
+  return [...regionMap.values()]
+    .map(({ engineers, ...row }) => ({ ...row, active_eng: engineers.size }))
+    .sort((a, b) => a.region.localeCompare(b.region));
+}
+
 export function buildMisEmailBranchPerformanceRowsFromTrace(
   traceRows: BdMisTraceRow[]
 ): BranchPerformanceRow[] {
@@ -128,23 +195,7 @@ export function buildMisEmailBranchPerformanceRowsFromTrace(
       });
     }
 
-    const agg = branchMap.get(key)!;
-    agg.total_calls += 1;
-    if (row.counts_toward === 'solved') {
-      agg.solved_calls += 1;
-    } else if (row.counts_toward === 'open') {
-      agg.open_calls += 1;
-      const aging = String(row.aging ?? '').trim().toLowerCase();
-      if (aging === '<2 days') agg.age_2 += 1;
-      else if (aging === '>3 days' || aging === '3-7 days') agg.age_3 += 1;
-      else if (aging === '>7 days' || aging === '8-15 days') agg.age_7 += 1;
-      else if (aging === '>15 days') agg.age_15 += 1;
-    }
-
-    const technician = row.technician_name?.trim() ?? '';
-    if (isRealTechnicianName(technician)) {
-      agg.engineers.add(technician.toLowerCase());
-    }
+    accumulateTracePerformanceMetrics(branchMap.get(key)!, row);
   }
 
   return [...branchMap.values()]
