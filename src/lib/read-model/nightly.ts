@@ -28,8 +28,8 @@ import {
   truncateCurrentYearFacts,
   upsertFactRows,
 } from '@/lib/read-model/upsert-facts';
-import { runArcpIncrementalSync } from '@/modules/arcp/server/sync/incremental';
-import { runBackfillArcpBmApproved } from '@/modules/arcp/server/sync/backfill-arcp-bm-approved';
+import { runArcpIncrementalSync } from '@/modules/arcp-claims/server/sync/incremental';
+import { runBackfillArcpBmApproved } from '@/modules/arcp-claims/server/sync/backfill-arcp-bm-approved';
 import { runTransactionEntryIncremental } from '@/lib/read-model/transaction-entry';
 
 const ENTITY = 'calls_latest_hot';
@@ -72,10 +72,8 @@ export async function runNightlyReconcile(): Promise<void> {
       const orphanTrns = existingYtd.rows
         .map((row) => String(row.vtrnno))
         .filter((trn) => !crmTrns.has(trn));
+      // YTD-only orphan delete: CRM refresh set is source of truth for current-year TRNs; leave pre-YTD alone.
       const deletedOrphans = await deleteHotRowsByTrn(client, orphanTrns);
-
-      // Do not prune pre-YTD rows — historical backfill keeps older solved/cancelled calls in hot.
-      const pruned = 0;
 
       console.log('[sync-worker] Rebuilding current-year facts');
       const yearStart = hotStart;
@@ -97,12 +95,12 @@ export async function runNightlyReconcile(): Promise<void> {
       await finishSyncRunLog(client, logId, 'completed', {
         startedAt,
         rowsUpserted: upserted,
-        rowsDeleted: deletedOrphans + pruned,
+        rowsDeleted: deletedOrphans,
       });
 
       const hotCount = await countHotRows(client);
       console.log(
-        `[sync-worker] Nightly complete — hot ${hotCount}, upserted ${upserted}, deleted ${deletedOrphans + pruned}, facts ${factRows.length}`
+        `[sync-worker] Nightly complete — hot ${hotCount}, upserted ${upserted}, deleted ${deletedOrphans}, facts ${factRows.length}`
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

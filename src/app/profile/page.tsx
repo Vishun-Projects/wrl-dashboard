@@ -25,10 +25,10 @@ import { feedback } from '@/lib/ui/feedback';
 import { resolveAvatarDisplayUrl } from '@/lib/auth/avatar-url';
 import { useSearchParams } from 'next/navigation';
 import { ThemePicker } from '@/components/settings/ThemePicker';
-import { MisEmailComposer } from '@/modules/mail-alerts/components/MisEmailComposer';
-import type { MisEmailBodySectionDef } from '@/modules/mail-alerts/services/body-sections';
-import type { MisEmailKeyAccountsByZone, MisEmailPreferences } from '@/modules/mail-alerts/services/preferences';
-import type { MisEmailLetterCopy } from '@/modules/mail-alerts/services/org-settings-defaults';
+import { MisEmailComposer } from '@/modules/mis-email/components/MisEmailComposer';
+import type { MisEmailBodySectionDef } from '@/modules/mis-email/services/body-sections';
+import type { MisEmailKeyAccountsByZone, MisEmailPreferences } from '@/modules/mis-email/services/preferences';
+import type { MisEmailLetterCopy } from '@/modules/mis-email/services/org-settings-defaults';
 
 type MisEmailSettings = {
   mis_email_enabled: boolean;

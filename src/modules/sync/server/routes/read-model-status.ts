@@ -15,6 +15,7 @@ export async function GET() {
   }
 
   const permissions = await prisma.getUserPermissions(user.id);
+  // Report readers need sync health; manage_users covers admin ops without a report tab.
   if (!hasAnyReportPageAccess(permissions) && !permissions.includes('manage_users')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }

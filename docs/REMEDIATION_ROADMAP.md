@@ -39,11 +39,11 @@ Enforced by `npm run check:feature-boundaries`.
 | # | Domain | Status |
 |---|--------|--------|
 | 1–8 | Feature-slice era | ☑ historical under `features/` |
-| 9 | `arcp` modules pilot | ☑ `src/modules/arcp/` |
-| 10 | Leaf report siblings | ☑ warranty, call-distribution, location-audit, serial-history |
-| 11 | `mail-alerts` | ☑ mis-email + major-repair |
+| 9 | `arcp` modules pilot | ☑ `src/modules/arcp-claims/` |
+| 10 | Leaf report siblings | ☑ warranty, distribution, location-audit, serial-audit |
+| 11 | `mis-email` | ☑ mis-email + major-repair |
 | 12 | `mis` hub | ☑ report + register + mis-import |
-| 13 | Admin modules | ☑ users, roles, performance, activity-log |
+| 13 | Admin modules | ☑ users, roles, performance, security-audit |
 | 14 | `lib` → `shared` rename | ☐ deferred |
 
 ---

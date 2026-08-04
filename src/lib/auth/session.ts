@@ -35,7 +35,6 @@ export async function getSessionUserId(): Promise<string | null> {
   return user.id;
 }
 
-/** Absolute portal session status for cookie-based sessions. */
 export async function getPortalSessionExpiry(): Promise<{
   ok: boolean;
   sessionExpiresAt: string | null;
@@ -50,7 +49,6 @@ export async function getPortalSessionExpiry(): Promise<{
   }
 }
 
-/** Resolve full app profile + permissions for a known user id. */
 export async function getUserInfoById(userId: string) {
   const auth = await loadUserAuth(userId);
   if (!auth) return null;

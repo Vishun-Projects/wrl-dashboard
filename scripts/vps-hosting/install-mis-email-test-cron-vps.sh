@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install a TEST-only MIS email cron at 14:00 IST → Vishnu only.
-# Also syncs src/modules/mail-alerts so the VPS has the cli path the cron needs.
+# Also syncs src/modules/mis-email so the VPS has the cli path the cron needs.
 # Does NOT change / remove the production digest cron (*/15 Mon–Sat).
 #
 #   npm run mis-email:install-test-cron:vps
@@ -96,7 +96,7 @@ root='${INSTALL_ROOT}'
 test_to='${TEST_TO}'
 hour='${CRON_HOUR}'
 min='${CRON_MIN}'
-test -f "\$root/src/modules/mail-alerts/services/cli.ts"
+test -f "\$root/src/modules/mis-email/services/cli.ts"
 test -f "\$root/.env.mis-email"
 # Register barrel must stay services-only (no UI re-exports) so cron does not need src/components.
 ! grep -q "export \* from './ui/" "\$root/src/modules/mis/register/index.ts"

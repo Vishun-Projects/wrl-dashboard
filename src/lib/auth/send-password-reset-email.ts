@@ -32,7 +32,6 @@ function createTransport() {
   };
 }
 
-/** Send password reset via the same SMTP transport as MIS reports. */
 export async function sendPasswordResetEmail(params: {
   to: string;
   resetLink: string;

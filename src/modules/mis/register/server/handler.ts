@@ -25,7 +25,7 @@ import {
   buildRegisterRepairNcodeExistsWhere,
 } from '@/sql/trhcalls/query';
 import { enrichRegisterRowsRepairDone } from '@/sql/register/repair-done-enrich';
-import { parseRepairQueryParam } from '@/modules/serial-history';
+import { parseRepairQueryParam } from '@/modules/serial-audit';
 import { resolveRegisterRepairCallKeys } from '@/modules/mis/register/server/repair-call-ncodes';
 import { getPincodeMapData } from '@/lib/geo/pincode-map';
 import { CITY_TO_STATE_MAP, getGeographicDetails } from '@/lib/geo/india-states';

@@ -19,6 +19,7 @@ export async function GET() {
     const authUser = await requireSupabaseUser(supabase);
     if (authUser) {
       const cookieStore = await cookies();
+      // JWT can still be valid after portal soft-timeout; expire session here before serving /me.
       const portal = evaluatePortalSession(cookieStore.getAll());
       if (!portal.ok) {
         return NextResponse.json(sessionExpiredJsonBody(), { status: 401 });

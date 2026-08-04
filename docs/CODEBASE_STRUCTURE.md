@@ -89,16 +89,16 @@ src/modules/<name>/
 | Module | Role |
 |--------|------|
 | `mis` | MIS Reports + register + client import |
-| `arcp` | ARCP claims UI + load + hot sync |
-| `call-distribution` | Call distribution |
-| `serial-history` | Serial wise history |
+| `arcp-claims` | ARCP claims UI + load + hot sync |
+| `distribution` | Call distribution |
+| `serial-audit` | Serial wise history |
 | `location-audit` | Location audit |
-| `warranty` | Warranty master |
-| `mail-alerts` | MIS email + major repair alerts |
+| `warranty-master` | Warranty master |
+| `mis-email` | MIS email + major repair alerts |
 | `users` | User management |
 | `roles` | Roles & access |
 | `performance` | Performance insights |
-| `activity-log` | Activity / security audit UI |
+| `security-audit` | Security audit UI |
 | `auth` | Sign-in / sign-out / me / password-reset API |
 | `calls` | Call-by-id / comments / flags / offices API |
 | `sync` | Read-model status + VPS cron API |
@@ -116,9 +116,9 @@ Empty placeholder — see `src/features/README.md`. Do not add domain code here.
 ```text
 src/app/
 ├── login / forgot-password / reset-password / profile
-├── admin/                   # Thin pages → @/modules/{users,roles,performance,activity-log,mail-alerts,…}
+├── admin/                   # Thin pages → @/modules/{users,roles,performance,security-audit,mis-email,…}
 ├── calls/
-├── report/                  # Thin pages → @/modules/{mis,arcp,call-distribution,…}
+├── report/                  # Thin pages → @/modules/{mis,arcp-claims,distribution,…}
 └── api/                     # Thin re-exports → @/modules/*/server/routes
 ```
 
@@ -156,7 +156,7 @@ src/components/
 └── README.md
 ```
 
-(`settings/` holds cross-cutting chrome like `ThemePicker`; domain settings UI such as MIS email composer lives under `modules/mail-alerts/components/`.)
+(`settings/` holds cross-cutting chrome like `ThemePicker`; domain settings UI such as MIS email composer lives under `modules/mis-email/components/`.)
 
 ---
 
@@ -239,15 +239,15 @@ Hot tables are **server SQL only**; PostgREST roles revoked (`21-revoke-hot-anon
 | MIS report tabs / filters UI | `src/modules/mis/` |
 | Call register | `src/modules/mis/register/` |
 | Client Excel/CSV import | `src/modules/mis/client-import/` |
-| ARCP claims | `src/modules/arcp/` |
-| Call distribution | `src/modules/call-distribution/` |
-| Serial wise history | `src/modules/serial-history/` |
+| ARCP claims | `src/modules/arcp-claims/` |
+| Call distribution | `src/modules/distribution/` |
+| Serial wise history | `src/modules/serial-audit/` |
 | Location audit | `src/modules/location-audit/` |
-| Warranty master | `src/modules/warranty/` |
-| Mail & alerts | `src/modules/mail-alerts/` |
+| Warranty master | `src/modules/warranty-master/` |
+| Mail & alerts | `src/modules/mis-email/` |
 | Users / roles | `src/modules/users/`, `src/modules/roles/` |
 | Performance insights | `src/modules/performance/` |
-| Activity log | `src/modules/activity-log/` |
+| Security audit | `src/modules/security-audit/` |
 | Nightly hot sync | `src/lib/read-model/` (+ `modules/*/server/sync/`) |
 | Auth / RBAC | `src/lib/auth/`, `src/lib/supabase/` |
 | Route URL / API surface | `src/app/...` (thin) |

@@ -31,6 +31,7 @@ async function sendViaVpsMailRelay(params: {
   }
 }
 
+/** generateLink always; send via VPS relay → local SMTP → GoTrue resetPasswordForEmail. */
 export async function sendRecoveryEmailForAccount(params: {
   email: string;
   recipientName?: string | null;

@@ -64,10 +64,21 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ message: 'No changes provided' });
     }
 
+    const beforeRows = (await prisma.$queryRawUnsafe(
+      'SELECT name, avatar_url, theme FROM public.app_users WHERE id = $1 LIMIT 1',
+      user.id
+    )) as Array<{ name: string | null; avatar_url: string | null; theme: string | null }>;
+    const before = beforeRows[0] ?? null;
+
     values.push(user.id);
     const query = `UPDATE public.app_users SET ${updates.join(', ')} WHERE id = $${paramIndex}`;
     
     await prisma.$queryRawUnsafe(query, ...values);
+
+    const changes: Record<string, { old: unknown; new: unknown }> = {};
+    if (name !== undefined) changes.name = { old: before?.name ?? null, new: name };
+    if (avatar_url !== undefined) changes.avatar_url = { old: before?.avatar_url ?? null, new: avatar_url };
+    if (theme !== undefined) changes.theme = { old: before?.theme ?? null, new: theme };
 
     await logAction({
       request,
@@ -77,7 +88,7 @@ export async function PATCH(request: Request) {
       statusCode: 200,
       target: { type: 'app_user', id: user.id, label: actor.email },
       summary: `Updated profile fields: ${changed.join(', ')}`,
-      metadata: { changed, theme: theme ?? null },
+      metadata: { changed, changes },
     });
 
     return NextResponse.json({ success: true });

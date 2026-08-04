@@ -10,7 +10,6 @@ const PO_CONT_START = `TRY_CONVERT(DATETIME, NULLIF(LTRIM(RTRIM(CAST(po.dcontsta
 const PO_CONT_END = `TRY_CONVERT(DATETIME, NULLIF(LTRIM(RTRIM(CAST(po.dcontenddate AS VARCHAR(30)))), ''), 103)`;
 const AS_OF = `TRY_CONVERT(DATETIME, tc.dtrndate)`;
 
-/** LEFT JOIN fragment for register / corpus queries. */
 export const REGISTER_MSTPRORG_JOIN_SQL = `
       LEFT JOIN mstprorg po (NOLOCK) ON tc.nitemserialno = po.ncode`;
 

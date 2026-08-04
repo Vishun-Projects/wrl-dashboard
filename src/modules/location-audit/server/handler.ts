@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { postQuery } from '@/lib/db/proxy';
-import { resolveReportSecurity, type ReportSecurity } from '@/lib/auth/report-security';
+import { type ReportSecurity } from '@/lib/auth/report-security';
 import {
   aggregateByBranch,
   analyzeListTierRows,
@@ -23,9 +23,6 @@ const QUERY_TIMEOUT_MS = 300_000;
 const ROW_TIMEOUT_MS = 60_000;
 
 export type LocationAuditSecurity = ReportSecurity;
-
-/** @deprecated Use resolveReportSecurity */
-export const resolveLocationAuditSecurity = resolveReportSecurity;
 
 export function parseLocationAuditQueryParams(
   searchParams: URLSearchParams,
@@ -110,9 +107,6 @@ export async function fetchLocationAuditList(
   return { rows, total: rows.length };
 }
 
-/** @deprecated Use {@link fetchLocationAuditList} */
-export const fetchLocationAuditListPage = fetchLocationAuditList;
-
 export async function fetchLocationAuditRowDetail(
   ncode: string,
   officeId: string,
@@ -154,12 +148,4 @@ export async function runLocationAuditExport(
     }
   }
   return details;
-}
-
-/** @deprecated Monolithic analysis */
-export function runLocationAuditAnalysis(rawRows: Record<string, unknown>[]) {
-  const rows = analyzeListTierRows(rawRows);
-  const summary = summarizeLocationAuditListRows(rows, LOCATION_AUDIT_MAX_ROWS);
-  const byBranch = aggregateByBranch(rows);
-  return { rows, summary, byBranch };
 }

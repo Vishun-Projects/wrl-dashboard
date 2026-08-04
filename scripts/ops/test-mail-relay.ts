@@ -11,7 +11,7 @@ import { join } from 'path';
 config({ path: join(process.cwd(), '.env.local') });
 config({ path: join(process.cwd(), '.env') });
 
-import '@/modules/mail-alerts/services/bootstrap-env';
+import '@/modules/mis-email/services/bootstrap-env';
 import {
   relayPostJson,
   resolveRelayTryUrls,

@@ -27,7 +27,7 @@ export function isHodUser(
   );
 }
 
-/** Resolves HOD flag and office scope for report APIs. */
+/** HOD / view_all_offices ⇒ national scope; else restrict to assigned office_ids. */
 export async function resolveReportSecurity(
   userId: string,
   spec?: RbacApiSpec | null

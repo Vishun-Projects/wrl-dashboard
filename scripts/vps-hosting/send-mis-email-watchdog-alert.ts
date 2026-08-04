@@ -30,8 +30,8 @@ config({ path: resolve(root, '.env.mis-email'), override: true });
 config({ path: resolve(root, '.env.local') });
 config({ path: resolve(root, '.env') });
 
-import { getMisEmailOrgSettings } from '@/modules/mail-alerts/services/org-settings';
-import { formatWatchdogAlert } from '@/modules/mail-alerts/services/watchdog-alert-copy';
+import { getMisEmailOrgSettings } from '@/modules/mis-email/services/org-settings';
+import { formatWatchdogAlert } from '@/modules/mis-email/services/watchdog-alert-copy';
 import { createMailTransport, resolveSmtpConfig } from '@/lib/mail/smtp';
 
 function argValue(flag: string): string | undefined {

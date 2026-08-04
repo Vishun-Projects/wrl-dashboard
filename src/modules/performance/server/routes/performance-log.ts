@@ -54,6 +54,7 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const userInfo = await getUserInfo();
   if (!userInfo || !canAccessPerformanceInsights(userInfo.permissions)) {
+    // 404 (not 403): hide insights endpoints from non-privileged callers.
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 

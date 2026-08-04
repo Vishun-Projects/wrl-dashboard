@@ -3,7 +3,7 @@ import { requirePageAccess } from '@/lib/auth/require-page-access';
 import { ReportPageSkeleton } from '@/modules/mis/components/ReportLoadingFeedback';
 
 const SerialAuditPageClient = dynamic(
-  () => import('@/modules/serial-history/pages/SerialAuditPageClient'),
+  () => import('@/modules/serial-audit/pages/SerialAuditPageClient'),
   { loading: () => <ReportPageSkeleton /> }
 );
 

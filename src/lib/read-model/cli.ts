@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import '@/lib/read-model/bootstrap-env';
 import { closePool } from '@/lib/read-model/db';
-import { runArcpBackfill } from '@/modules/arcp/server/sync/backfill';
-import { resetArcpReadModel } from '@/modules/arcp/server/sync/backfill';
-import { runArcpIncrementalSync } from '@/modules/arcp/server/sync/incremental';
+import { runArcpBackfill } from '@/modules/arcp-claims/server/sync/backfill';
+import { resetArcpReadModel } from '@/modules/arcp-claims/server/sync/backfill';
+import { runArcpIncrementalSync } from '@/modules/arcp-claims/server/sync/incremental';
 import { runInitialBackfill, runDimsRefresh } from '@/lib/read-model/backfill';
 import { runFillYtdHot } from '@/lib/read-model/sync-hot-ytd';
 import { runBackfillHistoricalHot } from '@/lib/read-model/sync-hot-ytd';
@@ -19,7 +19,7 @@ import { runEditedonCatchupRange, runEditedonCatchupStep } from '@/lib/read-mode
 import { todayLocalDate } from '@/lib/read-model/dates';
 import { runRetentionJobs } from '@/lib/read-model/batches';
 import { runBackfillCallsHotBmApproval } from '@/lib/read-model/backfill-bm-approval';
-import { runBackfillArcpBmApproved } from '@/modules/arcp/server/sync/backfill-arcp-bm-approved';
+import { runBackfillArcpBmApproved } from '@/modules/arcp-claims/server/sync/backfill-arcp-bm-approved';
 import { runBackfillCallsHotWco } from '@/lib/read-model/backfill-wco';
 import {
   runTransactionEntryBackfill,

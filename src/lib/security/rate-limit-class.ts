@@ -1,4 +1,4 @@
-/** Path → rate-limit class (pure; safe for unit tests). */
+/** Tighter limits for auth (esp. forgot-password) and heavy report/export paths. */
 
 export function rateLimitClassForPath(pathname: string): {
   limit: number;

@@ -1,1 +1,1 @@
-export { POST } from '@/modules/activity-log/server/routes/client-action';
+export { POST } from '@/modules/security-audit/server/routes/client-action';

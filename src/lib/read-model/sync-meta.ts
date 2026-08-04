@@ -1,10 +1,10 @@
 import { prisma } from '@/lib/db/prisma';
-import { releaseStaleArcpSyncLock } from '@/modules/arcp/server/sync/lock';
-import { arcpBackfillStartDate } from '@/modules/arcp/server/sync/dates';
+import { releaseStaleArcpSyncLock } from '@/modules/arcp-claims/server/sync/lock';
+import { arcpBackfillStartDate } from '@/modules/arcp-claims/server/sync/dates';
 import { withClient } from '@/lib/read-model/db';
 import { releaseStaleSyncLock } from '@/lib/read-model/lock';
 import { repairStaleIngestBatches } from '@/lib/read-model/batches';
-import type { ArcpPostgresCoverage } from '@/modules/arcp/server/sync/coverage-shared';
+import type { ArcpPostgresCoverage } from '@/modules/arcp-claims/server/sync/coverage-shared';
 import {
   readDimsFromPostgres,
   readArcpFromPostgres,

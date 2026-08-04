@@ -3,7 +3,7 @@ import { requirePageAccess } from '@/lib/auth/require-page-access';
 import { ReportPageSkeleton } from '@/modules/mis/components/ReportLoadingFeedback';
 
 const WarrantyMasterPageClient = dynamic(
-  () => import('@/modules/warranty/pages/WarrantyMasterPageClient'),
+  () => import('@/modules/warranty-master/pages/WarrantyMasterPageClient'),
   { loading: () => <ReportPageSkeleton /> }
 );
 

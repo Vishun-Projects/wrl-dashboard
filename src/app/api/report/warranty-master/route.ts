@@ -1,1 +1,1 @@
-export { GET } from '@/modules/warranty/server/routes/warranty-master';
+export { GET } from '@/modules/warranty-master/server/routes/warranty-master';

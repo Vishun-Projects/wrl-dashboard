@@ -1,3 +1,4 @@
+// ponytail: in-process Map — fine for single Node; multi-instance needs KV (rate-limit-kv).
 type RateLimitEntry = {
   count: number;
   resetAt: number;

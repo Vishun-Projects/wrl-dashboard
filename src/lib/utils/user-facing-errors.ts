@@ -1,6 +1,4 @@
-/**
- * Normalize API / internal error text before showing in toasts or UI.
- */
+/** Strip CRM/SQL/stack internals before toast/UI copy. */
 export function sanitizeUserFacingMessage(message: string): string {
   if (!message) return message;
   let text = message.trim();

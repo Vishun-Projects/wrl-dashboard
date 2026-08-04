@@ -1,1 +1,1 @@
-export { GET } from '@/modules/serial-history/server/routes/repair-call-ids';
+export { GET } from '@/modules/serial-audit/server/routes/repair-call-ids';

@@ -3,6 +3,7 @@
  * Each open call falls in exactly one bucket; the four counts sum to total open calls.
  *
  * Buckets: ≤2 days | 3–7 days | 8–15 days | >15 days
+ * Field names are legacy: age_3 = 3–7d, age_7 = 8–15d, age_15 = >15d.
  */
 
 export type AgingBucketFields = {

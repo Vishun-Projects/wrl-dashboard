@@ -97,7 +97,7 @@ function hotRowToValues(row: HotRow): unknown[] {
   ];
 }
 
-/** Keep existing BM fields when an incremental row has not repopulated them yet. */
+/** Incremental CRM rows often omit BM columns — COALESCE so upserts don't wipe existing approval. */
 const PRESERVE_ON_NULL_UPDATE = new Set(['bapproval', 'bm_approved_at', 'arcp_bm_approved_at']);
 
 const UPDATE_SET = HOT_COLUMNS.filter((c) => c !== 'vtrnno')

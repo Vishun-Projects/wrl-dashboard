@@ -31,7 +31,7 @@ function postPerformanceLogBeacon(entries: PerformanceLogEntry[]): void {
     const blob = new Blob([JSON.stringify({ entries })], { type: 'application/json' });
     navigator.sendBeacon('/api/admin/performance-log', blob);
   } catch {
-    /* ignore */
+    /* logging must not break the app */
   }
 }
 
@@ -69,7 +69,6 @@ function buildVitalEntry(route: string, metric: Metric): PerformanceLogEntry {
   };
 }
 
-/** Collects Web Vitals, navigation timing, resources, and long tasks; writes JSONL via API. */
 export function PerformanceMetricsLogger() {
   const pathname = usePathname() ?? '/';
   const routeRef = useRef(pathname);
@@ -183,7 +182,6 @@ export function PerformanceMetricsLogger() {
   return null;
 }
 
-/** Log a full insights snapshot (server + client) to the performance JSONL file. */
 export async function logInsightsSnapshot(payload: {
   route: string;
   trigger: string;

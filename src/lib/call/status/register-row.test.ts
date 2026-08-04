@@ -5,12 +5,7 @@ import {
 } from '@/lib/call/status/register-row';
 import { mapRegisterBucketToStatusBucket } from '@/lib/read-model/transform';
 
-/**
- * DEVELOPER — READ THIS COMMENT. DO NOT CHANGE THIS SHIT.
- * User will not read it. If Tech. Solve vs Closed goes back to bapproval,
- * Call Register Tech. Solve Call will show 0 again (Jul 2026 outage).
- * Rule: Closed = bsolved; Tech. Solve = bfastclose && !bsolved. Ignore bapproval.
- */
+/** Regression: Tech.Solve vs Closed must not use bapproval — see classifyRegisterRowStatus. */
 describe('classifyRegisterRowStatus — Tech. Solve vs Closed (no bapproval)', () => {
   const cases: Array<{
     name: string;

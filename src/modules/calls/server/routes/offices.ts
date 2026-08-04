@@ -9,12 +9,12 @@ import { isHodUser } from '@/lib/auth/report-security';
 import { resolveApiAccess } from '@/lib/auth/rbac-catalog';
 import { safeErrorMessage } from '@/lib/api/safe-error';
 
-// Global cache to optimize mstoffice retrieval and avoid slow remote DB scans
+// Process-local cache: remote mstoffice scans are slow.
 type OfficeRow = { ncode: string; nunder: string };
 
 let cachedAllOffices: OfficeRow[] | null = null;
 let lastCacheTime = 0;
-const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+const CACHE_TTL = 30 * 60 * 1000;
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -57,6 +57,7 @@ export async function GET(request: Request) {
     }
 
     const allOffices = cachedAllOffices || [];
+    // Empty office_ids means unrestricted (same as HOD), not "no offices".
     const seeAllOffices = isHod || assignedOffices.length === 0;
     const filteredOffices = seeAllOffices
       ? allOffices

@@ -8,6 +8,7 @@ import { lookupForgotPasswordAccount } from '@/lib/auth/forgot-password-lookup';
 import { sendRecoveryEmailForAccount } from '@/lib/auth/send-recovery-email';
 import { logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
 
+// Always same body — avoids account-enumeration via forgot-password.
 function genericOk() {
   return NextResponse.json({ ok: true, message: FORGOT_PASSWORD_GENERIC_MESSAGE });
 }

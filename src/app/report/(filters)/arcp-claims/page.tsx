@@ -3,7 +3,7 @@ import { requirePageAccess } from '@/lib/auth/require-page-access';
 import { ReportPageSkeleton } from '@/modules/mis/components/ReportLoadingFeedback';
 
 const ArcpClaimsPageClient = dynamic(
-  () => import('@/modules/arcp/pages/ArcpClaimsPageClient'),
+  () => import('@/modules/arcp-claims/pages/ArcpClaimsPageClient'),
   { loading: () => <ReportPageSkeleton /> }
 );
 

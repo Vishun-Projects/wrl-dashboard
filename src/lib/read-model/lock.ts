@@ -8,6 +8,7 @@ const SYNC_WAIT_POLL_MS = 2000;
 /** Max wait when another sync holds the lock (stale threshold + 5 min buffer). */
 export const SYNC_WAIT_TIMEOUT_MS =
   Number(process.env.SYNC_WAIT_TIMEOUT_MS) || STALE_LOCK_MS + 5 * 60 * 1000;
+/** Floor so null/epoch watermarks are treated as unset (forces bootstrap / skip, not "caught up"). */
 export const SYNC_WATERMARK_GUARD = new Date('2020-01-01T00:00:00.000Z');
 
 import { sleep } from '@/lib/utils/async';
@@ -35,6 +36,7 @@ export async function releaseStaleSyncLock(client: pg.PoolClient): Promise<boole
   return false;
 }
 
+/** Advisory lock (session) + sync_state.is_running (pollable without holding the advisory). Both or neither. */
 export async function tryAcquireSyncLock(client: pg.PoolClient): Promise<boolean> {
   const lock = await client.query(`SELECT pg_try_advisory_lock(hashtext('read_model_sync')) AS locked`);
   if (!lock.rows[0]?.locked) return false;

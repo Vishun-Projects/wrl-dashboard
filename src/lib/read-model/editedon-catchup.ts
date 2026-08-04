@@ -31,7 +31,6 @@ function recentDaysPerRun(): number {
   return Math.max(0, Number(process.env.SYNC_EDITEDON_RECENT_DAYS ?? 2) || 2);
 }
 
-/** Inclusive recent day window ending at endDay (YYYY-MM-DD). */
 export function recentEditedonDays(endDay: string, count: number): string[] {
   if (count <= 0) return [];
   const end = new Date(`${endDay}T00:00:00`);
@@ -101,6 +100,7 @@ async function applyEditedonRows(
     }
     try {
       const state = await getSyncState(client);
+      // Catch-up must not advance main editedon watermark (that's incremental's job).
       const applied = await applyCrmRowsToHot(client, rawRows, {
         state,
         advanceWatermarks: false,

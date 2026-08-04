@@ -125,6 +125,7 @@ export async function applyCrmRowsToHot(
     await applyNetFactDeltas(client, netFacts);
 
     const watermarks = maxCrmWatermarks(deduped);
+    // Never move watermarks backward — partial/overlap fetches can return older max stamps.
     const nextEdited =
       watermarks.lastEditedon && state?.last_editedon && watermarks.lastEditedon < state.last_editedon
         ? state.last_editedon

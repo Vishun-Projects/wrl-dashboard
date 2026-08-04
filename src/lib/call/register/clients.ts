@@ -7,14 +7,12 @@
 
 import { isSuperAdmin } from '@/lib/auth/rbac-catalog';
 
-/** Who can see the full dynamic account list + “Accounts visible” dropdown. */
 export function canSeeAllCallRegisterClients(
   permissions: string[] | null | undefined
 ): boolean {
   return isSuperAdmin(permissions);
 }
 
-/** Parse `clients=a,b,c` query param. */
 export function parseCallRegisterClientList(raw: string | null | undefined): string[] {
   if (!raw?.trim()) return [];
   const seen = new Set<string>();
@@ -28,7 +26,6 @@ export function parseCallRegisterClientList(raw: string | null | undefined): str
   return out;
 }
 
-/** Trim, collapse spaces, dedupe case-insensitively (first spelling wins). */
 export function normalizeVisibleClientNames(names: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];

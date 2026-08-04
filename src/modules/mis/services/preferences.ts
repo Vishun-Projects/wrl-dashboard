@@ -9,7 +9,7 @@ import {
   type ReportDateRange,
   type ReportFilterSnapshot,
 } from '@/modules/mis/services/filters';
-import { isRepairNcodeValue } from '@/modules/serial-history';
+import { isRepairNcodeValue } from '@/modules/serial-audit';
 import {
   resolveRegisterDateSqlColumn,
   type RegisterDateFilterColumn,

@@ -1,1 +1,1 @@
-export { GET, PATCH } from '@/modules/mail-alerts/server/routes/profile-prefs';
+export { GET, PATCH } from '@/modules/mis-email/server/routes/profile-prefs';

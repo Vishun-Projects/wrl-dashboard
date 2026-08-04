@@ -56,6 +56,7 @@ function sanitizeText(value: unknown): string | null {
   return text || null;
 }
 
+/** Skip DB writes under Vitest so route unit tests stay side-effect free. */
 function auditWritesEnabled(): boolean {
   return process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true';
 }
@@ -88,6 +89,7 @@ function redactValue(value: unknown): unknown {
   return out;
 }
 
+/** Only accept UUID session cookies — ignore garbage / injection in Cookie header. */
 function validSessionId(value: string | null | undefined): string | null {
   const text = sanitizeText(value);
   return text && /^[0-9a-f-]{36}$/i.test(text) ? text : null;

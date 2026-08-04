@@ -7,6 +7,7 @@ export { rateLimitClassForPath } from '@/lib/security/rate-limit-class';
 
 const hasKv = Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
 
+/** Prefer Vercel KV; fall back to memory when unset or on KV errors. */
 export async function checkRateLimitKv(
   key: string,
   limit: number,

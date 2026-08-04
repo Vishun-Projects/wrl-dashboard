@@ -10,10 +10,10 @@ import {
   fetchLocationAuditRowDetail,
   fetchLocationAuditSummary,
   parseLocationAuditQueryParams,
-  resolveLocationAuditSecurity,
   runLocationAuditExport,
 } from '@/modules/location-audit/server';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
+import { resolveReportSecurity } from '@/lib/auth/report-security';
 import { logAction } from '@/lib/security/audit';
 
 export async function GET(req: NextRequest) {
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const security = await resolveLocationAuditSecurity(user.id, {
+    const security = await resolveReportSecurity(user.id, {
       pageId: 'location_audit',
     });
     if (security.forbidden) {

@@ -10,7 +10,7 @@ function formatDmyDots(day: string, month: string, year: string): string {
   return `${pad2(Number(day))}.${pad2(Number(month))}.${year}`;
 }
 
-/** Export date cells: DD.MM.YYYY (e.g. 25.06.2026). */
+/** Export cells use dots (DD.MM.YYYY); UI dates use slashes. */
 export function formatExportDate(value: unknown): string {
   if (value == null || value === '') return '';
 

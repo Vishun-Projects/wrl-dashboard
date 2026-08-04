@@ -1,4 +1,3 @@
-/** Canonical CRM call row field aliases for register, export, and hot transforms. */
 export type NormalizedCallRow = Record<string, unknown> & {
   vtrnno: string;
   ncode: string;

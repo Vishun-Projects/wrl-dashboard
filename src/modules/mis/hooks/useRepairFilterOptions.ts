@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import type { RegisterMultiSelectOption } from '@/modules/mis/register';
-import type { RepairPickerItem } from '@/modules/serial-history';
+import type { RepairPickerItem } from '@/modules/serial-audit';
 
 /** Loads allowlisted mstrepair picker options for the shared Repair done filter. */
 export function useRepairFilterOptions(enabled = true): {

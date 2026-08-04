@@ -12,7 +12,6 @@ export type BearerAuthResult =
   | { ok: true; userId: string; security: ReportSecurity }
   | { ok: false; response: NextResponse };
 
-/** Authenticate API requests using Bearer token and RBAC spec. */
 export async function resolveBearerRbac(
   authHeader: string | null,
   spec: RbacApiSpec
@@ -44,7 +43,7 @@ export async function resolveBearerRbac(
   return { ok: true, userId, security };
 }
 
-/** Authenticate API requests via Bearer header or session cookies + RBAC spec. */
+/** Cookie/Bearer + RBAC; logs auth.access.denied (Bearer-only helper does not). */
 export async function requireRbac(
   req: NextRequest,
   spec: RbacApiSpec

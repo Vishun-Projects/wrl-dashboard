@@ -1,5 +1,3 @@
-/** Known VPS-managed cron jobs controllable from Super Admin portal. */
-
 export const VPS_CRON_JOB_IDS = [
   'mis_email_digest',
   'mis_email_test',

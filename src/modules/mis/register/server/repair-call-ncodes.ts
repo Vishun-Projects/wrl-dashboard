@@ -6,7 +6,7 @@ import {
   resolveRegisterDateSqlColumn,
   type RegisterDateFilterColumn,
 } from '@/sql/trhcalls/query';
-import { parseRepairQueryParam } from '@/modules/serial-history';
+import { parseRepairQueryParam } from '@/modules/serial-audit';
 
 const REPAIR_CALL_IDS_TIMEOUT_MS = 90_000;
 

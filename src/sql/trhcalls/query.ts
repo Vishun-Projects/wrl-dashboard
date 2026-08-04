@@ -704,11 +704,9 @@ export function buildCorpusTableName(opts: {
   `;
 }
 
-/** Valid device serial on raw trhcalls row (no alias). */
 export const SERIAL_AUDIT_VALID_SERIAL_WHERE =
   "ISNULL(vserialno, '') <> '' AND LTRIM(RTRIM(vserialno)) NOT IN ('0', 'N/A', 'NA', 'NONE', 'NULL', '-', '—')";
 
-/** Exclude transferred calls on raw trhcalls row (no alias). */
 export const SERIAL_AUDIT_TRANSFER_EXCLUDE_WHERE =
   "ISNULL(vtransfercallno, '') = '' AND ISNULL(CAST(ncancelreason AS INT), 0) <> 2";
 
@@ -1123,7 +1121,7 @@ export function buildMajorRepairRepeatDetailSql(
 
 /** Repeated serials in a date window — deduped rows with status counts.
  *  Nested subqueries only (db-proxy wraps as SELECT * FROM (...) t — CTE/WITH is invalid). */
-export function buildSerialAuditWindowListRawSql(
+export function buildSerialAuditWindowListBaseSql(
   opts: SerialAuditSqlOpts & { minRepeats?: number }
 ): string {
   const minRepeats = Math.max(2, opts.minRepeats ?? 2);
@@ -1184,9 +1182,60 @@ export function buildSerialAuditWindowListRawSql(
   `;
 }
 
-/** Repeated serials in the applied date window (startDate and endDate required). */
+function serialAuditListSearchWhere(serialSearch?: string): string {
+  const raw = (serialSearch ?? '').trim().toUpperCase();
+  if (!raw) return '';
+  const safe = sqlEscapeCrmLiteral(raw);
+  return ` AND listed.serial LIKE '%${safe}%'`;
+}
+
+export type SerialAuditListPageSqlOpts = SerialAuditSqlOpts & {
+  minRepeats?: number;
+  serialSearch?: string;
+  offset?: number;
+  limit?: number;
+};
+
+export function buildSerialAuditWindowListRawSql(opts: SerialAuditListPageSqlOpts): string {
+  const base = buildSerialAuditWindowListBaseSql(opts);
+  const searchWhere = serialAuditListSearchWhere(opts.serialSearch);
+  const offset = Math.max(0, Math.floor(opts.offset ?? 0));
+  const limit =
+    opts.limit != null && Number.isFinite(opts.limit)
+      ? Math.max(1, Math.floor(opts.limit))
+      : null;
+
+  let sql = `
+    SELECT listed.*
+    FROM (
+      ${base}
+    ) listed
+    WHERE 1=1${searchWhere}
+    ORDER BY listed.complaint_count DESC, listed.serial ASC
+  `;
+  if (limit != null) {
+    sql += `
+    OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`;
+  }
+  return sql;
+}
+
+export function buildSerialAuditWindowListCountRawSql(
+  opts: SerialAuditSqlOpts & { minRepeats?: number; serialSearch?: string }
+): string {
+  const base = buildSerialAuditWindowListBaseSql(opts);
+  const searchWhere = serialAuditListSearchWhere(opts.serialSearch);
+  return `
+    SELECT COUNT(*) AS total
+    FROM (
+      ${base}
+    ) listed
+    WHERE 1=1${searchWhere}
+  `;
+}
+
 export function buildSerialAuditListRawSql(
-  opts: SerialAuditSqlOpts & { minRepeats?: number }
+  opts: SerialAuditListPageSqlOpts
 ): string {
   return buildSerialAuditWindowListRawSql(opts);
 }
@@ -1408,8 +1457,8 @@ export function isRegisterBmApprovedDateColumn(column?: string | null): boolean 
 }
 
 /**
- * CRM date column for register filters.
- * BM Approved Date uses trhcalls.editedon while bapproval is true (same as ARCP Claims).
+ * Live CRM date column only. BM = editedon while bapproval (ARCP Claims).
+ * Hot register filters use arcp_bm_approved_at instead.
  */
 export function sqlRegisterDateColumn(column: RegisterDateFilterColumn, alias = 'tc'): string {
   if (column === 'bm_approved_at') return `${alias}.editedon`;

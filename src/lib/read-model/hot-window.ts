@@ -1,7 +1,7 @@
 import { currentYearStart, daysAgoDate, todayLocalDate } from '@/lib/read-model/dates';
 import { formatLocalDate } from '@/lib/dates/local-date';
 
-/** Matches backfill hot window in sync worker (rolling 90 days). */
+/** Register query routing: trust Postgres for this rolling window; hot retention itself is YTD (+ open-old). */
 export const HOT_WINDOW_DAYS = 90;
 
 /** Hot table retains all calls from this date (calendar YTD) plus open-old exceptions. */
@@ -40,8 +40,8 @@ export function hotWindowRange(): DateRange {
 }
 
 /**
- * Decide whether a user date range is served from Supabase hot table, CRM, or both.
- * Hot table holds calendar-year-to-date calls (+ open-old exceptions outside YTD).
+ * Routes UI date ranges: postgres for the rolling HOT_WINDOW_DAYS span, CRM outside it,
+ * hybrid when straddling. (Hot retention is YTD + open-old — see registerHotRetentionStart.)
  */
 export function resolveHotWindowCoverage(
   startDate: string | null | undefined,

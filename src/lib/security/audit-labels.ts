@@ -16,6 +16,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'admin.role.update': 'Updated role',
   'admin.role.delete': 'Deleted role',
   'admin.mis_email_org_settings.update': 'Updated MIS email org settings',
+  'admin.mis_email_user_prefs.update': 'Updated personal MIS digest prefs',
   'admin.vps_cron.pause': 'Paused VPS cron job',
   'admin.vps_cron.resume': 'Resumed VPS cron job',
   'admin.mis_email_routing.create': 'Created MIS email routing rule',

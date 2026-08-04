@@ -1,5 +1,3 @@
-/** Office scoping SQL fragment for CRM trhcalls / ARCP queries. */
-
 /** Empty assignedOffices = national scope (all branches). */
 export function seesAllOffices(isHod: boolean, assignedOffices: string[]): boolean {
   return isHod || assignedOffices.length === 0;
@@ -12,6 +10,7 @@ export function shouldRestrictToAssignedOffices(
   return !seesAllOffices(isHod, assignedOffices);
 }
 
+/** Restrict to assigned offices: call office or franchisee parent (nunder) under an assigned branch. */
 export function appendOfficeSecurityFilter(
   condition: string,
   isHod: boolean,

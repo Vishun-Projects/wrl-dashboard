@@ -1,1 +1,1 @@
-export { GET } from '@/modules/activity-log/server/routes/security-audit';
+export { GET } from '@/modules/security-audit/server/routes/security-audit';

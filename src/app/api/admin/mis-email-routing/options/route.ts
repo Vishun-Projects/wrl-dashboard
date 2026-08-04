@@ -1,1 +1,1 @@
-export { GET } from '@/modules/mail-alerts/server/routes/routing-options';
+export { GET } from '@/modules/mis-email/server/routes/routing-options';

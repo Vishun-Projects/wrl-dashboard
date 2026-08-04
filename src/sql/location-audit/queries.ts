@@ -19,7 +19,6 @@ export {
   type LocationAuditSeverity,
   type LocationAuditListRow,
   type LocationAuditDetailRow,
-  type LocationAuditRow,
   type LocationAuditSummary,
   type LocationAuditByBranch,
   type LocationAuditQueryParams,
@@ -58,6 +57,7 @@ const MAJOR_REPAIR_EXISTS = `
     WHERE tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid AND r.bmajor = 'True'
   )`;
 
+/** Tech. Solve only (bfastclose && !bsolved) — Closed/bsolved rows are out of location-audit scope. */
 const TECH_SOLVED_WHERE = `
   ISNULL(tc.bfastclose, 0) = 1
   AND ISNULL(tc.bsolved, 0) = 0
@@ -200,7 +200,6 @@ function buildDedupFrom(opts: LocationAuditQueryParams): string {
   });
 }
 
-/** Summary / export cap — up to LOCATION_AUDIT_MAX_ROWS. */
 export function buildLocationAuditRawSql(opts: LocationAuditQueryParams): string {
   const limit = clampLocationAuditLimit(opts.limit);
   const condition = buildLocationAuditWhereClause(opts);
@@ -240,7 +239,6 @@ export function buildLocationAuditPaginatedSql(opts: LocationAuditQueryParams): 
   `;
 }
 
-/** Single call for detail tier. */
 export function buildLocationAuditRowSql(
   ncode: string,
   officeId: string,

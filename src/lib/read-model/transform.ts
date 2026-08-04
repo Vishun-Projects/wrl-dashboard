@@ -62,9 +62,10 @@ export function isOpenPipelineRow(row: Record<string, unknown>): boolean {
   return !solved && !techSolved && (cancel === 0 || Number.isNaN(cancel));
 }
 
-export function isHotEligibleRow(row: Record<string, unknown>, now = new Date()): boolean {
+export function isHotEligibleRow(row: Record<string, unknown>): boolean {
   const trn = String(row.vtrnno ?? row.UniqueCallNo ?? '').trim();
   if (!trn) return false;
+  // Transferred calls leave the register — never keep in hot (reconcile deletes via includeTransferred).
   if (isRegisterRowTransferred(row)) return false;
 
   const loggedAt = parseCrmDate(row.callsdtrndate ?? row.dtrndate);
@@ -73,8 +74,7 @@ export function isHotEligibleRow(row: Record<string, unknown>, now = new Date())
   const ytdStart = new Date(`${registerHotRetentionStart()}T00:00:00`);
   if (loggedAt >= ytdStart) return true;
 
-  // Pre-YTD: keep open pipeline rows only (legacy open-old path).
-  void now;
+  // Pre-YTD: only still-open pipeline rows (open-old exceptions outside calendar retention).
   return isOpenPipelineRow(row);
 }
 
@@ -201,11 +201,11 @@ export function dedupeCrmRows(rows: Record<string, unknown>[]): Record<string, u
   return Array.from(byTrn.values());
 }
 
-export function processCrmRows(rows: Record<string, unknown>[], now = new Date()): HotRow[] {
+export function processCrmRows(rows: Record<string, unknown>[]): HotRow[] {
   const deduped = dedupeCrmRows(rows);
   const hotRows: HotRow[] = [];
   for (const row of deduped) {
-    if (!isHotEligibleRow(row, now)) continue;
+    if (!isHotEligibleRow(row)) continue;
     const hot = transformCrmRowToHot(row);
     if (hot) hotRows.push(hot);
   }

@@ -66,7 +66,7 @@ export async function requireSupabaseUser(
   return null;
 }
 
-/** Bearer header first, then cookie session. */
+/** Bearer first (no absolute portal TTL — API tokens), then cookie session. */
 export async function resolveRequestUserId(
   request: Request,
   supabase: SupabaseClient
@@ -122,6 +122,7 @@ export async function requireRequestUser(
     const cookieStore = await cookies();
     const fromCookies = await resolveSupabaseUserFromCookies(cookieStore.getAll());
     if (fromCookies) {
+      // Cookie path must also clear absolute portal TTL (Bearer path above skips this).
       const portal = evaluatePortalSession(cookieStore.getAll());
       if (!portal.ok) return null;
       return fromCookies;

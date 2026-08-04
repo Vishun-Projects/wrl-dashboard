@@ -64,15 +64,25 @@ function branchRow(
     all_age_7: 0,
     all_age_15: Math.max(0, open - 1),
     all_part_pending: 0,
+    all_tech_solved: solved,
+    tech_solved_calls: solved,
+    deployment_total: 0,
+    deployment_done: 0,
+    installation_total: 0,
+    installation_done: 0,
     active_eng: 1,
+    population: total,
+    headcount: 0,
   };
 }
 
 function accountRow(zone: string, name: string, open: number, solved = 5): AccountSummaryRow {
+  const total = solved + open;
   return {
     region: zone,
     account: name,
-    total_calls: solved + open,
+    population: total,
+    total_calls: total,
     total_solved: solved,
     cancelled_calls: 0,
     open_calls: open,
@@ -80,7 +90,14 @@ function accountRow(zone: string, name: string, open: number, solved = 5): Accou
     age_3: 0,
     age_7: 0,
     age_15: open,
+    part_pending: 0,
+    deployment_total: 0,
+    deployment_done: 0,
+    installation_total: 0,
+    installation_done: 0,
     active_eng: 1,
+    headcount: 0,
+    total_tech_solved: solved,
   };
 }
 
@@ -383,7 +400,7 @@ describe('Count parity — Key Account UI vs Key Account Excel', () => {
 describe('Count parity — digest key-account body vs Key Account Excel', () => {
   it('merged digest account opens match Key Account attachment Open column', async () => {
     const { buildDigestAccountDisplayRows } = await import(
-      '@/modules/mail-alerts/services/fetch-digest-accounts'
+      '@/modules/mis-email/services/fetch-digest-accounts'
     );
     const displayRows = buildDigestAccountDisplayRows(
       sharedCrmAccounts(),

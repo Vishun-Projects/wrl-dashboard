@@ -12,7 +12,6 @@ export {
   type LocationAuditSeverity,
   type LocationAuditListRow,
   type LocationAuditDetailRow,
-  type LocationAuditRow,
   type LocationAuditSummary,
   type LocationAuditByBranch,
   type LocationAuditQueryParams,

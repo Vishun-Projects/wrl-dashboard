@@ -108,6 +108,7 @@ export type RegisterPostgresParams = {
 
 export type RegisterHotDateField = 'logged_at' | 'solved_at' | 'arcp_bm_approved_at';
 
+/** Hot BM date window uses ARCP pick column (arcp_bm_approved_at), not call-level h.bm_approved_at / bapproval. */
 export function resolveRegisterHotDateField(
   column?: string | null
 ): RegisterHotDateField {

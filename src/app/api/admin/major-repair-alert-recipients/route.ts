@@ -1,1 +1,1 @@
-export { GET, POST, PUT, DELETE } from '@/modules/mail-alerts/server/routes/major-repair-recipients';
+export { GET, POST, PUT, DELETE } from '@/modules/mis-email/server/routes/major-repair-recipients';

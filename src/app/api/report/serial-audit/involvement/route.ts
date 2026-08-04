@@ -1,1 +1,1 @@
-export { GET, POST } from '@/modules/serial-history/server/routes/involvement';
+export { GET, POST } from '@/modules/serial-audit/server/routes/involvement';

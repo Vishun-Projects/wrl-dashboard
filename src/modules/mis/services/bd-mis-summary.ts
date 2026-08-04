@@ -216,6 +216,7 @@ function sumClientCadburyInZone(
   clientAccounts: AccountSummaryRow[],
   zone: BdMisZone
 ): BdMisMetricBundle {
+  // West keeps CRM Cadbury; Mondelez import is N/E/S only.
   if (zone === 'WEST ZONE') return emptyBdMisMetrics();
   return sumAccountMetricsInZone(clientAccounts, zone, isCadburyAccount);
 }

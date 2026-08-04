@@ -1,1 +1,1 @@
-export { GET } from '@/modules/serial-history/server/routes/repairs';
+export { GET } from '@/modules/serial-audit/server/routes/repairs';

@@ -1,7 +1,7 @@
 import type pg from 'pg';
 import { prisma } from '@/lib/db/prisma';
-import { formatArcpClaimsExportDate } from '@/modules/arcp/server/sync/dates';
-import { arcpLinesHotHasCallNo } from '@/modules/arcp/server/sync/upsert';
+import { formatArcpClaimsExportDate } from '@/modules/arcp-claims/server/sync/dates';
+import { arcpLinesHotHasCallNo } from '@/modules/arcp-claims/server/sync/upsert';
 import { enrichRegisterRowArcpApproveDates } from '@/sql/register/arcp-approve-dates';
 
 type ArcpPickByCall = {

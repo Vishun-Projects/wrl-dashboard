@@ -49,7 +49,7 @@ export function useDistributionSummary(
           ? appliedFilters.selectedOfficeIds.join(',')
           : 'All';
 
-      const res = await axios.get('/api/report/distribution-summary', {
+      const res = await axios.get('/api/report/distribution/summary', {
         ...cookieAuthRequestConfig,
         signal: controller.signal,
         params: {

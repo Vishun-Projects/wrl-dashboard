@@ -4,8 +4,6 @@
  */
 import { loadEnv } from '@/lib/read-model/db';
 
-/** Ensure sync worker writes to self-hosted VPS Postgres, not Supabase Cloud. */
-
 const CLOUD_HOST_PATTERNS = ['.supabase.co', 'pooler.supabase.com', 'aws-0-', 'aws-1-'];
 
 function parseDatabaseHost(connectionString: string | undefined): string | null {
@@ -18,6 +16,7 @@ function parseDatabaseHost(connectionString: string | undefined): string | null 
   }
 }
 
+/** Ensure sync worker writes to self-hosted VPS Postgres, not Supabase Cloud. */
 export function assertSyncWritesToVps(): void {
   const host = parseDatabaseHost(process.env.DATABASE_URL);
   if (!host) {
@@ -43,5 +42,6 @@ export function assertSyncWritesToVps(): void {
 
 
 loadEnv();
+// CLI sync bypasses pooler session limits — bulk upserts need direct Postgres.
 process.env.USE_DIRECT_DATABASE = 'true';
 assertSyncWritesToVps();

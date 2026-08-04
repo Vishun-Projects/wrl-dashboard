@@ -1,1 +1,1 @@
-export { POST, maxDuration } from '@/modules/arcp/server/routes/load-start';
+export { POST, maxDuration } from '@/modules/arcp-claims/server/routes/load-start';

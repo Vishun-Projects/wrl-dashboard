@@ -1,4 +1,3 @@
-/** Load Leaflet 1.9.4 from CDN (shared by report maps). */
 export function loadLeaflet(): Promise<boolean> {
   return new Promise((resolve) => {
     if (typeof window === 'undefined') {

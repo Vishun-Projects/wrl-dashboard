@@ -130,6 +130,9 @@ export async function POST(request: Request) {
     }
 
     clearRolesCache();
+    const nextPermissionIds = Array.isArray(permissionIds)
+      ? permissionIds.map((p: unknown) => String(p))
+      : [];
     await logSecurityEventBestEffort({
       eventType: 'admin.role.create',
       result: 'success',
@@ -144,7 +147,16 @@ export async function POST(request: Request) {
       targetType: 'app_role',
       targetId: roleId,
       targetLabel: String(name ?? ''),
-      metadata: { permissionCount: Array.isArray(permissionIds) ? permissionIds.length : 0 },
+      metadata: {
+        summary: `Created role ${String(name ?? roleId)}`,
+        actionLabel: 'Created role',
+        permissionCount: nextPermissionIds.length,
+        after: {
+          name: name ?? null,
+          description: description ?? null,
+          permissionIds: nextPermissionIds,
+        },
+      },
     });
     return NextResponse.json({ success: true, id: roleId });
   } catch (err: unknown) {
@@ -303,6 +315,24 @@ export async function DELETE(request: Request) {
 
     if (!id) throw new Error('Role ID is required');
 
+    const beforeRoleRows = (await prisma.$queryRawUnsafe(
+      'SELECT name, description FROM public.app_roles WHERE id = $1 LIMIT 1',
+      id
+    )) as Array<{ name: string | null; description: string | null }>;
+    const beforeRole = beforeRoleRows[0] ?? null;
+    const beforePermRows = (await prisma.$queryRawUnsafe(
+      'SELECT permission_id FROM public.app_role_permissions WHERE role_id = $1',
+      id
+    )) as Array<{ permission_id: string }>;
+    const beforePermissionIds = beforePermRows.map((r) => String(r.permission_id)).sort();
+    const before = beforeRole
+      ? {
+          name: beforeRole.name,
+          description: beforeRole.description,
+          permissionIds: beforePermissionIds,
+        }
+      : null;
+
     await prisma.$queryRawUnsafe('DELETE FROM public.app_roles WHERE id = $1', id);
 
     clearRolesCache();
@@ -319,6 +349,12 @@ export async function DELETE(request: Request) {
       statusCode: 200,
       targetType: 'app_role',
       targetId: String(id),
+      targetLabel: String(beforeRole?.name ?? id),
+      metadata: {
+        summary: `Deleted role ${String(beforeRole?.name ?? id)}`,
+        actionLabel: 'Deleted role',
+        before,
+      },
     });
     return NextResponse.json({ success: true });
   } catch (err: unknown) {

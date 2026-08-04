@@ -3,7 +3,7 @@ import { requirePageAccess } from '@/lib/auth/require-page-access';
 import { ReportPageSkeleton } from '@/modules/mis/components/ReportLoadingFeedback';
 
 const DistributionPageClient = dynamic(
-  () => import('@/modules/call-distribution/pages/DistributionPageClient'),
+  () => import('@/modules/distribution/pages/DistributionPageClient'),
   { loading: () => <ReportPageSkeleton /> }
 );
 

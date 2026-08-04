@@ -82,7 +82,7 @@ export function hotRowNeedsCrmRefresh(
   return false;
 }
 
-/** Whether a hot row should be refreshed or removed based on live CRM (incl. transferred). */
+/** true → upsert or delete: ineligible/transferred CRM rows fail transform and leave hot. */
 export function hotRowNeedsReconcileFromCrm(
   hot: HotReconcileFields,
   crmRow: Record<string, unknown>
@@ -148,6 +148,7 @@ export async function runPipelineReconcile(): Promise<PipelineReconcileResult> {
 
   for (let i = 0; i < trns.length; i += TRN_FETCH_CHUNK) {
     const chunk = trns.slice(i, i + TRN_FETCH_CHUNK);
+    // Need transferred rows visible so eligibility fails and hot deletes them.
     const crmRows = await fetchCrmRowsByTrns(chunk, { includeTransferred: true });
     const crmByTrn = new Map<string, Record<string, unknown>>();
     for (const row of crmRows) {

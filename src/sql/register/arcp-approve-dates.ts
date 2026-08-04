@@ -2,7 +2,7 @@ import {
   formatArcpClaimsExportDate,
   resolveArcpBmApprovedAt,
   resolveArcpHoApprovedAt,
-} from '@/modules/arcp/server/sync/dates';
+} from '@/modules/arcp-claims/server/sync/dates';
 
 /** CRM: latest ARCP line per call — prefer Service Order (vucnno = vtrnno); ncode only if vucnno blank. */
 export const REGISTER_ARCP_PICK_OUTER_APPLY = `

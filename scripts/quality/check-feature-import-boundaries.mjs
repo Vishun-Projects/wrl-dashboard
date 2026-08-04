@@ -54,13 +54,13 @@ const retiredCompRe = new RegExp(
 );
 /** Migrated feature packages → modules (hard-fail old import paths). Add entries only after move. */
 const retiredFeatureToModule = {
-  arcp: 'modules/arcp',
-  'warranty-master': 'modules/warranty',
-  distribution: 'modules/call-distribution',
+  arcp: 'modules/arcp-claims',
+  'warranty-master': 'modules/warranty-master',
+  distribution: 'modules/distribution',
   'location-audit': 'modules/location-audit',
-  'serial-audit': 'modules/serial-history',
-  'mis-email': 'modules/mail-alerts',
-  'major-repair-alerts': 'modules/mail-alerts',
+  'serial-audit': 'modules/serial-audit',
+  'mis-email': 'modules/mis-email',
+  'major-repair-alerts': 'modules/mis-email',
   report: 'modules/mis',
   register: 'modules/mis/register',
   'mis-import': 'modules/mis/client-import',
@@ -76,7 +76,18 @@ const retiredCallLibRe =
 const retiredSqlLibRe = /from\s+['"]@\/lib\/(register-sql|trhcalls|repair)(\/|['"])/;
 const retiredSqlReadModelQueriesRe = /from\s+['"]@\/lib\/read-model\/queries(\/|['"])/;
 const retiredSqlModuleRe =
-  /from\s+['"]@\/modules\/(warranty\/services\/sql|arcp\/services\/query|arcp\/server\/postgres|location-audit\/server\/queries|serial-history\/server\/sql-scope)(\/|['"])/;
+  /from\s+['"]@\/modules\/(warranty-master\/services\/sql|arcp-claims\/services\/query|arcp-claims\/server\/postgres|location-audit\/server\/queries|serial-audit\/server\/sql-scope)(\/|['"])/;
+/** Folder renames: report URLs / admin API families win. */
+const retiredModuleRenameRe =
+  /from\s+['"]@\/modules\/(call-distribution|serial-history|arcp|warranty|mail-alerts|activity-log)(\/|['"])/;
+const retiredModuleRenameTo = {
+  'call-distribution': 'modules/distribution',
+  'serial-history': 'modules/serial-audit',
+  arcp: 'modules/arcp-claims',
+  warranty: 'modules/warranty-master',
+  'mail-alerts': 'modules/mis-email',
+  'activity-log': 'modules/security-audit',
+};
 
 const deepFeatureImport =
   /from\s+['"]@\/features\/([a-z0-9-]+)\/(lib|ui|components|services|server|hooks|pages|constants)\//;
@@ -153,7 +164,7 @@ for (const file of walk(srcRoot)) {
     }
     if (retiredArcpReadModelRe.test(line)) {
       hard.push(
-        `${rel}: retired @/lib/read-model/arcp (use @/modules/arcp/server/sync)\n  ${line.trim()}`
+        `${rel}: retired @/lib/read-model/arcp (use @/modules/arcp-claims/server/sync)\n  ${line.trim()}`
       );
     }
     if (retiredCallLibRe.test(line)) {
@@ -173,6 +184,12 @@ for (const file of walk(srcRoot)) {
     }
     if (retiredSqlModuleRe.test(line)) {
       hard.push(`${rel}: retired module SQL path (use @/sql/<domain>)\n  ${line.trim()}`);
+    }
+    const renamed = line.match(retiredModuleRenameRe);
+    if (renamed) {
+      hard.push(
+        `${rel}: retired @/modules/${renamed[1]} (use @/${retiredModuleRenameTo[renamed[1]]})\n  ${line.trim()}`
+      );
     }
   }
 }

@@ -1,5 +1,3 @@
-/** Retry network / 5xx failures for export and file downloads. */
-
 export type FetchWithRetryOptions = RequestInit & {
   retries?: number;
   retryDelayMs?: number;
@@ -45,7 +43,6 @@ export type AxiosRetryConfig = {
   retryDelayMs?: number;
 };
 
-/** Wrap an axios call with retries on network / 5xx / 429. */
 export async function withAxiosRetry<T>(
   run: () => Promise<T>,
   config: AxiosRetryConfig = {}

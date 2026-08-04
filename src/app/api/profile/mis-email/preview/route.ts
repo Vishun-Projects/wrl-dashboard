@@ -1,1 +1,1 @@
-export { POST, maxDuration } from '@/modules/mail-alerts/server/routes/profile-preview';
+export { POST, maxDuration } from '@/modules/mis-email/server/routes/profile-preview';

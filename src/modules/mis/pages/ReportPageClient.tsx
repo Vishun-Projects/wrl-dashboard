@@ -630,7 +630,6 @@ export default function ReportPageClient() {
   };
 
 
-  // We no longer sync data to localStorage here to avoid overwriting base cache with filtered data.
 
   const [drillDown, setDrillDown] = useState<{
     isOpen: boolean;
@@ -739,7 +738,6 @@ export default function ReportPageClient() {
     repairFilter,
   };
 
-  // Client-side cascades computation removed in favor of server-side cascades
 
   const persistCurrentCache = async (
     calls: any[],

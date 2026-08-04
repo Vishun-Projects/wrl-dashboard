@@ -243,7 +243,6 @@ function expandPermissions(permissions: string[] | null | undefined): Set<string
   return expanded;
 }
 
-/** Expand legacy tab aliases to canonical permission names (for DB rows pre-migration). */
 export function expandPermissionList(permissions: string[]): string[] {
   return [...expandPermissions(permissions)];
 }
@@ -270,7 +269,6 @@ function pageByPath(path: string): RbacPage | undefined {
   return undefined;
 }
 
-/** Full page access (all tabs when page has tabs). */
 export function hasFullPageAccess(permissions: string[], pageId: string): boolean {
   const page = PAGE_BY_ID.get(pageId);
   if (!page) return false;
@@ -280,6 +278,7 @@ export function hasFullPageAccess(permissions: string[], pageId: string): boolea
 export function canAccessPage(permissions: string[], pageId: string): boolean {
   const page = PAGE_BY_ID.get(pageId);
   if (!page) return false;
+  // Mail & Alerts hub + legacy paths share one OR-gate so any legacy/admin/HOD grant opens the hub.
   if (
     pageId === 'mis_email_routing' ||
     pageId === 'major_repair_alerts' ||
@@ -396,6 +395,7 @@ export function canAccessPath(
   permissions: string[],
   path: string
 ): boolean {
+  // Authenticated users always reach /profile; public auth routes need no RBAC.
   if (isPublicAuthRoute(path) || path.startsWith('/profile')) return true;
 
   if (path === '/admin' || path === '/admin/') {
@@ -406,6 +406,7 @@ export function canAccessPath(
     return hasPermission(permissions, 'manage_users');
   }
 
+  // Activity Log + VPS Cron: super_admin only (not manage_users / HOD).
   if (path === '/admin/security-audit' || path.startsWith('/admin/security-audit/')) {
     return hasPermission(permissions, SUPER_ADMIN_PERMISSION);
   }

@@ -25,6 +25,7 @@ export function buildMisAccess(
     accounts: canAccessMisTab(userPermissions, 'accounts'),
     client_import: canAccessMisTab(userPermissions, 'client_import'),
     deployment_completion: canAccessMisTab(userPermissions, 'deployment_completion'),
+    // Tab RBAC ∩ feature flag — flag off hides bd_mis_summary even if permitted.
     bd_mis_summary:
       bdMisSummaryTabEnabled && canAccessMisTab(userPermissions, 'bd_mis_summary'),
   };

@@ -29,9 +29,10 @@ import { runPipelineReconcile } from '@/lib/read-model/pipeline-reconcile';
 import { runReconcileTechSolved } from '@/lib/read-model/reconcile-tech-solved';
 import { runEditedonCatchupStep } from '@/lib/read-model/editedon-catchup';
 import { repairHotCancelFromNcrReason } from '@/lib/read-model/repair-hot-cancel';
-import { checkMajorRepairRepeatAlerts } from '@/modules/mail-alerts/server/sync/major-repair-repeat-alert';
+import { checkMajorRepairRepeatAlerts } from '@/modules/mis-email/server/sync/major-repair-repeat-alert';
 import { runReconcileMajor } from '@/lib/read-model/reconcile-major';
 
+/** Re-fetch slightly before watermark — same-second CRM edits / mid-scan races. */
 const OVERLAP_MS = 2 * 60 * 1000;
 const MIN_HOT_FOR_INCREMENTAL = Math.floor(HOT_TARGET_ROWS * 0.95);
 const INCREMENTAL_ENTITY = 'calls_latest_hot';
@@ -93,6 +94,7 @@ export async function runIncrementalSync(): Promise<IncrementalSyncResult> {
     return { ok: false, skipped: true, reason: 'SYNC_WORKER_ENABLED is not true' };
   }
 
+  // Process-level coalesce: one CRM fetch in-flight; DB lock coalesce is separate (below).
   if (inFlightSync) {
     console.log('[sync-worker] Incremental coalesced — waiting for in-flight sync');
     return inFlightSync;

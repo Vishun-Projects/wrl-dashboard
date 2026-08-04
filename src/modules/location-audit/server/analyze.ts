@@ -29,6 +29,7 @@ import type {
   LocationAuditSummary,
 } from '../services/types';
 
+// Visit GPS soft thresholds (500 m vs stored, 1 km vs install) — secondary to pincode mismatch
 const VISIT_STORED_MAX_M = 500;
 const VISIT_INSTALL_MAX_M = 1000;
 
@@ -574,13 +575,11 @@ export function summarizeLocationAuditListRows(
       case 'mismatch':
         summary.withCrmGps++;
         summary.pincodeMismatch++;
-        summary.mismatchOver1km = summary.pincodeMismatch;
         break;
       case 'ok':
         summary.withCrmGps++;
         if (row.pincodeMatchStatus === 'same') {
           summary.pincodeMatch++;
-          summary.within1km = summary.pincodeMatch;
         } else if (row.pincodeMatchStatus === 'unknown') {
           if (!install) summary.missingInstallPincode++;
           else summary.pincodeUnknown++;
@@ -608,7 +607,6 @@ export function aggregateByBranch(rows: LocationAuditListRow[]): LocationAuditBy
     .map(([branch, v]) => ({
       branch,
       pincodeMismatch: v.pincodeMismatch,
-      mismatchOver1km: v.pincodeMismatch,
       total: v.total,
     }))
     .sort((a, b) => b.pincodeMismatch - a.pincodeMismatch || b.total - a.total);

@@ -4,7 +4,7 @@ import { notFound, redirect } from 'next/navigation';
 import { getUserInfo } from '@/lib/auth/session';
 import { canAccessPath } from '@/lib/auth/rbac-catalog';
 
-/** Server-side page guard: returns profile or hides route (404). */
+/** Unauthed → /login; missing permission → 404 (hide route existence). */
 export async function requirePageAccess(pathname: string) {
   const userInfo = await getUserInfo();
   if (!userInfo) {

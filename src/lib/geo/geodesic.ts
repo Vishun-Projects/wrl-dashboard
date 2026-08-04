@@ -31,7 +31,6 @@ export function geodesicArc(
   return points;
 }
 
-/** Midpoint on the great-circle path between two coordinates. */
 export function geodesicMidpoint(
   lat1: number,
   lng1: number,
@@ -42,7 +41,6 @@ export function geodesicMidpoint(
   return arc[1] ?? arc[0];
 }
 
-/** Human-readable distance from meters (e.g. "1.25 km", "450 m"). */
 export function formatDistanceMeters(m: number, suffix = ''): string {
   const base = m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`;
   return suffix ? `${base}${suffix}` : base;

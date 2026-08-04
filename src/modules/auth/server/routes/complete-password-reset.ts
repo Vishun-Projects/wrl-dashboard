@@ -107,10 +107,11 @@ export async function POST(request: Request) {
 
     try {
       clearSessionCookies(cookieWriter);
+      // Force re-login: recovery JWT must not remain a usable session.
       await clearSessionStartedAtCookie();
       await clearAuditSessionCookie();
     } catch {
-      /* best-effort */
+      /* cookies cleared; recovery session must not linger */
     }
 
     try {

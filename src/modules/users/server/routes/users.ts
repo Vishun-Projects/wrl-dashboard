@@ -14,7 +14,7 @@ import { isDevAuthBypass } from '@/lib/auth/verify-jwt';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { canAssignMisEmail, resolveMisEmailReportIncludes } from '@/lib/auth/rbac-catalog';
-import { defaultPreferencesForRecipient } from '@/modules/mail-alerts';
+import { defaultPreferencesForRecipient } from '@/modules/mis-email';
 import { USER_ROLE_IDS_SUBSELECT } from '@/lib/auth/user-roles-sql';
 import {
   loadPermissionsForRoleIds,
@@ -39,6 +39,30 @@ const USER_LIST_SQL = `
 
 function isDuplicateEmailMessage(message: string): boolean {
   return /already been registered|already registered|already exists|duplicate/i.test(message);
+}
+
+function userCreateAuditMetadata(input: {
+  email: string;
+  name: string;
+  role: string;
+  roleIds: string[];
+  officeIds: string[];
+  visibleStatuses: string[];
+  recovered?: boolean;
+}) {
+  return {
+    summary: `Created user ${input.email}`,
+    actionLabel: 'Created user',
+    ...(input.recovered ? { recovered: true } : {}),
+    after: {
+      email: input.email,
+      name: input.name,
+      role: input.role,
+      roleIds: input.roleIds,
+      officeIds: input.officeIds,
+      visibleStatuses: input.visibleStatuses,
+    },
+  };
 }
 
 function slugRoleName(name: string): string {
@@ -201,6 +225,7 @@ export async function POST(request: Request) {
         if (dbResult.status === 409) {
           const existingId = await findAuthUserIdByEmail(profileParams.email);
           if (existingId && !(await profileExists(existingId))) {
+            // Auth user exists without app_users row — attach profile instead of 409.
             await insertAppUser({ id: existingId, ...profileParams });
             clearAdminBootstrapCache();
             await logSecurityEventBestEffort({
@@ -217,7 +242,15 @@ export async function POST(request: Request) {
               targetType: 'app_user',
               targetId: existingId,
               targetLabel: profileParams.email,
-              metadata: { recovered: true, roleIds, officeIds: profileParams.officeIds },
+              metadata: userCreateAuditMetadata({
+                email: profileParams.email,
+                name: profileParams.name,
+                role: profileParams.role,
+                roleIds,
+                officeIds: profileParams.officeIds,
+                visibleStatuses: profileParams.visibleStatuses,
+                recovered: true,
+              }),
             });
             return NextResponse.json({
               success: true,
@@ -248,7 +281,14 @@ export async function POST(request: Request) {
         targetType: 'app_user',
         targetId: dbResult.id,
         targetLabel: profileParams.email,
-        metadata: { roleIds, officeIds: profileParams.officeIds },
+        metadata: userCreateAuditMetadata({
+          email: profileParams.email,
+          name: profileParams.name,
+          role: profileParams.role,
+          roleIds,
+          officeIds: profileParams.officeIds,
+          visibleStatuses: profileParams.visibleStatuses,
+        }),
       });
       return NextResponse.json({ success: true, id: dbResult.id, role_ids: roleIds });
     }
@@ -264,6 +304,7 @@ export async function POST(request: Request) {
       if (isDuplicateEmailMessage(createError.message)) {
         const existing = await findAuthUserByEmail(profileParams.email);
         if (existing && !(await profileExists(existing.id))) {
+          // Auth user exists without app_users row — attach profile instead of 409.
           authUserId = existing.id;
           await insertAppUser({ id: existing.id, ...profileParams });
           clearAdminBootstrapCache();
@@ -281,7 +322,15 @@ export async function POST(request: Request) {
             targetType: 'app_user',
             targetId: existing.id,
             targetLabel: profileParams.email,
-            metadata: { recovered: true, roleIds, officeIds: profileParams.officeIds },
+            metadata: userCreateAuditMetadata({
+              email: profileParams.email,
+              name: profileParams.name,
+              role: profileParams.role,
+              roleIds,
+              officeIds: profileParams.officeIds,
+              visibleStatuses: profileParams.visibleStatuses,
+              recovered: true,
+            }),
           });
           return NextResponse.json({
             success: true,
@@ -317,7 +366,14 @@ export async function POST(request: Request) {
       targetType: 'app_user',
       targetId: authData.user.id,
       targetLabel: profileParams.email,
-      metadata: { roleIds, officeIds: profileParams.officeIds },
+      metadata: userCreateAuditMetadata({
+        email: profileParams.email,
+        name: profileParams.name,
+        role: profileParams.role,
+        roleIds,
+        officeIds: profileParams.officeIds,
+        visibleStatuses: profileParams.visibleStatuses,
+      }),
     });
 
     return NextResponse.json({ success: true, id: authData.user.id, role_ids: roleIds });
@@ -410,6 +466,7 @@ export async function PUT(request: Request) {
     const wantsEmail = Boolean(mis_email_enabled);
     const roleSlug = typeof role === 'string' && role.trim() ? role : primary.roleSlug;
 
+    // MIS digest needs canAssignMisEmail on the *target* role set, not the admin's.
     if (wantsEmail && !canEmail) {
       return NextResponse.json(
         {
@@ -421,7 +478,7 @@ export async function PUT(request: Request) {
     }
 
     if (wantsEmail) {
-      const { getMisEmailOrgSettings } = await import('@/modules/mail-alerts/services/org-settings');
+      const { getMisEmailOrgSettings } = await import('@/modules/mis-email/services/org-settings');
       const org = await getMisEmailOrgSettings();
       const defaultPrefs = JSON.stringify(
         defaultPreferencesForRecipient(includes, {
@@ -555,13 +612,45 @@ export async function DELETE(request: Request) {
 
     if (!userId) throw new Error('User ID is required');
 
+    // Block self-delete so an admin cannot lock themselves out mid-session.
     if (userId === adminUser.id) throw new Error('Cannot delete your own account');
+
+    const beforeRows = (await prisma.$queryRawUnsafe(
+      `SELECT u.name, u.email, u.role, u.role_id, u.office_ids, u.visible_statuses, u.mis_email_enabled,
+              (${USER_ROLE_IDS_SUBSELECT}) AS role_ids
+       FROM public.app_users u
+       WHERE u.id = $1
+       LIMIT 1`,
+      userId
+    )) as Array<{
+      name: string | null;
+      email: string | null;
+      role: string | null;
+      role_id: string | null;
+      office_ids: string[] | null;
+      visible_statuses: string[] | null;
+      mis_email_enabled: boolean | null;
+      role_ids: string[] | null;
+    }>;
+    const beforeRow = beforeRows[0] ?? null;
+    const before = beforeRow
+      ? {
+          email: beforeRow.email,
+          name: beforeRow.name,
+          role: beforeRow.role,
+          roleIds: beforeRow.role_ids ?? [],
+          officeIds: beforeRow.office_ids ?? [],
+          visibleStatuses: beforeRow.visible_statuses ?? [],
+          misEmailEnabled: Boolean(beforeRow.mis_email_enabled),
+        }
+      : null;
 
     await prisma.$queryRawUnsafe('DELETE FROM public.app_users WHERE id = $1', userId);
     clearAdminBootstrapCache();
     clearMeCache(userId);
 
     if (isDevAuthBypass()) {
+      // Bypass has no Admin API TLS: profile gone; auth user must be deleted elsewhere.
       return NextResponse.json(
         {
           error:
@@ -586,6 +675,12 @@ export async function DELETE(request: Request) {
       statusCode: 200,
       targetType: 'app_user',
       targetId: userId,
+      targetLabel: String(before?.email ?? userId),
+      metadata: {
+        summary: `Deleted user ${String(before?.email ?? userId)}`,
+        actionLabel: 'Deleted user',
+        before,
+      },
     });
 
     return NextResponse.json({ success: true });

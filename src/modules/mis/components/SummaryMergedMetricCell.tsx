@@ -99,31 +99,19 @@ export {
 type Props = {
   crm: number;
   client: number;
-  /** @deprecated Use mergeSelection */
-  includeClientImport?: boolean;
-  mergeSelection?: MergeSelection;
+  mergeSelection: MergeSelection;
   className?: string;
   onClick?: () => void;
 };
 
-function resolveMergeSelection(
-  includeClientImport?: boolean,
-  mergeSelection?: MergeSelection
-): MergeSelection {
-  if (mergeSelection) return mergeSelection;
-  return { crm: true, client: includeClientImport !== false };
-}
-
 export function SummaryMergedMetricCell({
   crm,
   client,
-  includeClientImport,
   mergeSelection,
   className = '',
   onClick,
 }: Props) {
-  const selection = resolveMergeSelection(includeClientImport, mergeSelection);
-  const value = mergeSelectedMetrics(crm, client, selection);
+  const value = mergeSelectedMetrics(crm, client, mergeSelection);
 
   return (
     <td

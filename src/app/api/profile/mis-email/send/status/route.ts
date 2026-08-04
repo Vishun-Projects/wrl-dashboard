@@ -1,1 +1,1 @@
-export { GET } from '@/modules/mail-alerts/server/routes/profile-send-status';
+export { GET } from '@/modules/mis-email/server/routes/profile-send-status';

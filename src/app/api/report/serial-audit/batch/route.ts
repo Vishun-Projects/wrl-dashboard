@@ -1,1 +1,1 @@
-export { POST } from '@/modules/serial-history/server/routes/batch';
+export { POST } from '@/modules/serial-audit/server/routes/batch';

@@ -28,6 +28,7 @@ export async function GET() {
 
   const auth = await loadUserAuth(userId);
   if (!auth || !canAccessPerformanceInsights(auth.permissions)) {
+    // 404 (not 403): hide insights endpoints from non-privileged callers.
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 

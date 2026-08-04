@@ -1,6 +1,5 @@
 const DEFAULT_ALLOWED_EMAIL_DOMAINS = ['westernequipments.com'] as const;
 
-/** Normalize domain: strip leading @, lowercase, trim. */
 export function normalizeEmailDomain(raw: string): string {
   return raw.trim().toLowerCase().replace(/^@+/, '');
 }

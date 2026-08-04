@@ -1,6 +1,6 @@
 import type { RegisterDateFilterColumn } from '@/sql/trhcalls/query';
 
-/** Cap for CRM TOP / list analysis (was REPORT_MAX_ROWS from deleted sync proxy). */
+/** Cap for CRM TOP / list analysis. */
 export const LOCATION_AUDIT_MAX_ROWS = 2000;
 export const LOCATION_AUDIT_LIST_PAGE_SIZE = 50;
 
@@ -80,9 +80,6 @@ export type LocationAuditDetailRow = LocationAuditListRow & {
   severity: LocationAuditSeverity;
 };
 
-/** @deprecated Use LocationAuditListRow */
-export type LocationAuditRow = LocationAuditDetailRow;
-
 export type LocationAuditSummary = {
   totalCalls: number;
   analyzedCap: number;
@@ -97,10 +94,6 @@ export type LocationAuditSummary = {
   addressPincodeConflict: number;
   flagged: number;
   review: number;
-  /** @deprecated Use farFromInstall */
-  mismatchOver1km?: number;
-  /** @deprecated */
-  within1km?: number;
 };
 
 /** Install address pincode differs from pincode at stored GPS (primary audit signal). */
@@ -125,7 +118,6 @@ export function filterLocationAuditListRows(
 export type LocationAuditByBranch = {
   branch: string;
   pincodeMismatch: number;
-  mismatchOver1km: number;
   total: number;
 };
 

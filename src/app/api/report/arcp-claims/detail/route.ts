@@ -1,1 +1,1 @@
-export { GET, maxDuration } from '@/modules/arcp/server/routes/detail';
+export { GET, maxDuration } from '@/modules/arcp-claims/server/routes/detail';

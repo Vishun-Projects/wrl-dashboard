@@ -22,10 +22,10 @@ export const SYNC_CRM_NCODE_SHARD_MAX =
   Number(process.env.SYNC_CRM_NCODE_SHARD_MAX ?? 32) || 32;
 
 
-const FETCH_GAP_MS = Number(process.env.SYNC_CRM_FETCH_GAP_MS ?? 1500) || 1500;
+const FETCH_GAP_MS = Number(process.env.SYNC_CRM_FETCH_GAP_MS ?? 1500) || 1500; // Pause between shard/chunk POSTs — shared CRM DBQUERY melts under burst.
 const RETRY_DELAYS_MS = [3000, 10000, 30000];
 
-/** Default CRM window for incremental catch-up (was 7 — too heavy after downtime). */
+/** Incremental date-chunk size — keep small; wide catch-up after downtime OOMs/timeouts CRM. */
 const SYNC_INCREMENTAL_CHUNK_DAYS = Math.max(
   1,
   Number(process.env.SYNC_CRM_INCREMENTAL_CHUNK_DAYS ?? 1) || 1
@@ -197,6 +197,7 @@ async function fetchCrmCorpusWindow(
   });
 }
 
+/** OOM/timeout ladder: hour-split a single day, else binary-double ncode shards up to MAX. */
 async function fetchCrmCorpusWindowSharded(
   opts: CorpusWindowOpts & { orderBy?: string; timeoutMs: number },
   shardIndex: number,
@@ -520,7 +521,7 @@ export async function fetchCrmIncrementalRows(
   return allRows;
 }
 
-/** Open calls logged more than 90 days ago (~1,801 TRNs). */
+/** Open pipeline logged >90d ago — open-old exceptions outside the rolling register window. */
 export async function fetchCrmOpenOldRows(): Promise<Record<string, unknown>[]> {
   const tableName = `
     (

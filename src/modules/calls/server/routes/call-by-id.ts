@@ -55,7 +55,6 @@ export async function GET(
       parentCondition = `(${parentCondition}) AND tc.nofficeid = '${officeId.replace(/'/g, "''")}'`;
     }
 
-    // 1. Fetch parent call first by resolved key/office to avoid duplicates
     const parentRes = await postQuery({
       fields: "tc.ncode, tc.nofficeid, tc.vtrnno, tc.vtransfercallno, tc.vserialno, tc.vmanualjobno, tc.vlocation, tc.vpersoncalling, tc.vcomplaint, tc.vsolveremarks, tc.ncancelreason, cr.vname as ncancelreason_label, tc.callStatus, tc.bsolved, tc.bfastclose, tc.baccepted, tc.nengineer, u.vname as engineer_name, p.vname as customer_name, o.vcompanyname as branch_name, CONVERT(varchar(30), tc.dtrndate, 126) as dtrndate, CONVERT(varchar(30), tc.dallocationdatetime, 126) as dallocationdatetime, CONVERT(varchar(30), tc.dsolvedatetime, 126) as dsolvedatetime, CONVERT(varchar(30), tc.dfastclosedatetime, 126) as dfastclosedatetime, tc.bBMreject, tc.vBMrejectreason, CONVERT(varchar(30), tc.dBMrejectdatetime, 126) as dBMrejectdatetime",
       tableName: "trhcalls tc (NOLOCK) LEFT JOIN mstparty p (NOLOCK) ON tc.nparty = p.ncode LEFT JOIN mstoffice o (NOLOCK) ON tc.nofficeid = o.ncode LEFT JOIN mstusers u (NOLOCK) ON tc.nengineer = u.ncode LEFT JOIN mstcallcancelreasons cr (NOLOCK) ON tc.ncancelreason = cr.ncode",
@@ -99,7 +98,6 @@ export async function GET(
     const childConditionF = `f.ncalls = '${realId}' AND f.nofficeid = '${realOfficeId}'`;
     const childConditionP = `p.ncalls = '${realId}' AND p.nofficeid = '${realOfficeId}'`;
 
-    // 2. Fetch everything else in parallel using literal resolved keys
     const [visitsRes, faultsRes, partsRes, serialsRes, docsRes] = await Promise.all([
       postQuery({ 
         fields: "v.vVisitTrnNo as vtrnno, v.vpersoncontected, CONVERT(varchar(30), v.dvisitdatetime, 126) as dvisitdatetime, v.vvisitremark, v.vcustomerRemarks, v.vPartsReplacedDetails, v.ntimespent, v.nvisitexpense, v.nofficeid, v.vcustomersignPath, v.vengineersignPath", 
@@ -134,9 +132,7 @@ export async function GET(
     const serials = serialsRes.data || [];
     const docs = docsRes.data || [];
 
-    // 3. Smart-Merge Serial Numbers into Parts
-    const parts = rawParts.map((part: Record<string, string>): Record<string, string> => {
-      // Find matching serial entry (by part_id OR item_code)
+        const parts = rawParts.map((part: Record<string, string>): Record<string, string> => {
       const serialEntry = serials.find((serial: Record<string, string>) => 
         String(serial.ncalls3) === String(part.part_id) || 
         (String(serial.nitem) === String(part.nitem))
@@ -150,7 +146,7 @@ export async function GET(
         voldbarcode = serialEntry.voldserialno || voldbarcode;
       }
 
-      // Final fallback: Smart Extraction from visits
+      // Barcodes often empty in CRM; last-resort parse from visit remarks.
       if (!vnewbarcode || String(vnewbarcode).trim() === '') {
         const partNameLower = (part.vpartname || '').toLowerCase();
         const partCode = (part.vpartcode || '').toLowerCase();

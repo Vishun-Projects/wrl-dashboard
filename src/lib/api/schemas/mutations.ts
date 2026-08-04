@@ -7,6 +7,7 @@ export const flagPostSchema = z.object({
   vtrnno: z.string().trim().max(128).optional().nullable(),
 });
 
+/** Accept camelCase + snake_case keys from older clients. */
 export const commentPostSchema = z.object({
   callId: z.union([z.string(), z.number()]).transform(String).optional(),
   call_id: z.union([z.string(), z.number()]).transform(String).optional(),

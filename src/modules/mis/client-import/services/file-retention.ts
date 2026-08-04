@@ -3,9 +3,6 @@ export const IMPORT_FILE_RETENTION_DAYS = 7;
 
 export const IMPORT_FILE_UNAVAILABLE_LABEL = 'Unavailable';
 
-/** @deprecated use IMPORT_FILE_UNAVAILABLE_LABEL */
-export const IMPORT_FILE_DOWNLOAD_UNAVAILABLE_LABEL = IMPORT_FILE_UNAVAILABLE_LABEL;
-
 export function importFileRetentionTooltip(days = IMPORT_FILE_RETENTION_DAYS): string {
   return `Kept for ${days} days only`;
 }

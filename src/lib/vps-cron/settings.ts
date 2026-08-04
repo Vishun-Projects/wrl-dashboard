@@ -11,6 +11,7 @@ type Stored = { paused?: Record<string, boolean> };
 
 let ensured = false;
 let cache: { at: number; paused: Partial<Record<VpsCronJobId, boolean>> } | null = null;
+/** Short TTL so bash cli-gate sees portal pause flips without hammering Postgres. */
 const CACHE_TTL_MS = 10_000;
 
 async function ensureAppOrgSettingsTable(): Promise<void> {

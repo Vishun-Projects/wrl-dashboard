@@ -25,7 +25,6 @@ export async function ensureCallRegisterVisibleClientsTable(): Promise<void> {
   ensured = true;
 }
 
-/** Shared allowlist everyone else sees. Empty until an editor Saves. */
 export async function listVisibleCallRegisterClients(): Promise<string[]> {
   await ensureCallRegisterVisibleClientsTable();
   return withAppClient(async (client) => {
@@ -38,7 +37,6 @@ export async function listVisibleCallRegisterClients(): Promise<string[]> {
   });
 }
 
-/** Replace-all shared allowlist. Rejects empty after normalize. */
 export async function replaceVisibleCallRegisterClients(names: string[]): Promise<string[]> {
   const clients = normalizeVisibleClientNames(names);
   if (!clients.length) {

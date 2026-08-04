@@ -12,9 +12,6 @@ export const MIS_UPLOAD_CHUNK_BYTES_MAX = MIS_UPLOAD_CHUNK_BYTES_VPS;
 /** Chunk when transfer payload exceeds this (always — enables resume on flaky links). */
 export const MIS_UPLOAD_CHUNK_THRESHOLD_BYTES = 4 * 1024 * 1024;
 
-/** @deprecated Use MIS_UPLOAD_CHUNK_THRESHOLD_BYTES */
-export const MIS_VERCEL_CHUNK_THRESHOLD_BYTES = MIS_UPLOAD_CHUNK_THRESHOLD_BYTES;
-
 export const MIS_UPLOAD_CHUNK_CONCURRENCY = 6;
 export const MIS_UPLOAD_CHUNK_RETRIES = 3;
 

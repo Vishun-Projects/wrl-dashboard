@@ -1,1 +1,1 @@
-export { GET, maxDuration } from '@/modules/arcp/server/routes/label-lookups';
+export { GET, maxDuration } from '@/modules/arcp-claims/server/routes/label-lookups';

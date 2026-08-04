@@ -93,7 +93,7 @@ echo "==> Verifying cli path on VPS…"
 ssh "${SSH_OPTS[@]}" "$VPS_HOST" bash -s <<REMOTE
 set -euo pipefail
 root='${INSTALL_ROOT}'
-test -f "\$root/src/modules/mail-alerts/services/cli.ts"
+test -f "\$root/src/modules/mis-email/services/cli.ts"
 grep -n 'mis-email:digest' "\$root/package.json" | head -3
 # Register barrel must stay services-only (no UI re-exports) so cron does not need src/components.
 ! grep -q "export \* from './ui/" "\$root/src/modules/mis/register/index.ts"

@@ -22,7 +22,7 @@ export function assertNumericIdList(values: string, field: string): string {
   return parts.map((p) => String(assertNumericId(p, field))).join(',');
 }
 
-/** Escape ISO date strings for CRM SQL literals. */
+/** Require YYYY-MM-DD before embedding in CRM SQL. */
 export function assertIsoDate(value: string | null | undefined, field: string): string {
   const trimmed = (value ?? '').trim();
   if (!ISO_DATE.test(trimmed)) {

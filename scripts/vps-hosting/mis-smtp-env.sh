@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared SMTP resolution — same source as MIS digest (src/modules/mail-alerts/services/send.ts).
+# Shared SMTP resolution — same source as MIS digest (src/modules/mis-email/services/send.ts).
 # Source this file, then call load_mis_smtp_vars.
 
 load_mis_smtp_vars() {

@@ -27,6 +27,7 @@ export function readSessionStartedAt(
   return parseSessionStartedAt(raw);
 }
 
+/** Absolute 3-day portal TTL from wrl_session_started_at — independent of JWT exp / idle. */
 export function evaluatePortalSession(
   cookies: Array<{ name: string; value: string }>,
   nowSec: number = Math.floor(Date.now() / 1000)

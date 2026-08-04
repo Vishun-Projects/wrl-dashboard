@@ -78,6 +78,7 @@ export async function resolveSupabaseUserFromCookies(
   const userId = await verifyLocalAccessToken(token);
   if (userId) return { id: userId, email: session?.user?.email };
 
+  // JWT verify failed: still accept cookie-embedded user id (SSR storage shape). Trusts cookie integrity, not signature.
   const embedded = session?.user as { id?: string; email?: string } | undefined;
   if (embedded?.id) {
     return { id: String(embedded.id), email: embedded.email };

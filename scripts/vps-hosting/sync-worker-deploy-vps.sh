@@ -56,7 +56,7 @@ if command -v rsync >/dev/null 2>&1; then
   RSYNC_SSH="ssh ${SSH_OPTS[*]}"
   rsync -az -e "$RSYNC_SSH" \
     "${ROOT}/src/lib/" "${VPS_HOST}:${INSTALL_ROOT}/src/lib/"
-  # sync CLI imports @/modules/arcp + @/sql — keep them in sync with package.json scripts
+  # sync CLI imports @/modules/arcp-claims + @/sql — keep them in sync with package.json scripts
   rsync -az -e "$RSYNC_SSH" \
     "${ROOT}/src/modules/" "${VPS_HOST}:${INSTALL_ROOT}/src/modules/"
   rsync -az -e "$RSYNC_SSH" \

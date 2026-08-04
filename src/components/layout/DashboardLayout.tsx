@@ -16,7 +16,7 @@ import { PerformanceMetricsLogger } from '@/modules/performance/components/Perfo
 import { performanceLogEnabledClient } from '@/modules/performance/lib/log-config';
 import { MotionProvider } from '@/components/motion';
 import { ThemeProvider } from '@/components/theme/ThemeProvider';
-import { MisEmailSendTracker } from '@/modules/mail-alerts/components/MisEmailSendTracker';
+import { MisEmailSendTracker } from '@/modules/mis-email/components/MisEmailSendTracker';
 import { SessionExpiredDialog } from '@/components/auth/SessionExpiredDialog';
 
 type DashboardUser = {

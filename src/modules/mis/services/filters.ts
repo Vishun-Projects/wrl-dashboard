@@ -181,6 +181,10 @@ export function buildSerialAuditApiScopeParams(input: {
   selectedFranchisee: string[];
   minRepeats?: number;
   refresh?: boolean;
+  page?: number;
+  limit?: number;
+  search?: string;
+  export?: boolean;
 }): Record<string, string> {
   const params: Record<string, string> = {
     startDate: input.startDate,
@@ -194,6 +198,14 @@ export function buildSerialAuditApiScopeParams(input: {
   if (branch) params.branch = branch;
   if (franchisee) params.franchisee = franchisee;
   if (input.refresh) params.refresh = 'true';
+  if (input.export) {
+    params.export = '1';
+  } else {
+    if (input.page != null) params.page = String(Math.max(1, Math.floor(input.page)));
+    if (input.limit != null) params.limit = String(Math.max(1, Math.floor(input.limit)));
+  }
+  const search = (input.search ?? '').trim();
+  if (search) params.search = search;
   return params;
 }
 

@@ -26,6 +26,7 @@ function unseenSql(callIdExpr: string): string {
   return `NOT EXISTS (SELECT 1 FROM call_flags f WHERE f.call_id = cast(${callIdExpr} AS text) AND f.flag_type IN (${flagged}))`;
 }
 
+/** UI filter labels → call_flags.flag_type: verified=noted, rejected=escalate, hold=query; unseen = none of those. */
 function filterToSql(filter: string, callIdExpr: string): string | null {
   switch (filter) {
     case 'verified':
@@ -43,7 +44,6 @@ function filterToSql(filter: string, callIdExpr: string): string | null {
   }
 }
 
-/** Returns SQL AND clause for Postgres read model (h.ncode). */
 export function buildPortalFilterSqlForHot(portalFilter: string): string | null {
   const filters = parsePortalFilters(portalFilter);
   if (!filters.length) return null;
@@ -56,7 +56,6 @@ export function buildPortalFilterSqlForHot(portalFilter: string): string | null 
   return `(${parts.join(' OR ')})`;
 }
 
-/** Returns SQL AND fragment for CRM trhcalls queries (tc.ncode). */
 export function buildPortalFilterSqlForCrm(portalFilter: string): string | null {
   const filters = parsePortalFilters(portalFilter);
   if (!filters.length) return null;
