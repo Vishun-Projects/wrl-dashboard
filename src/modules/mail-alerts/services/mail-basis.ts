@@ -10,6 +10,7 @@ import {
 } from '@/modules/mis';
 import {
   countTraceOpenCalls,
+  filterTraceRowsForOpenExport,
   filterTraceRowsForSummaryExport,
   type BdMisTraceRow,
 } from '@/modules/mis';
@@ -91,6 +92,38 @@ export function reconcileMisEmailOpenCounts(
     traceOpenIncluded,
     delta,
     matches: delta === 0,
+  };
+}
+
+/**
+ * Contract: regional/branch email body and open-calls Excel share one call-level basis.
+ * Also locks body Total (solved+open) to summary-aligned trace detail row count.
+ */
+export function countMisEmailOpenParity(traceRows: BdMisTraceRow[]): {
+  regionalBodyOpen: number;
+  branchBodyOpen: number;
+  excelOpenRows: number;
+  regionalBodyCalls: number;
+  branchBodyCalls: number;
+  detailRowCount: number;
+  detailOpenCount: number;
+  detailSolvedCount: number;
+} {
+  const regional = buildMisEmailRegionalPerformanceRowsFromTrace(traceRows);
+  const branch = buildMisEmailBranchPerformanceRowsFromTrace(traceRows);
+  const detail = filterTraceRowsForSummaryExport(traceRows);
+  const excelOpenRows = filterTraceRowsForOpenExport(traceRows).length;
+  const regionalBodyOpen = regional.reduce((sum, row) => sum + row.open_calls, 0);
+  const branchBodyOpen = branch.reduce((sum, row) => sum + row.open_calls, 0);
+  return {
+    regionalBodyOpen,
+    branchBodyOpen,
+    excelOpenRows,
+    regionalBodyCalls: regional.reduce((sum, row) => sum + row.solved_calls + row.open_calls, 0),
+    branchBodyCalls: branch.reduce((sum, row) => sum + row.solved_calls + row.open_calls, 0),
+    detailRowCount: detail.length,
+    detailOpenCount: countTraceOpenCalls(detail),
+    detailSolvedCount: detail.filter((row) => row.counts_toward === 'solved').length,
   };
 }
 
