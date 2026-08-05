@@ -28,7 +28,7 @@ export function peekAccessTokenMeta(token: string | null | undefined): Record<st
   }
 }
 
-export type MisUploadTraceEvent = {
+type MisUploadTraceEvent = {
   phase: string;
   fileName?: string;
   fileSize?: number;

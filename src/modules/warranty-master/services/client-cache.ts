@@ -2,7 +2,7 @@ import type { WarrantyMasterFgLineRow } from '@/modules/warranty-master/services
 
 const CACHE_KEY = 'warranty-master-fg-lines-v1';
 
-export type WarrantyMasterClientCache = {
+type WarrantyMasterClientCache = {
   totalMachines: number;
   fgLines: WarrantyMasterFgLineRow[];
   cachedAt: string;

@@ -16,13 +16,13 @@ export function isMisEmailRelayConfigured(): boolean {
 
 const PREPARED_DIGEST_PATH = '/internal/mail/mis-digest-prepared';
 
-export type PreparedDigestEmailAttachment = {
+type PreparedDigestEmailAttachment = {
   filename: string;
   contentBase64: string;
   contentType: string;
 };
 
-export type PreparedDigestEmailPayload = {
+type PreparedDigestEmailPayload = {
   to: string | string[];
   cc?: string | string[];
   subject: string;

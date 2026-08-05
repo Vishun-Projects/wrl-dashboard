@@ -7,6 +7,7 @@ import {
 import { lookupForgotPasswordAccount } from '@/lib/auth/forgot-password-lookup';
 import { sendRecoveryEmailForAccount } from '@/lib/auth/send-recovery-email';
 import { logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
+import { checkRateLimit } from '@/lib/security/rate-limit';
 
 // Always same body — avoids account-enumeration via forgot-password.
 function genericOk() {
@@ -15,6 +16,25 @@ function genericOk() {
 
 export async function POST(request: Request) {
   const audit = requestAuditContext(request);
+  const ipKey = `forgot-password:${audit.ip || 'unknown'}`;
+  const rl = checkRateLimit(ipKey, 5, 60_000);
+  if (!rl.allowed) {
+    await logSecurityEventBestEffort({
+      eventType: 'auth.password_reset.request',
+      result: 'failure',
+      sessionId: audit.sessionId,
+      route: audit.route,
+      method: audit.method,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      statusCode: 429,
+      metadata: { reason: 'rate_limited', retryAfterSec: rl.retryAfterSec },
+    });
+    return NextResponse.json(
+      { error: 'Too many password reset attempts. Please try again in a minute.' },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } }
+    );
+  }
   try {
     const body = (await request.json()) as { email?: string };
     const validated = validateForgotPasswordEmail(body.email);

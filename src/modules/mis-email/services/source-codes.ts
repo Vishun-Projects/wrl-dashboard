@@ -4,4 +4,4 @@
  */
 export const MIS_EMAIL_CLIENT_SOURCE_CODES = ['cadbury', 'coke'] as const;
 
-export type MisEmailClientSourceCode = (typeof MIS_EMAIL_CLIENT_SOURCE_CODES)[number];
+type MisEmailClientSourceCode = (typeof MIS_EMAIL_CLIENT_SOURCE_CODES)[number];

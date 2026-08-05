@@ -29,7 +29,7 @@ export type RosterTechnician = {
   nofficeid?: string;
 };
 
-export type RosterFranchisee = {
+type RosterFranchisee = {
   ncode: string;
   vcompanyname: string;
 };
@@ -131,7 +131,7 @@ function resolveSfBranch(code: string, branchByOfficeId: Map<string, string>): s
   return branchByOfficeId.get(String(code)) ?? '';
 }
 
-export type IdleAssigneeKpis = {
+type IdleAssigneeKpis = {
   assignedNoCompletions: number;
   zeroAllocations: number;
 };

@@ -17,9 +17,6 @@ export const MOTION_EASE_OUT = [0.22, 1, 0.36, 1] as const;
 /** Gentle ease for exits and crossfades. */
 export const MOTION_EASE_IN_OUT = [0.45, 0.05, 0.55, 1] as const;
 
-/** @deprecated Use MOTION_EASE_OUT */
-export const MOTION_EASE = MOTION_EASE_OUT;
-
 /** Soft numeric roll — visible movement without bounce. */
 export const metricSpring = {
   stiffness: 55,
@@ -76,10 +73,6 @@ export const chipItem: Variants = {
   },
 };
 
-export const chipLayoutTransition = layoutSpring;
-
-export const collapseTransition: Transition = collapseSpring;
-
 export const tapScale = { scale: 0.985 };
 
 export const tapSpring: Transition = {
@@ -87,6 +80,13 @@ export const tapSpring: Transition = {
   stiffness: 520,
   damping: 28,
   mass: 0.4,
+};
+
+export const chipLayoutTransition: Transition = {
+  type: 'spring',
+  stiffness: 450,
+  damping: 34,
+  mass: 0.8,
 };
 
 export function instantTransition(): Transition {

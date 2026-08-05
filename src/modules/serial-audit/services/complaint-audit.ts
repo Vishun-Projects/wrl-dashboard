@@ -477,13 +477,13 @@ export function buildCallsBySerialMap(
   return map;
 }
 
-export type SerialAuditListItem = {
+type SerialAuditListItem = {
   serial: string;
   complaint_count: number | string;
   last_complaint_date: string | null;
 };
 
-export type SerialAuditListApiItem = {
+type SerialAuditListApiItem = {
   serial: string;
   complaint_count: number | string;
   open_count?: number | string;

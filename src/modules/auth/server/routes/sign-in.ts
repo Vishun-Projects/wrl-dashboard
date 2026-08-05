@@ -14,6 +14,8 @@ import {
   startSessionAudit,
 } from '@/lib/security/audit';
 import { setSessionStartedAtCookie } from '@/lib/auth/session-policy-server';
+import { checkRateLimit, recordFailedAttempt, resetFailedAttempts } from '@/lib/security/rate-limit';
+import { sendSuspiciousActivityAlert } from '@/lib/security/security-alert-email';
 
 type SignInBody = {
   email?: string;
@@ -156,11 +158,9 @@ async function persistSession(sessionPayload: SessionPayload) {
 export async function POST(request: Request) {
   try {
     const audit = requestAuditContext(request);
-    const body = (await request.json()) as SignInBody;
-    const email = body.email?.trim();
-    const password = body.password ?? '';
-
-    if (!email || !password) {
+    const ipKey = `sign-in:${audit.ip || 'unknown'}`;
+    const rl = checkRateLimit(ipKey, 5, 60_000);
+    if (!rl.allowed) {
       await logSecurityEventBestEffort({
         eventType: 'auth.sign_in.failure',
         result: 'failure',
@@ -168,10 +168,56 @@ export async function POST(request: Request) {
         method: audit.method,
         ip: audit.ip,
         userAgent: audit.userAgent,
-        statusCode: 400,
-        metadata: { email, reason: 'missing_credentials' },
+        statusCode: 429,
+        metadata: { reason: 'rate_limited', retryAfterSec: rl.retryAfterSec },
       });
-      return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Too many sign-in attempts. Please try again in a minute.' },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } }
+      );
+    }
+
+    const body = (await request.json()) as SignInBody;
+    const email = body.email?.trim();
+    const password = body.password ?? '';
+
+    const handleFailure = async (opts: {
+      statusCode: number;
+      reason: string;
+      message?: string;
+      userFacingError: string;
+    }) => {
+      const failedCount = recordFailedAttempt(ipKey, 60_000);
+      await logSecurityEventBestEffort({
+        eventType: 'auth.sign_in.failure',
+        result: 'failure',
+        route: audit.route,
+        method: audit.method,
+        ip: audit.ip,
+        userAgent: audit.userAgent,
+        statusCode: opts.statusCode,
+        metadata: { email, reason: opts.reason, failedCount, message: opts.message },
+      });
+
+      if (failedCount >= 5) {
+        void sendSuspiciousActivityAlert({
+          ip: audit.ip,
+          attemptedEmail: email,
+          route: audit.route,
+          userAgent: audit.userAgent,
+          failedCount,
+        });
+      }
+
+      return NextResponse.json({ error: opts.userFacingError }, { status: opts.statusCode });
+    };
+
+    if (!email || !password) {
+      return handleFailure({
+        statusCode: 400,
+        reason: 'missing_credentials',
+        userFacingError: 'Email and password are required',
+      });
     }
 
     let sessionPayload: SessionPayload | null = null;
@@ -183,31 +229,20 @@ export async function POST(request: Request) {
       try {
         sessionPayload = await signInViaDatabase(email, password);
         if (!sessionPayload) {
-          await logSecurityEventBestEffort({
-            eventType: 'auth.sign_in.failure',
-            result: 'failure',
-            route: audit.route,
-            method: audit.method,
-            ip: audit.ip,
-            userAgent: audit.userAgent,
+          return handleFailure({
             statusCode: 401,
-            metadata: { email, reason: 'invalid_credentials' },
+            reason: 'invalid_credentials',
+            userFacingError: 'Invalid email or password',
           });
-          return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
         }
       } catch (dbErr: unknown) {
         const message = dbErr instanceof Error ? dbErr.message : 'Database sign-in failed';
-        await logSecurityEventBestEffort({
-          eventType: 'auth.sign_in.failure',
-          result: 'failure',
-          route: audit.route,
-          method: audit.method,
-          ip: audit.ip,
-          userAgent: audit.userAgent,
+        return handleFailure({
           statusCode: 500,
-          metadata: { email, reason: 'db_sign_in_failed', message },
+          reason: 'db_sign_in_failed',
+          message,
+          userFacingError: 'Invalid email or password',
         });
-        return NextResponse.json({ error: 'Invalid email or password' }, { status: 500 });
       }
     }
 
@@ -219,20 +254,12 @@ export async function POST(request: Request) {
         } else if (proxy.ok === false) {
           proxyBlocked = proxy.blocked;
           if (proxy.message !== 'network_blocked') {
-            await logSecurityEventBestEffort({
-              eventType: 'auth.sign_in.failure',
-              result: 'failure',
-              route: audit.route,
-              method: audit.method,
-              ip: audit.ip,
-              userAgent: audit.userAgent,
+            return handleFailure({
               statusCode: proxy.status === 401 ? 401 : 502,
-              metadata: { email, reason: 'proxy_sign_in_failed', blocked: proxy.blocked, message: proxy.message },
+              reason: 'proxy_sign_in_failed',
+              message: proxy.message,
+              userFacingError: 'Invalid email or password',
             });
-            return NextResponse.json(
-              { error: 'Invalid email or password' },
-              { status: 401 }
-            );
           }
         }
       } catch {
@@ -241,26 +268,16 @@ export async function POST(request: Request) {
     }
 
     if (!sessionPayload) {
-      await logSecurityEventBestEffort({
-        eventType: 'auth.sign_in.failure',
-        result: 'failure',
-        route: audit.route,
-        method: audit.method,
-        ip: audit.ip,
-        userAgent: audit.userAgent,
+      return handleFailure({
         statusCode: proxyBlocked ? 503 : 401,
-        metadata: { email, reason: proxyBlocked ? 'network_blocked' : 'sign_in_failed' },
+        reason: proxyBlocked ? 'network_blocked' : 'sign_in_failed',
+        userFacingError: proxyBlocked
+          ? 'Sign-in is temporarily unavailable. Try again later.'
+          : 'Invalid email or password',
       });
-      return NextResponse.json(
-        {
-          error: proxyBlocked
-            ? 'Sign-in is temporarily unavailable. Try again later.'
-            : 'Invalid email or password',
-        },
-        { status: proxyBlocked ? 503 : 401 }
-      );
     }
 
+    resetFailedAttempts(ipKey);
     await persistSession(sessionPayload);
     await setSessionStartedAtCookie();
     const sessionUser = sessionUserFromPayload(sessionPayload.user);

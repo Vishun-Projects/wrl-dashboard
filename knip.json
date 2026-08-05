@@ -1,0 +1,20 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "next": {
+    "entry": [
+      "src/app/**/{page,layout,loading,error,not-found,route}.{js,jsx,ts,tsx}",
+      "src/middleware.ts"
+    ]
+  },
+  "entry": [
+    "src/app/**/{page,layout,loading,error,not-found,route}.{js,jsx,ts,tsx}",
+    "src/proxy.ts",
+    "scripts/**/*.mjs",
+    "scripts/**/*.ts",
+    "src/**/*.test.{ts,tsx}"
+  ],
+  "project": [
+    "src/**/*.{js,jsx,ts,tsx}",
+    "scripts/**/*.{mjs,ts}"
+  ]
+}

@@ -17,7 +17,7 @@ export type CorpusMeta = {
   truncated?: boolean;
 };
 
-export type SharedRegisterCache = {
+type SharedRegisterCache = {
   cacheKey: string;
   calls: Record<string, unknown>[];
   fetchedAt: number;

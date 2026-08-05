@@ -167,8 +167,6 @@ export function inferArcpPlanGranularity(
   if (avgDays <= 8) return 'week';
   return 'week';
 }
-/** @deprecated use ARCP_SUMMARY_SINGLE_QUERY_MAX_DAYS */
-export const ARCP_QUERY_CHUNK_DAYS = ARCP_SUMMARY_SINGLE_QUERY_MAX_DAYS;
 
 export type ArcpClaimsQueryOpts = {
   startDate?: string | null;

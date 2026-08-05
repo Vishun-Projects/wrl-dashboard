@@ -1,6 +1,6 @@
 import { escapeCsvCell } from '@/lib/utils/csv';
 
-export type DistributionFranchiseeCsvRow = {
+type DistributionFranchiseeCsvRow = {
   franchisee_code: string;
   franchisee_name: string;
   technicians_count: number;
@@ -9,7 +9,7 @@ export type DistributionFranchiseeCsvRow = {
   ratio: number;
 };
 
-export type DistributionIdleCsvRow = {
+type DistributionIdleCsvRow = {
   name: string;
   branchName: string;
   franchiseeName?: string;

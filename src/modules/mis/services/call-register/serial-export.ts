@@ -11,7 +11,6 @@ import {
   type CallRegisterSerialExportRow,
 } from './shape';
 
-export type { CallRegisterSerialExportRow };
 export { shapeSerialExportRow } from './shape';
 export { callRegisterSerialExportFilename } from './dates';
 

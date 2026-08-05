@@ -6,12 +6,8 @@
 export type {
   WarrantyMasterAggregateRow,
   WarrantyMasterClientFilters,
-  WarrantyMasterDimOption,
-  WarrantyMasterDims,
   WarrantyMasterFgDetailRow,
   WarrantyMasterFgLineRow,
-  WarrantyMasterQueryParams,
-  WarrantyMasterRowDetailParams,
   WarrantyMasterSummary,
 } from './types';
 

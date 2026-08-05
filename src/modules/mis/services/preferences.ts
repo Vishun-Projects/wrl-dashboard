@@ -15,13 +15,13 @@ import {
   type RegisterDateFilterColumn,
 } from '@/sql/trhcalls/query';
 
-export type StoredReportDateRange = {
+type StoredReportDateRange = {
   start: string;
   end: string;
   label: string;
 };
 
-export type StoredSharedFilters = {
+type StoredSharedFilters = {
   dateRange?: StoredReportDateRange;
   dateFilterColumn?: RegisterDateFilterColumn;
   selectedOfficeIds?: string[];

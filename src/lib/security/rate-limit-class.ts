@@ -9,7 +9,7 @@ export function rateLimitClassForPath(pathname: string): {
     return { limit: 5, windowMs: 15 * 60_000, keySuffix: 'auth-forgot' };
   }
   if (pathname === '/api/auth/sign-in' || pathname.startsWith('/api/auth/sign-in/')) {
-    return { limit: 10, windowMs: 15 * 60_000, keySuffix: 'auth-signin' };
+    return { limit: 5, windowMs: 15 * 60_000, keySuffix: 'auth-signin' };
   }
   if (pathname.startsWith('/api/auth/')) {
     return { limit: 20, windowMs: 60_000, keySuffix: 'auth' };

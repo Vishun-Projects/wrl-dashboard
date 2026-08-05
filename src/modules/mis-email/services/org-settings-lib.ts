@@ -32,7 +32,7 @@ const MIS_EMAIL_ORG_SETTINGS_KEY = 'mis_email';
 const CACHE_TTL_MS = 15_000;
 const TIME_HH_MM_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
-export type MisEmailDateRangeMode = 'yesterday' | 'month_to_date' | 'year_to_yesterday';
+type MisEmailDateRangeMode = 'yesterday' | 'month_to_date' | 'year_to_yesterday';
 
 export type MisEmailOrgSettings = {
   defaultToEmails: string[];
