@@ -20,7 +20,7 @@ import {
   Terminal,
   Zap,
 } from 'lucide-react';
-import { ReportFetchingBar } from '@/modules/mis/components/ReportLoadingFeedback';
+import { ReportFetchingBar } from '@/modules/mis/components';
 import { logInsightsSnapshot } from '@/modules/performance/components/PerformanceMetricsLogger';
 
 type VitalName = 'CLS' | 'FCP' | 'INP' | 'LCP' | 'TTFB';

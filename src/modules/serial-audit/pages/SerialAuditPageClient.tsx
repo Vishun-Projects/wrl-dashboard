@@ -17,7 +17,7 @@ import {
 import { createClient } from '@/lib/supabase/client';
 import { RegisterPageFilters } from '@/modules/mis/register/components/RegisterPageFilters';
 import { RegisterMultiSelect } from '@/modules/mis/register/components/RegisterMultiSelect';
-import { ReportLoadingPanel } from '@/modules/mis/components/ReportLoadingFeedback';
+import { ReportLoadingPanel, useReportFilters } from '@/modules/mis/components';
 import { formatUiDate } from '@/lib/dates/ui-date';
 import { DataTableLoading } from '@/components/ui/DataTableLoading';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
@@ -31,7 +31,6 @@ import {
   AdminToolbar,
   AdminTr,
 } from '@/components/admin/AdminUi';
-import { useReportFilters } from '@/modules/mis/components/ReportFiltersContext';
 import { buildCorpusCacheKey } from '@/modules/mis';
 import { sanitizeUserFacingMessage, toUserFacingError } from '@/lib/utils/user-facing-errors';
 import {

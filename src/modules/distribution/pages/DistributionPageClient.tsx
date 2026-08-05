@@ -22,8 +22,7 @@ import {
 import { RegisterPageFilters } from '@/modules/mis/register/components/RegisterPageFilters';
 import { RegisterStatsBar } from '@/modules/mis/register/components/RegisterStatsBar';
 import { PageShell } from '@/components/layout/PageShell';
-import { ReportPageSkeleton } from '@/modules/mis/components/ReportLoadingFeedback';
-import { useReportFilters } from '@/modules/mis/components/ReportFiltersContext';
+import { ReportPageSkeleton, useReportFilters } from '@/modules/mis/components';
 import { createClient } from '@/lib/supabase/client';
 import {
   sortRows,

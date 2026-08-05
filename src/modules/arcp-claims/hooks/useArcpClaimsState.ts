@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { createChunkedFetchAuth } from '@/lib/supabase/chunked-fetch';
-import { useReportFilters } from '@/modules/mis/components/ReportFiltersContext';
+import { useReportFilters } from '@/modules/mis/components';
 import { usePageAlert } from '@/hooks/usePageAlert';
 import {
   ARCP_DEFAULT_DATE_FILTER_COLUMN,

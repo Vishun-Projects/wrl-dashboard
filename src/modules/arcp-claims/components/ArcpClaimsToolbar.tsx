@@ -5,7 +5,7 @@ import { Filter, Loader2 } from 'lucide-react';
 import { DateRangeSelector } from '@/modules/mis/register/components/DateRangeSelector';
 import { RegisterBranchFranchiseeFilters } from '@/modules/mis/register/components/RegisterBranchFranchiseeFilters';
 import { RegisterMultiSelect } from '@/modules/mis/register/components/RegisterMultiSelect';
-import { ReportProgressBar } from '@/modules/mis/components/ReportLoadingFeedback';
+import { ReportProgressBar } from '@/modules/mis/components';
 import {
   ARCP_DATE_FILTER_OPTIONS,
   type ArcpDateFilterColumn,

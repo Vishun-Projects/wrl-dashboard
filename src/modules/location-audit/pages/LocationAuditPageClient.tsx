@@ -26,7 +26,7 @@ import {
   AdminThead,
   AdminTr,
 } from '@/components/admin/AdminUi';
-import { useReportFilters } from '@/modules/mis/components/ReportFiltersContext';
+import { ReportLoadingPanel, useReportFilters } from '@/modules/mis/components';
 import { sanitizeUserFacingMessage } from '@/lib/utils/user-facing-errors';
 import {
   SUMMARY_DEFAULT_CALL_TYPE,
@@ -42,7 +42,6 @@ import { PageAlert } from '@/components/ui/PageAlert';
 import { feedback } from '@/lib/ui/feedback';
 import { triggerBlobDownload } from '@/modules/mis/download';
 import { usePageAlert } from '@/hooks/usePageAlert';
-import { ReportLoadingPanel } from '@/modules/mis/components/ReportLoadingFeedback';
 import { DataTableLoading } from '@/components/ui/DataTableLoading';
 import { Loader2 } from 'lucide-react';
 import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
