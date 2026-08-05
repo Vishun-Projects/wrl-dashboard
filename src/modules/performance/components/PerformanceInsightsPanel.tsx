@@ -288,6 +288,12 @@ export function PerformanceInsightsPanel() {
   const [showRawJson, setShowRawJson] = useState(false);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsSnapshot | null>(null);
 
+  type ServerTarget = 'auto' | 'vps' | 'vercel';
+
+  const [selectedTarget, setSelectedTarget] = useState<ServerTarget>('auto');
+  const targetRef = useRef<ServerTarget>('auto');
+  targetRef.current = selectedTarget;
+
   // Historical trend points for sparklines
   const [historyCpu, setHistoryCpu] = useState<number[]>([12, 18, 14, 22, 16, 14, 19, 14]);
 
@@ -383,14 +389,18 @@ export function PerformanceInsightsPanel() {
     };
   }, [collectDiagnostics]);
 
-  const loadServerSnapshot = useCallback(async (trigger = 'refresh', overridePassphrase?: string) => {
+  const loadServerSnapshot = useCallback(async (trigger = 'refresh', overridePassphrase?: string, overrideTarget?: ServerTarget) => {
     setLoading(true);
     setServerError(null);
     try {
       const activePassphrase = (overridePassphrase ?? '').trim();
+      const activeTarget = overrideTarget ?? targetRef.current;
       const res = await axios.get('/api/admin/performance-snapshot', {
         withCredentials: true,
-        headers: activePassphrase ? { 'x-vps-passphrase': activePassphrase } : {},
+        headers: {
+          ...(activePassphrase ? { 'x-vps-passphrase': activePassphrase } : {}),
+          'x-telemetry-target': activeTarget,
+        },
       });
       const data: ServerSnapshotData = res.data;
       setServerSnapshot(data);
@@ -511,7 +521,27 @@ export function PerformanceInsightsPanel() {
             Real-time Hostinger VPS server telemetry, client Core Web Vitals, and network diagnostics
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Server Target Selector */}
+          <div className="flex items-center gap-2 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-bg-canvas)] px-3 py-1.5 text-xs shadow-xs">
+            <Server size={14} className="text-indigo-600 shrink-0" />
+            <span className="text-[11px] font-medium text-[var(--theme-fg-muted)] hidden sm:inline">Inspect:</span>
+            <select
+              aria-label="Select Server Telemetry Target"
+              value={selectedTarget}
+              onChange={(e) => {
+                const nextTarget = e.target.value as ServerTarget;
+                setSelectedTarget(nextTarget);
+                void loadServerSnapshot('target_change', undefined, nextTarget);
+              }}
+              className="bg-transparent text-xs font-semibold text-[var(--theme-fg-primary)] focus:outline-none cursor-pointer pr-1"
+            >
+              <option value="auto">⚡ Auto (Prefer VPS)</option>
+              <option value="vps">🌐 Hostinger VPS</option>
+              <option value="vercel">☁️ Vercel Edge Node</option>
+            </select>
+          </div>
+
           <button
             type="button"
             onClick={() => void loadServerSnapshot('manual_refresh')}
@@ -709,6 +739,60 @@ export function PerformanceInsightsPanel() {
                       : 'Local Node Active'}
                   </span>
                 </div>
+              </div>
+            </div>
+
+            {/* Target Server Quick Switcher */}
+            <div className="pt-2 border-t border-[var(--theme-border)] space-y-1.5">
+              <div className="text-[11px] font-medium text-[var(--theme-fg-muted)] flex items-center justify-between">
+                <span>Select Telemetry Target:</span>
+                <span className="text-[10px] font-bold tracking-wider text-indigo-600 uppercase">
+                  {selectedTarget === 'auto' ? 'Auto Mode' : selectedTarget === 'vps' ? 'VPS Target' : 'Vercel Target'}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1 rounded-xl bg-[var(--theme-bg-soft)] p-1 border border-[var(--theme-border)]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTarget('auto');
+                    void loadServerSnapshot('target_change', undefined, 'auto');
+                  }}
+                  className={`px-2 py-1 text-[11px] font-medium rounded-lg transition-all cursor-pointer ${
+                    selectedTarget === 'auto'
+                      ? 'bg-[var(--theme-bg-canvas)] text-[var(--theme-fg-primary)] shadow-xs font-semibold'
+                      : 'text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg-primary)]'
+                  }`}
+                >
+                  ⚡ Auto
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTarget('vps');
+                    void loadServerSnapshot('target_change', undefined, 'vps');
+                  }}
+                  className={`px-2 py-1 text-[11px] font-medium rounded-lg transition-all cursor-pointer ${
+                    selectedTarget === 'vps'
+                      ? 'bg-[var(--theme-bg-canvas)] text-[var(--theme-fg-primary)] shadow-xs font-semibold'
+                      : 'text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg-primary)]'
+                  }`}
+                >
+                  🌐 VPS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTarget('vercel');
+                    void loadServerSnapshot('target_change', undefined, 'vercel');
+                  }}
+                  className={`px-2 py-1 text-[11px] font-medium rounded-lg transition-all cursor-pointer ${
+                    selectedTarget === 'vercel'
+                      ? 'bg-[var(--theme-bg-canvas)] text-[var(--theme-fg-primary)] shadow-xs font-semibold'
+                      : 'text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg-primary)]'
+                  }`}
+                >
+                  ☁️ Vercel
+                </button>
               </div>
             </div>
 
