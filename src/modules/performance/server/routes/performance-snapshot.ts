@@ -243,11 +243,21 @@ function getRemoteVpsTelemetryViaSsh(clientPassphrase?: string) {
     let diskTotal = 0;
     let diskUsed = 0;
     let diskAvail = 0;
-    const dfMatch = out.match(/\/dev\/sda\d*\s+(\d+)\s+(\d+)\s+(\d+)/);
+    const dfMatch = out.match(/(?:\/dev\/(?:sda|vda|root|mapper)[^\s]*|\/)\s+(\d+)\s+(\d+)\s+(\d+)/);
     if (dfMatch) {
       diskTotal = parseInt(dfMatch[1], 10);
       diskUsed = parseInt(dfMatch[2], 10);
       diskAvail = parseInt(dfMatch[3], 10);
+    } else {
+      const dfLine = out.split('\n').find((l) => l.trim().endsWith('/'));
+      if (dfLine) {
+        const parts = dfLine.trim().split(/\s+/);
+        if (parts.length >= 4) {
+          diskTotal = parseInt(parts[1], 10) || 0;
+          diskUsed = parseInt(parts[2], 10) || 0;
+          diskAvail = parseInt(parts[3], 10) || 0;
+        }
+      }
     }
     const diskPercent = diskTotal > 0 ? Number(((diskUsed / diskTotal) * 100).toFixed(1)) : 0;
 
@@ -298,19 +308,58 @@ function getRemoteVpsTelemetryViaSsh(clientPassphrase?: string) {
   }
 }
 
+async function fetchRemoteVpsTelemetryViaHttp(clientPassphrase?: string) {
+  const secret = (
+    clientPassphrase ||
+    process.env.VPS_TELEMETRY_PASSPHRASE ||
+    process.env.VPS_MAIL_RELAY_SECRET ||
+    ''
+  ).trim();
+
+  const baseUrl = (
+    process.env.VPS_TELEMETRY_URL ||
+    process.env.VPS_MAIL_RELAY_URL ||
+    'https://api.wrl-fsm.cloud'
+  ).trim().replace(/\/$/, '');
+
+  const telemetryUrl = `${baseUrl}/api/admin/performance-snapshot`;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000); // 3s timeout
+
+    const res = await fetch(telemetryUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'x-telemetry-secret': secret,
+        'x-vps-passphrase': clientPassphrase || secret,
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.cpuUsage && data.systemMemory) {
+        return {
+          cpu: data.cpuUsage,
+          systemMemory: data.systemMemory,
+          diskStorage: data.diskStorage,
+          network: data.networkTraffic,
+          systemInfo: data.systemInfo,
+        };
+      }
+    }
+  } catch {
+    /* skip if unreachable */
+  }
+  return null;
+}
+
 export async function GET(request?: Request) {
   const userId = await getSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const auth = await loadUserAuth(userId);
-  if (!auth || !canAccessPerformanceInsights(auth.permissions)) {
-    // 404 (not 403): hide insights endpoints from non-privileged callers.
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  }
-
-  // Check for VPS Passphrase supplied by client
+  const secretHeader = request?.headers?.get('x-telemetry-secret')?.trim();
   const clientPassphrase = request?.headers?.get('x-vps-passphrase')?.trim() ?? '';
   const expectedSecret = (
     process.env.VPS_TELEMETRY_PASSPHRASE ??
@@ -319,14 +368,29 @@ export async function GET(request?: Request) {
     ''
   ).trim();
 
-  // Strict validation: Must match configured secret exactly
-  const isVpsAuthenticated = Boolean(
-    expectedSecret && clientPassphrase && clientPassphrase === expectedSecret
+  // Validate authentication: session user OR valid telemetry secret header
+  const isSecretAuthenticated = Boolean(
+    expectedSecret &&
+      ((secretHeader && secretHeader === expectedSecret) ||
+        (clientPassphrase && clientPassphrase === expectedSecret))
   );
-  const passphraseInvalid = Boolean(clientPassphrase && !isVpsAuthenticated);
+
+  if (!userId && !isSecretAuthenticated) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  if (userId && !isSecretAuthenticated) {
+    const auth = await loadUserAuth(userId);
+    if (!auth || !canAccessPerformanceInsights(auth.permissions)) {
+      // 404 (not 403): hide insights endpoints from non-privileged callers.
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+  }
+
+  const passphraseInvalid = Boolean(clientPassphrase && !isSecretAuthenticated);
 
   const now = Date.now();
-  if (!isVpsAuthenticated && snapshotCache && snapshotCache.expiresAt > now) {
+  if (!isSecretAuthenticated && snapshotCache && snapshotCache.expiresAt > now) {
     return NextResponse.json(snapshotCache.payload, {
       headers: { 'Cache-Control': 'private, max-age=10', 'X-Cache': 'HIT' },
     });
@@ -347,16 +411,29 @@ export async function GET(request?: Request) {
   let network = getNetworkTraffic();
   let systemInfo = getSystemInfo();
   let sshBridgeActive = false;
+  let telemetrySource: 'ssh_bridge' | 'http_relay' | 'local_node' = 'local_node';
 
   if (process.platform !== 'linux' || process.env.VERCEL === '1' || process.env.AWS_EXECUTION_ENV) {
-    const remote = getRemoteVpsTelemetryViaSsh(clientPassphrase);
-    if (remote) {
-      cpu = remote.cpu;
-      systemMemory = remote.systemMemory;
-      diskStorage = remote.diskStorage;
-      network = remote.network;
-      systemInfo = remote.systemInfo;
+    const remoteSsh = getRemoteVpsTelemetryViaSsh(clientPassphrase);
+    if (remoteSsh) {
+      cpu = remoteSsh.cpu;
+      systemMemory = remoteSsh.systemMemory;
+      diskStorage = remoteSsh.diskStorage;
+      network = remoteSsh.network;
+      systemInfo = remoteSsh.systemInfo;
       sshBridgeActive = true;
+      telemetrySource = 'ssh_bridge';
+    } else {
+      const remoteHttp = await fetchRemoteVpsTelemetryViaHttp(clientPassphrase);
+      if (remoteHttp) {
+        cpu = remoteHttp.cpu;
+        systemMemory = remoteHttp.systemMemory;
+        diskStorage = remoteHttp.diskStorage;
+        network = remoteHttp.network;
+        systemInfo = remoteHttp.systemInfo;
+        sshBridgeActive = true;
+        telemetrySource = 'http_relay';
+      }
     }
   }
 
@@ -367,9 +444,10 @@ export async function GET(request?: Request) {
       region: 'ap-south-1',
       gitCommit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'b8a74e2',
     },
-    passphraseAuthenticated: isVpsAuthenticated || sshBridgeActive,
+    passphraseAuthenticated: isSecretAuthenticated || sshBridgeActive,
     passphraseInvalid,
     sshBridgeActive,
+    telemetrySource,
     cpuUsage: cpu,
     systemMemory,
     diskStorage,

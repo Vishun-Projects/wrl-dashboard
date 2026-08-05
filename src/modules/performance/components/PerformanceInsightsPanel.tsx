@@ -46,6 +46,7 @@ type ServerSnapshotData = {
   passphraseAuthenticated?: boolean;
   passphraseInvalid?: boolean;
   sshBridgeActive?: boolean;
+  telemetrySource?: 'ssh_bridge' | 'http_relay' | 'local_node';
   deployment?: {
     region?: string | null;
     gitCommit?: string | null;
@@ -666,13 +667,25 @@ export function PerformanceInsightsPanel() {
           <div className="rounded-3xl border border-[var(--theme-border)] bg-[var(--theme-bg-canvas)] p-4 shadow-xs space-y-3">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-[var(--theme-bg-soft)] border border-[var(--theme-border)] flex items-center justify-center text-lg shadow-xs shrink-0">
-                {serverSnapshot?.sshBridgeActive ? '⚡' : isVercelServerless ? '☁️' : isLinux ? '🐧' : '🪟'}
+                {serverSnapshot?.telemetrySource === 'ssh_bridge' || (serverSnapshot?.sshBridgeActive && serverSnapshot?.telemetrySource !== 'http_relay')
+                  ? '⚡'
+                  : serverSnapshot?.telemetrySource === 'http_relay'
+                  ? '🌐'
+                  : isVercelServerless
+                  ? '☁️'
+                  : isLinux
+                  ? '🐧'
+                  : '🪟'}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <h3 className="text-sm font-semibold text-[var(--theme-fg-primary)] truncate">
-                    {serverSnapshot?.sshBridgeActive
+                    {serverSnapshot?.telemetrySource === 'ssh_bridge'
                       ? 'Hostinger VPS (Live SSH)'
+                      : serverSnapshot?.telemetrySource === 'http_relay'
+                      ? 'Hostinger VPS (HTTP Relay)'
+                      : serverSnapshot?.sshBridgeActive
+                      ? 'Hostinger VPS (Remote)'
                       : isVercelServerless
                       ? `Vercel Serverless (${serverSnapshot?.deployment?.region ?? 'ap-south-1'})`
                       : isLinux
@@ -683,8 +696,12 @@ export function PerformanceInsightsPanel() {
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <span className="w-2 h-2 rounded-full bg-[var(--theme-success)] animate-pulse" />
                   <span className="text-[11px] font-medium text-[var(--theme-success)] truncate">
-                    {serverSnapshot?.sshBridgeActive
+                    {serverSnapshot?.telemetrySource === 'ssh_bridge'
                       ? 'Live SSH Bridge Active'
+                      : serverSnapshot?.telemetrySource === 'http_relay'
+                      ? 'Live Telemetry Relay Active'
+                      : serverSnapshot?.sshBridgeActive
+                      ? 'Remote VPS Bridge Active'
                       : isVercelServerless
                       ? 'Cloud Edge Node Active'
                       : isLinux
