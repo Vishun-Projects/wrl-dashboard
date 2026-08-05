@@ -361,8 +361,6 @@ export async function GET(request?: Request) {
   const userId = await getSessionUserId();
   const secretHeader = request?.headers?.get('x-telemetry-secret')?.trim();
   const clientPassphrase = request?.headers?.get('x-vps-passphrase')?.trim() ?? '';
-  const telemetryTarget = (request?.headers?.get('x-telemetry-target')?.trim() ?? 'auto').toLowerCase() as 'auto' | 'vps' | 'vercel';
-
   const expectedSecret = (
     process.env.VPS_TELEMETRY_PASSPHRASE ??
     process.env.VPS_MAIL_RELAY_SECRET ??
@@ -392,7 +390,7 @@ export async function GET(request?: Request) {
   const passphraseInvalid = Boolean(clientPassphrase && !isSecretAuthenticated);
 
   const now = Date.now();
-  if (!isSecretAuthenticated && snapshotCache && snapshotCache.expiresAt > now && telemetryTarget === 'auto') {
+  if (!isSecretAuthenticated && snapshotCache && snapshotCache.expiresAt > now) {
     return NextResponse.json(snapshotCache.payload, {
       headers: { 'Cache-Control': 'private, max-age=10', 'X-Cache': 'HIT' },
     });
@@ -415,8 +413,7 @@ export async function GET(request?: Request) {
   let sshBridgeActive = false;
   let telemetrySource: 'ssh_bridge' | 'http_relay' | 'local_node' = 'local_node';
 
-  // Fetch remote VPS metrics if target is auto/vps
-  if (telemetryTarget !== 'vercel' && (process.platform !== 'linux' || process.env.VERCEL === '1' || process.env.AWS_EXECUTION_ENV)) {
+  if (process.platform !== 'linux' || process.env.VERCEL === '1' || process.env.AWS_EXECUTION_ENV) {
     const remoteSsh = getRemoteVpsTelemetryViaSsh(clientPassphrase);
     if (remoteSsh) {
       cpu = remoteSsh.cpu;
