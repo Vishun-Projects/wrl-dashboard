@@ -12,7 +12,7 @@ describe('rateLimitClassForPath', () => {
 
   it('throttles sign-in tightly', () => {
     expect(rateLimitClassForPath('/api/auth/sign-in')).toEqual({
-      limit: 10,
+      limit: 5,
       windowMs: 15 * 60_000,
       keySuffix: 'auth-signin',
     });
