@@ -10,7 +10,7 @@ export type CallRegisterQueryParams = {
   client?: string;
 };
 
-type CrmTransactionRow = {
+export type CrmTransactionRow = {
   Client: string;
   ProductSerialNo: string;
 };
