@@ -20,6 +20,7 @@ import { todayLocalDate } from '@/lib/read-model/dates';
 import { runRetentionJobs } from '@/lib/read-model/batches';
 import { runBackfillCallsHotBmApproval } from '@/lib/read-model/backfill-bm-approval';
 import { runBackfillArcpBmApproved } from '@/modules/arcp-claims/server/sync/backfill-arcp-bm-approved';
+import { runArcpApprovalRescan } from '@/modules/arcp-claims/server/sync/approval-rescan';
 import { runBackfillCallsHotWco } from '@/lib/read-model/backfill-wco';
 import {
   runTransactionEntryBackfill,
@@ -311,6 +312,18 @@ async function main(): Promise<void> {
     case 'arcp-nightly':
       await runArcpIncrementalSync();
       break;
+    case 'arcp-approval-rescan': {
+      const args = process.argv.slice(3);
+      const fromIdx = args.indexOf('--from');
+      const toIdx = args.indexOf('--to');
+      const daysIdx = args.indexOf('--days');
+      const fromDate = fromIdx >= 0 ? args[fromIdx + 1] : undefined;
+      const toDate = toIdx >= 0 ? args[toIdx + 1] : undefined;
+      const rescanDays = daysIdx >= 0 ? Number(args[daysIdx + 1]) : undefined;
+      const result = await runArcpApprovalRescan({ fromDate, toDate, rescanDays });
+      console.log('[arcp-approval-rescan] Done:', result);
+      break;
+    }
     case 'transaction-entry-backfill':
       await runTransactionEntryBackfill();
       break;
@@ -367,6 +380,9 @@ Commands:
   arcp-backfill     Initial ARCP lines backfill (ARCP_BACKFILL_START_DATE or YEARS)
   arcp-incremental  Single ARCP incremental sync run
   arcp-nightly      ARCP incremental only (for Task Scheduler / cron)
+  arcp-approval-rescan  Re-fetch last N days by call-log date to catch CRM approval updates
+                    that did not touch editedon (root cause of missing July BM approvals)
+                    --from YYYY-MM-DD --to YYYY-MM-DD --days N (default: ARCP_APPROVAL_RESCAN_DAYS=90)
   transaction-entry-backfill     Initial/resume CRM TransactionEntry → crm_transaction_entry
   transaction-entry-incremental  Re-sync last N months of TransactionEntry (default 2)
   transaction-entry-scrub        Full-history replace sync (start date → today) — drops unprocessed orphans

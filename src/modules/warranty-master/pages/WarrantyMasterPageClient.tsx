@@ -93,14 +93,9 @@ export default function WarrantyMasterPage() {
   
   const [filters, setFilters] = useState<WarrantyMasterClientFilters>(() => cloneFilters(EMPTY_FILTERS));
   const deferredFilters = useDeferredValue(filters);
-  const [allFgLines, setAllFgLines] = useState<WarrantyMasterFgLineRow[]>(() => {
-    return readWarrantyMasterCache()?.fgLines ?? [];
-  });
+  const [allFgLines, setAllFgLines] = useState<WarrantyMasterFgLineRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [cacheLabel, setCacheLabel] = useState<string | null>(() => {
-    const cached = readWarrantyMasterCache();
-    return cached ? formatCacheLabel(cached.cachedAt) : null;
-  });
+  const [cacheLabel, setCacheLabel] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const { alert: pageAlert, setError: setPageError, clear: clearPageAlert } = usePageAlert();
   const [expandedKey, setExpandedKey] = useState<string | null>(null);

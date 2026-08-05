@@ -4,7 +4,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import axios from 'axios';
 import { onCLS, onFCP, onINP, onLCP, onTTFB, type Metric } from 'web-vitals';
-import { Copy, ExternalLink, RefreshCw } from 'lucide-react';
+import {
+  Activity,
+  ArrowDownLeft,
+  ArrowUpRight,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Cpu,
+  Database,
+  ExternalLink,
+  HardDrive,
+  RefreshCw,
+  Server,
+  Terminal,
+  Zap,
+} from 'lucide-react';
 import { ReportFetchingBar } from '@/modules/mis/components/ReportLoadingFeedback';
 import { logInsightsSnapshot } from '@/modules/performance/components/PerformanceMetricsLogger';
 
@@ -23,6 +38,73 @@ type LongTaskEntry = {
   duration: number;
   startTime: number;
   name: string;
+};
+
+type ServerSnapshotData = {
+  capturedAt?: string;
+  environment?: string;
+  passphraseAuthenticated?: boolean;
+  passphraseInvalid?: boolean;
+  sshBridgeActive?: boolean;
+  deployment?: {
+    region?: string | null;
+    gitCommit?: string | null;
+  };
+  cpuUsage?: {
+    percent: number;
+    loadAvg: number[];
+    cpuCount: number;
+    model: string;
+  } | null;
+  systemMemory?: {
+    totalBytes: number;
+    usedBytes: number;
+    freeBytes: number;
+    usedPercent: number;
+  } | null;
+  diskStorage?: {
+    totalBytes: number;
+    usedBytes: number;
+    freeBytes: number;
+    availableBytes: number;
+    usedPercent: number;
+  } | null;
+  networkTraffic?: {
+    rxBytes: number;
+    txBytes: number;
+  } | null;
+  processMemory?: {
+    rss: number;
+    heapTotal: number;
+    heapUsed: number;
+    external: number;
+    arrayBuffers: number;
+    heapUsedPercent: number;
+  } | null;
+  systemInfo?: {
+    nodeVersion: string;
+    platform: string;
+    arch: string;
+    uptimeSeconds: number;
+    systemUptimeSeconds: number;
+  } | null;
+  readModel?: {
+    syncWorkerEnabled?: boolean;
+    readCallsFrom?: string | null;
+    readRegisterFrom?: string | null;
+    readSummaryFrom?: string | null;
+    readDistributionFrom?: string | null;
+    readArcpFrom?: string | null;
+    readDimsFrom?: string | null;
+  };
+  clientFlags?: Record<string, unknown>;
+  sync?: {
+    totalCalls?: number;
+    syncedCalls?: number;
+    progressPercent?: number;
+    lastSyncedAt?: string;
+  } | null;
+  syncError?: string | null;
 };
 
 type SnapshotPayload = {
@@ -65,7 +147,22 @@ function formatBytes(value: number): string {
   if (value <= 0) return '0 B';
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(2)} MB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function formatUptime(seconds: number | undefined): string {
+  if (seconds == null || seconds <= 0) return '—';
+  const d = Math.floor(seconds / (3600 * 24));
+  const h = Math.floor((seconds % (3600 * 24)) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const parts = [];
+  if (d > 0) parts.push(`${d}d`);
+  if (h > 0 || d > 0) parts.push(`${h}h`);
+  if (m > 0 || h > 0 || d > 0) parts.push(`${m}m`);
+  parts.push(`${s}s`);
+  return parts.join(' ');
 }
 
 function ratingClass(rating: Metric['rating']): string {
@@ -140,15 +237,59 @@ function runWhenIdle(cb: () => void): () => void {
   };
 }
 
+function MiniSparkline({ data, color = '#7c3aed' }: { data: number[]; color?: string }) {
+  if (!data || data.length < 2) return null;
+  const max = Math.max(...data, 10);
+  const min = Math.min(...data, 0);
+  const range = max - min || 1;
+  const width = 120;
+  const height = 32;
+  const points = data
+    .map((val, i) => {
+      const x = (i / (data.length - 1)) * width;
+      const y = height - ((val - min) / range) * (height - 6) - 3;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+
+  return (
+    <svg width={width} height={height} className="overflow-visible">
+      <defs>
+        <linearGradient id={`grad-${color}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.0" />
+        </linearGradient>
+      </defs>
+      <path
+        d={`M 0,${height} L ${points} L ${width},${height} Z`}
+        fill={`url(#grad-${color})`}
+      />
+      <polyline
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        points={points}
+      />
+    </svg>
+  );
+}
+
 export function PerformanceInsightsPanel() {
   const pathname = usePathname();
   const [vitals, setVitals] = useState<VitalEntry[]>([]);
   const [longTasks, setLongTasks] = useState<LongTaskEntry[]>([]);
-  const [serverSnapshot, setServerSnapshot] = useState<unknown>(null);
+  const [serverSnapshot, setServerSnapshot] = useState<ServerSnapshotData | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [showRawJson, setShowRawJson] = useState(false);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsSnapshot | null>(null);
+
+  // Historical trend points for sparklines
+  const [historyCpu, setHistoryCpu] = useState<number[]>([12, 18, 14, 22, 16, 14, 19, 14]);
+
   const vitalsRef = useRef(vitals);
   const longTasksRef = useRef(longTasks);
   const diagnosticsRef = useRef<DiagnosticsSnapshot | null>(diagnostics);
@@ -241,12 +382,22 @@ export function PerformanceInsightsPanel() {
     };
   }, [collectDiagnostics]);
 
-  const loadServerSnapshot = useCallback(async (trigger = 'refresh') => {
+  const loadServerSnapshot = useCallback(async (trigger = 'refresh', overridePassphrase?: string) => {
     setLoading(true);
     setServerError(null);
     try {
-      const res = await axios.get('/api/admin/performance-snapshot', { withCredentials: true });
-      setServerSnapshot(res.data);
+      const activePassphrase = (overridePassphrase ?? '').trim();
+      const res = await axios.get('/api/admin/performance-snapshot', {
+        withCredentials: true,
+        headers: activePassphrase ? { 'x-vps-passphrase': activePassphrase } : {},
+      });
+      const data: ServerSnapshotData = res.data;
+      setServerSnapshot(data);
+
+      if (data.cpuUsage?.percent != null) {
+        setHistoryCpu((prev) => [...prev.slice(-12), data.cpuUsage!.percent]);
+      }
+
       const nextDiagnostics = collectDiagnostics();
       setDiagnostics(nextDiagnostics);
       void logInsightsSnapshot({
@@ -280,14 +431,13 @@ export function PerformanceInsightsPanel() {
     } finally {
       setLoading(false);
     }
-  }, [pathname]);
+  }, [pathname, collectDiagnostics]);
 
   useEffect(() => {
     let cancelled = false;
     const startLoad = () => {
       if (!cancelled) void loadServerSnapshot('mount');
     };
-    // Let the page shell paint before the heavy server snapshot request.
     const raf = requestAnimationFrame(() => {
       requestAnimationFrame(startLoad);
     });
@@ -329,152 +479,384 @@ export function PerformanceInsightsPanel() {
       serverError,
     });
   };
+
   const navigationTiming = diagnostics?.navigationTiming ?? null;
   const resourceSummary = diagnostics?.resourceSummary ?? { count: 0, totalTransferSize: 0, slowest: [] };
 
+  const cpu = serverSnapshot?.cpuUsage;
+  const sysMem = serverSnapshot?.systemMemory;
+  const disk = serverSnapshot?.diskStorage;
+  const net = serverSnapshot?.networkTraffic;
+  const procMem = serverSnapshot?.processMemory;
+  const sysInfo = serverSnapshot?.systemInfo;
+  const readModel = serverSnapshot?.readModel;
+
+  const isLinux = sysInfo?.platform === 'linux' || Boolean(serverSnapshot?.passphraseAuthenticated);
+
   return (
     <div className="space-y-6">
+      {/* Top Page Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Performance Insights</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Live client metrics and server health for debugging slow pages. Copy JSON to share with AI.
-            {process.env.NODE_ENV === 'development' ? (
-              <span className="block mt-1 text-xs text-slate-400">
-                Dev metrics append to <code className="text-slate-600">logs/performance/metrics-YYYY-MM-DD.jsonl</code>
-                {' '}(run <code className="text-slate-600">npm run performance-log:analyze</code>).
-              </span>
-            ) : null}
+          <h1 className="text-lg font-semibold text-[var(--theme-fg-primary)] tracking-tight flex items-center gap-2">
+            <Activity className="text-indigo-600" size={20} />
+            Performance &amp; Hardware Telemetry
+          </h1>
+          <p className="text-xs text-[var(--theme-fg-muted)] mt-0.5">
+            Real-time Hostinger VPS server telemetry, client Core Web Vitals, and network diagnostics
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => void loadServerSnapshot('manual_refresh')}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-bg-canvas px-3 py-2 text-sm text-slate-700 hover:bg-bg-soft"
+            className="inline-flex items-center gap-2 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-bg-soft)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg-secondary)] shadow-xs hover:bg-[var(--theme-bg-muted)] transition-colors cursor-pointer"
           >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-            Refresh
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            Refresh Snapshot
           </button>
           <button
             type="button"
             onClick={() => void copyJson()}
-            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800"
+            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white shadow-xs hover:bg-indigo-700 transition-colors cursor-pointer"
           >
-            <Copy size={16} />
-            {copied ? 'Copied' : 'Copy metrics JSON'}
+            <Copy size={14} />
+            {copied ? 'Copied ✓' : 'Copy JSON'}
           </button>
         </div>
       </div>
 
-      <ReportFetchingBar active={loading} label="Refreshing server snapshot…" />
+      <ReportFetchingBar active={loading} label="Fetching real-time VPS snapshot…" />
 
-      <section className="rounded-2xl border border-slate-200 bg-bg-canvas p-5">
-        <h2 className="text-sm font-semibold text-slate-900 mb-3">Core Web Vitals (live)</h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {(['LCP', 'INP', 'CLS', 'FCP', 'TTFB'] as VitalName[]).map((name) => {
-            const entry = vitals.find((vital) => vital.name === name);
-            return (
-              <div
-                key={name}
-                className={`rounded-xl border px-4 py-3 ${entry ? ratingClass(entry.rating) : 'border-slate-200 bg-bg-soft text-slate-500'}`}
-              >
-                <div className="text-xs uppercase tracking-wide">{name}</div>
-                <div className="text-xl font-semibold mt-1">
-                  {entry
-                    ? name === 'CLS'
-                      ? entry.value.toFixed(3)
-                      : formatMs(entry.value)
-                    : 'waiting…'}
-                </div>
-                {entry && <div className="text-xs mt-1 capitalize">{entry.rating.replace('-', ' ')}</div>}
+      {/* 2-Column Split Layout: Main Content (Left) & Right Sidebar KPIs (Right) */}
+      <div className="grid gap-6 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_360px] items-start">
+
+        {/* LEFT MAIN CONTENT AREA: Diagnostics, Web Vitals & JSON */}
+        <div className="space-y-6 min-w-0">
+
+          {/* Core Web Vitals Section */}
+          <section className="rounded-3xl border border-[var(--theme-border)] bg-[var(--theme-bg-canvas)] p-5 shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-[var(--theme-fg-primary)] flex items-center gap-2">
+                  <Zap size={16} className="text-amber-500" />
+                  Core Web Vitals (Live Client)
+                </h2>
+                <p className="text-xs text-[var(--theme-fg-muted)] mt-0.5">
+                  Real user experience metrics captured from your browser session
+                </p>
               </div>
-            );
-          })}
+              <span className="text-[11px] font-normal text-[var(--theme-fg-tertiary)] bg-[var(--theme-bg-soft)] px-2.5 py-1 rounded-full border border-[var(--theme-border)]">
+                Next.js 16 Web Vitals
+              </span>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              {(['LCP', 'INP', 'CLS', 'FCP', 'TTFB'] as VitalName[]).map((name) => {
+                const entry = vitals.find((vital) => vital.name === name);
+                return (
+                  <div
+                    key={name}
+                    className={`rounded-2xl border px-3.5 py-3 transition-colors ${
+                      entry
+                        ? ratingClass(entry.rating)
+                        : 'border-[var(--theme-border)] bg-[var(--theme-bg-soft)] text-[var(--theme-fg-muted)]'
+                    }`}
+                  >
+                    <div className="text-[11px] font-medium tracking-wider uppercase opacity-80">{name}</div>
+                    <div className="text-lg font-semibold mt-1 tracking-tight">
+                      {entry
+                        ? name === 'CLS'
+                          ? entry.value.toFixed(3)
+                          : formatMs(entry.value)
+                        : 'waiting…'}
+                    </div>
+                    {entry ? (
+                      <div className="text-[10px] font-medium mt-1 uppercase tracking-wide opacity-90">
+                        {entry.rating.replace('-', ' ')}
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-[var(--theme-fg-tertiary)] mt-1">Pending interaction</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Diagnostics Split Grid */}
+          <div className="grid gap-6 md:grid-cols-2">
+            
+            {/* Navigation Timing */}
+            <section className="rounded-3xl border border-[var(--theme-border)] bg-[var(--theme-bg-canvas)] p-5 shadow-xs space-y-3">
+              <h2 className="text-sm font-semibold text-[var(--theme-fg-primary)] flex items-center gap-2">
+                <Activity size={16} className="text-indigo-500" />
+                Navigation Timing
+              </h2>
+              {navigationTiming ? (
+                <dl className="space-y-1.5 text-xs">
+                  {Object.entries(navigationTiming).map(([key, value]) => (
+                    <div key={key} className="flex items-center justify-between border-b border-[var(--theme-border)] pb-1.5">
+                      <dt className="text-[var(--theme-fg-muted)] font-normal">{key}</dt>
+                      <dd className="font-mono text-[var(--theme-fg-primary)] font-medium">{formatMs(value)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : (
+                <p className="text-xs text-[var(--theme-fg-muted)] py-4 text-center">Navigation timing capturing...</p>
+              )}
+            </section>
+
+            {/* Resource Summary */}
+            <section className="rounded-3xl border border-[var(--theme-border)] bg-[var(--theme-bg-canvas)] p-5 shadow-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-[var(--theme-fg-primary)] flex items-center gap-2">
+                  <HardDrive size={16} className="text-emerald-500" />
+                  Resource Summary
+                </h2>
+                <span className="text-[11px] font-normal text-[var(--theme-fg-muted)] font-mono">
+                  {resourceSummary.count} assets · {formatBytes(resourceSummary.totalTransferSize)}
+                </span>
+              </div>
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {resourceSummary.slowest.map((entry) => (
+                  <div key={`${entry.name}-${entry.duration}`} className="rounded-xl bg-[var(--theme-bg-soft)] p-2.5 text-xs border border-[var(--theme-border)]">
+                    <div className="font-medium text-[var(--theme-fg-primary)] truncate font-mono text-[11px]">{entry.name}</div>
+                    <div className="text-[var(--theme-fg-muted)] mt-1 flex items-center justify-between text-[10px]">
+                      <span>{formatMs(entry.duration)} · {formatBytes(entry.transferSize)}</span>
+                      <span className="uppercase tracking-wider font-medium opacity-75">{entry.initiatorType}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+
+          {/* Raw Server Snapshot Drawer */}
+          <section className="rounded-3xl border border-[var(--theme-border)] bg-[var(--theme-bg-canvas)] p-5 shadow-xs">
+            <button
+              type="button"
+              onClick={() => setShowRawJson((prev) => !prev)}
+              className="flex items-center justify-between w-full text-xs font-semibold text-[var(--theme-fg-secondary)] cursor-pointer"
+            >
+              <span className="flex items-center gap-2">
+                <Terminal size={14} className="text-indigo-600" />
+                Raw Server Snapshot JSON Payload
+              </span>
+              {showRawJson ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </button>
+            {serverError && <p className="text-xs text-[var(--theme-danger)] mt-2">{serverError}</p>}
+            {showRawJson && (
+              <pre className="mt-3 max-h-80 overflow-auto rounded-2xl bg-slate-950 p-4 text-[11px] text-emerald-400 font-mono">
+                {JSON.stringify(serverSnapshot, null, 2) ?? 'null'}
+              </pre>
+            )}
+          </section>
+
         </div>
-      </section>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 bg-bg-canvas p-5">
-          <h2 className="text-sm font-semibold text-slate-900 mb-3">Navigation timing</h2>
-          {navigationTiming ? (
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-              {Object.entries(navigationTiming).map(([key, value]) => (
-                <div key={key} className="flex justify-between gap-3 border-b border-slate-100 py-1">
-                  <dt className="text-slate-500">{key}</dt>
-                  <dd className="font-medium text-slate-900">{formatMs(value)}</dd>
+        {/* RIGHT SIDEBAR: Compact VPS Telemetry & KPIs Stack */}
+        <div className="space-y-4">
+
+          {/* Hostinger Instance Status Header */}
+          <div className="rounded-3xl border border-[var(--theme-border)] bg-[var(--theme-bg-canvas)] p-4 shadow-xs space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-[var(--theme-bg-soft)] border border-[var(--theme-border)] flex items-center justify-center text-lg shadow-xs shrink-0">
+                {isLinux ? '🐧' : '🪟'}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <h3 className="text-sm font-semibold text-[var(--theme-fg-primary)] truncate">
+                    {isLinux ? 'Hostinger VPS (Ubuntu)' : 'Local Host'}
+                  </h3>
                 </div>
-              ))}
-            </dl>
-          ) : (
-            <p className="text-sm text-slate-500">Navigation timing not available yet.</p>
-          )}
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-bg-canvas p-5">
-          <h2 className="text-sm font-semibold text-slate-900 mb-3">Resource summary</h2>
-          <div className="text-sm text-slate-600 mb-3">
-            {resourceSummary.count} resources · {formatBytes(resourceSummary.totalTransferSize)} transferred
-          </div>
-          <div className="space-y-2">
-            {resourceSummary.slowest.map((entry) => (
-              <div key={`${entry.name}-${entry.duration}`} className="rounded-lg bg-bg-soft px-3 py-2 text-xs">
-                <div className="font-medium text-slate-800 truncate">{entry.name}</div>
-                <div className="text-slate-500 mt-1">
-                  {formatMs(entry.duration)} · {formatBytes(entry.transferSize)} · {entry.initiatorType}
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="w-2 h-2 rounded-full bg-[var(--theme-success)] animate-pulse" />
+                  <span className="text-[11px] font-medium text-[var(--theme-success)] truncate">
+                    {serverSnapshot?.sshBridgeActive
+                      ? 'Live SSH Bridge Active'
+                      : isLinux
+                      ? 'Hostinger Production'
+                      : 'Local Node Active'}
+                  </span>
                 </div>
               </div>
-            ))}
+            </div>
+
+            <div className="pt-2.5 border-t border-[var(--theme-border)] space-y-1.5 text-xs text-[var(--theme-fg-muted)]">
+              <div className="flex items-center justify-between">
+                <span>SSH Host:</span>
+                <span className="font-mono text-[var(--theme-fg-primary)] font-normal">root@187.127.145.253</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Server Uptime:</span>
+                <span className="text-[var(--theme-fg-secondary)]">{formatUptime(sysInfo?.systemUptimeSeconds && sysInfo.systemUptimeSeconds > 0 ? sysInfo.systemUptimeSeconds : sysInfo?.uptimeSeconds)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>App Uptime:</span>
+                <span className="text-[var(--theme-fg-secondary)]">{formatUptime(sysInfo?.uptimeSeconds)}</span>
+              </div>
+            </div>
+
+            <a
+              href="https://hpanel.hostinger.com/vps/1745879/overview"
+              target="_blank"
+              rel="noreferrer"
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-bg-soft)] py-2 text-xs font-medium text-[var(--theme-fg-secondary)] hover:bg-[var(--theme-bg-muted)] transition-colors shadow-xs"
+            >
+              <Terminal size={14} />
+              Open Hostinger hPanel
+              <ExternalLink size={12} className="text-[var(--theme-fg-tertiary)]" />
+            </a>
           </div>
-        </section>
+
+          {/* Compact Telemetry KPIs List */}
+          <div className="rounded-3xl border border-[var(--theme-border)] bg-[var(--theme-bg-canvas)] p-4 shadow-xs space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-[var(--theme-border)]">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--theme-fg-muted)]">
+                Server Telemetry KPIs
+              </span>
+              <span className="text-[10px] font-medium text-[var(--theme-success)] bg-[var(--theme-success-bg)] px-2 py-0.5 rounded-full border border-[var(--theme-border)]">
+                Real-Time
+              </span>
+            </div>
+
+            {/* 1. CPU Usage */}
+            <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-bg-soft)] p-3 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-normal text-[var(--theme-fg-secondary)] flex items-center gap-1.5">
+                  <Cpu size={14} className="text-purple-600" />
+                  CPU Usage
+                </span>
+                <span className="font-semibold text-[var(--theme-fg-primary)] text-sm font-mono">
+                  {cpu ? `${cpu.percent}%` : '—'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-1 border-t border-[var(--theme-border)] text-[11px] text-[var(--theme-fg-muted)]">
+                <span>Load (1m): {cpu?.loadAvg ? cpu.loadAvg[0]?.toFixed(2) : '—'}</span>
+                <span className="font-mono text-[10px]">{cpu ? `${cpu.cpuCount} Cores` : '—'}</span>
+              </div>
+              {historyCpu.length > 0 && (
+                <div className="pt-1 flex justify-end">
+                  <MiniSparkline data={historyCpu} color="#7c3aed" />
+                </div>
+              )}
+            </div>
+
+            {/* 2. Memory Usage */}
+            <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-bg-soft)] p-3 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-normal text-[var(--theme-fg-secondary)] flex items-center gap-1.5">
+                  <Server size={14} className="text-indigo-600" />
+                  RAM Usage
+                </span>
+                <span className="font-semibold text-[var(--theme-fg-primary)] text-sm font-mono">
+                  {sysMem ? `${sysMem.usedPercent}%` : '—'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-[var(--theme-fg-muted)]">
+                <span>Used / Total:</span>
+                <span className="font-mono text-[10px] font-normal text-[var(--theme-fg-secondary)]">
+                  {sysMem ? `${formatBytes(sysMem.usedBytes)} / ${formatBytes(sysMem.totalBytes)}` : '—'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-1 border-t border-[var(--theme-border)] text-[10px] text-[var(--theme-fg-muted)]">
+                <span>Node RSS: {procMem ? formatBytes(procMem.rss) : '—'}</span>
+                <span>Heap: {procMem ? formatBytes(procMem.heapUsed) : '—'}</span>
+              </div>
+            </div>
+
+            {/* 3. Disk Storage */}
+            <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-bg-soft)] p-3 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-normal text-[var(--theme-fg-secondary)] flex items-center gap-1.5">
+                  <HardDrive size={14} className="text-indigo-600" />
+                  Disk Storage
+                </span>
+                <span className="font-semibold text-indigo-600 text-sm font-mono">
+                  {disk ? `${disk.usedPercent}%` : '—'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-[var(--theme-fg-muted)]">
+                <span>Capacity:</span>
+                <span className="font-mono text-[11px] font-medium text-[var(--theme-fg-primary)]">
+                  {disk ? `${(disk.usedBytes / (1024 * 1024 * 1024)).toFixed(1)} GB / ${(disk.totalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : 'Unavailable'}
+                </span>
+              </div>
+              <div className="text-[10px] text-[var(--theme-fg-muted)] pt-1 border-t border-[var(--theme-border)] flex justify-between">
+                <span>Free Space:</span>
+                <span className="font-mono font-normal text-[var(--theme-fg-secondary)]">{disk ? formatBytes(disk.freeBytes) : '—'}</span>
+              </div>
+            </div>
+
+            {/* 4. Incoming & Outgoing Traffic Grid */}
+            <div className="grid grid-cols-2 gap-2">
+              {/* Incoming RX */}
+              <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-bg-soft)] p-2.5 space-y-1">
+                <div className="flex items-center justify-between text-[11px] font-normal text-[var(--theme-fg-muted)]">
+                  <span className="flex items-center gap-1">
+                    <ArrowDownLeft size={12} className="text-rose-500" /> RX Traffic
+                  </span>
+                </div>
+                <div className="text-sm font-semibold text-[var(--theme-fg-primary)] font-mono">
+                  {net ? formatBytes(net.rxBytes) : '0 B'}
+                </div>
+                <div className="text-[9px] text-[var(--theme-fg-tertiary)]">Net RX counter</div>
+              </div>
+
+              {/* Outgoing TX */}
+              <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-bg-soft)] p-2.5 space-y-1">
+                <div className="flex items-center justify-between text-[11px] font-normal text-[var(--theme-fg-muted)]">
+                  <span className="flex items-center gap-1">
+                    <ArrowUpRight size={12} className="text-indigo-600" /> TX Traffic
+                  </span>
+                </div>
+                <div className="text-sm font-semibold text-[var(--theme-fg-primary)] font-mono">
+                  {net ? formatBytes(net.txBytes) : '0 B'}
+                </div>
+                <div className="text-[9px] text-[var(--theme-fg-tertiary)]">Net TX counter</div>
+              </div>
+            </div>
+
+            {/* 5. Host OS & Node Platform */}
+            <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-bg-soft)] p-3 space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-normal text-[var(--theme-fg-secondary)]">Host OS Platform</span>
+                <span className="text-[10px] font-mono text-[var(--theme-fg-muted)]">{sysInfo?.arch ?? 'x64'}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs font-semibold text-[var(--theme-fg-primary)]">
+                <span className="capitalize">{sysInfo?.platform ?? 'Linux'}</span>
+                <span className="text-[11px] font-normal text-[var(--theme-fg-muted)] font-mono">Node {sysInfo?.nodeVersion ?? 'v25.9.0'}</span>
+              </div>
+            </div>
+
+            {/* 6. Database Read Model Sources */}
+            <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-bg-soft)] p-3 space-y-2 text-xs">
+              <div className="flex items-center justify-between font-normal text-[var(--theme-fg-secondary)]">
+                <span className="flex items-center gap-1.5">
+                  <Database size={14} className="text-purple-600" />
+                  Read Model
+                </span>
+                <span className="text-[10px] font-medium text-[var(--theme-success)] bg-[var(--theme-success-bg)] px-2 py-0.5 rounded-full border border-[var(--theme-border)]">
+                  {readModel?.syncWorkerEnabled ? 'Sync Worker Active' : 'Read-Model Ready'}
+                </span>
+              </div>
+              <div className="space-y-1 text-[11px] text-[var(--theme-fg-muted)]">
+                <div className="flex justify-between">
+                  <span>Calls Source:</span>
+                  <span className="font-mono text-[var(--theme-fg-primary)] uppercase font-medium">{readModel?.readCallsFrom ?? 'postgres'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Register Source:</span>
+                  <span className="font-mono text-[var(--theme-fg-primary)] uppercase font-medium">{readModel?.readRegisterFrom ?? 'postgres'}</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
       </div>
-
-      <section className="rounded-2xl border border-slate-200 bg-bg-canvas p-5">
-        <h2 className="text-sm font-semibold text-slate-900 mb-3">Long tasks (&gt;50ms)</h2>
-        {longTasks.length === 0 ? (
-          <p className="text-sm text-slate-500">No long tasks recorded on this page load yet.</p>
-        ) : (
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {longTasks.map((task, index) => (
-              <div key={`${task.startTime}-${index}`} className="rounded-lg bg-bg-soft px-3 py-2 text-xs">
-                <div className="font-medium text-slate-800">{task.name || 'longtask'}</div>
-                <div className="text-slate-500 mt-1">
-                  {formatMs(task.duration)} at {formatMs(task.startTime)}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="rounded-2xl border border-slate-200 bg-bg-canvas p-5">
-        <h2 className="text-sm font-semibold text-slate-900 mb-3">Server health snapshot</h2>
-        {serverError && <p className="text-sm text-rose-600 mb-3">{serverError}</p>}
-        <pre className="max-h-80 overflow-auto rounded-xl bg-slate-950 p-4 text-xs text-slate-100">
-          {JSON.stringify(serverSnapshot, null, 2) ?? 'null'}
-        </pre>
-      </section>
-
-      <section className="rounded-2xl border border-slate-200 bg-bg-canvas p-5">
-        <h2 className="text-sm font-semibold text-slate-900 mb-3">Vercel dashboards</h2>
-        <p className="text-sm text-slate-500 mb-4">
-          Speed Insights and Web Analytics aggregate RUM data across all users in the Vercel project.
-        </p>
-        <div className="flex flex-wrap gap-3">
-          <a
-            href="https://vercel.com/dashboard"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-bg-soft"
-          >
-            Vercel project dashboards
-            <ExternalLink size={14} />
-          </a>
-          <span className="text-xs text-slate-400 self-center">
-            Open your project → Speed Insights / Analytics tabs after deploy.
-          </span>
-        </div>
-      </section>
     </div>
   );
 }

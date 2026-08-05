@@ -34,7 +34,7 @@ export default async function RootLayout({
 
   return (
     <html lang="en" data-theme={initialTheme} suppressHydrationWarning>
-      <body className={`${dmSans.variable} ${jetbrainsMono.variable} antialiased font-sans`}>
+      <body className={`${dmSans.variable} ${jetbrainsMono.variable} antialiased font-sans`} suppressHydrationWarning>
         <ThemeScript />
         <DashboardLayout initialUser={initialUser}>
           {children}

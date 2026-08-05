@@ -30,6 +30,7 @@ import {
 } from '@/lib/read-model/upsert-facts';
 import { runArcpIncrementalSync } from '@/modules/arcp-claims/server/sync/incremental';
 import { runBackfillArcpBmApproved } from '@/modules/arcp-claims/server/sync/backfill-arcp-bm-approved';
+import { runArcpApprovalRescan } from '@/modules/arcp-claims/server/sync/approval-rescan';
 import { runTransactionEntryIncremental } from '@/lib/read-model/transaction-entry';
 
 const ENTITY = 'calls_latest_hot';
@@ -123,6 +124,15 @@ export async function runNightlyReconcile(): Promise<void> {
       }
       const bmResult = await runBackfillArcpBmApproved({ onlyMissing: true });
       console.log(`[arcp-sync] arcp_bm_approved_at refresh: ${bmResult.rowsUpdated} rows`);
+
+      // Re-scan last N days by call-log date to catch approvals where CRM
+      // updated dbmapproveddate without touching editedon (incremental misses these).
+      if (process.env.ARCP_APPROVAL_RESCAN_NIGHTLY !== 'false') {
+        const rescan = await runArcpApprovalRescan();
+        console.log(
+          `[arcp-approval-rescan] Nightly rescan — ${rescan.rowsUpserted} rows upserted across ${rescan.chunksProcessed} chunks`
+        );
+      }
     } catch (err) {
       console.error(
         '[arcp-sync] Nightly incremental failed:',

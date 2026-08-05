@@ -1571,11 +1571,34 @@
 
   /* Shared sortable header affordance (SortableTh / AdminTh / distribution) */
   .table-th-sortable {
-    @apply cursor-pointer select-none transition-colors;
+    @apply cursor-pointer select-none transition-colors bg-bg-soft;
   }
 
   .table-th-sortable:hover {
-    @apply bg-black/[0.04];
+    @apply bg-slate-200/50;
+  }
+
+  .table-th-sortable--active,
+  .table-th-sortable[aria-sort="ascending"],
+  .table-th-sortable[aria-sort="descending"] {
+    @apply bg-slate-200/80 font-semibold text-slate-900;
+  }
+
+  [data-theme="dark"] .table-th-sortable {
+    background-color: var(--theme-bg-muted);
+    color: var(--theme-fg-secondary);
+  }
+
+  [data-theme="dark"] .table-th-sortable:hover {
+    background-color: color-mix(in oklab, var(--theme-bg-muted) 80%, #fff 20%);
+    color: var(--theme-fg-primary);
+  }
+
+  [data-theme="dark"] .table-th-sortable--active,
+  [data-theme="dark"] .table-th-sortable[aria-sort="ascending"],
+  [data-theme="dark"] .table-th-sortable[aria-sort="descending"] {
+    background-color: color-mix(in oklab, var(--theme-bg-muted) 65%, #fff 35%);
+    color: var(--theme-fg-primary);
   }
 
   .table-th-sortable:hover .table-sort-icon--idle {

@@ -215,8 +215,7 @@ async function fetchArcpRowsSharded(
     if (!isRetryableCrmError(err)) throw err;
     if (shardCount >= ARCP_NCODE_SHARD_MAX) {
       throw new Error(
-        `[arcp-sync] CRM failed on ${startDate}..${endDate} ncode shard ${shardIndex}/${shardCount}: ${
-          err instanceof Error ? err.message : String(err)
+        `[arcp-sync] CRM failed on ${startDate}..${endDate} ncode shard ${shardIndex}/${shardCount}: ${err instanceof Error ? err.message : String(err)
         }`
       );
     }
@@ -320,8 +319,7 @@ async function fetchIncrementalWindowSharded(
     if (!isRetryableCrmError(err)) throw err;
     if (shardCount >= ARCP_NCODE_SHARD_MAX) {
       throw new Error(
-        `[arcp-sync] CRM failed on incremental ${formatCrmDateTime(from)}..${formatCrmDateTime(toExclusive)} shard ${shardIndex}/${shardCount}: ${
-          err instanceof Error ? err.message : String(err)
+        `[arcp-sync] CRM failed on incremental ${formatCrmDateTime(from)}..${formatCrmDateTime(toExclusive)} shard ${shardIndex}/${shardCount}: ${err instanceof Error ? err.message : String(err)
         }`
       );
     }

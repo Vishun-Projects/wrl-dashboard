@@ -211,6 +211,9 @@ describe('runMisEmailDigest rule-driven routing', () => {
         includeDetailed: true,
         includeKeyAccount: true,
         mis_email_preferences: expect.objectContaining({
+          includeSummary: false,
+          includeDetailed: false,
+          includeKeyAccount: false,
           includeOpenCallsExport: true,
           bodyLayout: expect.objectContaining({ mode: 'grid', mergeKeyAccountRegions: true }),
           bodyInEmail: expect.arrayContaining([

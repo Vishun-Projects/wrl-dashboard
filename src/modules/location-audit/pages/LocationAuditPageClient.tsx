@@ -293,6 +293,9 @@ export default function LocationAuditPage() {
     }
   }, [getAppliedFiltersSnapshot, buildParams, clearPageAlert, setPageError]);
 
+  const runAuditRef = useRef(runAudit);
+  runAuditRef.current = runAudit;
+
   useEffect(() => {
     if (!resourcesLoaded || !prefsReady || auditBootstrapRef.current) return;
     auditBootstrapRef.current = true;
@@ -300,6 +303,7 @@ export default function LocationAuditPage() {
       priorityFilter: ['major'],
       selectedCallTypes: [SUMMARY_DEFAULT_CALL_TYPE],
     });
+    void runAuditRef.current();
   }, [resourcesLoaded, prefsReady, applyFilters]);
 
   const loadRowDetail = useCallback(

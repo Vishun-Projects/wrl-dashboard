@@ -86,7 +86,11 @@ function buildRoutingComposerRecipient(
     mis_email_enabled: true,
     mis_email_preferences: {
       ...prefs,
-      // All four company digest workbooks.
+      includeSummary: false,
+      includeDetailed: false,
+      includeKeyAccount: false,
+      includeTraceableExport: false,
+      // Send only WRL BD MIS Open Calls export workbook
       includeOpenCallsExport: true,
       // Custom grid (regional+branch left, key accounts right) — not stacked default.
       bodyLayout: MIS_EMAIL_BODY_LAYOUT_PRESETS.legacy_dashboard.layout,

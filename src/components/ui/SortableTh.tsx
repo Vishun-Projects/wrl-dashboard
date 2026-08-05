@@ -59,9 +59,11 @@ export function SortableTh({
     );
   }
 
+  const activeClass = active ? 'table-th-sortable--active' : '';
+
   return (
     <th
-      className={`table-th-sortable ui-field-label text-slate-600 ${alignClass} ${className}`.trim()}
+      className={`table-th-sortable ui-field-label text-slate-600 ${alignClass} ${activeClass} ${className}`.trim()}
       onClick={onClick}
       title={title ?? 'Click to sort'}
       aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}

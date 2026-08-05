@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/vps-hosting/init-dev.mjs",
+    "dev:next": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -50,6 +51,7 @@
     "sync-worker:arcp-backfill": "npx tsx src/lib/read-model/cli.ts arcp-backfill",
     "sync-worker:arcp-incremental": "npx tsx src/lib/read-model/cli.ts arcp-incremental",
     "sync-worker:arcp-nightly": "npx tsx src/lib/read-model/cli.ts arcp-nightly",
+    "sync-worker:arcp-approval-rescan": "npx tsx src/lib/read-model/cli.ts arcp-approval-rescan",
     "arcp:coverage:vps": "bash scripts/vps-hosting/arcp-coverage-vps.sh",
     "arcp:detail-indexes:vps": "bash scripts/vps-hosting/arcp-detail-indexes-vps.sh",
     "sync-worker:transaction-entry-backfill": "npx tsx src/lib/read-model/cli.ts transaction-entry-backfill",
@@ -77,7 +79,8 @@
     "mail-relay:test": "npx tsx scripts/ops/test-mail-relay.ts",
     "mis-client:pack": "npx tsx scripts/mis-client/pack-import-file.ts",
     "mis-client:purge-old-files": "npx tsx scripts/mis-client/purge-old-import-files.ts",
-    "mis-client:install-purge-cron:vps": "bash scripts/vps-hosting/install-mis-client-purge-cron.sh"
+    "mis-client:install-purge-cron:vps": "bash scripts/vps-hosting/install-mis-client-purge-cron.sh",
+    "vps:telemetry": "powershell -ExecutionPolicy Bypass -File scripts/vps-hosting/fetch-vps-telemetry.ps1"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.3",
