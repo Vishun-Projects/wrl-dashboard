@@ -29,8 +29,27 @@ const getCachedReadModelProgress = unstable_cache(
 function getDiskStorage() {
   try {
     if (typeof fs.statfsSync === 'function') {
-      const stats = fs.statfsSync(process.cwd());
-      const totalBytes = stats.bsize * stats.blocks;
+      let targetPath = process.cwd();
+      let stats = fs.statfsSync(targetPath);
+      let totalBytes = stats.bsize * stats.blocks;
+
+      // On serverless environments (e.g. Vercel Lambda), process.cwd() is /var/task
+      // which is a read-only 10MB deployment zip mount with 0 free bytes (100% full).
+      // Fallback to /tmp if process.cwd() is a tiny read-only mount (< 100MB).
+      if (totalBytes < 100 * 1024 * 1024 && fs.existsSync('/tmp')) {
+        try {
+          const tmpStats = fs.statfsSync('/tmp');
+          const tmpTotal = tmpStats.bsize * tmpStats.blocks;
+          if (tmpTotal > totalBytes) {
+            targetPath = '/tmp';
+            stats = tmpStats;
+            totalBytes = tmpTotal;
+          }
+        } catch {
+          /* keep cwd stats */
+        }
+      }
+
       const freeBytes = stats.bsize * stats.bfree;
       const availableBytes = stats.bsize * stats.bavail;
       const usedBytes = totalBytes - freeBytes;
@@ -44,7 +63,7 @@ function getDiskStorage() {
       };
     }
   } catch {
-    /* statfsSync skip if unsupported */
+    // Fallback if statfs is unavailable
   }
   return null;
 }
@@ -329,7 +348,7 @@ export async function GET(request?: Request) {
   let systemInfo = getSystemInfo();
   let sshBridgeActive = false;
 
-  if (process.platform !== 'linux') {
+  if (process.platform !== 'linux' || process.env.VERCEL === '1' || process.env.AWS_EXECUTION_ENV) {
     const remote = getRemoteVpsTelemetryViaSsh(clientPassphrase);
     if (remote) {
       cpu = remote.cpu;

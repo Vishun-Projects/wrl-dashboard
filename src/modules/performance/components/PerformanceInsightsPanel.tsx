@@ -491,6 +491,10 @@ export function PerformanceInsightsPanel() {
   const sysInfo = serverSnapshot?.systemInfo;
   const readModel = serverSnapshot?.readModel;
 
+  const isVercelServerless = Boolean(
+    serverSnapshot?.deployment?.region ||
+      (serverSnapshot?.environment === 'production' && !serverSnapshot?.sshBridgeActive)
+  );
   const isLinux = sysInfo?.platform === 'linux' || Boolean(serverSnapshot?.passphraseAuthenticated);
 
   return (
@@ -662,12 +666,18 @@ export function PerformanceInsightsPanel() {
           <div className="rounded-3xl border border-[var(--theme-border)] bg-[var(--theme-bg-canvas)] p-4 shadow-xs space-y-3">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-[var(--theme-bg-soft)] border border-[var(--theme-border)] flex items-center justify-center text-lg shadow-xs shrink-0">
-                {isLinux ? '🐧' : '🪟'}
+                {serverSnapshot?.sshBridgeActive ? '⚡' : isVercelServerless ? '☁️' : isLinux ? '🐧' : '🪟'}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <h3 className="text-sm font-semibold text-[var(--theme-fg-primary)] truncate">
-                    {isLinux ? 'Hostinger VPS (Ubuntu)' : 'Local Host'}
+                    {serverSnapshot?.sshBridgeActive
+                      ? 'Hostinger VPS (Live SSH)'
+                      : isVercelServerless
+                      ? `Vercel Serverless (${serverSnapshot?.deployment?.region ?? 'ap-south-1'})`
+                      : isLinux
+                      ? 'Hostinger VPS (Ubuntu)'
+                      : 'Local Host'}
                   </h3>
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
@@ -675,6 +685,8 @@ export function PerformanceInsightsPanel() {
                   <span className="text-[11px] font-medium text-[var(--theme-success)] truncate">
                     {serverSnapshot?.sshBridgeActive
                       ? 'Live SSH Bridge Active'
+                      : isVercelServerless
+                      ? 'Cloud Edge Node Active'
                       : isLinux
                       ? 'Hostinger Production'
                       : 'Local Node Active'}
@@ -780,7 +792,7 @@ export function PerformanceInsightsPanel() {
               <div className="flex items-center justify-between text-[11px] text-[var(--theme-fg-muted)]">
                 <span>Capacity:</span>
                 <span className="font-mono text-[11px] font-medium text-[var(--theme-fg-primary)]">
-                  {disk ? `${(disk.usedBytes / (1024 * 1024 * 1024)).toFixed(1)} GB / ${(disk.totalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : 'Unavailable'}
+                  {disk ? `${formatBytes(disk.usedBytes)} / ${formatBytes(disk.totalBytes)}` : 'Unavailable'}
                 </span>
               </div>
               <div className="text-[10px] text-[var(--theme-fg-muted)] pt-1 border-t border-[var(--theme-border)] flex justify-between">
