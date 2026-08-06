@@ -712,8 +712,10 @@ export async function handleRegisterGet(req: NextRequest) {
         orderBy: "tc.ncode DESC" // Order by recently edited/added
       });
 
-      const processedData = await mergeAuditEnrichment(
-        (res.data || []).map((row: Record<string, unknown>) => mapCrmRegisterRow(row))
+      const processedData = await enrichRegisterRowsRepairDone(
+        await mergeAuditEnrichment(
+          (res.data || []).map((row: Record<string, unknown>) => mapCrmRegisterRow(row))
+        )
       );
 
       return NextResponse.json({

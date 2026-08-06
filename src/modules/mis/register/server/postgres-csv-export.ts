@@ -2,6 +2,7 @@ import { withBulkReadClient } from '@/lib/read-model/db';
 import { formatRegisterExportDate } from '@/modules/mis/register/services/register-export-format';
 import { formatRegisterMajorMinor } from '@/modules/mis/register/services/register-export-format';
 import { formatRegisterRepairDone } from '@/modules/mis/register/services/register-export-format';
+import { enrichRegisterRowsRepairDone } from '@/sql/register/repair-done-enrich';
 import {
   buildRegisterListQuery,
   buildWhere,
@@ -222,15 +223,18 @@ export async function buildPostgresRegisterCsvStream(
             const rows = res.rows;
             if (!rows.length) break;
 
-            const lines = new Array<string>(rows.length);
-            for (let i = 0; i < rows.length; i++) {
-              lines[i] = hotPgRowToRegisterCsvLine(rows[i]!);
+            // Enrich repair_done from CRM before formatting (soft-fails on timeout).
+            const enriched = await enrichRegisterRowsRepairDone(rows);
+
+            const lines = new Array<string>(enriched.length);
+            for (let i = 0; i < enriched.length; i++) {
+              lines[i] = hotPgRowToRegisterCsvLine(enriched[i]!);
             }
             if (!enqueue(encoder.encode(`${lines.join('\r\n')}\r\n`))) {
               consumerGone = true;
               return;
             }
-            exportedRows += rows.length;
+            exportedRows += enriched.length;
 
             const cursor = registerKeysetCursorFromRow(
               rows[rows.length - 1]!,

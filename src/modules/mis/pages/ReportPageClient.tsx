@@ -56,7 +56,6 @@ import {
 import {
   readRegisterFromPostgresClient,
 } from '@/lib/read-model/client-flags';
-import { deriveRegisterView } from '@/modules/mis/services/register-view';
 import {
   collectRegisterRowsFromSessionCache,
   prepareRegisterCsvFromServer,
@@ -488,8 +487,24 @@ export default function ReportPageClient() {
 
       if (sourceTab === 'register') {
         try {
+          console.log('==============================');
+          console.log('STEP 1 - Register export started');
+          console.log('format:', format);
+          console.log('sourceTab:', sourceTab);
+          console.log('==============================');
+
           const startDateStr = toDateString(dateRange.start);
           const endDateStr = toDateString(dateRange.end);
+
+          console.log('STEP 2 - Date Range');
+          console.log({
+            startDateStr,
+            endDateStr,
+            total: registerTabState.total,
+            pageSize: registerTabState.limit,
+            currentRows: registerTabState.data.length,
+          });
+
           const queryKey = buildRegisterListQueryKeyFromViewFilters({
             officeIdsParam: 'All',
             callTypesParam: resolveViewCallTypesParam(selectedCallTypes),
@@ -515,8 +530,15 @@ export default function ReportPageClient() {
             pageLimit: registerTabState.limit,
           });
 
+          console.log('STEP 3 - Query Key');
+          console.log(queryKey);
+
           const exportQuery = buildRegisterExportQueryFromViewFilters({
-            officeId: resolveSummaryOfficeIdsParam(offices, selectedBranch, selectedFranchisee),
+            officeId: resolveSummaryOfficeIdsParam(
+              offices,
+              selectedBranch,
+              selectedFranchisee
+            ),
             callType: resolveViewCallTypesParam(selectedCallTypes),
             startDate: startDateStr,
             endDate: endDateStr,
@@ -538,52 +560,130 @@ export default function ReportPageClient() {
             },
           });
 
+          console.log('STEP 4 - Export Query');
+          console.log(exportQuery);
+
           let exportData: Record<string, unknown>[] = registerTabState.data;
-          const needsFullFetch = registerTabState.total > registerTabState.limit || registerTabState.data.length < registerTabState.total;
+
+          console.log('STEP 5 - Initial Export Data');
+          console.log('rows:', exportData.length);
+          console.log('first row:', exportData[0]);
+
+          const needsFullFetch =
+            registerTabState.total > registerTabState.limit ||
+            registerTabState.data.length < registerTabState.total;
+
+          console.log('STEP 6 - needsFullFetch');
+          console.log({
+            needsFullFetch,
+            total: registerTabState.total,
+            limit: registerTabState.limit,
+            loaded: registerTabState.data.length,
+          });
 
           if (needsFullFetch && exportData.length < registerTabState.total) {
+            console.log('STEP 7 - Checking session cache');
+
             const cachedAllPages = collectRegisterRowsFromSessionCache(
               registerTabState.registerPagesCacheRef.current,
               queryKey,
               registerTabState.total,
               registerTabState.limit
             );
+
+            console.log('cached rows:', cachedAllPages?.length);
+
             if (cachedAllPages?.length) {
               exportData = cachedAllPages;
+              console.log('Using cached rows');
             }
           }
 
-          if (needsFullFetch && !readRegisterFromPostgresClient() && exportData.length < registerTabState.total) {
+          if (
+            needsFullFetch &&
+            !readRegisterFromPostgresClient() &&
+            exportData.length < registerTabState.total
+          ) {
+            console.log('STEP 8 - Checking corpus');
+
             const spanDays = corpusSpanDays(startDateStr, endDateStr);
+
+            console.log({
+              spanDays,
+              cacheKey: callCorpusStore?.cacheKey,
+              corpusRows: callCorpusStore?.calls.size,
+            });
+
             if (spanDays <= MAX_CLIENT_CORPUS_DAYS) {
-              const corpusKey = buildCorpusCacheKey(startDateStr, endDateStr, dateFilterColumn);
-              if (callCorpusStore?.cacheKey === corpusKey && (callCorpusStore?.calls.size ?? 0) > 0) {
+              const corpusKey = buildCorpusCacheKey(
+                startDateStr,
+                endDateStr,
+                dateFilterColumn
+              );
+
+              console.log({
+                corpusKey,
+              });
+
+              if (
+                callCorpusStore?.cacheKey === corpusKey &&
+                (callCorpusStore?.calls.size ?? 0) > 0
+              ) {
                 const viewDateFilter = buildCorpusViewDateFilter(
                   startDateStr,
                   endDateStr,
                   dateFilterColumn
                 );
+
                 exportData = getFilteredCorpusCalls(
                   registerTabState.registerViewFilterRef.current,
                   callCorpusStore,
                   viewDateFilter
                 );
+
+                console.log('Corpus rows:', exportData.length);
               }
             }
           }
 
           if (needsFullFetch && exportData.length < registerTabState.total) {
-            if (shouldStreamRegisterExportFromServer(registerTabState.total, exportData.length)) {
-              onProgress({ fetched: 0, total: registerTabState.total });
+
+            console.log('STEP 9 - Need server fetch');
+
+            const stream = shouldStreamRegisterExportFromServer(
+              registerTabState.total,
+              exportData.length
+            );
+
+            console.log({
+              stream,
+              total: registerTabState.total,
+              currentRows: exportData.length,
+            });
+
+            if (stream) {
+
+              console.log('STEP 10 - Streaming CSV from server');
+
+              onProgress({
+                fetched: 0,
+                total: registerTabState.total,
+              });
+
               const {
                 data: { session },
               } = await supabase.auth.getSession();
+
+              console.log('Session exists:', !!session);
+
               const prepared = await prepareRegisterCsvFromServer({
                 query: exportQuery,
                 knownTotal: registerTabState.total,
                 signal,
                 accessToken: session?.access_token,
                 onProgress: (progress) => {
+                  console.log('STREAM PROGRESS', progress);
+
                   onProgress({
                     fetched: progress.fetched,
                     total: progress.total,
@@ -591,53 +691,92 @@ export default function ReportPageClient() {
                   });
                 },
               });
+
+              console.log('STEP 11 - Stream finished');
+
               if (format === 'excel') {
                 feedback.actionSuccess('Large export queued as CSV');
               }
+
               return prepared;
             }
+
+            console.log('STEP 12 - Fetching all rows');
 
             exportData = await fetchAllRegisterRowsForExport({
               knownTotal: registerTabState.total,
               signal,
-              onProgress: (fetched, exportTotal) => {
-                onProgress({ fetched, total: exportTotal });
-              },
               query: exportQuery,
+              onProgress: (fetched, total) => {
+                console.log('FETCH', fetched, '/', total);
+
+                onProgress({
+                  fetched,
+                  total,
+                });
+              },
             });
 
-            if (readRegisterFromPostgresClient() && exportData.length) {
-              const viewDateFilter = buildCorpusViewDateFilter(
-                startDateStr,
-                endDateStr,
-                dateFilterColumn
-              );
-              exportData = deriveRegisterView(
-                exportData,
-                registerTabState.registerViewFilterRef.current,
-                viewDateFilter
-              ).filteredCalls;
-            }
+            console.log('STEP 13 - Fetch finished');
+            console.log('Rows:', exportData.length);
           }
+
+          console.log('STEP 14 - Final Export Data');
+          console.log('Rows:', exportData.length);
+          console.log('First row:', exportData[0]);
+          console.log('repair_done:', exportData[0]?.repair_done);
+          console.log('Keys:', Object.keys(exportData[0] ?? {}));
 
           if (!exportData.length) {
             throw new Error('No data to export');
           }
 
           if (format === 'csv') {
-            const { prepareRegisterCsvExport } = await import('@/modules/mis/register/server/csv-export');
-            return prepareRegisterCsvExport(
-              exportData,
-              `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.csv`
-            );
+            console.log('STEP 15 - CSV Export');
           }
 
-          const { prepareRegisterExcelFromRows } = await import('@/modules/mis/register/services/excel-export');
+          console.log('STEP 16 - Importing Excel exporter');
+
+          const { prepareRegisterExcelFromRows } = await import(
+            '@/modules/mis/register/services/excel-export'
+          );
+
+          console.log('STEP 17 - Calling prepareRegisterExcelFromRows');
+          console.log('================ EXPORT DEBUG ================');
+
+          console.log('Total Rows:', exportData.length);
+
+          const withRepair = exportData.filter(
+            (r) => r.repair_done != null && String(r.repair_done).trim() !== ''
+          );
+
+          console.log('Rows having repair_done:', withRepair.length);
+
+          if (withRepair.length > 0) {
+            console.log('Sample row WITH repair_done:', withRepair[0]);
+          }
+
+          const withoutRepair = exportData.filter(
+            (r) => r.repair_done == null || String(r.repair_done).trim() === ''
+          );
+
+          console.log('Rows WITHOUT repair_done:', withoutRepair.length);
+
+          if (withoutRepair.length > 0) {
+            console.log('Sample row WITHOUT repair_done:', withoutRepair[0]);
+          }
+
+          console.log('=============================================');
           return prepareRegisterExcelFromRows(exportData, {
             filename: `WRL_MIS_Register_${new Date().toISOString().split('T')[0]}.xlsx`,
             sheetName: 'Call Register',
-            onProgress: (processed, exportTotal) => {
-              onProgress({ fetched: processed, total: exportTotal });
+            onProgress: (processed, total) => {
+              console.log('EXCEL BUILD', processed, '/', total);
+
+              onProgress({
+                fetched: processed,
+                total,
+              });
             },
           });
         } catch (err) {
@@ -645,6 +784,7 @@ export default function ReportPageClient() {
             throw new DOMException('Export cancelled', 'AbortError');
           }
           console.error('Register export failed:', err);
+
           const message =
             axios.isAxiosError(err) && err.response?.data?.error
               ? String(err.response.data.error)

@@ -715,7 +715,13 @@ export async function queryRegisterFromPostgres(params: RegisterPostgresParams) 
   )) as Record<string, unknown>[];
 
   const withRepairs = await enrichRegisterRowsRepairDone(mapped);
+  console.log('WITH REPAIRS COUNT:',
+    withRepairs.filter(r => r.repair_done).length
+  );
 
+  console.log('FIRST WITH REPAIR:',
+    withRepairs.find(r => r.repair_done)
+  );
   const syncMeta = await getSyncMeta();
   const response: Record<string, unknown> = {
     data: withRepairs,
@@ -798,9 +804,11 @@ export async function queryRegisterBulkFromPostgres(
     rows.map(hotRowToRegisterRow) as Record<string, unknown>[]
   );
 
+  const withRepairs = await enrichRegisterRowsRepairDone(mapped);
+
   return {
-    data: mapped,
-    total: mapped.length,
+    data: withRepairs,
+    total: withRepairs.length,
     readSource: 'postgres' as const,
     bulk: true,
   };
@@ -810,6 +818,7 @@ export async function queryRegisterBulkFromPostgres(
 export async function queryRegisterExportFromPostgres(
   params: RegisterPostgresParams
 ): Promise<Record<string, unknown>[]> {
+  console.log('🔥 queryRegisterExportFromPostgres CALLED');
   const { sql: whereSql, values } = buildWhere(params);
   const orderBy = registerHotOrderBy(params.dateFilterColumn);
 
@@ -826,7 +835,13 @@ export async function queryRegisterExportFromPostgres(
     REGISTER_BULK_MAX_ROWS
   );
 
-  return mergeArcpApproveDatesFromHot(rows.map(hotRowToRegisterRow) as Record<string, unknown>[]);
+  const mapped = await mergeArcpApproveDatesFromHot(
+    rows.map(hotRowToRegisterRow) as Record<string, unknown>[]
+  );
+
+  const withRepairs = await enrichRegisterRowsRepairDone(mapped);
+
+  return withRepairs;
 }
 
 /** Fast breakdown register export for MIS email — slim columns, no ARCP enrichment. */
