@@ -246,7 +246,7 @@ export function useSummaryTabState({
     };
 
     void initSummary();
-  }, [activeTab, misAccess.summary, misAccess.accounts, appliedRevision, sourceSelectionKey, loadClientImportSources, fetchHelper]);
+  }, [activeTab, misAccess.summary, misAccess.accounts, appliedRevision, sourceSelectionKey, loadClientImportSources, fetchHelper.runSummaryFilterLoad]);
 
   return {
     summaryData,
