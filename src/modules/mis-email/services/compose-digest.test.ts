@@ -239,6 +239,83 @@ describe('buildMisEmailPayload early exits', () => {
     expect(buildDigestAttachments).not.toHaveBeenCalled();
     expect(buildDigestTraceableExportPayload).toHaveBeenCalledOnce();
   });
+
+  it('does not filter excel data/trace payload by selected accounts but filters body keyAccountRows', async () => {
+    fetchDigestSummaryDataCached.mockResolvedValue({
+      branchSummary: [],
+      accountSummary: [
+        { account: 'COKE', open_calls: 5 },
+        { account: 'CADBURY', open_calls: 10 },
+        { account: 'PEPSI', open_calls: 15 },
+      ],
+      totals: {},
+    });
+    fetchDigestClientAccountSummaryCached.mockResolvedValue([
+      { account: 'COKE', open_calls: 5 },
+      { account: 'CADBURY', open_calls: 10 },
+      { account: 'PEPSI', open_calls: 15 },
+    ]);
+    buildDigestTraceableExportPayload.mockResolvedValue({
+      regionalRows: [],
+      grand: { region: 'ALL', open_calls: 30 },
+      crmBranchSummary: [],
+      crmAccountSummary: [],
+      clientAccountSummary: [],
+      sources: {},
+      traceRows: [
+        { client: 'COKE', open_calls: 5 },
+        { client: 'CADBURY', open_calls: 10 },
+        { client: 'PEPSI', open_calls: 15 },
+      ],
+      traceAlign: 'summary',
+      filterMeta: {},
+    });
+    buildDigestAttachments.mockResolvedValue([
+      { filename: 'Trace_Report.xlsx', content: Buffer.from('mock content') }
+    ]);
+
+    const result = await buildMisEmailPayload(
+      {
+        ...summaryRecipient,
+        includeKeyAccount: true,
+        mis_email_preferences: {
+          ...summaryRecipient.mis_email_preferences,
+          includeDetailed: false,
+          includeTraceableExport: true,
+          keyAccountsInBody: ['COKE', 'CADBURY'],
+          bodyInEmail: ['key_account_performance'],
+        },
+      } as never,
+      {
+        sentTo: 'user@example.com',
+        displayName: 'User',
+      }
+    );
+
+    // Assert buildDigestAttachments is called with UNFILTERED data
+    expect(buildDigestAttachments).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        accountSummary: expect.arrayContaining([
+          expect.objectContaining({ account: 'COKE' }),
+          expect.objectContaining({ account: 'CADBURY' }),
+          expect.objectContaining({ account: 'PEPSI' }),
+        ]),
+      }),
+      expect.objectContaining({
+        tracePayload: expect.objectContaining({
+          traceRows: expect.arrayContaining([
+            expect.objectContaining({ client: 'COKE' }),
+            expect.objectContaining({ client: 'CADBURY' }),
+            expect.objectContaining({ client: 'PEPSI' }),
+          ]),
+        }),
+      })
+    );
+
+    // Assert that the preview indicates only the selected accounts are in the body
+    expect(result.preview.keyAccountRowsInBody).toBe(2); // COKE and CADBURY
+  });
 });
 
 describe('resolveMisEmailSendTargets', () => {

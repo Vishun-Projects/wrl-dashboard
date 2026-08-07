@@ -327,13 +327,9 @@ export async function buildMisEmailPayload(
   const selectedAccounts = parseMisEmailKeyAccountsInBody(prefs.keyAccountsInBody);
   let data = dataRaw;
   if (selectedAccounts.length) {
-    data = {
-      ...dataRaw,
-      accountSummary: filterRowsByDigestAccounts(dataRaw.accountSummary, selectedAccounts),
-    };
     timer.step(
-      'filter accounts',
-      `selected=${selectedAccounts.length} · accounts=${data.accountSummary.length}/${dataRaw.accountSummary.length}`
+      'selected accounts (body only)',
+      `selected=${selectedAccounts.length} · overall accounts=${data.accountSummary.length}`
     );
   }
 
@@ -354,9 +350,6 @@ export async function buildMisEmailPayload(
         throw err;
       }
     }
-    if (selectedAccounts.length && clientAccountSummary) {
-      clientAccountSummary = filterRowsByDigestAccounts(clientAccountSummary, selectedAccounts);
-    }
   }
 
   let registerRows = includeDetailed
@@ -364,13 +357,6 @@ export async function buildMisEmailPayload(
         fetchDigestRegisterRows(effectiveRecipient, scope, dateRange), (rows) => `rows=${rows.length}`
       )
     : undefined;
-  if (selectedAccounts.length && registerRows) {
-    const before = registerRows.length;
-    registerRows = registerRows.filter((row) =>
-      accountMatchesDigestSelection(String(row.account ?? ''), selectedAccounts)
-    );
-    timer.step('filter register', `rows=${registerRows.length}/${before}`);
-  }
 
   let attachmentIncludes = effectiveIncludes;
   if (includeDetailed && registerRows !== undefined && registerRows.length === 0) {
@@ -389,25 +375,6 @@ export async function buildMisEmailPayload(
         ), (payload) => `traceRows=${payload.traceRows.length}`
       )
     : undefined;
-  if (selectedAccounts.length && tracePayload) {
-    const before = tracePayload.traceRows.length;
-    const traceRows = tracePayload.traceRows.filter((row) =>
-      accountMatchesDigestSelection(String(row.client ?? ''), selectedAccounts)
-    );
-    tracePayload = {
-      ...tracePayload,
-      traceRows,
-      crmAccountSummary: filterRowsByDigestAccounts(
-        tracePayload.crmAccountSummary,
-        selectedAccounts
-      ),
-      clientAccountSummary: filterRowsByDigestAccounts(
-        tracePayload.clientAccountSummary,
-        selectedAccounts
-      ),
-    };
-    timer.step('filter trace', `rows=${traceRows.length}/${before}`);
-  }
 
   let emailAttachments: EmailAttachment[];
   let attachmentFilenames: string[];

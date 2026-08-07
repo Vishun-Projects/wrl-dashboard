@@ -62,6 +62,7 @@ describe('bd-mis-excel-export trace row detail', () => {
         service_order: '26F301654',
         client: 'Sarvaraya sugars',
         wco: 'W',
+        repair_done: '—',
         call_status: 'ASSIGNED',
         aging: '<2 days',
         file_name: 'CRM Files',
@@ -79,7 +80,9 @@ describe('bd-mis-excel-export trace row detail', () => {
 
     expect(rowDetail!.getRow(1).getCell(9).value).toBe('WCO');
     expect(rowDetail!.getRow(2).getCell(9).value).toBe('W');
-    const dataCell = rowDetail!.getRow(2).getCell(15);
+    expect(rowDetail!.getRow(1).getCell(10).value).toBe('Repair Done');
+    expect(rowDetail!.getRow(2).getCell(10).value).toBe('—');
+    const dataCell = rowDetail!.getRow(2).getCell(16);
     expect(dataCell.value).toBe('open');
     expect(dataCell.formula).toBeUndefined();
   }, 30000);
@@ -96,6 +99,7 @@ describe('bd-mis-excel-export trace row detail', () => {
         service_order: 'SO-OPEN',
         client: 'Dealer',
         wco: 'O',
+        repair_done: '—',
         call_status: 'ASSIGNED',
         aging: '<2 days',
         file_name: 'CRM Files',
@@ -109,6 +113,8 @@ describe('bd-mis-excel-export trace row detail', () => {
     const rowDetail = workbook.getWorksheet('Row Detail');
     expect(rowDetail?.getRow(1).getCell(9).value).toBe('WCO');
     expect(rowDetail?.getRow(2).getCell(9).value).toBe('O');
-    expect(rowDetail?.getRow(2).getCell(10).value).toBe('Unsolved');
+    expect(rowDetail?.getRow(1).getCell(10).value).toBe('Repair Done');
+    expect(rowDetail?.getRow(2).getCell(10).value).toBe('—');
+    expect(rowDetail?.getRow(2).getCell(11).value).toBe('Unsolved');
   });
 });

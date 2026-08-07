@@ -3,6 +3,7 @@ export const VPS_CRON_JOB_IDS = [
   'mis_email_test',
   'mis_email_watchdog',
   'mis_client_purge',
+  'vacuum_full_mis_rows',
 ] as const;
 
 export type VpsCronJobId = (typeof VPS_CRON_JOB_IDS)[number];
@@ -38,6 +39,12 @@ export const VPS_CRON_CATALOG: readonly VpsCronJobDef[] = [
     label: 'MIS client import file purge',
     schedule: '~03:15 IST daily (files older than 7 days)',
     script: 'mis-client-purge-old-files.sh',
+  },
+  {
+    id: 'vacuum_full_mis_rows',
+    label: 'Database VACUUM FULL (MIS Rows)',
+    schedule: '00:00 IST Sunday (Saturday night)',
+    script: 'vacuum-full-mis-rows.sh',
   },
 ] as const;
 

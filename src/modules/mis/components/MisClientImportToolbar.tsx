@@ -570,6 +570,10 @@ export default function MisClientImportToolbar({
             <tbody>
               {allBatches.map((batch) => {
                 const status = batchStatus(batch);
+                const source = sources.find((s) => s.sourceCode === batch.sourceCode);
+                const latestBatch = source?.batches[0];
+                const latestUploadedAtMs = latestBatch ? new Date(latestBatch.uploadedAt).getTime() : Date.now();
+                
                 return (
                   <tr
                     key={batch.batchId}
@@ -603,6 +607,7 @@ export default function MisClientImportToolbar({
                           uploadedAt: batch.uploadedAt,
                           fileRetained: batch.fileRetained,
                           storedFilePath: batch.storedFilePath,
+                          nowMs: latestUploadedAtMs,
                         }) ? (
                           <>
                             <button

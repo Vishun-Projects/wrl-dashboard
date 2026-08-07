@@ -416,6 +416,8 @@ export type BdMisCrmCallTraceDbRow = {
   ncancelreason: number | null;
   account: string;
   wco: string | null;
+  ncode: number;
+  nofficeid: number;
 };
 
 /** Call-level CRM rows for BD MIS trace export (same filters as summary rollup). */
@@ -460,7 +462,9 @@ export async function queryBdMisCrmCallTraceRows(
       h.status_bucket::text AS status_bucket,
       h.ncancelreason,
       h.account,
-      h.wco
+      h.wco,
+      h.ncode,
+      h.nofficeid
     FROM calls_latest_hot h
     LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
     LEFT JOIN dim_offices d_parent ON d_parent.ncode = NULLIF(d.nunder, 0)

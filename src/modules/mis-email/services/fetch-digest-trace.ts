@@ -11,6 +11,7 @@ import { SUMMARY_DEFAULT_CALL_TYPE } from '@/modules/mis';
 import { MIS_EMAIL_CLIENT_SOURCE_CODES } from '@/modules/mis-email/services/source-codes';
 import { buildMisEmailBdMisRegionalPayload, misEmailBdMisSources, reconcileMisEmailOpenCounts } from '@/modules/mis-email/services/mail-basis';
 import type { AccountSummaryRow, SummaryDashboard } from '@/modules/mis';
+import { enrichRegisterRowsRepairDone } from '@/sql/register/repair-done-enrich';
 
 export async function buildDigestTraceableExportPayload(
   scope: UserDigestScope,
@@ -23,7 +24,7 @@ export async function buildDigestTraceableExportPayload(
   const sources = misEmailBdMisSources();
 
   const started = Date.now();
-  const [crmCallRows, clientCallRows] = await Promise.all([
+  const [crmCallRowsRaw, clientCallRows] = await Promise.all([
     queryBdMisCrmCallTraceRows({
       startDate: dateRange.startDate,
       endDate: dateRange.endDate,
@@ -42,8 +43,10 @@ export async function buildDigestTraceableExportPayload(
   ]);
 
   console.log(
-    `[mis-email/timing] trace export data ${dateRange.startDate}→${dateRange.endDate}: ${Date.now() - started}ms · crmCalls=${crmCallRows.length} clientCalls=${clientCallRows.length}`
+    `[mis-email/timing] trace export data ${dateRange.startDate}→${dateRange.endDate}: ${Date.now() - started}ms · crmCalls=${crmCallRowsRaw.length} clientCalls=${clientCallRows.length}`
   );
+
+  const crmCallRows = await enrichRegisterRowsRepairDone(crmCallRowsRaw);
 
   const traceRows = buildBdMisTraceRows({
     crmRows: crmCallRows.map((row) => ({

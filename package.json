@@ -80,7 +80,9 @@
     "mis-client:pack": "npx tsx scripts/mis-client/pack-import-file.ts",
     "mis-client:purge-old-files": "npx tsx scripts/mis-client/purge-old-import-files.ts",
     "mis-client:install-purge-cron:vps": "bash scripts/vps-hosting/install-mis-client-purge-cron.sh",
-    "vps:telemetry": "powershell -ExecutionPolicy Bypass -File scripts/vps-hosting/fetch-vps-telemetry.ps1"
+    "vps:telemetry": "powershell -ExecutionPolicy Bypass -File scripts/vps-hosting/fetch-vps-telemetry.ps1",
+    "db:vacuum-full-mis-rows": "npx tsx scripts/ops/vacuum-full-tables.ts",
+    "db:install-vacuum-cron:vps": "bash scripts/vps-hosting/install-vacuum-cron-vps.sh"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.3",

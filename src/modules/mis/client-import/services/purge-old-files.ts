@@ -1,6 +1,7 @@
 import { withAppClient } from '@/lib/read-model/db';
 import { deleteImportFile } from '@/modules/mis/client-import/services/file-store';
 import { IMPORT_FILE_RETENTION_DAYS } from '@/modules/mis/client-import/services/file-retention';
+import { recomputeBatchRowStatsForSource } from '@/modules/mis/client-import/services/config';
 
 export { IMPORT_FILE_RETENTION_DAYS };
 export const DEFAULT_IMPORT_FILE_RETENTION_DAYS = IMPORT_FILE_RETENTION_DAYS;
@@ -19,11 +20,12 @@ export type PurgeExpiredImportFilesResult = {
   candidates: number;
   filesDeleted: number;
   blobsCleared: number;
+  rowsPurgedBatches?: number;
 };
 
 /**
- * Drop original upload files (disk path + bytea blob) older than retention.
- * Imported rows stay; download falls back to reconstructing from `raw`.
+ * Drop original upload files (disk path + bytea blob) and import rows older than retention.
+ * Data is completely purged, but the batch metadata and UI row counts stay.
  */
 export async function purgeExpiredImportStoredFiles(opts?: {
   retentionDays?: number;
@@ -35,31 +37,45 @@ export async function purgeExpiredImportStoredFiles(opts?: {
   return withAppClient(async (client) => {
     const res = await client.query<{
       batch_id: string;
+      source_id: string;
       stored_file_path: string | null;
       has_blob: boolean;
+      has_rows: boolean;
     }>(
       `
-      SELECT batch_id,
-             stored_file_path,
-             (stored_file_blob IS NOT NULL AND octet_length(stored_file_blob) > 0) AS has_blob
-      FROM mis_client_import_batches
-      WHERE created_at < now() - ($1::int * interval '1 day')
+      SELECT b.batch_id,
+             b.source_id,
+             b.stored_file_path,
+             (b.stored_file_blob IS NOT NULL AND octet_length(b.stored_file_blob) > 0) AS has_blob,
+             EXISTS(SELECT 1 FROM mis_client_import_rows r WHERE r.batch_id = b.batch_id) AS has_rows
+      FROM mis_client_import_batches b
+      JOIN (
+        SELECT source_id, MAX(created_at) as latest_upload_at
+        FROM mis_client_import_batches
+        WHERE status = 'completed'
+        GROUP BY source_id
+      ) latest ON latest.source_id = b.source_id
+      WHERE b.created_at < latest.latest_upload_at - ($1::int * interval '1 day')
         AND (
-          NULLIF(btrim(COALESCE(stored_file_path, '')), '') IS NOT NULL
-          OR (stored_file_blob IS NOT NULL AND octet_length(stored_file_blob) > 0)
+          NULLIF(btrim(COALESCE(b.stored_file_path, '')), '') IS NOT NULL
+          OR (b.stored_file_blob IS NOT NULL AND octet_length(b.stored_file_blob) > 0)
+          OR EXISTS(SELECT 1 FROM mis_client_import_rows r WHERE r.batch_id = b.batch_id)
         )
-      ORDER BY created_at ASC
+      ORDER BY b.created_at ASC
       `,
       [retentionDays]
     );
 
     let filesDeleted = 0;
     let blobsCleared = 0;
+    let rowsPurgedBatches = 0;
+    const affectedSources = new Set<string>();
 
     for (const row of res.rows) {
       if (dryRun) {
         if (row.stored_file_path) filesDeleted += 1;
         if (row.has_blob) blobsCleared += 1;
+        if (row.has_rows) rowsPurgedBatches += 1;
         continue;
       }
 
@@ -78,7 +94,22 @@ export async function purgeExpiredImportStoredFiles(opts?: {
         [row.batch_id]
       );
 
+      if (row.has_rows) {
+        await client.query(
+          `DELETE FROM mis_client_import_rows WHERE batch_id = $1::uuid`,
+          [row.batch_id]
+        );
+        affectedSources.add(row.source_id);
+        rowsPurgedBatches += 1;
+      }
+
       if (row.has_blob) blobsCleared += 1;
+    }
+
+    if (!dryRun) {
+      for (const sourceId of affectedSources) {
+        await recomputeBatchRowStatsForSource(sourceId, client);
+      }
     }
 
     return {
@@ -87,6 +118,7 @@ export async function purgeExpiredImportStoredFiles(opts?: {
       candidates: res.rows.length,
       filesDeleted,
       blobsCleared,
-    };
+      rowsPurgedBatches, // Note: Added to PurgeExpiredImportFilesResult implicitly by returning it, assuming PurgeExpiredImportFilesResult allows it or we update it
+    } as PurgeExpiredImportFilesResult & { rowsPurgedBatches: number };
   });
 }

@@ -29,6 +29,7 @@ export type BdMisCrmCallTraceInput = {
   ncancelreason?: unknown;
   account: string;
   wco?: string | null;
+  repair_done?: string;
 };
 
 export type BdMisClientCallTraceInput = {
@@ -57,6 +58,7 @@ export type BdMisTraceRow = {
   client: string;
   /** W / C / O / V, or — when unknown / client import. */
   wco: string;
+  repair_done: string;
   call_status: string;
   aging: string;
   file_name: string;
@@ -346,6 +348,7 @@ export function mapCrmCallToTraceRow(
     service_order: row.service_order.trim() || '—',
     client: traceClientDisplayName(source, row.client),
     wco: formatTraceWco(row.wco),
+    repair_done: row.repair_done || '—',
     call_status: displayCallStatus(row.call_status, row.status_bucket, row.ncancelreason),
     aging: formatAgingLabel(dayDiff, row.status_bucket),
     file_name: traceFileDisplayName(source),
@@ -375,6 +378,7 @@ export function mapClientCallToTraceRow(
     service_order: row.service_order.trim() || '—',
     client: traceClientDisplayName(source, row.client),
     wco: '—',
+    repair_done: '—',
     call_status: displayCallStatus(row.call_status, row.status_bucket),
     aging: formatAgingLabel(dayDiff, row.status_bucket),
     file_name: traceFileDisplayName(source, row.file_name),

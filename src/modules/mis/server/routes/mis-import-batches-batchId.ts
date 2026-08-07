@@ -29,17 +29,28 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'batchId is required' }, { status: 400 });
     }
 
-    const uploadedAt = await withAppClient(async (client) => {
-      const res = await client.query<{ created_at: Date }>(
-        `SELECT created_at FROM mis_client_import_batches WHERE batch_id = $1::uuid`,
+    const { uploadedAt, latestUploadAt } = await withAppClient(async (client) => {
+      const res = await client.query<{ created_at: Date; latest_upload_at: Date }>(
+        `
+        SELECT b.created_at,
+               (SELECT MAX(created_at) FROM mis_client_import_batches WHERE source_id = b.source_id AND status = 'completed') AS latest_upload_at
+        FROM mis_client_import_batches b
+        WHERE b.batch_id = $1::uuid
+        `,
         [batchId]
       );
-      return res.rows[0]?.created_at ?? null;
+      return {
+        uploadedAt: res.rows[0]?.created_at ?? null,
+        latestUploadAt: res.rows[0]?.latest_upload_at ?? null,
+      };
     });
     if (!uploadedAt) {
       return NextResponse.json({ error: 'Batch not found' }, { status: 404 });
     }
-    if (isImportFilePastRetention(uploadedAt)) {
+    
+    // Retention is relative to the latest file uploaded for that source
+    const nowMs = latestUploadAt ? latestUploadAt.getTime() : Date.now();
+    if (isImportFilePastRetention(uploadedAt, undefined, nowMs)) {
       return NextResponse.json({ error: importFileRetentionTooltip() }, { status: 403 });
     }
 

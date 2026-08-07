@@ -22,6 +22,7 @@ import {
 } from '@/modules/mis/services/bd-mis-summary';
 import { buildBdMisTraceRows } from '@/modules/mis/services/bd-mis-trace';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
+import { enrichRegisterRowsRepairDone } from '@/sql/register/repair-done-enrich';
 
 export async function GET(req: NextRequest) {
   try {
@@ -91,7 +92,7 @@ export async function GET(req: NextRequest) {
     let traceRows: ReturnType<typeof buildBdMisTraceRows> | undefined;
     if (includeTrace) {
       const useClientSnapshot = traceAlign === 'bd_mis';
-      const [crmCallRows, clientCallRows] = await Promise.all([
+      const [crmCallRowsRaw, clientCallRows] = await Promise.all([
         includeCrm ? queryBdMisCrmCallTraceRows(queryParams) : Promise.resolve([]),
         clientSources.length
           ? useClientSnapshot
@@ -109,6 +110,8 @@ export async function GET(req: NextRequest) {
               })
           : Promise.resolve([]),
       ]);
+
+      const crmCallRows = await enrichRegisterRowsRepairDone(crmCallRowsRaw);
 
       traceRows = buildBdMisTraceRows({
         crmRows: crmCallRows.map((row) => ({

@@ -30,6 +30,7 @@ const REGISTER_COLUMNS: { header: string; key: string; width: number }[] = [
   { header: 'Repair done', key: 'repairDone', width: 22 },
   { header: 'Status', key: 'status', width: 12 },
   { header: 'Solved Date', key: 'solvedDate', width: 12 },
+  { header: 'BM Approved Date', key: 'bmApprovedDate', width: 18 },
   { header: 'Remarks', key: 'remarks', width: 30 },
   { header: 'Contact Person', key: 'contact', width: 20 },
   { header: 'Phone', key: 'phone', width: 15 },
@@ -57,6 +58,9 @@ function applyHeaderStyle(row: ExcelJS.Row): void {
 }
 
 function mapRegisterRow(row: Record<string, unknown>) {
+  console.log('=== EXPORT ROW ===');
+  console.log(row);
+  console.log('repair_done:', row.repair_done);
   const isCancelled = isRegisterRowCancelled(row);
   const isSolved =
     !isCancelled &&
@@ -96,6 +100,7 @@ function mapRegisterRow(row: Record<string, unknown>) {
       repairDone: formatRegisterRepairDone(row.repair_done) || '—',
       status: statusText,
       solvedDate: isSolved ? formatExcelExportDate(row.callsolveddate) : '—',
+      bmApprovedDate: formatExcelExportDate(row.bm_approved_date),
       remarks: row.vsolveremarks || row.cancel_reason || '—',
       contact: row.vpersoncalling,
       phone: row.vinsttel1,
@@ -135,6 +140,8 @@ export async function buildRegisterExcelWorkbook(
   rawRows: Record<string, unknown>[],
   opts?: Pick<RegisterExcelExportOptions, 'sheetName' | 'onProgress'>
 ): Promise<ExcelJS.Workbook> {
+  console.log('🔥 buildRegisterExcelWorkbook CALLED');
+  console.log('Rows:', rawRows.length);
   const ExcelJSRuntime = (await import('exceljs')).default;
   const rows = normalizeRegisterExportRows(rawRows);
   const workbook = new ExcelJSRuntime.Workbook();

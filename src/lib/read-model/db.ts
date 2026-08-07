@@ -208,6 +208,8 @@ export async function withAppClient<T>(
     const lockMs = Number(process.env.PG_LOCK_TIMEOUT_MS ?? 15_000);
     await client.query(`SET statement_timeout = '${statementMs}'`);
     await client.query(`SET lock_timeout = '${lockMs}'`);
+    // Disable parallel workers to prevent could not resize shared memory segment (shm size limits in Docker)
+    await client.query('SET max_parallel_workers_per_gather = 0');
     return await fn(client);
   } finally {
     client.release();
@@ -258,6 +260,8 @@ export async function withBulkReadClient<T>(
     const lockMs = Number(process.env.PG_LOCK_TIMEOUT_MS ?? 15_000);
     await client.query(`SET statement_timeout = '${statementMs}'`);
     await client.query(`SET lock_timeout = '${lockMs}'`);
+    // Disable parallel workers to prevent could not resize shared memory segment (shm size limits in Docker)
+    await client.query('SET max_parallel_workers_per_gather = 0');
     return await fn(client);
   } catch (err) {
     if (retries > 0 && isConnectTimeoutError(err) && (forceDirect ?? isDirectDatabaseForBulkReads())) {
