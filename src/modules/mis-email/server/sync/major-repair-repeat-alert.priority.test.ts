@@ -98,6 +98,7 @@ function hotRow(overrides: Partial<HotRow> = {}): HotRow {
 
 describe('checkMajorRepairRepeatAlerts priority refresh', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.resetAllMocks();
     process.env.MAJOR_REPAIR_REPEAT_ALERT_ENABLED = 'true';
     process.env.MAJOR_REPAIR_REPEAT_MIN_COUNT = '3';

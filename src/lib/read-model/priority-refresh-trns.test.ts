@@ -24,6 +24,7 @@ vi.mock('@/lib/read-model/apply-crm-delta', () => ({
 
 describe('priorityRefreshHotFromCrm', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     withClient.mockImplementation(async (fn: (client: unknown) => unknown) => fn({}));
   });
