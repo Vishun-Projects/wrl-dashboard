@@ -7,8 +7,6 @@ import {
   type MisEmailBodyContext,
 } from '@/modules/mis-email/services/body-sections';
 import {
-  accountMatchesDigestSelection,
-  filterRowsByDigestAccounts,
   resolveDigestKeyAccountBodyRows,
 } from '@/modules/mis-email/services/fetch-digest-accounts';
 import {
@@ -325,7 +323,7 @@ export async function buildMisEmailPayload(
   );
 
   const selectedAccounts = parseMisEmailKeyAccountsInBody(prefs.keyAccountsInBody);
-  let data = dataRaw;
+  const data = dataRaw;
   if (selectedAccounts.length) {
     timer.step(
       'selected accounts (body only)',
@@ -365,7 +363,7 @@ export async function buildMisEmailPayload(
     attachmentIncludes = { ...effectiveIncludes, includeDetailed: false };
   }
 
-  let tracePayload = includeTraceableExport || includeOpenCallsExport || needsTraceForBody
+  const tracePayload = includeTraceableExport || includeOpenCallsExport || needsTraceForBody
     ? await timer.measure('build trace export', () =>
         buildDigestTraceableExportPayload(
           scope,

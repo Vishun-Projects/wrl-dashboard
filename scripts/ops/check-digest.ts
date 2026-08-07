@@ -11,7 +11,7 @@ import '@/modules/mis-email/services/bootstrap-env';
 import { isVpsCronPaused } from '@/lib/vps-cron/settings';
 import { loadDigestRecipients } from '@/modules/mis-email/services/recipients';
 import { listMisEmailRoutingRules } from '@/modules/mis-email/services/routing-rules';
-import { shouldSendMisEmailNow, resolveMisEmailSendTimeIst, resolveEffectiveDigestIncludes } from '@/modules/mis-email/services/preferences';
+import { resolveMisEmailSendTimeIst, resolveEffectiveDigestIncludes } from '@/modules/mis-email/services/preferences';
 import { resolveDigestAttachmentFilenames } from '@/modules/mis-email/services/build-attachments';
 
 async function main() {
