@@ -2,7 +2,7 @@ import {
   queryClientCallTraceRowsFiltered,
 } from '@/modules/mis/client-import/server';
 import type { StatusBucket } from '@/modules/mis/client-import';
-import { queryBdMisCrmCallTraceRows } from '@/sql/read-model/bd-mis-summary';
+import { queryBdMisCrmCallTraceRows, type BdMisCrmCallTraceDbRow } from '@/sql/read-model/bd-mis-summary';
 import type { DigestDateRange } from '@/modules/mis-email/services/fetch-digest-data';
 import type { UserDigestScope } from '@/modules/mis-email/services/user-scope';
 import type { BdMisTraceableExportPayload } from '@/modules/mis';
@@ -51,22 +51,22 @@ export async function buildDigestTraceableExportPayload(
     `[mis-email/timing] trace export data ${dateRange.startDate}→${dateRange.endDate}: ${Date.now() - started}ms · crmCalls=${crmCallRowsRaw.length} clientCalls=${clientCallRows.length}`
   );
 
-  let crmCallRows = crmCallRowsRaw;
+  let crmCallRows: Array<BdMisCrmCallTraceDbRow & { repair_done?: string }> = crmCallRowsRaw;
   if (!options?.skipRepairDone) {
     const includeTrace = options?.includeTraceableExport !== false;
     const includeOpen = !!options?.includeOpenCallsExport;
 
     if (includeTrace) {
-      crmCallRows = await enrichRegisterRowsRepairDone(crmCallRowsRaw);
+      crmCallRows = await enrichRegisterRowsRepairDone(crmCallRowsRaw as any[]);
     } else if (includeOpen) {
       const openRows = crmCallRowsRaw.filter(
         (row) =>
           row.status_bucket === 'open_unallocated' ||
           row.status_bucket === 'assigned'
       );
-      const enrichedOpen = await enrichRegisterRowsRepairDone(openRows);
-      const enrichedMap = new Map(
-        enrichedOpen.map((row) => [`${row.ncode}:${row.nofficeid}`, row.repair_done] as const)
+      const enrichedOpen = await enrichRegisterRowsRepairDone(openRows as any[]) as Array<BdMisCrmCallTraceDbRow & { repair_done?: string }>;
+      const enrichedMap = new Map<string, string | undefined>(
+        enrichedOpen.map((row) => [`${row.ncode}:${row.nofficeid}`, row.repair_done])
       );
       crmCallRows = crmCallRowsRaw.map((row) => {
         const key = `${row.ncode}:${row.nofficeid}`;
