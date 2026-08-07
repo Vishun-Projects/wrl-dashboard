@@ -18,30 +18,30 @@ vi.mock('@/lib/read-model/priority-refresh-trns', async () => {
   );
   return {
     ...actual,
-    priorityRefreshHotFromCrm: (...args: unknown[]) => priorityRefreshHotFromCrm(...args),
+    priorityRefreshHotFromCrm: (...args: unknown[]) => (globalThis as any).__mockPriorityRefreshHotFromCrm?.(...args),
   };
 });
 vi.mock('@/lib/db/proxy', () => ({
-  postQuery: (...args: unknown[]) => postQuery(...args),
+  postQuery: (...args: unknown[]) => (globalThis as any).__mockPostQuery?.(...args),
 }));
 vi.mock('@/lib/read-model/db', () => ({
-  withClient: (fn: (client: unknown) => unknown) => withClient(fn),
+  withClient: (fn: (client: unknown) => unknown) => (globalThis as any).__mockWithClient?.(fn),
 }));
 vi.mock('@/lib/security/audit', () => ({
-  logAction: (...args: unknown[]) => logAction(...args),
+  logAction: (...args: unknown[]) => (globalThis as any).__mockLogAction?.(...args),
 }));
 vi.mock('@/modules/mis-email/services/org-settings-lib', () => ({
-  assertOrgOutboundMailEnabled: (...args: unknown[]) => assertOrgOutboundMailEnabled(...args),
-  getMisEmailOrgSettings: (...args: unknown[]) => getMisEmailOrgSettings(...args),
+  assertOrgOutboundMailEnabled: (...args: unknown[]) => (globalThis as any).__mockAssertOrgOutboundMailEnabled?.(...args),
+  getMisEmailOrgSettings: (...args: unknown[]) => (globalThis as any).__mockGetMisEmailOrgSettings?.(...args),
 }));
 vi.mock('@/modules/mis-email/server/sync/major-repair-repeat-recipients', () => ({
-  listEnabledEmailsForBranch: (...args: unknown[]) => listEnabledEmailsForBranch(...args),
+  listEnabledEmailsForBranch: (...args: unknown[]) => (globalThis as any).__mockListEnabledEmailsForBranch?.(...args),
   resolveAlertRecipients: () => ({ to: ['to@example.com'], cc: [] }),
 }));
 vi.mock('@/lib/mail/smtp', () => ({
-  isSmtpConfigured: (...args: unknown[]) => isSmtpConfigured(...args),
-  resolveSmtpConfig: (...args: unknown[]) => resolveSmtpConfig(...args),
-  createMailTransport: (...args: unknown[]) => createMailTransport(...args),
+  isSmtpConfigured: (...args: unknown[]) => (globalThis as any).__mockIsSmtpConfigured?.(...args),
+  resolveSmtpConfig: (...args: unknown[]) => (globalThis as any).__mockResolveSmtpConfig?.(...args),
+  createMailTransport: (...args: unknown[]) => (globalThis as any).__mockCreateMailTransport?.(...args),
 }));
 
 import type { HotRow } from '@/lib/read-model/types';
@@ -100,6 +100,17 @@ describe('checkMajorRepairRepeatAlerts priority refresh', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.resetAllMocks();
+    (globalThis as any).__mockPriorityRefreshHotFromCrm = priorityRefreshHotFromCrm;
+    (globalThis as any).__mockPostQuery = postQuery;
+    (globalThis as any).__mockWithClient = withClient;
+    (globalThis as any).__mockLogAction = logAction;
+    (globalThis as any).__mockAssertOrgOutboundMailEnabled = assertOrgOutboundMailEnabled;
+    (globalThis as any).__mockGetMisEmailOrgSettings = getMisEmailOrgSettings;
+    (globalThis as any).__mockListEnabledEmailsForBranch = listEnabledEmailsForBranch;
+    (globalThis as any).__mockIsSmtpConfigured = isSmtpConfigured;
+    (globalThis as any).__mockResolveSmtpConfig = resolveSmtpConfig;
+    (globalThis as any).__mockCreateMailTransport = createMailTransport;
+
     process.env.MAJOR_REPAIR_REPEAT_ALERT_ENABLED = 'true';
     process.env.MAJOR_REPAIR_REPEAT_MIN_COUNT = '3';
     process.env.MAJOR_REPAIR_REPEAT_MONTHS = '3';

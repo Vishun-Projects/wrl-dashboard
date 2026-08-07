@@ -1,4 +1,22 @@
-import { describe, expect, it } from 'vitest';
+import { vi } from 'vitest';
+
+vi.mock('@/lib/db/proxy', () => ({
+  postQuery: (...args: unknown[]) => (globalThis as any).__mockPostQuery?.(...args),
+}));
+vi.mock('@/lib/read-model/db', () => ({
+  withClient: (fn: (client: unknown) => unknown) => (globalThis as any).__mockWithClient?.(fn),
+}));
+vi.mock('@/lib/read-model/priority-refresh-trns', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/read-model/priority-refresh-trns')>(
+    '@/lib/read-model/priority-refresh-trns'
+  );
+  return {
+    ...actual,
+    priorityRefreshHotFromCrm: (...args: unknown[]) => (globalThis as any).__mockPriorityRefreshHotFromCrm?.(...args),
+  };
+});
+
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   buildAlertEmailHtml,
   buildAlertEmailText,
@@ -66,6 +84,12 @@ function hotRow(overrides: Partial<HotRow> = {}): HotRow {
 }
 
 describe('major-repair-repeat-alert', () => {
+  beforeEach(() => {
+    (globalThis as any).__mockPostQuery = vi.fn();
+    (globalThis as any).__mockWithClient = vi.fn();
+    (globalThis as any).__mockPriorityRefreshHotFromCrm = vi.fn();
+  });
+
   it('hasTargetRepair matches motor, compressor, and gas', () => {
     expect(hasTargetRepair('Motor Replaced')).toBe(true);
     expect(hasTargetRepair('Compressor Replaced; Gas Charging Done')).toBe(true);
