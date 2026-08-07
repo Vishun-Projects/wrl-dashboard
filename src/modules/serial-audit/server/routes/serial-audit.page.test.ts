@@ -9,15 +9,15 @@ vi.mock('@/lib/supabase/server', () => ({
 }));
 
 vi.mock('@/lib/auth/server-user', () => ({
-  requireRequestUser: (...args: unknown[]) => requireRequestUser(...args),
+  requireRequestUser: (...args: unknown[]) => (globalThis as any).__mockRequireRequestUser?.(...args),
 }));
 
 vi.mock('@/lib/auth/report-security', () => ({
-  resolveReportSecurity: (...args: unknown[]) => resolveReportSecurity(...args),
+  resolveReportSecurity: (...args: unknown[]) => (globalThis as any).__mockResolveReportSecurity?.(...args),
 }));
 
 vi.mock('@/lib/db/proxy', () => ({
-  postQuery: (...args: unknown[]) => postQuery(...args),
+  postQuery: (...args: unknown[]) => (globalThis as any).__mockPostQuery?.(...args),
 }));
 
 vi.mock('@/sql/serial-audit/sql-scope', () => ({
@@ -39,6 +39,11 @@ vi.mock('@/modules/serial-audit/server/batch-fetch', () => ({
 
 describe('GET /api/report/serial-audit list pagination', () => {
   beforeEach(() => {
+    vi.resetModules();
+    (globalThis as any).__mockRequireRequestUser = requireRequestUser;
+    (globalThis as any).__mockResolveReportSecurity = resolveReportSecurity;
+    (globalThis as any).__mockPostQuery = postQuery;
+
     requireRequestUser.mockReset();
     resolveReportSecurity.mockReset();
     postQuery.mockReset();

@@ -8,24 +8,31 @@ const getSyncState = vi.fn();
 const applyCrmRowsToHot = vi.fn();
 
 vi.mock('@/lib/read-model/crm-fetch', () => ({
-  fetchCrmRowsByTrns: (...args: unknown[]) => fetchCrmRowsByTrns(...args),
+  fetchCrmRowsByTrns: (...args: unknown[]) => (globalThis as any).__mockFetchCrmRowsByTrns?.(...args),
 }));
 vi.mock('@/lib/read-model/db', () => ({
-  withClient: (fn: (client: unknown) => unknown) => withClient(fn),
+  withClient: (fn: (client: unknown) => unknown) => (globalThis as any).__mockWithClient?.(fn),
 }));
 vi.mock('@/lib/read-model/lock', () => ({
-  tryAcquireSyncLock: (...args: unknown[]) => tryAcquireSyncLock(...args),
-  releaseSyncLock: (...args: unknown[]) => releaseSyncLock(...args),
-  getSyncState: (...args: unknown[]) => getSyncState(...args),
+  tryAcquireSyncLock: (...args: unknown[]) => (globalThis as any).__mockTryAcquireSyncLock?.(...args),
+  releaseSyncLock: (...args: unknown[]) => (globalThis as any).__mockReleaseSyncLock?.(...args),
+  getSyncState: (...args: unknown[]) => (globalThis as any).__mockGetSyncState?.(...args),
 }));
 vi.mock('@/lib/read-model/apply-crm-delta', () => ({
-  applyCrmRowsToHot: (...args: unknown[]) => applyCrmRowsToHot(...args),
+  applyCrmRowsToHot: (...args: unknown[]) => (globalThis as any).__mockApplyCrmRowsToHot?.(...args),
 }));
 
 describe('priorityRefreshHotFromCrm', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    (globalThis as any).__mockFetchCrmRowsByTrns = fetchCrmRowsByTrns;
+    (globalThis as any).__mockWithClient = withClient;
+    (globalThis as any).__mockTryAcquireSyncLock = tryAcquireSyncLock;
+    (globalThis as any).__mockReleaseSyncLock = releaseSyncLock;
+    (globalThis as any).__mockGetSyncState = getSyncState;
+    (globalThis as any).__mockApplyCrmRowsToHot = applyCrmRowsToHot;
+
     withClient.mockImplementation(async (fn: (client: unknown) => unknown) => fn({}));
   });
 
