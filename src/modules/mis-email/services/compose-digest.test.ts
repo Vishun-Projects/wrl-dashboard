@@ -316,7 +316,96 @@ describe('buildMisEmailPayload early exits', () => {
     // Assert that the preview indicates only the selected accounts are in the body
     expect(result.preview.keyAccountRowsInBody).toBe(2); // COKE and CADBURY
   });
+
+  it('shows only selected key accounts in key accounts section, while files and regional/branch body sections show overall ones', async () => {
+    fetchDigestSummaryDataCached.mockResolvedValue({
+      branchSummary: [
+        { branch: '1127 - GUWAHATI BRANCH', open_calls: 5 },
+      ],
+      accountSummary: [
+        { account: 'COKE', open_calls: 5 },
+        { account: 'CADBURY', open_calls: 10 },
+        { account: 'PEPSI', open_calls: 15 },
+      ],
+      totals: {},
+    });
+    fetchDigestClientAccountSummaryCached.mockResolvedValue([
+      { account: 'COKE', open_calls: 5 },
+      { account: 'CADBURY', open_calls: 10 },
+      { account: 'PEPSI', open_calls: 15 },
+    ]);
+    buildDigestTraceableExportPayload.mockResolvedValue({
+      regionalRows: [
+        { region: 'EAST', open_calls: 30, solved_calls: 10 },
+      ],
+      grand: { region: 'ALL', open_calls: 30 },
+      crmBranchSummary: [],
+      crmAccountSummary: [],
+      clientAccountSummary: [],
+      sources: {},
+      traceRows: [
+        ...Array.from({ length: 5 }, () => ({ client: 'COKE', region: 'EAST', plant: '1127 - GUWAHATI BRANCH', counts_toward: 'open', included_in_final_count: true, aging: '<2 days' })),
+        ...Array.from({ length: 2 }, () => ({ client: 'COKE', region: 'EAST', plant: '1127 - GUWAHATI BRANCH', counts_toward: 'solved', included_in_final_count: true })),
+        ...Array.from({ length: 10 }, () => ({ client: 'CADBURY', region: 'EAST', plant: '1127 - GUWAHATI BRANCH', counts_toward: 'open', included_in_final_count: true, aging: '3-7 days' })),
+        ...Array.from({ length: 3 }, () => ({ client: 'CADBURY', region: 'EAST', plant: '1127 - GUWAHATI BRANCH', counts_toward: 'solved', included_in_final_count: true })),
+        ...Array.from({ length: 15 }, () => ({ client: 'PEPSI', region: 'EAST', plant: '1127 - GUWAHATI BRANCH', counts_toward: 'open', included_in_final_count: true, aging: '8-15 days' })),
+        ...Array.from({ length: 5 }, () => ({ client: 'PEPSI', region: 'EAST', plant: '1127 - GUWAHATI BRANCH', counts_toward: 'solved', included_in_final_count: true })),
+      ] as any[],
+      traceAlign: 'summary',
+      filterMeta: {},
+    });
+    buildDigestAttachments.mockResolvedValue([
+      { filename: 'Trace_Report.xlsx', content: Buffer.from('mock content') }
+    ]);
+
+    const result = await buildMisEmailPayload(
+      {
+        ...summaryRecipient,
+        includeKeyAccount: true,
+        mis_email_preferences: {
+          ...summaryRecipient.mis_email_preferences,
+          includeDetailed: false,
+          includeTraceableExport: true,
+          keyAccountsInBody: ['COKE', 'CADBURY'],
+          bodyInEmail: ['key_account_performance', 'regional_performance'],
+        },
+      } as never,
+      {
+        sentTo: 'user@example.com',
+        displayName: 'User',
+      }
+    );
+
+    // 1. Assert Key Account Rows in body shows only selected (2 rows: COKE and CADBURY)
+    expect(result.preview.keyAccountRowsInBody).toBe(2);
+
+    // 2. Assert that buildDigestAttachments was called with the overall/unfiltered ones
+    expect(buildDigestAttachments).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        accountSummary: expect.arrayContaining([
+          expect.objectContaining({ account: 'COKE' }),
+          expect.objectContaining({ account: 'CADBURY' }),
+          expect.objectContaining({ account: 'PEPSI' }),
+        ]),
+      }),
+      expect.objectContaining({
+        tracePayload: expect.objectContaining({
+          traceRows: expect.arrayContaining([
+            expect.objectContaining({ client: 'COKE' }),
+            expect.objectContaining({ client: 'CADBURY' }),
+            expect.objectContaining({ client: 'PEPSI' }),
+          ]),
+        }),
+      })
+    );
+
+    // 3. Assert that the rest of the body (e.g. regionalPerformanceRows) shows overall/unfiltered ones
+    // We expect the html/plaintext to contain regional/overall stats including all open calls (30 calls total)
+    expect(result.preview.plainText).toContain('EAST: total 40, solved 10, open 30');
+  });
 });
+
 
 describe('resolveMisEmailSendTargets', () => {
   it('uses sendTo override when provided', () => {
