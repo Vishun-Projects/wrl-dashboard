@@ -127,12 +127,6 @@ export function countMisEmailOpenParity(traceRows: BdMisTraceRow[]): {
   };
 }
 
-function isRealTechnicianName(value: string): boolean {
-  const v = value.trim();
-  if (!v) return false;
-  return v !== '—' && v !== '-' && v.toLowerCase() !== 'unassigned';
-}
-
 function accumulateTracePerformanceMetrics<
   T extends {
     total_calls: number;
@@ -151,33 +145,37 @@ function accumulateTracePerformanceMetrics<
     agg.solved_calls += 1;
   } else if (row.counts_toward === 'open') {
     agg.open_calls += 1;
-    const aging = String(row.aging ?? '').trim().toLowerCase();
+    const aging = row.aging;
     if (aging === '<2 days') agg.age_2 += 1;
     else if (aging === '>3 days' || aging === '3-7 days') agg.age_3 += 1;
     else if (aging === '>7 days' || aging === '8-15 days') agg.age_7 += 1;
     else if (aging === '>15 days') agg.age_15 += 1;
   }
 
-  const technician = row.technician_name?.trim() ?? '';
-  if (isRealTechnicianName(technician)) {
-    agg.engineers.add(technician.toLowerCase());
+  const technician = row.technician_name;
+  if (technician && technician !== '—' && technician !== '-') {
+    const techLower = technician.toLowerCase();
+    if (techLower !== 'unassigned') {
+      agg.engineers.add(techLower);
+    }
   }
 }
 
-/**
- * Regional body metrics from the same filtered trace rows as open-calls Excel.
- * Prefer this over summary aggregates whenever digests build a trace payload.
- */
-export function buildMisEmailRegionalPerformanceRowsFromTrace(
+export function buildMisEmailRegionalAndBranchRowsFromTrace(
   traceRows: BdMisTraceRow[]
-): RegionalPerformanceRow[] {
-  const includedRows = filterTraceRowsForSummaryExport(traceRows);
+): {
+  regional: RegionalPerformanceRow[];
+  branch: BranchPerformanceRow[];
+} {
   const regionMap = new Map<string, RegionalPerformanceRow & { engineers: Set<string> }>();
+  const branchMap = new Map<string, BranchPerformanceRow & { engineers: Set<string> }>();
+  const includedRows = filterTraceRowsForSummaryExport(traceRows);
 
   for (const row of includedRows) {
     const region = String(row.region ?? 'OTHER').toUpperCase();
-    if (!regionMap.has(region)) {
-      regionMap.set(region, {
+    let regAgg = regionMap.get(region);
+    if (!regAgg) {
+      regAgg = {
         region,
         total_calls: 0,
         solved_calls: 0,
@@ -190,28 +188,16 @@ export function buildMisEmailRegionalPerformanceRowsFromTrace(
         part_pending: 0,
         active_eng: 0,
         engineers: new Set<string>(),
-      });
+      };
+      regionMap.set(region, regAgg);
     }
-    accumulateTracePerformanceMetrics(regionMap.get(region)!, row);
-  }
+    accumulateTracePerformanceMetrics(regAgg, row);
 
-  return [...regionMap.values()]
-    .map(({ engineers, ...row }) => ({ ...row, active_eng: engineers.size }))
-    .sort((a, b) => a.region.localeCompare(b.region));
-}
-
-export function buildMisEmailBranchPerformanceRowsFromTrace(
-  traceRows: BdMisTraceRow[]
-): BranchPerformanceRow[] {
-  const includedRows = filterTraceRowsForSummaryExport(traceRows);
-  const branchMap = new Map<string, BranchPerformanceRow & { engineers: Set<string> }>();
-
-  for (const row of includedRows) {
     const branch = row.plant?.trim() || '—';
-    const region = String(row.region ?? 'OTHER').toUpperCase();
     const key = `${region}::${branch}`;
-    if (!branchMap.has(key)) {
-      branchMap.set(key, {
+    let brAgg = branchMap.get(key);
+    if (!brAgg) {
+      brAgg = {
         branch,
         region,
         total_calls: 0,
@@ -225,17 +211,35 @@ export function buildMisEmailBranchPerformanceRowsFromTrace(
         part_pending: 0,
         active_eng: 0,
         engineers: new Set<string>(),
-      });
+      };
+      branchMap.set(key, brAgg);
     }
-
-    accumulateTracePerformanceMetrics(branchMap.get(key)!, row);
+    accumulateTracePerformanceMetrics(brAgg, row);
   }
 
-  return [...branchMap.values()]
+  const regional = [...regionMap.values()]
+    .map(({ engineers, ...row }) => ({ ...row, active_eng: engineers.size }))
+    .sort((a, b) => a.region.localeCompare(b.region));
+
+  const branch = [...branchMap.values()]
     .map(({ engineers, ...row }) => ({ ...row, active_eng: engineers.size }))
     .sort((a, b) => {
       const age15Diff = b.age_15 - a.age_15;
       if (age15Diff !== 0) return age15Diff;
       return a.branch.localeCompare(b.branch);
     });
+
+  return { regional, branch };
+}
+
+export function buildMisEmailRegionalPerformanceRowsFromTrace(
+  traceRows: BdMisTraceRow[]
+): RegionalPerformanceRow[] {
+  return buildMisEmailRegionalAndBranchRowsFromTrace(traceRows).regional;
+}
+
+export function buildMisEmailBranchPerformanceRowsFromTrace(
+  traceRows: BdMisTraceRow[]
+): BranchPerformanceRow[] {
+  return buildMisEmailRegionalAndBranchRowsFromTrace(traceRows).branch;
 }

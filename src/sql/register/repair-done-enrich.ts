@@ -1,7 +1,7 @@
 import { postQuery } from '@/lib/db/proxy';
 import { buildRegisterRepairDoneByCallKeysSql } from '@/sql/trhcalls/query';
 
-const ENRICH_CHUNK = 150;
+const ENRICH_CHUNK = 950;
 
 function flagOn(v: unknown): boolean {
   return v === 1 || v === '1' || v === true;

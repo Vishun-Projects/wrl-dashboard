@@ -17,7 +17,12 @@ export async function buildDigestTraceableExportPayload(
   scope: UserDigestScope,
   dateRange: DigestDateRange,
   summaryData: SummaryDashboard,
-  clientAccountSummary: AccountSummaryRow[]
+  clientAccountSummary: AccountSummaryRow[],
+  options?: {
+    skipRepairDone?: boolean;
+    includeTraceableExport?: boolean;
+    includeOpenCallsExport?: boolean;
+  }
 ): Promise<BdMisTraceableExportPayload> {
   // Mondelez + Coke client imports; CRM Cadbury replaced by Mondelez file in union formula.
   const sourceCodes = [...MIS_EMAIL_CLIENT_SOURCE_CODES];
@@ -46,7 +51,32 @@ export async function buildDigestTraceableExportPayload(
     `[mis-email/timing] trace export data ${dateRange.startDate}→${dateRange.endDate}: ${Date.now() - started}ms · crmCalls=${crmCallRowsRaw.length} clientCalls=${clientCallRows.length}`
   );
 
-  const crmCallRows = await enrichRegisterRowsRepairDone(crmCallRowsRaw);
+  let crmCallRows = crmCallRowsRaw;
+  if (!options?.skipRepairDone) {
+    const includeTrace = options?.includeTraceableExport !== false;
+    const includeOpen = !!options?.includeOpenCallsExport;
+
+    if (includeTrace) {
+      crmCallRows = await enrichRegisterRowsRepairDone(crmCallRowsRaw);
+    } else if (includeOpen) {
+      const openRows = crmCallRowsRaw.filter(
+        (row) =>
+          row.status_bucket === 'open_unallocated' ||
+          row.status_bucket === 'assigned'
+      );
+      const enrichedOpen = await enrichRegisterRowsRepairDone(openRows);
+      const enrichedMap = new Map(
+        enrichedOpen.map((row) => [`${row.ncode}:${row.nofficeid}`, row.repair_done] as const)
+      );
+      crmCallRows = crmCallRowsRaw.map((row) => {
+        const key = `${row.ncode}:${row.nofficeid}`;
+        if (enrichedMap.has(key)) {
+          return { ...row, repair_done: enrichedMap.get(key) };
+        }
+        return row;
+      });
+    }
+  }
 
   const traceRows = buildBdMisTraceRows({
     crmRows: crmCallRows.map((row) => ({

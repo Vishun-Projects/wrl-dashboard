@@ -10,9 +10,8 @@ import {
   resolveDigestKeyAccountBodyRows,
 } from '@/modules/mis-email/services/fetch-digest-accounts';
 import {
-  buildMisEmailBranchPerformanceRowsFromTrace,
+  buildMisEmailRegionalAndBranchRowsFromTrace,
   buildMisEmailRegionalPerformanceRows,
-  buildMisEmailRegionalPerformanceRowsFromTrace,
 } from '@/modules/mis-email/services/mail-basis';
 import { buildDigestTraceableExportPayload } from '@/modules/mis-email/services/fetch-digest-trace';
 import {
@@ -144,13 +143,6 @@ async function buildMisEmailBodyContext(
         ? clientAccountSummary
         : await fetchDigestClientAccountSummaryCached(dateRange);
     context.clientAccountSummary = clientRows as Array<Record<string, unknown>>;
-    if (bodySectionIds.includes('regional_performance')) {
-      // Same call-level basis as open-calls Excel when trace is available; summary
-      // aggregates can diverge (e.g. 4831 body vs 4682 Excel rows).
-      context.regionalPerformanceRows = traceRows?.length
-        ? buildMisEmailRegionalPerformanceRowsFromTrace(traceRows)
-        : buildMisEmailRegionalPerformanceRows(data, clientRows);
-    }
     if (bodySectionIds.includes('key_account_performance')) {
       const accountRows = resolveDigestKeyAccountBodyRows(
         data.accountSummary,
@@ -163,8 +155,25 @@ async function buildMisEmailBodyContext(
     }
   }
 
-  if (bodySectionIds.includes('branch_performance') && traceRows?.length) {
-    context.branchPerformanceRows = buildMisEmailBranchPerformanceRowsFromTrace(traceRows);
+  const needsRegionalBody = bodySectionIds.includes('regional_performance');
+  const needsBranchBody = bodySectionIds.includes('branch_performance');
+
+  if (traceRows?.length && (needsRegionalBody || needsBranchBody)) {
+    const { regional, branch } = buildMisEmailRegionalAndBranchRowsFromTrace(traceRows);
+    if (needsRegionalBody) {
+      context.regionalPerformanceRows = regional;
+    }
+    if (needsBranchBody) {
+      context.branchPerformanceRows = branch;
+    }
+  } else {
+    if (needsRegionalBody) {
+      const clientRows =
+        clientAccountSummary !== undefined
+          ? clientAccountSummary
+          : await fetchDigestClientAccountSummaryCached(dateRange);
+      context.regionalPerformanceRows = buildMisEmailRegionalPerformanceRows(data, clientRows);
+    }
   }
 
   return context;
@@ -369,7 +378,12 @@ export async function buildMisEmailPayload(
           scope,
           dateRange,
           data,
-          clientAccountSummary ?? []
+          clientAccountSummary ?? [],
+          {
+            skipRepairDone: !(includeTraceableExport || includeOpenCallsExport),
+            includeTraceableExport,
+            includeOpenCallsExport,
+          }
         ), (payload) => `traceRows=${payload.traceRows.length}`
       )
     : undefined;

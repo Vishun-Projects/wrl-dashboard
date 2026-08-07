@@ -13,6 +13,7 @@ export const SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL = excludePracticeWinmaxOfficeSq
 /** Requires `HOT_OFFICE_JOINS_SQL` (`d_reg` alias). */
 export const REGISTER_EXCLUDE_PRACTICE_OFFICE_SQL = excludePracticeWinmaxOfficeSql('d_reg');
 
-export function isPracticeWinmaxOfficeName(name: string): boolean {
+export function isPracticeWinmaxOfficeName(name: string | undefined | null): boolean {
+  if (!name) return false;
   return /practice|winmax|western\s+head\s+office\s*-\s*1100/i.test(name.trim());
 }
