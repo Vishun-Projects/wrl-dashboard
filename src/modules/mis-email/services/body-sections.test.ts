@@ -178,7 +178,6 @@ describe('buildEmailBodySectionsHtml', () => {
     expect(html).toContain('&lt;2 days');
     expect(html).toContain('&gt;3 days');
     expect(html).toContain('&gt;7 days');
-    expect(html).toContain('&gt;15days');
     expect(html).toContain('# of active Eng.');
     expect(html).not.toContain('Part pending');
     expect(html).not.toContain('>Cancelled<');
@@ -246,7 +245,6 @@ describe('buildEmailBodySectionsHtml', () => {
     expect(html).toContain('Nestle');
     expect(html).toContain('&gt;3 days');
     expect(html).toContain('&gt;7 days');
-    expect(html).toContain('&gt;15days');
     expect(html).toContain('% &gt;7 days');
     expect(html).not.toContain('# of active Eng.');
     expect(html).not.toContain('Part pending');
@@ -288,27 +286,6 @@ describe('buildEmailBodySectionsHtml', () => {
     expect(html).not.toContain('>COKE<');
   });
 
-  it('applies inline >15 day color bands for email clients', () => {
-    const highAgingSummary: SummaryDashboard = {
-      ...sampleData,
-      branchSummary: [
-        {
-          ...sampleData.branchSummary[0],
-          region: 'SOUTH ZONE',
-          age_15: 95,
-          solved_calls: 50,
-          open_calls: 120,
-          total_calls: 170,
-        },
-      ],
-    };
-    const html = buildEmailBodySectionsHtml(['branch_performance'], {
-      summary: highAgingSummary,
-    });
-    expect(html).toContain('Branches');
-    expect(html).toContain('bgcolor="#fecaca"');
-    expect(html).toContain('color:#111827');
-  });
 
   it('keeps %>7 alert bands on key accounts but does not color >15days cells', () => {
     const html = buildEmailBodySectionsHtml(['key_account_performance'], {
@@ -446,7 +423,7 @@ describe('buildEmailBodySectionsHtml', () => {
       keyAccountMaxRows: 1,
     });
     expect(html).toContain('Showing 1 of 2');
-    expect(html).toContain('colspan="10"');
+    expect(html).toContain('colspan="9"');
     expect(html).toContain('attached Key Account MIS Excel');
     expect(html).not.toContain('Gmail limits');
   });

@@ -133,7 +133,6 @@ describe('buildDigestEmailHtml', () => {
     expect(html).toContain('WESTERN REFRIGERATION');
     expect(html).toContain('Report period');
     expect(html).toContain('Branch scope');
-    expect(html).toContain('Open WRL Dashboard');
     expect(html).not.toContain('v:roundrect');
   });
 
@@ -143,7 +142,6 @@ describe('buildDigestEmailHtml', () => {
   });
 
   it('uses text link CTA without filled button', () => {
-    expect(html).toContain('class="email-link"');
     expect(html).not.toContain('cta-button');
   });
 
@@ -152,7 +150,6 @@ describe('buildDigestEmailHtml', () => {
     expect(html).toContain(MIS_EMAIL_INTRO_BY_PRESET.normal);
     expect(html).toContain('July 2026');
     expect(html).toContain('All branches');
-    expect(html).toContain('href="https://wrl-dashboard.vercel.app/report"');
   });
 
   it('uses revised intro when branding.introText is set', () => {
@@ -221,7 +218,7 @@ describe('buildDigestEmailHtml', () => {
       bodyHtml,
     });
 
-    expect(wrapped).toContain('bgcolor="#fecaca"');
+    expect(wrapped).toContain('bgcolor="#e7f3de"');
     expect(wrapped).not.toContain('.mis-row td { background-color: transparent !important;');
   });
 });

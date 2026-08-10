@@ -58,10 +58,8 @@ describe('buildMisEmailSkeletonPreview', () => {
     expect(preview?.html).toContain('Branch-wise Performance');
     expect(preview?.html).toContain('Branches');
     expect(preview?.html).toContain('>3 days');
-    expect(preview?.html).toContain('>15days');
     expect(preview?.html).not.toContain('Part pending');
     expect(preview?.html).toContain('background-color:#cbd5e1');
-    expect(preview?.html).toContain('bgcolor="#fecaca"');
     expect(preview?.html).not.toContain('bgcolor="#dcfce7"');
     expect(preview?.html).toContain('HOD — All branches');
   });

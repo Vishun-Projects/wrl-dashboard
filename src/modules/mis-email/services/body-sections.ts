@@ -246,7 +246,6 @@ function buildPerformanceTableHtml(params: {
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&lt;2 days</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;3 days</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;7 days</th>
-      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;15days</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}"># of active Eng.</th>
     </tr>`;
 
@@ -258,9 +257,6 @@ function buildPerformanceTableHtml(params: {
       const grandBg = zoneBgColor('mis-zone-grand');
       const labelBg = row.isGrand ? grandBg : zoneBg;
       const defaultBg = row.isGrand ? grandBg : plainBg;
-      const age15Class = age15BandClass(row.age_15);
-      const age15Bg = row.isGrand ? grandBg : age15BgColor(row.age_15);
-      const age15Color = age15TextColor();
       const totalCalls = row.solved_calls + row.open_calls;
       return `<tr class="mis-row">
         <td class="mis-td mis-td-l ${rowZoneClass}" bgcolor="${labelBg}" style="${tdStyle(t, { left: true, bold: true, bg: labelBg })}">${escapeHtml(formatRegionLabel(row.label))}</td>
@@ -269,8 +265,7 @@ function buildPerformanceTableHtml(params: {
         <td class="mis-td mis-open" bgcolor="${defaultBg}" style="${tdStyle(t, { bold: true, bg: defaultBg })}">${formatNum(row.open_calls)}</td>
         <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.age_2)}</td>
         <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.age_3)}</td>
-        <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.age_7)}</td>
-        <td class="mis-td ${age15Class}" bgcolor="${age15Bg}" style="${tdStyle(t, { bg: age15Bg, color: age15Color, bold: true })}">${formatNum(row.age_15)}</td>
+        <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.age_7 + row.age_15)}</td>
         <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.active_eng)}</td>
       </tr>`;
     })
@@ -318,7 +313,6 @@ function buildKeyAccountTableHtml(
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&lt;2 days</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;3 days</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;7 days</th>
-      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;15days</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">% &gt;7 days</th>
     </tr>`;
 
@@ -368,15 +362,14 @@ function buildKeyAccountTableHtml(
         <td class="mis-td mis-open" bgcolor="${plainBg}" style="${tdStyle(t, { bold: true, bg: plainBg })}">${formatNum(merged.open_calls)}</td>
         <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.age_2)}</td>
         <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.age_3)}</td>
-        <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.age_7)}</td>
-        <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.age_15)}</td>
+        <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.age_7 + merged.age_15)}</td>
         <td class="mis-td mis-pct ${pctClass}" bgcolor="${pctCellBg}" style="${tdStyle(t, { color: pctGt7TextColor(pctClass), bold: true, bg: pctCellBg })}">${escapeHtml(merged.pct_gt_7)}</td>
       </tr>`);
   }
 
   if (truncated) {
     bodyRows.push(`<tr>
-        <td colspan="10" class="mis-note" style="font-family:${t.fontInline};">
+        <td colspan="9" class="mis-note" style="font-family:${t.fontInline};">
           Showing ${accountRows.length} of ${totalRows} key-account rows.
           See the attached Key Account MIS Excel for the full list.
         </td>

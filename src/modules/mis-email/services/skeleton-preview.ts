@@ -122,7 +122,6 @@ function buildSkeletonPerformanceTable(params: {
     '<2 days',
     '>3 days',
     '>7 days',
-    '>15days',
     '# of active Eng.',
   ].slice(0, params.metricColumns);
 
@@ -219,7 +218,6 @@ function buildSkeletonKeyAccountTable(
     '<2 days',
     '>3 days',
     '>7 days',
-    '>15days',
     '% >7 days',
   ];
 
@@ -307,7 +305,7 @@ function buildSkeletonSectionHtmlMap(
           { label: 'West zone' },
           { label: 'All', isGrand: true },
         ],
-        metricColumns: 8,
+        metricColumns: 7,
       });
     } else if (id === 'branch_performance') {
       map[id] = buildSkeletonPerformanceTable({
@@ -320,7 +318,7 @@ function buildSkeletonSectionHtmlMap(
           { label: 'Branch' },
           { label: 'Branch' },
         ],
-        metricColumns: 8,
+        metricColumns: 7,
       });
     } else if (id === 'key_account_performance') {
       map[id] = buildSkeletonKeyAccountTable(keyAccountsByZone, mergeRegionCells);
