@@ -228,12 +228,11 @@ function buildForceLightStyles(params?: { includeDarkModeOverrides?: boolean }):
     ${buildMisZoneStyles()}
     .mis-grid-cell .mis-wrap { margin: 0 0 12px; }
     .mis-grid-cell .mis-th, .mis-grid-cell .mis-td { font-size: 9px; padding: 4px 5px; }
-    ${
-      includeDarkModeOverrides
-        ? `@media (prefers-color-scheme: dark) {
+    ${includeDarkModeOverrides
+      ? `@media (prefers-color-scheme: dark) {
       ${buildMisTableDarkModeStyles()}
     }`
-        : ''
+      : ''
     }
     ${buildMisZoneStyles('[data-ogsc]')}
     ${buildMisZoneStyles('[data-ogsb]')}
@@ -353,9 +352,8 @@ export function buildDigestEmailHtml(params: {
                     </table>
                   </td>
                 </tr>
-                ${
-                  bodyHtml
-                    ? `<tr>
+                ${bodyHtml
+      ? `<tr>
                   <td class="email-panel" bgcolor="${t.bgCanvas}" style="padding:0 36px 24px;background-color:${t.bgCanvas};">
                     <!--[if mso]>
                     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="${t.bgCanvas}" style="background-color:${t.bgCanvas};">
@@ -370,8 +368,8 @@ export function buildDigestEmailHtml(params: {
                     <![endif]-->
                   </td>
                 </tr>`
-                    : ''
-                }
+      : ''
+    }
                 <tr>
                   <td class="email-panel" bgcolor="${t.bgCanvas}" style="padding:0 36px 28px;background-color:${t.bgCanvas};">
                     <table role="presentation" class="email-meta" width="100%" cellspacing="0" cellpadding="0" border="1" bordercolor="${t.border}" bgcolor="${t.bgMuted}" style="background-color:${t.bgMuted};border:1px solid ${t.border};">
@@ -382,18 +380,6 @@ export function buildDigestEmailHtml(params: {
                         <td width="50%" bgcolor="${t.bgMuted}" style="width:50%;padding:16px 18px;background-color:${t.bgMuted};">
                           ${buildMetaCell('Branch scope', params.scopeLabel)}
                         </td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-                <tr>
-                  <td class="email-panel" bgcolor="${t.bgCanvas}" style="padding:0 36px 32px;background-color:${t.bgCanvas};">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                      <tr>
-                        <td class="email-text" style="padding:0 0 6px;font-family:${t.fontInline};font-size:14px;line-height:1.7;color:${t.fgPrimary};">You can also review the latest figures online:</td>
-                      </tr>
-                      <tr>
-                        <td style="padding:0;">${cta}</td>
                       </tr>
                     </table>
                   </td>

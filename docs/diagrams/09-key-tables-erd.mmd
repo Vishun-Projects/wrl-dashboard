@@ -1,0 +1,151 @@
+erDiagram
+    app_users {
+        uuid id PK
+        text email
+        text name
+        text role
+        text[] office_ids
+        text[] visible_statuses
+        jsonb mis_email_preferences
+        boolean mis_email_enabled
+        timestamptz created_at
+    }
+
+    roles {
+        uuid id PK
+        text name
+        timestamptz created_at
+    }
+
+    permissions {
+        uuid id PK
+        text name
+        text description
+    }
+
+    role_permissions {
+        uuid role_id FK
+        uuid permission_id FK
+    }
+
+    user_roles {
+        uuid user_id FK
+        uuid role_id FK
+    }
+
+    calls_latest_hot {
+        bigint ncode PK
+        text trn
+        text nofficeid
+        text status_bucket
+        text client_name
+        text region
+        text branch
+        date complaint_date
+        text technician_name
+        integer aging_days
+        text priority
+        timestamptz editedon
+        timestamptz synced_at
+    }
+
+    arcp_lines_hot {
+        bigint id PK
+        text trn
+        text nofficeid
+        date bm_approved_at
+        numeric claimed_amount
+        numeric bm_approved_amount
+        numeric ho_approved_amount
+        text status
+        timestamptz synced_at
+    }
+
+    mis_client_import_rows {
+        bigint id PK
+        uuid batch_id FK
+        text source_code
+        text client_name
+        text status_bucket
+        date complaint_date
+        text region
+        text branch
+        timestamptz created_at
+    }
+
+    mis_client_import_batches {
+        uuid id PK
+        text source_code
+        text filename
+        integer row_count
+        timestamptz uploaded_at
+        timestamptz expires_at
+    }
+
+    mis_email_routing_rules {
+        uuid id PK
+        text zone
+        text branch
+        text client
+        text[] to_emails
+        text[] cc_emails
+        boolean auto_send_enabled
+        text schedule_anchor_time_ist
+        integer schedule_interval_minutes
+        text default_date_range
+    }
+
+    mis_email_routing_send_log {
+        uuid id PK
+        uuid rule_id FK
+        text status
+        text sent_to
+        timestamptz sent_at
+    }
+
+    major_repair_recipients {
+        uuid id PK
+        text branch_id
+        text email
+        boolean enabled
+        boolean is_hq
+        timestamptz created_at
+    }
+
+    security_audit_log {
+        uuid id PK
+        text action
+        text result
+        jsonb actor
+        jsonb target
+        text summary
+        jsonb metadata
+        timestamptz created_at
+    }
+
+    call_flags {
+        uuid id PK
+        text trn
+        text nofficeid
+        text flag_type
+        text set_by_user_id
+        timestamptz created_at
+    }
+
+    call_comments {
+        uuid id PK
+        text trn
+        text nofficeid
+        text content
+        text user_id
+        timestamptz created_at
+    }
+
+    app_users ||--o{ user_roles : "has"
+    roles ||--o{ user_roles : "grants"
+    roles ||--o{ role_permissions : "has"
+    permissions ||--o{ role_permissions : "in"
+    mis_client_import_batches ||--o{ mis_client_import_rows : "contains"
+    mis_email_routing_rules ||--o{ mis_email_routing_send_log : "logged by"
+    calls_latest_hot ||--o{ call_flags : "flagged by"
+    calls_latest_hot ||--o{ call_comments : "annotated by"

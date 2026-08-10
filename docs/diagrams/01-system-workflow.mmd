@@ -1,0 +1,98 @@
+flowchart TD
+    subgraph Browser["Browser (Next.js SSR + Client)"]
+        LOGIN["login / forgot-password"]
+        REPORT["/report — MIS Reports"]
+        ARCP["/report/arcp-claims"]
+        DIST["/report/distribution"]
+        SERIAL["/report/serial-audit"]
+        LOCAUD["/report/location-audit"]
+        ADMIN["/admin — Users / Roles / Sync / VPS Cron"]
+        PROFILE["/profile — Prefs + MIS email"]
+        PERF["/admin/performance-insights"]
+    end
+
+    subgraph AUTH["auth module"]
+        SIGNIN["sign-in"]
+        SIGNOUT["sign-out"]
+        ME["GET /me"]
+        FORGOT["forgot-password"]
+        RESET["complete-reset"]
+    end
+
+    subgraph MIS["mis module"]
+        SUMMARY["Summary Dashboard"]
+        REGISTER["Call Register"]
+        BDMIS["BD-MIS (Cadbury/Coke merge)"]
+        CLIMPORT["Client Import (upload → normalize → batch)"]
+    end
+
+    subgraph CALLS["calls module"]
+        CALLBYID["call-by-id (CRM full graph)"]
+        COMMENTS["comments (Postgres)"]
+        FLAGS["flags (portal triage)"]
+        OFFICES["offices dimension"]
+    end
+
+    subgraph MISMAIL["mis-email module"]
+        RUNDIGEST["run-digest (cron + CLI)"]
+        COMPOSEDIGEST["compose-digest"]
+        MAILBASIS["mail-basis (Cadbury-safe counts)"]
+        PREFS["preferences / scheduling"]
+        ROUTING["routing-rules (slot dedupe)"]
+        SEND["send (SMTP / VPS relay)"]
+        MAJREP["major-repair-repeat-alert (sync worker)"]
+    end
+
+    subgraph ARCP_MOD["arcp-claims module"]
+        ARCPPAGE["ArcpClaimsPageClient"]
+        HYBRID["hybrid-load (Postgres ↔ CRM)"]
+        ARCPSYNC["sync worker (hot backfill)"]
+    end
+
+    subgraph SYNC_MOD["sync module"]
+        RMSTATUS["read-model-status API"]
+        VPSCRON["vps-cron pause/resume API"]
+    end
+
+    subgraph INFRA["Infrastructure / Shared Lib"]
+        SUPABASE["Supabase (auth + app_users)"]
+        POSTGRES["Postgres VPS (read-model hot tables)"]
+        CRM["CRM (trhcalls — source of truth)"]
+        SMTP["SMTP / VPS Postfix relay"]
+        READMODEL["@/lib/read-model (incremental/nightly sync CLI)"]
+        VPSCRONLIB["@/lib/vps-cron (pause catalog)"]
+        AUDIT["@/lib/security/audit (logAction)"]
+    end
+
+    LOGIN --> AUTH
+    REPORT --> MIS
+    REPORT --> CALLS
+    ARCP --> ARCP_MOD
+    ADMIN --> SYNC_MOD
+    PROFILE --> MISMAIL
+
+    MIS --> POSTGRES
+    MIS --> CRM
+    CALLS --> CRM
+    CALLS --> POSTGRES
+
+    MISMAIL --> MAILBASIS
+    MAILBASIS --> POSTGRES
+    MAILBASIS --> MIS
+    RUNDIGEST --> COMPOSEDIGEST --> MAILBASIS
+    RUNDIGEST --> SEND
+    SEND --> SMTP
+    RUNDIGEST --> AUDIT
+    RUNDIGEST --> ROUTING
+
+    ARCP_MOD --> POSTGRES
+    ARCP_MOD --> CRM
+
+    AUTH --> SUPABASE
+    AUTH --> AUDIT
+
+    SYNC_MOD --> VPSCRONLIB
+    SYNC_MOD --> POSTGRES
+
+    READMODEL --> POSTGRES
+    READMODEL --> CRM

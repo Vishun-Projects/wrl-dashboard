@@ -198,13 +198,14 @@ describe('buildMisEmailPayload early exits', () => {
     expect(fetchDigestRegisterRows).not.toHaveBeenCalled();
   });
 
-  it('forPreview skips register fetch and Excel builders but loads trace for body', async () => {
+  it('forPreview performs register check and loads trace for body but skips Excel builders', async () => {
     fetchDigestSummaryDataCached.mockResolvedValue({
       branchSummary: [],
       accountSummary: [],
       totals: {},
     });
     fetchDigestClientAccountSummaryCached.mockResolvedValue([]);
+    fetchDigestRegisterRows.mockResolvedValue([{ id: 1 }]);
     buildDigestTraceableExportPayload.mockResolvedValue({
       regionalRows: [],
       grand: { region: 'ALL', open_calls: 0 },
@@ -235,7 +236,7 @@ describe('buildMisEmailPayload early exits', () => {
     expect(result.emailAttachments).toEqual([]);
     expect(result.preview.attachments.length).toBeGreaterThan(0);
     expect(fetchDigestSummaryDataCached).toHaveBeenCalledOnce();
-    expect(fetchDigestRegisterRows).not.toHaveBeenCalled();
+    expect(fetchDigestRegisterRows).toHaveBeenCalledOnce();
     expect(buildDigestAttachments).not.toHaveBeenCalled();
     expect(buildDigestTraceableExportPayload).toHaveBeenCalledOnce();
   });

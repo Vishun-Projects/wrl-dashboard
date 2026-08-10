@@ -30,7 +30,7 @@ async function main() {
   }
 
   // Start Next.js dev server with process.env.VPS_SSH_PASSPHRASE passed through
-  const nextDev = spawn('npx', ['next', 'dev'], {
+  const nextDev = spawn('npx', ['next', 'dev', ...process.argv.slice(2)], {
     stdio: 'inherit',
     shell: true,
     env,

@@ -13,6 +13,7 @@ import { loadDigestRecipients } from '@/modules/mis-email/services/recipients';
 import { listMisEmailRoutingRules } from '@/modules/mis-email/services/routing-rules';
 import { resolveMisEmailSendTimeIst, resolveEffectiveDigestIncludes } from '@/modules/mis-email/services/preferences';
 import { resolveDigestAttachmentFilenames } from '@/modules/mis-email/services/build-attachments';
+import { buildRoutingComposerRecipient } from '@/modules/mis-email/services/run-digest';
 
 async function main() {
   console.log('=== MIS EMAIL DIGEST STATUS DIAGNOSIS ===\n');
@@ -60,16 +61,10 @@ async function main() {
   } else {
     for (const rule of activeRules) {
       const scheduledAt930 = rule.scheduleAnchorTimeIst === '09:30';
-      // Routing rule uses buildRoutingComposerRecipient, which always sets:
-      // includeOpenCallsExport: true
-      const attachmentMode = {
-        includeSummary: false,
-        includeDetailed: false,
-        includeKeyAccount: false,
-        includeTraceableExport: false,
-        includeOpenCallsExport: true
-      };
-      const files = resolveDigestAttachmentFilenames(attachmentMode);
+      // Dynamically resolve composer recipient based on routing rule parameters
+      const composer = buildRoutingComposerRecipient([], 'month_to_date', rule.client);
+      const effective = resolveEffectiveDigestIncludes(composer, composer.mis_email_preferences);
+      const files = resolveDigestAttachmentFilenames(effective);
 
       console.log(`📌 Rule ID: ${rule.id}`);
       console.log(`   Filter Scope: Zone="${rule.zone || '*'}" | Branch="${rule.branch || '*'}" | Client="${rule.client || '*'}"`);

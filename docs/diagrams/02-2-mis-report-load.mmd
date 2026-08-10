@@ -1,0 +1,35 @@
+sequenceDiagram
+    autonumber
+    actor User
+    participant Browser
+    participant NextJS as Next.js API
+    participant MISMod as mis module
+    participant Postgres as Postgres VPS
+    participant CRM
+
+    User->>Browser: Open /report
+    Browser->>NextJS: GET /api/auth/me
+    NextJS-->>Browser: profile + RBAC permissions
+    Browser->>Browser: ReportFiltersProvider init (restore saved filters)
+
+    Browser->>NextJS: GET /api/report/summary (dates, officeIds, callType)
+    NextJS->>MISMod: summary handler
+    MISMod->>Postgres: querySummaryDashboard()
+    Postgres-->>MISMod: branchSummary + accountSummary rows
+    MISMod-->>Browser: SummaryDashboard JSON
+
+    User->>Browser: Switch to Call Register tab
+    Browser->>NextJS: GET /api/report/register (filters + page)
+    NextJS->>MISMod: register handler
+    MISMod->>Postgres: queryDigestRegisterExport()
+    Postgres-->>MISMod: register rows
+    MISMod-->>Browser: rows + totals
+
+    User->>Browser: Click TRN row
+    Browser->>NextJS: GET /api/calls/:id
+    NextJS->>CRM: postQuery trhcalls (parent + history + visits + faults + parts)
+    CRM-->>NextJS: full call graph
+    NextJS->>Postgres: load call_comments + call_flags for TRN
+    Postgres-->>NextJS: portal annotations
+    NextJS-->>Browser: CallDetail payload
+    Browser->>Browser: Open CallDetailDialog drawer

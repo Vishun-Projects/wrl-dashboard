@@ -1,0 +1,20 @@
+flowchart TD
+    subgraph CRONGATE["VPS Cron Gate (vps-cron-gate.sh)"]
+        GATE{"isVpsCronPaused?\n(reads portal DB)"}
+    end
+
+    DIGESTCRON["cron: */15 Mon-Sat\nmis-email-digest.sh"] --> GATE
+    GATE -- "paused=true" --> SKIP["exit 0 — no send"]
+    GATE -- "paused=false" --> RUNDIGEST["tsx run-digest.ts\nrunMisEmailDigest()"]
+    RUNDIGEST --> WINDOW{"IST send window\nhalf-open [anchor, anchor+15m)"}
+    WINDOW -- "in window" --> SEND["compose + SMTP send"]
+    WINDOW -- "out of window" --> SKIPRECIP["skip recipient (logged)"]
+
+    WATCHDOG["cron: 09:50 Mon-Sat\nwatchdog.sh"] --> CHECK{"mis-email-cron.log\nhas today 09:30 send?"}
+    CHECK -- "yes" --> OK["exit 0 — all good"]
+    CHECK -- "no" --> ALERT["send watchdog alert\nto admin email"]
+
+    SYNCWORKER["systemd: fast-close-sync-worker\nrestart always"] --> LOCK{"acquireSyncLock\n(advisory Postgres lock)"}
+    LOCK -- "held" --> WAIT["sleep 30s, retry"]
+    LOCK -- "acquired" --> CRMDELTA["fetch CRM delta\ntransform → upsert"]
+    CRMDELTA --> RELEASE["release lock"]

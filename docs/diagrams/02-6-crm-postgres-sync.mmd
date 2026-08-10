@@ -1,0 +1,38 @@
+sequenceDiagram
+    autonumber
+    participant Cron as VPS Cron (CLI)
+    participant CLI as lib/read-model/cli.ts
+    participant VpsCronLib as lib/vps-cron
+    participant Lock as lock.ts
+    participant Incremental as incremental.ts
+    participant CrmFetch as crm-fetch.ts
+    participant Transform as transform.ts
+    participant Upsert as upsert-hot.ts
+    participant Postgres as Postgres VPS
+    participant CRM as CRM (trhcalls)
+
+    Cron->>CLI: tsx lib/read-model/cli.ts incremental
+    CLI->>VpsCronLib: isVpsCronPaused('crm_sync')?
+    VpsCronLib-->>CLI: false
+    CLI->>Lock: acquireSyncLock()
+    Lock->>Postgres: advisory lock on sync_lock
+    Postgres-->>Lock: acquired
+
+    CLI->>Incremental: runIncrementalSync()
+    Incremental->>Postgres: get last editedon watermark
+    Postgres-->>Incremental: watermark timestamp
+
+    Incremental->>CrmFetch: fetchCrmCallsDelta(since=watermark)
+    CrmFetch->>CRM: postQuery trhcalls WHERE editedon > watermark
+    CRM-->>CrmFetch: changed rows (batch)
+
+    loop For each batch
+        CrmFetch->>Transform: transformCrmRows(rawRows)
+        Transform-->>Upsert: transformed hot rows
+        Upsert->>Postgres: upsert calls_latest_hot (ON CONFLICT UPDATE)
+        Postgres-->>Upsert: upserted count
+    end
+
+    Incremental->>Postgres: update editedon watermark + sync_meta
+    Lock->>Postgres: release advisory lock
+    CLI-->>Cron: upserted + duration + errors

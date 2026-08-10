@@ -22,10 +22,6 @@ SSH_OPTS=(
   -i "${SSH_KEY}"
 )
 
-if [[ ! -t 0 ]] || [[ ! -t 1 ]]; then
-  echo "ERROR: need interactive terminal for SSH passphrase." >&2
-  exit 1
-fi
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Missing ${ENV_FILE}" >&2
   exit 1
@@ -34,11 +30,33 @@ fi
 source "$ENV_FILE"
 VPS_HOST="${VPS_HOST:?Set VPS_HOST in .env.vps-setup}"
 
-if [[ -z "${SSH_AUTH_SOCK:-}" ]]; then
-  eval "$(ssh-agent -s)"
+if [[ -n "${VPS_SSH_PASSPHRASE:-}" ]]; then
+  echo "==> Using SSH passphrase from environment..."
+  ASKPASS_TMP=$(mktemp)
+  echo "#!/usr/bin/env bash" > "$ASKPASS_TMP"
+  echo "echo \"\$VPS_SSH_PASSPHRASE\"" >> "$ASKPASS_TMP"
+  chmod +x "$ASKPASS_TMP"
+  
+  export DISPLAY="dummy:0"
+  export SSH_ASKPASS="$ASKPASS_TMP"
+  export SSH_ASKPASS_REQUIRE="force"
+  
+  if [[ -z "${SSH_AUTH_SOCK:-}" ]]; then
+    eval "$(ssh-agent -s)"
+  fi
+  ssh-add "$SSH_KEY" < /dev/null
+  rm -f "$ASKPASS_TMP"
+else
+  if [[ ! -t 0 ]] || [[ ! -t 1 ]]; then
+    echo "ERROR: need interactive terminal for SSH passphrase." >&2
+    exit 1
+  fi
+  if [[ -z "${SSH_AUTH_SOCK:-}" ]]; then
+    eval "$(ssh-agent -s)"
+  fi
+  echo "==> Enter SSH key passphrase for ${SSH_KEY}"
+  ssh-add "$SSH_KEY"
 fi
-echo "==> Enter SSH key passphrase for ${SSH_KEY}"
-ssh-add "$SSH_KEY"
 
 echo "==> Detecting install root…"
 detected_root=$(ssh "${SSH_OPTS[@]}" "$VPS_HOST" \

@@ -1,0 +1,43 @@
+flowchart TD
+    REQ["Incoming Request\n(cookie or Bearer token)"] --> VERIFY
+
+    VERIFY{"JWT verify\n@/lib/auth/server-user.ts"}
+    VERIFY -- "invalid / expired" --> DENY401["401 Unauthorized\nor redirect /login"]
+    VERIFY -- "valid JWT" --> LOADPROFILE
+
+    LOADPROFILE["Load app_users profile\n+ expand role permissions\n(TAB_PERMISSION_ALIASES)"]
+    LOADPROFILE --> SOFTTTL
+
+    SOFTTTL{"Portal soft-timeout\n(cookie session TTL)"}
+    SOFTTTL -- "expired" --> DENY401
+    SOFTTTL -- "ok" --> OFFICESCOPE
+
+    OFFICESCOPE{"office_ids check\nseesAllOffices?"}
+    OFFICESCOPE -- "view_all_offices OR\nlegacy HOD role OR\noffice_ids is empty" --> SEESALL["HOD scope\n(all branches)"]
+    OFFICESCOPE -- "non-empty office_ids" --> SCOPED["Branch scope\n(own offices only)"]
+
+    SEESALL --> PAGECHECK
+    SCOPED --> PAGECHECK
+
+    PAGECHECK{"canAccessPage()\ncanAccessPath()"}
+    PAGECHECK -- "no matching\npermission" --> DENY403["403 Forbidden\nor 404 hide"]
+    PAGECHECK -- "permission found" --> TABCHECK
+
+    TABCHECK{"Has tabs?\n(MIS Reports)"}
+    TABCHECK -- "no tabs" --> ALLOW["200 Allow\n(full page/API access)"]
+    TABCHECK -- "yes tabs" --> TABPERM
+
+    TABPERM{"canAccessTab()\ntab_mis_* permission"}
+    TABPERM -- "not permitted" --> DENY403
+    TABPERM -- "permitted" --> SCOPEFILTER
+
+    SCOPEFILTER["Apply office scope\nto SQL WHERE clause\n(assignedOffices filter)"]
+    SCOPEFILTER --> ALLOW
+
+    subgraph SPECIAL["Special gates"]
+        SUPERADMIN["super_admin only:\n/admin/security-audit\n/admin/vps-cron"]
+        MISEMAILCAP["mis_email_send capability:\nProfile email tab\nDigest recipients list"]
+        OFFICEDATA["canAccessOffice(nofficeid):\ncall-by-id drawer\ncomments + flags write"]
+    end
+
+    ALLOW -.-> SPECIAL

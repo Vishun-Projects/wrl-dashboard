@@ -1,0 +1,82 @@
+flowchart LR
+    subgraph SOURCE["Source of Truth"]
+        CRM[(CRM\ntrhcalls\nMS SQL)]
+    end
+
+    subgraph ETL["ETL — VPS Workers"]
+        direction TB
+        INCR["Incremental sync\n(every ~3 min)\nWatermark: editedon"]
+        NIGHTLY["Nightly YTD replay\n(02:30 IST)\nfill-hot-gaps + editedon-catchup"]
+        BACKFILL["One-time backfill\n(historical / gap fill)"]
+        ARCP_SYNC["ARCP sync worker\n(arcp_lines_hot)"]
+        TRANSFORM["transform.ts\nnormalise · status_bucket\nbranch / region tags"]
+        UPSERT["upsert calls_latest_hot\nON CONFLICT UPDATE"]
+    end
+
+    subgraph READMODEL["Postgres Read-Model (VPS)"]
+        direction TB
+        HOT[(calls_latest_hot)]
+        ARCPHOT[(arcp_lines_hot)]
+        IMPORTROWS[(mis_client_import_rows\nCoke · Mondelez)]
+        AUDIT[(security_audit_log)]
+        EMAILLOG[(mis_email_routing_send_log)]
+    end
+
+    subgraph PORTAL["Portal — Vercel / Next.js"]
+        direction TB
+        SUMMARY["querySummaryDashboard\n(regional + branch totals)"]
+        REGISTER["queryDigestRegisterExport\n(call-level rows)"]
+        TRACE["queryBdMisCrmCallTraceRows\n(BD-MIS traceable)"]
+        CALLBYID["postQuery CRM\n(single call detail drawer)"]
+    end
+
+    subgraph OUTPUT["Output"]
+        BROWSER["Browser\n(tables, charts, maps)"]
+        EXCEL["Excel workbooks\n(Summary · Register · Traceable)"]
+        EMAIL["MIS Email Digest\n(HTML + attachments)"]
+        CSV["CSV exports\n(ARCP · Register)"]
+        PDF["PDF\n(ARCP claims)"]
+    end
+
+    subgraph CLIENTIMPORT["Client Import (Browser upload)"]
+        UPLOAD["Upload CSV/Excel\n(Coke · Mondelez)"]
+        NORMALIZE["normalize + batch\n→ mis_client_import_rows"]
+    end
+
+    CRM -- "batch fetch\neditedon delta" --> INCR
+    CRM -- "YTD status replay" --> NIGHTLY
+    CRM -- "gap fill" --> BACKFILL
+    CRM -- "ARCP lines" --> ARCP_SYNC
+
+    INCR --> TRANSFORM --> UPSERT --> HOT
+    NIGHTLY --> HOT
+    BACKFILL --> HOT
+    ARCP_SYNC --> ARCPHOT
+
+    UPLOAD --> NORMALIZE --> IMPORTROWS
+
+    HOT --> SUMMARY --> BROWSER
+    HOT --> REGISTER --> BROWSER
+    HOT --> TRACE
+    IMPORTROWS -- "BD-MIS merge\n(Cadbury-safe)" --> TRACE
+    ARCPHOT --> BROWSER
+
+    SUMMARY --> EXCEL
+    REGISTER --> EXCEL
+    TRACE --> EXCEL
+
+    EXCEL --> EMAIL
+    SUMMARY --> EMAIL
+    TRACE -- "open-calls export" --> EMAIL
+
+    REGISTER --> CSV
+    ARCPHOT --> CSV
+    ARCPHOT --> PDF
+
+    CRM --> CALLBYID --> BROWSER
+
+    style SOURCE fill:#3a1a1a,color:#fff
+    style ETL fill:#1a1a3a,color:#eee
+    style READMODEL fill:#1a2a1a,color:#eee
+    style OUTPUT fill:#2a2a1a,color:#eee
+    style CLIENTIMPORT fill:#2a1a2a,color:#eee

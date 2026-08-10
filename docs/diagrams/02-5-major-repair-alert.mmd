@@ -1,0 +1,23 @@
+sequenceDiagram
+    autonumber
+    participant SyncWorker as Sync Worker (CLI / nightly)
+    participant AlertWorker as major-repair-repeat-alert.ts
+    participant Recipients as major-repair-repeat-recipients.ts
+    participant Postgres
+    participant Send as send.ts
+    participant SMTP
+
+    SyncWorker->>AlertWorker: detectAndSendMajorRepeatAlerts()
+    AlertWorker->>Postgres: query repeat major-repair TRNs (calls_latest_hot)
+    Postgres-->>AlertWorker: repeat case rows
+    loop For each repeat case
+        AlertWorker->>Recipients: resolveAlertRecipients(branchId)
+        Recipients->>Postgres: query major_repair_recipients (enabled + branch)
+        Postgres-->>Recipients: branch rows (To) + HQ rows (Cc)
+        Note right of Recipients: Branch To wins; HQ demotes to Cc
+        Recipients-->>AlertWorker: to[] + cc[]
+        AlertWorker->>Send: sendPreparedDigestEmail(to, cc, alertHtml)
+        Send->>SMTP: sendMail()
+        SMTP-->>AlertWorker: messageId
+        AlertWorker->>Postgres: log alert send
+    end

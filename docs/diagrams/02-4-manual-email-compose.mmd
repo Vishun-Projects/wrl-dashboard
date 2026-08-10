@@ -1,0 +1,35 @@
+sequenceDiagram
+    autonumber
+    actor User
+    participant Browser
+    participant NextJS as Next.js API
+    participant RouteHandler as mis-email routes
+    participant Compose as compose-digest.ts
+    participant Postgres
+    participant Send as send.ts
+    participant SMTP
+
+    User->>Browser: Open Profile → MIS Email tab
+    Browser->>NextJS: GET /api/mis-email/profile-prefs
+    NextJS->>Postgres: load mis_email_preferences from app_users
+    Postgres-->>Browser: saved preferences
+
+    User->>Browser: Adjust settings → Preview
+    Browser->>NextJS: POST /api/mis-email/profile-preview
+    NextJS->>RouteHandler: profile-preview handler
+    RouteHandler->>Compose: previewMisEmailCompose(recipient, forPreview=true)
+    Compose->>Postgres: fetchDigestSummaryDataCached()
+    Compose->>Postgres: fetchDigestClientAccountSummaryCached()
+    Note right of Compose: Skips Excel build — preview only
+    Compose-->>Browser: subject + html + attachmentFilenames + scopeLabel
+
+    User->>Browser: Click Send
+    Browser->>NextJS: POST /api/mis-email/profile-send
+    NextJS->>RouteHandler: profile-send handler
+    RouteHandler->>Compose: sendMisEmailComposeBatch(recipient, opts)
+    Compose->>Postgres: Full pipeline (summary + trace + register)
+    Compose->>Compose: buildDigestAttachments() → Excel buffers
+    Compose->>Send: sendPreparedDigestEmail(to, subject, html, attachments)
+    Send->>SMTP: sendMail()
+    SMTP-->>Send: messageId
+    Send-->>Browser: sentTo + attachments[] + messageId

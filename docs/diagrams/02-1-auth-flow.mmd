@@ -1,0 +1,30 @@
+sequenceDiagram
+    autonumber
+    actor User
+    participant Browser
+    participant NextJS as Next.js API
+    participant AuthMod as auth module
+    participant Supabase
+    participant AuditLog as security audit
+
+    User->>Browser: Enter email + password → Submit
+    Browser->>NextJS: POST /api/auth/sign-in
+    NextJS->>AuthMod: sign-in handler
+    AuthMod->>Supabase: GoTrue signInWithPassword()
+    Supabase-->>AuthMod: JWT + session
+    AuthMod->>AuditLog: logAction(session.start)
+    AuthMod->>NextJS: set session cookies (soft-timeout)
+    NextJS-->>Browser: 200 OK + cookies
+    Browser->>NextJS: GET /api/auth/me (poll)
+    NextJS->>AuthMod: me handler
+    AuthMod->>Supabase: verify JWT / resolve profile
+    AuthMod-->>Browser: profile + permissions + sessionExpiresAt
+    Browser->>Browser: Route to first allowed report page
+
+    Note over Browser,Supabase: On sign-out
+    User->>Browser: Click Sign Out
+    Browser->>NextJS: POST /api/auth/sign-out
+    NextJS->>AuthMod: clear cookies BEFORE GoTrue signOut
+    AuthMod->>Supabase: GoTrue signOut
+    AuthMod->>AuditLog: logAction(session.end)
+    NextJS-->>Browser: 200 + clear cookies, redirect /login

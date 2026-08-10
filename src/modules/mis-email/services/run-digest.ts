@@ -54,7 +54,7 @@ function clientsFromRoutingRule(clientCsv: string): string[] {
   );
 }
 
-function buildRoutingComposerRecipient(
+export function buildRoutingComposerRecipient(
   officeIds: string[],
   dateRange: DigestRecipient['mis_email_preferences']['dateRange'],
   clientCsv = ''
@@ -86,12 +86,12 @@ function buildRoutingComposerRecipient(
     mis_email_enabled: true,
     mis_email_preferences: {
       ...prefs,
-      includeSummary: false,
-      includeDetailed: false,
-      includeKeyAccount: false,
+      includeSummary: true,
+      includeDetailed: true,
+      includeKeyAccount: true,
       includeTraceableExport: false,
-      // Send only WRL BD MIS Open Calls export workbook
-      includeOpenCallsExport: true,
+      // Do not force restricted Open Calls-only content
+      includeOpenCallsExport: false,
       // Custom grid (regional+branch left, key accounts right) — not stacked default.
       bodyLayout: MIS_EMAIL_BODY_LAYOUT_PRESETS.legacy_dashboard.layout,
       // Empty = all clients in branch/zone scope; otherwise only these accounts.

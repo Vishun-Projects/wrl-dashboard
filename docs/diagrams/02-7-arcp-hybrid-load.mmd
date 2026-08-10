@@ -1,0 +1,39 @@
+sequenceDiagram
+    autonumber
+    actor User
+    participant Browser
+    participant NextJS as Next.js API
+    participant ArcpMod as arcp-claims module
+    participant HybridLoad as hybrid-load.ts
+    participant Postgres
+    participant CRM
+
+    User->>Browser: Open /report/arcp-claims → set date basis
+    Browser->>NextJS: POST /api/report/arcp-claims/load-start
+    NextJS->>ArcpMod: route-auth (page_arcp_claims + office scope)
+    ArcpMod->>HybridLoad: startOrResumeLoadJob(filters)
+    HybridLoad->>Postgres: check arcp_lines_hot coverage for date range
+    alt Postgres has full coverage
+        Postgres-->>HybridLoad: hot rows sufficient
+        HybridLoad-->>Browser: jobId + source=postgres
+    else Gap — fall back to CRM
+        HybridLoad->>CRM: postQuery arcp lines (weekly chunks)
+        CRM-->>HybridLoad: raw ARCP lines
+        HybridLoad->>Postgres: upsert arcp_lines_hot + mark coverage
+        HybridLoad-->>Browser: jobId + source=crm
+    end
+
+    loop Poll until complete
+        Browser->>NextJS: GET /api/report/arcp-claims/load-status?jobId=...
+        NextJS->>Postgres: check job progress rows
+        Postgres-->>Browser: progress% + chunksDone + total
+    end
+
+    Browser->>NextJS: GET /api/report/arcp-claims/aggregates
+    NextJS->>Postgres: queryArcpAggregates(filters + officeScope)
+    Postgres-->>Browser: aggregated claims data
+
+    User->>Browser: Export detail CSV
+    Browser->>NextJS: GET /api/report/arcp-claims/detail-export
+    NextJS->>Postgres: stream arcp_lines_hot rows
+    Postgres-->>Browser: CSV stream

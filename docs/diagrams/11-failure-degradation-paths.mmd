@@ -1,0 +1,56 @@
+flowchart TD
+    subgraph CRM_FAIL["CRM unavailable / timeout"]
+        direction LR
+        CRMDOWN["CRM postQuery timeout\nor connection refused"]
+        CRMDOWN --> HOTFALLBACK["calls_latest_hot still serves\nSummary + Register (stale)"]
+        CRMDOWN --> CALLBYID_FAIL["Call detail drawer → 502/504\n(no hot fallback for full graph)"]
+        CRMDOWN --> ARCP_CHUNK["ARCP: split weekly chunks\nretry each window\nnever skip a day"]
+        CRMDOWN --> SYNCLOGS["Sync worker logs error\nretries on next 3-min cycle\nno data loss (watermark not advanced)"]
+    end
+
+    subgraph SYNC_LOCK["Sync lock held / stuck"]
+        direction LR
+        LOCKSTUCK["acquireSyncLock() blocked"]
+        LOCKSTUCK --> SLEEPRETRY["sleep 30s → retry\nsystemd restarts if crash"]
+        LOCKSTUCK --> STALEHOT["calls_latest_hot may drift\n(last sync still served)"]
+        LOCKSTUCK --> MANUALFIX["Manual: SELECT pg_cancel_backend()\nor systemctl restart fast-close-sync-worker"]
+    end
+
+    subgraph SMTP_FAIL["SMTP / VPS email fails"]
+        direction LR
+        SMTPFAIL["Postfix / relay error\nor SMTP auth failure"]
+        SMTPFAIL --> DIGESTFAIL["Digest send → failed[]\nlogged in security_audit_log"]
+        SMTPFAIL --> WATCHDOG2["09:50 watchdog detects no send\n→ alert email to admin\n(via same relay — may also fail)"]
+        SMTPFAIL --> NORETRY["No automatic retry of digest\n(next cron poll = next 15 min)"]
+        SMTPFAIL --> DRYRUN["MIS_EMAIL_DRY_RUN=true\nlogs payload, skips SMTP"]
+    end
+
+    subgraph VPSCRON_PAUSE["VPS Cron paused from portal"]
+        direction LR
+        PAUSED["isVpsCronPaused() = true\n(portal DB flag)"]
+        PAUSED --> SKIPALL["cron shell gate: exit 0\nno digest, no sync trigger"]
+        PAUSED --> RESUMEUI["Resume via /admin/vps-cron\n(super_admin only)"]
+    end
+
+    subgraph POSTGRES_SLOW["Postgres VPS degraded"]
+        direction LR
+        PGDEG["High seq scan / temp spills\nor connection pool exhaustion"]
+        PGDEG --> SLOWQUERIES["Dashboard queries slow\nor timeout (Vercel 10s limit)"]
+        PGDEG --> VACUUMFIX["VACUUM ANALYZE\nor VACUUM FULL (Sunday cron)"]
+        PGDEG --> INDEXES["Composite indexes:\ncalls_latest_hot (editedon, nofficeid)\nmis_client_import_rows (batch_id, source_code)"]
+    end
+
+    subgraph VERCEL_FAIL["Vercel deploy fails / timeout"]
+        direction LR
+        VFAIL["Build error or\nVPS not reachable"]
+        VFAIL --> ROLLBACK["Vercel instant rollback\nto previous deployment"]
+        VFAIL --> SKIPBRANCH["Non-main branches skipped\n(ignoreCommand in vercel.json)"]
+        VFAIL --> VPSINDEP["VPS workers continue\nindependently of Vercel"]
+    end
+
+    subgraph SUPABASE_FAIL["Supabase auth degraded"]
+        direction LR
+        SFAIL["GoTrue unreachable\nor JWT verify fails"]
+        SFAIL --> COOKIEFALLBACK["server-user.ts: cookie-embedded\nuser_id accepted as fallback\n(trusts cookie integrity)"]
+        SFAIL --> LOGINBLOCK["sign-in page: returns 503\nno bypass"]
+    end

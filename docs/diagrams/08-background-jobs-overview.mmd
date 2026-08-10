@@ -1,0 +1,28 @@
+flowchart LR
+    subgraph DAEMON["systemd daemons (always-on)"]
+        D1["fast-close-sync-worker\nIncremental sync every ~3 min\nRestart: always"]
+        D2["fast-close-sync-worker-nightly\nYTD editedon catch-up\nTimer: 02:30 IST daily"]
+    end
+
+    subgraph CRON["cron (CRON_TZ=Asia/Kolkata, Mon-Sat unless noted)"]
+        C1["*/15 Mon-Sat\nMIS email digest\nmis-email-digest.sh"]
+        C2["09:50 Mon-Sat\nMorning watchdog\nmis-email-morning-watchdog.sh"]
+        C3["03:15 daily\nClient import purge\nmis-client-purge-old-files.sh"]
+        C4["00:00 Sunday\nVACUUM FULL\nvacuum-full-mis-rows.sh"]
+    end
+
+    subgraph LOGS["Log files (VPS /opt/fast-close-app/logs/)"]
+        L1[sync-worker.log]
+        L2[sync-worker-nightly.log]
+        L3[mis-email-cron.log]
+        L4[mis-email-watchdog.log]
+        L5[mis-client-purge.log]
+        L6[vacuum-full.log]
+    end
+
+    D1 --> L1
+    D2 --> L2
+    C1 --> L3
+    C2 --> L4
+    C3 --> L5
+    C4 --> L6

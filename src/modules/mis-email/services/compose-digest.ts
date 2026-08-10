@@ -306,11 +306,9 @@ export async function buildMisEmailPayload(
   const needsClientAccounts =
     bodySectionIds.includes('key_account_performance') ||
     bodySectionIds.includes('regional_performance');
-  const includeDetailed = !options.forPreview && effectiveIncludes.includeDetailed;
-  const includeTraceableExport =
-    !options.forPreview && effectiveIncludes.includeTraceableExport;
-  const includeOpenCallsExport =
-    !options.forPreview && effectiveIncludes.includeOpenCallsExport;
+  const includeDetailed = effectiveIncludes.includeDetailed;
+  const includeTraceableExport = effectiveIncludes.includeTraceableExport;
+  const includeOpenCallsExport = effectiveIncludes.includeOpenCallsExport;
   // Regional/branch body use Cadbury-safe call-level trace (CRM Cadbury out, Mondelez in)
   // so open totals match the open-calls Excel — including HTML preview.
   const needsTraceForBody =
