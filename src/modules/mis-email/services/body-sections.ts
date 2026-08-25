@@ -242,6 +242,7 @@ function buildPerformanceTableHtml(params: {
       <th class="mis-th mis-th-l" bgcolor="#0070C0" style="${thStyle(t, true)}">${escapeHtml(params.regionColumnLabel)}</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Total calls</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Total solved</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Cancelled</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}"># open calls</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&lt;2 days</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;3 days</th>
@@ -257,11 +258,12 @@ function buildPerformanceTableHtml(params: {
       const grandBg = zoneBgColor('mis-zone-grand');
       const labelBg = row.isGrand ? grandBg : zoneBg;
       const defaultBg = row.isGrand ? grandBg : plainBg;
-      const totalCalls = row.solved_calls + row.open_calls;
+      const totalCalls = row.solved_calls + row.open_calls + row.cancelled_calls;
       return `<tr class="mis-row">
         <td class="mis-td mis-td-l ${rowZoneClass}" bgcolor="${labelBg}" style="${tdStyle(t, { left: true, bold: true, bg: labelBg })}">${escapeHtml(formatRegionLabel(row.label))}</td>
         <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(totalCalls)}</td>
         <td class="mis-td mis-solved" bgcolor="${defaultBg}" style="${tdStyle(t, { color: solvedTextColor(), bg: defaultBg, bold: true })}">${formatNum(row.solved_calls)}</td>
+        <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.cancelled_calls)}</td>
         <td class="mis-td mis-open" bgcolor="${defaultBg}" style="${tdStyle(t, { bold: true, bg: defaultBg })}">${formatNum(row.open_calls)}</td>
         <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.age_2)}</td>
         <td class="mis-td" bgcolor="${defaultBg}" style="${tdStyle(t, { bg: defaultBg })}">${formatNum(row.age_3)}</td>
@@ -309,6 +311,7 @@ function buildKeyAccountTableHtml(
       <th class="mis-th mis-th-l" bgcolor="#0070C0" style="${thStyle(t, true)}">Key Account</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Total calls</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Total solved</th>
+      <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">Cancelled</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}"># open calls</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&lt;2 days</th>
       <th class="mis-th" bgcolor="#0070C0" style="${thStyle(t)}">&gt;3 days</th>
@@ -357,8 +360,9 @@ function buildKeyAccountTableHtml(
     bodyRows.push(`<tr class="mis-row">
         ${regionCell}
         <td class="mis-td mis-td-l" bgcolor="${plainBg}" style="${tdStyle(t, { left: true, bold: true, bg: plainBg })}">${escapeHtml(clientAccountDisplayName(merged.account))}</td>
-        <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.total_solved + merged.open_calls)}</td>
+        <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.total_solved + merged.open_calls + Number(merged.cancelled_calls || 0))}</td>
         <td class="mis-td mis-solved" bgcolor="${plainBg}" style="${tdStyle(t, { color: solvedTextColor(), bg: plainBg, bold: true })}">${formatNum(merged.total_solved)}</td>
+        <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(Number(merged.cancelled_calls || 0))}</td>
         <td class="mis-td mis-open" bgcolor="${plainBg}" style="${tdStyle(t, { bold: true, bg: plainBg })}">${formatNum(merged.open_calls)}</td>
         <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.age_2)}</td>
         <td class="mis-td" bgcolor="${plainBg}" style="${tdStyle(t, { bg: plainBg })}">${formatNum(merged.age_3)}</td>
@@ -369,7 +373,7 @@ function buildKeyAccountTableHtml(
 
   if (truncated) {
     bodyRows.push(`<tr>
-        <td colspan="9" class="mis-note" style="font-family:${t.fontInline};">
+        <td colspan="10" class="mis-note" style="font-family:${t.fontInline};">
           Showing ${accountRows.length} of ${totalRows} key-account rows.
           See the attached Key Account MIS Excel for the full list.
         </td>
@@ -439,7 +443,7 @@ function isNonZeroBranchPerformanceRow(row: {
   part_pending: number;
   active_eng: number;
 }): boolean {
-  // Displayed total is solved+open; hide rows with nothing meaningful to show.
+  // Displayed total is solved + open + cancelled; hide rows with nothing meaningful to show.
   return (
     Number(row.solved_calls || 0) +
       Number(row.open_calls || 0) +
@@ -573,7 +577,7 @@ function buildPerformancePlainLines(
   const lines = [title, ''];
   for (const row of rows) {
     lines.push(
-      `${formatRegionLabel(row.label)}: total ${formatNum(row.solved_calls + row.open_calls)}, solved ${formatNum(row.solved_calls)}, open ${formatNum(row.open_calls)}`
+      `${formatRegionLabel(row.label)}: total ${formatNum(row.solved_calls + row.open_calls + row.cancelled_calls)}, solved ${formatNum(row.solved_calls)}, cancelled ${formatNum(row.cancelled_calls)}, open ${formatNum(row.open_calls)}`
     );
   }
   return lines;
@@ -634,7 +638,7 @@ export function buildEmailBodySectionsPlainText(
           DEFAULT_CLIENT_MERGE_WITH_CRM
         );
         blocks.push(
-          `${formatRegionLabel(merged.region)} / ${clientAccountDisplayName(merged.account)}: calls ${formatNum(merged.total_solved + merged.open_calls)}, solved ${formatNum(merged.total_solved)}, open ${formatNum(merged.open_calls)}, % >7 days ${merged.pct_gt_7}`
+          `${formatRegionLabel(merged.region)} / ${clientAccountDisplayName(merged.account)}: calls ${formatNum(merged.total_solved + merged.open_calls + Number(merged.cancelled_calls || 0))}, solved ${formatNum(merged.total_solved)}, cancelled ${formatNum(Number(merged.cancelled_calls || 0))}, open ${formatNum(merged.open_calls)}, % >7 days ${merged.pct_gt_7}`
         );
       }
     }

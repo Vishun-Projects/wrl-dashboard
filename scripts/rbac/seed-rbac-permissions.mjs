@@ -23,6 +23,7 @@ const ALL_PERMISSION_SEED = [
   { name: 'page_serial_audit', description: 'Repeat serial complaints and repair audit' },
   { name: 'page_location_audit', description: 'Technician visit location verification' },
   { name: 'page_warranty_master', description: 'Active machines by customer, group, and warranty period' },
+  { name: 'page_athena_reconciliation', description: 'Failed Athena calls, CRM matching, and registration statistics' },
   { name: 'manage_users', description: 'Create and edit portal users' },
   { name: 'manage_roles', description: 'Define roles and page permissions' },
   { name: 'page_mis_email_routing', description: 'Zone/branch/client-wise automail recipients and routing controls' },

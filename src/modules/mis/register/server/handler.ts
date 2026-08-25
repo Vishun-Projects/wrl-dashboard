@@ -44,6 +44,8 @@ import { mergeAuditEnrichment } from '@/sql/register/audit-enrichment';
 import { buildPortalFilterSqlForCrm } from '@/sql/register/portal-filter-sql';
 import { REGISTER_MSTPRORG_JOIN_SQL, SQL_WCO_EXPR } from '@/sql/register/wco';
 import { logAccessDenied, logAction } from '@/lib/security/audit';
+import { filterCorpusCallsByViewDate } from '@/modules/mis/services/corpus';
+import { isIdentifierLookupSearch } from '@/modules/mis/services/search';
 
 
 
@@ -339,48 +341,77 @@ export async function handleRegisterGet(req: NextRequest) {
         });
       }
 
-      const payload = await queryRegisterFromPostgres({
-          page,
-          limit,
-          search,
-          officeId,
-          callType: callType ?? null,
-          startDate,
-          endDate,
-          dateFilterColumn: registerDateCol,
-          status,
-          account,
-          region,
-          pincode,
-          priority,
-          portalFilter,
-          state,
-          city,
-          branch,
-          franchisee,
-          technician,
-          fetchTotals: searchParams.get('fetchTotals') !== 'false',
-          fetchFilterOptions: searchParams.get('fetchFilterOptions') !== 'false',
-          assignedOffices,
-          visibleStatuses,
-          isHod,
-          repairCallKeys,
-          cursorLoggedAt: (() => {
-            const raw = searchParams.get('cursorLoggedAt');
-            return raw && raw.trim() ? raw.trim() : undefined;
-          })(),
-          cursorNcode: (() => {
-            const raw = searchParams.get('cursorNcode');
-            const parsed = raw ? parseInt(raw, 10) : NaN;
-            return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-          })(),
-          sortBy,
-          sortDir,
+      const postgresListParams = {
+        page,
+        limit,
+        search,
+        officeId,
+        callType: callType ?? null,
+        startDate,
+        endDate,
+        dateFilterColumn: registerDateCol,
+        status,
+        account,
+        region,
+        pincode,
+        priority,
+        portalFilter,
+        state,
+        city,
+        branch,
+        franchisee,
+        technician,
+        fetchTotals: searchParams.get('fetchTotals') !== 'false',
+        fetchFilterOptions: searchParams.get('fetchFilterOptions') !== 'false',
+        assignedOffices,
+        visibleStatuses,
+        isHod,
+        repairCallKeys,
+        cursorLoggedAt: (() => {
+          const raw = searchParams.get('cursorLoggedAt');
+          return raw && raw.trim() ? raw.trim() : undefined;
+        })(),
+        cursorNcode: (() => {
+          const raw = searchParams.get('cursorNcode');
+          const parsed = raw ? parseInt(raw, 10) : NaN;
+          return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+        })(),
+        sortBy,
+        sortDir,
+      };
+
+      let payload = await queryRegisterFromPostgres(postgresListParams);
+
+      const idLookup = !!(search && search.trim()) && isIdentifierLookupSearch(search);
+      if (idLookup && !(payload.data as unknown[] | undefined)?.length && (startDate || endDate)) {
+        const wide = await queryRegisterFromPostgres({
+          ...postgresListParams,
+          startDate: '',
+          endDate: '',
+          fetchTotals: false,
+          fetchFilterOptions: false,
+          page: 1,
         });
+        const matched = filterCorpusCallsByViewDate(
+          (wide.data || []) as Record<string, unknown>[],
+          {
+            viewStartDate: startDate,
+            viewEndDate: endDate,
+            dateFilterColumn: registerDateCol,
+          }
+        );
+        if (matched.length) {
+          payload = { ...payload, data: matched, total: matched.length };
+        }
+      }
+
+      if (!idLookup || (payload.data as unknown[] | undefined)?.length) {
         return NextResponse.json(payload);
+      }
+      // Identifier not in Postgres read-model — fall through to CRM lookup subquery.
     }
 
-    // Live CRM path (only when READ_REGISTER_FROM != postgres)
+    // Live CRM path (READ_REGISTER_FROM != postgres, or Postgres identifier lookup miss)
     const excludeTransferred = " AND ISNULL(tc.vtransfercallno, '') = '' AND ISNULL(tc.ncancelreason, 0) <> 2";
     const isLookupSearch = !!(search && search.trim());
     const registerDateCol = resolveRegisterDateSqlColumn(dateFilterColumnParam);
@@ -390,11 +421,16 @@ export async function handleRegisterGet(req: NextRequest) {
       registerDateCol === 'bm_approved_at' ? ` AND (ISNULL(tc.bapproval, '0') IN ('1', 'True', 'true'))` : '';
     const bmPredBare =
       registerDateCol === 'bm_approved_at' ? ` AND (ISNULL(bapproval, '0') IN ('1', 'True', 'true'))` : '';
+    const cancelPredAliased =
+      registerDateCol === 'cancelled_at' ? ` AND ISNULL(tc.ncancelreason, 0) NOT IN (0, 2)` : '';
+    const cancelPredBare =
+      registerDateCol === 'cancelled_at' ? ` AND ISNULL(ncancelreason, 0) NOT IN (0, 2)` : '';
 
     let baseCondition: string;
     if (isLookupSearch) {
       baseCondition = buildTrhcallsLookupCondition(search);
       baseCondition += bmPredAliased;
+      baseCondition += cancelPredAliased;
       if (startDate) {
         baseCondition += ` AND ${registerDateSql} >= '${startDate.replace(/'/g, "''")}'`;
       }
@@ -651,6 +687,7 @@ export async function handleRegisterGet(req: NextRequest) {
     if (lastSync) {
       subqueryCondition = `WHERE ISNULL(editedon, addedon) >= '${lastSync.replace(/'/g, "''")}'`;
       subqueryCondition += bmPredBare;
+      subqueryCondition += cancelPredBare;
       if (startDate) {
         subqueryCondition += ` AND ${registerDateBare} >= '${startDate.replace(/'/g, "''")}'`;
       }
@@ -658,6 +695,9 @@ export async function handleRegisterGet(req: NextRequest) {
       const dateParts: string[] = [];
       if (registerDateCol === 'bm_approved_at') {
         dateParts.push(`ISNULL(bapproval, '0') IN ('1', 'True', 'true')`);
+      }
+      if (registerDateCol === 'cancelled_at') {
+        dateParts.push(`ISNULL(ncancelreason, 0) NOT IN (0, 2)`);
       }
       if (startDate) dateParts.push(`${registerDateBare} >= '${startDate.replace(/'/g, "''")}'`);
       if (endDate) dateParts.push(`${registerDateBare} <= '${endDate.replace(/'/g, "''")} 23:59:59'`);

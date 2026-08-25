@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
+import * as Popover from '@radix-ui/react-popover';
 import { resolveAvatarDisplayUrl } from '@/lib/auth/avatar-url';
 import {
   Users,
@@ -12,6 +13,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   ShieldCheck,
   User,
   Map,
@@ -22,6 +24,7 @@ import {
   Gauge,
   Mail,
   History,
+  GitCompareArrows,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -47,6 +50,8 @@ export function Sidebar({ user }: SidebarProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [homePath, setHomePath] = useState('/report');
+  const [isAdminExpanded, setIsAdminExpanded] = useState(true);
+  const [isCollapsedAdminPopoverOpen, setIsCollapsedAdminPopoverOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Persistence in localStorage
@@ -62,6 +67,14 @@ export function Sidebar({ user }: SidebarProps) {
     setHomePath(defaultLandingPath(user.permissions ?? []));
   }, [user?.id, user?.permissions]);
 
+  // Auto-expand admin accordion if currently on an admin page
+  const isCurrentPathAdmin = pathname.startsWith('/admin');
+  useEffect(() => {
+    if (isCurrentPathAdmin) {
+      setIsAdminExpanded(true);
+    }
+  }, [isCurrentPathAdmin]);
+
   // Close profile dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -76,6 +89,7 @@ export function Sidebar({ user }: SidebarProps) {
   const toggleCollapse = () => {
     const nextState = !isCollapsed;
     setIsCollapsed(nextState);
+    setIsCollapsedAdminPopoverOpen(false);
     localStorage.setItem('wrl-sidebar-collapsed', String(nextState));
   };
 
@@ -90,7 +104,6 @@ export function Sidebar({ user }: SidebarProps) {
     } catch {
       /* client storage cleanup is best-effort */
     }
-    // Full page load clears dashboard state and stops in-flight report fetches.
     window.location.assign('/login');
   };
 
@@ -109,17 +122,21 @@ export function Sidebar({ user }: SidebarProps) {
               ? MapPin
               : path === '/report/warranty-master'
                 ? Shield
-                : path === '/admin/users'
+                : path === '/report/athena-reconciliation'
+                  ? GitCompareArrows
+                  : path === '/admin/users'
                   ? Users
-                  : path === '/admin/performance-insights'
-                    ? Gauge
-                  : path === '/admin/mis-email-settings'
-                    ? Mail
-                    : path === '/admin/security-audit'
-                      ? History
-                    : ShieldCheck;
+                  : path === '/admin/roles'
+                    ? ShieldCheck
+                    : path === '/admin/performance-insights'
+                      ? Gauge
+                    : path === '/admin/mis-email-settings'
+                      ? Mail
+                      : path === '/admin/security-audit'
+                        ? History
+                      : ShieldCheck;
 
-  const filteredNavigation = [
+  const allNavigationItems = [
     ...pageNav.map((page) => ({
       name: page.label,
       href: page.path,
@@ -131,20 +148,24 @@ export function Sidebar({ user }: SidebarProps) {
       : []),
   ];
 
+  // Separate into primary Reports and Admin sub-pages
+  const reportsNav = allNavigationItems.filter((item) => !item.href.startsWith('/admin'));
+  const adminNav = allNavigationItems.filter((item) => item.href.startsWith('/admin'));
+
   const sidebarContent = (
-    <div className="flex h-full flex-col border-r border-slate-200 bg-bg-canvas text-slate-600 select-none">
+    <div className="flex h-full flex-col border-r border-slate-200 bg-bg-canvas text-slate-600 select-none dark:border-slate-800 dark:bg-slate-900">
       {/* Header / Logo — h-14 aligns with PageShell header border */}
-      <div className="relative flex h-14 flex-shrink-0 items-center justify-between border-b border-slate-200 px-4">
+      <div className="relative flex h-14 flex-shrink-0 items-center justify-between border-b border-slate-200 px-4 dark:border-slate-800">
         <div
           className="flex items-center gap-3 cursor-pointer group overflow-hidden"
           onClick={() => router.push(homePath)}
         >
-          <div className="w-8 h-8 bg-bg-soft border border-slate-100 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105 active:scale-95 shadow-sm flex-shrink-0">
+          <div className="w-8 h-8 bg-bg-soft border border-slate-100 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105 active:scale-95 shadow-sm flex-shrink-0 dark:border-slate-800 dark:bg-slate-800">
             <Image src="/western-head-logo-2025.png" alt="W" width={20} height={20} className="object-contain" style={{ width: 'auto', height: 'auto' }} />
           </div>
           {!isCollapsed && (
             <div className="flex flex-col justify-center animate-in fade-in slide-in-from-left-2 duration-300">
-              <span className="text-xs text-slate-900 leading-none ui-label">WRL PORTAL</span>
+              <span className="text-xs text-slate-900 leading-none ui-label dark:text-white">WRL PORTAL</span>
             </div>
           )}
         </div>
@@ -152,30 +173,33 @@ export function Sidebar({ user }: SidebarProps) {
         {/* Collapsible toggle button on desktop */}
         <button
           onClick={toggleCollapse}
-          className="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-bg-canvas border border-slate-200 text-slate-400 hover:text-slate-800 items-center justify-center transition-colors z-50"
+          className="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-bg-canvas border border-slate-200 text-slate-400 hover:text-slate-800 items-center justify-center transition-colors z-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:text-white"
         >
           {isCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
         </button>
       </div>
 
       {/* Navigation links */}
-      <div className="flex-1 py-4 px-3 space-y-1.5 custom-scrollbar">
-        {filteredNavigation.map((item) => {
+      <div className="flex-1 py-4 px-3 space-y-1.5 overflow-y-auto overflow-x-hidden custom-scrollbar">
+        {/* 1. Main Report Links */}
+        {reportsNav.map((item) => {
           const isActive = item.exactPath
             ? pathname === item.href
             : pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <button
               key={item.name}
+              type="button"
+              title={isCollapsed ? item.name : undefined}
               onClick={() => {
                 router.push(item.href);
                 setIsMobileOpen(false);
               }}
-              className={`sidebar-nav-button group w-full flex items-center gap-3 py-3 rounded-xl text-xs transition-colors relative ${isActive ? 'is-active bg-slate-950 text-white' : 'text-slate-500 hover:bg-bg-soft hover:text-slate-900'} ${isCollapsed ? 'justify-center px-0' : 'px-3'} ui-label`}
+              className={`sidebar-nav-button group w-full flex items-center gap-3 py-2.5 rounded-xl text-xs transition-colors relative ${isActive ? 'is-active bg-slate-950 text-white dark:bg-blue-600' : 'text-slate-500 hover:bg-bg-soft hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white'} ${isCollapsed ? 'justify-center px-0' : 'px-3'} ui-label`}
             >
               <item.icon
                 size={18}
-                className={`sidebar-nav-icon transition-colors flex-shrink-0 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-700'}`}
+                className={`sidebar-nav-icon transition-colors flex-shrink-0 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200'}`}
               />
 
               {!isCollapsed && (
@@ -183,25 +207,166 @@ export function Sidebar({ user }: SidebarProps) {
                   {item.name}
                 </span>
               )}
-
-              {/* Tooltip for collapsed view */}
-              {isCollapsed && (
-                <div className="absolute left-full ml-3 px-2.5 py-1.5 text-[10px] bg-slate-900 text-white rounded-lg border border-slate-850 shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 pointer-events-none z-50 whitespace-nowrap ui-label">
-                  {item.name}
-                </div>
-              )}
             </button>
           );
         })}
+
+        {/* 2. Admin Section (Collapsed with Floating Popover / Expanded with Accordion) */}
+        {adminNav.length > 0 && (
+          <div className="pt-2">
+            <div className="my-1.5 border-t border-slate-100 dark:border-slate-800" />
+
+            {isCollapsed ? (
+              /* Collapsed Mode: Radix Floating Popover rendered outside sidebar container */
+              <Popover.Root
+                open={isCollapsedAdminPopoverOpen}
+                onOpenChange={setIsCollapsedAdminPopoverOpen}
+              >
+                <Popover.Trigger asChild>
+                  <button
+                    type="button"
+                    className={`sidebar-nav-button group w-full flex items-center justify-center py-2.5 rounded-xl text-xs transition-all relative ${
+                      isCurrentPathAdmin
+                        ? 'bg-blue-50/80 text-blue-900 font-semibold dark:bg-blue-950/40 dark:text-blue-200'
+                        : 'text-slate-500 hover:bg-bg-soft hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white'
+                    } px-0 ui-label`}
+                    title="Admin"
+                  >
+                    <ShieldCheck
+                      size={18}
+                      className={`sidebar-nav-icon transition-colors flex-shrink-0 ${
+                        isCurrentPathAdmin
+                          ? 'text-blue-600 dark:text-blue-400'
+                          : 'text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200'
+                      }`}
+                    />
+                  </button>
+                </Popover.Trigger>
+
+                <Popover.Portal>
+                  <Popover.Content
+                    side="right"
+                    align="start"
+                    sideOffset={14}
+                    className="z-[999] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-2xl p-2 min-w-[210px] animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 duration-150 space-y-1 backdrop-blur-md"
+                  >
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                      <span>Administration</span>
+                      <span className="text-[9px] bg-slate-100 dark:bg-slate-800 text-slate-500 rounded px-1 py-0.5">
+                        {adminNav.length}
+                      </span>
+                    </div>
+                    <div className="pt-1 space-y-0.5">
+                      {adminNav.map((subItem) => {
+                        const isSubActive =
+                          subItem.exactPath
+                            ? pathname === subItem.href
+                            : pathname === subItem.href || pathname.startsWith(`${subItem.href}/`);
+                        return (
+                          <button
+                            key={subItem.name}
+                            type="button"
+                            onClick={() => {
+                              router.push(subItem.href);
+                              setIsCollapsedAdminPopoverOpen(false);
+                            }}
+                            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs font-medium text-left transition-all ${
+                              isSubActive
+                                ? 'bg-slate-950 text-white font-semibold shadow-xs dark:bg-blue-600 dark:text-white'
+                                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
+                            }`}
+                          >
+                            <subItem.icon size={16} className={isSubActive ? 'text-white' : 'text-slate-400'} />
+                            <span>{subItem.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </Popover.Content>
+                </Popover.Portal>
+              </Popover.Root>
+            ) : (
+              /* Expanded Mode: Inline Collapsible Accordion */
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsAdminExpanded(!isAdminExpanded)}
+                  className={`sidebar-nav-button group w-full flex items-center justify-between py-2.5 rounded-xl text-xs transition-all relative ${
+                    isCurrentPathAdmin
+                      ? 'bg-blue-50/80 text-blue-900 font-semibold dark:bg-blue-950/40 dark:text-blue-200'
+                      : 'text-slate-500 hover:bg-bg-soft hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white'
+                  } px-3 ui-label`}
+                >
+                  <div className="flex items-center gap-3">
+                    <ShieldCheck
+                      size={18}
+                      className={`sidebar-nav-icon transition-colors flex-shrink-0 ${
+                        isCurrentPathAdmin
+                          ? 'text-blue-600 dark:text-blue-400'
+                          : 'text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200'
+                      }`}
+                    />
+                    <span className="animate-in fade-in slide-in-from-left-2 duration-300 whitespace-nowrap font-semibold">
+                      Admin
+                    </span>
+                  </div>
+
+                  <ChevronDown
+                    size={14}
+                    className={`text-slate-400 transition-transform duration-200 ${
+                      isAdminExpanded ? 'rotate-180 text-slate-700 dark:text-slate-200' : ''
+                    }`}
+                  />
+                </button>
+
+                {isAdminExpanded && (
+                  <div className="pl-3.5 pr-1 space-y-1 border-l-2 border-slate-200/80 dark:border-slate-800 ml-4.5 my-1.5 animate-in slide-in-from-top-1 duration-200">
+                    {adminNav.map((subItem) => {
+                      const isSubActive =
+                        subItem.exactPath
+                          ? pathname === subItem.href
+                          : pathname === subItem.href || pathname.startsWith(`${subItem.href}/`);
+                      return (
+                        <button
+                          key={subItem.name}
+                          type="button"
+                          onClick={() => {
+                            router.push(subItem.href);
+                            setIsMobileOpen(false);
+                          }}
+                          className={`group w-full flex items-center gap-2.5 py-2 px-2.5 rounded-lg text-xs font-medium transition-all ${
+                            isSubActive
+                              ? 'bg-slate-950 text-white font-semibold shadow-xs dark:bg-slate-800 dark:text-white'
+                              : 'text-slate-500 hover:bg-bg-soft hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-850 dark:hover:text-slate-200'
+                          }`}
+                        >
+                          <subItem.icon
+                            size={15}
+                            className={`flex-shrink-0 transition-colors ${
+                              isSubActive
+                                ? 'text-white'
+                                : 'text-slate-400 group-hover:text-slate-600 dark:text-slate-500'
+                            }`}
+                          />
+                          <span className="truncate">{subItem.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Footer / Profile section */}
-      <div className="p-3 border-t border-slate-100 flex-shrink-0 relative" ref={dropdownRef}>
+      <div className="p-3 border-t border-slate-100 dark:border-slate-800 flex-shrink-0 relative" ref={dropdownRef}>
         <div
           onClick={() => setIsProfileOpen(!isProfileOpen)}
-          className={`flex items-center gap-3 p-2 rounded-xl hover:bg-bg-soft cursor-pointer transition-all ${isCollapsed ? 'justify-center' : ''}`}
+          className={`flex items-center gap-3 p-2 rounded-xl hover:bg-bg-soft cursor-pointer transition-all dark:hover:bg-slate-800 ${isCollapsed ? 'justify-center' : ''}`}
         >
-          <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 overflow-hidden flex-shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 overflow-hidden flex-shrink-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
             {user?.avatar_url ? (
               <Image
                 src={resolveAvatarDisplayUrl(user.avatar_url) ?? user.avatar_url}
@@ -218,8 +383,8 @@ export function Sidebar({ user }: SidebarProps) {
 
           {!isCollapsed && (
             <div className="flex-1 min-w-0 animate-in fade-in slide-in-from-left-2 duration-300">
-              <p className="text-[11px] text-slate-900 truncate leading-tight ui-label">{user?.name || 'Loading...'}</p>
-              <p className="text-[9px] text-slate-450 truncate mt-0.5 ui-strong">
+              <p className="text-[11px] text-slate-900 truncate leading-tight ui-label dark:text-white">{user?.name || 'Loading...'}</p>
+              <p className="text-[9px] text-slate-450 truncate mt-0.5 ui-strong dark:text-slate-400">
                 {user?.role || 'User'}
               </p>
             </div>
@@ -228,15 +393,15 @@ export function Sidebar({ user }: SidebarProps) {
 
         {/* Profile Popover / Dropdown */}
         {isProfileOpen && (
-          <div className={`absolute bottom-full mb-2 bg-bg-canvas border border-slate-200 shadow-sm rounded-xl z-[150] p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-200 ${isCollapsed ? 'left-3 w-48' : 'right-3'}`}>
-            <div className="p-2 border-b border-slate-100 text-slate-500">
+          <div className={`absolute bottom-full mb-2 bg-bg-canvas border border-slate-200 shadow-sm rounded-xl z-[150] p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-200 dark:border-slate-800 dark:bg-slate-900 ${isCollapsed ? 'left-3 w-48' : 'right-3'}`}>
+            <div className="p-2 border-b border-slate-100 text-slate-500 dark:border-slate-800 dark:text-slate-400">
               <p className="text-[9px] text-slate-400 mb-0.5 ui-strong">Signed in as</p>
-              <p className="text-[11px] text-slate-700 truncate ui-label">{user?.email}</p>
+              <p className="text-[11px] text-slate-700 truncate ui-label dark:text-slate-200">{user?.email}</p>
             </div>
 
             <button
               onClick={() => { router.push('/profile'); setIsProfileOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] text-slate-600 hover:text-slate-950 hover:bg-bg-soft transition-all ui-label"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] text-slate-600 hover:text-slate-950 hover:bg-bg-soft transition-all ui-label dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
             >
               <User size={14} />
               My Profile
@@ -244,17 +409,17 @@ export function Sidebar({ user }: SidebarProps) {
 
             <button
               onClick={() => { router.push('/profile?tab=settings'); setIsProfileOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] text-slate-600 hover:text-slate-950 hover:bg-bg-soft transition-all ui-label"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] text-slate-600 hover:text-slate-950 hover:bg-bg-soft transition-all ui-label dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
             >
               <Settings size={14} />
               Settings
             </button>
 
-            <div className="h-px bg-slate-105 my-1 mx-1" />
+            <div className="h-px bg-slate-105 my-1 mx-1 dark:bg-slate-800" />
 
             <button
               onClick={handleSignOut}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] text-rose-650 hover:text-rose-700 hover:bg-rose-50/60 transition-all ui-label"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[11px] text-rose-650 hover:text-rose-700 hover:bg-rose-50/60 transition-all ui-label dark:hover:bg-rose-950/40"
             >
               <LogOut size={14} />
               Sign Out
@@ -268,16 +433,16 @@ export function Sidebar({ user }: SidebarProps) {
   return (
     <>
       {/* Mobile Top Bar */}
-      <div className="md:hidden w-full h-14 bg-bg-canvas text-slate-800 border-b border-slate-200 flex items-center justify-between px-4 z-[90] flex-shrink-0">
+      <div className="md:hidden w-full h-14 bg-bg-canvas text-slate-800 border-b border-slate-200 flex items-center justify-between px-4 z-[90] flex-shrink-0 dark:border-slate-800 dark:bg-slate-900 dark:text-white">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-bg-soft border border-slate-100 rounded-lg flex items-center justify-center shadow-sm">
+          <div className="w-8 h-8 bg-bg-soft border border-slate-100 rounded-lg flex items-center justify-center shadow-sm dark:border-slate-800 dark:bg-slate-800">
             <Image src="/western-head-logo-2025.png" alt="W" width={20} height={20} className="object-contain" style={{ width: 'auto', height: 'auto' }} />
           </div>
-          <span className="text-xs text-slate-900 ui-label">WRL PORTAL</span>
+          <span className="text-xs text-slate-900 ui-label dark:text-white">WRL PORTAL</span>
         </div>
         <button
           onClick={() => setIsMobileOpen(!isMobileOpen)}
-          className="p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-bg-soft transition-all"
+          className="p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-bg-soft transition-all dark:hover:bg-slate-800 dark:hover:text-white"
         >
           {isMobileOpen ? <X size={20} /> : <Menu size={20} />}
         </button>

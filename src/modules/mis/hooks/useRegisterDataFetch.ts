@@ -573,6 +573,13 @@ export function useRegisterDataFetch({
         applyMs: Number((performance.now() - applyStart).toFixed(1)),
       });
 
+      if (
+        ((viewFilters.search || '').trim() || (viewFilters.pincodeSearch || '').trim()) &&
+        derived.total === 0
+      ) {
+        return false;
+      }
+
       return true;
     },
     [

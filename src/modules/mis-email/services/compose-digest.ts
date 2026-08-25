@@ -12,7 +12,11 @@ import {
 import {
   buildMisEmailRegionalAndBranchRowsFromTrace,
   buildMisEmailRegionalPerformanceRows,
+  overlayBranchOpenFromExcelRows,
+  overlayRegionalOpenFromExcelRows,
+  reconcileMisEmailOpenCounts,
 } from '@/modules/mis-email/services/mail-basis';
+import type { BranchPerformanceRow } from '@/modules/mis-email/services/mail-types';
 import { buildDigestTraceableExportPayload } from '@/modules/mis-email/services/fetch-digest-trace';
 import {
   fetchDigestRegisterRows,
@@ -123,7 +127,12 @@ async function buildMisEmailBodyContext(
   dateRange: DigestDateRange,
   bodySectionIds: ReturnType<typeof resolveDigestBodySections>,
   clientAccountSummary?: Awaited<ReturnType<typeof fetchDigestClientAccountSummaryCached>>,
-  traceRows?: Awaited<ReturnType<typeof buildDigestTraceableExportPayload>>['traceRows']
+  options?: {
+    /** Full YTD call rows — body regional/branch counted entirely from these. */
+    fullTraceRows?: Awaited<ReturnType<typeof buildDigestTraceableExportPayload>>['traceRows'];
+    /** Open Excel rows — body open/aging taken from these so All open matches the attachment. */
+    openExcelTraceRows?: Awaited<ReturnType<typeof buildDigestTraceableExportPayload>>['traceRows'];
+  }
 ): Promise<MisEmailBodyContext> {
   const explicitAccounts = parseMisEmailKeyAccountsInBody(prefs.keyAccountsInBody);
   const explicitAccountsByZone = parseMisEmailKeyAccountsByZone(prefs.keyAccountsByZone);
@@ -157,22 +166,42 @@ async function buildMisEmailBodyContext(
 
   const needsRegionalBody = bodySectionIds.includes('regional_performance');
   const needsBranchBody = bodySectionIds.includes('branch_performance');
+  const fullTraceRows = options?.fullTraceRows;
+  const openExcelTraceRows = options?.openExcelTraceRows;
 
-  if (traceRows?.length && (needsRegionalBody || needsBranchBody)) {
-    const { regional, branch } = buildMisEmailRegionalAndBranchRowsFromTrace(traceRows);
+  if (fullTraceRows?.length && (needsRegionalBody || needsBranchBody)) {
+    const { regional, branch } = buildMisEmailRegionalAndBranchRowsFromTrace(fullTraceRows);
+    if (needsRegionalBody) context.regionalPerformanceRows = regional;
+    if (needsBranchBody) context.branchPerformanceRows = branch;
+  } else if (needsRegionalBody || needsBranchBody) {
+    const clientRows =
+      clientAccountSummary !== undefined
+        ? clientAccountSummary
+        : await fetchDigestClientAccountSummaryCached(dateRange);
     if (needsRegionalBody) {
+      let regional = buildMisEmailRegionalPerformanceRows(data, clientRows);
+      if (openExcelTraceRows?.length) {
+        // Same open set as the Excel attachment — as-on open matches the file.
+        regional = overlayRegionalOpenFromExcelRows(regional, openExcelTraceRows);
+      }
       context.regionalPerformanceRows = regional;
     }
-    if (needsBranchBody) {
-      context.branchPerformanceRows = branch;
-    }
-  } else {
-    if (needsRegionalBody) {
-      const clientRows =
-        clientAccountSummary !== undefined
-          ? clientAccountSummary
-          : await fetchDigestClientAccountSummaryCached(dateRange);
-      context.regionalPerformanceRows = buildMisEmailRegionalPerformanceRows(data, clientRows);
+    if (needsBranchBody && openExcelTraceRows?.length) {
+      const crmBranch: BranchPerformanceRow[] = data.branchSummary.map((row) => ({
+        branch: row.branch,
+        region: row.region,
+        total_calls: row.total_calls,
+        solved_calls: row.solved_calls,
+        cancelled_calls: row.cancelled_calls,
+        open_calls: row.open_calls,
+        age_2: row.age_2,
+        age_3: row.age_3,
+        age_7: row.age_7,
+        age_15: row.age_15,
+        part_pending: row.part_pending,
+        active_eng: row.active_eng,
+      }));
+      context.branchPerformanceRows = overlayBranchOpenFromExcelRows(crmBranch, openExcelTraceRows);
     }
   }
 
@@ -309,20 +338,15 @@ export async function buildMisEmailPayload(
   const includeDetailed = effectiveIncludes.includeDetailed;
   const includeTraceableExport = effectiveIncludes.includeTraceableExport;
   const includeOpenCallsExport = effectiveIncludes.includeOpenCallsExport;
-  // Regional/branch body use Cadbury-safe call-level trace (CRM Cadbury out, Mondelez in)
-  // so open totals match the open-calls Excel — including HTML preview.
-  const needsTraceForBody =
-    bodySectionIds.includes('branch_performance') ||
-    bodySectionIds.includes('regional_performance');
+  // Regional/branch HTML use summary rollups (fast). Call-level pull only for Excel attachments.
   const needsClientAccountData =
     needsClientAccounts ||
     includeTraceableExport ||
-    includeOpenCallsExport ||
-    needsTraceForBody;
+    includeOpenCallsExport;
 
   timer.step(
     'plan data fetch',
-    `sections=${bodySectionIds.join(',') || 'none'} · clientAccounts=${needsClientAccountData} · register=${includeDetailed} · trace=${includeTraceableExport || includeOpenCallsExport || needsTraceForBody}`
+    `sections=${bodySectionIds.join(',') || 'none'} · clientAccounts=${needsClientAccountData} · register=${includeDetailed} · traceExcel=${includeTraceableExport} · openExcel=${includeOpenCallsExport}`
   );
 
   const dataRaw = await timer.measure('fetch summary', () => fetchDigestSummaryDataCached(scope, dateRange), (result) =>
@@ -370,7 +394,7 @@ export async function buildMisEmailPayload(
     attachmentIncludes = { ...effectiveIncludes, includeDetailed: false };
   }
 
-  const tracePayload = includeTraceableExport || includeOpenCallsExport || needsTraceForBody
+  const tracePayload = includeTraceableExport || includeOpenCallsExport
     ? await timer.measure('build trace export', () =>
         buildDigestTraceableExportPayload(
           scope,
@@ -378,13 +402,25 @@ export async function buildMisEmailPayload(
           data,
           clientAccountSummary ?? [],
           {
-            skipRepairDone: !(includeTraceableExport || includeOpenCallsExport),
             includeTraceableExport,
             includeOpenCallsExport,
           }
         ), (payload) => `traceRows=${payload.traceRows.length}`
       )
     : undefined;
+
+  if (tracePayload) {
+    const reconciliation = reconcileMisEmailOpenCounts(tracePayload.grand, tracePayload.traceRows);
+    console.log(
+      `[mis-email/trace] open reconcile summary=${reconciliation.summaryOpen} trace=${reconciliation.traceOpenIncluded} delta=${reconciliation.delta} match=${reconciliation.matches}`
+    );
+    if (!reconciliation.matches) {
+      // Nightly open-cancel repair owns hot drift; mail must not block or spend minutes on CRM.
+      console.warn(
+        `[mis-email/trace] open call mismatch — summary ${reconciliation.summaryOpen} vs trace ${reconciliation.traceOpenIncluded} (delta ${reconciliation.delta}) — sending with Excel/trace basis`
+      );
+    }
+  }
 
   let emailAttachments: EmailAttachment[];
   let attachmentFilenames: string[];
@@ -419,7 +455,13 @@ export async function buildMisEmailPayload(
       dateRange,
       bodySectionIds,
       clientAccountSummary,
-      tracePayload?.traceRows
+      {
+        fullTraceRows: includeTraceableExport ? tracePayload?.traceRows : undefined,
+        openExcelTraceRows:
+          includeOpenCallsExport && !includeTraceableExport
+            ? tracePayload?.traceRows
+            : undefined,
+      }
     ), (ctx) => `accountRows=${ctx.accountRows?.length ?? 0}`
   );
 
@@ -691,15 +733,21 @@ export async function sendMisEmailComposeBatch(
   };
 
   const sentToLabel = targets.join(', ');
-  const { messageId } = await batchTimer.measure(`smtp send → ${sentToLabel}`, () =>
-    sendPreparedDigestEmail({
-      to: targets.length === 1 ? targets[0] : targets,
-      cc: ccTargets.length ? ccTargets : undefined,
-      subject: preview.subject,
-      html: buildDigestEmailHtml(emailBody),
-      text: buildDigestEmailPlainText(emailBody),
-      attachments: emailAttachments,
-    })
+  const headerTo = targets.length === 1 ? targets[0] : targets;
+  const headerCc = ccTargets.length ? ccTargets : undefined;
+  const html = buildDigestEmailHtml(emailBody);
+  const text = buildDigestEmailPlainText(emailBody);
+  const { messageId } = await batchTimer.measure(
+    `smtp send → to ${sentToLabel}${headerCc ? ` · cc ${ccTargets.join(', ')}` : ''}`,
+    () =>
+      sendPreparedDigestEmail({
+        to: headerTo,
+        cc: headerCc,
+        subject: preview.subject,
+        html,
+        text,
+        attachments: emailAttachments,
+      })
   );
 
   const results: MisEmailSendResult[] = [
@@ -707,14 +755,14 @@ export async function sendMisEmailComposeBatch(
       sentTo: sentToLabel,
       attachments: preview.attachments,
       scopeLabel,
-      messageId,
+      messageId: messageId ?? '',
       dateRange,
       timing: buildTiming,
     },
   ];
 
   const batchTiming = batchTimer.finish(
-    `recipients=${targets.length} to · ${ccTargets.length} cc`
+    `recipients=${targets.length} to · ${ccTargets.length} cc · messages=1`
   );
   results[0].timing = batchTiming;
 

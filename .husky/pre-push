@@ -1,5 +1,11 @@
 #!/usr/bin/env sh
 set -e
+# Remember remote tip for post-push change-log notify
+remote_tip="$(git rev-parse @{upstream} 2>/dev/null || true)"
+if [ -n "$remote_tip" ]; then
+  printf '%s' "$remote_tip" > "$(git rev-parse --git-dir)/changelog-notify-before"
+fi
+
 npm run check:feature-boundaries
 npm test
 # Turbopack may rewrite .next/dev/types while `next dev` runs; prefer stable generated types for tsc.

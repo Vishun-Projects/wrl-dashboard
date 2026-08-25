@@ -47,6 +47,11 @@ function primaryMailAddress(value: string | string[]): string {
 export async function sendPreparedDigestEmail(params: {
   to: string | string[];
   cc?: string | string[];
+  /**
+   * Actual SMTP RCPT TO. When set, headers still show full To/Cc but Netcore
+   * only sees this one mailbox (avoids bulk silent drops).
+   */
+  envelopeTo?: string;
   subject: string;
   html: string;
   text: string;
@@ -57,6 +62,7 @@ export async function sendPreparedDigestEmail(params: {
   if (process.env.MIS_EMAIL_DRY_RUN === 'true') {
     console.log('[mis-email] DRY RUN — would send to', toLabel, {
       cc: params.cc ? formatMailAddresses(params.cc) : undefined,
+      envelopeTo: params.envelopeTo,
       attachments: params.attachments.map((a) => `${a.filename} (${a.content.length} bytes)`),
     });
     return { messageId: 'dry-run' };
@@ -66,11 +72,12 @@ export async function sendPreparedDigestEmail(params: {
     const started = Date.now();
     const attachmentBytes = params.attachments.reduce((sum, file) => sum + file.content.length, 0);
     console.log(
-      `[mis-email/timing] smtp relay → ${toLabel}${params.cc ? ` · cc ${formatMailAddresses(params.cc)}` : ''} · attachments=${params.attachments.length} · payload ${formatBytes(attachmentBytes)} · html ${params.html.length} chars`
+      `[mis-email/timing] smtp relay → ${toLabel}${params.cc ? ` · cc ${formatMailAddresses(params.cc)}` : ''}${params.envelopeTo ? ` · envelope ${params.envelopeTo}` : ''} · attachments=${params.attachments.length} · payload ${formatBytes(attachmentBytes)} · html ${params.html.length} chars`
     );
     const result = await sendPreparedMisEmailViaVpsRelay({
       to: formatMailAddresses(params.to),
       cc: params.cc ? formatMailAddresses(params.cc) : undefined,
+      envelopeTo: params.envelopeTo?.trim() || undefined,
       subject: params.subject,
       html: params.html,
       text: params.text,
@@ -85,14 +92,18 @@ export async function sendPreparedDigestEmail(params: {
   }
 
   const started = Date.now();
-  console.log(`[mis-email/timing] smtp direct → ${toLabel} · attachments=${params.attachments.length}`);
   const smtp = resolveSmtpConfig();
   const transport = createMailTransport(smtp);
+  const envelopeTo = params.envelopeTo?.trim();
+  console.log(
+    `[mis-email/timing] smtp direct → ${toLabel}${envelopeTo ? ` · envelope ${envelopeTo}` : ''} · attachments=${params.attachments.length}`
+  );
 
   const info = await transport.sendMail({
     from: smtp.from,
     to: params.to,
     cc: params.cc,
+    ...(envelopeTo ? { envelope: { from: smtp.from, to: envelopeTo } } : {}),
     subject: params.subject,
     text: params.text,
     html: params.html,
@@ -112,6 +123,8 @@ export async function sendPreparedDigestEmail(params: {
 export async function sendDigestEmail(params: {
   to: string | string[];
   cc?: string | string[];
+  /** Actual SMTP RCPT TO when headers list many people — one mailbox per call. */
+  envelopeTo?: string;
   recipientName: string;
   recipientEmail?: string;
   dateRange: DigestDateRange;
@@ -125,6 +138,7 @@ export async function sendDigestEmail(params: {
   if (process.env.MIS_EMAIL_DRY_RUN === 'true') {
     console.log('[mis-email] DRY RUN — would send to', formatMailAddresses(params.to), {
       cc: params.cc ? formatMailAddresses(params.cc) : undefined,
+      envelopeTo: params.envelopeTo,
       attachments: params.attachments.map((a) => `${a.filename} (${a.content.length} bytes)`),
       scope: params.scopeLabel,
     });
@@ -159,10 +173,12 @@ export async function sendDigestEmail(params: {
     branding,
   };
 
+  const envelopeTo = params.envelopeTo?.trim();
   const info = await transport.sendMail({
     from: smtp.from,
     to: params.to,
     cc: params.cc,
+    ...(envelopeTo ? { envelope: { from: smtp.from, to: envelopeTo } } : {}),
     subject: formatDigestSubject(params.dateRange.endDate, params.subjectDate, subjectTemplate),
     text: buildDigestEmailPlainText(emailBody),
     html: buildDigestEmailHtml(emailBody),

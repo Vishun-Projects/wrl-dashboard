@@ -13,6 +13,8 @@ import { buildMisEmailBdMisRegionalPayload, misEmailBdMisSources, reconcileMisEm
 import type { AccountSummaryRow, SummaryDashboard } from '@/modules/mis';
 import { enrichRegisterRowsRepairDone } from '@/sql/register/repair-done-enrich';
 
+const OPEN_STATUS_BUCKETS = ['open_unallocated', 'assigned'] as const;
+
 export async function buildDigestTraceableExportPayload(
   scope: UserDigestScope,
   dateRange: DigestDateRange,
@@ -24,9 +26,11 @@ export async function buildDigestTraceableExportPayload(
     includeOpenCallsExport?: boolean;
   }
 ): Promise<BdMisTraceableExportPayload> {
-  // Mondelez + Coke client imports; CRM Cadbury replaced by Mondelez file in union formula.
   const sourceCodes = [...MIS_EMAIL_CLIENT_SOURCE_CODES];
   const sources = misEmailBdMisSources();
+  // Open-calls-only mail: pull open/assigned rows only — never the full YTD corpus.
+  const openOnly =
+    !!options?.includeOpenCallsExport && options?.includeTraceableExport !== true;
 
   const started = Date.now();
   const [crmCallRowsRaw, clientCallRows] = await Promise.all([
@@ -38,43 +42,33 @@ export async function buildDigestTraceableExportPayload(
       callTypes: [SUMMARY_DEFAULT_CALL_TYPE],
       assignedOffices: scope.assignedOffices,
       isHod: scope.isHod,
+      ...(openOnly ? { statusBuckets: [...OPEN_STATUS_BUCKETS] } : {}),
     }),
     queryClientCallTraceRowsFiltered({
       startDate: dateRange.startDate,
       endDate: dateRange.endDate,
       agingAsOf: dateRange.endDate,
       sourceCodes,
+      ...(openOnly ? { statusBuckets: [...OPEN_STATUS_BUCKETS] } : {}),
     }),
   ]);
 
   console.log(
-    `[mis-email/timing] trace export data ${dateRange.startDate}→${dateRange.endDate}: ${Date.now() - started}ms · crmCalls=${crmCallRowsRaw.length} clientCalls=${clientCallRows.length}`
+    `[mis-email/timing] trace export data ${dateRange.startDate}→${dateRange.endDate}: ${Date.now() - started}ms · crmCalls=${crmCallRowsRaw.length} clientCalls=${clientCallRows.length}${openOnly ? ' · openOnly' : ''}`
   );
 
   let crmCallRows: Array<BdMisCrmCallTraceDbRow & { repair_done?: string }> = crmCallRowsRaw;
   if (!options?.skipRepairDone) {
-    const includeTrace = options?.includeTraceableExport !== false;
+    const includeTrace = options?.includeTraceableExport === true;
     const includeOpen = !!options?.includeOpenCallsExport;
 
     if (includeTrace) {
       crmCallRows = await enrichRegisterRowsRepairDone(crmCallRowsRaw as any[]);
     } else if (includeOpen) {
-      const openRows = crmCallRowsRaw.filter(
-        (row) =>
-          row.status_bucket === 'open_unallocated' ||
-          row.status_bucket === 'assigned'
-      );
-      const enrichedOpen = await enrichRegisterRowsRepairDone(openRows as any[]) as Array<BdMisCrmCallTraceDbRow & { repair_done?: string }>;
-      const enrichedMap = new Map<string, string | undefined>(
-        enrichedOpen.map((row) => [`${row.ncode}:${row.nofficeid}`, row.repair_done])
-      );
-      crmCallRows = crmCallRowsRaw.map((row) => {
-        const key = `${row.ncode}:${row.nofficeid}`;
-        if (enrichedMap.has(key)) {
-          return { ...row, repair_done: enrichedMap.get(key) };
-        }
-        return row;
-      });
+      const enrichedOpen = (await enrichRegisterRowsRepairDone(crmCallRowsRaw as any[])) as Array<
+        BdMisCrmCallTraceDbRow & { repair_done?: string }
+      >;
+      crmCallRows = enrichedOpen;
     }
   }
 
@@ -98,7 +92,7 @@ export async function buildDigestTraceableExportPayload(
 
   const reconciliation = reconcileMisEmailOpenCounts(grand, traceRows);
   console.log(
-    `[mis-email/trace] open reconcile summary=${reconciliation.summaryOpen} trace=${reconciliation.traceOpenIncluded} delta=${reconciliation.delta} match=${reconciliation.matches}`
+    `[mis-email/trace] open reconcile summary=${reconciliation.summaryOpen} trace=${reconciliation.traceOpenIncluded} delta=${reconciliation.delta} match=${reconciliation.matches}${openOnly ? ' · openOnly' : ''}`
   );
   if (!reconciliation.matches) {
     console.warn(

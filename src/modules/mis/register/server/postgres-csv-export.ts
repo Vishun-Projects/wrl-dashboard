@@ -68,6 +68,8 @@ function hotPgRowToRegisterCsvLine(row: Record<string, unknown>): string {
     formatRegisterRepairDone(row.repair_done),
     statusText,
     isSolved ? formatRegisterExportDate(row.solved_at) : '',
+    isCancelled ? formatRegisterExportDate(row.cancelled_at) : '',
+    isCancelled ? row.cancel_reason || '' : '',
     bmDate,
     row.solve_remarks || '',
     row.contact_person,

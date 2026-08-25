@@ -1,12 +1,13 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Bell, Mail, Route, Settings2, Timer } from 'lucide-react';
+import { Bell, Mail, Route, Settings2, Timer, Package } from 'lucide-react';
 import { PageShell } from '@/components/layout/PageShell';
 import MisEmailOrgSettingsPageClient from '@/modules/mis-email/pages/MisEmailOrgSettingsPageClient';
 import MisEmailRoutingPageClient from '@/modules/mis-email/pages/MisEmailRoutingPageClient';
 import MajorRepairAlertsPageClient from '@/modules/mis-email/pages/MajorRepairAlertsPageClient';
 import MisEmailCronSchedulesPanel from '@/modules/mis-email/components/MisEmailCronSchedulesPanel';
+import SubcontractorStockSettingsPageClient from '@/modules/subcontractor-stock/pages/SubcontractorStockSettingsPageClient';
 import {
   MAIL_ALERTS_TABS,
   type MailAlertsTab,
@@ -18,6 +19,7 @@ const TAB_ICONS = {
   routing: Route,
   repair: Bell,
   cron: Timer,
+  subcontractor: Package,
 } as const;
 
 function TabBar({
@@ -75,6 +77,7 @@ export default function MailAlertsHubPageClient({
     routing: safeInitial === 'routing',
     repair: safeInitial === 'repair',
     cron: safeInitial === 'cron',
+    subcontractor: safeInitial === 'subcontractor',
   });
 
   const selectTab = (next: MailAlertsTab) => {
@@ -120,6 +123,11 @@ export default function MailAlertsHubPageClient({
       {showCron && visited.cron ? (
         <div className={panelClass('cron')}>
           <MisEmailCronSchedulesPanel embedded />
+        </div>
+      ) : null}
+      {visited.subcontractor ? (
+        <div className={panelClass('subcontractor')}>
+          <SubcontractorStockSettingsPageClient embedded />
         </div>
       ) : null}
     </PageShell>

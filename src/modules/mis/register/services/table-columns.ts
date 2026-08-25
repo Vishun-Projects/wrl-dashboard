@@ -18,6 +18,8 @@ export type RegisterTableColumnKey =
   | 'repair_done'
   | 'portal_action'
   | 'callsolveddate'
+  | 'cancelled_date'
+  | 'cancel_reason'
   | 'vsolveremarks'
   | 'vpersoncalling'
   | 'vinsttel1'
@@ -49,6 +51,8 @@ export const REGISTER_TABLE_COLUMNS: RegisterTableColumnDef[] = [
   { key: 'repair_done', label: 'Repair done' },
   { key: 'portal_action', label: 'Portal Action' },
   { key: 'callsolveddate', label: 'Solved' },
+  { key: 'cancelled_date', label: 'Cancelled' },
+  { key: 'cancel_reason', label: 'Cancel Reason' },
   { key: 'bm_approved_date', label: 'BM Approved Date' },
   { key: 'vsolveremarks', label: 'Remarks' },
   { key: 'vpersoncalling', label: 'Contact Person' },
@@ -79,6 +83,8 @@ export const REGISTER_EXPORT_COLUMNS: { key: string; header: string }[] = [
   { key: 'repair_done', header: 'Repair done' },
   { key: 'display_status', header: 'Status' },
   { key: 'solvedDate', header: 'Solved Date' },
+  { key: 'cancelled_date', header: 'Cancelled Date' },
+  { key: 'cancel_reason', header: 'Cancel Reason' },
   { key: 'bm_approved_date', header: 'BM Approved Date' },
   { key: 'remarks', header: 'Remarks' },
   { key: 'vpersoncalling', header: 'Contact Person' },

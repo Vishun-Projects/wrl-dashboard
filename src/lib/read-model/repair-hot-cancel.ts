@@ -11,7 +11,8 @@ export async function repairHotCancelFromNcrReason(
     SET status_bucket = 'cancelled',
         status_label = 'Cancelled',
         bsolved = false,
-        bfastclose = false
+        bfastclose = false,
+        cancelled_at = COALESCE(edited_at, source_editedon, logged_at)
     WHERE status_bucket IN ('assigned', 'open_unallocated')
       AND coalesce(ncancelreason, 0) NOT IN (0, 2)
     `

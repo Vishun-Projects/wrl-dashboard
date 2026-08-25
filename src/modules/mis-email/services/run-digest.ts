@@ -175,6 +175,19 @@ async function resolveSendContext(
   return { effectiveRecipient: fallbackRecipient, displayName: fallbackRecipient.name };
 }
 
+/** Deduped To∪Cc for per-person SMTP envelope delivery (headers stay full To/Cc). */
+export function digestEnvelopeRecipients(to: string[], cc: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of [...to, ...cc]) {
+    const email = raw.trim().toLowerCase();
+    if (!email || seen.has(email)) continue;
+    seen.add(email);
+    out.push(email);
+  }
+  return out;
+}
+
 async function sendForRecipient(
   recipient: DigestRecipient,
   options: {
@@ -213,9 +226,12 @@ async function sendForRecipient(
       dateRange,
     });
 
+  // One SMTP message: full To + Cc on headers and envelope (same as classic blast).
+  const headerTo = toList.length === 1 ? toList[0] : toList;
+  const headerCc = ccList.length ? ccList : undefined;
   const { messageId } = await sendDigestEmail({
-    to: toList.length === 1 ? toList[0] : toList,
-    cc: ccList.length ? ccList : undefined,
+    to: headerTo,
+    cc: headerCc,
     recipientName: displayName,
     recipientEmail: primaryTo,
     dateRange,
@@ -231,7 +247,7 @@ async function sendForRecipient(
     sentTo: toList.join(', '),
     attachments: preview.attachments,
     scopeLabel,
-    messageId,
+    messageId: messageId ?? '',
     dateRange,
   };
 }
@@ -321,10 +337,35 @@ export async function runMisEmailTestBatch(options: {
     }
   }
 
-  // One SMTP message with To + optional Cc (matches automated routing delivery).
+  // Lean SMTP package by default (summary + key-account only) — full Excel suite
+  // often exceeds relay limits (~37MB). MIS_EMAIL_TEST_FORCE_ALL=1 for the full set.
+  const forceAll = process.env.MIS_EMAIL_TEST_FORCE_ALL === '1';
+  recipient = {
+    ...recipient,
+    includeSummary: true,
+    includeDetailed: forceAll,
+    includeKeyAccount: true,
+    mis_email_preferences: {
+      ...recipient.mis_email_preferences,
+      includeSummary: true,
+      includeDetailed: forceAll,
+      includeKeyAccount: true,
+      includeTraceableExport: forceAll,
+      includeOpenCallsExport: forceAll,
+    },
+  };
+  console.log(
+    forceAll
+      ? '[mis-email] Test digest: FORCE_ALL attachments (summary+detailed+key+trace+open)'
+      : '[mis-email] Test digest: lean attachments (summary+key-account only; set MIS_EMAIL_TEST_FORCE_ALL=1 for full)'
+  );
+
   const result = await sendForRecipient(recipient, {
     to: testRecipients,
     cc: ccRecipients,
+    // Always compose as this lean/full profile — do not swap in To-address prefs
+    // (those often enable every heavy Excel and blow the SMTP size limit).
+    composeAs: recipient,
   });
   return [result];
 }

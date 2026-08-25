@@ -41,6 +41,8 @@ const REGISTER_SORT_SQL = {
   vcomplaint: 'h.complaint',
   Status: 'h.status_label',
   callsolveddate: 'h.solved_at',
+  cancelled_date: 'h.cancelled_at',
+  cancel_reason: 'h.cancel_reason',
   vsolveremarks: 'h.solve_remarks',
   vpersoncalling: 'h.contact_person',
   vinsttel1: 'h.phone',
@@ -106,7 +108,11 @@ export type RegisterPostgresParams = {
   sortDir?: 'asc' | 'desc';
 };
 
-export type RegisterHotDateField = 'logged_at' | 'solved_at' | 'arcp_bm_approved_at';
+export type RegisterHotDateField =
+  | 'logged_at'
+  | 'solved_at'
+  | 'arcp_bm_approved_at'
+  | 'cancelled_at';
 
 /** Hot BM date window uses ARCP pick column (arcp_bm_approved_at), not call-level h.bm_approved_at / bapproval. */
 export function resolveRegisterHotDateField(
@@ -114,6 +120,7 @@ export function resolveRegisterHotDateField(
 ): RegisterHotDateField {
   if (column === 'dsolvedatetime') return 'solved_at';
   if (column === 'bm_approved_at') return 'arcp_bm_approved_at';
+  if (column === 'cancelled_at') return 'cancelled_at';
   return 'logged_at';
 }
 
@@ -127,6 +134,7 @@ export function registerHotOrderBy(column?: string | null): string {
   const field = resolveRegisterHotDateField(column);
   if (field === 'solved_at') return 'h.solved_at DESC NULLS LAST, h.ncode DESC';
   if (field === 'arcp_bm_approved_at') return 'h.arcp_bm_approved_at DESC NULLS LAST, h.ncode DESC';
+  if (field === 'cancelled_at') return 'h.cancelled_at DESC NULLS LAST, h.ncode DESC';
   return REGISTER_HOT_ORDER_BY;
 }
 
@@ -170,7 +178,9 @@ export function registerKeysetCursorFromRow(
       ? row.solved_at ?? row.callsolveddate
       : field === 'arcp_bm_approved_at'
         ? row.bm_approved_at ?? row.bm_approved_date
-        : row.logged_at ?? row.callsdtrndate;
+        : field === 'cancelled_at'
+          ? row.cancelled_at ?? row.cancelled_date
+          : row.logged_at ?? row.callsdtrndate;
   const ncode = Number(row.ncode ?? row.id);
   if (dateVal == null || !Number.isFinite(ncode) || ncode <= 0) return null;
   const cursorLoggedAt =
@@ -253,6 +263,8 @@ export function hotRowToRegisterRow(row: Record<string, unknown>): Record<string
     callsolved: row.bsolved,
     callsdtrndate: row.logged_at,
     callsolveddate: row.solved_at,
+    cancelled_date: row.cancelled_at,
+    cancel_reason: row.cancel_reason,
     bm_approved_at: row.bm_approved_at,
     bapproval: row.bapproval,
     vsolveremarks: row.solve_remarks,
@@ -266,11 +278,25 @@ export function hotRowToRegisterRow(row: Record<string, unknown>): Record<string
   });
 }
 
+/** Call Register date chips are IST calendar days (matches Western CRM). */
+const REGISTER_REPORT_TZ = '+05:30';
+
+function registerDateRangeBound(date: string, end = false): string {
+  return end
+    ? `${date}T23:59:59.999${REGISTER_REPORT_TZ}`
+    : `${date}T00:00:00${REGISTER_REPORT_TZ}`;
+}
+
 export function buildWhere(params: RegisterPostgresParams): { sql: string; values: unknown[] } {
   const clauses: string[] = ['1=1'];
   const values: unknown[] = [];
   let idx = 1;
   const dateSql = registerHotDateSql(params.dateFilterColumn);
+
+  if (params.dateFilterColumn === 'cancelled_at') {
+    clauses.push('COALESCE(h.ncancelreason, 0) NOT IN (0, 2)');
+    clauses.push('h.cancelled_at IS NOT NULL');
+  }
 
   if (!params.isHod && params.assignedOffices.length > 0) {
     clauses.push(`h.nofficeid = ANY($${idx}::bigint[])`);
@@ -287,12 +313,12 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
 
   if (params.startDate) {
     clauses.push(`${dateSql} >= $${idx}::timestamptz`);
-    values.push(`${params.startDate}T00:00:00`);
+    values.push(registerDateRangeBound(params.startDate));
     idx++;
   }
   if (params.endDate) {
     clauses.push(`${dateSql} <= $${idx}::timestamptz`);
-    values.push(`${params.endDate}T23:59:59`);
+    values.push(registerDateRangeBound(params.endDate, true));
     idx++;
   }
 

@@ -4,6 +4,8 @@ export const VPS_CRON_JOB_IDS = [
   'mis_email_watchdog',
   'mis_client_purge',
   'vacuum_full_mis_rows',
+  'sync_worker_health',
+  'nightly_ytd_calls_export',
 ] as const;
 
 export type VpsCronJobId = (typeof VPS_CRON_JOB_IDS)[number];
@@ -45,6 +47,18 @@ export const VPS_CRON_CATALOG: readonly VpsCronJobDef[] = [
     label: 'Database VACUUM FULL (MIS Rows)',
     schedule: '00:00 IST Sunday (Saturday night)',
     script: 'vacuum-full-mis-rows.sh',
+  },
+  {
+    id: 'sync_worker_health',
+    label: 'Sync worker health watchdog',
+    schedule: 'Every 15 min IST (crash-loop / stale watermark → mail)',
+    script: 'sync-worker-health-watchdog.sh',
+  },
+  {
+    id: 'nightly_ytd_calls_export',
+    label: 'Nightly YTD calls export',
+    schedule: '00:00 IST daily (Jan 1 → yesterday Excel → ops mail)',
+    script: 'nightly-ytd-calls-export.sh',
   },
 ] as const;
 

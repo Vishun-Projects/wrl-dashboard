@@ -89,24 +89,37 @@ Create `profiles` storage bucket in Supabase Studio if avatar uploads fail.
 
 Keeps Postgres read-model in sync with Western CRM while the app is not open.
 
+**Layout (git-SHA releases):** `/opt/fast-close-app/current` → `releases/<sha>`; env/logs/node_modules live in `shared/`. Last 5 SHAs listed in `release-history`.
+
 **One-time setup from Git Bash** (uses `.env.vps-setup`):
 
 ```bash
 npm run sync-worker:setup:vps
 ```
 
-Then on the VPS, edit `/opt/fast-close-app/.env.sync-worker`:
+Then on the VPS, edit `/opt/fast-close-app/shared/.env.sync-worker`:
 
 - `DATABASE_URL` — direct Postgres (`127.0.0.1:5432` on VPS)
 - `SYNC_WORKER_ENABLED=true`
 - `SYNC_INTERVAL_MS=180000` (3 minutes, default)
 
-**Manage from your PC:**
+**Ship / roll back from your PC:**
 
 ```bash
-npm run sync-worker:status:vps   # systemd status + last log lines
-npm run sync-worker:logs:vps     # tail -f logs
+npm run sync-worker:deploy:vps     # commit first; uploads releases/<sha>, flips current
+npm run mis-email:deploy:vps       # same release pipeline (mail + sync tree)
+npm run sync-worker:rollback:vps   # undo last deploy (current → previous)
+SHA=abc123def456 npm run sync-worker:rollback:vps   # jump to a kept release
+npm run sync-worker:status:vps     # systemd + current/previous + logs
+npm run sync-worker:logs:vps       # tail -f shared/logs
 ```
+
+| Surface | How you ship |
+|---------|----------------|
+| Web UI | `git push` → Vercel Instant Rollback |
+| Mail + sync on VPS | deploy above (VPS **is** prod for mail) |
+
+Schema/DDL: backup first; code rollback does **not** undo migrations. Never edit files under `releases/` or `current` by hand.
 
 On VPS: `systemctl restart fast-close-sync-worker`
 

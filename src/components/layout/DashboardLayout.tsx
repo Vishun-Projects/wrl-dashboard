@@ -18,7 +18,7 @@ import {
 } from '@/modules/performance';
 import { MotionProvider } from '@/components/motion';
 import { ThemeProvider } from '@/components/theme/ThemeProvider';
-import { MisEmailSendTracker } from '@/modules/mis-email';
+import { MisEmailSendTracker } from '@/modules/mis-email/components/MisEmailSendTracker';
 import { SessionExpiredDialog } from '@/components/auth/SessionExpiredDialog';
 
 type DashboardUser = {

@@ -211,7 +211,7 @@ function classifyCrmContribution(
   const zone = formatDisplayRegion(row.region);
   const bucket = row.status_bucket;
 
-  if (bucket === 'cancelled') {
+  if (bucket === 'cancelled' || isRealCancelReasonCode(row.ncancelreason)) {
     return {
       contribution_step: 'CRM — cancelled (excluded from total)',
       included_in_final_count: false,
@@ -412,10 +412,9 @@ export function buildBdMisTraceRows(params: {
   });
 }
 
-/** Row detail export excludes cancelled calls. */
+/** Row detail export: non-practice rows (includes cancelled as its own bucket). */
 export function filterTraceRowsForExport(traceRows: BdMisTraceRow[]): BdMisTraceRow[] {
   return traceRows.filter((row) => {
-    if (row.counts_toward === 'cancelled') return false;
     if (isExcludedMisBranchTraceRow(row)) return false;
     return true;
   });
@@ -429,24 +428,25 @@ function isExcludedMisBranchTraceRow(row: BdMisTraceRow): boolean {
 }
 
 /**
- * MIS email / summary-aligned export: included rows only, minus CRM Cadbury from CRM Files.
- * All other clients keep open, closed, solved, and tech-solved detail.
+ * MIS email / summary-aligned export: union basis minus CRM Cadbury from CRM Files.
+ * Includes cancelled (separate bucket) plus included open/solved/tech-solved.
  */
 export function filterTraceRowsForSummaryExport(traceRows: BdMisTraceRow[]): BdMisTraceRow[] {
   return traceRows.filter((row) => {
-    if (row.counts_toward === 'cancelled') return false;
     if (isCrmCadburyCrmFileTraceRow(row)) return false;
     if (isExcludedMisBranchTraceRow(row)) return false;
+    if (row.counts_toward === 'cancelled') return true;
     if (!row.included_in_final_count) return false;
     return true;
   });
 }
 
-/** Open-calls export: included rows only (assigned + open_unallocated). */
+/** Open-calls export: included open rows + cancelled (same union strip rules). */
 export function filterTraceRowsForOpenExport(traceRows: BdMisTraceRow[]): BdMisTraceRow[] {
   return traceRows.filter((row) => {
     if (isCrmCadburyCrmFileTraceRow(row)) return false;
     if (isExcludedMisBranchTraceRow(row)) return false;
+    if (row.counts_toward === 'cancelled') return true;
     return row.included_in_final_count && row.counts_toward === 'open';
   });
 }

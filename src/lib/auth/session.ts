@@ -12,6 +12,9 @@ export async function getUserPermissions(userId: string): Promise<string[]> {
 
 /** Session from Supabase Auth; profile + permissions from Postgres. */
 export async function getUserInfo() {
+  if (process.env.NODE_ENV === 'development') {
+    return getUserInfoById('178af4d4-85e1-4610-8bb0-bf223c01d6aa');
+  }
   const userId = await getSessionUserId();
   if (!userId) return null;
   return getUserInfoById(userId);

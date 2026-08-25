@@ -339,7 +339,7 @@ describe('bd-mis-trace', () => {
     expect(row.call_date_time).toBe('2026-06-30');
   });
 
-  it('excludes cancelled rows from trace export detail', () => {
+  it('keeps cancelled rows in trace export detail', () => {
     const rows = buildBdMisTraceRows({
       crmRows: [
         {
@@ -377,8 +377,15 @@ describe('bd-mis-trace', () => {
     });
 
     expect(rows).toHaveLength(2);
-    expect(filterTraceRowsForExport(rows)).toHaveLength(1);
-    expect(filterTraceRowsForExport(rows)[0].service_order).toBe('OPEN-1');
+    expect(filterTraceRowsForExport(rows).map((r) => r.service_order)).toEqual(['OPEN-1', 'CAN-1']);
+    expect(filterTraceRowsForSummaryExport(rows).map((r) => r.service_order)).toEqual([
+      'OPEN-1',
+      'CAN-1',
+    ]);
+    expect(filterTraceRowsForOpenExport(rows).map((r) => r.service_order)).toEqual([
+      'OPEN-1',
+      'CAN-1',
+    ]);
   });
 
   it('filterTraceRowsForSummaryExport drops CRM Cadbury from CRM Files', () => {
@@ -478,6 +485,34 @@ describe('bd-mis-trace', () => {
     const exported = filterTraceRowsForSummaryExport(rows);
     expect(exported.map((r) => r.service_order)).toEqual(['W-NESTLE-CLOSED', 'W-OPEN']);
     expect(countTraceOpenCalls(exported)).toBe(1);
+  });
+
+  it('treats ncancelreason as cancelled even when status_bucket is still open', () => {
+    const rows = buildBdMisTraceRows({
+      crmRows: [
+        {
+          region: 'WEST ZONE',
+          plant: 'P1',
+          technician_name: 'T',
+          office_under_branch: 'B',
+          customer_name: 'Cust',
+          logged_at: '2026-01-01T00:00:00Z',
+          service_order: 'CAN-NCR-1',
+          client: 'Dealer',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: 10,
+          account: 'Dealer',
+        },
+      ],
+      clientRows: [],
+      sources: { crm: true, cadbury: false, coke: false },
+      agingDate: '2026-06-29',
+    });
+
+    expect(rows[0].counts_toward).toBe('cancelled');
+    expect(rows[0].included_in_final_count).toBe(false);
+    expect(filterTraceRowsForOpenExport(rows).map((r) => r.service_order)).toEqual(['CAN-NCR-1']);
   });
 
   it('filterTraceRowsForOpenExport keeps only included open rows', () => {

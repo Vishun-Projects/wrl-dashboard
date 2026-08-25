@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install morning MIS watchdog cron (09:50 IST) + fix Postfix bounce loop.
-# Asks for SSH passphrase. Keeps existing prod digest line + any test cron lines.
+# Keeps existing prod digest line + any test cron lines.
 #
 #   npm run mis-email:install-watchdog:vps
 set -euo pipefail
@@ -9,7 +9,10 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${ROOT}/.env.vps-setup"
 SSH_KEY="${SSH_KEY:-${HOME}/.ssh/id_ed25519}"
 INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-/opt/fast-close-app}"
+INSTALL_ROOT="${INSTALL_ROOT%/current}"
 ALERT_TO="${MIS_EMAIL_WATCHDOG_TO:-vishnu.vishwakarma@westernequipments.com}"
+# shellcheck disable=SC1091
+source "${ROOT}/scripts/vps-hosting/vps-detect-base.inc.sh"
 
 SSH_OPTS=(
   -o ServerAliveInterval=30
@@ -33,43 +36,53 @@ fi
 echo "==> Enter SSH key passphrase for ${SSH_KEY}"
 ssh-add "$SSH_KEY"
 
-detected_root=$(ssh "${SSH_OPTS[@]}" "$VPS_HOST" \
-  'find /opt -name "mis-email-digest.sh" -path "*/scripts/vps-hosting/mis-email-digest.sh" 2>/dev/null | head -n 1 | sed "s|/scripts/vps-hosting/mis-email-digest.sh||"' || true)
+detected_root=$(ssh "${SSH_OPTS[@]}" "$VPS_HOST" bash -s <<DETECT || true
+$(vps_ssh_detect_base_script "$INSTALL_ROOT")
+DETECT
+)
 if [[ -n "$detected_root" ]]; then
   INSTALL_ROOT="$detected_root"
 fi
-echo "    host=${VPS_HOST}  root=${INSTALL_ROOT}"
+echo "    host=${VPS_HOST}  base=${INSTALL_ROOT}"
 
 echo "==> Syncing watchdog + postfix bounce fix…"
 scp "${SSH_OPTS[@]}" \
   "${ROOT}/scripts/vps-hosting/mis-email-morning-watchdog.sh" \
   "${ROOT}/scripts/vps-hosting/fix-postfix-bounce-loop.sh" \
-  "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/"
+  "${VPS_HOST}:/tmp/"
 
 ssh "${SSH_OPTS[@]}" "$VPS_HOST" bash -s <<REMOTE
 set -euo pipefail
-root='${INSTALL_ROOT}'
+base='${INSTALL_ROOT}'
 alert_to='${ALERT_TO}'
-chmod +x "\$root/scripts/vps-hosting/mis-email-morning-watchdog.sh" \
-         "\$root/scripts/vps-hosting/fix-postfix-bounce-loop.sh"
+if [[ -e "\${base}/current/scripts/vps-hosting/mis-email-digest.sh" ]]; then
+  code="\${base}/current"
+else
+  code="\$base"
+fi
+log_dir="\${base}/shared/logs"
+[[ -d "\$log_dir" ]] || log_dir="\${code}/logs"
+mkdir -p "\$code/scripts/vps-hosting" "\$log_dir"
+mv /tmp/mis-email-morning-watchdog.sh /tmp/fix-postfix-bounce-loop.sh "\$code/scripts/vps-hosting/"
+chmod +x "\$code/scripts/vps-hosting/mis-email-morning-watchdog.sh" \
+         "\$code/scripts/vps-hosting/fix-postfix-bounce-loop.sh"
 
 echo "==> Fixing Postfix bounce loop (connection refused to public :25)"
-MAIL_DOMAIN=wrl-fsm.cloud bash "\$root/scripts/vps-hosting/fix-postfix-bounce-loop.sh"
+MAIL_DOMAIN=wrl-fsm.cloud bash "\$code/scripts/vps-hosting/fix-postfix-bounce-loop.sh" || true
 
-echo "==> Installing watchdog cron 09:50 IST → \$alert_to"
+echo "==> Installing watchdog cron 09:50 IST → \$alert_to (code=\$code)"
 prod=\$(crontab -l 2>/dev/null | grep 'mis-email-digest.sh' | grep -v test | grep -v watchdog | head -1 || true)
 test=\$(crontab -l 2>/dev/null | grep 'mis-email-test-digest.sh' | head -1 || true)
 if [[ -z "\$prod" ]]; then
-  prod="*/15 * * * 1-6 \${root}/scripts/vps-hosting/mis-email-digest.sh >> \${root}/logs/mis-email-cron.log 2>&1"
+  prod="*/15 * * * 1-6 \${code}/scripts/vps-hosting/mis-email-digest.sh >> \${log_dir}/mis-email-cron.log 2>&1"
 else
-  # Ensure existing prod line skips Sunday even if older crontab said * * *
   prod=\$(echo "\$prod" | sed -E 's/^([*0-9\/]+) ([*0-9]+) \* \* \*/\1 \2 * * 1-6/')
 fi
 {
   echo "CRON_TZ=Asia/Kolkata"
   echo "\$prod"
   [[ -n "\$test" ]] && echo "\$test"
-  echo "50 9 * * 1-6 MIS_EMAIL_WATCHDOG_TO=\${alert_to} \${root}/scripts/vps-hosting/mis-email-morning-watchdog.sh >> \${root}/logs/mis-email-watchdog.log 2>&1"
+  echo "50 9 * * 1-6 MIS_EMAIL_WATCHDOG_TO=\${alert_to} \${code}/scripts/vps-hosting/mis-email-morning-watchdog.sh >> \${log_dir}/mis-email-watchdog.log 2>&1"
 } | crontab -
 
 echo "==> Crontab now:"

@@ -252,6 +252,7 @@ describe('runMisEmailDigest rule-driven routing', () => {
 
     const { runMisEmailDigest } = await import('@/modules/mis-email/services/run-digest');
     const result = await runMisEmailDigest();
+    // enabledRule: 1 blast (to+cc); scopedRule: 1 blast (to only)
     expect(sendDigestEmail).toHaveBeenCalledTimes(2);
     expect(result.sent).toHaveLength(2);
     expect(result.sent.map((s) => s.sentTo).sort()).toEqual(
@@ -308,6 +309,7 @@ describe('runMisEmailDigest rule-driven routing', () => {
 
     const { runMisEmailDigest } = await import('@/modules/mis-email/services/run-digest');
     const result = await runMisEmailDigest();
+    // personal (1) + routing (1 single blast) = 2
     expect(sendDigestEmail).toHaveBeenCalledTimes(2);
     expect(sendDigestEmail).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -315,6 +317,7 @@ describe('runMisEmailDigest rule-driven routing', () => {
         cc: ['cc@example.com'],
       })
     );
+    expect(sendDigestEmail.mock.calls.some((call) => call[0]?.envelopeTo)).toBe(false);
     expect(result.sent).toHaveLength(2);
     expect(result.sent.some((s) => s.sentTo === 'to@example.com')).toBe(true);
     expect(result.sent.some((s) => s.sentTo === 'u@example.com')).toBe(true);

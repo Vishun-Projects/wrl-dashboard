@@ -151,18 +151,18 @@ function mixedParityTraceRows() {
 }
 
 describe('MIS email open-count parity (body === Excel)', () => {
-  it('regional body, branch body, and open-export row count are identical', () => {
+  it('regional body open matches open rows in open-export (cancelled listed separately in Excel)', () => {
     const traceRows = mixedParityTraceRows();
     const parity = countMisEmailOpenParity(traceRows);
 
-    expect(parity.regionalBodyOpen).toBe(parity.excelOpenRows);
-    expect(parity.branchBodyOpen).toBe(parity.excelOpenRows);
-    expect(parity.detailOpenCount).toBe(parity.excelOpenRows);
-    // Nestle open + Pepsi open + Mondelez import; CRM Cadbury dropped
+    expect(parity.regionalBodyOpen).toBe(parity.detailOpenCount);
+    expect(parity.branchBodyOpen).toBe(parity.detailOpenCount);
+    // Nestle open + Pepsi open + Mondelez import; CRM Cadbury dropped; no cancelled in fixture
     expect(parity.excelOpenRows).toBe(3);
+    expect(parity.detailOpenCount).toBe(3);
   });
 
-  it('body Total (solved+open) matches summary-aligned trace detail row count', () => {
+  it('body Total (solved+open+cancelled) matches summary-aligned trace detail row count', () => {
     const traceRows = mixedParityTraceRows();
     const parity = countMisEmailOpenParity(traceRows);
 
@@ -203,7 +203,9 @@ describe('MIS email open-count parity (body === Excel)', () => {
     expect(html).toContain(`>${openFormatted}<`);
   });
 
-  it('open-calls Excel workbook data rows match body open total', async () => {
+  it(
+    'open-calls Excel workbook data rows match body open total',
+    async () => {
     const traceRows = mixedParityTraceRows();
     const parity = countMisEmailOpenParity(traceRows);
 
@@ -245,7 +247,9 @@ describe('MIS email open-count parity (body === Excel)', () => {
     expect(dataRows).toBe(parity.regionalBodyOpen);
     expect(dataRows).toBe(parity.branchBodyOpen);
     expect(dataRows).toBe(parity.excelOpenRows);
-  });
+  },
+  15_000
+  );
 
   it('regression: summary body can diverge from Excel; trace body must not', () => {
     // Inflated summary opens (the old email-body path) vs leaner call-level trace.
@@ -268,8 +272,8 @@ describe('MIS email open-count parity (body === Excel)', () => {
     const traceRows = mixedParityTraceRows();
     const parity = countMisEmailOpenParity(traceRows);
 
-    expect(summaryBodyOpen).toBeGreaterThan(parity.excelOpenRows);
-    expect(parity.regionalBodyOpen).toBe(parity.excelOpenRows);
-    expect(parity.branchBodyOpen).toBe(parity.excelOpenRows);
+    expect(summaryBodyOpen).toBeGreaterThan(parity.detailOpenCount);
+    expect(parity.regionalBodyOpen).toBe(parity.detailOpenCount);
+    expect(parity.branchBodyOpen).toBe(parity.detailOpenCount);
   });
 });

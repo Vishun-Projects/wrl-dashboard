@@ -433,7 +433,12 @@ export async function queryBdMisCrmCallTraceRows(
 
   const officeFilter = buildOfficeFilter(params, 'h', 3);
   const callTypeFilter = buildCallTypeFilter(params, 'h', officeFilter.nextIdx);
-  const values = [periodStart, periodEnd, ...officeFilter.values, ...callTypeFilter.values];
+  const values: unknown[] = [periodStart, periodEnd, ...officeFilter.values, ...callTypeFilter.values];
+  let statusClause = '';
+  if (params.statusBuckets?.length) {
+    values.push(params.statusBuckets);
+    statusClause = `AND h.status_bucket::text = ANY($${values.length}::text[])`;
+  }
 
   const rows = await prisma.$queryRawUnsafe<BdMisCrmCallTraceDbRow[]>(
     `
@@ -473,6 +478,7 @@ export async function queryBdMisCrmCallTraceRows(
       AND h.logged_at <= $2::timestamptz
       ${officeFilter.clause}
       ${callTypeFilter.clause}
+      ${statusClause}
       ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
     ORDER BY ${BD_MIS_REGION_SQL}, h.logged_at, h.vtrnno
     `,

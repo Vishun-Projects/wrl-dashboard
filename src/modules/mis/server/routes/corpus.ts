@@ -469,7 +469,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const cacheKey = `corpus_${startDate || 'default'}_${endDate || 'default'}_${dateFilterColumn}_${callType}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
+    const cacheKey = `corpus_v2_${startDate || 'default'}_${endDate || 'default'}_${dateFilterColumn}_${callType}_${security.isHod ? 'hod' : security.assignedOffices.join('-')}`;
     staleCacheKey = cacheKey;
 
     const cached = await resolveCachedCorpus(cacheKey, bypassCache);

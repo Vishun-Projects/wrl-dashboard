@@ -99,8 +99,8 @@ describe('register composite keyset', () => {
     expect(sql).toContain('h.solved_at >=');
     expect(sql).toContain('h.solved_at <=');
     expect(sql).not.toContain('h.logged_at >=');
-    expect(values).toContain('2026-07-01T00:00:00');
-    expect(values).toContain('2026-07-09T23:59:59');
+    expect(values).toContain('2026-07-01T00:00:00+05:30');
+    expect(values).toContain('2026-07-09T23:59:59.999+05:30');
   });
 
   it('uses solved_at in keyset predicate when solved-date mode', () => {
@@ -161,14 +161,61 @@ describe('register composite keyset', () => {
     expect(sql).toContain('h.arcp_bm_approved_at >=');
     expect(sql).toContain('h.arcp_bm_approved_at <=');
     expect(sql).not.toContain('h.logged_at >=');
-    expect(values).toContain('2026-07-01T00:00:00');
-    expect(values).toContain('2026-07-31T23:59:59');
+    expect(values).toContain('2026-07-01T00:00:00+05:30');
+    expect(values).toContain('2026-07-31T23:59:59.999+05:30');
   });
 
   it('orders by arcp_bm_approved_at when BM-approved date mode', () => {
     expect(registerHotOrderBy('bm_approved_at')).toBe(
       'h.arcp_bm_approved_at DESC NULLS LAST, h.ncode DESC'
     );
+  });
+
+  it('filters Cancelled At date range on h.cancelled_at', () => {
+    const { sql, values } = buildWhere(
+      baseParams({
+        dateFilterColumn: 'cancelled_at',
+        startDate: '2026-08-01',
+        endDate: '2026-08-31',
+      })
+    );
+    expect(sql).toContain('h.cancelled_at >=');
+    expect(sql).toContain('h.cancelled_at <=');
+    expect(sql).not.toContain('h.logged_at >=');
+    expect(values).toContain('2026-08-01T00:00:00+05:30');
+    expect(values).toContain('2026-08-31T23:59:59.999+05:30');
+  });
+
+  it('requires cancelled rows when filtering Cancelled At', () => {
+    const { sql } = buildWhere(
+      baseParams({
+        dateFilterColumn: 'cancelled_at',
+        startDate: '2026-08-01',
+        endDate: '2026-08-31',
+      })
+    );
+    expect(sql).toContain('COALESCE(h.ncancelreason, 0) NOT IN (0, 2)');
+    expect(sql).toContain('h.cancelled_at IS NOT NULL');
+  });
+
+  it('orders by cancelled_at when Cancelled At date mode', () => {
+    expect(registerHotOrderBy('cancelled_at')).toBe(
+      'h.cancelled_at DESC NULLS LAST, h.ncode DESC'
+    );
+  });
+
+  it('derives Cancelled At cursor from cancelled_at', () => {
+    const cursor = registerKeysetCursorFromRow(
+      {
+        cancelled_at: new Date('2026-08-15T14:30:00.000Z'),
+        ncode: 99,
+      },
+      'cancelled_at'
+    );
+    expect(cursor).toEqual({
+      cursorLoggedAt: '2026-08-15T14:30:00.000Z',
+      cursorNcode: 99,
+    });
   });
 
   it('derives BM-approved cursor preferring ARCP pick on row', () => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Push sync-worker code to VPS and restart the daemon (no full npm ci).
-# Lighter than setup-sync-worker-daemon.sh — use after code changes.
+# Push sync-worker (+ MIS scripts) to VPS as an immutable git-SHA release, then
+# atomically flip /opt/fast-close-app/current. Keeps last 5 releases for rollback.
 #
 #   npm run sync-worker:deploy:vps
 #
@@ -9,7 +9,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${ROOT}/.env.vps-setup"
-INSTALL_ROOT="${SYNC_WORKER_INSTALL_ROOT:-/opt/fast-close-app}"
+INSTALL_BASE="${SYNC_WORKER_INSTALL_ROOT:-/opt/fast-close-app}"
+# Strip trailing /current if someone passes the code root by mistake
+INSTALL_BASE="${INSTALL_BASE%/current}"
 
 SSH_OPTS=(
   -o ServerAliveInterval=30
@@ -25,115 +27,208 @@ fi
 source "$ENV_FILE"
 VPS_HOST="${VPS_HOST:?Set VPS_HOST in .env.vps-setup}"
 
-echo "==> Auto-detecting installation directory on VPS..."
-detected_root=$(ssh "${SSH_OPTS[@]}" "$VPS_HOST" 'find /opt -name "mis-email-digest.sh" -path "*/scripts/vps-hosting/mis-email-digest.sh" 2>/dev/null | head -n 1 | sed "s|/scripts/vps-hosting/mis-email-digest.sh||"' || true)
-if [[ -n "$detected_root" ]]; then
-  INSTALL_ROOT="$detected_root"
-  echo "    Detected root: $INSTALL_ROOT"
-else
-  INSTALL_ROOT="${SYNC_WORKER_INSTALL_ROOT:-/opt/fast-close-app}"
-  echo "    Using default root: $INSTALL_ROOT"
+if ! git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "ERROR: ${ROOT} is not a git repo — need a SHA for release deploys" >&2
+  exit 1
 fi
 
-echo "==> Deploying sync-worker code to ${VPS_HOST}:${INSTALL_ROOT}"
+SHA="$(git -C "$ROOT" rev-parse --short=12 HEAD)"
+if [[ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null || true)" ]]; then
+  SHA="${SHA}-dirty"
+  echo "==> Working tree dirty — release id: ${SHA}"
+else
+  echo "==> Release SHA: ${SHA}"
+fi
 
-ssh "${SSH_OPTS[@]}" "$VPS_HOST" "mkdir -p '${INSTALL_ROOT}/src/lib' '${INSTALL_ROOT}/src/modules' '${INSTALL_ROOT}/src/sql' '${INSTALL_ROOT}/scripts/vps-hosting' '${INSTALL_ROOT}/docs/read-model-phase1-schema' '${INSTALL_ROOT}/logs'"
+echo "==> Detecting install base on VPS..."
+# Prefer existing current layout; fall back to flat tree / default
+# shellcheck disable=SC1091
+source "${ROOT}/scripts/vps-hosting/vps-detect-base.inc.sh"
+detected_base=$(ssh "${SSH_OPTS[@]}" "$VPS_HOST" bash -s <<DETECT || true
+$(vps_ssh_detect_base_script "$INSTALL_BASE")
+DETECT
+)
+if [[ -n "$detected_base" ]]; then
+  INSTALL_BASE="$detected_base"
+fi
+echo "    Base: ${INSTALL_BASE}"
+RELEASE_DIR="${INSTALL_BASE}/releases/${SHA}"
 
-# Upload .env.sync-worker if VPS is missing it (never overwrite an existing remote file)
+echo "==> Uploading release helpers"
+scp "${SSH_OPTS[@]}" \
+  "${ROOT}/scripts/vps-hosting/vps-release-lib.sh" \
+  "${VPS_HOST}:/tmp/vps-release-lib.sh"
+
+echo "==> Ensuring release layout (one-time migrate if flat)"
+ssh "${SSH_OPTS[@]}" "$VPS_HOST" bash -s <<REMOTE
+set -euo pipefail
+# shellcheck disable=SC1091
+source /tmp/vps-release-lib.sh
+vps_migrate_flat_to_releases '${INSTALL_BASE}'
+mkdir -p '${INSTALL_BASE}/releases' '${INSTALL_BASE}/shared/logs'
+REMOTE
+
+# Seed shared env once (never overwrite)
 if [[ -f "${ROOT}/.env.sync-worker" ]]; then
-  remote_has_env=$(ssh "${SSH_OPTS[@]}" "$VPS_HOST" "test -f '${INSTALL_ROOT}/.env.sync-worker' && echo yes || echo no")
+  remote_has_env=$(ssh "${SSH_OPTS[@]}" "$VPS_HOST" \
+    "if test -f '${INSTALL_BASE}/shared/.env.sync-worker' || test -f '${INSTALL_BASE}/.env.sync-worker'; then echo yes; else echo no; fi")
   if [[ "$remote_has_env" == "no" ]]; then
-    echo "==> Uploading .env.sync-worker (missing on VPS)"
-    scp "${SSH_OPTS[@]}" "${ROOT}/.env.sync-worker" "${VPS_HOST}:${INSTALL_ROOT}/.env.sync-worker"
-    ssh "${SSH_OPTS[@]}" "$VPS_HOST" "chmod 600 '${INSTALL_ROOT}/.env.sync-worker'"
+    echo "==> Uploading .env.sync-worker → shared/ (missing on VPS)"
+    scp "${SSH_OPTS[@]}" "${ROOT}/.env.sync-worker" "${VPS_HOST}:${INSTALL_BASE}/shared/.env.sync-worker"
+    ssh "${SSH_OPTS[@]}" "$VPS_HOST" "chmod 600 '${INSTALL_BASE}/shared/.env.sync-worker'"
   else
     echo "==> Keeping existing VPS .env.sync-worker"
+    ssh "${SSH_OPTS[@]}" "$VPS_HOST" bash -s <<ENVFIX
+set -euo pipefail
+base='${INSTALL_BASE}'
+if [[ -f "\${base}/.env.sync-worker" && ! -f "\${base}/shared/.env.sync-worker" ]]; then
+  mkdir -p "\${base}/shared"
+  mv "\${base}/.env.sync-worker" "\${base}/shared/.env.sync-worker"
+fi
+ENVFIX
   fi
 fi
 
-if command -v rsync >/dev/null 2>&1; then
-  # rsync -e needs ssh opts as a single string
-  RSYNC_SSH="ssh ${SSH_OPTS[*]}"
-  rsync -az -e "$RSYNC_SSH" \
-    "${ROOT}/src/lib/" "${VPS_HOST}:${INSTALL_ROOT}/src/lib/"
-  # sync CLI imports @/modules/arcp-claims + @/sql — keep them in sync with package.json scripts
-  rsync -az -e "$RSYNC_SSH" \
-    "${ROOT}/src/modules/" "${VPS_HOST}:${INSTALL_ROOT}/src/modules/"
-  rsync -az -e "$RSYNC_SSH" \
-    "${ROOT}/src/sql/" "${VPS_HOST}:${INSTALL_ROOT}/src/sql/"
-  rsync -az -e "$RSYNC_SSH" \
-    "${ROOT}/package.json" "${ROOT}/package-lock.json" "${ROOT}/tsconfig.json" \
-    "${VPS_HOST}:${INSTALL_ROOT}/"
-  rsync -az -e "$RSYNC_SSH" \
-    "${ROOT}/docs/read-model-phase1-schema/" \
-    "${VPS_HOST}:${INSTALL_ROOT}/docs/read-model-phase1-schema/"
-  rsync -az -e "$RSYNC_SSH" \
-    "${ROOT}/scripts/" "${VPS_HOST}:${INSTALL_ROOT}/scripts/"
+# Skip re-upload for clean SHA that already exists
+remote_exists=$(ssh "${SSH_OPTS[@]}" "$VPS_HOST" \
+  "test -d '${RELEASE_DIR}' && test '${SHA}' = '${SHA%-dirty}' && echo yes || echo no")
+if [[ "$remote_exists" == "yes" ]]; then
+  echo "==> Release ${SHA} already on VPS — skip upload, will activate"
 else
-  echo "    (rsync not found — streaming src/lib + src/modules + src/sql + package/schema files via tar)"
-  tar -C "${ROOT}" -czf - \
-    src/lib \
-    src/modules \
-    src/sql \
-    package.json \
-    package-lock.json \
-    tsconfig.json \
-    docs/read-model-phase1-schema \
-    scripts \
-    | ssh "${SSH_OPTS[@]}" "$VPS_HOST" "tar -xzf - -C '${INSTALL_ROOT}'"
+  echo "==> Uploading code → ${RELEASE_DIR}"
+  ssh "${SSH_OPTS[@]}" "$VPS_HOST" \
+    "rm -rf '${RELEASE_DIR}' && mkdir -p '${RELEASE_DIR}/src/lib' '${RELEASE_DIR}/src/modules' '${RELEASE_DIR}/src/sql' '${RELEASE_DIR}/scripts/vps-hosting' '${RELEASE_DIR}/docs/read-model-phase1-schema'"
+
+  if command -v rsync >/dev/null 2>&1; then
+    RSYNC_SSH="ssh ${SSH_OPTS[*]}"
+    rsync -az -e "$RSYNC_SSH" \
+      "${ROOT}/src/lib/" "${VPS_HOST}:${RELEASE_DIR}/src/lib/"
+    rsync -az -e "$RSYNC_SSH" \
+      "${ROOT}/src/modules/" "${VPS_HOST}:${RELEASE_DIR}/src/modules/"
+    rsync -az -e "$RSYNC_SSH" \
+      "${ROOT}/src/sql/" "${VPS_HOST}:${RELEASE_DIR}/src/sql/"
+    rsync -az -e "$RSYNC_SSH" \
+      "${ROOT}/package.json" "${ROOT}/package-lock.json" "${ROOT}/tsconfig.json" \
+      "${VPS_HOST}:${RELEASE_DIR}/"
+    rsync -az -e "$RSYNC_SSH" \
+      "${ROOT}/docs/read-model-phase1-schema/" \
+      "${VPS_HOST}:${RELEASE_DIR}/docs/read-model-phase1-schema/"
+    rsync -az -e "$RSYNC_SSH" \
+      "${ROOT}/scripts/" "${VPS_HOST}:${RELEASE_DIR}/scripts/"
+  else
+    echo "    (rsync not found — streaming via tar)"
+    tar -C "${ROOT}" -czf - \
+      src/lib \
+      src/modules \
+      src/sql \
+      package.json \
+      package-lock.json \
+      tsconfig.json \
+      docs/read-model-phase1-schema \
+      scripts \
+      | ssh "${SSH_OPTS[@]}" "$VPS_HOST" "tar -xzf - -C '${RELEASE_DIR}'"
+  fi
 fi
 
-echo "==> Updating systemd unit + restarting sync worker"
-ssh "${SSH_OPTS[@]}" "$VPS_HOST" "SYNC_WORKER_INSTALL_ROOT='${INSTALL_ROOT}' bash -s" <<'REMOTE'
+echo "==> Link shared + preflight + activate ${SHA}"
+ALERT_TO="${SYNC_WORKER_ALERT_TO:-vishunvishwakarma90211@gmail.com}"
+ssh "${SSH_OPTS[@]}" "$VPS_HOST" \
+  "INSTALL_BASE='${INSTALL_BASE}' SHA='${SHA}' SYNC_WORKER_ALERT_TO='${ALERT_TO}' bash -s" <<'REMOTE'
 set -euo pipefail
-root="${SYNC_WORKER_INSTALL_ROOT:-/opt/fast-close-app}"
-unit="/etc/systemd/system/fast-close-sync-worker.service"
+# shellcheck disable=SC1091
+source /tmp/vps-release-lib.sh
 
-cat >"$unit" <<EOF
-[Unit]
-Description=Fast Close CRM read-model sync worker (incremental + pipeline reconcile + editedon catch-up every 3 min)
-Documentation=file://${root}/docs/sync.md
-After=network-online.target docker.service
-Wants=network-online.target
+base="${INSTALL_BASE:?}"
+sha="${SHA:?}"
+alert_to="${SYNC_WORKER_ALERT_TO:-vishunvishwakarma90211@gmail.com}"
+rel="${base}/releases/${sha}"
+stamp="$(TZ=Asia/Kolkata date -Iseconds)"
+today="$(TZ=Asia/Kolkata date +%F)"
 
-[Service]
-Type=simple
-WorkingDirectory=${root}
-Environment=HOME=/root
-Environment=SYNC_WORKER_INSTALL_ROOT=${root}
-EnvironmentFile=-${root}/.env.sync-worker
-ExecStart=${root}/scripts/vps-hosting/sync-worker-daemon.sh
-Restart=always
-RestartSec=30
-StandardOutput=append:${root}/logs/sync-worker.log
-StandardError=append:${root}/logs/sync-worker.log
+vps_link_shared_into_release "$base" "$rel"
 
-[Install]
-WantedBy=multi-user.target
-EOF
+# Recover shared env from known locations
+if [[ ! -f "${base}/shared/.env.sync-worker" ]]; then
+  for candidate in \
+    "${base}/.env.sync-worker" \
+    /opt/fast-close-app/.env.sync-worker \
+    /opt/wrl/database/fast-close-app/.env.sync-worker; do
+    if [[ -f "$candidate" ]]; then
+      mkdir -p "${base}/shared"
+      cp -a "$candidate" "${base}/shared/.env.sync-worker"
+      echo "    Restored .env.sync-worker from ${candidate}"
+      vps_link_shared_into_release "$base" "$rel"
+      break
+    fi
+  done
+fi
+if [[ ! -f "${base}/shared/.env.sync-worker" && ! -f "${rel}/.env.sync-worker" ]]; then
+  echo "ERROR: ${base}/shared/.env.sync-worker is missing on VPS." >&2
+  exit 1
+fi
 
-chmod +x "${root}/scripts/vps-hosting/sync-worker-daemon.sh" 2>/dev/null || true
-chmod +x "${root}/scripts/vps-hosting/sync-worker-nightly.sh" 2>/dev/null || true
+# Ensure shared node_modules exists (symlink target)
+if [[ ! -d "${base}/shared/node_modules" ]]; then
+  echo "==> shared/node_modules missing — npm ci in shared (one-time)"
+  if [[ -f "${rel}/package.json" ]]; then
+    cp -a "${rel}/package.json" "${rel}/package-lock.json" "${base}/shared/" 2>/dev/null || \
+      cp -a "${rel}/package.json" "${base}/shared/"
+    cd "${base}/shared"
+    npm ci 2>/dev/null || npm install
+    vps_link_shared_into_release "$base" "$rel"
+  fi
+fi
 
+# Idempotent WCO column (DDL — not undone by code rollback)
+if [[ -f "${rel}/docs/read-model-phase1-schema/18-calls_hot_wco.sql" ]]; then
+  echo "==> Applying WCO hot-column migration (18-calls_hot_wco.sql)"
+  set -a
+  # shellcheck disable=SC1091
+  source <(sed 's/\r$//' "${base}/shared/.env.sync-worker")
+  set +a
+  DATABASE_URL="$(echo -n "${DATABASE_URL:-}" | tr -d '\r' | xargs || true)"
+  if [[ -n "${DATABASE_URL}" ]]; then
+    cd "$rel"
+    DATABASE_URL="${DATABASE_URL}" node -e "
+      const fs=require('fs');
+      const pg=require('pg');
+      const sql=fs.readFileSync('docs/read-model-phase1-schema/18-calls_hot_wco.sql','utf8');
+      (async()=>{
+        const c=new pg.Client({connectionString:process.env.DATABASE_URL});
+        await c.connect();
+        await c.query(sql);
+        const r=await c.query(\"SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='calls_latest_hot' AND column_name='wco') AS ok\");
+        console.log('wco column present:', r.rows[0]?.ok);
+        await c.end();
+      })().catch((e)=>{ console.error(e); process.exit(1); });
+    "
+  else
+    echo "WARN: DATABASE_URL missing — skip WCO DDL"
+  fi
+fi
+
+# Nightly timer unit (paths via current after activate)
 install_nightly_timer() {
+  local code="${base}/current"
   local service_name="fast-close-sync-worker-nightly"
   local service_unit="/etc/systemd/system/${service_name}.service"
   local timer_unit="/etc/systemd/system/${service_name}.timer"
   cat >"$service_unit" <<UNIT
 [Unit]
 Description=Fast Close CRM read-model nightly reconcile (editedon catch-up + YTD open scan)
-Documentation=file://${root}/docs/sync.md
+Documentation=file://${code}/docs/sync.md
 After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=${root}
-Environment=SYNC_WORKER_INSTALL_ROOT=${root}
-EnvironmentFile=-${root}/.env.sync-worker
-ExecStart=${root}/scripts/vps-hosting/sync-worker-nightly.sh
-StandardOutput=append:${root}/logs/sync-worker-nightly.log
-StandardError=append:${root}/logs/sync-worker-nightly.log
+WorkingDirectory=${code}
+Environment=SYNC_WORKER_INSTALL_ROOT=${code}
+EnvironmentFile=-${base}/shared/.env.sync-worker
+EnvironmentFile=-${code}/.env.sync-worker
+ExecStart=${code}/scripts/vps-hosting/sync-worker-nightly.sh
+StandardOutput=append:${base}/shared/logs/sync-worker-nightly.log
+StandardError=append:${base}/shared/logs/sync-worker-nightly.log
 UNIT
   cat >"$timer_unit" <<TIMER
 [Unit]
@@ -149,78 +244,119 @@ TIMER
   chmod 644 "$service_unit" "$timer_unit"
   systemctl daemon-reload
   systemctl enable "${service_name}.timer"
-  systemctl restart "${service_name}.timer"
-  echo "--- nightly timer ---"
-  systemctl --no-pager list-timers "${service_name}.timer" || true
+  systemctl restart "${service_name}.timer" || true
 }
+# Install timer skeleton before activate so rewrite can refresh paths
 install_nightly_timer
 
-# Recover .env.sync-worker if missing (common after install-root path change)
-if [[ ! -f "${root}/.env.sync-worker" ]]; then
-  echo "==> .env.sync-worker missing at ${root} — searching known locations"
-  for candidate in /opt/fast-close-app/.env.sync-worker /opt/wrl/database/fast-close-app/.env.sync-worker; do
-    if [[ -f "$candidate" && "$candidate" != "${root}/.env.sync-worker" ]]; then
-      cp -a "$candidate" "${root}/.env.sync-worker"
-      echo "    Restored from ${candidate}"
-      break
-    fi
-  done
-fi
-if [[ ! -f "${root}/.env.sync-worker" ]]; then
-  echo "ERROR: ${root}/.env.sync-worker is missing on VPS." >&2
-  echo "  From your PC (repo root), after creating .env.sync-worker locally:" >&2
-  echo "    scp .env.sync-worker ${VPS_HOST:-root@vps}:${root}/.env.sync-worker" >&2
-  echo "  Or on VPS: cp ${root}/scripts/vps-hosting/.env.sync-worker.example ${root}/.env.sync-worker" >&2
+echo "==> Preflight on release ${sha} (before flipping current)"
+cd "$rel"
+set +e
+preflight_out="$(npx tsx src/lib/read-model/cli.ts help 2>&1)"
+preflight_rc=$?
+set -e
+if [[ "$preflight_rc" -ne 0 ]]; then
+  echo "ERROR: deploy preflight failed — NOT activating release" >&2
+  echo "$preflight_out" | tail -n 40 >&2
+  if [[ -f "${rel}/scripts/vps-hosting/send-vps-ops-alert.ts" ]]; then
+    VPS_OPS_ALERT_TO="${alert_to}" \
+      VPS_OPS_ALERT_SUBJECT="Update to call sync was stopped — ${today}" \
+      VPS_OPS_ALERT_BODY="Hello,
+
+An update to the call sync service was started on the server, but a safety check failed, so the old working version was left running.
+
+When: ${stamp} (India time)
+Failed release: ${sha}
+
+What this means:
+  • We did not flip current to the broken release.
+  • Morning MIS and dashboard should keep using the previous version for now.
+
+What to do:
+  1. Fix the incomplete update and try again.
+  2. From your PC run: npm run sync-worker:deploy:vps
+
+— WRL server monitoring
+" \
+      npx tsx "${rel}/scripts/vps-hosting/send-vps-ops-alert.ts" || true
+  fi
   exit 1
 fi
+echo "    preflight ok"
 
-# Ensure calls_latest_hot.wco exists (idempotent ADD COLUMN IF NOT EXISTS).
-if [[ -f "${root}/docs/read-model-phase1-schema/18-calls_hot_wco.sql" ]]; then
-  echo "==> Applying WCO hot-column migration (18-calls_hot_wco.sql)"
-  if [[ -f "${root}/.env.sync-worker" ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    # Strip CRLF so DATABASE_URL checks work after Windows edits
-    source <(sed 's/\r$//' "${root}/.env.sync-worker")
-    set +a
-  fi
-  DATABASE_URL="$(echo -n "${DATABASE_URL:-}" | tr -d '\r' | xargs || true)"
-  if [[ -n "${DATABASE_URL}" ]]; then
-    cd "${root}"
-    DATABASE_URL="${DATABASE_URL}" node -e "
-      const {config}=require('dotenv');
-      const fs=require('fs');
-      const pg=require('pg');
-      const sql=fs.readFileSync('docs/read-model-phase1-schema/18-calls_hot_wco.sql','utf8');
-      (async()=>{
-        const c=new pg.Client({connectionString:process.env.DATABASE_URL});
-        await c.connect();
-        await c.query(sql);
-        const r=await c.query(\"SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='calls_latest_hot' AND column_name='wco') AS ok\");
-        console.log('wco column present:', r.rows[0]?.ok);
-        await c.end();
-      })().catch((e)=>{ console.error(e); process.exit(1); });
-    "
-  else
-    echo "WARN: DATABASE_URL missing in .env.sync-worker — skip WCO DDL (run npm run db:apply-read-model:vps)"
-  fi
-fi
+vps_activate_release "$base" "$sha"
+vps_prune_releases "$base" 5
+install_nightly_timer
 
+code="${base}/current"
 systemctl daemon-reload
 systemctl restart fast-close-sync-worker
 sleep 3
 if ! systemctl is-active --quiet fast-close-sync-worker; then
-  echo "ERROR: sync worker failed to start — last journal lines:" >&2
+  echo "ERROR: sync worker failed to start — rolling back to previous" >&2
   journalctl -u fast-close-sync-worker -n 40 --no-pager >&2 || true
-  echo "--- sync-worker.log ---" >&2
-  tail -n 40 "${root}/logs/sync-worker.log" 2>/dev/null || true
+  tail -n 40 "${base}/shared/logs/sync-worker.log" 2>/dev/null || true
+  vps_rollback_to "$base" || true
+  systemctl daemon-reload
+  systemctl restart fast-close-sync-worker || true
+  if [[ -f "${code}/scripts/vps-hosting/send-vps-ops-alert.ts" ]] || [[ -f "${rel}/scripts/vps-hosting/send-vps-ops-alert.ts" ]]; then
+    alert_script="${code}/scripts/vps-hosting/send-vps-ops-alert.ts"
+    [[ -f "$alert_script" ]] || alert_script="${rel}/scripts/vps-hosting/send-vps-ops-alert.ts"
+    VPS_OPS_ALERT_TO="${alert_to}" \
+      VPS_OPS_ALERT_SUBJECT="Call sync did not start after update — rolled back — ${today}" \
+      VPS_OPS_ALERT_BODY="Hello,
+
+An update (release ${sha}) was applied, but the service did not stay running. The server was rolled back to the previous release.
+
+When: ${stamp} (India time)
+
+What to do:
+  1. npm run sync-worker:status:vps
+  2. Fix and redeploy: npm run sync-worker:deploy:vps
+
+— WRL server monitoring
+" \
+      npx tsx "$alert_script" || true
+  fi
   exit 1
 fi
+
+echo "==> current=$(readlink -f "${base}/current")"
+echo "==> previous=$(readlink "${base}/previous" 2>/dev/null || echo '?')"
 systemctl --no-pager status fast-close-sync-worker | head -15
 echo "---"
-tail -n 8 "${root}/logs/sync-worker.log" 2>/dev/null || true
+tail -n 8 "${base}/shared/logs/sync-worker.log" 2>/dev/null || true
+
+if [[ -f "${code}/scripts/vps-hosting/send-vps-ops-alert.ts" ]]; then
+  watermark="$(
+    docker exec supabase-db psql -U postgres postgres -At -c \
+      "SELECT coalesce(last_editedon::text,'?') FROM sync_state WHERE entity='calls_latest_hot' LIMIT 1;" 2>/dev/null || echo '?'
+  )"
+  VPS_OPS_ALERT_TO="${alert_to}" \
+    VPS_OPS_ALERT_SUBJECT="Call sync was updated on the server — ${today}" \
+    VPS_OPS_ALERT_BODY="Hello,
+
+The call sync service on the VPS was updated and restarted successfully.
+
+When: ${stamp} (India time)
+Release: ${sha}
+Last time call data was synced: ${watermark}
+
+What changed:
+  • The programs that copy call updates from CRM into our reports database
+  • Related helpers used by MIS, register, and overnight cleanup jobs
+
+Rollback if needed:
+  npm run sync-worker:rollback:vps
+  SHA=${sha} is current; previous remains available.
+
+— WRL server monitoring
+" \
+    npx tsx "${code}/scripts/vps-hosting/send-vps-ops-alert.ts" || echo "WARN: post-deploy mail failed"
+fi
 REMOTE
 
 echo ""
-echo "==> Deploy done. Verify: npm run sync-worker:status:vps"
-echo "    WCO backfill (optional historical): ssh ${VPS_HOST} 'cd ${INSTALL_ROOT} && npm run sync-worker:backfill-wco -- --from 2026-01-01 --to $(date +%Y-%m-%d)'"
+echo "==> Deploy done. SHA=${SHA}  Verify: npm run sync-worker:status:vps"
+echo "    Rollback last: npm run sync-worker:rollback:vps"
+echo "    Rollback to SHA: SHA=${SHA} npm run sync-worker:rollback:vps"

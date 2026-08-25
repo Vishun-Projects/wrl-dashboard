@@ -135,7 +135,7 @@ export function buildCorpusCacheKey(
   dateFilterColumn: RegisterDateFilterColumn = 'dtrndate'
 ): string {
   const scope = resolveCorpusFetchScope(viewStartDate, viewEndDate, dateFilterColumn);
-  return `${scope.fetchStartDate}|${scope.fetchEndDate}|${scope.dateFilterColumn}`;
+  return `${scope.fetchStartDate}|${scope.fetchEndDate}|${scope.dateFilterColumn}|v2`;
 }
 
 /** YYYY-MM month keys present in corpus rows (by active date column). */
@@ -204,6 +204,11 @@ export function registerRowDateValue(
     if (raw == null || String(raw).trim() === '') return null;
     return String(raw);
   }
+  if (column === 'cancelled_at') {
+    const raw = row.cancelled_at ?? row.cancelled_date;
+    if (raw == null || String(raw).trim() === '') return null;
+    return String(raw);
+  }
   const raw =
     column === 'dsolvedatetime'
       ? row.callsolveddate ?? row.dsolvedatetime
@@ -222,8 +227,8 @@ export function rowMatchesDateRange(
   if (!raw) return false;
   const t = new Date(raw).getTime();
   if (Number.isNaN(t)) return false;
-  const start = new Date(`${startDate}T00:00:00`).getTime();
-  const end = new Date(`${endDate}T23:59:59.999`).getTime();
+  const start = new Date(`${startDate}T00:00:00+05:30`).getTime();
+  const end = new Date(`${endDate}T23:59:59.999+05:30`).getTime();
   return t >= start && t <= end;
 }
 

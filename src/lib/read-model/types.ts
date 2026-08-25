@@ -52,6 +52,10 @@ export type HotRow = {
   /** BM approved date from matched ARCP claim line. */
   arcp_bm_approved_at: Date | null;
   ncancelreason: number | null;
+  /** mstcallcancelreasons.vname when cancelled; otherwise null. */
+  cancel_reason: string | null;
+  /** Cancel datetime = trhcalls.editedon when cancelled; otherwise null. */
+  cancelled_at: Date | null;
   lat: number | null;
   lng: number | null;
 };

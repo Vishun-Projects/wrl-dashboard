@@ -46,6 +46,8 @@ function hot(overrides: Partial<HotRow> = {}): HotRow {
     bm_approved_at: null,
     arcp_bm_approved_at: null,
     ncancelreason: 0,
+    cancel_reason: null,
+    cancelled_at: null,
     lat: 18.5204,
     lng: 73.8567,
     ...overrides,

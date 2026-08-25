@@ -121,11 +121,14 @@ export function registerExportCursorFromRow(
 ): RegisterExportKeysetCursor | null {
   const useSolved = dateFilterColumn === 'dsolvedatetime';
   const useBm = dateFilterColumn === 'bm_approved_at';
-  const dateVal = useBm
-    ? row.bm_approved_at ?? row.bm_approved_date
-    : useSolved
-      ? row.callsolveddate ?? row.solved_at
-      : row.callsdtrndate ?? row.logged_at;
+  const useCancelled = dateFilterColumn === 'cancelled_at';
+  const dateVal = useCancelled
+    ? row.cancelled_at ?? row.cancelled_date
+    : useBm
+      ? row.bm_approved_at ?? row.bm_approved_date
+      : useSolved
+        ? row.callsolveddate ?? row.solved_at
+        : row.callsdtrndate ?? row.logged_at;
   const ncode = Number(row.ncode ?? row.id);
   if (dateVal == null || !Number.isFinite(ncode) || ncode <= 0) return null;
   const cursorLoggedAt =

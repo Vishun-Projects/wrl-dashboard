@@ -180,10 +180,9 @@ describe('buildEmailBodySectionsHtml', () => {
     expect(html).toContain('&gt;7 days');
     expect(html).toContain('# of active Eng.');
     expect(html).not.toContain('Part pending');
-    expect(html).not.toContain('>Cancelled<');
-    expect(html).not.toContain('Cancelled</th>');
-    // Total = solved + open (exclude cancelled): Delhi 90+8=98
-    expect(html).toContain('>98<');
+    expect(html).toContain('Cancelled</th>');
+    // Total = solved + open + cancelled: Delhi 90+8+2=100
+    expect(html).toContain('>100<');
   });
 
   it('allows empty regional rows (scoped user / no data) without throwing', () => {
@@ -445,7 +444,7 @@ describe('buildEmailBodySectionsPlainText', () => {
     expect(text).toContain('Regional Performance');
     expect(text).toContain('NORTH');
     expect(text).toContain('All');
-    expect(text).not.toContain('cancelled');
-    expect(text).toContain('total 98');
+    expect(text).toContain('cancelled');
+    expect(text).toContain('total 100');
   });
 });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import '@/lib/read-model/bootstrap-env';
-import { closePool } from '@/lib/read-model/db';
+import { closePool, withClient } from '@/lib/read-model/db';
 import { runArcpBackfill } from '@/modules/arcp-claims/server/sync/backfill';
 import { resetArcpReadModel } from '@/modules/arcp-claims/server/sync/backfill';
 import { runArcpIncrementalSync } from '@/modules/arcp-claims/server/sync/incremental';
@@ -27,11 +27,21 @@ import {
   runTransactionEntryIncremental,
 } from '@/lib/read-model/transaction-entry';
 import {
+  runAthenaFailedCallsSync,
+  executeAthenaReconciliation,
+} from '@/lib/read-model/athena-reconciliation';
+import {
   auditExitCode,
   parseAuditCliArgs,
   runFullReadModelAudit,
 } from '@/lib/read-model/audit/run-full-audit';
 import { logAction } from '@/lib/security/audit';
+import { backfillCancelledFromHot } from '@/lib/read-model/upsert-cancelled';
+import { runAttendanceDetailsSync } from '@/lib/read-model/attendance-details';
+import {
+  runCallsMirrorBackfill,
+  runCallsMirrorIncremental,
+} from '@/lib/read-model/calls-mirror';
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
 const DAEMON_MAX_CONSECUTIVE_FAILURES = Number(process.env.SYNC_DAEMON_MAX_FAILURES ?? 5) || 5;
@@ -190,6 +200,23 @@ async function runDaemon(): Promise<void> {
           console.error('[transaction-entry] Daemon incremental failed:', formatSyncWorkerError(teErr));
         }
       }
+      if (process.env.SYNC_ATHENA_RECONCILIATION_ENABLED !== 'false') {
+        try {
+          await runAthenaFailedCallsSync();
+        } catch (athenaErr) {
+          console.error('[athena-sync] Daemon incremental failed:', formatSyncWorkerError(athenaErr));
+        }
+      }
+      if (process.env.CALLS_MIRROR_SYNC_ENABLED !== 'false') {
+        try {
+          const mirror = await runCallsMirrorIncremental();
+          if (mirror.skipped) {
+            console.log(`[calls-mirror] Daemon skip — ${mirror.reason}`);
+          }
+        } catch (mirrorErr) {
+          console.error('[calls-mirror] Daemon incremental failed:', formatSyncWorkerError(mirrorErr));
+        }
+      }
     } catch (err) {
       consecutiveFailures += 1;
       console.error('[sync-worker] Incremental failed:', formatSyncWorkerError(err));
@@ -342,6 +369,57 @@ async function main(): Promise<void> {
       console.log(`[transaction-entry] verify/heal upserted ${healed}`);
       break;
     }
+    case 'athena-sync': {
+      const args = process.argv.slice(3);
+      const fromIdx = args.indexOf('--from');
+      const toIdx = args.indexOf('--to');
+      const dateFrom = fromIdx >= 0 ? args[fromIdx + 1] : undefined;
+      const dateTo = toIdx >= 0 ? args[toIdx + 1] : undefined;
+      const reprocessAll = args.includes('--reprocess-all');
+      const fullBackfill = args.includes('--full');
+      const result = await runAthenaFailedCallsSync({ dateFrom, dateTo, reprocessAll, fullBackfill });
+      console.log('[athena-sync] Complete:', result);
+      break;
+    }
+    case 'athena-reconcile': {
+      const reprocessAll = process.argv.includes('--reprocess-all');
+      const stats = await executeAthenaReconciliation(undefined, { reprocessAll });
+      console.log('[athena-reconcile] Reconciliation complete:', stats);
+      break;
+    }
+    case 'calls-mirror-backfill': {
+      const result = await runCallsMirrorBackfill();
+      console.log('[calls-mirror] Backfill done:', result);
+      break;
+    }
+    case 'calls-mirror-incremental': {
+      const result = await runCallsMirrorIncremental();
+      console.log('[calls-mirror] Incremental done:', result);
+      break;
+    }
+    case 'backfill-cancelled': {
+      const upserted = await withClient((client) => backfillCancelledFromHot(client));
+      console.log(`[cancelled] Backfilled ${upserted} row(s) from calls_latest_hot`);
+      break;
+    }
+    case 'reconcile-open-cancel': {
+      const { reconcileOpenCancelDriftFromCrm } = await import('@/lib/read-model/reconcile-open-cancel');
+      const typeIdx = process.argv.indexOf('--call-type');
+      const callType = typeIdx >= 0 ? process.argv[typeIdx + 1] : 'BREAKDOWN';
+      const result = await reconcileOpenCancelDriftFromCrm({ callType });
+      console.log('[reconcile-open-cancel] Complete:', result);
+      break;
+    }
+    case 'attendance-sync': {
+      const args = process.argv.slice(3);
+      const fromIdx = args.indexOf('--from');
+      const toIdx = args.indexOf('--to');
+      const dateFrom = fromIdx >= 0 ? args[fromIdx + 1] : undefined;
+      const dateTo = toIdx >= 0 ? args[toIdx + 1] : undefined;
+      const result = await runAttendanceDetailsSync({ dateFrom, dateTo });
+      console.log('[attendance] Complete:', result);
+      break;
+    }
     case 'daemon':
       await runDaemon();
       break;
@@ -376,6 +454,12 @@ Commands:
   backfill-arcp-bm      Fill calls_latest_hot.arcp_bm_approved_at from arcp_lines_hot (no truncate)
   backfill-wco          Fill calls_latest_hot.wco from CRM mstprorg (no truncate)
                     --from YYYY-MM-DD --to YYYY-MM-DD  (optional hot logged_at window)
+  backfill-cancelled    Upsert calls_cancelled from current hot cancels (editedon = cancelled_at)
+  calls-mirror-backfill Full/resume CRM → calls_crm_mirror by dtrndate (excl. transfers)
+  calls-mirror-incremental  Editedon watermark sync into calls_crm_mirror (status=ok only)
+  reconcile-open-cancel Refresh open/assigned hot rows that CRM shows cancelled (MIS mail preflight)
+  attendance-sync       Fetch CRM uv_rptattandenceDetails_New2 → crm_attendance_details
+                    --from YYYY-MM-DD --to YYYY-MM-DD  (default: watermark-2d or year start → today)
   arcp-reset        Truncate arcp_lines_hot + reset sync_state (fresh start)
   arcp-backfill     Initial ARCP lines backfill (ARCP_BACKFILL_START_DATE or YEARS)
   arcp-incremental  Single ARCP incremental sync run
@@ -432,6 +516,10 @@ Environment:
   SYNC_BACKFILL_CHUNK_DAYS     CRM days per backfill request (default 14)
   SYNC_BACKFILL_FETCH_GAP_MS   Pause between backfill CRM chunks (default 400)
   SYNC_HOT_UPSERT_BATCH        Postgres upsert batch size (default 300)
+  CALLS_MIRROR_SYNC_ENABLED    Daemon/incremental for calls_crm_mirror (default on; needs status=ok)
+  CALLS_MIRROR_START_DATE      Backfill floor YYYY-MM-DD (default: CRM min or 2015-01-01)
+  CALLS_MIRROR_END_DATE        Optional backfill ceiling (smoke/partial; leaves status=backfilling)
+  CALLS_MIRROR_FORCE_BACKFILL  Re-run backfill even when status=ok
   ARCP_BACKFILL_START_DATE   First day to load (e.g. 2025-01-01; skips earlier years)
   ARCP_BACKFILL_YEARS        Fallback window if START_DATE unset (default 1)
   ARCP_BACKFILL_FORCE_RESET  Truncate existing rows (prefer: npm run sync-worker:arcp-reset)

@@ -9,10 +9,20 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${ROOT}/.env.vps-setup"
 INSTALL_ROOT="${SYNC_WORKER_INSTALL_ROOT:-/opt/fast-close-app}"
+INSTALL_ROOT="${INSTALL_ROOT%/current}"
 SERVICE_NAME="fast-close-sync-worker"
 
 install_systemd_nightly_timer() {
-  local root="${1:?}"
+  local base="${1:?}"
+  local code
+  if [[ -L "${base}/current" || -d "${base}/current" ]]; then
+    code="${base}/current"
+  else
+    code="$base"
+  fi
+  local shared_env="${base}/shared/.env.sync-worker"
+  local log_dir="${base}/shared/logs"
+  [[ -d "$log_dir" ]] || log_dir="${code}/logs"
   local service_name="fast-close-sync-worker-nightly"
   local service_unit="/etc/systemd/system/${service_name}.service"
   local timer_unit="/etc/systemd/system/${service_name}.timer"
@@ -20,19 +30,20 @@ install_systemd_nightly_timer() {
   echo "==> Installing nightly YTD refresh timer ${timer_unit}"
   cat >"$service_unit" <<EOF
 [Unit]
-  Description=Fast Close CRM read-model nightly editedon catch-up (YTD status replay)
-Documentation=file://${root}/docs/sync.md
+Description=Fast Close CRM read-model nightly editedon catch-up (YTD status replay)
+Documentation=file://${code}/docs/sync.md
 After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=${root}
-Environment=SYNC_WORKER_INSTALL_ROOT=${root}
-EnvironmentFile=-${root}/.env.sync-worker
-ExecStart=${root}/scripts/vps-hosting/sync-worker-nightly.sh
-StandardOutput=append:${root}/logs/sync-worker-nightly.log
-StandardError=append:${root}/logs/sync-worker-nightly.log
+WorkingDirectory=${code}
+Environment=SYNC_WORKER_INSTALL_ROOT=${code}
+EnvironmentFile=-${shared_env}
+EnvironmentFile=-${code}/.env.sync-worker
+ExecStart=${code}/scripts/vps-hosting/sync-worker-nightly.sh
+StandardOutput=append:${log_dir}/sync-worker-nightly.log
+StandardError=append:${log_dir}/sync-worker-nightly.log
 EOF
 
   cat >"$timer_unit" <<EOF
@@ -56,28 +67,38 @@ EOF
 }
 
 install_systemd_unit() {
-  local root="${1:?}"
+  local base="${1:?}"
+  local code
+  if [[ -L "${base}/current" || -d "${base}/current" ]]; then
+    code="${base}/current"
+  else
+    code="$base"
+  fi
+  local shared_env="${base}/shared/.env.sync-worker"
+  local log_dir="${base}/shared/logs"
+  [[ -d "$log_dir" ]] || log_dir="${code}/logs"
   local service_name="fast-close-sync-worker"
   local unit="/etc/systemd/system/${service_name}.service"
 
-  echo "==> Installing systemd unit ${unit}"
+  echo "==> Installing systemd unit ${unit} (code=${code})"
   cat >"$unit" <<EOF
 [Unit]
 Description=Fast Close CRM read-model sync worker (incremental + pipeline reconcile + editedon catch-up every 3 min)
-Documentation=file://${root}/docs/sync.md
+Documentation=file://${code}/docs/sync.md
 After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=${root}
-Environment=SYNC_WORKER_INSTALL_ROOT=${root}
-EnvironmentFile=-${root}/.env.sync-worker
-ExecStart=${root}/scripts/vps-hosting/sync-worker-daemon.sh
+WorkingDirectory=${code}
+Environment=SYNC_WORKER_INSTALL_ROOT=${code}
+EnvironmentFile=-${shared_env}
+EnvironmentFile=-${code}/.env.sync-worker
+ExecStart=${code}/scripts/vps-hosting/sync-worker-daemon.sh
 Restart=always
 RestartSec=30
-StandardOutput=append:${root}/logs/sync-worker.log
-StandardError=append:${root}/logs/sync-worker.log
+StandardOutput=append:${log_dir}/sync-worker.log
+StandardError=append:${log_dir}/sync-worker.log
 
 [Install]
 WantedBy=multi-user.target
@@ -92,10 +113,11 @@ EOF
 }
 
 run_install_on_machine() {
-  local root="${1:?}"
-  echo "==> Sync worker daemon install at ${root}"
+  local base="${1:?}"
+  base="${base%/current}"
+  echo "==> Sync worker daemon install at ${base}"
 
-  mkdir -p "${root}/logs" "${root}/scripts/vps-hosting"
+  mkdir -p "${base}/logs" "${base}/scripts/vps-hosting" "${base}/shared/logs"
 
   if ! command -v node >/dev/null 2>&1; then
     echo "==> Installing Node.js 20"
@@ -107,37 +129,65 @@ run_install_on_machine() {
   fi
   echo "    Node $(node -v)"
 
-  if [[ -f "${root}/package.json" ]]; then
-    echo "==> Installing npm dependencies"
-    cd "${root}"
-    npm ci 2>/dev/null || npm install
+  # Prefer release layout if helpers are present
+  if [[ -f "${base}/scripts/vps-hosting/vps-release-lib.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${base}/scripts/vps-hosting/vps-release-lib.sh"
+    vps_migrate_flat_to_releases "$base"
+  elif [[ -f /tmp/vps-release-lib.sh ]]; then
+    # shellcheck disable=SC1091
+    source /tmp/vps-release-lib.sh
+    vps_migrate_flat_to_releases "$base"
+  fi
+
+  local code
+  if [[ -L "${base}/current" || -d "${base}/current" ]]; then
+    code="${base}/current"
   else
-    echo "FATAL: ${root}/package.json not found — sync repo to VPS first" >&2
+    code="$base"
+  fi
+
+  if [[ -f "${code}/package.json" ]]; then
+    echo "==> Installing npm dependencies into shared/"
+    mkdir -p "${base}/shared"
+    cp -a "${code}/package.json" "${base}/shared/" 2>/dev/null || true
+    cp -a "${code}/package-lock.json" "${base}/shared/" 2>/dev/null || true
+    cd "${base}/shared"
+    npm ci 2>/dev/null || npm install
+    if [[ -L "${base}/current" || -d "${base}/current" ]]; then
+      vps_link_shared_into_release "$base" "$(readlink -f "${base}/current")"
+    fi
+  else
+    echo "FATAL: ${code}/package.json not found — sync repo to VPS first" >&2
     exit 1
   fi
 
-  chmod +x "${root}/scripts/vps-hosting/sync-worker-daemon.sh" 2>/dev/null || true
-  chmod +x "${root}/scripts/vps-hosting/sync-worker-nightly.sh" 2>/dev/null || true
+  chmod +x "${code}/scripts/vps-hosting/sync-worker-daemon.sh" 2>/dev/null || true
+  chmod +x "${code}/scripts/vps-hosting/sync-worker-nightly.sh" 2>/dev/null || true
 
-  if [[ ! -f "${root}/.env.sync-worker" ]]; then
-    if [[ -f "${root}/scripts/vps-hosting/.env.sync-worker.example" ]]; then
-      cp "${root}/scripts/vps-hosting/.env.sync-worker.example" "${root}/.env.sync-worker"
-      echo "==> Created ${root}/.env.sync-worker — set DATABASE_URL and SYNC_WORKER_ENABLED=true"
+  if [[ ! -f "${base}/shared/.env.sync-worker" ]]; then
+    if [[ -f "${code}/scripts/vps-hosting/.env.sync-worker.example" ]]; then
+      cp "${code}/scripts/vps-hosting/.env.sync-worker.example" "${base}/shared/.env.sync-worker"
+      echo "==> Created ${base}/shared/.env.sync-worker — set DATABASE_URL and SYNC_WORKER_ENABLED=true"
     fi
+  fi
+  if [[ -L "${base}/current" || -d "${base}/current" ]]; then
+    vps_link_shared_into_release "$base" "$(readlink -f "${base}/current")"
   fi
 
   if command -v systemctl >/dev/null 2>&1; then
-    install_systemd_unit "${root}"
-    install_systemd_nightly_timer "${root}"
+    install_systemd_unit "${base}"
+    install_systemd_nightly_timer "${base}"
   else
     echo "WARN: systemctl not found — install systemd unit manually or use cron (not recommended for daemon)"
-    echo "    Test: bash ${root}/scripts/vps-hosting/sync-worker-daemon.sh"
+    echo "    Test: bash ${code}/scripts/vps-hosting/sync-worker-daemon.sh"
   fi
 
-  echo "==> Sync worker daemon ready at ${root}"
-  echo "    Logs: tail -f ${root}/logs/sync-worker.log"
-  echo "    Nightly: tail -f ${root}/logs/sync-worker-nightly.log"
+  echo "==> Sync worker daemon ready at ${base} (code=${code})"
+  echo "    Logs: tail -f ${base}/shared/logs/sync-worker.log"
+  echo "    Nightly: tail -f ${base}/shared/logs/sync-worker-nightly.log"
   echo "    Status: systemctl status fast-close-sync-worker"
+  echo "    Deploys: npm run sync-worker:deploy:vps"
 }
 
 if [[ "${1:-}" == "--local" ]]; then
@@ -208,16 +258,24 @@ copy_one "${ROOT}/scripts/vps-hosting/.env.sync-worker.example" \
   "${INSTALL_ROOT}/scripts/vps-hosting/.env.sync-worker.example"
 copy_one "${ROOT}/scripts/vps-hosting/setup-sync-worker-daemon.sh" \
   "${INSTALL_ROOT}/scripts/vps-hosting/setup-sync-worker-daemon.sh"
+copy_one "${ROOT}/scripts/vps-hosting/vps-release-lib.sh" \
+  "${INSTALL_ROOT}/scripts/vps-hosting/vps-release-lib.sh"
+scp "${SSH_OPTS[@]}" "${ROOT}/scripts/vps-hosting/vps-release-lib.sh" \
+  "${VPS_HOST}:/tmp/vps-release-lib.sh"
 
 echo "==> Running install on VPS"
 ssh "${SSH_OPTS[@]}" "$VPS_HOST" "SYNC_WORKER_INSTALL_ROOT='${INSTALL_ROOT}' bash -s" <<REMOTE
 $(declare -f install_systemd_unit install_systemd_nightly_timer run_install_on_machine)
+# shellcheck disable=SC1091
+source /tmp/vps-release-lib.sh
 run_install_on_machine '${INSTALL_ROOT}'
 REMOTE
 
 echo ""
 echo "Next steps:"
 echo "  1. ssh ${VPS_HOST}"
-echo "  2. nano ${INSTALL_ROOT}/.env.sync-worker   # DATABASE_URL, SYNC_WORKER_ENABLED=true"
+echo "  2. nano ${INSTALL_ROOT}/shared/.env.sync-worker   # DATABASE_URL, SYNC_WORKER_ENABLED=true"
 echo "  3. systemctl restart fast-close-sync-worker"
-echo "  4. tail -f ${INSTALL_ROOT}/logs/sync-worker.log"
+echo "  4. tail -f ${INSTALL_ROOT}/shared/logs/sync-worker.log"
+echo "  Code updates: npm run sync-worker:deploy:vps"
+echo "  Rollback:     npm run sync-worker:rollback:vps"

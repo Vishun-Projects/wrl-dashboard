@@ -60,7 +60,11 @@ export function rowForCsv(raw: Record<string, unknown>): Record<string, unknown>
     repair_done: formatRegisterRepairDone(row.repair_done),
     display_status: statusText,
     solvedDate: isSolved ? formatRegisterExportDate(row.callsolveddate) : '',
-    remarks: row.vsolveremarks || row.cancel_reason || '',
+    cancelled_date: isCancelled
+      ? formatRegisterExportDate(row.cancelled_date ?? row.cancelled_at)
+      : '',
+    cancel_reason: isCancelled ? row.cancel_reason || '' : '',
+    remarks: row.vsolveremarks || '',
     bm_approved_date: formatRegisterExportDate(row.bm_approved_date) || '',
     vpersoncalling: row.vpersoncalling,
     vinsttel1: row.vinsttel1,

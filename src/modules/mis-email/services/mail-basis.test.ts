@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountSummaryRow, BranchSummaryRow, SummaryDashboard } from '@/modules/mis';
 import {
+  assertMisEmailOpenParity,
   buildMisEmailBranchPerformanceRowsFromTrace,
   buildMisEmailBdMisRegionalPayload,
+  buildMisEmailRegionalPerformanceRows,
   buildMisEmailRegionalPerformanceRowsFromTrace,
   misEmailBdMisSources,
+  overlayRegionalOpenFromExcelRows,
   reconcileMisEmailOpenCounts,
 } from '@/modules/mis-email/services/mail-basis';
 import { buildBdMisTraceRows, countTraceOpenCalls, filterTraceRowsForOpenExport } from '@/modules/mis';
@@ -172,6 +175,17 @@ describe('buildMisEmailBdMisRegionalPayload', () => {
     expect(reconciliation.summaryOpen).toBe(2);
     expect(reconciliation.traceOpenIncluded).toBe(2);
   });
+
+  it('assertMisEmailOpenParity throws on any internal mismatch', () => {
+    expect(() =>
+      assertMisEmailOpenParity({
+        summaryOpen: 4125,
+        traceOpenIncluded: 3981,
+        delta: -144,
+        matches: false,
+      })
+    ).toThrow(/MIS open-count mismatch/);
+  });
 });
 
 describe('buildMisEmailRegionalPerformanceRowsFromTrace', () => {
@@ -245,6 +259,62 @@ describe('buildMisEmailRegionalPerformanceRowsFromTrace', () => {
     const bodyOpen = regional.reduce((sum, row) => sum + row.open_calls, 0);
     expect(bodyOpen).toBe(countTraceOpenCalls(filterTraceRowsForOpenExport(traceRows)));
     expect(bodyOpen).toBe(2); // Nestle CRM open + Mondelez import; CRM Cadbury dropped
+  });
+});
+
+describe('overlayRegionalOpenFromExcelRows', () => {
+  it('replaces summary open with Excel open and rebalances total_calls', () => {
+    const summary: SummaryDashboard = {
+      branchSummary: [branch('NORTH', 50), branch('EAST', 50)],
+      accountSummary: [],
+      totals: {} as SummaryDashboard['totals'],
+    };
+    const regional = buildMisEmailRegionalPerformanceRows(summary, []);
+    expect(regional.reduce((s, r) => s + r.open_calls, 0)).toBe(100);
+
+    const traceRows = buildBdMisTraceRows({
+      crmRows: [
+        {
+          region: 'NORTH ZONE',
+          plant: 'P1',
+          technician_name: 'T1',
+          office_under_branch: 'B1',
+          customer_name: 'C1',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'O1',
+          client: 'Nestle',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+        {
+          region: 'EAST ZONE',
+          plant: 'P2',
+          technician_name: 'T2',
+          office_under_branch: 'B2',
+          customer_name: 'C2',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'O2',
+          client: 'Nestle',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+      ],
+      clientRows: [],
+      sources: misEmailBdMisSources(),
+      agingDate: '2026-07-09',
+    });
+
+    const overlaid = overlayRegionalOpenFromExcelRows(regional, traceRows);
+    const bodyOpen = overlaid.reduce((s, r) => s + r.open_calls, 0);
+    expect(bodyOpen).toBe(countTraceOpenCalls(filterTraceRowsForOpenExport(traceRows)));
+    expect(bodyOpen).toBe(2);
+    for (const row of overlaid) {
+      expect(row.total_calls).toBe(row.solved_calls + row.cancelled_calls + row.open_calls);
+    }
   });
 });
 

@@ -41,6 +41,30 @@ describe('isHotEligibleRow', () => {
       })
     ).toBe(false);
   });
+
+  it('keeps pre-YTD real cancels (Cancelled At is by cancel day, not call day)', () => {
+    expect(
+      isHotEligibleRow({
+        vtrnno: '25I03443',
+        callsdtrndate: '2025-09-03',
+        bsolved: 0,
+        bfastclose: 0,
+        ncancelreason: 9,
+      })
+    ).toBe(true);
+  });
+
+  it('still rejects pre-YTD transfer cancel reason 2', () => {
+    expect(
+      isHotEligibleRow({
+        vtrnno: '25XFER',
+        callsdtrndate: '2025-09-03',
+        bsolved: 0,
+        bfastclose: 0,
+        ncancelreason: 2,
+      })
+    ).toBe(false);
+  });
 });
 
 describe('processCrmRowsForYtdLoad', () => {
@@ -58,6 +82,31 @@ describe('processCrmRowsForYtdLoad', () => {
       },
     ]);
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.vtrnno).toBe('T1');
+    expect(rows[0].status_bucket).toBe('solved');
+    expect(rows[0].cancelled_at).toBeNull();
+  });
+
+  it('sets cancelled_at from editedon for cancelled rows', () => {
+    const edited = '2026-08-22T10:00:00';
+    const rows = processCrmRowsForYtdLoad([
+      {
+        ncode: 2,
+        vtrnno: 'T-CAN',
+        nofficeid: 100,
+        callsdtrndate: '2026-02-01',
+        editedon: edited,
+        bsolved: 0,
+        bfastclose: 0,
+        ncancelreason: 10,
+        Status: 'Cancelled',
+        callstatus: 'Cancelled',
+        cancel_reason: 'Customer refused',
+        officename: 'Branch',
+      },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status_bucket).toBe('cancelled');
+    expect(rows[0].cancel_reason).toBe('Customer refused');
+    expect(rows[0].cancelled_at?.toISOString()).toBe(new Date(edited).toISOString());
   });
 });

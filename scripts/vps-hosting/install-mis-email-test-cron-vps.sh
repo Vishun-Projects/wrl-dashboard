@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Install a TEST-only MIS email cron at 14:00 IST → Vishnu only.
-# Also syncs src/modules/mis-email so the VPS has the cli path the cron needs.
+# Uses .../current (release layout). Does NOT pin a SHA path.
 # Does NOT change / remove the production digest cron (*/15 Mon–Sat).
 #
 #   npm run mis-email:install-test-cron:vps
+#   RUN_NOW=0 npm run mis-email:install-test-cron:vps   # cron only, no immediate send
 #
 # Optional:
 #   MIS_EMAIL_TEST_TO=other@example.com
@@ -14,10 +15,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${ROOT}/.env.vps-setup"
 SSH_KEY="${SSH_KEY:-${HOME}/.ssh/id_ed25519}"
-INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-/opt/fast-close-app}"
+INSTALL_BASE="${MIS_EMAIL_INSTALL_ROOT:-/opt/fast-close-app}"
+INSTALL_BASE="${INSTALL_BASE%/current}"
 TEST_TO="${MIS_EMAIL_TEST_TO:-vishnu.vishwakarma@westernequipments.com}"
 CRON_HOUR="${MIS_EMAIL_TEST_CRON_HOUR:-14}"
 CRON_MIN="${MIS_EMAIL_TEST_CRON_MIN:-0}"
+# shellcheck disable=SC1091
+source "${ROOT}/scripts/vps-hosting/vps-detect-base.inc.sh"
 
 SSH_OPTS=(
   -o ServerAliveInterval=30
@@ -45,80 +49,61 @@ fi
 echo "==> Enter SSH key passphrase for ${SSH_KEY}"
 ssh-add "$SSH_KEY"
 
-detected_root=$(ssh "${SSH_OPTS[@]}" "$VPS_HOST" \
-  'find /opt -name "mis-email-digest.sh" -path "*/scripts/vps-hosting/mis-email-digest.sh" 2>/dev/null | head -n 1 | sed "s|/scripts/vps-hosting/mis-email-digest.sh||"' || true)
-if [[ -n "$detected_root" ]]; then
-  INSTALL_ROOT="$detected_root"
+detected=$(ssh "${SSH_OPTS[@]}" "$VPS_HOST" bash -s <<DETECT || true
+$(vps_ssh_detect_base_script "$INSTALL_BASE")
+DETECT
+)
+if [[ -n "$detected" ]]; then
+  INSTALL_BASE="$detected"
 fi
-echo "    host=${VPS_HOST}  root=${INSTALL_ROOT}"
+echo "    host=${VPS_HOST}  base=${INSTALL_BASE}"
 
-echo "==> Syncing package.json + src/modules + src/lib + src/sql + tsconfig (CLI must not need src/components)"
-ssh "${SSH_OPTS[@]}" "$VPS_HOST" \
-  "mkdir -p '${INSTALL_ROOT}/src/modules' '${INSTALL_ROOT}/src/lib' '${INSTALL_ROOT}/src/sql' '${INSTALL_ROOT}/scripts/vps-hosting' '${INSTALL_ROOT}/logs'"
+echo "==> Uploading test digest script into current (strip CRLF)"
+scp "${SSH_OPTS[@]}" \
+  "${ROOT}/scripts/vps-hosting/mis-email-test-digest.sh" \
+  "${ROOT}/scripts/vps-hosting/vps-cron-gate.sh" \
+  "${VPS_HOST}:/tmp/"
 
-if command -v rsync >/dev/null 2>&1; then
-  RSYNC_SSH="ssh ${SSH_OPTS[*]}"
-  rsync -az -e "$RSYNC_SSH" \
-    "${ROOT}/package.json" "${ROOT}/package-lock.json" "${ROOT}/tsconfig.json" \
-    "${VPS_HOST}:${INSTALL_ROOT}/"
-  rsync -az -e "$RSYNC_SSH" \
-    "${ROOT}/src/modules/" \
-    "${VPS_HOST}:${INSTALL_ROOT}/src/modules/"
-  rsync -az -e "$RSYNC_SSH" \
-    "${ROOT}/src/lib/" \
-    "${VPS_HOST}:${INSTALL_ROOT}/src/lib/"
-  rsync -az -e "$RSYNC_SSH" \
-    "${ROOT}/src/sql/" \
-    "${VPS_HOST}:${INSTALL_ROOT}/src/sql/"
-  rsync -az -e "$RSYNC_SSH" \
-    "${ROOT}/scripts/vps-hosting/mis-email-test-digest.sh" \
-    "${ROOT}/scripts/vps-hosting/mis-email-digest.sh" \
-    "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/"
-else
-  scp "${SSH_OPTS[@]}" \
-    "${ROOT}/package.json" "${ROOT}/package-lock.json" "${ROOT}/tsconfig.json" \
-    "${VPS_HOST}:${INSTALL_ROOT}/"
-  tar -C "${ROOT}" -czf - src/modules src/lib src/sql \
-    | ssh "${SSH_OPTS[@]}" "$VPS_HOST" "tar -xzf - -C '${INSTALL_ROOT}'"
-  scp "${SSH_OPTS[@]}" \
-    "${ROOT}/scripts/vps-hosting/mis-email-test-digest.sh" \
-    "${ROOT}/scripts/vps-hosting/mis-email-digest.sh" \
-    "${VPS_HOST}:${INSTALL_ROOT}/scripts/vps-hosting/"
-fi
-
-ssh "${SSH_OPTS[@]}" "$VPS_HOST" \
-  "chmod +x '${INSTALL_ROOT}/scripts/vps-hosting/mis-email-test-digest.sh' '${INSTALL_ROOT}/scripts/vps-hosting/mis-email-digest.sh'"
-
-echo "==> Installing TEST cron at ${CRON_HOUR}:${CRON_MIN} IST → ${TEST_TO}"
 ssh "${SSH_OPTS[@]}" "$VPS_HOST" bash -s <<REMOTE
 set -euo pipefail
-root='${INSTALL_ROOT}'
+base='${INSTALL_BASE}'
 test_to='${TEST_TO}'
 hour='${CRON_HOUR}'
 min='${CRON_MIN}'
-test -f "\$root/src/modules/mis-email/services/cli.ts"
-test -f "\$root/.env.mis-email"
-# Register barrel must stay services-only (no UI re-exports) so cron does not need src/components.
-! grep -q "export \* from './ui/" "\$root/src/modules/mis/register/index.ts"
-! grep -q "export \* from './components/" "\$root/src/modules/mis/index.ts"
 
-prod=\$(crontab -l 2>/dev/null | grep 'mis-email-digest.sh' | grep -v 'mis-email-test' | head -1 || true)
-if [[ -z "\$prod" ]]; then
-  prod="*/15 * * * 1-6 \${root}/scripts/vps-hosting/mis-email-digest.sh >> \${root}/logs/mis-email-cron.log 2>&1"
+if [[ -e "\${base}/current/scripts/vps-hosting/mis-email-digest.sh" ]]; then
+  code="\${base}/current"
 else
-  prod=\$(echo "\$prod" | sed -E 's/^([0-9]+) ([0-9]+) \* \* \*/\1 \2 * * 1-6/')
+  echo "ERROR: release layout missing at \${base}/current — run: npm run sync-worker:deploy:vps" >&2
+  exit 1
 fi
+log_dir="\${base}/shared/logs"
+mkdir -p "\$log_dir" "\$code/scripts/vps-hosting"
 
+# Strip Windows CRLF so bash does not see pipefail\\r
+sed 's/\r$//' /tmp/mis-email-test-digest.sh > "\$code/scripts/vps-hosting/mis-email-test-digest.sh"
+sed 's/\r$//' /tmp/vps-cron-gate.sh > "\$code/scripts/vps-hosting/vps-cron-gate.sh"
+chmod +x "\$code/scripts/vps-hosting/mis-email-test-digest.sh" \
+         "\$code/scripts/vps-hosting/vps-cron-gate.sh"
+rm -f /tmp/mis-email-test-digest.sh /tmp/vps-cron-gate.sh
+
+# Env lives in shared/ (symlink into current)
+if [[ ! -f "\$code/.env.mis-email" && -f "\${base}/shared/.env.mis-email" ]]; then
+  ln -sfn "\${base}/shared/.env.mis-email" "\$code/.env.mis-email"
+fi
+if [[ ! -f "\$code/.env.mis-email" ]]; then
+  echo "ERROR: missing .env.mis-email under current/shared" >&2
+  exit 1
+fi
+test -f "\$code/src/modules/mis-email/services/cli.ts"
+
+echo "==> Installing TEST cron at \${hour}:\${min} IST → \${test_to} (code=\$code)"
+# Keep existing prod + watchdog lines; only replace test line
 {
-  crontab -l 2>/dev/null \
-    | grep -v 'mis-email-digest.sh' \
-    | grep -v 'mis-email-test-digest.sh' \
-    | grep -v '^CRON_TZ=' \
-    || true
+  crontab -l 2>/dev/null | grep -v 'mis-email-test-digest.sh' | grep -v '^CRON_TZ=' || true
   echo "CRON_TZ=Asia/Kolkata"
-  echo "\$prod"
-  echo "\${min} \${hour} * * * MIS_EMAIL_TEST_TO=\${test_to} \${root}/scripts/vps-hosting/mis-email-test-digest.sh >> \${root}/logs/mis-email-test-cron.log 2>&1"
-} | crontab -
+  echo "\${min} \${hour} * * * MIS_EMAIL_TEST_TO=\${test_to} \${code}/scripts/vps-hosting/mis-email-test-digest.sh >> \${log_dir}/mis-email-test-cron.log 2>&1"
+} | awk 'NF && !seen[\$0]++' | crontab -
 
 echo "==> Crontab now:"
 crontab -l | grep -E 'CRON_TZ|mis-email' || true
@@ -127,17 +112,13 @@ date -Iseconds
 
 if [[ '${RUN_NOW:-1}' == '1' ]]; then
   echo "==> Running test digest NOW (does not wait for cron)…"
-  MIS_EMAIL_TEST_TO="\${test_to}" bash "\${root}/scripts/vps-hosting/mis-email-test-digest.sh" \
-    | tee -a "\${root}/logs/mis-email-test-cron.log"
+  MIS_EMAIL_TEST_TO="\${test_to}" MIS_EMAIL_INSTALL_ROOT="\$code" \
+    bash "\$code/scripts/vps-hosting/mis-email-test-digest.sh" \
+    | tee -a "\${log_dir}/mis-email-test-cron.log"
 fi
 REMOTE
 
 echo ""
-echo "Installed. Test mail goes only to ${TEST_TO} at ${CRON_HOUR}:$(printf '%02d' "$CRON_MIN") IST."
+echo "Installed. Test mail → ${TEST_TO} at ${CRON_HOUR}:$(printf '%02d' "$CRON_MIN") IST via current."
 echo "Production digest cron unchanged."
-if [[ "${RUN_NOW:-1}" == "1" ]]; then
-  echo "A send was also triggered immediately (RUN_NOW=1). Check inbox + log:"
-else
-  echo "No immediate send (RUN_NOW=0). Wait for cron, or check log after it fires:"
-fi
-echo "  ssh ${VPS_HOST} 'tail -n 80 ${INSTALL_ROOT}/logs/mis-email-test-cron.log'"
+echo "  ssh ${VPS_HOST} 'tail -n 80 ${INSTALL_BASE}/shared/logs/mis-email-test-cron.log'"

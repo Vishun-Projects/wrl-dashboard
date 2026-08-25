@@ -32,6 +32,8 @@ import { runArcpIncrementalSync } from '@/modules/arcp-claims/server/sync/increm
 import { runBackfillArcpBmApproved } from '@/modules/arcp-claims/server/sync/backfill-arcp-bm-approved';
 import { runArcpApprovalRescan } from '@/modules/arcp-claims/server/sync/approval-rescan';
 import { runTransactionEntryIncremental } from '@/lib/read-model/transaction-entry';
+import { runAthenaFailedCallsSync } from '@/lib/read-model/athena-reconciliation';
+import { runAttendanceDetailsSync } from '@/lib/read-model/attendance-details';
 
 const ENTITY = 'calls_latest_hot';
 
@@ -152,6 +154,42 @@ export async function runNightlyReconcile(): Promise<void> {
     } catch (err) {
       console.error(
         '[transaction-entry] Nightly failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
+  if (process.env.SYNC_ATHENA_RECONCILIATION_ENABLED !== 'false') {
+    try {
+      const athena = await runAthenaFailedCallsSync();
+      if (athena.ok) {
+        console.log(
+          `[athena-sync] Nightly complete — fetched ${athena.crmRowsFetched} CRM rows, ingested ${athena.newRawIngested} new`
+        );
+      } else {
+        console.error(`[athena-sync] Nightly sync failed: ${athena.errorMessage}`);
+      }
+    } catch (err) {
+      console.error(
+        '[athena-sync] Nightly failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
+  if (process.env.SYNC_ATTENDANCE_DETAILS_ENABLED !== 'false') {
+    try {
+      const attendance = await runAttendanceDetailsSync();
+      if (attendance.skipped) {
+        console.log(`[attendance] Nightly skipped — ${attendance.reason}`);
+      } else {
+        console.log(
+          `[attendance] Nightly complete — fetched ${attendance.fetched}, upserted ${attendance.upserted} (${attendance.dateFrom} .. ${attendance.dateTo})`
+        );
+      }
+    } catch (err) {
+      console.error(
+        '[attendance] Nightly failed:',
         err instanceof Error ? err.message : err
       );
     }

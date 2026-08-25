@@ -129,6 +129,14 @@ export const RBAC_PAGES: RbacPage[] = [
     group: 'Reports',
   },
   {
+    id: 'athena_reconciliation',
+    permission: 'page_athena_reconciliation',
+    path: '/report/athena-reconciliation',
+    label: 'Athena Reconciliation',
+    description: 'Failed Athena calls, CRM matching, and registration statistics',
+    group: 'Reports',
+  },
+  {
     id: 'admin_users',
     permission: 'manage_users',
     path: '/admin/users',
@@ -403,6 +411,10 @@ export function canAccessPath(
   }
 
   if (path === '/admin/sync' || path.startsWith('/admin/sync/')) {
+    return hasPermission(permissions, 'manage_users');
+  }
+
+  if (path === '/admin/attendance' || path.startsWith('/admin/attendance/')) {
     return hasPermission(permissions, 'manage_users');
   }
 

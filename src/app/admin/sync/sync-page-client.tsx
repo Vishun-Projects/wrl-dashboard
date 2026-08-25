@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { RefreshCw, Database, Activity, CheckCircle2, AlertTriangle, Clock, Mail } from 'lucide-react';
 import { PageShell, PageLoadingState } from '@/components/layout/PageShell';
@@ -246,15 +247,24 @@ export default function ReadModelSyncPage() {
       title="Read Model Sync"
       subtitle="Cached data backfill and sync progress"
       actions={
-        <button
-          type="button"
-          onClick={() => void load(true)}
-          disabled={refreshing}
-          className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-bg-canvas px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-bg-soft disabled:opacity-60"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/admin/attendance"
+            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-bg-canvas px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-bg-soft"
+          >
+            <Activity className="h-3.5 w-3.5" />
+            Attendance
+          </Link>
+          <button
+            type="button"
+            onClick={() => void load(true)}
+            disabled={refreshing}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-bg-canvas px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-bg-soft disabled:opacity-60"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       }
     >
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 md:p-6">

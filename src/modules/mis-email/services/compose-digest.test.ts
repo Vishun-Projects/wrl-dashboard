@@ -64,6 +64,7 @@ vi.mock('@/modules/mis-email/services/digest-cache', () => ({
   fetchDigestSummaryDataCached: (...args: unknown[]) => fetchDigestSummaryDataCached(...args),
   fetchDigestClientAccountSummaryCached: (...args: unknown[]) =>
     fetchDigestClientAccountSummaryCached(...args),
+  clearDigestSummaryCache: vi.fn(),
 }));
 
 vi.mock('@/modules/mis-email/services/fetch-digest-data', () => ({
@@ -198,7 +199,7 @@ describe('buildMisEmailPayload early exits', () => {
     expect(fetchDigestRegisterRows).not.toHaveBeenCalled();
   });
 
-  it('forPreview performs register check and loads trace for body but skips Excel builders', async () => {
+  it('forPreview uses summary for body and skips Excel builders and full/open trace', async () => {
     fetchDigestSummaryDataCached.mockResolvedValue({
       branchSummary: [],
       accountSummary: [],
@@ -206,17 +207,6 @@ describe('buildMisEmailPayload early exits', () => {
     });
     fetchDigestClientAccountSummaryCached.mockResolvedValue([]);
     fetchDigestRegisterRows.mockResolvedValue([{ id: 1 }]);
-    buildDigestTraceableExportPayload.mockResolvedValue({
-      regionalRows: [],
-      grand: { region: 'ALL', open_calls: 0 },
-      crmBranchSummary: [],
-      crmAccountSummary: [],
-      clientAccountSummary: [],
-      sources: {},
-      traceRows: [],
-      traceAlign: 'summary',
-      filterMeta: {},
-    });
 
     const result = await buildMisEmailPayload(
       {
@@ -238,7 +228,7 @@ describe('buildMisEmailPayload early exits', () => {
     expect(fetchDigestSummaryDataCached).toHaveBeenCalledOnce();
     expect(fetchDigestRegisterRows).toHaveBeenCalledOnce();
     expect(buildDigestAttachments).not.toHaveBeenCalled();
-    expect(buildDigestTraceableExportPayload).toHaveBeenCalledOnce();
+    expect(buildDigestTraceableExportPayload).not.toHaveBeenCalled();
   });
 
   it('does not filter excel data/trace payload by selected accounts but filters body keyAccountRows', async () => {
@@ -258,7 +248,7 @@ describe('buildMisEmailPayload early exits', () => {
     ]);
     buildDigestTraceableExportPayload.mockResolvedValue({
       regionalRows: [],
-      grand: { region: 'ALL', open_calls: 30 },
+      grand: { region: 'ALL', open_calls: 0 },
       crmBranchSummary: [],
       crmAccountSummary: [],
       clientAccountSummary: [],
@@ -403,7 +393,7 @@ describe('buildMisEmailPayload early exits', () => {
 
     // 3. Assert that the rest of the body (e.g. regionalPerformanceRows) shows overall/unfiltered ones
     // We expect the html/plaintext to contain regional/overall stats including all open calls (30 calls total)
-    expect(result.preview.plainText).toContain('EAST: total 40, solved 10, open 30');
+    expect(result.preview.plainText).toContain('EAST: total 40, solved 10, cancelled 0, open 30');
   });
 });
 

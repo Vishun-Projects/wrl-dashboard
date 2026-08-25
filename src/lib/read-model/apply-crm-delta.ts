@@ -13,6 +13,7 @@ import {
   fetchHotRowsByTrn,
   upsertHotRows,
 } from '@/lib/read-model/upsert-hot';
+import { syncCancelledFromCrmRows } from '@/lib/read-model/upsert-cancelled';
 import { updateSyncWatermarks } from '@/lib/read-model/lock';
 import type { HotRow } from '@/lib/read-model/types';
 import type { getSyncState } from '@/lib/read-model/lock';
@@ -78,6 +79,7 @@ export async function applyCrmRowsToHot(
 
     const upsertRows: HotRow[] = [];
     const deleteTrns: string[] = [];
+    const skippedStaleTrns = new Set<string>();
     let rowsSkippedStale = 0;
 
     for (const row of deduped) {
@@ -91,6 +93,7 @@ export async function applyCrmRowsToHot(
             upsertRows.push(hot);
           } else {
             rowsSkippedStale += 1;
+            skippedStaleTrns.add(trn);
           }
         } else if (existingByTrn.has(trn)) {
           deleteTrns.push(trn);
@@ -108,6 +111,13 @@ export async function applyCrmRowsToHot(
 
     const rowsUpserted = await upsertHotRows(client, upsertRows);
     const rowsDeleted = await deleteHotRowsByTrn(client, deleteTrns);
+    await syncCancelledFromCrmRows(
+      client,
+      deduped.filter((row) => {
+        const trn = String(row.vtrnno ?? row.UniqueCallNo ?? '').trim();
+        return !skippedStaleTrns.has(trn);
+      })
+    );
 
     const oldFactRows: HotRow[] = [];
     const newFactRows: HotRow[] = [];

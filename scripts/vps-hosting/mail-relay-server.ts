@@ -139,6 +139,7 @@ const server = createServer(async (req, res) => {
       const body = (await readJson(req)) as {
         to?: string | string[];
         cc?: string | string[];
+        envelopeTo?: string;
         subject?: string;
         html?: string;
         text?: string;
@@ -151,6 +152,7 @@ const server = createServer(async (req, res) => {
 
       const to = normalizeMailAddresses(body.to);
       const cc = normalizeMailAddresses(body.cc);
+      const envelopeTo = body.envelopeTo?.trim() || '';
       if (to.length === 0 || !body.subject?.trim()) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'to and subject are required' }));
@@ -163,6 +165,9 @@ const server = createServer(async (req, res) => {
         from: smtp.from,
         to,
         ...(cc.length > 0 ? { cc } : {}),
+        ...(envelopeTo
+          ? { envelope: { from: smtp.from, to: envelopeTo } }
+          : {}),
         subject: body.subject.trim(),
         text: body.text ?? '',
         html: body.html ?? body.text ?? '',

@@ -12,6 +12,7 @@ import type { HotRow, StatusBucket } from '@/lib/read-model/types';
 import { parseCrmDate } from '@/lib/read-model/dates';
 import { registerHotRetentionStart } from '@/lib/read-model/hot-window';
 import { isTruthyCrmRowFlag, resolveTrhcallsBmApprovedAt } from '@/sql/trhcalls/bm-approval';
+import { isRealCancelReasonCode } from '@/lib/call/status/cancel';
 
 const STATUS_LABEL_BY_BUCKET: Record<Exclude<RegisterSummaryBucket, 'transferred'>, string> = {
   openUnallocated: 'Open Unallocated',
@@ -74,8 +75,8 @@ export function isHotEligibleRow(row: Record<string, unknown>): boolean {
   const ytdStart = new Date(`${registerHotRetentionStart()}T00:00:00`);
   if (loggedAt >= ytdStart) return true;
 
-  // Pre-YTD: only still-open pipeline rows (open-old exceptions outside calendar retention).
-  return isOpenPipelineRow(row);
+  // Pre-YTD: open-old pipeline, or real cancels (Cancelled At is by editedon, not call date).
+  return isOpenPipelineRow(row) || isRealCancelReasonCode(row.ncancelreason);
 }
 
 export function transformCrmRowToHot(row: Record<string, unknown>): HotRow | null {
@@ -175,6 +176,14 @@ export function transformCrmRowToHot(row: Record<string, unknown>): HotRow | nul
           ? null
           : false,
     ncancelreason: enriched.ncancelreason != null ? Number(enriched.ncancelreason) : null,
+    cancel_reason:
+      statusBucket === 'cancelled' || isRealCancelReasonCode(enriched.ncancelreason)
+        ? String(enriched.cancel_reason ?? '').trim() || null
+        : null,
+    cancelled_at:
+      statusBucket === 'cancelled' || isRealCancelReasonCode(enriched.ncancelreason)
+        ? (editedAt ?? addedAt ?? loggedAt)
+        : null,
     lat: lat != null && !Number.isNaN(lat) ? lat : null,
     lng: lng != null && !Number.isNaN(lng) ? lng : null,
   };

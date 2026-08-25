@@ -32,7 +32,7 @@ export function getRegisterCellClassName(key: RegisterTableColumnKey): string {
     return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-900';
   if (key === 'vpersoncalling')
     return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-600';
-  if (key === 'bm_approved_date') {
+  if (key === 'bm_approved_date' || key === 'cancelled_date' || key === 'cancel_reason') {
     return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px] text-slate-600';
   }
   if (key === 'vsolveremarks') return 'whitespace-nowrap border-r border-slate-50 px-3 py-2 text-[11px]';
@@ -198,11 +198,17 @@ export function renderRegisterCell(
     }
     case 'callsolveddate':
       return formatDate(row.callsolveddate);
+    case 'cancelled_date':
+      return formatDate(row.cancelled_date ?? row.cancelled_at);
+    case 'cancel_reason':
+      return row.cancel_reason != null && String(row.cancel_reason).trim() !== ''
+        ? String(row.cancel_reason)
+        : '—';
     case 'bm_approved_date':
       return row.bm_approved_date ? String(row.bm_approved_date).replace(/\./g, '/') : '—';
     case 'vsolveremarks': {
       const rejectionRemark = row.vcomment || null;
-      const solveRemark = row.vsolveremarks || row.cancel_reason || null;
+      const solveRemark = row.vsolveremarks || null;
       if (rejectionRemark) {
         return <span className="font-medium text-rose-600">⚑ {String(rejectionRemark)}</span>;
       }

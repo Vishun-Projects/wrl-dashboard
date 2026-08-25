@@ -49,6 +49,104 @@ export function buildMisEmailRegionalPerformanceRows(
   return buildMisEmailBdMisRegionalPayload(summary, clientAccountSummary).performanceRows;
 }
 
+type OpenAgingAgg = {
+  open_calls: number;
+  age_2: number;
+  age_3: number;
+  age_7: number;
+  age_15: number;
+  engineers: Set<string>;
+};
+
+function emptyOpenAging(): OpenAgingAgg {
+  return { open_calls: 0, age_2: 0, age_3: 0, age_7: 0, age_15: 0, engineers: new Set() };
+}
+
+function accumulateOpenAging(agg: OpenAgingAgg, row: BdMisTraceRow): void {
+  if (row.counts_toward !== 'open') return;
+  agg.open_calls += 1;
+  const aging = row.aging;
+  if (aging === '<2 days') agg.age_2 += 1;
+  else if (aging === '>3 days' || aging === '3-7 days') agg.age_3 += 1;
+  else if (aging === '>7 days' || aging === '8-15 days') agg.age_7 += 1;
+  else if (aging === '>15 days') agg.age_15 += 1;
+  const technician = row.technician_name;
+  if (technician && technician !== '—' && technician !== '-') {
+    const techLower = technician.toLowerCase();
+    if (techLower !== 'unassigned') agg.engineers.add(techLower);
+  }
+}
+
+/**
+ * Body open/aging must match the open-calls Excel for the same as-on window.
+ * Keep solved/cancelled from summary; replace open columns from Excel row set;
+ * rebalance total_calls = solved + cancelled + open.
+ */
+export function overlayRegionalOpenFromExcelRows(
+  summaryRegional: RegionalPerformanceRow[],
+  traceRows: BdMisTraceRow[]
+): RegionalPerformanceRow[] {
+  const byRegion = new Map<string, OpenAgingAgg>();
+  for (const row of filterTraceRowsForOpenExport(traceRows)) {
+    if (row.counts_toward !== 'open') continue;
+    const region = String(row.region ?? 'OTHER').toUpperCase();
+    let agg = byRegion.get(region);
+    if (!agg) {
+      agg = emptyOpenAging();
+      byRegion.set(region, agg);
+    }
+    accumulateOpenAging(agg, row);
+  }
+
+  return summaryRegional.map((row) => {
+    const open = byRegion.get(String(row.region ?? '').toUpperCase()) ?? emptyOpenAging();
+    return {
+      ...row,
+      open_calls: open.open_calls,
+      age_2: open.age_2,
+      age_3: open.age_3,
+      age_7: open.age_7,
+      age_15: open.age_15,
+      active_eng: open.engineers.size,
+      total_calls: row.solved_calls + row.cancelled_calls + open.open_calls,
+    };
+  });
+}
+
+export function overlayBranchOpenFromExcelRows(
+  summaryBranch: BranchPerformanceRow[],
+  traceRows: BdMisTraceRow[]
+): BranchPerformanceRow[] {
+  const byKey = new Map<string, OpenAgingAgg>();
+  for (const row of filterTraceRowsForOpenExport(traceRows)) {
+    if (row.counts_toward !== 'open') continue;
+    const region = String(row.region ?? 'OTHER').toUpperCase();
+    const branch = row.plant?.trim() || '—';
+    const key = `${region}::${branch}`;
+    let agg = byKey.get(key);
+    if (!agg) {
+      agg = emptyOpenAging();
+      byKey.set(key, agg);
+    }
+    accumulateOpenAging(agg, row);
+  }
+
+  return summaryBranch.map((row) => {
+    const key = `${String(row.region ?? '').toUpperCase()}::${row.branch}`;
+    const open = byKey.get(key) ?? emptyOpenAging();
+    return {
+      ...row,
+      open_calls: open.open_calls,
+      age_2: open.age_2,
+      age_3: open.age_3,
+      age_7: open.age_7,
+      age_15: open.age_15,
+      active_eng: open.engineers.size,
+      total_calls: row.solved_calls + row.cancelled_calls + open.open_calls,
+    };
+  });
+}
+
 export function buildMisEmailBdMisRegionalPayload(
   summary: SummaryDashboard,
   clientAccountSummary: AccountSummaryRow[] = []
@@ -96,8 +194,26 @@ export function reconcileMisEmailOpenCounts(
 }
 
 /**
+ * Internal summary↔trace open must match exactly after hot is repaired.
+ * Day-over-day report drift is separate; this gate only catches same-mail inconsistency.
+ */
+export function assertMisEmailOpenParity(
+  reconciliation: MisEmailOpenReconciliation,
+  opts?: { maxAbsDelta?: number; context?: string }
+): void {
+  const maxAbsDelta = Math.max(0, opts?.maxAbsDelta ?? 0);
+  if (Math.abs(reconciliation.delta) <= maxAbsDelta) return;
+  const where = opts?.context ? ` (${opts.context})` : '';
+  throw new Error(
+    `MIS open-count mismatch${where}: summary open=${reconciliation.summaryOpen} ` +
+      `trace open=${reconciliation.traceOpenIncluded} delta=${reconciliation.delta}. ` +
+      `Refuse send until calls_latest_hot open/cancel drift is repaired and both bases use the same snapshot.`
+  );
+}
+
+/**
  * Contract: regional/branch email body and open-calls Excel share one call-level basis.
- * Also locks body Total (solved+open) to summary-aligned trace detail row count.
+ * Body Total = solved + open + cancelled; detail row count matches that total.
  */
 export function countMisEmailOpenParity(traceRows: BdMisTraceRow[]): {
   regionalBodyOpen: number;
@@ -115,12 +231,14 @@ export function countMisEmailOpenParity(traceRows: BdMisTraceRow[]): {
   const excelOpenRows = filterTraceRowsForOpenExport(traceRows).length;
   const regionalBodyOpen = regional.reduce((sum, row) => sum + row.open_calls, 0);
   const branchBodyOpen = branch.reduce((sum, row) => sum + row.open_calls, 0);
+  const bodyCalls = (row: { solved_calls: number; open_calls: number; cancelled_calls: number }) =>
+    row.solved_calls + row.open_calls + row.cancelled_calls;
   return {
     regionalBodyOpen,
     branchBodyOpen,
     excelOpenRows,
-    regionalBodyCalls: regional.reduce((sum, row) => sum + row.solved_calls + row.open_calls, 0),
-    branchBodyCalls: branch.reduce((sum, row) => sum + row.solved_calls + row.open_calls, 0),
+    regionalBodyCalls: regional.reduce((sum, row) => sum + bodyCalls(row), 0),
+    branchBodyCalls: branch.reduce((sum, row) => sum + bodyCalls(row), 0),
     detailRowCount: detail.length,
     detailOpenCount: countTraceOpenCalls(detail),
     detailSolvedCount: detail.filter((row) => row.counts_toward === 'solved').length,
@@ -150,6 +268,8 @@ function accumulateTracePerformanceMetrics<
     else if (aging === '>3 days' || aging === '3-7 days') agg.age_3 += 1;
     else if (aging === '>7 days' || aging === '8-15 days') agg.age_7 += 1;
     else if (aging === '>15 days') agg.age_15 += 1;
+  } else if (row.counts_toward === 'cancelled') {
+    agg.cancelled_calls += 1;
   }
 
   const technician = row.technician_name;

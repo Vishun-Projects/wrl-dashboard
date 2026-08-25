@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Account theme (`data-theme`), not prefers-color-scheme */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 /* Leaflet needs explicit height inside flex/overflow panels (Location Audit, Distribution). */
 .leaflet-container {
   width: 100%;

@@ -40,12 +40,14 @@ export const REGISTER_HOT_COLUMNS = [
   'h.branch_headcount',
   'h.logged_at',
   'h.solved_at',
+  'h.cancelled_at',
   'h.bm_approved_at',
   'h.arcp_bm_approved_at',
   'h.bapproval',
   'h.bsolved',
   'h.bfastclose',
   'h.ncancelreason',
+  'h.cancel_reason',
   'h.lat',
   'h.lng',
 ].join(',\n    ');
@@ -72,6 +74,7 @@ export const REGISTER_EXPORT_HOT_COLUMNS = [
   'h.status_label',
   'h.logged_at',
   'h.solved_at',
+  'h.cancelled_at',
   'h.bm_approved_at',
   'h.arcp_bm_approved_at',
   'h.solve_remarks',
@@ -81,6 +84,7 @@ export const REGISTER_EXPORT_HOT_COLUMNS = [
   'h.bsolved',
   'h.bfastclose',
   'h.ncancelreason',
+  'h.cancel_reason',
 ].join(',\n    ');
 
 /** Minimal columns for distribution idle-assignee / audit scope computations. */

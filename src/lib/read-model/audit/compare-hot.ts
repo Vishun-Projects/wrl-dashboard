@@ -263,6 +263,13 @@ export function normalizeHotRowFromDb(row: Record<string, unknown>): HotRow {
           ? row.arcp_bm_approved_at
           : new Date(String(row.arcp_bm_approved_at)),
     ncancelreason: normalizeInteger(row.ncancelreason),
+    cancel_reason: normalizeString(row.cancel_reason),
+    cancelled_at:
+      row.cancelled_at == null
+        ? null
+        : row.cancelled_at instanceof Date
+          ? row.cancelled_at
+          : new Date(String(row.cancelled_at)),
     lat: row.lat == null ? null : Number(row.lat),
     lng: row.lng == null ? null : Number(row.lng),
   };

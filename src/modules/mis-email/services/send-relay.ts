@@ -25,6 +25,8 @@ type PreparedDigestEmailAttachment = {
 type PreparedDigestEmailPayload = {
   to: string | string[];
   cc?: string | string[];
+  /** Single SMTP RCPT TO; headers still use full to/cc. */
+  envelopeTo?: string;
   subject: string;
   html: string;
   text: string;
@@ -49,11 +51,17 @@ export async function sendPreparedMisEmailViaVpsRelay(
     : Array.isArray(payload.cc)
       ? payload.cc.join(', ')
       : payload.cc;
+  const envelopeTo = payload.envelopeTo?.trim() || undefined;
 
   try {
     const result = await relayPostJson<{ error?: string; messageId?: string }>(
       PREPARED_DIGEST_PATH,
-      { ...payload, to, ...(cc !== undefined ? { cc } : {}) },
+      {
+        ...payload,
+        to,
+        ...(cc !== undefined ? { cc } : {}),
+        ...(envelopeTo ? { envelopeTo } : {}),
+      },
       relaySecret
     );
     return { messageId: String(result.data.messageId || '') };

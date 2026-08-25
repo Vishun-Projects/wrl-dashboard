@@ -1,0 +1,67 @@
+name: Change log notify
+
+# On every push to main: append auto change-log + email risks / overlooked.
+# Secrets (Settings → Secrets and variables → Actions):
+#   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
+#   CHANGELOG_MAIL_TO (optional; default vishnu.vishwakarma@westernequipments.com)
+#   VERCEL_TOKEN (optional; checks deploy status for the SHA)
+#   VERCEL_ORG_ID, VERCEL_PROJECT_ID (optional; else read from .vercel/project.json)
+
+on:
+  push:
+    branches: [main, master]
+
+concurrency:
+  group: change-log-notify-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  notify:
+    if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install nodemailer only
+        run: npm install --no-save nodemailer@^9.0.1
+
+      - name: Notify push change log
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+          CHANGELOG_MAIL_TO: ${{ secrets.CHANGELOG_MAIL_TO }}
+          CHANGELOG_MAIL_ALWAYS: ${{ vars.CHANGELOG_MAIL_ALWAYS }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          node scripts/quality/notify-push-change-log.mjs \
+            --before "${{ github.event.before }}" \
+            --after "${{ github.sha }}"
+
+      - name: Commit auto change-log artifacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add artifacts/change-log-auto.md artifacts/change-log-auto.csv || true
+          if git diff --staged --quiet; then
+            echo "No log file changes"
+            exit 0
+          fi
+          git commit -m "chore: append push change-log [skip ci]"
+          git push

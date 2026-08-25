@@ -18,6 +18,8 @@ export type SummaryQueryParams = {
   callTypes?: string[];
   assignedOffices?: string[];
   isHod?: boolean;
+  /** Optional hot status_bucket filter (e.g. open-only digest export). */
+  statusBuckets?: string[];
 };
 
 function yearStart(): string {

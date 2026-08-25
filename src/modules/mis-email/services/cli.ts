@@ -11,6 +11,7 @@ import {
   runMisEmailDigest,
   runMisEmailTestBatch,
 } from '@/modules/mis-email/services/run-digest';
+import { runNightlyYtdCallsExport } from '@/modules/mis-email/services/nightly-ytd-export';
 import { listMisEmailRoutingRules } from '@/modules/mis-email/services/routing-rules';
 
 async function main(): Promise<void> {
@@ -40,6 +41,16 @@ async function main(): Promise<void> {
         break;
       }
 
+      case 'nightly-ytd-export': {
+        const dryRun = process.argv.includes('--dry-run');
+        const toArg = process.argv.find((a) => a.startsWith('--to='))?.slice('--to='.length);
+        const result = await runNightlyYtdCallsExport({ to: toArg, dryRun });
+        console.log(
+          `[mis-email] Nightly YTD export complete — ${result.dateRange.startDate}→${result.dateRange.endDate} · rows=${result.summary.exportRows} · messageId=${result.messageId}`
+        );
+        break;
+      }
+
       case 'preview': {
         console.log('\n========================================');
         console.log('       MIS EMAIL DIGEST RECIPIENTS');
@@ -66,10 +77,10 @@ async function main(): Promise<void> {
             console.log(`Role: ${recipient.role} `);
             console.log(`User ID: ${recipient.id} `);
             console.log(
-              `To: ${recipient.mis_email_preferences?.to?.join(', ') || recipient.email} `
+              `To: ${recipient.mis_email_preferences?.toEmails?.join(', ') || recipient.email} `
             );
             console.log(
-              `CC: ${recipient.mis_email_preferences?.cc?.join(', ') || '(none)'} `
+              `CC: ${recipient.mis_email_preferences?.ccEmails?.join(', ') || '(none)'} `
             );
             console.log('----------------------------------------');
           }
@@ -226,10 +237,64 @@ async function main(): Promise<void> {
         break;
       }
 
+      case 'reconcile-subcontractor': {
+        const fileArg = process.argv
+          .find((a) => a.startsWith('--file='))
+          ?.slice('--file='.length);
+
+        const outputArg = process.argv
+          .find((a) => a.startsWith('--output='))
+          ?.slice('--output='.length);
+
+        if (!fileArg) {
+          throw new Error('--file=<path> is required');
+        }
+
+        const { runSubcontractorReconciliation } = await import(
+          '@/modules/subcontractor-stock/services/reconcile-runner'
+        );
+
+        const result = await runSubcontractorReconciliation({
+          filePath: fileArg,
+          outputPath: outputArg,
+        });
+
+        console.log(`\nReconciliation completed for plants: ${result.plantCodes.join(', ')}`);
+        console.log(`Total Reconciled Records: ${result.summary.totalRecords}`);
+        console.log(`Perfect Matches: ${result.summary.matches}`);
+        console.log(`Discrepancies: ${result.summary.discrepancies}`);
+        console.log(`  - Items only in SAP: ${result.summary.sapOnly}`);
+        console.log(`  - Items only in CRM: ${result.summary.crmOnly}`);
+
+        if (result.excelPath) {
+          console.log(`Excel report saved to: ${result.excelPath}`);
+        }
+
+        console.log('\n--- SAMPLE RECONCILIATION (First 30 Rows) ---');
+        console.table(
+          result.rows.slice(0, 30).map((r) => ({
+            Plant: r.plant,
+            Vendor: r.vendor,
+            'Vendor Name': r.vendorName.substring(0, 20),
+            Material: r.material,
+            Description: r.description.substring(0, 25),
+            Group: r.group,
+            UOM: r.uom,
+            'SAP Qty': r.sapQty,
+            'CRM Qty': r.crmQty,
+            Difference: r.difference,
+          }))
+        );
+
+        break;
+      }
+
       default:
         console.log(`Usage:
 
 npx tsx src / modules / mis - email / services / cli.ts digest
+
+npx tsx src / modules / mis - email / services / cli.ts nightly-ytd-export [--to=email] [--dry-run]
 
 npx tsx src / modules / mis - email / services / cli.ts preview
 
@@ -237,6 +302,8 @@ npx tsx src / modules / mis - email / services / cli.ts test[--user=][--to=a@x.c
 
 npx tsx src / modules / mis - email / services / cli.ts send - user
   (MIS_EMAIL_SEND_PAYLOAD = base64 json)
+
+npx tsx src / modules / mis - email / services / cli.ts reconcile-subcontractor --file=<sap_html_path> [--output=<excel_out_path>]
 
 Environment:
 SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_FROM

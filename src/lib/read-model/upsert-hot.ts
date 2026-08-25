@@ -1,5 +1,10 @@
 import type pg from 'pg';
 import type { HotRow } from '@/lib/read-model/types';
+import {
+  cancelledAtFromHot,
+  isCancelledHotRow,
+  upsertCancelledFromHotRows,
+} from '@/lib/read-model/upsert-cancelled';
 
 const HOT_COLUMNS = [
   'ncode',
@@ -44,9 +49,15 @@ const HOT_COLUMNS = [
   'bm_approved_at',
   'arcp_bm_approved_at',
   'ncancelreason',
+  'cancel_reason',
+  'cancelled_at',
   'lat',
   'lng',
 ] as const;
+
+function cancelledAtForUpsert(row: HotRow): Date | null {
+  return isCancelledHotRow(row) ? cancelledAtFromHot(row) : null;
+}
 
 function hotRowToValues(row: HotRow): unknown[] {
   return [
@@ -92,20 +103,29 @@ function hotRowToValues(row: HotRow): unknown[] {
     row.bm_approved_at,
     row.arcp_bm_approved_at,
     row.ncancelreason,
+    row.cancel_reason,
+    row.cancelled_at ?? cancelledAtForUpsert(row),
     row.lat,
     row.lng,
   ];
 }
 
-/** Incremental CRM rows often omit BM columns — COALESCE so upserts don't wipe existing approval. */
 const PRESERVE_ON_NULL_UPDATE = new Set(['bapproval', 'bm_approved_at', 'arcp_bm_approved_at']);
 
+/** Keep first cancel stamp; clear when row is no longer cancelled. */
 const UPDATE_SET = HOT_COLUMNS.filter((c) => c !== 'vtrnno')
-  .map((c) =>
-    PRESERVE_ON_NULL_UPDATE.has(c)
-      ? `${c} = COALESCE(EXCLUDED.${c}, calls_latest_hot.${c})`
-      : `${c} = EXCLUDED.${c}`
-  )
+  .map((c) => {
+    if (PRESERVE_ON_NULL_UPDATE.has(c)) {
+      return `${c} = COALESCE(EXCLUDED.${c}, calls_latest_hot.${c})`;
+    }
+    if (c === 'cancelled_at') {
+      return `${c} = CASE
+        WHEN EXCLUDED.cancelled_at IS NULL THEN NULL
+        ELSE COALESCE(calls_latest_hot.cancelled_at, EXCLUDED.cancelled_at)
+      END`;
+    }
+    return `${c} = EXCLUDED.${c}`;
+  })
   .concat('synced_at = now()')
   .join(', ');
 
@@ -142,6 +162,7 @@ export async function upsertHotRows(
     upserted += batch.length;
   }
 
+  await upsertCancelledFromHotRows(client, rows);
   return upserted;
 }
 

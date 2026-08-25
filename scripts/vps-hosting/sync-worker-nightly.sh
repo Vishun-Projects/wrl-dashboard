@@ -40,6 +40,8 @@ echo "tech_solved -> closed/cancelled refresh"
 npm run sync-worker:reconcile-tech-solved -- --apply
 echo "Full YTD open/assigned reconcile (transferred + cancelled orphans)"
 npm run sync-worker:reconcile-ytd-open -- --apply
+echo "Open→cancel drift repair (all open/assigned Breakdown vs live CRM)"
+npm run sync-worker:reconcile-open-cancel || echo "WARN: open-cancel reconcile failed (non-fatal)"
 echo "Major/minor reconcile (open pipeline + recent fault edits)"
 npm run sync-worker:reconcile-major
 echo "Sample hot vs CRM mismatch check"
@@ -56,4 +58,12 @@ if [[ -z "${WCO_BACKFILL_FROM:-}" ]]; then
 fi
 echo "WCO backfill ${WCO_FROM} .. ${TODAY}"
 npm run sync-worker:backfill-wco -- --from "${WCO_FROM}" --to "${TODAY}" || echo "WARN: WCO backfill failed (non-fatal)"
+echo "Athena failed calls incremental sync + reconcile"
+npm run sync-worker:athena-sync || echo "WARN: Athena sync failed (non-fatal)"
+echo "Attendance details (uv_rptattandenceDetails_New2) watermark + 2d overlap"
+if pgrep -f 'attendance-details/run.ts' >/dev/null 2>&1; then
+  echo "SKIP attendance — backfill already running (do not start a second CRM pull)"
+else
+  npm run sync-worker:attendance-sync || echo "WARN: Attendance sync failed (non-fatal)"
+fi
 echo "=== sync-worker-nightly done $(date -Iseconds) ==="

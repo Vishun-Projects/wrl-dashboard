@@ -1,25 +1,40 @@
 #!/usr/bin/env bash
 # Install MIS email digest cron — every 15 min Mon–Sat IST on VPS (no Sunday).
-# Send times come from portal prefs/routing; this runner only polls the window.
+# Paths use .../current so releases flip without reinstalling cron.
 #   npm run mis-email:install-cron:vps
-#   bash scripts/vps-hosting/install-mis-email-cron.sh --local   # on the VPS itself
+#   bash scripts/vps-hosting/install-mis-email-cron.sh --local
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${ROOT}/.env.vps-setup"
-INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-/opt/fast-close-app}"
-# Every 15 min Asia/Kolkata Mon–Sat. Cron DOW 1-6 = Mon–Sat.
-CRON_LINE="*/15 * * * 1-6 ${INSTALL_ROOT}/scripts/vps-hosting/mis-email-digest.sh >> ${INSTALL_ROOT}/logs/mis-email-cron.log 2>&1"
+INSTALL_BASE="${MIS_EMAIL_INSTALL_ROOT:-/opt/fast-close-app}"
+INSTALL_BASE="${INSTALL_BASE%/current}"
+# shellcheck disable=SC1091
+source "${ROOT}/scripts/vps-hosting/vps-detect-base.inc.sh"
+
+resolve_code_root() {
+  local base="${1:?}"
+  if [[ -e "${base}/current/scripts/vps-hosting/mis-email-digest.sh" ]]; then
+    echo "${base}/current"
+  else
+    echo "$base"
+  fi
+}
 
 install_cron() {
-  local root="${1}"
-  local line="*/15 * * * 1-6 ${root}/scripts/vps-hosting/mis-email-digest.sh >> ${root}/logs/mis-email-cron.log 2>&1"
+  local base="${1}"
+  local code
+  code="$(resolve_code_root "$base")"
+  local log_dir="${base}/shared/logs"
+  [[ -d "$log_dir" ]] || log_dir="${code}/logs"
+  mkdir -p "$log_dir"
+  local line="*/15 * * * 1-6 ${code}/scripts/vps-hosting/mis-email-digest.sh >> ${log_dir}/mis-email-cron.log 2>&1"
   (
     crontab -l 2>/dev/null | grep -v 'mis-email-digest.sh' | grep -v '^CRON_TZ=' || true
     echo "CRON_TZ=Asia/Kolkata"
     echo "$line"
   ) | crontab -
-  echo "==> Installed MIS email cron (every 15 min Mon–Sat IST; schedule from portal)"
+  echo "==> Installed MIS email cron (every 15 min Mon–Sat IST) code=${code}"
   crontab -l | grep -E 'CRON_TZ|mis-email' || true
 }
 
@@ -36,16 +51,32 @@ fi
 source "$ENV_FILE"
 VPS_HOST="${VPS_HOST:?Set VPS_HOST in .env.vps-setup}"
 
-ssh "$VPS_HOST" "INSTALL_ROOT='${INSTALL_ROOT}' bash -s" <<'REMOTE'
+detected=$(ssh "$VPS_HOST" bash -s <<DETECT || true
+$(vps_ssh_detect_base_script "$INSTALL_BASE")
+DETECT
+)
+if [[ -n "$detected" ]]; then
+  INSTALL_BASE="$detected"
+fi
+echo "==> base=${INSTALL_BASE}"
+
+ssh "$VPS_HOST" "INSTALL_BASE='${INSTALL_BASE}' bash -s" <<'REMOTE'
 set -euo pipefail
-detected_root=$(find /opt -name "mis-email-digest.sh" -path "*/scripts/vps-hosting/mis-email-digest.sh" 2>/dev/null | head -n 1 | sed 's|/scripts/vps-hosting/mis-email-digest.sh||')
-root="${detected_root:-${INSTALL_ROOT:-/opt/fast-close-app}}"
-mkdir -p "${root}/logs"
+base="${INSTALL_BASE:?}"
+base="${base%/current}"
+if [[ -e "${base}/current/scripts/vps-hosting/mis-email-digest.sh" ]]; then
+  code="${base}/current"
+else
+  code="$base"
+fi
+log_dir="${base}/shared/logs"
+[[ -d "$log_dir" ]] || log_dir="${code}/logs"
+mkdir -p "$log_dir"
 (
   crontab -l 2>/dev/null | grep -v 'mis-email-digest.sh' | grep -v '^CRON_TZ=' || true
   echo "CRON_TZ=Asia/Kolkata"
-  echo "*/15 * * * 1-6 ${root}/scripts/vps-hosting/mis-email-digest.sh >> ${root}/logs/mis-email-cron.log 2>&1"
+  echo "*/15 * * * 1-6 ${code}/scripts/vps-hosting/mis-email-digest.sh >> ${log_dir}/mis-email-cron.log 2>&1"
 ) | crontab -
-echo "==> Installed MIS email cron (every 15 min Mon–Sat IST; schedule from portal) at root: ${root}"
+echo "==> Installed MIS email cron at code=${code}"
 crontab -l | grep -E 'CRON_TZ|mis-email' || true
 REMOTE

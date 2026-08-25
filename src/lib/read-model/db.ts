@@ -151,6 +151,18 @@ export function loadEnv(): void {
     return;
   }
 
+  dotenv.config({ path: path.join(root, '.env.local'), ...opts });
+
+  let afterLocal = process.env.DATABASE_URL?.replace(/^["']|["']$/g, '') ?? '';
+  if (afterLocal.startsWith('prisma+postgres://')) {
+    delete process.env.DATABASE_URL;
+    afterLocal = '';
+  }
+  if (afterLocal) {
+    mergeMisEmailEnv();
+    return;
+  }
+
   dotenv.config({ path: path.join(root, '.env.sync-worker'), ...opts });
 
   let afterSync = process.env.DATABASE_URL?.replace(/^["']|["']$/g, '') ?? '';
@@ -174,7 +186,6 @@ export function loadEnv(): void {
     return;
   }
 
-  dotenv.config({ path: path.join(root, '.env.local'), ...opts });
   dotenv.config({ path: path.join(root, '.env'), ...opts });
 }
 

@@ -459,7 +459,7 @@ function resolveTraceRowDetailRows(payload: BdMisTraceableExportPayload): BdMisT
 function addTraceRowDetailSheet(
   workbook: ExcelJS.Workbook,
   traceRows: BdMisTraceRow[],
-  opts?: { statusLabel?: string }
+  opts?: { statusLabel?: string | ((row: BdMisTraceRow) => string) }
 ): void {
   const exportRows = traceRows;
   const EXCEL_MAX_DATA_ROWS = 1_048_575;
@@ -476,6 +476,10 @@ function addTraceRowDetailSheet(
     applySummaryHeaderStyle(header);
 
     for (const row of chunk) {
+      const status =
+        typeof opts?.statusLabel === 'function'
+          ? opts.statusLabel(row)
+          : (opts?.statusLabel ?? row.call_status);
       detail.addRow([
         row.region.replace(/\s+ZONE$/i, ''),
         row.plant,
@@ -487,7 +491,7 @@ function addTraceRowDetailSheet(
         row.client,
         row.wco,
         row.repair_done,
-        opts?.statusLabel ?? row.call_status,
+        status,
         row.aging,
         row.file_name,
         row.contribution_step,
@@ -538,14 +542,16 @@ export async function buildBdMisTraceableWorkbook(
   return workbook;
 }
 
-/** Open-calls trace workbook: same row detail format, only included open rows. */
+/** Open-calls workbook: included open (Unsolved) + cancelled (real status). */
 export async function buildBdMisOpenCallsWorkbook(
   payload: BdMisTraceableExportPayload
 ): Promise<ExcelJS.Workbook> {
   const ExcelJSRuntime = (await import('exceljs')).default;
   const workbook = new ExcelJSRuntime.Workbook();
-  addTraceRowDetailSheet(workbook, filterTraceRowsForOpenExport(payload.traceRows), {
-    statusLabel: 'Unsolved',
+  const rows = filterTraceRowsForOpenExport(payload.traceRows);
+  addTraceRowDetailSheet(workbook, rows, {
+    statusLabel: (row) =>
+      row.counts_toward === 'cancelled' ? row.call_status || 'Cancelled' : 'Unsolved',
   });
   autoSizeWorkbookColumns(workbook, { skipSheetNamePattern: /^Row Detail/ });
   return workbook;

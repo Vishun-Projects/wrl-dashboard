@@ -11,6 +11,8 @@ export type ClientAggregateParams = {
   agingAsOf?: string | null;
   /** BD MIS Excel: count every row in the latest Coke/Cadbury snapshot batch (no logged_at filter). */
   bdMisSnapshotMode?: boolean;
+  /** Optional status_bucket filter (e.g. open-only digest export). */
+  statusBuckets?: StatusBucket[] | null;
 };
 
 type DbRow = {
@@ -250,17 +252,27 @@ function buildDedupedRowsSql(
   bdMisSnapshotMode: boolean,
   opts?: { includeSourceCode?: boolean }
 ): string {
+  const clientDateExpr = `(
+    CASE
+      WHEN s.code = 'coke' AND coalesce(trim(r.raw->>'Call Log Date'), '') ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$'
+        THEN to_date(trim(r.raw->>'Call Log Date'), 'DD/MM/YYYY')
+      WHEN s.code = 'coke' AND coalesce(trim(r.raw->>'VDate'), '') ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$'
+        THEN to_date(trim(r.raw->>'VDate'), 'DD/MM/YYYY')
+      ELSE (r.logged_at AT TIME ZONE 'Asia/Kolkata')::date
+    END
+  )`;
+
   const dateFilter = bdMisSnapshotMode
     ? `AND (
           (s.code = ANY($${snapshotParamIndex}::text[]) AND b.batch_id = lb.batch_id)
           OR (
             s.code <> ALL($${snapshotParamIndex}::text[])
-            AND r.logged_at >= $1::date
-            AND r.logged_at <= ($2::date + interval '1 day' - interval '1 second')
+            AND ${clientDateExpr} >= $1::date
+            AND ${clientDateExpr} <= $2::date
           )
         )`
-    : `AND r.logged_at >= $1::date
-        AND r.logged_at <= ($2::date + interval '1 day' - interval '1 second')
+    : `AND ${clientDateExpr} >= $1::date
+        AND ${clientDateExpr} <= $2::date
         AND (
           (s.code = ANY($${snapshotParamIndex}::text[]) AND b.batch_id = lb.batch_id)
           OR (s.code <> ALL($${snapshotParamIndex}::text[]))
@@ -624,19 +636,30 @@ export type ClientCallTraceDbRow = {
 function buildDedupedTraceRowsSql(
   sourceClause: string,
   snapshotParamIndex: number,
-  bdMisSnapshotMode: boolean
+  bdMisSnapshotMode: boolean,
+  statusClause = ''
 ): string {
+  const clientDateExpr = `(
+    CASE
+      WHEN s.code = 'coke' AND coalesce(trim(r.raw->>'Call Log Date'), '') ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$'
+        THEN to_date(trim(r.raw->>'Call Log Date'), 'DD/MM/YYYY')
+      WHEN s.code = 'coke' AND coalesce(trim(r.raw->>'VDate'), '') ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$'
+        THEN to_date(trim(r.raw->>'VDate'), 'DD/MM/YYYY')
+      ELSE (r.logged_at AT TIME ZONE 'Asia/Kolkata')::date
+    END
+  )`;
+
   const dateFilter = bdMisSnapshotMode
     ? `AND (
           (s.code = ANY($${snapshotParamIndex}::text[]) AND b.batch_id = lb.batch_id)
           OR (
             s.code <> ALL($${snapshotParamIndex}::text[])
-            AND r.logged_at >= $1::date
-            AND r.logged_at <= ($2::date + interval '1 day' - interval '1 second')
+            AND ${clientDateExpr} >= $1::date
+            AND ${clientDateExpr} <= $2::date
           )
         )`
-    : `AND r.logged_at >= $1::date
-        AND r.logged_at <= ($2::date + interval '1 day' - interval '1 second')
+    : `AND ${clientDateExpr} >= $1::date
+        AND ${clientDateExpr} <= $2::date
         AND (
           (s.code = ANY($${snapshotParamIndex}::text[]) AND b.batch_id = lb.batch_id)
           OR (s.code <> ALL($${snapshotParamIndex}::text[]))
@@ -703,6 +726,7 @@ function buildDedupedTraceRowsSql(
       WHERE b.status = 'completed'
         AND r.source_id IS NOT NULL
         ${sourceClause}
+        ${statusClause}
         ${dateFilter}
       ORDER BY r.source_id, r.call_key, b.created_at DESC
     `;
@@ -721,9 +745,14 @@ async function queryDedupedTraceRows(params: ClientAggregateParams): Promise<Cli
       values.push(sourceCodes);
       sourceClause = `AND s.code = ANY($${values.length}::text[])`;
     }
+    let statusClause = '';
+    if (params.statusBuckets?.length) {
+      values.push(params.statusBuckets);
+      statusClause = `AND r.status_bucket::text = ANY($${values.length}::text[])`;
+    }
 
     const res = await client.query<ClientCallTraceDbRow>(
-      buildDedupedTraceRowsSql(sourceClause, 3, bdMisSnapshotMode),
+      buildDedupedTraceRowsSql(sourceClause, 3, bdMisSnapshotMode, statusClause),
       values
     );
     return res.rows;

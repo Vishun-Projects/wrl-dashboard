@@ -1,0 +1,31 @@
+#!/usr/bin/env sh
+# After a successful push: append local auto change-log.
+# Email is handled by GitHub Action on main (avoids double mail).
+# To also email from this machine: CHANGELOG_MAIL_LOCAL=1 git push
+set -e
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+case "$branch" in
+  main|master) ;;
+  *) exit 0 ;;
+esac
+
+if [ "${CHANGELOG_MAIL_LOCAL:-}" = "1" ]; then
+  unset CHANGELOG_SKIP_MAIL
+else
+  export CHANGELOG_SKIP_MAIL=1
+fi
+
+git_dir="$(git rev-parse --git-dir)"
+before_file="$git_dir/changelog-notify-before"
+after="$(git rev-parse HEAD)"
+before=""
+if [ -f "$before_file" ]; then
+  before="$(cat "$before_file")"
+  rm -f "$before_file"
+fi
+
+if [ -n "$before" ] && [ -n "$after" ] && [ "$before" != "$after" ]; then
+  node scripts/quality/notify-push-change-log.mjs --before "$before" --after "$after" || true
+else
+  node scripts/quality/notify-push-change-log.mjs || true
+fi

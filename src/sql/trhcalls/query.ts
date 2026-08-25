@@ -353,7 +353,9 @@ export function buildTrhcallsDateRangeWhere(opts: {
   fallbackDays?: number;
 }): string {
   const column =
-    opts.column === 'bm_approved_at' ? 'editedon' : opts.column || 'dtrndate';
+    opts.column === 'bm_approved_at' || opts.column === 'cancelled_at'
+      ? 'editedon'
+      : opts.column || 'dtrndate';
   const parts = buildTrhcallsDateRangePredicates({
     startDate: opts.startDate,
     endDate: opts.endDate,
@@ -362,6 +364,9 @@ export function buildTrhcallsDateRangeWhere(opts: {
   });
   if (opts.column === 'bm_approved_at') {
     parts.unshift(sqlTruthyCrmFlag('bapproval'));
+  }
+  if (opts.column === 'cancelled_at') {
+    parts.unshift(`ISNULL(ncancelreason, 0) NOT IN (0, 2)`);
   }
   return parts.join(' AND ');
 }
@@ -622,6 +627,11 @@ export function buildCorpusFieldsSql(): string {
     ${CORPUS_CALL_STATUS_EXPR} AS callstatus,
     tc.bsolved AS callsolved,
     CONVERT(varchar(30), tc.dsolvedatetime, 126) AS callsolveddate,
+    CASE
+      WHEN tc.ncancelreason IS NOT NULL AND tc.ncancelreason <> 0 AND tc.ncancelreason <> 2
+      THEN CONVERT(varchar(30), ISNULL(tc.editedon, tc.addedon), 126)
+      ELSE NULL
+    END AS cancelled_at,
     tc.vsolveremarks,
     cr.vname AS cancel_reason,
     (SELECT TOP 1 r.bmajor FROM trdcalls2fault tf (NOLOCK) JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode WHERE tf.ncalls = tc.ncode AND tf.nofficeid = tc.nofficeid ORDER BY CASE WHEN r.bmajor = 'True' THEN 1 ELSE 2 END) AS is_major_repair,
@@ -841,6 +851,9 @@ export function buildRegisterCallIdsWithRepairSql(opts: {
     ${TRHCALLS_EXCLUDE_TRANSFERRED}`;
   if (dateCol === 'bm_approved_at') {
     where += ` AND ${sqlRegisterBmApprovalPredicate('tc')}`;
+  }
+  if (dateCol === 'cancelled_at') {
+    where += ` AND ${sqlRegisterCancelledPredicate('tc')}`;
   }
   if (opts.startDate) {
     where += ` AND ${dateSql} >= '${opts.startDate.replace(/'/g, "''")}'`;
@@ -1404,6 +1417,9 @@ export function buildTrhcallsLookupSubquery(
   if (dateCol === 'bm_approved_at') {
     lookupWhere += ` AND ${sqlRegisterBmApprovalPredicate()}`;
   }
+  if (dateCol === 'cancelled_at') {
+    lookupWhere += ` AND ${sqlRegisterCancelledPredicate()}`;
+  }
   if (opts?.startDate) {
     lookupWhere += ` AND ${dateSql} >= '${opts.startDate.replace(/'/g, "''")}'`;
   }
@@ -1435,7 +1451,11 @@ export function buildTrhcallsLookupCondition(search: string): string {
   return `(${buildAliasedTrnLikeMatch(searchSafe)} OR p.vname LIKE '%${searchSafe}%' OR mstitems.vname LIKE '%${searchSafe}%' OR tc.vserialno LIKE '%${searchSafe}%' OR p.vinstpostalcode LIKE '%${searchSafe}%')`;
 }
 
-export type RegisterDateFilterColumn = 'dtrndate' | 'dsolvedatetime' | 'bm_approved_at';
+export type RegisterDateFilterColumn =
+  | 'dtrndate'
+  | 'dsolvedatetime'
+  | 'bm_approved_at'
+  | 'cancelled_at';
 
 /** Raw trhcalls column names used in date-range WHERE (no alias). */
 export type TrhcallsDateColumn = RegisterDateFilterColumn | 'editedon';
@@ -1444,11 +1464,13 @@ export const REGISTER_DATE_FILTER_OPTIONS: { value: RegisterDateFilterColumn; la
   { value: 'dtrndate', label: 'Call Date' },
   { value: 'dsolvedatetime', label: 'Solved Date' },
   { value: 'bm_approved_at', label: 'BM Approved Date' },
+  { value: 'cancelled_at', label: 'Cancelled At' },
 ];
 
 export function resolveRegisterDateSqlColumn(column: string | null | undefined): RegisterDateFilterColumn {
   if (column === 'dsolvedatetime') return 'dsolvedatetime';
   if (column === 'bm_approved_at') return 'bm_approved_at';
+  if (column === 'cancelled_at') return 'cancelled_at';
   return 'dtrndate';
 }
 
@@ -1456,25 +1478,36 @@ export function isRegisterBmApprovedDateColumn(column?: string | null): boolean 
   return column === 'bm_approved_at';
 }
 
+export function isRegisterCancelledAtDateColumn(column?: string | null): boolean {
+  return column === 'cancelled_at';
+}
+
 /**
  * Live CRM date column only. BM = editedon while bapproval (ARCP Claims).
- * Hot register filters use arcp_bm_approved_at instead.
+ * Cancelled At = editedon while real cancel (ncancelreason not 0/2).
+ * Hot register filters use arcp_bm_approved_at / cancelled_at instead.
  */
 export function sqlRegisterDateColumn(column: RegisterDateFilterColumn, alias = 'tc'): string {
-  if (column === 'bm_approved_at') return `${alias}.editedon`;
+  if (column === 'bm_approved_at' || column === 'cancelled_at') return `${alias}.editedon`;
   if (column === 'dsolvedatetime') return `${alias}.dsolvedatetime`;
   return `${alias}.dtrndate`;
 }
 
 /** Unaliased CRM column name for dedup subquery WHERE clauses. */
 export function sqlRegisterDateColumnBare(column: RegisterDateFilterColumn): string {
-  if (column === 'bm_approved_at') return 'editedon';
+  if (column === 'bm_approved_at' || column === 'cancelled_at') return 'editedon';
   if (column === 'dsolvedatetime') return 'dsolvedatetime';
   return 'dtrndate';
 }
 
 export function sqlRegisterBmApprovalPredicate(alias?: string): string {
   return sqlTruthyCrmFlag(alias ? `${alias}.bapproval` : 'bapproval');
+}
+
+/** Real cancel (exclude transfer ncancelreason=2 and empty 0). */
+export function sqlRegisterCancelledPredicate(alias?: string): string {
+  const col = alias ? `${alias}.ncancelreason` : 'ncancelreason';
+  return `ISNULL(${col}, 0) NOT IN (0, 2)`;
 }
 
 /** CRM NVARCHAR date comparisons — `column` may be qualified (e.g. `tc.dtrndate`). */
@@ -1538,6 +1571,9 @@ export function buildTrhcallsBaseCondition(opts: {
     const dateCol = sqlRegisterDateColumn(opts.dateColumn || 'dtrndate');
     if (opts.dateColumn === 'bm_approved_at') {
       condition += ` AND ${sqlRegisterBmApprovalPredicate('tc')}`;
+    }
+    if (opts.dateColumn === 'cancelled_at') {
+      condition += ` AND ${sqlRegisterCancelledPredicate('tc')}`;
     }
     if (opts.startDate) {
       condition += ` AND ${dateCol} >= '${opts.startDate.replace(/'/g, "''")}'`;

@@ -1,3 +1,3 @@
 /** Public surface for @/modules/mis-email — cross-domain imports must use this entry. */
 export { defaultPreferencesForRecipient } from './services/preferences';
-export { MisEmailSendTracker } from './components/MisEmailSendTracker';
+export { getMisEmailOrgSettings } from './services/org-settings-lib';
