@@ -60,7 +60,7 @@ describe('report characterization — filter / corpus key', () => {
     const c = buildCorpusCacheKey('2026-07-01', '2026-07-22', 'dsolvedatetime');
     expect(a).toBe(b);
     expect(a).not.toBe(c);
-    expect(a.split('|')).toHaveLength(3);
+    expect(a.split('|')).toHaveLength(4);
   });
 
   it('buildDistributionCacheKey is order-insensitive for call types', () => {

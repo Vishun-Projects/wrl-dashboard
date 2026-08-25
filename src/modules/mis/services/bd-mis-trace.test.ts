@@ -377,14 +377,15 @@ describe('bd-mis-trace', () => {
     });
 
     expect(rows).toHaveLength(2);
-    expect(filterTraceRowsForExport(rows).map((r) => r.service_order)).toEqual(['OPEN-1', 'CAN-1']);
+    // Sort is region → file → service_order (CAN-1 before OPEN-1).
+    expect(filterTraceRowsForExport(rows).map((r) => r.service_order)).toEqual(['CAN-1', 'OPEN-1']);
     expect(filterTraceRowsForSummaryExport(rows).map((r) => r.service_order)).toEqual([
-      'OPEN-1',
       'CAN-1',
+      'OPEN-1',
     ]);
     expect(filterTraceRowsForOpenExport(rows).map((r) => r.service_order)).toEqual([
-      'OPEN-1',
       'CAN-1',
+      'OPEN-1',
     ]);
   });
 

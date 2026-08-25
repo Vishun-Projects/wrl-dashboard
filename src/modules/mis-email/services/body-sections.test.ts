@@ -422,7 +422,7 @@ describe('buildEmailBodySectionsHtml', () => {
       keyAccountMaxRows: 1,
     });
     expect(html).toContain('Showing 1 of 2');
-    expect(html).toContain('colspan="9"');
+    expect(html).toContain('colspan="10"');
     expect(html).toContain('attached Key Account MIS Excel');
     expect(html).not.toContain('Gmail limits');
   });
