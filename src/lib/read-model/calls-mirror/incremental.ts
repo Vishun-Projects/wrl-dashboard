@@ -5,7 +5,6 @@ import { applyCrmRowsToMirror } from '@/lib/read-model/calls-mirror/apply-delta'
 import {
   getMirrorSyncState,
   markMirrorError,
-  releaseMirrorLock,
   releaseStaleMirrorLock,
   tryAcquireMirrorLock,
 } from '@/lib/read-model/calls-mirror/lock';

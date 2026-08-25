@@ -152,22 +152,6 @@ function zoneBgColor(zoneClassName: string): string {
   }
 }
 
-function age15BandClass(age15: number): string {
-  if (age15 < 30) return 'mis-gt15-low';
-  if (age15 <= 80) return 'mis-gt15-mid';
-  return 'mis-gt15-high';
-}
-
-function age15BgColor(age15: number): string {
-  if (age15 < 30) return '#bbf7d0';
-  if (age15 <= 80) return '#fde68a';
-  return '#fecaca';
-}
-
-function age15TextColor(): string {
-  return '#111827';
-}
-
 function solvedTextColor(): string {
   return '#065f46';
 }

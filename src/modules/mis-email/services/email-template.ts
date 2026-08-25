@@ -125,15 +125,6 @@ export function formatDigestSubject(
   return subjectTemplate.trim() || `Daily MIS Report as on ${asOn}`;
 }
 
-function buildCtaLink(href: string, label: string): string {
-  const t = MIS_EMAIL_THEME;
-  const safeHref = escapeHtml(href);
-  const safeLabel = escapeHtml(label);
-
-  return `<a class="email-link" href="${safeHref}" target="_blank" rel="noopener noreferrer"
-    style="font-family:${t.fontInline};font-size:14px;font-weight:bold;line-height:1.5;color:${t.link};text-decoration:underline;">${safeLabel}</a>`;
-}
-
 function buildMetaCell(label: string, value: string): string {
   const t = MIS_EMAIL_THEME;
   return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
@@ -296,7 +287,6 @@ export function buildDigestEmailHtml(params: {
 }, options?: { forPreview?: boolean }): string {
   void options;
   const t = MIS_EMAIL_THEME;
-  const reportUrl = `${params.portalUrl.replace(/\/$/, '')}/report`;
   const greeting = formatRecipientGreeting(
     params.recipientName,
     params.recipientEmail,
@@ -306,7 +296,6 @@ export function buildDigestEmailHtml(params: {
   const brandTitle = params.branding?.brandTitle?.trim() || 'WESTERN REFRIGERATION';
   const brandSubtitle = params.branding?.brandSubtitle?.trim() || 'WRL Dashboard';
   const preheader = `${formatDigestSubject(params.dateRange.endDate, undefined, params.branding?.subjectTemplate)} — ${params.scopeLabel}`;
-  const cta = buildCtaLink(reportUrl, 'Open WRL Dashboard');
   const bodyHtml = params.bodyHtml?.trim() ?? '';
   const introText =
     params.branding?.introText?.trim() || MIS_EMAIL_INTRO_BY_PRESET.normal;

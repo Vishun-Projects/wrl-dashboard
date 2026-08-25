@@ -84,7 +84,7 @@ export async function runAthenaFailedCallsSync(
       today.setHours(23, 59, 59, 999);
 
       const chunks: Array<{ from: string; to: string }> = [];
-      let cursor = new Date(startDate);
+      const cursor = new Date(startDate);
       while (cursor <= today) {
         const chunkEnd = new Date(cursor);
         chunkEnd.setMonth(chunkEnd.getMonth() + CHUNK_MONTHS);

@@ -4,7 +4,7 @@ import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { canAccessPage } from '@/lib/auth/rbac-catalog';
 import { assertSameOriginMutation } from '@/lib/api/same-origin';
-import { jsonSafeError, safeErrorMessage } from '@/lib/api/safe-error';
+import { safeErrorMessage } from '@/lib/api/safe-error';
 import { logAccessDenied, logAction } from '@/lib/security/audit';
 
 import {
@@ -26,14 +26,7 @@ import {
   fetchCrmActiveMaterials,
 } from '../../services/crm-query';
 
-import { runSubcontractorReconciliation } from '../../services/reconcile-runner';
 import { triggerSubcontractorEmails } from '../../services/email-sender'; // We will create this!
-
-const SYSTEM_ACTOR = {
-  userId: null,
-  email: 'system:subcontractor-stock-api',
-  name: 'Subcontractor Stock API',
-};
 
 async function requireAccess(request: Request): Promise<
   | { error: NextResponse; auth?: never; user?: never }

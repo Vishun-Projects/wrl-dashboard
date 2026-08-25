@@ -51,7 +51,7 @@ export function parseSapMblbHtml(filePath: string): SapSupplierGroup[] {
   }
 }
 
-function parseModernFormat($: cheerio.CheerioAPI, html: string): SapSupplierGroup[] {
+function parseModernFormat($: cheerio.CheerioAPI, _html: string): SapSupplierGroup[] {
   const tables = $('table');
   const groups: SapSupplierGroup[] = [];
 

@@ -6,7 +6,6 @@ import {
   RotateCcw,
   X,
   Calendar,
-  BarChart2,
   Sliders,
   ChevronDown,
   Check,

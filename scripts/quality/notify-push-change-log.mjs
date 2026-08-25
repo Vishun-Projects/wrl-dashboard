@@ -13,7 +13,7 @@
  *   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM  (or load from .env.mis-email / .env.local)
  *   VERCEL_TOKEN + VERCEL_ORG_ID / project from .vercel/project.json  (optional deploy check)
  */
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

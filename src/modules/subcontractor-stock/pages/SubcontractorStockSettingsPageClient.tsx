@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState, type UIEvent } from 'react';
 import axios from 'axios';
 import {
-  Mail,
   Plus,
   Trash2,
   Edit2,
@@ -12,8 +11,6 @@ import {
   CheckCircle2,
   AlertTriangle,
   Search,
-  Info,
-  ShieldAlert,
   Settings,
   Calendar,
   Clock,
@@ -25,12 +22,10 @@ import { feedback } from '@/lib/ui/feedback';
 import {
   AdminIconButton,
   AdminTable,
-  AdminTableCard,
   AdminTd,
   AdminTh,
   AdminThead,
   AdminTr,
-  settingsInputClass,
 } from '@/components/admin/AdminUi';
 import {
   MAIL_ALERTS_CONTENT,
@@ -83,7 +78,7 @@ type CrmMetaItem = {
 };
 
 export default function SubcontractorStockSettingsPageClient({
-  embedded = false,
+  embedded: _embedded = false,
 }: {
   embedded?: boolean;
 }) {
@@ -810,7 +805,7 @@ export default function SubcontractorStockSettingsPageClient({
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="flex items-center gap-2 border-b border-slate-100 pb-3 font-semibold text-slate-800">
                 <Calendar className="h-4 w-4 text-indigo-500" />
-                Today's Reconciliation Run
+                Today&apos;s Reconciliation Run
               </h3>
 
               {/* Status Indicator */}
