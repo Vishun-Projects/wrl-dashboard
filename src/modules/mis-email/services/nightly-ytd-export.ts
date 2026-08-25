@@ -204,7 +204,7 @@ export async function runNightlyYtdCallsExport(options?: {
 
   const [summaryData, registerRows] = await Promise.all([
     fetchDigestSummaryData(
-      { isHod: true, assignedOffices: [] },
+      { isHod: true, assignedOffices: [], scopeLabel: 'All branches' },
       dateRange
     ),
     fetchYtdRegisterRows(dateRange, callType),

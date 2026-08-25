@@ -201,7 +201,7 @@ export async function handleRegisterGet(req: NextRequest) {
     const repair = searchParams.get('repair') || 'All';
     const repairNcodes = parseRepairQueryParam(repair);
     const sortBy = parseRegisterSortBy(searchParams.get('sortBy'));
-    const sortDir = searchParams.get('sortDir') === 'asc' ? 'asc' : 'desc';
+    const sortDir: 'asc' | 'desc' = searchParams.get('sortDir') === 'asc' ? 'asc' : 'desc';
 
     // Cascading filters
     const state = searchParams.get('state') || '';

@@ -748,6 +748,7 @@ export type MergedAccountMetricRow = {
   account: string;
   total_calls: number;
   total_solved: number;
+  cancelled_calls: number;
   open_calls: number;
   age_2: number;
   age_3: number;
@@ -788,6 +789,11 @@ export function buildMergedAccountMetricRow(
     total_solved: mergeSelectedMetrics(
       Number(row.total_solved ?? 0),
       clientMetric('total_solved'),
+      flags
+    ),
+    cancelled_calls: mergeSelectedMetrics(
+      Number(row.cancelled_calls ?? 0),
+      clientMetric('cancelled_calls'),
       flags
     ),
     open_calls: openDisplay,

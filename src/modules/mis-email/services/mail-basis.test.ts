@@ -267,7 +267,7 @@ describe('overlayRegionalOpenFromExcelRows', () => {
     const summary: SummaryDashboard = {
       branchSummary: [branch('NORTH', 50), branch('EAST', 50)],
       accountSummary: [],
-      totals: {} as SummaryDashboard['totals'],
+      globalHeadcount: 0,
     };
     const regional = buildMisEmailRegionalPerformanceRows(summary, []);
     expect(regional.reduce((s, r) => s + r.open_calls, 0)).toBe(100);
