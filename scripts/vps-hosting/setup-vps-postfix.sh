@@ -24,9 +24,15 @@ run_postfix_setup() {
 
   postconf -e "myhostname = api.${MAIL_DOMAIN}"
   postconf -e "myorigin = ${MAIL_DOMAIN}"
-  postconf -e "mydestination = localhost"
-  postconf -e "inet_interfaces = loopback-only"
+  # Local domains only + reject_unauth_destination = not an open relay.
+  # Must listen on public :25 so SAP → mis@mail.${MAIL_DOMAIN} lands in /home/mis/Maildir
+  # (loopback-only silently breaks inbound; Roundcube/IMAP still work but nothing new arrives).
+  postconf -e "mydestination = \$myhostname, localhost.\$mydomain, localhost, ${MAIL_DOMAIN}, mail.${MAIL_DOMAIN}, api.${MAIL_DOMAIN}"
+  postconf -e "inet_interfaces = all"
   postconf -e "inet_protocols = ipv4"
+  postconf -e "home_mailbox = Maildir/"
+  postconf -e "smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination"
+  postconf -e "smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination"
   postconf -e "smtp_tls_security_level = may"
 
   setup_opendkim
@@ -46,7 +52,8 @@ run_postfix_setup() {
   print_dns_records
 
   echo ""
-  echo "==> Postfix ready on 127.0.0.1:25 (DKIM signing enabled)"
+  echo "==> Postfix ready on 0.0.0.0:25 (inbound local domains + outbound DKIM)"
+  echo "    Local mailboxes (e.g. mis@mail.${MAIL_DOMAIN} → /home/mis/Maildir) receive SAP/inbound."
   echo "    Add the DNS records above in Hostinger, wait ~30–60 min, then:"
   echo "    npm run mis-email:test:vps"
 }

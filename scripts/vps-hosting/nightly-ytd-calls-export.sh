@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Midnight CRM delta — thorough calls sync once, then YTD report mail (00:00 IST).
+# Midnight calls sync only — 00:00 IST (CRM delta mail is a separate 00:15 job).
 # Cron: 0 0 * * * …/nightly-ytd-calls-export.sh >> …/nightly-ytd-export-cron.log
-#
-# Daytime daemon does NOT run calls incremental (see SYNC_CALLS_DAEMON_ENABLED).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,7 +14,7 @@ mkdir -p "${INSTALL_ROOT}/logs"
 if [[ -f "$LOCK_FILE" ]]; then
   lock_pid=$(cat "$LOCK_FILE" 2>/dev/null || true)
   if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
-    echo "=== midnight-crm-delta skipped — already running (pid ${lock_pid}) ==="
+    echo "=== midnight-calls-sync skipped — already running (pid ${lock_pid}) ==="
     exit 0
   fi
   rm -f "$LOCK_FILE"
@@ -28,17 +26,15 @@ trap 'rm -f "$LOCK_FILE"' EXIT
 if [[ -f "${INSTALL_ROOT}/.env.mis-email" ]]; then
   set -a
   # shellcheck disable=SC1091
-  source "${INSTALL_ROOT}/.env.mis-email"
+  source <(sed 's/\r$//' "${INSTALL_ROOT}/.env.mis-email")
   set +a
-else
-  echo "FATAL: missing ${INSTALL_ROOT}/.env.mis-email" >&2
-  exit 1
 fi
 
 export NODE_ENV=production
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=8192}"
+export TZ="${TZ:-Asia/Kolkata}"
 
-echo "=== midnight-crm-delta $(TZ=Asia/Kolkata date -Iseconds) TZ=${TZ:-system} ==="
+echo "=== midnight-crm-delta sync-only $(TZ=Asia/Kolkata date -Iseconds) TZ=${TZ:-system} ==="
 
 # shellcheck source=vps-cron-gate.sh
 source "${SCRIPT_DIR}/vps-cron-gate.sh"
@@ -49,21 +45,10 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-# Thorough trhcalls sync once (cancelled / solved / open all repaired) — then mail.
 echo "=== midnight calls sync (once) ==="
 if bash "${SCRIPT_DIR}/midnight-calls-sync.sh"; then
   echo "=== midnight calls sync ok ==="
 else
-  echo "FATAL: midnight calls sync failed — refusing to send report on stale/partial data" >&2
+  echo "FATAL: midnight calls sync failed — mail job at 00:15 will still run" >&2
   exit 1
 fi
-
-npm run mis-email:midnight-crm-delta
-rc=$?
-
-if [[ "$rc" -ne 0 ]]; then
-  echo "FATAL: midnight CRM delta exited with code ${rc}" >&2
-  exit "$rc"
-fi
-
-echo "=== midnight-crm-delta complete ==="

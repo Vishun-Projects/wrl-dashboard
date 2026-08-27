@@ -95,6 +95,8 @@
     "rbac:grant-cancelled-calls": "node scripts/rbac/grant-cancelled-calls.mjs",
     "mis-email:install-nightly-ytd-export-cron:vps": "bash scripts/vps-hosting/install-nightly-ytd-export-cron-vps.sh",
     "mis-email:install-midnight-delta-watchdog:vps": "bash scripts/vps-hosting/install-midnight-crm-delta-watchdog-vps.sh",
+    "mis-email:install-evening-ops:vps": "bash scripts/vps-hosting/install-evening-ops-sequencer-vps.sh",
+    "mis-email:evening-ops": "npx tsx scripts/vps-hosting/evening-ops-sequencer.ts",
     "subcontractor-stock:install-cron:vps": "bash scripts/vps-hosting/install-subcontractor-cron.sh",
     "mis-email:setup-postfix:vps": "bash scripts/vps-hosting/setup-vps-postfix.sh --remote",
     "mis-email:dns:vps": "bash scripts/vps-hosting/show-mis-email-dns-vps.sh",

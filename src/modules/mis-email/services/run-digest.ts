@@ -281,6 +281,12 @@ export async function runMisEmailTestBatch(options: {
   recipientOverride?: string;
   cc?: string[];
   ccOverride?: string;
+  /**
+   * lean = summary+key (default SMTP-safe)
+   * force_all = full Excel suite (env MIS_EMAIL_TEST_FORCE_ALL=1 unless overridden)
+   * open_only = HTML body + open-calls Excel only (evening ops probes)
+   */
+  attachmentProfile?: 'lean' | 'force_all' | 'open_only';
 }): Promise<DigestSendResult[]> {
   const { isVpsCronPaused } = await import('@/lib/vps-cron/settings');
   if (await isVpsCronPaused('mis_email_test')) {
@@ -331,15 +337,37 @@ export async function runMisEmailTestBatch(options: {
     }
   } else {
     const all = await loadDigestRecipients();
-    recipient = all[0] ?? (await loadDigestRecipientByEmail(testRecipients[0]));
+    const want = testRecipients[0]?.trim().toLowerCase() || '';
+    recipient =
+      (want
+        ? all.find((r) => r.email.trim().toLowerCase() === want) ??
+          (await loadDigestRecipientByEmail(want))
+        : null) ||
+      all[0] ||
+      null;
     if (!recipient) {
       throw new Error('No eligible MIS digest recipients found in app_users');
     }
   }
 
-  // Lean SMTP package by default (summary + key-account only) — full Excel suite
-  // often exceeds relay limits (~37MB). MIS_EMAIL_TEST_FORCE_ALL=1 for the full set.
-  const forceAll = process.env.MIS_EMAIL_TEST_FORCE_ALL === '1';
+  const profile =
+    options.attachmentProfile ??
+    (process.env.MIS_EMAIL_TEST_FORCE_ALL === '1' ? 'force_all' : 'lean');
+  const forceAll = profile === 'force_all';
+  const openOnly = profile === 'open_only';
+
+  // open_only: keep summary+key *capability* so body tables stay (Key Account Breakdown);
+  // attachment prefs turn off every Excel except open-calls.
+  const bodyInEmail = [
+    ...new Set([
+      ...(recipient.mis_email_preferences.bodyInEmail ?? [
+        'regional_performance',
+        'branch_performance',
+        'key_account_performance',
+      ]),
+      ...(openOnly ? (['key_account_performance'] as const) : []),
+    ]),
+  ];
   recipient = {
     ...recipient,
     includeSummary: true,
@@ -347,17 +375,20 @@ export async function runMisEmailTestBatch(options: {
     includeKeyAccount: true,
     mis_email_preferences: {
       ...recipient.mis_email_preferences,
-      includeSummary: true,
+      bodyInEmail,
+      includeSummary: openOnly ? false : true,
       includeDetailed: forceAll,
-      includeKeyAccount: true,
+      includeKeyAccount: openOnly ? false : true,
       includeTraceableExport: forceAll,
-      includeOpenCallsExport: forceAll,
+      includeOpenCallsExport: openOnly || forceAll,
     },
   };
   console.log(
-    forceAll
-      ? '[mis-email] Test digest: FORCE_ALL attachments (summary+detailed+key+trace+open)'
-      : '[mis-email] Test digest: lean attachments (summary+key-account only; set MIS_EMAIL_TEST_FORCE_ALL=1 for full)'
+    openOnly
+      ? '[mis-email] Test digest: OPEN_ONLY attachment (open-calls Excel; body keeps regional/branch/key)'
+      : forceAll
+        ? '[mis-email] Test digest: FORCE_ALL attachments (summary+detailed+key+trace+open)'
+        : '[mis-email] Test digest: lean attachments (summary+key-account only; set MIS_EMAIL_TEST_FORCE_ALL=1 for full)'
   );
 
   const result = await sendForRecipient(recipient, {

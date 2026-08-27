@@ -55,12 +55,20 @@ async function main(): Promise<void> {
 
       case 'cancelled-call-digest': {
         const dryRun = process.argv.includes('--dry-run');
+        const force = process.argv.includes('--force');
         const dateArg = process.argv
           .find((a) => a.startsWith('--date='))
           ?.slice('--date='.length);
+        const toArg = process.argv.find((a) => a.startsWith('--to='))?.slice('--to='.length);
+        const branchArg = process.argv
+          .find((a) => a.startsWith('--branch='))
+          ?.slice('--branch='.length);
         const result = await runCancelledCallDigest({
           digestDate: dateArg,
           dryRun,
+          force: force || Boolean(toArg),
+          forceTo: toArg,
+          branch: branchArg,
         });
         console.log(
           `[cancelled-call-digest] ${result.digestDate} — sent ${result.sent.length}, skipped ${result.skipped.length}, failed ${result.failed.length}, ${result.durationMs} ms`

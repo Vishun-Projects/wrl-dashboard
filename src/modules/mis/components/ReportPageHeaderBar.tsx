@@ -26,6 +26,10 @@ type Props = {
   isCurrentTabExcelExporting: boolean;
   isCurrentTabTraceExporting: boolean;
   onSync: () => void;
+  /** Thorough CRM→hot sync through yesterday (super_admin only). Register tab only. */
+  canManualCallsHotSync?: boolean;
+  manualCallsHotSyncBusy?: boolean;
+  onManualCallsHotSync?: () => void;
   onExportExcel: () => void;
   onExportTrace: () => void;
   exportQueueItems: ExportQueueItem[];
@@ -53,6 +57,9 @@ export function ReportPageHeaderBar({
   isCurrentTabExcelExporting,
   isCurrentTabTraceExporting,
   onSync,
+  canManualCallsHotSync = false,
+  manualCallsHotSyncBusy = false,
+  onManualCallsHotSync,
   onExportExcel,
   onExportTrace,
   exportQueueItems,
@@ -141,6 +148,17 @@ export function ReportPageHeaderBar({
               </svg>
             </div>
           </button>
+          {activeTab === 'register' && canManualCallsHotSync && onManualCallsHotSync ? (
+            <button
+              type="button"
+              onClick={onManualCallsHotSync}
+              disabled={manualCallsHotSyncBusy}
+              className="flex h-8 items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 text-[11px] font-semibold text-amber-950 shadow-sm transition-all hover:bg-amber-100 disabled:opacity-50"
+              title="Pull CRM calls into hot through yesterday IST (bypasses midnight schedule; runs on VPS)"
+            >
+              {manualCallsHotSyncBusy ? 'Syncing…' : 'CRM sync → yesterday'}
+            </button>
+          ) : null}
           {activeTab !== 'client_import' && activeTab !== 'deployment_completion' ? (
             <button
               onClick={onExportExcel}

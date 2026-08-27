@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
   defaultMisTab,
+  isSuperAdmin,
   type MisTabId,
 } from '@/lib/auth/rbac-catalog';
 import axios from 'axios';
@@ -97,8 +98,10 @@ const BD_MIS_SUMMARY_TAB_ENABLED = false;
 
 export default function ReportPageClient() {
   const [mounted, setMounted] = useState(false);
+  const [manualCallsHotSyncBusy, setManualCallsHotSyncBusy] = useState(false);
   const { userProfile } = useUser();
   const userPermissions = (userProfile?.permissions ?? []) as string[];
+  const canManualCallsHotSync = isSuperAdmin(userPermissions);
   const misAccess = useMemo(
     () => buildMisAccess(userPermissions, BD_MIS_SUMMARY_TAB_ENABLED),
     [userPermissions]
@@ -805,6 +808,47 @@ export default function ReportPageClient() {
     [activeTab, enqueueExport, executeExport]
   );
 
+  const handleManualCallsHotSync = useCallback(async () => {
+    if (manualCallsHotSyncBusy) return;
+    setManualCallsHotSyncBusy(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const res = await axios.post<{
+        success?: boolean;
+        started?: boolean;
+        asOf?: string;
+        detail?: string;
+        error?: string;
+      }>(
+        '/api/admin/calls-hot-sync',
+        {},
+        {
+          headers: session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : undefined,
+        }
+      );
+      const detail = res.data.detail || `Sync through ${res.data.asOf ?? 'yesterday'} started`;
+      if (res.data.started === false) {
+        feedback.actionWarning(detail);
+      } else {
+        feedback.actionSuccess(detail);
+      }
+    } catch (err) {
+      const message =
+        axios.isAxiosError(err) && err.response?.data?.error
+          ? String(err.response.data.error)
+          : err instanceof Error
+            ? err.message
+            : 'Failed to start CRM sync';
+      feedback.actionFailed(message);
+    } finally {
+      setManualCallsHotSyncBusy(false);
+    }
+  }, [manualCallsHotSyncBusy, supabase.auth]);
+
   if (!mounted) {
     return <ReportPageSkeleton className="bg-bg-canvas" />;
   }
@@ -825,6 +869,9 @@ export default function ReportPageClient() {
         isCurrentTabExcelExporting={isCurrentTabExcelExporting}
         isCurrentTabTraceExporting={isCurrentTabTraceExporting}
         onSync={() => void registerTabState.fetchDelta()}
+        canManualCallsHotSync={canManualCallsHotSync}
+        manualCallsHotSyncBusy={manualCallsHotSyncBusy}
+        onManualCallsHotSync={() => void handleManualCallsHotSync()}
         onExportExcel={() => handleExport('excel')}
         onExportTrace={() => bdMisTabState.handleBdMisTraceExport()}
         exportQueueItems={exportQueueItems}

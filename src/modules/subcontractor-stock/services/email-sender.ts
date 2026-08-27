@@ -19,6 +19,8 @@ export type TriggerEmailOptions = {
   force?: boolean;
   /** When set, send only to these recipient row ids. */
   recipientIds?: string[];
+  /** Override all recipients with a single To (evening ops / test). */
+  forceTo?: string;
 };
 
 export type TriggerEmailResult = {
@@ -59,12 +61,35 @@ export async function triggerSubcontractorEmails(
   }
 
   // 3. Fetch active recipients
+  const forceTo = options.forceTo?.trim().toLowerCase() || '';
   const allRecipients = await listSubcontractorRecipients();
   let activeRecipients = allRecipients.filter((r) => r.enabled);
 
   if (options.recipientIds && options.recipientIds.length > 0) {
     const idSet = new Set(options.recipientIds);
     activeRecipients = activeRecipients.filter((r) => idSet.has(r.id));
+  }
+
+  if (forceTo) {
+    // Probe mode: one synthetic recipient covering all plants seen in rows (or ALL).
+    const plants = new Set<string>();
+    for (const row of reconciledRows) {
+      const code = String(row.plant ?? '').trim();
+      if (code) plants.add(code);
+    }
+    if (plants.size === 0) plants.add('ALL');
+    activeRecipients = [
+      {
+        id: 'force-to',
+        email: forceTo,
+        recipientName: 'Evening ops',
+        plantCode: [...plants].join(','),
+        reportFilter: 'all',
+        enabled: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ];
   }
 
   if (activeRecipients.length === 0) {

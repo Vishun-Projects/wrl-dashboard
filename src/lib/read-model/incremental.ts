@@ -37,6 +37,29 @@ const OVERLAP_MS = 2 * 60 * 1000;
 const MIN_HOT_FOR_INCREMENTAL = Math.floor(HOT_TARGET_ROWS * 0.95);
 const INCREMENTAL_ENTITY = 'calls_latest_hot';
 
+/** Hard ceiling: end of AS_OF day IST (never ingest into calendar "today"). */
+export function incrementalAsOfEndMs(asOfYmd: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(asOfYmd.trim());
+  if (!m) return null;
+  return Date.parse(`${m[1]}-${m[2]}-${m[3]}T23:59:59.999+05:30`);
+}
+
+export function filterCrmRowsThroughAsOf(
+  rows: Record<string, unknown>[],
+  asOfYmd: string
+): { rows: Record<string, unknown>[]; endMs: number; dropped: number } | null {
+  const endMs = incrementalAsOfEndMs(asOfYmd);
+  if (endMs == null) return null;
+  const kept = rows.filter((row) => {
+    const raw = row.editedon ?? row.addedon;
+    if (raw == null || raw === '') return true;
+    const t = new Date(String(raw)).getTime();
+    if (Number.isNaN(t)) return true;
+    return t <= endMs;
+  });
+  return { rows: kept, endMs, dropped: rows.length - kept.length };
+}
+
 async function skipIncrementalReason(client: import('pg').PoolClient): Promise<string | null> {
   const state = await getSyncState(client);
   if (state?.status === 'pending_backfill' || state?.status === 'backfilling') {
@@ -149,6 +172,24 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
     return new Date(watermarkBase.getTime() - OVERLAP_MS);
   });
 
+  // Hard ceiling (midnight / manual): never CRM-fetch past AS_OF day IST.
+  // If watermark already sits in "today" from a bad run, skip — do not query editedon>=today.
+  const asOfCap =
+    process.env.MIDNIGHT_SYNC_AS_OF?.trim() || process.env.SYNC_INCREMENTAL_UNTIL?.trim() || '';
+  const asOfEndMs = asOfCap ? incrementalAsOfEndMs(asOfCap) : null;
+  if (asOfEndMs != null && watermarkStart.getTime() > asOfEndMs) {
+    console.log(
+      `[sync-worker] Incremental SKIPPED — watermark ${watermarkStart.toISOString()} is past AS_OF ${asOfCap} 23:59:59 IST. Will not load editedon into calendar today.`
+    );
+    return {
+      ok: true,
+      skipped: true,
+      reason: `watermark past AS_OF ${asOfCap}`,
+      rowsUpserted: 0,
+      rowsDeleted: 0,
+    };
+  }
+
   const startedAt = new Date();
   const audit = await withClient(async (client) => {
     const batch = await startIngestBatch(client, INCREMENTAL_ENTITY, watermarkStart);
@@ -198,6 +239,18 @@ async function runIncrementalSyncOnce(): Promise<IncrementalSyncResult> {
       errorMessage: message,
     });
     throw err;
+  }
+
+  const asOfCapFilter =
+    process.env.MIDNIGHT_SYNC_AS_OF?.trim() || process.env.SYNC_INCREMENTAL_UNTIL?.trim() || '';
+  if (asOfCapFilter) {
+    const capped = filterCrmRowsThroughAsOf(rawRows, asOfCapFilter);
+    if (capped) {
+      console.log(
+        `[sync-worker] Incremental hard-capped through ${asOfCapFilter} 23:59:59 IST — kept ${capped.rows.length}/${rawRows.length} (dropped ${capped.dropped} past ceiling)`
+      );
+      rawRows = capped.rows;
+    }
   }
 
   console.log(`[sync-worker] CRM editedon delta: ${rawRows.length} rows — writing to Postgres`);

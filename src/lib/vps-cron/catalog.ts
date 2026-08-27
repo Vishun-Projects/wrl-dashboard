@@ -6,9 +6,11 @@ export const VPS_CRON_JOB_IDS = [
   'vacuum_full_mis_rows',
   'sync_worker_health',
   'nightly_ytd_calls_export',
+  'midnight_crm_delta_mail',
   'midnight_crm_delta_watchdog',
   'cancelled_call_digest',
   'subcontractor_stock',
+  'evening_ops_sequencer',
 ] as const;
 
 export type VpsCronJobId = (typeof VPS_CRON_JOB_IDS)[number];
@@ -59,9 +61,15 @@ export const VPS_CRON_CATALOG: readonly VpsCronJobDef[] = [
   },
   {
     id: 'nightly_ytd_calls_export',
-    label: 'Midnight calls sync + CRM delta report',
-    schedule: '00:00 IST daily (thorough calls sync once, then YTD delta mail)',
+    label: 'Midnight calls sync',
+    schedule: '00:00 IST daily (thorough calls sync once; mail is separate at 00:15)',
     script: 'nightly-ytd-calls-export.sh',
+  },
+  {
+    id: 'midnight_crm_delta_mail',
+    label: 'Midnight CRM delta mail',
+    schedule: '00:15 IST daily (always send report — even if 00:00 sync failed)',
+    script: 'midnight-crm-delta-mail.sh',
   },
   {
     id: 'midnight_crm_delta_watchdog',
@@ -80,6 +88,12 @@ export const VPS_CRON_CATALOG: readonly VpsCronJobDef[] = [
     label: 'Subcontractor SAP stock reconciliation',
     schedule: 'Every 15 min daily IST (extract SAP mail, reconcile, morning send)',
     script: 'subcontractor-stock-cron.sh',
+  },
+  {
+    id: 'evening_ops_sequencer',
+    label: 'Evening ops mail sequencer',
+    schedule: '16:00 IST daily (inventory + probe mails to ops → final OK/FAIL status)',
+    script: 'evening-ops-sequencer.sh',
   },
 ] as const;
 

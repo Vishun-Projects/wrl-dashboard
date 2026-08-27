@@ -40,6 +40,8 @@ config({ path: resolve(root, '.env') });
 config({ path: resolve(root, '.env.mis-email') });
 config({ path: resolve(root, '.env.sync-worker') });
 
+import { startCallsHotSyncThroughYesterday } from '@/lib/read-model/start-calls-hot-sync';
+
 const PORT = Number(process.env.MAIL_RELAY_PORT ?? 8789);
 const RESET_PATH = '/internal/mail/send';
 const MIS_DIGEST_PATH = '/internal/mail/mis-digest';
@@ -48,6 +50,8 @@ const MIGRATION_REPORT_PATH = '/internal/mail/migration-report';
 const SAP_INBOX_SYNC_PATH = '/internal/mail/subcontractor-sap-inbox/sync';
 const SAP_RECONCILE_PATH = '/internal/mail/subcontractor-reconcile';
 const SAP_SEND_PATH = '/internal/mail/subcontractor-send';
+// Under /internal/mail* so existing Caddy handle reaches the relay (same as SAP paths).
+const CALLS_HOT_SYNC_PATH = '/internal/mail/sync/calls-hot';
 const SECRET = process.env.VPS_MAIL_RELAY_SECRET?.trim() ?? '';
 
 const MAX_BODY_BYTES = Math.max(
@@ -303,6 +307,15 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.url === CALLS_HOT_SYNC_PATH) {
+      const body = (await readJson(req)) as { asOf?: string };
+      const asOf = typeof body.asOf === 'string' ? body.asOf.trim() : undefined;
+      const result = startCallsHotSyncThroughYesterday({ asOf, rootDir: root });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, ...result }));
+      return;
+    }
+
     if (req.url !== RESET_PATH) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Not found' }));
@@ -352,4 +365,5 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`[mail-relay]   ${SAP_INBOX_SYNC_PATH} (subcontractor SAP inbox sync)`);
   console.log(`[mail-relay]   ${SAP_RECONCILE_PATH} (subcontractor reconcile)`);
   console.log(`[mail-relay]   ${SAP_SEND_PATH} (subcontractor send)`);
+  console.log(`[mail-relay]   ${CALLS_HOT_SYNC_PATH} (manual calls→hot sync through yesterday)`);
 });

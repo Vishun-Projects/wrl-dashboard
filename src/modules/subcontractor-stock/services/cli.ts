@@ -71,7 +71,11 @@ async function main(): Promise<void> {
       }
       case 'send-emails': {
         console.log('[subcontractor-stock] Triggering email dispatches...');
-        const result = await triggerSubcontractorEmails({ force: true });
+        const toArg = process.argv.find((a) => a.startsWith('--to='))?.slice('--to='.length);
+        const result = await triggerSubcontractorEmails({
+          force: true,
+          forceTo: toArg?.trim() || undefined,
+        });
         console.log(`[subcontractor-stock] Email trigger complete. Sent to ${result.sentCount} recipients.`);
         break;
       }
