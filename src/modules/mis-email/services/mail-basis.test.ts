@@ -321,7 +321,7 @@ describe('digest body trace basis', () => {
     expect(fromTrace[0]?.solved_calls).toBe(1);
     expect(fromTrace[0]?.open_calls).toBe(1);
     expect(fromSummaryOverlay[0]?.open_calls).toBe(1);
-    // Hybrid keeps summary solved while open comes from trace — body must use trace-only.
+    // Open-only trace has open rows only — body must keep BdMis solved/cancelled (hybrid), not trace-only.
     expect(fromSummaryOverlay[0]?.solved_calls).toBe(0);
     expect(fromSummaryOverlay[0]?.solved_calls).not.toBe(fromTrace[0]?.solved_calls);
   });

@@ -59,3 +59,8 @@ eslint-report.json
 eslint-unused.json
 eslint-any.json
 eslint-hooks.json
+
+# local scratch / generated artifacts (never commit)
+/scratch/
+/artifacts/
+=

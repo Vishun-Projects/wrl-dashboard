@@ -147,6 +147,42 @@ export function overlayBranchOpenFromExcelRows(
   });
 }
 
+function branchPerformanceKey(region: unknown, branch: unknown): string {
+  return `${String(region ?? '').trim().toUpperCase()}::${String(branch ?? '').trim().toLowerCase()}`;
+}
+
+/** Collapse duplicate branch labels (franchisee offices → one row). */
+export function mergeBranchPerformanceRowsByName(rows: BranchPerformanceRow[]): BranchPerformanceRow[] {
+  const map = new Map<string, BranchPerformanceRow>();
+  for (const row of rows) {
+    const key = branchPerformanceKey(row.region, row.branch);
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, { ...row });
+      continue;
+    }
+    map.set(key, {
+      branch: prev.branch || row.branch,
+      region: prev.region || row.region,
+      total_calls: prev.total_calls + row.total_calls,
+      solved_calls: prev.solved_calls + row.solved_calls,
+      cancelled_calls: prev.cancelled_calls + row.cancelled_calls,
+      open_calls: prev.open_calls + row.open_calls,
+      age_2: prev.age_2 + row.age_2,
+      age_3: prev.age_3 + row.age_3,
+      age_7: prev.age_7 + row.age_7,
+      age_15: prev.age_15 + row.age_15,
+      part_pending: prev.part_pending + row.part_pending,
+      active_eng: Math.max(prev.active_eng, row.active_eng),
+    });
+  }
+  return [...map.values()].sort((a, b) => {
+    const age15Diff = b.age_15 - a.age_15;
+    if (age15Diff !== 0) return age15Diff;
+    return String(a.branch).localeCompare(String(b.branch));
+  });
+}
+
 export function buildMisEmailBdMisRegionalPayload(
   summary: SummaryDashboard,
   clientAccountSummary: AccountSummaryRow[] = []
