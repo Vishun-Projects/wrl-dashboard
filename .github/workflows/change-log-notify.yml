@@ -1,6 +1,8 @@
 name: Change log notify
 
 # On every push to main: append auto change-log + email risks / overlooked.
+# Does NOT commit back to main (that used to create "chore: append..." pushes
+# which still triggered Vercel despite [skip ci]).
 # Secrets (Settings → Secrets and variables → Actions):
 #   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
 #   CHANGELOG_MAIL_TO (optional; default vishnu.vishwakarma@westernequipments.com)
@@ -15,8 +17,10 @@ concurrency:
   group: change-log-notify-${{ github.ref }}
   cancel-in-progress: false
 
+# No contents:write — do not push bot commits to main (those were triggering
+# Vercel deploys; [skip ci] is ignored by Vercel unless ignoreCommand checks it).
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   notify:
@@ -54,14 +58,11 @@ jobs:
             --before "${{ github.event.before }}" \
             --after "${{ github.sha }}"
 
-      - name: Commit auto change-log artifacts
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add artifacts/change-log-auto.md artifacts/change-log-auto.csv || true
-          if git diff --staged --quiet; then
-            echo "No log file changes"
-            exit 0
-          fi
-          git commit -m "chore: append push change-log [skip ci]"
-          git push
+      - name: Upload change-log artifacts (no commit to main)
+        uses: actions/upload-artifact@v4
+        with:
+          name: change-log-auto
+          path: |
+            artifacts/change-log-auto.md
+            artifacts/change-log-auto.csv
+          if-no-files-found: ignore
