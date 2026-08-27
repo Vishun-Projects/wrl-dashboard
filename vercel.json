@@ -1,3 +1,3 @@
 {
-  "ignoreCommand": "bash -c 'set -e; ref=\"$VERCEL_GIT_COMMIT_REF\"; msg=\"$VERCEL_GIT_COMMIT_MESSAGE\"; if [ \"$ref\" != \"main\" ] && [ \"$ref\" != \"master\" ]; then echo \"Skip deploy for branch $ref\"; exit 0; fi; case \"$msg\" in *\"[skip ci]\"*|*\"[ci skip]\"*|*\"[skip vercel]\"*) echo \"Skip deploy: commit marked skip\"; exit 0;; esac; exit 1'"
+  "ignoreCommand": "bash scripts/ci/vercel-ignore.sh"
 }
