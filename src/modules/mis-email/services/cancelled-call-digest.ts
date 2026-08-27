@@ -70,6 +70,8 @@ export async function runCancelledCallDigest(options?: {
   dryRun?: boolean;
   /** Skip schedule window + send-log dedupe (portal test send). */
   force?: boolean;
+  /** Override recipient list (CLI `--to=` test send). */
+  forceTo?: string;
   /** Optional branch filter for test send. */
   branch?: string;
 }): Promise<CancelledCallDigestResult> {
@@ -77,6 +79,7 @@ export async function runCancelledCallDigest(options?: {
   const digestDate = options?.digestDate?.trim() || istYesterdayYmd();
   const dryRun = options?.dryRun === true;
   const force = options?.force === true;
+  const forceTo = options?.forceTo?.trim() || '';
   const branchFilter = options?.branch?.trim() || '';
 
   if (!force && !dryRun) {
@@ -130,12 +133,13 @@ export async function runCancelledCallDigest(options?: {
     }
 
     const people = await listEnabledCancelledDigestEmailsForBranch(branch);
-    if (people.length === 0) {
+    const to = forceTo
+      ? [forceTo]
+      : [...new Set(people.map((p) => p.email))];
+    if (to.length === 0) {
       result.skipped.push({ branch, reason: 'no_enabled_recipients', rowCount: rows.length });
       continue;
     }
-
-    const to = [...new Set(people.map((p) => p.email))];
     const csv = buildCancelledCallsCsv(rows);
     const subject = `Cancelled calls — ${branch} — ${digestDate}`;
     const html = buildBranchHtml(branch, digestDate, rows);
