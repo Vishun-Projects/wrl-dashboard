@@ -31,6 +31,25 @@ export type SubcontractorRun = {
   createdAt: string;
 };
 
+export type SapMailReconcileStatus = 'pending' | 'reconciled' | 'failed' | 'skipped';
+
+export type SapMailLogEntry = {
+  id: string;
+  mailKey: string;
+  subject: string;
+  sender: string;
+  receivedAt: string;
+  extractedAt: string | null;
+  attachmentNames: string[];
+  reportDate: string | null;
+  plantCodes: string[];
+  reconcileStatus: SapMailReconcileStatus;
+  lastError: string | null;
+  runDate: string | null;
+  reconciledAt: string | null;
+  createdAt: string;
+};
+
 let ensured = false;
 
 export async function ensureSubcontractorStockSettingsTables(): Promise<void> {
@@ -96,8 +115,66 @@ export async function ensureSubcontractorStockSettingsTables(): Promise<void> {
         created_at timestamptz NOT NULL DEFAULT now()
       );
     `);
+
+    // 5. SAP inbound mail log (VPS Maildir → extract tracking)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS public.subcontractor_sap_mail_log (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        mail_key text NOT NULL UNIQUE,
+        subject text NOT NULL DEFAULT '',
+        sender text NOT NULL DEFAULT '',
+        received_at timestamptz NOT NULL,
+        extracted_at timestamptz,
+        attachment_names text[] NOT NULL DEFAULT '{}',
+        report_date date,
+        plant_codes text[] NOT NULL DEFAULT '{}',
+        reconcile_status text NOT NULL DEFAULT 'pending'
+          CHECK (reconcile_status IN ('pending', 'reconciled', 'failed', 'skipped')),
+        last_error text,
+        run_date date,
+        reconciled_at timestamptz,
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_subcontractor_sap_mail_log_received_at
+      ON public.subcontractor_sap_mail_log (received_at DESC);
+    `);
   });
   ensured = true;
+}
+
+function mapSapMailLogRow(row: Record<string, unknown>): SapMailLogEntry {
+  return {
+    id: String(row.id),
+    mailKey: String(row.mail_key),
+    subject: String(row.subject ?? ''),
+    sender: String(row.sender ?? ''),
+    receivedAt: new Date(row.received_at as string | Date).toISOString(),
+    extractedAt: row.extracted_at
+      ? new Date(row.extracted_at as string | Date).toISOString()
+      : null,
+    attachmentNames: Array.isArray(row.attachment_names)
+      ? row.attachment_names.map(String)
+      : [],
+    reportDate: row.report_date
+      ? row.report_date instanceof Date
+        ? row.report_date.toISOString().split('T')[0]
+        : String(row.report_date)
+      : null,
+    plantCodes: Array.isArray(row.plant_codes) ? row.plant_codes.map(String) : [],
+    reconcileStatus: (row.reconcile_status ?? 'pending') as SapMailReconcileStatus,
+    lastError: row.last_error ? String(row.last_error) : null,
+    runDate: row.run_date
+      ? row.run_date instanceof Date
+        ? row.run_date.toISOString().split('T')[0]
+        : String(row.run_date)
+      : null,
+    reconciledAt: row.reconciled_at
+      ? new Date(row.reconciled_at as string | Date).toISOString()
+      : null,
+    createdAt: new Date(row.created_at as string | Date).toISOString(),
+  };
 }
 
 // --- SKIP RULES ---
@@ -404,6 +481,146 @@ export async function markSubcontractorRunEmailSent(dateStr?: string): Promise<v
       WHERE run_date = $1
       `,
       [targetDate]
+    );
+  });
+}
+
+export async function listRecentSubcontractorRuns(limit = 14): Promise<SubcontractorRun[]> {
+  await ensureSubcontractorStockSettingsTables();
+  const safeLimit = Math.min(Math.max(limit, 1), 90);
+  return withAppClient(async (client) => {
+    const res = await client.query(
+      `
+      SELECT id, run_date, reconciled_at, email_sent_at, summary, excel_filename, created_at
+      FROM public.subcontractor_stock_runs
+      ORDER BY run_date DESC
+      LIMIT $1
+      `,
+      [safeLimit]
+    );
+    return res.rows.map((row) => ({
+      id: row.id,
+      runDate: row.run_date instanceof Date ? row.run_date.toISOString().split('T')[0] : String(row.run_date),
+      reconciledAt: row.reconciled_at ? new Date(row.reconciled_at).toISOString() : null,
+      emailSentAt: row.email_sent_at ? new Date(row.email_sent_at).toISOString() : null,
+      summary: row.summary,
+      excelFilename: row.excel_filename,
+      createdAt: new Date(row.created_at).toISOString(),
+    }));
+  });
+}
+
+// --- SAP MAIL LOG ---
+
+export async function upsertSapMailLogEntry(params: {
+  mailKey: string;
+  subject?: string;
+  sender?: string;
+  receivedAt: Date;
+  extractedAt?: Date | null;
+  attachmentNames?: string[];
+  reportDate?: string | null;
+  plantCodes?: string[];
+}): Promise<SapMailLogEntry> {
+  await ensureSubcontractorStockSettingsTables();
+  return withAppClient(async (client) => {
+    const res = await client.query(
+      `
+      INSERT INTO public.subcontractor_sap_mail_log (
+        mail_key, subject, sender, received_at, extracted_at,
+        attachment_names, report_date, plant_codes
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ON CONFLICT (mail_key) DO UPDATE SET
+        subject = EXCLUDED.subject,
+        sender = EXCLUDED.sender,
+        received_at = EXCLUDED.received_at,
+        extracted_at = COALESCE(EXCLUDED.extracted_at, subcontractor_sap_mail_log.extracted_at),
+        attachment_names = CASE
+          WHEN cardinality(EXCLUDED.attachment_names) > 0 THEN EXCLUDED.attachment_names
+          ELSE subcontractor_sap_mail_log.attachment_names
+        END,
+        report_date = COALESCE(EXCLUDED.report_date, subcontractor_sap_mail_log.report_date),
+        plant_codes = CASE
+          WHEN cardinality(EXCLUDED.plant_codes) > 0 THEN EXCLUDED.plant_codes
+          ELSE subcontractor_sap_mail_log.plant_codes
+        END
+      RETURNING *
+      `,
+      [
+        params.mailKey,
+        (params.subject ?? '').trim(),
+        (params.sender ?? '').trim(),
+        params.receivedAt,
+        params.extractedAt ?? null,
+        params.attachmentNames ?? [],
+        params.reportDate ?? null,
+        params.plantCodes ?? [],
+      ]
+    );
+    return mapSapMailLogRow(res.rows[0]);
+  });
+}
+
+export async function listSapMailLog(options?: {
+  days?: number;
+  status?: SapMailReconcileStatus;
+}): Promise<SapMailLogEntry[]> {
+  await ensureSubcontractorStockSettingsTables();
+  const days = Math.min(Math.max(options?.days ?? 14, 1), 90);
+  return withAppClient(async (client) => {
+    const params: unknown[] = [days];
+    let statusClause = '';
+    if (options?.status) {
+      params.push(options.status);
+      statusClause = `AND reconcile_status = $${params.length}`;
+    }
+    const res = await client.query(
+      `
+      SELECT *
+      FROM public.subcontractor_sap_mail_log
+      WHERE received_at >= (now() AT TIME ZONE 'Asia/Kolkata')::date - ($1::int - 1) * interval '1 day'
+      ${statusClause}
+      ORDER BY received_at DESC
+      `,
+      params
+    );
+    return res.rows.map(mapSapMailLogRow);
+  });
+}
+
+export async function markSapMailsReconciled(params: {
+  mailKeys: string[];
+  runDate: string;
+}): Promise<void> {
+  if (params.mailKeys.length === 0) return;
+  await ensureSubcontractorStockSettingsTables();
+  await withAppClient(async (client) => {
+    await client.query(
+      `
+      UPDATE public.subcontractor_sap_mail_log
+      SET reconcile_status = 'reconciled',
+          run_date = $2::date,
+          reconciled_at = now(),
+          last_error = NULL
+      WHERE mail_key = ANY($1::text[])
+      `,
+      [params.mailKeys, params.runDate]
+    );
+  });
+}
+
+export async function markSapMailFailed(mailKey: string, error: string): Promise<void> {
+  await ensureSubcontractorStockSettingsTables();
+  await withAppClient(async (client) => {
+    await client.query(
+      `
+      UPDATE public.subcontractor_sap_mail_log
+      SET reconcile_status = 'failed',
+          last_error = $2
+      WHERE mail_key = $1
+      `,
+      [mailKey, error.slice(0, 2000)]
     );
   });
 }

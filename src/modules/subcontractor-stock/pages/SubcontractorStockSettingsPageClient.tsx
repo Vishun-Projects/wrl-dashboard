@@ -14,6 +14,9 @@ import {
   Settings,
   Calendar,
   Clock,
+  RefreshCw,
+  Inbox,
+  Mail,
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
@@ -72,6 +75,22 @@ type RunStatus = {
   excelFilename: string | null;
 };
 
+type SapMailRow = {
+  id: string;
+  mailKey: string;
+  subject: string;
+  sender: string;
+  receivedAt: string;
+  extractedAt: string | null;
+  attachmentNames: string[];
+  reportDate: string | null;
+  plantCodes: string[];
+  reconcileStatus: 'pending' | 'reconciled' | 'failed' | 'skipped';
+  lastError: string | null;
+  runDate: string | null;
+  reconciledAt: string | null;
+};
+
 type CrmMetaItem = {
   code: string;
   name: string;
@@ -86,6 +105,12 @@ export default function SubcontractorStockSettingsPageClient({
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [sendTime, setSendTime] = useState('08:00');
   const [todayRun, setTodayRun] = useState<RunStatus | null>(null);
+  const [recentRuns, setRecentRuns] = useState<RunStatus[]>([]);
+  const [inboxRows, setInboxRows] = useState<SapMailRow[]>([]);
+  const [todayMailCount, setTodayMailCount] = useState(0);
+  const [latestReceivedAt, setLatestReceivedAt] = useState<string | null>(null);
+  const [selectedMailKeys, setSelectedMailKeys] = useState<string[]>([]);
+  const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([]);
 
   // Metadata for dropdowns
   const [crmPlants, setCrmPlants] = useState<CrmMetaItem[]>([]);
@@ -96,6 +121,7 @@ export default function SubcontractorStockSettingsPageClient({
   const [savingTime, setSavingTime] = useState(false);
   const [runningReconciliation, setRunningReconciliation] = useState(false);
   const [sendingEmails, setSendingEmails] = useState(false);
+  const [syncingInbox, setSyncingInbox] = useState(false);
 
   // Search filter
   const [searchRecipients, setSearchRecipients] = useState('');
@@ -141,6 +167,33 @@ export default function SubcontractorStockSettingsPageClient({
       setRecipients(dataRes.data.recipients ?? []);
       setSendTime(dataRes.data.sendTime ?? '08:00');
       setTodayRun(dataRes.data.todayRun ?? null);
+      setRecentRuns(dataRes.data.recentRuns ?? []);
+      setInboxRows(dataRes.data.inbox ?? []);
+
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+      const todayMails = (dataRes.data.inbox ?? []).filter(
+        (row: SapMailRow) =>
+          row.reportDate === today ||
+          new Date(row.receivedAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) === today
+      );
+      setTodayMailCount(todayMails.length);
+      setLatestReceivedAt(
+        todayMails.length > 0
+          ? todayMails.reduce((latest: string, row: SapMailRow) =>
+              new Date(row.receivedAt) > new Date(latest) ? row.receivedAt : latest
+            , todayMails[0].receivedAt)
+          : null
+      );
+
+      const pendingTodayKeys = todayMails
+        .filter((row: SapMailRow) => row.reconcileStatus === 'pending')
+        .map((row: SapMailRow) => row.mailKey);
+      setSelectedMailKeys(pendingTodayKeys);
+
+      const enabledIds = (dataRes.data.recipients ?? [])
+        .filter((r: Recipient) => r.enabled)
+        .map((r: Recipient) => r.id);
+      setSelectedRecipientIds(enabledIds);
 
       setCrmPlants(optionsRes.data.plants ?? []);
       setCrmVendors(optionsRes.data.vendors ?? []);
@@ -362,16 +415,32 @@ export default function SubcontractorStockSettingsPageClient({
   };
 
   // Execution triggers
+  const handleSyncInbox = async () => {
+    setSyncingInbox(true);
+    try {
+      const res = await axios.post(API_URL, { action: 'sync-inbox' });
+      setInboxRows(res.data.inbox ?? []);
+      feedback.actionSuccess(`Inbox refreshed (${res.data.upserted ?? 0} updated on VPS).`);
+      void loadData();
+    } catch (err: any) {
+      feedback.actionFailed(err.response?.data?.error || 'Failed to sync SAP inbox');
+    } finally {
+      setSyncingInbox(false);
+    }
+  };
+
   const handleRunReconciliation = async () => {
     setRunningReconciliation(true);
 
     try {
       const res = await axios.post(API_URL, {
         action: 'run-reconciliation',
+        mailKeys: selectedMailKeys.length > 0 ? selectedMailKeys : undefined,
       });
 
       setTodayRun(res.data.todayRun);
       feedback.actionSuccess('Reconciliation run completed successfully!');
+      void loadData();
     } catch (err: any) {
       feedback.actionFailed(
         err.response?.data?.error || 'Failed to run reconciliation'
@@ -382,11 +451,17 @@ export default function SubcontractorStockSettingsPageClient({
   };
 
   const handleSendEmails = async () => {
+    if (selectedRecipientIds.length === 0) {
+      feedback.actionFailed('Select at least one recipient to send reports.');
+      return;
+    }
+
     setSendingEmails(true);
 
     try {
       const res = await axios.post(API_URL, {
         action: 'send-emails',
+        recipientIds: selectedRecipientIds,
       });
 
       feedback.actionSuccess(
@@ -400,6 +475,36 @@ export default function SubcontractorStockSettingsPageClient({
       );
     } finally {
       setSendingEmails(false);
+    }
+  };
+
+  const toggleMailKey = (mailKey: string) => {
+    setSelectedMailKeys((prev) =>
+      prev.includes(mailKey) ? prev.filter((k) => k !== mailKey) : [...prev, mailKey]
+    );
+  };
+
+  const toggleRecipientId = (id: string) => {
+    setSelectedRecipientIds((prev) =>
+      prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]
+    );
+  };
+
+  const formatIstDateTime = (iso: string | null) => {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+  };
+
+  const statusBadgeClass = (status: SapMailRow['reconcileStatus']) => {
+    switch (status) {
+      case 'reconciled':
+        return 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/10';
+      case 'failed':
+        return 'bg-red-50 text-red-700 ring-1 ring-red-600/10';
+      case 'skipped':
+        return 'bg-slate-100 text-slate-600';
+      default:
+        return 'bg-amber-50 text-amber-800 ring-1 ring-amber-600/10';
     }
   };
 
@@ -511,9 +616,167 @@ export default function SubcontractorStockSettingsPageClient({
           </h2>
 
           <p className="mt-1 text-sm text-slate-500">
-            Configure data exclusion filters (skip rules), plant-specific email
-            routing, and daily schedule timings.
+            SAP subcontractor stock: inbound mail tracking, CRM reconciliation, and plant-specific report routing.
           </p>
+        </div>
+
+        {/* SAP Inbox Dashboard */}
+        <div className="mb-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div>
+              <h3 className="flex items-center gap-2 font-semibold text-slate-800">
+                <Inbox className="h-4 w-4 text-indigo-500" />
+                SAP Mail Inbox
+              </h3>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Inbound SAP MBLB mails on VPS (variable timing). Auto-reconciles when new files arrive; use manual send for late arrivals.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleSyncInbox}
+              disabled={syncingInbox}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${syncingInbox ? 'animate-spin' : ''}`} />
+              {syncingInbox ? 'Refreshing…' : 'Refresh from VPS'}
+            </button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Today&apos;s SAP mails</p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">{todayMailCount}</p>
+              <p className="mt-0.5 text-[10px] text-slate-500">
+                Latest: {formatIstDateTime(latestReceivedAt)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Reconciliation</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">
+                {todayRun?.reconciledAt ? 'Done today' : 'Pending'}
+              </p>
+              <p className="mt-0.5 text-[10px] text-slate-500">
+                {todayRun?.reconciledAt
+                  ? formatIstDateTime(todayRun.reconciledAt)
+                  : 'Waiting for SAP files or manual run'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Email dispatch</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">
+                {todayRun?.emailSentAt ? 'Sent today' : `Scheduled ${sendTime} IST`}
+              </p>
+              <p className="mt-0.5 text-[10px] text-slate-500">
+                {todayRun?.emailSentAt
+                  ? formatIstDateTime(todayRun.emailSentAt)
+                  : 'Late SAP → manual send below'}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 overflow-hidden rounded-lg border border-slate-150">
+            <AdminTable>
+              <AdminThead>
+                <AdminTr>
+                  <AdminTh className="w-10">Select</AdminTh>
+                  <AdminTh>Received (IST)</AdminTh>
+                  <AdminTh>Subject</AdminTh>
+                  <AdminTh>Attachments</AdminTh>
+                  <AdminTh>Plants</AdminTh>
+                  <AdminTh>Status</AdminTh>
+                  <AdminTh>Reconciled at</AdminTh>
+                </AdminTr>
+              </AdminThead>
+              <tbody>
+                {inboxRows.length === 0 ? (
+                  <AdminTr>
+                    <td colSpan={7} className="px-4 py-6 text-center align-middle text-xs text-slate-400">
+                      No SAP mails logged yet. Click Refresh from VPS after SAP delivery.
+                    </td>
+                  </AdminTr>
+                ) : (
+                  inboxRows.map((row) => (
+                    <AdminTr key={row.id}>
+                      <AdminTd>
+                        <input
+                          type="checkbox"
+                          checked={selectedMailKeys.includes(row.mailKey)}
+                          onChange={() => toggleMailKey(row.mailKey)}
+                          className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      </AdminTd>
+                      <AdminTd className="font-mono text-[10px] text-slate-600">
+                        {formatIstDateTime(row.receivedAt)}
+                      </AdminTd>
+                      <AdminTd className="max-w-[200px] truncate text-xs text-slate-800">
+                        <span title={row.subject}>{row.subject}</span>
+                      </AdminTd>
+                      <AdminTd className="text-[10px] text-slate-600">
+                        {row.attachmentNames.length}
+                      </AdminTd>
+                      <AdminTd className="font-mono text-[10px] text-slate-600">
+                        {row.plantCodes.length > 0 ? row.plantCodes.join(', ') : '—'}
+                      </AdminTd>
+                      <AdminTd>
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${statusBadgeClass(row.reconcileStatus)}`}
+                        >
+                          {row.reconcileStatus}
+                        </span>
+                      </AdminTd>
+                      <AdminTd className="font-mono text-[10px] text-slate-500">
+                        {formatIstDateTime(row.reconciledAt)}
+                      </AdminTd>
+                    </AdminTr>
+                  ))
+                )}
+              </tbody>
+            </AdminTable>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleRunReconciliation}
+              disabled={runningReconciliation}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-indigo-500 disabled:opacity-50"
+            >
+              <Play className="h-3.5 w-3.5" />
+              {runningReconciliation
+                ? 'Reconciling…'
+                : selectedMailKeys.length > 0
+                  ? `Reconcile selected (${selectedMailKeys.length})`
+                  : 'Reconcile all today'}
+            </button>
+          </div>
+
+          {recentRuns.length > 0 && (
+            <div className="mt-5 border-t border-slate-100 pt-4">
+              <h4 className="mb-2 text-xs font-semibold text-slate-600">Recent run history</h4>
+              <div className="space-y-1">
+                {recentRuns.slice(0, 7).map((run) => (
+                  <div
+                    key={run.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-slate-50 px-3 py-1.5 text-[10px]"
+                  >
+                    <span className="font-mono font-semibold text-slate-700">{run.runDate}</span>
+                    <span className="text-slate-500">
+                      Reconciled: {formatIstDateTime(run.reconciledAt)}
+                    </span>
+                    <span className="text-slate-500">
+                      Email: {run.emailSentAt ? formatIstDateTime(run.emailSentAt) : 'Not sent'}
+                    </span>
+                    {run.summary && (
+                      <span className="text-slate-600">
+                        Discrepancies: {run.summary.discrepancyCount ?? 0}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 2 Column Layout: Settings & Rules vs Status Panel */}
@@ -795,8 +1058,7 @@ export default function SubcontractorStockSettingsPageClient({
                 </div>
 
                 <p className="mt-2 text-[10px] text-slate-400">
-                  Note: Inbound mails are ingested nightly. Report compilation
-                  runs at 7 AM. Emails are dispatched at this configured time.
+                  SAP mail arrival time varies. Morning auto-send runs at this time when reconciliation is ready. Late SAP requires manual send from the inbox panel.
                 </p>
               </div>
             </div>
@@ -896,6 +1158,38 @@ export default function SubcontractorStockSettingsPageClient({
                 )}
               </div>
 
+              {/* Manual send — recipient picker */}
+              <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50/50 p-3">
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                  <Mail className="h-3.5 w-3.5" />
+                  Send to selected recipients
+                </p>
+                <div className="max-h-32 space-y-1 overflow-y-auto">
+                  {recipients.filter((r) => r.enabled).length === 0 ? (
+                    <p className="text-[10px] text-slate-400">No enabled recipients.</p>
+                  ) : (
+                    recipients
+                      .filter((r) => r.enabled)
+                      .map((r) => (
+                        <label
+                          key={r.id}
+                          className="flex cursor-pointer items-center gap-2 rounded p-1 text-[10px] hover:bg-white"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedRecipientIds.includes(r.id)}
+                            onChange={() => toggleRecipientId(r.id)}
+                            className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <span className="font-medium text-slate-800">{r.recipientName}</span>
+                          <span className="font-mono text-slate-500">{r.email}</span>
+                          <span className="text-slate-400">Plant {r.plantCode}</span>
+                        </label>
+                      ))
+                  )}
+                </div>
+              </div>
+
               {/* Action Buttons */}
               <div className="mt-5 space-y-2">
                 <button
@@ -913,13 +1207,13 @@ export default function SubcontractorStockSettingsPageClient({
                 <button
                   type="button"
                   onClick={handleSendEmails}
-                  disabled={sendingEmails || !todayRun}
+                  disabled={sendingEmails || !todayRun || selectedRecipientIds.length === 0}
                   className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-slate-800 disabled:opacity-50"
                 >
                   <Send className="h-3.5 w-3.5" />
                   {sendingEmails
                     ? 'Sending Emails...'
-                    : 'Send Email Reports Now'}
+                    : `Send to selected (${selectedRecipientIds.length})`}
                 </button>
               </div>
             </div>

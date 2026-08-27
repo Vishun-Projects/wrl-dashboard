@@ -128,6 +128,7 @@ export function AdminTh({
   sortKey,
   sort,
   onSort,
+  title,
 }: {
   children: React.ReactNode;
   className?: string;
@@ -136,6 +137,7 @@ export function AdminTh({
   sortKey?: string;
   sort?: { key: string; dir: 'asc' | 'desc' } | null;
   onSort?: (key: string) => void;
+  title?: string;
 }) {
   const alignClass =
     align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left';
@@ -154,7 +156,7 @@ export function AdminTh({
           ? () => onSort!(sortKey!)
           : undefined
       }
-      title={clickable ? 'Click to sort' : undefined}
+      title={title ?? (clickable ? 'Click to sort' : undefined)}
       aria-sort={
         active ? (sort!.dir === 'asc' ? 'ascending' : 'descending') : clickable ? 'none' : undefined
       }

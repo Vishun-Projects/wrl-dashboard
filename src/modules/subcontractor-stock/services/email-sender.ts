@@ -15,6 +15,12 @@ function formatQty(val: number): string {
   });
 }
 
+export type TriggerEmailOptions = {
+  force?: boolean;
+  /** When set, send only to these recipient row ids. */
+  recipientIds?: string[];
+};
+
 export type TriggerEmailResult = {
   sentCount: number;
 };
@@ -22,7 +28,9 @@ export type TriggerEmailResult = {
 /**
  * Triggers subcontractor stock reconciliation emails to configured recipients.
  */
-export async function triggerSubcontractorEmails(options: { force?: boolean } = {}): Promise<TriggerEmailResult> {
+export async function triggerSubcontractorEmails(
+  options: TriggerEmailOptions = {}
+): Promise<TriggerEmailResult> {
   // 1. Get today's run data
   const dateStr = getIstLocalDateStr();
   let todayRun = await getTodaySubcontractorRun(dateStr);
@@ -52,7 +60,12 @@ export async function triggerSubcontractorEmails(options: { force?: boolean } = 
 
   // 3. Fetch active recipients
   const allRecipients = await listSubcontractorRecipients();
-  const activeRecipients = allRecipients.filter((r) => r.enabled);
+  let activeRecipients = allRecipients.filter((r) => r.enabled);
+
+  if (options.recipientIds && options.recipientIds.length > 0) {
+    const idSet = new Set(options.recipientIds);
+    activeRecipients = activeRecipients.filter((r) => idSet.has(r.id));
+  }
 
   if (activeRecipients.length === 0) {
     console.log('No enabled subcontractor stock recipients configured. Skipping email dispatch.');
@@ -329,8 +342,16 @@ export async function triggerSubcontractorEmails(options: { force?: boolean } = 
     sentCount++;
   }
 
-  // 7. Mark as email sent
-  await markSubcontractorRunEmailSent(dateStr);
+  // 7. Mark as email sent when dispatch covered all enabled recipients
+  const enabledCount = allRecipients.filter((r) => r.enabled).length;
+  const sentToAll =
+    !options.recipientIds ||
+    options.recipientIds.length === 0 ||
+    (enabledCount > 0 && activeRecipients.length >= enabledCount);
+
+  if (sentToAll && sentCount > 0) {
+    await markSubcontractorRunEmailSent(dateStr);
+  }
 
   return {
     sentCount,

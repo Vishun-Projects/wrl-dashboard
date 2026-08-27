@@ -1,11 +1,12 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Bell, Mail, Route, Settings2, Timer, Package } from 'lucide-react';
+import { Bell, Ban, Mail, Route, Settings2, Timer, Package } from 'lucide-react';
 import { PageShell } from '@/components/layout/PageShell';
 import MisEmailOrgSettingsPageClient from '@/modules/mis-email/pages/MisEmailOrgSettingsPageClient';
 import MisEmailRoutingPageClient from '@/modules/mis-email/pages/MisEmailRoutingPageClient';
 import MajorRepairAlertsPageClient from '@/modules/mis-email/pages/MajorRepairAlertsPageClient';
+import CancelledCallAlertsPageClient from '@/modules/mis-email/pages/CancelledCallAlertsPageClient';
 import MisEmailCronSchedulesPanel from '@/modules/mis-email/components/MisEmailCronSchedulesPanel';
 import SubcontractorStockSettingsPageClient from '@/modules/subcontractor-stock/pages/SubcontractorStockSettingsPageClient';
 import {
@@ -18,6 +19,7 @@ const TAB_ICONS = {
   org: Settings2,
   routing: Route,
   repair: Bell,
+  cancelled: Ban,
   cron: Timer,
   subcontractor: Package,
 } as const;
@@ -76,6 +78,7 @@ export default function MailAlertsHubPageClient({
     org: safeInitial === 'org',
     routing: safeInitial === 'routing',
     repair: safeInitial === 'repair',
+    cancelled: safeInitial === 'cancelled',
     cron: safeInitial === 'cron',
     subcontractor: safeInitial === 'subcontractor',
   });
@@ -96,7 +99,7 @@ export default function MailAlertsHubPageClient({
   return (
     <PageShell
       title="Mail & Alerts"
-      subtitle="Org defaults, routing rules, major-repair recipients, and (Super Admin) VPS cron — saving never sends mail."
+      subtitle="Org defaults, routing rules, major-repair and cancelled-call recipients, and (Super Admin) VPS cron — saving never sends mail."
       icon={<Mail size={16} />}
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-soft"
       toolbar={
@@ -118,6 +121,11 @@ export default function MailAlertsHubPageClient({
       {visited.repair ? (
         <div className={panelClass('repair')}>
           <MajorRepairAlertsPageClient embedded />
+        </div>
+      ) : null}
+      {visited.cancelled ? (
+        <div className={panelClass('cancelled')}>
+          <CancelledCallAlertsPageClient embedded />
         </div>
       ) : null}
       {showCron && visited.cron ? (

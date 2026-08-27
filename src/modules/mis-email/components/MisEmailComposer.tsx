@@ -255,6 +255,7 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
   const sendStatus = activeJobs[0]?.message ?? null;
   const sendResult = lastFinished?.ok ? lastFinished.message : null;
   const sendError = lastFinished && !lastFinished.ok ? lastFinished.message : null;
+  const queuingSendRef = useRef(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => resizePreviewIframe(), 80);
@@ -388,6 +389,8 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
   }
 
   async function handleSend(saveFirst: boolean) {
+    if (sendInProgress || queuingSendRef.current || sendTargets.length === 0) return;
+    queuingSendRef.current = true;
     clearLastFinished();
     try {
       const auth = await misEmailRequestAuth();
@@ -428,6 +431,8 @@ export function MisEmailComposer({ settings, prefs, onPrefsChange, onSaved }: Pr
         ? err.response?.data?.error || err.message
         : 'Send failed';
       feedback.actionFailed(message);
+    } finally {
+      queuingSendRef.current = false;
     }
   }
 

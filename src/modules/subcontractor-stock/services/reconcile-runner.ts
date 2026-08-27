@@ -1,11 +1,22 @@
 import path from 'path';
 import fs from 'fs';
-import os from 'os';
 import { parseSapMblbHtml, SapSupplierGroup } from './sap-parser';
 import { fetchCrmSubcontractorStock, fetchCrmVendorPlantMap } from './crm-query';
 import { reconcileStock, ReconciledRow, ReconciliationSummary } from './reconciliation-engine';
 import { generateReconciliationExcel } from './excel-generator';
-import { listSubcontractorSkipRules, upsertSubcontractorReconciledRun, getIstLocalDateStr } from './settings';
+import {
+  listSubcontractorSkipRules,
+  upsertSubcontractorReconciledRun,
+  getIstLocalDateStr,
+  markSapMailsReconciled,
+} from './settings';
+import { resolveSubcontractorExtractDir } from './vps-host';
+
+export type RunTodayReconciliationOptions = {
+  /** Maildir basenames — only include extracted files prefixed with `{mailKey}_`. */
+  mailKeys?: string[];
+  dateStr?: string;
+};
 
 export type RunReconciliationOptions = {
   filePath: string;
@@ -71,37 +82,48 @@ export async function runSubcontractorReconciliation(
 /**
  * Automatically reconciles today's SAP reports by parsing all files for the latest date.
  */
-export async function runTodayReconciliation(): Promise<{ run: any; summary: ReconciliationSummary; rows: ReconciledRow[] }> {
-  // Determine input directory (VPS uses /tmp/extracted_sap, local uses extracted_sap)
-  const isVPS = os.hostname().startsWith('srv') || fs.existsSync('/home/mis');
-  const searchDir = isVPS ? '/tmp/extracted_sap' : path.resolve(process.cwd(), 'extracted_sap');
+export async function runTodayReconciliation(
+  options: RunTodayReconciliationOptions = {}
+): Promise<{ run: any; summary: ReconciliationSummary; rows: ReconciledRow[] }> {
+  const searchDir = resolveSubcontractorExtractDir();
 
   if (!fs.existsSync(searchDir)) {
     throw new Error(`SAP extracted directory not found at: ${searchDir}`);
   }
 
+  const mailKeySet =
+    options.mailKeys && options.mailKeys.length > 0
+      ? new Set(options.mailKeys.map((k) => k.trim()).filter(Boolean))
+      : null;
+
   // Scan files and extract timestamps
   const files = fs.readdirSync(searchDir);
-  const sapFiles: { filename: string; filepath: string; timestamp: number; dateStr: string }[] = [];
+  const sapFiles: { filename: string; filepath: string; timestamp: number; dateStr: string; mailKey: string | null }[] = [];
 
   for (const filename of files) {
     if (filename.toLowerCase().endsWith('.htm') || filename.toLowerCase().endsWith('.html')) {
       const filepath = path.join(searchDir, filename);
+      const mailKeyMatch = filename.match(/^(.+?)_[^/\\]+\.(htm|html)$/i);
+      const mailKey = mailKeyMatch?.[1] ?? null;
+
+      if (mailKeySet && mailKey && !mailKeySet.has(mailKey)) continue;
+      if (mailKeySet && !mailKey) continue;
+
       const match = filename.match(/^(\d+)\./);
       if (match) {
         const timestamp = parseInt(match[1], 10);
         const date = new Date(timestamp * 1000);
         const dateStr = getIstLocalDateStr(date);
-        sapFiles.push({ filename, filepath, timestamp, dateStr });
+        sapFiles.push({ filename, filepath, timestamp, dateStr, mailKey });
       } else {
         const stats = fs.statSync(filepath);
         const dateStr = getIstLocalDateStr(stats.mtime);
-        sapFiles.push({ filename, filepath, timestamp: stats.mtimeMs / 1000, dateStr });
+        sapFiles.push({ filename, filepath, timestamp: stats.mtimeMs / 1000, dateStr, mailKey });
       }
     }
   }
 
-  const todayDateStr = getIstLocalDateStr();
+  const todayDateStr = options.dateStr || getIstLocalDateStr();
   const targetFiles = sapFiles.filter((f) => f.dateStr === todayDateStr);
 
   if (targetFiles.length === 0) {
@@ -173,6 +195,15 @@ export async function runTodayReconciliation(): Promise<{ run: any; summary: Rec
     summary,
     excelFilename,
   });
+
+  const reconciledMailKeys = [
+    ...new Set(
+      targetFiles.map((f) => f.mailKey).filter((k): k is string => Boolean(k))
+    ),
+  ];
+  if (reconciledMailKeys.length > 0) {
+    await markSapMailsReconciled({ mailKeys: reconciledMailKeys, runDate: latestDateStr });
+  }
 
   return {
     run: runRecord,

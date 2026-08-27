@@ -12,10 +12,13 @@ import {
 import {
   buildMisEmailRegionalAndBranchRowsFromTrace,
   buildMisEmailRegionalPerformanceRows,
+  mergeBranchPerformanceRowsByName,
   overlayBranchOpenFromExcelRows,
   overlayRegionalOpenFromExcelRows,
   reconcileMisEmailOpenCounts,
 } from '@/modules/mis-email/services/mail-basis';
+import { mergeBranchSummaryRowsByName } from '@/modules/mis';
+import { buildTopLevelBranchRows } from '@/modules/mis-email/services/body-sections';
 import type { BranchPerformanceRow } from '@/modules/mis-email/services/mail-types';
 import { buildDigestTraceableExportPayload } from '@/modules/mis-email/services/fetch-digest-trace';
 import {
@@ -128,10 +131,10 @@ async function buildMisEmailBodyContext(
   bodySectionIds: ReturnType<typeof resolveDigestBodySections>,
   clientAccountSummary?: Awaited<ReturnType<typeof fetchDigestClientAccountSummaryCached>>,
   options?: {
-    /** Full YTD call rows — body regional/branch counted entirely from these. */
+    /** Full trace export — all status buckets; body counted entirely from these rows. */
     fullTraceRows?: Awaited<ReturnType<typeof buildDigestTraceableExportPayload>>['traceRows'];
-    /** Open Excel rows — body open/aging taken from these so All open matches the attachment. */
-    openExcelTraceRows?: Awaited<ReturnType<typeof buildDigestTraceableExportPayload>>['traceRows'];
+    /** Open-calls Excel only — open/aging/eng overlay; solved/cancelled stay on BdMis summary. */
+    openTraceRows?: Awaited<ReturnType<typeof buildDigestTraceableExportPayload>>['traceRows'];
   }
 ): Promise<MisEmailBodyContext> {
   const explicitAccounts = parseMisEmailKeyAccountsInBody(prefs.keyAccountsInBody);
@@ -167,12 +170,14 @@ async function buildMisEmailBodyContext(
   const needsRegionalBody = bodySectionIds.includes('regional_performance');
   const needsBranchBody = bodySectionIds.includes('branch_performance');
   const fullTraceRows = options?.fullTraceRows;
-  const openExcelTraceRows = options?.openExcelTraceRows;
+  const openTraceRows = options?.openTraceRows;
 
   if (fullTraceRows?.length && (needsRegionalBody || needsBranchBody)) {
     const { regional, branch } = buildMisEmailRegionalAndBranchRowsFromTrace(fullTraceRows);
     if (needsRegionalBody) context.regionalPerformanceRows = regional;
-    if (needsBranchBody) context.branchPerformanceRows = branch;
+    if (needsBranchBody) {
+      context.branchPerformanceRows = mergeBranchPerformanceRowsByName(branch);
+    }
   } else if (needsRegionalBody || needsBranchBody) {
     const clientRows =
       clientAccountSummary !== undefined
@@ -180,14 +185,15 @@ async function buildMisEmailBodyContext(
         : await fetchDigestClientAccountSummaryCached(dateRange);
     if (needsRegionalBody) {
       let regional = buildMisEmailRegionalPerformanceRows(data, clientRows);
-      if (openExcelTraceRows?.length) {
-        // Same open set as the Excel attachment — as-on open matches the file.
-        regional = overlayRegionalOpenFromExcelRows(regional, openExcelTraceRows);
+      if (openTraceRows?.length) {
+        regional = overlayRegionalOpenFromExcelRows(regional, openTraceRows);
       }
       context.regionalPerformanceRows = regional;
     }
-    if (needsBranchBody && openExcelTraceRows?.length) {
-      const crmBranch: BranchPerformanceRow[] = data.branchSummary.map((row) => ({
+    if (needsBranchBody) {
+      const crmBranch: BranchPerformanceRow[] = mergeBranchSummaryRowsByName(
+        buildTopLevelBranchRows(data.branchSummary)
+      ).map((row) => ({
         branch: row.branch,
         region: row.region,
         total_calls: row.total_calls,
@@ -201,7 +207,9 @@ async function buildMisEmailBodyContext(
         part_pending: row.part_pending,
         active_eng: row.active_eng,
       }));
-      context.branchPerformanceRows = overlayBranchOpenFromExcelRows(crmBranch, openExcelTraceRows);
+      context.branchPerformanceRows = openTraceRows?.length
+        ? overlayBranchOpenFromExcelRows(crmBranch, openTraceRows)
+        : crmBranch;
     }
   }
 
@@ -457,7 +465,7 @@ export async function buildMisEmailPayload(
       clientAccountSummary,
       {
         fullTraceRows: includeTraceableExport ? tracePayload?.traceRows : undefined,
-        openExcelTraceRows:
+        openTraceRows:
           includeOpenCallsExport && !includeTraceableExport
             ? tracePayload?.traceRows
             : undefined,

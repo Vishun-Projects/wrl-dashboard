@@ -58,6 +58,8 @@ export type MisEmailOrgSettings = {
   majorRepairMonths: number;
   majorRepairDefaultTo: string;
   majorRepairDefaultCc: string;
+  /** Daily cancelled-call branch digest send time (IST HH:mm). VPS cron polls every 15 min. */
+  cancelledCallDigestSendTimeIst: string;
   /** Morning watchdog alert recipient (env MIS_EMAIL_WATCHDOG_TO overrides). */
   watchdogToEmail: string;
   /** Placeholders: {date} */
@@ -87,6 +89,7 @@ export const MIS_EMAIL_ORG_SETTINGS_FALLBACKS: MisEmailOrgSettings = {
   majorRepairMonths: 3,
   majorRepairDefaultTo: 'sunil.sawant@westernequipments.com',
   majorRepairDefaultCc: 'vishnu.vishwakarma@westernequipments.com',
+  cancelledCallDigestSendTimeIst: '09:00',
   watchdogToEmail: DEFAULT_WATCHDOG_TO_EMAIL,
   watchdogSubjectTemplate: DEFAULT_WATCHDOG_SUBJECT_TEMPLATE,
   watchdogBodyTemplate: DEFAULT_WATCHDOG_BODY_TEMPLATE,

@@ -106,6 +106,8 @@ export type RegisterPostgresParams = {
   repairCallKeys?: Array<{ ncode: number; officeId: number }>;
   sortBy?: RegisterSortBy;
   sortDir?: 'asc' | 'desc';
+  /** Lowercase account names excluded from results (e.g. cadbury, coke). */
+  excludeAccountsLower?: string[];
 };
 
 export type RegisterHotDateField =
@@ -336,6 +338,12 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
       values.push(accounts);
       idx++;
     }
+  }
+
+  if (params.excludeAccountsLower?.length) {
+    clauses.push(`lower(coalesce(h.account, '')) <> ALL($${idx}::text[])`);
+    values.push(params.excludeAccountsLower.map((a) => a.toLowerCase()));
+    idx++;
   }
 
   if (params.region && params.region !== 'All') {
@@ -872,10 +880,12 @@ export async function queryRegisterExportFromPostgres(
 
 /** Fast breakdown register export for MIS email — slim columns, no ARCP enrichment. */
 export async function queryDigestRegisterExportFromPostgres(
-  params: RegisterPostgresParams
+  params: RegisterPostgresParams,
+  opts?: { maxRows?: number }
 ): Promise<Record<string, unknown>[]> {
   const { sql: whereSql, values } = buildWhere(params);
   const orderBy = registerHotOrderBy(params.dateFilterColumn);
+  const maxRows = Math.max(1, opts?.maxRows ?? REGISTER_BULK_MAX_ROWS);
 
   const rows = await prisma.$queryRawUnsafeBulk<Record<string, unknown>[]>(
     `
@@ -887,7 +897,7 @@ export async function queryDigestRegisterExportFromPostgres(
     LIMIT $${values.length + 1}
     `,
     ...values,
-    REGISTER_BULK_MAX_ROWS
+    maxRows
   );
 
   return rows.map((row) => hotRowToRegisterRow(row));

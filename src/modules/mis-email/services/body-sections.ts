@@ -14,6 +14,7 @@ import {
   type MisEmailBodyLayout,
 } from '@/modules/mis-email/services/email-body-layout';
 import type { BranchPerformanceRow, RegionalPerformanceRow } from '@/modules/mis-email/services/mail-types';
+import { mergeBranchSummaryRowsByName } from '@/modules/mis';
 
 export const MIS_EMAIL_BODY_SECTION_IDS = [
   'regional_performance',
@@ -392,12 +393,14 @@ function resolveRegionalPerformanceRows(
   );
 }
 
-function buildRegionalPerformanceHtml(bodyContext: MisEmailBodyContext): string {
-  const regionalRows = resolveRegionalPerformanceRows(bodyContext.summary, bodyContext);
+/** Same regional table HTML as morning MIS mail (zones + All, cancelled, aging, eng). */
+export function renderRegionalPerformanceTableHtml(
+  regionalRows: RegionalPerformanceRow[],
+  title = 'Regional Performance'
+): string {
   const grand = sumRegionalRows(regionalRows);
-
   return buildPerformanceTableHtml({
-    title: 'Regional Performance',
+    title,
     regionColumnLabel: 'Region',
     rows: [
       ...regionalRows.map((row) => ({
@@ -413,6 +416,12 @@ function buildRegionalPerformanceHtml(bodyContext: MisEmailBodyContext): string 
       },
     ],
   });
+}
+
+function buildRegionalPerformanceHtml(bodyContext: MisEmailBodyContext): string {
+  return renderRegionalPerformanceTableHtml(
+    resolveRegionalPerformanceRows(bodyContext.summary, bodyContext)
+  );
 }
 
 function isNonZeroBranchPerformanceRow(row: {
@@ -448,8 +457,7 @@ function resolveBranchPerformanceRows(
 ): BranchPerformanceRow[] {
   const rows = bodyContext.branchPerformanceRows?.length
     ? bodyContext.branchPerformanceRows
-    : buildTopLevelBranchRows(data.branchSummary)
-        .map((row) => ({
+    : mergeBranchSummaryRowsByName(buildTopLevelBranchRows(data.branchSummary)).map((row) => ({
           branch: row.branch,
           region: row.region,
           total_calls: row.total_calls,

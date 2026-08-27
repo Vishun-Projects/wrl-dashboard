@@ -4,7 +4,15 @@ import type { MailAlertsTab } from '@/modules/mis-email/components/MailAlertsSub
 
 function parseTab(raw: string | string[] | undefined): MailAlertsTab {
   const value = Array.isArray(raw) ? raw[0] : raw;
-  if (value === 'routing' || value === 'repair' || value === 'cron') return value;
+  if (
+    value === 'routing' ||
+    value === 'repair' ||
+    value === 'cancelled' ||
+    value === 'cron' ||
+    value === 'subcontractor'
+  ) {
+    return value;
+  }
   return 'org';
 }
 

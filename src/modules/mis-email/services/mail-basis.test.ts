@@ -262,6 +262,71 @@ describe('buildMisEmailRegionalPerformanceRowsFromTrace', () => {
   });
 });
 
+describe('digest body trace basis', () => {
+  it('trace body rows align solved/open/cancelled — do not mix summary solved with trace open overlay', () => {
+    const traceRows = buildBdMisTraceRows({
+      crmRows: [
+        {
+          region: 'SOUTH ZONE',
+          plant: 'P1',
+          technician_name: 'T1',
+          office_under_branch: 'B1',
+          customer_name: 'C1',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'CRM-SOLVED',
+          client: 'Nestle',
+          call_status: 'Solved',
+          status_bucket: 'solved',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+        {
+          region: 'SOUTH ZONE',
+          plant: 'P1',
+          technician_name: 'T2',
+          office_under_branch: 'B1',
+          customer_name: 'C2',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'CRM-OPEN',
+          client: 'Nestle',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+      ],
+      clientRows: [],
+      sources: misEmailBdMisSources(),
+      agingDate: '2026-07-09',
+    });
+
+    const fromTrace = buildMisEmailRegionalPerformanceRowsFromTrace(traceRows);
+    const summaryRegional = [
+      {
+        region: 'SOUTH ZONE',
+        total_calls: 0,
+        solved_calls: 0,
+        cancelled_calls: 0,
+        open_calls: 99,
+        age_2: 0,
+        age_3: 0,
+        age_7: 0,
+        age_15: 0,
+        part_pending: 0,
+        active_eng: 0,
+      },
+    ];
+    const fromSummaryOverlay = overlayRegionalOpenFromExcelRows(summaryRegional, traceRows);
+
+    expect(fromTrace[0]?.solved_calls).toBe(1);
+    expect(fromTrace[0]?.open_calls).toBe(1);
+    expect(fromSummaryOverlay[0]?.open_calls).toBe(1);
+    // Hybrid keeps summary solved while open comes from trace — body must use trace-only.
+    expect(fromSummaryOverlay[0]?.solved_calls).toBe(0);
+    expect(fromSummaryOverlay[0]?.solved_calls).not.toBe(fromTrace[0]?.solved_calls);
+  });
+});
+
 describe('overlayRegionalOpenFromExcelRows', () => {
   it('replaces summary open with Excel open and rebalances total_calls', () => {
     const summary: SummaryDashboard = {

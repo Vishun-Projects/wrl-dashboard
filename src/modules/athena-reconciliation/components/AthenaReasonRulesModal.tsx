@@ -102,7 +102,7 @@ export function AthenaReasonRulesModal({
                 )}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Customize how specific Athena error messages are categorized in KPI counts and reports.
+                Customize how specific CRM error messages are categorized in KPI counts and reports.
               </p>
             </div>
           </div>

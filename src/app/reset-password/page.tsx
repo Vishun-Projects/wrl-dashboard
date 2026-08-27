@@ -133,6 +133,8 @@ export default function ResetPasswordPage() {
 
       stripRecoveryParamsFromUrl();
       feedback.actionSuccess('Password updated. You can sign in now.');
+      // Hard navigation clears recovery state; router.push can leave stale session UI.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- intentional post-reset full reload
       window.location.assign('/login');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Password update failed');

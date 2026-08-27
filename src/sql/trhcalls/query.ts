@@ -1068,6 +1068,92 @@ export function buildRegisterRepairDoneByCallKeysSql(
   `;
 }
 
+function normalizeCallKeyPairs(
+  keys: Array<{ ncode: number; officeId: number }>
+): Array<{ ncode: number; officeId: number }> {
+  return [
+    ...new Map(
+      keys
+        .map((k) => ({
+          ncode: Math.trunc(Number(k.ncode)),
+          officeId: Math.trunc(Number(k.officeId)),
+        }))
+        .filter(
+          (k) =>
+            Number.isFinite(k.ncode) &&
+            k.ncode > 0 &&
+            Number.isFinite(k.officeId) &&
+            k.officeId > 0
+        )
+        .map((k) => [`${k.ncode}:${k.officeId}`, k] as const)
+    ).values(),
+  ];
+}
+
+/** Full repair-done labels (all mstrepair names) for attendance / activity rows. */
+export function buildFullRepairDoneByCallKeysSql(
+  keys: Array<{ ncode: number; officeId: number }>
+): string | null {
+  const pairs = normalizeCallKeyPairs(keys);
+  if (!pairs.length) return null;
+  const valuesList = pairs.map((k) => `(${k.ncode},${k.officeId})`).join(',');
+  return `
+    SELECT
+      keys.ncalls AS id,
+      keys.nofficeid AS office_id,
+      STUFF((
+        SELECT DISTINCT '; ' + LTRIM(RTRIM(r.vname))
+        FROM trdcalls2fault tf (NOLOCK)
+        INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
+        WHERE tf.ncalls = keys.ncalls
+          AND tf.nofficeid = keys.nofficeid
+          AND LTRIM(RTRIM(ISNULL(r.vname, ''))) <> ''
+        FOR XML PATH(''), TYPE
+      ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS repair_done
+    FROM (VALUES ${valuesList}) AS keys(ncalls, nofficeid)
+  `;
+}
+
+/** Distinct repair names present on the given call keys. */
+export function buildDistinctRepairDoneByCallKeysSql(
+  keys: Array<{ ncode: number; officeId: number }>
+): string | null {
+  const pairs = normalizeCallKeyPairs(keys);
+  if (!pairs.length) return null;
+  const valuesList = pairs.map((k) => `(${k.ncode},${k.officeId})`).join(',');
+  return `
+    SELECT DISTINCT LTRIM(RTRIM(r.vname)) AS repair_done
+    FROM trdcalls2fault tf (NOLOCK)
+    INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
+    INNER JOIN (VALUES ${valuesList}) AS keys(ncalls, nofficeid)
+      ON keys.ncalls = tf.ncalls AND keys.nofficeid = tf.nofficeid
+    WHERE LTRIM(RTRIM(ISNULL(r.vname, ''))) <> ''
+    ORDER BY repair_done ASC
+  `;
+}
+
+/** Call keys among candidates that include any of the given repair names. */
+export function buildCallKeysWithRepairDoneSql(
+  keys: Array<{ ncode: number; officeId: number }>,
+  repairDones: string | string[]
+): string | null {
+  const pairs = normalizeCallKeyPairs(keys);
+  const names = (Array.isArray(repairDones) ? repairDones : [repairDones])
+    .map((n) => n.trim())
+    .filter(Boolean);
+  if (!pairs.length || !names.length) return null;
+  const valuesList = pairs.map((k) => `(${k.ncode},${k.officeId})`).join(',');
+  const nameList = names.map((n) => `'${n.replace(/'/g, "''").toUpperCase()}'`).join(',');
+  return `
+    SELECT DISTINCT tf.ncalls AS id, tf.nofficeid AS office_id
+    FROM trdcalls2fault tf (NOLOCK)
+    INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode
+    INNER JOIN (VALUES ${valuesList}) AS keys(ncalls, nofficeid)
+      ON keys.ncalls = tf.ncalls AND keys.nofficeid = tf.nofficeid
+    WHERE UPPER(LTRIM(RTRIM(r.vname))) IN (${nameList})
+  `;
+}
+
 const MAJOR_REPAIR_REPEAT_MAJOR_EXISTS = `EXISTS (
   SELECT 1 FROM trdcalls2fault tf (NOLOCK)
   INNER JOIN mstrepair r (NOLOCK) ON tf.nrepair = r.ncode

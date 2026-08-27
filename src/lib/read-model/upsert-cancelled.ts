@@ -3,7 +3,8 @@ import { isRealCancelReasonCode } from '@/lib/call/status/cancel';
 import { transformCrmRowToHot } from '@/lib/read-model/transform';
 import type { HotRow } from '@/lib/read-model/types';
 
-const CANCELLED_COLUMNS = [
+/** Must stay aligned with docs/read-model-phase1-schema/28-calls_cancelled.sql columns (excl. synced_at). */
+export const CANCELLED_COLUMNS = [
   'vtrnno',
   'ncode',
   'ncancelreason',

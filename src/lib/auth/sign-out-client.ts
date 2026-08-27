@@ -5,5 +5,6 @@ export async function signOutAndGoToLogin(): Promise<void> {
   } catch {
     /* best-effort */
   }
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- hard-navigate breaks middleware loops
   window.location.assign('/login');
 }

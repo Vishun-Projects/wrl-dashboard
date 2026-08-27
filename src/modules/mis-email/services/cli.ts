@@ -11,7 +11,8 @@ import {
   runMisEmailDigest,
   runMisEmailTestBatch,
 } from '@/modules/mis-email/services/run-digest';
-import { runNightlyYtdCallsExport } from '@/modules/mis-email/services/nightly-ytd-export';
+import { runMidnightCrmDeltaReport } from '@/modules/mis-email/services/midnight-crm-delta';
+import { runCancelledCallDigest } from '@/modules/mis-email/services/cancelled-call-digest';
 import { listMisEmailRoutingRules } from '@/modules/mis-email/services/routing-rules';
 
 async function main(): Promise<void> {
@@ -41,13 +42,36 @@ async function main(): Promise<void> {
         break;
       }
 
-      case 'nightly-ytd-export': {
+      case 'nightly-ytd-export':
+      case 'midnight-crm-delta': {
         const dryRun = process.argv.includes('--dry-run');
         const toArg = process.argv.find((a) => a.startsWith('--to='))?.slice('--to='.length);
-        const result = await runNightlyYtdCallsExport({ to: toArg, dryRun });
+        const result = await runMidnightCrmDeltaReport({ to: toArg, dryRun });
         console.log(
-          `[mis-email] Nightly YTD export complete — ${result.dateRange.startDate}→${result.dateRange.endDate} · rows=${result.summary.exportRows} · messageId=${result.messageId}`
+          `[mis-email] Midnight CRM delta — ${result.dateRange.endDate} · rows=${result.exportRows} · total=${result.ytd.all} · baseline=${result.delta.baseline} · messageId=${result.messageId}`
         );
+        break;
+      }
+
+      case 'cancelled-call-digest': {
+        const dryRun = process.argv.includes('--dry-run');
+        const dateArg = process.argv
+          .find((a) => a.startsWith('--date='))
+          ?.slice('--date='.length);
+        const result = await runCancelledCallDigest({
+          digestDate: dateArg,
+          dryRun,
+        });
+        console.log(
+          `[cancelled-call-digest] ${result.digestDate} — sent ${result.sent.length}, skipped ${result.skipped.length}, failed ${result.failed.length}, ${result.durationMs} ms`
+        );
+        for (const s of result.skipped) {
+          console.log(`  SKIP ${s.branch}: ${s.reason} (${s.rowCount} rows)`);
+        }
+        for (const f of result.failed) {
+          console.error(`  FAIL ${f.branch}: ${f.error}`);
+        }
+        if (result.failed.length) process.exitCode = 1;
         break;
       }
 

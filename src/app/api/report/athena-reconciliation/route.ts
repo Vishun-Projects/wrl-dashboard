@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
       const stamp = new Date().toISOString().slice(0, 10);
       const { body, headers } = gzippedCsvPayload(
         csv,
-        `athena-failed-reconciliation-${stamp}.csv`,
+        `reconciliation-${stamp}.csv`,
         req.headers.get('accept-encoding')
       );
       return new NextResponse(body, { headers });

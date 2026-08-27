@@ -18,6 +18,8 @@ import {
   getSubcontractorConfig,
   setSubcontractorConfig,
   getTodaySubcontractorRun,
+  listRecentSubcontractorRuns,
+  listSapMailLog,
 } from '../../services/settings';
 
 import {
@@ -26,7 +28,15 @@ import {
   fetchCrmActiveMaterials,
 } from '../../services/crm-query';
 
-import { triggerSubcontractorEmails } from '../../services/email-sender'; // We will create this!
+import { triggerSubcontractorEmails } from '../../services/email-sender';
+import { runTodayReconciliation } from '../../services/reconcile-runner';
+import { getSapInboxDashboard, syncSapMailInbox } from '../../services/sap-inbox';
+import {
+  isSubcontractorVpsHost,
+  relaySubcontractorReconcile,
+  relaySubcontractorSend,
+  relaySubcontractorSyncInbox,
+} from '@/lib/mail/subcontractor-relay-client';
 
 async function requireAccess(request: Request): Promise<
   | { error: NextResponse; auth?: never; user?: never }
@@ -51,7 +61,6 @@ async function requireAccess(request: Request): Promise<
     return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
   }
 
-  // Gate using the page_mis_email_settings permission
   if (!canAccessPage(auth.permissions, 'mis_email_settings')) {
     await logAccessDenied({
       request,
@@ -73,6 +82,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     const { searchParams } = new URL(request.url);
     const options = searchParams.get('options');
+    const inbox = searchParams.get('inbox');
 
     if (options === 'true' || options === '1') {
       const [plants, vendors, materials] = await Promise.all([
@@ -83,15 +93,41 @@ export async function GET(request: Request): Promise<NextResponse> {
       return NextResponse.json({ plants, vendors, materials });
     }
 
-    const [skipRules, recipients, sendTime, todayRun] = await Promise.all([
+    if (inbox === 'true' || inbox === '1') {
+      const days = Math.min(Math.max(Number(searchParams.get('days') ?? 14) || 14, 1), 90);
+      const [dashboard, todayRun, recentRuns] = await Promise.all([
+        getSapInboxDashboard(days),
+        getTodaySubcontractorRun(),
+        listRecentSubcontractorRuns(14),
+      ]);
+      return NextResponse.json({
+        inbox: dashboard.inbox,
+        todayMailCount: dashboard.todayMailCount,
+        latestReceivedAt: dashboard.latestReceivedAt,
+        todayRun,
+        recentRuns,
+      });
+    }
+
+    const [skipRules, recipients, sendTime, todayRun, recentRuns] = await Promise.all([
       listSubcontractorSkipRules(),
       listSubcontractorRecipients(),
       getSubcontractorConfig('send_time_ist').then((val) => val || '08:00'),
       getTodaySubcontractorRun(),
+      listRecentSubcontractorRuns(14),
     ]);
 
-    return NextResponse.json({ skipRules, recipients, sendTime, todayRun });
-  } catch (err: any) {
+    const inboxEntries = await listSapMailLog({ days: 14 });
+
+    return NextResponse.json({
+      skipRules,
+      recipients,
+      sendTime,
+      todayRun,
+      recentRuns,
+      inbox: inboxEntries,
+    });
+  } catch (err: unknown) {
     return NextResponse.json({ error: safeErrorMessage(err) }, { status: 500 });
   }
 }
@@ -103,7 +139,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     await assertSameOriginMutation(request);
 
     const body = await request.json();
-    const { type, action, data } = body;
+    const { type, action, data, mailKeys, recipientIds } = body;
 
     const actor = {
       userId: access.user.id,
@@ -111,56 +147,116 @@ export async function POST(request: Request): Promise<NextResponse> {
       name: access.auth.profile.name,
     };
 
-    if (action === 'run-reconciliation') {
-      // Find files for today (usually in e:\database\fast-close-app\extracted_sap or /tmp/extracted_sap)
-      // For local development, search for any HTML files in extracted_sap
-      const fs = require('fs');
-      const path = require('path');
-      const glob = require('glob');
-      const os = require('os');
-
-      const isVPS = os.hostname().startsWith('srv') || fs.existsSync('/home/mis');
-      const searchDir = isVPS ? '/tmp/extracted_sap' : path.resolve(process.cwd(), 'extracted_sap');
-      
-      const htmFiles = glob.sync(`${searchDir}/*.htm*`);
-      if (htmFiles.length === 0) {
-        return NextResponse.json(
-          { error: `No SAP HTML files found to reconcile in: ${searchDir}` },
-          { status: 400 }
-        );
+    if (action === 'sync-inbox') {
+      if (isSubcontractorVpsHost()) {
+        const result = await syncSapMailInbox();
+        await logAction({
+          action: 'subcontractor_stock.sync_inbox',
+          actor,
+          result: 'success',
+          summary: 'Synced SAP mail inbox on VPS',
+          metadata: { upserted: result.upserted },
+        });
+        return NextResponse.json({
+          success: true,
+          upserted: result.upserted,
+          inbox: result.entries,
+        });
       }
 
-      // Reconcile using the first file or merge all?
-      // Since they come in multiple parts, let's run the runner!
-      // The runner expects a single filePath or we can merge/parse them.
-      // Wait, let's use the first file for simplicity or let the runner handle it.
-      // Wait! In reconcile-today-excel.ts, it reads all .htm files, parses them, merges them, and reconciles.
-      // Let's make sure our runner or custom endpoint does this!
-      // We will create a helper to run today's reconciliation.
-      const { runTodayReconciliation } = await import('../../services/reconcile-runner');
-      const result = await runTodayReconciliation();
+      const relay = await relaySubcontractorSyncInbox();
+      await logAction({
+        action: 'subcontractor_stock.sync_inbox',
+        actor,
+        result: 'success',
+        summary: 'Synced SAP mail inbox via VPS relay',
+        metadata: { upserted: relay.data.upserted },
+      });
+      return NextResponse.json({
+        success: true,
+        upserted: relay.data.upserted,
+        inbox: relay.data.entries ?? [],
+      });
+    }
 
+    if (action === 'run-reconciliation') {
+      const keys = Array.isArray(mailKeys)
+        ? mailKeys.map((k: string) => String(k).trim()).filter(Boolean)
+        : undefined;
+
+      if (isSubcontractorVpsHost()) {
+        const result = await runTodayReconciliation(
+          keys && keys.length > 0 ? { mailKeys: keys } : {}
+        );
+        await logAction({
+          action: 'subcontractor_stock.reconcile_manual',
+          actor,
+          result: 'success',
+          summary: 'Manually executed subcontractor stock reconciliation',
+          metadata: { summary: result.summary, mailKeys: keys },
+        });
+        return NextResponse.json({ success: true, summary: result.summary, todayRun: result.run });
+      }
+
+      const relay = await relaySubcontractorReconcile(
+        keys && keys.length > 0 ? { mailKeys: keys } : {}
+      );
+      if (relay.data.error) {
+        return NextResponse.json({ error: relay.data.error }, { status: 502 });
+      }
       await logAction({
         action: 'subcontractor_stock.reconcile_manual',
         actor,
         result: 'success',
-        summary: `Manually executed subcontractor stock reconciliation for today`,
-        metadata: { summary: result.summary },
+        summary: 'Manually executed subcontractor stock reconciliation via VPS relay',
+        metadata: { summary: relay.data.summary, mailKeys: keys },
       });
-
-      return NextResponse.json({ success: true, summary: result.summary, todayRun: result.run });
+      return NextResponse.json({
+        success: true,
+        summary: relay.data.summary,
+        todayRun: relay.data.todayRun,
+      });
     }
 
     if (action === 'send-emails') {
-      const result = await triggerSubcontractorEmails({ force: true });
+      const ids = Array.isArray(recipientIds)
+        ? recipientIds.map((id: string) => String(id).trim()).filter(Boolean)
+        : undefined;
+
+      if (isSubcontractorVpsHost()) {
+        const result = await triggerSubcontractorEmails({
+          force: true,
+          recipientIds: ids,
+        });
+        await logAction({
+          action: 'subcontractor_stock.send_emails_manual',
+          actor,
+          result: 'success',
+          summary: 'Manually sent subcontractor stock reconciliation emails',
+          metadata: { sentCount: result.sentCount, recipientIds: ids },
+        });
+        return NextResponse.json({ success: true, sentCount: result.sentCount });
+      }
+
+      if (!ids || ids.length === 0) {
+        return NextResponse.json(
+          { error: 'Select at least one recipient for manual send from the portal.' },
+          { status: 400 }
+        );
+      }
+
+      const relay = await relaySubcontractorSend({ recipientIds: ids, force: true });
+      if (relay.data.error) {
+        return NextResponse.json({ error: relay.data.error }, { status: 502 });
+      }
       await logAction({
         action: 'subcontractor_stock.send_emails_manual',
         actor,
         result: 'success',
-        summary: `Manually sent subcontractor stock reconciliation emails`,
-        metadata: { sentCount: result.sentCount },
+        summary: 'Manually sent subcontractor stock emails via VPS relay',
+        metadata: { sentCount: relay.data.sentCount, recipientIds: ids },
       });
-      return NextResponse.json({ success: true, sentCount: result.sentCount });
+      return NextResponse.json({ success: true, sentCount: relay.data.sentCount });
     }
 
     if (type === 'skip-rule') {
@@ -204,7 +300,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     return NextResponse.json({ error: 'Invalid POST body' }, { status: 400 });
-  } catch (err: any) {
+  } catch (err: unknown) {
     return NextResponse.json({ error: safeErrorMessage(err) }, { status: 500 });
   }
 }
@@ -249,7 +345,7 @@ export async function PUT(request: Request): Promise<NextResponse> {
     }
 
     return NextResponse.json({ error: 'Invalid PUT body' }, { status: 400 });
-  } catch (err: any) {
+  } catch (err: unknown) {
     return NextResponse.json({ error: safeErrorMessage(err) }, { status: 500 });
   }
 }
@@ -295,7 +391,7 @@ export async function DELETE(request: Request): Promise<NextResponse> {
     }
 
     return NextResponse.json({ success: true });
-  } catch (err: any) {
+  } catch (err: unknown) {
     return NextResponse.json({ error: safeErrorMessage(err) }, { status: 500 });
   }
 }

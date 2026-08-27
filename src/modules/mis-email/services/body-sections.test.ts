@@ -321,6 +321,29 @@ describe('buildEmailBodySectionsHtml', () => {
     expect(html).not.toMatch(/mis-td mis-open" bgcolor="#e7f3de"/);
   });
 
+  it('merges duplicate branch labels in branch performance (franchisee offices)', () => {
+    const duplicateBranch = sampleData.branchSummary[0];
+    const summary: SummaryDashboard = {
+      ...sampleData,
+      branchSummary: [
+        duplicateBranch,
+        {
+          ...duplicateBranch,
+          officeId: 101,
+          total_calls: 47,
+          solved_calls: 40,
+          cancelled_calls: 1,
+          open_calls: 6,
+          active_eng: 3,
+        },
+      ],
+    };
+    const html = buildEmailBodySectionsHtml(['branch_performance'], { summary });
+    expect((html.match(/Delhi/g) ?? []).length).toBe(1);
+    // merged total = solved + open + cancelled = (90+40) + (8+6) + (2+1) = 147
+    expect(html).toContain('>147<');
+  });
+
   it('omits branch rows that are all zeros', () => {
     const summary: SummaryDashboard = {
       ...sampleData,

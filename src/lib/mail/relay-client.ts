@@ -253,7 +253,11 @@ export async function relayPostJson<T extends Record<string, unknown>>(
           continue;
         }
         if (url !== urls[urls.length - 1]) {
-          console.warn(`[mis-email/relay] ${url} failed, trying next:`, message);
+          const isLocalTunnel = /127\.0\.0\.1:8789|localhost:8789/i.test(url);
+          console.warn(
+            `[mis-email/relay] ${url} failed, trying next:${isLocalTunnel ? ' (local tunnel down — start npm run mail-relay:tunnel or set VPS_MAIL_RELAY_TUNNEL=false)' : ''}`,
+            message
+          );
         }
         break;
       }

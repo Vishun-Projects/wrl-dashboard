@@ -104,6 +104,9 @@ export function mergeMisEmailOrgSettings(raw: unknown): MisEmailOrgSettings {
       typeof raw.majorRepairDefaultCc === 'string' && raw.majorRepairDefaultCc.trim()
         ? raw.majorRepairDefaultCc.trim().toLowerCase()
         : base.majorRepairDefaultCc,
+    cancelledCallDigestSendTimeIst:
+      normalizeMisEmailSendTime(raw.cancelledCallDigestSendTimeIst) ??
+      base.cancelledCallDigestSendTimeIst,
     watchdogToEmail:
       typeof raw.watchdogToEmail === 'string' && raw.watchdogToEmail.trim()
         ? raw.watchdogToEmail.trim().toLowerCase()

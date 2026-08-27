@@ -243,7 +243,7 @@ export default function AthenaReconciliationPageClient() {
       const blobUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = `athena-reconciliation-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = `reconciliation-${new Date().toISOString().slice(0, 10)}.csv`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -262,7 +262,7 @@ export default function AthenaReconciliationPageClient() {
     <PageShell
       title={
         <div className="flex items-center gap-2">
-          <span>Athena Failed Calls & CRM Reconciliation</span>
+          <span>Failed Calls & CRM Reconciliation</span>
           {summary && (
             <span className="hidden sm:inline-flex rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:text-slate-300">
               {summary.kpis.totalRecords.toLocaleString()} Records
@@ -273,7 +273,7 @@ export default function AthenaReconciliationPageClient() {
       subtitle={
         summary?.lastReconciledAt
           ? `Last Reconciled: ${new Date(summary.lastReconciledAt).toLocaleString()}`
-          : 'Athena Failed Ingestion & CRM Matching Engine'
+          : 'Failed CRM ingestion matched to the call register'
       }
       icon={<GitCompareArrows className="h-4 w-4 text-blue-600 dark:text-blue-400" />}
       actions={

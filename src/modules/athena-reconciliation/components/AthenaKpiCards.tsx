@@ -28,7 +28,7 @@ export function AthenaKpiCards({
       id: 'ALL',
       label: 'All Failed Calls',
       value: kpis.totalRecords.toLocaleString(),
-      detail: 'Total raw Athena failures',
+      detail: 'Total raw CRM ingestion failures',
       icon: FileText,
       activeBorder: 'border-slate-900 bg-slate-950 text-white dark:border-blue-500 dark:bg-blue-950/40 dark:text-white',
       inactiveBorder: 'border-slate-200 bg-white hover:border-slate-300 text-slate-800 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100 dark:hover:border-slate-700',

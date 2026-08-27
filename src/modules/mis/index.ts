@@ -17,5 +17,6 @@ export * from './services/search';
 export * from '@/lib/summary/derive';
 export * from './services/summary-excel-export';
 export * from './services/portal-cache';
+export * from './services/report-page-helpers';
 export * from './services/sync';
 /** UI is deep-imported — do not re-export here (MIS email CLI must not pull React/components). */

@@ -132,8 +132,16 @@ export const RBAC_PAGES: RbacPage[] = [
     id: 'athena_reconciliation',
     permission: 'page_athena_reconciliation',
     path: '/report/athena-reconciliation',
-    label: 'Athena Reconciliation',
-    description: 'Failed Athena calls, CRM matching, and registration statistics',
+    label: 'Reconciliation',
+    description: 'Failed CRM ingestion calls matched against the call register',
+    group: 'Reports',
+  },
+  {
+    id: 'cancelled_calls',
+    permission: 'page_cancelled_calls',
+    path: '/report/cancelled-calls',
+    label: 'Cancelled Calls',
+    description: 'Cancelled call register from Postgres — view and download',
     group: 'Reports',
   },
   {
@@ -157,7 +165,7 @@ export const RBAC_PAGES: RbacPage[] = [
     permission: 'page_mis_email_settings',
     path: '/admin/mis-email-settings',
     label: 'Mail & Alerts',
-    description: 'Org settings, MIS email routing, and major repair alerts',
+    description: 'Org settings, MIS email routing, major repair and cancelled-call digests',
     group: 'Administration',
   },
   {
@@ -174,6 +182,15 @@ export const RBAC_PAGES: RbacPage[] = [
     permission: 'page_major_repair_alerts',
     path: '/admin/major-repair-alerts',
     label: 'Major Repair Alerts',
+    description: 'Legacy path — use Mail & Alerts hub',
+    group: 'Administration',
+    nav: false,
+  },
+  {
+    id: 'cancelled_call_alerts',
+    permission: 'page_cancelled_call_alerts',
+    path: '/admin/cancelled-call-alerts',
+    label: 'Cancelled Call Digests',
     description: 'Legacy path — use Mail & Alerts hub',
     group: 'Administration',
     nav: false,
@@ -286,10 +303,12 @@ export function hasFullPageAccess(permissions: string[], pageId: string): boolea
 export function canAccessPage(permissions: string[], pageId: string): boolean {
   const page = PAGE_BY_ID.get(pageId);
   if (!page) return false;
+
   // Mail & Alerts hub + legacy paths share one OR-gate so any legacy/admin/HOD grant opens the hub.
   if (
     pageId === 'mis_email_routing' ||
     pageId === 'major_repair_alerts' ||
+    pageId === 'cancelled_call_alerts' ||
     pageId === 'mis_email_settings'
   ) {
     if (
@@ -298,12 +317,21 @@ export function canAccessPage(permissions: string[], pageId: string): boolean {
       hasPermission(permissions, 'manage_roles') ||
       hasPermission(permissions, 'page_mis_email_settings') ||
       hasPermission(permissions, 'page_mis_email_routing') ||
-      hasPermission(permissions, 'page_major_repair_alerts')
+      hasPermission(permissions, 'page_major_repair_alerts') ||
+      hasPermission(permissions, 'page_cancelled_call_alerts')
     ) {
       return true;
     }
   }
+
   if (hasFullPageAccess(permissions, pageId)) return true;
+
+  // Cancelled Calls report: same audience as Reconciliation or Call Register.
+  if (pageId === 'cancelled_calls') {
+    if (hasPermission(permissions, 'page_athena_reconciliation')) return true;
+    if (canAccessMisTab(permissions, 'register')) return true;
+  }
+
   if (page.tabs?.length) {
     return page.tabs.some((tab) => hasPermission(permissions, tab.permission));
   }

@@ -40,5 +40,6 @@ export async function confirmSessionExpiredSignIn(): Promise<void> {
   } catch {
     /* best-effort */
   }
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- hard-navigate after session expiry
   window.location.assign('/login?reason=session_expired');
 }

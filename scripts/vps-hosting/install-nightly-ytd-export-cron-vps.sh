@@ -29,6 +29,7 @@ if [[ "${1:-}" == "--local" ]]; then
     [[ -d "$log_dir" ]] || log_dir="${code}/logs"
     mkdir -p "$log_dir"
     chmod +x "${code}/scripts/vps-hosting/nightly-ytd-calls-export.sh" \
+             "${code}/scripts/vps-hosting/midnight-calls-sync.sh" \
              "${code}/scripts/vps-hosting/vps-cron-gate.sh" 2>/dev/null || true
     (
       crontab -l 2>/dev/null | grep -v 'nightly-ytd-calls-export.sh' | grep -v '^CRON_TZ=' || true
@@ -62,6 +63,7 @@ echo "==> base=${INSTALL_BASE}"
 echo "==> Uploading nightly YTD export script into current (strip CRLF)"
 scp \
   "${ROOT}/scripts/vps-hosting/nightly-ytd-calls-export.sh" \
+  "${ROOT}/scripts/vps-hosting/midnight-calls-sync.sh" \
   "${ROOT}/scripts/vps-hosting/vps-cron-gate.sh" \
   "${VPS_HOST}:/tmp/"
 
@@ -78,10 +80,12 @@ log_dir="${base}/shared/logs"
 [[ -d "$log_dir" ]] || log_dir="${code}/logs"
 mkdir -p "$log_dir"
 sed 's/\r$//' /tmp/nightly-ytd-calls-export.sh > "$code/scripts/vps-hosting/nightly-ytd-calls-export.sh"
+sed 's/\r$//' /tmp/midnight-calls-sync.sh > "$code/scripts/vps-hosting/midnight-calls-sync.sh"
 sed 's/\r$//' /tmp/vps-cron-gate.sh > "$code/scripts/vps-hosting/vps-cron-gate.sh"
 chmod +x "$code/scripts/vps-hosting/nightly-ytd-calls-export.sh" \
+         "$code/scripts/vps-hosting/midnight-calls-sync.sh" \
          "$code/scripts/vps-hosting/vps-cron-gate.sh"
-rm -f /tmp/nightly-ytd-calls-export.sh /tmp/vps-cron-gate.sh
+rm -f /tmp/nightly-ytd-calls-export.sh /tmp/midnight-calls-sync.sh /tmp/vps-cron-gate.sh
 
 to="${NIGHTLY_YTD_EXPORT_TO:-${DEFAULT_TO:-vishunvishwakarma90211@gmail.com}}"
 (

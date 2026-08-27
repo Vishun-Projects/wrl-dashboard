@@ -80,7 +80,7 @@ export function AthenaPayloadModal({ row, onClose }: AthenaPayloadModalProps) {
               <span className="text-xs text-slate-400">Record ID: #{row.id}</span>
             </div>
             <h2 className="mt-2 text-lg font-bold text-slate-900 dark:text-white">
-              {row.clientTicketNo ? `Athena Ticket ${row.clientTicketNo}` : 'Athena Failed Call Details'}
+              {row.clientTicketNo ? `Ticket ${row.clientTicketNo}` : 'Failed Call Details'}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
               {row.clientCaption || 'Client'} • {row.branchName || 'Branch'} • {row.callType || 'Call Type'}

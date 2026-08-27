@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Nightly YTD calls export — full register Excel Jan 1 → yesterday, emailed at midnight IST.
+# Midnight CRM delta — thorough calls sync once, then YTD report mail (00:00 IST).
 # Cron: 0 0 * * * …/nightly-ytd-calls-export.sh >> …/nightly-ytd-export-cron.log
+#
+# Daytime daemon does NOT run calls incremental (see SYNC_CALLS_DAEMON_ENABLED).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,13 +10,13 @@ DEFAULT_INSTALL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-$DEFAULT_INSTALL_ROOT}"
 cd "$INSTALL_ROOT"
 
-LOCK_FILE="${INSTALL_ROOT}/logs/nightly-ytd-export.lock"
+LOCK_FILE="${INSTALL_ROOT}/logs/midnight-crm-delta.lock"
 mkdir -p "${INSTALL_ROOT}/logs"
 
 if [[ -f "$LOCK_FILE" ]]; then
   lock_pid=$(cat "$LOCK_FILE" 2>/dev/null || true)
   if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
-    echo "=== nightly-ytd-calls-export skipped — already running (pid ${lock_pid}) ==="
+    echo "=== midnight-crm-delta skipped — already running (pid ${lock_pid}) ==="
     exit 0
   fi
   rm -f "$LOCK_FILE"
@@ -36,7 +38,7 @@ fi
 export NODE_ENV=production
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=8192}"
 
-echo "=== nightly-ytd-calls-export $(TZ=Asia/Kolkata date -Iseconds) TZ=${TZ:-system} ==="
+echo "=== midnight-crm-delta $(TZ=Asia/Kolkata date -Iseconds) TZ=${TZ:-system} ==="
 
 # shellcheck source=vps-cron-gate.sh
 source "${SCRIPT_DIR}/vps-cron-gate.sh"
@@ -47,12 +49,21 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-npm run mis-email:nightly-ytd-export
+# Thorough trhcalls sync once (cancelled / solved / open all repaired) — then mail.
+echo "=== midnight calls sync (once) ==="
+if bash "${SCRIPT_DIR}/midnight-calls-sync.sh"; then
+  echo "=== midnight calls sync ok ==="
+else
+  echo "FATAL: midnight calls sync failed — refusing to send report on stale/partial data" >&2
+  exit 1
+fi
+
+npm run mis-email:midnight-crm-delta
 rc=$?
 
 if [[ "$rc" -ne 0 ]]; then
-  echo "FATAL: nightly YTD export exited with code ${rc}" >&2
+  echo "FATAL: midnight CRM delta exited with code ${rc}" >&2
   exit "$rc"
 fi
 
-echo "=== nightly-ytd-calls-export complete ==="
+echo "=== midnight-crm-delta complete ==="

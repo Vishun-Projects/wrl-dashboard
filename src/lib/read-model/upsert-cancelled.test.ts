@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CANCELLED_COLUMNS,
   cancelledAtFromHot,
   isCancelledHotRow,
 } from './upsert-cancelled';
@@ -56,6 +57,30 @@ function hotRow(overrides: Partial<HotRow> = {}): HotRow {
     ...overrides,
   };
 }
+
+describe('CANCELLED_COLUMNS', () => {
+  it('matches calls_cancelled schema (excl. synced_at)', () => {
+    expect([...CANCELLED_COLUMNS]).toEqual([
+      'vtrnno',
+      'ncode',
+      'ncancelreason',
+      'cancelled_at',
+      'logged_at',
+      'call_type',
+      'nofficeid',
+      'office_under',
+      'party_name',
+      'branch_name',
+      'franchisee_name',
+      'region',
+      'account',
+      'item_name',
+      'serial',
+      'engineer_name',
+      'complaint',
+    ]);
+  });
+});
 
 describe('isCancelledHotRow', () => {
   it('treats a real ncancelreason as cancelled', () => {

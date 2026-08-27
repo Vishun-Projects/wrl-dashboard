@@ -34,6 +34,7 @@ import { runArcpApprovalRescan } from '@/modules/arcp-claims/server/sync/approva
 import { runTransactionEntryIncremental } from '@/lib/read-model/transaction-entry';
 import { runAthenaFailedCallsSync } from '@/lib/read-model/athena-reconciliation';
 import { runAttendanceDetailsSync } from '@/lib/read-model/attendance-details';
+import { runUserLocationsSync } from '@/lib/read-model/user-locations';
 
 const ENTITY = 'calls_latest_hot';
 
@@ -190,6 +191,20 @@ export async function runNightlyReconcile(): Promise<void> {
     } catch (err) {
       console.error(
         '[attendance] Nightly failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
+  if (process.env.SYNC_USER_LOCATIONS_ENABLED !== 'false') {
+    try {
+      const locations = await runUserLocationsSync();
+      console.log(
+        `[user-locations] Nightly complete — fetched ${locations.fetched}, upserted ${locations.upserted} (${locations.dateFrom} .. ${locations.dateTo})`
+      );
+    } catch (err) {
+      console.error(
+        '[user-locations] Nightly failed:',
         err instanceof Error ? err.message : err
       );
     }

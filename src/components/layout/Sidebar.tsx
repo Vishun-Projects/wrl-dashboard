@@ -25,6 +25,7 @@ import {
   Mail,
   History,
   GitCompareArrows,
+  Ban,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -104,6 +105,8 @@ export function Sidebar({ user }: SidebarProps) {
     } catch {
       /* client storage cleanup is best-effort */
     }
+    // Hard navigation breaks auth redirect loops after cookie clear.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- intentional sign-out full reload
     window.location.assign('/login');
   };
 
@@ -124,6 +127,8 @@ export function Sidebar({ user }: SidebarProps) {
                 ? Shield
                 : path === '/report/athena-reconciliation'
                   ? GitCompareArrows
+                  : path === '/report/cancelled-calls'
+                    ? Ban
                   : path === '/admin/users'
                   ? Users
                   : path === '/admin/roles'

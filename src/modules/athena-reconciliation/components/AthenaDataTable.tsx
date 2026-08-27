@@ -191,7 +191,7 @@ export function AthenaDataTable({
             ) : rows.length === 0 ? (
               <tr>
                 <td colSpan={hasAnyMatch ? 11 : 10} className="py-8 text-center text-xs text-slate-400">
-                  No Athena failed calls found matching your filter criteria.
+                  No failed calls found matching your filter criteria.
                 </td>
               </tr>
             ) : (
@@ -215,7 +215,7 @@ export function AthenaDataTable({
                       {row.attemptCount && row.attemptCount > 1 ? (
                         <span
                           className="rounded bg-amber-50 px-1 py-0.2 text-[9px] font-bold text-amber-700 border border-amber-200/60 dark:bg-amber-950/50 dark:text-amber-300 whitespace-nowrap"
-                          title={`${row.attemptCount} repeated failure logs recorded in Athena CRM`}
+                          title={`${row.attemptCount} repeated failure logs recorded in CRM`}
                         >
                           {row.attemptCount} logs
                         </span>

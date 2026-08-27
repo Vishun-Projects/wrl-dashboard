@@ -30,6 +30,9 @@ import { sendMisEmailComposeBatch } from '@/modules/mis-email/services/compose-d
 import { createMailTransport, resolveSmtpConfig } from '@/modules/mis-email/services/send';
 import { loadDigestRecipientById } from '@/modules/mis-email/services/recipients';
 import type { MisEmailPreferences } from '@/modules/mis-email/services/preferences';
+import { syncSapMailInbox } from '@/modules/subcontractor-stock/services/sap-inbox';
+import { runTodayReconciliation } from '@/modules/subcontractor-stock/services/reconcile-runner';
+import { triggerSubcontractorEmails } from '@/modules/subcontractor-stock/services/email-sender';
 
 const root = resolve(__dirname, '../..');
 config({ path: resolve(root, '.env.local') });
@@ -42,6 +45,9 @@ const RESET_PATH = '/internal/mail/send';
 const MIS_DIGEST_PATH = '/internal/mail/mis-digest';
 const MIS_DIGEST_PREPARED_PATH = '/internal/mail/mis-digest-prepared';
 const MIGRATION_REPORT_PATH = '/internal/mail/migration-report';
+const SAP_INBOX_SYNC_PATH = '/internal/mail/subcontractor-sap-inbox/sync';
+const SAP_RECONCILE_PATH = '/internal/mail/subcontractor-reconcile';
+const SAP_SEND_PATH = '/internal/mail/subcontractor-send';
 const SECRET = process.env.VPS_MAIL_RELAY_SECRET?.trim() ?? '';
 
 const MAX_BODY_BYTES = Math.max(
@@ -243,6 +249,60 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.url === SAP_INBOX_SYNC_PATH) {
+      const result = await syncSapMailInbox();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          ok: true,
+          upserted: result.upserted,
+          entries: result.entries,
+        })
+      );
+      return;
+    }
+
+    if (req.url === SAP_RECONCILE_PATH) {
+      const body = (await readJson(req)) as { mailKeys?: string[] };
+      const mailKeys = Array.isArray(body.mailKeys)
+        ? body.mailKeys.map((k) => String(k).trim()).filter(Boolean)
+        : undefined;
+      const result = await runTodayReconciliation(
+        mailKeys && mailKeys.length > 0 ? { mailKeys } : {}
+      );
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          ok: true,
+          summary: result.summary,
+          todayRun: result.run,
+        })
+      );
+      return;
+    }
+
+    if (req.url === SAP_SEND_PATH) {
+      const body = (await readJson(req)) as {
+        recipientIds?: string[];
+        force?: boolean;
+      };
+      const recipientIds = Array.isArray(body.recipientIds)
+        ? body.recipientIds.map((id) => String(id).trim()).filter(Boolean)
+        : [];
+      if (recipientIds.length === 0) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'recipientIds is required' }));
+        return;
+      }
+      const result = await triggerSubcontractorEmails({
+        force: body.force ?? true,
+        recipientIds,
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, sentCount: result.sentCount }));
+      return;
+    }
+
     if (req.url !== RESET_PATH) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Not found' }));
@@ -289,4 +349,7 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`[mail-relay]   ${MIS_DIGEST_PATH} (MIS digest — compose on VPS)`);
   console.log(`[mail-relay]   ${MIS_DIGEST_PREPARED_PATH} (MIS digest — pre-built from app)`);
   console.log(`[mail-relay]   ${MIGRATION_REPORT_PATH} (migration reports)`);
+  console.log(`[mail-relay]   ${SAP_INBOX_SYNC_PATH} (subcontractor SAP inbox sync)`);
+  console.log(`[mail-relay]   ${SAP_RECONCILE_PATH} (subcontractor reconcile)`);
+  console.log(`[mail-relay]   ${SAP_SEND_PATH} (subcontractor send)`);
 });

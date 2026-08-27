@@ -42,8 +42,15 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
+# shellcheck source=vps-cron-gate.sh
+source "${SCRIPT_DIR}/vps-cron-gate.sh"
+vps_cron_gate_allow subcontractor_stock || exit 0
+
 echo "=== extracting SAP attachments from Maildir ==="
 python3 scripts/vps-hosting/extract-sap-attachments.py || echo "WARNING: SAP extraction failed" >&2
+
+echo "=== syncing SAP mail inbox log ==="
+npm run subcontractor-stock:sync-inbox || echo "WARNING: SAP inbox sync failed" >&2
 
 npm run subcontractor-stock:cron
 rc=$?
