@@ -21,10 +21,21 @@ RELAY_PORT="${MAIL_RELAY_PORT:-8789}"
 
 run_setup() {
   local root="${1:?}"
+  local code="${root}"
+  if [[ -e "${root}/current/package.json" ]]; then
+    code="${root}/current"
+  fi
   local secret
 
   if [[ -f "${root}/.env.mis-email" ]] && grep -q '^VPS_MAIL_RELAY_SECRET=' "${root}/.env.mis-email" 2>/dev/null; then
-    secret="$(grep '^VPS_MAIL_RELAY_SECRET=' "${root}/.env.mis-email" | cut -d= -f2- | tr -d "'\"")"
+    secret="$(grep '^VPS_MAIL_RELAY_SECRET=' "${root}/.env.mis-email" | tail -1 | cut -d= -f2- | tr -d "'\"")"
+  elif [[ -f "${root}/shared/.env.mis-email" ]] && grep -q '^VPS_MAIL_RELAY_SECRET=' "${root}/shared/.env.mis-email" 2>/dev/null; then
+    secret="$(grep '^VPS_MAIL_RELAY_SECRET=' "${root}/shared/.env.mis-email" | tail -1 | cut -d= -f2- | tr -d "'\"")"
+  elif [[ -f "${code}/.env.mis-email" ]] && grep -q '^VPS_MAIL_RELAY_SECRET=' "${code}/.env.mis-email" 2>/dev/null; then
+    secret="$(grep '^VPS_MAIL_RELAY_SECRET=' "${code}/.env.mis-email" | tail -1 | cut -d= -f2- | tr -d "'\"")"
+  elif secret="$(tr '\0' '\n' < /proc/$(systemctl show "${SERVICE_NAME}" -p MainPID --value 2>/dev/null)/environ 2>/dev/null | grep '^VPS_MAIL_RELAY_SECRET=' | cut -d= -f2-)" && [[ -n "${secret}" ]]; then
+    mkdir -p "${root}"
+    printf 'VPS_MAIL_RELAY_SECRET=%s\nMAIL_RELAY_PORT=%s\n' "${secret}" "${RELAY_PORT}" > "${root}/.env.mis-email"
   else
     secret="$(openssl rand -hex 24)"
     mkdir -p "${root}"
@@ -42,9 +53,11 @@ After=network.target postfix.service
 
 [Service]
 Type=simple
-WorkingDirectory=${root}
+WorkingDirectory=${code}
 EnvironmentFile=-${root}/.env.mis-email
-ExecStart=/usr/bin/npx tsx ${root}/scripts/vps-hosting/mail-relay-server.ts
+EnvironmentFile=-${root}/shared/.env.mis-email
+EnvironmentFile=-${code}/.env.mis-email
+ExecStart=/usr/bin/npx tsx ${code}/scripts/vps-hosting/mail-relay-server.ts
 Restart=on-failure
 RestartSec=5
 
@@ -62,7 +75,9 @@ EOF
   systemctl reload postfix
 
   echo "==> Patching Caddy for ${API_DOMAIN}/internal/mail/* → 127.0.0.1:${RELAY_PORT}"
-  cat > /etc/caddy/Caddyfile <<EOF
+  local caddyfile="/etc/caddy/Caddyfile"
+  if [[ ! -f "$caddyfile" ]]; then
+    cat >"$caddyfile" <<EOF
 ${API_DOMAIN} {
   request_body {
     max_size 64MB
@@ -73,6 +88,30 @@ ${API_DOMAIN} {
   reverse_proxy localhost:8000
 }
 EOF
+  elif ! grep -Fq 'handle /internal/mail*' "$caddyfile"; then
+    python3 - "$caddyfile" "$RELAY_PORT" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+port = sys.argv[2]
+text = path.read_text()
+block = f"""\thandle /internal/mail* {{
+\t\treverse_proxy 127.0.0.1:{port}
+\t}}
+"""
+site = "api.wrl-fsm.cloud {"
+idx = text.find(site)
+if idx < 0:
+    raise SystemExit("api.wrl-fsm.cloud site block not found in Caddyfile")
+insert_at = idx + len(site)
+catch = text.find("reverse_proxy localhost:8000", insert_at)
+if catch > insert_at:
+    insert_at = catch
+path.write_text(text[:insert_at] + "\n" + block + text[insert_at:])
+print("    inserted /internal/mail* handle (preserved existing routes)")
+PY
+  else
+    echo "    /internal/mail* route already present — not wiping Caddyfile"
+  fi
   systemctl reload caddy
 
   echo ""
@@ -114,7 +153,10 @@ if [[ "${1:-}" == "--remote" ]]; then
   ssh "${SSH_OPTS[@]}" "$VPS_HOST" "INSTALL_ROOT='${INSTALL_ROOT}' API_DOMAIN='${API_DOMAIN}' bash '${INSTALL_ROOT}/scripts/vps-hosting/setup-mail-relay.sh'"
 
   echo "==> Verifying /internal/mail/mis-digest-prepared (expect 400, not 404)"
-  ssh "${SSH_OPTS[@]}" "$VPS_HOST" "secret=\$(grep '^VPS_MAIL_RELAY_SECRET=' '${INSTALL_ROOT}/.env.mis-email' | cut -d= -f2- | tr -d '\"'); code=\$(curl -s -o /dev/null -w '%{http_code}' -X POST 'http://127.0.0.1:${RELAY_PORT}/internal/mail/mis-digest-prepared' -H 'Content-Type: application/json' -H \"X-Mail-Relay-Secret: \${secret}\" -d '{}'); echo \"    local relay HTTP \${code}\"; if [ \"\${code}\" = '404' ]; then echo 'ERROR: mis-digest-prepared still returns 404' >&2; exit 1; fi"
+  ssh "${SSH_OPTS[@]}" "$VPS_HOST" "secret=\$(grep -h '^VPS_MAIL_RELAY_SECRET=' '${INSTALL_ROOT}/.env.mis-email' '${INSTALL_ROOT}/shared/.env.mis-email' '${INSTALL_ROOT}/current/.env.mis-email' 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\"'); code=\$(curl -s -o /dev/null -w '%{http_code}' -X POST 'http://127.0.0.1:${RELAY_PORT}/internal/mail/mis-digest-prepared' -H 'Content-Type: application/json' -H \"X-Mail-Relay-Secret: \${secret}\" -d '{}'); echo \"    local relay HTTP \${code}\"; if [ \"\${code}\" = '404' ]; then echo 'ERROR: mis-digest-prepared still returns 404' >&2; exit 1; fi"
+
+  echo "==> Verifying /internal/mail/sync/calls-hot (expect 200, not 404)"
+  ssh "${SSH_OPTS[@]}" "$VPS_HOST" "secret=\$(grep -h '^VPS_MAIL_RELAY_SECRET=' '${INSTALL_ROOT}/.env.mis-email' '${INSTALL_ROOT}/shared/.env.mis-email' '${INSTALL_ROOT}/current/.env.mis-email' 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\"'); code=\$(curl -s -o /tmp/calls-hot-probe.json -w '%{http_code}' -X POST 'http://127.0.0.1:${RELAY_PORT}/internal/mail/sync/calls-hot' -H 'Content-Type: application/json' -H \"X-Mail-Relay-Secret: \${secret}\" -d '{}'); echo \"    local relay HTTP \${code} \$(cat /tmp/calls-hot-probe.json)\"; if [ \"\${code}\" = '404' ]; then echo 'ERROR: calls-hot still returns 404' >&2; exit 1; fi"
   exit 0
 fi
 

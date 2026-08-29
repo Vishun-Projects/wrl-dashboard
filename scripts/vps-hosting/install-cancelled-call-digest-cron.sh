@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Install cancelled-call digest cron — polls every 15 min Mon–Sat IST; send time from portal.
+# Cancelled-call digest — no standalone poller.
+# Production/ops probe runs from evening-ops-sequencer (16:00 IST, force→ops).
+# This script remains for manual / portal test: npm run mis-email:cancelled-call-digest
+#
 #   npm run mis-email:install-cancelled-call-digest-cron:vps
-#   bash scripts/vps-hosting/install-cancelled-call-digest-cron.sh --local
+#   → removes any leftover */15 cancelled-call-digest crontab line
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -11,34 +14,17 @@ INSTALL_BASE="${INSTALL_BASE%/current}"
 # shellcheck disable=SC1091
 source "${ROOT}/scripts/vps-hosting/vps-detect-base.inc.sh"
 
-resolve_code_root() {
-  local base="${1:?}"
-  if [[ -e "${base}/current/scripts/vps-hosting/cancelled-call-digest.sh" ]]; then
-    echo "${base}/current"
-  else
-    echo "$base"
-  fi
-}
-
-install_cron() {
-  local base="${1}"
-  local code
-  code="$(resolve_code_root "$base")"
-  local log_dir="${base}/shared/logs"
-  [[ -d "$log_dir" ]] || log_dir="${code}/logs"
-  mkdir -p "$log_dir"
-  local line="*/15 * * * 1-6 ${code}/scripts/vps-hosting/cancelled-call-digest.sh >> ${log_dir}/cancelled-call-digest-cron.log 2>&1"
+remove_poll_cron() {
   (
     crontab -l 2>/dev/null | grep -v 'cancelled-call-digest.sh' | grep -v '^CRON_TZ=' || true
     echo "CRON_TZ=Asia/Kolkata"
-    echo "$line"
-  ) | crontab -
-  echo "==> Installed cancelled-call digest cron (every 15 min Mon–Sat IST; send time from portal) code=${code}"
-  crontab -l | grep -E 'CRON_TZ|cancelled-call-digest' || true
+  ) | awk 'NF && !seen[$0]++' | crontab -
+  echo "==> Removed cancelled-call-digest standalone cron (evening-ops covers the ops probe)"
+  crontab -l | grep -E 'CRON_TZ|cancelled-call|evening-ops' || true
 }
 
 if [[ "${1:-}" == "--local" ]]; then
-  install_cron "${MIS_EMAIL_INSTALL_ROOT:-$ROOT}"
+  remove_poll_cron
   exit 0
 fi
 
@@ -58,9 +44,12 @@ if [[ -n "$detected" ]]; then
   INSTALL_BASE="$detected"
 fi
 
-ssh "$VPS_HOST" bash -s <<REMOTE
+ssh "$VPS_HOST" bash -s <<'REMOTE'
 set -euo pipefail
-$(declare -f resolve_code_root)
-$(declare -f install_cron)
-install_cron "${INSTALL_BASE}"
+(
+  crontab -l 2>/dev/null | grep -v 'cancelled-call-digest.sh' | grep -v '^CRON_TZ=' || true
+  echo "CRON_TZ=Asia/Kolkata"
+) | awk 'NF && !seen[$0]++' | crontab -
+echo "==> Removed cancelled-call-digest standalone cron (evening-ops covers the ops probe)"
+crontab -l | grep -E 'CRON_TZ|cancelled-call|evening-ops' || true
 REMOTE

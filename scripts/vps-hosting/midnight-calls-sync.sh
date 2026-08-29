@@ -114,4 +114,8 @@ fi
 echo "→ WCO backfill ${WCO_FROM} .. ${AS_OF}"
 npm run sync-worker:backfill-wco -- --from "${WCO_FROM}" --to "${AS_OF}" || echo "WARN: WCO backfill failed (non-fatal)"
 
+# 9) New logged TRNs never appear in editedon-only replay — upsert any CRM corpus TRNs still missing from hot
+echo "→ fill missing corpus TRNs ${YTD_START} .. ${AS_OF}"
+npm run sync-worker:fill-hot-gaps -- --from "${YTD_START}" --to "${AS_OF}" --skip-short-days || echo "WARN: fill-hot-gaps failed (non-fatal)"
+
 echo "=== midnight-calls-sync done $(TZ=Asia/Kolkata date -Iseconds) AS_OF=${AS_OF} ==="

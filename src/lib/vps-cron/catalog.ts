@@ -74,13 +74,13 @@ export const VPS_CRON_CATALOG: readonly VpsCronJobDef[] = [
   {
     id: 'midnight_crm_delta_watchdog',
     label: 'Midnight CRM delta watchdog',
-    schedule: '02:00 IST daily (mail if 00:00 sync/report missing or failed)',
+    schedule: '00:30 + 02:00 IST daily (mail if 00:15 report missing or failed)',
     script: 'midnight-crm-delta-watchdog.sh',
   },
   {
     id: 'cancelled_call_digest',
     label: 'Cancelled call daily digest',
-    schedule: 'Every 15 min Mon–Sat IST (send time from Mail & Alerts → Cancelled Calls)',
+    schedule: 'Evening ops 16:00 IST only (force→ops; no */15 poller)',
     script: 'cancelled-call-digest.sh',
   },
   {

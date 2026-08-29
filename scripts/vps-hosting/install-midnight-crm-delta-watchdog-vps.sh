@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Install midnight CRM delta watchdog cron (00:45 IST) — mails if 00:00 job failed/missing.
+# Install midnight CRM delta watchdog crons:
+#   00:30 IST — early alert after 00:15 mail window
+#   02:00 IST — second check after long sync
 #
 #   npm run mis-email:install-midnight-delta-watchdog:vps
 set -euo pipefail
@@ -59,16 +61,18 @@ chmod +x "$code/scripts/vps-hosting/midnight-crm-delta-watchdog.sh" \
          "$code/scripts/vps-hosting/vps-cron-gate.sh"
 rm -f /tmp/midnight-crm-delta-watchdog.sh /tmp/send-vps-ops-alert.ts /tmp/vps-cron-gate.sh /tmp/catalog.ts
 
+wd_line="${code}/scripts/vps-hosting/midnight-crm-delta-watchdog.sh >> ${log_dir}/midnight-crm-delta-watchdog.log 2>&1"
 (
   crontab -l 2>/dev/null | grep -v 'midnight-crm-delta-watchdog.sh' | grep -v '^CRON_TZ=' || true
   echo "CRON_TZ=Asia/Kolkata"
-  echo "0 2 * * * MIDNIGHT_CRM_DELTA_WATCHDOG_TO=${alert_to} ${code}/scripts/vps-hosting/midnight-crm-delta-watchdog.sh >> ${log_dir}/midnight-crm-delta-watchdog.log 2>&1"
+  echo "30 0 * * * MIDNIGHT_CRM_DELTA_WATCHDOG_TO=${alert_to} ${wd_line}"
+  echo "0 2 * * * MIDNIGHT_CRM_DELTA_WATCHDOG_TO=${alert_to} ${wd_line}"
 ) | awk 'NF && !seen[$0]++' | crontab -
 
 echo "==> Crontab (midnight job + watchdog):"
-crontab -l | grep -E 'CRON_TZ|nightly-ytd-calls-export|midnight-crm-delta-watchdog' || true
-echo "==> Watchdog: 02:00 IST daily → ${alert_to} if 00:00 job missing/failed"
+crontab -l | grep -E 'CRON_TZ|nightly-ytd|midnight-crm-delta' || true
+echo "==> Watchdog: 00:30 + 02:00 IST → ${alert_to} if broken"
 REMOTE
 
-echo "Installed. Watchdog at 02:00 IST → ${ALERT_TO}"
+echo "Installed. Watchdog at 00:30 and 02:00 IST → ${ALERT_TO}"
 echo "  ssh ${VPS_HOST} 'tail -n 40 ${INSTALL_BASE}/shared/logs/midnight-crm-delta-watchdog.log'"

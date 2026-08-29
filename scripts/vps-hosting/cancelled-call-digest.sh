@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Cancelled-call daily digest — previous IST calendar day → branch BM recipients.
-# Cron polls every 15 min; portal sets send time (default 09:00 IST).
+# Cancelled-call digest (manual / evening-ops / portal test).
+# No standalone */15 cron — evening-ops-sequencer runs the ops probe at 16:00 IST.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -58,7 +58,7 @@ export type MisEmailOrgSettings = {
   majorRepairMonths: number;
   majorRepairDefaultTo: string;
   majorRepairDefaultCc: string;
-  /** Daily cancelled-call branch digest send time (IST HH:mm). VPS cron polls every 15 min. */
+  /** Daily cancelled-call branch digest send time (IST HH:mm). Used when a poller/manual run is scheduled; ops probe uses evening-ops force. */
   cancelledCallDigestSendTimeIst: string;
   /** Morning watchdog alert recipient (env MIS_EMAIL_WATCHDOG_TO overrides). */
   watchdogToEmail: string;

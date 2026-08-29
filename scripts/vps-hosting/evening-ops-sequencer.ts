@@ -26,8 +26,11 @@ try {
 }
 
 const root = resolve(__dirname, '../..');
+const sharedEnv = resolve(root, '../shared/.env.mis-email');
 config({ path: resolve(root, '.env.mis-email'), override: true });
+if (existsSync(sharedEnv)) config({ path: sharedEnv }); // fill gaps (e.g. OLD_CRM) without clobbering current
 config({ path: resolve(root, '.env.sync-worker') });
+config({ path: resolve(root, '../shared/.env.sync-worker') });
 config({ path: resolve(root, '.env.local') });
 config({ path: resolve(root, '.env') });
 
@@ -271,18 +274,12 @@ async function collectInventory(code: string, today: string): Promise<Inventory>
     : [`crontab -l failed: ${cron.out}`];
   if (!cron.ok) broken.push('crontab -l failed');
 
-  // Heal-detect: cancelled digest cron must use …/current/scripts (release layout).
+  // Heal-detect: cancelled digest used to poll */15 — must not come back.
   for (const line of cronLines) {
     if (!/cancelled-call-digest\.sh/.test(line)) continue;
-    if (/\/current\/scripts\/vps-hosting\/cancelled-call-digest\.sh/.test(line)) continue;
-    const currentScript = join(code, 'scripts', 'vps-hosting', 'cancelled-call-digest.sh');
-    if (existsSync(currentScript)) {
-      broken.push(
-        `cancelled cron not under /current/ — HEAL: point line at ${currentScript}`
-      );
-    } else {
-      broken.push('cancelled-call-digest.sh cron path looks stale and current script missing');
-    }
+    broken.push(
+      `cancelled-call-digest still on crontab (${line.slice(0, 80)}…) — remove poller; evening-ops covers it`
+    );
   }
 
   for (const job of VPS_CRON_CATALOG) {
@@ -307,12 +304,12 @@ async function collectInventory(code: string, today: string): Promise<Inventory>
   const mailMatrix = [
     'MIS morning digest | */15 Mon–Sat (prefs often 09:30) | Profile To/Cc + routing | evening: test→ops',
     'MIS test digest | often 14:00 | ops test To | evening: re-run→ops',
-    'Cancelled-call digest | portal time (~09:00) | branch BMs | evening: force→ops',
+    'Cancelled-call digest | evening ops 16:00 only | force→ops (no */15 poller)',
     'Subcontractor SAP vs CRM | morning via stock cron | stock recipients | evening: force→ops',
     'SAP inbound mis@ | continuous (Postfix→Maildir) | extract every 15 min | live check below',
     'Midnight CRM delta | 00:15 IST (always) | configured ops | evening: log-check only',
     'Morning MIS watchdog | ~09:50 alert-on-fail | watchdog To | status only',
-    'Midnight CRM watchdog | ~02:00 alert-on-fail | watchdog To | status only',
+    'Midnight CRM watchdog | 00:30 + 02:00 alert-on-fail | watchdog To | status only',
     'Sync-worker health | every 15 min on fail | ops alert To | status only',
     'Evening ops sequencer | 16:00 IST | ops only | this run',
   ];
@@ -424,6 +421,9 @@ async function main(): Promise<void> {
         ? join(code, '.env.mis-email')
         : join(installRoot(), 'shared', '.env.mis-email');
       if (!existsSync(envMis)) issues.push('missing .env.mis-email');
+      if (!process.env.OLD_CRM_DATABASE_URL?.trim()) {
+        issues.push('OLD_CRM_DATABASE_URL unset (SAP vs CRM / subcontractor stock needs old_crm)');
+      }
       const cli = join(code, 'src', 'modules', 'mis-email', 'services', 'cli.ts');
       if (!existsSync(cli)) issues.push('missing cli.ts');
       for (const script of [

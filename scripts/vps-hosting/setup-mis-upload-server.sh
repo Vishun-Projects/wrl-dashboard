@@ -15,11 +15,21 @@ INSTALL_ROOT="${MIS_UPLOAD_INSTALL_ROOT:-/opt/wrl/database/fast-close-app}"
 SERVICE_NAME="fast-close-mis-upload"
 UPLOAD_PORT="${MIS_UPLOAD_PORT:-3099}"
 
+resolve_install_code_dir() {
+  local root="${1:?}"
+  if [[ -e "${root}/current/package.json" ]]; then
+    echo "${root}/current"
+  else
+    echo "${root}"
+  fi
+}
+
 install_systemd_unit() {
   local root="${1:?}"
+  local code="${2:-$(resolve_install_code_dir "$root")}"
   local unit="/etc/systemd/system/${SERVICE_NAME}.service"
 
-  echo "==> Installing systemd unit ${unit}"
+  echo "==> Installing systemd unit ${unit} (code: ${code})"
   cat >"$unit" <<EOF
 [Unit]
 Description=Fast Close MIS client file upload server (large files)
@@ -28,12 +38,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=${root}
+WorkingDirectory=${code}
 Environment=MIS_UPLOAD_PORT=${UPLOAD_PORT}
 Environment=NODE_OPTIONS=--max-old-space-size=4096
 EnvironmentFile=-${root}/.env.mis-upload
+EnvironmentFile=-${root}/shared/.env.mis-email
 EnvironmentFile=-${root}/.env.mis-email
-ExecStart=/usr/bin/npx tsx ${root}/scripts/vps-hosting/mis-upload-server.ts
+ExecStart=/usr/bin/npx tsx ${code}/scripts/vps-hosting/mis-upload-server.ts
 Restart=always
 RestartSec=10
 
@@ -87,6 +98,28 @@ new = "handle /api/mis-client-import/upload* {"
 if old in text:
     path.write_text(text.replace(old, new, 1))
     print("    upgraded upload handle → upload*")
+PY
+      else
+        echo "    inserting upload* handle"
+        python3 - "$caddyfile" "$upload_port" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+port = sys.argv[2]
+text = path.read_text()
+block = f"""\thandle /api/mis-client-import/upload* {{
+\t\trequest_body {{
+\t\t\tmax_size 320MB
+\t\t}}
+\t\treverse_proxy 127.0.0.1:{port}
+\t}}
+"""
+needle = "api.wrl-fsm.cloud {"
+idx = text.find(needle)
+if idx < 0:
+    raise SystemExit("api.wrl-fsm.cloud site block not found in Caddyfile")
+insert_at = idx + len(needle)
+path.write_text(text[:insert_at] + "\n" + block + text[insert_at:])
+print("    inserted upload* handle")
 PY
       fi
     fi
@@ -172,31 +205,45 @@ PY
   fi
 }
 
+resolve_mis_upload_secrets() {
+  local jwt secret
+  jwt="$(docker exec supabase-auth printenv GOTRUE_JWT_SECRET 2>/dev/null || true)"
+  secret="$(docker exec supabase-kong printenv SUPABASE_SERVICE_KEY 2>/dev/null || true)"
+  if [[ -z "$jwt" && -f "${ROOT}/.env.vps-setup" ]]; then
+    # shellcheck disable=SC1090
+    source "${ROOT}/.env.vps-setup"
+    jwt="${JWT_SECRET:-}"
+    secret="${SERVICE_ROLE_KEY:-}"
+  fi
+  if [[ -z "$jwt" && -f "${1}/.env.vps-setup" ]]; then
+    # shellcheck disable=SC1090
+    source "${1}/.env.vps-setup"
+    jwt="${JWT_SECRET:-}"
+    secret="${SERVICE_ROLE_KEY:-}"
+  fi
+  printf '%s\n%s' "$jwt" "$secret"
+}
+
 run_install_on_machine() {
   local root="${1:?}"
-  echo "==> MIS upload server install at ${root}"
+  local code
+  code="$(resolve_install_code_dir "$root")"
+  echo "==> MIS upload server install at ${root} (code: ${code})"
 
-  if [[ ! -f "${root}/.env.mis-email" ]]; then
-    echo "FATAL: ${root}/.env.mis-email missing (DATABASE_URL)" >&2
+  if [[ ! -f "${root}/.env.mis-email" && ! -f "${root}/shared/.env.mis-email" ]]; then
+    echo "FATAL: ${root}/.env.mis-email or shared/.env.mis-email missing (DATABASE_URL)" >&2
     exit 1
   fi
 
   if [[ ! -f "${root}/.env.mis-upload" ]]; then
     echo "==> Creating ${root}/.env.mis-upload"
+    local jwt secret
+    IFS=$'\n' read -r jwt secret < <(resolve_mis_upload_secrets "$root")
     {
       echo "NEXT_PUBLIC_SUPABASE_URL=https://api.wrl-fsm.cloud"
       echo "MIS_UPLOAD_CORS_ORIGINS=https://wrl-dashboard.vercel.app,https://www.wrl-fsm.cloud,https://wrl-fsm.cloud,http://localhost:3000"
-      if [[ -f "${root}/.env.vps-setup" ]]; then
-        # shellcheck disable=SC1090
-        source "${root}/.env.vps-setup"
-        echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}"
-        echo "SUPABASE_JWT_SECRET=${JWT_SECRET}"
-      elif [[ -f "${ROOT}/.env.vps-setup" ]]; then
-        # shellcheck disable=SC1090
-        source "${ROOT}/.env.vps-setup"
-        echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}"
-        echo "SUPABASE_JWT_SECRET=${JWT_SECRET}"
-      fi
+      [[ -n "$jwt" ]] && echo "SUPABASE_JWT_SECRET=${jwt}"
+      [[ -n "$secret" ]] && echo "SUPABASE_SERVICE_ROLE_KEY=${secret}"
     } >"${root}/.env.mis-upload"
     chmod 600 "${root}/.env.mis-upload"
   else
@@ -209,10 +256,10 @@ run_install_on_machine() {
     fi
   fi
 
-  cd "${root}"
+  cd "${code}"
   npm ci 2>/dev/null || npm install
 
-  install_systemd_unit "${root}"
+  install_systemd_unit "${root}" "${code}"
   install_caddy_route
 
   echo ""

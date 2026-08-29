@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Midnight CRM delta watchdog — alert if 00:00 IST calls sync + report did not complete.
-# Cron AFTER midnight job window (default 02:00 IST — allows long YTD catch-up).
+# Midnight CRM delta watchdog — alert if 00:00 sync / 00:15 report did not complete.
+# Runs twice: 00:30 IST (early catch after mail) + 02:00 IST (after long sync window).
 #
 #   CRON_TZ=Asia/Kolkata
+#   30 0 * * * …/midnight-crm-delta-watchdog.sh >> …/midnight-crm-delta-watchdog.log
 #   0 2 * * * …/midnight-crm-delta-watchdog.sh >> …/midnight-crm-delta-watchdog.log
 #
 #   npm run mis-email:install-midnight-delta-watchdog:vps
@@ -45,7 +46,7 @@ elif [[ -f "${CODE}/.env.mis-email" ]]; then
 fi
 vps_cron_gate_allow midnight_crm_delta_watchdog || exit 0
 
-# If the midnight job is still running, wait — do not false-alarm.
+# If the midnight sync is still running, wait — do not false-alarm (esp. at 00:30).
 LOCK="${INSTALL_ROOT}/logs/midnight-crm-delta.lock"
 if [[ ! -f "$LOCK" && -f "${INSTALL_ROOT}/shared/logs/midnight-crm-delta.lock" ]]; then
   LOCK="${INSTALL_ROOT}/shared/logs/midnight-crm-delta.lock"
@@ -57,7 +58,7 @@ fi
 if [[ -f "$LOCK" ]]; then
   lock_pid=$(cat "$LOCK" 2>/dev/null || true)
   if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
-    echo "[${STAMP}] SKIP — midnight job still running (pid ${lock_pid}). Will alert next day if it never completes."
+    echo "[${STAMP}] SKIP — midnight sync still running (pid ${lock_pid}). 00:15 mail may still have been sent; will re-check at 02:00."
     exit 0
   fi
 fi
@@ -68,10 +69,19 @@ reason=""
 if [[ ! -f "$LOG" ]]; then
   reason="Midnight CRM delta log missing (${LOG}). Cron may not be installed or path wrong."
 elif ! grep -F "$TODAY" "$LOG" >/dev/null 2>&1; then
-  reason="No midnight CRM delta log lines for today (${TODAY}). 00:00 job likely did not run."
+  reason="No midnight CRM delta log lines for today (${TODAY}). 00:00/00:15 jobs likely did not run."
 elif grep -E "FATAL: midnight calls sync failed|FATAL: midnight CRM delta" "$LOG" \
   | grep -F "$TODAY" >/dev/null 2>&1; then
-  reason="Midnight job logged FATAL for ${TODAY}. Check ${LOG}."
+  # Mail is always-send at 00:15 — sync FATAL alone is not enough if complete exists.
+  if awk -v d="$TODAY" '
+    $0 ~ d { day=1 }
+    day && /midnight-crm-delta complete/ { ok=1 }
+    END { exit ok ? 0 : 1 }
+  ' "$LOG"; then
+    ok=1
+  else
+    reason="Midnight job logged FATAL for ${TODAY} and no 'midnight-crm-delta complete'. Check ${LOG}."
+  fi
 elif awk -v d="$TODAY" '
   $0 ~ d { day=1 }
   day && /midnight-crm-delta complete/ { ok=1 }
@@ -85,14 +95,14 @@ else
     day && /midnight calls sync/ { started=1 }
     END { exit started ? 0 : 1 }
   ' "$LOG"; then
-    reason="Midnight job started today but no 'midnight-crm-delta complete'. Crashed or hung. Check ${LOG}."
+    reason="Midnight job started today but no 'midnight-crm-delta complete' (00:15 mail missing). Check ${LOG}."
   else
     reason="Midnight log has ${TODAY} activity but no clear start/complete. Check ${LOG}."
   fi
 fi
 
 if [[ "$ok" -eq 1 ]]; then
-  echo "[${STAMP}] OK — midnight calls sync + CRM delta completed for ${TODAY}."
+  echo "[${STAMP}] OK — midnight CRM delta mail completed for ${TODAY} (00:15 complete marker)."
   exit 0
 fi
 
@@ -109,12 +119,13 @@ Reason: ${reason}
 
 Log: ${LOG}
 
-Expected: cron at 00:00 IST → midnight-calls-sync.sh then mis-email:midnight-crm-delta
-Watchdog: this script at 02:00 IST
+Expected:
+  00:00 IST — nightly-ytd-calls-export.sh (sync only)
+  00:15 IST — midnight-crm-delta-mail.sh (always mail + complete marker)
+Watchdog: this script at 00:30 and 02:00 IST (alert only if broken)
 
 Manual check:
   tail -n 200 ${LOG}
-  bash ${CODE}/scripts/vps-hosting/nightly-ytd-calls-export.sh
 "
 
 npx tsx "${CODE}/scripts/vps-hosting/send-vps-ops-alert.ts"

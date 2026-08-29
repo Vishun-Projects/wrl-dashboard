@@ -98,14 +98,13 @@ if [[ ! -f "\$code/.env.mis-email" ]]; then
 fi
 
 echo "==> Installing evening-ops cron at 16:00 IST → \${ops_to} (code=\$code)"
-# Also heal cancelled-call-digest off stale non-/current/ path (breaks after release flip).
+# Drop any leftover cancelled-call */15 poller — ops probe is evening-ops only.
 {
   crontab -l 2>/dev/null \
     | grep -v 'evening-ops-sequencer.sh' \
     | grep -v 'cancelled-call-digest.sh' \
     | grep -v '^CRON_TZ=' || true
   echo "CRON_TZ=Asia/Kolkata"
-  echo "*/15 * * * 1-6 \${code}/scripts/vps-hosting/cancelled-call-digest.sh >> \${log_dir}/cancelled-call-digest-cron.log 2>&1"
   echo "0 16 * * * EVENING_OPS_TO=\${ops_to} \${code}/scripts/vps-hosting/evening-ops-sequencer.sh >> \${log_dir}/evening-ops-sequencer.log 2>&1"
 } | awk 'NF && !seen[\$0]++' | crontab -
 

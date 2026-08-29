@@ -389,11 +389,20 @@ export function buildMailPipelineHealth(params: {
     cronLines: params.cronLines,
     needles: [/cancelled-call-digest\.sh/],
   });
-  pipes.push(
-    params.catalogPaused.has('cancelled_call_digest')
-      ? { ...cronCancel, ok: true, status: 'WARN', detail: 'PAUSED in portal' }
-      : cronCancel
-  );
+  // Standalone */15 poller removed — evening-ops covers the ops probe.
+  if (!cronCancel.ok && params.cronLines.some((l) => /evening-ops-sequencer\.sh/.test(l))) {
+    pipes.push({
+      id: 'cron_cancelled',
+      label: 'Cancelled-call digest',
+      ok: true,
+      status: 'WORKING',
+      detail: 'no standalone cron (by design) — covered by evening-ops 16:00 force→ops',
+    });
+  } else if (params.catalogPaused.has('cancelled_call_digest')) {
+    pipes.push({ ...cronCancel, ok: true, status: 'WARN', detail: 'PAUSED in portal' });
+  } else {
+    pipes.push(cronCancel);
+  }
   pipes.push(
     scoreCronLogRecent({
       id: 'cancelled_log',
@@ -495,6 +504,13 @@ export function explainFailedStep(step: EveningOpsStepResult): {
         action: 'See MAIL PIPELINES — LIVE and Broken / warnings in this mail; fix BROKEN items first.',
       };
     case 'sap_crm':
+      if (/OLD_CRM_DATABASE_URL/i.test(step.detail)) {
+        return {
+          plain: 'SAP vs CRM could not query old_crm — OLD_CRM_DATABASE_URL missing in VPS env.',
+          action:
+            'Put OLD_CRM_DATABASE_URL in shared/.env.mis-email (same host as DATABASE_URL, db=old_crm). Stock cron needs it too.',
+        };
+      }
       return {
         plain: 'Subcontractor SAP vs CRM probe failed (not a soft skip).',
         action: 'Check /tmp/extracted_sap and subcontractor stock cron / relay.',
