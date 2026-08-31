@@ -135,6 +135,22 @@ export function evaluateAthenaCallMatch(
   });
 
   const matchCount = matchingCrmCalls.length;
+  const cclidAligned = ticketNo
+    ? matchingCrmCalls.filter(
+        (c) => c.vcclid && c.vcclid.trim().toUpperCase() === ticketNo.toUpperCase()
+      )
+    : [];
+
+  if (ticketNo && cclidAligned.length > 1) {
+    return {
+      status: 'MULTIPLE_MATCHES',
+      matchCount: cclidAligned.length,
+      matchedVtrnno: cclidAligned[0].vtrnno,
+      matchedVtrnnos: cclidAligned.map((c) => c.vtrnno),
+      matchedCrmLoggedAt: cclidAligned[cclidAligned.length - 1].loggedAt,
+    };
+  }
+
   if (matchCount === 0) {
     return {
       status: 'NOT_REGISTERED',
@@ -145,22 +161,25 @@ export function evaluateAthenaCallMatch(
     };
   }
 
-  if (matchCount === 1) {
+  const primary =
+    cclidAligned.length === 1 ? cclidAligned[0] : matchingCrmCalls.length === 1 ? matchingCrmCalls[0] : null;
+
+  if (!primary) {
     return {
-      status: 'REGISTERED',
-      matchCount: 1,
-      matchedVtrnno: matchingCrmCalls[0].vtrnno,
-      matchedVtrnnos: [matchingCrmCalls[0].vtrnno],
-      matchedCrmLoggedAt: matchingCrmCalls[0].loggedAt,
+      status: 'NOT_REGISTERED',
+      matchCount: 0,
+      matchedVtrnno: null,
+      matchedVtrnnos: [],
+      matchedCrmLoggedAt: null,
     };
   }
 
   return {
-    status: 'MULTIPLE_MATCHES',
-    matchCount,
-    matchedVtrnno: matchingCrmCalls[0].vtrnno,
-    matchedVtrnnos: matchingCrmCalls.map((c) => c.vtrnno),
-    matchedCrmLoggedAt: matchingCrmCalls[matchingCrmCalls.length - 1].loggedAt,
+    status: 'REGISTERED',
+    matchCount: 1,
+    matchedVtrnno: primary.vtrnno,
+    matchedVtrnnos: [primary.vtrnno],
+    matchedCrmLoggedAt: primary.loggedAt,
   };
 }
 
@@ -202,6 +221,7 @@ export async function executeAthenaReconciliation(
         SELECT
           a.id,
           c.vtrnno,
+          c.vcclid,
           c.status_label,
           c.party_name,
           c.call_type,
@@ -220,6 +240,7 @@ export async function executeAthenaReconciliation(
         SELECT
           a.id,
           c.vtrnno,
+          c.vcclid,
           c.status_label,
           c.party_name,
           c.call_type,
@@ -238,6 +259,7 @@ export async function executeAthenaReconciliation(
         SELECT
           a.id,
           c.vtrnno,
+          c.vcclid,
           c.status_label,
           c.party_name,
           c.call_type,
@@ -263,6 +285,7 @@ export async function executeAthenaReconciliation(
         SELECT
           a.id,
           c.vtrnno,
+          c.vcclid,
           c.status_label,
           c.party_name,
           c.call_type,
@@ -282,33 +305,106 @@ export async function executeAthenaReconciliation(
       ),
       deduped_matches AS (
         SELECT DISTINCT ON (id, vtrnno)
-          id, vtrnno, status_label, party_name, call_type, serial, logged_at, priority
+          id, vtrnno, vcclid, status_label, party_name, call_type, serial, logged_at, priority
         FROM candidate_matches
         ORDER BY id, vtrnno, priority ASC
       ),
       aggregated AS (
         SELECT
-          id,
-          COUNT(vtrnno) AS match_count,
-          (ARRAY_AGG(vtrnno ORDER BY priority ASC, logged_at DESC))[1] AS primary_vtrnno,
-          ARRAY_AGG(vtrnno ORDER BY priority ASC, logged_at DESC) AS all_vtrnnos,
-          (ARRAY_AGG(logged_at ORDER BY priority ASC, logged_at DESC))[1] AS primary_crm_logged_at,
-          (ARRAY_AGG(status_label ORDER BY priority ASC, logged_at DESC))[1] AS primary_crm_status,
-          (ARRAY_AGG(party_name ORDER BY priority ASC, logged_at DESC))[1] AS matched_crm_party_name,
-          (ARRAY_AGG(call_type ORDER BY priority ASC, logged_at DESC))[1] AS matched_crm_call_type,
-          (ARRAY_AGG(serial ORDER BY priority ASC, logged_at DESC))[1] AS matched_crm_serial
-        FROM deduped_matches
-        GROUP BY id
+          dm.id,
+          COUNT(dm.vtrnno) AS match_count,
+          COUNT(dm.vtrnno) FILTER (
+            WHERE a.client_ticket_no IS NOT NULL
+              AND TRIM(a.client_ticket_no) NOT IN ('', '0')
+              AND UPPER(TRIM(COALESCE(dm.vcclid, ''))) = UPPER(TRIM(a.client_ticket_no))
+          ) AS same_cclid_match_count,
+          BOOL_OR(dm.priority = 1) AS has_service_order_match,
+          (ARRAY_AGG(dm.vtrnno ORDER BY
+            CASE
+              WHEN a.client_ticket_no IS NOT NULL
+                AND TRIM(a.client_ticket_no) NOT IN ('', '0')
+                AND UPPER(TRIM(COALESCE(dm.vcclid, ''))) = UPPER(TRIM(a.client_ticket_no))
+              THEN 0
+              ELSE 1
+            END,
+            dm.priority ASC,
+            dm.logged_at DESC
+          ))[1] AS primary_vtrnno,
+          ARRAY_AGG(dm.vtrnno ORDER BY dm.priority ASC, dm.logged_at DESC) AS all_vtrnnos,
+          (ARRAY_AGG(dm.logged_at ORDER BY
+            CASE
+              WHEN a.client_ticket_no IS NOT NULL
+                AND TRIM(a.client_ticket_no) NOT IN ('', '0')
+                AND UPPER(TRIM(COALESCE(dm.vcclid, ''))) = UPPER(TRIM(a.client_ticket_no))
+              THEN 0
+              ELSE 1
+            END,
+            dm.priority ASC,
+            dm.logged_at DESC
+          ))[1] AS primary_crm_logged_at,
+          (ARRAY_AGG(dm.status_label ORDER BY
+            CASE
+              WHEN a.client_ticket_no IS NOT NULL
+                AND TRIM(a.client_ticket_no) NOT IN ('', '0')
+                AND UPPER(TRIM(COALESCE(dm.vcclid, ''))) = UPPER(TRIM(a.client_ticket_no))
+              THEN 0
+              ELSE 1
+            END,
+            dm.priority ASC,
+            dm.logged_at DESC
+          ))[1] AS primary_crm_status,
+          (ARRAY_AGG(dm.party_name ORDER BY
+            CASE
+              WHEN a.client_ticket_no IS NOT NULL
+                AND TRIM(a.client_ticket_no) NOT IN ('', '0')
+                AND UPPER(TRIM(COALESCE(dm.vcclid, ''))) = UPPER(TRIM(a.client_ticket_no))
+              THEN 0
+              ELSE 1
+            END,
+            dm.priority ASC,
+            dm.logged_at DESC
+          ))[1] AS matched_crm_party_name,
+          (ARRAY_AGG(dm.call_type ORDER BY
+            CASE
+              WHEN a.client_ticket_no IS NOT NULL
+                AND TRIM(a.client_ticket_no) NOT IN ('', '0')
+                AND UPPER(TRIM(COALESCE(dm.vcclid, ''))) = UPPER(TRIM(a.client_ticket_no))
+              THEN 0
+              ELSE 1
+            END,
+            dm.priority ASC,
+            dm.logged_at DESC
+          ))[1] AS matched_crm_call_type,
+          (ARRAY_AGG(dm.serial ORDER BY
+            CASE
+              WHEN a.client_ticket_no IS NOT NULL
+                AND TRIM(a.client_ticket_no) NOT IN ('', '0')
+                AND UPPER(TRIM(COALESCE(dm.vcclid, ''))) = UPPER(TRIM(a.client_ticket_no))
+              THEN 0
+              ELSE 1
+            END,
+            dm.priority ASC,
+            dm.logged_at DESC
+          ))[1] AS matched_crm_serial
+        FROM deduped_matches dm
+        JOIN athena_failed_calls_normalized a ON a.id = dm.id
+        GROUP BY dm.id
       )
       UPDATE athena_failed_calls_normalized a
       SET
         reconciliation_status = CASE
           WHEN a.is_valid_matching_data = false THEN 'INVALID_DATA'
-          WHEN m.match_count = 1 THEN 'REGISTERED'
-          WHEN m.match_count > 1 THEN 'MULTIPLE_MATCHES'
+          WHEN COALESCE(m.same_cclid_match_count, 0) > 1 THEN 'MULTIPLE_MATCHES'
+          WHEN COALESCE(m.has_service_order_match, false)
+            OR COALESCE(m.same_cclid_match_count, 0) = 1
+            OR COALESCE(m.match_count, 0) = 1 THEN 'REGISTERED'
           ELSE 'NOT_REGISTERED'
         END,
-        match_count = COALESCE(m.match_count, 0),
+        match_count = CASE
+          WHEN COALESCE(m.same_cclid_match_count, 0) > 1 THEN m.same_cclid_match_count
+          WHEN COALESCE(m.match_count, 0) > 0 THEN 1
+          ELSE 0
+        END,
         matched_vtrnno = m.primary_vtrnno,
         matched_vtrnnos = m.all_vtrnnos,
         matched_crm_logged_at = m.primary_crm_logged_at,
@@ -319,7 +415,8 @@ export async function executeAthenaReconciliation(
         reconciled_at = now(),
         updated_at = now()
       FROM (
-        SELECT a.id, m.match_count, m.primary_vtrnno, m.all_vtrnnos, m.primary_crm_logged_at,
+        SELECT a.id, m.match_count, m.same_cclid_match_count, m.has_service_order_match,
+               m.primary_vtrnno, m.all_vtrnnos, m.primary_crm_logged_at,
                m.primary_crm_status, m.matched_crm_party_name, m.matched_crm_call_type, m.matched_crm_serial
         FROM athena_failed_calls_normalized a
         LEFT JOIN aggregated m ON a.id = m.id
