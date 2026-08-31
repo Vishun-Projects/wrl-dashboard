@@ -89,11 +89,11 @@ export function evaluateAthenaCallMatch(
     }
     if (cclidMatches.length > 1) {
       return {
-        status: 'MULTIPLE_MATCHES',
-        matchCount: cclidMatches.length,
-        matchedVtrnno: cclidMatches[0].vtrnno,
-        matchedVtrnnos: cclidMatches.map((c) => c.vtrnno),
-        matchedCrmLoggedAt: cclidMatches[cclidMatches.length - 1].loggedAt,
+        status: 'NOT_REGISTERED',
+        matchCount: 0,
+        matchedVtrnno: null,
+        matchedVtrnnos: [],
+        matchedCrmLoggedAt: null,
       };
     }
   }
@@ -137,11 +137,11 @@ export function evaluateAthenaCallMatch(
 
   if (ticketNo && cclidAligned.length > 1) {
     return {
-      status: 'MULTIPLE_MATCHES',
-      matchCount: cclidAligned.length,
-      matchedVtrnno: cclidAligned[0].vtrnno,
-      matchedVtrnnos: cclidAligned.map((c) => c.vtrnno),
-      matchedCrmLoggedAt: cclidAligned[cclidAligned.length - 1].loggedAt,
+      status: 'NOT_REGISTERED',
+      matchCount: 0,
+      matchedVtrnno: null,
+      matchedVtrnnos: [],
+      matchedCrmLoggedAt: null,
     };
   }
 
@@ -187,6 +187,14 @@ export async function executeAthenaReconciliation(
   const runner = async (db: PoolClient): Promise<ReconciliationRunStats> => {
     const reprocessAll = opts?.reprocessAll === true;
     const targetId = opts?.targetId ?? null;
+
+    // Legacy rows: multiple-match status is retired — treat as unregistered
+    await db.query(`
+      UPDATE athena_failed_calls_normalized
+      SET reconciliation_status = 'NOT_REGISTERED', updated_at = now()
+      WHERE reconciliation_status = 'MULTIPLE_MATCHES'
+        ${targetId ? `AND id = ${targetId}` : ''}
+    `);
 
     // First ensure INVALID_DATA rows are properly tagged
     await db.query(`
@@ -380,15 +388,15 @@ export async function executeAthenaReconciliation(
       SET
         reconciliation_status = CASE
           WHEN a.is_valid_matching_data = false THEN 'INVALID_DATA'
-          WHEN COALESCE(m.same_cclid_match_count, 0) > 1 THEN 'MULTIPLE_MATCHES'
           WHEN COALESCE(m.has_service_order_match, false)
             OR COALESCE(m.same_cclid_match_count, 0) = 1
             OR COALESCE(m.match_count, 0) = 1 THEN 'REGISTERED'
           ELSE 'NOT_REGISTERED'
         END,
         match_count = CASE
-          WHEN COALESCE(m.same_cclid_match_count, 0) > 1 THEN m.same_cclid_match_count
-          WHEN COALESCE(m.match_count, 0) > 0 THEN 1
+          WHEN COALESCE(m.has_service_order_match, false)
+            OR COALESCE(m.same_cclid_match_count, 0) = 1
+            OR COALESCE(m.match_count, 0) = 1 THEN 1
           ELSE 0
         END,
         matched_vtrnno = m.primary_vtrnno,
@@ -408,7 +416,7 @@ export async function executeAthenaReconciliation(
         LEFT JOIN aggregated m ON a.id = m.id
         WHERE 1=1
           ${targetId ? `AND a.id = ${targetId}` : ''}
-          ${!reprocessAll && !targetId ? `AND (a.reconciled_at IS NULL OR a.reconciliation_status IN ('NOT_REGISTERED', 'MULTIPLE_MATCHES', 'REGISTERED'))` : ''}
+          ${!reprocessAll && !targetId ? `AND (a.reconciled_at IS NULL OR a.reconciliation_status IN ('NOT_REGISTERED', 'REGISTERED'))` : ''}
       ) m
       WHERE a.id = m.id;
     `;

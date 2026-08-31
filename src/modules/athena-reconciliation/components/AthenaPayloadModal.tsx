@@ -6,7 +6,6 @@ import {
   X,
   CheckCircle2,
   AlertTriangle,
-  Copy,
   FileQuestion,
   ExternalLink,
   ShieldCheck,
@@ -35,15 +34,10 @@ function statusBadge(status: AthenaReconciliationStatus) {
         </span>
       );
     case 'NOT_REGISTERED':
+    case 'MULTIPLE_MATCHES':
       return (
         <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-rose-50 text-rose-800 border border-rose-200/80 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-800/60">
           <AlertTriangle className="h-2.5 w-2.5" /> Unregistered
-        </span>
-      );
-    case 'MULTIPLE_MATCHES':
-      return (
-        <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-violet-50 text-violet-800 border border-violet-200/80 dark:bg-violet-950/50 dark:text-violet-300 dark:border-violet-800/60">
-          <Copy className="h-2.5 w-2.5" /> Multiple
         </span>
       );
     case 'INVALID_DATA':
@@ -84,6 +78,9 @@ export function AthenaPayloadModal({ row, onClose }: AthenaPayloadModalProps) {
 
   if (!row) return null;
 
+  const displayStatus =
+    row.reconciliationStatus === 'MULTIPLE_MATCHES' ? 'NOT_REGISTERED' : row.reconciliationStatus;
+
   const statusConfig = {
     REGISTERED: {
       label: 'Registered in CRM',
@@ -95,17 +92,12 @@ export function AthenaPayloadModal({ row, onClose }: AthenaPayloadModalProps) {
       icon: AlertTriangle,
       badgeClass: 'bg-rose-100 text-rose-800 dark:bg-rose-900/60 dark:text-rose-300 border-rose-200',
     },
-    MULTIPLE_MATCHES: {
-      label: 'Multiple CRM Matches',
-      icon: Copy,
-      badgeClass: 'bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-300 border-purple-200',
-    },
     INVALID_DATA: {
       label: 'Invalid / Incomplete Data',
       icon: FileQuestion,
       badgeClass: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300 border-amber-200',
     },
-  }[row.reconciliationStatus] ?? {
+  }[displayStatus] ?? {
     label: row.reconciliationStatus,
     icon: FileText,
     badgeClass: 'bg-slate-100 text-slate-800',

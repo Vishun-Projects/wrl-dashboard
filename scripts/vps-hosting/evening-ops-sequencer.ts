@@ -230,10 +230,10 @@ async function collectInventory(code: string, today: string): Promise<Inventory>
   const systemd: string[] = [];
 
   syncWorkers.push(
-    'Daemon: every 3 min (SYNC_INTERVAL_MS=180000) — ARCP / TE / Athena; calls OFF by default'
+    'Daemon: every 3 min (SYNC_INTERVAL_MS=180000) — ARCP / TE / Athena / cancelled register; calls OFF by default'
   );
   syncWorkers.push('Calls register: once daily 00:00 IST (midnight-calls-sync.sh)');
-  syncWorkers.push('Nightly non-calls: ~02:30 IST (athena / attendance / user-locations)');
+  syncWorkers.push('Nightly non-calls: ~02:30 IST (athena / attendance / user-locations / cancelled register)');
   syncWorkers.push('Health watchdog: every 15 min on failure');
 
   const daemon = sh('systemctl', ['is-active', 'fast-close-sync-worker']);

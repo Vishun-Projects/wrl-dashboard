@@ -31,9 +31,9 @@ export type CancelledCallsHealth = {
   totalRows: number;
   maxCancelledAt: string | null;
   maxSyncedAt: string | null;
-  hotLastSyncedAt: string | null;
-  hotStatus: string | null;
-  hotLagMinutes: number | null;
+  registerLastSyncedAt: string | null;
+  registerStatus: string | null;
+  registerLagMinutes: number | null;
 };
 
 export type CancelledCallsSummary = {

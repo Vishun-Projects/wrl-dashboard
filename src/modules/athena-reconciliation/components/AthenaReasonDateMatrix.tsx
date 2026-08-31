@@ -139,7 +139,7 @@ export function AthenaReasonDateMatrixPanel({ filters }: Props) {
             {formatUiDateDash(window.start)} – {formatUiDateDash(window.end)} (Mon–Sat)
           </span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 dark:border-slate-700 dark:bg-slate-800/60">
           <button
             type="button"
             disabled={!canGoPrev || loading}
@@ -147,12 +147,12 @@ export function AthenaReasonDateMatrixPanel({ filters }: Props) {
               const prev = shiftWindowEnd(window, -1, boundStart, boundEnd);
               if (prev) setWindowEndAnchor(prev.end);
             }}
-            className="inline-flex items-center rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            className="inline-flex items-center rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
             aria-label="Previous 15 days"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <span className="px-1 text-[11px] text-slate-500">15-day window</span>
+          <span className="px-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200">15-day window</span>
           <button
             type="button"
             disabled={!canGoNext || loading}
@@ -160,7 +160,7 @@ export function AthenaReasonDateMatrixPanel({ filters }: Props) {
               const next = shiftWindowEnd(window, 1, boundStart, boundEnd);
               if (next) setWindowEndAnchor(next.end);
             }}
-            className="inline-flex items-center rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            className="inline-flex items-center rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
             aria-label="Next 15 days"
           >
             <ChevronRight className="h-4 w-4" />
@@ -286,27 +286,6 @@ export function AthenaReasonDateMatrixPanel({ filters }: Props) {
                     {matrix.unregisteredTotal.toLocaleString('en-IN')}
                   </td>
                 </tr>
-                {matrix.multipleMatchesTotal > 0 ? (
-                  <tr className="bg-violet-50/60 font-medium dark:bg-violet-950/30">
-                    <td className="sticky left-0 z-[1] border-b border-r border-violet-100 bg-violet-50/60 px-3 py-1.5 text-violet-800 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-200">
-                      Multiple CRM matches
-                    </td>
-                    {matrix.dates.map((d) => {
-                      const n = matrix.multipleMatchesByDate[d] ?? 0;
-                      return (
-                        <td
-                          key={d}
-                          className="border-b border-violet-100 px-2 py-1.5 text-center tabular-nums text-violet-800 dark:border-violet-900 dark:text-violet-200"
-                        >
-                          {n > 0 ? n.toLocaleString('en-IN') : '—'}
-                        </td>
-                      );
-                    })}
-                    <td className="border-b border-l border-violet-100 bg-violet-100/50 px-2 py-1.5 text-center font-semibold tabular-nums text-violet-900 dark:border-violet-900 dark:bg-violet-900/40 dark:text-violet-100">
-                      {matrix.multipleMatchesTotal.toLocaleString('en-IN')}
-                    </td>
-                  </tr>
-                ) : null}
                 {matrix.invalidDataTotal > 0 ? (
                   <tr className="bg-amber-50/60 font-medium dark:bg-amber-950/30">
                     <td className="sticky left-0 z-[1] border-b border-r border-amber-100 bg-amber-50/60 px-3 py-1.5 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">

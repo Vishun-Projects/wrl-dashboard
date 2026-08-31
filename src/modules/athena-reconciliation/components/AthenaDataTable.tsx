@@ -4,7 +4,6 @@ import React from 'react';
 import {
   CheckCircle2,
   AlertTriangle,
-  Copy,
   FileQuestion,
   ChevronLeft,
   ChevronRight,
@@ -54,15 +53,10 @@ export function AthenaDataTable({
           </span>
         );
       case 'NOT_REGISTERED':
+      case 'MULTIPLE_MATCHES':
         return (
           <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-rose-50 text-rose-800 border border-rose-200/80 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-800/60">
             <AlertTriangle className="h-2.5 w-2.5" /> Unregistered
-          </span>
-        );
-      case 'MULTIPLE_MATCHES':
-        return (
-          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-violet-50 text-violet-800 border border-violet-200/80 dark:bg-violet-950/50 dark:text-violet-300 dark:border-violet-800/60">
-            <Copy className="h-2.5 w-2.5" /> Multiple
           </span>
         );
       case 'INVALID_DATA':
@@ -156,6 +150,14 @@ export function AthenaDataTable({
                 </div>
               </th>
               <th
+                className="cursor-pointer px-2.5 py-2 font-semibold group hover:bg-slate-100/60 dark:hover:bg-slate-800 whitespace-nowrap text-[11px]"
+                onClick={() => onSortChange('model')}
+              >
+                <div className="flex items-center gap-1">
+                  Model {renderSortIcon('model')}
+                </div>
+              </th>
+              <th
                 className="cursor-pointer px-2.5 py-2 font-semibold group hover:bg-slate-100/60 dark:hover:bg-slate-800 text-[11px]"
                 onClick={() => onSortChange('failureReason')}
               >
@@ -182,7 +184,7 @@ export function AthenaDataTable({
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i} className="animate-pulse">
-                  {Array.from({ length: hasAnyMatch ? 11 : 10 }).map((_, j) => (
+                  {Array.from({ length: hasAnyMatch ? 12 : 11 }).map((_, j) => (
                     <td key={j} className="px-2.5 py-2">
                       <div className="h-3.5 w-full rounded bg-slate-100 dark:bg-slate-800" />
                     </td>
@@ -191,7 +193,7 @@ export function AthenaDataTable({
               ))
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={hasAnyMatch ? 11 : 10} className="py-8 text-center text-xs text-slate-400">
+                <td colSpan={hasAnyMatch ? 12 : 11} className="py-8 text-center text-xs text-slate-400">
                   No failed calls found matching your filter criteria.
                 </td>
               </tr>
@@ -231,6 +233,9 @@ export function AthenaDataTable({
                   </td>
                   <td className="px-2.5 py-1.5 font-mono font-semibold text-slate-900 dark:text-white">
                     {row.serialNo || '-'}
+                  </td>
+                  <td className="px-2.5 py-1.5 font-mono text-[11px] text-slate-700 dark:text-slate-300 truncate max-w-[180px]" title={row.model || undefined}>
+                    {row.model || '-'}
                   </td>
                   <td className="px-2.5 py-1.5 text-rose-600 dark:text-rose-400 font-medium truncate max-w-[160px]">
                     {row.failureReason || '-'}

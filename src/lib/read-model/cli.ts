@@ -39,6 +39,7 @@ import { logAction } from '@/lib/security/audit';
 import { backfillCancelledFromHot } from '@/lib/read-model/upsert-cancelled';
 import { runAttendanceDetailsSync } from '@/lib/read-model/attendance-details';
 import { runUserLocationsSync } from '@/lib/read-model/user-locations';
+import { runCancelledCallRegisterSync } from '@/lib/read-model/cancelled-call-register';
 import {
   runCallsMirrorBackfill,
   runCallsMirrorIncremental,
@@ -214,6 +215,17 @@ async function runDaemon(): Promise<void> {
           await runAthenaFailedCallsSync();
         } catch (athenaErr) {
           console.error('[athena-sync] Daemon incremental failed:', formatSyncWorkerError(athenaErr));
+        }
+      }
+      if (process.env.SYNC_CANCELLED_REGISTER_ENABLED !== 'false') {
+        try {
+          const cancelled = await runCancelledCallRegisterSync();
+          console.log('[cancelled-register] Daemon sync complete:', cancelled);
+        } catch (cancelledErr) {
+          console.error(
+            '[cancelled-register] Daemon incremental failed:',
+            formatSyncWorkerError(cancelledErr)
+          );
         }
       }
       if (process.env.CALLS_MIRROR_SYNC_ENABLED !== 'false') {
@@ -439,6 +451,17 @@ async function main(): Promise<void> {
       console.log('[user-locations] Complete:', result);
       break;
     }
+    case 'cancelled-register-sync': {
+      const args = process.argv.slice(3);
+      const fromIdx = args.indexOf('--from');
+      const toIdx = args.indexOf('--to');
+      const dateFrom = fromIdx >= 0 ? args[fromIdx + 1] : undefined;
+      const dateTo = toIdx >= 0 ? args[toIdx + 1] : undefined;
+      const full = args.includes('--full');
+      const result = await runCancelledCallRegisterSync({ dateFrom, dateTo, full });
+      console.log('[cancelled-register] Complete:', result);
+      break;
+    }
     case 'daemon':
       await runDaemon();
       break;
@@ -481,6 +504,8 @@ Commands:
                     --from YYYY-MM-DD --to YYYY-MM-DD  (default: watermark-2d or year start → today)
   user-locations-sync   Fetch CRM msduserlocation → crm_user_locations
                     --from YYYY-MM-DD --to YYYY-MM-DD  (default: watermark-2d or year start → today)
+  cancelled-register-sync  calls_crm_mirror (or hot) → calls_cancelled for /report/cancelled-calls
+                    --from YYYY-MM-DD --to YYYY-MM-DD  (default: watermark-2d) | --full
   arcp-reset        Truncate arcp_lines_hot + reset sync_state (fresh start)
   arcp-backfill     Initial ARCP lines backfill (ARCP_BACKFILL_START_DATE or YEARS)
   arcp-incremental  Single ARCP incremental sync run
@@ -498,7 +523,7 @@ Commands:
   retention         Purge old sync logs and ingest batches
   full-audit        Full read-model audit vs live CRM (see scripts/ops/audit-read-model-full.ts)
                     --apply  refresh stale rows; --only hot,dims,facts; --resume-from-trn TRN
-  daemon            Loop ARCP / TE / Athena / mirror; calls only if SYNC_CALLS_DAEMON_ENABLED=true
+  daemon            Loop ARCP / TE / Athena / cancelled register / mirror; calls only if SYNC_CALLS_DAEMON_ENABLED=true
 
 Live sync: PostgresAutoSync in the app (see docs/sync.md). Use daemon only if you need
 sync while no browser is open.
@@ -507,6 +532,7 @@ Environment:
   DATABASE_URL           VPS Postgres (api.wrl-fsm.cloud; CLI uses direct :5432)
   SYNC_WORKER_ENABLED    Must be "true" for incremental/nightly/daemon
   SYNC_CALLS_DAEMON_ENABLED  If "true", daemon runs calls incremental every SYNC_INTERVAL_MS (default off — midnight only)
+  SYNC_CANCELLED_REGISTER_ENABLED  Mirror/hot → calls_cancelled in daemon (default on; no CRM report SQL)
   SYNC_ARCP_ENABLED      Run ARCP incremental in daemon / API sync
   SYNC_TRANSACTION_ENTRY_ENABLED  TransactionEntry sync in daemon/nightly (default on; set false to disable)
   TRANSACTION_ENTRY_RECENT_DAYS   Recent-window bulk refresh for all CRM clients (default 14)

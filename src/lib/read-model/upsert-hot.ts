@@ -5,6 +5,7 @@ import {
   isCancelledHotRow,
   upsertCancelledFromHotRows,
 } from '@/lib/read-model/upsert-cancelled';
+import { isDedicatedCancelledRegisterSyncEnabled } from '@/lib/read-model/cancelled-call-register/constants';
 
 const HOT_COLUMNS = [
   'ncode',
@@ -162,7 +163,9 @@ export async function upsertHotRows(
     upserted += batch.length;
   }
 
-  await upsertCancelledFromHotRows(client, rows);
+  if (!isDedicatedCancelledRegisterSyncEnabled()) {
+    await upsertCancelledFromHotRows(client, rows);
+  }
   return upserted;
 }
 

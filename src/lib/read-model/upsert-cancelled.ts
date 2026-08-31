@@ -3,6 +3,27 @@ import { isRealCancelReasonCode } from '@/lib/call/status/cancel';
 import { transformCrmRowToHot } from '@/lib/read-model/transform';
 import type { HotRow } from '@/lib/read-model/types';
 
+/** Row shape for calls_cancelled upsert (excl. synced_at). */
+export type CancelledUpsertRow = {
+  vtrnno: string;
+  ncode: number;
+  ncancelreason: number;
+  cancelled_at: Date;
+  logged_at: Date;
+  call_type: string | null;
+  nofficeid: number;
+  office_under: number | null;
+  party_name: string | null;
+  branch_name: string | null;
+  franchisee_name: string | null;
+  region: string;
+  account: string;
+  item_name: string | null;
+  serial: string | null;
+  engineer_name: string | null;
+  complaint: string | null;
+};
+
 /** Must stay aligned with docs/read-model-phase1-schema/28-calls_cancelled.sql columns (excl. synced_at). */
 export const CANCELLED_COLUMNS = [
   'vtrnno',
@@ -42,6 +63,28 @@ export function cancelledAtFromHot(
   return row.edited_at ?? row.source_editedon ?? row.logged_at;
 }
 
+function cancelledValuesFromRow(row: CancelledUpsertRow): unknown[] {
+  return [
+    row.vtrnno,
+    row.ncode,
+    row.ncancelreason,
+    row.cancelled_at,
+    row.logged_at,
+    row.call_type,
+    row.nofficeid,
+    row.office_under,
+    row.party_name,
+    row.branch_name,
+    row.franchisee_name,
+    row.region,
+    row.account,
+    row.item_name,
+    row.serial,
+    row.engineer_name,
+    row.complaint,
+  ];
+}
+
 function cancelledValues(row: HotRow): unknown[] {
   return [
     row.vtrnno,
@@ -62,6 +105,37 @@ function cancelledValues(row: HotRow): unknown[] {
     row.engineer_name,
     row.complaint,
   ];
+}
+
+export async function upsertCancelledRows(
+  client: pg.PoolClient,
+  rows: CancelledUpsertRow[],
+  batchSize = 100
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  let upserted = 0;
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize);
+    const values: unknown[] = [];
+    const placeholders: string[] = [];
+    batch.forEach((row, rowIndex) => {
+      const offset = rowIndex * CANCELLED_COLUMNS.length;
+      placeholders.push(
+        `(${CANCELLED_COLUMNS.map((_, colIndex) => `$${offset + colIndex + 1}`).join(', ')})`
+      );
+      values.push(...cancelledValuesFromRow(row));
+    });
+    await client.query(
+      `
+      INSERT INTO calls_cancelled (${CANCELLED_COLUMNS.join(', ')})
+      VALUES ${placeholders.join(', ')}
+      ON CONFLICT (vtrnno) DO UPDATE SET ${CANCELLED_UPDATE_SET}
+      `,
+      values
+    );
+    upserted += batch.length;
+  }
+  return upserted;
 }
 
 export async function upsertCancelledFromHotRows(

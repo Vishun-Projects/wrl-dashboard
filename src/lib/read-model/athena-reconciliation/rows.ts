@@ -124,6 +124,8 @@ function resolveSortColumn(sortBy?: string): string {
       return 'a.outlet_name';
     case 'serialNo':
       return 'a.serial_no';
+    case 'model':
+      return 'a.model';
     case 'reconciliationStatus':
       return 'a.reconciliation_status';
     case 'failureReason':

@@ -22,6 +22,13 @@ function toList(val?: string | string[] | null): string[] {
   return [val];
 }
 
+/** Unregistered + legacy multiple-match rows (latter folded into unregistered in UI). */
+function unregisteredStatusSql(alias: string, hasTreat: boolean, treatParamIdx: number): string {
+  const status = `${alias}.reconciliation_status IN ('NOT_REGISTERED', 'MULTIPLE_MATCHES')`;
+  if (!hasTreat) return `(${status})`;
+  return `(${status} AND NOT EXISTS (SELECT 1 FROM unnest($${treatParamIdx}::text[]) AS p WHERE ${alias}.failure_reason ILIKE (p || '%')))`;
+}
+
 function buildBaseFacetedConditions(
   params: AthenaReconciliationFilterParams,
   options: FacetedFilterOptions = {},
@@ -147,12 +154,7 @@ export async function fetchAthenaReconciliationSummary(
     const regCond = hasTreat
       ? `(a.reconciliation_status = 'REGISTERED' OR EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
       : `(a.reconciliation_status = 'REGISTERED')`;
-    const notRegCond = hasTreat
-      ? `(a.reconciliation_status = 'NOT_REGISTERED' AND NOT EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
-      : `(a.reconciliation_status = 'NOT_REGISTERED')`;
-    const multCond = hasTreat
-      ? `(a.reconciliation_status = 'MULTIPLE_MATCHES' AND NOT EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
-      : `(a.reconciliation_status = 'MULTIPLE_MATCHES')`;
+    const notRegCond = unregisteredStatusSql('a', hasTreat, treatIdx);
     const invCond = hasTreat
       ? `(a.reconciliation_status = 'INVALID_DATA' AND NOT EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
       : `(a.reconciliation_status = 'INVALID_DATA')`;
@@ -161,7 +163,6 @@ export async function fetchAthenaReconciliationSummary(
       total_records: string;
       registered: string;
       not_registered: string;
-      multiple_matches: string;
       invalid_data: string;
     }>(
       `
@@ -169,7 +170,6 @@ export async function fetchAthenaReconciliationSummary(
         COUNT(*)::text AS total_records,
         COUNT(*) FILTER (WHERE ${regCond})::text AS registered,
         COUNT(*) FILTER (WHERE ${notRegCond})::text AS not_registered,
-        COUNT(*) FILTER (WHERE ${multCond})::text AS multiple_matches,
         COUNT(*) FILTER (WHERE ${invCond})::text AS invalid_data
       FROM ${dedupSubquery(kpiWhere)}
       `,
@@ -180,14 +180,12 @@ export async function fetchAthenaReconciliationSummary(
       total_records: '0',
       registered: '0',
       not_registered: '0',
-      multiple_matches: '0',
       invalid_data: '0',
     };
 
     const totalRecords = parseInt(kpiRow.total_records, 10) || 0;
     const registered = parseInt(kpiRow.registered, 10) || 0;
     const notRegistered = parseInt(kpiRow.not_registered, 10) || 0;
-    const multipleMatches = parseInt(kpiRow.multiple_matches, 10) || 0;
     const invalidData = parseInt(kpiRow.invalid_data, 10) || 0;
 
     const registrationRatePct = totalRecords > 0 ? Number(((registered / totalRecords) * 100).toFixed(1)) : 0;
@@ -197,7 +195,7 @@ export async function fetchAthenaReconciliationSummary(
       totalRecords,
       registered,
       notRegistered,
-      multipleMatches,
+      multipleMatches: 0,
       invalidData,
       registrationRatePct,
       failureRatePct,
@@ -213,12 +211,7 @@ export async function fetchAthenaReconciliationSummary(
     const trendRegCond = hasTreat
       ? `(a.reconciliation_status = 'REGISTERED' OR EXISTS (SELECT 1 FROM unnest($${trendTreatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
       : `(a.reconciliation_status = 'REGISTERED')`;
-    const trendNotRegCond = hasTreat
-      ? `(a.reconciliation_status = 'NOT_REGISTERED' AND NOT EXISTS (SELECT 1 FROM unnest($${trendTreatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
-      : `(a.reconciliation_status = 'NOT_REGISTERED')`;
-    const trendMultCond = hasTreat
-      ? `(a.reconciliation_status = 'MULTIPLE_MATCHES' AND NOT EXISTS (SELECT 1 FROM unnest($${trendTreatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
-      : `(a.reconciliation_status = 'MULTIPLE_MATCHES')`;
+    const trendNotRegCond = unregisteredStatusSql('a', hasTreat, trendTreatIdx);
     const trendInvCond = hasTreat
       ? `(a.reconciliation_status = 'INVALID_DATA' AND NOT EXISTS (SELECT 1 FROM unnest($${trendTreatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
       : `(a.reconciliation_status = 'INVALID_DATA')`;
@@ -228,7 +221,6 @@ export async function fetchAthenaReconciliationSummary(
       total: string;
       registered: string;
       not_registered: string;
-      multiple_matches: string;
       invalid_data: string;
     }>(
       `
@@ -238,7 +230,6 @@ export async function fetchAthenaReconciliationSummary(
           COUNT(*)::text AS total,
           COUNT(*) FILTER (WHERE ${trendRegCond})::text AS registered,
           COUNT(*) FILTER (WHERE ${trendNotRegCond})::text AS not_registered,
-          COUNT(*) FILTER (WHERE ${trendMultCond})::text AS multiple_matches,
           COUNT(*) FILTER (WHERE ${trendInvCond})::text AS invalid_data
         FROM ${dedupSubquery(trendWhere)}
         WHERE a.call_date IS NOT NULL OR a.addedon_at IS NOT NULL
@@ -256,7 +247,7 @@ export async function fetchAthenaReconciliationSummary(
       total: parseInt(r.total, 10) || 0,
       registered: parseInt(r.registered, 10) || 0,
       notRegistered: parseInt(r.not_registered, 10) || 0,
-      multipleMatches: parseInt(r.multiple_matches, 10) || 0,
+      multipleMatches: 0,
       invalidData: parseInt(r.invalid_data, 10) || 0,
     }));
 
@@ -289,10 +280,8 @@ export async function fetchAthenaReconciliationSummary(
     const statusTotal =
       params.status === 'REGISTERED'
         ? registered
-        : params.status === 'NOT_REGISTERED'
+        : params.status === 'NOT_REGISTERED' || params.status === 'MULTIPLE_MATCHES'
         ? notRegistered
-        : params.status === 'MULTIPLE_MATCHES'
-        ? multipleMatches
         : totalRecords;
 
     const byFailureReason: AthenaBreakdownItem[] = reasonRes.rows.map((r) => {
@@ -578,12 +567,7 @@ export async function fetchAthenaReasonDateMatrix(
     const regCond = hasTreat
       ? `(a.reconciliation_status = 'REGISTERED' OR EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
       : `(a.reconciliation_status = 'REGISTERED')`;
-    const notRegCond = hasTreat
-      ? `(a.reconciliation_status = 'NOT_REGISTERED' AND NOT EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
-      : `(a.reconciliation_status = 'NOT_REGISTERED')`;
-    const multCond = hasTreat
-      ? `(a.reconciliation_status = 'MULTIPLE_MATCHES' AND NOT EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
-      : `(a.reconciliation_status = 'MULTIPLE_MATCHES')`;
+    const notRegCond = unregisteredStatusSql('a', hasTreat, treatIdx);
     const invCond = hasTreat
       ? `(a.reconciliation_status = 'INVALID_DATA' AND NOT EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
       : `(a.reconciliation_status = 'INVALID_DATA')`;
@@ -609,7 +593,6 @@ export async function fetchAthenaReasonDateMatrix(
         day: string;
         registered: string;
         not_registered: string;
-        multiple_matches: string;
         invalid_data: string;
       }>(
         `
@@ -617,7 +600,6 @@ export async function fetchAthenaReasonDateMatrix(
         TO_CHAR(a.call_date::date, 'YYYY-MM-DD') AS day,
         COUNT(*) FILTER (WHERE ${regCond})::text AS registered,
         COUNT(*) FILTER (WHERE ${notRegCond})::text AS not_registered,
-        COUNT(*) FILTER (WHERE ${multCond})::text AS multiple_matches,
         COUNT(*) FILTER (WHERE ${invCond})::text AS invalid_data
       FROM ${dedupSubquery(`${where} AND a.call_date IS NOT NULL`)}
       GROUP BY day
@@ -650,26 +632,21 @@ export async function fetchAthenaReasonDateMatrix(
 
     const registeredByDate: Record<string, number> = Object.fromEntries(dates.map((d) => [d, 0]));
     const unregisteredByDate: Record<string, number> = Object.fromEntries(dates.map((d) => [d, 0]));
-    const multipleMatchesByDate: Record<string, number> = Object.fromEntries(dates.map((d) => [d, 0]));
     const invalidDataByDate: Record<string, number> = Object.fromEntries(dates.map((d) => [d, 0]));
     let registeredTotal = 0;
     let unregisteredTotal = 0;
-    let multipleMatchesTotal = 0;
     let invalidDataTotal = 0;
 
     for (const row of statusRes.rows) {
       if (!dates.includes(row.day)) continue;
       const reg = parseInt(row.registered, 10) || 0;
       const unreg = parseInt(row.not_registered, 10) || 0;
-      const mult = parseInt(row.multiple_matches, 10) || 0;
       const inv = parseInt(row.invalid_data, 10) || 0;
       registeredByDate[row.day] = reg;
       unregisteredByDate[row.day] = unreg;
-      multipleMatchesByDate[row.day] = mult;
       invalidDataByDate[row.day] = inv;
       registeredTotal += reg;
       unregisteredTotal += unreg;
-      multipleMatchesTotal += mult;
       invalidDataTotal += inv;
     }
 
@@ -682,11 +659,11 @@ export async function fetchAthenaReasonDateMatrix(
       grandTotal,
       registeredByDate,
       unregisteredByDate,
-      multipleMatchesByDate,
+      multipleMatchesByDate: Object.fromEntries(dates.map((d) => [d, 0])),
       invalidDataByDate,
       registeredTotal,
       unregisteredTotal,
-      multipleMatchesTotal,
+      multipleMatchesTotal: 0,
       invalidDataTotal,
     };
   });

@@ -132,7 +132,7 @@ export const RBAC_PAGES: RbacPage[] = [
     id: 'athena_reconciliation',
     permission: 'page_athena_reconciliation',
     path: '/report/athena-reconciliation',
-    label: 'Reconciliation',
+    label: 'Failed Calls - Athena API',
     description: 'Failed CRM ingestion calls matched against the call register',
     group: 'Reports',
   },

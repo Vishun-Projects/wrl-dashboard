@@ -46,4 +46,10 @@ if pgrep -f 'user-locations/run.ts' >/dev/null 2>&1; then
 else
   npm run sync-worker:user-locations-sync || echo "WARN: User locations sync failed (non-fatal)"
 fi
+echo "Cancelled call register (mirror/hot → calls_cancelled)"
+if pgrep -f 'cancelled-call-register/run.ts' >/dev/null 2>&1; then
+  echo "SKIP cancelled-register — sync already running"
+else
+  npm run sync-worker:cancelled-register-sync || echo "WARN: Cancelled register sync failed (non-fatal)"
+fi
 echo "=== sync-worker-nightly done $(date -Iseconds) ==="

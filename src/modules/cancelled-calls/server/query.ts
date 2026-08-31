@@ -1,5 +1,5 @@
 import { withAppClient } from '@/lib/read-model/db';
-import { getSyncMeta } from '@/lib/read-model/sync-meta';
+import { CANCELLED_CALL_REGISTER_ENTITY } from '@/lib/read-model/cancelled-call-register/constants';
 import { shouldRestrictToAssignedOffices } from '@/sql/trhcalls/office-security';
 import type {
   CancelledCallRow,
@@ -160,7 +160,7 @@ const FROM_JOIN = `
 `;
 
 export async function fetchCancelledCallsHealth(): Promise<CancelledCallsHealth> {
-  const [counts, sync] = await Promise.all([
+  const [counts, registerSync] = await Promise.all([
     withAppClient(async (client) => {
       const res = await client.query<{
         total_rows: number | string;
@@ -175,8 +175,22 @@ export async function fetchCancelledCallsHealth(): Promise<CancelledCallsHealth>
       `);
       return res.rows[0];
     }),
-    getSyncMeta(),
+    withAppClient(async (client) => {
+      const res = await client.query<{ last_run_at: Date | null; status: string | null }>(
+        `SELECT last_run_at, status FROM sync_state WHERE entity = $1 LIMIT 1`,
+        [CANCELLED_CALL_REGISTER_ENTITY]
+      );
+      return res.rows[0];
+    }),
   ]);
+
+  const registerLastSyncedAt = registerSync?.last_run_at
+    ? new Date(registerSync.last_run_at).toISOString()
+    : null;
+  const registerLagMinutes =
+    registerSync?.last_run_at != null
+      ? Math.max(0, Math.round((Date.now() - new Date(registerSync.last_run_at).getTime()) / 60000))
+      : null;
 
   return {
     totalRows: Number(counts?.total_rows ?? 0),
@@ -186,9 +200,9 @@ export async function fetchCancelledCallsHealth(): Promise<CancelledCallsHealth>
     maxSyncedAt: counts?.max_synced_at
       ? new Date(counts.max_synced_at).toISOString()
       : null,
-    hotLastSyncedAt: sync.lastSyncedAt,
-    hotStatus: sync.status,
-    hotLagMinutes: sync.lagMinutes,
+    registerLastSyncedAt,
+    registerStatus: registerSync?.status ?? null,
+    registerLagMinutes,
   };
 }
 

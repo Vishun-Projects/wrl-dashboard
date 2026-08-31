@@ -70,6 +70,7 @@
     "sync-worker:reconcile-open-cancel": "npx tsx src/lib/read-model/reconcile-open-cancel-run.ts",
     "sync-worker:attendance-sync": "npx tsx src/lib/read-model/attendance-details/run.ts",
     "sync-worker:user-locations-sync": "npx tsx src/lib/read-model/user-locations/run.ts",
+    "sync-worker:cancelled-register-sync": "npx tsx src/lib/read-model/cancelled-call-register/run.ts",
     "crm-mirror:status": "python scripts/crm_mirror_sync.py status",
     "db:apply-old-crm": "node scripts/db/apply-old-crm-schema.mjs",
     "arcp-trends-html": "npx tsx scripts/ops/generate-arcp-trends-html.ts",

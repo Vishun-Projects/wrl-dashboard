@@ -142,16 +142,16 @@ export default function CancelledCallsPageClient() {
       title="Cancelled Calls"
       subtitle={
         health
-          ? `Register rows ${health.totalRows.toLocaleString()} · hot sync ${
-              health.hotLastSyncedAt
-                ? formatUiDateTime(health.hotLastSyncedAt)
+          ? `Register rows ${health.totalRows.toLocaleString()} · CRM sync ${
+              health.registerLastSyncedAt
+                ? formatUiDateTime(health.registerLastSyncedAt)
                 : '—'
             }${
-              health.hotLagMinutes != null ? ` (${health.hotLagMinutes}m lag)` : ''
+              health.registerLagMinutes != null ? ` (${health.registerLagMinutes}m lag)` : ''
             } · max cancelled ${
               health.maxCancelledAt ? formatUiDateTime(health.maxCancelledAt) : '—'
             }`
-          : 'Cancelled call register from Postgres'
+          : 'Cancelled call register from Postgres (calls_crm_mirror / hot)'
       }
       icon={<Ban className="h-4 w-4" />}
       actions={

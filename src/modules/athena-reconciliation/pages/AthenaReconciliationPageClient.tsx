@@ -67,7 +67,6 @@ export default function AthenaReconciliationPageClient() {
   const [isLoadingSummary, setIsLoadingSummary] = useState<boolean>(true);
   const [isLoadingRows, setIsLoadingRows] = useState<boolean>(true);
   const [isExportingCsv, setIsExportingCsv] = useState<boolean>(false);
-  const [isReconciling, setIsReconciling] = useState<boolean>(false);
   const [showCharts, setShowCharts] = useState<boolean>(true);
   const [selectedRow, setSelectedRow] = useState<AthenaFailedNormalizedRow | null>(null);
   const [isReasonRulesOpen, setIsReasonRulesOpen] = useState<boolean>(false);
@@ -194,26 +193,8 @@ export default function AthenaReconciliationPageClient() {
     setFilters(initialAthenaFilters());
   };
 
-  const handleReconcile = async () => {
-    setIsReconciling(true);
-    try {
-      const res = await axios.post('/api/report/athena-reconciliation', {
-        action: 'reconcile',
-        reprocessAll: true,
-      });
-      const stats = res.data?.stats;
-      toast.success(
-        stats
-          ? `Reconciled ${stats.totalProcessed.toLocaleString()} rows (${stats.multipleMatches.toLocaleString()} multiple CCLID duplicates)`
-          : 'Reconciliation complete'
-      );
-      await Promise.all([loadSummary(), loadRows()]);
-    } catch (err: unknown) {
-      console.error('Reconcile failed:', err);
-      toast.error('Failed to re-run CRM matching');
-    } finally {
-      setIsReconciling(false);
-    }
+  const handleRefresh = () => {
+    void Promise.all([loadSummary(), loadRows()]);
   };
 
   const handleExportCsv = async () => {
@@ -263,7 +244,7 @@ export default function AthenaReconciliationPageClient() {
     <PageShell
       title={
         <div className="flex items-center gap-2">
-          <span>Failed Calls & CRM Reconciliation</span>
+          <span>Failed Calls - Athena API</span>
           {summary && (
             <span className="hidden sm:inline-flex rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:text-slate-300">
               {summary.kpis.totalRecords.toLocaleString()} Records
@@ -272,23 +253,15 @@ export default function AthenaReconciliationPageClient() {
         </div>
       }
       subtitle={
-        summary?.lastReconciledAt
-          ? `Last Reconciled: ${new Date(summary.lastReconciledAt).toLocaleString()}`
-          : 'Failed CRM ingestion matched to the call register'
+        summary?.lastSyncState?.lastRunAt
+          ? `Auto-synced on VPS · last run ${new Date(summary.lastSyncState.lastRunAt).toLocaleString()}`
+          : summary?.lastReconciledAt
+            ? `Last reconciled ${new Date(summary.lastReconciledAt).toLocaleString()}`
+            : 'Synced automatically on VPS — refresh to reload'
       }
       icon={<GitCompareArrows className="h-4 w-4 text-blue-600 dark:text-blue-400" />}
       actions={
         <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={handleReconcile}
-            disabled={isReconciling}
-            className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800 shadow-2xs hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200 dark:hover:bg-blue-900/50"
-          >
-            <GitCompareArrows className={`h-3 w-3 ${isReconciling ? 'animate-pulse' : ''}`} />
-            <span>{isReconciling ? 'Matching…' : 'Re-match CRM'}</span>
-          </button>
-
           <button
             type="button"
             onClick={handleExportCsv}
@@ -301,14 +274,12 @@ export default function AthenaReconciliationPageClient() {
 
           <button
             type="button"
-            onClick={() => {
-              loadSummary();
-              loadRows();
-            }}
-            className="rounded-md border border-slate-200 bg-white p-1 text-slate-600 shadow-2xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+            onClick={handleRefresh}
+            className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
             title="Refresh data"
           >
-            <RefreshCw className="h-3.5 w-3.5" />
+            <RefreshCw className="h-3 w-3 text-slate-500" />
+            <span>Refresh</span>
           </button>
         </div>
       }
@@ -317,8 +288,8 @@ export default function AthenaReconciliationPageClient() {
         <div className="w-full space-y-2.5 p-3 sm:p-4">
           {/* 1. Status Metric Filter Cards (Persistent & smooth, zero layout shift) */}
           {!summary ? (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 w-full">
-              {Array.from({ length: 4 }).map((_, i) => (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 w-full">
+              {Array.from({ length: 3 }).map((_, i) => (
                 <div
                   key={i}
                   className="h-16 rounded-xl border border-slate-200 bg-slate-50/50 animate-pulse dark:border-slate-800 dark:bg-slate-900/50"

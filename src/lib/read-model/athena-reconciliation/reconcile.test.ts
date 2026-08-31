@@ -131,7 +131,7 @@ describe('Athena Multi-Tier Reconciliation Logic', () => {
     expect(result.matchCount).toBe(0);
   });
 
-  it('flags MULTIPLE_MATCHES when more than one CRM call shares the same CCLID', () => {
+  it('treats duplicate CCLID CRM rows as unregistered', () => {
     const failedCall = {
       ...baseFailedCall,
       clientTicketNo: '2667215',
@@ -156,9 +156,9 @@ describe('Athena Multi-Tier Reconciliation Logic', () => {
     ];
 
     const result = evaluateAthenaCallMatch(failedCall, candidateCalls);
-    expect(result.status).toBe('MULTIPLE_MATCHES');
-    expect(result.matchCount).toBe(2);
-    expect(result.matchedVtrnnos).toEqual(['TRN-2025-010', 'TRN-2025-011']);
+    expect(result.status).toBe('NOT_REGISTERED');
+    expect(result.matchCount).toBe(0);
+    expect(result.matchedVtrnno).toBeNull();
   });
 
   it('registers via single 4-way match even when CRM CCLID differs from ticket', () => {

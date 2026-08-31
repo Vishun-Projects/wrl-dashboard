@@ -117,7 +117,7 @@ export async function runCallsMirrorBackfill(): Promise<CallsMirrorBackfillResul
 
       let startDate = configuredStart;
       if (
-        state?.status === 'backfilling' &&
+        (state?.status === 'backfilling' || state?.status === 'error') &&
         state.last_addedon &&
         !isEpochOrNull(state.last_addedon)
       ) {

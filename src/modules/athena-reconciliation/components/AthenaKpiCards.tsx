@@ -38,7 +38,7 @@ export function AthenaKpiCards({
       id: 'REGISTERED',
       label: 'Subsequently Registered',
       value: kpis.registered.toLocaleString(),
-      detail: `${kpis.registrationRatePct}% resolved in CRM`,
+      detail: `${kpis.registrationRatePct}% Registered in CRM`,
       icon: CheckCircle2,
       activeBorder: 'border-teal-700 bg-teal-900 text-white dark:border-teal-500 dark:bg-teal-950/60 dark:text-white',
       inactiveBorder: 'border-slate-200 bg-white hover:border-teal-300 text-slate-800 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100 dark:hover:border-teal-800',
