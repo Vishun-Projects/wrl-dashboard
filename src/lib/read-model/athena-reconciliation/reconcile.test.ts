@@ -161,6 +161,27 @@ describe('Athena Multi-Tier Reconciliation Logic', () => {
     expect(result.matchedVtrnnos).toEqual(['TRN-2025-010', 'TRN-2025-011']);
   });
 
+  it('registers via single 4-way match even when CRM CCLID differs from ticket', () => {
+    const failedCall = {
+      ...baseFailedCall,
+      clientTicketNo: '2678026',
+    };
+    const candidateCalls = [
+      {
+        vtrnno: '26H99999',
+        vcclid: null,
+        callType: 'Breakdown',
+        partyName: 'Metro Store Delhi',
+        serial: 'WRL987654',
+        loggedAt: new Date('2025-02-10T14:30:00Z'),
+      },
+    ];
+
+    const result = evaluateAthenaCallMatch(failedCall, candidateCalls);
+    expect(result.status).toBe('REGISTERED');
+    expect(result.matchedVtrnno).toBe('26H99999');
+  });
+
   it('does not treat unrelated serial matches as multiple when ticket CCLID matches one CRM call', () => {
     const failedCall = {
       ...baseFailedCall,
