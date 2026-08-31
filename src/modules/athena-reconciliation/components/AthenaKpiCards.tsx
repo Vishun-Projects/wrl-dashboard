@@ -5,7 +5,6 @@ import {
   FileText,
   CheckCircle2,
   AlertTriangle,
-  Copy,
   Check,
 } from 'lucide-react';
 import type { AthenaReconciliationKpis } from '../types';
@@ -57,21 +56,10 @@ export function AthenaKpiCards({
       badgeClass: 'bg-rose-50 text-rose-800 border border-rose-200/80 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-800/60',
       iconColor: 'text-rose-600 dark:text-rose-400',
     },
-    {
-      id: 'MULTIPLE_MATCHES',
-      label: 'Multiple CRM Matches',
-      value: kpis.multipleMatches.toLocaleString(),
-      detail: 'Same ticket/CCLID registered more than once',
-      icon: Copy,
-      activeBorder: 'border-violet-700 bg-violet-950 text-white dark:border-violet-500 dark:bg-violet-950/60 dark:text-white',
-      inactiveBorder: 'border-slate-200 bg-white hover:border-violet-300 text-slate-800 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100 dark:hover:border-violet-800',
-      badgeClass: 'bg-violet-50 text-violet-800 border border-violet-200/80 dark:bg-violet-950/50 dark:text-violet-300 dark:border-violet-800/60',
-      iconColor: 'text-violet-600 dark:text-violet-400',
-    },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 w-full">
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 w-full">
       {cards.map((card) => {
         const Icon = card.icon;
         const isSelected = currentStatus === card.id;
