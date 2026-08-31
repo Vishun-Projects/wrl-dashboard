@@ -298,9 +298,12 @@ async function main(): Promise<void> {
           ? args[toIdx + 1]
           : process.env.SYNC_EDITEDON_CATCHUP_TO ?? todayLocalDate();
       const result = from
-        ? await runEditedonCatchupRange(from, to)
+        ? await runEditedonCatchupRange(from, to, {
+            resume: !args.includes('--no-resume'),
+          })
         : await runEditedonCatchupStep();
       console.log('[sync-worker] Editedon catch-up:', result);
+      if (from && result.ok === false && !result.skipped) process.exitCode = 1;
       break;
     }
     case 'backfill-bm-approval': {

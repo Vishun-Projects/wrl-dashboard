@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Midnight CRM delta MAIL — 00:15 IST daily.
-# Always attempts the report mail (success or failure of 00:00 sync).
-#
-# Cron: 15 0 * * * …/midnight-crm-delta-mail.sh >> …/nightly-ytd-export-cron.log
+# Midnight CRM delta MAIL — runs after successful midnight sync (or 05:30 fallback cron).
+# Always attempts the report mail when invoked.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +28,18 @@ fi
 export NODE_ENV=production
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=8192}"
 export TZ="${TZ:-Asia/Kolkata}"
+TODAY="$(TZ=Asia/Kolkata date +%F)"
+STAMP="$(TZ=Asia/Kolkata date -Iseconds)"
+
+MAIL_MARKER="${INSTALL_ROOT}/shared/logs/midnight-crm-delta-mailed-${TODAY}"
+if [[ ! -d "${INSTALL_ROOT}/shared/logs" ]]; then
+  MAIL_MARKER="${INSTALL_ROOT}/logs/midnight-crm-delta-mailed-${TODAY}"
+fi
+if [[ -f "$MAIL_MARKER" && "${MIDNIGHT_MAIL_FORCE:-}" != "1" ]]; then
+  echo "[${STAMP}] SKIP — CRM delta mail already sent today"
+  echo "=== midnight-crm-delta complete ==="
+  exit 0
+fi
 
 echo "=== midnight-crm-delta mail $(TZ=Asia/Kolkata date -Iseconds) TZ=${TZ:-system} ==="
 
@@ -42,7 +52,7 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-# Always send — even if 00:00 sync failed or is still running.
+# Always send when this script is invoked.
 set +e
 npm run mis-email:midnight-crm-delta
 rc=$?
@@ -52,5 +62,8 @@ if [[ "$rc" -ne 0 ]]; then
   echo "FATAL: midnight CRM delta mail exited with code ${rc}" >&2
   exit "$rc"
 fi
+
+mkdir -p "$(dirname "$MAIL_MARKER")"
+touch "$MAIL_MARKER"
 
 echo "=== midnight-crm-delta complete ==="

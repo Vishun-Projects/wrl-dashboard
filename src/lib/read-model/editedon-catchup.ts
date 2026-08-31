@@ -85,7 +85,43 @@ export type EditedonCatchupResult = {
   rowsUpserted?: number;
   fromDay?: string;
   toDay?: string;
+  failedDays?: string[];
+  resumedFrom?: string;
 };
+
+function maxYmd(a: string, b: string): string {
+  return a > b ? a : b;
+}
+
+function dayAfter(ymd: string): string {
+  const d = new Date(`${ymd}T00:00:00`);
+  d.setDate(d.getDate() + 1);
+  return formatLocalDate(d);
+}
+
+/** Days to replay: trailing recent window + cursor→end (deduped, sorted). */
+export function resolveEditedonCatchupDays(
+  startDate: string,
+  endDate: string,
+  cursor: string | null,
+  opts?: { resume?: boolean; recentCount?: number }
+): { days: string[]; resumedFrom: string } {
+  const resume = opts?.resume !== false;
+  const recentCount = Math.max(0, opts?.recentCount ?? recentDaysPerRun());
+  let rangeStart = startDate;
+  if (resume && cursor && cursor >= startDate) {
+    rangeStart = maxYmd(startDate, dayAfter(cursor));
+  }
+  const days = new Set<string>();
+  for (const day of recentEditedonDays(endDate, recentCount)) {
+    if (day >= startDate && day <= endDate) days.add(day);
+  }
+  for (const chunk of splitDateRangeByDays(rangeStart, endDate, 1)) {
+    days.add(chunk.start);
+  }
+  const sorted = [...days].sort();
+  return { days: sorted, resumedFrom: rangeStart };
+}
 
 async function applyEditedonRows(
   rawRows: Record<string, unknown>[]
@@ -214,35 +250,102 @@ export async function runEditedonCatchupStep(): Promise<EditedonCatchupResult> {
 /** Full replay: each calendar day in range, editedon BETWEEN day AND addedon <> editedon. */
 export async function runEditedonCatchupRange(
   startDate: string,
-  endDate: string
+  endDate: string,
+  opts?: { resume?: boolean; retriesPerDay?: number }
 ): Promise<EditedonCatchupResult> {
   if (process.env.SYNC_WORKER_ENABLED !== 'true') {
     return { ok: false, skipped: true, reason: 'SYNC_WORKER_ENABLED is not true' };
   }
 
-  const chunks = splitDateRangeByDays(startDate, endDate, 1);
+  const retries = Math.max(1, Number(opts?.retriesPerDay ?? process.env.SYNC_CATCHUP_DAY_RETRIES ?? 3) || 3);
+  const retryDelayMs = Number(process.env.SYNC_CATCHUP_DAY_RETRY_MS ?? 15_000) || 15_000;
+  const recentCount = Math.max(
+    recentDaysPerRun(),
+    Number(process.env.SYNC_EDITEDON_MIDNIGHT_RECENT_DAYS ?? 3) || 3
+  );
+
+  const cursor = await withClient((client) => readCatchupCursor(client));
+  const { days, resumedFrom } = resolveEditedonCatchupDays(startDate, endDate, cursor, {
+    resume: opts?.resume,
+    recentCount,
+  });
+
+  if (!days.length) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: 'no catch-up days in range',
+      resumedFrom,
+      fromDay: startDate,
+      toDay: endDate,
+    };
+  }
+
+  console.log(
+    `[sync-worker] Editedon catch-up plan ${startDate}..${endDate} — ${days.length} day(s), resume from ${resumedFrom}, cursor=${cursor}`
+  );
+
   let totalFetched = 0;
   let totalUpserted = 0;
+  let daysProcessed = 0;
+  const failedDays: string[] = [];
 
-  for (const chunk of chunks) {
-    const rows = await fetchCrmEditedonDayWindow(chunk.start, chunk.end);
-    const applied = await applyEditedonRows(rows);
-    totalFetched += rows.length;
-    totalUpserted += applied.rowsUpserted;
-    console.log(
-      `[sync-worker] Editedon catch-up ${chunk.start} — fetched ${rows.length}, upserted ${applied.rowsUpserted}`
-    );
+  async function processDay(day: string): Promise<boolean> {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const rows = await fetchCrmEditedonDayWindow(day, day);
+        const applied = await applyEditedonRows(rows);
+        await withClient((client) => writeCatchupCursor(client, day));
+        totalFetched += rows.length;
+        totalUpserted += applied.rowsUpserted;
+        daysProcessed += 1;
+        console.log(
+          `[sync-worker] Editedon catch-up ${day} — fetched ${rows.length}, upserted ${applied.rowsUpserted}`
+        );
+        return true;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(
+          `[sync-worker] Editedon catch-up ${day} attempt ${attempt}/${retries} failed: ${msg}`
+        );
+        if (attempt < retries) await sleep(retryDelayMs * attempt);
+      }
+    }
+    return false;
+  }
+
+  for (const day of days) {
+    if (!(await processDay(day))) failedDays.push(day);
     await sleep(FETCH_GAP_MS);
   }
 
-  await withClient((client) => writeCatchupCursor(client, endDate));
+  const stillFailed: string[] = [];
+  if (failedDays.length) {
+    console.warn(
+      `[sync-worker] Editedon catch-up retrying ${failedDays.length} failed day(s): ${failedDays.join(', ')}`
+    );
+    for (const day of failedDays) {
+      if (!(await processDay(day))) stillFailed.push(day);
+      await sleep(FETCH_GAP_MS);
+    }
+  }
+
+  if (stillFailed.length) {
+    console.error(
+      `[sync-worker] Editedon catch-up incomplete — failed days: ${stillFailed.join(', ')}`
+    );
+  } else {
+    await withClient((client) => writeCatchupCursor(client, endDate));
+  }
 
   return {
-    ok: true,
-    daysProcessed: chunks.length,
+    ok: stillFailed.length === 0,
+    daysProcessed,
     rowsFetched: totalFetched,
     rowsUpserted: totalUpserted,
-    fromDay: startDate,
-    toDay: endDate,
+    fromDay: days[0],
+    toDay: days[days.length - 1],
+    failedDays: stillFailed.length ? stillFailed : undefined,
+    resumedFrom,
   };
 }

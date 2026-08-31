@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Thorough trhcalls → calls_latest_hot sync — once per day at midnight (before CRM delta mail).
+# Thorough trhcalls → calls_latest_hot sync — overnight window (00:00+ IST).
 # Daytime daemon skips calls incremental (SYNC_CALLS_DAEMON_ENABLED!=true).
 #
 # Hard rule: never ingest past previous IST calendar day (ceiling = AS_OF 23:59:59 IST).
 # Default AS_OF = yesterday IST. Override with MIDNIGHT_SYNC_AS_OF=YYYY-MM-DD only when intentional.
-set -euo pipefail
+#
+# Resilient: per-step retries + checkpoint file so retries/deadline loops skip finished work.
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_INSTALL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -67,40 +69,80 @@ if [[ "$AS_OF" == "$IST_TODAY" ]]; then
   exit 1
 fi
 
+STATE_DIR="${INSTALL_ROOT}/shared/logs/midnight-sync"
+mkdir -p "$STATE_DIR"
+STATE_FILE="${STATE_DIR}/state-${AS_OF}.env"
+STEP_RETRIES="${MIDNIGHT_STEP_RETRIES:-3}"
+
+step_done() {
+  [[ -f "$STATE_FILE" ]] && grep -qx "done:$1" "$STATE_FILE"
+}
+
+mark_done() {
+  echo "done:$1" >>"$STATE_FILE"
+}
+
+run_step() {
+  local name=$1
+  shift
+  if step_done "$name"; then
+    echo "→ skip $name (checkpoint ok)"
+    return 0
+  fi
+  local attempt=1
+  while [[ "$attempt" -le "$STEP_RETRIES" ]]; do
+    echo "→ $name (attempt ${attempt}/${STEP_RETRIES})"
+    if "$@"; then
+      mark_done "$name"
+      return 0
+    fi
+    echo "WARN: $name failed attempt ${attempt}/${STEP_RETRIES}" >&2
+    attempt=$((attempt + 1))
+    if [[ "$attempt" -le "$STEP_RETRIES" ]]; then
+      sleep $((attempt * 90))
+    fi
+  done
+  echo "FATAL: $name failed after ${STEP_RETRIES} attempt(s)" >&2
+  return 1
+}
+
+fatal=0
+
 echo "=== midnight-calls-sync $(TZ=Asia/Kolkata date -Iseconds) ==="
 echo "YTD status window ${YTD_START} .. ${AS_OF} (hard cap; calendar today=${IST_TODAY})"
+echo "checkpoint=${STATE_FILE} step_retries=${STEP_RETRIES}"
 
-# NEVER run watermark incremental here.
-# Incremental queries editedon>=watermark through CRM "now". After any daytime mistake the
-# watermark sits inside calendar today, so incremental would load today again — forbidden.
-# Thorough repair through AS_OF is catch-up + reconciles + WCO only.
+# NEVER run watermark incremental here — would pull through CRM now / today.
 echo "→ skip incremental (forbidden on midnight path — would pull through CRM now / today)"
 
-# Replay YTD rows where addedon <> editedon (late solves / cancels) through AS_OF only
-echo "→ editedon catch-up ${YTD_START} .. ${AS_OF}"
-MIDNIGHT_SYNC_AS_OF="${AS_OF}" npm run sync-worker:editedon-catchup -- --from "${YTD_START}" --to "${AS_OF}"
+run_editedon_catchup() {
+  # Full YTD replay Jan 1 → AS_OF every midnight (not cursor-shortcut).
+  MIDNIGHT_SYNC_AS_OF="${AS_OF}" npm run sync-worker:editedon-catchup -- --from "${YTD_START}" --to "${AS_OF}" --no-resume
+}
 
-# 3) Open / assigned / tech_solved pipeline refresh
-echo "→ pipeline reconcile"
-npm run sync-worker:pipeline-reconcile
+if ! run_step editedon-catchup run_editedon_catchup; then
+  fatal=1
+fi
 
-# 4) tech_solved → closed / cancelled
-echo "→ reconcile tech_solved"
-npm run sync-worker:reconcile-tech-solved -- --apply
+if ! run_step pipeline-reconcile npm run sync-worker:pipeline-reconcile; then
+  fatal=1
+fi
 
-# 5) Open/assigned orphans (transferred + cancelled)
-echo "→ reconcile YTD open"
-npm run sync-worker:reconcile-ytd-open -- --apply
+if ! run_step reconcile-tech-solved npm run sync-worker:reconcile-tech-solved -- --apply; then
+  fatal=1
+fi
 
-# 6) Open→cancel drift vs live CRM
-echo "→ reconcile open-cancel"
-npm run sync-worker:reconcile-open-cancel || echo "WARN: open-cancel reconcile failed (non-fatal)"
+if ! run_step reconcile-ytd-open npm run sync-worker:reconcile-ytd-open -- --apply; then
+  fatal=1
+fi
 
-# 7) Major / minor flags
-echo "→ reconcile major"
-npm run sync-worker:reconcile-major
+run_step reconcile-open-cancel npm run sync-worker:reconcile-open-cancel \
+  || echo "WARN: open-cancel reconcile failed (non-fatal)"
 
-# 8) WCO rolling window (late CRM edits)
+if ! run_step reconcile-major npm run sync-worker:reconcile-major; then
+  fatal=1
+fi
+
 WCO_FROM="${WCO_BACKFILL_FROM:-}"
 if [[ -z "$WCO_FROM" ]]; then
   if date -d "${AS_OF} -2 days" +%Y-%m-%d >/dev/null 2>&1; then
@@ -111,11 +153,17 @@ if [[ -z "$WCO_FROM" ]]; then
     WCO_FROM="$AS_OF"
   fi
 fi
-echo "→ WCO backfill ${WCO_FROM} .. ${AS_OF}"
-npm run sync-worker:backfill-wco -- --from "${WCO_FROM}" --to "${AS_OF}" || echo "WARN: WCO backfill failed (non-fatal)"
 
-# 9) New logged TRNs never appear in editedon-only replay — upsert any CRM corpus TRNs still missing from hot
-echo "→ fill missing corpus TRNs ${YTD_START} .. ${AS_OF}"
-npm run sync-worker:fill-hot-gaps -- --from "${YTD_START}" --to "${AS_OF}" --skip-short-days || echo "WARN: fill-hot-gaps failed (non-fatal)"
+run_step backfill-wco npm run sync-worker:backfill-wco -- --from "${WCO_FROM}" --to "${AS_OF}" \
+  || echo "WARN: WCO backfill failed (non-fatal)"
 
+run_step fill-hot-gaps npm run sync-worker:fill-hot-gaps -- --from "${YTD_START}" --to "${AS_OF}" \
+  || echo "WARN: fill-hot-gaps failed (non-fatal)"
+
+if [[ "$fatal" -ne 0 ]]; then
+  echo "=== midnight-calls-sync INCOMPLETE $(TZ=Asia/Kolkata date -Iseconds) AS_OF=${AS_OF} ===" >&2
+  exit 1
+fi
+
+mark_done all
 echo "=== midnight-calls-sync done $(TZ=Asia/Kolkata date -Iseconds) AS_OF=${AS_OF} ==="

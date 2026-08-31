@@ -40,9 +40,7 @@ config({ path: resolve(root, '.env') });
 config({ path: resolve(root, '.env.mis-email') });
 config({ path: resolve(root, '.env.sync-worker') });
 
-import { startCallsHotSyncThroughYesterday } from '@/lib/read-model/start-calls-hot-sync';
-
-const PORT = Number(process.env.MAIL_RELAY_PORT ?? 8789);
+ = Number(process.env.MAIL_RELAY_PORT ?? 8789);
 const RESET_PATH = '/internal/mail/send';
 const MIS_DIGEST_PATH = '/internal/mail/mis-digest';
 const MIS_DIGEST_PREPARED_PATH = '/internal/mail/mis-digest-prepared';
@@ -310,9 +308,12 @@ const server = createServer(async (req, res) => {
     if (req.url === CALLS_HOT_SYNC_PATH) {
       const body = (await readJson(req)) as { asOf?: string };
       const asOf = typeof body.asOf === 'string' ? body.asOf.trim() : undefined;
-      const result = startCallsHotSyncThroughYesterday({ asOf, rootDir: root });
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, ...result }));
+      const { runFastCallsHotSyncThroughYesterday } = await import(
+        '@/lib/read-model/manual-calls-hot-sync'
+      );
+      const result = await runFastCallsHotSyncThroughYesterday(asOf);
+      res.writeHead(result.ok ? 200 : 502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: result.ok, ...result }));
       return;
     }
 

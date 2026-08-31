@@ -8,12 +8,16 @@ import { safeErrorMessage } from '@/lib/api/safe-error';
 import { logAccessDenied, logAction } from '@/lib/security/audit';
 import { isSubcontractorVpsHost } from '@/modules/subcontractor-stock/services/vps-host';
 import { startCallsHotSyncThroughYesterday } from '@/lib/read-model/start-calls-hot-sync';
+import { runFastCallsHotSyncThroughYesterday } from '@/lib/read-model/manual-calls-hot-sync';
 import {
   relayPostJson,
   resolveVpsMailRelaySecret,
 } from '@/lib/mail/relay-client';
 
 const RELAY_PATH = '/internal/mail/sync/calls-hot';
+
+/** Fast manual sync can run ~2–5 min via VPS relay. */
+export const maxDuration = 300;
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
@@ -39,12 +43,29 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const actor = { userId: user.id, email: auth.profile.email ?? user.email ?? null };
-    const body = (await request.json().catch(() => ({}))) as { asOf?: string };
+    const body = (await request.json().catch(() => ({}))) as {
+      asOf?: string;
+      mode?: 'fast' | 'thorough';
+    };
     const asOf = typeof body.asOf === 'string' ? body.asOf.trim() : undefined;
+    const thorough = body.mode === 'thorough';
 
-    let result: ReturnType<typeof startCallsHotSyncThroughYesterday>;
+    if (thorough && isSubcontractorVpsHost()) {
+      const result = startCallsHotSyncThroughYesterday({ asOf });
+      await logAction({
+        request,
+        action: 'sync.manual.calls_hot',
+        actor,
+        result: 'success',
+        summary: result.detail,
+        metadata: { asOf: result.asOf, pid: result.pid, started: result.started, mode: 'thorough' },
+      });
+      return NextResponse.json({ success: true, ...result });
+    }
+
+    let result: Awaited<ReturnType<typeof runFastCallsHotSyncThroughYesterday>>;
     if (isSubcontractorVpsHost()) {
-      result = startCallsHotSyncThroughYesterday({ asOf });
+      result = await runFastCallsHotSyncThroughYesterday(asOf);
     } else {
       const secret = resolveVpsMailRelaySecret();
       if (!secret) {
@@ -55,10 +76,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
       const relay = await relayPostJson<{
         ok?: boolean;
-        started?: boolean;
         asOf?: string;
-        pid?: number | null;
-        logPath?: string;
+        rowsUpserted?: number;
         detail?: string;
         error?: string;
       }>(RELAY_PATH, { asOf }, secret);
@@ -66,12 +85,28 @@ export async function POST(request: Request): Promise<NextResponse> {
         return NextResponse.json({ error: relay.data.error }, { status: 502 });
       }
       result = {
-        started: Boolean(relay.data.started),
+        ok: Boolean(relay.data.ok),
         asOf: String(relay.data.asOf ?? asOf ?? ''),
-        pid: relay.data.pid ?? null,
-        logPath: String(relay.data.logPath ?? ''),
-        detail: String(relay.data.detail ?? 'relay started'),
+        rowsUpserted: Number(relay.data.rowsUpserted ?? 0),
+        rowsDeleted: 0,
+        crmRowsFetched: 0,
+        catchupUpserted: 0,
+        pipelineRefreshed: 0,
+        techSolvedUpserted: 0,
+        detail: String(relay.data.detail ?? 'relay sync complete'),
       };
+    }
+
+    if (!result.ok) {
+      await logAction({
+        request,
+        action: 'sync.manual.calls_hot',
+        actor,
+        result: 'failure',
+        summary: result.detail,
+        metadata: { asOf: result.asOf, rowsUpserted: result.rowsUpserted },
+      });
+      return NextResponse.json({ error: result.detail, ...result }, { status: 502 });
     }
 
     await logAction({
@@ -80,7 +115,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       actor,
       result: 'success',
       summary: result.detail,
-      metadata: { asOf: result.asOf, pid: result.pid, started: result.started },
+      metadata: { asOf: result.asOf, rowsUpserted: result.rowsUpserted, mode: 'fast' },
     });
 
     return NextResponse.json({ success: true, ...result });

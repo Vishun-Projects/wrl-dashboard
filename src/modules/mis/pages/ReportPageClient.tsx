@@ -817,8 +817,9 @@ export default function ReportPageClient() {
       } = await supabase.auth.getSession();
       const res = await axios.post<{
         success?: boolean;
-        started?: boolean;
+        ok?: boolean;
         asOf?: string;
+        rowsUpserted?: number;
         detail?: string;
         error?: string;
       }>(
@@ -828,26 +829,26 @@ export default function ReportPageClient() {
           headers: session?.access_token
             ? { Authorization: `Bearer ${session.access_token}` }
             : undefined,
+          timeout: 300_000,
         }
       );
-      const detail = res.data.detail || `Sync through ${res.data.asOf ?? 'yesterday'} started`;
-      if (res.data.started === false) {
-        feedback.actionWarning(detail);
-      } else {
-        feedback.actionSuccess(detail);
+      if (!res.data.ok && res.data.success !== true) {
+        throw new Error(res.data.error || res.data.detail || 'Sync failed');
       }
+      feedback.actionSuccess(res.data.detail || `Synced through ${res.data.asOf ?? 'yesterday'}`);
+      await registerTabState.fetchDelta();
     } catch (err) {
       const message =
         axios.isAxiosError(err) && err.response?.data?.error
           ? String(err.response.data.error)
           : err instanceof Error
             ? err.message
-            : 'Failed to start CRM sync';
+            : 'Failed to sync from CRM';
       feedback.actionFailed(message);
     } finally {
       setManualCallsHotSyncBusy(false);
     }
-  }, [manualCallsHotSyncBusy, supabase.auth]);
+  }, [manualCallsHotSyncBusy, supabase.auth, registerTabState.fetchDelta]);
 
   if (!mounted) {
     return <ReportPageSkeleton className="bg-bg-canvas" />;
