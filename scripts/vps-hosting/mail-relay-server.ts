@@ -40,7 +40,7 @@ config({ path: resolve(root, '.env') });
 config({ path: resolve(root, '.env.mis-email') });
 config({ path: resolve(root, '.env.sync-worker') });
 
- = Number(process.env.MAIL_RELAY_PORT ?? 8789);
+const PORT = Number(process.env.MAIL_RELAY_PORT ?? 8789);
 const RESET_PATH = '/internal/mail/send';
 const MIS_DIGEST_PATH = '/internal/mail/mis-digest';
 const MIS_DIGEST_PREPARED_PATH = '/internal/mail/mis-digest-prepared';
