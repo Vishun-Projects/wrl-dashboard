@@ -140,7 +140,7 @@ const SELECT_COLS = `
   c.vtrnno,
   c.ncode,
   c.ncancelreason,
-  COALESCE(NULLIF(btrim(h.cancel_reason), ''), NULL) AS cancel_reason,
+  COALESCE(NULLIF(btrim(m.cancel_reason), ''), NULLIF(btrim(h.cancel_reason), ''), NULL) AS cancel_reason,
   c.cancelled_at,
   c.logged_at,
   c.call_type,
@@ -156,6 +156,7 @@ const SELECT_COLS = `
 
 const FROM_JOIN = `
   FROM public.calls_cancelled c
+  LEFT JOIN public.calls_crm_mirror m ON m.vtrnno = c.vtrnno
   LEFT JOIN public.calls_latest_hot h ON h.vtrnno = c.vtrnno
 `;
 
