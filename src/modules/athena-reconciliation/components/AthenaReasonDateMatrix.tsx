@@ -127,6 +127,12 @@ export function AthenaReasonDateMatrixPanel({ filters }: Props) {
   const canGoPrev = Boolean(prevWindow && prevWindow.end !== window.end);
   const canGoNext = Boolean(nextWindow && nextWindow.end !== window.end);
 
+  /** Newest date left (after Failure reason), oldest right before Total. */
+  const displayDates = useMemo(() => {
+    const dates = matrix?.dates ?? windowDatesPlaceholder(window);
+    return [...dates].reverse();
+  }, [matrix?.dates, window]);
+
   const colLabel = (iso: string) => formatUiDateDash(iso);
 
   return (
@@ -142,26 +148,26 @@ export function AthenaReasonDateMatrixPanel({ filters }: Props) {
         <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 dark:border-slate-700 dark:bg-slate-800/60">
           <button
             type="button"
-            disabled={!canGoPrev || loading}
-            onClick={() => {
-              const prev = shiftWindowEnd(window, -1, boundStart, boundEnd);
-              if (prev) setWindowEndAnchor(prev.end);
-            }}
-            className="inline-flex items-center rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-            aria-label="Previous 15 days"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <span className="px-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200">15-day window</span>
-          <button
-            type="button"
             disabled={!canGoNext || loading}
             onClick={() => {
               const next = shiftWindowEnd(window, 1, boundStart, boundEnd);
               if (next) setWindowEndAnchor(next.end);
             }}
             className="inline-flex items-center rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-            aria-label="Next 15 days"
+            aria-label="Newer 15 days"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span className="px-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200">15-day window</span>
+          <button
+            type="button"
+            disabled={!canGoPrev || loading}
+            onClick={() => {
+              const prev = shiftWindowEnd(window, -1, boundStart, boundEnd);
+              if (prev) setWindowEndAnchor(prev.end);
+            }}
+            className="inline-flex items-center rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+            aria-label="Older 15 days"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
@@ -175,7 +181,7 @@ export function AthenaReasonDateMatrixPanel({ filters }: Props) {
               <th className="sticky left-0 z-20 min-w-[12rem] border-b border-r border-slate-200 bg-slate-50 px-3 py-2 text-left font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
                 Failure reason
               </th>
-              {(matrix?.dates ?? windowDatesPlaceholder(window)).map((d) => (
+              {(displayDates).map((d) => (
                 <th
                   key={d}
                   className="min-w-[5.5rem] border-b border-slate-200 px-2 py-2 text-center font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300 whitespace-nowrap"
@@ -192,7 +198,7 @@ export function AthenaReasonDateMatrixPanel({ filters }: Props) {
             {loading ? (
               <tr>
                 <td
-                  colSpan={(matrix?.dates.length ?? WINDOW_DAYS) + 2}
+                  colSpan={displayDates.length + 2}
                   className="px-3 py-8 text-center text-slate-400"
                 >
                   Loading matrix…
@@ -201,7 +207,7 @@ export function AthenaReasonDateMatrixPanel({ filters }: Props) {
             ) : !matrix || matrix.rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={matrix?.dates.length ? matrix.dates.length + 2 : WINDOW_DAYS + 2}
+                  colSpan={displayDates.length + 2}
                   className="px-3 py-8 text-center text-slate-400"
                 >
                   No calls in this window
@@ -214,7 +220,7 @@ export function AthenaReasonDateMatrixPanel({ filters }: Props) {
                     <td className="sticky left-0 z-[1] max-w-[14rem] truncate border-b border-r border-slate-100 bg-white px-3 py-1.5 font-medium text-slate-800 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100">
                       {row.reason}
                     </td>
-                    {matrix.dates.map((d) => {
+                    {displayDates.map((d) => {
                       const n = row.byDate[d] ?? 0;
                       return (
                         <td
@@ -236,7 +242,7 @@ export function AthenaReasonDateMatrixPanel({ filters }: Props) {
                   <td className="sticky left-0 z-[1] border-r border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-200">
                     Total
                   </td>
-                  {matrix.dates.map((d) => (
+                  {displayDates.map((d) => (
                     <td
                       key={d}
                       className="px-2 py-2 text-center tabular-nums text-slate-800 dark:text-slate-100"
@@ -252,7 +258,7 @@ export function AthenaReasonDateMatrixPanel({ filters }: Props) {
                   <td className="sticky left-0 z-[1] border-b border-r border-teal-100 bg-teal-50/60 px-3 py-1.5 text-teal-800 dark:border-teal-900 dark:bg-teal-950/30 dark:text-teal-200">
                     Registered
                   </td>
-                  {matrix.dates.map((d) => {
+                  {displayDates.map((d) => {
                     const n = matrix.registeredByDate[d] ?? 0;
                     return (
                       <td
@@ -271,7 +277,7 @@ export function AthenaReasonDateMatrixPanel({ filters }: Props) {
                   <td className="sticky left-0 z-[1] border-b border-r border-rose-100 bg-rose-50/60 px-3 py-1.5 text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200">
                     Unregistered
                   </td>
-                  {matrix.dates.map((d) => {
+                  {displayDates.map((d) => {
                     const n = matrix.unregisteredByDate[d] ?? 0;
                     return (
                       <td
@@ -291,7 +297,7 @@ export function AthenaReasonDateMatrixPanel({ filters }: Props) {
                     <td className="sticky left-0 z-[1] border-b border-r border-amber-100 bg-amber-50/60 px-3 py-1.5 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
                       Invalid data
                     </td>
-                    {matrix.dates.map((d) => {
+                    {displayDates.map((d) => {
                       const n = matrix.invalidDataByDate[d] ?? 0;
                       return (
                         <td
