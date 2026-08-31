@@ -5,3 +5,4 @@ export * from './reconcile';
 export * from './sync';
 export * from './metrics';
 export * from './rows';
+export * from './detail';

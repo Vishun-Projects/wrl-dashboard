@@ -125,6 +125,8 @@ export type AthenaReconciliationFilterParams = {
   pageSize?: number;
   sortBy?: string;
   sortDir?: 'asc' | 'desc';
+  /** Preset label from DateRangeSelector (e.g. This Month, Last 7 Days). */
+  dateRangeLabel?: string | null;
 };
 
 export type AthenaReconciliationKpis = {
@@ -176,6 +178,61 @@ export type AthenaReconciliationSummary = {
     lastRunAt: string | null;
     rowsUpsertedLast: number;
   } | null;
+};
+
+export type AthenaReasonDateMatrixRow = {
+  reason: string;
+  total: number;
+  byDate: Record<string, number>;
+};
+
+export type AthenaReasonDateMatrix = {
+  windowStart: string;
+  windowEnd: string;
+  dates: string[];
+  rows: AthenaReasonDateMatrixRow[];
+  columnTotals: Record<string, number>;
+  grandTotal: number;
+  registeredByDate: Record<string, number>;
+  unregisteredByDate: Record<string, number>;
+  multipleMatchesByDate: Record<string, number>;
+  invalidDataByDate: Record<string, number>;
+  registeredTotal: number;
+  unregisteredTotal: number;
+  multipleMatchesTotal: number;
+  invalidDataTotal: number;
+};
+
+export type AthenaFailedAttemptSummary = {
+  id: number;
+  clientTicketNo: string | null;
+  callDate: Date | null;
+  failureReason: string | null;
+  result: string | null;
+  resultValue: string | null;
+  reconciliationStatus: AthenaReconciliationStatus;
+  matchCount: number;
+  matchedVtrnnos: string[] | null;
+  isCurrent: boolean;
+};
+
+export type AthenaCrmCallSummary = {
+  vtrnno: string;
+  vcclid: string | null;
+  callType: string | null;
+  partyName: string | null;
+  serial: string | null;
+  loggedAt: Date | null;
+  statusLabel: string | null;
+  statusBucket: string | null;
+  complaint: string | null;
+  branchName: string | null;
+};
+
+export type AthenaInspectionDetail = {
+  row: AthenaFailedNormalizedRow;
+  relatedFailures: AthenaFailedAttemptSummary[];
+  crmCalls: AthenaCrmCallSummary[];
 };
 
 export type AthenaFailedRowDetail = AthenaFailedNormalizedRow & {

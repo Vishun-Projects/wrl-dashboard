@@ -5,7 +5,6 @@ import {
   Search,
   RotateCcw,
   X,
-  Calendar,
   Sliders,
   ChevronDown,
   Check,
@@ -15,6 +14,14 @@ import {
   Tag,
   PhoneCall,
 } from 'lucide-react';
+import { DateRangeSelector } from '@/modules/mis/register/components/DateRangeSelector';
+import {
+  defaultDateRange,
+  formatLocalDate,
+  isDefaultDateRange,
+  parseLocalDateString,
+  type ReportDateRange,
+} from '@/modules/mis';
 import type {
   AthenaBreakdownItem,
   AthenaReconciliationFilterParams,
@@ -100,7 +107,7 @@ function AthenaFilterDropdown({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className={`flex h-8 w-full items-center justify-between gap-1.5 rounded-lg border px-2.5 text-left text-xs transition-all ${
+        className={`flex h-9 w-full items-center justify-between gap-1.5 rounded-lg border px-2.5 text-left text-sm transition-all ${
           hasSelection
             ? 'border-blue-300 bg-blue-50/70 font-semibold text-blue-900 shadow-2xs dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-200'
             : 'border-slate-200 bg-slate-50/60 text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-200 dark:hover:bg-slate-800'
@@ -114,7 +121,7 @@ function AthenaFilterDropdown({
               }`}
             />
           )}
-          <span className="truncate text-xs">
+          <span className="truncate text-sm">
             {hasSelection ? (
               <span>
                 <span className="font-normal text-slate-400">{label}: </span>
@@ -163,7 +170,7 @@ function AthenaFilterDropdown({
         >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/80 px-2.5 py-1.5 dark:border-slate-800 dark:bg-slate-800/80">
-            <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wider dark:text-slate-300">
+            <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider dark:text-slate-300">
               {label} {hasSelection && `(${selected.length})`}
             </span>
             <div className="flex items-center gap-2">
@@ -171,7 +178,7 @@ function AthenaFilterDropdown({
                 <button
                   type="button"
                   onClick={selectAllFiltered}
-                  className="text-[10px] text-blue-600 hover:underline dark:text-blue-400"
+                  className="text-[11px] text-blue-600 hover:underline dark:text-blue-400"
                 >
                   Select all
                 </button>
@@ -180,7 +187,7 @@ function AthenaFilterDropdown({
                 <button
                   type="button"
                   onClick={() => onSelect([])}
-                  className="text-[10px] text-rose-600 hover:underline dark:text-rose-400"
+                  className="text-[11px] text-rose-600 hover:underline dark:text-rose-400"
                 >
                   Clear
                 </button>
@@ -197,7 +204,7 @@ function AthenaFilterDropdown({
                 placeholder={`Filter ${label.toLowerCase()}...`}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full rounded-md border border-slate-200 bg-slate-50/50 py-1 pl-6 pr-2 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                className="w-full rounded-md border border-slate-200 bg-slate-50/50 py-1 pl-6 pr-2 text-sm text-slate-800 outline-none focus:border-blue-500 focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 autoFocus
               />
             </div>
@@ -209,7 +216,7 @@ function AthenaFilterDropdown({
             <button
               type="button"
               onClick={() => onSelect([])}
-              className={`flex w-full items-center justify-between rounded-lg px-2 py-1 text-xs text-left transition-colors ${
+              className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-sm text-left transition-colors ${
                 !hasSelection
                   ? 'bg-blue-50 font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300'
                   : 'text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800/60'
@@ -230,7 +237,7 @@ function AthenaFilterDropdown({
             </button>
 
             {filteredOptions.length === 0 ? (
-              <p className="px-2 py-3 text-center text-xs text-slate-400">No matching options</p>
+              <p className="px-2 py-3 text-center text-sm text-slate-400">No matching options</p>
             ) : (
               filteredOptions.map((opt) => {
                 const isSelected = selected.includes(opt.label);
@@ -239,7 +246,7 @@ function AthenaFilterDropdown({
                     key={opt.label}
                     type="button"
                     onClick={() => toggleOption(opt.label)}
-                    className={`flex w-full items-center justify-between rounded-lg px-2 py-1 text-xs text-left transition-colors ${
+                    className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-sm text-left transition-colors ${
                       isSelected
                         ? 'bg-blue-50 font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300'
                         : 'text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800/60'
@@ -259,7 +266,7 @@ function AthenaFilterDropdown({
                     </div>
 
                     <span
-                      className={`shrink-0 rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                      className={`shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-bold ${
                         isSelected
                           ? 'bg-blue-200/70 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200'
                           : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
@@ -288,44 +295,26 @@ export function AthenaFilterBar({
   failureReasonOptions,
   onOpenReasonRules,
 }: AthenaFilterBarProps) {
-  const currentYear = new Date().getFullYear();
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const currentYearStart = `${currentYear}-01-01`;
-
   const selectedBranches = toArray(filters.branches || filters.branch);
   const selectedClients = toArray(filters.clients || filters.client);
   const selectedCallTypes = toArray(filters.callTypes || filters.callType);
   const selectedFailureReasons = toArray(filters.failureReasons || filters.failureReason);
 
-  // Determine active date preset
-  const isCurrentYear =
-    filters.startDate === currentYearStart &&
-    (!filters.endDate || filters.endDate === todayStr);
-  const isAllTime = !filters.startDate && !filters.endDate;
+  const dateRange: ReportDateRange = {
+    start: filters.startDate
+      ? parseLocalDateString(filters.startDate)
+      : defaultDateRange().start,
+    end: filters.endDate ? parseLocalDateString(filters.endDate) : defaultDateRange().end,
+    label: filters.dateRangeLabel || 'Custom Range',
+  };
 
-  const handleDatePreset = (preset: 'ytd' | 'mtd' | '30d' | '7d' | 'today' | 'all') => {
-    const today = new Date();
-    const formatDate = (d: Date) => d.toISOString().slice(0, 10);
-
-    if (preset === 'ytd') {
-      onFilterChange({ startDate: currentYearStart, endDate: formatDate(today), page: 1 });
-    } else if (preset === 'mtd') {
-      const start = new Date(today.getFullYear(), today.getMonth(), 1);
-      onFilterChange({ startDate: formatDate(start), endDate: formatDate(today), page: 1 });
-    } else if (preset === '30d') {
-      const past = new Date(today);
-      past.setDate(past.getDate() - 30);
-      onFilterChange({ startDate: formatDate(past), endDate: formatDate(today), page: 1 });
-    } else if (preset === '7d') {
-      const past = new Date(today);
-      past.setDate(past.getDate() - 7);
-      onFilterChange({ startDate: formatDate(past), endDate: formatDate(today), page: 1 });
-    } else if (preset === 'today') {
-      const d = formatDate(today);
-      onFilterChange({ startDate: d, endDate: d, page: 1 });
-    } else if (preset === 'all') {
-      onFilterChange({ startDate: null, endDate: null, page: 1 });
-    }
+  const handleDateRangeChange = (range: ReportDateRange) => {
+    onFilterChange({
+      startDate: formatLocalDate(range.start),
+      endDate: formatLocalDate(range.end),
+      dateRangeLabel: range.label,
+      page: 1,
+    });
   };
 
   const activeRulesCount =
@@ -342,8 +331,7 @@ export function AthenaFilterBar({
       selectedFailureReasons.length > 0 ||
       (filters.status && filters.status !== 'ALL') ||
       activeRulesCount > 0 ||
-      filters.startDate !== currentYearStart ||
-      (filters.endDate && filters.endDate !== todayStr)
+      !isDefaultDateRange(dateRange)
   );
 
   const toggleFailureReasonChip = (reasonLabel: string) => {
@@ -366,121 +354,23 @@ export function AthenaFilterBar({
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-2xs dark:border-slate-800 dark:bg-slate-900/70 w-full space-y-2">
-      {/* 1. Date Range Selector & Action Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2 dark:border-slate-800">
-        {/* Date Range Controls */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <div className="flex items-center gap-1 text-xs font-semibold text-slate-700 dark:text-slate-200 mr-1">
-            <Calendar className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-            <span>Dates:</span>
-          </div>
-
-          {/* Quick Presets */}
-          <div className="flex flex-wrap items-center gap-1">
-            <button
-              type="button"
-              onClick={() => handleDatePreset('ytd')}
-              className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                isCurrentYear
-                  ? 'bg-blue-600 text-white font-semibold shadow-2xs dark:bg-blue-500'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
-              }`}
-            >
-              Current Year ({currentYear})
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDatePreset('mtd')}
-              className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-            >
-              MTD
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDatePreset('30d')}
-              className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-            >
-              30D
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDatePreset('7d')}
-              className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-            >
-              7D
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDatePreset('all')}
-              className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                isAllTime
-                  ? 'bg-blue-600 text-white font-semibold shadow-2xs dark:bg-blue-500'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
-              }`}
-            >
-              All Time
-            </button>
-          </div>
-
-          {/* Explicit Start & End Date Inputs */}
-          <div className="flex items-center gap-1 ml-1 text-xs">
-            <input
-              type="date"
-              value={filters.startDate || ''}
-              onChange={(e) => onFilterChange({ startDate: e.target.value || null, page: 1 })}
-              className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-            />
-            <span className="text-slate-400 text-[10px]">to</span>
-            <input
-              type="date"
-              value={filters.endDate || ''}
-              onChange={(e) => onFilterChange({ endDate: e.target.value || null, page: 1 })}
-              className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-            />
-          </div>
+      {/* Search, date range & dropdown filters — one row */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 pb-2 dark:border-slate-800">
+        <div className="shrink-0">
+          <DateRangeSelector
+            value={dateRange.label}
+            startDate={dateRange.start}
+            endDate={dateRange.end}
+            onChange={handleDateRangeChange}
+          />
         </div>
 
-        {/* Right Action Buttons */}
-        <div className="flex items-center gap-1.5">
-          {/* Reason Rules & Exclusions Button */}
-          {onOpenReasonRules && (
-            <button
-              type="button"
-              onClick={onOpenReasonRules}
-              className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                activeRulesCount > 0
-                  ? 'border-purple-300 bg-purple-50 text-purple-700 dark:border-purple-700 dark:bg-purple-950/50 dark:text-purple-300 font-semibold'
-                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
-              }`}
-            >
-              <Sliders className="h-3 w-3 text-purple-600 dark:text-purple-400" />
-              <span>Rules {activeRulesCount > 0 ? `(${activeRulesCount})` : ''}</span>
-            </button>
-          )}
-
-          {/* Reset Filters */}
-          {hasNonDefaultFilters && (
-            <button
-              type="button"
-              onClick={onResetFilters}
-              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-            >
-              <RotateCcw className="h-3 w-3" />
-              <span>Reset</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* 2. Search & Multi-Select ReportFilter Dropdowns */}
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 w-full">
-        {/* Global Search */}
-        <div className="relative lg:col-span-1 sm:col-span-2">
+        <div className="relative min-w-[11rem] flex-[1.25] basis-[11rem] max-w-sm">
           <Search className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             placeholder="Search Serial, Ticket, Reason..."
-            className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50/50 py-1 pl-7 pr-6 text-xs text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800/60 dark:text-white dark:focus:border-blue-400"
+            className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50/50 py-1 pl-7 pr-6 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800/60 dark:text-white dark:focus:border-blue-400"
             value={filters.search || ''}
             onChange={(e) => onFilterChange({ search: e.target.value, page: 1 })}
           />
@@ -495,8 +385,7 @@ export function AthenaFilterBar({
           )}
         </div>
 
-        {/* Branch Filter Dropdown (Multi-Select) */}
-        <div>
+        <div className="min-w-[9rem] flex-1 basis-[9rem]">
           <AthenaFilterDropdown
             label="Branch"
             emptyLabel="All Branches"
@@ -513,8 +402,7 @@ export function AthenaFilterBar({
           />
         </div>
 
-        {/* Client / Brand Filter Dropdown (Multi-Select) */}
-        <div>
+        <div className="min-w-[9rem] flex-1 basis-[9rem]">
           <AthenaFilterDropdown
             label="Client / Brand"
             emptyLabel="All Clients"
@@ -531,8 +419,7 @@ export function AthenaFilterBar({
           />
         </div>
 
-        {/* Call Type Filter Dropdown (Multi-Select) */}
-        <div>
+        <div className="min-w-[9rem] flex-1 basis-[9rem]">
           <AthenaFilterDropdown
             label="Call Type"
             emptyLabel="All Call Types"
@@ -549,8 +436,7 @@ export function AthenaFilterBar({
           />
         </div>
 
-        {/* Failure Reason Filter Dropdown (Multi-Select) */}
-        <div>
+        <div className="min-w-[9rem] flex-1 basis-[9rem]">
           <AthenaFilterDropdown
             label="Reason"
             emptyLabel="All Failure Reasons"
@@ -566,13 +452,41 @@ export function AthenaFilterBar({
             icon={AlertCircle}
           />
         </div>
+
+        <div className="flex shrink-0 items-center gap-1.5 sm:ml-auto">
+          {onOpenReasonRules && (
+            <button
+              type="button"
+              onClick={onOpenReasonRules}
+              className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+                activeRulesCount > 0
+                  ? 'border-purple-300 bg-purple-50 text-purple-700 dark:border-purple-700 dark:bg-purple-950/50 dark:text-purple-300 font-semibold'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+              }`}
+            >
+              <Sliders className="h-3 w-3 text-purple-600 dark:text-purple-400" />
+              <span>Rules {activeRulesCount > 0 ? `(${activeRulesCount})` : ''}</span>
+            </button>
+          )}
+
+          {hasNonDefaultFilters && (
+            <button
+              type="button"
+              onClick={onResetFilters}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>Reset</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* 3. Outside Filterable Failure Reason Counts (Multi-Select Chips Bar) */}
+      {/* Failure reason count chips */}
       {failureReasonOptions.filter((item) => item.count > 0).length > 0 && (
         <div className="flex flex-wrap items-center gap-1 pt-0.5">
-          <div className="flex items-center gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400 shrink-0 mr-1">
-            <Filter className="h-2.5 w-2.5" />
+          <div className="flex items-center gap-1 text-xs font-semibold text-slate-500 dark:text-slate-400 shrink-0 mr-1">
+            <Filter className="h-3 w-3" />
             <span>Failure Reasons:</span>
           </div>
 
@@ -586,7 +500,7 @@ export function AthenaFilterBar({
                 page: 1,
               })
             }
-            className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-all ${
+            className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
               selectedFailureReasons.length === 0
                 ? 'bg-slate-900 text-white shadow-2xs dark:bg-blue-600'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-750'
@@ -595,7 +509,7 @@ export function AthenaFilterBar({
             <span>All</span>
             {totalFailuresCount > 0 && (
               <span
-                className={`rounded-full px-1 py-0.1 text-[9px] font-bold ${
+                className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
                   selectedFailureReasons.length === 0
                     ? 'bg-slate-700 text-slate-100 dark:bg-blue-700'
                     : 'bg-slate-200/80 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
@@ -617,7 +531,7 @@ export function AthenaFilterBar({
                   key={item.label}
                   type="button"
                   onClick={() => toggleFailureReasonChip(item.label)}
-                  className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-all ${
+                  className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
                     isSelected
                       ? 'bg-blue-600 text-white font-semibold shadow-2xs dark:bg-blue-500'
                       : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-750 border border-transparent hover:border-slate-300 dark:hover:border-slate-700'
@@ -625,7 +539,7 @@ export function AthenaFilterBar({
                 >
                   <span className="truncate max-w-[180px]">{item.label}</span>
                   <span
-                    className={`rounded-full px-1 py-0.1 text-[9px] font-bold ${
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
                       isSelected
                         ? 'bg-blue-700 text-blue-100 dark:bg-blue-600'
                         : 'bg-slate-200/90 text-slate-700 dark:bg-slate-700 dark:text-slate-200'

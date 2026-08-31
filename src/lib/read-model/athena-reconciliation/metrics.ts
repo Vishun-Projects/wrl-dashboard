@@ -1,4 +1,5 @@
 import { withClient } from '@/lib/read-model/db';
+import { formatLocalDate } from '@/lib/dates/local-date';
 import type {
   AthenaBreakdownItem,
   AthenaDailyTrendPoint,
@@ -6,6 +7,7 @@ import type {
   AthenaReconciliationFilterParams,
   AthenaReconciliationKpis,
   AthenaReconciliationSummary,
+  AthenaReasonDateMatrix,
 } from './types';
 
 interface FacetedFilterOptions {
@@ -515,6 +517,177 @@ export async function fetchAthenaReconciliationSummary(
       topUnregisteredOutlets,
       lastReconciledAt,
       lastSyncState,
+    };
+  });
+}
+
+function normalizeFailureReasonLabel(raw: string | null): string {
+  if (!raw) return 'Unknown';
+  if (raw.toLowerCase().startsWith('call is already open')) return 'Call is Already Open';
+  if (raw.toLowerCase().startsWith('different party profile')) return 'Different Party Profile';
+  return raw.replace(/\.$/, '').trim() || 'Unknown';
+}
+
+function isSundayIsoDate(iso: string): boolean {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).getDay() === 0;
+}
+
+function listIsoDatesInclusive(start: string, end: string): string[] {
+  const dates: string[] = [];
+  const [sy, sm, sd] = start.split('-').map(Number);
+  const [ey, em, ed] = end.split('-').map(Number);
+  const cur = new Date(sy, sm - 1, sd);
+  const last = new Date(ey, em - 1, ed);
+  while (cur <= last) {
+    const iso = formatLocalDate(cur);
+    if (!isSundayIsoDate(iso)) dates.push(iso);
+    cur.setDate(cur.getDate() + 1);
+  }
+  return dates;
+}
+
+/** Failure reason × call-date counts for a fixed window (typically 15 days). */
+export async function fetchAthenaReasonDateMatrix(
+  params: AthenaReconciliationFilterParams,
+  window: { start: string; end: string }
+): Promise<AthenaReasonDateMatrix> {
+  const dates = listIsoDatesInclusive(window.start, window.end);
+  const matrixParams: AthenaReconciliationFilterParams = {
+    ...params,
+    startDate: window.start,
+    endDate: window.end,
+    failureReason: null,
+    failureReasons: [],
+    status: 'ALL',
+  };
+
+  return withClient(async (client) => {
+    const treatList = toList(params.treatAsRegisteredReasons);
+    const hasTreat = treatList.length > 0;
+
+    const { conditions, values } = buildBaseFacetedConditions(
+      matrixParams,
+      { omitField: 'failureReason', applyStatus: false },
+      'a'
+    );
+    const where = conditions.join(' AND ');
+    const statusValues = hasTreat ? [...values, treatList] : values;
+    const treatIdx = hasTreat ? statusValues.length : -1;
+
+    const regCond = hasTreat
+      ? `(a.reconciliation_status = 'REGISTERED' OR EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
+      : `(a.reconciliation_status = 'REGISTERED')`;
+    const notRegCond = hasTreat
+      ? `(a.reconciliation_status = 'NOT_REGISTERED' AND NOT EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
+      : `(a.reconciliation_status = 'NOT_REGISTERED')`;
+    const multCond = hasTreat
+      ? `(a.reconciliation_status = 'MULTIPLE_MATCHES' AND NOT EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
+      : `(a.reconciliation_status = 'MULTIPLE_MATCHES')`;
+    const invCond = hasTreat
+      ? `(a.reconciliation_status = 'INVALID_DATA' AND NOT EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE a.failure_reason ILIKE (p || '%')))`
+      : `(a.reconciliation_status = 'INVALID_DATA')`;
+
+    const [res, statusRes] = await Promise.all([
+      client.query<{ reason: string; day: string; count: string }>(
+        `
+      SELECT
+        CASE
+          WHEN a.failure_reason ILIKE 'Call is Already Open%' THEN 'Call is Already Open'
+          WHEN a.failure_reason ILIKE 'Different Party Profile%' THEN 'Different Party Profile'
+          ELSE COALESCE(TRIM(TRAILING '.' FROM a.failure_reason), 'Unknown')
+        END AS reason,
+        TO_CHAR(a.call_date::date, 'YYYY-MM-DD') AS day,
+        COUNT(*)::text AS count
+      FROM ${dedupSubquery(`${where} AND a.call_date IS NOT NULL`)}
+      GROUP BY reason, day
+      ORDER BY reason ASC, day ASC
+      `,
+        values
+      ),
+      client.query<{
+        day: string;
+        registered: string;
+        not_registered: string;
+        multiple_matches: string;
+        invalid_data: string;
+      }>(
+        `
+      SELECT
+        TO_CHAR(a.call_date::date, 'YYYY-MM-DD') AS day,
+        COUNT(*) FILTER (WHERE ${regCond})::text AS registered,
+        COUNT(*) FILTER (WHERE ${notRegCond})::text AS not_registered,
+        COUNT(*) FILTER (WHERE ${multCond})::text AS multiple_matches,
+        COUNT(*) FILTER (WHERE ${invCond})::text AS invalid_data
+      FROM ${dedupSubquery(`${where} AND a.call_date IS NOT NULL`)}
+      GROUP BY day
+      ORDER BY day ASC
+      `,
+        statusValues
+      ),
+    ]);
+
+    const byReason = new Map<string, { total: number; byDate: Record<string, number> }>();
+    const columnTotals: Record<string, number> = Object.fromEntries(dates.map((d) => [d, 0]));
+    let grandTotal = 0;
+
+    for (const row of res.rows) {
+      const reason = normalizeFailureReasonLabel(row.reason);
+      const day = row.day;
+      const count = parseInt(row.count, 10) || 0;
+      if (!dates.includes(day)) continue;
+      const entry = byReason.get(reason) ?? { total: 0, byDate: {} };
+      entry.byDate[day] = (entry.byDate[day] ?? 0) + count;
+      entry.total += count;
+      byReason.set(reason, entry);
+      columnTotals[day] = (columnTotals[day] ?? 0) + count;
+      grandTotal += count;
+    }
+
+    const rows = [...byReason.entries()]
+      .map(([reason, data]) => ({ reason, total: data.total, byDate: data.byDate }))
+      .sort((a, b) => b.total - a.total || a.reason.localeCompare(b.reason));
+
+    const registeredByDate: Record<string, number> = Object.fromEntries(dates.map((d) => [d, 0]));
+    const unregisteredByDate: Record<string, number> = Object.fromEntries(dates.map((d) => [d, 0]));
+    const multipleMatchesByDate: Record<string, number> = Object.fromEntries(dates.map((d) => [d, 0]));
+    const invalidDataByDate: Record<string, number> = Object.fromEntries(dates.map((d) => [d, 0]));
+    let registeredTotal = 0;
+    let unregisteredTotal = 0;
+    let multipleMatchesTotal = 0;
+    let invalidDataTotal = 0;
+
+    for (const row of statusRes.rows) {
+      if (!dates.includes(row.day)) continue;
+      const reg = parseInt(row.registered, 10) || 0;
+      const unreg = parseInt(row.not_registered, 10) || 0;
+      const mult = parseInt(row.multiple_matches, 10) || 0;
+      const inv = parseInt(row.invalid_data, 10) || 0;
+      registeredByDate[row.day] = reg;
+      unregisteredByDate[row.day] = unreg;
+      multipleMatchesByDate[row.day] = mult;
+      invalidDataByDate[row.day] = inv;
+      registeredTotal += reg;
+      unregisteredTotal += unreg;
+      multipleMatchesTotal += mult;
+      invalidDataTotal += inv;
+    }
+
+    return {
+      windowStart: window.start,
+      windowEnd: window.end,
+      dates,
+      rows,
+      columnTotals,
+      grandTotal,
+      registeredByDate,
+      unregisteredByDate,
+      multipleMatchesByDate,
+      invalidDataByDate,
+      registeredTotal,
+      unregisteredTotal,
+      multipleMatchesTotal,
+      invalidDataTotal,
     };
   });
 }

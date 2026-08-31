@@ -278,9 +278,9 @@ export async function runAthenaFailedCallsSync(
       });
     }
 
-    // 5. Execute 4-field CRM call register matching & reconciliation
+    // 5. Reconcile all rows so KPIs, matrix, and grid share one matching rule set
     const reconciliationStats = await executeAthenaReconciliation(undefined, {
-      reprocessAll: opts?.reprocessAll,
+      reprocessAll: opts?.reprocessAll !== false,
     });
 
     console.log(

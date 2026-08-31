@@ -131,10 +131,15 @@ describe('Athena Multi-Tier Reconciliation Logic', () => {
     expect(result.matchCount).toBe(0);
   });
 
-  it('flags MULTIPLE_MATCHES when more than one CRM call matches standard criteria', () => {
+  it('flags MULTIPLE_MATCHES when more than one CRM call shares the same CCLID', () => {
+    const failedCall = {
+      ...baseFailedCall,
+      clientTicketNo: '2667215',
+    };
     const candidateCalls = [
       {
         vtrnno: 'TRN-2025-010',
+        vcclid: '2667215',
         callType: 'Breakdown',
         partyName: 'Metro Store Delhi',
         serial: 'WRL987654',
@@ -142,6 +147,7 @@ describe('Athena Multi-Tier Reconciliation Logic', () => {
       },
       {
         vtrnno: 'TRN-2025-011',
+        vcclid: '2667215',
         callType: 'Breakdown',
         partyName: 'Metro Store Delhi',
         serial: 'WRL987654',
@@ -149,10 +155,40 @@ describe('Athena Multi-Tier Reconciliation Logic', () => {
       },
     ];
 
-    const result = evaluateAthenaCallMatch(baseFailedCall, candidateCalls);
+    const result = evaluateAthenaCallMatch(failedCall, candidateCalls);
     expect(result.status).toBe('MULTIPLE_MATCHES');
     expect(result.matchCount).toBe(2);
     expect(result.matchedVtrnnos).toEqual(['TRN-2025-010', 'TRN-2025-011']);
+  });
+
+  it('does not treat unrelated serial matches as multiple when ticket CCLID matches one CRM call', () => {
+    const failedCall = {
+      ...baseFailedCall,
+      clientTicketNo: '2675652',
+    };
+    const candidateCalls = [
+      {
+        vtrnno: '26H21469',
+        vcclid: '2675652',
+        callType: 'Breakdown',
+        partyName: 'Metro Store Delhi',
+        serial: 'WRL987654',
+        loggedAt: new Date('2025-02-10T14:30:00Z'),
+      },
+      {
+        vtrnno: '26H241163',
+        vcclid: null,
+        callType: 'Breakdown',
+        partyName: 'Metro Store Delhi',
+        serial: 'WRL987654',
+        loggedAt: new Date('2025-02-12T14:30:00Z'),
+      },
+    ];
+
+    const result = evaluateAthenaCallMatch(failedCall, candidateCalls);
+    expect(result.status).toBe('REGISTERED');
+    expect(result.matchCount).toBe(1);
+    expect(result.matchedVtrnno).toBe('26H21469');
   });
 
   it('returns INVALID_DATA when required matching fields are invalid', () => {

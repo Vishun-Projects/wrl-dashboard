@@ -102,6 +102,12 @@ export function formatUiDate(value: unknown): string {
   return formatDmySlash(parts.day, parts.month, parts.year);
 }
 
+/** On-screen dates: dd-mm-yyyy (e.g. 14-11-2025). Empty / invalid → ''. */
+export function formatUiDateDash(value: unknown): string {
+  const s = formatUiDate(value);
+  return s ? s.replace(/\//g, '-') : '';
+}
+
 /** On-screen date+time: dd/mm/yyyy HH:mm. Empty / invalid → ''. */
 export function formatUiDateTime(value: unknown): string {
   if (value == null || value === '') return '';

@@ -4,7 +4,9 @@ import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { gzippedCsvPayload } from '@/lib/net/csv-gzip-response';
 import {
   fetchAthenaFailedCallsRows,
+  fetchAthenaFailedCallDetail,
   fetchAthenaReconciliationSummary,
+  fetchAthenaReasonDateMatrix,
   generateAthenaReconciliationCsv,
   runAthenaFailedCallsSync,
   executeAthenaReconciliation,
@@ -91,6 +93,31 @@ export async function GET(req: NextRequest) {
     if (mode === 'rows') {
       const result = await fetchAthenaFailedCallsRows(params);
       return NextResponse.json(result);
+    }
+
+    if (mode === 'detail') {
+      const id = parseInt(searchParams.get('id') || '', 10);
+      if (!Number.isFinite(id) || id <= 0) {
+        return NextResponse.json({ error: 'id is required' }, { status: 400 });
+      }
+      const detail = await fetchAthenaFailedCallDetail(id);
+      if (!detail) {
+        return NextResponse.json({ error: 'Record not found' }, { status: 404 });
+      }
+      return NextResponse.json(detail);
+    }
+
+    if (mode === 'reason-matrix') {
+      const matrixStart = searchParams.get('matrixStart');
+      const matrixEnd = searchParams.get('matrixEnd');
+      if (!matrixStart || !matrixEnd) {
+        return NextResponse.json({ error: 'matrixStart and matrixEnd are required' }, { status: 400 });
+      }
+      const matrix = await fetchAthenaReasonDateMatrix(params, {
+        start: matrixStart,
+        end: matrixEnd,
+      });
+      return NextResponse.json(matrix);
     }
 
     const summary = await fetchAthenaReconciliationSummary(params);

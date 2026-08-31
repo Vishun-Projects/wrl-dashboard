@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import { AthenaKpiCards } from '../components/AthenaKpiCards';
+import { AthenaReasonDateMatrixPanel } from '../components/AthenaReasonDateMatrix';
 import { AthenaFilterBar } from '../components/AthenaFilterBar';
 import { AthenaTrendAndBreakdown } from '../components/AthenaTrendAndBreakdown';
 import { AthenaDataTable } from '../components/AthenaDataTable';
@@ -21,26 +22,15 @@ import type {
   AthenaReconciliationSummary,
   AthenaRowsResponse,
 } from '../types';
+import { defaultDateRange, formatLocalDate } from '@/modules/mis';
 
-function appendListParam(params: URLSearchParams, key: string, val?: string | string[] | null) {
-  if (!val) return;
-  if (Array.isArray(val)) {
-    const valid = val.filter((v) => Boolean(v) && v !== 'All');
-    if (valid.length > 0) params.set(key, valid.join(','));
-  } else if (val !== 'All') {
-    params.set(key, val);
-  }
-}
-
-export default function AthenaReconciliationPageClient() {
-  const currentYear = new Date().getFullYear();
-  const defaultStartDate = `${currentYear}-01-01`;
-  const defaultEndDate = new Date().toISOString().slice(0, 10);
-
-  const [filters, setFilters] = useState<AthenaReconciliationFilterParams>({
+function initialAthenaFilters(): AthenaReconciliationFilterParams {
+  const range = defaultDateRange();
+  return {
     status: 'ALL',
-    startDate: defaultStartDate,
-    endDate: defaultEndDate,
+    startDate: formatLocalDate(range.start),
+    endDate: formatLocalDate(range.end),
+    dateRangeLabel: range.label,
     branches: [],
     clients: [],
     callTypes: [],
@@ -57,13 +47,27 @@ export default function AthenaReconciliationPageClient() {
     pageSize: 25,
     sortBy: 'callDate',
     sortDir: 'desc',
-  });
+  };
+}
 
+function appendListParam(params: URLSearchParams, key: string, val?: string | string[] | null) {
+  if (!val) return;
+  if (Array.isArray(val)) {
+    const valid = val.filter((v) => Boolean(v) && v !== 'All');
+    if (valid.length > 0) params.set(key, valid.join(','));
+  } else if (val !== 'All') {
+    params.set(key, val);
+  }
+}
+
+export default function AthenaReconciliationPageClient() {
+  const [filters, setFilters] = useState<AthenaReconciliationFilterParams>(initialAthenaFilters);
   const [summary, setSummary] = useState<AthenaReconciliationSummary | null>(null);
   const [rowsData, setRowsData] = useState<AthenaRowsResponse | null>(null);
   const [isLoadingSummary, setIsLoadingSummary] = useState<boolean>(true);
   const [isLoadingRows, setIsLoadingRows] = useState<boolean>(true);
   const [isExportingCsv, setIsExportingCsv] = useState<boolean>(false);
+  const [isReconciling, setIsReconciling] = useState<boolean>(false);
   const [showCharts, setShowCharts] = useState<boolean>(true);
   const [selectedRow, setSelectedRow] = useState<AthenaFailedNormalizedRow | null>(null);
   const [isReasonRulesOpen, setIsReasonRulesOpen] = useState<boolean>(false);
@@ -187,32 +191,29 @@ export default function AthenaReconciliationPageClient() {
   };
 
   const handleResetFilters = () => {
-    setFilters({
-      status: 'ALL',
-      startDate: defaultStartDate,
-      endDate: defaultEndDate,
-      branch: null,
-      branches: [],
-      client: null,
-      clients: [],
-      callType: null,
-      callTypes: [],
-      failureReason: null,
-      failureReasons: [],
-      search: '',
-      treatAsRegisteredReasons: [
-        'Call is Already Open',
-        'CCLID Already Exist',
-      ],
-      excludedReasons: [
-        'Call is Already Open',
-        'CCLID Already Exist',
-      ],
-      page: 1,
-      pageSize: 25,
-      sortBy: 'callDate',
-      sortDir: 'desc',
-    });
+    setFilters(initialAthenaFilters());
+  };
+
+  const handleReconcile = async () => {
+    setIsReconciling(true);
+    try {
+      const res = await axios.post('/api/report/athena-reconciliation', {
+        action: 'reconcile',
+        reprocessAll: true,
+      });
+      const stats = res.data?.stats;
+      toast.success(
+        stats
+          ? `Reconciled ${stats.totalProcessed.toLocaleString()} rows (${stats.multipleMatches.toLocaleString()} multiple CCLID duplicates)`
+          : 'Reconciliation complete'
+      );
+      await Promise.all([loadSummary(), loadRows()]);
+    } catch (err: unknown) {
+      console.error('Reconcile failed:', err);
+      toast.error('Failed to re-run CRM matching');
+    } finally {
+      setIsReconciling(false);
+    }
   };
 
   const handleExportCsv = async () => {
@@ -280,6 +281,16 @@ export default function AthenaReconciliationPageClient() {
         <div className="flex items-center gap-1.5">
           <button
             type="button"
+            onClick={handleReconcile}
+            disabled={isReconciling}
+            className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800 shadow-2xs hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200 dark:hover:bg-blue-900/50"
+          >
+            <GitCompareArrows className={`h-3 w-3 ${isReconciling ? 'animate-pulse' : ''}`} />
+            <span>{isReconciling ? 'Matching…' : 'Re-match CRM'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleExportCsv}
             disabled={isExportingCsv}
             className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
@@ -324,7 +335,20 @@ export default function AthenaReconciliationPageClient() {
             </div>
           )}
 
-          {/* 2. Visual Analytics & Diagnostics (In View by Default) */}
+          <AthenaReasonDateMatrixPanel filters={filters} />
+
+          {/* Filters */}
+          <AthenaFilterBar
+            filters={filters}
+            onFilterChange={handleFilterChange}
+            onResetFilters={handleResetFilters}
+            branchOptions={summary?.byBranch || []}
+            clientOptions={summary?.byClient || []}
+            callTypeOptions={summary?.byCallType || []}
+            failureReasonOptions={summary?.byFailureReason || []}
+            onOpenReasonRules={() => setIsReasonRulesOpen(true)}
+          />
+
           {summary && (
             <AthenaTrendAndBreakdown
               summary={summary}
@@ -338,19 +362,7 @@ export default function AthenaReconciliationPageClient() {
             />
           )}
 
-          {/* 3. Unified Filter & Search Toolbar */}
-          <AthenaFilterBar
-            filters={filters}
-            onFilterChange={handleFilterChange}
-            onResetFilters={handleResetFilters}
-            branchOptions={summary?.byBranch || []}
-            clientOptions={summary?.byClient || []}
-            callTypeOptions={summary?.byCallType || []}
-            failureReasonOptions={summary?.byFailureReason || []}
-            onOpenReasonRules={() => setIsReasonRulesOpen(true)}
-          />
-
-          {/* 4. Full-Width Audit Data Table */}
+          {/* Full-Width Audit Data Table */}
           <AthenaDataTable
             rows={rowsData?.rows || []}
             total={rowsData?.total || 0}

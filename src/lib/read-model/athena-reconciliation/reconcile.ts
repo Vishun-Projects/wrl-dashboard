@@ -25,7 +25,7 @@ export function extractServiceOrderNo(resultValue?: string | null): string | nul
  * Supports:
  * 1. Direct Service Order No extracted from result_value text
  * 2. Direct CCLID / Client Ticket No match
- * 3. Standard 4-Way Match (Call Type + Outlet + Serial + Date)
+ * 3. Standard 4-Way Match (Call Type + Outlet + Serial + Date + Ticket=CCLID when ticket present)
  * 4. CCLID Already Exist matched by Serial No
  */
 export function evaluateAthenaCallMatch(
@@ -73,9 +73,10 @@ export function evaluateAthenaCallMatch(
   }
 
   // Check direct CCLID / Client Ticket match
-  if (failedCall.clientTicketNo && failedCall.clientTicketNo.trim() !== '') {
+  const ticketNo = failedCall.clientTicketNo?.trim();
+  if (ticketNo) {
     const cclidMatches = candidateCrmCalls.filter(
-      (c) => c.vcclid && c.vcclid.trim().toUpperCase() === failedCall.clientTicketNo?.trim().toUpperCase()
+      (c) => c.vcclid && c.vcclid.trim().toUpperCase() === ticketNo.toUpperCase()
     );
     if (cclidMatches.length === 1) {
       return {
@@ -84,6 +85,15 @@ export function evaluateAthenaCallMatch(
         matchedVtrnno: cclidMatches[0].vtrnno,
         matchedVtrnnos: [cclidMatches[0].vtrnno],
         matchedCrmLoggedAt: cclidMatches[0].loggedAt,
+      };
+    }
+    if (cclidMatches.length > 1) {
+      return {
+        status: 'MULTIPLE_MATCHES',
+        matchCount: cclidMatches.length,
+        matchedVtrnno: cclidMatches[0].vtrnno,
+        matchedVtrnnos: cclidMatches.map((c) => c.vtrnno),
+        matchedCrmLoggedAt: cclidMatches[cclidMatches.length - 1].loggedAt,
       };
     }
   }
@@ -103,8 +113,14 @@ export function evaluateAthenaCallMatch(
   const normSerial = failedCall.serialNo.replace(/\s+/g, '').toUpperCase();
   const callTimestamp = failedCall.callDate.getTime();
 
+  const normTicket = ticketNo?.toUpperCase() ?? null;
+
   const matchingCrmCalls = candidateCrmCalls.filter((crm) => {
     if (!crm.callType || !crm.partyName || !crm.serial) return false;
+    if (normTicket) {
+      const crmCclid = crm.vcclid?.trim().toUpperCase();
+      if (!crmCclid || crmCclid !== normTicket) return false;
+    }
     const crmType = crm.callType.trim().toUpperCase();
     const crmOutlet = crm.partyName.trim().toUpperCase();
     const crmSerial = crm.serial.replace(/\s+/g, '').toUpperCase();
@@ -178,7 +194,7 @@ export async function executeAthenaReconciliation(
     // Match records against calls_latest_hot across:
     // 1. Direct Service Order No extracted from result_value text ("Call is Already Open. Service Order No. is X")
     // 2. Direct CCLID match (client_ticket_no === vcclid)
-    // 3. Standard 4-way match (Call Type + Outlet Name + Serial No + crm.logged_at >= failed.call_date)
+    // 3. Standard 4-way match (Call Type + Outlet + Serial + logged_at >= call_date + ticket=CCLID when ticket present)
     // 4. CCLID Already Exist matched by Serial No
     const matchQuery = `
       WITH candidate_matches AS (
@@ -235,6 +251,10 @@ export async function executeAthenaReconciliation(
          AND UPPER(REGEXP_REPLACE(COALESCE(c.serial, ''), '\\s+', '', 'g')) = UPPER(REGEXP_REPLACE(COALESCE(a.serial_no, ''), '\\s+', '', 'g'))
          AND c.logged_at >= a.call_date
         WHERE a.is_valid_matching_data = true
+          AND (
+            a.client_ticket_no IS NULL OR TRIM(a.client_ticket_no) IN ('', '0')
+            OR UPPER(TRIM(c.vcclid)) = UPPER(TRIM(a.client_ticket_no))
+          )
           ${targetId ? `AND a.id = ${targetId}` : ''}
 
         UNION ALL
@@ -254,6 +274,10 @@ export async function executeAthenaReconciliation(
           ON UPPER(REGEXP_REPLACE(COALESCE(c.serial, ''), '\\s+', '', 'g')) = UPPER(REGEXP_REPLACE(COALESCE(a.serial_no, ''), '\\s+', '', 'g'))
         WHERE (a.failure_reason ILIKE '%cclid%' OR a.result_value ILIKE '%cclid%')
           AND a.serial_no IS NOT NULL AND a.serial_no NOT IN ('', '00000000000000', '0')
+          AND (
+            a.client_ticket_no IS NULL OR TRIM(a.client_ticket_no) IN ('', '0')
+            OR UPPER(TRIM(c.vcclid)) = UPPER(TRIM(a.client_ticket_no))
+          )
           ${targetId ? `AND a.id = ${targetId}` : ''}
       ),
       deduped_matches AS (
@@ -301,7 +325,7 @@ export async function executeAthenaReconciliation(
         LEFT JOIN aggregated m ON a.id = m.id
         WHERE 1=1
           ${targetId ? `AND a.id = ${targetId}` : ''}
-          ${!reprocessAll && !targetId ? `AND (a.reconciled_at IS NULL OR a.reconciliation_status IN ('NOT_REGISTERED', 'MULTIPLE_MATCHES'))` : ''}
+          ${!reprocessAll && !targetId ? `AND (a.reconciled_at IS NULL OR a.reconciliation_status IN ('NOT_REGISTERED', 'MULTIPLE_MATCHES', 'REGISTERED'))` : ''}
       ) m
       WHERE a.id = m.id;
     `;

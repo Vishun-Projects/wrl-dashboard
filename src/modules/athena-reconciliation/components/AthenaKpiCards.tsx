@@ -61,7 +61,7 @@ export function AthenaKpiCards({
       id: 'MULTIPLE_MATCHES',
       label: 'Multiple CRM Matches',
       value: kpis.multipleMatches.toLocaleString(),
-      detail: 'Candidate open calls to audit',
+      detail: 'Same ticket/CCLID registered more than once',
       icon: Copy,
       activeBorder: 'border-violet-700 bg-violet-950 text-white dark:border-violet-500 dark:bg-violet-950/60 dark:text-white',
       inactiveBorder: 'border-slate-200 bg-white hover:border-violet-300 text-slate-800 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100 dark:hover:border-violet-800',

@@ -13,6 +13,7 @@ import {
   ArrowDown,
 } from 'lucide-react';
 import { TrnLink } from '@/components/calls/TrnLink';
+import { formatUiDateDash } from '@/lib/dates/ui-date';
 import type { AthenaFailedNormalizedRow, AthenaReconciliationStatus } from '../types';
 
 interface AthenaDataTableProps {
@@ -86,8 +87,8 @@ export function AthenaDataTable({
 
   const formatDate = (d: Date | string | null) => {
     if (!d) return '-';
-    const date = new Date(d);
-    return isNaN(date.getTime()) ? String(d) : date.toLocaleDateString();
+    const formatted = formatUiDateDash(d);
+    return formatted || String(d);
   };
 
   const hasAnyMatch = rows.some((r) => Boolean(r.matchedVtrnno));
