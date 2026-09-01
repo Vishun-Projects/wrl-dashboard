@@ -22,6 +22,9 @@ export type CancelledUpsertRow = {
   serial: string | null;
   engineer_name: string | null;
   complaint: string | null;
+  cancel_reason: string | null;
+  item_code: string | null;
+  franchisee_vendor_code: string | null;
 };
 
 /** Must stay aligned with docs/read-model-phase1-schema/28-calls_cancelled.sql columns (excl. synced_at). */
@@ -43,6 +46,9 @@ export const CANCELLED_COLUMNS = [
   'serial',
   'engineer_name',
   'complaint',
+  'cancel_reason',
+  'item_code',
+  'franchisee_vendor_code',
 ] as const;
 
 const CANCELLED_UPDATE_SET = CANCELLED_COLUMNS.filter((c) => c !== 'vtrnno')
@@ -82,6 +88,9 @@ function cancelledValuesFromRow(row: CancelledUpsertRow): unknown[] {
     row.serial,
     row.engineer_name,
     row.complaint,
+    row.cancel_reason,
+    row.item_code,
+    row.franchisee_vendor_code,
   ];
 }
 
@@ -104,6 +113,9 @@ function cancelledValues(row: HotRow): unknown[] {
     row.serial,
     row.engineer_name,
     row.complaint,
+    row.cancel_reason,
+    row.item_code,
+    null,
   ];
 }
 
@@ -212,7 +224,8 @@ export async function backfillCancelledFromHot(client: pg.PoolClient): Promise<n
     INSERT INTO calls_cancelled (
       vtrnno, ncode, ncancelreason, cancelled_at, logged_at, call_type,
       nofficeid, office_under, party_name, branch_name, franchisee_name,
-      region, account, item_name, serial, engineer_name, complaint, synced_at
+      region, account, item_name, serial, engineer_name, complaint,
+      cancel_reason, item_code, franchisee_vendor_code, synced_at
     )
     SELECT
       h.vtrnno,
@@ -232,8 +245,18 @@ export async function backfillCancelledFromHot(client: pg.PoolClient): Promise<n
       h.serial,
       h.engineer_name,
       h.complaint,
+      NULLIF(btrim(h.cancel_reason), ''),
+      NULLIF(btrim(h.item_code), ''),
+      NULLIF(btrim(fo.vsapvendorcode), ''),
       now()
     FROM calls_latest_hot h
+    LEFT JOIN dim_offices fo ON fo.ncode = (
+      CASE
+        WHEN btrim(COALESCE(h.franchisee_code, '')) ~ '^[0-9]+$'
+        THEN btrim(h.franchisee_code)::bigint
+        ELSE NULL
+      END
+    )
     WHERE COALESCE(h.ncancelreason, 0) NOT IN (0, 2)
        OR h.status_bucket = 'cancelled'
     ON CONFLICT (vtrnno) DO UPDATE SET
@@ -253,6 +276,9 @@ export async function backfillCancelledFromHot(client: pg.PoolClient): Promise<n
       serial = EXCLUDED.serial,
       engineer_name = EXCLUDED.engineer_name,
       complaint = EXCLUDED.complaint,
+      cancel_reason = EXCLUDED.cancel_reason,
+      item_code = EXCLUDED.item_code,
+      franchisee_vendor_code = EXCLUDED.franchisee_vendor_code,
       synced_at = now()
     `
   );

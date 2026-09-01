@@ -21,6 +21,15 @@ async function persistItemCodes(byTrn: Map<string, string>): Promise<void> {
   await withAppClient(async (client) => {
     await client.query(
       `
+      UPDATE calls_cancelled c
+      SET item_code = data.item_code
+      FROM unnest($1::text[], $2::text[]) AS data(vtrnno, item_code)
+      WHERE c.vtrnno = data.vtrnno
+      `,
+      [vtrns, codes]
+    );
+    await client.query(
+      `
       UPDATE calls_crm_mirror m
       SET item_code = data.item_code
       FROM unnest($1::text[], $2::text[]) AS data(vtrnno, item_code)

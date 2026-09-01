@@ -79,6 +79,9 @@ describe('CANCELLED_COLUMNS', () => {
       'serial',
       'engineer_name',
       'complaint',
+      'cancel_reason',
+      'item_code',
+      'franchisee_vendor_code',
     ]);
   });
 });

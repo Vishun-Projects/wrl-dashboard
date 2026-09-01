@@ -83,7 +83,7 @@ export function parseCancelledCallsFilters(
 type FilterSql = { where: string; params: unknown[] };
 
 function cancelledDateRangeSql(alias: string, startParam: number): string {
-  return `(${alias}.cancelled_at AT TIME ZONE 'Asia/Kolkata')::date >= $${startParam}::date AND (${alias}.cancelled_at AT TIME ZONE 'Asia/Kolkata')::date <= $${startParam + 1}::date`;
+  return `${alias}.cancelled_date_ist >= $${startParam}::date AND ${alias}.cancelled_date_ist <= $${startParam + 1}::date`;
 }
 
 function buildFilterSql(filters: CancelledCallsFilters, alias = 'c'): FilterSql {
@@ -95,7 +95,7 @@ function buildFilterSql(filters: CancelledCallsFilters, alias = 'c'): FilterSql 
   }
   if (filters.franchisees.length > 0) {
     params.push(filters.franchisees.map((f) => f.toUpperCase()));
-    parts.push(`upper(btrim(fo.vsapvendorcode)) = ANY($${params.length}::text[])`);
+    parts.push(`upper(btrim(${alias}.franchisee_vendor_code)) = ANY($${params.length}::text[])`);
   }
   if (filters.partyProfiles.length > 0) {
     params.push(filters.partyProfiles.map((p) => p.toUpperCase()));
@@ -162,40 +162,22 @@ const SELECT_COLS = `
   c.vtrnno,
   c.ncode,
   c.ncancelreason,
-  COALESCE(NULLIF(btrim(m.cancel_reason), ''), NULLIF(btrim(h.cancel_reason), ''), NULL) AS cancel_reason,
+  c.cancel_reason,
   c.cancelled_at,
   c.logged_at,
   c.call_type,
   c.branch_name,
   c.franchisee_name,
-  NULLIF(btrim(fo.vsapvendorcode), '') AS franchisee_vendor_code,
+  c.franchisee_vendor_code,
   c.party_name,
   NULLIF(btrim(c.account), '') AS party_profile,
-  COALESCE(
-    NULLIF(btrim(m.item_code), ''),
-    NULLIF(btrim(h.item_code), '')
-  ) AS item_code,
+  c.item_code,
   c.serial,
   c.complaint,
   c.region
 `;
 
-const FRANCHISEE_OFFICE_JOIN = `
-  LEFT JOIN public.dim_offices fo ON fo.ncode = (
-    CASE
-      WHEN btrim(COALESCE(m.franchisee_code, h.franchisee_code, '')) ~ '^[0-9]+$'
-      THEN btrim(COALESCE(m.franchisee_code, h.franchisee_code))::bigint
-      ELSE NULL
-    END
-  )
-`;
-
-const FROM_JOIN = `
-  FROM public.calls_cancelled c
-  LEFT JOIN public.calls_crm_mirror m ON m.vtrnno = c.vtrnno
-  LEFT JOIN public.calls_latest_hot h ON h.vtrnno = c.vtrnno
-  ${FRANCHISEE_OFFICE_JOIN}
-`;
+const FROM_TABLE = `FROM public.calls_cancelled c`;
 
 export async function fetchCancelledCallsHealth(): Promise<CancelledCallsHealth> {
   const [counts, registerSync] = await Promise.all([
@@ -252,13 +234,13 @@ export async function fetchCancelledCallsSummary(
     withAppClient(async (client) => {
       const [totalRes, branchRes, typeRes] = await Promise.all([
         client.query<{ total: number | string }>(
-          `SELECT count(*)::int AS total ${FROM_JOIN} WHERE ${where}`,
+          `SELECT count(*)::int AS total ${FROM_TABLE} WHERE ${where}`,
           params
         ),
         client.query<{ label: string; count: number | string }>(
           `SELECT coalesce(nullif(btrim(c.branch_name), ''), '(unknown)') AS label,
                   count(*)::int AS count
-           ${FROM_JOIN}
+           ${FROM_TABLE}
            WHERE ${where}
            GROUP BY 1
            ORDER BY count DESC, label
@@ -268,7 +250,7 @@ export async function fetchCancelledCallsSummary(
         client.query<{ label: string; count: number | string }>(
           `SELECT coalesce(nullif(btrim(c.call_type), ''), '(unknown)') AS label,
                   count(*)::int AS count
-           ${FROM_JOIN}
+           ${FROM_TABLE}
            WHERE ${where}
            GROUP BY 1
            ORDER BY count DESC, label
@@ -306,22 +288,37 @@ export async function fetchCancelledCallsRows(
   const offset = (filters.page - 1) * filters.pageSize;
 
   return withAppClient(async (client) => {
-    const countRes = await client.query<{ total: number | string }>(
-      `SELECT count(*)::int AS total ${FROM_JOIN} WHERE ${where}`,
-      params
-    );
-    const total = Number(countRes.rows[0]?.total ?? 0);
     const pageParams = [...params, filters.pageSize, offset];
-    const rowsRes = await client.query(
-      `SELECT ${SELECT_COLS}
-       ${FROM_JOIN}
+    const rowsRes = await client.query<{
+      total_count: number | string;
+      vtrnno: string;
+      ncode: number | string;
+      ncancelreason: number | string;
+      cancel_reason: string | null;
+      cancelled_at: Date | string;
+      logged_at: Date | string;
+      call_type: string | null;
+      branch_name: string | null;
+      franchisee_name: string | null;
+      franchisee_vendor_code: string | null;
+      party_name: string | null;
+      party_profile: string | null;
+      item_code: string | null;
+      serial: string | null;
+      complaint: string | null;
+      region: string | null;
+    }>(
+      `SELECT ${SELECT_COLS}, count(*) OVER() AS total_count
+       ${FROM_TABLE}
        WHERE ${where}
        ORDER BY c.cancelled_at DESC, c.vtrnno DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       pageParams
     );
+    const total = Number(rowsRes.rows[0]?.total_count ?? 0);
+    const rows = rowsRes.rows.map(({ total_count: _total, ...row }) => row);
     return {
-      rows: await enrichCancelledCallItemCodes(rowsRes.rows.map(mapRow)),
+      rows: await enrichCancelledCallItemCodes(rows.map(mapRow)),
       total,
       page: filters.page,
       pageSize: filters.pageSize,
@@ -336,7 +333,7 @@ export async function fetchCancelledCallsForCsv(
   return withAppClient(async (client) => {
     const rowsRes = await client.query(
       `SELECT ${SELECT_COLS}
-       ${FROM_JOIN}
+       ${FROM_TABLE}
        WHERE ${where}
        ORDER BY c.cancelled_at DESC, c.vtrnno DESC
        LIMIT 50000`,
@@ -356,8 +353,8 @@ export async function fetchCancelledCallsForDigestDay(
   const rows = await withAppClient(async (client) => {
     const res = await client.query(
       `SELECT ${SELECT_COLS}
-       ${FROM_JOIN}
-       WHERE (c.cancelled_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date
+       ${FROM_TABLE}
+       WHERE c.cancelled_date_ist = $1::date
        ORDER BY upper(btrim(c.branch_name)), c.cancelled_at DESC, c.vtrnno DESC`,
       [digestDateYmd]
     );
@@ -410,14 +407,10 @@ export async function fetchCancelledCallsFilterOptions(scope: {
       client.query<{ vendor_code: string; franchisee_name: string }>(
         `
         SELECT
-          NULLIF(btrim(fo.vsapvendorcode), '') AS vendor_code,
-          min(coalesce(
-            nullif(btrim(c.franchisee_name), ''),
-            nullif(btrim(fo.vcompanyname), '')
-          )) AS franchisee_name
-        ${FROM_JOIN}
-        WHERE coalesce(btrim(c.franchisee_name), nullif(btrim(fo.vcompanyname), ''), '') <> ''
-          AND NULLIF(btrim(fo.vsapvendorcode), '') IS NOT NULL
+          NULLIF(btrim(c.franchisee_vendor_code), '') AS vendor_code,
+          min(nullif(btrim(c.franchisee_name), '')) AS franchisee_name
+        FROM public.calls_cancelled c
+        WHERE coalesce(btrim(c.franchisee_vendor_code), '') <> ''
           AND ${dateClause}
           ${officeClauseC}
         GROUP BY 1

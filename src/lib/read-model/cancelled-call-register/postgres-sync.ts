@@ -16,6 +16,16 @@ function cancelAtSql(alias: string): string {
   return `COALESCE(${alias}.cancelled_at, ${alias}.edited_at, ${alias}.source_editedon, ${alias}.logged_at)`;
 }
 
+const FRANCHISEE_OFFICE_JOIN = `
+  LEFT JOIN dim_offices fo ON fo.ncode = (
+    CASE
+      WHEN btrim(COALESCE(t.franchisee_code, '')) ~ '^[0-9]+$'
+      THEN btrim(t.franchisee_code)::bigint
+      ELSE NULL
+    END
+  )
+`;
+
 async function mirrorReady(client: pg.PoolClient): Promise<boolean> {
   const res = await client.query<{ status: string | null; rows: string }>(
     `
@@ -46,7 +56,8 @@ async function upsertFromTable(
     INSERT INTO calls_cancelled (
       vtrnno, ncode, ncancelreason, cancelled_at, logged_at, call_type,
       nofficeid, office_under, party_name, branch_name, franchisee_name,
-      region, account, item_name, serial, engineer_name, complaint, synced_at
+      region, account, item_name, serial, engineer_name, complaint,
+      cancel_reason, item_code, franchisee_vendor_code, synced_at
     )
     SELECT
       t.vtrnno,
@@ -66,8 +77,12 @@ async function upsertFromTable(
       t.serial,
       t.engineer_name,
       t.complaint,
+      NULLIF(btrim(t.cancel_reason), ''),
+      NULLIF(btrim(t.item_code), ''),
+      NULLIF(btrim(fo.vsapvendorcode), ''),
       now()
     FROM ${table} t
+    ${FRANCHISEE_OFFICE_JOIN}
     WHERE ${CANCELLED_WHERE}
       ${sinceClause}
     ON CONFLICT (vtrnno) DO UPDATE SET
@@ -87,6 +102,9 @@ async function upsertFromTable(
       serial = EXCLUDED.serial,
       engineer_name = EXCLUDED.engineer_name,
       complaint = EXCLUDED.complaint,
+      cancel_reason = EXCLUDED.cancel_reason,
+      item_code = EXCLUDED.item_code,
+      franchisee_vendor_code = EXCLUDED.franchisee_vendor_code,
       synced_at = now()
     `,
     params
