@@ -642,7 +642,7 @@ export async function fetchCrmTrnsWithRecentFaultEdits(
 
 export async function fetchDimOffices(): Promise<Record<string, string>[]> {
   return fetchDimQuery({
-    fields: 'ncode, vcompanyname, nunder, nzone',
+    fields: 'ncode, vcompanyname, nunder, nzone, vsapvendorcode',
     tableName: 'mstoffice (NOLOCK)',
     condition: '1=1',
     orderBy: 'ncode ASC',

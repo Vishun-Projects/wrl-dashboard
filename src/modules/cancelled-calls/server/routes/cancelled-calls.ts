@@ -25,7 +25,12 @@ export async function GET(req: NextRequest) {
     };
 
     if (mode === 'options') {
-      const options = await fetchCancelledCallsFilterOptions(scope);
+      const { startDate, endDate } = parseCancelledCallsFilters(searchParams);
+      const options = await fetchCancelledCallsFilterOptions({
+        startDate,
+        endDate,
+        ...scope,
+      });
       return NextResponse.json(options);
     }
 

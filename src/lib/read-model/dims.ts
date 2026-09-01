@@ -62,6 +62,7 @@ export async function refreshDimensions(client: pg.PoolClient): Promise<{
       toBigInt(row.nunder),
       toBigInt(row.nzone),
       looksLikeBranchOffice(name),
+      String(row.vsapvendorcode ?? '').trim() || null,
     ]);
   }
 
@@ -95,8 +96,11 @@ export async function refreshDimensions(client: pg.PoolClient): Promise<{
 
   await batchInsert(
     client,
-    `INSERT INTO dim_offices (ncode, vcompanyname, nunder, nzone, is_branch, region, synced_at)`,
-    officeRows.map((row) => [...row, 'OTHER', new Date()])
+    `INSERT INTO dim_offices (ncode, vcompanyname, nunder, nzone, is_branch, region, vsapvendorcode, synced_at)`,
+    officeRows.map((row) => {
+      const [ncode, vcompanyname, nunder, nzone, is_branch, vsapvendorcode] = row;
+      return [ncode, vcompanyname, nunder, nzone, is_branch, 'OTHER', vsapvendorcode, new Date()];
+    })
   );
   await batchInsert(
     client,

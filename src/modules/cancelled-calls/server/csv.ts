@@ -1,5 +1,6 @@
 import type { CancelledCallRow } from '@/modules/cancelled-calls/types';
-import { formatUiDateTime } from '@/lib/dates/ui-date';
+import { formatCancelledCallFranchisee } from '@/modules/cancelled-calls/franchisee-label';
+import { formatUiDate, formatUiDateTime } from '@/lib/dates/ui-date';
 
 function csvEscape(value: unknown): string {
   const s = value == null ? '' : String(value);
@@ -9,18 +10,18 @@ function csvEscape(value: unknown): string {
 
 const HEADERS = [
   'TRN',
+  'Call Date',
   'Cancelled At',
-  'Logged At',
   'Branch',
+  'Franchisee',
   'Party',
+  'Party Profile',
   'Call Type',
-  'Item',
+  'Item Code',
   'Serial',
-  'Engineer',
   'Complaint',
   'Cancel Reason',
   'Region',
-  'Account',
 ] as const;
 
 export function buildCancelledCallsCsv(rows: CancelledCallRow[]): string {
@@ -29,18 +30,18 @@ export function buildCancelledCallsCsv(rows: CancelledCallRow[]): string {
     lines.push(
       [
         row.vtrnno,
+        formatUiDate(row.loggedAt),
         formatUiDateTime(row.cancelledAt),
-        formatUiDateTime(row.loggedAt),
         row.branchName ?? '',
+        formatCancelledCallFranchisee(row.franchiseeVendorCode, row.franchiseeName),
         row.partyName ?? '',
+        row.partyProfile ?? '',
         row.callType ?? '',
-        row.itemName ?? '',
+        row.itemCode ?? '',
         row.serial ?? '',
-        row.engineerName ?? '',
         row.complaint ?? '',
         row.cancelReason,
         row.region ?? '',
-        row.account ?? '',
       ]
         .map(csvEscape)
         .join(',')

@@ -2,11 +2,19 @@ export type CancelledCallsFilters = {
   startDate: string;
   endDate: string;
   branches: string[];
+  franchisees: string[];
+  partyProfiles: string[];
   callTypes: string[];
   page: number;
   pageSize: number;
   isHod: boolean;
   assignedOffices: string[];
+};
+
+export type CancelledCallsFranchiseeOption = {
+  vendorCode: string;
+  name: string;
+  label: string;
 };
 
 export type CancelledCallRow = {
@@ -18,13 +26,14 @@ export type CancelledCallRow = {
   loggedAt: string;
   callType: string | null;
   branchName: string | null;
+  franchiseeName: string | null;
+  franchiseeVendorCode: string | null;
   partyName: string | null;
-  itemName: string | null;
+  partyProfile: string | null;
+  itemCode: string | null;
   serial: string | null;
-  engineerName: string | null;
   complaint: string | null;
   region: string | null;
-  account: string | null;
 };
 
 export type CancelledCallsHealth = {

@@ -131,6 +131,7 @@ export function transformCrmRowToHot(row: Record<string, unknown>): HotRow | nul
     region: String(enriched.region ?? 'OTHER').trim().toUpperCase() || 'OTHER',
     account: String(enriched.account ?? 'UNCLASSIFIED').trim() || 'UNCLASSIFIED',
     item_name: String(enriched.itemname ?? enriched.item_name ?? '').trim() || null,
+    item_code: String(enriched.itemcode ?? enriched.item_code ?? '').trim() || null,
     serial: String(enriched.callsvserialno ?? enriched.vserialno ?? '').trim() || null,
     wco: (() => {
       const raw = String(enriched.WCO ?? enriched.wco ?? '').trim().toUpperCase();

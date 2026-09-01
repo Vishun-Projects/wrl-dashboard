@@ -5,34 +5,28 @@ import axios from 'axios';
 import { Ban, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import { AdminTable, AdminTableCard, AdminTd, AdminTh, AdminThead, AdminTr } from '@/components/admin/AdminUi';
-import { formatUiDateTime } from '@/lib/dates/ui-date';
+import { formatUiDate, formatUiDateTime } from '@/lib/dates/ui-date';
 import { feedback } from '@/lib/ui/feedback';
 import type {
   CancelledCallRow,
+  CancelledCallsFranchiseeOption,
   CancelledCallsRowsResponse,
   CancelledCallsSummary,
 } from '@/modules/cancelled-calls/types';
+import { formatCancelledCallFranchisee } from '@/modules/cancelled-calls/franchisee-label';
+import { DateRangeSelector } from '@/modules/mis/register/components/DateRangeSelector';
+import { RegisterMultiSelect } from '@/modules/mis/register/components/RegisterMultiSelect';
+import type { RegisterMultiSelectOption } from '@/modules/mis/register/components/RegisterMultiSelect';
+import { defaultDateRange, toDateString, type ReportDateRange } from '@/modules/mis';
 
 const API = '/api/report/cancelled-calls';
-
-function defaultMonthRange(): { startDate: string; endDate: string } {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-  const pick = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
-  const year = pick('year');
-  const month = pick('month');
-  const day = pick('day');
-  return { startDate: `${year}-${month}-01`, endDate: `${year}-${month}-${day}` };
-}
 
 function buildParams(opts: {
   startDate: string;
   endDate: string;
   branches: string[];
+  franchisees: string[];
+  partyProfiles: string[];
   callTypes: string[];
   page?: number;
   pageSize?: number;
@@ -41,22 +35,33 @@ function buildParams(opts: {
   params.set('startDate', opts.startDate);
   params.set('endDate', opts.endDate);
   if (opts.branches.length) params.set('branches', opts.branches.join(','));
+  if (opts.franchisees.length) params.set('franchisees', opts.franchisees.join(','));
+  if (opts.partyProfiles.length) params.set('partyProfiles', opts.partyProfiles.join(','));
   if (opts.callTypes.length) params.set('callTypes', opts.callTypes.join(','));
   if (opts.page) params.set('page', String(opts.page));
   if (opts.pageSize) params.set('pageSize', String(opts.pageSize));
   return params;
 }
 
+function pickSingleFilterValue(values: string[]): string {
+  if (values.length === 0) return '';
+  return values[values.length - 1] ?? '';
+}
+
 export default function CancelledCallsPageClient() {
-  const defaults = useMemo(() => defaultMonthRange(), []);
-  const [startDate, setStartDate] = useState(defaults.startDate);
-  const [endDate, setEndDate] = useState(defaults.endDate);
+  const [dateRange, setDateRange] = useState<ReportDateRange>(() => defaultDateRange());
+  const startDate = useMemo(() => toDateString(dateRange.start), [dateRange.start]);
+  const endDate = useMemo(() => toDateString(dateRange.end), [dateRange.end]);
   const [branch, setBranch] = useState('');
+  const [franchisee, setFranchisee] = useState('');
+  const [partyProfile, setPartyProfile] = useState('');
   const [callType, setCallType] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 50;
 
   const [branchOptions, setBranchOptions] = useState<string[]>([]);
+  const [franchiseeOptions, setFranchiseeOptions] = useState<CancelledCallsFranchiseeOption[]>([]);
+  const [partyProfileOptions, setPartyProfileOptions] = useState<string[]>([]);
   const [callTypeOptions, setCallTypeOptions] = useState<string[]>([]);
   const [summary, setSummary] = useState<CancelledCallsSummary | null>(null);
   const [rowsData, setRowsData] = useState<CancelledCallsRowsResponse | null>(null);
@@ -64,24 +69,58 @@ export default function CancelledCallsPageClient() {
   const [exporting, setExporting] = useState(false);
 
   const branches = branch ? [branch] : [];
+  const franchisees = franchisee ? [franchisee] : [];
+  const partyProfiles = partyProfile ? [partyProfile] : [];
   const callTypes = callType ? [callType] : [];
+
+  const branchSelectOptions = useMemo<RegisterMultiSelectOption[]>(
+    () => branchOptions.map((b) => ({ value: b, label: b })),
+    [branchOptions]
+  );
+  const franchiseeSelectOptions = useMemo<RegisterMultiSelectOption[]>(
+    () => franchiseeOptions.map((f) => ({ value: f.vendorCode, label: f.label })),
+    [franchiseeOptions]
+  );
+  const partyProfileSelectOptions = useMemo<RegisterMultiSelectOption[]>(
+    () => partyProfileOptions.map((p) => ({ value: p, label: p })),
+    [partyProfileOptions]
+  );
+  const callTypeSelectOptions = useMemo<RegisterMultiSelectOption[]>(
+    () => callTypeOptions.map((t) => ({ value: t, label: t })),
+    [callTypeOptions]
+  );
+
+  const resetPage = useCallback(() => setPage(1), []);
 
   useEffect(() => {
     void (async () => {
       try {
-        const res = await axios.get(`${API}?mode=options`, { withCredentials: true });
-        setBranchOptions(res.data.branches ?? []);
-        setCallTypeOptions(res.data.callTypes ?? []);
+        const params = new URLSearchParams({ mode: 'options', startDate, endDate });
+        const res = await axios.get(`${API}?${params.toString()}`, { withCredentials: true });
+        const branches: string[] = res.data.branches ?? [];
+        const franchisees: CancelledCallsFranchiseeOption[] = res.data.franchisees ?? [];
+        const profiles: string[] = res.data.partyProfiles ?? [];
+        const types: string[] = res.data.callTypes ?? [];
+        setBranchOptions(branches);
+        setFranchiseeOptions(franchisees);
+        setPartyProfileOptions(profiles);
+        setCallTypeOptions(types);
+        setBranch((prev) => (prev && branches.includes(prev) ? prev : ''));
+        setFranchisee((prev) =>
+          prev && franchisees.some((f) => f.vendorCode === prev) ? prev : ''
+        );
+        setPartyProfile((prev) => (prev && profiles.includes(prev) ? prev : ''));
+        setCallType((prev) => (prev && types.includes(prev) ? prev : ''));
       } catch {
         /* options are best-effort */
       }
     })();
-  }, []);
+  }, [startDate, endDate]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const base = { startDate, endDate, branches, callTypes };
+      const base = { startDate, endDate, branches, franchisees, partyProfiles, callTypes };
       const [summaryRes, rowsRes] = await Promise.all([
         axios.get<CancelledCallsSummary>(
           `${API}?mode=summary&${buildParams(base).toString()}`,
@@ -103,7 +142,7 @@ export default function CancelledCallsPageClient() {
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, branch, callType, page]);
+  }, [startDate, endDate, branch, franchisee, partyProfile, callType, page]);
 
   useEffect(() => {
     void load();
@@ -112,7 +151,7 @@ export default function CancelledCallsPageClient() {
   async function exportCsv() {
     setExporting(true);
     try {
-      const params = buildParams({ startDate, endDate, branches, callTypes });
+      const params = buildParams({ startDate, endDate, branches, franchisees, partyProfiles, callTypes });
       params.set('format', 'csv');
       const res = await axios.get(`${API}?${params.toString()}`, {
         withCredentials: true,
@@ -166,70 +205,79 @@ export default function CancelledCallsPageClient() {
         </button>
       }
       toolbar={
-        <div className="register-filter-bar flex flex-wrap items-end gap-2">
-          <label className="text-[11px] text-slate-600">
-            From
-            <input
-              type="date"
-              className="mt-0.5 block rounded border border-slate-200 px-2 py-1 text-[12px]"
-              value={startDate}
-              onChange={(e) => {
-                setPage(1);
-                setStartDate(e.target.value);
+        <div className="register-filter-bar">
+          <div className="register-filter-row register-filter-row-compact items-end">
+            <div className="register-date-field shrink-0">
+              <DateRangeSelector
+                value={dateRange.label}
+                startDate={dateRange.start}
+                endDate={dateRange.end}
+                onChange={(range) => {
+                  resetPage();
+                  setDateRange(range);
+                }}
+              />
+            </div>
+            <RegisterMultiSelect
+              label="Branch"
+              emptyLabel="All Branches"
+              options={branchSelectOptions}
+              selected={branches}
+              onChange={(values) => {
+                resetPage();
+                setBranch(pickSingleFilterValue(values));
               }}
+              searchable
+              searchPlaceholder="Search branch…"
+              panelClassName="w-72"
+              layout="inline"
             />
-          </label>
-          <label className="text-[11px] text-slate-600">
-            To
-            <input
-              type="date"
-              className="mt-0.5 block rounded border border-slate-200 px-2 py-1 text-[12px]"
-              value={endDate}
-              onChange={(e) => {
-                setPage(1);
-                setEndDate(e.target.value);
+            <RegisterMultiSelect
+              label="Franchisee"
+              emptyLabel="All Franchisees"
+              options={franchiseeSelectOptions}
+              selected={franchisees}
+              onChange={(values) => {
+                resetPage();
+                setFranchisee(pickSingleFilterValue(values));
               }}
+              searchable
+              searchPlaceholder="Search vendor or name…"
+              panelClassName="w-80"
+              layout="inline"
             />
-          </label>
-          <label className="text-[11px] text-slate-600">
-            Branch
-            <select
-              className="mt-0.5 block min-w-[140px] rounded border border-slate-200 px-2 py-1 text-[12px]"
-              value={branch}
-              onChange={(e) => {
-                setPage(1);
-                setBranch(e.target.value);
+            <RegisterMultiSelect
+              label="Party Profile"
+              emptyLabel="All Party Profiles"
+              options={partyProfileSelectOptions}
+              selected={partyProfiles}
+              onChange={(values) => {
+                resetPage();
+                setPartyProfile(pickSingleFilterValue(values));
               }}
-            >
-              <option value="">All</option>
-              {branchOptions.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-[11px] text-slate-600">
-            Call type
-            <select
-              className="mt-0.5 block min-w-[140px] rounded border border-slate-200 px-2 py-1 text-[12px]"
-              value={callType}
-              onChange={(e) => {
-                setPage(1);
-                setCallType(e.target.value);
+              searchable
+              searchPlaceholder="Search party profile…"
+              panelClassName="w-64"
+              layout="inline"
+            />
+            <RegisterMultiSelect
+              label="Call Type"
+              emptyLabel="All Call Types"
+              options={callTypeSelectOptions}
+              selected={callTypes}
+              onChange={(values) => {
+                resetPage();
+                setCallType(pickSingleFilterValue(values));
               }}
-            >
-              <option value="">All</option>
-              {callTypeOptions.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </label>
-          <span className="pb-1 text-[12px] text-slate-500">
-            {loading ? 'Loading…' : `${(summary?.total ?? total).toLocaleString()} in range`}
-          </span>
+              searchable
+              searchPlaceholder="Search call type…"
+              panelClassName="w-64"
+              layout="inline"
+            />
+            <span className="ml-auto shrink-0 self-end pb-1 text-[12px] text-slate-500">
+              {loading ? 'Loading…' : `${(summary?.total ?? total).toLocaleString()} in range`}
+            </span>
+          </div>
         </div>
       }
     >
@@ -247,13 +295,15 @@ export default function CancelledCallsPageClient() {
               <AdminThead>
                 <tr>
                   <AdminTh>TRN</AdminTh>
+                  <AdminTh>Call Date</AdminTh>
                   <AdminTh>Cancelled At</AdminTh>
                   <AdminTh>Branch</AdminTh>
+                  <AdminTh>Franchisee</AdminTh>
                   <AdminTh>Party</AdminTh>
+                  <AdminTh>Party Profile</AdminTh>
                   <AdminTh>Call Type</AdminTh>
-                  <AdminTh>Item</AdminTh>
+                  <AdminTh>Item Code</AdminTh>
                   <AdminTh>Serial</AdminTh>
-                  <AdminTh>Engineer</AdminTh>
                   <AdminTh>Cancel Reason</AdminTh>
                   <AdminTh>Complaint</AdminTh>
                 </tr>
@@ -261,7 +311,7 @@ export default function CancelledCallsPageClient() {
               <tbody>
                 {loading ? (
                   <AdminTr>
-                    <td className="px-4 py-3 text-[12px] text-slate-500" colSpan={10}>
+                    <td className="px-4 py-3 text-[12px] text-slate-500" colSpan={12}>
                       Loading…
                     </td>
                   </AdminTr>
@@ -269,13 +319,17 @@ export default function CancelledCallsPageClient() {
                   rows.map((r) => (
                     <AdminTr key={r.vtrnno}>
                       <AdminTd className="font-mono text-[11px]">{r.vtrnno}</AdminTd>
+                      <AdminTd>{formatUiDate(r.loggedAt)}</AdminTd>
                       <AdminTd>{formatUiDateTime(r.cancelledAt)}</AdminTd>
                       <AdminTd>{r.branchName ?? '—'}</AdminTd>
+                      <AdminTd>
+                        {formatCancelledCallFranchisee(r.franchiseeVendorCode, r.franchiseeName)}
+                      </AdminTd>
                       <AdminTd>{r.partyName ?? '—'}</AdminTd>
+                      <AdminTd>{r.partyProfile ?? '—'}</AdminTd>
                       <AdminTd>{r.callType ?? '—'}</AdminTd>
-                      <AdminTd>{r.itemName ?? '—'}</AdminTd>
+                      <AdminTd className="font-mono text-[11px]">{r.itemCode ?? '—'}</AdminTd>
                       <AdminTd className="font-mono text-[11px]">{r.serial ?? '—'}</AdminTd>
-                      <AdminTd>{r.engineerName ?? '—'}</AdminTd>
                       <AdminTd>{r.cancelReason || '—'}</AdminTd>
                       <AdminTd className="max-w-[220px] truncate">
                         <span title={r.complaint ?? ''}>{r.complaint ?? '—'}</span>
