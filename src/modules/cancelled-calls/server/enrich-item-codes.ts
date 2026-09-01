@@ -52,9 +52,13 @@ async function persistItemCodes(byTrn: Map<string, string>): Promise<void> {
 /** Fill missing item codes from CRM (mstitems.vitemcode) and cache on mirror/hot. */
 export async function enrichCancelledCallItemCodes(
   rows: CancelledCallRow[],
-  opts?: { persist?: boolean }
+  opts?: { persist?: boolean; maxTrns?: number }
 ): Promise<CancelledCallRow[]> {
-  const missing = rows.filter((r) => !String(r.itemCode ?? '').trim());
+  let missing = rows.filter((r) => !String(r.itemCode ?? '').trim());
+  if (!missing.length) return rows;
+  if (opts?.maxTrns != null && opts.maxTrns >= 0) {
+    missing = missing.slice(0, opts.maxTrns);
+  }
   if (!missing.length) return rows;
 
   const crmRows = await fetchCrmRowsByTrns(

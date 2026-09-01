@@ -86,6 +86,14 @@ function cancelledDateRangeSql(alias: string, startParam: number): string {
   return `${alias}.cancelled_date_ist >= $${startParam}::date AND ${alias}.cancelled_date_ist <= $${startParam + 1}::date`;
 }
 
+/** Shared WHERE clause for cancelled-calls list/summary/export queries. */
+export function buildCancelledCallsFilterSql(
+  filters: CancelledCallsFilters,
+  alias = 'c'
+): FilterSql {
+  return buildFilterSql(filters, alias);
+}
+
 function buildFilterSql(filters: CancelledCallsFilters, alias = 'c'): FilterSql {
   const params: unknown[] = [filters.startDate, filters.endDate];
   const parts = [cancelledDateRangeSql(alias, 1)];
@@ -281,6 +289,17 @@ export async function fetchCancelledCallsSummary(
   };
 }
 
+export async function countCancelledCalls(filters: CancelledCallsFilters): Promise<number> {
+  const { where, params } = buildFilterSql(filters);
+  const res = await withAppClient((client) =>
+    client.query<{ total: number | string }>(
+      `SELECT count(*)::int AS total FROM public.calls_cancelled c WHERE ${where}`,
+      params
+    )
+  );
+  return Number(res.rows[0]?.total ?? 0);
+}
+
 export async function fetchCancelledCallsRows(
   filters: CancelledCallsFilters
 ): Promise<CancelledCallsRowsResponse> {
@@ -318,7 +337,7 @@ export async function fetchCancelledCallsRows(
     const total = Number(rowsRes.rows[0]?.total_count ?? 0);
     const rows = rowsRes.rows.map(({ total_count: _total, ...row }) => row);
     return {
-      rows: await enrichCancelledCallItemCodes(rows.map(mapRow)),
+      rows: await enrichCancelledCallItemCodes(rows.map(mapRow), { maxTrns: filters.pageSize }),
       total,
       page: filters.page,
       pageSize: filters.pageSize,
@@ -326,24 +345,6 @@ export async function fetchCancelledCallsRows(
   });
 }
 
-export async function fetchCancelledCallsForCsv(
-  filters: CancelledCallsFilters
-): Promise<CancelledCallRow[]> {
-  const { where, params } = buildFilterSql(filters);
-  return withAppClient(async (client) => {
-    const rowsRes = await client.query(
-      `SELECT ${SELECT_COLS}
-       ${FROM_TABLE}
-       WHERE ${where}
-       ORDER BY c.cancelled_at DESC, c.vtrnno DESC
-       LIMIT 50000`,
-      params
-    );
-    return enrichCancelledCallItemCodes(rowsRes.rows.map(mapRow));
-  });
-}
-
-/** All cancels for one IST calendar day, grouped by branch for digest. */
 export async function fetchCancelledCallsForDigestDay(
   digestDateYmd: string
 ): Promise<Map<string, CancelledCallRow[]>> {

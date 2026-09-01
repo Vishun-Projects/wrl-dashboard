@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
-import { gzippedCsvPayload } from '@/lib/net/csv-gzip-response';
-import { buildCancelledCallsCsv } from '@/modules/cancelled-calls/server/csv';
+import { buildCancelledCallsCsvStream } from '@/modules/cancelled-calls/server/csv-export';
 import {
   fetchCancelledCallsFilterOptions,
-  fetchCancelledCallsForCsv,
   fetchCancelledCallsRows,
   fetchCancelledCallsSummary,
   parseCancelledCallsFilters,
@@ -40,15 +38,7 @@ export async function GET(req: NextRequest) {
     };
 
     if (format === 'csv') {
-      const rows = await fetchCancelledCallsForCsv(filters);
-      const csv = buildCancelledCallsCsv(rows);
-      const stamp = new Date().toISOString().slice(0, 10);
-      const { body, headers } = gzippedCsvPayload(
-        csv,
-        `cancelled-calls-${stamp}.csv`,
-        req.headers.get('accept-encoding')
-      );
-      return new NextResponse(body, { headers });
+      return buildCancelledCallsCsvStream(filters);
     }
 
     if (mode === 'summary') {
