@@ -22,6 +22,12 @@ interface DateRangeSelectorProps {
 
 const PANEL_WIDTH = 180;
 
+function minPanelLeft(margin: number): number {
+  const sidebar = document.querySelector<HTMLElement>('aside.hidden.md\\:flex');
+  if (!sidebar) return margin;
+  return sidebar.getBoundingClientRect().right + margin;
+}
+
 export function DateRangeSelector({ value, startDate, endDate, onChange }: DateRangeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [portalReady, setPortalReady] = useState(false);
@@ -100,11 +106,11 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    let left = trigger.right - PANEL_WIDTH;
+    let left = trigger.left;
     if (left + PANEL_WIDTH > vw - margin) {
-      left = Math.max(margin, trigger.right - PANEL_WIDTH);
+      left = Math.max(minPanelLeft(margin), trigger.right - PANEL_WIDTH);
     }
-    if (left < margin) left = margin;
+    if (left < minPanelLeft(margin)) left = minPanelLeft(margin);
 
     let top = trigger.bottom + gap;
     if (top + panelHeight > vh - margin) {

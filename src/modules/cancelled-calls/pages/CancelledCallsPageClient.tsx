@@ -205,9 +205,9 @@ export default function CancelledCallsPageClient() {
         </button>
       }
       toolbar={
-        <div className="register-filter-bar">
-          <div className="register-filter-row register-filter-row-compact items-end">
-            <div className="register-date-field shrink-0">
+        <div className="register-filter-bar border-b border-slate-200 bg-bg-canvas px-3 py-1.5">
+          <div className="report-toolbar-filters-row items-end">
+            <div className="report-toolbar-filters-date shrink-0">
               <DateRangeSelector
                 value={dateRange.label}
                 startDate={dateRange.start}
