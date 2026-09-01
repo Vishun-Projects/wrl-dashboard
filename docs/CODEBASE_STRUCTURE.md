@@ -167,7 +167,6 @@ src/components/
 ```text
 docs/
 ├── REMEDIATION_ROADMAP.md      # Living remediation + feature-layout board
-├── CODEBASE_AUDIT.md           # Points at roadmap for architecture tracking
 ├── SUPABASE_SETUP.md / sync.md / crm-mirror-sync.md / ui-patterns.md / …
 ├── read-model-phase1-*.md      # Architecture / cutover / worker specs
 ├── read-model-phase1-schema/   # Versioned SQL 01…21 (incl. revoke-hot-anon)
@@ -183,32 +182,14 @@ docs/
 
 ```text
 scripts/
-├── apply-read-model-schema.mjs          # Applies docs/read-model-phase1-schema/*.sql
-├── check-feature-import-boundaries.mjs  # npm run check:feature-boundaries
-├── vps-hosting/                         # Deploy, sync-worker, mis-email, upload, mail relay
-├── mis-client/                          # MIS import investigation / seed helpers
+├── db/           # Schema apply helpers (`npm run db:apply-*`)
+├── quality/      # `check:feature-boundaries`, performance-log analyze, push notify
+├── ops/          # One-off probes, exports, mail-relay test
+├── vps-hosting/  # Deploy, sync-worker, mis-email, upload, mail relay
+├── mis-client/   # MIS import investigation / seed helpers
 ├── crm_mirror/ + crm_mirror_sync.py
 ├── ci/
-├── rbac/
-└── check-*.ts / audit-*.ts / reconcile-*.ts   # One-off ops & data probes
-```
-
----
-
-## `dump/` (local only)
-
-Not part of the running app. Current contents after discards:
-
-```text
-dump/
-├── README.md
-├── requirements-crm-mirror.txt
-├── requirements-sync.txt
-├── root/                       # zip, leftovers, …
-├── scripts/                    # One-off remediation codemods
-├── docs/                       # BRD/FSD binaries, git-audit, sample data
-├── exports-data/
-└── logs/
+└── rbac/
 ```
 
 ---

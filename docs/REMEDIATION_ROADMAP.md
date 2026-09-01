@@ -1,9 +1,8 @@
 # Remediation Roadmap
 
-Living checklist for structure + audit safety work.  
-**Do not** treat the Jun 2026 [`CODEBASE_AUDIT.md`](./CODEBASE_AUDIT.md) orphan cleanup as current architecture guidance — see Phase 9 verdict below.
+Living checklist for structure + audit safety work.
 
-**Updated:** 2026-07-31
+**Updated:** 2026-09-01
 
 ---
 

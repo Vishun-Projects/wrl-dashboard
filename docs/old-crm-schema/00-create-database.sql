@@ -5,6 +5,6 @@
 --
 -- Then apply migrations:
 --   OLD_CRM_DATABASE_URL=postgresql://postgres:PASSWORD@api.wrl-fsm.cloud:5432/old_crm \
---     node scripts/apply-old-crm-schema.mjs
+--     npm run db:apply-old-crm
 
 CREATE DATABASE old_crm;

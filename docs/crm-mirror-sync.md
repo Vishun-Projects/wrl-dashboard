@@ -15,7 +15,7 @@ docker exec -it supabase-db psql -U postgres -c "CREATE DATABASE old_crm;"
 
 ```bash
 OLD_CRM_DATABASE_URL=postgresql://postgres.ddmapuyghfeoyajxbcjh:PASSWORD@api.wrl-fsm.cloud:6543/old_crm?pgbouncer=true \
-  node scripts/apply-old-crm-schema.mjs
+  npm run db:apply-old-crm
 ```
 
 3. **Python deps**:
