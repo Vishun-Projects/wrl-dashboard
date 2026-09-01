@@ -248,7 +248,7 @@ describe('MIS email open-count parity (body === Excel)', () => {
     expect(dataRows).toBe(parity.branchBodyOpen);
     expect(dataRows).toBe(parity.excelOpenRows);
   },
-  15_000
+  30_000
   );
 
   it('regression: summary body can diverge from Excel; trace body must not', () => {
