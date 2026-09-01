@@ -154,7 +154,7 @@ export function ReportPageHeaderBar({
               onClick={onManualCallsHotSync}
               disabled={manualCallsHotSyncBusy}
               className="flex h-8 items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 text-[11px] font-semibold text-amber-950 shadow-sm transition-all hover:bg-amber-100 disabled:opacity-50"
-              title="Pull recent CRM changes into hot through yesterday IST (~2–5 min), then refresh register"
+              title="Start full YTD calls register sync (Jan 1 → yesterday IST) on VPS — runs in background ~1–3h; refresh when done"
             >
               {manualCallsHotSyncBusy ? 'Syncing…' : 'CRM sync → yesterday'}
             </button>

@@ -41,7 +41,7 @@ import {
   deriveRegisterPageFromCorpus,
   getFilteredCorpusCalls,
 } from '@/modules/mis/services/corpus';
-import { readRegisterFromPostgresClient, registerPostgresHotPathAvailable } from '@/lib/read-model/client-flags';
+import { readRegisterFromPostgresClient } from '@/lib/read-model/client-flags';
 import { deriveRegisterPageFromCalls, deriveRegisterView } from '@/modules/mis/services/register-view';
 import { ensurePortalAuditCache } from '@/modules/mis/services/portal-cache';
 import {
@@ -1009,7 +1009,7 @@ export function useRegisterDataFetch({
 
           const loadTotalsLazy = async () => {
             try {
-              const totalsPath = registerPostgresHotPathAvailable(startDateStr, endDateStr)
+              const totalsPath = readRegisterFromPostgresClient()
                 ? `/api/report/totals?officeId=${officeIdsParam}&callType=${viewCallTypesParam}`
                 : `/api/report?page=1&limit=1&fetchTotals=true&officeId=${officeIdsParam}&callType=${viewCallTypesParam}`;
               const totalsUrl = appendRegisterFilters(totalsPath);

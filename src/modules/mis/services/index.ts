@@ -10,8 +10,6 @@ export * from './corpus';
 export * from './corpus-storage';
 export * from './sync';
 export * from './register-view';
-export * from '@/lib/geo/pincode-geo';
-export * from '@/lib/summary/derive';
 export * from './portal-cache';
 export * from './preferences';
 export * from './call-type-badge';

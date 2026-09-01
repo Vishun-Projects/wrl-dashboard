@@ -16,9 +16,7 @@ import {
   verifyCallRegisterTransactionEntry,
 } from './verify';
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+import { sleep } from '@/lib/utils/async';
 
 /** Pause between backfill period fetches so we do not hammer CRM (default 1500ms). */
 function backfillGapMs(): number {

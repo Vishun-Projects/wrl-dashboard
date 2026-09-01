@@ -1,11 +1,9 @@
+import { sleep } from '@/lib/utils/async';
+
 export type FetchWithRetryOptions = RequestInit & {
   retries?: number;
   retryDelayMs?: number;
 };
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function isRetryableStatus(status: number): boolean {
   return status >= 500 || status === 429;

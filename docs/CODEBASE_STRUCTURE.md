@@ -99,6 +99,8 @@ src/modules/<name>/
 | `roles` | Roles & access |
 | `performance` | Performance insights |
 | `security-audit` | Security audit UI |
+| `cancelled-calls` | Cancelled call register |
+| `athena-reconciliation` | Athena failed-calls report (query/CSV in `server/`; CRM ingest in `lib/read-model/athena-reconciliation`) |
 | `auth` | Sign-in / sign-out / me / password-reset API |
 | `calls` | Call-by-id / comments / flags / offices API |
 | `sync` | Read-model status + VPS cron API |

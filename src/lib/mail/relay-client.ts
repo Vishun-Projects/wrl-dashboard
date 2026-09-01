@@ -1,5 +1,6 @@
 import { Agent, fetch as undiciFetch } from 'undici';
 
+import { sleep } from '@/lib/utils/async';
 export const DEFAULT_VPS_MAIL_RELAY_BASE = 'https://api.wrl-fsm.cloud';
 
 const RELAY_HEADERS_TIMEOUT_MS = Math.max(
@@ -116,9 +117,6 @@ export function resolveRelayRetryDelayMs(): number {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 400;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 export type RelayPostResult<T> = {
   ok: true;

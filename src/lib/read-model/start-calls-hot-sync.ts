@@ -40,11 +40,20 @@ function resolveCodeRoot(): string {
   return resolve(cwd, '../..');
 }
 
+export function ytdStartYmd(now = new Date()): string {
+  const year = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+  }).format(now);
+  return process.env.SYNC_EDITEDON_CATCHUP_FROM?.trim() || `${year}-01-01`;
+}
+
 export function startCallsHotSyncThroughYesterday(
   options?: { asOf?: string; rootDir?: string }
 ): StartCallsHotSyncResult {
   const root = options?.rootDir ?? resolveCodeRoot();
   const asOf = options?.asOf?.trim() || istYesterdayYmd();
+  const ytdStart = ytdStartYmd();
   const script = join(root, 'scripts', 'vps-hosting', 'midnight-calls-sync.sh');
   if (!existsSync(script)) {
     throw new Error(`missing ${script}`);
@@ -78,7 +87,7 @@ export function startCallsHotSyncThroughYesterday(
   const outFd = openSync(logPath, 'a');
   writeSync(
     outFd,
-    `\n=== manual calls-hot sync start ${new Date().toISOString()} asOf=${asOf} ===\n`
+    `\n=== manual calls-hot sync start ${new Date().toISOString()} YTD ${ytdStart} → ${asOf} ===\n`
   );
 
   const child = spawn('bash', [script], {
@@ -111,6 +120,6 @@ export function startCallsHotSyncThroughYesterday(
     asOf,
     pid,
     logPath,
-    detail: `started thorough sync through ${asOf} (pid ${pid ?? '?'})`,
+    detail: `Started YTD calls register sync ${ytdStart} → ${asOf} in background (pid ${pid ?? '?'})`,
   };
 }

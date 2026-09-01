@@ -1,4 +1,4 @@
-import type { BranchSummaryRow, SummaryDashboard } from '@/modules/mis';
+import type { BranchSummaryRow, SummaryDashboard } from '@/lib/summary/derive';
 import { MIS_EMAIL_THEME } from '@/modules/mis-email/services/email-template';
 import type { MisEmailBodyPermissions, MisEmailKeyAccountsByZone } from '@/modules/mis-email/services/preferences';
 import {

@@ -3,110 +3,9 @@ import type {
   AthenaFailedNormalizedRow,
   AthenaReconciliationFilterParams,
   AthenaRowsResponse,
-} from './types';
-
-function toList(val?: string | string[] | null): string[] {
-  if (!val) return [];
-  if (Array.isArray(val)) return val.filter((v) => Boolean(v) && v !== 'All');
-  if (val === 'All') return [];
-  return [val];
-}
-
-function buildRowsWhereClause(
-  params: AthenaReconciliationFilterParams,
-  alias = 'a'
-): { whereClause: string; values: unknown[] } {
-  const conditions: string[] = ['1=1'];
-  const values: unknown[] = [];
-  let paramIdx = 1;
-
-  if (params.startDate) {
-    conditions.push(`${alias}.call_date >= $${paramIdx++}`);
-    values.push(params.startDate);
-  }
-  if (params.endDate) {
-    conditions.push(`${alias}.call_date <= $${paramIdx++}::date + interval '1 day'`);
-    values.push(params.endDate);
-  }
-
-  const branchList = toList(params.branches || params.branch);
-  if (branchList.length > 0) {
-    conditions.push(`${alias}.branch_name = ANY($${paramIdx++}::text[])`);
-    values.push(branchList);
-  }
-
-  const clientList = toList(params.clients || params.client);
-  if (clientList.length > 0) {
-    conditions.push(`${alias}.client_caption = ANY($${paramIdx++}::text[])`);
-    values.push(clientList);
-  }
-
-  const callTypeList = toList(params.callTypes || params.callType);
-  if (callTypeList.length > 0) {
-    conditions.push(`${alias}.call_type = ANY($${paramIdx++}::text[])`);
-    values.push(callTypeList);
-  }
-
-  const reasonList = toList(params.failureReasons || params.failureReason);
-  if (reasonList.length > 0) {
-    conditions.push(`EXISTS (
-      SELECT 1 FROM unnest($${paramIdx++}::text[]) AS r
-      WHERE ${alias}.failure_reason = r
-         OR ${alias}.failure_reason ILIKE (r || '%')
-    )`);
-    values.push(reasonList);
-  }
-
-  const excludedList = toList(params.excludedReasons);
-  if (excludedList.length > 0) {
-    conditions.push(`(${alias}.failure_reason IS NULL OR NOT EXISTS (
-      SELECT 1 FROM unnest($${paramIdx++}::text[]) AS p
-      WHERE ${alias}.failure_reason ILIKE (p || '%')
-    ))`);
-    values.push(excludedList);
-  }
-
-  const treatList = toList(params.treatAsRegisteredReasons);
-  const hasTreat = treatList.length > 0;
-
-  if (params.status && params.status !== 'ALL') {
-    if (hasTreat) {
-      const treatIdx = paramIdx++;
-      values.push(params.treatAsRegisteredReasons);
-
-      if (params.status === 'REGISTERED') {
-        conditions.push(`(${alias}.reconciliation_status = 'REGISTERED' OR EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE ${alias}.failure_reason ILIKE (p || '%')) )`);
-      } else {
-        const statusIdx = paramIdx++;
-        values.push(params.status);
-        conditions.push(`(${alias}.reconciliation_status = $${statusIdx} AND NOT EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE ${alias}.failure_reason ILIKE (p || '%')) )`);
-      }
-    } else {
-      conditions.push(`${alias}.reconciliation_status = $${paramIdx++}`);
-      values.push(params.status);
-    }
-  }
-
-  if (params.search) {
-    const term = `%${params.search.trim()}%`;
-    conditions.push(`(
-      ${alias}.serial_no ILIKE $${paramIdx}
-      OR ${alias}.outlet_name ILIKE $${paramIdx}
-      OR ${alias}.client_ticket_no ILIKE $${paramIdx}
-      OR ${alias}.failure_reason ILIKE $${paramIdx}
-      OR ${alias}.branch_name ILIKE $${paramIdx}
-      OR ${alias}.client_caption ILIKE $${paramIdx}
-      OR ${alias}.matched_vtrnno ILIKE $${paramIdx}
-    )`);
-    values.push(term);
-    paramIdx++;
-  }
-
-  return {
-    whereClause: conditions.join(' AND '),
-    values,
-  };
-}
+} from '@/modules/athena-reconciliation/types';
+import { buildAthenaFilterSql } from '@/modules/athena-reconciliation/server/filter-sql';
+import { escapeCsvCell } from '@/lib/utils/csv';
 
 function resolveSortColumn(sortBy?: string): string {
   switch (sortBy) {
@@ -141,7 +40,10 @@ export async function fetchAthenaFailedCallsRows(
   params: AthenaReconciliationFilterParams = {}
 ): Promise<AthenaRowsResponse> {
   return withClient(async (client) => {
-    const { whereClause, values } = buildRowsWhereClause(params, 'a');
+    const { whereClause, values } = buildAthenaFilterSql(params, {
+      applyStatus: true,
+      includeSearch: true,
+    });
     const page = Math.max(1, Number(params.page) || 1);
     const pageSize = Math.max(1, Math.min(200, Number(params.pageSize) || 25));
     const offset = (page - 1) * pageSize;
@@ -320,20 +222,14 @@ export async function fetchAthenaFailedCallsRows(
   });
 }
 
-function escapeCsvField(val: unknown): string {
-  if (val === null || val === undefined) return '';
-  const str = String(val);
-  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
-}
-
 export async function generateAthenaReconciliationCsv(
   params: AthenaReconciliationFilterParams = {}
 ): Promise<string> {
   return withClient(async (client) => {
-    const { whereClause, values } = buildRowsWhereClause(params, 'a');
+    const { whereClause, values } = buildAthenaFilterSql(params, {
+      applyStatus: true,
+      includeSearch: true,
+    });
     const sortCol = resolveSortColumn(params.sortBy);
     const sortOrder = params.sortDir?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
@@ -403,23 +299,23 @@ export async function generateAthenaReconciliationCsv(
     for (const row of dataRes.rows) {
       lines.push(
         [
-          escapeCsvField(row.id),
-          escapeCsvField(row.client_caption),
-          escapeCsvField(row.branch_name),
-          escapeCsvField(row.client_ticket_no),
-          escapeCsvField(row.call_type),
-          escapeCsvField(row.outlet_name),
-          escapeCsvField(row.serial_no),
-          escapeCsvField(row.call_date),
-          escapeCsvField(row.received_date),
-          escapeCsvField(row.failure_reason),
-          escapeCsvField(row.reconciliation_status),
-          escapeCsvField(row.match_count),
-          escapeCsvField(row.matched_vtrnno),
-          escapeCsvField(row.all_matched_calls),
-          escapeCsvField(row.matched_crm_logged_at),
-          escapeCsvField(row.matched_crm_status),
-          escapeCsvField(row.reconciled_at),
+          escapeCsvCell(row.id),
+          escapeCsvCell(row.client_caption),
+          escapeCsvCell(row.branch_name),
+          escapeCsvCell(row.client_ticket_no),
+          escapeCsvCell(row.call_type),
+          escapeCsvCell(row.outlet_name),
+          escapeCsvCell(row.serial_no),
+          escapeCsvCell(row.call_date),
+          escapeCsvCell(row.received_date),
+          escapeCsvCell(row.failure_reason),
+          escapeCsvCell(row.reconciliation_status),
+          escapeCsvCell(row.match_count),
+          escapeCsvCell(row.matched_vtrnno),
+          escapeCsvCell(row.all_matched_calls),
+          escapeCsvCell(row.matched_crm_logged_at),
+          escapeCsvCell(row.matched_crm_status),
+          escapeCsvCell(row.reconciled_at),
         ].join(',')
       );
     }

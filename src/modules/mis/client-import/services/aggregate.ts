@@ -1,4 +1,4 @@
-import type { AccountSummaryRow, BranchSummaryRow } from '@/modules/mis';
+import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/summary/derive';
 import { withBulkReadClient } from '@/lib/read-model/db';
 import { SNAPSHOT_IMPORT_SOURCE_CODES } from '@/modules/mis/client-import/services/snapshot-sources';
 import type { StatusBucket } from '@/modules/mis/client-import/services/types';
@@ -31,7 +31,7 @@ function resolveAgingDate(params: ClientAggregateParams): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-import { incrementAgingBucket, openCallsFromAging } from '@/modules/mis';
+import { incrementAgingBucket, openCallsFromAging } from '@/lib/aging/buckets';
 
 function sqlDayDiff(loggedAt: Date, agingDate: string): number {
   const callDate = new Date(loggedAt);

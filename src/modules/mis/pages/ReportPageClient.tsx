@@ -818,8 +818,9 @@ export default function ReportPageClient() {
       const res = await axios.post<{
         success?: boolean;
         ok?: boolean;
+        started?: boolean;
         asOf?: string;
-        rowsUpserted?: number;
+        pid?: number | null;
         detail?: string;
         error?: string;
       }>(
@@ -829,13 +830,20 @@ export default function ReportPageClient() {
           headers: session?.access_token
             ? { Authorization: `Bearer ${session.access_token}` }
             : undefined,
-          timeout: 300_000,
+          timeout: 60_000,
         }
       );
-      if (!res.data.ok && res.data.success !== true) {
-        throw new Error(res.data.error || res.data.detail || 'Sync failed');
+      if (res.data.error) {
+        throw new Error(res.data.error);
       }
-      feedback.actionSuccess(res.data.detail || `Synced through ${res.data.asOf ?? 'yesterday'}`);
+      if (res.data.started === false) {
+        feedback.actionWarning(res.data.detail || 'YTD calls sync already running');
+      } else {
+        feedback.actionSuccess(
+          res.data.detail ||
+            `YTD calls register sync started through ${res.data.asOf ?? 'yesterday'}`
+        );
+      }
       await registerTabState.fetchDelta();
     } catch (err) {
       const message =

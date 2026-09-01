@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { resolveRequestUserId } from '@/lib/auth/server-user';
 import { isCrmOutOfMemoryError, postQuery } from '@/lib/db/proxy';
 
+import { sleep } from '@/lib/utils/async';
 import {
   appendCallTypeFilter,
   appendOfficeSecurityFilter,
@@ -193,9 +194,6 @@ async function fetchCorpusSlice(
   return mapCorpusRows((res.data || []) as Record<string, unknown>[]);
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function mergeRowsIntoMap(
   merged: Map<string, Record<string, unknown>>,

@@ -4,7 +4,7 @@ import type {
   AthenaFailedAttemptSummary,
   AthenaFailedNormalizedRow,
   AthenaInspectionDetail,
-} from './types';
+} from '@/modules/athena-reconciliation/types';
 
 const INVALID_SERIALS = new Set(['', '0', '00000000000000']);
 

@@ -1,0 +1,14 @@
+---
+description: Where code lives — module-first layout. Do not put logic in app/api or report queries in read-model.
+alwaysApply: true
+---
+
+# Module layout
+
+- `src/app/api/**/route.ts` re-exports from `@/modules/<domain>/server/routes/*`. Optional `maxDuration` only. No auth, parsing, or SQL there. Copy cancelled-calls, not a fat route.
+- `src/lib/read-model/` is CRM fetch, transform, upsert, reconcile workers. Report summary/rows/detail/CSV live in `modules/<domain>/server/` (and `src/sql/…`).
+- New report modules: `pages/`, `components/`, `server/routes/` (+ optional `server/sync`). Types live with the module, not a passthrough of lib.
+- `src/modules/<name>/index.ts` does not `export * from '@/lib/…'`. Cross-domain code imports `@/lib/…` directly.
+- Dates: UI → `@/lib/dates/*`; CRM parse → `@/lib/read-model/dates`; exports → `formatExportDate`. Do not add a fourth parser in a feature module.
+- Do not add chart libraries, axios, or a copied `lock.ts`. Use existing UI, `fetch` / `fetchWithRetry`, and the shared lock helper.
+- No new code under `src/features/` or `src/shared/`. Platform stays in `src/lib/`.

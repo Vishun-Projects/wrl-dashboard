@@ -40,7 +40,7 @@ function partsInZone(
  * Parse common CRM / ISO / slash date strings without relying on `new Date('dd/mm/yyyy')`
  * (which is locale-ambiguous). Returns null when not a plain calendar string.
  */
-function parseCalendarString(
+export function parseCalendarString(
   trimmed: string
 ): { day: string; month: string; year: string; hour?: string; minute?: string } | null {
   if (!trimmed || trimmed === '-' || trimmed === '0') return null;

@@ -6,7 +6,6 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { cookieAuthRequestConfig } from '@/lib/api/cookie-auth';
 import {
   readRegisterFromPostgresClient,
-  registerPostgresHotPathAvailable,
 } from '@/lib/read-model/client-flags';
 import {
   joinFilterParam,
@@ -34,10 +33,6 @@ export function useRegisterFilterOptions(
     if (
       !readRegisterFromPostgresClient() ||
       !appliedFilters ||
-      !registerPostgresHotPathAvailable(
-        toDateString(appliedFilters.dateRange.start),
-        toDateString(appliedFilters.dateRange.end)
-      ) ||
       loadedRef.current
     ) {
       return;

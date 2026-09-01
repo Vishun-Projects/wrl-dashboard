@@ -1,6 +1,7 @@
+import { parseCalendarString, UI_DATE_TIMEZONE } from '@/lib/dates/ui-date';
+
 /** Default timezone for export date columns (India operations). */
-export const EXPORT_DATE_TIMEZONE =
-  process.env.EXPORT_DATE_TIMEZONE?.trim() || 'Asia/Kolkata';
+export const EXPORT_DATE_TIMEZONE = UI_DATE_TIMEZONE;
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0');
@@ -16,29 +17,13 @@ export function formatExportDate(value: unknown): string {
 
   if (typeof value === 'string') {
     const trimmed = value.trim();
-    if (!trimmed || trimmed === '-' || trimmed === '0') return '';
-
-    const dotted = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/);
-    if (dotted) {
-      const base = formatDmyDots(dotted[1], dotted[2], dotted[3]);
-      if (dotted[4] != null && dotted[5] != null) {
-        return `${base} ${pad2(Number(dotted[4]))}:${dotted[5]}`;
+    const cal = parseCalendarString(trimmed);
+    if (cal) {
+      const base = formatDmyDots(cal.day, cal.month, cal.year);
+      if (cal.hour != null && cal.minute != null) {
+        return `${base} ${pad2(Number(cal.hour))}:${pad2(Number(cal.minute))}`;
       }
       return base;
-    }
-
-    const slashOrDash = trimmed.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
-    if (slashOrDash) {
-      const base = formatDmyDots(slashOrDash[1], slashOrDash[2], slashOrDash[3]);
-      if (slashOrDash[4] != null && slashOrDash[5] != null) {
-        return `${base} ${pad2(Number(slashOrDash[4]))}:${slashOrDash[5]}`;
-      }
-      return base;
-    }
-
-    const isoDateOnly = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (isoDateOnly) {
-      return formatDmyDots(isoDateOnly[3], isoDateOnly[2], isoDateOnly[1]);
     }
   }
 

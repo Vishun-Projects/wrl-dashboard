@@ -24,7 +24,7 @@ import {
   buildSummaryDashboardExportAlign,
   sumUiRegionalRows,
 } from '@/modules/mis/services/summary-trace-export';
-import type { AccountSummaryRow, BranchSummaryRow } from '@/modules/mis';
+import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/summary/derive';
 
 const SOURCES: BdMisSourceFlags = {
   crm: true,

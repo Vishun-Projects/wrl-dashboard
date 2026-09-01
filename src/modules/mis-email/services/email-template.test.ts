@@ -9,7 +9,7 @@ import {
   resolveMisEmailIntroText,
 } from '@/modules/mis-email/services/email-template';
 import type { DigestDateRange } from '@/modules/mis-email/services/fetch-digest-data';
-import type { SummaryDashboard } from '@/modules/mis';
+import type { SummaryDashboard } from '@/lib/summary/derive';
 
 const sampleRange: DigestDateRange = {
   startDate: '2026-07-01',

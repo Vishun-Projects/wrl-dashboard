@@ -306,14 +306,23 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.url === CALLS_HOT_SYNC_PATH) {
-      const body = (await readJson(req)) as { asOf?: string };
+      const body = (await readJson(req)) as { asOf?: string; mode?: 'fast' | 'thorough' };
       const asOf = typeof body.asOf === 'string' ? body.asOf.trim() : undefined;
-      const { runFastCallsHotSyncThroughYesterday } = await import(
-        '@/lib/read-model/manual-calls-hot-sync'
+      if (body.mode === 'fast') {
+        const { runFastCallsHotSyncThroughYesterday } = await import(
+          '@/lib/read-model/manual-calls-hot-sync'
+        );
+        const result = await runFastCallsHotSyncThroughYesterday(asOf);
+        res.writeHead(result.ok ? 200 : 502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: result.ok, ...result }));
+        return;
+      }
+      const { startCallsHotSyncThroughYesterday } = await import(
+        '@/lib/read-model/start-calls-hot-sync'
       );
-      const result = await runFastCallsHotSyncThroughYesterday(asOf);
-      res.writeHead(result.ok ? 200 : 502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: result.ok, ...result }));
+      const result = startCallsHotSyncThroughYesterday({ asOf, rootDir: root });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, ...result }));
       return;
     }
 

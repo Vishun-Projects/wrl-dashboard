@@ -1,5 +1,5 @@
 import { postQuery } from '@/lib/db/proxy';
-import { enrichCallRowForReport } from '@/modules/mis';
+import { enrichCallRowForReport } from '@/lib/geo/pincode-geo';
 import {
   buildSerialAuditBatchDetailRawSql,
   MAX_SERIAL_AUDIT_BATCH_SERIALS,

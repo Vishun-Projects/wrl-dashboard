@@ -19,6 +19,7 @@ jobs:
       - run: npm run check:feature-boundaries
         env:
           BOUNDARY_LIB_FEATURES: strict
+      - run: npx knip --include dependencies,devDependencies
       - run: npm test
       - run: npm run lint:ci
       - run: npm run typecheck

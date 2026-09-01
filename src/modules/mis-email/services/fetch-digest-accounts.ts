@@ -10,7 +10,7 @@ import {
 } from '@/modules/mis';
 import type { MisEmailKeyAccountsByZone } from '@/modules/mis-email/services/preferences';
 import { accountsMatchDisplayOrKey } from '@/modules/mis';
-import type { AccountSummaryRow } from '@/modules/mis';
+import type { AccountSummaryRow } from '@/lib/summary/derive';
 
 const DIGEST_MERGE_FLAGS: MergeSelection = {
   crm: true,

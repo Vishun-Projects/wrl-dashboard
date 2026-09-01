@@ -8,7 +8,7 @@ import {
   resolveDigestKeyAccountBodyRows,
   resolveDigestKeyAccountNames,
 } from '@/modules/mis-email/services/fetch-digest-accounts';
-import type { AccountSummaryRow } from '@/modules/mis';
+import type { AccountSummaryRow } from '@/lib/summary/derive';
 
 const crmAccounts: AccountSummaryRow[] = [
   {

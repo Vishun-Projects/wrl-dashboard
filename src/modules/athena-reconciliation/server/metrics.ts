@@ -8,114 +8,12 @@ import type {
   AthenaReconciliationKpis,
   AthenaReconciliationSummary,
   AthenaReasonDateMatrix,
-} from './types';
-
-interface FacetedFilterOptions {
-  omitField?: 'branch' | 'client' | 'callType' | 'failureReason';
-  applyStatus?: boolean;
-}
-
-function toList(val?: string | string[] | null): string[] {
-  if (!val) return [];
-  if (Array.isArray(val)) return val.filter((v) => Boolean(v) && v !== 'All');
-  if (val === 'All') return [];
-  return [val];
-}
-
-/** Unregistered + legacy multiple-match rows (latter folded into unregistered in UI). */
-function unregisteredStatusSql(alias: string, hasTreat: boolean, treatParamIdx: number): string {
-  const status = `${alias}.reconciliation_status IN ('NOT_REGISTERED', 'MULTIPLE_MATCHES')`;
-  if (!hasTreat) return `(${status})`;
-  return `(${status} AND NOT EXISTS (SELECT 1 FROM unnest($${treatParamIdx}::text[]) AS p WHERE ${alias}.failure_reason ILIKE (p || '%')))`;
-}
-
-function buildBaseFacetedConditions(
-  params: AthenaReconciliationFilterParams,
-  options: FacetedFilterOptions = {},
-  alias = 'a'
-): {
-  conditions: string[];
-  values: unknown[];
-} {
-  const conditions: string[] = ['1=1'];
-  const values: unknown[] = [];
-  let paramIdx = 1;
-
-  if (params.startDate) {
-    conditions.push(`${alias}.call_date >= $${paramIdx++}`);
-    values.push(params.startDate);
-  }
-  if (params.endDate) {
-    conditions.push(`${alias}.call_date <= $${paramIdx++}::date + interval '1 day'`);
-    values.push(params.endDate);
-  }
-
-  const branchList = toList(params.branches || params.branch);
-  if (options.omitField !== 'branch' && branchList.length > 0) {
-    conditions.push(`${alias}.branch_name = ANY($${paramIdx++}::text[])`);
-    values.push(branchList);
-  }
-
-  const clientList = toList(params.clients || params.client);
-  if (options.omitField !== 'client' && clientList.length > 0) {
-    conditions.push(`${alias}.client_caption = ANY($${paramIdx++}::text[])`);
-    values.push(clientList);
-  }
-
-  const callTypeList = toList(params.callTypes || params.callType);
-  if (options.omitField !== 'callType' && callTypeList.length > 0) {
-    conditions.push(`${alias}.call_type = ANY($${paramIdx++}::text[])`);
-    values.push(callTypeList);
-  }
-
-  const reasonList = toList(params.failureReasons || params.failureReason);
-  if (options.omitField !== 'failureReason' && reasonList.length > 0) {
-    conditions.push(`EXISTS (
-      SELECT 1 FROM unnest($${paramIdx++}::text[]) AS r
-      WHERE ${alias}.failure_reason = r
-         OR ${alias}.failure_reason ILIKE (r || '%')
-    )`);
-    values.push(reasonList);
-  }
-
-  const excludedList = toList(params.excludedReasons);
-  if (excludedList.length > 0) {
-    conditions.push(`(${alias}.failure_reason IS NULL OR NOT EXISTS (
-      SELECT 1 FROM unnest($${paramIdx++}::text[]) AS p
-      WHERE ${alias}.failure_reason ILIKE (p || '%')
-    ))`);
-    values.push(excludedList);
-  }
-
-  // If applying status filter
-  if (options.applyStatus && params.status && params.status !== 'ALL') {
-    const treatList = toList(params.treatAsRegisteredReasons);
-    const hasTreat = treatList.length > 0;
-
-    if (hasTreat) {
-      const treatIdx = paramIdx++;
-      values.push(treatList);
-
-      if (params.status === 'REGISTERED') {
-        conditions.push(
-          `(${alias}.reconciliation_status = 'REGISTERED' OR EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE ${alias}.failure_reason ILIKE (p || '%')) )`
-        );
-      } else {
-        const statusIdx = paramIdx++;
-        values.push(params.status);
-        conditions.push(
-          `(${alias}.reconciliation_status = $${statusIdx} AND NOT EXISTS (SELECT 1 FROM unnest($${treatIdx}::text[]) AS p WHERE ${alias}.failure_reason ILIKE (p || '%')) )`
-        );
-      }
-    } else {
-      const statusIdx = paramIdx++;
-      values.push(params.status);
-      conditions.push(`${alias}.reconciliation_status = $${statusIdx}`);
-    }
-  }
-
-  return { conditions, values };
-}
+} from '@/modules/athena-reconciliation/types';
+import {
+  buildAthenaFilterSql,
+  toList,
+  unregisteredStatusSql,
+} from '@/modules/athena-reconciliation/server/filter-sql';
 
 function dedupSubquery(whereClause: string): string {
   return `(
@@ -146,7 +44,7 @@ export async function fetchAthenaReconciliationSummary(
 
     // 1. Executive KPIs (calculated across all statuses for current filter scope)
     const { conditions: kpiConds, values: baseKpiValues } =
-      buildBaseFacetedConditions(params, { applyStatus: false }, 'a');
+      buildAthenaFilterSql(params, { applyStatus: false });
     const kpiWhere = kpiConds.join(' AND ');
     const kpiValues = hasTreat ? [...baseKpiValues, treatList] : baseKpiValues;
     const treatIdx = hasTreat ? kpiValues.length : -1;
@@ -203,7 +101,7 @@ export async function fetchAthenaReconciliationSummary(
 
     // 2. Daily Trend
     const { conditions: trendConds, values: baseTrendValues } =
-      buildBaseFacetedConditions(params, { applyStatus: false }, 'a');
+      buildAthenaFilterSql(params, { applyStatus: false });
     const trendWhere = trendConds.join(' AND ');
     const trendValues = hasTreat ? [...baseTrendValues, treatList] : baseTrendValues;
     const trendTreatIdx = hasTreat ? trendValues.length : -1;
@@ -253,7 +151,7 @@ export async function fetchAthenaReconciliationSummary(
 
     // 3. Breakdown by Failure Reason (Faceted: omit failureReason so all options remain available; apply status)
     const { conditions: reasonConds, values: reasonValues } =
-      buildBaseFacetedConditions(params, { omitField: 'failureReason', applyStatus: true }, 'a');
+      buildAthenaFilterSql(params, { omitField: 'failureReason', applyStatus: true });
     const reasonWhere = reasonConds.join(' AND ');
 
     const reasonRes = await client.query<{
@@ -295,7 +193,7 @@ export async function fetchAthenaReconciliationSummary(
 
     // 4. Breakdown by Call Type (Faceted: omit callType so all call types remain available)
     const { conditions: typeConds, values: typeValues } =
-      buildBaseFacetedConditions(params, { omitField: 'callType', applyStatus: true }, 'a');
+      buildAthenaFilterSql(params, { omitField: 'callType', applyStatus: true });
     const typeWhere = typeConds.join(' AND ');
 
     const typeRes = await client.query<{
@@ -325,7 +223,7 @@ export async function fetchAthenaReconciliationSummary(
 
     // 5. Breakdown by Client (Faceted: omit client so all clients remain available)
     const { conditions: clientConds, values: clientValues } =
-      buildBaseFacetedConditions(params, { omitField: 'client', applyStatus: true }, 'a');
+      buildAthenaFilterSql(params, { omitField: 'client', applyStatus: true });
     const clientWhere = clientConds.join(' AND ');
 
     const clientRes = await client.query<{
@@ -355,7 +253,7 @@ export async function fetchAthenaReconciliationSummary(
 
     // 6. Breakdown by Branch (Faceted: omit branch so all branches remain available)
     const { conditions: branchConds, values: branchValues } =
-      buildBaseFacetedConditions(params, { omitField: 'branch', applyStatus: true }, 'a');
+      buildAthenaFilterSql(params, { omitField: 'branch', applyStatus: true });
     const branchWhere = branchConds.join(' AND ');
 
     const branchRes = await client.query<{
@@ -385,7 +283,7 @@ export async function fetchAthenaReconciliationSummary(
 
     // 7. Top 10 Problem Serials (strictly NOT_REGISTERED after pattern exclusions)
     const { conditions: serialsConds, values: baseSerialsValues } =
-      buildBaseFacetedConditions(params, { applyStatus: false }, 'a');
+      buildAthenaFilterSql(params, { applyStatus: false });
     const serialsWhere = serialsConds.join(' AND ');
     const serialsValues = hasTreat ? [...baseSerialsValues, treatList] : baseSerialsValues;
     const serialsTreatIdx = hasTreat ? serialsValues.length : -1;
@@ -426,7 +324,7 @@ export async function fetchAthenaReconciliationSummary(
 
     // 8. Top 10 Problem Outlets (strictly NOT_REGISTERED after pattern exclusions)
     const { conditions: outletsConds, values: baseOutletsValues } =
-      buildBaseFacetedConditions(params, { applyStatus: false }, 'a');
+      buildAthenaFilterSql(params, { applyStatus: false });
     const outletsWhere = outletsConds.join(' AND ');
     const outletsValues = hasTreat ? [...baseOutletsValues, treatList] : baseOutletsValues;
     const outletsTreatIdx = hasTreat ? outletsValues.length : -1;
@@ -546,7 +444,6 @@ export async function fetchAthenaReasonDateMatrix(
     ...params,
     startDate: window.start,
     endDate: window.end,
-    failureReason: null,
     failureReasons: [],
     status: 'ALL',
   };
@@ -555,10 +452,9 @@ export async function fetchAthenaReasonDateMatrix(
     const treatList = toList(params.treatAsRegisteredReasons);
     const hasTreat = treatList.length > 0;
 
-    const { conditions, values } = buildBaseFacetedConditions(
+    const { conditions, values } = buildAthenaFilterSql(
       matrixParams,
       { omitField: 'failureReason', applyStatus: false },
-      'a'
     );
     const where = conditions.join(' AND ');
     const statusValues = hasTreat ? [...values, treatList] : values;

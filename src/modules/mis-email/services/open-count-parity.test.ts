@@ -6,7 +6,7 @@ import {
 } from '@/modules/mis-email/services/mail-basis';
 import { buildBdMisOpenCallsWorkbook } from '@/modules/mis';
 import { buildBdMisTraceRows } from '@/modules/mis';
-import type { AccountSummaryRow, BranchSummaryRow, SummaryDashboard } from '@/modules/mis';
+import type { AccountSummaryRow, BranchSummaryRow, SummaryDashboard } from '@/lib/summary/derive';
 
 function branch(zone: string, open: number): BranchSummaryRow {
   return {

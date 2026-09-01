@@ -10,7 +10,7 @@ import { buildBdMisTraceRows } from '@/modules/mis';
 import { SUMMARY_DEFAULT_CALL_TYPE } from '@/modules/mis';
 import { MIS_EMAIL_CLIENT_SOURCE_CODES } from '@/modules/mis-email/services/source-codes';
 import { buildMisEmailBdMisRegionalPayload, misEmailBdMisSources, reconcileMisEmailOpenCounts } from '@/modules/mis-email/services/mail-basis';
-import type { AccountSummaryRow, SummaryDashboard } from '@/modules/mis';
+import type { AccountSummaryRow, SummaryDashboard } from '@/lib/summary/derive';
 import { enrichRegisterRowsRepairDone } from '@/sql/register/repair-done-enrich';
 
 const OPEN_STATUS_BUCKETS = ['open_unallocated', 'assigned'] as const;

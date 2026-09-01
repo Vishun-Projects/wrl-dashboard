@@ -14,7 +14,7 @@ import {
   filterTraceRowsForSummaryExport,
   type BdMisTraceRow,
 } from '@/modules/mis';
-import type { AccountSummaryRow, SummaryDashboard } from '@/modules/mis';
+import type { AccountSummaryRow, SummaryDashboard } from '@/lib/summary/derive';
 
 export type { BranchPerformanceRow, RegionalPerformanceRow } from '@/modules/mis-email/services/mail-types';
 

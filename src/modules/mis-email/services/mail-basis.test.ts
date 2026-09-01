@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AccountSummaryRow, BranchSummaryRow, SummaryDashboard } from '@/modules/mis';
+import type { AccountSummaryRow, BranchSummaryRow, SummaryDashboard } from '@/lib/summary/derive';
 import {
   assertMisEmailOpenParity,
   buildMisEmailBranchPerformanceRowsFromTrace,

@@ -160,6 +160,9 @@ run_step backfill-wco npm run sync-worker:backfill-wco -- --from "${WCO_FROM}" -
 run_step fill-hot-gaps npm run sync-worker:fill-hot-gaps -- --from "${YTD_START}" --to "${AS_OF}" \
   || echo "WARN: fill-hot-gaps failed (non-fatal)"
 
+run_step athena-reconcile npm run sync-worker:athena-reconcile \
+  || echo "WARN: Athena reconcile after hot sync failed (non-fatal)"
+
 if [[ "$fatal" -ne 0 ]]; then
   echo "=== midnight-calls-sync INCOMPLETE $(TZ=Asia/Kolkata date -Iseconds) AS_OF=${AS_OF} ===" >&2
   exit 1

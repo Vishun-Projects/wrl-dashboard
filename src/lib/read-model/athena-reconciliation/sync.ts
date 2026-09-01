@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { withAppClient } from '@/lib/read-model/db';
-import { fetchCrmAthenaFailedCalls } from './crm-fetch';
+import { fetchCrmAthenaFailedCalls, fetchCrmAthenaFailedCallsIncremental } from './crm-fetch';
 import { computeAthenaRawFingerprint, normalizeAthenaFailedRow } from './normalize';
 import { executeAthenaReconciliation, type ReconciliationRunStats } from './reconcile';
 
@@ -67,13 +67,16 @@ export async function runAthenaFailedCallsSync(
     let crmRows: Awaited<ReturnType<typeof fetchCrmAthenaFailedCalls>>;
 
     if (watermarkAddedon || opts?.dateFrom || opts?.fullBackfill) {
-      // Incremental: watermark covers a small recent window — single query is fine
-      crmRows = await fetchCrmAthenaFailedCalls({
-        dateFrom: opts?.dateFrom,
-        dateTo: opts?.dateTo,
-        watermarkAddedon,
-        fullBackfill: opts?.fullBackfill,
-      });
+      if (watermarkAddedon && !opts?.dateFrom && !opts?.fullBackfill) {
+        crmRows = await fetchCrmAthenaFailedCallsIncremental(watermarkAddedon);
+      } else {
+        crmRows = await fetchCrmAthenaFailedCalls({
+          dateFrom: opts?.dateFrom,
+          dateTo: opts?.dateTo,
+          watermarkAddedon,
+          fullBackfill: opts?.fullBackfill,
+        });
+      }
     } else {
       // No watermark: chunk YTD by month to avoid CRM query OOM
       // ponytail: 1-month chunk is conservative; raise ATHENA_CHUNK_MONTHS if CRM can handle more

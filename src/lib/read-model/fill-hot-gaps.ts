@@ -11,6 +11,7 @@
  *   npx tsx src/lib/read-model/cli.ts fill-hot-gaps --skip-short-days --from 2025-09-01 --to 2025-12-31
  */
 import { forEachCrmBackfillChunk, fetchCrmRowsByTrns } from '@/lib/read-model/crm-fetch';
+import { sleep } from '@/lib/utils/async';
 import { dayBeforeDate, registerHotRetentionStart } from '@/lib/read-model/hot-window';
 import { processCrmRowsForYtdLoad } from '@/lib/read-model/transform';
 import { countHotRows, upsertHotRows } from '@/lib/read-model/upsert-hot';
@@ -44,10 +45,6 @@ function eachDay(start: string, end: string): string[] {
     d.setDate(d.getDate() + 1);
   }
   return out;
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((r) => setTimeout(r, ms));
 }
 
 async function resolveInstallationCallTypeCode(): Promise<number> {

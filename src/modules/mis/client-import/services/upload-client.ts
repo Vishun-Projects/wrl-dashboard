@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { sleep } from '@/lib/utils/async';
 import {
   formatMisVercelUploadTooLargeMessage,
   isBrowserOnVercel,
@@ -132,9 +133,6 @@ export function validateMisUploadFileSize(file: File): string | null {
   return `File is ${mb} MB. Maximum upload size is ${maxMb} MB.`;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function isRetryableChunkError(err: unknown): boolean {
   if (!axios.isAxiosError(err)) return false;

@@ -8,7 +8,7 @@ import {
   resolveEffectiveBodySections,
   type MisEmailBodyContext,
 } from '@/modules/mis-email/services/body-sections';
-import type { SummaryDashboard } from '@/modules/mis';
+import type { SummaryDashboard } from '@/lib/summary/derive';
 import { buildMisEmailRegionalPerformanceRows } from '@/modules/mis-email/services/mail-basis';
 
 const sampleData: SummaryDashboard = {

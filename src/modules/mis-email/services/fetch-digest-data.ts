@@ -4,7 +4,7 @@ import {
 } from '@/sql/read-model/register';
 import { querySummaryDashboard } from '@/sql/read-model/summary';
 import { readCallsFromPostgres, readSummaryFromPostgres } from '@/lib/read-model/flags';
-import type { SummaryDashboard } from '@/modules/mis';
+import type { SummaryDashboard } from '@/lib/summary/derive';
 import type { DigestRecipient } from '@/modules/mis-email/services/recipients';
 import type { UserDigestScope } from '@/modules/mis-email/services/user-scope';
 import { SUMMARY_DEFAULT_CALL_TYPE } from '@/modules/mis';

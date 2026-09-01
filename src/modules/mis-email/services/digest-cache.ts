@@ -3,7 +3,7 @@ import { fetchDigestSummaryData } from '@/modules/mis-email/services/fetch-diges
 import { fetchDigestClientAccountSummary } from '@/modules/mis-email/services/fetch-digest-accounts';
 import { isDirectDatabaseForBulkReads } from '@/lib/read-model/db';
 import type { UserDigestScope } from '@/modules/mis-email/services/user-scope';
-import type { AccountSummaryRow, SummaryDashboard } from '@/modules/mis';
+import type { AccountSummaryRow, SummaryDashboard } from '@/lib/summary/derive';
 
 const LOG_PREFIX = '[mis-email/timing]';
 

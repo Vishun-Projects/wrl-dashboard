@@ -2,6 +2,7 @@ import { postQuery, isCrmOutOfMemoryError, isCrmSqlTimeoutError } from '@/lib/db
 import { splitDateRangeByDays } from '@/lib/read-model/dates';
 import { formatCrmDateTime } from '@/lib/read-model/dates';
 
+import { sleep } from '@/lib/utils/async';
 const FETCH_GAP_MS = Number(process.env.ARCP_FETCH_GAP_MS ?? 1200) || 1200;
 const RETRY_DELAYS_MS = [3000, 10000, 30000];
 /** Default CRM window — heavy weeks OOM at 7 days; override with ARCP_BACKFILL_CHUNK_DAYS. */
@@ -102,9 +103,6 @@ OUTER APPLY (
 ) major
 `.trim();
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /** Avoid `target.push(...rows)` — spreads >~10k elements blow the JS call stack. */
 function appendRows(

@@ -1,6 +1,7 @@
 import { postQuery, isCrmOutOfMemoryError } from '@/lib/db/proxy';
 import { parseCrmDaddedon, periodDays, TRANSACTION_ENTRY_PROCESSED_SQL } from './shared';
 
+import { sleep } from '@/lib/utils/async';
 /** Gap between CRM calls when chunking after OOM / between slices (default 1000ms). */
 const FETCH_GAP_MS = Number(process.env.TRANSACTION_ENTRY_FETCH_GAP_MS ?? 1000) || 1000;
 
@@ -30,9 +31,6 @@ function sqlLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function buildSelect(client: string | null, dateFrom: string, dateTo: string): string {
   const clientFilter = client ? `AND Client = ${sqlLiteral(client)}` : '';

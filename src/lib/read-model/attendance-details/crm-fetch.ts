@@ -3,13 +3,11 @@ import { formatLocalDate } from '@/lib/dates/local-date';
 import { splitDateRangeByDays } from '@/lib/read-model/dates';
 import { mapCrmAttendanceRow, type AttendanceDetailRow } from './map';
 
+import { sleep } from '@/lib/utils/async';
 const CRM_TIMEOUT_MS = Number(process.env.ATTENDANCE_CRM_TIMEOUT_MS ?? 180_000) || 180_000;
 const FETCH_GAP_MS = Number(process.env.ATTENDANCE_FETCH_GAP_MS ?? 800) || 800;
 const CHUNK_DAYS = Math.max(1, Number(process.env.ATTENDANCE_CHUNK_DAYS ?? 1) || 1);
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 export function addDays(isoDate: string, days: number): string {
   const d = new Date(`${isoDate}T00:00:00`);

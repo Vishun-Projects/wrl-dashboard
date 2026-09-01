@@ -24,16 +24,6 @@ export function readRegisterFromPostgresClient(): boolean {
   );
 }
 
-/** Postgres register APIs (/totals, /filter-options) when READ_REGISTER_FROM=postgres. */
-export function registerPostgresHotPathAvailable(
-  _startDate?: string,
-  _endDate?: string
-): boolean {
-  void _startDate;
-  void _endDate;
-  return readRegisterFromPostgresClient();
-}
-
 function readDistributionFromPostgresClient(): boolean {
   return (
     readClientSource(process.env.NEXT_PUBLIC_READ_DISTRIBUTION_FROM) === 'postgres'
@@ -62,13 +52,4 @@ export function readCallsFromPostgresClient(): boolean {
     readDistributionFromPostgresClient() ||
     readArcpFromPostgresClient()
   );
-}
-
-/**
- * Browser must not run CRM ingest when the UI reads from Postgres — that runs on the sync worker.
- * (Calling CRM from Vercel can hit viewstate OOM; the refresh button reloads from Supabase only.)
- */
-export function postgresAutoSyncEnabled(): boolean {
-  if (readCallsFromPostgresClient()) return false;
-  return process.env.NEXT_PUBLIC_AUTO_SYNC_ENABLED !== 'false';
 }

@@ -1,6 +1,7 @@
 import { postQuery, isCrmOutOfMemoryError, isCrmSqlTimeoutError } from '@/lib/db/proxy';
 import { withClient } from '@/lib/read-model/db';
 import { splitDateRangeByDays, todayLocalDate, daysAgoDate } from '@/lib/read-model/dates';
+import { sleep } from '@/lib/utils/async';
 import { ARCP_NCODE_SHARD_INITIAL, ARCP_NCODE_SHARD_MAX } from '@/modules/arcp-claims/server/sync/crm-fetch';
 import { processArcpRows } from '@/modules/arcp-claims/server/sync/transform';
 import { upsertArcpRows } from '@/modules/arcp-claims/server/sync/upsert';
@@ -18,10 +19,6 @@ export type ArcpApprovalRescanResult = {
   rowsUpserted: number;
   chunksProcessed: number;
 };
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 function appendRows(target: Record<string, unknown>[], source: Record<string, unknown>[]): void {
   for (let i = 0; i < source.length; i++) target.push(source[i]);

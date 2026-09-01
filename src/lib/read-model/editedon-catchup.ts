@@ -11,12 +11,10 @@ import {
 import { applyCrmRowsToHot } from '@/lib/read-model/apply-crm-delta';
 import { formatLocalDate } from '@/lib/dates/local-date';
 
+import { sleep } from '@/lib/utils/async';
 const CATCHUP_ENTITY = 'calls_latest_hot_editedon_catchup';
 const FETCH_GAP_MS = Number(process.env.SYNC_CRM_FETCH_GAP_MS ?? 1500) || 1500;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function catchupEnabled(): boolean {
   return process.env.SYNC_EDITEDON_CATCHUP_ENABLED !== 'false';

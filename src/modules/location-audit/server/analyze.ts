@@ -15,7 +15,7 @@ import {
   parseVisitGpsFromFields,
   type CrmGpsSource,
 } from '@/lib/geo/parse-latlong';
-import { resolveInstallAddressCoords } from '@/modules/mis';
+import { resolveInstallAddressCoords } from '@/lib/geo/pincode-geo';
 
 import type {
   LocationAuditByBranch,

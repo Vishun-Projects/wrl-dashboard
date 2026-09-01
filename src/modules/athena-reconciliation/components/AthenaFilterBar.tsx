@@ -295,10 +295,10 @@ export function AthenaFilterBar({
   failureReasonOptions,
   onOpenReasonRules,
 }: AthenaFilterBarProps) {
-  const selectedBranches = toArray(filters.branches || filters.branch);
-  const selectedClients = toArray(filters.clients || filters.client);
-  const selectedCallTypes = toArray(filters.callTypes || filters.callType);
-  const selectedFailureReasons = toArray(filters.failureReasons || filters.failureReason);
+  const selectedBranches = toArray(filters.branches);
+  const selectedClients = toArray(filters.clients);
+  const selectedCallTypes = toArray(filters.callTypes);
+  const selectedFailureReasons = toArray(filters.failureReasons);
 
   const dateRange: ReportDateRange = {
     start: filters.startDate
@@ -339,14 +339,12 @@ export function AthenaFilterBar({
       const updated = selectedFailureReasons.filter((r) => r !== reasonLabel);
       onFilterChange({
         failureReasons: updated,
-        failureReason: updated.length === 1 ? updated[0] : updated.length === 0 ? null : updated,
         page: 1,
       });
     } else {
       const updated = [...selectedFailureReasons, reasonLabel];
       onFilterChange({
         failureReasons: updated,
-        failureReason: updated.length === 1 ? updated[0] : updated,
         page: 1,
       });
     }
@@ -394,7 +392,6 @@ export function AthenaFilterBar({
             onSelect={(vals) =>
               onFilterChange({
                 branches: vals,
-                branch: vals.length === 1 ? vals[0] : vals.length === 0 ? null : vals,
                 page: 1,
               })
             }
@@ -411,7 +408,6 @@ export function AthenaFilterBar({
             onSelect={(vals) =>
               onFilterChange({
                 clients: vals,
-                client: vals.length === 1 ? vals[0] : vals.length === 0 ? null : vals,
                 page: 1,
               })
             }
@@ -428,7 +424,6 @@ export function AthenaFilterBar({
             onSelect={(vals) =>
               onFilterChange({
                 callTypes: vals,
-                callType: vals.length === 1 ? vals[0] : vals.length === 0 ? null : vals,
                 page: 1,
               })
             }
@@ -445,7 +440,6 @@ export function AthenaFilterBar({
             onSelect={(vals) =>
               onFilterChange({
                 failureReasons: vals,
-                failureReason: vals.length === 1 ? vals[0] : vals.length === 0 ? null : vals,
                 page: 1,
               })
             }
@@ -496,7 +490,6 @@ export function AthenaFilterBar({
             onClick={() =>
               onFilterChange({
                 failureReasons: [],
-                failureReason: null,
                 page: 1,
               })
             }

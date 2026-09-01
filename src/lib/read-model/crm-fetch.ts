@@ -13,6 +13,7 @@ import {
   todayLocalDate,
 } from '@/lib/read-model/dates';
 import { formatLocalDate } from '@/lib/dates/local-date';
+import { sleep } from '@/lib/utils/async';
 /** Initial ncode shards per day — lighter sync query than ARCP; default 8 (ARCP uses 16 on a simpler table). */
 export const SYNC_CRM_NCODE_SHARD_INITIAL =
   Number(process.env.SYNC_CRM_NCODE_SHARD_INITIAL ?? 8) || 8;
@@ -72,9 +73,6 @@ export type CrmIncrementalPlan = {
   estimatedCrmRequests: number;
 };
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function rangeSpanDays(startDate: string, endDate: string): number {
   const start = new Date(`${startDate}T00:00:00`);

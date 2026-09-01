@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
 import { withAppClient } from '@/lib/read-model/db';
-import type { AthenaReconciliationStatus } from './types';
+import type { AthenaReconciliationStatus } from '@/modules/athena-reconciliation/types';
 
 export type ReconciliationRunStats = {
   totalProcessed: number;
@@ -212,13 +212,17 @@ export async function executeAthenaReconciliation(
         ${targetId ? `AND id = ${targetId}` : ''}
     `);
 
-    // Match records against calls_latest_hot across:
-    // 1. Direct Service Order No extracted from result_value text ("Call is Already Open. Service Order No. is X")
-    // 2. Direct CCLID match (client_ticket_no === vcclid)
-    // 3. Standard 4-way match (Call Type + Outlet + Serial + logged_at >= call_date)
-    // 4. CCLID Already Exist matched by Serial No
+    // Match records against call register (hot + mirror gaps):
     const matchQuery = `
-      WITH candidate_matches AS (
+      WITH crm_register AS (
+        SELECT vtrnno, vcclid, status_label, party_name, call_type, serial, logged_at
+        FROM calls_latest_hot
+        UNION ALL
+        SELECT m.vtrnno, m.vcclid, m.status_label, m.party_name, m.call_type, m.serial, m.logged_at
+        FROM calls_crm_mirror m
+        WHERE NOT EXISTS (SELECT 1 FROM calls_latest_hot h WHERE h.vtrnno = m.vtrnno)
+      ),
+      candidate_matches AS (
         -- 1. Direct Service Order No from result_value text
         SELECT
           a.id,
@@ -231,7 +235,7 @@ export async function executeAthenaReconciliation(
           c.logged_at,
           1 AS priority
         FROM athena_failed_calls_normalized a
-        JOIN calls_latest_hot c
+        JOIN crm_register c
           ON c.vtrnno = TRIM(SUBSTRING(a.result_value FROM '(?i)(?:Service Order No\\.?\\s*is|Call No\\.?\\s*is)\\s*([A-Z0-9]+)'))
         WHERE a.result_value ILIKE '%Service Order No%is%' OR a.result_value ILIKE '%Call No%is%'
           ${targetId ? `AND a.id = ${targetId}` : ''}
@@ -250,7 +254,7 @@ export async function executeAthenaReconciliation(
           c.logged_at,
           2 AS priority
         FROM athena_failed_calls_normalized a
-        JOIN calls_latest_hot c
+        JOIN crm_register c
           ON UPPER(TRIM(c.vcclid)) = UPPER(TRIM(a.client_ticket_no))
         WHERE a.client_ticket_no IS NOT NULL AND a.client_ticket_no NOT IN ('', '0')
           ${targetId ? `AND a.id = ${targetId}` : ''}
@@ -269,7 +273,7 @@ export async function executeAthenaReconciliation(
           c.logged_at,
           3 AS priority
         FROM athena_failed_calls_normalized a
-        JOIN calls_latest_hot c
+        JOIN crm_register c
           ON UPPER(TRIM(c.call_type)) = UPPER(TRIM(a.call_type))
          AND UPPER(TRIM(c.party_name)) = UPPER(TRIM(a.outlet_name))
          AND UPPER(REGEXP_REPLACE(COALESCE(c.serial, ''), '\\s+', '', 'g')) = UPPER(REGEXP_REPLACE(COALESCE(a.serial_no, ''), '\\s+', '', 'g'))
@@ -291,7 +295,7 @@ export async function executeAthenaReconciliation(
           c.logged_at,
           4 AS priority
         FROM athena_failed_calls_normalized a
-        JOIN calls_latest_hot c
+        JOIN crm_register c
           ON UPPER(REGEXP_REPLACE(COALESCE(c.serial, ''), '\\s+', '', 'g')) = UPPER(REGEXP_REPLACE(COALESCE(a.serial_no, ''), '\\s+', '', 'g'))
         WHERE (a.failure_reason ILIKE '%cclid%' OR a.result_value ILIKE '%cclid%')
           AND a.serial_no IS NOT NULL AND a.serial_no NOT IN ('', '00000000000000', '0')

@@ -8,6 +8,8 @@
  *  - src/shared → @/features or @/modules
  *  - src/lib → @/features unless listed in scripts/quality/boundary-lib-features-debt.txt
  *  - deep feature→feature / module→module imports (STRICT, default on)
+ *  - src/app/api route.ts handler bodies (re-export + maxDuration only)
+ *  - src/modules/<name>/index.ts re-exporting @/lib
  *
  * Soft (never fail alone):
  *  - allowlisted lib→features debt (inventory)
@@ -392,6 +394,47 @@ if (softStale.length) {
   console.log(`Stale allowlist entries (${softStale.length}):`);
   for (const s of softStale) console.log(' ', s);
   console.log('');
+}
+
+const apiRoutesRoot = join(srcRoot, 'app', 'api');
+if (existsSync(apiRoutesRoot)) {
+  for (const file of walk(apiRoutesRoot)) {
+    const norm = file.split('\\').join('/');
+    if (!norm.endsWith('/route.ts')) continue;
+    const text = readFileSync(file, 'utf8');
+    const rel = relative(root, file).split('\\').join('/');
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith('//') || line.startsWith('/*') || line.startsWith('*') || line.startsWith('*/')) {
+        continue;
+      }
+      if (line.startsWith('import type ')) continue;
+      if (/^export\s+\{[^}]+}\s+from\s+['"]/.test(line)) continue;
+      if (/^export\s+const\s+maxDuration\s*=/.test(line)) continue;
+      if (/^export\s+const\s+runtime\s*=/.test(line)) continue;
+      hard.push(
+        `${rel}: fat API route — re-export from modules/*/server/routes only\n  ${line}`
+      );
+      break;
+    }
+  }
+}
+
+if (existsSync(modulesRoot)) {
+  for (const name of readdirSync(modulesRoot)) {
+    const indexPath = join(modulesRoot, name, 'index.ts');
+    if (!existsSync(indexPath)) continue;
+    const text = readFileSync(indexPath, 'utf8');
+    const rel = relative(root, indexPath).split('\\').join('/');
+    for (const raw of text.split(/\r?\n/)) {
+      if (
+        /export\s+\*\s+from\s+['"]@\/lib\//.test(raw) ||
+        /export\s+\{[^}]*\}\s+from\s+['"]@\/lib\//.test(raw)
+      ) {
+        hard.push(`${rel}: module barrel must not re-export @/lib\n  ${raw.trim()}`);
+      }
+    }
+  }
 }
 
 if (hard.length) {

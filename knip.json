@@ -16,5 +16,9 @@
   "project": [
     "src/**/*.{js,jsx,ts,tsx}",
     "scripts/**/*.{mjs,ts}"
+  ],
+  "ignoreDependencies": [
+    "sharp",
+    "tailwindcss"
   ]
 }

@@ -12,7 +12,6 @@ import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import { AthenaKpiCards } from '../components/AthenaKpiCards';
 import { AthenaReasonDateMatrixPanel } from '../components/AthenaReasonDateMatrix';
 import { AthenaFilterBar } from '../components/AthenaFilterBar';
-import { AthenaTrendAndBreakdown } from '../components/AthenaTrendAndBreakdown';
 import { AthenaDataTable } from '../components/AthenaDataTable';
 import { AthenaPayloadModal } from '../components/AthenaPayloadModal';
 import { AthenaReasonRulesModal } from '../components/AthenaReasonRulesModal';
@@ -67,7 +66,6 @@ export default function AthenaReconciliationPageClient() {
   const [isLoadingSummary, setIsLoadingSummary] = useState<boolean>(true);
   const [isLoadingRows, setIsLoadingRows] = useState<boolean>(true);
   const [isExportingCsv, setIsExportingCsv] = useState<boolean>(false);
-  const [showCharts, setShowCharts] = useState<boolean>(true);
   const [selectedRow, setSelectedRow] = useState<AthenaFailedNormalizedRow | null>(null);
   const [isReasonRulesOpen, setIsReasonRulesOpen] = useState<boolean>(false);
 
@@ -79,10 +77,10 @@ export default function AthenaReconciliationPageClient() {
       params.set('mode', 'summary');
       if (filters.startDate) params.set('startDate', filters.startDate);
       if (filters.endDate) params.set('endDate', filters.endDate);
-      appendListParam(params, 'branch', filters.branches || filters.branch);
-      appendListParam(params, 'client', filters.clients || filters.client);
-      appendListParam(params, 'callType', filters.callTypes || filters.callType);
-      appendListParam(params, 'failureReason', filters.failureReasons || filters.failureReason);
+      appendListParam(params, 'branch', filters.branches);
+      appendListParam(params, 'client', filters.clients);
+      appendListParam(params, 'callType', filters.callTypes);
+      appendListParam(params, 'failureReason', filters.failureReasons);
       if (filters.status && filters.status !== 'ALL') params.set('status', filters.status);
       if (filters.excludedReasons && filters.excludedReasons.length > 0) {
         params.set('excludedReasons', filters.excludedReasons.join(','));
@@ -105,13 +103,9 @@ export default function AthenaReconciliationPageClient() {
     filters.startDate,
     filters.endDate,
     filters.branches,
-    filters.branch,
     filters.clients,
-    filters.client,
     filters.callTypes,
-    filters.callType,
     filters.failureReasons,
-    filters.failureReason,
     filters.status,
     filters.excludedReasons,
     filters.treatAsRegisteredReasons,
@@ -125,10 +119,10 @@ export default function AthenaReconciliationPageClient() {
       params.set('mode', 'rows');
       if (filters.startDate) params.set('startDate', filters.startDate);
       if (filters.endDate) params.set('endDate', filters.endDate);
-      appendListParam(params, 'branch', filters.branches || filters.branch);
-      appendListParam(params, 'client', filters.clients || filters.client);
-      appendListParam(params, 'callType', filters.callTypes || filters.callType);
-      appendListParam(params, 'failureReason', filters.failureReasons || filters.failureReason);
+      appendListParam(params, 'branch', filters.branches);
+      appendListParam(params, 'client', filters.clients);
+      appendListParam(params, 'callType', filters.callTypes);
+      appendListParam(params, 'failureReason', filters.failureReasons);
       if (filters.status && filters.status !== 'ALL') params.set('status', filters.status);
       if (filters.search) params.set('search', filters.search);
       if (filters.excludedReasons && filters.excludedReasons.length > 0) {
@@ -156,13 +150,9 @@ export default function AthenaReconciliationPageClient() {
     filters.startDate,
     filters.endDate,
     filters.branches,
-    filters.branch,
     filters.clients,
-    filters.client,
     filters.callTypes,
-    filters.callType,
     filters.failureReasons,
-    filters.failureReason,
     filters.status,
     filters.search,
     filters.excludedReasons,
@@ -204,10 +194,10 @@ export default function AthenaReconciliationPageClient() {
       params.set('format', 'csv');
       if (filters.startDate) params.set('startDate', filters.startDate);
       if (filters.endDate) params.set('endDate', filters.endDate);
-      appendListParam(params, 'branch', filters.branches || filters.branch);
-      appendListParam(params, 'client', filters.clients || filters.client);
-      appendListParam(params, 'callType', filters.callTypes || filters.callType);
-      appendListParam(params, 'failureReason', filters.failureReasons || filters.failureReason);
+      appendListParam(params, 'branch', filters.branches);
+      appendListParam(params, 'client', filters.clients);
+      appendListParam(params, 'callType', filters.callTypes);
+      appendListParam(params, 'failureReason', filters.failureReasons);
       if (filters.status && filters.status !== 'ALL') params.set('status', filters.status);
       if (filters.search) params.set('search', filters.search);
       if (filters.excludedReasons && filters.excludedReasons.length > 0) {
@@ -319,19 +309,6 @@ export default function AthenaReconciliationPageClient() {
             failureReasonOptions={summary?.byFailureReason || []}
             onOpenReasonRules={() => setIsReasonRulesOpen(true)}
           />
-
-          {summary && (
-            <AthenaTrendAndBreakdown
-              summary={summary}
-              isCollapsed={!showCharts}
-              onToggleCollapse={() => setShowCharts((prev) => !prev)}
-              onSelectReason={(reason) => {
-                const cur = filters.failureReasons || [];
-                const updated = cur.includes(reason) ? cur.filter((r) => r !== reason) : [...cur, reason];
-                handleFilterChange({ failureReasons: updated, failureReason: updated });
-              }}
-            />
-          )}
 
           {/* Full-Width Audit Data Table */}
           <AthenaDataTable

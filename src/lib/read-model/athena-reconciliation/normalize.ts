@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import type {
   AthenaReconciliationStatus,
   CrmAthenaFailedRow,
-} from './types';
+} from '@/modules/athena-reconciliation/types';
 
 export const ATHENA_BRANCH_CODE_MAP: Record<string, string> = {
   '1111': 'JAIPUR',
