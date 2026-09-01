@@ -204,6 +204,7 @@ export function normalizeHotRowFromDb(row: Record<string, unknown>): HotRow {
     region: normalizeString(row.region, true) ?? 'OTHER',
     account: normalizeString(row.account, true) ?? 'UNCLASSIFIED',
     item_name: normalizeString(row.item_name),
+    item_code: normalizeString(row.item_code),
     serial: normalizeString(row.serial),
     wco: (() => {
       const raw = normalizeString(row.wco, true);

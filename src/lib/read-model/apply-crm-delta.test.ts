@@ -20,6 +20,7 @@ function hotRow(overrides: Partial<HotRow> = {}): HotRow {
     region: 'WEST ZONE',
     account: 'Pepsi',
     item_name: null,
+    item_code: null,
     serial: null,
     wco: null,
     engineer_name: null,
