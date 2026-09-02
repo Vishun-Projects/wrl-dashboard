@@ -19,13 +19,13 @@ import { arcpChunkProgressLabel } from '../hooks/load-helpers';
 export default function ArcpClaimsPage() {
   const {
     dateRange, setDateRange, selectedCallTypes, setSelectedCallTypes,
-    callTypeOptions, resourcesLoaded,
+    callTypeOptions,
     arcpDateFilterColumn, setArcpDateFilterColumn, includeTravelReimbursement, onIncludeTravelChange,
     tableView, setTableView, tallyGrouping, onTallyGroupingChange, tallyDetailLevel, onTallyDetailLevelChange,
     appliedFilters, pageAlert, clearPageAlert, loading, loadStatus, appliedLoadPlan, draftLoadPreview, wideScopeLoad, pageScopeSubtitle,
     mergedAggregateRows, tableModel, summaryTotals, categorySectionCount, displayModel, monthlyBreakdown, canExportPdf,
     hasPendingFilterChanges, hasNoResults, exportingDetail, exportingPdf, pdfViewerOpen, pdfViewerUrl, pdfFileName,
-    detailExportStatus, detailExportRunningTotals, closePdfViewer, onExportCsv, onViewPdf, onExportDetail, handleApplyFilters, dateBasisLabel,
+    detailExportStatus, detailExportRunningTotals, closePdfViewer, onExportCsv, onViewPdf, onExportDetail, dateBasisLabel,
   } = useArcpClaimsState();
 
   const headerActions = (
