@@ -1,7 +1,7 @@
 # Codebase structure
 
 Snapshot of the repo layout after **module-first** migration  
-**(re-scanned 2026-07-31).**
+**(re-scanned 2026-09-01 — all 18 product modules documented).**
 
 Runtime app lives under `src/`. Non-runtime archives sit in `dump/` (gitignored).  
 **Module-first:** all product domains live in `src/modules/<name>/`. `src/features/` is empty. Platform infra stays in `src/lib/` until a later bulk rename to `src/shared/`. `src/app/` is a URL → module mapper only.
@@ -99,11 +99,15 @@ src/modules/<name>/
 | `roles` | Roles & access |
 | `performance` | Performance insights |
 | `security-audit` | Security audit UI |
-| `cancelled-calls` | Cancelled call register |
+| `cancelled-calls` | Cancelled call register (Postgres) + digest Excel export |
 | `athena-reconciliation` | Athena failed-calls report (query/CSV in `server/`; CRM ingest in `lib/read-model/athena-reconciliation`) |
+| `attendance` | Service call activity admin report (`manage_users`; SQL in `@/sql/attendance`) |
+| `subcontractor-stock` | SAP vs CRM stock reconciliation + Mail & Alerts settings tab |
 | `auth` | Sign-in / sign-out / me / password-reset API |
 | `calls` | Call-by-id / comments / flags / offices API |
 | `sync` | Read-model status + VPS cron API |
+
+Each module has a **`README.md`** at `src/modules/<name>/README.md` (MIS sub-leaves: `mis/register/`, `mis/client-import/`). System-wide design: [`docs/ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ---
 
@@ -166,10 +170,22 @@ src/components/
 
 ```text
 docs/
-├── REMEDIATION_ROADMAP.md      # Living remediation + feature-layout board
+├── ARCHITECTURE.md             # System design — start here (module map, diagrams, RBAC)
+├── CODEBASE_STRUCTURE.md       # This file — repo layout + module index
+├── REMEDIATION_ROADMAP.md       # Living remediation + feature-layout board
 ├── SUPABASE_SETUP.md / sync.md / crm-mirror-sync.md / ui-patterns.md / …
-├── read-model-phase1-*.md      # Architecture / cutover / worker specs
-├── read-model-phase1-schema/   # Versioned SQL 01…21 (incl. revoke-hot-anon)
+├── diagrams/                   # 20 Mermaid + PNG pairs (source of truth: ARCHITECTURE.md §1–§11)
+│   ├── 01-system-workflow.*
+│   ├── 02-1 … 02-12 sequence flows (auth, MIS, email, ARCP, cancelled, Athena, …)
+│   ├── 06-deployment-infrastructure.*
+│   ├── 07-etl-data-flow.*
+│   ├── 08-background-jobs-*. *
+│   ├── 09-key-tables-erd.*
+│   ├── 10-rbac-decision-flow.*
+│   └── 11-failure-degradation-paths.*
+│   Regenerate: `node scripts/ops/export-mermaid-diagrams.mjs`
+├── read-model-phase1-*.md      # Read-model cutover / worker specs
+├── read-model-phase1-schema/   # Versioned SQL chunks
 ├── old-crm-schema/
 ├── WesternCRM Schema Architect.txt   # Legacy CRM schema notes
 ├── WesternCRM_Schema_Blueprint.sql
@@ -208,7 +224,7 @@ Next.js (Vercel)  ──API──►  features/* server libs
 VPS (optional)
     ├── sync-worker (read-model CLI daemon)
     ├── mis-upload-server (chunked MIS uploads)
-    └── mis-email digest / mail relay
+    └── mail-scheduler.sh (MIS digest + subcontractor) / mail relay
 ```
 
 Hot tables are **server SQL only**; PostgREST roles revoked (`21-revoke-hot-anon.sql`).
@@ -227,10 +243,14 @@ Hot tables are **server SQL only**; PostgREST roles revoked (`21-revoke-hot-anon
 | Serial wise history | `src/modules/serial-audit/` |
 | Location audit | `src/modules/location-audit/` |
 | Warranty master | `src/modules/warranty-master/` |
-| Mail & alerts | `src/modules/mis-email/` |
+| Mail & alerts (send transport + digests) | `src/modules/mis-email/services/send.ts`, `src/modules/mis-email/` |
 | Users / roles | `src/modules/users/`, `src/modules/roles/` |
 | Performance insights | `src/modules/performance/` |
 | Security audit | `src/modules/security-audit/` |
+| Cancelled calls register | `src/modules/cancelled-calls/` |
+| Athena failed-calls reconciliation | `src/modules/athena-reconciliation/` (+ `src/lib/read-model/athena-reconciliation/`) |
+| Service call activity (admin) | `src/modules/attendance/`, `src/app/admin/attendance/` |
+| Subcontractor stock reconciliation | `src/modules/subcontractor-stock/` (Mail & Alerts tab) |
 | Nightly hot sync | `src/lib/read-model/` (+ `modules/*/server/sync/`) |
 | Auth / RBAC | `src/lib/auth/`, `src/lib/supabase/` |
 | Route URL / API surface | `src/app/...` (thin) |

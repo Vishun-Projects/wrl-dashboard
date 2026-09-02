@@ -29,7 +29,7 @@ sequenceDiagram
     RouteHandler->>Compose: sendMisEmailComposeBatch(recipient, opts)
     Compose->>Postgres: Full pipeline (summary + trace + register)
     Compose->>Compose: buildDigestAttachments() → Excel buffers
-    Compose->>Send: sendPreparedDigestEmail(to, subject, html, attachments)
-    Send->>SMTP: sendMail()
+    Compose->>Send: sendDigestPayload(to, subject, html, attachments)
+    Send->>SMTP: relay or direct SMTP
     SMTP-->>Send: messageId
     Send-->>Browser: sentTo + attachments[] + messageId

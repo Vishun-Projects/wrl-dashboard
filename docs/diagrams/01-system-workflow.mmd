@@ -6,9 +6,14 @@ flowchart TD
         DIST["/report/distribution"]
         SERIAL["/report/serial-audit"]
         LOCAUD["/report/location-audit"]
+        WARR["/report/warranty-master"]
+        CANCEL["/report/cancelled-calls"]
+        ATHENA["/report/athena-reconciliation"]
         ADMIN["/admin — Users / Roles / Sync / VPS Cron"]
+        ATTEND["/admin/attendance"]
         PROFILE["/profile — Prefs + MIS email"]
         PERF["/admin/performance-insights"]
+        MAILSET["/admin/mis-email-settings"]
     end
 
     subgraph AUTH["auth module"]
@@ -39,8 +44,9 @@ flowchart TD
         MAILBASIS["mail-basis (Cadbury-safe counts)"]
         PREFS["preferences / scheduling"]
         ROUTING["routing-rules (slot dedupe)"]
-        SEND["send (SMTP / VPS relay)"]
+        SEND["send.ts\nsendDigestPayload · sendHtmlEmail"]
         MAJREP["major-repair-repeat-alert (sync worker)"]
+        CANCELDIG["cancelled-call-digest (evening-ops)"]
     end
 
     subgraph ARCP_MOD["arcp-claims module"]
@@ -52,6 +58,25 @@ flowchart TD
     subgraph SYNC_MOD["sync module"]
         RMSTATUS["read-model-status API"]
         VPSCRON["vps-cron pause/resume API"]
+    end
+
+    subgraph CANCEL_MOD["cancelled-calls module"]
+        CANCELREG["Cancelled register (Postgres)"]
+        CANCELEX["CSV + digest Excel export"]
+    end
+
+    subgraph ATHENA_MOD["athena-reconciliation module"]
+        ATHENAPAGE["AthenaReconciliationPageClient"]
+        ATHENASYNC["sync + reconcile (read-model)"]
+    end
+
+    subgraph ATTEND_MOD["attendance module"]
+        ACTIVITY["Service call activity report"]
+    end
+
+    subgraph SUBCON_MOD["subcontractor-stock module"]
+        SUBCONUI["Mail & Alerts → Subcontractor tab"]
+        SUBCONRUN["SAP inbox → reconcile → email (VPS)"]
     end
 
     subgraph INFRA["Infrastructure / Shared Lib"]
@@ -68,8 +93,17 @@ flowchart TD
     REPORT --> MIS
     REPORT --> CALLS
     ARCP --> ARCP_MOD
+    DIST --> MIS
+    SERIAL --> MIS
+    LOCAUD --> MIS
+    WARR --> MIS
+    CANCEL --> CANCEL_MOD
+    ATHENA --> ATHENA_MOD
     ADMIN --> SYNC_MOD
+    ATTEND --> ATTEND_MOD
     PROFILE --> MISMAIL
+    MAILSET --> MISMAIL
+    MAILSET --> SUBCON_MOD
 
     MIS --> POSTGRES
     MIS --> CRM
@@ -81,9 +115,12 @@ flowchart TD
     MAILBASIS --> MIS
     RUNDIGEST --> COMPOSEDIGEST --> MAILBASIS
     RUNDIGEST --> SEND
+    MAJREP --> SEND
     SEND --> SMTP
     RUNDIGEST --> AUDIT
     RUNDIGEST --> ROUTING
+    CANCELDIG --> CANCEL_MOD
+    CANCELDIG --> SEND
 
     ARCP_MOD --> POSTGRES
     ARCP_MOD --> CRM
@@ -93,6 +130,14 @@ flowchart TD
 
     SYNC_MOD --> VPSCRONLIB
     SYNC_MOD --> POSTGRES
+
+    CANCEL_MOD --> POSTGRES
+    ATHENA_MOD --> POSTGRES
+    ATHENA_MOD --> CRM
+    ATTEND_MOD --> CRM
+    SUBCON_MOD --> POSTGRES
+    SUBCON_MOD --> CRM
+    SUBCON_MOD --> SEND
 
     READMODEL --> POSTGRES
     READMODEL --> CRM

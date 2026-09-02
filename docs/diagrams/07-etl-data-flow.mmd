@@ -6,20 +6,27 @@ flowchart LR
     subgraph ETL["ETL — VPS Workers"]
         direction TB
         INCR["Incremental sync\n(every ~3 min)\nWatermark: editedon"]
-        NIGHTLY["Nightly YTD replay\n(02:30 IST)\nfill-hot-gaps + editedon-catchup"]
+        NIGHTLY["Nightly timer @ 02:30 IST\nYTD replay + athena + attendance\n+ cancelled register"]
         BACKFILL["One-time backfill\n(historical / gap fill)"]
         ARCP_SYNC["ARCP sync worker\n(arcp_lines_hot)"]
+        ATHENA_SYNC["Athena failed-calls sync\n+ reconcile"]
+        CANCEL_SYNC["Cancelled register sync\n→ calls_cancelled"]
+        ATTEND_SYNC["Attendance details sync\n→ crm_attendance_details"]
         TRANSFORM["transform.ts\nnormalise · status_bucket\nbranch / region tags"]
-        UPSERT["upsert calls_latest_hot\nON CONFLICT UPDATE"]
+        UPSERT["upsert hot tables\nON CONFLICT UPDATE"]
     end
 
     subgraph READMODEL["Postgres Read-Model (VPS)"]
         direction TB
         HOT[(calls_latest_hot)]
+        CANCELHOT[(calls_cancelled)]
+        ATHENAHOT[(athena_failed_calls_normalized)]
+        ATTENDHOT[(crm_attendance_details)]
         ARCPHOT[(arcp_lines_hot)]
         IMPORTROWS[(mis_client_import_rows\nCoke · Mondelez)]
         AUDIT[(security_audit_log)]
         EMAILLOG[(mis_email_routing_send_log)]
+        SUBCON[(subcontractor_stock_runs\nsubcontractor_sap_mail_log)]
     end
 
     subgraph PORTAL["Portal — Vercel / Next.js"]
@@ -27,14 +34,17 @@ flowchart LR
         SUMMARY["querySummaryDashboard\n(regional + branch totals)"]
         REGISTER["queryDigestRegisterExport\n(call-level rows)"]
         TRACE["queryBdMisCrmCallTraceRows\n(BD-MIS traceable)"]
+        CANCELREG["cancelled-calls query\n(summary · rows · CSV)"]
+        ATHENAREP["athena-reconciliation\n(summary · rows · CSV)"]
+        ACTIVITY["attendance activity report\n(admin)"]
         CALLBYID["postQuery CRM\n(single call detail drawer)"]
     end
 
     subgraph OUTPUT["Output"]
-        BROWSER["Browser\n(tables, charts, maps)"]
-        EXCEL["Excel workbooks\n(Summary · Register · Traceable)"]
-        EMAIL["MIS Email Digest\n(HTML + attachments)"]
-        CSV["CSV exports\n(ARCP · Register)"]
+        BROWSER["Browser\n(tables, charts, KPIs)"]
+        EXCEL["Excel workbooks\n(Summary · Register · Traceable\n· Cancelled digest · Subcontractor)"]
+        EMAIL["MIS + cancelled + subcontractor email"]
+        CSV["CSV exports\n(Register · ARCP · Cancelled · Athena)"]
         PDF["PDF\n(ARCP claims)"]
     end
 
@@ -44,32 +54,46 @@ flowchart LR
     end
 
     CRM -- "batch fetch\neditedon delta" --> INCR
-    CRM -- "YTD status replay" --> NIGHTLY
+    CRM -- "YTD + sidecar jobs" --> NIGHTLY
     CRM -- "gap fill" --> BACKFILL
     CRM -- "ARCP lines" --> ARCP_SYNC
+    CRM -- "Athena failures" --> ATHENA_SYNC
+    CRM -- "cancelled register" --> CANCEL_SYNC
+    CRM -- "attendance rows" --> ATTEND_SYNC
 
     INCR --> TRANSFORM --> UPSERT --> HOT
     NIGHTLY --> HOT
     BACKFILL --> HOT
     ARCP_SYNC --> ARCPHOT
+    ATHENA_SYNC --> ATHENAHOT
+    CANCEL_SYNC --> CANCELHOT
+    ATTEND_SYNC --> ATTENDHOT
 
     UPLOAD --> NORMALIZE --> IMPORTROWS
 
     HOT --> SUMMARY --> BROWSER
     HOT --> REGISTER --> BROWSER
     HOT --> TRACE
+    CANCELHOT --> CANCELREG --> BROWSER
+    ATHENAHOT --> ATHENAREP --> BROWSER
+    ATTENDHOT --> ACTIVITY --> BROWSER
     IMPORTROWS -- "BD-MIS merge\n(Cadbury-safe)" --> TRACE
     ARCPHOT --> BROWSER
+    SUBCON --> EXCEL
 
     SUMMARY --> EXCEL
     REGISTER --> EXCEL
     TRACE --> EXCEL
+    CANCELREG --> EXCEL
 
     EXCEL --> EMAIL
     SUMMARY --> EMAIL
     TRACE -- "open-calls export" --> EMAIL
+    CANCELREG --> EMAIL
 
     REGISTER --> CSV
+    CANCELREG --> CSV
+    ATHENAREP --> CSV
     ARCPHOT --> CSV
     ARCPHOT --> PDF
 

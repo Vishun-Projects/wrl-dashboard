@@ -5,7 +5,7 @@ flowchart TD
     VERIFY -- "invalid / expired" --> DENY401["401 Unauthorized\nor redirect /login"]
     VERIFY -- "valid JWT" --> LOADPROFILE
 
-    LOADPROFILE["Load app_users profile\n+ expand role permissions\n(TAB_PERMISSION_ALIASES)"]
+    LOADPROFILE["Load app_users profile\n+ expand role permissions\n(canonical DB names)"]
     LOADPROFILE --> SOFTTTL
 
     SOFTTTL{"Portal soft-timeout\n(cookie session TTL)"}
@@ -35,8 +35,11 @@ flowchart TD
     SCOPEFILTER --> ALLOW
 
     subgraph SPECIAL["Special gates"]
-        SUPERADMIN["super_admin only:\n/admin/security-audit\n/admin/vps-cron"]
+        SUPERADMIN["super_admin only:\n/admin/security-audit\n/admin/vps-cron (legacy → Mail hub)"]
+        ADMINUSERS["manage_users:\n/admin/sync · /admin/attendance\n(rbac-catalog pages)"]
         MISEMAILCAP["mis_email_send capability:\nProfile email tab\nDigest recipients list"]
+        MAILSETTINGS["page_mis_email_settings:\nMail & Alerts hub\n(incl. subcontractor tab)"]
+        ATHENAALIAS["page_athena_reconciliation\nalso grants /report/cancelled-calls"]
         OFFICEDATA["canAccessOffice(nofficeid):\ncall-by-id drawer\ncomments + flags write"]
     end
 

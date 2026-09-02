@@ -1,0 +1,90 @@
+role,permission
+BM - Serial Audit,page_athena_reconciliation
+BM - Serial Audit,page_cancelled_calls
+BM - Serial Audit,page_serial_audit
+Branch Manager,mis_client_import_delete
+Branch Manager,mis_client_import_upload
+Branch Manager,mis_email_send
+Branch Manager,page_arcp_claims
+Branch Manager,page_athena_reconciliation
+Branch Manager,page_call_distribution
+Branch Manager,page_cancelled_calls
+Branch Manager,page_location_audit
+Branch Manager,page_mis_reports
+Branch Manager,page_serial_audit
+Branch Manager,page_warranty_master
+Branch Manager,tab_mis_accounts
+Branch Manager,tab_mis_bd_mis_summary
+Branch Manager,tab_mis_client_import
+Branch Manager,tab_mis_register
+Branch Manager,tab_mis_summary
+HOD,delete_calls
+HOD,manage_roles
+HOD,manage_users
+HOD,mis_client_import_delete
+HOD,mis_client_import_upload
+HOD,mis_email_send
+HOD,page_arcp_claims
+HOD,page_athena_reconciliation
+HOD,page_call_distribution
+HOD,page_cancelled_call_alerts
+HOD,page_cancelled_calls
+HOD,page_location_audit
+HOD,page_mis_reports
+HOD,page_performance_insights
+HOD,page_serial_audit
+HOD,page_warranty_master
+HOD,tab_mis_accounts
+HOD,tab_mis_bd_mis_summary
+HOD,tab_mis_client_import
+HOD,tab_mis_register
+HOD,tab_mis_summary
+Mail access,mis_email_send
+Mail access,tab_mis_accounts
+Mail access,tab_mis_register
+Mail access,tab_mis_summary
+Super Admin,delete_calls
+Super Admin,manage_roles
+Super Admin,manage_users
+Super Admin,mis_client_import_delete
+Super Admin,mis_client_import_upload
+Super Admin,mis_email_send
+Super Admin,page_arcp_claims
+Super Admin,page_athena_reconciliation
+Super Admin,page_call_distribution
+Super Admin,page_cancelled_call_alerts
+Super Admin,page_cancelled_calls
+Super Admin,page_location_audit
+Super Admin,page_major_repair_alerts
+Super Admin,page_mis_email_routing
+Super Admin,page_mis_email_settings
+Super Admin,page_mis_reports
+Super Admin,page_performance_insights
+Super Admin,page_serial_audit
+Super Admin,page_warranty_master
+Super Admin,super_admin
+Super Admin,tab_mis_accounts
+Super Admin,tab_mis_bd_mis_summary
+Super Admin,tab_mis_client_import
+Super Admin,tab_mis_deployment_completion
+Super Admin,tab_mis_register
+Super Admin,tab_mis_summary
+Super Admin,view_all_offices
+Super Admin,view_calls
+Super Admin,view_mis_accounts
+Super Admin,view_mis_register
+Super Admin,view_mis_summary
+Super Admin,view_reports
+Super Admin,view_summary
+View Summary,mis_client_import_delete
+View Summary,mis_client_import_upload
+View Summary,mis_email_send
+View Summary,page_athena_reconciliation
+View Summary,page_cancelled_calls
+View Summary,page_mis_reports
+View Summary,page_serial_audit
+View Summary,tab_mis_accounts
+View Summary,tab_mis_bd_mis_summary
+View Summary,tab_mis_client_import
+View Summary,tab_mis_register
+View Summary,tab_mis_summary

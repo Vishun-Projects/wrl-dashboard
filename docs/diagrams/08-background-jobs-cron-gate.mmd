@@ -3,14 +3,21 @@ flowchart TD
         GATE{"isVpsCronPaused?\n(reads portal DB)"}
     end
 
-    DIGESTCRON["cron: */15 Mon-Sat\nmis-email-digest.sh"] --> GATE
+    DIGESTCRON["cron: */15 daily\nmail-scheduler.sh"] --> GATE
+    SUBCONCRON["mail-scheduler step 2\nsubcontractor-stock-cron.sh"] --> GATE
     GATE -- "paused=true" --> SKIP["exit 0 — no send"]
     GATE -- "paused=false" --> RUNDIGEST["tsx run-digest.ts\nrunMisEmailDigest()"]
     RUNDIGEST --> WINDOW{"IST send window\nhalf-open [anchor, anchor+15m)"}
-    WINDOW -- "in window" --> SEND["compose + SMTP send"]
+    WINDOW -- "in window" --> SEND["compose + sendDigestPayload()"]
     WINDOW -- "out of window" --> SKIPRECIP["skip recipient (logged)"]
 
-    WATCHDOG["cron: 09:50 Mon-Sat\nwatchdog.sh"] --> CHECK{"mis-email-cron.log\nhas today 09:30 send?"}
+    SUBCONCRON --> SUBCONRUN["sync inbox → reconcile\n→ send at send_time_ist"]
+
+    EVENINGOPS["cron: 16:00 daily\nevening-ops-sequencer.sh"] --> EVENINGGATE{"isVpsCronPaused?\n(per job id in TS)"}
+    EVENINGGATE -- "paused" --> EVENSKIP["skip step (logged)"]
+    EVENINGGATE -- "not paused" --> EVENINGSTEPS["MIS compose probe\n→ cancelled digest\n→ subcontractor probe\n→ midnight delta check"]
+
+    WATCHDOG["cron: 09:50 Mon-Sat\nwatchdog.sh"] --> CHECK{"mail-scheduler.log\nhas today MIS digest complete?"}
     CHECK -- "yes" --> OK["exit 0 — all good"]
     CHECK -- "no" --> ALERT["send watchdog alert\nto admin email"]
 

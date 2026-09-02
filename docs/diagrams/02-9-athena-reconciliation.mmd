@@ -1,0 +1,38 @@
+sequenceDiagram
+    autonumber
+    actor User
+    participant Browser
+    participant NextJS as Next.js API
+    participant AthenaMod as athena-reconciliation module
+    participant ReadModel as lib/read-model/athena-reconciliation
+    participant Postgres as Postgres VPS
+    participant CRM
+
+    User->>Browser: Open /report/athena-reconciliation
+    Browser->>NextJS: GET ?mode=summary
+    NextJS->>AthenaMod: fetchAthenaReconciliationSummary()
+    AthenaMod->>Postgres: KPIs from athena_failed_calls_normalized
+    Postgres-->>Browser: status breakdown + counts
+
+    Browser->>NextJS: GET ?mode=rows
+    NextJS->>AthenaMod: fetchAthenaFailedCallsRows()
+    AthenaMod->>Postgres: paginated failed-call rows
+    Postgres-->>Browser: table rows
+
+    User->>Browser: View payload / matches
+    Browser->>NextJS: GET ?mode=detail&id=…
+    NextJS->>AthenaMod: fetchAthenaFailedCallDetail()
+    Postgres-->>Browser: raw payload + match detail
+
+    User->>Browser: Trigger sync (admin action)
+    Browser->>NextJS: POST { action: sync }
+    NextJS->>ReadModel: runAthenaFailedCallsSync()
+    ReadModel->>CRM: fetch new Athena failures
+    ReadModel->>Postgres: upsert raw + normalized rows
+    Postgres-->>Browser: sync stats
+
+    User->>Browser: Reconcile against register
+    Browser->>NextJS: POST { action: reconcile }
+    NextJS->>ReadModel: executeAthenaReconciliation()
+    ReadModel->>Postgres: match vs calls_latest_hot → update status
+    Postgres-->>Browser: reconcile stats

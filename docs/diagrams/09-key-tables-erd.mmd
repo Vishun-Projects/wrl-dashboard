@@ -112,6 +112,52 @@ erDiagram
         timestamptz created_at
     }
 
+    calls_cancelled {
+        bigint id PK
+        text trn
+        text nofficeid
+        date cancelled_date_ist
+        text branch_name
+        text call_type
+        text cancel_reason
+        timestamptz synced_at
+    }
+
+    athena_failed_calls_normalized {
+        bigint id PK
+        text status
+        text failure_reason
+        date call_date
+        text serial_no
+        text outlet_name
+        timestamptz reconciled_at
+    }
+
+    crm_attendance_details {
+        bigint id PK
+        integer user_id
+        integer office_id
+        date activity_date
+        text heading
+        text unique_call
+        timestamptz synced_at
+    }
+
+    cancelled_call_digest_recipients {
+        uuid id PK
+        text branch
+        text email
+        boolean enabled
+    }
+
+    subcontractor_stock_recipients {
+        uuid id PK
+        text recipient_name
+        text email
+        text plant_code
+        boolean enabled
+    }
+
     security_audit_log {
         uuid id PK
         text action
@@ -149,3 +195,5 @@ erDiagram
     mis_email_routing_rules ||--o{ mis_email_routing_send_log : "logged by"
     calls_latest_hot ||--o{ call_flags : "flagged by"
     calls_latest_hot ||--o{ call_comments : "annotated by"
+    calls_cancelled }o--|| calls_latest_hot : "may reference trn"
+    athena_failed_calls_normalized }o--o| calls_latest_hot : "matched against"

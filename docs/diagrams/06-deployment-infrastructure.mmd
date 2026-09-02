@@ -1,65 +1,62 @@
-graph TB
-    subgraph DEV["Developer machine (Windows)"]
+flowchart LR
+    subgraph DEV["① Developer machine"]
         LOCALDEV["npm run dev\nlocalhost:3000"]
-        SCRIPTS["npm scripts / PowerShell\n(deploy, sync, ops)"]
+        SCRIPTS["git push main\nSSH rsync deploy"]
     end
 
-    subgraph VERCEL["Vercel (Edge CDN + Serverless)"]
-        NEXTAPP["Next.js App\n(SSR + API routes)\nDomain: portal.wrl-fsm.cloud"]
-        CSP["Content-Security-Policy\nHSTS · nosniff · SAMEORIGIN"]
+    subgraph VERCEL["② Vercel serverless"]
+        NEXTAPP["Next.js SSR + API\nwrl-dashboard.vercel.app"]
     end
 
-    subgraph VPS["Hostinger VPS — 187.127.145.253\n/opt/fast-close-app"]
+    subgraph SUPABASE["③ Supabase auth"]
+        GOTRUE["GoTrue JWT"]
+        POOLER["Connection pooler"]
+        SUPADB[("app_users\nroles · permissions")]
+        GOTRUE --- SUPADB
+        POOLER --- SUPADB
+    end
+
+    subgraph VPS["④ Hostinger VPS · /opt/fast-close-app"]
         direction TB
-        subgraph DAEMONS["systemd services"]
-            SYNCWORKER["fast-close-sync-worker\n(incremental every ~3 min)"]
-            NIGHTLYTIMER["fast-close-sync-worker-nightly\ntimer @ 02:30 IST"]
-        end
-        subgraph CRONS["cron (CRON_TZ=Asia/Kolkata)"]
-            EMAILCRON["*/15 Mon–Sat\nmis-email-digest.sh"]
-            WATCHDOG["09:50 Mon–Sat\nmis-email-morning-watchdog.sh"]
-            PURGECRON["03:15 daily\nmis-client-purge-old-files.sh"]
-            VACUUMCRON["00:00 Sunday\nvacuum-full-mis-rows.sh"]
-        end
-        POSTGRESDB[("Postgres 15\ncalls_latest_hot\narcp_lines_hot\nmis_client_import_rows\n…audit tables")]
-        POSTFIX["Postfix MTA\nSMTP relay :25\nDomain: wrl-fsm.cloud"]
-        RELAYSERVER["mail-relay-server.ts\n(HTTP → Postfix bridge\nfor Vercel → VPS email)"]
+        PG[("Postgres 15\nread-model hot tables")]
+        SYNCWORKER["systemd sync-worker\n~3 min incremental"]
+        NIGHTLY["systemd nightly timer\n02:30 IST sidecar"]
+        MAILCRON["cron mail-scheduler\n*/15 MIS + subcontractor"]
+        EVENINGOPS["cron evening-ops\n16:00 probes"]
+        RELAY["mail-relay-server\n→ Postfix SMTP :25"]
+        SYNCWORKER --> PG
+        NIGHTLY --> PG
+        MAILCRON --> PG
+        MAILCRON --> RELAY
+        EVENINGOPS --> RELAY
+        EVENINGOPS --> PG
     end
 
-    subgraph SUPABASE["Supabase (AWS ap-southeast-1)"]
-        GOTRUE["GoTrue Auth\n(JWT · sign-in · password reset)"]
-        SUPAPG[("Supabase Postgres\napp_users · roles\npermissions · session")]
-        POOLER["Connection Pooler\naws-1-ap-southeast-1\n.pooler.supabase.com"]
+    subgraph EXT["⑤ External"]
+        USER(["Portal users"])
+        CRM[("CRM trhcalls\nMS SQL")]
+        GMAIL["Gmail SMTP\nlocal dev only"]
     end
 
-    subgraph EXTERNAL["External Systems"]
-        CRM["CRM Server\ntrhcalls (MS SQL)\npostQuery API"]
-        GMAILSMTP["Gmail SMTP\n(local dev fallback)"]
-        ENDUSER["WRL Portal Users\n(Browser)"]
-    end
+    USER -->|HTTPS| NEXTAPP
+    NEXTAPP -->|JWT + profile| POOLER
+    NEXTAPP -->|READ_*_FROM=postgres| PG
+    NEXTAPP -->|live drawer · serial| CRM
+    NEXTAPP -->|HTTPS mail relay| RELAY
+    RELAY -->|outbound email| USER
 
-    ENDUSER -- "HTTPS" --> VERCEL
-    NEXTAPP -- "JWT verify\nprofile + permissions" --> GOTRUE
-    NEXTAPP -- "app_users reads/writes" --> POOLER --> SUPAPG
-    NEXTAPP -- "CRM calls\n(serial, location, call-by-id)" --> CRM
-    NEXTAPP -- "HTTPS → mail-relay API" --> RELAYSERVER
-    RELAYSERVER --> POSTFIX --> ENDUSER
+    SYNCWORKER -->|editedon delta| CRM
+    NIGHTLY -->|nightly ETL| CRM
 
-    SYNCWORKER -- "editedon delta\nbatch upsert" --> CRM
-    SYNCWORKER --> POSTGRESDB
-    NIGHTLYTIMER --> CRM
-    NIGHTLYTIMER --> POSTGRESDB
+    SCRIPTS -->|CI deploy| NEXTAPP
+    SCRIPTS -->|ops scripts| VPS
+    LOCALDEV -.->|dev CRM / optional Gmail| CRM
+    LOCALDEV -.-> GMAIL
 
-    EMAILCRON -- "tsx run-digest.ts" --> POSTGRESDB
-    EMAILCRON --> RELAYSERVER
+    PG -.->|initial pg_dump| SUPADB
 
-    SCRIPTS -- "SSH rsync deploy" --> VPS
-    SCRIPTS -- "git push main" --> VERCEL
-
-    NEXTAPP -- "READ_SUMMARY_FROM\n=postgres" --> POSTGRESDB
-    POSTGRESDB -. "pg_dump restore\n(initial migration)" .-> SUPABASE
-
-    style VERCEL fill:#000,color:#fff
-    style VPS fill:#1a1a2e,color:#eee
-    style SUPABASE fill:#1c3a2a,color:#eee
-    style EXTERNAL fill:#2a1a1a,color:#eee
+    style VERCEL fill:#111827,color:#f9fafb
+    style VPS fill:#1e1b4b,color:#e0e7ff
+    style SUPABASE fill:#14532d,color:#ecfdf5
+    style EXT fill:#431407,color:#ffedd5
+    style DEV fill:#1f2937,color:#f3f4f6

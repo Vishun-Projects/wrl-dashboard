@@ -2,6 +2,8 @@
 
 Living checklist for structure + audit safety work.
 
+> **External audience:** Known limitations and residual items for stakeholders are summarized in [`docs/handover/05-Operations/KNOWN_ISSUES_AND_LIMITATIONS.md`](handover/05-Operations/KNOWN_ISSUES_AND_LIMITATIONS.md). This file remains the internal remediation log.
+
 **Updated:** 2026-09-01
 
 ---

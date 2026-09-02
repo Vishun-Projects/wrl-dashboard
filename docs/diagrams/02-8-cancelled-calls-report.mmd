@@ -1,0 +1,32 @@
+sequenceDiagram
+    autonumber
+    actor User
+    participant Browser
+    participant NextJS as Next.js API
+    participant CancelMod as cancelled-calls module
+    participant Postgres as Postgres VPS
+
+    User->>Browser: Open /report/cancelled-calls
+    Browser->>NextJS: GET /api/auth/me
+    NextJS-->>Browser: profile + RBAC (page_cancelled_calls or Athena alias)
+
+    Browser->>NextJS: GET /api/report/cancelled-calls?mode=options
+    NextJS->>CancelMod: fetchCancelledCallsFilterOptions()
+    CancelMod->>Postgres: distinct branches / franchisees / call types
+    Postgres-->>Browser: filter options
+
+    Browser->>NextJS: GET ?mode=summary + date/filters
+    NextJS->>CancelMod: fetchCancelledCallsSummary()
+    CancelMod->>Postgres: aggregate calls_cancelled (office scope)
+    Postgres-->>Browser: KPI summary
+
+    Browser->>NextJS: GET ?mode=rows&page=1
+    NextJS->>CancelMod: fetchCancelledCallsRows()
+    CancelMod->>Postgres: paginated register rows
+    Postgres-->>Browser: rows + total
+
+    User->>Browser: Export CSV
+    Browser->>NextJS: GET ?format=csv
+    NextJS->>CancelMod: buildCancelledCallsCsvStream()
+    CancelMod->>Postgres: full filtered set
+    Postgres-->>Browser: CSV download

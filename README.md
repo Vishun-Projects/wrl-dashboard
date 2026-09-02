@@ -13,10 +13,13 @@ Sign in with your assigned email and password. After login you land on your usua
 | Page | Purpose |
 |------|---------|
 | **MIS Reports** | Search and browse the call register — summary counts, detailed rows, accounts view. Filter by date, branch, franchisee, call type, and status. Export to CSV or Excel. Click a TRN to open call details in a dialog. |
-| **Call Distribution** | See how calls are spread across branches and franchisees — map view, idle assignees, and distribution KPIs. |
+| **Call Distribution** | See how calls are spread across branches and franchisees — capacity KPIs and idle assignee rows. |
 | **ARCP Claims** | Review ARCP claims in a register view with detail export. |
 | **Serial Wise History** | Find serial numbers with repeat complaints. Expand a row to see call history, repeat flags, and repair context in the selected date range. |
 | **Location Audit** | Check whether technician visit locations match customer install addresses — pincode and GPS comparison with flagged mismatches. |
+| **Warranty Master** | Active machines by customer, group, and warranty period. |
+| **Cancelled Calls** | Cancelled call register — filter, paginate, and export CSV. |
+| **Failed Calls (Athena API)** | CRM Athena ingestion failures matched against the call register. |
 
 Report filters and column choices are remembered per user. A small banner can show when your last saved view was restored.
 
@@ -26,6 +29,9 @@ Report filters and column choices are remembered per user. A small banner can sh
 |------|---------|
 | **User Management** | Create and edit portal users (admins). |
 | **Roles & Access** | Define roles and choose which report pages each role can open. |
+| **Mail & Alerts** | MIS email routing, major repair alerts, cancelled-call digests, subcontractor stock reconciliation. |
+| **Service Call Activity** | Technician activity report with filters and CSV export (admin). |
+| **Performance Insights** | Client performance metrics and diagnostics. |
 
 ### Profile
 
@@ -59,7 +65,11 @@ npm run build
 npm start
 ```
 
-Environment variables and database setup for portal users are documented in [`docs/SUPABASE_SETUP.md`](docs/SUPABASE_SETUP.md). Additional internal docs live under `docs/` for the team maintaining the project.
+Environment variables and database setup for portal users are documented in [`docs/SUPABASE_SETUP.md`](docs/SUPABASE_SETUP.md).
+
+**System design:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (module map, diagrams, RBAC). **Repo layout:** [`docs/CODEBASE_STRUCTURE.md`](docs/CODEBASE_STRUCTURE.md). Per-module notes: `src/modules/<name>/README.md`.
+
+**Stakeholder handover pack:** [`docs/handover/`](docs/handover/) — BRD, functional spec, admin guide, RBAC matrix, ops docs. **Company share:** `docs/handover/07-Company-Share/` (PDF + Word + zip). Regenerate: `npm run handover:export`.
 
 ---
 

@@ -1,6 +1,6 @@
 sequenceDiagram
     autonumber
-    participant VPS as VPS Cron (9:30 AM IST)
+    participant VPS as VPS Cron\nmail-scheduler.sh (*/15 IST)
     participant RunDigest as run-digest.ts
     participant VpsCronLib as vps-cron settings
     participant Recipients as recipients.ts
@@ -48,8 +48,8 @@ sequenceDiagram
             Compose->>Attachments: buildDigestAttachments()
             Attachments-->>Compose: Excel buffers (Summary + Register + Traceable)
             Compose-->>RunDigest: preview + emailAttachments + bodyHtml
-            RunDigest->>Send: sendDigestEmail(to, cc, attachments, bodyHtml)
-            Send->>SMTP: sendMail() via VPS relay or local SMTP
+            RunDigest->>Send: sendDigestEmail() → sendDigestPayload()
+            Send->>SMTP: VPS relay (portal) or direct SMTP (VPS)
             SMTP-->>Send: messageId
             RunDigest->>AuditLog: logAction(notification.mis_email.digest.sent)
         else Outside window
@@ -66,8 +66,8 @@ sequenceDiagram
             RunDigest->>Compose: buildMisEmailPayload(composer)
             Note right of Compose: Same data pipeline as personal digest
             Compose-->>RunDigest: emailAttachments + bodyHtml
-            RunDigest->>Send: sendDigestEmail(toEmails, ccEmails)
-            Send->>SMTP: sendMail()
+            RunDigest->>Send: sendDigestEmail() → sendDigestPayload()
+            Send->>SMTP: VPS relay or direct SMTP
             RunDigest->>RoutingRules: logMisEmailRoutingSendAttempt(sent)
             RunDigest->>AuditLog: logAction(digest.sent, ruleId)
         end

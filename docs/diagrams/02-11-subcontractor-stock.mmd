@@ -1,0 +1,34 @@
+sequenceDiagram
+    autonumber
+    participant Cron as VPS mail-scheduler.sh\nstep 2 (*/15 IST)
+    participant CLI as subcontractor-stock/cli.ts
+    participant Inbox as sap-inbox.ts
+    participant Reconcile as reconcile-runner.ts
+    participant Engine as reconciliation-engine.ts
+    participant CRM as CRM (old_crm stock)
+    participant Postgres as Postgres VPS
+    participant EmailSender as email-sender.ts
+    participant Send as send.ts
+    participant SMTP as SMTP / VPS relay
+
+    Cron->>CLI: sync-inbox → cron loop
+    CLI->>Inbox: syncSapMailInbox()
+    Inbox->>Postgres: upsert subcontractor_sap_mail_log
+
+    CLI->>Reconcile: runTodayReconciliation() when new SAP files
+    Reconcile->>Inbox: load today's SAP spreadsheets
+    Reconcile->>Engine: reconcileSapVsCrm(rows)
+    Engine->>CRM: fetchCrmStock by plant/vendor/material
+    CRM-->>Engine: CRM quantities
+    Engine-->>Reconcile: discrepancies + matches
+    Reconcile->>Postgres: insert subcontractor_stock_runs
+
+    CLI->>EmailSender: triggerSubcontractorEmails() at send_time_ist
+    loop For each enabled recipient (plant)
+        EmailSender->>Postgres: load run + filter by plant
+        EmailSender->>EmailSender: excel-generator workbook + HTML body
+        EmailSender->>Send: sendHtmlEmail(attachment)
+        Send->>SMTP: sendDigestPayload → relay or SMTP
+    end
+
+    Note over Cron,SMTP: Portal manual actions relay to VPS via mail-relay-server.ts

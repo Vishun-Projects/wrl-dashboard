@@ -18,8 +18,8 @@ flowchart TD
 
     subgraph SMTP_FAIL["SMTP / VPS email fails"]
         direction LR
-        SMTPFAIL["Postfix / relay error\nor SMTP auth failure"]
-        SMTPFAIL --> DIGESTFAIL["Digest send → failed[]\nlogged in security_audit_log"]
+        SMTPFAIL["Postfix / relay error\nor outbound disabled"]
+        SMTPFAIL --> DIGESTFAIL["Any sendDigestPayload path\n→ failed[] + audit log"]
         SMTPFAIL --> WATCHDOG2["09:50 watchdog detects no send\n→ alert email to admin\n(via same relay — may also fail)"]
         SMTPFAIL --> NORETRY["No automatic retry of digest\n(next cron poll = next 15 min)"]
         SMTPFAIL --> DRYRUN["MIS_EMAIL_DRY_RUN=true\nlogs payload, skips SMTP"]
@@ -29,7 +29,7 @@ flowchart TD
         direction LR
         PAUSED["isVpsCronPaused() = true\n(portal DB flag)"]
         PAUSED --> SKIPALL["cron shell gate: exit 0\nno digest, no sync trigger"]
-        PAUSED --> RESUMEUI["Resume via /admin/vps-cron\n(super_admin only)"]
+        PAUSED --> RESUMEUI["Resume via Mail & Alerts\n→ VPS Cron tab (super_admin)"]
     end
 
     subgraph POSTGRES_SLOW["Postgres VPS degraded"]
@@ -53,4 +53,21 @@ flowchart TD
         SFAIL["GoTrue unreachable\nor JWT verify fails"]
         SFAIL --> COOKIEFALLBACK["server-user.ts: cookie-embedded\nuser_id accepted as fallback\n(trusts cookie integrity)"]
         SFAIL --> LOGINBLOCK["sign-in page: returns 503\nno bypass"]
+    end
+
+    subgraph SAP_SUBCON_FAIL["SAP inbox / subcontractor stock"]
+        direction LR
+        SAPMISS["No SAP file for today\nor parse error"]
+        SAPMISS --> SUBCONSKIP["cron logs SKIP\nno recipient email sent"]
+        SAPMISS --> PORTALRELAY["Portal manual action\nrelays to VPS mail-relay"]
+        CRMSTOCK["OLD_CRM_DATABASE_URL unset"]
+        CRMSTOCK --> RECONPARTIAL["Reconcile may skip\nCRM stock comparison"]
+    end
+
+    subgraph ATHENA_CANCEL_FAIL["Athena / cancelled register stale"]
+        direction LR
+        SIDECARLAG["Nightly sidecar job failed\n(non-fatal logged)"]
+        SIDECARLAG --> STALEATHENA["Athena report shows old failures"]
+        SIDECARLAG --> STALECANCEL["Cancelled register lags CRM"]
+        SIDECARLAG --> MANUALSYNC["POST reconcile/sync from UI\nor re-run nightly timer"]
     end

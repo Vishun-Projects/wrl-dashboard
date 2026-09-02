@@ -1,0 +1,30 @@
+sequenceDiagram
+    autonumber
+    actor Admin
+    participant Browser
+    participant NextJS as Next.js API
+    participant AttendMod as attendance module
+    participant SQL as sql/attendance/activity-report
+    participant Postgres as Postgres VPS
+
+    Admin->>Browser: Open /admin/attendance
+    Browser->>NextJS: GET /api/auth/me
+    NextJS-->>Browser: manage_users required
+
+    Browser->>NextJS: GET /api/admin/attendance?meta=offices
+    NextJS->>AttendMod: queryAttendanceOfficeOptions()
+    AttendMod->>SQL: office list for date window
+    SQL->>Postgres: crm_attendance_details
+    Postgres-->>Browser: offices + org settings
+
+    Browser->>NextJS: GET /api/admin/attendance (paginated)
+    NextJS->>AttendMod: queryActivityReport()
+    AttendMod->>SQL: filtered activity rows
+    SQL->>Postgres: crm_attendance_details JOIN filters
+    Postgres-->>Browser: rows + total
+
+    Admin->>Browser: Export CSV
+    Browser->>NextJS: GET ?export=csv
+    NextJS->>AttendMod: queryActivityReportExport()
+    AttendMod->>SQL: capped export + buildActivityReportCsv()
+    Postgres-->>Browser: CSV download

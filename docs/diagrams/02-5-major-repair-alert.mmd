@@ -2,7 +2,7 @@ sequenceDiagram
     autonumber
     participant SyncWorker as Sync Worker (CLI / nightly)
     participant AlertWorker as major-repair-repeat-alert.ts
-    participant Recipients as major-repair-repeat-recipients.ts
+    participant Recipients as branch-recipient-store\n(major-repair)
     participant Postgres
     participant Send as send.ts
     participant SMTP
@@ -14,10 +14,10 @@ sequenceDiagram
         AlertWorker->>Recipients: resolveAlertRecipients(branchId)
         Recipients->>Postgres: query major_repair_recipients (enabled + branch)
         Postgres-->>Recipients: branch rows (To) + HQ rows (Cc)
-        Note right of Recipients: Branch To wins; HQ demotes to Cc
+        Note right of Recipients: Branch To wins — HQ demotes to Cc
         Recipients-->>AlertWorker: to[] + cc[]
-        AlertWorker->>Send: sendPreparedDigestEmail(to, cc, alertHtml)
-        Send->>SMTP: sendMail()
+        AlertWorker->>Send: sendHtmlEmail(to, cc, alertHtml)
+        Send->>SMTP: sendDigestPayload → relay or SMTP
         SMTP-->>AlertWorker: messageId
         AlertWorker->>Postgres: log alert send
     end

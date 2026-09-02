@@ -128,6 +128,10 @@ else
       scripts \
       | ssh "${SSH_OPTS[@]}" "$VPS_HOST" "tar -xzf - -C '${RELEASE_DIR}'"
   fi
+
+  echo "==> Normalizing vps-hosting/*.sh to LF (Windows checkouts may ship CRLF)"
+  ssh "${SSH_OPTS[@]}" "$VPS_HOST" \
+    "find '${RELEASE_DIR}/scripts/vps-hosting' -name '*.sh' -exec sed -i 's/\\r$//' {} +"
 fi
 
 echo "==> Link shared + preflight + activate ${SHA}"

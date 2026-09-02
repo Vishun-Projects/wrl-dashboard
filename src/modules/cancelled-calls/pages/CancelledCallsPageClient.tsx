@@ -21,6 +21,11 @@ import { defaultDateRange, toDateString, type ReportDateRange } from '@/modules/
 
 const API = '/api/report/cancelled-calls';
 
+const ASSIGNMENT_OPTIONS: FilterSelectOption[] = [
+  { value: 'assigned', label: 'Assigned' },
+  { value: 'unassigned', label: 'Unassigned' },
+];
+
 function buildParams(opts: {
   startDate: string;
   endDate: string;
@@ -28,6 +33,7 @@ function buildParams(opts: {
   franchisees: string[];
   partyProfiles: string[];
   callTypes: string[];
+  assignment?: string;
   page?: number;
   pageSize?: number;
 }): URLSearchParams {
@@ -38,6 +44,7 @@ function buildParams(opts: {
   if (opts.franchisees.length) params.set('franchisees', opts.franchisees.join(','));
   if (opts.partyProfiles.length) params.set('partyProfiles', opts.partyProfiles.join(','));
   if (opts.callTypes.length) params.set('callTypes', opts.callTypes.join(','));
+  if (opts.assignment) params.set('assignment', opts.assignment);
   if (opts.page) params.set('page', String(opts.page));
   if (opts.pageSize) params.set('pageSize', String(opts.pageSize));
   return params;
@@ -56,6 +63,7 @@ export default function CancelledCallsPageClient() {
   const [franchisee, setFranchisee] = useState('');
   const [partyProfile, setPartyProfile] = useState('');
   const [callType, setCallType] = useState('');
+  const [assignment, setAssignment] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 50;
 
@@ -120,7 +128,15 @@ export default function CancelledCallsPageClient() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const base = { startDate, endDate, branches, franchisees, partyProfiles, callTypes };
+      const base = {
+        startDate,
+        endDate,
+        branches,
+        franchisees,
+        partyProfiles,
+        callTypes,
+        assignment: assignment || undefined,
+      };
       const [summaryRes, rowsRes] = await Promise.all([
         axios.get<CancelledCallsSummary>(
           `${API}?mode=summary&${buildParams(base).toString()}`,
@@ -142,7 +158,7 @@ export default function CancelledCallsPageClient() {
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, branch, franchisee, partyProfile, callType, page]);
+  }, [startDate, endDate, branch, franchisee, partyProfile, callType, assignment, page]);
 
   useEffect(() => {
     void load();
@@ -151,7 +167,15 @@ export default function CancelledCallsPageClient() {
   async function exportCsv() {
     setExporting(true);
     try {
-      const params = buildParams({ startDate, endDate, branches, franchisees, partyProfiles, callTypes });
+      const params = buildParams({
+        startDate,
+        endDate,
+        branches,
+        franchisees,
+        partyProfiles,
+        callTypes,
+        assignment: assignment || undefined,
+      });
       params.set('format', 'csv');
       const res = await axios.get(`${API}?${params.toString()}`, {
         withCredentials: true,
@@ -244,6 +268,19 @@ export default function CancelledCallsPageClient() {
               }}
               searchPlaceholder="Search vendor or name…"
               panelClassName="w-80"
+              layout="inline"
+            />
+            <FilterSelect
+              label="Assignment"
+              emptyLabel="All Assignment"
+              options={ASSIGNMENT_OPTIONS}
+              selected={assignment ? [assignment] : []}
+              mode="single"
+              onChange={(values) => {
+                resetPage();
+                setAssignment(pickSingleFilterValue(values));
+              }}
+              panelClassName="w-44"
               layout="inline"
             />
             <FilterSelect

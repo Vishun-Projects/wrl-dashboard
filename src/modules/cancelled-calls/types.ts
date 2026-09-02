@@ -1,3 +1,5 @@
+export type CancelledCallAssignmentFilter = 'assigned' | 'unassigned';
+
 export type CancelledCallsFilters = {
   startDate: string;
   endDate: string;
@@ -5,6 +7,8 @@ export type CancelledCallsFilters = {
   franchisees: string[];
   partyProfiles: string[];
   callTypes: string[];
+  /** Branch set, franchisee missing/Unallocated = unassigned; both set = assigned. */
+  assignment: CancelledCallAssignmentFilter | null;
   page: number;
   pageSize: number;
   isHod: boolean;

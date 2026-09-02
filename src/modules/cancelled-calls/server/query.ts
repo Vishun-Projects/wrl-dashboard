@@ -68,6 +68,10 @@ export function parseCancelledCallsFilters(
     200,
     Math.max(1, Number(searchParams.get('pageSize') ?? 50) || 50)
   );
+  const assignmentRaw = searchParams.get('assignment')?.trim().toLowerCase();
+  const assignment =
+    assignmentRaw === 'assigned' || assignmentRaw === 'unassigned' ? assignmentRaw : null;
+
   return {
     startDate,
     endDate,
@@ -75,6 +79,7 @@ export function parseCancelledCallsFilters(
     franchisees: parseCsvList(searchParams.get('franchisees')),
     partyProfiles: parseCsvList(searchParams.get('partyProfiles')),
     callTypes: parseCsvList(searchParams.get('callTypes')),
+    assignment,
     page,
     pageSize,
   };
@@ -94,9 +99,22 @@ export function buildCancelledCallsFilterSql(
   return buildFilterSql(filters, alias);
 }
 
+function hasBranchNameSql(alias: string): string {
+  return `nullif(btrim(${alias}.branch_name), '') IS NOT NULL`;
+}
+
+function hasFranchiseeNameSql(alias: string): string {
+  return `(nullif(btrim(${alias}.franchisee_name), '') IS NOT NULL AND upper(btrim(${alias}.franchisee_name)) <> 'UNALLOCATED')`;
+}
+
 function buildFilterSql(filters: CancelledCallsFilters, alias = 'c'): FilterSql {
   const params: unknown[] = [filters.startDate, filters.endDate];
   const parts = [cancelledDateRangeSql(alias, 1)];
+  if (filters.assignment === 'assigned') {
+    parts.push(`(${hasBranchNameSql(alias)} AND ${hasFranchiseeNameSql(alias)})`);
+  } else if (filters.assignment === 'unassigned') {
+    parts.push(`(${hasBranchNameSql(alias)} AND NOT (${hasFranchiseeNameSql(alias)}))`);
+  }
   if (filters.branches.length > 0) {
     params.push(filters.branches.map((b) => b.toUpperCase()));
     parts.push(`upper(btrim(${alias}.branch_name)) = ANY($${params.length}::text[])`);

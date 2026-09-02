@@ -1,0 +1,27 @@
+sequenceDiagram
+    autonumber
+    participant Cron as VPS Cron 16:00 IST\nevening-ops-sequencer.sh
+    participant EveningOps as evening-ops-sequencer.ts
+    participant CancelDigest as cancelled-call-digest.ts
+    participant CancelMod as cancelled-calls module
+    participant Postgres as Postgres VPS
+    participant Send as send.ts
+    participant SMTP as SMTP / VPS relay
+
+    Cron->>EveningOps: run evening ops probe
+    EveningOps->>EveningOps: isVpsCronPaused per step (TS)
+    EveningOps->>EveningOps: MIS compose probe (optional)
+    EveningOps->>CancelDigest: runCancelledCallDigest({ force, forceTo })
+    CancelDigest->>CancelMod: fetchCancelledCallsForDigestDay(yesterday IST)
+    CancelMod->>Postgres: calls_cancelled by branch
+    Postgres-->>CancelDigest: rows grouped by branch
+    CancelDigest->>CancelMod: buildCancelledCallsWorkbook(byBranch)
+    loop For each branch recipient
+        CancelDigest->>Postgres: wasCancelledDigestAlreadySent?
+        alt Not yet sent today
+            CancelDigest->>Send: sendDigestPayload(Excel attach)
+            Send->>SMTP: relay or direct SMTP
+            CancelDigest->>Postgres: recordCancelledDigestSent()
+        end
+    end
+    CancelDigest-->>EveningOps: sent[] + skipped[] + failed[]
