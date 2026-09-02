@@ -3,7 +3,6 @@ import type { BranchPerformanceRow, RegionalPerformanceRow } from '@/modules/mis
 import {
   bdMisSourcesFromSelection,
   buildBdMisRegionalRows,
-  buildMisUnifiedReportAlign,
   countTraceOpenCalls,
   filterTraceRowsForOpenExport,
   filterTraceRowsForSummaryExport,
@@ -16,6 +15,7 @@ import {
   type UiBranchPerformanceRow,
   type UiRegionalPerformanceRow,
 } from '@/modules/mis';
+import { buildMisUnifiedReportAlign } from '@/modules/mis/server';
 import type { AccountSummaryRow, SummaryDashboard } from '@/lib/summary/derive';
 
 export type { BranchPerformanceRow, RegionalPerformanceRow } from '@/modules/mis-email/services/mail-types';
