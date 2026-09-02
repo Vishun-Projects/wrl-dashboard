@@ -10,16 +10,10 @@ import {
   resolveDigestKeyAccountBodyRows,
 } from '@/modules/mis-email/services/fetch-digest-accounts';
 import {
-  buildMisEmailRegionalAndBranchRowsFromTrace,
-  buildMisEmailRegionalPerformanceRows,
+  buildMisEmailSummaryDashboardBodyRows,
   mergeBranchPerformanceRowsByName,
-  overlayBranchOpenFromExcelRows,
-  overlayRegionalOpenFromExcelRows,
   reconcileMisEmailOpenCounts,
 } from '@/modules/mis-email/services/mail-basis';
-import { mergeBranchSummaryRowsByName } from '@/modules/mis';
-import { buildTopLevelBranchRows } from '@/modules/mis-email/services/body-sections';
-import type { BranchPerformanceRow } from '@/modules/mis-email/services/mail-types';
 import { buildDigestTraceableExportPayload } from '@/modules/mis-email/services/fetch-digest-trace';
 import {
   fetchDigestRegisterRows,
@@ -129,13 +123,7 @@ async function buildMisEmailBodyContext(
   data: Awaited<ReturnType<typeof fetchDigestSummaryDataCached>>,
   dateRange: DigestDateRange,
   bodySectionIds: ReturnType<typeof resolveDigestBodySections>,
-  clientAccountSummary?: Awaited<ReturnType<typeof fetchDigestClientAccountSummaryCached>>,
-  options?: {
-    /** Full trace export — all status buckets; body counted entirely from these rows. */
-    fullTraceRows?: Awaited<ReturnType<typeof buildDigestTraceableExportPayload>>['traceRows'];
-    /** Open-calls Excel only — open/aging/eng overlay; solved/cancelled stay on BdMis summary. */
-    openTraceRows?: Awaited<ReturnType<typeof buildDigestTraceableExportPayload>>['traceRows'];
-  }
+  clientAccountSummary?: Awaited<ReturnType<typeof fetchDigestClientAccountSummaryCached>>
 ): Promise<MisEmailBodyContext> {
   const explicitAccounts = parseMisEmailKeyAccountsInBody(prefs.keyAccountsInBody);
   const explicitAccountsByZone = parseMisEmailKeyAccountsByZone(prefs.keyAccountsByZone);
@@ -169,47 +157,20 @@ async function buildMisEmailBodyContext(
 
   const needsRegionalBody = bodySectionIds.includes('regional_performance');
   const needsBranchBody = bodySectionIds.includes('branch_performance');
-  const fullTraceRows = options?.fullTraceRows;
-  const openTraceRows = options?.openTraceRows;
 
-  if (fullTraceRows?.length && (needsRegionalBody || needsBranchBody)) {
-    const { regional, branch } = buildMisEmailRegionalAndBranchRowsFromTrace(fullTraceRows);
-    if (needsRegionalBody) context.regionalPerformanceRows = regional;
-    if (needsBranchBody) {
-      context.branchPerformanceRows = mergeBranchPerformanceRowsByName(branch);
-    }
-  } else if (needsRegionalBody || needsBranchBody) {
+  if (needsRegionalBody || needsBranchBody) {
     const clientRows =
       clientAccountSummary !== undefined
         ? clientAccountSummary
         : await fetchDigestClientAccountSummaryCached(dateRange);
-    if (needsRegionalBody) {
-      let regional = buildMisEmailRegionalPerformanceRows(data, clientRows);
-      if (openTraceRows?.length) {
-        regional = overlayRegionalOpenFromExcelRows(regional, openTraceRows);
-      }
-      context.regionalPerformanceRows = regional;
-    }
+    const { regional, branch } = await buildMisEmailSummaryDashboardBodyRows(
+      data,
+      clientRows,
+      dateRange
+    );
+    if (needsRegionalBody) context.regionalPerformanceRows = regional;
     if (needsBranchBody) {
-      const crmBranch: BranchPerformanceRow[] = mergeBranchSummaryRowsByName(
-        buildTopLevelBranchRows(data.branchSummary)
-      ).map((row) => ({
-        branch: row.branch,
-        region: row.region,
-        total_calls: row.total_calls,
-        solved_calls: row.solved_calls,
-        cancelled_calls: row.cancelled_calls,
-        open_calls: row.open_calls,
-        age_2: row.age_2,
-        age_3: row.age_3,
-        age_7: row.age_7,
-        age_15: row.age_15,
-        part_pending: row.part_pending,
-        active_eng: row.active_eng,
-      }));
-      context.branchPerformanceRows = openTraceRows?.length
-        ? overlayBranchOpenFromExcelRows(crmBranch, openTraceRows)
-        : crmBranch;
+      context.branchPerformanceRows = mergeBranchPerformanceRowsByName(branch);
     }
   }
 
@@ -422,12 +383,6 @@ export async function buildMisEmailPayload(
     console.log(
       `[mis-email/trace] open reconcile summary=${reconciliation.summaryOpen} trace=${reconciliation.traceOpenIncluded} delta=${reconciliation.delta} match=${reconciliation.matches}`
     );
-    if (!reconciliation.matches) {
-      // Nightly open-cancel repair owns hot drift; mail must not block or spend minutes on CRM.
-      console.warn(
-        `[mis-email/trace] open call mismatch — summary ${reconciliation.summaryOpen} vs trace ${reconciliation.traceOpenIncluded} (delta ${reconciliation.delta}) — sending with Excel/trace basis`
-      );
-    }
   }
 
   let emailAttachments: EmailAttachment[];
@@ -441,6 +396,8 @@ export async function buildMisEmailPayload(
     emailAttachments = await timer.measure('build attachments', () =>
       buildDigestAttachments(effectiveRecipient, data, {
         registerRows,
+        dateRange,
+        clientAccountSummary: clientAccountSummary ?? [],
         effectiveIncludes: attachmentIncludes,
         tracePayload,
       }), (attachments) =>
@@ -462,14 +419,7 @@ export async function buildMisEmailPayload(
       data,
       dateRange,
       bodySectionIds,
-      clientAccountSummary,
-      {
-        fullTraceRows: includeTraceableExport ? tracePayload?.traceRows : undefined,
-        openTraceRows:
-          includeOpenCallsExport && !includeTraceableExport
-            ? tracePayload?.traceRows
-            : undefined,
-      }
+      clientAccountSummary
     ), (ctx) => `accountRows=${ctx.accountRows?.length ?? 0}`
   );
 

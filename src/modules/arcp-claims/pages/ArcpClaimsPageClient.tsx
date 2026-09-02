@@ -52,9 +52,6 @@ export default function ArcpClaimsPage() {
       callTypeOptions={callTypeOptions}
       selectedCallTypes={selectedCallTypes}
       onCallTypesChange={setSelectedCallTypes}
-      onApply={handleApplyFilters}
-      applyDisabled={loading || !resourcesLoaded}
-      hasPendingFilterChanges={hasPendingFilterChanges}
       loading={loading}
       loadStatus={loadStatus}
       loadProgressLabel={appliedLoadPlan ? arcpChunkProgressLabel(appliedLoadPlan) : 'periods'}

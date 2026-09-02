@@ -10,7 +10,7 @@ import {
 } from '@/modules/mis-email/services/org-settings';
 import { assertSameOriginMutation } from '@/lib/api/same-origin';
 import { jsonSafeError, safeErrorMessage } from '@/lib/api/safe-error';
-import { assertAllowedEmailDomains } from '@/modules/mis-email/services/allowed-domains';
+import { assertAllowedEmailDomains } from '@/lib/mail/allowed-domains';
 import { logAccessDenied, logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
 
 async function requireAccess(request: Request) {

@@ -479,8 +479,14 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     ]
   );
 
-  const hasPendingFilterChanges =
-    isSearchDebouncing || !filterSnapshotsEqual(draftSnapshot, appliedFilters);
+  const hasPendingFilterChanges = isSearchDebouncing;
+
+  useEffect(() => {
+    if (isSearchDebouncing) return;
+    if (!filterSnapshotsEqual(draftSnapshot, appliedFilters)) {
+      applyFilterSnapshot(draftSnapshot);
+    }
+  }, [draftSnapshot, appliedFilters, isSearchDebouncing, applyFilterSnapshot]);
 
   const getAppliedFiltersSnapshot = useCallback(
     (): ReportFilterSnapshot | null => appliedFiltersRef.current,

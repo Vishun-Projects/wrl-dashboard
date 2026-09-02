@@ -14,7 +14,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_INSTALL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-$DEFAULT_INSTALL_ROOT}"
-LOG="${INSTALL_ROOT}/logs/mis-email-cron.log"
+LOG="${INSTALL_ROOT}/logs/mail-scheduler.log"
+[[ -f "$LOG" ]] || LOG="${INSTALL_ROOT}/logs/mis-email-cron.log"
 TODAY="$(TZ=Asia/Kolkata date +%F)"
 STAMP="$(TZ=Asia/Kolkata date -Iseconds)"
 

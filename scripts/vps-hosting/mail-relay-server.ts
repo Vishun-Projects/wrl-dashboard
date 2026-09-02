@@ -26,10 +26,7 @@ import { createServer } from 'http';
 import { resolve } from 'path';
 import { sendPasswordResetEmail } from '@/lib/auth/send-password-reset-email';
 import '@/modules/mis-email/services/bootstrap-env';
-import { sendMisEmailComposeBatch } from '@/modules/mis-email/services/compose-digest';
 import { createMailTransport, resolveSmtpConfig } from '@/modules/mis-email/services/send';
-import { loadDigestRecipientById } from '@/modules/mis-email/services/recipients';
-import type { MisEmailPreferences } from '@/modules/mis-email/services/preferences';
 import { syncSapMailInbox } from '@/modules/subcontractor-stock/services/sap-inbox';
 import { runTodayReconciliation } from '@/modules/subcontractor-stock/services/reconcile-runner';
 import { triggerSubcontractorEmails } from '@/modules/subcontractor-stock/services/email-sender';
@@ -42,7 +39,6 @@ config({ path: resolve(root, '.env.sync-worker') });
 
 const PORT = Number(process.env.MAIL_RELAY_PORT ?? 8789);
 const RESET_PATH = '/internal/mail/send';
-const MIS_DIGEST_PATH = '/internal/mail/mis-digest';
 const MIS_DIGEST_PREPARED_PATH = '/internal/mail/mis-digest-prepared';
 const MIGRATION_REPORT_PATH = '/internal/mail/migration-report';
 const SAP_INBOX_SYNC_PATH = '/internal/mail/subcontractor-sap-inbox/sync';
@@ -194,37 +190,6 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (req.url === MIS_DIGEST_PATH) {
-      const body = (await readJson(req)) as {
-        userId?: string;
-        preferences?: MisEmailPreferences;
-        sendTo?: string[];
-      };
-
-      if (!body.userId?.trim()) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'userId is required' }));
-        return;
-      }
-
-      const recipient = await loadDigestRecipientById(body.userId.trim());
-      if (!recipient) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Recipient not found' }));
-        return;
-      }
-
-      const sent = await sendMisEmailComposeBatch(recipient, {
-        preferences: body.preferences,
-        sendTo: body.sendTo,
-        displayName: recipient.name,
-      });
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, sent }));
-      return;
-    }
-
     if (req.url === MIGRATION_REPORT_PATH) {
       const body = (await readJson(req)) as {
         to?: string;
@@ -369,7 +334,6 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`[mail-relay] listening on 127.0.0.1:${PORT}`);
   console.log(`[mail-relay]   max body ${MAX_BODY_BYTES} bytes, timeout ${REQUEST_TIMEOUT_MS}ms`);
   console.log(`[mail-relay]   ${RESET_PATH} (password reset)`);
-  console.log(`[mail-relay]   ${MIS_DIGEST_PATH} (MIS digest — compose on VPS)`);
   console.log(`[mail-relay]   ${MIS_DIGEST_PREPARED_PATH} (MIS digest — pre-built from app)`);
   console.log(`[mail-relay]   ${MIGRATION_REPORT_PATH} (migration reports)`);
   console.log(`[mail-relay]   ${SAP_INBOX_SYNC_PATH} (subcontractor SAP inbox sync)`);

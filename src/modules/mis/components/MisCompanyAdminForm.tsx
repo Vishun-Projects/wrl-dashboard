@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { ChevronDown, ChevronUp, Loader2, Save } from 'lucide-react';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import type { MisClientSourceConfig } from '@/modules/mis/client-import';
 import type { SourceConfigPayload } from '@/modules/mis/client-import';
 
@@ -161,22 +162,22 @@ export default function MisCompanyAdminForm({ canEdit, onSaved }: Props) {
           <div className="flex flex-wrap items-end gap-2">
             <label className="flex flex-col gap-0.5">
               <span className="text-slate-500">Edit existing</span>
-              <select
-                value={editCode}
-                onChange={(e) => {
-                  const code = e.target.value;
+              <FilterSelect
+                label="Company"
+                emptyLabel="— New company —"
+                mode="single"
+                options={sources.map((s) => ({
+                  value: s.code,
+                  label: `${s.code} — ${s.name}`,
+                }))}
+                selected={editCode ? [editCode] : []}
+                onChange={(values) => {
+                  const code = values[0] ?? '';
                   setEditCode(code);
                   void loadConfig(code);
                 }}
-                className="rounded border border-slate-200 px-2 py-1"
-              >
-                <option value="">— New company —</option>
-                {sources.map((s) => (
-                  <option key={s.code} value={s.code}>
-                    {s.code} — {s.name}
-                  </option>
-                ))}
-              </select>
+                panelClassName="w-72"
+              />
             </label>
             {editCode ? (
               <label className="flex flex-col gap-0.5">
@@ -208,16 +209,23 @@ export default function MisCompanyAdminForm({ canEdit, onSaved }: Props) {
             </label>
             <label className="flex flex-col gap-0.5">
               <span className="text-slate-500">File type</span>
-              <select
-                value={payload.file_kind}
-                onChange={(e) =>
-                  setPayload({ ...payload, file_kind: e.target.value as 'csv' | 'xlsx' })
+              <FilterSelect
+                label="File type"
+                emptyLabel="File type"
+                mode="single"
+                options={[
+                  { value: 'csv', label: 'CSV' },
+                  { value: 'xlsx', label: 'Excel' },
+                ]}
+                selected={[payload.file_kind]}
+                onChange={(values) =>
+                  setPayload({
+                    ...payload,
+                    file_kind: (values[0] ?? 'csv') as 'csv' | 'xlsx',
+                  })
                 }
-                className="rounded border border-slate-200 px-2 py-1"
-              >
-                <option value="csv">CSV</option>
-                <option value="xlsx">Excel</option>
-              </select>
+                panelClassName="w-44"
+              />
             </label>
             {payload.file_kind === 'csv' && (
               <label className="flex flex-col gap-0.5">
@@ -277,21 +285,19 @@ export default function MisCompanyAdminForm({ canEdit, onSaved }: Props) {
                     placeholder="Client column"
                     className="rounded border border-slate-200 px-2 py-1 flex-1 min-w-[120px]"
                   />
-                  <select
-                    value={m.crm_field}
-                    onChange={(e) => {
+                  <FilterSelect
+                    label="CRM field"
+                    emptyLabel="CRM field"
+                    mode="single"
+                    options={CRM_FIELDS.map((f) => ({ value: f, label: f }))}
+                    selected={[m.crm_field]}
+                    onChange={(values) => {
                       const fieldMappings = [...payload.fieldMappings];
-                      fieldMappings[i] = { ...m, crm_field: e.target.value };
+                      fieldMappings[i] = { ...m, crm_field: values[0] ?? m.crm_field };
                       setPayload({ ...payload, fieldMappings });
                     }}
-                    className="rounded border border-slate-200 px-2 py-1"
-                  >
-                    {CRM_FIELDS.map((f) => (
-                      <option key={f} value={f}>
-                        {f}
-                      </option>
-                    ))}
-                  </select>
+                    panelClassName="w-44"
+                  />
                   <button
                     type="button"
                     onClick={() =>
@@ -339,24 +345,22 @@ export default function MisCompanyAdminForm({ canEdit, onSaved }: Props) {
                     placeholder="Client status"
                     className="rounded border border-slate-200 px-2 py-1 flex-1 min-w-[100px]"
                   />
-                  <select
-                    value={m.status_bucket}
-                    onChange={(e) => {
+                  <FilterSelect
+                    label="Status bucket"
+                    emptyLabel="Status bucket"
+                    mode="single"
+                    options={STATUS_BUCKETS.map((b) => ({ value: b, label: b }))}
+                    selected={[m.status_bucket]}
+                    onChange={(values) => {
                       const statusMappings = [...payload.statusMappings];
                       statusMappings[i] = {
                         ...m,
-                        status_bucket: e.target.value as (typeof STATUS_BUCKETS)[number],
+                        status_bucket: (values[0] ?? m.status_bucket) as (typeof STATUS_BUCKETS)[number],
                       };
                       setPayload({ ...payload, statusMappings });
                     }}
-                    className="rounded border border-slate-200 px-2 py-1"
-                  >
-                    {STATUS_BUCKETS.map((b) => (
-                      <option key={b} value={b}>
-                        {b}
-                      </option>
-                    ))}
-                  </select>
+                    panelClassName="w-44"
+                  />
                   <input
                     value={m.status_label}
                     onChange={(e) => {
@@ -402,25 +406,22 @@ export default function MisCompanyAdminForm({ canEdit, onSaved }: Props) {
                     placeholder="Entity / state"
                     className="rounded border border-slate-200 px-2 py-1 flex-1 min-w-[120px]"
                   />
-                  <select
-                    value={m.region_override ?? ''}
-                    onChange={(e) => {
+                  <FilterSelect
+                    label="Zone"
+                    emptyLabel="— zone —"
+                    mode="single"
+                    options={ZONES.map((z) => ({ value: z, label: z }))}
+                    selected={m.region_override ? [m.region_override] : []}
+                    onChange={(values) => {
                       const stateMappings = [...payload.stateMappings];
                       stateMappings[i] = {
                         ...m,
-                        region_override: e.target.value || null,
+                        region_override: values[0] || null,
                       };
                       setPayload({ ...payload, stateMappings });
                     }}
-                    className="rounded border border-slate-200 px-2 py-1"
-                  >
-                    <option value="">— zone —</option>
-                    {ZONES.map((z) => (
-                      <option key={z} value={z}>
-                        {z}
-                      </option>
-                    ))}
-                  </select>
+                    panelClassName="w-44"
+                  />
                 </div>
               ))}
               <button

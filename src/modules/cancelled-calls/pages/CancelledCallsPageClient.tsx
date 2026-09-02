@@ -15,8 +15,8 @@ import type {
 } from '@/modules/cancelled-calls/types';
 import { formatCancelledCallFranchisee } from '@/modules/cancelled-calls/franchisee-label';
 import { DateRangeSelector } from '@/modules/mis/register/components/DateRangeSelector';
-import { RegisterMultiSelect } from '@/modules/mis/register/components/RegisterMultiSelect';
-import type { RegisterMultiSelectOption } from '@/modules/mis/register/components/RegisterMultiSelect';
+import { FilterSelect } from '@/components/filters/FilterSelect';
+import type { FilterSelectOption } from '@/components/filters/filter-select-types';
 import { defaultDateRange, toDateString, type ReportDateRange } from '@/modules/mis';
 
 const API = '/api/report/cancelled-calls';
@@ -73,19 +73,19 @@ export default function CancelledCallsPageClient() {
   const partyProfiles = partyProfile ? [partyProfile] : [];
   const callTypes = callType ? [callType] : [];
 
-  const branchSelectOptions = useMemo<RegisterMultiSelectOption[]>(
+  const branchSelectOptions = useMemo<FilterSelectOption[]>(
     () => branchOptions.map((b) => ({ value: b, label: b })),
     [branchOptions]
   );
-  const franchiseeSelectOptions = useMemo<RegisterMultiSelectOption[]>(
+  const franchiseeSelectOptions = useMemo<FilterSelectOption[]>(
     () => franchiseeOptions.map((f) => ({ value: f.vendorCode, label: f.label })),
     [franchiseeOptions]
   );
-  const partyProfileSelectOptions = useMemo<RegisterMultiSelectOption[]>(
+  const partyProfileSelectOptions = useMemo<FilterSelectOption[]>(
     () => partyProfileOptions.map((p) => ({ value: p, label: p })),
     [partyProfileOptions]
   );
-  const callTypeSelectOptions = useMemo<RegisterMultiSelectOption[]>(
+  const callTypeSelectOptions = useMemo<FilterSelectOption[]>(
     () => callTypeOptions.map((t) => ({ value: t, label: t })),
     [callTypeOptions]
   );
@@ -218,58 +218,58 @@ export default function CancelledCallsPageClient() {
                 }}
               />
             </div>
-            <RegisterMultiSelect
+            <FilterSelect
               label="Branch"
               emptyLabel="All Branches"
               options={branchSelectOptions}
               selected={branches}
+              mode="single"
               onChange={(values) => {
                 resetPage();
                 setBranch(pickSingleFilterValue(values));
               }}
-              searchable
               searchPlaceholder="Search branch…"
               panelClassName="w-72"
               layout="inline"
             />
-            <RegisterMultiSelect
+            <FilterSelect
               label="Franchisee"
               emptyLabel="All Franchisees"
               options={franchiseeSelectOptions}
               selected={franchisees}
+              mode="single"
               onChange={(values) => {
                 resetPage();
                 setFranchisee(pickSingleFilterValue(values));
               }}
-              searchable
               searchPlaceholder="Search vendor or name…"
               panelClassName="w-80"
               layout="inline"
             />
-            <RegisterMultiSelect
+            <FilterSelect
               label="Party Profile"
               emptyLabel="All Party Profiles"
               options={partyProfileSelectOptions}
               selected={partyProfiles}
+              mode="single"
               onChange={(values) => {
                 resetPage();
                 setPartyProfile(pickSingleFilterValue(values));
               }}
-              searchable
               searchPlaceholder="Search party profile…"
               panelClassName="w-64"
               layout="inline"
             />
-            <RegisterMultiSelect
+            <FilterSelect
               label="Call Type"
               emptyLabel="All Call Types"
               options={callTypeSelectOptions}
               selected={callTypes}
+              mode="single"
               onChange={(values) => {
                 resetPage();
                 setCallType(pickSingleFilterValue(values));
               }}
-              searchable
               searchPlaceholder="Search call type…"
               panelClassName="w-64"
               layout="inline"

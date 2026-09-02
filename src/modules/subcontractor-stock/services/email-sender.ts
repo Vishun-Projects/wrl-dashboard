@@ -1,8 +1,11 @@
-import { resolveSmtpConfig, createMailTransport } from '@/lib/mail/smtp';
+import { sendHtmlEmail, type EmailAttachment } from '@/modules/mis-email';
 import { listSubcontractorRecipients, getTodaySubcontractorRun, markSubcontractorRunEmailSent, getIstLocalDateStr } from './settings';
 import { runTodayReconciliation } from './reconcile-runner';
 import { generateReconciliationExcel } from './excel-generator';
 import { ReconciledRow } from './reconciliation-engine';
+
+const XLSX_CONTENT_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 function formatQty(val: number): string {
   if (val % 1 === 0) {
@@ -122,18 +125,14 @@ export async function triggerSubcontractorEmails(
     }
   }
 
-  // 5. Initialize SMTP Transport
-  const smtpConfig = resolveSmtpConfig();
-  const transport = createMailTransport(smtpConfig);
-
+  // 5. Send consolidated email per unique recipient email
   let sentCount = 0;
 
-  // 6. Send consolidated email per unique recipient email
   for (const [recipientEmail, config] of recipientsByEmail.entries()) {
     const plantCodes = Array.from(config.plants.keys());
     console.log(`Preparing consolidated report for: ${recipientEmail} with Plants: ${plantCodes.join(', ')}`);
 
-    const attachments: any[] = [];
+    const attachments: EmailAttachment[] = [];
     const combinedFilteredRows: ReconciledRow[] = [];
     let plantsHtml = '';
 
@@ -325,6 +324,7 @@ export async function triggerSubcontractorEmails(
       attachments.push({
         filename: `subcontractor_stock_reconciliation_${dateStr}.xlsx`,
         content: buffer,
+        contentType: XLSX_CONTENT_TYPE,
       });
     }
 
@@ -356,12 +356,12 @@ export async function triggerSubcontractorEmails(
       </div>
     `;
 
-    await transport.sendMail({
-      from: smtpConfig.from,
+    await sendHtmlEmail({
       to: recipientEmail,
-      subject: subject,
+      subject,
       html: htmlContent,
-      attachments: attachments,
+      text: `Dear ${config.recipientName}, subcontractor stock reconciliation for ${dateStr}. Plants: ${plantCodes.join(', ')}. See attached Excel.`,
+      attachments,
     });
 
     sentCount++;

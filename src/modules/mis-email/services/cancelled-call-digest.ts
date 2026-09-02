@@ -1,16 +1,22 @@
 import {
-  buildCancelledCallsCsv,
+  buildCancelledCallsWorkbook,
+  cancelledCallsOverview,
+  cancelledCallsWorkbookFilename,
   fetchCancelledCallsForDigestDay,
   istYesterdayYmd,
 } from '@/modules/cancelled-calls';
 import {
   ensureCancelledCallDigestTables,
-  listEnabledCancelledDigestEmailsForBranch,
+  listCancelledCallDigestRecipients,
   recordCancelledDigestSent,
   wasCancelledDigestAlreadySent,
 } from '@/modules/mis-email/server/sync/cancelled-call-digest-recipients';
 import { sendPreparedDigestEmail } from '@/modules/mis-email/services/send';
+import { workbookToBuffer } from '@/modules/mis';
 import type { CancelledCallRow } from '@/modules/cancelled-calls/types';
+
+const XLSX_CONTENT_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 export type CancelledCallDigestResult = {
   digestDate: string;
@@ -28,41 +34,110 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function buildBranchHtml(branch: string, digestDate: string, rows: CancelledCallRow[]): string {
-  const preview = rows.slice(0, 25);
-  const more = rows.length > preview.length ? rows.length - preview.length : 0;
-  const trs = preview
+function buildOverviewHtml(
+  digestDate: string,
+  byBranch: Map<string, CancelledCallRow[]>
+): string {
+  const overview = cancelledCallsOverview(byBranch);
+  const total = overview.reduce((sum, row) => sum + row.count, 0);
+  const rows = overview
     .map(
-      (r) =>
+      (row) =>
         `<tr>
-          <td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-size:12px">${escapeHtml(r.vtrnno)}</td>
-          <td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;font-size:12px">${escapeHtml(r.callType ?? '')}</td>
-          <td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;font-size:12px">${escapeHtml(r.partyName ?? '')}</td>
-          <td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;font-size:12px">${escapeHtml(r.cancelReason)}</td>
+          <td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;font-size:13px">${escapeHtml(row.branch)}</td>
+          <td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;text-align:right">${row.count}</td>
         </tr>`
     )
     .join('');
 
   return `<!DOCTYPE html>
 <html><body style="font-family:system-ui,sans-serif;color:#0f172a">
-  <h2 style="margin:0 0 8px">Cancelled calls — ${escapeHtml(branch)}</h2>
+  <h2 style="margin:0 0 8px">Cancelled calls — ${escapeHtml(digestDate)}</h2>
   <p style="margin:0 0 16px;color:#475569;font-size:14px">
-    ${rows.length} cancelled call${rows.length === 1 ? '' : 's'} on ${escapeHtml(digestDate)} (IST).
-    Full list attached as CSV.
+    ${total} cancelled call${total === 1 ? '' : 's'} across ${overview.length} branch${overview.length === 1 ? '' : 'es'} (IST).
+    Full list attached as Excel.
   </p>
-  <table style="border-collapse:collapse;width:100%;max-width:720px">
+  <table style="border-collapse:collapse;width:100%;max-width:420px">
     <thead>
       <tr style="background:#f8fafc;text-align:left">
-        <th style="padding:6px 8px;font-size:11px;color:#64748b">TRN</th>
-        <th style="padding:6px 8px;font-size:11px;color:#64748b">Call type</th>
-        <th style="padding:6px 8px;font-size:11px;color:#64748b">Party</th>
-        <th style="padding:6px 8px;font-size:11px;color:#64748b">Reason</th>
+        <th style="padding:6px 8px;font-size:11px;color:#64748b">Branch</th>
+        <th style="padding:6px 8px;font-size:11px;color:#64748b;text-align:right">Count</th>
       </tr>
     </thead>
-    <tbody>${trs}</tbody>
+    <tbody>
+      ${rows}
+      <tr style="background:#f8fafc;font-weight:600">
+        <td style="padding:6px 8px;font-size:13px">Total</td>
+        <td style="padding:6px 8px;font-size:13px;text-align:right">${total}</td>
+      </tr>
+    </tbody>
   </table>
-  ${more ? `<p style="color:#64748b;font-size:12px">…and ${more} more in the CSV.</p>` : ''}
 </body></html>`;
+}
+
+function buildOverviewText(byBranch: Map<string, CancelledCallRow[]>): string {
+  const overview = cancelledCallsOverview(byBranch);
+  const total = overview.reduce((sum, row) => sum + row.count, 0);
+  const lines = overview.map((row) => `${row.branch}: ${row.count}`);
+  lines.push(`Total: ${total}`);
+  return lines.join('\n');
+}
+
+async function pendingBranchesForRecipient(
+  branches: string[],
+  digestDate: string,
+  force: boolean
+): Promise<string[]> {
+  const pending: string[] = [];
+  for (const branch of branches) {
+    if (force || !(await wasCancelledDigestAlreadySent(branch, digestDate))) {
+      pending.push(branch);
+    }
+  }
+  return pending;
+}
+
+async function buildRecipientPlans(options: {
+  byBranch: Map<string, CancelledCallRow[]>;
+  forceTo: string;
+  branchFilter: string;
+}): Promise<Map<string, string[]>> {
+  const { byBranch, forceTo, branchFilter } = options;
+  const plans = new Map<string, string[]>();
+
+  if (forceTo) {
+    const branches = [...byBranch.keys()].filter((branch) => (byBranch.get(branch)?.length ?? 0) > 0);
+    if (branches.length) plans.set(forceTo, branches);
+    return plans;
+  }
+
+  const recipients = await listCancelledCallDigestRecipients();
+  for (const recipient of recipients) {
+    if (!recipient.enabled) continue;
+    if (branchFilter) {
+      const key = branchFilter.toUpperCase();
+      const branchKey = recipient.branch.toUpperCase();
+      if (branchKey !== key && !branchKey.includes(key)) continue;
+    }
+    if (!(byBranch.get(recipient.branch)?.length ?? 0)) continue;
+    const existing = plans.get(recipient.email) ?? [];
+    if (!existing.includes(recipient.branch)) existing.push(recipient.branch);
+    plans.set(recipient.email, existing);
+  }
+
+  return plans;
+}
+
+function subsetByBranches(
+  byBranch: Map<string, CancelledCallRow[]>,
+  branches: string[]
+): Map<string, CancelledCallRow[]> {
+  const out = new Map<string, CancelledCallRow[]>();
+  for (const branch of branches) {
+    const rows = byBranch.get(branch);
+    if (rows?.length) out.set(branch, rows);
+  }
+  return out;
 }
 
 export async function runCancelledCallDigest(options?: {
@@ -124,60 +199,84 @@ export async function runCancelledCallDigest(options?: {
     durationMs: 0,
   };
 
-  for (const [branch, rows] of byBranch) {
-    if (rows.length === 0) continue;
+  const recipientPlans = await buildRecipientPlans({ byBranch, forceTo, branchFilter });
 
-    if (!force && (await wasCancelledDigestAlreadySent(branch, digestDate))) {
-      result.skipped.push({ branch, reason: 'already_sent', rowCount: rows.length });
+  for (const [email, branches] of recipientPlans) {
+    const pendingBranches = await pendingBranchesForRecipient(branches, digestDate, force);
+    if (!pendingBranches.length) {
+      for (const branch of branches) {
+        const rowCount = byBranch.get(branch)?.length ?? 0;
+        result.skipped.push({ branch, reason: 'already_sent', rowCount });
+      }
       continue;
     }
 
-    const people = await listEnabledCancelledDigestEmailsForBranch(branch);
-    const to = forceTo
-      ? [forceTo]
-      : [...new Set(people.map((p) => p.email))];
-    if (to.length === 0) {
-      result.skipped.push({ branch, reason: 'no_enabled_recipients', rowCount: rows.length });
-      continue;
-    }
-    const csv = buildCancelledCallsCsv(rows);
-    const subject = `Cancelled calls — ${branch} — ${digestDate}`;
-    const html = buildBranchHtml(branch, digestDate, rows);
-    const text = `${rows.length} cancelled calls for ${branch} on ${digestDate} (IST). See CSV attachment.`;
+    const scoped = subsetByBranches(byBranch, pendingBranches);
+    const rows = pendingBranches.flatMap((branch) => byBranch.get(branch) ?? []);
+    if (!rows.length) continue;
+
+    const subject = `Cancelled calls — ${digestDate}`;
+    const html = buildOverviewHtml(digestDate, scoped);
+    const text = `Cancelled calls on ${digestDate} (IST):\n${buildOverviewText(scoped)}\n\nSee Excel attachment.`;
+    const branchLabel = pendingBranches.join(', ');
 
     try {
       if (dryRun) {
-        console.log(`[cancelled-call-digest] DRY RUN ${branch} → ${to.join(', ')} (${rows.length} rows)`);
-        result.sent.push({ branch, to, rowCount: rows.length, messageId: 'dry-run' });
+        console.log(
+          `[cancelled-call-digest] DRY RUN → ${email} (${rows.length} rows, ${pendingBranches.length} branches)`
+        );
+        result.sent.push({
+          branch: branchLabel,
+          to: [email],
+          rowCount: rows.length,
+          messageId: 'dry-run',
+        });
         continue;
       }
 
+      const workbook = await buildCancelledCallsWorkbook(scoped);
+      const content = await workbookToBuffer(workbook);
       const { messageId } = await sendPreparedDigestEmail({
-        to,
+        to: [email],
         subject,
         html,
         text,
         attachments: [
           {
-            filename: `cancelled-calls-${branch.replace(/\s+/g, '-')}-${digestDate}.csv`,
-            content: Buffer.from(csv, 'utf8'),
-            contentType: 'text/csv',
+            filename: cancelledCallsWorkbookFilename(digestDate),
+            content,
+            contentType: XLSX_CONTENT_TYPE,
           },
         ],
       });
 
-      await recordCancelledDigestSent({
-        branch,
-        digestDateYmd: digestDate,
+      for (const branch of pendingBranches) {
+        await recordCancelledDigestSent({
+          branch,
+          digestDateYmd: digestDate,
+          rowCount: byBranch.get(branch)?.length ?? 0,
+          messageId,
+        });
+      }
+
+      result.sent.push({
+        branch: branchLabel,
+        to: [email],
         rowCount: rows.length,
         messageId,
       });
-
-      result.sent.push({ branch, to, rowCount: rows.length, messageId });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
-      console.error(`[cancelled-call-digest] FAIL ${branch}:`, error);
-      result.failed.push({ branch, error });
+      console.error(`[cancelled-call-digest] FAIL ${email}:`, error);
+      result.failed.push({ branch: branchLabel, error });
+    }
+  }
+
+  for (const [branch, rows] of byBranch) {
+    if (!rows.length) continue;
+    const covered = [...recipientPlans.values()].some((branches) => branches.includes(branch));
+    if (!covered) {
+      result.skipped.push({ branch, reason: 'no_enabled_recipients', rowCount: rows.length });
     }
   }
 

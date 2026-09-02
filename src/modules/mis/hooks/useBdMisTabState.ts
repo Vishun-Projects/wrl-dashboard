@@ -13,6 +13,8 @@ import type { BdMisGrandRow, BdMisRegionalRow, BdMisSourceFlags } from '@/module
 import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/summary/derive';
 import type { MisSourceSelection } from '@/modules/mis/client-import';
 import { mergeFlagsFromSelection } from '@/modules/mis/components/SummaryMergedMetricCell';
+import type { ClientMergeWithCrmPrefs } from '@/modules/mis/components/SummaryMergedMetricCell';
+import { buildAccountDisplayRows } from '@/modules/mis/services/account-merge';
 import { feedback } from '@/lib/ui/feedback';
 
 interface UseBdMisTabStateProps {
@@ -27,6 +29,8 @@ interface UseBdMisTabStateProps {
   accountsData: any[];
   clientAccountSummaryData: any[];
   mergeFlags: ReturnType<typeof mergeFlagsFromSelection>;
+  clientMergeWithCrm: ClientMergeWithCrmPrefs;
+  clientOnlyMode: boolean;
 }
 
 export function useBdMisTabState({
@@ -41,6 +45,8 @@ export function useBdMisTabState({
   accountsData,
   clientAccountSummaryData,
   mergeFlags,
+  clientMergeWithCrm,
+  clientOnlyMode,
 }: UseBdMisTabStateProps) {
   const {
     selectedBranch,
@@ -148,7 +154,7 @@ export function useBdMisTabState({
     console.info('[bd-mis-trace-export] start');
     const applied = getAppliedFiltersSnapshot();
     if (!applied) {
-      throw new Error('Apply filters before exporting.');
+      throw new Error('Wait for the dashboard to load before exporting.');
     }
     const traceAlign = activeTab === 'summary' ? 'summary' : 'bd_mis';
     const { startDateStr, endDateStr, officeIdsParam: summaryOfficeIds, viewCallTypesParam: callTypesParam, agingStr } =
@@ -184,6 +190,12 @@ export function useBdMisTabState({
     let crmAccountSummary = data.crmAccountSummary ?? [];
     let clientAccountSummary = data.clientAccountSummary ?? [];
     const traceRows = data.traceRows ?? [];
+    let summaryDashboard:
+      | {
+          summaryData: BranchSummaryRow[];
+          uiAlign: import('@/modules/mis/services/summary-trace-export').SummaryDashboardExportAlign;
+        }
+      | undefined;
 
     if (traceAlign === 'summary') {
       const {
@@ -191,6 +203,7 @@ export function useBdMisTabState({
         sumUiRegionalRows,
         toBdMisGrandRow,
         toBdMisRegionalRow,
+        buildSummaryDashboardExportAlign,
       } = await import('@/modules/mis/services/summary-trace-export');
       const uiRegional = buildUiRegionalPerformanceRows(
         summaryData,
@@ -198,7 +211,7 @@ export function useBdMisTabState({
         mergeFlags
       );
       if (!uiRegional.length) {
-        throw new Error('No data to export. Apply filters and wait for the summary to load.');
+        throw new Error('No data to export. Wait for the dashboard to load.');
       }
       const uiGrand = sumUiRegionalRows(uiRegional);
       regionalRows = uiRegional.map(toBdMisRegionalRow);
@@ -206,6 +219,22 @@ export function useBdMisTabState({
       crmBranchSummary = summaryData;
       crmAccountSummary = accountsData;
       clientAccountSummary = clientAccountSummaryData ?? [];
+      summaryDashboard = {
+        summaryData,
+        uiAlign: buildSummaryDashboardExportAlign({
+          summaryData,
+          clientSummaryData,
+          clientAccountSummaryData: clientAccountSummary,
+          mergedAccountRows: buildAccountDisplayRows(
+            accountsData,
+            clientAccountSummary,
+            mergeFlags
+          ),
+          mergeFlags,
+          clientMergeWithCrm,
+          clientOnlyMode,
+        }),
+      };
     }
 
     console.info('[bd-mis-trace-export] payload', {
@@ -216,10 +245,10 @@ export function useBdMisTabState({
     });
 
     if (!regionalRows.length || !grand) {
-      throw new Error('No data to export. Apply filters and wait for the summary to load.');
+      throw new Error('No data to export. Wait for the dashboard to load.');
     }
 
-    const { buildBdMisTraceableWorkbook, bdMisTraceableFilename } = await import(
+    const { buildBdMisTraceableWorkbook, bdMisTraceableFilename, summaryTraceFilename } = await import(
       '@/modules/mis/services/bd-mis-excel-export'
     );
     const buildT0 = performance.now();
@@ -236,13 +265,15 @@ export function useBdMisTabState({
       },
       traceRows,
       traceAlign,
+      summaryDashboard,
       filterMeta: buildBdMisExportFilterMeta(),
     });
     console.info('[bd-mis-trace-export] workbook-built', {
       elapsed_ms: Math.round(performance.now() - buildT0),
       sheets: workbook.worksheets.length,
     });
-    const filename = bdMisTraceableFilename();
+    const filename =
+      traceAlign === 'summary' ? summaryTraceFilename() : bdMisTraceableFilename();
     const dlT0 = performance.now();
     console.info('[bd-mis-trace-export] download-trigger', { filename });
     const { workbookToPreparedExport } = await import('@/modules/mis/services/summary-excel-export');
@@ -265,6 +296,8 @@ export function useBdMisTabState({
     mergeFlags,
     accountsData,
     clientAccountSummaryData,
+    clientMergeWithCrm,
+    clientOnlyMode,
   ]);
 
   const handleBdMisTraceExport = useCallback(() => {

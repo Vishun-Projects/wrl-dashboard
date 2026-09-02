@@ -1,4 +1,2 @@
-export * from './normalize';
-export * from './crm-fetch';
-export * from './reconcile';
-export * from './sync';
+/** @deprecated Import from `@/modules/athena-reconciliation/server/sync` */
+export * from '@/modules/athena-reconciliation/server/sync';

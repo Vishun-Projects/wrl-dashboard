@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import axios from 'axios';
 import { Mail, Save } from 'lucide-react';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import { PageShell } from '@/components/layout/PageShell';
 import { feedback } from '@/lib/ui/feedback';
 import { SettingsField, settingsInputClass } from '@/components/admin/AdminUi';
@@ -476,17 +477,24 @@ export default function MisEmailOrgSettingsPageClient({
           />
         </SettingsField>
         <SettingsField label="Default date range">
-          <select
-            className={inputClass}
-            value={settings.defaultDateRange}
-            onChange={(e) =>
-              update('defaultDateRange', e.target.value as MisEmailOrgSettings['defaultDateRange'])
+          <FilterSelect
+            label="Default date range"
+            emptyLabel="Default date range"
+            mode="single"
+            options={[
+              { value: 'yesterday', label: 'Yesterday' },
+              { value: 'month_to_date', label: 'Month to yesterday' },
+              { value: 'year_to_yesterday', label: 'Year to yesterday' },
+            ]}
+            selected={[settings.defaultDateRange]}
+            onChange={(values) =>
+              update(
+                'defaultDateRange',
+                (values[0] ?? settings.defaultDateRange) as MisEmailOrgSettings['defaultDateRange']
+              )
             }
-          >
-            <option value="yesterday">Yesterday</option>
-            <option value="month_to_date">Month to yesterday</option>
-            <option value="year_to_yesterday">Year to yesterday</option>
-          </select>
+            panelClassName="w-56"
+          />
         </SettingsField>
       </PanelShell>
     );
@@ -667,18 +675,20 @@ export default function MisEmailOrgSettingsPageClient({
         ) : (
           <>
             <SettingsField label="User">
-              <select
-                className={inputClass}
-                value={selectedUserId}
-                onChange={(e) => setSelectedUserId(e.target.value)}
-              >
-                {personalUsers.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} — {u.email}
-                    {!u.misEmailEnabled ? ' (disabled)' : !u.subscribed ? ' (Digest No)' : ''}
-                  </option>
-                ))}
-              </select>
+              <FilterSelect
+                label="User"
+                emptyLabel="Select user"
+                mode="single"
+                options={personalUsers.map((u) => ({
+                  value: u.id,
+                  label: `${u.name} — ${u.email}${
+                    !u.misEmailEnabled ? ' (disabled)' : !u.subscribed ? ' (Digest No)' : ''
+                  }`,
+                }))}
+                selected={selectedUserId ? [selectedUserId] : []}
+                onChange={(values) => setSelectedUserId(values[0] ?? '')}
+                panelClassName="w-80"
+              />
             </SettingsField>
 
             {personalDraft ? (
@@ -713,17 +723,24 @@ export default function MisEmailOrgSettingsPageClient({
                     />
                   </SettingsField>
                   <SettingsField label="Date range">
-                    <select
-                      className={inputClass}
-                      value={personalDraft.dateRange}
-                      onChange={(e) =>
-                        updatePersonal('dateRange', e.target.value as MisEmailDateRangeMode)
+                    <FilterSelect
+                      label="Date range"
+                      emptyLabel="Date range"
+                      mode="single"
+                      options={[
+                        { value: 'yesterday', label: 'Yesterday' },
+                        { value: 'month_to_date', label: 'Month to yesterday' },
+                        { value: 'year_to_yesterday', label: 'Year to yesterday' },
+                      ]}
+                      selected={[personalDraft.dateRange]}
+                      onChange={(values) =>
+                        updatePersonal(
+                          'dateRange',
+                          (values[0] ?? personalDraft.dateRange) as MisEmailDateRangeMode
+                        )
                       }
-                    >
-                      <option value="yesterday">Yesterday</option>
-                      <option value="month_to_date">Month to yesterday</option>
-                      <option value="year_to_yesterday">Year to yesterday</option>
-                    </select>
+                      panelClassName="w-56"
+                    />
                   </SettingsField>
                 </div>
                 <EmailChipsInput

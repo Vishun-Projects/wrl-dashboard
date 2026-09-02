@@ -1,12 +1,10 @@
 'use client';
 
 import React from 'react';
-import { flushSync } from 'react-dom';
 import { AnimatedMetric } from '@/components/motion';
 import {
   REGISTER_STATUS_PRESETS,
   statusPresetMatches,
-  type DraftFilterOverrides,
 } from '@/modules/mis';
 import type { RegisterSummary } from '@/modules/mis';
 import { useReportFilters } from '@/modules/mis/components/ReportFiltersContext';
@@ -27,13 +25,12 @@ function statItemClass(active: boolean, detailed = false) {
 }
 
 export function RegisterStatsBar({ summary }: RegisterStatsBarProps) {
-  const { selectedStatus, setSelectedStatus, applyFilters } = useReportFilters();
+  const { selectedStatus, setSelectedStatus } = useReportFilters();
 
   if (!summary) return null;
 
   const commitStatus = (next: string[]) => {
-    flushSync(() => setSelectedStatus(next));
-    applyFilters({ selectedStatus: next } as DraftFilterOverrides);
+    setSelectedStatus(next);
   };
 
   const togglePreset = (preset: readonly string[]) => {

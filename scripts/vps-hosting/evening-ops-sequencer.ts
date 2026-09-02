@@ -36,7 +36,8 @@ config({ path: resolve(root, '.env') });
 
 import { createMailTransport, resolveSmtpConfig } from '@/lib/mail/smtp';
 import { VPS_CRON_CATALOG } from '@/lib/vps-cron/catalog';
-import { listVpsCronJobStatus } from '@/lib/vps-cron/settings';
+import { isVpsCronPaused, listVpsCronJobStatus } from '@/lib/vps-cron/settings';
+import type { VpsCronJobId } from '@/lib/vps-cron/catalog';
 import { closePool } from '@/lib/read-model/db';
 import { runCancelledCallDigest } from '@/modules/mis-email/services/cancelled-call-digest';
 import { runMidnightCrmDeltaReport } from '@/modules/mis-email/services/midnight-crm-delta';
@@ -487,8 +488,17 @@ async function main(): Promise<void> {
     }
   };
 
+  async function skipIfPaused(jobId: VpsCronJobId, label: string): Promise<string | null> {
+    if (await isVpsCronPaused(jobId)) {
+      return `SKIP — ${label} paused from portal (${jobId})`;
+    }
+    return null;
+  }
+
   steps.push(
     await runStep('mis_test', 'MIS daily test digest (cron-style, open-only)', async () => {
+      const paused = await skipIfPaused('mis_email_test', 'MIS test digest');
+      if (paused) return paused;
       const results = await runMisEmailTestBatch({
         recipientOverride: to,
         attachmentProfile: 'open_only',
@@ -535,6 +545,8 @@ async function main(): Promise<void> {
 
   steps.push(
     await runStep('cancelled', 'Cancelled-call digest (force→ops)', async () => {
+      const paused = await skipIfPaused('cancelled_call_digest', 'Cancelled-call digest');
+      if (paused) return paused;
       const result = await runCancelledCallDigest({ force: true, forceTo: to });
       if (result.failed.length) {
         throw new Error(result.failed.map((f) => `${f.branch}:${f.error}`).join('; '));
@@ -546,6 +558,8 @@ async function main(): Promise<void> {
 
   steps.push(
     await runStep('sap_crm', 'Subcontractor SAP vs CRM (force→ops)', async () => {
+      const paused = await skipIfPaused('subcontractor_stock', 'Subcontractor stock');
+      if (paused) return paused;
       try {
         const result = await triggerSubcontractorEmails({ force: true, forceTo: to });
         return `sentCount=${result.sentCount}`;

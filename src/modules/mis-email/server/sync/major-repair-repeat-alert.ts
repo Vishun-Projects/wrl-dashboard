@@ -1,7 +1,7 @@
 import { postQuery } from '@/lib/db/proxy';
 import { daysAgoDate, todayLocalDate } from '@/lib/read-model/dates';
 import { withClient } from '@/lib/read-model/db';
-import { createMailTransport, isSmtpConfigured, resolveSmtpConfig } from '@/lib/mail/smtp';
+import { isSmtpConfigured } from '@/lib/mail/smtp';
 import type { HotRow } from '@/lib/read-model/types';
 import {
   listEnabledEmailsForBranch,
@@ -16,7 +16,9 @@ import {
 import {
   assertOrgOutboundMailEnabled,
   getMisEmailOrgSettings,
-} from '@/modules/mis-email/services/org-settings-lib';
+} from '@/modules/mis-email/services/org-settings';
+import { isMisEmailRelayConfigured } from '@/modules/mis-email/services/send-relay';
+import { sendHtmlEmail } from '@/modules/mis-email/services/send';
 import { logAction } from '@/lib/security/audit';
 import {
   normalizePriorityTrns,
@@ -301,13 +303,14 @@ async function sendRepeatAlertEmail(params: {
   endDate: string;
   details: RepeatDetailRow[];
 }): Promise<void> {
-  if (!isSmtpConfigured()) {
+  if (!isMisEmailRelayConfigured() && !isSmtpConfigured()) {
     console.warn(
-      '[sync-worker] major-repair-repeat-alert: SMTP not configured — skip send (set SMTP in .env.mis-email)'
+      '[sync-worker] major-repair-repeat-alert: mail not configured — skip send (set SMTP or VPS relay)'
     );
     return;
   }
 
+  await assertOrgOutboundMailEnabled();
   const org = await getMisEmailOrgSettings();
   const branchPeople = await listEnabledEmailsForBranch(params.branchName);
   const { to, cc } = resolveAlertRecipients({
@@ -321,15 +324,12 @@ async function sendRepeatAlertEmail(params: {
     );
   }
 
-  const smtp = resolveSmtpConfig();
-  const transport = createMailTransport(smtp);
   const subject = `WRL SLA Alert: Major repair repeat — Call ${params.triggerTrn} — Serial ${params.serial}`;
   const html = buildAlertEmailHtml(params);
   const text = buildAlertEmailText(params);
-  const info = await transport.sendMail({
-    from: smtp.from,
-    to: to.join(', '),
-    ...(cc.length ? { cc: cc.join(', ') } : {}),
+  const info = await sendHtmlEmail({
+    to,
+    ...(cc.length ? { cc } : {}),
     subject,
     html,
     text,

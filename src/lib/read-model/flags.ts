@@ -1,11 +1,10 @@
-type ReadSource = 'crm' | 'postgres';
+import {
+  readSourceFromEnv,
+  type ReadSource,
+} from '@/lib/read-model/read-source-core';
 
 function readSource(envKey: string, fallbackKey = 'READ_CALLS_FROM'): ReadSource {
-  const specific = process.env[envKey]?.toLowerCase();
-  if (specific === 'postgres' || specific === 'crm') return specific;
-  const global = process.env[fallbackKey]?.toLowerCase();
-  if (global === 'postgres' || global === 'crm') return global;
-  return 'crm';
+  return readSourceFromEnv(process.env[envKey], process.env[fallbackKey]);
 }
 
 export function readSummaryFromPostgres(): boolean {

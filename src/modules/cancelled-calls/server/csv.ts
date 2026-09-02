@@ -49,31 +49,10 @@ function partyProfileText(value: string | null | undefined): string {
   return text;
 }
 
-export function cancelledCallDbRowToCsvLine(row: CancelledCallCsvDbRow): string {
-  return [
-    row.vtrnno,
-    formatUiDate(row.logged_at),
-    formatUiDateTime(row.cancelled_at),
-    row.branch_name ?? '',
-    formatCancelledCallFranchisee(row.franchisee_vendor_code, row.franchisee_name),
-    row.party_name ?? '',
-    partyProfileText(row.account),
-    row.call_type ?? '',
-    row.item_code ?? '',
-    row.serial ?? '',
-    row.complaint ?? '',
-    cancelReasonText(row),
-    row.region ?? '',
-  ]
-    .map(escapeCsvCell)
-    .join(',');
-}
-
-export function buildCancelledCallsCsv(rows: CancelledCallRow[]): string {
-  const lines = [CANCELLED_CALLS_CSV_HEADERS.join(',')];
-  for (const row of rows) {
-    lines.push(
-      cancelledCallDbRowToCsvLine({
+function cancelledCallRowToCells(row: CancelledCallRow | CancelledCallCsvDbRow): string[] {
+  const isDigestRow = 'loggedAt' in row;
+  const db = isDigestRow
+    ? {
         vtrnno: row.vtrnno,
         logged_at: row.loggedAt,
         cancelled_at: row.cancelledAt,
@@ -89,8 +68,37 @@ export function buildCancelledCallsCsv(rows: CancelledCallRow[]): string {
         cancel_reason: row.cancelReason,
         ncancelreason: row.ncancelreason,
         region: row.region,
-      })
-    );
+      }
+    : row;
+  return [
+    db.vtrnno,
+    formatUiDate(db.logged_at),
+    formatUiDateTime(db.cancelled_at),
+    db.branch_name ?? '',
+    formatCancelledCallFranchisee(db.franchisee_vendor_code, db.franchisee_name),
+    db.party_name ?? '',
+    partyProfileText(db.account),
+    db.call_type ?? '',
+    db.item_code ?? '',
+    db.serial ?? '',
+    db.complaint ?? '',
+    cancelReasonText(db),
+    db.region ?? '',
+  ];
+}
+
+export function cancelledCallDbRowToCsvLine(row: CancelledCallCsvDbRow): string {
+  return cancelledCallRowToCells(row).map(escapeCsvCell).join(',');
+}
+
+export function cancelledCallRowToExportValues(row: CancelledCallRow): string[] {
+  return cancelledCallRowToCells(row);
+}
+
+export function buildCancelledCallsCsv(rows: CancelledCallRow[]): string {
+  const lines = [CANCELLED_CALLS_CSV_HEADERS.join(',')];
+  for (const row of rows) {
+    lines.push(cancelledCallRowToCells(row).map(escapeCsvCell).join(','));
   }
   return lines.join('\n');
 }

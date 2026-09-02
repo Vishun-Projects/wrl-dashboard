@@ -1,7 +1,7 @@
 /**
  * BD MIS regional summary union rules:
  * - Cadbury: import only — subtract CRM Cadbury/Mondelez (N/E/S), add client Cadbury.
- * - Coke: CRM + import — keep CRM Coke in branch base, add client Coke (South); never subtract CRM Coke.
+ * - Coke: import only when coke source on — subtract CRM Coke, add client Coke (South).
  */
 
 import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/summary/derive';
@@ -80,8 +80,11 @@ function isCrmCadburyAccount(account: string): boolean {
   return key === 'cadbury' || key === 'mondelez';
 }
 
-/** CRM Coke/HCCB accounts — kept in branch base when Coke import is merged (both count). */
+/** CRM Coke — replaced by HCCB import when coke source is on. */
 
+function shouldSubtractCrmCoke(sources: BdMisSourceFlags): boolean {
+  return sources.crm && sources.coke;
+}
 
 function regionsMatch(zone: string, rowRegion: string): boolean {
   return formatDisplayRegion(rowRegion) === formatDisplayRegion(zone);
@@ -237,7 +240,7 @@ function shouldSubtractCrmCadbury(zone: BdMisZone, sources: BdMisSourceFlags): b
   return sources.cadbury && zone !== 'WEST ZONE';
 }
 
-/** Apply per-zone source union (Cadbury import-only, Coke CRM + import). */
+/** Apply per-zone source union (Cadbury import-only, Coke import-only). */
 function applyBdMisZoneUnion(
   zone: BdMisZone,
   crmBranchSummary: BranchSummaryRow[],
@@ -258,8 +261,9 @@ function applyBdMisZoneUnion(
       ? sumClientCadburyInZone(clientAccountSummary, zone)
       : emptyBdMisMetrics();
 
-  // Coke: never subtract CRM — both CRM Coke (in branch base) and import Coke count.
-  const subtractCrmCoke = emptyBdMisMetrics();
+  const subtractCrmCoke = shouldSubtractCrmCoke(sources)
+    ? sumAccountMetricsInZone(crmAccountSummary, zone, isCokeAccount)
+    : emptyBdMisMetrics();
 
   const addClientCoke =
     sources.coke && zone === 'SOUTH ZONE'
@@ -277,6 +281,9 @@ function applyBdMisZoneUnion(
     result = addBdMisMetrics(result, addClientCadbury);
   }
 
+  if (shouldSubtractCrmCoke(sources)) {
+    result = subtractBdMisMetrics(result, subtractCrmCoke);
+  }
   if (sources.coke && zone === 'SOUTH ZONE') {
     result = addBdMisMetrics(result, addClientCoke);
   }

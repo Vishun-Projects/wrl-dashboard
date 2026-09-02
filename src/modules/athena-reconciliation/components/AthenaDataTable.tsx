@@ -11,6 +11,7 @@ import {
   ArrowUp,
   ArrowDown,
 } from 'lucide-react';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import { TrnLink } from '@/components/calls/TrnLink';
 import { formatUiDateDash } from '@/lib/dates/ui-date';
 import type { AthenaFailedNormalizedRow, AthenaReconciliationStatus } from '../types';
@@ -295,18 +296,23 @@ export function AthenaDataTable({
 
           <div className="flex items-center gap-1">
             <span>Per page:</span>
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                onPageSizeChange(Number(e.target.value));
+            <FilterSelect
+              label="Per page"
+              emptyLabel="Per page"
+              mode="single"
+              options={[
+                { value: '25', label: '25' },
+                { value: '50', label: '50' },
+                { value: '100', label: '100' },
+              ]}
+              selected={[String(pageSize)]}
+              onChange={(values) => {
+                onPageSizeChange(Number(values[0] ?? pageSize));
                 onPageChange(1);
               }}
-              className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-            >
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
+              layout="inline"
+              panelClassName="w-44"
+            />
           </div>
         </div>
 

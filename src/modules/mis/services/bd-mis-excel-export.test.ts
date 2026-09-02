@@ -50,7 +50,7 @@ const basePayload = {
 };
 
 describe('bd-mis-excel-export trace row detail', () => {
-  it('exports row detail only without formulas', async () => {
+  it('exports row detail only without formulas when summary dashboard is omitted', async () => {
     const traceRows: BdMisTraceRow[] = [
       {
         region: 'NORTH ZONE',
@@ -82,9 +82,74 @@ describe('bd-mis-excel-export trace row detail', () => {
     expect(rowDetail!.getRow(2).getCell(9).value).toBe('W');
     expect(rowDetail!.getRow(1).getCell(10).value).toBe('Repair Done');
     expect(rowDetail!.getRow(2).getCell(10).value).toBe('—');
-    const dataCell = rowDetail!.getRow(2).getCell(16);
-    expect(dataCell.value).toBe('open');
-    expect(dataCell.formula).toBeUndefined();
+    expect(rowDetail!.getRow(2).getCell(16).value).toBe('open');
+    expect(rowDetail!.getRow(2).getCell(16).formula).toBeUndefined();
+  }, 30000);
+
+  it('prepends Summary Dashboard sheet when summaryDashboard is set', async () => {
+    const traceRows: BdMisTraceRow[] = [
+      {
+        region: 'NORTH ZONE',
+        office_under_branch: 'DELHI BRANCH',
+        plant: '1101 - DELHI BRANCH',
+        technician_name: 'TECH A',
+        customer_name: 'CUSTOMER A',
+        call_date_time: '30.06.2026 10:30',
+        service_order: '26F301654',
+        client: 'Sarvaraya sugars',
+        wco: 'W',
+        repair_done: '—',
+        call_status: 'ASSIGNED',
+        aging: '<2 days',
+        file_name: 'CRM Files',
+        source: 'CRM',
+        contribution_step: '1. CRM branch base (included)',
+        included_in_final_count: true,
+        counts_toward: 'open',
+      },
+    ];
+
+    const workbook = await buildBdMisTraceableWorkbook({
+      ...basePayload,
+      traceRows,
+      traceAlign: 'summary',
+      summaryDashboard: {
+        summaryData: [],
+        uiAlign: {
+          regionalRows: [
+            {
+              region: 'North',
+              total_calls: 10,
+              solved_calls: 6,
+              cancelled_calls: 0,
+              open_calls: 4,
+              age_2: 2,
+              age_3: 1,
+              age_7: 1,
+              age_15: 0,
+              part_pending: 0,
+              active_eng: 100,
+            },
+          ],
+          aiRow: {
+            region: 'All',
+            total_calls: 10,
+            solved_calls: 6,
+            cancelled_calls: 0,
+            open_calls: 4,
+            age_2: 2,
+            age_3: 1,
+            age_7: 1,
+            age_15: 0,
+            part_pending: 0,
+            active_eng: 100,
+          },
+          branchRows: [],
+        },
+      },
+    });
+
+    expect(workbook.worksheets.map((s) => s.name)).toEqual(['Summary Dashboard', 'Row Detail']);
   }, 30000);
 
   it('builds open-calls workbook with Unsolved status labels and WCO', async () => {

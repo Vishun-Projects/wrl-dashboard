@@ -48,9 +48,9 @@ export function buildArcpPartialFailureMessage(
   hasRows: boolean
 ): string {
   if (hasRows) {
-    return `Loaded partial tally — ${failedChunks} of ${totalChunks} period(s) timed out. Click Apply filters again to retry failed periods.`;
+    return `Loaded partial tally — ${failedChunks} of ${totalChunks} period(s) timed out. Change filters to retry failed periods.`;
   }
-  return `${failedChunks} of ${totalChunks} period(s) timed out. Click Apply filters again to retry — completed periods are kept on the server.`;
+  return `${failedChunks} of ${totalChunks} period(s) timed out. Change filters to retry — completed periods are kept on the server.`;
 }
 
 export function buildArcpPlanMessage(

@@ -1,3 +1,2 @@
-export { runUserLocationsSync } from './sync';
-export { mapCrmUserLocationRow } from './map';
-export type { UserLocationRow } from './map';
+/** @deprecated Import from `@/modules/attendance/server/sync/user-locations` */
+export * from '@/modules/attendance/server/sync/user-locations';

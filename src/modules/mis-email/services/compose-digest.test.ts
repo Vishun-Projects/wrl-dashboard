@@ -84,6 +84,31 @@ vi.mock('@/modules/mis-email/services/fetch-digest-trace', () => ({
     buildDigestTraceableExportPayload(...args),
 }));
 
+vi.mock('@/modules/mis-email/services/mail-basis', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/modules/mis-email/services/mail-basis')>();
+  return {
+    ...actual,
+    buildMisEmailSummaryDashboardBodyRows: vi.fn(async () => ({
+      regional: [
+        {
+          region: 'EAST ZONE',
+          total_calls: 40,
+          solved_calls: 10,
+          cancelled_calls: 0,
+          open_calls: 30,
+          age_2: 0,
+          age_3: 0,
+          age_7: 0,
+          age_15: 0,
+          part_pending: 0,
+          active_eng: 0,
+        },
+      ],
+      branch: [],
+    })),
+  };
+});
+
 // Static import after mocks — avoids cold dynamic-import eating the test timeout.
 const {
   buildMisEmailPayload,

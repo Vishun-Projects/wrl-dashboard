@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { RegisterPageFilters } from '@/modules/mis/register/components/RegisterPageFilters';
-import { RegisterMultiSelect } from '@/modules/mis/register/components/RegisterMultiSelect';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import { ReportLoadingPanel, useReportFilters } from '@/modules/mis/components';
 import { formatUiDate } from '@/lib/dates/ui-date';
 import { DataTableLoading } from '@/components/ui/DataTableLoading';
@@ -1102,7 +1102,7 @@ export default function SerialAuditPage() {
     setExpandedSerial(null);
   }, [selectedInvolvementPair]);
 
-  const handleApplyFilters = useCallback(() => {
+  useEffect(() => {
     setAppliedRepairs(draftRepairs);
   }, [draftRepairs]);
 
@@ -1143,7 +1143,7 @@ export default function SerialAuditPage() {
     <div className="register-filter-group register-filter-group--stacked mt-2">
       <span className="register-filter-group-label">Repair done</span>
       <div className="register-filter-group-controls">
-        <RegisterMultiSelect
+        <FilterSelect
           label="Repair"
           emptyLabel={
             repairOptionsLoading ? 'Loading repair types…' : 'All repair types'
@@ -1151,8 +1151,6 @@ export default function SerialAuditPage() {
           options={repairOptions}
           selected={draftRepairs}
           onChange={setDraftRepairs}
-          searchable
-          showSelectAll
           selectAllLabel="All repair types"
           panelClassName="w-80"
           searchPlaceholder="Search repair type…"
@@ -1320,7 +1318,6 @@ export default function SerialAuditPage() {
         <RegisterPageFilters
           updating={listUpdating}
           updatingLabel="Updating serial audit…"
-          onApply={handleApplyFilters}
           onClearAll={handleClearAllFilters}
           drawerExtra={repairDrawerExtra}
           extraActiveChips={extraActiveChips}

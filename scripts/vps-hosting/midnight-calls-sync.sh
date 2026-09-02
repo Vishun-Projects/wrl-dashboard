@@ -163,6 +163,9 @@ run_step fill-hot-gaps npm run sync-worker:fill-hot-gaps -- --from "${YTD_START}
 run_step athena-reconcile npm run sync-worker:athena-reconcile \
   || echo "WARN: Athena reconcile after hot sync failed (non-fatal)"
 
+run_step backfill-cancelled npm run sync-worker:backfill-cancelled \
+  || echo "WARN: cancelled register backfill from hot failed (non-fatal)"
+
 if [[ "$fatal" -ne 0 ]]; then
   echo "=== midnight-calls-sync INCOMPLETE $(TZ=Asia/Kolkata date -Iseconds) AS_OF=${AS_OF} ===" >&2
   exit 1

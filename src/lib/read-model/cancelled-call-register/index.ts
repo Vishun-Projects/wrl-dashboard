@@ -1,2 +1,2 @@
-export { CANCELLED_CALL_REGISTER_ENTITY, isDedicatedCancelledRegisterSyncEnabled } from './constants';
-export { runCancelledCallRegisterSync } from './sync';
+/** @deprecated Import from `@/modules/cancelled-calls/server/sync` */
+export * from '@/modules/cancelled-calls/server/sync';

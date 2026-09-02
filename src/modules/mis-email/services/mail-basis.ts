@@ -3,16 +3,18 @@ import type { BranchPerformanceRow, RegionalPerformanceRow } from '@/modules/mis
 import {
   bdMisSourcesFromSelection,
   buildBdMisRegionalRows,
+  buildMisUnifiedReportAlign,
+  countTraceOpenCalls,
+  filterTraceRowsForOpenExport,
+  filterTraceRowsForSummaryExport,
   sumBdMisRegionalGrand,
   type BdMisGrandRow,
   type BdMisRegionalRow,
   type BdMisSourceFlags,
-} from '@/modules/mis';
-import {
-  countTraceOpenCalls,
-  filterTraceRowsForOpenExport,
-  filterTraceRowsForSummaryExport,
   type BdMisTraceRow,
+  type SummaryDashboardExportAlign,
+  type UiBranchPerformanceRow,
+  type UiRegionalPerformanceRow,
 } from '@/modules/mis';
 import type { AccountSummaryRow, SummaryDashboard } from '@/lib/summary/derive';
 
@@ -392,6 +394,60 @@ export function buildMisEmailRegionalPerformanceRowsFromTrace(
   traceRows: BdMisTraceRow[]
 ): RegionalPerformanceRow[] {
   return buildMisEmailRegionalAndBranchRowsFromTrace(traceRows).regional;
+}
+
+function uiRegionalToPerformanceRow(row: UiRegionalPerformanceRow): RegionalPerformanceRow {
+  return {
+    region: row.region,
+    total_calls: row.total_calls,
+    solved_calls: row.solved_calls,
+    cancelled_calls: row.cancelled_calls,
+    open_calls: row.open_calls,
+    age_2: row.age_2,
+    age_3: row.age_3,
+    age_7: row.age_7,
+    age_15: row.age_15,
+    part_pending: row.part_pending,
+    active_eng: row.active_eng,
+  };
+}
+
+function uiBranchToPerformanceRow(row: UiBranchPerformanceRow): BranchPerformanceRow {
+  return {
+    branch: row.branch,
+    region: row.region,
+    total_calls: row.total_calls,
+    solved_calls: row.solved_calls,
+    cancelled_calls: row.cancelled_calls,
+    open_calls: row.open_calls,
+    age_2: row.age_2,
+    age_3: row.age_3,
+    age_7: row.age_7,
+    age_15: row.age_15,
+    part_pending: row.part_pending,
+    active_eng: row.active_eng,
+  };
+}
+
+/** Email body regional/branch rows — unified formula (same as Summary Dashboard AI row). */
+export async function buildMisEmailSummaryDashboardBodyRows(
+  summary: SummaryDashboard,
+  clientAccountSummary: AccountSummaryRow[],
+  dateRange: { startDate: string; endDate: string }
+): Promise<{ regional: RegionalPerformanceRow[]; branch: BranchPerformanceRow[] }> {
+  const align = await buildMisUnifiedReportAlign(summary, clientAccountSummary, dateRange);
+  return {
+    regional: align.regionalRows.map(uiRegionalToPerformanceRow),
+    branch: align.branchRows.map(uiBranchToPerformanceRow),
+  };
+}
+
+export async function buildMisEmailUnifiedReportAlign(
+  summary: SummaryDashboard,
+  clientAccountSummary: AccountSummaryRow[],
+  dateRange: { startDate: string; endDate: string }
+): Promise<SummaryDashboardExportAlign> {
+  return buildMisUnifiedReportAlign(summary, clientAccountSummary, dateRange);
 }
 
 export function buildMisEmailBranchPerformanceRowsFromTrace(

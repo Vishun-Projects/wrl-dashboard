@@ -1,36 +1,21 @@
 'use client';
 
-import React, { useCallback } from 'react';
-import { flushSync } from 'react-dom';
+import React, { useMemo } from 'react';
 import { Search, MapPin, X } from 'lucide-react';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import { DateRangeSelector } from '@/modules/mis/register/components/DateRangeSelector';
-import { RegisterMultiSelect } from '@/modules/mis/register/components/RegisterMultiSelect';
 import { RegisterBranchFranchiseeFilters } from '@/modules/mis/register/components/RegisterBranchFranchiseeFilters';
 import { RegisterStatusChips } from '@/modules/mis/register/components/RegisterStatusChips';
 import {
   REGISTER_PORTAL_OPTIONS,
   REGISTER_PRIORITY_OPTIONS,
   REGISTER_STATUS_OPTIONS,
-  type DraftFilterOverrides,
 } from '@/modules/mis';
-
-type FilterArrayField = keyof Pick<
-  DraftFilterOverrides,
-  | 'selectedStatus'
-  | 'selectedCallTypes'
-  | 'priorityFilter'
-  | 'portalFilter'
-  | 'repairFilter'
-  | 'selectedRegion'
-  | 'selectedAccount'
-  | 'selectedTechnician'
->;
 import { useReportFilters } from '@/modules/mis/components/ReportFiltersContext';
 import { useRepairFilterOptions } from '@/modules/mis';
 
 type RegisterFilterBarProps = {
   layout?: 'inline' | 'drawer-content';
-  applyMode?: 'instant' | 'confirm';
   onSearchEnter?: () => void;
   onPincodeEnter?: () => void;
   showClearButton?: boolean;
@@ -55,20 +40,13 @@ function FilterGroup({
 }
 
 function FilterGroups({
-  applyMode = 'confirm',
   showStatusChips = false,
-  commitOnChange = false,
   collapseAdvanced = false,
 }: {
-  applyMode?: 'instant' | 'confirm';
   showStatusChips?: boolean;
-  /** In drawer: sync applied filters on each change so chips/removal work before Apply. */
-  commitOnChange?: boolean;
-  /** Hick's Law: hide geography/people filters until expanded. */
   collapseAdvanced?: boolean;
 }) {
   const {
-    applyFilters,
     callTypeOptions,
     selectedCallTypes,
     setSelectedCallTypes,
@@ -98,92 +76,50 @@ function FilterGroups({
   } = useReportFilters();
 
   const { options: repairOptions, loading: repairOptionsLoading } = useRepairFilterOptions();
-
-  const wrapCommit = useCallback(
-    (setter: (values: string[]) => void, field: FilterArrayField) => {
-      if (!commitOnChange) return setter;
-      return (values: string[]) => {
-        flushSync(() => setter(values));
-        applyFilters({ [field]: values } as DraftFilterOverrides);
-      };
-    },
-    [commitOnChange, applyFilters]
-  );
-
-  const onStatusChange = wrapCommit(setSelectedStatus, 'selectedStatus');
-  const onCallTypesChange = wrapCommit(setSelectedCallTypes, 'selectedCallTypes');
-  const onPriorityChange = wrapCommit(setPriorityFilter, 'priorityFilter');
-  const onPortalChange = wrapCommit(setPortalFilter, 'portalFilter');
-  const onRepairChange = wrapCommit(setRepairFilter, 'repairFilter');
-  const onStateChange = commitOnChange
-    ? (values: string[]) => {
-        flushSync(() => handleStatesChange(values));
-        applyFilters();
-      }
-    : handleStatesChange;
-  const onCityChange = commitOnChange
-    ? (values: string[]) => {
-        flushSync(() => handleCitiesChange(values));
-        applyFilters();
-      }
-    : handleCitiesChange;
-  const onTechnicianChange = wrapCommit(setSelectedTechnician, 'selectedTechnician');
-  const onRegionChange = wrapCommit(setSelectedRegion, 'selectedRegion');
-  const onAccountChange = wrapCommit(setSelectedAccount, 'selectedAccount');
   const [showAdvanced, setShowAdvanced] = React.useState(!collapseAdvanced);
 
   const advancedFilters = (
     <>
       <FilterGroup label="Location">
-        <RegisterBranchFranchiseeFilters applyMode={applyMode} commitOnChange={commitOnChange} />
-        <RegisterMultiSelect
+        <RegisterBranchFranchiseeFilters layout="block" />
+        <FilterSelect
           label="Region"
           emptyLabel="All regions"
           options={regionOptions}
           selected={selectedRegion}
-          onChange={onRegionChange}
-          searchable
-          applyMode={applyMode}
+          onChange={setSelectedRegion}
         />
-        <RegisterMultiSelect
+        <FilterSelect
           label="Account"
           emptyLabel="All accounts"
           options={accountOptions}
           selected={selectedAccount}
-          onChange={onAccountChange}
-          searchable
-          applyMode={applyMode}
+          onChange={setSelectedAccount}
         />
-        <RegisterMultiSelect
+        <FilterSelect
           label="State"
           emptyLabel="All states"
           options={stateOptions}
           selected={selectedState}
-          onChange={onStateChange}
-          searchable
-          applyMode={applyMode}
+          onChange={handleStatesChange}
         />
-        <RegisterMultiSelect
+        <FilterSelect
           label="City"
           emptyLabel="All cities"
           options={cityOptions}
           selected={selectedCity}
-          onChange={onCityChange}
-          searchable
-          applyMode={applyMode}
+          onChange={handleCitiesChange}
         />
       </FilterGroup>
 
       <FilterGroup label="People" className="register-filter-group--people">
-        <RegisterMultiSelect
+        <FilterSelect
           label="Technician"
           emptyLabel="All technicians"
           options={technicianOptions}
           selected={selectedTechnician}
-          onChange={onTechnicianChange}
-          searchable
+          onChange={setSelectedTechnician}
           panelClassName="w-64"
-          applyMode={applyMode}
         />
       </FilterGroup>
     </>
@@ -192,46 +128,41 @@ function FilterGroups({
   return (
     <>
       <FilterGroup label="Call">
-        {showStatusChips && <RegisterStatusChips commitOnChange={commitOnChange} />}
-        <RegisterMultiSelect
+        {showStatusChips && <RegisterStatusChips />}
+        <FilterSelect
           label="Status"
           emptyLabel="All statuses"
           options={REGISTER_STATUS_OPTIONS}
           selected={selectedStatus}
-          onChange={onStatusChange}
-          applyMode={applyMode}
+          onChange={setSelectedStatus}
         />
-        <RegisterMultiSelect
+        <FilterSelect
           label="Type"
           emptyLabel="All types"
           options={callTypeOptions}
           selected={selectedCallTypes}
-          onChange={onCallTypesChange}
-          applyMode={applyMode}
+          onChange={setSelectedCallTypes}
         />
-        <RegisterMultiSelect
+        <FilterSelect
           label="Priority"
           emptyLabel="All priorities"
           options={REGISTER_PRIORITY_OPTIONS}
           selected={priorityFilter}
-          onChange={onPriorityChange}
-          applyMode={applyMode}
+          onChange={setPriorityFilter}
         />
-        <RegisterMultiSelect
+        <FilterSelect
           label="Portal"
           emptyLabel="All portals"
           options={REGISTER_PORTAL_OPTIONS}
           selected={portalFilter}
-          onChange={onPortalChange}
-          applyMode={applyMode}
+          onChange={setPortalFilter}
         />
-        <RegisterMultiSelect
+        <FilterSelect
           label="Repair done"
           emptyLabel={repairOptionsLoading ? 'Loading repair types…' : 'All repair types'}
           options={repairOptions}
           selected={repairFilter}
-          onChange={onRepairChange}
-          applyMode={applyMode}
+          onChange={setRepairFilter}
         />
       </FilterGroup>
 
@@ -261,7 +192,6 @@ function FilterGroups({
 
 export function RegisterFilterBar({
   layout = 'inline',
-  applyMode = 'confirm',
   onSearchEnter,
   onPincodeEnter,
   showClearButton = true,
@@ -286,11 +216,16 @@ export function RegisterFilterBar({
     onClear?.();
   };
 
+  const dateColumnOptions = useMemo(
+    () => dateFilterColumnOptions.map((opt) => ({ value: opt.value, label: opt.label })),
+    [dateFilterColumnOptions]
+  );
+
   if (layout === 'drawer-content') {
     return (
       <div className="register-filter-drawer-content">
         <div className="register-filter-row register-filter-row-compact flex-col items-stretch gap-3">
-          <FilterGroups applyMode={applyMode} showStatusChips commitOnChange collapseAdvanced />
+          <FilterGroups showStatusChips collapseAdvanced />
         </div>
       </div>
     );
@@ -326,19 +261,18 @@ export function RegisterFilterBar({
           </FilterGroup>
 
           <FilterGroup label="Date range" className="register-filter-group--date">
-            <select
-              className="register-filter-select register-date-column-select"
-              value={dateFilterColumn}
-              onChange={(e) => setDateFilterColumn(e.target.value as typeof dateFilterColumn)}
-              title="Which date column to filter"
-              aria-label="Date column for range filter"
-            >
-              {dateFilterColumnOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+            <FilterSelect
+              label="Date column"
+              emptyLabel="Date column"
+              mode="single"
+              options={dateColumnOptions}
+              selected={dateFilterColumn ? [dateFilterColumn] : []}
+              onChange={(values) =>
+                setDateFilterColumn((values[0] ?? dateFilterColumn) as typeof dateFilterColumn)
+              }
+              layout="inline"
+              panelClassName="w-64"
+            />
             <div className="register-date-field">
               <DateRangeSelector
                 value={dateRange.label}
@@ -363,7 +297,7 @@ export function RegisterFilterBar({
         </div>
 
         <div className="register-filter-row register-filter-row-compact">
-          <FilterGroups applyMode={applyMode} />
+          <FilterGroups />
         </div>
       </div>
     </div>

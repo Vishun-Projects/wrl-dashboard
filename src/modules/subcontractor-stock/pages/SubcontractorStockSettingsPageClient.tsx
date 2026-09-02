@@ -18,6 +18,7 @@ import {
   Inbox,
   Mail,
 } from 'lucide-react';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 import { ModalPortal } from '@/components/ui/ModalPortal';
@@ -1373,24 +1374,28 @@ export default function SubcontractorStockSettingsPageClient({
                     Report Filter Preference
                   </label>
 
-                  <select
-                    value={recipientForm.reportFilter || 'all'}
-                    onChange={(e) =>
+                  <FilterSelect
+                    label="Report filter"
+                    emptyLabel="All Records"
+                    mode="single"
+                    options={[
+                      { value: 'all', label: 'All Records' },
+                      { value: 'positive', label: 'Positive Discrepancies Only (> 0)' },
+                      { value: 'negative', label: 'Negative Discrepancies Only (< 0)' },
+                    ]}
+                    selected={[recipientForm.reportFilter || 'all']}
+                    onChange={(values) =>
                       setRecipientForm((prev) =>
                         prev
                           ? {
                               ...prev,
-                              reportFilter: e.target.value as 'all' | 'positive' | 'negative',
+                              reportFilter: (values[0] ?? 'all') as 'all' | 'positive' | 'negative',
                             }
                           : null
                       )
                     }
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:ring-1 focus:ring-indigo-500"
-                  >
-                    <option value="all">All Records</option>
-                    <option value="positive">Positive Discrepancies Only (&gt; 0)</option>
-                    <option value="negative">Negative Discrepancies Only (&lt; 0)</option>
-                  </select>
+                    panelClassName="w-72"
+                  />
                 </div>
 
                 <div className="flex items-center gap-2 pt-2">
@@ -1459,33 +1464,33 @@ export default function SubcontractorStockSettingsPageClient({
                     Rule Type
                   </label>
 
-                  <select
-                    value={ruleForm.type}
-                    onChange={(e) => {
+                  <FilterSelect
+                    label="Rule type"
+                    emptyLabel="Rule type"
+                    mode="single"
+                    options={[
+                      { value: 'PLANT', label: 'Exclude Plant (All matching items)' },
+                      { value: 'VENDOR', label: 'Exclude Vendor Code' },
+                      { value: 'MATERIAL', label: 'Exclude Material Code' },
+                    ]}
+                    selected={[ruleForm.type]}
+                    onChange={(values) => {
+                      const type = (values[0] ?? ruleForm.type) as 'PLANT' | 'VENDOR' | 'MATERIAL';
                       setRuleForm((prev) =>
                         prev
                           ? {
-                            ...prev,
-                            type: e.target.value as
-                              | 'PLANT'
-                              | 'VENDOR'
-                              | 'MATERIAL',
-                            codes: [],
-                          }
+                              ...prev,
+                              type,
+                              codes: [],
+                            }
                           : null
                       );
 
                       setRuleSearchQuery('');
                       setVisibleRuleOptionCount(100);
                     }}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:ring-1 focus:ring-indigo-500"
-                  >
-                    <option value="PLANT">
-                      Exclude Plant (All matching items)
-                    </option>
-                    <option value="VENDOR">Exclude Vendor Code</option>
-                    <option value="MATERIAL">Exclude Material Code</option>
-                  </select>
+                    panelClassName="w-72"
+                  />
                 </div>
 
                 <div>

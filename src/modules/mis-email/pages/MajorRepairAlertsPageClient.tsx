@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { Mail, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import { PageShell } from '@/components/layout/PageShell';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
@@ -276,21 +277,22 @@ export default function MajorRepairAlertsPageClient({
               <div className="space-y-3">
                 <label className="block text-[12px] text-slate-600">
                   Branch
-                  <select
-                    className={`${settingsInputClass()} mt-1`}
-                    value={form.branch}
-                    onChange={(e) => setForm({ ...form, branch: e.target.value })}
-                  >
-                    <option value="">Select branch…</option>
-                    {branches.map((b) => (
-                      <option key={b} value={b}>
-                        {b}
-                      </option>
-                    ))}
-                    {form.branch && !branches.includes(form.branch) ? (
-                      <option value={form.branch}>{form.branch}</option>
-                    ) : null}
-                  </select>
+                  <div className="mt-1">
+                    <FilterSelect
+                      label="Branch"
+                      emptyLabel="Select branch…"
+                      mode="single"
+                      options={[
+                        ...branches.map((b) => ({ value: b, label: b })),
+                        ...(form.branch && !branches.includes(form.branch)
+                          ? [{ value: form.branch, label: form.branch }]
+                          : []),
+                      ]}
+                      selected={form.branch ? [form.branch] : []}
+                      onChange={(values) => setForm({ ...form, branch: values[0] ?? '' })}
+                      panelClassName="w-64"
+                    />
+                  </div>
                 </label>
                 <label className="block text-[12px] text-slate-600">
                   Recipient name

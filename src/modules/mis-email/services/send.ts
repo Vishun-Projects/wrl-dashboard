@@ -43,8 +43,8 @@ function primaryMailAddress(value: string | string[]): string {
   return Array.isArray(value) ? (value[0] ?? '') : value;
 }
 
-/** Send a pre-built digest (HTML + attachments) via VPS relay or local SMTP. */
-export async function sendPreparedDigestEmail(params: {
+/** Send pre-built digest (HTML + attachments) via relay (Vercel) or direct SMTP (VPS). */
+export async function sendDigestPayload(params: {
   to: string | string[];
   cc?: string | string[];
   /**
@@ -119,7 +119,22 @@ export async function sendPreparedDigestEmail(params: {
   return { messageId: String(info.messageId || '') };
 }
 
-/** Send digest with Excel attachments via configured SMTP (Gmail, or local VPS Postfix). */
+/** @deprecated Use sendDigestPayload — kept for existing imports. */
+export const sendPreparedDigestEmail = sendDigestPayload;
+
+/** Simple HTML mail — relay-aware, optional attachments. */
+export async function sendHtmlEmail(params: {
+  to: string | string[];
+  cc?: string | string[];
+  subject: string;
+  html: string;
+  text: string;
+  attachments?: EmailAttachment[];
+}): Promise<{ messageId: string }> {
+  return sendDigestPayload({ ...params, attachments: params.attachments ?? [] });
+}
+
+/** Send digest with Excel attachments — builds template shell then uses sendDigestPayload (relay-aware). */
 export async function sendDigestEmail(params: {
   to: string | string[];
   cc?: string | string[];
@@ -146,9 +161,6 @@ export async function sendDigestEmail(params: {
   }
 
   const org = await getMisEmailOrgSettings({ fresh: true });
-  const smtp = resolveSmtpConfig();
-  const transport = createMailTransport(smtp);
-
   const portalUrl = resolvePortalUrl(org.portalBaseUrl);
   const subjectTemplate = resolveMisEmailSubjectTemplate('normal', {
     normal: org.subjectTemplate,
@@ -173,22 +185,13 @@ export async function sendDigestEmail(params: {
     branding,
   };
 
-  const envelopeTo = params.envelopeTo?.trim();
-  const info = await transport.sendMail({
-    from: smtp.from,
+  return sendDigestPayload({
     to: params.to,
     cc: params.cc,
-    ...(envelopeTo ? { envelope: { from: smtp.from, to: envelopeTo } } : {}),
+    envelopeTo: params.envelopeTo,
     subject: formatDigestSubject(params.dateRange.endDate, params.subjectDate, subjectTemplate),
-    text: buildDigestEmailPlainText(emailBody),
     html: buildDigestEmailHtml(emailBody),
-    attachments: params.attachments.map((a) => ({
-      filename: a.filename,
-      content: a.content,
-      contentType: a.contentType,
-      contentDisposition: 'attachment' as const,
-    })),
+    text: buildDigestEmailPlainText(emailBody),
+    attachments: params.attachments,
   });
-
-  return { messageId: String(info.messageId || '') };
 }

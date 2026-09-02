@@ -117,6 +117,7 @@ interface UseRegisterDataFetchProps {
   summaryOfficeIdsParam: string;
   lastSummaryQueryKeyRef: React.MutableRefObject<string | null>;
   getAppliedFiltersSnapshot: () => any;
+  appliedRevision: number;
   ensureCorpusLoaded: (opts?: { silent?: boolean; force?: boolean }) => Promise<void>;
 
   activeTab: string;
@@ -181,6 +182,7 @@ export function useRegisterDataFetch({
   summaryOfficeIdsParam,
   lastSummaryQueryKeyRef,
   getAppliedFiltersSnapshot,
+  appliedRevision,
   ensureCorpusLoaded,
 
   activeTab,
@@ -1370,7 +1372,7 @@ export function useRegisterDataFetch({
 
   useEffect(() => {
     void runRegisterFilterLoad();
-  }, [runRegisterFilterLoad]);
+  }, [runRegisterFilterLoad, appliedRevision]);
 
   return {
     fetchData,

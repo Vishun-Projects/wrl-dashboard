@@ -3,13 +3,12 @@ import {
   assertAllowedEmailDomains,
   isEmailAllowedForDomains,
   normalizeAllowedEmailDomains,
-} from '@/modules/mis-email/services/allowed-domains';
-import { DEFAULT_ALLOWED_EMAIL_DOMAINS } from '@/modules/mis-email/services/org-settings-defaults';
+} from '@/lib/mail/allowed-domains';
 
 describe('allowed-domains', () => {
   it('falls back to westernequipments.com when empty', () => {
-    expect(normalizeAllowedEmailDomains([])).toEqual([...DEFAULT_ALLOWED_EMAIL_DOMAINS]);
-    expect(normalizeAllowedEmailDomains(null)).toEqual([...DEFAULT_ALLOWED_EMAIL_DOMAINS]);
+    expect(normalizeAllowedEmailDomains([])).toEqual(['westernequipments.com']);
+    expect(normalizeAllowedEmailDomains(null)).toEqual(['westernequipments.com']);
   });
 
   it('allows corporate domain and rejects gmail', () => {

@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Activity, RefreshCw } from 'lucide-react';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import { PageShell } from '@/components/layout/PageShell';
 import { TableSkeleton } from '@/components/ui/DataTableLoading';
 import {
@@ -147,19 +148,23 @@ export default function SecurityAuditPageClient() {
             value={filters.actorEmail}
             onChange={(e) => setFilters((f) => ({ ...f, actorEmail: e.target.value }))}
           />
-          <select
-            className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"
-            value={filters.result}
-            onChange={(e) => setFilters((f) => ({ ...f, result: e.target.value }))}
-          >
-            <option value="">All results</option>
-            <option value="success">success</option>
-            <option value="completed">completed</option>
-            <option value="started">started</option>
-            <option value="cancelled">cancelled</option>
-            <option value="failure">failure</option>
-            <option value="denied">denied</option>
-          </select>
+          <FilterSelect
+            label="Result"
+            emptyLabel="All results"
+            mode="single"
+            options={[
+              { value: 'success', label: 'success' },
+              { value: 'completed', label: 'completed' },
+              { value: 'started', label: 'started' },
+              { value: 'cancelled', label: 'cancelled' },
+              { value: 'failure', label: 'failure' },
+              { value: 'denied', label: 'denied' },
+            ]}
+            selected={filters.result ? [filters.result] : []}
+            onChange={(values) => setFilters((f) => ({ ...f, result: values[0] ?? '' }))}
+            layout="inline"
+            panelClassName="w-44"
+          />
           <input
             type="date"
             className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"

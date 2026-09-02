@@ -1,28 +1,18 @@
 'use client';
 
-import React, { useCallback, useMemo } from 'react';
-import { flushSync } from 'react-dom';
-import { RegisterMultiSelect } from '@/modules/mis/register/components/RegisterMultiSelect';
-import {
-  buildFranchiseeOptions,
-  buildMainBranchOptions,
-  type DraftFilterOverrides,
-} from '@/modules/mis';
+import React, { useMemo } from 'react';
+import { FilterSelect } from '@/components/filters/FilterSelect';
+import { buildFranchiseeOptions, buildMainBranchOptions } from '@/modules/mis';
 import { useReportFilters } from '@/modules/mis/components/ReportFiltersContext';
 
 type RegisterBranchFranchiseeFiltersProps = {
-  applyMode?: 'instant' | 'confirm';
-  commitOnChange?: boolean;
   layout?: 'block' | 'inline';
 };
 
 export function RegisterBranchFranchiseeFilters({
-  applyMode = 'confirm',
-  commitOnChange = false,
   layout = 'block',
 }: RegisterBranchFranchiseeFiltersProps) {
   const {
-    applyFilters,
     offices,
     branchesList,
     franchiseesList,
@@ -31,25 +21,6 @@ export function RegisterBranchFranchiseeFilters({
     selectedFranchisee,
     setSelectedFranchisee,
   } = useReportFilters();
-
-  const wrapCommit = useCallback(
-    (setter: (values: string[]) => void, field: keyof Pick<DraftFilterOverrides, 'selectedFranchisee'>) => {
-      if (!commitOnChange) return setter;
-      return (values: string[]) => {
-        flushSync(() => setter(values));
-        applyFilters({ [field]: values } as DraftFilterOverrides);
-      };
-    },
-    [commitOnChange, applyFilters]
-  );
-
-  const onBranchChange = commitOnChange
-    ? (values: string[]) => {
-        flushSync(() => handleBranchesChange(values));
-        applyFilters();
-      }
-    : handleBranchesChange;
-  const onFranchiseeChange = wrapCommit(setSelectedFranchisee, 'selectedFranchisee');
 
   const branchOptions = useMemo(
     () => buildMainBranchOptions(offices, branchesList),
@@ -61,31 +32,25 @@ export function RegisterBranchFranchiseeFilters({
     [offices, selectedBranch, franchiseesList]
   );
 
-  const selectLayout = layout;
-
   const selects = (
     <>
-      <RegisterMultiSelect
+      <FilterSelect
         label="Main Branch"
         emptyLabel="All Branches"
         options={branchOptions}
         selected={selectedBranch}
-        onChange={onBranchChange}
-        searchable
+        onChange={handleBranchesChange}
         panelClassName="w-64"
-        applyMode={applyMode}
-        layout={selectLayout}
+        layout={layout}
       />
-      <RegisterMultiSelect
+      <FilterSelect
         label="Franchisee"
         emptyLabel="All Franchisees"
         options={franchiseeOptions}
         selected={selectedFranchisee}
-        onChange={onFranchiseeChange}
-        searchable
+        onChange={setSelectedFranchisee}
         panelClassName="w-64"
-        applyMode={applyMode}
-        layout={selectLayout}
+        layout={layout}
       />
     </>
   );

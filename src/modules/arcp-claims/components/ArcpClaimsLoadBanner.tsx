@@ -77,7 +77,7 @@ export function ArcpClaimsLoadBanner({
             : 'Loading ARCP tally…'
       }
       periodLabel={isDetailExport ? 'row' : 'period'}
-      previewApplyLabel="Apply filters"
+      previewApplyLabel="Load tally"
       exportHint={
         isDetailExport
           ? 'The CSV saves to your Downloads folder when ready (browsers usually skip a Save dialog) — keep this tab open.'

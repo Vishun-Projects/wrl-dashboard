@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { Upload, Loader2, Trash2, Download } from 'lucide-react';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import {
   estimateMisUploadEtaSec,
   formatMisUploadProgressLabel,
@@ -420,18 +421,18 @@ export default function MisClientImportToolbar({
           <>
             <div className="flex items-center gap-2">
               <span className="text-slate-500 ui-label">Import as</span>
-              <select
-                value={uploadSource}
-                onChange={(e) => onUploadSourceChange(e.target.value)}
-                className="rounded border border-slate-200 px-2 py-1 text-slate-800"
-                disabled={sources.length === 0}
-              >
-                {(sources.length ? sources : [{ sourceCode: 'coke', sourceName: 'Coke' }]).map((s) => (
-                  <option key={s.sourceCode} value={s.sourceCode}>
-                    {s.sourceName}
-                  </option>
-                ))}
-              </select>
+              <FilterSelect
+                label="Import as"
+                emptyLabel="Import as"
+                mode="single"
+                options={(sources.length ? sources : [{ sourceCode: 'coke', sourceName: 'Coke' }]).map(
+                  (s) => ({ value: s.sourceCode, label: s.sourceName })
+                )}
+                selected={uploadSource ? [uploadSource] : []}
+                onChange={(values) => onUploadSourceChange(values[0] ?? '')}
+                layout="inline"
+                panelClassName="w-56"
+              />
             </div>
 
             <input

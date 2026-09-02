@@ -1,40 +1,29 @@
 'use client';
 
 import React from 'react';
-import { flushSync } from 'react-dom';
 import {
   REGISTER_STATUS_OPTIONS,
   REGISTER_STATUS_PRESETS,
   statusPresetMatches,
-  type DraftFilterOverrides,
 } from '@/modules/mis';
 import { useReportFilters } from '@/modules/mis/components/ReportFiltersContext';
 
-export function RegisterStatusChips({ commitOnChange = false }: { commitOnChange?: boolean }) {
-  const { selectedStatus, setSelectedStatus, applyFilters } = useReportFilters();
-
-  const commitStatus = (next: string[]) => {
-    if (commitOnChange) {
-      flushSync(() => setSelectedStatus(next));
-      applyFilters({ selectedStatus: next } as DraftFilterOverrides);
-    } else {
-      setSelectedStatus(next);
-    }
-  };
+export function RegisterStatusChips() {
+  const { selectedStatus, setSelectedStatus } = useReportFilters();
 
   const togglePreset = (preset: readonly string[]) => {
     if (statusPresetMatches(selectedStatus, preset)) {
-      commitStatus([]);
+      setSelectedStatus([]);
     } else {
-      commitStatus([...preset]);
+      setSelectedStatus([...preset]);
     }
   };
 
   const toggleSingle = (value: string) => {
     if (selectedStatus.length === 1 && selectedStatus[0] === value) {
-      commitStatus([]);
+      setSelectedStatus([]);
     } else {
-      commitStatus([value]);
+      setSelectedStatus([value]);
     }
   };
 

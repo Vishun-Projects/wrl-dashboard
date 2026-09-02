@@ -1,10 +1,9 @@
 'use client';
 
-import React from 'react';
-import { Filter, Loader2 } from 'lucide-react';
+import React, { useMemo } from 'react';
 import { DateRangeSelector } from '@/modules/mis/register/components/DateRangeSelector';
 import { RegisterBranchFranchiseeFilters } from '@/modules/mis/register/components/RegisterBranchFranchiseeFilters';
-import { RegisterMultiSelect } from '@/modules/mis/register/components/RegisterMultiSelect';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import { ReportProgressBar } from '@/modules/mis/components';
 import {
   ARCP_DATE_FILTER_OPTIONS,
@@ -12,12 +11,6 @@ import {
 } from '@/sql/arcp-claims/query';
 import type { ReportDateRange } from '@/modules/mis';
 import type { ArcpLoadStatus } from '@/modules/arcp-claims/components/ArcpClaimsLoadBanner';
-
-const DATE_BASIS_SHORT: Record<ArcpDateFilterColumn, string> = {
-  dcalllogdatetime: 'Call',
-  dsolveddatetime: 'Solved',
-  bm_approved_at: 'BM appr.',
-};
 
 type ArcpClaimsToolbarProps = {
   arcpDateFilterColumn: ArcpDateFilterColumn;
@@ -27,9 +20,6 @@ type ArcpClaimsToolbarProps = {
   callTypeOptions: Array<{ value: string; label: string }>;
   selectedCallTypes: string[];
   onCallTypesChange: (values: string[]) => void;
-  onApply: () => void;
-  applyDisabled: boolean;
-  hasPendingFilterChanges: boolean;
   loading: boolean;
   loadStatus: ArcpLoadStatus | null;
   loadProgressLabel: string;
@@ -43,38 +33,31 @@ export function ArcpClaimsToolbar({
   callTypeOptions,
   selectedCallTypes,
   onCallTypesChange,
-  onApply,
-  applyDisabled,
-  hasPendingFilterChanges,
   loading,
   loadStatus,
   loadProgressLabel,
 }: ArcpClaimsToolbarProps) {
+  const dateBasisOptions = useMemo(
+    () => ARCP_DATE_FILTER_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label })),
+    []
+  );
+
   return (
     <div className="relative z-20 border-b border-slate-200 bg-bg-canvas px-3 py-1.5">
       <div className="report-toolbar-filters-row arcp-claims-toolbar-row">
-        <div
-          className="arcp-date-basis-control shrink-0"
-          role="group"
-          aria-label="Date basis"
-          title="Date basis for filtering claims"
-        >
-          {ARCP_DATE_FILTER_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              title={option.label}
-              onClick={() => onDateFilterColumnChange(option.value)}
-              className={`rounded px-2 py-1 text-[10px] font-medium transition-colors ${
-                arcpDateFilterColumn === option.value
-                  ? 'bg-slate-900 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-bg-canvas hover:text-slate-900'
-              }`}
-            >
-              {DATE_BASIS_SHORT[option.value]}
-            </button>
-          ))}
-        </div>
+        <FilterSelect
+          label="Date basis"
+          emptyLabel="Date basis"
+          mode="single"
+          options={dateBasisOptions}
+          selected={[arcpDateFilterColumn]}
+          onChange={(values) => {
+            const next = values[0] as ArcpDateFilterColumn | undefined;
+            if (next) onDateFilterColumnChange(next);
+          }}
+          layout="inline"
+          panelClassName="w-64"
+        />
 
         <div className="report-toolbar-filters-date shrink-0">
           <DateRangeSelector
@@ -85,17 +68,15 @@ export function ArcpClaimsToolbar({
           />
         </div>
 
-        <RegisterBranchFranchiseeFilters applyMode="confirm" layout="inline" />
+        <RegisterBranchFranchiseeFilters layout="inline" />
 
-        <RegisterMultiSelect
+        <FilterSelect
           label="Call Type"
           emptyLabel="All Call Types"
           options={callTypeOptions}
           selected={selectedCallTypes}
           onChange={onCallTypesChange}
-          applyMode="confirm"
           layout="inline"
-          searchable
           panelClassName="w-64"
         />
 
@@ -112,19 +93,6 @@ export function ArcpClaimsToolbar({
               className="hidden min-w-[12rem] lg:flex"
             />
           ) : null}
-          <button
-            type="button"
-            onClick={onApply}
-            disabled={applyDisabled}
-            className={`filter-apply-btn ${hasPendingFilterChanges ? 'filter-apply-btn--pending' : ''}`}
-          >
-            {loading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Filter className="h-3.5 w-3.5" />
-            )}
-            Apply
-          </button>
         </div>
       </div>
     </div>

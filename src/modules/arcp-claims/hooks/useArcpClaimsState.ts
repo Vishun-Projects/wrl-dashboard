@@ -80,7 +80,7 @@ export function useArcpClaimsState() {
 
   const draftQueryKey = useMemo(() => appliedArcpFiltersKey(draftFilters), [draftFilters]);
   const appliedQueryKey = useMemo(() => (appliedFilters ? appliedArcpFiltersKey(appliedFilters) : null), [appliedFilters]);
-  const hasPendingFilterChanges = appliedQueryKey !== draftQueryKey;
+  const hasPendingFilterChanges = false;
 
   const mergedAggregateRows = useMemo(() => {
     if (!rawAggregateRows?.length) return [];
@@ -190,6 +190,12 @@ export function useArcpClaimsState() {
     if (nextKey !== appliedQueryKey) setRawAggregateRows(null);
     runLoad(next, false);
   }, [buildDraftFiltersSnapshot, runLoad, appliedQueryKey, loading, setRawAggregateRows]);
+
+  useEffect(() => {
+    if (!resourcesLoaded || !prefsReady || !arcpBootstrapRef.current) return;
+    if (draftQueryKey === appliedQueryKey) return;
+    handleApplyFilters();
+  }, [draftQueryKey, appliedQueryKey, resourcesLoaded, prefsReady, handleApplyFilters]);
 
   useEffect(() => {
     if (!resourcesLoaded || !prefsReady || arcpBootstrapRef.current) return;

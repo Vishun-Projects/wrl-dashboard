@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { RegisterMultiSelect } from '@/modules/mis/register/components/RegisterMultiSelect';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import { UiDateInput } from '@/components/ui/UiDateInput';
 import type { WarrantyMasterClientFilters } from '@/modules/warranty-master/services';
 
@@ -45,39 +45,36 @@ export function WarrantyMasterToolbar({
   return (
     <div className="relative z-20 shrink-0 border-b border-slate-200 bg-bg-canvas">
       <div className="report-toolbar-filters-row px-3 py-1.5">
-        <RegisterMultiSelect
+        <FilterSelect
           label="Customer"
           emptyLabel="All customers"
           layout="inline"
           options={customerOptions}
           selected={filters.selectedCustomer}
           onChange={onCustomerChange}
-          searchable
           searchPlaceholder="Search…"
           panelClassName="w-72"
         />
-        <RegisterMultiSelect
+        <FilterSelect
           label="Group"
           emptyLabel="All groups"
           layout="inline"
           options={groupOptions}
           selected={filters.selectedGroup}
           onChange={onGroupChange}
-          searchable
           panelClassName="w-56"
         />
-        <RegisterMultiSelect
+        <FilterSelect
           label="FG model"
           emptyLabel="All FG models"
           layout="inline"
           options={fgModelOptions}
           selected={filters.selectedFgModel}
           onChange={onFgModelChange}
-          searchable
           searchPlaceholder="Search…"
           panelClassName="w-56"
         />
-        <RegisterMultiSelect
+        <FilterSelect
           label="Warranty"
           emptyLabel="All months"
           layout="inline"

@@ -411,7 +411,17 @@ export async function handleRegisterGet(req: NextRequest) {
       // Identifier not in Postgres read-model — fall through to CRM lookup subquery.
     }
 
-    // Live CRM path (READ_REGISTER_FROM != postgres, or Postgres identifier lookup miss)
+    // Live CRM path — identifier lookup fallback when Postgres read-model misses a TRN
+    if (!readRegisterFromPostgres()) {
+      return NextResponse.json(
+        {
+          error:
+            'Call register requires READ_REGISTER_FROM=postgres. Full CRM register path removed.',
+        },
+        { status: 503 }
+      );
+    }
+
     const excludeTransferred = " AND ISNULL(tc.vtransfercallno, '') = '' AND ISNULL(tc.ncancelreason, 0) <> 2";
     const isLookupSearch = !!(search && search.trim());
     const registerDateCol = resolveRegisterDateSqlColumn(dateFilterColumnParam);

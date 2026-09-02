@@ -4,7 +4,7 @@ import {
   DEFAULT_MIS_EMAIL_CC_EMAILS,
   DEFAULT_MIS_EMAIL_TO_EMAILS,
 } from '@/modules/mis-email/services/default-recipients';
-import { assertAllowedEmailDomains } from '@/modules/mis-email/services/allowed-domains';
+import { assertAllowedEmailDomains } from '@/lib/mail/allowed-domains';
 import { normalizeEmailList } from '@/modules/mis-email/services/parse-outlook-emails';
 import {
   parseMisEmailBodySectionIds,

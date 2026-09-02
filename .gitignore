@@ -24,7 +24,9 @@
 .DS_Store
 *.pem
 *.docx
+!scripts/ops/handover-reference.docx
 *.zip
+scripts/ops/vendor/pandoc-*
 
 # debug
 npm-debug.log*

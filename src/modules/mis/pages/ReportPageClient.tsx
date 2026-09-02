@@ -153,9 +153,7 @@ export default function ReportPageClient() {
     corpusLoading,
     appliedFilters,
     appliedRevision,
-    applyFilters,
     getAppliedFiltersSnapshot,
-    hasPendingFilterChanges,
     reportBanner,
     clearReportBanner,
     refreshDelta,
@@ -245,6 +243,8 @@ export default function ReportPageClient() {
     accountsData: summaryTabState.accountsData,
     clientAccountSummaryData: summaryTabState.clientAccountSummaryData,
     mergeFlags: summaryTabState.mergeFlags,
+    clientMergeWithCrm: summaryTabState.clientMergeWithCrm,
+    clientOnlyMode: summaryTabState.clientOnlyMode,
   });
 
   const viewCallTypesParam = useMemo(
@@ -474,11 +474,6 @@ export default function ReportPageClient() {
     registerTabState.limit,
   ]);
 
-  const handleApplySummaryFilters = useCallback(() => {
-    applyFilters();
-    summaryTabState.setSourceSelection(summaryTabState.sourceSelection);
-  }, [applyFilters, summaryTabState]);
-
   const executeExport = useCallback(
     async (
       format: 'excel' | 'csv',
@@ -683,7 +678,7 @@ export default function ReportPageClient() {
 
       if (sourceTab === 'bd_mis_summary') {
         if (!bdMisTabState.bdMisExportData?.regionalRows?.length) {
-          throw new Error('No data to export. Apply filters and wait for the summary to load.');
+          throw new Error('No data to export. Wait for the dashboard to load.');
         }
         const { buildBdMisSummaryWorkbook, bdMisSummaryFilename } = await import(
           '@/modules/mis/services/bd-mis-excel-export'
@@ -907,9 +902,6 @@ export default function ReportPageClient() {
             registerTabState.loading ? 'Updating filters…' : 'Refreshing call register…'
           }
           onBeforeOpenFilters={() => void loadFilterOptions()}
-          onApply={() => void registerTabState.runRegisterFilterLoad({ force: true })}
-          onSearchEnter={() => void registerTabState.runRegisterFilterLoad({ force: true })}
-          onPincodeEnter={() => void registerTabState.runRegisterFilterLoad({ force: true })}
         />
       ) : activeTab === 'summary' ||
         activeTab === 'accounts' ||
@@ -922,10 +914,7 @@ export default function ReportPageClient() {
           setDateRange={setDateRange}
           agingAsOf={agingAsOf}
           setAgingAsOf={setAgingAsOf}
-          onApply={handleApplySummaryFilters}
           summaryTabLoading={summaryTabState.summaryTabLoading}
-          bdMisTabLoading={bdMisTabState.bdMisTabLoading}
-          hasPendingFilterChanges={hasPendingFilterChanges}
           clientImportActiveSources={summaryTabState.clientImportActiveSources}
           sourceSelection={summaryTabState.sourceSelection}
           setSourceSelection={summaryTabState.setSourceSelection}

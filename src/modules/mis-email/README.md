@@ -9,11 +9,17 @@ Cron / CLI  →  run-digest (personal prefs ∪ routing rules in IST window)
                   ↓
             compose-digest + mail-basis (Cadbury-safe counts)
                   ↓
-            @/lib/mail (SMTP / VPS relay)
+            @/modules/mis-email/services/send.ts (sendDigestPayload · sendHtmlEmail)
+                  ↓
+            @/lib/mail (SMTP / VPS relay when send.ts delegates)
                   ↓
             slot success log (no double-send)
 
-Major-repair worker  →  resolveAlertRecipients (branch To → HQ Cc) → send
+Major-repair worker  →  resolveAlertRecipients (branch To → HQ Cc) → sendHtmlEmail
+
+Cancelled-call digest  →  yesterday IST rows from @/modules/cancelled-calls → sendDigestPayload
+
+Subcontractor stock  →  email-sender.ts → sendHtmlEmail (worker in @/modules/subcontractor-stock)
 ```
 
 ## What is *not* here
@@ -23,6 +29,8 @@ Major-repair worker  →  resolveAlertRecipients (branch To → HQ Cc) → send
 | SMTP / VPS relay / domain allowlists | `@/lib/mail/*` |
 | BD-MIS / Register math | `@/modules/mis`, `@/sql/*` |
 | Cron pause catalog | `@/lib/vps-cron/*` (digest is a catalog id; worker is CLI) |
+| Cancelled-call register query / Excel | `@/modules/cancelled-calls` |
+| Subcontractor stock reconcile / VPS CLI | `@/modules/subcontractor-stock` |
 | MIS email permission names | `@/lib/auth/rbac-catalog.ts` |
 | Thin admin / profile stubs | `src/app/admin/mis-email-*`, `src/app/api/…` |
 
@@ -54,6 +62,16 @@ index.ts      Tiny public barrel (`defaultPreferencesForRecipient`)
 1. Sync worker detects repeat major repair.
 2. `resolveAlertRecipients` — branch enabled To wins; HQ To/Cc become Cc (or sole To if no branch rows).
 3. Send alert; new recipient rows default `enabled=false`.
+
+**Cancelled-call digest**
+
+1. Cron/CLI runs `cancelled-call-digest` for yesterday (IST).
+2. Fetches rows via `@/modules/cancelled-calls`; builds per-branch Excel.
+3. Sends to branch recipients; slot dedupe via digest recipient tables.
+
+**Subcontractor stock (hub tab only)**
+
+Mail & Alerts hosts the settings UI; reconcile/inbox/send workers are in `@/modules/subcontractor-stock`.
 
 ---
 
@@ -89,3 +107,5 @@ index.ts      Tiny public barrel (`defaultPreferencesForRecipient`)
 | MIS email permission rename | `rbac-catalog`, users enable-email gate, recipients |
 | Recipient domain / kill-switch | `allowed-domains`, org-settings |
 | Major-repair To/Cc | `resolveAlertRecipients` only |
+| Cancelled digest | `services/cancelled-call-digest.ts`, `server/sync/cancelled-call-digest-recipients` |
+| Subcontractor tab | `@/modules/subcontractor-stock/pages/*` |

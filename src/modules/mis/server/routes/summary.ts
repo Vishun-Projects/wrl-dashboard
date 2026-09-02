@@ -8,16 +8,6 @@ import {
   querySummaryDashboard,
 } from '@/sql/read-model/summary';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
-import { postQuery } from '@/lib/db/proxy';
-import {
-  appendCallTypeFilter,
-  appendOfficeSecurityFilter,
-  buildCorpusFieldsSql,
-  buildCorpusTableName,
-  enrichTrhcallBranchFranchisee,
-  TRHCALLS_EXCLUDE_TRANSFERRED,
-} from '@/sql/trhcalls/query';
-import { deriveSummaryDashboard } from '@/lib/summary/derive';
 import { queryAllClientBranchSummary, countClientRowsInRange } from '@/modules/mis/client-import/services/aggregate';
 import {
   listAllSourcesWithBatches,
@@ -87,41 +77,13 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    let condition = `(tc.vtrnno IS NOT NULL AND tc.vtrnno <> '')${TRHCALLS_EXCLUDE_TRANSFERRED}`;
-    condition = appendCallTypeFilter(condition, callType);
-    condition = appendOfficeSecurityFilter(condition, isHod, assignedOffices);
-
-    if (startDate) {
-      condition += ` AND tc.dtrndate >= '${startDate.replace(/'/g, "''")}'`;
-    }
-    if (endDate) {
-      condition += ` AND tc.dtrndate <= '${endDate.replace(/'/g, "''")} 23:59:59'`;
-    }
-
-    const rawRes = await postQuery({
-      fields: buildCorpusFieldsSql(),
-      tableName: buildCorpusTableName({ startDate, endDate }),
-      condition,
-      orderBy: 'tc.dtrndate DESC',
-    });
-
-    const rows = (rawRes.data || []).map((row: Record<string, unknown>) =>
-      enrichTrhcallBranchFranchisee(row)
+    return NextResponse.json(
+      {
+        error:
+          'MIS summary requires READ_SUMMARY_FROM=postgres. Set env flag for local CRM mode (deprecated).',
+      },
+      { status: 503 }
     );
-
-    const agingStr =
-      agingAsOf && !Number.isNaN(new Date(agingAsOf).getTime())
-        ? new Date(agingAsOf).toISOString().split('T')[0]
-        : agingAsOf || undefined;
-
-    const result = deriveSummaryDashboard(rows, {
-      agingAsOf: agingStr,
-      endDate: endDate || undefined,
-      officeIdsParam: officeId || 'All',
-      callTypesParam: callType || 'All',
-    });
-
-    return NextResponse.json(result);
   } catch (err: unknown) {
     console.error('Report Summary Error:', err);
     return NextResponse.json({ error: toUserFacingError(err) }, { status: 500 });

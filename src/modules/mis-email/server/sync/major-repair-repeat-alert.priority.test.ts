@@ -3,14 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const priorityRefreshHotFromCrm = vi.fn();
 const postQuery = vi.fn();
 const withClient = vi.fn();
-const sendMail = vi.fn();
+const sendHtmlEmail = vi.fn();
 const logAction = vi.fn();
 const assertOrgOutboundMailEnabled = vi.fn();
 const getMisEmailOrgSettings = vi.fn();
 const listEnabledEmailsForBranch = vi.fn();
 const isSmtpConfigured = vi.fn();
-const resolveSmtpConfig = vi.fn();
-const createMailTransport = vi.fn();
+const isMisEmailRelayConfigured = vi.fn();
 
 vi.mock('@/lib/read-model/priority-refresh-trns', async () => {
   const actual = await vi.importActual<typeof import('@/lib/read-model/priority-refresh-trns')>(
@@ -30,9 +29,15 @@ vi.mock('@/lib/read-model/db', () => ({
 vi.mock('@/lib/security/audit', () => ({
   logAction: (...args: unknown[]) => (globalThis as any).__mockLogAction?.(...args),
 }));
-vi.mock('@/modules/mis-email/services/org-settings-lib', () => ({
+vi.mock('@/modules/mis-email/services/org-settings', () => ({
   assertOrgOutboundMailEnabled: (...args: unknown[]) => (globalThis as any).__mockAssertOrgOutboundMailEnabled?.(...args),
   getMisEmailOrgSettings: (...args: unknown[]) => (globalThis as any).__mockGetMisEmailOrgSettings?.(...args),
+}));
+vi.mock('@/modules/mis-email/services/send-relay', () => ({
+  isMisEmailRelayConfigured: (...args: unknown[]) => (globalThis as any).__mockIsMisEmailRelayConfigured?.(...args),
+}));
+vi.mock('@/modules/mis-email/services/send', () => ({
+  sendHtmlEmail: (...args: unknown[]) => (globalThis as any).__mockSendHtmlEmail?.(...args),
 }));
 vi.mock('@/modules/mis-email/server/sync/major-repair-repeat-recipients', () => ({
   listEnabledEmailsForBranch: (...args: unknown[]) => (globalThis as any).__mockListEnabledEmailsForBranch?.(...args),
@@ -40,8 +45,6 @@ vi.mock('@/modules/mis-email/server/sync/major-repair-repeat-recipients', () => 
 }));
 vi.mock('@/lib/mail/smtp', () => ({
   isSmtpConfigured: (...args: unknown[]) => (globalThis as any).__mockIsSmtpConfigured?.(...args),
-  resolveSmtpConfig: (...args: unknown[]) => (globalThis as any).__mockResolveSmtpConfig?.(...args),
-  createMailTransport: (...args: unknown[]) => (globalThis as any).__mockCreateMailTransport?.(...args),
 }));
 
 import type { HotRow } from '@/lib/read-model/types';
@@ -111,8 +114,8 @@ describe('checkMajorRepairRepeatAlerts priority refresh', () => {
     (globalThis as any).__mockGetMisEmailOrgSettings = getMisEmailOrgSettings;
     (globalThis as any).__mockListEnabledEmailsForBranch = listEnabledEmailsForBranch;
     (globalThis as any).__mockIsSmtpConfigured = isSmtpConfigured;
-    (globalThis as any).__mockResolveSmtpConfig = resolveSmtpConfig;
-    (globalThis as any).__mockCreateMailTransport = createMailTransport;
+    (globalThis as any).__mockIsMisEmailRelayConfigured = isMisEmailRelayConfigured;
+    (globalThis as any).__mockSendHtmlEmail = sendHtmlEmail;
 
     process.env.MAJOR_REPAIR_REPEAT_ALERT_ENABLED = 'true';
     process.env.MAJOR_REPAIR_REPEAT_MIN_COUNT = '3';
@@ -126,9 +129,8 @@ describe('checkMajorRepairRepeatAlerts priority refresh', () => {
     });
     listEnabledEmailsForBranch.mockResolvedValue([{ email: 'bm@example.com', name: 'BM' }]);
     isSmtpConfigured.mockReturnValue(true);
-    resolveSmtpConfig.mockReturnValue({ from: 'noreply@example.com' });
-    createMailTransport.mockReturnValue({ sendMail });
-    sendMail.mockResolvedValue({ messageId: 'mid-1' });
+    isMisEmailRelayConfigured.mockReturnValue(false);
+    sendHtmlEmail.mockResolvedValue({ messageId: 'mid-1' });
     priorityRefreshHotFromCrm.mockResolvedValue({ kind: 'ok', rowsUpserted: 2, rowsFetched: 2 });
     withClient.mockImplementation(async (fn: (client: { query: ReturnType<typeof vi.fn> }) => unknown) => {
       const client = {
@@ -137,7 +139,6 @@ describe('checkMajorRepairRepeatAlerts priority refresh', () => {
       return fn(client);
     });
 
-    // postQuery: repair flags, count, details (order of calls in happy path)
     postQuery
       .mockResolvedValueOnce({
         data: [{ id: 1, office_id: 1, has_motor: 1, has_compressor: 0, has_gas: 0 }],
@@ -155,7 +156,7 @@ describe('checkMajorRepairRepeatAlerts priority refresh', () => {
     const { checkMajorRepairRepeatAlerts } = await import('./major-repair-repeat-alert');
     await checkMajorRepairRepeatAlerts([hotRow({ vtrnno: '26F01029', serial: 'ABC123' })]);
 
-    expect(sendMail).toHaveBeenCalled();
+    expect(sendHtmlEmail).toHaveBeenCalled();
     expect(priorityRefreshHotFromCrm).toHaveBeenCalledWith(['26F01029', '26F01030']);
   });
 
@@ -165,7 +166,7 @@ describe('checkMajorRepairRepeatAlerts priority refresh', () => {
     await expect(
       checkMajorRepairRepeatAlerts([hotRow({ vtrnno: '26F01029', serial: 'ABC123' })])
     ).resolves.toBeUndefined();
-    expect(sendMail).toHaveBeenCalled();
+    expect(sendHtmlEmail).toHaveBeenCalled();
     expect(priorityRefreshHotFromCrm).toHaveBeenCalled();
   });
 });

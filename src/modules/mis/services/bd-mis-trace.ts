@@ -121,6 +121,14 @@ function crmRowIsCadburyUnionExcluded(
   return isCrmCadburyAccount(row.account) || isCrmCadburyAccount(row.client);
 }
 
+function crmRowIsCokeUnionExcluded(
+  row: BdMisCrmCallTraceInput,
+  sources: BdMisSourceFlags
+): boolean {
+  if (!sources.crm || !sources.coke) return false;
+  return isCokeClientAccount(String(row.account ?? '')) || isCokeClientAccount(String(row.client ?? ''));
+}
+
 function isCadburyClientAccount(account: string): boolean {
   return account.trim().toLowerCase() === 'cadbury';
 }
@@ -232,6 +240,14 @@ function classifyCrmContribution(
       contribution_step: sources.cadbury
         ? '2. − CRM Cadbury/Mondelez (replaced by Cadbury import)'
         : '2. − CRM Cadbury/Mondelez (excluded from MIS mail)',
+      included_in_final_count: false,
+      counts_toward: 'none',
+    };
+  }
+
+  if (crmRowIsCokeUnionExcluded(row, sources)) {
+    return {
+      contribution_step: '4. − CRM Coke (replaced by HCCB import)',
       included_in_final_count: false,
       counts_toward: 'none',
     };
@@ -392,8 +408,10 @@ export function buildBdMisTraceRows(params: {
   clientRows: BdMisClientCallTraceInput[];
   sources: BdMisSourceFlags;
   agingDate: string;
+  /** Default true; set false for large exports where sort cost dominates. */
+  sort?: boolean;
 }): BdMisTraceRow[] {
-  const { crmRows, clientRows, sources, agingDate } = params;
+  const { crmRows, clientRows, sources, agingDate, sort = true } = params;
   const traceRows: BdMisTraceRow[] = [];
 
   for (const row of crmRows) {
@@ -402,6 +420,8 @@ export function buildBdMisTraceRows(params: {
   for (const row of clientRows) {
     traceRows.push(mapClientCallToTraceRow(row, sources, agingDate));
   }
+
+  if (!sort) return traceRows;
 
   return traceRows.sort((a, b) => {
     const regionCmp = a.region.localeCompare(b.region);

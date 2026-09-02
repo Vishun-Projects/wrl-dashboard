@@ -12,11 +12,14 @@ import {
   filterTraceRowsForSummaryExport,
   type BdMisTraceRow,
 } from '@/modules/mis/services/bd-mis-trace';
+import { filterTraceRowsForUnifiedOpenExport } from '@/modules/mis/services/mis-unified-metrics';
 import {
   applyAge15CellStyle,
   applySummaryHeaderStyle,
   applyRegionRowStyle,
+  buildSummaryDashboardWorkbook,
 } from '@/modules/mis/services/summary-excel-export';
+import type { SummaryDashboardExportAlign } from '@/modules/mis/services/summary-trace-export';
 
 export type BdMisExportFilterMeta = {
   startDate: string;
@@ -42,6 +45,11 @@ export type BdMisTraceableExportPayload = BdMisExportPayload & {
   traceRows: BdMisTraceRow[];
   /** Summary dashboard uses date-filtered trace + UI regional totals; BD MIS uses snapshot client files. */
   traceAlign?: 'summary' | 'bd_mis';
+  /** When set with traceAlign=summary, prepends the on-screen Summary Dashboard sheet. */
+  summaryDashboard?: {
+    summaryData: BranchSummaryRow[];
+    uiAlign: SummaryDashboardExportAlign;
+  };
 };
 
 function zoneShort(zone: string): string {
@@ -456,6 +464,30 @@ function resolveTraceRowDetailRows(payload: BdMisTraceableExportPayload): BdMisT
   return filterTraceRowsForExport(payload.traceRows);
 }
 
+function traceRowExportValues(
+  row: BdMisTraceRow,
+  status: string
+): (string | boolean | null | undefined)[] {
+  return [
+    row.region.replace(/\s+ZONE$/i, ''),
+    row.plant,
+    row.office_under_branch,
+    row.technician_name,
+    row.customer_name,
+    row.call_date_time,
+    row.service_order,
+    row.client,
+    row.wco,
+    row.repair_done,
+    status,
+    row.aging,
+    row.file_name,
+    row.contribution_step,
+    row.included_in_final_count ? 'Yes' : 'No',
+    row.counts_toward,
+  ];
+}
+
 function addTraceRowDetailSheet(
   workbook: ExcelJS.Workbook,
   traceRows: BdMisTraceRow[],
@@ -464,6 +496,7 @@ function addTraceRowDetailSheet(
   const exportRows = traceRows;
   const EXCEL_MAX_DATA_ROWS = 1_048_575;
   const chunkCount = Math.max(1, Math.ceil(exportRows.length / EXCEL_MAX_DATA_ROWS));
+  const TRACE_DETAIL_COLUMN_WIDTHS = [12, 28, 24, 20, 24, 18, 16, 20, 6, 14, 14, 12, 18, 36, 12, 14];
 
   for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
     const start = chunkIndex * EXCEL_MAX_DATA_ROWS;
@@ -474,31 +507,17 @@ function addTraceRowDetailSheet(
 
     const header = detail.addRow([...TRACE_DETAIL_COLUMNS]);
     applySummaryHeaderStyle(header);
+    detail.columns = TRACE_DETAIL_COLUMN_WIDTHS.map((width, index) => ({
+      key: TRACE_DETAIL_COLUMNS[index],
+      width,
+    }));
 
-    for (const row of chunk) {
-      const status =
-        typeof opts?.statusLabel === 'function'
-          ? opts.statusLabel(row)
-          : (opts?.statusLabel ?? row.call_status);
-      detail.addRow([
-        row.region.replace(/\s+ZONE$/i, ''),
-        row.plant,
-        row.office_under_branch,
-        row.technician_name,
-        row.customer_name,
-        row.call_date_time,
-        row.service_order,
-        row.client,
-        row.wco,
-        row.repair_done,
-        status,
-        row.aging,
-        row.file_name,
-        row.contribution_step,
-        row.included_in_final_count ? 'Yes' : 'No',
-        row.counts_toward,
-      ]);
-    }
+    const resolveStatus = (row: BdMisTraceRow): string =>
+      typeof opts?.statusLabel === 'function'
+        ? opts.statusLabel(row)
+        : (opts?.statusLabel ?? row.call_status);
+
+    detail.addRows(chunk.map((row) => traceRowExportValues(row, resolveStatus(row))));
 
     const lastRow = detail.rowCount;
     if (lastRow >= 2) {
@@ -529,16 +548,38 @@ function autoSizeWorkbookColumns(
   }
 }
 
-/** Traceable export: row detail only. */
+/** Traceable export: Summary Dashboard (when aligned) + row detail. */
 export async function buildBdMisTraceableWorkbook(
   payload: BdMisTraceableExportPayload
 ): Promise<ExcelJS.Workbook> {
   const ExcelJSRuntime = (await import('exceljs')).default;
-  const workbook = new ExcelJSRuntime.Workbook();
+  const workbook =
+    payload.traceAlign === 'summary' && payload.summaryDashboard
+      ? await buildSummaryDashboardWorkbook(
+          payload.summaryDashboard.summaryData,
+          'Summary Dashboard',
+          { uiAlign: payload.summaryDashboard.uiAlign }
+        )
+      : new ExcelJSRuntime.Workbook();
 
   addTraceRowDetailSheet(workbook, resolveTraceRowDetailRows(payload));
   autoSizeWorkbookColumns(workbook, { skipSheetNamePattern: /^Row Detail/ });
 
+  return workbook;
+}
+
+/** Open-calls workbook: unified Summary Dashboard formula (import-only Cadbury/Coke). */
+export async function buildMisUnifiedOpenCallsWorkbook(
+  payload: BdMisTraceableExportPayload
+): Promise<ExcelJS.Workbook> {
+  const ExcelJSRuntime = (await import('exceljs')).default;
+  const workbook = new ExcelJSRuntime.Workbook();
+  const rows = filterTraceRowsForUnifiedOpenExport(payload.traceRows);
+  addTraceRowDetailSheet(workbook, rows, {
+    statusLabel: (row) =>
+      row.counts_toward === 'cancelled' ? row.call_status || 'Cancelled' : 'Unsolved',
+  });
+  autoSizeWorkbookColumns(workbook, { skipSheetNamePattern: /^Row Detail/ });
   return workbook;
 }
 
@@ -559,6 +600,10 @@ export async function buildBdMisOpenCallsWorkbook(
 
 export function bdMisTraceableFilename(date = new Date()): string {
   return `WRL_BD_MIS_Traceable_${date.toISOString().split('T')[0]}.xlsx`;
+}
+
+export function summaryTraceFilename(date = new Date()): string {
+  return `WRL Summary Dashboard Trace — ${date.toISOString().split('T')[0]}.xlsx`;
 }
 
 export function bdMisOpenCallsFilename(date = new Date()): string {

@@ -78,7 +78,7 @@ function account(
 }
 
 describe('buildBdMisRegionalRows', () => {
-  it('matches New_BD_MIS Excel Summary union (HCCB snapshot, no CRM Coke subtract)', () => {
+  it('matches New_BD_MIS Excel Summary union with import-only Coke (subtract CRM Coke)', () => {
     const crmBranches = [
       branch('NORTH ZONE', 56770),
       branch('EAST ZONE', 19465),
@@ -105,7 +105,7 @@ describe('buildBdMisRegionalRows', () => {
       sources: { crm: true, cadbury: true, coke: true },
     });
 
-    expect(rows.find((r) => r.region === 'SOUTH ZONE')!.total_calls).toBe(74218);
+    expect(rows.find((r) => r.region === 'SOUTH ZONE')!.total_calls).toBe(74065);
   });
 
   it('rolls all Coke client rows into South only', () => {
@@ -204,7 +204,7 @@ describe('buildBdMisRegionalRows', () => {
     expect(grand.open_calls).toBe(25);
   });
 
-  it('Cadbury import-only + Coke CRM+import open union', () => {
+  it('Cadbury import-only + Coke import-only open union', () => {
     const crmBranches = [branch('SOUTH ZONE', 1000, 900)];
     crmBranches[0].open_calls = 50;
     const crmAccounts = [
@@ -225,8 +225,8 @@ describe('buildBdMisRegionalRows', () => {
       })
     );
 
-    // 50 CRM branch open − 30 CRM Cadbury + 40 import Cadbury + 10 import Coke (CRM Coke 20 stays in base)
-    expect(grand.open_calls).toBe(50 - 30 + 40 + 10);
+    // 50 CRM branch open − 30 CRM Cadbury − 20 CRM Coke + 40 import Cadbury + 10 import Coke
+    expect(grand.open_calls).toBe(50 - 30 - 20 + 40 + 10);
   });
 
   it('excludes CRM Cadbury when excludeCrmCadbury is set (MIS mail)', () => {

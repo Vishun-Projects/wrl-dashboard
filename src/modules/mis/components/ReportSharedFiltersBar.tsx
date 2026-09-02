@@ -1,11 +1,10 @@
 'use client';
 
-import { Filter, Loader2 } from 'lucide-react';
 import { UiDateInput } from '@/components/ui/UiDateInput';
 import { DateRangeSelector } from '@/modules/mis/register/components/DateRangeSelector';
 import { RegisterBranchFranchiseeFilters } from '@/modules/mis/register/components/RegisterBranchFranchiseeFilters';
-import { RegisterMultiSelect } from '@/modules/mis/register/components/RegisterMultiSelect';
-import type { RegisterMultiSelectOption } from '@/modules/mis/register';
+import { FilterSelect } from '@/components/filters/FilterSelect';
+import type { FilterSelectOption } from '@/components/filters';
 import {
   saveMisSourceSelection,
   type MisSourceSelection,
@@ -16,17 +15,14 @@ import type { ClientMergeWithCrmPrefs } from '@/modules/mis/components/SummaryMe
 import type { ReportDateRange } from '@/modules/mis/services/filters';
 
 type Props = {
-  callTypeOptions: RegisterMultiSelectOption[];
+  callTypeOptions: FilterSelectOption[];
   selectedCallTypes: string[];
   setSelectedCallTypes: (v: string[]) => void;
   dateRange: ReportDateRange;
   setDateRange: (range: ReportDateRange) => void;
   agingAsOf: string;
   setAgingAsOf: (iso: string) => void;
-  onApply: () => void;
   summaryTabLoading: boolean;
-  bdMisTabLoading: boolean;
-  hasPendingFilterChanges: boolean;
   clientImportActiveSources: Array<{ code: string; name: string }>;
   sourceSelection: MisSourceSelection;
   setSourceSelection: (s: MisSourceSelection) => void;
@@ -42,31 +38,25 @@ export function ReportSharedFiltersBar({
   setDateRange,
   agingAsOf,
   setAgingAsOf,
-  onApply,
   summaryTabLoading,
-  bdMisTabLoading,
-  hasPendingFilterChanges,
   clientImportActiveSources,
   sourceSelection,
   setSourceSelection,
   clientMergeWithCrm,
   setClientMergeWithCrm,
 }: Props) {
-  const applying = summaryTabLoading || bdMisTabLoading;
   return (
     <div className="report-toolbar-filters-row report-shared-filters-surface border-b border-slate-200 bg-bg-canvas px-4 py-2">
-      <RegisterMultiSelect
+      <FilterSelect
         label="Call Type"
         emptyLabel="All Call Types"
         options={callTypeOptions}
         selected={selectedCallTypes}
         onChange={setSelectedCallTypes}
-        applyMode="confirm"
         layout="inline"
-        searchable
         panelClassName="w-64"
       />
-      <RegisterBranchFranchiseeFilters applyMode="confirm" layout="inline" />
+      <RegisterBranchFranchiseeFilters layout="inline" />
       <div className="report-toolbar-filters-date report-shared-date-field shrink-0">
         <DateRangeSelector
           value={dateRange.label}
@@ -87,26 +77,9 @@ export function ReportSharedFiltersBar({
           aria-label="Aging as of"
         />
       </div>
-      <button
-        type="button"
-        onClick={onApply}
-        disabled={applying}
-        aria-busy={applying}
-        className={`filter-apply-btn report-shared-apply-btn ${
-          applying
-            ? 'border border-blue-300 bg-blue-50 text-blue-800'
-            : hasPendingFilterChanges
-              ? 'filter-apply-btn--pending'
-              : ''
-        }`}
-      >
-        {applying ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-        ) : (
-          <Filter className="h-3.5 w-3.5" aria-hidden />
-        )}
-        {applying ? 'Applying…' : 'Apply filters'}
-      </button>
+      {summaryTabLoading ? (
+        <span className="ui-micro text-blue-700">Updating…</span>
+      ) : null}
       {(clientImportActiveSources.length > 0 ||
         sourceSelection.clientSourceCodes.includes('cadbury')) && (
         <div className="report-toolbar-filters-sources report-shared-sources-group shrink-0 border-l border-slate-200 pl-2 flex flex-wrap items-center gap-2">

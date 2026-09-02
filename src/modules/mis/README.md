@@ -2,7 +2,7 @@
 
 ## Why this exists
 
-Primary ops reporting hub: Call Register, Summary, Accounts, BD-MIS, Deployment Completion, and client Excel/CSV import. Sibling reports (ARCP, distribution, serial, location, warranty) reuse MIS filters, corpus loading, and register-view helpers instead of reinventing them.
+Primary ops reporting hub: Call Register, Summary, Accounts, BD-MIS, Deployment Completion, and client Excel/CSV import. Sibling reports (ARCP, distribution, serial, location, warranty, cancelled-calls, athena-reconciliation) reuse MIS filters, corpus loading, and register-view helpers instead of reinventing them.
 
 ```text
 /report  →  ReportPageClient + ReportFiltersProvider

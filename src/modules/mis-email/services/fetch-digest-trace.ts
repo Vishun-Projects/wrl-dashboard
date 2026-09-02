@@ -80,6 +80,7 @@ export async function buildDigestTraceableExportPayload(
     clientRows: clientCallRows,
     sources,
     agingDate: dateRange.endDate,
+    sort: false,
   });
 
   const { regionalRows, grand } = buildMisEmailBdMisRegionalPayload(

@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { Mail, Plus, Trash2, X } from 'lucide-react';
 import { PageShell } from '@/components/layout/PageShell';
-import { RegisterMultiSelect, type RegisterMultiSelectOption } from '@/modules/mis/register/components';
+import { FilterSelect } from '@/components/filters/FilterSelect';
+import type { FilterSelectOption } from '@/components/filters/filter-select-types';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 import { ModalPortal } from '@/components/ui/ModalPortal';
@@ -342,7 +343,7 @@ export default function MisEmailRoutingPageClient({
       : (globalClientOptionsByMode[mode] ?? []);
   }
 
-  function mapToOptions(values: string[]): RegisterMultiSelectOption[] {
+  function mapToOptions(values: string[]): FilterSelectOption[] {
     return values.map((value) => ({ value, label: value }));
   }
 
@@ -759,17 +760,19 @@ export default function MisEmailRoutingPageClient({
                   {Math.min(safePage * pageSize, sortedFilteredRows.length)} of {sortedFilteredRows.length}
                 </div>
                 <div className="flex items-center gap-2">
-                  <select
-                    value={String(pageSize)}
-                    onChange={(event) => setPageSize(Number(event.target.value))}
-                    className={`${settingsInputClass()} h-8 w-[88px] px-2 ui-label`}
-                  >
-                    {PAGE_SIZE_OPTIONS.map((size) => (
-                      <option key={size} value={String(size)}>
-                        {size}/page
-                      </option>
-                    ))}
-                  </select>
+                  <FilterSelect
+                    label="Per page"
+                    emptyLabel="Per page"
+                    mode="single"
+                    options={PAGE_SIZE_OPTIONS.map((size) => ({
+                      value: String(size),
+                      label: `${size}/page`,
+                    }))}
+                    selected={[String(pageSize)]}
+                    onChange={(values) => setPageSize(Number(values[0] ?? pageSize))}
+                    layout="inline"
+                    panelClassName="w-44"
+                  />
                   <button
                     type="button"
                     disabled={safePage <= 1}
@@ -872,34 +875,32 @@ export default function MisEmailRoutingPageClient({
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div className="space-y-1.5">
                     <label className="ui-field-label">Client basis</label>
-                    <select
-                      className={settingsInputClass()}
-                      value={activeRow.clientSourceMode}
-                      onChange={(event) => {
-                        const mode: ClientSourceMode = event.target.value === 'crm' ? 'crm' : 'mail';
+                    <FilterSelect
+                      label="Client basis"
+                      emptyLabel="Client basis"
+                      mode="single"
+                      options={CLIENT_SOURCE_MODE_OPTIONS.map((option) => ({
+                        value: option.value,
+                        label: option.label,
+                      }))}
+                      selected={[activeRow.clientSourceMode]}
+                      onChange={(values) => {
+                        const mode: ClientSourceMode = values[0] === 'crm' ? 'crm' : 'mail';
                         updateRow(activeRow.id, { clientSourceMode: mode, client: [] });
                       }}
-                    >
-                      {CLIENT_SOURCE_MODE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                      panelClassName="w-56"
+                    />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                   <div className="space-y-1.5">
                     <label className="ui-field-label">Zones</label>
-                    <RegisterMultiSelect
+                    <FilterSelect
                       label="Zones"
                       emptyLabel={`All zones (${zoneOptions.length})`}
                       options={mapToOptions(zoneOptions)}
                       selected={activeRow.zone}
-                      searchable
-                      showSelectAll
-                      selectAllLabel="Select all"
                       panelClassName="w-80"
                       onChange={(values) => {
                         const nextZones = normalizeUnique(values);
@@ -930,14 +931,11 @@ export default function MisEmailRoutingPageClient({
 
                   <div className="space-y-1.5">
                     <label className="ui-field-label">Branches</label>
-                    <RegisterMultiSelect
+                    <FilterSelect
                       label="Branches"
                       emptyLabel={`All branches (${globalBranchOptions.length})`}
                       options={mapToOptions(branchOptionsForZones(activeRow.zone))}
                       selected={activeRow.branch}
-                      searchable
-                      showSelectAll
-                      selectAllLabel="Select all"
                       panelClassName="w-80"
                       onChange={(values) => {
                         const branch = normalizeUnique(values);
@@ -967,16 +965,13 @@ export default function MisEmailRoutingPageClient({
 
                   <div className="space-y-1.5">
                     <label className="ui-field-label">Clients</label>
-                    <RegisterMultiSelect
+                    <FilterSelect
                       label="Clients"
                       emptyLabel={`All clients (${globalClientOptionsByMode[activeRow.clientSourceMode]?.length ?? 0})`}
                       options={mapToOptions(
                         clientOptionsFor(activeRow.zone, activeRow.branch, activeRow.clientSourceMode)
                       )}
                       selected={activeRow.client}
-                      searchable
-                      showSelectAll
-                      selectAllLabel="Select all"
                       panelClassName="w-80"
                       onChange={(values) => updateRow(activeRow.id, { client: normalizeUnique(values) })}
                     />
@@ -1018,32 +1013,31 @@ export default function MisEmailRoutingPageClient({
                     </div>
                     <div>
                       <label className="ui-field-label mb-1 block">Repeat</label>
-                      <select
-                        className={settingsInputClass()}
-                        value={String(activeRow.scheduleIntervalMinutes)}
-                        onChange={(event) =>
+                      <FilterSelect
+                        label="Repeat"
+                        emptyLabel="Repeat"
+                        mode="single"
+                        options={SCHEDULE_INTERVAL_OPTIONS.map((opt) => ({
+                          value: String(opt.value),
+                          label: opt.label,
+                        }))}
+                        selected={[String(activeRow.scheduleIntervalMinutes)]}
+                        onChange={(values) =>
                           updateRow(activeRow.id, {
-                            scheduleIntervalMinutes: Number(event.target.value || 1440),
+                            scheduleIntervalMinutes: Number(values[0] ?? 1440),
                           })
                         }
-                      >
-                        {SCHEDULE_INTERVAL_OPTIONS.map((opt) => (
-                          <option key={opt.value} value={String(opt.value)}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
+                        panelClassName="w-56"
+                      />
                     </div>
                     <div>
                       <label className="ui-field-label mb-1 block">On days</label>
-                      <RegisterMultiSelect
+                      <FilterSelect
                         label="Days"
                         emptyLabel="All days"
                         options={DAY_OPTIONS.map((day) => ({ value: day, label: DAY_LABELS[day] || day }))}
                         selected={activeRow.scheduleDaysOfWeek}
                         panelClassName="w-80"
-                        showSelectAll
-                        selectAllLabel="Select all"
                         onChange={(values) =>
                           updateRow(activeRow.id, {
                             scheduleDaysOfWeek: values.length > 0 ? normalizeUnique(values) : [...DAY_OPTIONS],

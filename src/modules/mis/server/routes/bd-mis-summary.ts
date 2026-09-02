@@ -67,6 +67,49 @@ export async function GET(req: NextRequest) {
       isHod,
     };
 
+    const sources = bdMisSourcesFromSelection(includeCrm, clientSources);
+    const agingDate =
+      agingAsOf || endDate || new Date().toISOString().slice(0, 10);
+
+    // Summary-dashboard trace export only needs call-level rows; UI already has rollup totals.
+    if (includeTrace && traceAlign === 'summary') {
+      const started = Date.now();
+      const [crmCallRowsRaw, clientCallRows] = await Promise.all([
+        includeCrm ? queryBdMisCrmCallTraceRows(queryParams) : Promise.resolve([]),
+        clientSources.length
+          ? queryClientCallTraceRowsFiltered({
+              startDate,
+              endDate,
+              agingAsOf: agingAsOf || undefined,
+              sourceCodes: clientSources,
+            })
+          : Promise.resolve([]),
+      ]);
+
+      const crmCallRows = await enrichRegisterRowsRepairDone(crmCallRowsRaw);
+      const traceRows = buildBdMisTraceRows({
+        crmRows: crmCallRows.map((row) => ({
+          ...row,
+          status_bucket: row.status_bucket as import('@/modules/mis/client-import/services/types').StatusBucket,
+        })),
+        clientRows: clientCallRows,
+        sources,
+        agingDate,
+        sort: false,
+      });
+
+      console.info(
+        `[bd-mis-summary] summary trace-only ${startDate}→${endDate}: ${Date.now() - started}ms · traceRows=${traceRows.length}`
+      );
+
+      return NextResponse.json({
+        sources,
+        traceRows,
+        syncMeta: await getSyncMeta(),
+        readSource: 'postgres',
+      });
+    }
+
     const crm = await queryBdMisCrmSummary(queryParams);
 
     const clientAccountSummary = await queryClientAccountSummaryForBdMis({
@@ -76,7 +119,6 @@ export async function GET(req: NextRequest) {
       sourceCodes: clientSources,
     });
 
-    const sources = bdMisSourcesFromSelection(includeCrm, clientSources);
     const regionalRows = buildBdMisRegionalRows({
       crmBranchSummary: crm.branchSummary,
       crmAccountSummary: crm.accountSummary,
@@ -85,9 +127,6 @@ export async function GET(req: NextRequest) {
     });
     const grand = sumBdMisRegionalGrand(regionalRows);
     const syncMeta = await getSyncMeta();
-
-    const agingDate =
-      agingAsOf || endDate || new Date().toISOString().slice(0, 10);
 
     let traceRows: ReturnType<typeof buildBdMisTraceRows> | undefined;
     if (includeTrace) {
@@ -121,6 +160,7 @@ export async function GET(req: NextRequest) {
         clientRows: clientCallRows,
         sources,
         agingDate,
+        sort: false,
       });
     }
 

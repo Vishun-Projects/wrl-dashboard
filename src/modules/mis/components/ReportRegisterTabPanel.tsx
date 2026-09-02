@@ -1,6 +1,7 @@
 'use client';
 
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import { HorizontalScrollFade } from '@/components/ui/HorizontalScrollFade';
 import { SortableTh } from '@/components/ui/SortableTh';
 import { ReportErrorBoundary } from '@/modules/mis/components/ReportErrorBoundary';
@@ -153,19 +154,21 @@ export function ReportRegisterTabPanel({
                 </span>
                 <label className="flex items-center gap-1.5">
                   <span className="text-slate-500">Rows</span>
-                  <select
-                    value={limit}
-                    onChange={(e) => handleRegisterPageSizeChange(Number(e.target.value))}
-                    disabled={loading && data.length === 0}
-                    className="rounded border border-slate-200 bg-bg-canvas px-2 py-0.5 text-[11px] font-medium text-slate-700 shadow-sm hover:border-slate-300 focus:border-slate-400 focus:outline-none disabled:opacity-50"
-                    aria-label="Rows per page"
-                  >
-                    {REGISTER_PAGE_SIZE_OPTIONS.map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
+                  <FilterSelect
+                    label="Rows"
+                    emptyLabel="Rows"
+                    mode="single"
+                    options={REGISTER_PAGE_SIZE_OPTIONS.map((size) => ({
+                      value: String(size),
+                      label: String(size),
+                    }))}
+                    selected={[String(limit)]}
+                    onChange={(values) =>
+                      handleRegisterPageSizeChange(Number(values[0] ?? limit) as RegisterPageSize)
+                    }
+                    layout="inline"
+                    panelClassName="w-44"
+                  />
                 </label>
               </div>
               <div className="flex items-center gap-2">

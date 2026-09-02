@@ -17,9 +17,9 @@ import {
 } from './rbac-catalog';
 
 describe('expandPermissionList', () => {
-  it('maps legacy MIS tab aliases to canonical names', () => {
-    const expanded = expandPermissionList(['view_mis_summary']);
-    expect(expanded).toContain('tab_mis_summary');
+  it('returns permissions unchanged (legacy aliases migrated in DB)', () => {
+    const expanded = expandPermissionList(['view_mis_summary', 'tab_mis_register']);
+    expect(expanded).toEqual(['view_mis_summary', 'tab_mis_register']);
   });
 });
 

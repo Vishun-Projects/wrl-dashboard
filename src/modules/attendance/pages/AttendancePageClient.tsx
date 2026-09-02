@@ -11,13 +11,13 @@ import {
   ChevronUp,
   Columns3,
   Download,
-  Filter,
   RefreshCw,
   RotateCcw,
   Search,
   Settings2,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import { PageShell, PageLoadingState } from '@/components/layout/PageShell';
 import {
   AdminTable,
@@ -140,19 +140,19 @@ function formatMultiLabel(values: string[]): string {
   return `${values.length} selected`;
 }
 
-function hasSelectedValue(selected: string[], value: string): boolean {
-  const u = value.trim().toUpperCase();
-  return selected.some((s) => s.trim().toUpperCase() === u);
-}
+const SEARCH_BY_OPTIONS = [
+  { value: 'call', label: 'Call' },
+  { value: 'serial', label: 'Serial Number' },
+  { value: 'call_number', label: 'Call Number' },
+  { value: 'office', label: 'Office' },
+  { value: 'technician', label: 'Technician' },
+] as const;
 
-const SEARCH_BY_LABELS: Record<SearchBy | '', string> = {
-  '': 'Any',
-  call: 'Call',
-  serial: 'Serial Number',
-  call_number: 'Call Number',
-  office: 'Office',
-  technician: 'Technician',
-};
+const PAGE_SIZE_OPTIONS = [
+  { value: '10', label: '10' },
+  { value: '25', label: '25' },
+  { value: '50', label: '50' },
+] as const;
 
 function defaultEndDate(): string {
   return new Date().toISOString().slice(0, 10);
@@ -331,10 +331,6 @@ export default function AttendancePageClient() {
   const [appliedSearchBy, setAppliedSearchBy] = useState<SearchBy | ''>('call_number');
   const [officeIds, setOfficeIds] = useState<number[]>([]);
   const [headerFilters, setHeaderFilters] = useState(emptyHeaderFilters);
-  const [openHeaderMenu, setOpenHeaderMenu] = useState<HeaderFilterField | null>(null);
-  const [headerDraft, setHeaderDraft] = useState<string[]>([]);
-  const [headerSearch, setHeaderSearch] = useState('');
-  const [headerOptionsLoading, setHeaderOptionsLoading] = useState(false);
   const [headerOptions, setHeaderOptions] = useState<Record<HeaderFilterField, string[]>>({
     office: [],
     technician: [],
@@ -469,7 +465,6 @@ export default function AttendancePageClient() {
 
   const loadHeaderOptions = useCallback(async (field: HeaderFilterField) => {
     if (!token) return;
-    setHeaderOptionsLoading(true);
     try {
       const res = await axios.get('/api/admin/attendance', {
         headers: authHeaders,
@@ -499,8 +494,6 @@ export default function AttendancePageClient() {
       }));
     } catch {
       setHeaderOptions((prev) => ({ ...prev, [field]: [] }));
-    } finally {
-      setHeaderOptionsLoading(false);
     }
   }, [
     token,
@@ -515,47 +508,14 @@ export default function AttendancePageClient() {
     activityDateTo,
   ]);
 
-  async function openHeaderFilterMenu(e: React.MouseEvent, field: HeaderFilterField) {
-    e.stopPropagation();
-    const next = openHeaderMenu === field ? null : field;
-    setOpenHeaderMenu(next);
-    if (next) {
-      setHeaderDraft([...headerFilters[next]]);
-      setHeaderSearch('');
-      await loadHeaderOptions(next);
-    }
-  }
-
-  function toggleHeaderDraft(value: string) {
-    setHeaderDraft((prev) => {
-      if (hasSelectedValue(prev, value)) {
-        return prev.filter((v) => v.trim().toUpperCase() !== value.trim().toUpperCase());
+  const primeHeaderOptions = useCallback(
+    (field: HeaderFilterField) => {
+      if ((headerOptions[field] ?? []).length === 0) {
+        void loadHeaderOptions(field);
       }
-      return [...prev, value];
-    });
-  }
-
-  function applyHeaderDraft(field: HeaderFilterField) {
-    setHeaderFilters((prev) => ({ ...prev, [field]: [...headerDraft] }));
-    setPage(1);
-    setOpenHeaderMenu(null);
-    setSelectedKey(null);
-  }
-
-  function clearHeaderDraft() {
-    setHeaderDraft([]);
-  }
-
-  useEffect(() => {
-    if (!openHeaderMenu) return;
-    function onDocClick(ev: MouseEvent) {
-      const t = ev.target as HTMLElement | null;
-      if (t?.closest?.('[data-header-filter]')) return;
-      setOpenHeaderMenu(null);
-    }
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, [openHeaderMenu]);
+    },
+    [headerOptions, loadHeaderOptions]
+  );
 
   const loadReport = useCallback(async () => {
     if (!token) return;
@@ -665,9 +625,6 @@ export default function AttendancePageClient() {
     setAppliedSearchBy('call_number');
     setOfficeIds([]);
     setHeaderFilters(emptyHeaderFilters());
-    setOpenHeaderMenu(null);
-    setHeaderDraft([]);
-    setHeaderSearch('');
     setCallDateFrom('');
     setCallDateTo('');
     setActivityDateFrom(defaultStartDate());
@@ -707,7 +664,7 @@ export default function AttendancePageClient() {
 
   const activeFilterItems = useMemo(
     () => [
-      { name: 'Search by', value: SEARCH_BY_LABELS[appliedSearchBy] || 'Any' },
+      { name: 'Search by', value: SEARCH_BY_OPTIONS.find((o) => o.value === appliedSearchBy)?.label || 'Any' },
       { name: 'Value', value: appliedQ.trim() || 'All' },
       { name: 'Branch', value: selectedOfficeName },
       { name: 'Status', value: 'Tech Solved, Solved' },
@@ -764,14 +721,6 @@ export default function AttendancePageClient() {
   const visibleColumnDefs = ALL_COLUMNS.filter((c) => visibleCols[c.key]);
   const selectedHeaderValue = (field: HeaderFilterField): string[] => headerFilters[field];
 
-  const filteredHeaderOptions = useMemo(() => {
-    if (!openHeaderMenu) return [];
-    const q = headerSearch.trim().toLowerCase();
-    const options = headerOptions[openHeaderMenu] ?? [];
-    if (!q) return options;
-    return options.filter((o) => o.toLowerCase().includes(q));
-  }, [openHeaderMenu, headerOptions, headerSearch]);
-
   const selectedRow = useMemo(
     () => displayRows.find((r) => r.row_key === selectedKey) ?? rows.find((r) => r.row_key === selectedKey) ?? null,
     [displayRows, rows, selectedKey]
@@ -814,17 +763,15 @@ export default function AttendancePageClient() {
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex min-w-[140px] flex-col gap-1 text-xs text-slate-600">
               Search by
-              <select
-                className={settingsInputClass()}
-                value={searchBy}
-                onChange={(e) => setSearchBy(e.target.value as SearchBy | '')}
-              >
-                <option value="call">Call</option>
-                <option value="serial">Serial Number</option>
-                <option value="call_number">Call Number</option>
-                <option value="office">Office</option>
-                <option value="technician">Technician</option>
-              </select>
+              <FilterSelect
+                label="Search by"
+                emptyLabel="Search by"
+                mode="single"
+                options={[...SEARCH_BY_OPTIONS]}
+                selected={searchBy ? [searchBy] : []}
+                onChange={(values) => setSearchBy((values[0] ?? '') as SearchBy | '')}
+                panelClassName="w-56"
+              />
             </label>
             <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs text-slate-600">
               Value
@@ -860,22 +807,22 @@ export default function AttendancePageClient() {
             <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-slate-100 pt-4">
               <label className="flex min-w-[180px] flex-col gap-1 text-xs text-slate-600">
                 Branch
-                <select
-                  className={settingsInputClass()}
-                  value={officeIds[0] ?? ''}
-                  onChange={(e) => {
-                    const v = e.target.value;
+                <FilterSelect
+                  label="Branch"
+                  emptyLabel="All Branches"
+                  mode="single"
+                  options={offices.map((o) => ({
+                    value: String(o.office_id),
+                    label: o.office_name,
+                  }))}
+                  selected={officeIds[0] != null ? [String(officeIds[0])] : []}
+                  onChange={(values) => {
+                    const v = values[0];
                     setOfficeIds(v ? [Number(v)] : []);
                     setPage(1);
                   }}
-                >
-                  <option value="">All Branches</option>
-                  {offices.map((o) => (
-                    <option key={o.office_id} value={o.office_id}>
-                      {o.office_name}
-                    </option>
-                  ))}
-                </select>
+                  panelClassName="w-64"
+                />
               </label>
             <label className="flex flex-col gap-1 text-xs text-slate-600">
                 Call Date from
@@ -1181,9 +1128,7 @@ export default function AttendancePageClient() {
                   {visibleColumnDefs.map((c) => {
                     if (HEADER_FILTERABLE_COLUMNS.includes(c.key as HeaderFilterField)) {
                       const field = c.key as HeaderFilterField;
-                      const menuOpen = openHeaderMenu === field;
                       const selected = selectedHeaderValue(field);
-                      const options = menuOpen ? filteredHeaderOptions : headerOptions[field];
                       return (
                         <AdminTh
                           key={c.key}
@@ -1194,118 +1139,28 @@ export default function AttendancePageClient() {
                           sort={sort}
                           onSort={(key) => onSort(key as ColumnKey)}
                         >
-                          <span
-                            data-header-filter
-                            className="relative inline-flex items-center gap-1"
+                          <div
+                            className="inline-flex min-w-0 flex-col gap-1"
+                            onMouseEnter={() => primeHeaderOptions(field)}
                           >
                             <span>{c.label}</span>
-                            <button
-                              type="button"
-                              className={`inline-flex items-center rounded p-0.5 ${
-                                selected.length
-                                  ? 'bg-sky-100 text-sky-800'
-                                  : 'text-slate-500 hover:bg-slate-100'
-                              }`}
-                              title="Filter by distinct values (search + multi-select)"
-                              aria-label={`Filter by ${c.label}`}
-                              aria-expanded={menuOpen}
-                              onClick={(e) => void openHeaderFilterMenu(e, field)}
-                            >
-                              <Filter className="h-3 w-3" />
-                            </button>
-                            {menuOpen ? (
-                              <div
-                                className="absolute left-0 top-full z-30 mt-1 flex w-64 flex-col rounded-md border border-slate-200 bg-white shadow-lg"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <div className="border-b border-slate-100 p-2">
-                                  <div className="relative">
-                                    <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
-                                    <input
-                                      className="w-full rounded border border-slate-200 py-1.5 pl-7 pr-2 text-[11px] outline-none focus:border-sky-300"
-                                      placeholder={`Search ${c.label.toLowerCase()}…`}
-                                      value={headerSearch}
-                                      autoFocus
-                                      onChange={(e) => setHeaderSearch(e.target.value)}
-                                      onClick={(e) => e.stopPropagation()}
-                                      onKeyDown={(e) => e.stopPropagation()}
-                                    />
-                </div>
-                                  <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-500">
-                                    <span>
-                                      {headerDraft.length
-                                        ? `${headerDraft.length} selected`
-                                        : 'None selected'}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      className="font-medium text-slate-600 hover:text-slate-900"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        clearHeaderDraft();
-                                      }}
-                                    >
-                                      Clear
-                                    </button>
-                                  </div>
-                                </div>
-                                <div className="max-h-52 overflow-auto py-1">
-                                  {headerOptionsLoading ? (
-                                    <div className="px-3 py-2 text-[11px] text-slate-400">Loading…</div>
-                                  ) : options.length === 0 ? (
-                                    <div className="px-3 py-2 text-[11px] text-slate-400">
-                                      No values found
-                                    </div>
-                                  ) : (
-                                    options.map((t) => {
-                                      const checked = hasSelectedValue(headerDraft, t);
-                                      return (
-                                        <label
-                                          key={t}
-                                          className={`flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[11px] hover:bg-slate-50 ${
-                                            checked ? 'bg-sky-50 text-sky-900' : 'text-slate-700'
-                                          }`}
-                                        >
-                                          <input
-                                            type="checkbox"
-                                            className="h-3 w-3 rounded border-slate-300"
-                                            checked={checked}
-                                            onChange={() => toggleHeaderDraft(t)}
-                                            onClick={(e) => e.stopPropagation()}
-                                          />
-                                          <span className="min-w-0 flex-1 truncate" title={t}>
-                                            {t}
-                      </span>
-                                        </label>
-                                      );
-                                    })
-                                  )}
-                  </div>
-                                <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-2 py-1.5">
-                                  <button
-                                    type="button"
-                                    className="rounded px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setOpenHeaderMenu(null);
-                                    }}
-                                  >
-                                    Cancel
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="rounded bg-slate-900 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-slate-800"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      applyHeaderDraft(field);
-                                    }}
-                                  >
-                                    Apply
-                                  </button>
-                  </div>
-              </div>
-            ) : null}
-                          </span>
+                            <FilterSelect
+                              label={c.label}
+                              emptyLabel="All"
+                              options={(headerOptions[field] ?? []).map((value) => ({
+                                value,
+                                label: value,
+                              }))}
+                              selected={selected}
+                              onChange={(values) => {
+                                setHeaderFilters((prev) => ({ ...prev, [field]: values }));
+                                setPage(1);
+                                setSelectedKey(null);
+                              }}
+                              layout="inline"
+                              panelClassName="w-64"
+                            />
+                          </div>
                         </AdminTh>
                       );
                     }
@@ -1547,18 +1402,19 @@ export default function AttendancePageClient() {
             </div>
             <label className="flex items-center gap-2">
               Rows per page:
-              <select
-                className="rounded border border-slate-200 px-1.5 py-1"
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
+              <FilterSelect
+                label="Rows per page"
+                emptyLabel="Rows per page"
+                mode="single"
+                options={[...PAGE_SIZE_OPTIONS]}
+                selected={[String(pageSize)]}
+                onChange={(values) => {
+                  setPageSize(Number(values[0] ?? pageSize));
                   setPage(1);
                 }}
-              >
-                <option value={10}>10</option>
-                <option value={25}>25</option>
-                <option value={50}>50</option>
-              </select>
+                layout="inline"
+                panelClassName="w-44"
+              />
             </label>
           </div>
               </div>

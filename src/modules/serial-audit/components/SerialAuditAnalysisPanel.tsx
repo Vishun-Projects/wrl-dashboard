@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { BarChart3, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import { SortableTh } from '@/components/ui/SortableTh';
 import { sortRows, toggleSort, type TableSortState } from '@/lib/ui/table-sort';
 import {
@@ -316,17 +317,21 @@ export function SerialAuditAnalysisPanel({
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-3 py-2">
           <label className="flex items-center gap-1.5 text-[10px] text-slate-600">
             <span className="text-slate-400">Show</span>
-            <select
-              value={pageSize}
-              onChange={(e) => setPageSize(Number(e.target.value) as SerialAuditInvolvementPageSize)}
-              className="rounded border border-slate-200 bg-bg-canvas px-1.5 py-0.5 text-[10px] font-medium text-slate-700"
-            >
-              {pageSizeOptions.map((size) => (
-                <option key={size} value={size}>
-                  {size === totalEntries ? `All (${size})` : size}
-                </option>
-              ))}
-            </select>
+            <FilterSelect
+              label="Show"
+              emptyLabel="Show"
+              mode="single"
+              options={pageSizeOptions.map((size) => ({
+                value: String(size),
+                label: size === totalEntries ? `All (${size})` : String(size),
+              }))}
+              selected={[String(pageSize)]}
+              onChange={(values) =>
+                setPageSize(Number(values[0] ?? pageSize) as SerialAuditInvolvementPageSize)
+              }
+              layout="inline"
+              panelClassName="w-44"
+            />
           </label>
           {totalEntries > pageSize ? (
             <div className="flex items-center gap-1">

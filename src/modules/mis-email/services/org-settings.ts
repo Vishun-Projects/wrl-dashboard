@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
-import { normalizeAllowedEmailDomains } from '@/modules/mis-email/services/allowed-domains';
+import { normalizeAllowedEmailDomains } from '@/lib/mail/allowed-domains';
 import { normalizeEmailList } from '@/modules/mis-email/services/parse-outlook-emails';
 import { normalizeMisEmailSendTime } from '@/modules/mis-email/services/preferences';
 import { resolveMisEmailBrandSubtitle } from '@/modules/mis-email/services/email-template';

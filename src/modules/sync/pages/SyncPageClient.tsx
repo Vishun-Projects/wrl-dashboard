@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { RefreshCw, Database, Activity, CheckCircle2, AlertTriangle, Clock, Mail } from 'lucide-react';
@@ -23,6 +22,26 @@ function formatDuration(ms: number | null): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   return `${(ms / 60000).toFixed(1)}m`;
+}
+
+async function fetchJson<T>(
+  url: string,
+  accessToken: string | undefined,
+  init?: RequestInit
+): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      ...init?.headers,
+    },
+  });
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) {
+    throw new Error(body.error || res.statusText || 'Request failed');
+  }
+  return body as T;
 }
 
 function PhaseBanner({ phase, message }: { phase: ReadModelProgress['phase']; message: string }) {
@@ -143,11 +162,12 @@ export default function ReadModelSyncPage() {
   const loadMisEmailConfig = useCallback(async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const res = await axios.get('/api/admin/mis-email/test', {
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      });
-      setMisEmailTestTo(res.data.testRecipient ?? null);
-      setMisEmailSmtpReady(Boolean(res.data.smtpConfigured));
+      const data = await fetchJson<{ testRecipient?: string; smtpConfigured?: boolean }>(
+        '/api/admin/mis-email/test',
+        session?.access_token
+      );
+      setMisEmailTestTo(data.testRecipient ?? null);
+      setMisEmailSmtpReady(Boolean(data.smtpConfigured));
     } catch {
       setMisEmailTestTo(null);
       setMisEmailSmtpReady(false);
@@ -160,19 +180,18 @@ export default function ReadModelSyncPage() {
     setMisEmailResult(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const res = await axios.post(
-        '/api/admin/mis-email/test',
-        {},
-        { headers: { Authorization: `Bearer ${session?.access_token}` } }
-      );
-      const files = (res.data.attachments as string[] | undefined)?.join(', ') ?? 'none';
+      const data = await fetchJson<{
+        sentTo?: string;
+        attachments?: string[];
+        scopeLabel?: string;
+        durationMs?: number;
+      }>('/api/admin/mis-email/test', session?.access_token, { method: 'POST', body: '{}' });
+      const files = data.attachments?.join(', ') ?? 'none';
       setMisEmailResult(
-        `Sent to ${res.data.sentTo} (${files}) · scope: ${res.data.scopeLabel} · ${res.data.durationMs}ms`
+        `Sent to ${data.sentTo} (${files}) · scope: ${data.scopeLabel} · ${data.durationMs}ms`
       );
     } catch (err: unknown) {
-      const message = axios.isAxiosError(err)
-        ? err.response?.data?.error || err.message
-        : 'Failed to send test MIS email';
+      const message = err instanceof Error ? err.message : 'Failed to send test MIS email';
       setMisEmailError(message);
     } finally {
       setMisEmailSending(false);
@@ -185,14 +204,13 @@ export default function ReadModelSyncPage() {
     setError(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const res = await axios.get('/api/read-model/status', {
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      });
-      setProgress(res.data);
+      const data = await fetchJson<ReadModelProgress>(
+        '/api/read-model/status',
+        session?.access_token
+      );
+      setProgress(data);
     } catch (err: unknown) {
-      const message = axios.isAxiosError(err)
-        ? err.response?.data?.error || err.message
-        : 'Failed to load status';
+      const message = err instanceof Error ? err.message : 'Failed to load status';
       setError(message);
     } finally {
       setLoading(false);

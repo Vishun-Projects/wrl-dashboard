@@ -1,5 +1,5 @@
 import { seesAllOfficesForUser } from '@/lib/auth/rbac-catalog';
-import { assertAllowedEmailDomains } from '@/modules/mis-email/services/allowed-domains';
+import { assertAllowedEmailDomains } from '@/lib/mail/allowed-domains';
 import { getMisEmailOrgSettings } from '@/modules/mis-email/services/org-settings';
 import { resolveDigestDateRangeForPreferences } from '@/modules/mis-email/services/preferences';
 import {

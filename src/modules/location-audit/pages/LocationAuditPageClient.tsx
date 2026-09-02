@@ -98,6 +98,7 @@ export default function LocationAuditPage() {
     getAppliedFiltersSnapshot,
     resourcesLoaded,
     prefsReady,
+    appliedRevision,
   } = useReportFilters();
 
   
@@ -305,6 +306,16 @@ export default function LocationAuditPage() {
     void runAuditRef.current();
   }, [resourcesLoaded, prefsReady, applyFilters]);
 
+  const skipRevisionReloadRef = useRef(true);
+  useEffect(() => {
+    if (!resourcesLoaded || !prefsReady || !auditBootstrapRef.current) return;
+    if (skipRevisionReloadRef.current) {
+      skipRevisionReloadRef.current = false;
+      return;
+    }
+    void runAuditRef.current();
+  }, [appliedRevision, resourcesLoaded, prefsReady]);
+
   const loadRowDetail = useCallback(
     async (list: AuditListRow) => {
       const key = rowKey(list);
@@ -465,12 +476,8 @@ export default function LocationAuditPage() {
       icon={<MapPin className="h-4 w-4" />}
       toolbar={
         <RegisterPageFilters
-          applyLabel="Run audit"
-          onApply={() => void runAudit()}
-          onDrawerApply={() => resetAuditResults()}
           onFilterRemoved={resetAuditResults}
           onClearAll={handleClearFilters}
-          reloadOnClearAll={false}
         />
       }
       actions={

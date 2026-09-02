@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { Filter, Search, MapPin, SlidersHorizontal } from 'lucide-react';
+import { Search, MapPin, SlidersHorizontal } from 'lucide-react';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import { DateRangeSelector } from '@/modules/mis/register/components/DateRangeSelector';
 import {
   buildFranchiseeOptions,
@@ -14,9 +15,6 @@ type RegisterCompactToolbarProps = {
   onOpenFilters: () => void;
   onSearchEnter?: () => void;
   onPincodeEnter?: () => void;
-  onApply?: () => void;
-  applyDisabled?: boolean;
-  applyLabel?: string;
   extraFilterCount?: number;
 };
 
@@ -24,13 +22,9 @@ export function RegisterCompactToolbar({
   onOpenFilters,
   onSearchEnter,
   onPincodeEnter,
-  onApply,
-  applyDisabled = false,
-  applyLabel = 'Apply filters',
   extraFilterCount = 0,
 }: RegisterCompactToolbarProps) {
   const {
-    hasPendingFilterChanges,
     search,
     setSearch,
     pincodeSearch,
@@ -105,6 +99,11 @@ export function RegisterCompactToolbar({
     resolveLabel,
   });
 
+  const dateColumnOptions = useMemo(
+    () => dateFilterColumnOptions.map((opt) => ({ value: opt.value, label: opt.label })),
+    [dateFilterColumnOptions]
+  );
+
   return (
     <div className="register-compact-toolbar register-page-filters-surface">
       <div className="register-compact-toolbar-search">
@@ -132,19 +131,18 @@ export function RegisterCompactToolbar({
       </div>
 
       <div className="register-compact-toolbar-date">
-        <select
-          className="register-filter-select register-date-column-select"
-          value={dateFilterColumn}
-          onChange={(e) => setDateFilterColumn(e.target.value as typeof dateFilterColumn)}
-          title="Which date column to filter"
-          aria-label="Date column for range filter"
-        >
-          {dateFilterColumnOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        <FilterSelect
+          label="Date column"
+          emptyLabel="Date column"
+          mode="single"
+          options={dateColumnOptions}
+          selected={dateFilterColumn ? [dateFilterColumn] : []}
+          onChange={(values) =>
+            setDateFilterColumn((values[0] ?? dateFilterColumn) as typeof dateFilterColumn)
+          }
+          layout="inline"
+          panelClassName="w-64"
+        />
         <DateRangeSelector
           value={dateRange.label}
           startDate={dateRange.start}
@@ -162,20 +160,6 @@ export function RegisterCompactToolbar({
           </span>
         )}
       </button>
-
-      {onApply && (
-        <button
-          type="button"
-          onClick={onApply}
-          disabled={applyDisabled}
-          className={`filter-apply-btn register-compact-toolbar-apply-btn ${
-            hasPendingFilterChanges ? 'filter-apply-btn--pending' : ''
-          }`}
-        >
-          <Filter className="h-3.5 w-3.5" />
-          {applyLabel}
-        </button>
-      )}
     </div>
   );
 }

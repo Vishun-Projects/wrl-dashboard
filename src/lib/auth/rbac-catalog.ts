@@ -38,6 +38,9 @@ export type RbacApiSpec =
   | { pageId: 'mis_reports'; tabId: MisTabId }
   | { pageId: 'mis_reports'; shared: true };
 
+export const SUPER_ADMIN_PERMISSION = 'super_admin';
+export const MIS_EMAIL_SEND_PERMISSION = 'mis_email_send';
+
 const MIS_TABS: RbacTab[] = [
   {
     id: 'summary',
@@ -161,6 +164,33 @@ export const RBAC_PAGES: RbacPage[] = [
     group: 'Administration',
   },
   {
+    id: 'admin_sync',
+    permission: 'manage_users',
+    path: '/admin/sync',
+    label: 'Read-model sync',
+    description: 'Sync status and manual hot-sync trigger',
+    group: 'Administration',
+    nav: false,
+  },
+  {
+    id: 'admin_attendance',
+    permission: 'manage_users',
+    path: '/admin/attendance',
+    label: 'Service call activity',
+    description: 'Technician activity report (admin)',
+    group: 'Administration',
+    nav: false,
+  },
+  {
+    id: 'admin_vps_cron',
+    permission: SUPER_ADMIN_PERMISSION,
+    path: '/admin/vps-cron',
+    label: 'VPS Cron',
+    description: 'Legacy path — use Mail & Alerts hub',
+    group: 'Administration',
+    nav: false,
+  },
+  {
     id: 'mis_email_settings',
     permission: 'page_mis_email_settings',
     path: '/admin/mis-email-settings',
@@ -205,10 +235,6 @@ export const RBAC_PAGES: RbacPage[] = [
   },
 ];
 
-export const MIS_EMAIL_SEND_PERMISSION = 'mis_email_send';
-
-export const SUPER_ADMIN_PERMISSION = 'super_admin';
-
 export const RBAC_CAPABILITIES: RbacCapability[] = [
   {
     permission: 'view_all_offices',
@@ -238,20 +264,11 @@ export const RBAC_CAPABILITIES: RbacCapability[] = [
   },
 ];
 
-/** Legacy permission names mapped to canonical tab permissions (pre-migration DB rows). */
-const TAB_PERMISSION_ALIASES: Record<string, string> = {
-  view_mis_summary: 'tab_mis_summary',
-  view_summary: 'tab_mis_summary',
-  view_mis_register: 'tab_mis_register',
-  view_mis_accounts: 'tab_mis_accounts',
-};
-
 /** Permissions excluded from Roles UI "other" bucket — managed in hierarchical editor. */
 export const RBAC_MANAGED_PERMISSIONS = new Set([
   ...RBAC_PAGES.map((p) => p.permission),
   ...MIS_TABS.map((t) => t.permission),
   ...RBAC_CAPABILITIES.map((c) => c.permission),
-  ...Object.keys(TAB_PERMISSION_ALIASES),
 ]);
 
 const PAGE_BY_ID = new Map(RBAC_PAGES.map((p) => [p.id, p]));
@@ -260,12 +277,7 @@ const TAB_BY_ID = new Map(MIS_TABS.map((t) => [t.id, t]));
 
 function expandPermissions(permissions: string[] | null | undefined): Set<string> {
   const list = Array.isArray(permissions) ? permissions : [];
-  const expanded = new Set(list);
-  for (const name of list) {
-    const canonical = TAB_PERMISSION_ALIASES[name];
-    if (canonical) expanded.add(canonical);
-  }
-  return expanded;
+  return new Set(list);
 }
 
 export function expandPermissionList(permissions: string[]): string[] {
@@ -438,20 +450,8 @@ export function canAccessPath(
     return hasPermission(permissions, 'manage_users') || hasPermission(permissions, 'manage_roles');
   }
 
-  if (path === '/admin/sync' || path.startsWith('/admin/sync/')) {
-    return hasPermission(permissions, 'manage_users');
-  }
-
-  if (path === '/admin/attendance' || path.startsWith('/admin/attendance/')) {
-    return hasPermission(permissions, 'manage_users');
-  }
-
-  // Activity Log + VPS Cron: super_admin only (not manage_users / HOD).
+  // Activity Log: super_admin only (not manage_users / HOD).
   if (path === '/admin/security-audit' || path.startsWith('/admin/security-audit/')) {
-    return hasPermission(permissions, SUPER_ADMIN_PERMISSION);
-  }
-
-  if (path === '/admin/vps-cron' || path.startsWith('/admin/vps-cron/')) {
     return hasPermission(permissions, SUPER_ADMIN_PERMISSION);
   }
 

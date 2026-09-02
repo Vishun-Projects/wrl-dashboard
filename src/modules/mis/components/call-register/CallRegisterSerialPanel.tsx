@@ -16,6 +16,7 @@ import {
   sortSerialPanelRows,
   type SerialPanelSortKey,
 } from '@/modules/mis/services/call-register/serial-panel';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import { formatUiDate } from '@/lib/dates/ui-date';
 import type { CallRegisterDateField } from '@/modules/mis/services/call-register/dates';
 
@@ -199,27 +200,41 @@ export function CallRegisterSerialPanel({
             />
             <label className="flex items-center gap-1.5 text-[11px] text-slate-500">
               Deploy
-              <select
-                value={pendingDeploy}
-                onChange={(e) => setPendingDeploy(e.target.value as 'all' | 'Yes' | 'No')}
-                className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[12px] text-slate-700 shadow-sm"
-              >
-                <option value="all">All</option>
-                <option value="Yes">Pending</option>
-                <option value="No">Done</option>
-              </select>
+              <FilterSelect
+                label="Deploy"
+                emptyLabel="All"
+                mode="single"
+                options={[
+                  { value: 'all', label: 'All' },
+                  { value: 'Yes', label: 'Pending' },
+                  { value: 'No', label: 'Done' },
+                ]}
+                selected={[pendingDeploy]}
+                onChange={(values) =>
+                  setPendingDeploy((values[0] ?? 'all') as 'all' | 'Yes' | 'No')
+                }
+                layout="inline"
+                panelClassName="w-44"
+              />
             </label>
             <label className="flex items-center gap-1.5 text-[11px] text-slate-500">
               Install
-              <select
-                value={pendingInstall}
-                onChange={(e) => setPendingInstall(e.target.value as 'all' | 'Yes' | 'No')}
-                className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[12px] text-slate-700 shadow-sm"
-              >
-                <option value="all">All</option>
-                <option value="Yes">Pending</option>
-                <option value="No">Done</option>
-              </select>
+              <FilterSelect
+                label="Install"
+                emptyLabel="All"
+                mode="single"
+                options={[
+                  { value: 'all', label: 'All' },
+                  { value: 'Yes', label: 'Pending' },
+                  { value: 'No', label: 'Done' },
+                ]}
+                selected={[pendingInstall]}
+                onChange={(values) =>
+                  setPendingInstall((values[0] ?? 'all') as 'all' | 'Yes' | 'No')
+                }
+                layout="inline"
+                panelClassName="w-44"
+              />
             </label>
             <span className="ml-auto text-[11px] text-slate-500 tabular-nums">
               {sorted.length.toLocaleString('en-IN')} of {rows.length.toLocaleString('en-IN')} serials

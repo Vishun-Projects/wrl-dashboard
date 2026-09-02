@@ -122,7 +122,7 @@ export async function POST(request: Request) {
     // Also validate explicit sendTo/sendCc when provided
     try {
       const { assertAllowedEmailDomains } = await import(
-        '@/modules/mis-email/services/allowed-domains'
+        '@/lib/mail/allowed-domains'
       );
       assertAllowedEmailDomains(
         [...(body.sendTo ?? []), ...(body.sendCc ?? [])],

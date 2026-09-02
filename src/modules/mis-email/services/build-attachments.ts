@@ -10,12 +10,15 @@ import {
   summaryDashboardFilename,
   workbookToBuffer,
   bdMisOpenCallsFilename,
-  buildBdMisOpenCallsWorkbook,
+  buildMisUnifiedOpenCallsWorkbook,
   buildBdMisTraceableWorkbook,
   bdMisTraceableFilename,
   type BdMisTraceableExportPayload,
 } from '@/modules/mis';
 import type { SummaryDashboard } from '@/lib/summary/derive';
+import type { DigestDateRange } from '@/modules/mis-email/services/fetch-digest-data';
+import { buildMisEmailUnifiedReportAlign } from '@/modules/mis-email/services/mail-basis';
+import type { AccountSummaryRow } from '@/lib/summary/derive';
 import type { DigestRecipient } from '@/modules/mis-email/services/recipients';
 import type { EffectiveDigestIncludes } from '@/modules/mis-email/services/preferences';
 import { formatBytes } from '@/modules/mis-email/services/timing';
@@ -74,11 +77,15 @@ export async function buildDigestAttachments(
   options?: {
     registerRows?: Record<string, unknown>[];
     date?: Date;
+    dateRange?: DigestDateRange;
+    clientAccountSummary?: AccountSummaryRow[];
     effectiveIncludes?: EffectiveDigestIncludes;
     tracePayload?: BdMisTraceableExportPayload;
   }
 ): Promise<EmailAttachment[]> {
   const date = options?.date ?? new Date();
+  const dateRange = options?.dateRange;
+  const clientAccountSummary = options?.clientAccountSummary;
   const includes = options?.effectiveIncludes ?? {
     includeSummary: recipient.includeSummary,
     includeDetailed: recipient.includeDetailed,
@@ -94,7 +101,13 @@ export async function buildDigestAttachments(
       (async () => {
         const started = Date.now();
         const branches = data.branchSummary.map(withCancelledInTotal);
-        const workbook = await buildSummaryDashboardWorkbook(branches, 'Summary Dashboard');
+        const uiAlign =
+          dateRange && clientAccountSummary
+            ? await buildMisEmailUnifiedReportAlign(data, clientAccountSummary, dateRange)
+            : undefined;
+        const workbook = await buildSummaryDashboardWorkbook(branches, 'Summary Dashboard', {
+          uiAlign,
+        });
         const workbookMs = Date.now() - started;
         const bufferStarted = Date.now();
         const content = await workbookToBuffer(workbook);
@@ -191,7 +204,7 @@ export async function buildDigestAttachments(
           throw new Error('Open calls export data was not prepared');
         }
         const started = Date.now();
-        const workbook = await buildBdMisOpenCallsWorkbook(payload);
+        const workbook = await buildMisUnifiedOpenCallsWorkbook(payload);
         const workbookMs = Date.now() - started;
         const bufferStarted = Date.now();
         const content = await workbookToBuffer(workbook);

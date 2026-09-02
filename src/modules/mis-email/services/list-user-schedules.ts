@@ -1,5 +1,5 @@
 import { withAppClient } from '@/lib/read-model/db';
-import { assertAllowedEmailDomains } from '@/modules/mis-email/services/allowed-domains';
+import { assertAllowedEmailDomains } from '@/lib/mail/allowed-domains';
 import { normalizeEmailList } from '@/modules/mis-email/services/parse-outlook-emails';
 import {
   isMisEmailSubscribed,

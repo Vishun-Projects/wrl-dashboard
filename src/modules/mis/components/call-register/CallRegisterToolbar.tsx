@@ -2,7 +2,7 @@
 
 import React, { useMemo } from 'react';
 import { UiDateInput } from '@/components/ui/UiDateInput';
-import { RegisterMultiSelect } from '@/modules/mis/register/components/RegisterMultiSelect';
+import { FilterSelect } from '@/components/filters/FilterSelect';
 
 type CallRegisterToolbarProps = {
   dateFrom: string;
@@ -115,16 +115,13 @@ export function CallRegisterToolbar({
       {showVisibilityFilter ? (
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <div className={busy ? 'pointer-events-none opacity-50' : undefined}>
-            <RegisterMultiSelect
+            <FilterSelect
               label="Accounts visible"
               emptyLabel="Accounts visible"
               options={visibilitySelectOptions}
               selected={visibleClients}
               onChange={onVisibleClientsChange}
               layout="inline"
-              searchable
-              showSelectAll
-              selectAllLabel="Select all"
               panelClassName="w-64"
             />
           </div>
@@ -141,16 +138,13 @@ export function CallRegisterToolbar({
 
       <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
         <div className={busy ? 'pointer-events-none opacity-50' : undefined}>
-          <RegisterMultiSelect
+          <FilterSelect
             label="Export accounts"
             emptyLabel="Export accounts"
             options={exportSelectOptions}
             selected={exportClients}
             onChange={onExportClientsChange}
             layout="inline"
-            searchable
-            showSelectAll
-            selectAllLabel="Select all"
             panelClassName="w-64"
           />
         </div>

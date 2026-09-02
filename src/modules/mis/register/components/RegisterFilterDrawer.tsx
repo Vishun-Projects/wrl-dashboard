@@ -10,8 +10,6 @@ type RegisterFilterDrawerProps = {
   open: boolean;
   onClose: () => void;
   onClear?: () => void;
-  onApply?: () => void;
-  applyDisabled?: boolean;
   drawerExtra?: React.ReactNode;
   extraFilterCount?: number;
 };
@@ -20,8 +18,6 @@ export function RegisterFilterDrawer({
   open,
   onClose,
   onClear,
-  onApply,
-  applyDisabled = false,
   drawerExtra,
   extraFilterCount = 0,
 }: RegisterFilterDrawerProps) {
@@ -110,24 +106,14 @@ export function RegisterFilterDrawer({
         </div>
 
         <div className="register-filter-drawer-body custom-scrollbar">
-          <RegisterFilterBar layout="drawer-content" applyMode="instant" showClearButton={false} />
+          <RegisterFilterBar layout="drawer-content" showClearButton={false} />
           {drawerExtra}
         </div>
 
         <div className="register-filter-drawer-footer register-filter-drawer-footer--actions">
-          <button type="button" onClick={onClose} className="register-filter-drawer-done register-filter-drawer-done--secondary">
+          <button type="button" onClick={onClose} className="register-filter-drawer-done register-filter-drawer-done--primary">
             Close
           </button>
-          {onApply && (
-            <button
-              type="button"
-              onClick={onApply}
-              disabled={applyDisabled}
-              className="register-filter-drawer-done register-filter-drawer-done--primary disabled:opacity-50"
-            >
-              Apply filters
-            </button>
-          )}
         </div>
       </aside>
     </div>
