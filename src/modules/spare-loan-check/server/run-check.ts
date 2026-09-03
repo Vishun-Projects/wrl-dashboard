@@ -5,11 +5,16 @@ import {
 } from '@/modules/spare-loan-check/server/match';
 import { lookupCallsByVtrnno } from '@/modules/spare-loan-check/server/lookup';
 import { parseZss02Html } from '@/modules/spare-loan-check/server/parse-zss02-html';
+import {
+  saveSpareLoanCheckByPlant,
+  type SpareLoanPlantSnapshot,
+} from '@/modules/spare-loan-check/server/store';
 import type {
   SpareLoanCheckResponse,
   SpareLoanCheckSummary,
   SpareLoanProblemReason,
   SpareLoanProblemRow,
+  Zss02ParsedRow,
 } from '@/modules/spare-loan-check/types';
 
 function emptyByReason(): Record<SpareLoanProblemReason, number> {
@@ -19,18 +24,52 @@ function emptyByReason(): Record<SpareLoanProblemReason, number> {
   };
 }
 
-export async function runSpareLoanCheck(html: string): Promise<SpareLoanCheckResponse> {
+function emptySummary(): SpareLoanCheckSummary {
+  return {
+    parsed: 0,
+    skipped: 0,
+    ok: 0,
+    problems: 0,
+    byReason: emptyByReason(),
+  };
+}
+
+export type RunSpareLoanCheckMeta = {
+  fileName: string;
+  uploadedBy: string | null;
+};
+
+export async function runSpareLoanCheck(
+  html: string,
+  meta: RunSpareLoanCheckMeta
+): Promise<SpareLoanCheckResponse & { savedPlants: string[] }> {
   const parsedRows = parseZss02Html(html);
   const keyed: Array<{
-    row: (typeof parsedRows)[number];
+    row: Zss02ParsedRow;
     match: NonNullable<ReturnType<typeof selectMatchKey>>;
   }> = [];
-  let skipped = 0;
+
+  const perPlant = new Map<
+    string,
+    { summary: SpareLoanCheckSummary; rows: SpareLoanProblemRow[] }
+  >();
+
+  function plantBucket(plant: string) {
+    const key = plant.trim() || 'UNKNOWN';
+    let b = perPlant.get(key);
+    if (!b) {
+      b = { summary: emptySummary(), rows: [] };
+      perPlant.set(key, b);
+    }
+    return b;
+  }
 
   for (const row of parsedRows) {
+    const bucket = plantBucket(row.plant);
+    bucket.summary.parsed += 1;
     const match = selectMatchKey(row.soLoan, row.soConRtn);
     if (!match) {
-      skipped += 1;
+      bucket.summary.skipped += 1;
       continue;
     }
     keyed.push({ row, match });
@@ -39,17 +78,28 @@ export async function runSpareLoanCheck(html: string): Promise<SpareLoanCheckRes
   const callMap = await lookupCallsByVtrnno(keyed.map((k) => k.match.key));
   const problems: SpareLoanProblemRow[] = [];
   const byReason = emptyByReason();
+  let skipped = 0;
   let ok = 0;
 
   for (const { row, match } of keyed) {
+    const bucket = plantBucket(row.plant);
     const call = callMap.get(match.key);
     const reason = classifySpareLoanRow(row.vendorNo, call);
     if (!reason) {
       ok += 1;
+      bucket.summary.ok += 1;
       continue;
     }
     byReason[reason] += 1;
-    problems.push(toProblemRow(row, match, reason, call));
+    bucket.summary.byReason[reason] += 1;
+    bucket.summary.problems += 1;
+    const problem = toProblemRow(row, match, reason, call);
+    problems.push(problem);
+    bucket.rows.push(problem);
+  }
+
+  for (const b of perPlant.values()) {
+    skipped += b.summary.skipped;
   }
 
   const summary: SpareLoanCheckSummary = {
@@ -60,5 +110,19 @@ export async function runSpareLoanCheck(html: string): Promise<SpareLoanCheckRes
     byReason,
   };
 
-  return { summary, rows: problems };
+  const snapshots: SpareLoanPlantSnapshot[] = [...perPlant.entries()].map(
+    ([plant, b]) => ({
+      plant,
+      summary: b.summary,
+      rows: b.rows,
+    })
+  );
+
+  const savedPlants = await saveSpareLoanCheckByPlant({
+    fileName: meta.fileName,
+    uploadedBy: meta.uploadedBy,
+    snapshots,
+  });
+
+  return { summary, rows: problems, savedPlants };
 }

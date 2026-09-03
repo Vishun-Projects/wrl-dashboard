@@ -57,4 +57,5 @@ export type SpareLoanCheckSummary = {
 export type SpareLoanCheckResponse = {
   summary: SpareLoanCheckSummary;
   rows: SpareLoanProblemRow[];
+  savedPlants?: string[];
 };

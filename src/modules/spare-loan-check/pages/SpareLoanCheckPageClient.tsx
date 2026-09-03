@@ -103,7 +103,11 @@ export default function SpareLoanCheckPageClient() {
         throw new Error(data?.error || 'Check failed');
       }
       setResult(data as SpareLoanCheckResponse);
-      feedback.actionSuccess(`Found ${(data as SpareLoanCheckResponse).summary.problems} problem row(s)`);
+      const plants = (data as SpareLoanCheckResponse).savedPlants ?? [];
+      const plantNote = plants.length ? ` · saved plant(s) ${plants.join(', ')}` : '';
+      feedback.actionSuccess(
+        `Found ${(data as SpareLoanCheckResponse).summary.problems} problem row(s)${plantNote}`
+      );
     } catch (err) {
       feedback.actionFailed(err instanceof Error ? err.message : 'Check failed');
     } finally {

@@ -36,7 +36,10 @@ export async function POST(req: NextRequest) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const html = buffer.toString('utf8');
-    const result = await runSpareLoanCheck(html);
+    const result = await runSpareLoanCheck(html, {
+      fileName: file.name,
+      uploadedBy: auth.userId,
+    });
     return NextResponse.json(result);
   } catch (err) {
     console.error('[spare-loan-check]', err);
