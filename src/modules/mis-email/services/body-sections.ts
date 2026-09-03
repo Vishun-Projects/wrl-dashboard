@@ -64,6 +64,8 @@ export type MisEmailBodyContext = {
   branchPerformanceRows?: BranchPerformanceRow[];
   accountRows?: Array<Record<string, unknown>>;
   clientAccountSummary?: Array<Record<string, unknown>>;
+  /** When true, accountRows are already call-level final — do not re-merge client import. */
+  accountMetricsFromTrace?: boolean;
   keyAccountsInBody?: string[];
   keyAccountsByZone?: MisEmailKeyAccountsByZone;
 };
@@ -305,11 +307,14 @@ function buildKeyAccountTableHtml(
     </tr>`;
 
   const mergeRegionCells = options?.mergeRegionCells ?? false;
+  const accountMergeFlagsForBody: MergeSelection = context.accountMetricsFromTrace
+    ? { crm: true, client: false }
+    : DIGEST_MERGE_FLAGS;
   const mergedRows = accountRows.map((row) =>
     buildMergedAccountMetricRow(
       row,
-      context.clientAccountSummary,
-      DIGEST_MERGE_FLAGS,
+      context.accountMetricsFromTrace ? undefined : context.clientAccountSummary,
+      accountMergeFlagsForBody,
       DEFAULT_CLIENT_MERGE_WITH_CRM
     )
   );
@@ -621,12 +626,15 @@ export function buildEmailBodySectionsPlainText(
   if (sectionIds.includes('key_account_performance') && (bodyContext.accountRows?.length ?? 0) > 0) {
     const accountRows = sortAccountRowsByZoneThenAccount(bodyContext.accountRows ?? []);
     if (accountRows.length > 0) {
+      const accountMergeFlagsForBody: MergeSelection = bodyContext.accountMetricsFromTrace
+        ? { crm: true, client: false }
+        : DIGEST_MERGE_FLAGS;
       blocks.push('', 'Key Account Breakdown', '');
       for (const row of accountRows) {
         const merged = buildMergedAccountMetricRow(
           row,
-          bodyContext.clientAccountSummary,
-          DIGEST_MERGE_FLAGS,
+          bodyContext.accountMetricsFromTrace ? undefined : bodyContext.clientAccountSummary,
+          accountMergeFlagsForBody,
           DEFAULT_CLIENT_MERGE_WITH_CRM
         );
         blocks.push(

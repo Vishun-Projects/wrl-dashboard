@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildMisEmailRegionalPerformanceRows,
-  countMisEmailOpenParity,
-  misEmailBdMisSources,
-} from '@/modules/mis-email/services/mail-basis';
-import { buildBdMisOpenCallsWorkbook } from '@/modules/mis';
+import { buildMisEmailRegionalPerformanceRows, countMisEmailOpenParity, misEmailBdMisSources } from '@/modules/mis-email/services/mail-basis';
+import { buildMisUnifiedOpenCallsWorkbook } from '@/modules/mis';
 import { buildBdMisTraceRows } from '@/modules/mis';
 import type { AccountSummaryRow, BranchSummaryRow, SummaryDashboard } from '@/lib/summary/derive';
 
@@ -209,7 +205,7 @@ describe('MIS email open-count parity (body === Excel)', () => {
     const traceRows = mixedParityTraceRows();
     const parity = countMisEmailOpenParity(traceRows);
 
-    const workbook = await buildBdMisOpenCallsWorkbook({
+    const workbook = await buildMisUnifiedOpenCallsWorkbook({
       regionalRows: [],
       grand: {
         region: 'ALL',
@@ -243,10 +239,16 @@ describe('MIS email open-count parity (body === Excel)', () => {
 
     const sheet = workbook.getWorksheet('Row Detail');
     expect(sheet).toBeDefined();
-    const dataRows = Math.max(0, (sheet?.rowCount ?? 0) - 1);
-    expect(dataRows).toBe(parity.regionalBodyOpen);
-    expect(dataRows).toBe(parity.branchBodyOpen);
-    expect(dataRows).toBe(parity.excelOpenRows);
+    // Unified open workbook includes cancelled + open; count Unsolved / open toward only.
+    let openRows = 0;
+    sheet!.eachRow((row, n) => {
+      if (n === 1) return;
+      const toward = String(row.getCell(16).value ?? '').toLowerCase();
+      if (toward === 'open') openRows += 1;
+    });
+    expect(openRows).toBe(parity.regionalBodyOpen);
+    expect(openRows).toBe(parity.branchBodyOpen);
+    expect(openRows).toBe(parity.excelOpenRows);
   },
   30_000
   );
@@ -275,5 +277,301 @@ describe('MIS email open-count parity (body === Excel)', () => {
     expect(summaryBodyOpen).toBeGreaterThan(parity.detailOpenCount);
     expect(parity.regionalBodyOpen).toBe(parity.detailOpenCount);
     expect(parity.branchBodyOpen).toBe(parity.detailOpenCount);
+  });
+
+  it('branch + key-account rollups count solved, cancelled, and open from the same included trace', async () => {
+    const {
+      buildMisEmailKeyAccountRowsFromTrace,
+      buildMisEmailBranchPerformanceRowsFromTrace,
+    } = await import('@/modules/mis-email/services/mail-basis');
+
+    const traceRows = buildBdMisTraceRows({
+      crmRows: [
+        {
+          region: 'EAST ZONE',
+          plant: '1150 - RANCHI BRANCH',
+          technician_name: 'T1',
+          office_under_branch: 'Ranchi',
+          customer_name: 'Nestle Cust',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'CRM-OPEN',
+          client: 'Nestle',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+        {
+          region: 'EAST ZONE',
+          plant: '1150 - RANCHI BRANCH',
+          technician_name: 'T2',
+          office_under_branch: 'Ranchi',
+          customer_name: 'Nestle Cust 2',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'CRM-SOLVED',
+          client: 'Nestle',
+          call_status: 'Solved',
+          status_bucket: 'solved',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+        {
+          region: 'EAST ZONE',
+          plant: '1150 - RANCHI BRANCH',
+          technician_name: 'T3',
+          office_under_branch: 'Ranchi',
+          customer_name: 'Nestle Cust 3',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'CRM-CANCEL',
+          client: 'Nestle',
+          call_status: 'Cancelled',
+          status_bucket: 'cancelled',
+          ncancelreason: 1,
+          account: 'Nestle',
+        },
+        {
+          region: 'EAST ZONE',
+          plant: '1150 - RANCHI BRANCH',
+          technician_name: 'T4',
+          office_under_branch: 'Ranchi',
+          customer_name: 'Mondelez Cust',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'CRM-MDLZ-OPEN',
+          client: 'Mondelez',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Mondelez',
+        },
+      ],
+      clientRows: [
+        {
+          source_code: 'cadbury',
+          region: 'EAST',
+          plant: '1150 - RANCHI BRANCH',
+          technician_name: 'Imp',
+          office_under_branch: 'Ranchi',
+          customer_name: 'Import Cust',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'IMP-OPEN',
+          client: 'Cadbury',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          file_name: 'cad.csv',
+        },
+        {
+          source_code: 'cadbury',
+          region: 'EAST',
+          plant: '1150 - RANCHI BRANCH',
+          technician_name: 'Imp2',
+          office_under_branch: 'Ranchi',
+          customer_name: 'Import Cust 2',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'IMP-SOLVED',
+          client: 'Cadbury',
+          call_status: 'Solved',
+          status_bucket: 'solved',
+          file_name: 'cad.csv',
+        },
+      ],
+      sources: misEmailBdMisSources(),
+      agingDate: '2026-07-09',
+    });
+
+    const branch = buildMisEmailBranchPerformanceRowsFromTrace(traceRows).find(
+      (row) => row.branch === '1150 - RANCHI BRANCH'
+    );
+    expect(branch).toBeDefined();
+    expect(branch!.open_calls).toBe(2);
+    expect(branch!.solved_calls).toBe(2);
+    expect(branch!.cancelled_calls).toBe(1);
+    expect(branch!.total_calls).toBe(5);
+
+    const accounts = buildMisEmailKeyAccountRowsFromTrace(traceRows);
+    const nestle = accounts.find((row) => String(row.account) === 'Nestle');
+    const mondelez = accounts.find((row) =>
+      ['mondelez', 'cadbury'].includes(String(row.account).toLowerCase())
+    );
+    expect(nestle).toMatchObject({
+      open_calls: 1,
+      total_solved: 1,
+      cancelled_calls: 1,
+      total_calls: 3,
+    });
+    expect(mondelez).toMatchObject({
+      open_calls: 1,
+      total_solved: 1,
+      cancelled_calls: 0,
+      total_calls: 2,
+    });
+  });
+
+  it('rolls franchisee plant POWER REFRIGERATION into parent Patna, not a fake 1127 branch', async () => {
+    const {
+      buildMisEmailBranchPerformanceRowsFromTrace,
+      resolveTracePlantToWrlBranch,
+    } = await import('@/modules/mis-email/services/mail-basis');
+
+    const branchSummary = [
+      {
+        officeId: 32,
+        parentId: 612,
+        branch: '1182 - PATNA BRANCH',
+        region: 'EAST ZONE',
+        total_calls: 0,
+        solved_calls: 0,
+        cancelled_calls: 0,
+        open_calls: 0,
+        age_2: 0,
+        age_3: 0,
+        age_7: 0,
+        age_15: 0,
+        part_pending: 0,
+        all_total: 0,
+        all_solved: 0,
+        all_cancelled: 0,
+        all_open: 0,
+        all_age_2: 0,
+        all_age_3: 0,
+        all_age_7: 0,
+        all_age_15: 0,
+        all_part_pending: 0,
+        all_tech_solved: 0,
+        tech_solved_calls: 0,
+        deployment_total: 0,
+        deployment_done: 0,
+        installation_total: 0,
+        installation_done: 0,
+        active_eng: 0,
+        population: 0,
+        headcount: 0,
+      },
+      {
+        officeId: 1127,
+        parentId: 32,
+        branch: 'POWER REFRIGERATION',
+        region: 'EAST ZONE',
+        total_calls: 0,
+        solved_calls: 0,
+        cancelled_calls: 0,
+        open_calls: 0,
+        age_2: 0,
+        age_3: 0,
+        age_7: 0,
+        age_15: 0,
+        part_pending: 0,
+        all_total: 0,
+        all_solved: 0,
+        all_cancelled: 0,
+        all_open: 0,
+        all_age_2: 0,
+        all_age_3: 0,
+        all_age_7: 0,
+        all_age_15: 0,
+        all_part_pending: 0,
+        all_tech_solved: 0,
+        tech_solved_calls: 0,
+        deployment_total: 0,
+        deployment_done: 0,
+        installation_total: 0,
+        installation_done: 0,
+        active_eng: 0,
+        population: 0,
+        headcount: 0,
+      },
+      {
+        officeId: 11,
+        parentId: 612,
+        branch: '1127 - GUWAHATI BRANCH',
+        region: 'EAST ZONE',
+        total_calls: 0,
+        solved_calls: 0,
+        cancelled_calls: 0,
+        open_calls: 0,
+        age_2: 0,
+        age_3: 0,
+        age_7: 0,
+        age_15: 0,
+        part_pending: 0,
+        all_total: 0,
+        all_solved: 0,
+        all_cancelled: 0,
+        all_open: 0,
+        all_age_2: 0,
+        all_age_3: 0,
+        all_age_7: 0,
+        all_age_15: 0,
+        all_part_pending: 0,
+        all_tech_solved: 0,
+        tech_solved_calls: 0,
+        deployment_total: 0,
+        deployment_done: 0,
+        installation_total: 0,
+        installation_done: 0,
+        active_eng: 0,
+        population: 0,
+        headcount: 0,
+      },
+    ];
+
+    expect(
+      resolveTracePlantToWrlBranch('1127 - POWER REFRIGERATION', 'EAST ZONE', branchSummary)
+    ).toEqual({
+      branch: '1182 - PATNA BRANCH',
+      region: 'EAST ZONE',
+    });
+    expect(resolveTracePlantToWrlBranch('POWER REFRIGERATION', 'EAST ZONE', branchSummary)).toEqual({
+      branch: '1182 - PATNA BRANCH',
+      region: 'EAST ZONE',
+    });
+    expect(
+      resolveTracePlantToWrlBranch('1127 - GUWAHATI BRANCH', 'EAST ZONE', branchSummary)
+    ).toEqual({
+      branch: '1127 - GUWAHATI BRANCH',
+      region: 'EAST ZONE',
+    });
+
+    const traceRows = buildBdMisTraceRows({
+      crmRows: [
+        {
+          region: 'EAST ZONE',
+          plant: '1127 - POWER REFRIGERATION',
+          technician_name: 'T1',
+          office_under_branch: 'POWER REFRIGERATION',
+          customer_name: 'C1',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'PWR-1',
+          client: 'Nestle',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+        {
+          region: 'EAST ZONE',
+          plant: '1127 - GUWAHATI BRANCH',
+          technician_name: 'T2',
+          office_under_branch: 'Guwahati',
+          customer_name: 'C2',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'GHY-1',
+          client: 'Nestle',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+      ],
+      clientRows: [],
+      sources: misEmailBdMisSources(),
+      agingDate: '2026-07-09',
+    });
+
+    const branches = buildMisEmailBranchPerformanceRowsFromTrace(traceRows, branchSummary);
+    expect(branches.map((b) => b.branch).sort()).toEqual([
+      '1127 - GUWAHATI BRANCH',
+      '1182 - PATNA BRANCH',
+    ]);
+    expect(branches.find((b) => /POWER/i.test(b.branch))).toBeUndefined();
   });
 });

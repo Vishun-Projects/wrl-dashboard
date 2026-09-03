@@ -1,5 +1,8 @@
 import { formatDisplayRegion } from '@/modules/mis/client-import';
-import { accountsMatchDisplayOrKey } from '@/modules/mis/services/client-account-display';
+import {
+  accountsMatchDisplayOrKey,
+  clientAccountDisplayName,
+} from '@/modules/mis/services/client-account-display';
 import type { MisSourceSelection } from '@/modules/mis/client-import';
 
 export type MergeSelection = { crm: boolean; client: boolean };
@@ -21,24 +24,26 @@ export const DEFAULT_CLIENT_MERGE_WITH_CRM: ClientMergeWithCrmPrefs = {
   coke: false,
 };
 
+/** Cadbury import + CRM Mondelez alias (same Key Account / open-export treatment). */
 export function isCadburyAccount(account: string): boolean {
-  return account.trim().toLowerCase() === 'cadbury';
-}
-
-export function isCokeAccount(account: string): boolean {
-  return account.trim().toLowerCase() === 'coke';
-}
-
-/** Coke / Cadbury client-import rows on Key Account (case-insensitive). */
-export function isClientImportAccount(account: string): boolean {
   const key = account.trim().toLowerCase();
-  return key === 'cadbury' || key === 'coke';
+  return key === 'cadbury' || key === 'mondelez';
+}
+
+/** Coke import + CRM HCCB alias. */
+export function isCokeAccount(account: string): boolean {
+  const key = account.trim().toLowerCase();
+  return key === 'coke' || key === 'hccb';
+}
+
+/** Coke / Cadbury client-import rows on Key Account (incl. CRM display aliases). */
+export function isClientImportAccount(account: string): boolean {
+  return isCadburyAccount(account) || isCokeAccount(account);
 }
 
 function mergeWithCrmForAccount(account: string, prefs: ClientMergeWithCrmPrefs): boolean {
-  const key = account.trim().toLowerCase();
-  if (key === 'cadbury') return prefs.cadbury;
-  if (key === 'coke') return prefs.coke;
+  if (isCadburyAccount(account)) return prefs.cadbury;
+  if (isCokeAccount(account)) return prefs.coke;
   return false;
 }
 
@@ -65,7 +70,12 @@ function regionsMatch(crmRegion: string, clientRegion: string): boolean {
 }
 
 function accountsMatch(crmAccount: string, clientAccount: string): boolean {
-  return crmAccount.trim().toLowerCase() === clientAccount.trim().toLowerCase();
+  return accountsMatchDisplayOrKey(crmAccount, clientAccount);
+}
+
+/** One row per zone+display alias (Cadbury/Mondelez, Coke/HCCB). */
+function accountDisplayMergeKey(account: string): string {
+  return clientAccountDisplayName(account).toLowerCase();
 }
 
 function resolveClientAccountField(field: string): string {
@@ -210,14 +220,18 @@ export function buildAccountDisplayRows(
   if (flags.client && !flags.crm) return buildClientOnlyAccountRows(clientAccounts);
 
   if (!clientAccounts?.length) return crmAccounts;
-  const rows = [...crmAccounts];
-  const keys = new Set(
-    crmAccounts.map(
-      (a) => `${zoneKey(String(a.region ?? ''))}::${String(a.account ?? '').toLowerCase()}`
-    )
-  );
+  // Collapse CRM Cadbury/Mondelez (and Coke/HCCB) onto one display key so import
+  // metrics attach once — same treatment as open-calls export.
+  const rows: Array<Record<string, unknown>> = [];
+  const keys = new Set<string>();
+  for (const a of crmAccounts) {
+    const key = `${zoneKey(String(a.region ?? ''))}::${accountDisplayMergeKey(String(a.account ?? ''))}`;
+    if (keys.has(key)) continue;
+    keys.add(key);
+    rows.push(a);
+  }
   for (const clientRow of clientAccounts) {
-    const key = `${zoneKey(String(clientRow.region ?? ''))}::${String(clientRow.account ?? '').toLowerCase()}`;
+    const key = `${zoneKey(String(clientRow.region ?? ''))}::${accountDisplayMergeKey(String(clientRow.account ?? ''))}`;
     if (keys.has(key)) continue;
     rows.push({
       region: formatDisplayRegion(String(clientRow.region ?? '')),
@@ -452,11 +466,13 @@ export function findBranchRowMetric(
   field: string
 ): number {
   if (!branches?.length) return 0;
-  const branchLower = branch.toLowerCase();
+  const branchLower = branch.trim().toLowerCase();
   const matched = branches.filter((b) => {
     if (!regionsMatch(region, String(b.region ?? ''))) return false;
-    const label = String(b.branch ?? '').toLowerCase();
-    return label === branchLower || label.includes(branchLower) || branchLower.includes(label);
+    // Exact label only — substring match glued Cadbury plant "Ranchi" onto
+    // "1150 - RANCHI BRANCH" and double-counted Branch-wise Performance.
+    const label = String(b.branch ?? '').trim().toLowerCase();
+    return label === branchLower;
   });
   return matched.reduce((sum, b) => sum + Number(b[field] ?? 0), 0);
 }

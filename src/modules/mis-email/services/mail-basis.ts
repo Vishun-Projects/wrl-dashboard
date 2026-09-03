@@ -6,6 +6,7 @@ import {
   countTraceOpenCalls,
   filterTraceRowsForOpenExport,
   filterTraceRowsForSummaryExport,
+  filterTraceRowsForUnifiedOpenExport,
   sumBdMisRegionalGrand,
   type BdMisGrandRow,
   type BdMisRegionalRow,
@@ -16,7 +17,7 @@ import {
   type UiRegionalPerformanceRow,
 } from '@/modules/mis';
 import { buildMisUnifiedReportAlign } from '@/modules/mis/server';
-import type { AccountSummaryRow, SummaryDashboard } from '@/lib/summary/derive';
+import type { AccountSummaryRow, BranchSummaryRow, SummaryDashboard } from '@/lib/summary/derive';
 
 export type { BranchPerformanceRow, RegionalPerformanceRow } from '@/modules/mis-email/services/mail-types';
 
@@ -89,7 +90,7 @@ export function overlayRegionalOpenFromExcelRows(
   traceRows: BdMisTraceRow[]
 ): RegionalPerformanceRow[] {
   const byRegion = new Map<string, OpenAgingAgg>();
-  for (const row of filterTraceRowsForOpenExport(traceRows)) {
+  for (const row of filterTraceRowsForUnifiedOpenExport(traceRows)) {
     if (row.counts_toward !== 'open') continue;
     const region = String(row.region ?? 'OTHER').toUpperCase();
     let agg = byRegion.get(region);
@@ -117,14 +118,16 @@ export function overlayRegionalOpenFromExcelRows(
 
 export function overlayBranchOpenFromExcelRows(
   summaryBranch: BranchPerformanceRow[],
-  traceRows: BdMisTraceRow[]
+  traceRows: BdMisTraceRow[],
+  branchSummary?: BranchSummaryRow[]
 ): BranchPerformanceRow[] {
   const byKey = new Map<string, OpenAgingAgg>();
-  for (const row of filterTraceRowsForOpenExport(traceRows)) {
+  for (const row of filterTraceRowsForUnifiedOpenExport(traceRows)) {
     if (row.counts_toward !== 'open') continue;
     const region = String(row.region ?? 'OTHER').toUpperCase();
-    const branch = row.plant?.trim() || '—';
-    const key = `${region}::${branch}`;
+    const resolved = resolveTracePlantToWrlBranch(row.plant ?? '', region, branchSummary);
+    if (!resolved) continue;
+    const key = `${String(resolved.region).toUpperCase()}::${resolved.branch}`;
     let agg = byKey.get(key);
     if (!agg) {
       agg = emptyOpenAging();
@@ -266,7 +269,10 @@ export function countMisEmailOpenParity(traceRows: BdMisTraceRow[]): {
   const regional = buildMisEmailRegionalPerformanceRowsFromTrace(traceRows);
   const branch = buildMisEmailBranchPerformanceRowsFromTrace(traceRows);
   const detail = filterTraceRowsForSummaryExport(traceRows);
-  const excelOpenRows = filterTraceRowsForOpenExport(traceRows).length;
+  // Same open basis as WRL_BD_MIS_Open_Calls attachment (unified filter, open rows only).
+  const excelOpenRows = filterTraceRowsForUnifiedOpenExport(traceRows).filter(
+    (row) => row.counts_toward === 'open'
+  ).length;
   const regionalBodyOpen = regional.reduce((sum, row) => sum + row.open_calls, 0);
   const branchBodyOpen = branch.reduce((sum, row) => sum + row.open_calls, 0);
   const bodyCalls = (row: { solved_calls: number; open_calls: number; cancelled_calls: number }) =>
@@ -296,7 +302,7 @@ function accumulateTracePerformanceMetrics<
     engineers: Set<string>;
   },
 >(agg: T, row: BdMisTraceRow): void {
-  agg.total_calls += 1;
+  // Count every included row into exactly one status bucket (solved / open / cancelled).
   if (row.counts_toward === 'solved') {
     agg.solved_calls += 1;
   } else if (row.counts_toward === 'open') {
@@ -308,7 +314,10 @@ function accumulateTracePerformanceMetrics<
     else if (aging === '>15 days') agg.age_15 += 1;
   } else if (row.counts_toward === 'cancelled') {
     agg.cancelled_calls += 1;
+  } else {
+    return;
   }
+  agg.total_calls = agg.solved_calls + agg.open_calls + agg.cancelled_calls;
 
   const technician = row.technician_name;
   if (technician && technician !== '—' && technician !== '-') {
@@ -319,8 +328,84 @@ function accumulateTracePerformanceMetrics<
   }
 }
 
+function isCrmTopLevelBranch(
+  row: BranchSummaryRow,
+  byId: Map<number, BranchSummaryRow>
+): boolean {
+  return row.parentId === 0 || !byId.has(row.parentId);
+}
+
+function crmTopLevelBranch(
+  row: BranchSummaryRow,
+  byId: Map<number, BranchSummaryRow>
+): BranchSummaryRow {
+  let cur = row;
+  const seen = new Set<number>();
+  while (!isCrmTopLevelBranch(cur, byId) && !seen.has(cur.officeId)) {
+    seen.add(cur.officeId);
+    const parent = byId.get(cur.parentId);
+    if (!parent) break;
+    cur = parent;
+  }
+  return cur;
+}
+
+/**
+ * Map trace plant labels onto CRM top-level WRL branches (same shape as yesterday's mail).
+ * Franchisee offices like ncode 1127 "POWER REFRIGERATION" roll into their parent (Patna),
+ * not a fake "1127 - POWER REFRIGERATION" branch row.
+ */
+export function resolveTracePlantToWrlBranch(
+  plant: string,
+  region: string,
+  branchSummary: BranchSummaryRow[] | undefined
+): { branch: string; region: string } | null {
+  const label = plant.trim();
+  // Without CRM office tree, keep prior plant/— behavior for fixtures.
+  if (!branchSummary?.length) {
+    return { branch: label || '—', region };
+  }
+  if (!label || label === '—') return null;
+
+  const byId = new Map(branchSummary.map((b) => [b.officeId, b]));
+  const byName = new Map(branchSummary.map((b) => [b.branch.trim().toLowerCase(), b]));
+
+  const named = byName.get(label.toLowerCase());
+  if (named) {
+    const top = crmTopLevelBranch(named, byId);
+    return { branch: top.branch, region: top.region || region };
+  }
+
+  const codeMatch = label.match(/^(\d+)\s*-/);
+  if (codeMatch) {
+    const officeId = Number(codeMatch[1]);
+    const office = byId.get(officeId);
+    if (office) {
+      const top = crmTopLevelBranch(office, byId);
+      return { branch: top.branch, region: top.region || region };
+    }
+    // Only treat "NNNN - … BRANCH" as SAP-style top-level label (Guwahati ncode≠1127).
+    // Do not map "1127 - POWER REFRIGERATION" → Guwahati via the numeric prefix.
+    if (/branch$/i.test(label)) {
+      const prefix = `${codeMatch[1]} -`.toLowerCase();
+      for (const b of branchSummary) {
+        if (!isCrmTopLevelBranch(b, byId)) continue;
+        if (b.branch.trim().toLowerCase().startsWith(prefix) && /branch$/i.test(b.branch)) {
+          return { branch: b.branch, region: b.region || region };
+        }
+      }
+    }
+  }
+
+  if (/^\d+\s*-\s*.+\s+BRANCH$/i.test(label)) {
+    return { branch: label, region };
+  }
+  return null;
+}
+
 export function buildMisEmailRegionalAndBranchRowsFromTrace(
-  traceRows: BdMisTraceRow[]
+  traceRows: BdMisTraceRow[],
+  branchSummary?: BranchSummaryRow[]
 ): {
   regional: RegionalPerformanceRow[];
   branch: BranchPerformanceRow[];
@@ -351,13 +436,16 @@ export function buildMisEmailRegionalAndBranchRowsFromTrace(
     }
     accumulateTracePerformanceMetrics(regAgg, row);
 
-    const branch = row.plant?.trim() || '—';
-    const key = `${region}::${branch}`;
+    const resolved = resolveTracePlantToWrlBranch(row.plant ?? '', region, branchSummary);
+    if (!resolved) continue;
+    const branch = resolved.branch;
+    const branchRegion = String(resolved.region ?? region).toUpperCase();
+    const key = `${branchRegion}::${branch}`;
     let brAgg = branchMap.get(key);
     if (!brAgg) {
       brAgg = {
         branch,
-        region,
+        region: branchRegion,
         total_calls: 0,
         solved_calls: 0,
         cancelled_calls: 0,
@@ -391,9 +479,83 @@ export function buildMisEmailRegionalAndBranchRowsFromTrace(
 }
 
 export function buildMisEmailRegionalPerformanceRowsFromTrace(
-  traceRows: BdMisTraceRow[]
+  traceRows: BdMisTraceRow[],
+  branchSummary?: BranchSummaryRow[]
 ): RegionalPerformanceRow[] {
-  return buildMisEmailRegionalAndBranchRowsFromTrace(traceRows).regional;
+  return buildMisEmailRegionalAndBranchRowsFromTrace(traceRows, branchSummary).regional;
+}
+
+/** Key Account body rows — same included call-level basis as open-calls Excel. */
+export function buildMisEmailKeyAccountRowsFromTrace(
+  traceRows: BdMisTraceRow[]
+): Array<Record<string, unknown>> {
+  type Agg = {
+    region: string;
+    account: string;
+    total_calls: number;
+    solved_calls: number;
+    cancelled_calls: number;
+    open_calls: number;
+    age_2: number;
+    age_3: number;
+    age_7: number;
+    age_15: number;
+    part_pending: number;
+    active_eng: number;
+    population: number;
+    headcount: number;
+    deployment_total: number;
+    deployment_done: number;
+    installation_total: number;
+    installation_done: number;
+    total_tech_solved: number;
+    engineers: Set<string>;
+  };
+  const map = new Map<string, Agg>();
+  for (const row of filterTraceRowsForSummaryExport(traceRows)) {
+    const region = String(row.region ?? 'OTHER').toUpperCase();
+    const account = String(row.client ?? '').trim() || '—';
+    const key = `${region}::${account.toLowerCase()}`;
+    let agg = map.get(key);
+    if (!agg) {
+      agg = {
+        region,
+        account,
+        total_calls: 0,
+        solved_calls: 0,
+        cancelled_calls: 0,
+        open_calls: 0,
+        age_2: 0,
+        age_3: 0,
+        age_7: 0,
+        age_15: 0,
+        part_pending: 0,
+        active_eng: 0,
+        population: 0,
+        headcount: 0,
+        deployment_total: 0,
+        deployment_done: 0,
+        installation_total: 0,
+        installation_done: 0,
+        total_tech_solved: 0,
+        engineers: new Set<string>(),
+      };
+      map.set(key, agg);
+    }
+    accumulateTracePerformanceMetrics(agg, row);
+  }
+  return [...map.values()]
+    .map(({ engineers, solved_calls, ...row }) => ({
+      ...row,
+      // AccountSummaryRow / Key Account merge read total_solved.
+      total_solved: solved_calls,
+      active_eng: engineers.size,
+    }))
+    .sort((a, b) => {
+      const zoneCmp = a.region.localeCompare(b.region);
+      if (zoneCmp !== 0) return zoneCmp;
+      return a.account.localeCompare(b.account);
+    });
 }
 
 function uiRegionalToPerformanceRow(row: UiRegionalPerformanceRow): RegionalPerformanceRow {
@@ -451,7 +613,8 @@ export async function buildMisEmailUnifiedReportAlign(
 }
 
 export function buildMisEmailBranchPerformanceRowsFromTrace(
-  traceRows: BdMisTraceRow[]
+  traceRows: BdMisTraceRow[],
+  branchSummary?: BranchSummaryRow[]
 ): BranchPerformanceRow[] {
-  return buildMisEmailRegionalAndBranchRowsFromTrace(traceRows).branch;
+  return buildMisEmailRegionalAndBranchRowsFromTrace(traceRows, branchSummary).branch;
 }

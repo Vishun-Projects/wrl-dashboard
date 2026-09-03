@@ -15,22 +15,29 @@ import { enrichRegisterRowsRepairDone } from '@/sql/register/repair-done-enrich'
 
 const OPEN_STATUS_BUCKETS = ['open_unallocated', 'assigned'] as const;
 
+export type BuildDigestTraceOptions = {
+  skipRepairDone?: boolean;
+  includeTraceableExport?: boolean;
+  includeOpenCallsExport?: boolean;
+  /** When true, pull full YTD corpus (solved+open+cancelled) even if only open Excel is selected. */
+  requireFullCorpus?: boolean;
+};
+
 export async function buildDigestTraceableExportPayload(
   scope: UserDigestScope,
   dateRange: DigestDateRange,
   summaryData: SummaryDashboard,
   clientAccountSummary: AccountSummaryRow[],
-  options?: {
-    skipRepairDone?: boolean;
-    includeTraceableExport?: boolean;
-    includeOpenCallsExport?: boolean;
-  }
+  options?: BuildDigestTraceOptions
 ): Promise<BdMisTraceableExportPayload> {
   const sourceCodes = [...MIS_EMAIL_CLIENT_SOURCE_CODES];
   const sources = misEmailBdMisSources();
   // Open-calls-only mail: pull open/assigned rows only — never the full YTD corpus.
+  // Body tables need full corpus for solved/cancelled totals.
   const openOnly =
-    !!options?.includeOpenCallsExport && options?.includeTraceableExport !== true;
+    !!options?.includeOpenCallsExport &&
+    options?.includeTraceableExport !== true &&
+    options?.requireFullCorpus !== true;
 
   const started = Date.now();
   const [crmCallRowsRaw, clientCallRows] = await Promise.all([
@@ -54,7 +61,7 @@ export async function buildDigestTraceableExportPayload(
   ]);
 
   console.log(
-    `[mis-email/timing] trace export data ${dateRange.startDate}→${dateRange.endDate}: ${Date.now() - started}ms · crmCalls=${crmCallRowsRaw.length} clientCalls=${clientCallRows.length}${openOnly ? ' · openOnly' : ''}`
+    `[mis-email/timing] trace export data ${dateRange.startDate}→${dateRange.endDate}: ${Date.now() - started}ms · crmCalls=${crmCallRowsRaw.length} clientCalls=${clientCallRows.length}${openOnly ? ' · openOnly' : ''}${options?.skipRepairDone ? ' · skipRepair' : ''}`
   );
 
   let crmCallRows: Array<BdMisCrmCallTraceDbRow & { repair_done?: string }> = crmCallRowsRaw;
@@ -65,10 +72,21 @@ export async function buildDigestTraceableExportPayload(
     if (includeTrace) {
       crmCallRows = await enrichRegisterRowsRepairDone(crmCallRowsRaw as any[]);
     } else if (includeOpen) {
-      const enrichedOpen = (await enrichRegisterRowsRepairDone(crmCallRowsRaw as any[])) as Array<
-        BdMisCrmCallTraceDbRow & { repair_done?: string }
-      >;
-      crmCallRows = enrichedOpen;
+      // Open Excel only needs repair_done on open/assigned rows — not the full YTD corpus.
+      const openRows = crmCallRowsRaw.filter(
+        (row) =>
+          row.status_bucket === 'open_unallocated' || row.status_bucket === 'assigned'
+      );
+      if (openRows.length > 0) {
+        const enrichedOpen = (await enrichRegisterRowsRepairDone(openRows as any[])) as Array<
+          BdMisCrmCallTraceDbRow & { repair_done?: string }
+        >;
+        const byNcode = new Map(enrichedOpen.map((row) => [row.ncode, row.repair_done]));
+        crmCallRows = crmCallRowsRaw.map((row) => {
+          const repair = byNcode.get(row.ncode);
+          return repair !== undefined ? { ...row, repair_done: repair } : row;
+        });
+      }
     }
   }
 

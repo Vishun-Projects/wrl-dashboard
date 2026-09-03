@@ -8,7 +8,7 @@ const fetchDigestSummaryDataCached = vi.fn();
 const fetchDigestClientAccountSummaryCached = vi.fn();
 const fetchDigestRegisterRows = vi.fn();
 const buildDigestAttachments = vi.fn();
-const buildDigestTraceableExportPayload = vi.fn();
+const buildDigestTraceableExportPayloadCached = vi.fn();
 
 vi.mock('@/modules/mis-email/services/routing-rules', () => ({
   listMisEmailRoutingRules: (...args: unknown[]) => listMisEmailRoutingRules(...args),
@@ -64,6 +64,8 @@ vi.mock('@/modules/mis-email/services/digest-cache', () => ({
   fetchDigestSummaryDataCached: (...args: unknown[]) => fetchDigestSummaryDataCached(...args),
   fetchDigestClientAccountSummaryCached: (...args: unknown[]) =>
     fetchDigestClientAccountSummaryCached(...args),
+  buildDigestTraceableExportPayloadCached: (...args: unknown[]) =>
+    buildDigestTraceableExportPayloadCached(...args),
   clearDigestSummaryCache: vi.fn(),
 }));
 
@@ -76,36 +78,6 @@ vi.mock('@/modules/mis-email/services/build-attachments', async (importOriginal)
   return {
     ...actual,
     buildDigestAttachments: (...args: unknown[]) => buildDigestAttachments(...args),
-  };
-});
-
-vi.mock('@/modules/mis-email/services/fetch-digest-trace', () => ({
-  buildDigestTraceableExportPayload: (...args: unknown[]) =>
-    buildDigestTraceableExportPayload(...args),
-}));
-
-vi.mock('@/modules/mis-email/services/mail-basis', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/modules/mis-email/services/mail-basis')>();
-  return {
-    ...actual,
-    buildMisEmailSummaryDashboardBodyRows: vi.fn(async () => ({
-      regional: [
-        {
-          region: 'EAST ZONE',
-          total_calls: 40,
-          solved_calls: 10,
-          cancelled_calls: 0,
-          open_calls: 30,
-          age_2: 0,
-          age_3: 0,
-          age_7: 0,
-          age_15: 0,
-          part_pending: 0,
-          active_eng: 0,
-        },
-      ],
-      branch: [],
-    })),
   };
 });
 
@@ -162,7 +134,7 @@ describe('sendMisEmailComposeBatch auto-send override', () => {
     fetchDigestClientAccountSummaryCached.mockReset();
     fetchDigestRegisterRows.mockReset();
     buildDigestAttachments.mockReset();
-    buildDigestTraceableExportPayload.mockReset();
+    buildDigestTraceableExportPayloadCached.mockReset();
 
     listMisEmailRoutingRules.mockResolvedValue([{ id: 'r1' }]);
     resolveRoutingClientNamesForScope.mockResolvedValue({ mail: [], crm: [] });
@@ -210,7 +182,7 @@ describe('buildMisEmailPayload early exits', () => {
     fetchDigestClientAccountSummaryCached.mockReset();
     fetchDigestRegisterRows.mockReset();
     buildDigestAttachments.mockReset();
-    buildDigestTraceableExportPayload.mockReset();
+    buildDigestTraceableExportPayloadCached.mockReset();
   });
 
   it('rejects with no includes before fetching summary', async () => {
@@ -224,7 +196,7 @@ describe('buildMisEmailPayload early exits', () => {
     expect(fetchDigestRegisterRows).not.toHaveBeenCalled();
   });
 
-  it('forPreview uses summary for body and skips Excel builders and full/open trace', async () => {
+  it('forPreview builds call-level trace for body and skips Excel builders', async () => {
     fetchDigestSummaryDataCached.mockResolvedValue({
       branchSummary: [],
       accountSummary: [],
@@ -232,6 +204,17 @@ describe('buildMisEmailPayload early exits', () => {
     });
     fetchDigestClientAccountSummaryCached.mockResolvedValue([]);
     fetchDigestRegisterRows.mockResolvedValue([{ id: 1 }]);
+    buildDigestTraceableExportPayloadCached.mockResolvedValue({
+      regionalRows: [{ region: 'EAST ZONE', open_calls: 0, solved_calls: 0, cancelled_calls: 0 }],
+      grand: { region: 'ALL', open_calls: 0 },
+      crmBranchSummary: [],
+      crmAccountSummary: [],
+      clientAccountSummary: [],
+      sources: {},
+      traceRows: [],
+      traceAlign: 'summary',
+      filterMeta: {},
+    });
 
     const result = await buildMisEmailPayload(
       {
@@ -253,7 +236,7 @@ describe('buildMisEmailPayload early exits', () => {
     expect(fetchDigestSummaryDataCached).toHaveBeenCalledOnce();
     expect(fetchDigestRegisterRows).toHaveBeenCalledOnce();
     expect(buildDigestAttachments).not.toHaveBeenCalled();
-    expect(buildDigestTraceableExportPayload).not.toHaveBeenCalled();
+    expect(buildDigestTraceableExportPayloadCached).toHaveBeenCalledOnce();
   });
 
   it('does not filter excel data/trace payload by selected accounts but filters body keyAccountRows', async () => {
@@ -271,7 +254,7 @@ describe('buildMisEmailPayload early exits', () => {
       { account: 'CADBURY', open_calls: 10 },
       { account: 'PEPSI', open_calls: 15 },
     ]);
-    buildDigestTraceableExportPayload.mockResolvedValue({
+    buildDigestTraceableExportPayloadCached.mockResolvedValue({
       regionalRows: [],
       grand: { region: 'ALL', open_calls: 0 },
       crmBranchSummary: [],
@@ -279,10 +262,31 @@ describe('buildMisEmailPayload early exits', () => {
       clientAccountSummary: [],
       sources: {},
       traceRows: [
-        { client: 'COKE', open_calls: 5 },
-        { client: 'CADBURY', open_calls: 10 },
-        { client: 'PEPSI', open_calls: 15 },
-      ],
+        ...Array.from({ length: 5 }, () => ({
+          client: 'COKE',
+          region: 'EAST ZONE',
+          plant: 'P1',
+          counts_toward: 'open',
+          included_in_final_count: true,
+          aging: '<2 days',
+        })),
+        ...Array.from({ length: 10 }, () => ({
+          client: 'CADBURY',
+          region: 'EAST ZONE',
+          plant: 'P1',
+          counts_toward: 'open',
+          included_in_final_count: true,
+          aging: '3-7 days',
+        })),
+        ...Array.from({ length: 15 }, () => ({
+          client: 'PEPSI',
+          region: 'EAST ZONE',
+          plant: 'P1',
+          counts_toward: 'open',
+          included_in_final_count: true,
+          aging: '8-15 days',
+        })),
+      ] as any[],
       traceAlign: 'summary',
       filterMeta: {},
     });
@@ -350,7 +354,7 @@ describe('buildMisEmailPayload early exits', () => {
       { account: 'CADBURY', open_calls: 10 },
       { account: 'PEPSI', open_calls: 15 },
     ]);
-    buildDigestTraceableExportPayload.mockResolvedValue({
+    buildDigestTraceableExportPayloadCached.mockResolvedValue({
       regionalRows: [
         { region: 'EAST', open_calls: 30, solved_calls: 10 },
       ],

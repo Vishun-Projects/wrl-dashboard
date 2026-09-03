@@ -3,7 +3,7 @@ import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { dedupeClientRowsLatestBatchWins } from '@/modules/mis/client-import/services/aggregate';
 import { buildImportFilePath } from '@/modules/mis/client-import/services/file-store';
-import { mergedMetricValue, findAccountMetric, mergeSelectedMetrics, rollupAccountsByAccount, accountMergeFlags, filterTopAccountsByZone, accountRowScore, isAccountExcludedFromZoneTop, DEFAULT_CLIENT_MERGE_WITH_CRM, type ClientMergeWithCrmPrefs } from '@/modules/mis';
+import { mergedMetricValue, findAccountMetric, findBranchRowMetric, mergeSelectedMetrics, rollupAccountsByAccount, accountMergeFlags, buildAccountDisplayRows, buildMergedAccountMetricRow, filterTopAccountsByZone, accountRowScore, isAccountExcludedFromZoneTop, DEFAULT_CLIENT_MERGE_WITH_CRM, type ClientMergeWithCrmPrefs } from '@/modules/mis';
 import { parsePipeDelimitedCsv, decodeCsvBuffer } from '@/modules/mis/client-import/services/parse-csv';
 import { parseClientDate } from '@/modules/mis/client-import/services/parse-dates';
 import { normalizeClientRows } from '@/modules/mis/client-import/services/normalize';
@@ -420,23 +420,87 @@ describe('accountMergeFlags', () => {
   it('defaults Cadbury to import-only', () => {
     expect(accountMergeFlags('Cadbury', global, noMerge)).toEqual({ crm: false, client: true });
     expect(accountMergeFlags('CADBURY', global, noMerge)).toEqual({ crm: false, client: true });
+    expect(accountMergeFlags('Mondelez', global, noMerge)).toEqual({ crm: false, client: true });
   });
 
   it('defaults Coke to import-only', () => {
     expect(accountMergeFlags('Coke', global, noMerge)).toEqual({ crm: false, client: true });
     expect(accountMergeFlags('COKE', global, noMerge)).toEqual({ crm: false, client: true });
+    expect(accountMergeFlags('HCCB', global, noMerge)).toEqual({ crm: false, client: true });
   });
 
   it('merges Cadbury with CRM when enabled', () => {
     expect(accountMergeFlags('Cadbury', global, cadburyMerge)).toEqual(global);
+    expect(accountMergeFlags('Mondelez', global, cadburyMerge)).toEqual(global);
   });
 
   it('merges Coke with CRM when enabled', () => {
     expect(accountMergeFlags('Coke', global, cokeMerge)).toEqual(global);
+    expect(accountMergeFlags('HCCB', global, cokeMerge)).toEqual(global);
   });
 
   it('does not affect other accounts', () => {
     expect(accountMergeFlags('UB', global, noMerge)).toEqual(global);
+  });
+});
+
+describe('findBranchRowMetric', () => {
+  const clientBranches = [
+    { region: 'EAST ZONE', branch: 'Ranchi', total_calls: 470, solved_calls: 468 },
+    { region: 'EAST ZONE', branch: '1150 - RANCHI BRANCH', total_calls: 10, solved_calls: 8 },
+  ];
+
+  it('matches exact branch labels only (no Cadbury plant substring glue)', () => {
+    expect(
+      findBranchRowMetric(clientBranches, 'EAST ZONE', '1150 - RANCHI BRANCH', 'total_calls')
+    ).toBe(10);
+    expect(findBranchRowMetric(clientBranches, 'EAST ZONE', 'Ranchi', 'total_calls')).toBe(470);
+  });
+});
+
+describe('Mondelez CRM + Cadbury import (Key Account body)', () => {
+  it('replaces CRM Mondelez with Cadbury import and does not duplicate the row', () => {
+    const crm = [
+      {
+        region: 'EAST ZONE',
+        account: 'Mondelez',
+        total_calls: 5000,
+        total_solved: 4000,
+        cancelled_calls: 500,
+        open_calls: 500,
+        age_2: 100,
+        age_3: 100,
+        age_7: 100,
+        age_15: 200,
+        active_eng: 10,
+      },
+    ];
+    const client = [
+      {
+        region: 'EAST ZONE',
+        account: 'Cadbury',
+        total_calls: 470,
+        total_solved: 400,
+        cancelled_calls: 20,
+        open_calls: 50,
+        age_2: 10,
+        age_3: 10,
+        age_7: 10,
+        age_15: 20,
+        active_eng: 2,
+      },
+    ];
+    const rows = buildAccountDisplayRows(crm, client, { crm: true, client: true });
+    expect(rows).toHaveLength(1);
+    const merged = buildMergedAccountMetricRow(
+      rows[0],
+      client,
+      { crm: true, client: true },
+      DEFAULT_CLIENT_MERGE_WITH_CRM
+    );
+    expect(merged.total_calls).toBe(470);
+    expect(merged.total_solved).toBe(400);
+    expect(merged.open_calls).toBe(50);
   });
 });
 

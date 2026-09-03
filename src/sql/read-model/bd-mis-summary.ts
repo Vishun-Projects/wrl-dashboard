@@ -480,7 +480,6 @@ export async function queryBdMisCrmCallTraceRows(
       ${callTypeFilter.clause}
       ${statusClause}
       ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
-    ORDER BY ${BD_MIS_REGION_SQL}, h.logged_at, h.vtrnno
     `,
     ...values
   );
