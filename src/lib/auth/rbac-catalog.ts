@@ -148,6 +148,14 @@ export const RBAC_PAGES: RbacPage[] = [
     group: 'Reports',
   },
   {
+    id: 'spare_loan_check',
+    permission: 'page_spare_loan_check',
+    path: '/report/spare-loan-check',
+    label: 'Spare Loan Check',
+    description: 'Upload SAP HTML and highlight SO/vendor mismatches and cancelled/transferred calls',
+    group: 'Reports',
+  },
+  {
     id: 'admin_users',
     permission: 'manage_users',
     path: '/admin/users',
@@ -341,6 +349,12 @@ export function canAccessPage(permissions: string[], pageId: string): boolean {
   // Cancelled Calls report: same audience as Reconciliation or Call Register.
   if (pageId === 'cancelled_calls') {
     if (hasPermission(permissions, 'page_athena_reconciliation')) return true;
+    if (canAccessMisTab(permissions, 'register')) return true;
+  }
+
+  // ZSS02 spare loan check: MIS reports audience until roles matrix is updated.
+  if (pageId === 'spare_loan_check') {
+    if (hasPermission(permissions, 'page_mis_reports')) return true;
     if (canAccessMisTab(permissions, 'register')) return true;
   }
 

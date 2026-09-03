@@ -41,11 +41,11 @@ describe('canAccessPath', () => {
     expect(canAccessPath(['manage_users'], '/admin/vps-cron')).toBe(false);
   });
 
-  it('allows MIS report with page or tab permission', () => {
-    expect(canAccessPath(['page_mis_reports'], '/report')).toBe(true);
-    expect(canAccessPath(['tab_mis_register'], '/report')).toBe(true);
-    expect(canAccessPath(['page_call_distribution'], '/report/distribution')).toBe(true);
-    expect(canAccessPath(['tab_mis_register'], '/report/distribution')).toBe(false);
+  it('allows spare loan check via dedicated or MIS reports permission', () => {
+    expect(canAccessPath(['page_spare_loan_check'], '/report/spare-loan-check')).toBe(true);
+    expect(canAccessPath(['page_mis_reports'], '/report/spare-loan-check')).toBe(true);
+    expect(canAccessPath(['tab_mis_register'], '/report/spare-loan-check')).toBe(true);
+    expect(canAccessPath(['page_arcp_claims'], '/report/spare-loan-check')).toBe(false);
   });
 
   it('exactPath MIS does not leak into distribution or ARCP', () => {
