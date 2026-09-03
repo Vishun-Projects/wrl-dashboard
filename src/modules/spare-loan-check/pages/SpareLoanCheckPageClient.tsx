@@ -1,9 +1,11 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Loader2, Upload } from 'lucide-react';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import { AdminTable, AdminTableCard, AdminTd, AdminTh, AdminThead, AdminTr } from '@/components/admin/AdminUi';
+import { FilterSelect } from '@/components/filters/FilterSelect';
+import type { FilterSelectOption } from '@/components/filters/filter-select-types';
 import { feedback } from '@/lib/ui/feedback';
 import type {
   SpareLoanCheckResponse,
@@ -17,6 +19,24 @@ const REASON_LABEL: Record<SpareLoanProblemReason, string> = {
   vendor_mismatch: 'Vendor mismatch',
   cancelled: 'Cancelled',
 };
+
+type SavedPlantOption = {
+  plant: string;
+  fileName: string;
+  problems: number;
+  importedAt: string;
+};
+
+async function readApiJson(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 180);
+    throw new Error(snippet || `Request failed (${res.status})`);
+  }
+}
 
 function csvEscape(value: string): string {
   if (/[",\n\r]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
@@ -76,9 +96,20 @@ export default function SpareLoanCheckPageClient() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SpareLoanCheckResponse | null>(null);
+  const [savedPlants, setSavedPlants] = useState<SavedPlantOption[]>([]);
+  const [plantFilter, setPlantFilter] = useState('');
 
   const rows = result?.rows ?? [];
   const summary = result?.summary;
+
+  const plantOptions = useMemo<FilterSelectOption[]>(
+    () =>
+      savedPlants.map((p) => ({
+        value: p.plant,
+        label: `${p.plant} (${p.problems} problems)`,
+      })),
+    [savedPlants]
+  );
 
   const subtitle = useMemo(() => {
     if (!summary) {
@@ -86,6 +117,44 @@ export default function SpareLoanCheckPageClient() {
     }
     return `Parsed ${summary.parsed.toLocaleString()} · skipped ${summary.skipped.toLocaleString()} · ok ${summary.ok.toLocaleString()} · problems ${summary.problems.toLocaleString()}`;
   }, [summary]);
+
+  const refreshPlants = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}?mode=plants`, { credentials: 'include' });
+      const data = await readApiJson(res);
+      if (!res.ok) throw new Error(String(data.error || 'Failed to load plants'));
+      const plants = (data.plants as SavedPlantOption[]) ?? [];
+      setSavedPlants(plants);
+      return plants;
+    } catch {
+      setSavedPlants([]);
+      return [] as SavedPlantOption[];
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshPlants();
+  }, [refreshPlants]);
+
+  async function loadPlant(plant: string) {
+    if (!plant) {
+      setResult(null);
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}?mode=rows&plant=${encodeURIComponent(plant)}`, {
+        credentials: 'include',
+      });
+      const data = await readApiJson(res);
+      if (!res.ok) throw new Error(String(data.error || 'Failed to load plant'));
+      setResult(data as unknown as SpareLoanCheckResponse);
+    } catch (err) {
+      feedback.actionFailed(err instanceof Error ? err.message : 'Failed to load plant');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function runCheck() {
     if (!file) {
@@ -98,16 +167,19 @@ export default function SpareLoanCheckPageClient() {
       const form = new FormData();
       form.set('file', file);
       const res = await fetch(API, { method: 'POST', body: form, credentials: 'include' });
-      const data = await res.json();
+      const data = await readApiJson(res);
       if (!res.ok) {
-        throw new Error(data?.error || 'Check failed');
+        throw new Error(String(data.error || `Check failed (${res.status})`));
       }
-      setResult(data as SpareLoanCheckResponse);
-      const plants = (data as SpareLoanCheckResponse).savedPlants ?? [];
+      const payload = data as unknown as SpareLoanCheckResponse;
+      setResult(payload);
+      const plants = payload.savedPlants ?? [];
       const plantNote = plants.length ? ` · saved plant(s) ${plants.join(', ')}` : '';
-      feedback.actionSuccess(
-        `Found ${(data as SpareLoanCheckResponse).summary.problems} problem row(s)${plantNote}`
-      );
+      feedback.actionSuccess(`Found ${payload.summary.problems} problem row(s)${plantNote}`);
+      const refreshed = await refreshPlants();
+      if (plants[0] && refreshed.some((p) => p.plant === plants[0])) {
+        setPlantFilter(plants[0]);
+      }
     } catch (err) {
       feedback.actionFailed(err instanceof Error ? err.message : 'Check failed');
     } finally {
@@ -165,18 +237,35 @@ export default function SpareLoanCheckPageClient() {
     >
       <PageScrollRegion>
         <div className="p-3">
-          {summary ? (
-            <div className="mb-3 flex flex-wrap gap-2 text-[11px]">
-              {(Object.keys(REASON_LABEL) as SpareLoanProblemReason[]).map((key) => (
-                <span
-                  key={key}
-                  className="rounded-md border border-rose-100 bg-rose-50 px-2 py-1 text-rose-800"
-                >
-                  {REASON_LABEL[key]}: {summary.byReason[key].toLocaleString()}
-                </span>
-              ))}
-            </div>
-          ) : null}
+          <div className="mb-3 flex flex-wrap items-end gap-3">
+            <FilterSelect
+              label="Saved plant"
+              emptyLabel="All / latest upload"
+              options={plantOptions}
+              selected={plantFilter ? [plantFilter] : []}
+              mode="single"
+              onChange={(values) => {
+                const next = values[values.length - 1] ?? '';
+                setPlantFilter(next);
+                void loadPlant(next);
+              }}
+              searchPlaceholder="Search plant…"
+              panelClassName="w-56"
+              layout="inline"
+            />
+            {summary ? (
+              <div className="flex flex-wrap gap-2 text-[11px] pb-1">
+                {(Object.keys(REASON_LABEL) as SpareLoanProblemReason[]).map((key) => (
+                  <span
+                    key={key}
+                    className="rounded-md border border-rose-100 bg-rose-50 px-2 py-1 text-rose-800"
+                  >
+                    {REASON_LABEL[key]}: {summary.byReason[key].toLocaleString()}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
 
           <AdminTableCard
             isEmpty={!loading && rows.length === 0}
@@ -184,7 +273,9 @@ export default function SpareLoanCheckPageClient() {
               <p className="p-6 text-sm text-slate-500">
                 {result
                   ? 'No problem rows — all keyed SOs matched vendor and are active.'
-                  : 'Upload a HTML file and run the check.'}
+                  : plantFilter
+                    ? 'No saved rows for this plant.'
+                    : 'Upload a HTML file and run the check, or pick a saved plant.'}
               </p>
             }
           >
@@ -206,7 +297,7 @@ export default function SpareLoanCheckPageClient() {
                 {loading ? (
                   <AdminTr>
                     <td className="px-4 py-3 text-[12px] text-slate-500" colSpan={9}>
-                      Checking…
+                      Loading…
                     </td>
                   </AdminTr>
                 ) : (
