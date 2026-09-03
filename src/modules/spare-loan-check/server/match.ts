@@ -70,7 +70,8 @@ export function toProblemRow(
   row: Zss02ParsedRow,
   match: { key: string; source: SpareLoanMatchSource },
   reason: SpareLoanProblemReason,
-  call: SpareLoanCallLookup | undefined
+  call: SpareLoanCallLookup | undefined,
+  itemCategory: string | null = null
 ): SpareLoanProblemRow {
   return {
     plant: row.plant,
@@ -78,6 +79,7 @@ export function toProblemRow(
     vendorName: row.vendorName,
     material: row.material,
     materialDescription: row.materialDescription,
+    itemCategory,
     barcode: row.barcode,
     soLoan: row.soLoan,
     soConRtn: row.soConRtn,

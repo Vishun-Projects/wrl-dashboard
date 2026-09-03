@@ -40,6 +40,8 @@ export type SpareLoanProblemRow = {
   vendorName: string;
   material: string;
   materialDescription: string;
+  /** CRM mstitemcategory.vname via material → mstitems. */
+  itemCategory: string | null;
   barcode: string;
   soLoan: string;
   soConRtn: string;

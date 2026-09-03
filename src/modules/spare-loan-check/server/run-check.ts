@@ -3,6 +3,10 @@ import {
   selectMatchKey,
   toProblemRow,
 } from '@/modules/spare-loan-check/server/match';
+import {
+  lookupItemCategoriesByMaterial,
+  normalizeMaterialCode,
+} from '@/modules/spare-loan-check/server/item-category';
 import { lookupCallsByVtrnno } from '@/modules/spare-loan-check/server/lookup';
 import { parseZss02Html } from '@/modules/spare-loan-check/server/parse-zss02-html';
 import {
@@ -75,7 +79,10 @@ export async function runSpareLoanCheck(
     keyed.push({ row, match });
   }
 
-  const callMap = await lookupCallsByVtrnno(keyed.map((k) => k.match.key));
+  const [callMap, categoryMap] = await Promise.all([
+    lookupCallsByVtrnno(keyed.map((k) => k.match.key)),
+    lookupItemCategoriesByMaterial(keyed.map((k) => k.row.material)),
+  ]);
   const problems: SpareLoanProblemRow[] = [];
   const byReason = emptyByReason();
   let skipped = 0;
@@ -93,7 +100,9 @@ export async function runSpareLoanCheck(
     byReason[reason] += 1;
     bucket.summary.byReason[reason] += 1;
     bucket.summary.problems += 1;
-    const problem = toProblemRow(row, match, reason, call);
+    const itemCategory =
+      categoryMap.get(normalizeMaterialCode(row.material)) ?? null;
+    const problem = toProblemRow(row, match, reason, call, itemCategory);
     problems.push(problem);
     bucket.rows.push(problem);
   }

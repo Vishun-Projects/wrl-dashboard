@@ -27,6 +27,7 @@ type SortKey =
   | 'vendorNo'
   | 'material'
   | 'materialDescription'
+  | 'itemCategory'
   | 'matchKey'
   | 'matchSource'
   | 'crmVendorCode'
@@ -70,6 +71,7 @@ function downloadProblemsCsv(rows: SpareLoanProblemRow[]) {
     'Vendor Name',
     'Material',
     'Material Description',
+    'Item Category',
     'Barcode',
     'SO Loan',
     'SO Con/Rtn',
@@ -91,6 +93,7 @@ function downloadProblemsCsv(rows: SpareLoanProblemRow[]) {
         r.vendorName,
         r.material,
         r.materialDescription,
+        r.itemCategory ?? '',
         r.barcode,
         r.soLoan,
         r.soConRtn,
@@ -131,6 +134,7 @@ export default function SpareLoanCheckPageClient() {
   const [plantFilter, setPlantFilter] = useState('');
   const [reasonFilter, setReasonFilter] = useState('');
   const [vendorFilter, setVendorFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
   const { sort, onSort, sorted } = useTableSort<SortKey>(null);
 
@@ -159,6 +163,17 @@ export default function SpareLoanCheckPageClient() {
       .map(([value, label]) => ({ value, label }));
   }, [allRows]);
 
+  const categoryOptions = useMemo<FilterSelectOption[]>(() => {
+    const set = new Set<string>();
+    for (const r of allRows) {
+      const cat = r.itemCategory?.trim();
+      if (cat) set.add(cat);
+    }
+    return [...set]
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({ value, label: value }));
+  }, [allRows]);
+
   const sourceOptions = useMemo<FilterSelectOption[]>(
     () => [
       { value: 'loan', label: 'Loan' },
@@ -171,11 +186,11 @@ export default function SpareLoanCheckPageClient() {
     return allRows.filter((r) => {
       if (reasonFilter && r.reason !== reasonFilter) return false;
       if (vendorFilter && r.vendorNo !== vendorFilter) return false;
+      if (categoryFilter && (r.itemCategory ?? '') !== categoryFilter) return false;
       if (sourceFilter && r.matchSource !== sourceFilter) return false;
       return true;
     });
-  }, [allRows, reasonFilter, vendorFilter, sourceFilter]);
-
+  }, [allRows, reasonFilter, vendorFilter, categoryFilter, sourceFilter]);
   function sortValue(row: SpareLoanProblemRow, key: SortKey): unknown {
     switch (key) {
       case 'plant':
@@ -186,6 +201,8 @@ export default function SpareLoanCheckPageClient() {
         return row.material;
       case 'materialDescription':
         return row.materialDescription;
+      case 'itemCategory':
+        return row.itemCategory;
       case 'matchKey':
         return row.matchKey;
       case 'matchSource':
@@ -286,6 +303,7 @@ export default function SpareLoanCheckPageClient() {
       if (plants[0]) setPlantFilter(plants[0]);
       setReasonFilter('');
       setVendorFilter('');
+      setCategoryFilter('');
       setSourceFilter('');
     } catch (err) {
       feedback.actionFailed(err instanceof Error ? err.message : 'Check failed');
@@ -311,6 +329,7 @@ export default function SpareLoanCheckPageClient() {
                 const next = pickSingle(values);
                 setPlantFilter(next);
                 setVendorFilter('');
+                setCategoryFilter('');
                 void loadRows(next);
               }}
               searchPlaceholder="Search plant…"
@@ -336,6 +355,17 @@ export default function SpareLoanCheckPageClient() {
               onChange={(values) => setVendorFilter(pickSingle(values))}
               searchPlaceholder="Search vendor…"
               panelClassName="w-72"
+              layout="inline"
+            />
+            <FilterSelect
+              label="Item category"
+              emptyLabel="All categories"
+              options={categoryOptions}
+              selected={categoryFilter ? [categoryFilter] : []}
+              mode="single"
+              onChange={(values) => setCategoryFilter(pickSingle(values))}
+              searchPlaceholder="Search category…"
+              panelClassName="w-56"
               layout="inline"
             />
             <FilterSelect
@@ -450,6 +480,14 @@ export default function SpareLoanCheckPageClient() {
                   </AdminTh>
                   <AdminTh
                     sortable
+                    sortKey="itemCategory"
+                    sort={sort}
+                    onSort={(k) => onSort(k as SortKey)}
+                  >
+                    Item category
+                  </AdminTh>
+                  <AdminTh
+                    sortable
                     sortKey="matchKey"
                     sort={sort}
                     onSort={(k) => onSort(k as SortKey)}
@@ -504,7 +542,7 @@ export default function SpareLoanCheckPageClient() {
               <tbody>
                 {loading ? (
                   <AdminTr>
-                    <td className="px-4 py-3 text-[12px] text-slate-500" colSpan={11}>
+                    <td className="px-4 py-3 text-[12px] text-slate-500" colSpan={12}>
                       Loading…
                     </td>
                   </AdminTr>
@@ -523,6 +561,7 @@ export default function SpareLoanCheckPageClient() {
                       </AdminTd>
                       <AdminTd className="font-mono text-[11px]">{r.material}</AdminTd>
                       <AdminTd className="max-w-[220px] text-[11px]">{r.materialDescription || '—'}</AdminTd>
+                      <AdminTd className="text-[11px]">{r.itemCategory || '—'}</AdminTd>
                       <AdminTd className="font-mono text-[11px]">{r.matchKey}</AdminTd>
                       <AdminTd className="text-[11px]">
                         {r.matchSource === 'loan' ? 'Loan' : 'Con/Rtn'}
