@@ -6,9 +6,11 @@ import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import { AdminTable, AdminTableCard, AdminTd, AdminTh, AdminThead, AdminTr } from '@/components/admin/AdminUi';
 import { FilterSelect } from '@/components/filters/FilterSelect';
 import type { FilterSelectOption } from '@/components/filters/filter-select-types';
-import { formatUiDateDash } from '@/lib/dates/ui-date';
+import { formatLocalDate } from '@/lib/dates/local-date';
+import { formatUiDateDash, UI_DATE_TIMEZONE } from '@/lib/dates/ui-date';
 import { useTableSort } from '@/lib/ui/table-sort';
 import { feedback } from '@/lib/ui/feedback';
+import { DateRangeSelector } from '@/modules/mis/register/components/DateRangeSelector';
 import type {
   SpareLoanCheckResponse,
   SpareLoanProblemReason,
@@ -20,6 +22,7 @@ const API = '/api/report/spare-loan-check';
 const REASON_LABEL: Record<SpareLoanProblemReason, string> = {
   vendor_mismatch: 'Vendor mismatch',
   cancelled: 'Cancelled',
+  unassigned_cancelled: 'Unassigned cancelled',
 };
 
 type SortKey =
@@ -39,6 +42,7 @@ type SortKey =
 const REASON_OPTIONS: FilterSelectOption[] = [
   { value: 'vendor_mismatch', label: 'Vendor mismatch' },
   { value: 'cancelled', label: 'Cancelled' },
+  { value: 'unassigned_cancelled', label: 'Unassigned cancelled' },
 ];
 
 type SavedPlantOption = {
@@ -124,6 +128,27 @@ function pickSingle(values: string[]): string {
   return values[values.length - 1] ?? '';
 }
 
+type CallLoggedRange = { start: Date; end: Date; label: string };
+
+const ALL_TIME_RANGE: CallLoggedRange = {
+  start: new Date(0),
+  end: new Date(),
+  label: 'All Time',
+};
+
+/** Call log calendar day in UI timezone (YYYY-MM-DD), for from/to filters. */
+function callLogCalendarDay(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: UI_DATE_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
 export default function SpareLoanCheckPageClient() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState('');
@@ -136,6 +161,7 @@ export default function SpareLoanCheckPageClient() {
   const [vendorFilter, setVendorFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
+  const [loggedRange, setLoggedRange] = useState<CallLoggedRange>(ALL_TIME_RANGE);
   const { sort, onSort, sorted } = useTableSort<SortKey>(null);
 
   const allRows = result?.rows ?? [];
@@ -183,14 +209,23 @@ export default function SpareLoanCheckPageClient() {
   );
 
   const filteredRows = useMemo(() => {
+    const applyLogged = loggedRange.label !== 'All Time';
+    const from = applyLogged ? formatLocalDate(loggedRange.start) : '';
+    const to = applyLogged ? formatLocalDate(loggedRange.end) : '';
     return allRows.filter((r) => {
       if (reasonFilter && r.reason !== reasonFilter) return false;
       if (vendorFilter && r.vendorNo !== vendorFilter) return false;
       if (categoryFilter && (r.itemCategory ?? '') !== categoryFilter) return false;
       if (sourceFilter && r.matchSource !== sourceFilter) return false;
+      if (applyLogged) {
+        const day = callLogCalendarDay(r.callLoggedAt);
+        if (!day) return false;
+        if (from && day < from) return false;
+        if (to && day > to) return false;
+      }
       return true;
     });
-  }, [allRows, reasonFilter, vendorFilter, categoryFilter, sourceFilter]);
+  }, [allRows, reasonFilter, vendorFilter, categoryFilter, sourceFilter, loggedRange]);
   function sortValue(row: SpareLoanProblemRow, key: SortKey): unknown {
     switch (key) {
       case 'plant':
@@ -228,7 +263,11 @@ export default function SpareLoanCheckPageClient() {
   );
 
   const filteredByReason = useMemo(() => {
-    const counts = { vendor_mismatch: 0, cancelled: 0 };
+    const counts = {
+      vendor_mismatch: 0,
+      cancelled: 0,
+      unassigned_cancelled: 0,
+    };
     for (const r of filteredRows) counts[r.reason] += 1;
     return counts;
   }, [filteredRows]);
@@ -305,6 +344,7 @@ export default function SpareLoanCheckPageClient() {
       setVendorFilter('');
       setCategoryFilter('');
       setSourceFilter('');
+      setLoggedRange(ALL_TIME_RANGE);
     } catch (err) {
       feedback.actionFailed(err instanceof Error ? err.message : 'Check failed');
     } finally {
@@ -330,6 +370,7 @@ export default function SpareLoanCheckPageClient() {
                 setPlantFilter(next);
                 setVendorFilter('');
                 setCategoryFilter('');
+                setLoggedRange(ALL_TIME_RANGE);
                 void loadRows(next);
               }}
               searchPlaceholder="Search plant…"
@@ -378,6 +419,18 @@ export default function SpareLoanCheckPageClient() {
               panelClassName="w-44"
               layout="inline"
             />
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                Call logged
+              </span>
+              <DateRangeSelector
+                value={loggedRange.label}
+                startDate={loggedRange.start}
+                endDate={loggedRange.end}
+                includeAllTime
+                onChange={(range) => setLoggedRange(range)}
+              />
+            </div>
             {summary ? (
               <div className="ml-auto flex flex-wrap gap-2 pb-1 text-[11px]">
                 {(Object.keys(REASON_LABEL) as SpareLoanProblemReason[]).map((key) => (

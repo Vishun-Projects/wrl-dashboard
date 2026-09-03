@@ -1,7 +1,10 @@
 export type SpareLoanMatchSource = 'loan' | 'con_rtn';
 
 /** Shown problems only — not_found is hidden; transferred counts as vendor_mismatch. */
-export type SpareLoanProblemReason = 'vendor_mismatch' | 'cancelled';
+export type SpareLoanProblemReason =
+  | 'vendor_mismatch'
+  | 'cancelled'
+  | 'unassigned_cancelled';
 
 export type Zss02ParsedRow = {
   plant: string;

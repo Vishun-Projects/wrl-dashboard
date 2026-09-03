@@ -102,13 +102,28 @@ describe('classifySpareLoanRow', () => {
     ).toBe('cancelled');
   });
 
+  it('flags unassigned_cancelled when CRM has no vendor', () => {
+    expect(
+      classifySpareLoanRow(
+        '305572',
+        call({
+          statusBucket: 'cancelled',
+          ncancelreason: 9,
+          cancelReason: 'NOT Required',
+          vendorCode: null,
+          vendorName: null,
+        })
+      )
+    ).toBe('unassigned_cancelled');
+  });
+
   it('treats transferred as vendor_mismatch', () => {
     expect(classifySpareLoanRow('300364', call({ transferred: true, ncancelreason: 2 }))).toBe(
       'vendor_mismatch'
     );
   });
 
-  it('prefers cancelled over vendor_mismatch', () => {
+  it('prefers cancelled over vendor_mismatch when CRM vendor present', () => {
     expect(
       classifySpareLoanRow(
         '999999',

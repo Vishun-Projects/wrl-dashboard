@@ -52,6 +52,7 @@ export function isLookupCancelled(call: SpareLoanCallLookup): boolean {
  * Classify one SAP row against CRM lookup.
  * Returns null when clean match or SO not in CRM (both hidden).
  * Transferred → vendor_mismatch (same bucket for display).
+ * Cancelled with no CRM vendor → unassigned_cancelled.
  */
 export function classifySpareLoanRow(
   htmlVendor: string,
@@ -61,7 +62,11 @@ export function classifySpareLoanRow(
   if (call.transferred) return 'vendor_mismatch';
   const cancelled = isLookupCancelled(call);
   const vendorOk = vendorsMatch(htmlVendor, call.vendorCode);
-  if (cancelled) return 'cancelled';
+  if (cancelled) {
+    const crmVendor = normalizeVendorCode(call.vendorCode ?? '');
+    if (!crmVendor) return 'unassigned_cancelled';
+    return 'cancelled';
+  }
   if (!vendorOk) return 'vendor_mismatch';
   return null;
 }

@@ -64,7 +64,7 @@ function emptySummary(): SpareLoanCheckSummary {
     skipped: 0,
     ok: 0,
     problems: 0,
-    byReason: { vendor_mismatch: 0, cancelled: 0 },
+    byReason: { vendor_mismatch: 0, cancelled: 0, unassigned_cancelled: 0 },
   };
 }
 
@@ -134,6 +134,7 @@ export async function loadSpareLoanPlant(
         byReason: {
           vendor_mismatch: Number(imp.by_reason?.vendor_mismatch) || 0,
           cancelled: Number(imp.by_reason?.cancelled) || 0,
+          unassigned_cancelled: Number(imp.by_reason?.unassigned_cancelled) || 0,
         },
       },
       rows: rows.map((r) => mapRow(r as Record<string, unknown>)),
@@ -173,6 +174,8 @@ export async function loadSpareLoanAllPlants(): Promise<{
       summary.problems += Number(imp.problems) || 0;
       summary.byReason.vendor_mismatch += Number(imp.by_reason?.vendor_mismatch) || 0;
       summary.byReason.cancelled += Number(imp.by_reason?.cancelled) || 0;
+      summary.byReason.unassigned_cancelled +=
+        Number(imp.by_reason?.unassigned_cancelled) || 0;
     }
 
     const { rows } = await client.query(

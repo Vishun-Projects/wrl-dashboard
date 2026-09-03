@@ -25,6 +25,7 @@ function emptyByReason(): Record<SpareLoanProblemReason, number> {
   return {
     vendor_mismatch: 0,
     cancelled: 0,
+    unassigned_cancelled: 0,
   };
 }
 

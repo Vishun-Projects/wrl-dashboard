@@ -18,6 +18,8 @@ interface DateRangeSelectorProps {
   startDate?: Date;
   endDate?: Date;
   onChange: (range: DateRange) => void;
+  /** Prepend All Time (no date window). Consumers should skip filtering when label is All Time. */
+  includeAllTime?: boolean;
 }
 
 const PANEL_WIDTH = 180;
@@ -28,7 +30,13 @@ function minPanelLeft(margin: number): number {
   return sidebar.getBoundingClientRect().right + margin;
 }
 
-export function DateRangeSelector({ value, startDate, endDate, onChange }: DateRangeSelectorProps) {
+export function DateRangeSelector({
+  value,
+  startDate,
+  endDate,
+  onChange,
+  includeAllTime = false,
+}: DateRangeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [portalReady, setPortalReady] = useState(false);
   const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({ visibility: 'hidden' });
@@ -36,6 +44,18 @@ export function DateRangeSelector({ value, startDate, endDate, onChange }: DateR
   const panelRef = useRef<HTMLDivElement>(null);
 
   const ranges = [
+    ...(includeAllTime
+      ? [
+          {
+            label: 'All Time',
+            getValue: () => ({
+              start: new Date(0),
+              end: new Date(),
+              label: 'All Time',
+            }),
+          },
+        ]
+      : []),
     {
       label: 'Today', getValue: () => {
         const d = new Date();
