@@ -4,7 +4,6 @@ import {
   bdMisSourcesFromSelection,
   buildBdMisRegionalRows,
   countTraceOpenCalls,
-  filterTraceRowsForOpenExport,
   filterTraceRowsForSummaryExport,
   filterTraceRowsForUnifiedOpenExport,
   sumBdMisRegionalGrand,
