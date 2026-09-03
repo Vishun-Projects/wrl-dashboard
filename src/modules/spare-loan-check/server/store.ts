@@ -32,8 +32,38 @@ function mapRow(row: Record<string, unknown>): SpareLoanProblemRow {
     matchSource: row.match_source === 'loan' ? 'loan' : 'con_rtn',
     crmVtrnno: row.crm_vtrnno == null ? null : String(row.crm_vtrnno),
     crmVendorCode: row.crm_vendor_code == null ? null : String(row.crm_vendor_code),
+    crmVendorName: row.crm_vendor_name == null ? null : String(row.crm_vendor_name),
     reason: String(row.reason) as SpareLoanProblemReason,
     cancelReason: row.cancel_reason == null ? null : String(row.cancel_reason),
+    callLoggedAt:
+      row.call_logged_at == null
+        ? null
+        : row.call_logged_at instanceof Date
+          ? row.call_logged_at.toISOString()
+          : String(row.call_logged_at),
+    lastEditedAt:
+      row.last_edited_at == null
+        ? null
+        : row.last_edited_at instanceof Date
+          ? row.last_edited_at.toISOString()
+          : String(row.last_edited_at),
+  };
+}
+
+const ROW_SELECT = `
+  plant, vendor_no, vendor_name, material, material_description, barcode,
+  so_loan, so_con_rtn, match_key, match_source,
+  crm_vtrnno, crm_vendor_code, crm_vendor_name, reason, cancel_reason,
+  call_logged_at, last_edited_at
+`;
+
+function emptySummary(): SpareLoanCheckSummary {
+  return {
+    parsed: 0,
+    skipped: 0,
+    ok: 0,
+    problems: 0,
+    byReason: { vendor_mismatch: 0, cancelled: 0 },
   };
 }
 
@@ -86,10 +116,7 @@ export async function loadSpareLoanPlant(
 
     const { rows } = await client.query(
       `
-      SELECT
-        plant, vendor_no, vendor_name, material, material_description, barcode,
-        so_loan, so_con_rtn, match_key, match_source,
-        crm_vtrnno, crm_vendor_code, reason, cancel_reason
+      SELECT ${ROW_SELECT}
       FROM spare_loan_check_rows
       WHERE plant = $1
       ORDER BY reason, match_key, vendor_no, material
@@ -97,20 +124,68 @@ export async function loadSpareLoanPlant(
       [key]
     );
 
-    const byReason = {
-      vendor_mismatch: Number(imp.by_reason?.vendor_mismatch) || 0,
-      cancelled: Number(imp.by_reason?.cancelled) || 0,
-    };
-
     return {
       summary: {
         parsed: Number(imp.parsed) || 0,
         skipped: Number(imp.skipped) || 0,
         ok: Number(imp.ok) || 0,
         problems: Number(imp.problems) || 0,
-        byReason,
+        byReason: {
+          vendor_mismatch: Number(imp.by_reason?.vendor_mismatch) || 0,
+          cancelled: Number(imp.by_reason?.cancelled) || 0,
+        },
       },
       rows: rows.map((r) => mapRow(r as Record<string, unknown>)),
+    };
+  });
+}
+
+/** Load all saved plants' problem rows (combined summary). */
+export async function loadSpareLoanAllPlants(): Promise<{
+  summary: SpareLoanCheckSummary;
+  rows: SpareLoanProblemRow[];
+  savedPlants: string[];
+}> {
+  return withAppClient(async (client) => {
+    const { rows: imports } = await client.query<{
+      plant: string;
+      parsed: number;
+      skipped: number;
+      ok: number;
+      problems: number;
+      by_reason: Record<string, number> | null;
+    }>(
+      `
+      SELECT plant, parsed, skipped, ok, problems, by_reason
+      FROM spare_loan_check_imports
+      ORDER BY plant
+      `
+    );
+
+    const summary = emptySummary();
+    const plants: string[] = [];
+    for (const imp of imports) {
+      plants.push(imp.plant);
+      summary.parsed += Number(imp.parsed) || 0;
+      summary.skipped += Number(imp.skipped) || 0;
+      summary.ok += Number(imp.ok) || 0;
+      summary.problems += Number(imp.problems) || 0;
+      summary.byReason.vendor_mismatch += Number(imp.by_reason?.vendor_mismatch) || 0;
+      summary.byReason.cancelled += Number(imp.by_reason?.cancelled) || 0;
+    }
+
+    const { rows } = await client.query(
+      `
+      SELECT ${ROW_SELECT}
+      FROM spare_loan_check_rows
+      ORDER BY plant, reason, match_key, vendor_no, material
+      `
+    );
+
+    return {
+      summary,
+      rows: rows.map((r) => mapRow(r as Record<string, unknown>)),
+      savedPlants: plants,
     };
   });
 }
@@ -159,7 +234,7 @@ export async function saveSpareLoanCheckByPlant(params: {
           let i = 1;
           for (const r of snap.rows) {
             placeholders.push(
-              `($${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++})`
+              `($${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++})`
             );
             values.push(
               plant,
@@ -174,8 +249,11 @@ export async function saveSpareLoanCheckByPlant(params: {
               r.matchSource,
               r.crmVtrnno,
               r.crmVendorCode,
+              r.crmVendorName,
               r.reason,
-              r.cancelReason
+              r.cancelReason,
+              r.callLoggedAt,
+              r.lastEditedAt
             );
           }
           await client.query(
@@ -183,7 +261,8 @@ export async function saveSpareLoanCheckByPlant(params: {
             INSERT INTO spare_loan_check_rows (
               plant, vendor_no, vendor_name, material, material_description, barcode,
               so_loan, so_con_rtn, match_key, match_source,
-              crm_vtrnno, crm_vendor_code, reason, cancel_reason
+              crm_vtrnno, crm_vendor_code, crm_vendor_name, reason, cancel_reason,
+              call_logged_at, last_edited_at
             ) VALUES ${placeholders.join(',')}
             `,
             values

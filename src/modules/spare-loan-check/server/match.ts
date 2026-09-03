@@ -85,7 +85,10 @@ export function toProblemRow(
     matchSource: match.source,
     crmVtrnno: call?.vtrnno ?? null,
     crmVendorCode: call?.vendorCode ?? null,
+    crmVendorName: call?.vendorName ?? null,
     reason,
     cancelReason: call?.cancelReason ?? null,
+    callLoggedAt: call?.loggedAt ?? null,
+    lastEditedAt: call?.lastEditedAt ?? null,
   };
 }

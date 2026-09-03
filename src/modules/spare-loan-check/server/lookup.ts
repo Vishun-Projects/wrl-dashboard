@@ -11,7 +11,17 @@ type MirrorRow = {
   ncancelreason: number | null;
   cancel_reason: string | null;
   vendor_code: string | null;
+  vendor_name: string | null;
+  logged_at: Date | null;
+  last_edited_at: Date | null;
 };
+
+function toIso(value: unknown): string | null {
+  if (value == null || value === '') return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
+  const d = new Date(String(value));
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
 
 export async function lookupCallsByVtrnno(
   keys: string[]
@@ -28,7 +38,10 @@ export async function lookupCallsByVtrnno(
         m.status_bucket::text AS status_bucket,
         m.ncancelreason,
         NULLIF(btrim(m.cancel_reason), '') AS cancel_reason,
-        NULLIF(btrim(fo.vsapvendorcode), '') AS vendor_code
+        NULLIF(btrim(fo.vsapvendorcode), '') AS vendor_code,
+        NULLIF(btrim(fo.vcompanyname), '') AS vendor_name,
+        m.logged_at,
+        COALESCE(m.cancelled_at, m.edited_at, m.source_editedon) AS last_edited_at
       FROM calls_crm_mirror m
       LEFT JOIN dim_offices fo ON fo.ncode = (
         CASE
@@ -48,10 +61,13 @@ export async function lookupCallsByVtrnno(
       map.set(key, {
         vtrnno: key,
         vendorCode: row.vendor_code,
+        vendorName: row.vendor_name,
         statusBucket: String(row.status_bucket ?? ''),
         ncancelreason: row.ncancelreason == null ? null : Number(row.ncancelreason),
         cancelReason: row.cancel_reason,
         transferred: false,
+        loggedAt: toIso(row.logged_at),
+        lastEditedAt: toIso(row.last_edited_at),
       });
     }
   });
@@ -59,36 +75,71 @@ export async function lookupCallsByVtrnno(
   const missing = unique.filter((k) => !map.has(k));
   if (missing.length === 0) return map;
 
-  const transferred = await probeTransferredInCrm(missing);
-  for (const key of transferred) {
-    map.set(key, {
-      vtrnno: key,
-      vendorCode: null,
-      statusBucket: 'transferred',
-      ncancelreason: 2,
-      cancelReason: null,
-      transferred: true,
-    });
+  // Best-effort only — CRM outages must not fail the whole import (mirror hits still save).
+  try {
+    const transferred = await probeTransferredInCrm(missing);
+    for (const [key, dates] of transferred) {
+      map.set(key, {
+        vtrnno: key,
+        vendorCode: null,
+        vendorName: null,
+        statusBucket: 'transferred',
+        ncancelreason: 2,
+        cancelReason: null,
+        transferred: true,
+        loggedAt: dates.loggedAt,
+        lastEditedAt: dates.lastEditedAt,
+      });
+    }
+  } catch (err) {
+    console.warn(
+      '[spare-loan-check] CRM transfer probe skipped:',
+      err instanceof Error ? err.message : err
+    );
   }
 
   return map;
 }
 
-async function probeTransferredInCrm(keys: string[]): Promise<Set<string>> {
-  const found = new Set<string>();
-  for (let i = 0; i < keys.length; i += CRM_CHUNK) {
-    const chunk = keys.slice(i, i + CRM_CHUNK);
+async function probeTransferredInCrm(
+  keys: string[]
+): Promise<Map<string, { loggedAt: string | null; lastEditedAt: string | null }>> {
+  const found = new Map<string, { loggedAt: string | null; lastEditedAt: string | null }>();
+  // Cap CRM traffic: large ZSS02 files have thousands of SOs absent from mirror.
+  const MAX_KEYS = 400;
+  const toProbe = keys.length > MAX_KEYS ? keys.slice(0, MAX_KEYS) : keys;
+  if (keys.length > MAX_KEYS) {
+    console.warn(
+      `[spare-loan-check] transfer probe capped at ${MAX_KEYS}/${keys.length} missing SOs`
+    );
+  }
+
+  for (let i = 0; i < toProbe.length; i += CRM_CHUNK) {
+    const chunk = toProbe.slice(i, i + CRM_CHUNK);
     const inList = chunk.map((k) => `'${escapeSqlLiteral(k)}'`).join(',');
-    const res = await postQuery({
-      fields: 'vtrnno, vtransfercallno, ncancelreason',
-      tableName: 'trhcalls',
-      condition: `vtrnno IN (${inList}) AND (ISNULL(ncancelreason, 0) = 2 OR (vtransfercallno IS NOT NULL AND vtransfercallno <> ''))`,
-    });
-    for (const row of res.data ?? []) {
-      const key = String(row.vtrnno ?? '')
-        .trim()
-        .toUpperCase();
-      if (key) found.add(key);
+    try {
+      const res = await postQuery({
+        fields:
+          'vtrnno, vtransfercallno, ncancelreason, CONVERT(varchar(30), dtrndate, 126) as dtrndate, CONVERT(varchar(30), editedon, 126) as editedon',
+        tableName: 'trhcalls',
+        condition: `vtrnno IN (${inList}) AND (ISNULL(ncancelreason, 0) = 2 OR (vtransfercallno IS NOT NULL AND vtransfercallno <> ''))`,
+      });
+      for (const row of res.data ?? []) {
+        const key = String(row.vtrnno ?? '')
+          .trim()
+          .toUpperCase();
+        if (!key) continue;
+        found.set(key, {
+          loggedAt: toIso(row.dtrndate),
+          lastEditedAt: toIso(row.editedon),
+        });
+      }
+    } catch (err) {
+      console.warn(
+        '[spare-loan-check] CRM transfer chunk failed — stopping further CRM probes:',
+        err instanceof Error ? err.message : err
+      );
+      break;
     }
   }
   return found;

@@ -4,6 +4,7 @@ import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { runSpareLoanCheck } from '@/modules/spare-loan-check/server/run-check';
 import {
   listSpareLoanSavedPlants,
+  loadSpareLoanAllPlants,
   loadSpareLoanPlant,
 } from '@/modules/spare-loan-check/server/store';
 
@@ -28,7 +29,12 @@ export async function GET(req: NextRequest) {
 
     if (mode === 'rows') {
       if (!plant) {
-        return NextResponse.json({ error: 'plant is required' }, { status: 400 });
+        const loaded = await loadSpareLoanAllPlants();
+        return NextResponse.json({
+          summary: loaded.summary,
+          rows: loaded.rows,
+          savedPlants: loaded.savedPlants,
+        });
       }
       const loaded = await loadSpareLoanPlant(plant);
       if (!loaded) {

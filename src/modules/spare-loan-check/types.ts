@@ -23,10 +23,15 @@ export type Zss02ParsedRow = {
 export type SpareLoanCallLookup = {
   vtrnno: string;
   vendorCode: string | null;
+  vendorName: string | null;
   statusBucket: string;
   ncancelreason: number | null;
   cancelReason: string | null;
   transferred: boolean;
+  /** Call log date (ISO). */
+  loggedAt: string | null;
+  /** Cancel / transfer / last CRM edit (ISO). */
+  lastEditedAt: string | null;
 };
 
 export type SpareLoanProblemRow = {
@@ -42,8 +47,11 @@ export type SpareLoanProblemRow = {
   matchSource: SpareLoanMatchSource;
   crmVtrnno: string | null;
   crmVendorCode: string | null;
+  crmVendorName: string | null;
   reason: SpareLoanProblemReason;
   cancelReason: string | null;
+  callLoggedAt: string | null;
+  lastEditedAt: string | null;
 };
 
 export type SpareLoanCheckSummary = {

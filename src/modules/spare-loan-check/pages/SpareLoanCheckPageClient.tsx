@@ -6,6 +6,8 @@ import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import { AdminTable, AdminTableCard, AdminTd, AdminTh, AdminThead, AdminTr } from '@/components/admin/AdminUi';
 import { FilterSelect } from '@/components/filters/FilterSelect';
 import type { FilterSelectOption } from '@/components/filters/filter-select-types';
+import { formatUiDateDash } from '@/lib/dates/ui-date';
+import { useTableSort } from '@/lib/ui/table-sort';
 import { feedback } from '@/lib/ui/feedback';
 import type {
   SpareLoanCheckResponse,
@@ -19,6 +21,24 @@ const REASON_LABEL: Record<SpareLoanProblemReason, string> = {
   vendor_mismatch: 'Vendor mismatch',
   cancelled: 'Cancelled',
 };
+
+type SortKey =
+  | 'plant'
+  | 'vendorNo'
+  | 'material'
+  | 'materialDescription'
+  | 'matchKey'
+  | 'matchSource'
+  | 'crmVendorCode'
+  | 'callLoggedAt'
+  | 'lastEditedAt'
+  | 'reason'
+  | 'cancelReason';
+
+const REASON_OPTIONS: FilterSelectOption[] = [
+  { value: 'vendor_mismatch', label: 'Vendor mismatch' },
+  { value: 'cancelled', label: 'Cancelled' },
+];
 
 type SavedPlantOption = {
   plant: string;
@@ -56,6 +76,9 @@ function downloadProblemsCsv(rows: SpareLoanProblemRow[]) {
     'SO',
     'Match Source',
     'CRM Vendor',
+    'CRM Vendor Name',
+    'Call Logged',
+    'Last Edited',
     'Reason',
     'Cancel Reason',
   ];
@@ -74,6 +97,9 @@ function downloadProblemsCsv(rows: SpareLoanProblemRow[]) {
         r.matchKey,
         r.matchSource,
         r.crmVendorCode ?? '',
+        r.crmVendorName ?? '',
+        r.callLoggedAt ?? '',
+        r.lastEditedAt ?? '',
         r.reason,
         r.cancelReason ?? '',
       ]
@@ -90,6 +116,11 @@ function downloadProblemsCsv(rows: SpareLoanProblemRow[]) {
   URL.revokeObjectURL(url);
 }
 
+function pickSingle(values: string[]): string {
+  if (values.length === 0) return '';
+  return values[values.length - 1] ?? '';
+}
+
 export default function SpareLoanCheckPageClient() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState('');
@@ -98,25 +129,99 @@ export default function SpareLoanCheckPageClient() {
   const [result, setResult] = useState<SpareLoanCheckResponse | null>(null);
   const [savedPlants, setSavedPlants] = useState<SavedPlantOption[]>([]);
   const [plantFilter, setPlantFilter] = useState('');
+  const [reasonFilter, setReasonFilter] = useState('');
+  const [vendorFilter, setVendorFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
+  const { sort, onSort, sorted } = useTableSort<SortKey>(null);
 
-  const rows = result?.rows ?? [];
+  const allRows = result?.rows ?? [];
   const summary = result?.summary;
 
   const plantOptions = useMemo<FilterSelectOption[]>(
     () =>
       savedPlants.map((p) => ({
         value: p.plant,
-        label: `${p.plant} (${p.problems} problems)`,
+        label: `${p.plant} (${p.problems})`,
       })),
     [savedPlants]
   );
+
+  const vendorOptions = useMemo<FilterSelectOption[]>(() => {
+    const map = new Map<string, string>();
+    for (const r of allRows) {
+      if (!r.vendorNo) continue;
+      if (!map.has(r.vendorNo)) {
+        map.set(r.vendorNo, r.vendorName ? `${r.vendorNo} — ${r.vendorName}` : r.vendorNo);
+      }
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([value, label]) => ({ value, label }));
+  }, [allRows]);
+
+  const sourceOptions = useMemo<FilterSelectOption[]>(
+    () => [
+      { value: 'loan', label: 'Loan' },
+      { value: 'con_rtn', label: 'Con/Rtn' },
+    ],
+    []
+  );
+
+  const filteredRows = useMemo(() => {
+    return allRows.filter((r) => {
+      if (reasonFilter && r.reason !== reasonFilter) return false;
+      if (vendorFilter && r.vendorNo !== vendorFilter) return false;
+      if (sourceFilter && r.matchSource !== sourceFilter) return false;
+      return true;
+    });
+  }, [allRows, reasonFilter, vendorFilter, sourceFilter]);
+
+  function sortValue(row: SpareLoanProblemRow, key: SortKey): unknown {
+    switch (key) {
+      case 'plant':
+        return row.plant;
+      case 'vendorNo':
+        return row.vendorNo;
+      case 'material':
+        return row.material;
+      case 'materialDescription':
+        return row.materialDescription;
+      case 'matchKey':
+        return row.matchKey;
+      case 'matchSource':
+        return row.matchSource;
+      case 'crmVendorCode':
+        return row.crmVendorCode;
+      case 'callLoggedAt':
+        return row.callLoggedAt;
+      case 'lastEditedAt':
+        return row.lastEditedAt;
+      case 'reason':
+        return row.reason;
+      case 'cancelReason':
+        return row.cancelReason;
+      default:
+        return null;
+    }
+  }
+
+  const rows = useMemo(
+    () => sorted(filteredRows, sortValue),
+    [filteredRows, sorted]
+  );
+
+  const filteredByReason = useMemo(() => {
+    const counts = { vendor_mismatch: 0, cancelled: 0 };
+    for (const r of filteredRows) counts[r.reason] += 1;
+    return counts;
+  }, [filteredRows]);
 
   const subtitle = useMemo(() => {
     if (!summary) {
       return 'Upload a plant HTML report. Only vendor mismatches and cancelled calls are shown.';
     }
-    return `Parsed ${summary.parsed.toLocaleString()} · skipped ${summary.skipped.toLocaleString()} · ok ${summary.ok.toLocaleString()} · problems ${summary.problems.toLocaleString()}`;
-  }, [summary]);
+    return `Parsed ${summary.parsed.toLocaleString()} · skipped ${summary.skipped.toLocaleString()} · ok ${summary.ok.toLocaleString()} · problems ${summary.problems.toLocaleString()} · showing ${rows.length.toLocaleString()}`;
+  }, [summary, rows.length]);
 
   const refreshPlants = useCallback(async () => {
     try {
@@ -132,29 +237,30 @@ export default function SpareLoanCheckPageClient() {
     }
   }, []);
 
-  useEffect(() => {
-    void refreshPlants();
-  }, [refreshPlants]);
-
-  async function loadPlant(plant: string) {
-    if (!plant) {
-      setResult(null);
-      return;
-    }
+  const loadRows = useCallback(async (plant: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`${API}?mode=rows&plant=${encodeURIComponent(plant)}`, {
-        credentials: 'include',
-      });
+      const qs = plant
+        ? `mode=rows&plant=${encodeURIComponent(plant)}`
+        : 'mode=rows';
+      const res = await fetch(`${API}?${qs}`, { credentials: 'include' });
       const data = await readApiJson(res);
-      if (!res.ok) throw new Error(String(data.error || 'Failed to load plant'));
+      if (!res.ok) throw new Error(String(data.error || 'Failed to load rows'));
       setResult(data as unknown as SpareLoanCheckResponse);
     } catch (err) {
-      feedback.actionFailed(err instanceof Error ? err.message : 'Failed to load plant');
+      feedback.actionFailed(err instanceof Error ? err.message : 'Failed to load rows');
+      setResult(null);
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      await refreshPlants();
+      await loadRows('');
+    })();
+  }, [refreshPlants, loadRows]);
 
   async function runCheck() {
     if (!file) {
@@ -176,10 +282,11 @@ export default function SpareLoanCheckPageClient() {
       const plants = payload.savedPlants ?? [];
       const plantNote = plants.length ? ` · saved plant(s) ${plants.join(', ')}` : '';
       feedback.actionSuccess(`Found ${payload.summary.problems} problem row(s)${plantNote}`);
-      const refreshed = await refreshPlants();
-      if (plants[0] && refreshed.some((p) => p.plant === plants[0])) {
-        setPlantFilter(plants[0]);
-      }
+      await refreshPlants();
+      if (plants[0]) setPlantFilter(plants[0]);
+      setReasonFilter('');
+      setVendorFilter('');
+      setSourceFilter('');
     } catch (err) {
       feedback.actionFailed(err instanceof Error ? err.message : 'Check failed');
     } finally {
@@ -191,6 +298,71 @@ export default function SpareLoanCheckPageClient() {
     <PageShell
       title="Spare Loan Check "
       subtitle={subtitle}
+      toolbar={
+        <div className="register-filter-bar border-b border-slate-200 px-4 py-2">
+          <div className="flex flex-wrap items-end gap-3">
+            <FilterSelect
+              label="Plant"
+              emptyLabel="All plants"
+              options={plantOptions}
+              selected={plantFilter ? [plantFilter] : []}
+              mode="single"
+              onChange={(values) => {
+                const next = pickSingle(values);
+                setPlantFilter(next);
+                setVendorFilter('');
+                void loadRows(next);
+              }}
+              searchPlaceholder="Search plant…"
+              panelClassName="w-56"
+              layout="inline"
+            />
+            <FilterSelect
+              label="Reason"
+              emptyLabel="All reasons"
+              options={REASON_OPTIONS}
+              selected={reasonFilter ? [reasonFilter] : []}
+              mode="single"
+              onChange={(values) => setReasonFilter(pickSingle(values))}
+              panelClassName="w-48"
+              layout="inline"
+            />
+            <FilterSelect
+              label="Vendor"
+              emptyLabel="All vendors"
+              options={vendorOptions}
+              selected={vendorFilter ? [vendorFilter] : []}
+              mode="single"
+              onChange={(values) => setVendorFilter(pickSingle(values))}
+              searchPlaceholder="Search vendor…"
+              panelClassName="w-72"
+              layout="inline"
+            />
+            <FilterSelect
+              label="SO source"
+              emptyLabel="Loan or Con/Rtn"
+              options={sourceOptions}
+              selected={sourceFilter ? [sourceFilter] : []}
+              mode="single"
+              onChange={(values) => setSourceFilter(pickSingle(values))}
+              panelClassName="w-44"
+              layout="inline"
+            />
+            {summary ? (
+              <div className="ml-auto flex flex-wrap gap-2 pb-1 text-[11px]">
+                {(Object.keys(REASON_LABEL) as SpareLoanProblemReason[]).map((key) => (
+                  <span
+                    key={key}
+                    className="rounded-md border border-rose-100 bg-rose-50 px-2 py-1 text-rose-800"
+                  >
+                    {REASON_LABEL[key]}: {filteredByReason[key].toLocaleString()}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      }
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -202,7 +374,6 @@ export default function SpareLoanCheckPageClient() {
               const next = e.target.files?.[0] ?? null;
               setFile(next);
               setFileName(next?.name ?? '');
-              setResult(null);
             }}
           />
           <button
@@ -237,76 +408,118 @@ export default function SpareLoanCheckPageClient() {
     >
       <PageScrollRegion>
         <div className="p-3">
-          <div className="mb-3 flex flex-wrap items-end gap-3">
-            <FilterSelect
-              label="Saved plant"
-              emptyLabel="All / latest upload"
-              options={plantOptions}
-              selected={plantFilter ? [plantFilter] : []}
-              mode="single"
-              onChange={(values) => {
-                const next = values[values.length - 1] ?? '';
-                setPlantFilter(next);
-                void loadPlant(next);
-              }}
-              searchPlaceholder="Search plant…"
-              panelClassName="w-56"
-              layout="inline"
-            />
-            {summary ? (
-              <div className="flex flex-wrap gap-2 text-[11px] pb-1">
-                {(Object.keys(REASON_LABEL) as SpareLoanProblemReason[]).map((key) => (
-                  <span
-                    key={key}
-                    className="rounded-md border border-rose-100 bg-rose-50 px-2 py-1 text-rose-800"
-                  >
-                    {REASON_LABEL[key]}: {summary.byReason[key].toLocaleString()}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-          </div>
-
           <AdminTableCard
             isEmpty={!loading && rows.length === 0}
             empty={
               <p className="p-6 text-sm text-slate-500">
                 {result
-                  ? 'No problem rows — all keyed SOs matched vendor and are active.'
-                  : plantFilter
-                    ? 'No saved rows for this plant.'
-                    : 'Upload a HTML file and run the check, or pick a saved plant.'}
+                  ? 'No rows match the current filters.'
+                  : 'Upload a HTML file and run the check, or pick a saved plant.'}
               </p>
             }
           >
             <AdminTable>
               <AdminThead>
                 <tr>
-                  <AdminTh>Plant</AdminTh>
-                  <AdminTh>Vendor (Stock issued to)</AdminTh>
-                  <AdminTh>Material</AdminTh>
-                  <AdminTh>Material Description</AdminTh>
-                  <AdminTh>SO</AdminTh>
-                  <AdminTh>Source</AdminTh>
-                  <AdminTh>CRM Vendor</AdminTh>
-                  <AdminTh>Reason</AdminTh>
-                  <AdminTh>Cancel Reason</AdminTh>
+                  <AdminTh sortable sortKey="plant" sort={sort} onSort={(k) => onSort(k as SortKey)}>
+                    Plant
+                  </AdminTh>
+                  <AdminTh
+                    sortable
+                    sortKey="vendorNo"
+                    sort={sort}
+                    onSort={(k) => onSort(k as SortKey)}
+                  >
+                    Vendor (Stock issued to)
+                  </AdminTh>
+                  <AdminTh
+                    sortable
+                    sortKey="material"
+                    sort={sort}
+                    onSort={(k) => onSort(k as SortKey)}
+                  >
+                    Material
+                  </AdminTh>
+                  <AdminTh
+                    sortable
+                    sortKey="materialDescription"
+                    sort={sort}
+                    onSort={(k) => onSort(k as SortKey)}
+                  >
+                    Material Description
+                  </AdminTh>
+                  <AdminTh
+                    sortable
+                    sortKey="matchKey"
+                    sort={sort}
+                    onSort={(k) => onSort(k as SortKey)}
+                  >
+                    SO
+                  </AdminTh>
+                  <AdminTh
+                    sortable
+                    sortKey="matchSource"
+                    sort={sort}
+                    onSort={(k) => onSort(k as SortKey)}
+                  >
+                    Source
+                  </AdminTh>
+                  <AdminTh
+                    sortable
+                    sortKey="crmVendorCode"
+                    sort={sort}
+                    onSort={(k) => onSort(k as SortKey)}
+                  >
+                    CRM Vendor
+                  </AdminTh>
+                  <AdminTh
+                    sortable
+                    sortKey="callLoggedAt"
+                    sort={sort}
+                    onSort={(k) => onSort(k as SortKey, 'desc')}
+                  >
+                    Call logged
+                  </AdminTh>
+                  <AdminTh
+                    sortable
+                    sortKey="lastEditedAt"
+                    sort={sort}
+                    onSort={(k) => onSort(k as SortKey, 'desc')}
+                  >
+                    Cancel / transfer edit
+                  </AdminTh>
+                  <AdminTh sortable sortKey="reason" sort={sort} onSort={(k) => onSort(k as SortKey)}>
+                    Reason
+                  </AdminTh>
+                  <AdminTh
+                    sortable
+                    sortKey="cancelReason"
+                    sort={sort}
+                    onSort={(k) => onSort(k as SortKey)}
+                  >
+                    Cancel Reason
+                  </AdminTh>
                 </tr>
               </AdminThead>
               <tbody>
                 {loading ? (
                   <AdminTr>
-                    <td className="px-4 py-3 text-[12px] text-slate-500" colSpan={9}>
+                    <td className="px-4 py-3 text-[12px] text-slate-500" colSpan={11}>
                       Loading…
                     </td>
                   </AdminTr>
                 ) : (
-                  rows.map((r, i) => (
+                  rows.map((r, i) => {
+                    const vendorMismatch = r.reason === 'vendor_mismatch';
+                    const nameHighlight = vendorMismatch
+                      ? 'text-[10px] font-medium text-rose-700'
+                      : 'text-[10px] text-slate-500';
+                    return (
                     <AdminTr key={`${r.matchKey}-${r.vendorNo}-${r.material}-${i}`}>
                       <AdminTd className="font-mono text-[11px]">{r.plant}</AdminTd>
                       <AdminTd>
                         <div className="font-mono text-[11px]">{r.vendorNo}</div>
-                        <div className="text-[10px] text-slate-500">{r.vendorName}</div>
+                        <div className={nameHighlight}>{r.vendorName || '—'}</div>
                       </AdminTd>
                       <AdminTd className="font-mono text-[11px]">{r.material}</AdminTd>
                       <AdminTd className="max-w-[220px] text-[11px]">{r.materialDescription || '—'}</AdminTd>
@@ -314,7 +527,16 @@ export default function SpareLoanCheckPageClient() {
                       <AdminTd className="text-[11px]">
                         {r.matchSource === 'loan' ? 'Loan' : 'Con/Rtn'}
                       </AdminTd>
-                      <AdminTd className="font-mono text-[11px]">{r.crmVendorCode ?? '—'}</AdminTd>
+                      <AdminTd>
+                        <div className="font-mono text-[11px]">{r.crmVendorCode ?? '—'}</div>
+                        <div className={nameHighlight}>{r.crmVendorName || '—'}</div>
+                      </AdminTd>
+                      <AdminTd className="whitespace-nowrap text-[11px]">
+                        {r.callLoggedAt ? formatUiDateDash(r.callLoggedAt) || '—' : '—'}
+                      </AdminTd>
+                      <AdminTd className="whitespace-nowrap text-[11px]">
+                        {r.lastEditedAt ? formatUiDateDash(r.lastEditedAt) || '—' : '—'}
+                      </AdminTd>
                       <AdminTd>
                         <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[11px] font-medium text-rose-800">
                           {REASON_LABEL[r.reason]}
@@ -324,7 +546,8 @@ export default function SpareLoanCheckPageClient() {
                         {r.cancelReason ?? '—'}
                       </AdminTd>
                     </AdminTr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </AdminTable>

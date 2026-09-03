@@ -11,10 +11,13 @@ function call(partial: Partial<SpareLoanCallLookup>): SpareLoanCallLookup {
   return {
     vtrnno: '25B22681',
     vendorCode: '300364',
+    vendorName: 'MOHAN C',
     statusBucket: 'closed',
     ncancelreason: 0,
     cancelReason: null,
     transferred: false,
+    loggedAt: '2025-02-25T10:00:00.000Z',
+    lastEditedAt: '2025-03-01T12:00:00.000Z',
     ...partial,
   };
 }
