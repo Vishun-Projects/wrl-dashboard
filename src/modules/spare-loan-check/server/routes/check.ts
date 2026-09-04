@@ -1,6 +1,8 @@
+import { gunzipSync } from 'zlib';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
+import { isGzipBuffer } from '@/modules/mis/client-import/services/upload-gzip';
 import { enrichMissingItemCategories } from '@/modules/spare-loan-check/server/item-category';
 import { runSpareLoanCheck } from '@/modules/spare-loan-check/server/run-check';
 import {
@@ -12,7 +14,21 @@ import {
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+/** Decompressed HTML ceiling (client gzips on the wire for Vercel payload limits). */
+const MAX_HTML_BYTES = 32 * 1024 * 1024;
+
+function inflateUpload(buffer: Buffer, contentEncoding: string | null): Buffer {
+  const encoding = (contentEncoding ?? '').trim().toLowerCase();
+  if (encoding !== 'gzip' && !isGzipBuffer(buffer)) return buffer;
+  try {
+    return gunzipSync(buffer);
+  } catch {
+    if (encoding === 'gzip') {
+      throw new Error('Upload claimed gzip encoding but could not be decompressed');
+    }
+    return buffer;
+  }
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -69,7 +85,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'Upload too large or invalid form data. Restart the dev server if this persists (large HTML needs body size allowance).',
+            'Upload too large for the server. Retry — large HTML is gzipped automatically. If it still fails, split by plant.',
         },
         { status: 413 }
       );
@@ -80,19 +96,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing file' }, { status: 400 });
     }
 
-    const name = file.name.toLowerCase();
+    const originalName = String(formData.get('fileName') ?? file.name).trim() || file.name;
+    const name = originalName.toLowerCase();
     if (!name.endsWith('.htm') && !name.endsWith('.html')) {
       return NextResponse.json({ error: 'Upload a .htm or .html report' }, { status: 400 });
     }
 
-    if (file.size > MAX_UPLOAD_BYTES) {
-      return NextResponse.json({ error: 'File exceeds 20 MB limit' }, { status: 413 });
+    const contentEncoding = String(formData.get('contentEncoding') ?? '').trim() || null;
+    const raw = Buffer.from(await file.arrayBuffer());
+    const buffer = inflateUpload(raw, contentEncoding);
+
+    if (buffer.byteLength > MAX_HTML_BYTES) {
+      return NextResponse.json(
+        { error: `Decompressed file exceeds ${MAX_HTML_BYTES / (1024 * 1024)} MB limit` },
+        { status: 413 }
+      );
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
     const html = buffer.toString('utf8');
     const result = await runSpareLoanCheck(html, {
-      fileName: file.name,
+      fileName: originalName,
       uploadedBy: auth.userId,
     });
     return NextResponse.json(result);

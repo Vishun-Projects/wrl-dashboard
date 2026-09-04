@@ -11,6 +11,7 @@ import { formatUiDateDash, UI_DATE_TIMEZONE } from '@/lib/dates/ui-date';
 import { useTableSort } from '@/lib/ui/table-sort';
 import { feedback } from '@/lib/ui/feedback';
 import { DateRangeSelector } from '@/modules/mis/register/components/DateRangeSelector';
+import { gzipBlobForMisUpload } from '@/modules/mis/client-import/services/upload-gzip';
 import type {
   SpareLoanCheckResponse,
   SpareLoanProblemReason,
@@ -350,18 +351,31 @@ export default function SpareLoanCheckPageClient() {
     setLoading(true);
     setResult(null);
     try {
+      // Vercel rejects ~4.5MB+ bodies (Function_Payload_Too_Large). Gzip HTML first.
+      const { blob: wireBlob, encoding } = await gzipBlobForMisUpload(file);
       const form = new FormData();
-      form.set('file', file);
+      form.set('file', wireBlob, file.name);
+      form.set('fileName', file.name);
+      if (encoding) form.set('contentEncoding', encoding);
       const res = await fetch(API, { method: 'POST', body: form, credentials: 'include' });
       const data = await readApiJson(res);
       if (!res.ok) {
-        throw new Error(String(data.error || `Check failed (${res.status})`));
+        const rawErr = String(data.error || `Check failed (${res.status})`);
+        if (
+          res.status === 413 ||
+          /payload.?too.?large|entity too large|function_payload/i.test(rawErr)
+        ) {
+          throw new Error(
+            'File still too large after compression. Split the SAP report by plant and upload separately.'
+          );
+        }
+        throw new Error(rawErr);
       }
-      const payload = data as unknown as SpareLoanCheckResponse;
-      setResult(payload);
-      const plants = payload.savedPlants ?? [];
+      const checkResult = data as unknown as SpareLoanCheckResponse;
+      setResult(checkResult);
+      const plants = checkResult.savedPlants ?? [];
       const plantNote = plants.length ? ` · saved plant(s) ${plants.join(', ')}` : '';
-      feedback.actionSuccess(`Found ${payload.summary.problems} problem row(s)${plantNote}`);
+      feedback.actionSuccess(`Found ${checkResult.summary.problems} problem row(s)${plantNote}`);
       await refreshPlants();
       if (plants[0]) setPlantFilter(plants[0]);
       setReasonFilter('');
@@ -371,7 +385,14 @@ export default function SpareLoanCheckPageClient() {
       setLoggedRange(ALL_TIME_RANGE);
       setSearch('');
     } catch (err) {
-      feedback.actionFailed(err instanceof Error ? err.message : 'Check failed');
+      const msg = err instanceof Error ? err.message : 'Check failed';
+      if (/payload.?too.?large|entity too large|function_payload/i.test(msg)) {
+        feedback.actionFailed(
+          'File still too large after compression. Split the SAP report by plant and upload separately.'
+        );
+      } else {
+        feedback.actionFailed(msg);
+      }
     } finally {
       setLoading(false);
     }
