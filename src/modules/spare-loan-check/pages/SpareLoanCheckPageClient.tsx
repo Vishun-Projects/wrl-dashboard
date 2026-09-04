@@ -31,6 +31,7 @@ type SortKey =
   | 'material'
   | 'materialDescription'
   | 'itemCategory'
+  | 'barcode'
   | 'matchKey'
   | 'matchSource'
   | 'crmVendorCode'
@@ -162,6 +163,7 @@ export default function SpareLoanCheckPageClient() {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
   const [loggedRange, setLoggedRange] = useState<CallLoggedRange>(ALL_TIME_RANGE);
+  const [search, setSearch] = useState('');
   const { sort, onSort, sorted } = useTableSort<SortKey>(null);
 
   const allRows = result?.rows ?? [];
@@ -212,6 +214,7 @@ export default function SpareLoanCheckPageClient() {
     const applyLogged = loggedRange.label !== 'All Time';
     const from = applyLogged ? formatLocalDate(loggedRange.start) : '';
     const to = applyLogged ? formatLocalDate(loggedRange.end) : '';
+    const q = search.trim().toUpperCase();
     return allRows.filter((r) => {
       if (reasonFilter && r.reason !== reasonFilter) return false;
       if (vendorFilter && r.vendorNo !== vendorFilter) return false;
@@ -223,9 +226,28 @@ export default function SpareLoanCheckPageClient() {
         if (from && day < from) return false;
         if (to && day > to) return false;
       }
+      if (q) {
+        const hay = [
+          r.matchKey,
+          r.soLoan,
+          r.soConRtn,
+          r.barcode,
+        ]
+          .join(' ')
+          .toUpperCase();
+        if (!hay.includes(q)) return false;
+      }
       return true;
     });
-  }, [allRows, reasonFilter, vendorFilter, categoryFilter, sourceFilter, loggedRange]);
+  }, [
+    allRows,
+    reasonFilter,
+    vendorFilter,
+    categoryFilter,
+    sourceFilter,
+    loggedRange,
+    search,
+  ]);
   function sortValue(row: SpareLoanProblemRow, key: SortKey): unknown {
     switch (key) {
       case 'plant':
@@ -238,6 +260,8 @@ export default function SpareLoanCheckPageClient() {
         return row.materialDescription;
       case 'itemCategory':
         return row.itemCategory;
+      case 'barcode':
+        return row.barcode;
       case 'matchKey':
         return row.matchKey;
       case 'matchSource':
@@ -345,6 +369,7 @@ export default function SpareLoanCheckPageClient() {
       setCategoryFilter('');
       setSourceFilter('');
       setLoggedRange(ALL_TIME_RANGE);
+      setSearch('');
     } catch (err) {
       feedback.actionFailed(err instanceof Error ? err.message : 'Check failed');
     } finally {
@@ -359,6 +384,18 @@ export default function SpareLoanCheckPageClient() {
       toolbar={
         <div className="register-filter-bar border-b border-slate-200 px-4 py-2">
           <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                Search
+              </span>
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="SO / call no or barcode…"
+                className="h-8 w-56 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] text-slate-800 placeholder:text-slate-400"
+              />
+            </div>
             <FilterSelect
               label="Plant"
               emptyLabel="All plants"
@@ -371,6 +408,7 @@ export default function SpareLoanCheckPageClient() {
                 setVendorFilter('');
                 setCategoryFilter('');
                 setLoggedRange(ALL_TIME_RANGE);
+                setSearch('');
                 void loadRows(next);
               }}
               searchPlaceholder="Search plant…"
@@ -541,6 +579,14 @@ export default function SpareLoanCheckPageClient() {
                   </AdminTh>
                   <AdminTh
                     sortable
+                    sortKey="barcode"
+                    sort={sort}
+                    onSort={(k) => onSort(k as SortKey)}
+                  >
+                    Barcode
+                  </AdminTh>
+                  <AdminTh
+                    sortable
                     sortKey="matchKey"
                     sort={sort}
                     onSort={(k) => onSort(k as SortKey)}
@@ -595,7 +641,7 @@ export default function SpareLoanCheckPageClient() {
               <tbody>
                 {loading ? (
                   <AdminTr>
-                    <td className="px-4 py-3 text-[12px] text-slate-500" colSpan={12}>
+                    <td className="px-4 py-3 text-[12px] text-slate-500" colSpan={13}>
                       Loading…
                     </td>
                   </AdminTr>
@@ -615,6 +661,7 @@ export default function SpareLoanCheckPageClient() {
                       <AdminTd className="font-mono text-[11px]">{r.material}</AdminTd>
                       <AdminTd className="max-w-[220px] text-[11px]">{r.materialDescription || '—'}</AdminTd>
                       <AdminTd className="text-[11px]">{r.itemCategory || '—'}</AdminTd>
+                      <AdminTd className="font-mono text-[11px]">{r.barcode || '—'}</AdminTd>
                       <AdminTd className="font-mono text-[11px]">{r.matchKey}</AdminTd>
                       <AdminTd className="text-[11px]">
                         {r.matchSource === 'loan' ? 'Loan' : 'Con/Rtn'}
