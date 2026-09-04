@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
+import { enrichMissingItemCategories } from '@/modules/spare-loan-check/server/item-category';
 import { runSpareLoanCheck } from '@/modules/spare-loan-check/server/run-check';
 import {
   listSpareLoanSavedPlants,
@@ -30,9 +31,10 @@ export async function GET(req: NextRequest) {
     if (mode === 'rows') {
       if (!plant) {
         const loaded = await loadSpareLoanAllPlants();
+        const rows = await enrichMissingItemCategories(loaded.rows);
         return NextResponse.json({
           summary: loaded.summary,
-          rows: loaded.rows,
+          rows,
           savedPlants: loaded.savedPlants,
         });
       }
@@ -40,9 +42,10 @@ export async function GET(req: NextRequest) {
       if (!loaded) {
         return NextResponse.json({ error: `No saved import for plant ${plant}` }, { status: 404 });
       }
+      const rows = await enrichMissingItemCategories(loaded.rows);
       return NextResponse.json({
         summary: loaded.summary,
-        rows: loaded.rows,
+        rows,
         savedPlants: [plant],
       });
     }
