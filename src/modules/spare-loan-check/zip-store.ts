@@ -107,5 +107,7 @@ export function buildStoreZip(files: ZipStoreFile[]): Blob {
     u16(0),
   ]);
 
-  return new Blob([concat([...localParts, central, end])], { type: 'application/zip' });
+  const bytes = concat([...localParts, central, end]);
+  // Copy into a fresh ArrayBuffer-backed view for BlobPart typing.
+  return new Blob([new Uint8Array(bytes)], { type: 'application/zip' });
 }
