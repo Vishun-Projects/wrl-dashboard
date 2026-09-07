@@ -453,7 +453,10 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
       values.push(exact);
       idx++;
     } else if (/^\d+$/.test(params.search.trim())) {
-      clauses.push(`(cast(h.ncode as text) = $${idx} OR h.vtrnno ILIKE $${idx + 1})`);
+      // Digit strings are often serials — must hit h.serial or we miss and the handler used to fall through to CRM.
+      clauses.push(
+        `(cast(h.ncode as text) = $${idx} OR h.serial = $${idx} OR h.vtrnno ILIKE $${idx + 1} OR h.serial ILIKE $${idx + 1})`
+      );
       values.push(params.search.trim(), `%${params.search.trim()}%`);
       idx += 2;
     } else {

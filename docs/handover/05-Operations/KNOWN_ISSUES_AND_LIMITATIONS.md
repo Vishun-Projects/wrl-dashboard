@@ -3,7 +3,7 @@
 > **Status:** Ready — external-facing honest summary (not a marketing doc). Internal engineering backlog: `docs/REMEDIATION_ROADMAP.md` in the repository.
 
 **Audience:** Stakeholders and ops.  
-**Last updated:** 2026-09-02
+**Last updated:** 2026-09-07
 
 ---
 

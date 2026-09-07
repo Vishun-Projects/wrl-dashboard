@@ -793,6 +793,7 @@ Per-module design notes: `src/modules/<name>/README.md`. MIS sub-leaves: `mis/re
 | `location-audit` | `src/modules/location-audit` | Tech GPS vs install address |
 | `warranty-master` | `src/modules/warranty-master` | Warranty coverage reports |
 | `cancelled-calls` | `src/modules/cancelled-calls` | Cancelled register (Postgres), CSV/Excel export, digest data |
+| `spare-loan-check` | `src/modules/spare-loan-check` | ZSS02 HTML upload; CRM SO/vendor mismatch + cancelled flags |
 | `athena-reconciliation` | `src/modules/athena-reconciliation` | Athena API failure triage + reconcile UI |
 | `attendance` | `src/modules/attendance` | Service call activity admin report |
 | `subcontractor-stock` | `src/modules/subcontractor-stock` | SAP vs CRM stock reconcile + email (VPS) |

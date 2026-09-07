@@ -9,4 +9,4 @@
 
 Regenerate from production: `npm run handover:export` (requires `DATABASE_URL` in `.env.local`).
 
-Workshop with Sunil/Rakesh is optional — matrix is already live from DB.
+Optional business validation with Sunil — matrix is already live from DB.

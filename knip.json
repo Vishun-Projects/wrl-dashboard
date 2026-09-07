@@ -8,10 +8,16 @@
   },
   "entry": [
     "src/app/**/{page,layout,loading,error,not-found,route}.{js,jsx,ts,tsx}",
-    "src/proxy.ts",
     "scripts/**/*.mjs",
     "scripts/**/*.ts",
-    "src/**/*.test.{ts,tsx}"
+    "scripts/**/*.check.ts",
+    "src/**/*.test.{ts,tsx}",
+    "src/**/*.check.ts",
+    "src/lib/vps-cron/cli-gate.ts",
+    "src/lib/read-model/debug-trn-status.ts",
+    "src/lib/read-model/repair-trn-from-crm.ts",
+    "src/lib/read-model/repair-and-check-trn.ts",
+    "src/modules/mis/services/call-register/verify-*.ts"
   ],
   "project": [
     "src/**/*.{js,jsx,ts,tsx}",

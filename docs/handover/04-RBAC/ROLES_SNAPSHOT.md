@@ -1,6 +1,6 @@
 # Portal roles snapshot (production DB)
 
-> **Generated:** 2026-09-02T05:51:55Z from `app_roles`, `app_role_permissions`, `app_users`. Regenerate: `npm run handover:export`.
+> **Generated:** 2026-09-07T09:19:58Z from `app_roles`, `app_role_permissions`, `app_users`. Regenerate: `npm run handover:export`.
 
 This is the **live** role configuration in the portal database — not a workshop template.
 
@@ -103,11 +103,7 @@ This is the **live** role configuration in the portal database — not a worksho
 - `tab_mis_summary` — tab: Summary Dashboard
 - `view_all_offices` — capability: View all offices
 - `view_calls`
-- `view_mis_accounts`
-- `view_mis_register`
-- `view_mis_summary`
 - `view_reports`
-- `view_summary`
 
 ### View Summary
 

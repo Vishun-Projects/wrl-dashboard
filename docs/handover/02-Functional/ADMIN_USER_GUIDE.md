@@ -59,6 +59,7 @@ Legacy mail sub-routes (`/admin/mis-email-routing`, etc.) redirect to **Mail & A
 | Warranty Master | `/report/warranty-master` | Reports | Yes |
 | Failed Calls - Athena API | `/report/athena-reconciliation` | Reports | Yes |
 | Cancelled Calls | `/report/cancelled-calls` | Reports | Yes |
+| Spare Loan Check | `/report/spare-loan-check` | Reports | Yes |
 | User Management | `/admin/users` | Administration | Yes |
 | Roles & Access | `/admin/roles` | Administration | Yes |
 | Mail & Alerts | `/admin/mis-email-settings` | Administration | Yes |
@@ -108,10 +109,18 @@ Each report has its own menu item with filters suited to that audit:
 | **Serial Wise History** | `/report/serial-audit` | Repeat serial complaints |
 | **Location Audit** | `/report/location-audit` | Visit location vs install address |
 | **Warranty Master** | `/report/warranty-master` | Active machines and warranty |
-| **Cancelled Calls** | `/report/cancelled-calls` | Cancelled register and export |
+| **Cancelled Calls** | `/report/cancelled-calls` | Cancelled register; assigned / unassigned filter; export |
 | **Failed Calls (Athena API)** | `/report/athena-reconciliation` | CRM ingestion failures |
+| **Spare Loan Check** | `/report/spare-loan-check` | Upload ZSS02 HTML; vendor mismatch / cancelled SO vs CRM |
 
 Open the page → set filters → browse or export. Behaviour matches the on-screen labels.
+
+### Spare Loan Check (detail)
+
+1. Open **Spare Loan Check** → upload one or more SAP **ZSS02 HTML** exports (large files are gzip’d in the browser before upload).
+2. Portal matches each row to CRM by SO loan / SO con-rtn and shows **problem** rows only: vendor mismatch, cancelled, unassigned cancelled.
+3. Filter by plant, zone, item category, reason, call-logged date; search by call number or barcode.
+4. Re-open a previously imported plant from the saved list (stored in Postgres). Export filtered problems as CSV or multi-plant ZIP.
 
 ---
 

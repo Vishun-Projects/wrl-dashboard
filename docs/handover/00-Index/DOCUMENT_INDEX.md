@@ -3,7 +3,7 @@
 **Product:** WRL Portal (WRL Dashboard)  
 **Production URL:** https://wrl-dashboard.vercel.app  
 **Repository:** https://github.com/Vishun-Projects/wrl-dashboard  
-**Pack version:** Production handover · 2026-09-02
+**Pack version:** Production handover · 2026-09-07
 
 > **Ready for company share.** Business, functional, technical, RBAC, and ops docs reflect production and codebase. VPS checklist needs SSH sign-off on host; formal acceptance block in `06-Delivery/DELIVERY_STATEMENT.md`.
 
@@ -40,7 +40,7 @@
 | [KNOWN_ISSUES_AND_LIMITATIONS.md](../05-Operations/KNOWN_ISSUES_AND_LIMITATIONS.md) | All | Ready |
 | [VPS_ENV_VERIFICATION_CHECKLIST.md](../05-Operations/VPS_ENV_VERIFICATION_CHECKLIST.md) | Ops | **Needs SSH sign-off** |
 | [SYSTEM_VERIFICATION.md](../06-Delivery/SYSTEM_VERIFICATION.md) | All | Ready (auto-generated) |
-| [DELIVERY_STATEMENT.md](../06-Delivery/DELIVERY_STATEMENT.md) | VP / Rakesh | Ready — sign-off block blank |
+| [DELIVERY_STATEMENT.md](../06-Delivery/DELIVERY_STATEMENT.md) | Sunil / VP | Ready — sign-off block blank |
 | [06-Delivery/README.md](../06-Delivery/README.md) | All | Index |
 | **Company share (PDF / Word)** | All stakeholders | [`07-Company-Share/`](../07-Company-Share/) |
 | [RBAC_MATRIX.xlsx](../07-Company-Share/Excel/RBAC_MATRIX.xlsx) | Roles / IT | Ready (live DB export) |

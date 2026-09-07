@@ -405,13 +405,12 @@ export async function handleRegisterGet(req: NextRequest) {
         }
       }
 
-      if (!idLookup || (payload.data as unknown[] | undefined)?.length) {
-        return NextResponse.json(payload);
-      }
-      // Identifier not in Postgres read-model — fall through to CRM lookup subquery.
+      // Identifier miss → empty. Do not fall through to CRM lookup (CAST/LIKE on trhcalls ~30s timeout).
+      // lastSync incremental path below still hits CRM when present.
+      return NextResponse.json(payload);
     }
 
-    // Live CRM path — identifier lookup fallback when Postgres read-model misses a TRN
+    // Postgres-off → refuse. lastSync (and only that) still uses CRM below when Postgres is on.
     if (!readRegisterFromPostgres()) {
       return NextResponse.json(
         {

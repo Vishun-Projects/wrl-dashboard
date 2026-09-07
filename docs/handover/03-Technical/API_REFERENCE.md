@@ -1,6 +1,6 @@
 # API Reference
 
-Generated: 2026-09-02 from `src/app/api/**/route.ts`.
+Generated: 2026-09-07 from `src/app/api/**/route.ts`.
 
 ## Admin
 
@@ -104,6 +104,7 @@ Generated: 2026-09-02 from `src/app/api/**/route.ts`.
 | GET | `/api/report/serial-audit/repair-call-ids` | page:serial_audit | @/modules/serial-audit/server/routes/repair-call-ids |
 | GET | `/api/report/serial-audit/repair-counts` | page:serial_audit | @/modules/serial-audit/server/routes/repair-counts |
 | GET | `/api/report/serial-audit/repairs` | page:serial_audit, tab:register | @/modules/serial-audit/server/routes/repairs |
+| GET, POST | `/api/report/spare-loan-check` | page:spare_loan_check | @/modules/spare-loan-check/server/routes/check |
 | GET | `/api/report/summary` | page:mis_reports, tab:summary | @/modules/mis/server/routes/summary |
 | GET | `/api/report/totals` | session | @/modules/mis/server/routes/totals |
 | GET | `/api/report/warranty-master` | page:warranty_master | @/modules/warranty-master/server/routes/warranty-master |

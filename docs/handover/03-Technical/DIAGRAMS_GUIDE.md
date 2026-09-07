@@ -4,7 +4,7 @@
 
 Visual reference for stakeholders and IT.
 
-Generated: 2026-09-02
+Generated: 2026-09-07
 
 ## System workflow overview
 

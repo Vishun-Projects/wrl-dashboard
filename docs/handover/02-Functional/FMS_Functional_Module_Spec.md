@@ -53,12 +53,26 @@ Module-by-module functional reference. Technical implementation: `03-Technical/A
 | Field | Detail |
 |-------|--------|
 | **Purpose** | Cancelled call register from Postgres; CSV export; feeds cancelled digest |
-| **Users / roles** | `page_cancelled_calls` |
+| **Users / roles** | `page_cancelled_calls` (Athena page permission also grants access) |
 | **Screens** | `/report/cancelled-calls` |
-| **Key actions** | Filter, paginate, export CSV |
+| **Key actions** | Filter by date, branch, franchisee, party, call type, **assigned / unassigned**; paginate; export CSV |
 | **Data sources** | Postgres read-model (sync from CRM) |
 | **Scheduled jobs** | Sync via read-model worker; digest via mis-email |
 | **RBAC** | `page_cancelled_calls` |
+
+---
+
+## spare-loan-check — Spare Loan Check
+
+| Field | Detail |
+|-------|--------|
+| **Purpose** | Upload SAP ZSS02 spare-loan HTML; match to CRM by SO loan / SO con-rtn; flag vendor mismatches and cancelled (incl. unassigned cancelled) calls |
+| **Users / roles** | `page_spare_loan_check` |
+| **Screens** | `/report/spare-loan-check` |
+| **Key actions** | Upload HTML (gzip for large files); re-load saved plant snapshots; filter by plant/zone/reason/item category/date; search call no / barcode; CSV / ZIP export |
+| **Data sources** | SAP ZSS02 HTML upload → Postgres `spare_loan_check_*` tables; CRM match for vendor, cancel status, plant name, zone, item category |
+| **Scheduled jobs** | None (on-demand upload) |
+| **RBAC** | `page_spare_loan_check` |
 
 ---
 

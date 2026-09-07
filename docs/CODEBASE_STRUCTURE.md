@@ -100,6 +100,7 @@ src/modules/<name>/
 | `performance` | Performance insights |
 | `security-audit` | Security audit UI |
 | `cancelled-calls` | Cancelled call register (Postgres) + digest Excel export |
+| `spare-loan-check` | ZSS02 spare-loan HTML upload; CRM SO/vendor mismatch check |
 | `athena-reconciliation` | Athena failed-calls report (query/CSV in `server/`; CRM ingest in `lib/read-model/athena-reconciliation`) |
 | `attendance` | Service call activity admin report (`manage_users`; SQL in `@/sql/attendance`) |
 | `subcontractor-stock` | SAP vs CRM stock reconciliation + Mail & Alerts settings tab |
@@ -248,6 +249,7 @@ Hot tables are **server SQL only**; PostgREST roles revoked (`21-revoke-hot-anon
 | Performance insights | `src/modules/performance/` |
 | Security audit | `src/modules/security-audit/` |
 | Cancelled calls register | `src/modules/cancelled-calls/` |
+| Spare loan check (ZSS02) | `src/modules/spare-loan-check/` |
 | Athena failed-calls reconciliation | `src/modules/athena-reconciliation/` (+ `src/lib/read-model/athena-reconciliation/`) |
 | Service call activity (admin) | `src/modules/attendance/`, `src/app/admin/attendance/` |
 | Subcontractor stock reconciliation | `src/modules/subcontractor-stock/` (Mail & Alerts tab) |

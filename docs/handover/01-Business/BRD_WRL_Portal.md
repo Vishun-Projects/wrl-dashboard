@@ -2,10 +2,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | Production handover v1 |
-| **Date** | 2026-09-02 |
-| **Author** | Delivery team |
-| **Approvers** | Sunil (business sponsor), Rakesh / VP (acceptance) |
+| **Version** | Production handover v1.1 |
+| **Date** | 2026-09-07 |
+| **Author** | Vishnu Vishwakarma |
+| **Approvers** | Sunil (business sponsor), VP (acceptance) |
 
 ## 1. Executive summary
 
@@ -20,11 +20,11 @@ Production: **https://wrl-dashboard.vercel.app**
 | Role | Name | Interest |
 |------|------|----------|
 | Business sponsor | Sunil | MIS close, branch visibility, digest routing |
-| Acceptance authority | Rakesh / VP | Formal sign-off on delivered scope |
+| Acceptance authority | VP | Formal sign-off on delivered scope |
 | HOD / MIS ops | Portal HOD role holders | National reports, BD-MIS, mail digests |
 | Branch managers | Portal BM role holders | Branch-scoped registers and exports |
-| IT / ops | Delivery + VPS ops | VPS workers, cron, env, read-model sync |
-| Portal admins | Users with `manage_users`, `manage_roles`, or Mail & Alerts grants | User/role/mail configuration |
+| IT / ops | Vishnu Vishwakarma | VPS workers, cron, env, read-model sync |
+| Portal admin | Vishnu Vishwakarma | User/role/mail configuration (`manage_users`, `manage_roles`, Mail & Alerts) |
 
 ### 2.1 Configured portal roles
 
@@ -41,7 +41,7 @@ Edit roles in `/admin/roles`, then re-run `npm run handover:export` to refresh.
 
 1. **Faster MIS close** — Summary, register, and accounts views with consistent open/solved math and Excel export.
 2. **Branch visibility** — Office-scoped filters; optional national scope for HOD roles.
-3. **Audit trails** — Serial, location, ARCP, warranty, cancelled-call, and Athena reconciliation registers.
+3. **Audit trails** — Serial, location, ARCP, warranty, cancelled-call, Athena reconciliation, and spare-loan (ZSS02) checks.
 4. **Automated digests** — MIS email, major-repair alerts, cancelled-call digests without manual copy-paste.
 5. **Controlled access** — Role-based pages and tabs; admin-managed users.
 
@@ -96,6 +96,7 @@ See [`SCOPE_SUMMARY.md`](SCOPE_SUMMARY.md) for the detailed in/out list.
 | BR-05 | Admins manage users, roles, and mail settings without code deploy |
 | BR-06 | Scheduled jobs on VPS send digests and run read-model sync per documented cron |
 | BR-07 | Security audit log for privileged actions (super-admin) |
+| BR-08 | Spare Loan Check: upload ZSS02 HTML; flag vendor mismatch / cancelled SOs vs CRM |
 
 Detailed module behaviour: [`02-Functional/FMS_Functional_Module_Spec.md`](../02-Functional/FMS_Functional_Module_Spec.md).
 
@@ -143,6 +144,7 @@ Detailed module behaviour: [`02-Functional/FMS_Functional_Module_Spec.md`](../02
 | BR-05 | Admin user/role/mail without deploy | FMS §Administration, `/admin/*` routes | Delivered |
 | BR-06 | VPS cron sync and mail | [`SYNC_ENTRY_POINTS.md`](../05-Operations/SYNC_ENTRY_POINTS.md), [`MAIL_SCHEDULE.md`](../05-Operations/MAIL_SCHEDULE.md) | Delivered |
 | BR-07 | Security audit log | FMS §Security audit, `super_admin` capability | Delivered |
+| BR-08 | Spare Loan Check (ZSS02 vs CRM) | FMS §spare-loan-check, `/report/spare-loan-check` | Delivered |
 
 ---
 

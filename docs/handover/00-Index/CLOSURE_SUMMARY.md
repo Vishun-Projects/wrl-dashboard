@@ -15,7 +15,7 @@
 
 ## What was delivered
 
-- **Reports:** MIS (register, summary, accounts, BD-MIS, deployment), distribution, ARCP, serial/location/warranty audits, cancelled calls, Athena reconciliation
+- **Reports:** MIS (register, summary, accounts, BD-MIS, deployment), distribution, ARCP, serial/location/warranty audits, cancelled calls (assignment filter), Athena reconciliation, **Spare Loan Check** (ZSS02 HTML vs CRM)
 - **Mail & alerts:** MIS digests, major-repair alerts, cancelled-call digests, subcontractor stock reconciliation
 - **Administration:** Users, roles/RBAC, read-model sync status, service-call activity, performance insights
 - **Documentation:** Business (BRD, scope), functional (FMS, admin guide), technical (architecture, API), live RBAC matrix, ops runbooks
@@ -30,9 +30,9 @@ Open [`DOCUMENT_INDEX.md`](DOCUMENT_INDEX.md) for the full table of contents and
 
 | Item | Owner | Status |
 |------|-------|--------|
-| VPS `.env` verification on production host | Ops / IT | See `05-Operations/VPS_ENV_VERIFICATION_CHECKLIST.md` |
-| Formal acceptance | Rakesh / VP | Sign-off block in `06-Delivery/DELIVERY_STATEMENT.md` |
-| Postgres backup procedure | Ops | Not documented in repo — ops to define |
+| VPS `.env` verification on production host | Vishnu Vishwakarma (IT / ops) | See `05-Operations/VPS_ENV_VERIFICATION_CHECKLIST.md` |
+| Formal acceptance | Sunil / VP | Sign-off block in `06-Delivery/DELIVERY_STATEMENT.md` |
+| Postgres backup procedure | Vishnu Vishwakarma | Not documented in repo — ops to define |
 
 ## Known limitations (summary)
 

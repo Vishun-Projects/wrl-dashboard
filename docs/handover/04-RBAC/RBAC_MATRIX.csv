@@ -71,11 +71,7 @@ Super Admin,tab_mis_register
 Super Admin,tab_mis_summary
 Super Admin,view_all_offices
 Super Admin,view_calls
-Super Admin,view_mis_accounts
-Super Admin,view_mis_register
-Super Admin,view_mis_summary
 Super Admin,view_reports
-Super Admin,view_summary
 View Summary,mis_client_import_delete
 View Summary,mis_client_import_upload
 View Summary,mis_email_send

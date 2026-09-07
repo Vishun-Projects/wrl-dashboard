@@ -1,6 +1,6 @@
 # Git and release
 
-Generated: 2026-09-02
+Generated: 2026-09-07
 
 ## Repository
 
@@ -11,7 +11,7 @@ origin	https://github.com/Vishun-Projects/wrl-dashboard.git (push)
 
 - **Default branch:** main
 - **Package:** fast-close-app@0.1.0
-- **Describe:** 4cd6dee
+- **Describe:** b56e11b
 
 ## Production
 
@@ -34,24 +34,24 @@ Feature branches → pull request → `main`. Deploy follows Vercel + VPS rsync.
 ## Recent commits
 
 ```
-4cd6dee updated the date range filter in cancelled calls ui
-50e7734 optimized the performance
-72257fc perf: speed up cancelled calls with denormalized columns and indexes
-c987e20 fix: add item_code to HotRow test fixtures and DB normalizer
-2e221bb fix: raise open-count parity Excel test timeout under full suite load
-e5117f1 updated cancelled calls page with additional filters
-71f7ac3 Remove obsolete script shims, stale docs, and unused quality tooling.
-de3718b Prune dead deps, relocate Athena/sync routes, and add module guardrails.
-35d124d updated for ui sync button
-9decfab updated for ui sync button
-b67b0f3 updated show sorting of dates in athena
-c2ea02c solved query for cancelled calls - to reflect names instead of id
-2182375 Add Postgres-only cancelled register sync and refine Athena reconciliation.
-a12c6e5 Remove Multiple CRM Matches KPI from Athena reconciliation UI.
-423a720 Fix Aug 25 registered count: allow single 4-way match without CCLID
-e4d5bf7 Only flag Multiple CRM Matches for true same-CCLID duplicates.
-e30b6bb Remove dead chart code from Athena analytics component.
-fc3d778 Revert "Restore Athena trend analytics expanded view removed by accident."
-18481c7 Restore Athena trend analytics expanded view removed by accident.
-9b0050d Fix vitest root config when parent tsconfig is empty.
+b56e11b Tighten spare loan check layout: table scroll and denser filters.
+df5b182 Fix spare loan ZIP Blob typing for TypeScript push checks.
+781d63c Enrich spare loan check with plant name, zone, and safer CSV exports.
+e252f0e Keep nodemailer out of the report UI client bundle.
+2887e5b Fix midnight verify false fails from nengineer string vs number.
+adde845 Harden CRM 405 handling and gate morning MIS on midnight verify.
+7cbe452 Gzip spare loan HTML uploads so large files clear Vercel payload limits.
+d02f58e Fix spare loan item category: live CRM fallback and backfill on load.
+75ecd57 Add spare loan search by call number/barcode and show barcode column.
+f825a99 Distinguish unassigned cancelled calls and add call-logged date presets.
+5f9b091 Map spare loan materials to CRM item category and filter by it.
+436c1cc Enrich spare loan check with filters, CRM dates, and clearer vendor mismatch UI.
+79921b6 there was error while processing excel - resolved it
+ee1ce88 will save in database too the successfully processed data
+5397603 Add ZSS02 spare loan HTML check for vendor/SO mismatches.
+68d1d0d Drop unused open-export filter import so pre-push lint passes.
+f96b1e6 Fix MIS digest body to match yesterday's CRM totals plus open-calls Excel.
+a1b6110 Add cancelled calls assignment filter and handover documentation pack.
+553fcb7 fix: remove unused ARCP filter apply leftovers after instant apply
+bbaab32 fix: keep Postgres MIS align off client barrel exports
 ```

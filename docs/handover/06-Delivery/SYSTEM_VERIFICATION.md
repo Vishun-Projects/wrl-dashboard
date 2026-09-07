@@ -1,6 +1,6 @@
 # System verification — WRL Portal
 
-> **Generated:** 2026-09-02T05:51:55Z · Regenerate: `npm run handover:export`
+> **Generated:** 2026-09-07T09:19:58Z · Regenerate: `npm run handover:export`
 
 Factual snapshot of the **production** portal configuration. VPS host checks require SSH — see [`VPS_ENV_VERIFICATION_CHECKLIST.md`](../05-Operations/VPS_ENV_VERIFICATION_CHECKLIST.md).
 
@@ -10,8 +10,8 @@ Factual snapshot of the **production** portal configuration. VPS host checks req
 | --- | --- |
 | Portal URL | https://wrl-dashboard.vercel.app |
 | Package | fast-close-app@0.1.0 |
-| Git | `4cd6dee` on `main` |
-| Export date | 2026-09-02 |
+| Git | `b56e11b` on `main` |
+| Export date | 2026-09-07 |
 
 ## Portal users and roles (live DB)
 
@@ -20,7 +20,7 @@ Factual snapshot of the **production** portal configuration. VPS host checks req
 | Active portal users | 16 |
 | Configured roles | 6 |
 | Roles with assigned users | 4 |
-| Role-permission grants | 89 |
+| Role-permission grants | 85 |
 
 ### Users per role
 
@@ -37,10 +37,10 @@ Full permission lists: [`04-RBAC/ROLES_SNAPSHOT.md`](../04-RBAC/ROLES_SNAPSHOT.m
 
 | Item | Count |
 | --- | ---: |
-| RBAC pages (catalog) | 18 |
-| Sidebar nav pages | 12 |
+| RBAC pages (catalog) | 19 |
+| Sidebar nav pages | 13 |
 | MIS tabs | 6 |
-| API routes | 78 |
+| API routes | 79 |
 
 ## Documentation present in handover pack
 

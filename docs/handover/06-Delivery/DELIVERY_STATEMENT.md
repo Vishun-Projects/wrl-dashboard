@@ -1,12 +1,12 @@
 # Delivery statement — WRL Portal
 
-> **Generated:** 2026-09-02T05:51:55Z · Production: https://wrl-dashboard.vercel.app
+> **Generated:** 2026-09-07T09:19:58Z · Production: https://wrl-dashboard.vercel.app
 
 ## Delivered scope
 
 | Area | Delivered capability |
 | --- | --- |
-| **Reporting** | MIS (Summary, Register, Accounts, BD-MIS, Deployment, Client Import), Call Distribution, ARCP, Serial/Location/Warranty audits, Cancelled Calls, Athena reconciliation |
+| **Reporting** | MIS (Summary, Register, Accounts, BD-MIS, Deployment, Client Import), Call Distribution, ARCP, Serial/Location/Warranty audits, Cancelled Calls, Athena reconciliation, Spare Loan Check (ZSS02) |
 | **Mail & alerts** | MIS digests, major-repair alerts, cancelled-call digests, subcontractor stock reconciliation |
 | **Administration** | Users, roles/RBAC, Mail & Alerts hub, read-model sync, service-call activity, performance insights, security audit log |
 | **Platform** | Supabase auth, office-scoped data, Vercel app + VPS workers |
@@ -20,16 +20,16 @@
 | Active users | 16 |
 | Configured roles | 6 |
 | Roles in use | BM - Serial Audit (6), Branch Manager (1), HOD (5), View Summary (4) |
-| API routes | 78 |
-| Git revision | `4cd6dee` |
+| API routes | 79 |
+| Git revision | `b56e11b` |
 
 ## Suggested email to request sign-off
 
-**To:** Rakesh, VP
-**Cc:** Sunil, delivery team
+**To:** Sunil, VP
+**Cc:** Vishnu Vishwakarma (IT / ops, portal admin)
 **Subject:** WRL Portal — handover documentation and acceptance request
 
-Dear Rakesh,
+Dear Sunil,
 
 Please find attached the **WRL Portal** handover pack for Western Refrigeration.
 
@@ -52,7 +52,7 @@ Please find attached the **WRL Portal** handover pack for Western Refrigeration.
 **We request confirmation** that the delivered scope is accepted, or a list of outstanding items with owners and dates.
 
 Regards,
-_[Delivery team]_
+Vishnu Vishwakarma
 
 ---
 
