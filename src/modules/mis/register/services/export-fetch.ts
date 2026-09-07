@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { readRegisterFromPostgresClient } from '@/lib/read-model/client-flags';
-import { downloadRegisterCsvInBrowser } from '../server/csv-export';
+import { downloadRegisterCsvInBrowser } from '../server/csv-export-browser';
 import {
   blobToPreparedExport,
   triggerBlobDownload,

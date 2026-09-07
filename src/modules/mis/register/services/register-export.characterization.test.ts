@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
 
 import { parseRegisterSearchParams } from '@/modules/mis/register/server/postgres-request';
-import { rowForCsv, buildRegisterCsvContent } from '@/modules/mis/register/server/csv-export';
+import { rowForCsv, buildRegisterCsvContent } from '@/modules/mis/register/server/csv-export-browser';
 import { collectRegisterRowsFromSessionCache } from '@/modules/mis/register/services/export-fetch';
 import { REGISTER_EXPORT_COLUMNS } from '@/modules/mis/register/services/table-columns';
 

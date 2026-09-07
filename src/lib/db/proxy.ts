@@ -1,12 +1,17 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import type { Element } from 'domhandler';
-import {
-  isCrmHttpOverloadStatus,
-  maybeAlertCrmHttpStorm,
-} from '@/lib/db/crm-http-health';
+import { isCrmHttpOverloadStatus } from '@/lib/db/crm-http-health';
 
 const DB_URL = 'https://westerncrm.com/wrl/OTHERS/DBQUERY.aspx';
+
+/** Never statically import crm-http-alert (nodemailer) — client graphs that touch proxy must stay clean. */
+function maybeAlertCrmHttpStorm(status: number | undefined | null): void {
+  if (typeof window !== 'undefined') return;
+  void import('@/lib/db/crm-http-alert')
+    .then((m) => m.maybeAlertCrmHttpStorm(status))
+    .catch(() => {});
+}
 
 const SESSION_CACHE_MS = Number(process.env.CRM_SESSION_CACHE_MS ?? 30_000) || 30_000;
 const CRM_SESSION_GET_TIMEOUT_MS =
