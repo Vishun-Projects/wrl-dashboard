@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hotRowNeedsCrmRefresh } from './pipeline-reconcile';
+import { hotRowNeedsCrmRefresh, sameNengineerId } from './pipeline-reconcile';
 import type { HotRow } from './types';
 
 function hot(overrides: Partial<HotRow> = {}): HotRow {
@@ -147,5 +147,42 @@ describe('hotRowNeedsCrmRefresh', () => {
       }
     );
     expect(needs).toBe(true);
+  });
+
+  it('does not treat pg string nengineer vs CRM number as drift', () => {
+    const needs = hotRowNeedsCrmRefresh(
+      hot({
+        // pg bigint often arrives as string on the driver
+        nengineer: '90' as unknown as number,
+        status_bucket: 'solved',
+        bsolved: true,
+        region: 'WEST ZONE',
+        source_editedon: new Date('2026-03-22T18:29:59.000Z'),
+      }),
+      {
+        vtrnno: '26C061391',
+        ncode: '1',
+        nofficeid: '1',
+        ncancelreason: '0',
+        bsolved: '1',
+        callsolved: '1',
+        bfastclose: '0',
+        nengineer: '90',
+        callstatus: 'Solved',
+        editedon: '22/03/2026 23:59:59',
+        addedon: '01/03/2026 10:00:00',
+        dtrndate: '01/03/2026 10:00:00',
+        region: 'WEST ZONE',
+        account: 'Pepsi',
+      }
+    );
+    expect(needs).toBe(false);
+  });
+
+  it('sameNengineerId equates string and number', () => {
+    expect(sameNengineerId('441', 441)).toBe(true);
+    expect(sameNengineerId(441, 441)).toBe(true);
+    expect(sameNengineerId('441', 442)).toBe(false);
+    expect(sameNengineerId(null, null)).toBe(true);
   });
 });

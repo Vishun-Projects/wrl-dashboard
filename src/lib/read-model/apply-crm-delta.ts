@@ -21,6 +21,12 @@ import type { getSyncState } from '@/lib/read-model/lock';
 
 const SYNC_TX_LOCK_TIMEOUT_MS = Number(process.env.PG_SYNC_LOCK_TIMEOUT_MS ?? 120_000);
 
+function nengineerId(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 /**
  * Replace hot from CRM when stamp is at least as fresh, OR when status/major/assignment
  * content differs (CRM is source of truth — fault edits often don't bump editedon).
@@ -40,7 +46,7 @@ export function shouldReplaceHotFromCrm(
   if (Number(existing.ncancelreason ?? 0) !== Number(incoming.ncancelreason ?? 0)) return true;
   if (Boolean(existing.bsolved) !== Boolean(incoming.bsolved)) return true;
   if (Boolean(existing.bfastclose) !== Boolean(incoming.bfastclose)) return true;
-  if ((existing.nengineer ?? null) !== (incoming.nengineer ?? null)) return true;
+  if (nengineerId(existing.nengineer) !== nengineerId(incoming.nengineer)) return true;
   return false;
 }
 

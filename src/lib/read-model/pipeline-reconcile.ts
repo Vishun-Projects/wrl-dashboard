@@ -49,6 +49,16 @@ type HotReconcileFields = Pick<
   | 'nengineer'
 >;
 
+/** pg may return bigint nengineer as string; CRM transform uses number — compare numerically. */
+export function sameNengineerId(a: unknown, b: unknown): boolean {
+  const toId = (v: unknown): number | null => {
+    if (v == null || v === '') return null;
+    const n = typeof v === 'number' ? v : Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  return toId(a) === toId(b);
+}
+
 export function hotRowNeedsCrmRefresh(
   hot: HotReconcileFields,
   crmRow: Record<string, unknown>
@@ -69,7 +79,7 @@ export function hotRowNeedsCrmRefresh(
   if (Boolean(hot.bsolved) !== Boolean(fresh.bsolved)) return true;
   if (Boolean(hot.bfastclose) !== Boolean(fresh.bfastclose)) return true;
   if (Boolean(hot.is_major) !== Boolean(fresh.is_major)) return true;
-  if ((hot.nengineer ?? null) !== (fresh.nengineer ?? null)) return true;
+  if (!sameNengineerId(hot.nengineer, fresh.nengineer)) return true;
   if (hotRowCancelReasonMismatch(hot)) return true;
   if (
     isRealCancelReasonCode(crmRow.ncancelreason) &&
