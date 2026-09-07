@@ -39,6 +39,10 @@ export type SpareLoanCallLookup = {
 
 export type SpareLoanProblemRow = {
   plant: string;
+  /** CRM mstoffice.vcompanyname where vsapplantcode = plant. */
+  plantName: string | null;
+  /** mis_plant_region_mappings.region_zone, else CRM mstzones via mstoffice.nzone. */
+  zone: string | null;
   vendorNo: string;
   vendorName: string;
   material: string;

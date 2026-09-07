@@ -21,6 +21,8 @@ export type SpareLoanSavedPlant = {
 function mapRow(row: Record<string, unknown>): SpareLoanProblemRow {
   return {
     plant: String(row.plant ?? ''),
+    plantName: row.plant_name == null ? null : String(row.plant_name),
+    zone: row.zone == null ? null : String(row.zone),
     vendorNo: String(row.vendor_no ?? ''),
     vendorName: String(row.vendor_name ?? ''),
     material: String(row.material ?? ''),
@@ -52,7 +54,8 @@ function mapRow(row: Record<string, unknown>): SpareLoanProblemRow {
 }
 
 const ROW_SELECT = `
-  plant, vendor_no, vendor_name, material, material_description, item_category, barcode,
+  plant, plant_name, zone, vendor_no, vendor_name, material, material_description,
+  item_category, barcode,
   so_loan, so_con_rtn, match_key, match_source,
   crm_vtrnno, crm_vendor_code, crm_vendor_name, reason, cancel_reason,
   call_logged_at, last_edited_at
@@ -238,10 +241,12 @@ export async function saveSpareLoanCheckByPlant(params: {
           let i = 1;
           for (const r of snap.rows) {
             placeholders.push(
-              `($${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++})`
+              `($${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++})`
             );
             values.push(
               plant,
+              r.plantName || null,
+              r.zone || null,
               r.vendorNo,
               r.vendorName || null,
               r.material || null,
@@ -264,7 +269,8 @@ export async function saveSpareLoanCheckByPlant(params: {
           await client.query(
             `
             INSERT INTO spare_loan_check_rows (
-              plant, vendor_no, vendor_name, material, material_description, item_category, barcode,
+              plant, plant_name, zone, vendor_no, vendor_name, material, material_description,
+              item_category, barcode,
               so_loan, so_con_rtn, match_key, match_source,
               crm_vtrnno, crm_vendor_code, crm_vendor_name, reason, cancel_reason,
               call_logged_at, last_edited_at

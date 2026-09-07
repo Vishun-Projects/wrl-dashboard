@@ -76,10 +76,13 @@ export function toProblemRow(
   match: { key: string; source: SpareLoanMatchSource },
   reason: SpareLoanProblemReason,
   call: SpareLoanCallLookup | undefined,
-  itemCategory: string | null = null
+  itemCategory: string | null = null,
+  plantMeta: { plantName: string | null; zone: string | null } | null = null
 ): SpareLoanProblemRow {
   return {
     plant: row.plant,
+    plantName: plantMeta?.plantName ?? null,
+    zone: plantMeta?.zone ?? null,
     vendorNo: row.vendorNo,
     vendorName: row.vendorName,
     material: row.material,

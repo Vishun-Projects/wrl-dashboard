@@ -4,6 +4,7 @@ import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { isGzipBuffer } from '@/modules/mis/client-import/services/upload-gzip';
 import { enrichMissingItemCategories } from '@/modules/spare-loan-check/server/item-category';
+import { enrichMissingPlantMeta } from '@/modules/spare-loan-check/server/plant-meta';
 import { runSpareLoanCheck } from '@/modules/spare-loan-check/server/run-check';
 import {
   listSpareLoanSavedPlants,
@@ -47,7 +48,8 @@ export async function GET(req: NextRequest) {
     if (mode === 'rows') {
       if (!plant) {
         const loaded = await loadSpareLoanAllPlants();
-        const rows = await enrichMissingItemCategories(loaded.rows);
+        const withCats = await enrichMissingItemCategories(loaded.rows);
+        const rows = await enrichMissingPlantMeta(withCats);
         return NextResponse.json({
           summary: loaded.summary,
           rows,
@@ -58,7 +60,8 @@ export async function GET(req: NextRequest) {
       if (!loaded) {
         return NextResponse.json({ error: `No saved import for plant ${plant}` }, { status: 404 });
       }
-      const rows = await enrichMissingItemCategories(loaded.rows);
+      const withCats = await enrichMissingItemCategories(loaded.rows);
+      const rows = await enrichMissingPlantMeta(withCats);
       return NextResponse.json({
         summary: loaded.summary,
         rows,

@@ -7,11 +7,15 @@ import { AdminTable, AdminTableCard, AdminTd, AdminTh, AdminThead, AdminTr } fro
 import { FilterSelect } from '@/components/filters/FilterSelect';
 import type { FilterSelectOption } from '@/components/filters/filter-select-types';
 import { formatLocalDate } from '@/lib/dates/local-date';
-import { formatUiDateDash, UI_DATE_TIMEZONE } from '@/lib/dates/ui-date';
+import { formatUiDate, formatUiDateDash, UI_DATE_TIMEZONE } from '@/lib/dates/ui-date';
 import { useTableSort } from '@/lib/ui/table-sort';
 import { feedback } from '@/lib/ui/feedback';
+import { escapeCsvCell } from '@/lib/utils/csv';
 import { DateRangeSelector } from '@/modules/mis/register/components/DateRangeSelector';
 import { gzipBlobForMisUpload } from '@/modules/mis/client-import/services/upload-gzip';
+import { excelTextFormula } from '@/modules/spare-loan-check/excel-text';
+import { branchFileLabel, plantExportValue, safeFilePart } from '@/modules/spare-loan-check/export-labels';
+import { buildStoreZip } from '@/modules/spare-loan-check/zip-store';
 import type {
   SpareLoanCheckResponse,
   SpareLoanProblemReason,
@@ -28,6 +32,7 @@ const REASON_LABEL: Record<SpareLoanProblemReason, string> = {
 
 type SortKey =
   | 'plant'
+  | 'zone'
   | 'vendorNo'
   | 'material'
   | 'materialDescription'
@@ -65,14 +70,10 @@ async function readApiJson(res: Response): Promise<Record<string, unknown>> {
   }
 }
 
-function csvEscape(value: string): string {
-  if (/[",\n\r]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
-  return value;
-}
-
-function downloadProblemsCsv(rows: SpareLoanProblemRow[]) {
+function buildProblemsCsv(rows: SpareLoanProblemRow[]): string {
   const headers = [
     'Plant',
+    'Zone',
     'Vendor No',
     'Vendor Name',
     'Material',
@@ -94,35 +95,90 @@ function downloadProblemsCsv(rows: SpareLoanProblemRow[]) {
     headers.join(','),
     ...rows.map((r) =>
       [
-        r.plant,
+        plantExportValue(r.plant, r.plantName),
+        r.zone ?? '',
         r.vendorNo,
         r.vendorName,
         r.material,
         r.materialDescription,
         r.itemCategory ?? '',
-        r.barcode,
+        excelTextFormula(r.barcode),
         r.soLoan,
         r.soConRtn,
         r.matchKey,
         r.matchSource,
         r.crmVendorCode ?? '',
         r.crmVendorName ?? '',
-        r.callLoggedAt ?? '',
-        r.lastEditedAt ?? '',
+        r.callLoggedAt ? formatUiDate(r.callLoggedAt) : '',
+        r.lastEditedAt ? formatUiDate(r.lastEditedAt) : '',
         r.reason,
         r.cancelReason ?? '',
       ]
-        .map((c) => csvEscape(String(c)))
+        .map((c) => escapeCsvCell(c))
         .join(',')
     ),
   ];
-  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  return lines.join('\n');
+}
+
+function downloadCsvFile(content: string, fileName: string) {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `spare-loan-check-mismatches-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = fileName;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function downloadBlobFile(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportDateStamp(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Group non-empty keys; empty key → Unassigned. */
+function groupRowsBy(
+  rows: SpareLoanProblemRow[],
+  keyOf: (row: SpareLoanProblemRow) => string
+): Array<{ key: string; rows: SpareLoanProblemRow[] }> {
+  const map = new Map<string, SpareLoanProblemRow[]>();
+  for (const row of rows) {
+    const key = keyOf(row).trim() || 'Unassigned';
+    const list = map.get(key);
+    if (list) list.push(row);
+    else map.set(key, [row]);
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, groupRows]) => ({ key, rows: groupRows }));
+}
+
+function uniqueFileNames(
+  entries: Array<{ label: string; content: string }>
+): Array<{ name: string; content: string }> {
+  const used = new Map<string, number>();
+  return entries.map(({ label, content }) => {
+    const base = safeFilePart(label);
+    const n = (used.get(base) ?? 0) + 1;
+    used.set(base, n);
+    const stem = n === 1 ? base : `${base}_${n}`;
+    return { name: `${stem}.csv`, content };
+  });
+}
+
+function downloadGroupedZip(
+  files: Array<{ name: string; content: string }>,
+  zipName: string
+) {
+  downloadBlobFile(buildStoreZip(files), zipName);
 }
 
 function pickSingle(values: string[]): string {
@@ -153,14 +209,17 @@ function callLogCalendarDay(iso: string | null | undefined): string | null {
 
 export default function SpareLoanCheckPageClient() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const exportMenuRef = useRef<HTMLDetailsElement>(null);
   const [fileName, setFileName] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [result, setResult] = useState<SpareLoanCheckResponse | null>(null);
   const [savedPlants, setSavedPlants] = useState<SavedPlantOption[]>([]);
   const [plantFilter, setPlantFilter] = useState('');
   const [reasonFilter, setReasonFilter] = useState('');
   const [vendorFilter, setVendorFilter] = useState('');
+  const [zoneFilter, setZoneFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
   const [loggedRange, setLoggedRange] = useState<CallLoggedRange>(ALL_TIME_RANGE);
@@ -170,13 +229,30 @@ export default function SpareLoanCheckPageClient() {
   const allRows = result?.rows ?? [];
   const summary = result?.summary;
 
+  const plantNameByCode = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const r of allRows) {
+      const name = r.plantName?.trim();
+      if (r.plant && name && !map.has(r.plant)) map.set(r.plant, name);
+    }
+    return map;
+  }, [allRows]);
+
   const plantOptions = useMemo<FilterSelectOption[]>(
     () =>
-      savedPlants.map((p) => ({
-        value: p.plant,
-        label: `${p.plant} (${p.problems})`,
-      })),
-    [savedPlants]
+      savedPlants
+        .filter((p) => p.problems > 0)
+        .map((p) => {
+          const name = plantNameByCode.get(p.plant);
+          // CRM names are often already "1152 - BANGALORE BRANCH" — don't prefix the code again.
+          const label = name
+            ? name.toUpperCase().startsWith(p.plant.toUpperCase())
+              ? `${name} (${p.problems})`
+              : `${p.plant} — ${name} (${p.problems})`
+            : `${p.plant} (${p.problems})`;
+          return { value: p.plant, label };
+        }),
+    [savedPlants, plantNameByCode]
   );
 
   const vendorOptions = useMemo<FilterSelectOption[]>(() => {
@@ -190,6 +266,17 @@ export default function SpareLoanCheckPageClient() {
     return [...map.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([value, label]) => ({ value, label }));
+  }, [allRows]);
+
+  const zoneOptions = useMemo<FilterSelectOption[]>(() => {
+    const set = new Set<string>();
+    for (const r of allRows) {
+      const z = r.zone?.trim();
+      if (z) set.add(z);
+    }
+    return [...set]
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({ value, label: value }));
   }, [allRows]);
 
   const categoryOptions = useMemo<FilterSelectOption[]>(() => {
@@ -219,6 +306,7 @@ export default function SpareLoanCheckPageClient() {
     return allRows.filter((r) => {
       if (reasonFilter && r.reason !== reasonFilter) return false;
       if (vendorFilter && r.vendorNo !== vendorFilter) return false;
+      if (zoneFilter && (r.zone ?? '') !== zoneFilter) return false;
       if (categoryFilter && (r.itemCategory ?? '') !== categoryFilter) return false;
       if (sourceFilter && r.matchSource !== sourceFilter) return false;
       if (applyLogged) {
@@ -228,14 +316,7 @@ export default function SpareLoanCheckPageClient() {
         if (to && day > to) return false;
       }
       if (q) {
-        const hay = [
-          r.matchKey,
-          r.soLoan,
-          r.soConRtn,
-          r.barcode,
-        ]
-          .join(' ')
-          .toUpperCase();
+        const hay = [r.matchKey, r.soLoan, r.soConRtn, r.barcode].join(' ').toUpperCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -244,6 +325,7 @@ export default function SpareLoanCheckPageClient() {
     allRows,
     reasonFilter,
     vendorFilter,
+    zoneFilter,
     categoryFilter,
     sourceFilter,
     loggedRange,
@@ -253,6 +335,8 @@ export default function SpareLoanCheckPageClient() {
     switch (key) {
       case 'plant':
         return row.plant;
+      case 'zone':
+        return row.zone;
       case 'vendorNo':
         return row.vendorNo;
       case 'material':
@@ -380,6 +464,7 @@ export default function SpareLoanCheckPageClient() {
       if (plants[0]) setPlantFilter(plants[0]);
       setReasonFilter('');
       setVendorFilter('');
+      setZoneFilter('');
       setCategoryFilter('');
       setSourceFilter('');
       setLoggedRange(ALL_TIME_RANGE);
@@ -395,6 +480,86 @@ export default function SpareLoanCheckPageClient() {
       }
     } finally {
       setLoading(false);
+    }
+  }
+
+  function closeExportMenu() {
+    if (exportMenuRef.current) exportMenuRef.current.open = false;
+  }
+
+  async function runExport(mode: 'consolidated' | 'branch' | 'zone') {
+    if (filteredRows.length === 0 || exporting) return;
+    closeExportMenu();
+    setExporting(true);
+    try {
+      const date = exportDateStamp();
+      if (mode === 'consolidated') {
+        downloadCsvFile(
+          buildProblemsCsv(filteredRows),
+          `spare-loan-check-mismatches-${date}.csv`
+        );
+        return;
+      }
+      if (mode === 'branch') {
+        const groups = plantFilter
+          ? groupRowsBy(
+              filteredRows.filter((r) => r.plant === plantFilter),
+              (r) => r.plant
+            )
+          : groupRowsBy(filteredRows, (r) => r.plant);
+        if (groups.length === 0) {
+          feedback.actionFailed('No branch rows to export');
+          return;
+        }
+        const labeled = groups.map((g) => {
+          const name =
+            g.rows.find((r) => r.plantName?.trim())?.plantName ??
+            plantNameByCode.get(g.key) ??
+            null;
+          return {
+            label: branchFileLabel(g.key, name),
+            content: buildProblemsCsv(g.rows),
+          };
+        });
+        if (labeled.length === 1) {
+          downloadCsvFile(
+            labeled[0]!.content,
+            `spare-loan-${safeFilePart(labeled[0]!.label)}-${date}.csv`
+          );
+        } else {
+          downloadGroupedZip(
+            uniqueFileNames(labeled),
+            `spare-loan-branches-${date}.zip`
+          );
+          feedback.actionSuccess(`Downloaded ZIP with ${labeled.length} branch CSV file(s)`);
+        }
+        return;
+      }
+      const groups = zoneFilter
+        ? groupRowsBy(
+            filteredRows.filter((r) => (r.zone ?? '') === zoneFilter),
+            (r) => r.zone ?? 'Unassigned'
+          )
+        : groupRowsBy(filteredRows, (r) => r.zone ?? 'Unassigned');
+      if (groups.length === 0) {
+        feedback.actionFailed('No zone rows to export');
+        return;
+      }
+      const labeled = groups.map((g) => ({
+        label: g.key,
+        content: buildProblemsCsv(g.rows),
+      }));
+      if (labeled.length === 1) {
+        downloadCsvFile(
+          labeled[0]!.content,
+          `spare-loan-${safeFilePart(labeled[0]!.label)}-${date}.csv`
+        );
+      } else {
+        downloadGroupedZip(uniqueFileNames(labeled), `spare-loan-zones-${date}.zip`);
+        feedback.actionSuccess(`Downloaded ZIP with ${labeled.length} zone CSV file(s)`);
+      }
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -427,13 +592,14 @@ export default function SpareLoanCheckPageClient() {
                 const next = pickSingle(values);
                 setPlantFilter(next);
                 setVendorFilter('');
+                setZoneFilter('');
                 setCategoryFilter('');
                 setLoggedRange(ALL_TIME_RANGE);
                 setSearch('');
                 void loadRows(next);
               }}
               searchPlaceholder="Search plant…"
-              panelClassName="w-56"
+              panelClassName="w-72"
               layout="inline"
             />
             <FilterSelect
@@ -455,6 +621,16 @@ export default function SpareLoanCheckPageClient() {
               onChange={(values) => setVendorFilter(pickSingle(values))}
               searchPlaceholder="Search vendor…"
               panelClassName="w-72"
+              layout="inline"
+            />
+            <FilterSelect
+              label="Zone"
+              emptyLabel="All zones"
+              options={zoneOptions}
+              selected={zoneFilter ? [zoneFilter] : []}
+              mode="single"
+              onChange={(values) => setZoneFilter(pickSingle(values))}
+              panelClassName="w-48"
               layout="inline"
             />
             <FilterSelect
@@ -536,15 +712,59 @@ export default function SpareLoanCheckPageClient() {
             {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
             {loading ? 'Checking…' : 'Run check'}
           </button>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            onClick={() => downloadProblemsCsv(rows)}
-            disabled={rows.length === 0}
+          <details
+            ref={exportMenuRef}
+            className="relative"
+            onToggle={(e) => {
+              if ((filteredRows.length === 0 || exporting) && e.currentTarget.open) {
+                e.currentTarget.open = false;
+              }
+            }}
           >
-            <Download className="h-3.5 w-3.5" />
-            CSV
-          </button>
+            <summary
+              className={`inline-flex list-none items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50 [&::-webkit-details-marker]:hidden ${
+                filteredRows.length === 0 || exporting ? 'pointer-events-none opacity-50' : 'cursor-pointer'
+              }`}
+            >
+              {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              {exporting ? 'Exporting…' : 'CSV'}
+            </summary>
+            <div className="absolute right-0 z-20 mt-1 w-56 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-md">
+              <button
+                type="button"
+                className="block w-full px-3 py-1.5 text-left text-[12px] text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                disabled={filteredRows.length === 0 || exporting}
+                onClick={() => void runExport('consolidated')}
+              >
+                Consolidated
+                <span className="mt-0.5 block text-[10px] text-slate-500">Full export (current filters)</span>
+              </button>
+              <button
+                type="button"
+                className="block w-full px-3 py-1.5 text-left text-[12px] text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                disabled={filteredRows.length === 0 || exporting}
+                onClick={() => void runExport('branch')}
+              >
+                Branch wise
+                <span className="mt-0.5 block text-[10px] text-slate-500">
+                  {plantFilter
+                    ? `Selected plant → named CSV`
+                    : 'ZIP with one CSV per branch name'}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="block w-full px-3 py-1.5 text-left text-[12px] text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                disabled={filteredRows.length === 0 || exporting}
+                onClick={() => void runExport('zone')}
+              >
+                Zone wise
+                <span className="mt-0.5 block text-[10px] text-slate-500">
+                  {zoneFilter ? `Selected zone → named CSV` : 'ZIP with one CSV per zone'}
+                </span>
+              </button>
+            </div>
+          </details>
         </div>
       }
     >
@@ -565,6 +785,9 @@ export default function SpareLoanCheckPageClient() {
                 <tr>
                   <AdminTh sortable sortKey="plant" sort={sort} onSort={(k) => onSort(k as SortKey)}>
                     Plant
+                  </AdminTh>
+                  <AdminTh sortable sortKey="zone" sort={sort} onSort={(k) => onSort(k as SortKey)}>
+                    Zone
                   </AdminTh>
                   <AdminTh
                     sortable
@@ -662,7 +885,7 @@ export default function SpareLoanCheckPageClient() {
               <tbody>
                 {loading ? (
                   <AdminTr>
-                    <td className="px-4 py-3 text-[12px] text-slate-500" colSpan={13}>
+                    <td className="px-4 py-3 text-[12px] text-slate-500" colSpan={14}>
                       Loading…
                     </td>
                   </AdminTr>
@@ -674,7 +897,11 @@ export default function SpareLoanCheckPageClient() {
                       : 'text-[10px] text-slate-500';
                     return (
                     <AdminTr key={`${r.matchKey}-${r.vendorNo}-${r.material}-${i}`}>
-                      <AdminTd className="font-mono text-[11px]">{r.plant}</AdminTd>
+                      <AdminTd>
+                        <div className="font-mono text-[11px]">{r.plant}</div>
+                        <div className="text-[10px] text-slate-500">{r.plantName || '—'}</div>
+                      </AdminTd>
+                      <AdminTd className="text-[11px]">{r.zone || '—'}</AdminTd>
                       <AdminTd>
                         <div className="font-mono text-[11px]">{r.vendorNo}</div>
                         <div className={nameHighlight}>{r.vendorName || '—'}</div>

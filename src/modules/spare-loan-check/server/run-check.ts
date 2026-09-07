@@ -8,6 +8,7 @@ import {
   normalizeMaterialCode,
 } from '@/modules/spare-loan-check/server/item-category';
 import { lookupCallsByVtrnno } from '@/modules/spare-loan-check/server/lookup';
+import { lookupPlantMeta } from '@/modules/spare-loan-check/server/plant-meta';
 import { parseZss02Html } from '@/modules/spare-loan-check/server/parse-zss02-html';
 import {
   saveSpareLoanCheckByPlant,
@@ -80,9 +81,10 @@ export async function runSpareLoanCheck(
     keyed.push({ row, match });
   }
 
-  const [callMap, categoryMap] = await Promise.all([
+  const [callMap, categoryMap, plantMetaMap] = await Promise.all([
     lookupCallsByVtrnno(keyed.map((k) => k.match.key)),
     lookupItemCategoriesByMaterial(keyed.map((k) => k.row.material)),
+    lookupPlantMeta(keyed.map((k) => k.row.plant)),
   ]);
   const problems: SpareLoanProblemRow[] = [];
   const byReason = emptyByReason();
@@ -103,7 +105,8 @@ export async function runSpareLoanCheck(
     bucket.summary.problems += 1;
     const itemCategory =
       categoryMap.get(normalizeMaterialCode(row.material)) ?? null;
-    const problem = toProblemRow(row, match, reason, call, itemCategory);
+    const plantMeta = plantMetaMap.get(row.plant.trim()) ?? null;
+    const problem = toProblemRow(row, match, reason, call, itemCategory, plantMeta);
     problems.push(problem);
     bucket.rows.push(problem);
   }
