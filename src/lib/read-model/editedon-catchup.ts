@@ -10,10 +10,44 @@ import {
 } from '@/lib/read-model/lock';
 import { applyCrmRowsToHot } from '@/lib/read-model/apply-crm-delta';
 import { formatLocalDate } from '@/lib/dates/local-date';
+import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { sleep } from '@/lib/utils/async';
 const CATCHUP_ENTITY = 'calls_latest_hot_editedon_catchup';
 const FETCH_GAP_MS = Number(process.env.SYNC_CRM_FETCH_GAP_MS ?? 1500) || 1500;
+
+/** Shared logs dir for catch-up failure markers (release layout: …/shared/logs). */
+function syncSharedLogsDir(): string {
+  const fromEnv = process.env.SYNC_SHARED_LOG_DIR?.trim();
+  if (fromEnv) return fromEnv;
+  const install = process.env.MIS_EMAIL_INSTALL_ROOT?.trim() || process.env.SYNC_WORKER_INSTALL_ROOT?.trim();
+  if (install) {
+    const base = install.replace(/\/current\/?$/, '');
+    return join(base, 'shared', 'logs');
+  }
+  return join(process.cwd(), 'logs');
+}
+
+function editedonFailedMarkerPath(asOf: string): string {
+  return join(syncSharedLogsDir(), `editedon-catchup-failed-${asOf}`);
+}
+
+function writeEditedonFailedMarker(asOf: string, failedDays: string[]): void {
+  const dir = syncSharedLogsDir();
+  mkdirSync(dir, { recursive: true });
+  const path = editedonFailedMarkerPath(asOf);
+  writeFileSync(path, `${failedDays.join('\n')}\n`, 'utf8');
+  console.error(`[sync-worker] Editedon catch-up FAILED marker → ${path}`);
+}
+
+function clearEditedonFailedMarker(asOf: string): void {
+  try {
+    unlinkSync(editedonFailedMarkerPath(asOf));
+  } catch {
+    /* absent is fine */
+  }
+}
 
 
 function catchupEnabled(): boolean {
@@ -332,7 +366,10 @@ export async function runEditedonCatchupRange(
     console.error(
       `[sync-worker] Editedon catch-up incomplete — failed days: ${stillFailed.join(', ')}`
     );
+    writeEditedonFailedMarker(endDate, stillFailed);
+    // Do NOT advance cursor to endDate — midnight must not treat this as done.
   } else {
+    clearEditedonFailedMarker(endDate);
     await withClient((client) => writeCatchupCursor(client, endDate));
   }
 

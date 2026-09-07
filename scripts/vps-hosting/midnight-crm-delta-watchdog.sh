@@ -47,6 +47,7 @@ fi
 vps_cron_gate_allow midnight_crm_delta_watchdog || exit 0
 
 # If the midnight sync is still running, wait — do not false-alarm (esp. at 00:30).
+# At 02:00+ still running is normal for long catch-up; only SKIP. Evening-ops / MIS verify gate cover staleness.
 LOCK="${INSTALL_ROOT}/logs/midnight-crm-delta.lock"
 if [[ ! -f "$LOCK" && -f "${INSTALL_ROOT}/shared/logs/midnight-crm-delta.lock" ]]; then
   LOCK="${INSTALL_ROOT}/shared/logs/midnight-crm-delta.lock"
@@ -58,6 +59,31 @@ fi
 if [[ -f "$LOCK" ]]; then
   lock_pid=$(cat "$LOCK" 2>/dev/null || true)
   if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
+    # If CRM 405 storm / editedon failure already marked, alert even while sync runs.
+    if TZ=Asia/Kolkata date -d yesterday +%Y-%m-%d >/dev/null 2>&1; then
+      AS_OF_WD="$(TZ=Asia/Kolkata date -d yesterday +%Y-%m-%d)"
+    else
+      AS_OF_WD="$(TZ=Asia/Kolkata date -v-1d +%Y-%m-%d)"
+    fi
+    FAIL_MARK="${INSTALL_ROOT}/shared/logs/editedon-catchup-failed-${AS_OF_WD}"
+    [[ -f "$FAIL_MARK" ]] || FAIL_MARK="${INSTALL_ROOT}/logs/editedon-catchup-failed-${AS_OF_WD}"
+    if [[ -f "$FAIL_MARK" ]]; then
+      echo "[${STAMP}] FAIL — editedon catch-up failed for ${AS_OF_WD} while midnight sync still running (pid ${lock_pid})"
+      cd "$CODE"
+      export VPS_OPS_ALERT_TO="$ALERT_TO"
+      export VPS_OPS_ALERT_SUBJECT="ALERT: Editedon catch-up failed (CRM overload) — ${AS_OF_WD}"
+      export VPS_OPS_ALERT_BODY="Midnight editedon catch-up left failed days while sync still running.
+
+AS_OF: ${AS_OF_WD}
+Checked at: ${STAMP}
+Marker: ${FAIL_MARK}
+Failed days:
+$(cat "$FAIL_MARK" 2>/dev/null || true)
+
+CRM DBQUERY may be returning HTTP 405. Morning MIS will stay blocked until verify + catch-up succeed."
+      npx tsx "${CODE}/scripts/vps-hosting/send-vps-ops-alert.ts" || true
+      exit 1
+    fi
     echo "[${STAMP}] SKIP — midnight sync still running (pid ${lock_pid}). 00:15 mail may still have been sent; will re-check at 02:00."
     exit 0
   fi

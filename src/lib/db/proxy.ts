@@ -1,6 +1,10 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import type { Element } from 'domhandler';
+import {
+  isCrmHttpOverloadStatus,
+  maybeAlertCrmHttpStorm,
+} from '@/lib/db/crm-http-health';
 
 const DB_URL = 'https://westerncrm.com/wrl/OTHERS/DBQUERY.aspx';
 
@@ -8,6 +12,20 @@ const SESSION_CACHE_MS = Number(process.env.CRM_SESSION_CACHE_MS ?? 30_000) || 3
 const CRM_SESSION_GET_TIMEOUT_MS =
   Number(process.env.CRM_SESSION_GET_TIMEOUT_MS ?? 180_000) || 180_000;
 const CRM_SESSION_GET_MAX_ATTEMPTS = 3;
+/** Extra POST attempts when CRM returns 405/502/503 (overload / Method Not Allowed). */
+const CRM_OVERLOAD_MAX_ATTEMPTS =
+  Number(process.env.CRM_OVERLOAD_MAX_ATTEMPTS ?? 5) || 5;
+const CRM_OVERLOAD_BACKOFF_MS = [30_000, 60_000, 90_000, 120_000, 120_000];
+
+function clearCrmSessionCache(): void {
+  cachedState = null;
+  lastFetch = 0;
+}
+
+function overloadBackoffMs(attempt: number): number {
+  const idx = Math.min(Math.max(attempt - 1, 0), CRM_OVERLOAD_BACKOFF_MS.length - 1);
+  return CRM_OVERLOAD_BACKOFF_MS[idx] ?? 120_000;
+}
 
 let cachedState: {
   viewState: string;
@@ -133,16 +151,20 @@ async function fetchAppStateOnce(): Promise<{
       const errCode =
         (err as { code?: string })?.code ??
         (err as { cause?: { code?: string } })?.cause?.code;
+      const httpStatus = axios.isAxiosError(err) ? err.response?.status : undefined;
       const isTimeout =
         errCode === 'ECONNABORTED' ||
         errCode === 'ETIMEDOUT' ||
         errMessage.includes('timeout of') ||
         errMessage.includes('ETIMEDOUT');
+      const isOverload = isCrmHttpOverloadStatus(httpStatus);
+      if (isOverload) maybeAlertCrmHttpStorm(httpStatus);
 
       if (attempts >= CRM_SESSION_GET_MAX_ATTEMPTS) {
         logCrmTiming('GET session failed (max retries)', sessionMs, {
           attempt: `${attempts}/${CRM_SESSION_GET_MAX_ATTEMPTS}`,
           error: errMessage.slice(0, 200),
+          ...(httpStatus != null ? { httpStatus } : {}),
         });
         throw err;
       }
@@ -151,11 +173,16 @@ async function fetchAppStateOnce(): Promise<{
         attempt: `${attempts}/${CRM_SESSION_GET_MAX_ATTEMPTS}`,
         error: errMessage.slice(0, 200),
         willRetry: true,
+        ...(httpStatus != null ? { httpStatus } : {}),
       });
 
-      cachedState = null;
-      lastFetch = 0;
-      await new Promise((r) => setTimeout(r, isTimeout ? 5000 * attempts : 2000));
+      clearCrmSessionCache();
+      const waitMs = isOverload
+        ? overloadBackoffMs(attempts)
+        : isTimeout
+          ? 5000 * attempts
+          : 2000;
+      await new Promise((r) => setTimeout(r, waitMs));
     }
   }
 
@@ -223,7 +250,8 @@ async function executePostWithRetry(params: QueryParams, signal?: AbortSignal) {
   formData.append('btn_View', 'Execute');
 
   let attempts = 0;
-  const maxAttempts = 3;
+  /** Raised mid-loop when CRM returns 405/502/503 so we keep retrying with long backoff. */
+  let maxAttempts = 3;
 
   while (attempts < maxAttempts) {
     attempts++;
@@ -323,7 +351,13 @@ async function executePostWithRetry(params: QueryParams, signal?: AbortSignal) {
         throw oomErr;
       }
 
-      if (attempts === maxAttempts) {
+      const isHttpOverload = isCrmHttpOverloadStatus(httpStatus);
+      if (isHttpOverload) {
+        maybeAlertCrmHttpStorm(httpStatus);
+        maxAttempts = Math.max(maxAttempts, CRM_OVERLOAD_MAX_ATTEMPTS);
+      }
+
+      if (attempts >= maxAttempts) {
         logCrmTiming('POST failed (max retries)', postMs, {
           attempt: `${attempts}/${maxAttempts}`,
           query: queryDesc,
@@ -342,7 +376,7 @@ async function executePostWithRetry(params: QueryParams, signal?: AbortSignal) {
         errCode === 'ETIMEDOUT' ||
         errMessage.includes('ECONNRESET') ||
         errMessage.includes('ETIMEDOUT');
-      const isOverloaded = errMessage.includes('503') || isReset;
+      const isOverloaded = isHttpOverload || errMessage.includes('503') || isReset;
 
       logCrmTiming('POST failed (retrying)', postMs, {
         attempt: `${attempts}/${maxAttempts}`,
@@ -353,12 +387,26 @@ async function executePostWithRetry(params: QueryParams, signal?: AbortSignal) {
         ...(httpBody ? { httpBodySnippet: httpBody } : {}),
       });
 
-      if (isReset) {
-        cachedState = null;
-        lastFetch = 0;
+      if (isReset || isHttpOverload) {
+        clearCrmSessionCache();
+        // Fresh viewstate for the next POST (stale session often rides with 405s).
+        try {
+          const fresh = await getAppState();
+          formData.set('__VIEWSTATE', fresh.viewState);
+          formData.set('__VIEWSTATEGENERATOR', fresh.viewStateGenerator);
+          if (fresh.eventValidation) formData.set('__EVENTVALIDATION', fresh.eventValidation);
+          else formData.delete('__EVENTVALIDATION');
+        } catch {
+          /* next attempt will fetch session again */
+        }
       }
 
-      await new Promise((r) => setTimeout(r, isOverloaded ? 10000 * attempts : 3000));
+      const waitMs = isHttpOverload
+        ? overloadBackoffMs(attempts)
+        : isOverloaded
+          ? 10000 * attempts
+          : 3000;
+      await new Promise((r) => setTimeout(r, waitMs));
     }
   }
   throw new Error('Maximum retry attempts reached');

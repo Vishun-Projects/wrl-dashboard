@@ -137,7 +137,7 @@ if ! run_step reconcile-ytd-open npm run sync-worker:reconcile-ytd-open -- --app
 fi
 
 run_step reconcile-open-cancel npm run sync-worker:reconcile-open-cancel \
-  || echo "WARN: open-cancel reconcile failed (non-fatal)"
+  || fatal=1
 
 if ! run_step reconcile-major npm run sync-worker:reconcile-major; then
   fatal=1

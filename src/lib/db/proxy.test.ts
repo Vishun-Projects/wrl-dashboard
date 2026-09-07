@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isCrmOutOfMemoryError, isCrmSqlTimeoutError } from './proxy';
+import { isCrmHttpOverloadStatus } from './crm-http-health';
 
 describe('isCrmOutOfMemoryError', () => {
   it('detects flagged CRM OOM errors', () => {
@@ -21,5 +22,12 @@ describe('isCrmSqlTimeoutError', () => {
     expect(isCrmSqlTimeoutError(new Error('Timeout expired. The timeout period elapsed'))).toBe(
       true
     );
+  });
+});
+
+describe('CRM HTTP overload statuses (405 storm path)', () => {
+  it('flags Method Not Allowed and gateway overload codes', () => {
+    expect(isCrmHttpOverloadStatus(405)).toBe(true);
+    expect(isCrmHttpOverloadStatus(503)).toBe(true);
   });
 });

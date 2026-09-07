@@ -70,7 +70,7 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-DEADLINE_HOUR="${MIDNIGHT_SYNC_DEADLINE_HOUR:-5}"
+DEADLINE_HOUR="${MIDNIGHT_SYNC_DEADLINE_HOUR:-7}"
 DEADLINE_MIN="${MIDNIGHT_SYNC_DEADLINE_MIN:-0}"
 RETRY_SLEEP_SEC="${MIDNIGHT_SYNC_RETRY_SLEEP_SEC:-600}"
 MAIL_EARLIEST_HOUR="${MIDNIGHT_MAIL_EARLIEST_HOUR:-3}"
@@ -80,10 +80,15 @@ past_deadline() {
   local now_h now_m
   now_h="$(TZ=Asia/Kolkata date +%H)"
   now_m="$(TZ=Asia/Kolkata date +%M)"
-  if [[ "$now_h" -gt "$DEADLINE_HOUR" ]]; then
+  # Force base-10 — %H can be 08/09 which bash treats as invalid octal.
+  now_h=$((10#$now_h))
+  now_m=$((10#$now_m))
+  local dh=$((10#$DEADLINE_HOUR))
+  local dm=$((10#$DEADLINE_MIN))
+  if [[ "$now_h" -gt "$dh" ]]; then
     return 0
   fi
-  if [[ "$now_h" -eq "$DEADLINE_HOUR" && "$now_m" -ge "$DEADLINE_MIN" ]]; then
+  if [[ "$now_h" -eq "$dh" && "$now_m" -ge "$dm" ]]; then
     return 0
   fi
   return 1
