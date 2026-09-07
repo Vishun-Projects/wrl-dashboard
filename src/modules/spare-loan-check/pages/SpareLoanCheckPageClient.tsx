@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Loader2, Upload } from 'lucide-react';
-import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
+import { PageShell } from '@/components/layout/PageShell';
 import { AdminTable, AdminTableCard, AdminTd, AdminTh, AdminThead, AdminTr } from '@/components/admin/AdminUi';
 import { FilterSelect } from '@/components/filters/FilterSelect';
 import type { FilterSelectOption } from '@/components/filters/filter-select-types';
@@ -568,20 +568,16 @@ export default function SpareLoanCheckPageClient() {
       title="Spare Loan Check "
       subtitle={subtitle}
       toolbar={
-        <div className="register-filter-bar border-b border-slate-200 px-4 py-2">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-                Search
-              </span>
-              <input
-                type="search"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="SO / call no or barcode…"
-                className="h-8 w-56 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] text-slate-800 placeholder:text-slate-400"
-              />
-            </div>
+        <div className="register-filter-bar register-filter-row-compact !px-2 !py-1">
+          <div className="flex flex-wrap items-center gap-1.5 [&_.filter-select-root]:!min-w-[7.5rem] [&_.filter-select-root]:!max-w-[11rem] [&_.filter-select-root]:!flex-[0_1_9rem] [&_.register-filter-btn]:!h-6 [&_.register-filter-btn]:!px-1.5 [&_.register-filter-btn]:!text-[10px] [&_.register-filter-btn]:!shadow-none">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="SO / call no or barcode…"
+              aria-label="Search"
+              className="h-6 w-40 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
+            />
             <FilterSelect
               label="Plant"
               emptyLabel="All plants"
@@ -654,10 +650,7 @@ export default function SpareLoanCheckPageClient() {
               panelClassName="w-44"
               layout="inline"
             />
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-                Call logged
-              </span>
+            <div className="min-w-[7.5rem] max-w-[10rem] shrink-0 [&_button]:!h-6 [&_button]:!px-1.5 [&_button]:!text-[10px] [&_button]:!shadow-none">
               <DateRangeSelector
                 value={loggedRange.label}
                 startDate={loggedRange.start}
@@ -667,11 +660,11 @@ export default function SpareLoanCheckPageClient() {
               />
             </div>
             {summary ? (
-              <div className="ml-auto flex flex-wrap gap-2 pb-1 text-[11px]">
+              <div className="ml-auto flex flex-wrap items-center gap-1 text-[9px]">
                 {(Object.keys(REASON_LABEL) as SpareLoanProblemReason[]).map((key) => (
                   <span
                     key={key}
-                    className="rounded-md border border-rose-100 bg-rose-50 px-2 py-1 text-rose-800"
+                    className="rounded border border-rose-100 bg-rose-50 px-1 py-px text-rose-800"
                   >
                     {REASON_LABEL[key]}: {filteredByReason[key].toLocaleString()}
                   </span>
@@ -768,8 +761,7 @@ export default function SpareLoanCheckPageClient() {
         </div>
       }
     >
-      <PageScrollRegion>
-        <div className="p-3">
+      <div className="flex min-h-0 flex-1 flex-col p-3">
           <AdminTableCard
             isEmpty={!loading && rows.length === 0}
             empty={
@@ -780,24 +772,38 @@ export default function SpareLoanCheckPageClient() {
               </p>
             }
           >
-            <AdminTable>
+            <AdminTable className="w-full min-w-0 table-fixed border-collapse text-left [&_td]:!px-1.5 [&_td]:!py-1 [&_td]:text-[11px] [&_td]:leading-snug">
               <AdminThead>
                 <tr>
-                  <AdminTh sortable sortKey="plant" sort={sort} onSort={(k) => onSort(k as SortKey)}>
+                  <AdminTh
+                    className="w-[11%]"
+                    sortable
+                    sortKey="plant"
+                    sort={sort}
+                    onSort={(k) => onSort(k as SortKey)}
+                  >
                     Plant
                   </AdminTh>
-                  <AdminTh sortable sortKey="zone" sort={sort} onSort={(k) => onSort(k as SortKey)}>
+                  <AdminTh
+                    className="w-[7%]"
+                    sortable
+                    sortKey="zone"
+                    sort={sort}
+                    onSort={(k) => onSort(k as SortKey)}
+                  >
                     Zone
                   </AdminTh>
                   <AdminTh
+                    className="w-[10%]"
                     sortable
                     sortKey="vendorNo"
                     sort={sort}
                     onSort={(k) => onSort(k as SortKey)}
                   >
-                    Vendor (Stock issued to)
+                    Vendor
                   </AdminTh>
                   <AdminTh
+                    className="w-[7%]"
                     sortable
                     sortKey="material"
                     sort={sort}
@@ -806,22 +812,25 @@ export default function SpareLoanCheckPageClient() {
                     Material
                   </AdminTh>
                   <AdminTh
+                    className="w-[12%]"
                     sortable
                     sortKey="materialDescription"
                     sort={sort}
                     onSort={(k) => onSort(k as SortKey)}
                   >
-                    Material Description
+                    Description
                   </AdminTh>
                   <AdminTh
+                    className="w-[7%]"
                     sortable
                     sortKey="itemCategory"
                     sort={sort}
                     onSort={(k) => onSort(k as SortKey)}
                   >
-                    Item category
+                    Category
                   </AdminTh>
                   <AdminTh
+                    className="w-[9%]"
                     sortable
                     sortKey="barcode"
                     sort={sort}
@@ -830,6 +839,7 @@ export default function SpareLoanCheckPageClient() {
                     Barcode
                   </AdminTh>
                   <AdminTh
+                    className="w-[7%]"
                     sortable
                     sortKey="matchKey"
                     sort={sort}
@@ -838,14 +848,16 @@ export default function SpareLoanCheckPageClient() {
                     SO
                   </AdminTh>
                   <AdminTh
+                    className="w-[5%]"
                     sortable
                     sortKey="matchSource"
                     sort={sort}
                     onSort={(k) => onSort(k as SortKey)}
                   >
-                    Source
+                    Src
                   </AdminTh>
                   <AdminTh
+                    className="w-[9%]"
                     sortable
                     sortKey="crmVendorCode"
                     sort={sort}
@@ -854,38 +866,47 @@ export default function SpareLoanCheckPageClient() {
                     CRM Vendor
                   </AdminTh>
                   <AdminTh
+                    className="w-[6%]"
                     sortable
                     sortKey="callLoggedAt"
                     sort={sort}
                     onSort={(k) => onSort(k as SortKey, 'desc')}
                   >
-                    Call logged
+                    Logged
                   </AdminTh>
                   <AdminTh
+                    className="w-[6%]"
                     sortable
                     sortKey="lastEditedAt"
                     sort={sort}
                     onSort={(k) => onSort(k as SortKey, 'desc')}
                   >
-                    Cancel / transfer edit
+                    Edited
                   </AdminTh>
-                  <AdminTh sortable sortKey="reason" sort={sort} onSort={(k) => onSort(k as SortKey)}>
+                  <AdminTh
+                    className="w-[7%]"
+                    sortable
+                    sortKey="reason"
+                    sort={sort}
+                    onSort={(k) => onSort(k as SortKey)}
+                  >
                     Reason
                   </AdminTh>
                   <AdminTh
+                    className="w-[7%]"
                     sortable
                     sortKey="cancelReason"
                     sort={sort}
                     onSort={(k) => onSort(k as SortKey)}
                   >
-                    Cancel Reason
+                    Cancel
                   </AdminTh>
                 </tr>
               </AdminThead>
               <tbody>
                 {loading ? (
                   <AdminTr>
-                    <td className="px-4 py-3 text-[12px] text-slate-500" colSpan={14}>
+                    <td className="px-1 py-1 text-[11px] text-slate-500" colSpan={14}>
                       Loading…
                     </td>
                   </AdminTr>
@@ -893,44 +914,58 @@ export default function SpareLoanCheckPageClient() {
                   rows.map((r, i) => {
                     const vendorMismatch = r.reason === 'vendor_mismatch';
                     const nameHighlight = vendorMismatch
-                      ? 'text-[10px] font-medium text-rose-700'
-                      : 'text-[10px] text-slate-500';
+                      ? 'break-words text-[10px] font-medium leading-snug text-rose-700'
+                      : 'break-words text-[10px] leading-snug text-slate-500';
+                    const plantLabel = r.plantName?.trim() || r.plant;
                     return (
                     <AdminTr key={`${r.matchKey}-${r.vendorNo}-${r.material}-${i}`}>
-                      <AdminTd>
-                        <div className="font-mono text-[11px]">{r.plant}</div>
-                        <div className="text-[10px] text-slate-500">{r.plantName || '—'}</div>
+                      <AdminTd className="text-[11px] leading-snug">
+                        <div className="break-words">{plantLabel}</div>
                       </AdminTd>
-                      <AdminTd className="text-[11px]">{r.zone || '—'}</AdminTd>
-                      <AdminTd>
-                        <div className="font-mono text-[11px]">{r.vendorNo}</div>
+                      <AdminTd className="text-[11px] leading-snug">
+                        <div className="break-words">{r.zone || '—'}</div>
+                      </AdminTd>
+                      <AdminTd className="leading-snug">
+                        <div className="break-all font-mono text-[11px] leading-snug">{r.vendorNo}</div>
                         <div className={nameHighlight}>{r.vendorName || '—'}</div>
                       </AdminTd>
-                      <AdminTd className="font-mono text-[11px]">{r.material}</AdminTd>
-                      <AdminTd className="max-w-[220px] text-[11px]">{r.materialDescription || '—'}</AdminTd>
-                      <AdminTd className="text-[11px]">{r.itemCategory || '—'}</AdminTd>
-                      <AdminTd className="font-mono text-[11px]">{r.barcode || '—'}</AdminTd>
-                      <AdminTd className="font-mono text-[11px]">{r.matchKey}</AdminTd>
-                      <AdminTd className="text-[11px]">
+                      <AdminTd className="font-mono text-[11px] leading-snug">
+                        <div className="break-all">{r.material}</div>
+                      </AdminTd>
+                      <AdminTd className="text-[11px] leading-snug">
+                        <div className="break-words">{r.materialDescription || '—'}</div>
+                      </AdminTd>
+                      <AdminTd className="text-[11px] leading-snug">
+                        <div className="break-words">{r.itemCategory || '—'}</div>
+                      </AdminTd>
+                      <AdminTd className="font-mono text-[10px] leading-snug">
+                        <div className="break-all">{r.barcode || '—'}</div>
+                      </AdminTd>
+                      <AdminTd className="font-mono text-[11px] leading-snug">
+                        <div className="break-all">{r.matchKey}</div>
+                      </AdminTd>
+                      <AdminTd className="text-[11px] leading-snug">
                         {r.matchSource === 'loan' ? 'Loan' : 'Con/Rtn'}
                       </AdminTd>
-                      <AdminTd>
-                        <div className="font-mono text-[11px]">{r.crmVendorCode ?? '—'}</div>
+                      <AdminTd className="leading-snug">
+                        <div className="break-all font-mono text-[11px] leading-snug">
+                          {r.crmVendorCode ?? '—'}
+                        </div>
                         <div className={nameHighlight}>{r.crmVendorName || '—'}</div>
                       </AdminTd>
-                      <AdminTd className="whitespace-nowrap text-[11px]">
+                      <AdminTd className="whitespace-nowrap text-[11px] leading-snug">
                         {r.callLoggedAt ? formatUiDateDash(r.callLoggedAt) || '—' : '—'}
                       </AdminTd>
-                      <AdminTd className="whitespace-nowrap text-[11px]">
+                      <AdminTd className="whitespace-nowrap text-[11px] leading-snug">
                         {r.lastEditedAt ? formatUiDateDash(r.lastEditedAt) || '—' : '—'}
                       </AdminTd>
-                      <AdminTd>
-                        <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[11px] font-medium text-rose-800">
+                      <AdminTd className="leading-snug">
+                        <span className="rounded bg-rose-100 px-1 py-px text-[10px] font-medium leading-snug text-rose-800">
                           {REASON_LABEL[r.reason]}
                         </span>
                       </AdminTd>
-                      <AdminTd className="max-w-[180px] truncate text-[11px]">
-                        {r.cancelReason ?? '—'}
+                      <AdminTd className="text-[11px] leading-snug">
+                        <div className="break-words">{r.cancelReason ?? '—'}</div>
                       </AdminTd>
                     </AdminTr>
                     );
@@ -939,8 +974,7 @@ export default function SpareLoanCheckPageClient() {
               </tbody>
             </AdminTable>
           </AdminTableCard>
-        </div>
-      </PageScrollRegion>
+      </div>
     </PageShell>
   );
 }
