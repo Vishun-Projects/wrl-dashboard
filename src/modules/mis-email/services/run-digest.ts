@@ -282,9 +282,9 @@ export async function runMisEmailTestBatch(options: {
   cc?: string[];
   ccOverride?: string;
   /**
-   * lean = summary+key (default SMTP-safe)
+   * open_only = HTML body + open-calls Excel only (default — matches evening ops)
+   * lean = summary+key Excel
    * force_all = full Excel suite (env MIS_EMAIL_TEST_FORCE_ALL=1 unless overridden)
-   * open_only = HTML body + open-calls Excel only (evening ops probes)
    */
   attachmentProfile?: 'lean' | 'force_all' | 'open_only';
 }): Promise<DigestSendResult[]> {
@@ -352,7 +352,11 @@ export async function runMisEmailTestBatch(options: {
 
   const profile =
     options.attachmentProfile ??
-    (process.env.MIS_EMAIL_TEST_FORCE_ALL === '1' ? 'force_all' : 'lean');
+    (process.env.MIS_EMAIL_TEST_FORCE_ALL === '1'
+      ? 'force_all'
+      : process.env.MIS_EMAIL_TEST_LEAN === '1'
+        ? 'lean'
+        : 'open_only');
   const forceAll = profile === 'force_all';
   const openOnly = profile === 'open_only';
 
@@ -388,7 +392,7 @@ export async function runMisEmailTestBatch(options: {
       ? '[mis-email] Test digest: OPEN_ONLY attachment (open-calls Excel; body keeps regional/branch/key)'
       : forceAll
         ? '[mis-email] Test digest: FORCE_ALL attachments (summary+detailed+key+trace+open)'
-        : '[mis-email] Test digest: lean attachments (summary+key-account only; set MIS_EMAIL_TEST_FORCE_ALL=1 for full)'
+        : '[mis-email] Test digest: lean attachments (summary+key-account only)'
   );
 
   const result = await sendForRecipient(recipient, {

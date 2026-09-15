@@ -46,6 +46,7 @@ const SAP_RECONCILE_PATH = '/internal/mail/subcontractor-reconcile';
 const SAP_SEND_PATH = '/internal/mail/subcontractor-send';
 // Under /internal/mail* so existing Caddy handle reaches the relay (same as SAP paths).
 const CALLS_HOT_SYNC_PATH = '/internal/mail/sync/calls-hot';
+const MIS_DIGEST_STATUS_PATH = '/internal/mail/mis-digest-status';
 const SECRET = process.env.VPS_MAIL_RELAY_SECRET?.trim() ?? '';
 
 const MAX_BODY_BYTES = Math.max(
@@ -291,6 +292,17 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.url === MIS_DIGEST_STATUS_PATH) {
+      await readJson(req);
+      const { readMisEmailDigestRunStatus } = await import(
+        '@/modules/mis-email/services/digest-run-status'
+      );
+      const status = readMisEmailDigestRunStatus();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, ...status }));
+      return;
+    }
+
     if (req.url !== RESET_PATH) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Not found' }));
@@ -335,6 +347,7 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`[mail-relay]   max body ${MAX_BODY_BYTES} bytes, timeout ${REQUEST_TIMEOUT_MS}ms`);
   console.log(`[mail-relay]   ${RESET_PATH} (password reset)`);
   console.log(`[mail-relay]   ${MIS_DIGEST_PREPARED_PATH} (MIS digest — pre-built from app)`);
+  console.log(`[mail-relay]   ${MIS_DIGEST_STATUS_PATH} (MIS digest running status)`);
   console.log(`[mail-relay]   ${MIGRATION_REPORT_PATH} (migration reports)`);
   console.log(`[mail-relay]   ${SAP_INBOX_SYNC_PATH} (subcontractor SAP inbox sync)`);
   console.log(`[mail-relay]   ${SAP_RECONCILE_PATH} (subcontractor reconcile)`);

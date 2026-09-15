@@ -123,6 +123,8 @@ export function Sidebar({ user }: SidebarProps) {
             ? ScanBarcode
             : path === '/report/location-audit'
               ? MapPin
+              : path === '/compressor-barcodes'
+                ? ScanBarcode
               : path === '/report/warranty-master'
                 ? Shield
                 : path === '/report/athena-reconciliation'

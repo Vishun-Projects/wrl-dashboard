@@ -14,7 +14,7 @@ import {
   upsertHotRows,
 } from '@/lib/read-model/upsert-hot';
 import { syncCancelledFromCrmRows } from '@/lib/read-model/upsert-cancelled';
-import { isDedicatedCancelledRegisterSyncEnabled } from '@/lib/read-model/cancelled-call-register/constants';
+import { isDedicatedCancelledRegisterSyncEnabled } from '@/modules/cancelled-calls/server/sync/constants';
 import { updateSyncWatermarks } from '@/lib/read-model/lock';
 import type { HotRow } from '@/lib/read-model/types';
 import type { getSyncState } from '@/lib/read-model/lock';

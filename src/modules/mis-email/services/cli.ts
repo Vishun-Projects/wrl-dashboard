@@ -251,10 +251,19 @@ async function main(): Promise<void> {
           .find((a) => a.startsWith('--cc='))
           ?.slice('--cc='.length);
 
+        const attachmentProfile = process.argv.includes('--force-all')
+          ? ('force_all' as const)
+          : process.argv.includes('--lean')
+            ? ('lean' as const)
+            : process.argv.includes('--open-only')
+              ? ('open_only' as const)
+              : undefined;
+
         const results = await runMisEmailTestBatch({
           userId: userIdArg,
           recipientOverride: toArg,
           ccOverride: ccArg,
+          attachmentProfile,
         });
 
         for (const result of results) {
@@ -330,7 +339,7 @@ npx tsx src / modules / mis - email / services / cli.ts nightly-ytd-export [--to
 
 npx tsx src / modules / mis - email / services / cli.ts preview
 
-npx tsx src / modules / mis - email / services / cli.ts test[--user=][--to=a@x.com, b@y.com][--cc= c@z.com]
+npx tsx src / modules / mis - email / services / cli.ts test[--user=][--to=a@x.com, b@y.com][--cc= c@z.com][--open-only|--lean|--force-all]
 
 npx tsx src / modules / mis - email / services / cli.ts send - user
   (MIS_EMAIL_SEND_PAYLOAD = base64 json)

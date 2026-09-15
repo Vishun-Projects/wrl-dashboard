@@ -32,9 +32,9 @@ import { runArcpIncrementalSync } from '@/modules/arcp-claims/server/sync/increm
 import { runBackfillArcpBmApproved } from '@/modules/arcp-claims/server/sync/backfill-arcp-bm-approved';
 import { runArcpApprovalRescan } from '@/modules/arcp-claims/server/sync/approval-rescan';
 import { runTransactionEntryIncremental } from '@/lib/read-model/transaction-entry';
-import { runAthenaFailedCallsSync } from '@/lib/read-model/athena-reconciliation';
-import { runAttendanceDetailsSync } from '@/lib/read-model/attendance-details';
-import { runUserLocationsSync } from '@/lib/read-model/user-locations';
+import { runAthenaFailedCallsSync } from '@/modules/athena-reconciliation/server/sync';
+import { runAttendanceDetailsSync } from '@/modules/attendance/server/sync';
+import { runUserLocationsSync } from '@/modules/attendance/server/sync/user-locations';
 
 const ENTITY = 'calls_latest_hot';
 

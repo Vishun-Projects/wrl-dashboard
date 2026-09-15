@@ -111,9 +111,9 @@ wait_until_mail_time() {
 }
 
 midnight_repair() {
-  echo "=== midnight repair — re-run catch-up + gaps after verify mismatch ==="
+  echo "=== midnight repair — re-run catch-up + open-cancel reconcile after verify mismatch ==="
   if [[ -f "$STATE_FILE" ]]; then
-    grep -v '^done:editedon-catchup$' "$STATE_FILE" | grep -v '^done:fill-hot-gaps$' >"${STATE_FILE}.tmp" || true
+    grep -vE '^done:(editedon-catchup|fill-hot-gaps|reconcile-open-cancel)$' "$STATE_FILE" >"${STATE_FILE}.tmp" || true
     mv "${STATE_FILE}.tmp" "$STATE_FILE"
   fi
   bash "${SCRIPT_DIR}/midnight-calls-sync.sh" || true

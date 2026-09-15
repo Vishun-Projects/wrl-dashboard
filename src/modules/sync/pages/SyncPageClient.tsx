@@ -114,6 +114,16 @@ export default function ReadModelSyncPage() {
   const [misEmailSending, setMisEmailSending] = useState(false);
   const [misEmailResult, setMisEmailResult] = useState<string | null>(null);
   const [misEmailError, setMisEmailError] = useState<string | null>(null);
+  const [digestRun, setDigestRun] = useState<{
+    running: boolean;
+    phase: string;
+    asOf: string | null;
+    startedAt: string | null;
+    lastFinishedAt: string | null;
+    lastOutcome: string | null;
+    lastSkipReason: string | null;
+    lastSentCount: number | null;
+  } | null>(null);
   const [syncStateSort, setSyncStateSort] = useState<TableSortState<SyncStateSortKey> | null>(null);
   const [recentRunsSort, setRecentRunsSort] = useState<TableSortState<RecentRunSortKey> | null>(null);
 
@@ -174,6 +184,34 @@ export default function ReadModelSyncPage() {
     }
   }, [supabase]);
 
+  const loadDigestRun = useCallback(async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const data = await fetchJson<{
+        running?: boolean;
+        phase?: string;
+        asOf?: string | null;
+        startedAt?: string | null;
+        lastFinishedAt?: string | null;
+        lastOutcome?: string | null;
+        lastSkipReason?: string | null;
+        lastSentCount?: number | null;
+      }>('/api/admin/mis-email/digest-status', session?.access_token);
+      setDigestRun({
+        running: Boolean(data.running),
+        phase: data.phase ?? 'unknown',
+        asOf: data.asOf ?? null,
+        startedAt: data.startedAt ?? null,
+        lastFinishedAt: data.lastFinishedAt ?? null,
+        lastOutcome: data.lastOutcome ?? null,
+        lastSkipReason: data.lastSkipReason ?? null,
+        lastSentCount: data.lastSentCount ?? null,
+      });
+    } catch {
+      /* keep last known */
+    }
+  }, [supabase]);
+
   const sendMisEmailTest = useCallback(async () => {
     setMisEmailSending(true);
     setMisEmailError(null);
@@ -221,11 +259,17 @@ export default function ReadModelSyncPage() {
   useEffect(() => {
     void load();
     void loadMisEmailConfig();
+    void loadDigestRun();
     let timer: number | null = null;
+
+    const poll = () => {
+      void load(true);
+      void loadDigestRun();
+    };
 
     const startPolling = () => {
       if (timer != null) return;
-      timer = window.setInterval(() => void load(true), 10000);
+      timer = window.setInterval(poll, 10000);
     };
 
     const stopPolling = () => {
@@ -239,7 +283,7 @@ export default function ReadModelSyncPage() {
       if (document.hidden) {
         stopPolling();
       } else {
-        void load(true);
+        poll();
         startPolling();
       }
     };
@@ -250,7 +294,7 @@ export default function ReadModelSyncPage() {
       stopPolling();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [load, loadMisEmailConfig]);
+  }, [load, loadMisEmailConfig, loadDigestRun]);
 
   if (loading && !progress) {
     return (
@@ -314,13 +358,46 @@ export default function ReadModelSyncPage() {
             <button
               type="button"
               onClick={() => void sendMisEmailTest()}
-              disabled={misEmailSending || !misEmailSmtpReady}
+              disabled={misEmailSending || !misEmailSmtpReady || Boolean(digestRun?.running)}
+              title={
+                digestRun?.running
+                  ? 'VPS digest is running — wait until it finishes before sending another'
+                  : undefined
+              }
               className="inline-flex items-center gap-2 rounded-md bg-[#0f172a] px-3 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-60"
             >
               <Mail className={`h-3.5 w-3.5 ${misEmailSending ? 'animate-pulse' : ''}`} />
               {misEmailSending ? 'Sending…' : 'Send test MIS email'}
             </button>
           </div>
+
+          {digestRun?.running ? (
+            <div className="mt-3 flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+              <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+              <div>
+                <p className="font-semibold">
+                  Digest running — {digestRun.phase}
+                  {digestRun.asOf ? ` · AS_OF ${digestRun.asOf}` : ''}
+                </p>
+                <p className="mt-0.5 text-xs opacity-90">
+                  Started {formatWhen(digestRun.startedAt)}. Morning reconcile can take a few minutes;
+                  company open mail often lands ~09:30–09:40 — do not re-send manually while this is
+                  spinning.
+                </p>
+              </div>
+            </div>
+          ) : digestRun ? (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              <span className="font-medium text-slate-700">Idle</span>
+              {digestRun.lastFinishedAt ? ` · last finished ${formatWhen(digestRun.lastFinishedAt)}` : ''}
+              {digestRun.lastOutcome ? ` · ${digestRun.lastOutcome}` : ''}
+              {digestRun.lastSentCount != null ? ` · sent ${digestRun.lastSentCount}` : ''}
+              {digestRun.lastSkipReason ? (
+                <p className="mt-1 text-amber-800">Last skip: {digestRun.lastSkipReason}</p>
+              ) : null}
+            </div>
+          ) : null}
+
           {misEmailResult ? (
             <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
               {misEmailResult}

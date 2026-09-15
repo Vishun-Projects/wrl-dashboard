@@ -75,3 +75,19 @@ model CachedPart {
   @@index([call_id, office_id], name: "idx_cached_parts_call")
   @@map("cached_parts")
 }
+
+model CompressorBarcode {
+  id                  String   @id @default(uuid())
+  serial_number       String
+  call_no             String
+  call_date           DateTime
+  office_name         String?
+  derived_old_barcode String
+  derived_new_barcode String
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  @@unique([serial_number, call_no])
+  @@index([serial_number])
+  @@map("compressor_barcodes")
+}

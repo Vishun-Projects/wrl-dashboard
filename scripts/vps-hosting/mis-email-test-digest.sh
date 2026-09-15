@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One-off / scheduled MIS email TEST send — never the full production recipient list.
 # Default To: vishnu.vishwakarma@westernequipments.com
-# Attachments: lean (summary + key-account). Full suite: MIS_EMAIL_TEST_FORCE_ALL=1
+# Attachments: open-calls Excel only (HTML body keeps regional/branch/key tables).
+# Lean summary+key Excel: MIS_EMAIL_TEST_LEAN=1. Full suite: MIS_EMAIL_TEST_FORCE_ALL=1
 #
 # Cron (IST): 0 14 * * * …/mis-email-test-digest.sh >> …/mis-email-test-cron.log
 set -euo pipefail

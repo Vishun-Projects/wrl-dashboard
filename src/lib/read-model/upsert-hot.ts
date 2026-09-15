@@ -5,7 +5,7 @@ import {
   isCancelledHotRow,
   upsertCancelledFromHotRows,
 } from '@/lib/read-model/upsert-cancelled';
-import { isDedicatedCancelledRegisterSyncEnabled } from '@/lib/read-model/cancelled-call-register/constants';
+import { isDedicatedCancelledRegisterSyncEnabled } from '@/modules/cancelled-calls/server/sync/constants';
 
 const HOT_COLUMNS = [
   'ncode',

@@ -29,7 +29,7 @@ import {
 import {
   runAthenaFailedCallsSync,
   executeAthenaReconciliation,
-} from '@/lib/read-model/athena-reconciliation';
+} from '@/modules/athena-reconciliation/server/sync';
 import {
   auditExitCode,
   parseAuditCliArgs,
@@ -37,13 +37,14 @@ import {
 } from '@/lib/read-model/audit/run-full-audit';
 import { logAction } from '@/lib/security/audit';
 import { backfillCancelledFromHot } from '@/lib/read-model/upsert-cancelled';
-import { runAttendanceDetailsSync } from '@/lib/read-model/attendance-details';
-import { runUserLocationsSync } from '@/lib/read-model/user-locations';
-import { runCancelledCallRegisterSync } from '@/lib/read-model/cancelled-call-register';
+import { runAttendanceDetailsSync } from '@/modules/attendance/server/sync';
+import { runUserLocationsSync } from '@/modules/attendance/server/sync/user-locations';
+import { runCancelledCallRegisterSync } from '@/modules/cancelled-calls/server/sync';
 import {
   runCallsMirrorBackfill,
   runCallsMirrorIncremental,
 } from '@/lib/read-model/calls-mirror';
+import { syncCompressorBarcodesToPostgres } from '@/modules/compressor-barcodes/server/sync/postgres-sync';
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
 const DAEMON_MAX_CONSECUTIVE_FAILURES = Number(process.env.SYNC_DAEMON_MAX_FAILURES ?? 5) || 5;
@@ -236,6 +237,16 @@ async function runDaemon(): Promise<void> {
           }
         } catch (mirrorErr) {
           console.error('[calls-mirror] Daemon incremental failed:', formatSyncWorkerError(mirrorErr));
+        }
+      }
+      if (process.env.SYNC_COMPRESSOR_BARCODES_ENABLED !== 'false') {
+        try {
+          const cb = await syncCompressorBarcodesToPostgres();
+          if (cb.count > 0) {
+            console.log(`[compressor-barcodes] Daemon sync complete (${cb.mode}):`, cb.count);
+          }
+        } catch (cbErr) {
+          console.error('[compressor-barcodes] Daemon incremental failed:', formatSyncWorkerError(cbErr));
         }
       }
     } catch (err) {
@@ -502,7 +513,7 @@ Commands:
   backfill-cancelled    Upsert calls_cancelled from current hot cancels (editedon = cancelled_at)
   calls-mirror-backfill Full/resume CRM → calls_crm_mirror by dtrndate (excl. transfers)
   calls-mirror-incremental  Editedon watermark sync into calls_crm_mirror (status=ok only)
-  reconcile-open-cancel Refresh open/assigned hot rows that CRM shows cancelled (MIS mail preflight)
+  reconcile-open-cancel Refresh open/assigned hot rows CRM cancelled (midnight-calls-sync only)
   attendance-sync       Fetch CRM uv_rptattandenceDetails_New2 → crm_attendance_details
                     --from YYYY-MM-DD --to YYYY-MM-DD  (default: watermark-2d or year start → today)
   user-locations-sync   Fetch CRM msduserlocation → crm_user_locations
@@ -524,7 +535,7 @@ Commands:
   dims              Refresh dimension tables only
   nightly           Calls nightly + ARCP + TransactionEntry when enabled
   retention         Purge old sync logs and ingest batches
-  full-audit        Full read-model audit vs live CRM (see scripts/ops/audit-read-model-full.ts)
+  full-audit        Full read-model audit vs live CRM (npm run sync-worker -- full-audit)
                     --apply  refresh stale rows; --only hot,dims,facts; --resume-from-trn TRN
   daemon            Loop ARCP / TE / Athena / cancelled register / mirror; calls only if SYNC_CALLS_DAEMON_ENABLED=true
 

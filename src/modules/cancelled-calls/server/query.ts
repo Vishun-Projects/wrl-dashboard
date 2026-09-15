@@ -1,5 +1,5 @@
 import { withAppClient } from '@/lib/read-model/db';
-import { CANCELLED_CALL_REGISTER_ENTITY } from '@/lib/read-model/cancelled-call-register/constants';
+import { CANCELLED_CALL_REGISTER_ENTITY } from '@/modules/cancelled-calls/server/sync/constants';
 import { shouldRestrictToAssignedOffices } from '@/sql/trhcalls/office-security';
 import type {
   CancelledCallRow,

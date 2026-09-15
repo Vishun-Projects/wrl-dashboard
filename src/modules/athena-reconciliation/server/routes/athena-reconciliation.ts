@@ -5,7 +5,7 @@ import { gzippedCsvPayload } from '@/lib/net/csv-gzip-response';
 import {
   executeAthenaReconciliation,
   runAthenaFailedCallsSync,
-} from '@/lib/read-model/athena-reconciliation';
+} from '@/modules/athena-reconciliation/server/sync';
 import {
   fetchAthenaFailedCallDetail,
 } from '@/modules/athena-reconciliation/server/detail';

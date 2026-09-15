@@ -156,6 +156,14 @@ export const RBAC_PAGES: RbacPage[] = [
     group: 'Reports',
   },
   {
+    id: 'compressor_barcodes',
+    permission: 'page_compressor_barcodes',
+    path: '/compressor-barcodes',
+    label: 'Compressor Barcodes',
+    description: 'Track barcode replacements for compressor repairs',
+    group: 'Reports',
+  },
+  {
     id: 'admin_users',
     permission: 'manage_users',
     path: '/admin/users',
@@ -352,8 +360,8 @@ export function canAccessPage(permissions: string[], pageId: string): boolean {
     if (canAccessMisTab(permissions, 'register')) return true;
   }
 
-  // ZSS02 spare loan check: MIS reports audience until roles matrix is updated.
-  if (pageId === 'spare_loan_check') {
+  // ZSS02 spare loan check & compressor barcodes: MIS reports audience until roles matrix is updated.
+  if (pageId === 'spare_loan_check' || pageId === 'compressor_barcodes') {
     if (hasPermission(permissions, 'page_mis_reports')) return true;
     if (canAccessMisTab(permissions, 'register')) return true;
   }
