@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const page = Math.max(1, Math.floor(Number(searchParams.get('page') || 1) || 1));
-    const limit = Math.min(100, Math.max(1, Number(searchParams.get('limit') || 25)));
+    const limit = Math.min(200, Math.max(1, Number(searchParams.get('limit') || 100)));
     const offset = (page - 1) * limit;
     const search = (searchParams.get('search') || '').trim();
     const filter = (searchParams.get('filter') || 'all').trim(); // 'all' | 'broken' | 'repeat3'
@@ -147,27 +147,44 @@ export async function GET(req: NextRequest) {
         ${whereClause}
       `;
 
-      const sortBy = (searchParams.get('sortBy') || 'solve_date').trim();
-      const sortOrder = (searchParams.get('sortOrder') || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+      // Multi-sort: `sort=total_calls:desc,solve_date:asc` takes priority.
+      // Falls back to legacy `sortBy` / `sortOrder` params.
+      const SORT_SQL: Record<string, (dir: 'ASC' | 'DESC') => string> = {
+        serial_number:  (d) => `serial_number ${d}`,
+        total_calls:    (d) => `COUNT(*) ${d}`,
+        avg_days_gap:   (d) => `ROUND(AVG(days_gap) FILTER (WHERE days_gap IS NOT NULL)) ${d} NULLS LAST`,
+        current_barcode:(d) => `current_barcode ${d} NULLS LAST`,
+        branch:         (d) => `latest_branch ${d} NULLS LAST`,
+        office:         (d) => `latest_office ${d} NULLS LAST`,
+        solve_date:     (d) => `MAX(solve_date) ${d} NULLS LAST`,
+        call_date:      (d) => `MAX(call_date) ${d}`,
+      };
 
-      let orderBySql = 'MAX(COALESCE(solve_date, call_date)) DESC, serial_number ASC';
-      if (sortBy === 'serial_number') {
-        orderBySql = `serial_number ${sortOrder}`;
-      } else if (sortBy === 'total_calls') {
-        orderBySql = `COUNT(*) ${sortOrder}, MAX(COALESCE(solve_date, call_date)) DESC`;
-      } else if (sortBy === 'avg_days_gap') {
-        orderBySql = `ROUND(AVG(days_gap) FILTER (WHERE days_gap IS NOT NULL)) ${sortOrder} NULLS LAST`;
-      } else if (sortBy === 'current_barcode') {
-        orderBySql = `current_barcode ${sortOrder} NULLS LAST`;
-      } else if (sortBy === 'branch') {
-        orderBySql = `latest_branch ${sortOrder} NULLS LAST`;
-      } else if (sortBy === 'office') {
-        orderBySql = `latest_office ${sortOrder} NULLS LAST`;
-      } else if (sortBy === 'solve_date') {
-        orderBySql = `MAX(solve_date) ${sortOrder} NULLS LAST`;
-      } else if (sortBy === 'call_date') {
-        orderBySql = `MAX(call_date) ${sortOrder}`;
+      type SortKey = { field: string; dir: 'ASC' | 'DESC' };
+      let sortKeys: SortKey[] = [];
+
+      const sortParam = (searchParams.get('sort') || '').trim();
+      if (sortParam) {
+        sortKeys = sortParam
+          .split(',')
+          .map((s) => {
+            const [field, rawDir] = s.trim().split(':');
+            const dir = rawDir?.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+            return { field: field?.trim() ?? '', dir };
+          })
+          .filter((k) => k.field in SORT_SQL) as SortKey[];
       }
+
+      // Legacy fallback
+      if (sortKeys.length === 0) {
+        const legacyField = (searchParams.get('sortBy') || 'solve_date').trim();
+        const legacyDir = (searchParams.get('sortOrder') || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+        if (legacyField in SORT_SQL) sortKeys = [{ field: legacyField, dir: legacyDir }];
+      }
+
+      const orderBySql = sortKeys.length > 0
+        ? sortKeys.map((k) => SORT_SQL[k.field](k.dir)).join(', ')
+        : 'MAX(COALESCE(solve_date, call_date)) DESC, serial_number ASC';
 
       const dataQuery = `
         SELECT 

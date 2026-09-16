@@ -1,23 +1,31 @@
 'use client';
 
-import React, { useState, useEffect, useTransition } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
-import { SortableTh } from '@/components/ui/SortableTh';
 import {
-  BarChart2,
+  AdminTableCard,
+  AdminTable,
+  AdminThead,
+  AdminTr,
+  AdminTd,
+} from '@/components/admin/AdminUi';
+import { SortableTh } from '@/components/ui/SortableTh';
+import { AnimatedMetric } from '@/components/motion';
+import { formatUiDate } from '@/lib/dates/ui-date';
+import {
+  ScanBarcode,
   Loader2,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
   Search,
-  RefreshCw,
   X,
-  Layers,
   ArrowRight,
   AlertTriangle,
   Calendar,
+  AlertCircle,
+  RotateCcw,
 } from 'lucide-react';
-import { toast } from 'sonner';
 
 const fetcher = (url: string) =>
   fetch(url).then((res) => {
@@ -71,14 +79,22 @@ type APIResponse = {
     total_machines: number;
     broken_machines: number;
     repeat_machines: number;
+    three_plus_machines?: number;
   };
 };
 
+type SortKey = { field: string; dir: 'asc' | 'desc' };
+type FilterTab = 'repeat' | 'broken' | 'repeat3' | 'all';
+
 function formatDate(val: string | null | undefined): string {
   if (!val) return '—';
-  const d = new Date(val);
-  if (isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-GB');
+  try {
+    return formatUiDate(val) || '—';
+  } catch {
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('en-GB');
+  }
 }
 
 function renderCallStatusBadge(status: string | null | undefined, cancelReason?: string | null) {
@@ -149,41 +165,73 @@ function renderCallStatusBadge(status: string | null | undefined, cancelReason?:
   );
 }
 
+const SORT_LABELS: Record<string, string> = {
+  serial_number: 'Serial',
+  total_calls: 'Repairs',
+  avg_days_gap: 'Avg Gap',
+  current_barcode: 'Barcode',
+  branch: 'Branch',
+  office: 'Office',
+  solve_date: 'Solved Date',
+  call_date: 'Call Date',
+};
+
 export function CompressorBarcodesPageClient() {
   const [page, setPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeSearch, setActiveSearch] = useState('');
-  // Keep only 2 tabs: 1 broken continuity, 2 2+ repair calls
-  const [filterTab, setFilterTab] = useState<'broken' | 'repeat'>('repeat');
+  const [filterTab, setFilterTab] = useState<FilterTab>('repeat');
   const [dateType, setDateType] = useState<'call_date' | 'solve_date'>('call_date');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [sortBy, setSortBy] = useState<string>('solve_date');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const limit = 25;
+  const [sortKeys, setSortKeys] = useState<SortKey[]>([{ field: 'solve_date', dir: 'desc' }]);
+  const limit = 100;
 
   const [data, setData] = useState<APIResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const [isSyncing, startSyncTransition] = useTransition();
 
   // Set of currently expanded serial numbers
   const [expandedSerials, setExpandedSerials] = useState<Set<string>>(new Set());
   // Set of serial numbers toggled to view full history when date filter is active
   const [showAllHistorySerials, setShowAllHistorySerials] = useState<Set<string>>(new Set());
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
-  // Handle column header sort
+  // Multi-sort handler
   const handleSort = (field: string) => {
-    if (sortBy === field) {
-      setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortBy(field);
-      setSortOrder('desc');
-    }
+    setSortKeys((prev) => {
+      const idx = prev.findIndex((k) => k.field === field);
+      if (idx === -1) {
+        return [...prev, { field, dir: 'desc' as const }];
+      }
+      const next = [...prev];
+      next[idx] = { field, dir: next[idx].dir === 'desc' ? 'asc' : 'desc' };
+      return next;
+    });
     setPage(1);
   };
 
-  // Fetch data from database API
+  const removeSortKey = (field: string) => {
+    setSortKeys((prev) => {
+      const next = prev.filter((k) => k.field !== field);
+      return next.length > 0 ? next : [{ field: 'solve_date', dir: 'desc' }];
+    });
+    setPage(1);
+  };
+
+  const buildSortParam = (keys: SortKey[]) =>
+    keys.map((k) => `${k.field}:${k.dir}`).join(',');
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setActiveSearch(searchTerm);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Fetch data
   useEffect(() => {
     let ignore = false;
     setIsLoading(true);
@@ -193,9 +241,12 @@ export function CompressorBarcodesPageClient() {
       limit: String(limit),
       filter: filterTab,
       dateType,
-      sortBy,
-      sortOrder,
+      sort: buildSortParam(sortKeys),
     });
+
+    if (filterTab === 'all') {
+      queryParams.set('minRepairs', '1');
+    }
     if (activeSearch.trim()) {
       queryParams.set('search', activeSearch.trim());
     }
@@ -212,7 +263,6 @@ export function CompressorBarcodesPageClient() {
           setData(res);
           setIsLoading(false);
           setError(null);
-          // If a single item matched, expand it automatically
           if (res.data?.length === 1) {
             setExpandedSerials(new Set([res.data[0].serial_number]));
           }
@@ -228,11 +278,9 @@ export function CompressorBarcodesPageClient() {
     return () => {
       ignore = true;
     };
-  }, [page, limit, activeSearch, filterTab, dateType, startDate, endDate, sortBy, sortOrder]);
+  }, [page, limit, activeSearch, filterTab, dateType, startDate, endDate, sortKeys]);
 
-  const [autoRefresh, setAutoRefresh] = useState(true);
-
-  // Periodic silent background auto-refresh every 60s
+  // Background silent auto-refresh every 60s
   useEffect(() => {
     if (!autoRefresh) return;
 
@@ -242,24 +290,20 @@ export function CompressorBarcodesPageClient() {
         limit: String(limit),
         filter: filterTab,
         dateType,
-        sortBy,
-        sortOrder,
+        sort: buildSortParam(sortKeys),
       });
+      if (filterTab === 'all') queryParams.set('minRepairs', '1');
       if (activeSearch.trim()) queryParams.set('search', activeSearch.trim());
       if (startDate) queryParams.set('startDate', startDate);
       if (endDate) queryParams.set('endDate', endDate);
 
       fetcher(`/api/compressor-barcodes?${queryParams.toString()}`)
-        .then((res) => {
-          setData(res);
-        })
-        .catch((err) => {
-          console.warn('[Auto-refresh] Silent poll error:', err);
-        });
+        .then((res) => setData(res))
+        .catch((err) => console.warn('[Auto-refresh] Silent poll error:', err));
     }, 60_000);
 
     return () => clearInterval(interval);
-  }, [autoRefresh, page, limit, activeSearch, filterTab, dateType, startDate, endDate, sortBy, sortOrder]);
+  }, [autoRefresh, page, limit, activeSearch, filterTab, dateType, startDate, endDate, sortKeys]);
 
   const toggleExpand = (serial: string) => {
     setExpandedSerials((prev) => {
@@ -279,682 +323,686 @@ export function CompressorBarcodesPageClient() {
     setExpandedSerials(new Set());
   };
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPage(1);
-    setActiveSearch(searchTerm);
-  };
-
-  const handleClearSearch = () => {
-    setSearchTerm('');
-    setActiveSearch('');
-    setPage(1);
-  };
-
   const handleClearDates = () => {
     setStartDate('');
     setEndDate('');
     setPage(1);
   };
 
-  const handleSyncData = () => {
-    startSyncTransition(async () => {
-      const toastId = toast.loading('Syncing compressor barcodes from Western CRM...');
-      try {
-        const res = await fetch('/api/admin/sync-compressor-barcodes', {
-          method: 'POST',
-        });
-        const result = await res.json();
-        if (!res.ok) {
-          throw new Error(result.error || 'Failed to sync data');
-        }
-        toast.success(`Successfully synced ${result.count?.toLocaleString() ?? 0} compressor records!`, { id: toastId });
-        setPage(1);
-        setIsLoading(true);
-        const queryParams = new URLSearchParams({
-          page: '1',
-          limit: String(limit),
-          filter: filterTab,
-          dateType,
-          sortBy,
-          sortOrder,
-        });
-        if (activeSearch) queryParams.set('search', activeSearch);
-        if (startDate) queryParams.set('startDate', startDate);
-        if (endDate) queryParams.set('endDate', endDate);
-
-        const refreshed = await fetcher(`/api/compressor-barcodes?${queryParams.toString()}`);
-        setData(refreshed);
-        setIsLoading(false);
-      } catch (err: unknown) {
-        console.error('Sync failed:', err);
-        toast.error(err instanceof Error ? err.message : 'Sync failed', { id: toastId });
-      }
-    });
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    setActiveSearch('');
+    setStartDate('');
+    setEndDate('');
+    setFilterTab('repeat');
+    setSortKeys([{ field: 'solve_date', dir: 'desc' }]);
+    setPage(1);
   };
 
-  const totalPages = data ? Math.ceil(data.total / limit) : 0;
-  const allExpanded =
-    data?.data && data.data.length > 0 && data.data.every((d) => expandedSerials.has(d.serial_number));
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / limit)) : 1;
+  const isDateFiltered = Boolean(startDate || endDate);
+
+  const stats = data?.stats;
 
   return (
     <PageShell
       title="Compressor Barcodes Tracker"
-      icon={<BarChart2 className="h-4 w-4" />}
-    >
-      <PageScrollRegion className="p-4 bg-slate-100/70">
-        <div className="flex flex-col gap-4 p-5 bg-white rounded-xl shadow-xs border border-slate-200">
-          {/* Header & Actions */}
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-800">Repeat Compressor Barcodes Tracker</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Grouped by unique machine serial number &mdash; displaying machines with 2+ compressor repairs. Click any table header to sort ASC/DESC.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md text-slate-600 shadow-2xs">
-                <span className="relative flex h-2 w-2">
-                  {autoRefresh ? (
-                    <>
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                    </>
-                  ) : (
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-slate-400"></span>
-                  )}
-                </span>
-                <span className="font-medium text-[11px] text-slate-700">
-                  {autoRefresh ? 'Live Auto-sync (1m)' : 'Auto-sync paused'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setAutoRefresh(!autoRefresh)}
-                  className="text-[10px] text-blue-600 hover:text-blue-800 underline ml-1 cursor-pointer font-medium"
-                >
-                  {autoRefresh ? 'Pause' : 'Resume'}
-                </button>
-              </div>
-
-              {data?.data && data.data.length > 0 && (
-                <button
-                  type="button"
-                  onClick={allExpanded ? collapseAllOnPage : expandAllOnPage}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 bg-white hover:bg-slate-50 border border-slate-300 rounded-md shadow-2xs transition-colors cursor-pointer"
-                >
-                  <Layers className="h-3.5 w-3.5 text-slate-500" />
-                  {allExpanded ? 'Collapse All' : 'Expand All'}
-                </button>
-              )}
-
-              <button
-                onClick={handleSyncData}
-                disabled={isSyncing}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded-md shadow-2xs transition-colors disabled:opacity-50 cursor-pointer"
-                title="Manually trigger immediate sync from CRM into PostgreSQL"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin text-blue-600' : ''}`} />
-                {isSyncing ? 'Syncing...' : 'Sync Now'}
-              </button>
-            </div>
-          </div>
-
-          {/* Filter Tabs & Controls Row */}
-          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 pt-3 border-t border-slate-100">
-            {/* Only 2 Tabs: 1 Broken Continuity, 2 2+ Repair Calls */}
-            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg w-fit">
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterTab('broken');
-                  setPage(1);
-                }}
-                className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
-                  filterTab === 'broken'
-                    ? 'bg-amber-500 text-white shadow-2xs'
-                    : 'text-amber-800 hover:bg-amber-100/70'
-                }`}
-              >
-                <AlertTriangle className="h-3 w-3" />
-                Broken Continuity{' '}
-                {data?.stats?.broken_machines != null ? (
-                  <span
-                    className={`text-[11px] font-semibold px-1.5 py-0.2 rounded-full ${
-                      filterTab === 'broken' ? 'bg-amber-700 text-white' : 'bg-amber-200/80 text-amber-900'
-                    }`}
+      subtitle="Monitor repeat compressor replacements, barcode continuity, and repair lineage across CRM calls"
+      icon={<ScanBarcode className="h-4 w-4" />}
+      toolbar={
+        <>
+          <div className="register-filter-bar !px-3 !py-1.5 bg-white border-b border-slate-200">
+            <div className="flex flex-wrap items-center justify-between gap-2.5">
+              {/* Left: Date Range Filter */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center h-8 gap-1.5 bg-slate-50/80 hover:bg-slate-50 border border-slate-200 rounded-lg px-2.5 text-xs text-slate-700 shadow-2xs transition-colors">
+                  <Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                  <select
+                    value={dateType}
+                    onChange={(e) => {
+                      setDateType(e.target.value as 'call_date' | 'solve_date');
+                      setPage(1);
+                    }}
+                    className="bg-transparent border-0 text-[11px] font-semibold text-slate-700 focus:outline-none cursor-pointer pr-1"
+                    title="Filter by Call Date or Solved Date"
                   >
-                    {data.stats.broken_machines.toLocaleString()}
-                  </span>
-                ) : null}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterTab('repeat');
-                  setPage(1);
-                }}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
-                  filterTab === 'repeat'
-                    ? 'bg-white text-slate-900 shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                }`}
-              >
-                2+ Repair Calls
-                {data?.stats?.repeat_machines != null ? (
-                  <span className="text-[11px] font-normal text-slate-500 ml-1">
-                    ({data.stats.repeat_machines.toLocaleString()})
-                  </span>
-                ) : null}
-              </button>
-            </div>
-
-            {/* Date Range & Search Controls */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
-              {/* Date Range Filter with Call Date vs Solved Date selector */}
-              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-600">
-                <Calendar className="h-3.5 w-3.5 text-slate-400" />
-                <select
-                  value={dateType}
-                  onChange={(e) => {
-                    setDateType(e.target.value as 'call_date' | 'solve_date');
-                    setPage(1);
-                  }}
-                  className="bg-transparent border-0 text-[11px] font-semibold text-slate-700 focus:outline-none cursor-pointer pr-1"
-                  title="Filter by Call Date or Solved Date"
-                >
-                  <option value="call_date">Call Date</option>
-                  <option value="solve_date">Solved Date</option>
-                </select>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => {
-                    setStartDate(e.target.value);
-                    setPage(1);
-                  }}
-                  className="bg-transparent border-0 text-xs text-slate-700 focus:outline-none cursor-pointer"
-                  title="Filter start date"
-                />
-                <span className="text-slate-400 text-xs">to</span>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => {
-                    setEndDate(e.target.value);
-                    setPage(1);
-                  }}
-                  className="bg-transparent border-0 text-xs text-slate-700 focus:outline-none cursor-pointer"
-                  title="Filter end date"
-                />
-                {(startDate || endDate) && (
-                  <button
-                    type="button"
-                    onClick={handleClearDates}
-                    className="text-slate-400 hover:text-slate-600 ml-1 cursor-pointer"
-                    title="Clear date filter"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-
-              {/* Search Input */}
-              <form onSubmit={handleSearchSubmit} className="flex gap-2 max-w-xs w-full">
-                <div className="relative flex-1">
-                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+                    <option value="call_date">Call Date</option>
+                    <option value="solve_date">Solved Date</option>
+                  </select>
+                  <span className="text-slate-300">|</span>
                   <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Search serial, call, barcode, office..."
-                    className="w-full pl-9 pr-8 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white transition-all"
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => {
+                      setStartDate(e.target.value);
+                      setPage(1);
+                    }}
+                    className="bg-transparent border-0 text-xs text-slate-700 focus:outline-none cursor-pointer"
+                    title="Filter start date"
                   />
-                  {searchTerm && (
+                  <span className="text-slate-400 text-xs font-medium">to</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => {
+                      setEndDate(e.target.value);
+                      setPage(1);
+                    }}
+                    className="bg-transparent border-0 text-xs text-slate-700 focus:outline-none cursor-pointer"
+                    title="Filter end date"
+                  />
+                  {(startDate || endDate) && (
                     <button
                       type="button"
-                      onClick={handleClearSearch}
-                      className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      onClick={handleClearDates}
+                      className="text-slate-400 hover:text-slate-600 ml-1 cursor-pointer"
+                      title="Clear date filter"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
                   )}
                 </div>
-                <button
-                  type="submit"
-                  className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors cursor-pointer"
-                >
-                  Search
-                </button>
-              </form>
+              </div>
+
+              {/* Right Search Input & Result Count */}
+              <div className="flex items-center gap-2 flex-1 max-w-sm justify-end">
+                <div className="relative w-full max-w-xs">
+                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search serial, barcode, call no, office..."
+                    className="h-8 w-full pl-8 pr-7 bg-slate-50/80 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 focus:border-slate-400 shadow-2xs transition-all"
+                  />
+                  {searchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchTerm('');
+                        setActiveSearch('');
+                        setPage(1);
+                      }}
+                      className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      title="Clear search"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {(activeSearch || isDateFiltered || filterTab !== 'repeat') && (
+                  <button
+                    type="button"
+                    onClick={handleClearFilters}
+                    className="h-8 inline-flex items-center gap-1 px-2.5 text-xs font-medium text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg shadow-2xs transition-colors cursor-pointer shrink-0"
+                    title="Reset all filters"
+                  >
+                    <RotateCcw className="h-3 w-3 text-slate-400" />
+                    Reset
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Table Content */}
-          {error ? (
-            <div className="text-rose-600 bg-rose-50 p-4 rounded-md text-sm border border-rose-200">
-              Failed to load data. Please ensure you have permissions or try refreshing.
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-slate-200">
-              <table className="w-full text-sm text-left border-collapse">
-                <thead className="text-xs text-slate-600 uppercase bg-slate-100/90 border-b border-slate-200">
-                  <tr>
-                    <th className="w-10 px-3 py-3 text-center"></th>
-                    <SortableTh
-                      active={sortBy === 'serial_number'}
-                      dir={sortOrder}
-                      onClick={() => handleSort('serial_number')}
-                      className="px-4 py-3 font-semibold"
-                    >
-                      Serial Number
-                    </SortableTh>
-                    <SortableTh
-                      active={sortBy === 'total_calls'}
-                      dir={sortOrder}
-                      onClick={() => handleSort('total_calls')}
-                      className="px-4 py-3 font-semibold"
-                    >
-                      Total Repairs
-                    </SortableTh>
-                    <SortableTh
-                      active={sortBy === 'avg_days_gap'}
-                      dir={sortOrder}
-                      onClick={() => handleSort('avg_days_gap')}
-                      className="px-4 py-3 font-semibold"
-                    >
-                      Avg Days Gap
-                    </SortableTh>
-                    <SortableTh
-                      active={sortBy === 'current_barcode'}
-                      dir={sortOrder}
-                      onClick={() => handleSort('current_barcode')}
-                      className="px-4 py-3 font-semibold"
-                    >
-                      Current Barcode
-                    </SortableTh>
-                    <SortableTh
-                      active={sortBy === 'branch'}
-                      dir={sortOrder}
-                      onClick={() => handleSort('branch')}
-                      className="px-4 py-3 font-semibold"
-                    >
-                      Branch
-                    </SortableTh>
-                    <SortableTh
-                      active={sortBy === 'office'}
-                      dir={sortOrder}
-                      onClick={() => handleSort('office')}
-                      className="px-4 py-3 font-semibold"
-                    >
-                      Latest Office / Workshop
-                    </SortableTh>
-                    <SortableTh
-                      active={sortBy === 'solve_date'}
-                      dir={sortOrder}
-                      onClick={() => handleSort('solve_date')}
-                      className="px-4 py-3 font-semibold"
-                    >
-                      Latest Solved Date
-                    </SortableTh>
-                    <SortableTh
-                      active={sortBy === 'call_date'}
-                      dir={sortOrder}
-                      onClick={() => handleSort('call_date')}
-                      className="px-4 py-3 font-semibold"
-                    >
-                      Latest Call Date
-                    </SortableTh>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {isLoading ? (
-                    <tr>
-                      <td colSpan={9} className="h-32 text-center align-middle">
-                        <Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-400" />
-                        <span className="text-xs text-slate-400 mt-2 block">Loading records from database...</span>
-                      </td>
-                    </tr>
-                  ) : data?.data && data.data.length > 0 ? (
-                    data.data.map((row) => {
-                      const isExpanded = expandedSerials.has(row.serial_number);
-                      const isBroken = row.has_continuity_break;
-                      const isDateFiltered = Boolean(startDate || endDate);
-                      const displayedCalls =
-                        showAllHistorySerials.has(row.serial_number) || !isDateFiltered
-                          ? row.all_calls && row.all_calls.length > 0
-                            ? row.all_calls
-                            : row.calls
-                          : row.calls || [];
+          {/* Executive KPI Stats Bar */}
+          {stats && (
+            <div className="register-stats-bar !px-3 !py-2 border-b border-slate-200 bg-slate-50/60">
+              {/* Card 1: 2+ Repeat Repairs */}
+              <button
+                type="button"
+                className={`register-stat-item register-stat-item--clickable ${
+                  filterTab === 'repeat' ? 'register-stat-item--active' : ''
+                }`}
+                onClick={() => {
+                  setFilterTab('repeat');
+                  setPage(1);
+                }}
+                title="Filter machines with 2 or more compressor repairs"
+              >
+                <AnimatedMetric
+                  value={stats.repeat_machines || 0}
+                  className="register-stat-value text-slate-900"
+                />
+                <span className="register-stat-label">Repeat Machines (2+ Repairs)</span>
+              </button>
 
-                      return (
-                        <React.Fragment key={row.serial_number}>
-                          {/* Parent Machine Row */}
-                          <tr
-                            onClick={() => toggleExpand(row.serial_number)}
-                            className={`cursor-pointer transition-colors border-b border-slate-100 ${
-                              isBroken
-                                ? isExpanded
-                                  ? 'bg-amber-50/70 border-l-4 border-l-amber-500'
-                                  : 'bg-amber-50/30 hover:bg-amber-50/50 border-l-4 border-l-amber-400'
-                                : isExpanded
-                                ? 'bg-blue-50/40 hover:bg-blue-50/60'
-                                : 'hover:bg-slate-50/80'
-                            }`}
-                          >
-                            <td className="px-3 py-3 text-center align-middle">
-                              <ChevronDown
-                                className={`h-4 w-4 text-slate-400 transition-transform duration-200 inline-block ${
-                                  isExpanded ? 'transform rotate-180 text-blue-600' : ''
-                                }`}
-                              />
-                            </td>
-                            <td className="px-4 py-3 font-semibold text-slate-900 font-mono text-xs">
-                              <div className="flex items-center gap-1.5">
-                                <span className="hover:text-blue-600 transition-colors">{row.serial_number}</span>
-                                {isBroken && (
-                                  <span
-                                    title="Continuity break detected midway in compressor replacement history"
-                                    className="inline-flex items-center text-amber-600"
-                                  >
-                                    <AlertTriangle className="h-3.5 w-3.5" />
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex flex-col gap-0.5">
+              {/* Card 2: Broken Continuity */}
+              <button
+                type="button"
+                className={`register-stat-item register-stat-item--clickable ${
+                  filterTab === 'broken' ? 'register-stat-item--active' : ''
+                }`}
+                onClick={() => {
+                  setFilterTab('broken');
+                  setPage(1);
+                }}
+                title="Filter machines where old barcode did not match previously installed barcode"
+              >
+                <div className="flex items-center justify-between w-full">
+                  <AnimatedMetric
+                    value={stats.broken_machines || 0}
+                    className="register-stat-value text-amber-600"
+                  />
+                  <span className="text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded">
+                    Integrity Risk
+                  </span>
+                </div>
+                <span className="register-stat-label flex items-center gap-1 text-amber-800">
+                  <AlertTriangle className="h-2.5 w-2.5 text-amber-600" /> Broken Continuity
+                </span>
+              </button>
+
+              {/* Card 3: 3+ Frequent Repairs */}
+              <button
+                type="button"
+                className={`register-stat-item register-stat-item--clickable ${
+                  filterTab === 'repeat3' ? 'register-stat-item--active' : ''
+                }`}
+                onClick={() => {
+                  setFilterTab('repeat3');
+                  setPage(1);
+                }}
+                title="Filter machines with 3 or more compressor repairs"
+              >
+                <AnimatedMetric
+                  value={stats.three_plus_machines || 0}
+                  className="register-stat-value text-indigo-600"
+                />
+                <span className="register-stat-label">Frequent Repeat (3+ Repairs)</span>
+              </button>
+
+              {/* Card 4: Total Tracked Universe */}
+              <button
+                type="button"
+                className={`register-stat-item register-stat-item--clickable ${
+                  filterTab === 'all' ? 'register-stat-item--active' : ''
+                }`}
+                onClick={() => {
+                  setFilterTab('all');
+                  setPage(1);
+                }}
+                title="View total compressor serial universe"
+              >
+                <AnimatedMetric
+                  value={stats.total_machines || 0}
+                  className="register-stat-value text-slate-700"
+                />
+                <span className="register-stat-label">Total Serial Universe</span>
+              </button>
+            </div>
+          )}
+        </>
+      }
+    >
+      <PageScrollRegion className="p-3 bg-bg-soft/70">
+        <div className="flex flex-col gap-2.5">
+          {/* Main Table Card */}
+          <AdminTableCard
+            isEmpty={!isLoading && (!data?.data || data.data.length === 0)}
+            empty={
+              <div className="flex flex-col items-center justify-center p-8 text-center">
+                <AlertCircle className="h-8 w-8 text-slate-300 mb-2" />
+                <p className="text-sm font-semibold text-slate-700">No compressor records found</p>
+                <p className="text-xs text-slate-400 mt-1 max-w-sm">
+                  {activeSearch
+                    ? `No matches found for search "${activeSearch}".`
+                    : isDateFiltered
+                    ? 'No repairs match the selected date range.'
+                    : filterTab === 'broken'
+                    ? 'No machines with broken barcode continuity found.'
+                    : 'No repeat compressor repair records found.'}
+                </p>
+                {(activeSearch || isDateFiltered || filterTab !== 'repeat') && (
+                  <button
+                    type="button"
+                    onClick={handleClearFilters}
+                    className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-white border border-slate-200 rounded-md text-slate-700 hover:bg-slate-50 shadow-2xs cursor-pointer"
+                  >
+                    <RotateCcw className="h-3 w-3" /> Reset all filters
+                  </button>
+                )}
+              </div>
+            }
+          >
+            {/* Multi-sort Chips Strip */}
+            {sortKeys.length > 1 && (
+              <div className="flex items-center gap-1.5 px-3.5 py-1.5 border-b border-slate-200 bg-slate-50/70 text-[11px] text-slate-600 flex-wrap">
+                <span className="font-semibold text-slate-500 uppercase tracking-wide text-[10px] mr-1">
+                  Active Sort Order:
+                </span>
+                {sortKeys.map((k, i) => (
+                  <span
+                    key={k.field}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50/90 border border-blue-200 text-blue-800 font-medium"
+                  >
+                    <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-blue-600 text-white text-[9px] font-bold">
+                      {i + 1}
+                    </span>
+                    <span>{SORT_LABELS[k.field] ?? k.field}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleSort(k.field)}
+                      className="text-blue-600 hover:text-blue-900 font-bold px-0.5 cursor-pointer"
+                      title={`Click to reverse direction (${k.dir === 'desc' ? 'ASC' : 'DESC'})`}
+                    >
+                      {k.dir === 'desc' ? '↓' : '↑'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeSortKey(k.field)}
+                      className="text-blue-400 hover:text-blue-700 ml-0.5 cursor-pointer font-bold leading-none"
+                      title={`Remove ${SORT_LABELS[k.field]} from sort`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSortKeys([{ field: 'solve_date', dir: 'desc' }]);
+                    setPage(1);
+                  }}
+                  className="text-[11px] text-slate-500 hover:text-slate-800 underline cursor-pointer ml-auto"
+                >
+                  Reset to default
+                </button>
+              </div>
+            )}
+
+            <AdminTable>
+              <AdminThead>
+                <tr className="border-b border-slate-200 bg-slate-50/90 text-[11px] uppercase tracking-wider text-slate-500 font-semibold select-none">
+                  <th className="w-10 px-3 py-2.5 text-center"></th>
+                  {([
+                    { field: 'serial_number',  label: 'Serial Number' },
+                    { field: 'total_calls',     label: 'Total Repairs' },
+                    { field: 'avg_days_gap',    label: 'Avg Days Gap' },
+                    { field: 'current_barcode', label: 'Current Barcode' },
+                    { field: 'branch',          label: 'Branch' },
+                    { field: 'office',          label: 'Latest Office / Workshop' },
+                    { field: 'solve_date',      label: 'Latest Solved Date' },
+                    { field: 'call_date',       label: 'Latest Call Date' },
+                  ] as const).map(({ field, label }) => {
+                    const idx = sortKeys.findIndex((k) => k.field === field);
+                    const active = idx !== -1;
+                    const dir = active ? sortKeys[idx].dir : 'desc';
+                    const priority = sortKeys.length > 1 && active ? idx + 1 : null;
+                    return (
+                      <SortableTh
+                        key={field}
+                        active={active}
+                        dir={dir}
+                        onClick={() => handleSort(field)}
+                        className={`!bg-transparent hover:!bg-slate-100/70 transition-colors px-3.5 py-2.5 text-[11px] font-semibold uppercase tracking-wider ${
+                          active ? '!text-slate-900 font-bold' : 'text-slate-500'
+                        }`}
+                        title={`Click to sort by ${label}. Click again to toggle ASC/DESC.`}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <span>{label}</span>
+                          {priority !== null && (
+                            <span className="inline-flex items-center justify-center w-3.5 h-3.5 text-[9px] font-bold rounded-full bg-blue-600 text-white leading-none">
+                              {priority}
+                            </span>
+                          )}
+                        </span>
+                      </SortableTh>
+                    );
+                  })}
+                </tr>
+              </AdminThead>
+              <tbody className="divide-y divide-slate-100">
+                {isLoading ? (
+                  <tr>
+                    <td colSpan={9} className="h-40 text-center align-middle">
+                      <Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-400" />
+                      <span className="text-xs text-slate-400 mt-2 block">Loading compressor records...</span>
+                    </td>
+                  </tr>
+                ) : data?.data && data.data.length > 0 ? (
+                  data.data.map((row) => {
+                    const isExpanded = expandedSerials.has(row.serial_number);
+                    const isBroken = row.has_continuity_break;
+                    const displayedCalls =
+                      showAllHistorySerials.has(row.serial_number) || !isDateFiltered
+                        ? row.all_calls && row.all_calls.length > 0
+                          ? row.all_calls
+                          : row.calls
+                        : row.calls || [];
+
+                    return (
+                      <React.Fragment key={row.serial_number}>
+                        {/* Parent Machine Row */}
+                        <AdminTr
+                          onClick={() => toggleExpand(row.serial_number)}
+                          className={`group transition-colors ${
+                            isBroken
+                              ? isExpanded
+                                ? 'bg-amber-50/60 border-l-[3px] border-l-amber-500'
+                                : 'bg-amber-50/20 hover:bg-amber-50/40 border-l-[3px] border-l-amber-400'
+                              : isExpanded
+                              ? 'bg-blue-50/30 hover:bg-blue-50/50'
+                              : 'hover:bg-slate-50/70'
+                          }`}
+                        >
+                          <td className="w-10 px-3 py-2 text-center align-middle">
+                            <ChevronDown
+                              className={`h-4 w-4 text-slate-400 group-hover:text-slate-600 transition-transform duration-200 inline-block ${
+                                isExpanded ? 'transform rotate-180 text-blue-600' : ''
+                              }`}
+                            />
+                          </td>
+                          <AdminTd className="font-mono text-[12px] font-semibold text-slate-900 py-2.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="group-hover:text-blue-600 transition-colors">{row.serial_number}</span>
+                              {isBroken && (
                                 <span
-                                  className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border w-fit ${
-                                    row.total_calls >= 5
-                                      ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                      : row.total_calls >= 2
-                                      ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                      : 'bg-slate-100 text-slate-700 border-slate-200'
-                                  }`}
+                                  title="Continuity break detected midway in compressor replacement history"
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] font-semibold bg-amber-100/80 text-amber-800 border border-amber-300/80"
                                 >
-                                  {row.total_calls} {row.total_calls === 1 ? 'Repair' : 'Repairs'}
+                                  <AlertTriangle className="h-2.5 w-2.5 text-amber-600 shrink-0" />
+                                  Broken
                                 </span>
-                                {isDateFiltered && row.calls_in_range != null && row.calls_in_range !== row.total_calls && (
-                                  <span className="text-[10px] text-blue-600 font-medium">
-                                    ({row.calls_in_range} in period)
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">
-                              {row.avg_days_gap != null ? (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                  {row.avg_days_gap} {row.avg_days_gap === 1 ? 'day' : 'days'}
-                                </span>
-                              ) : (
-                                <span className="text-slate-400 text-xs">—</span>
                               )}
-                            </td>
-                            <td className="px-4 py-3">
-                              {row.current_barcode && row.current_barcode !== '-' ? (
-                                <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded text-xs font-mono font-medium">
-                                  {row.current_barcode}
+                            </div>
+                          </AdminTd>
+                          <AdminTd className="py-2.5">
+                            <div className="flex items-center gap-1">
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                                  row.total_calls >= 5
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                    : row.total_calls >= 2
+                                    ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                    : 'bg-slate-100 text-slate-600 border-slate-200'
+                                }`}
+                              >
+                                {row.total_calls} {row.total_calls === 1 ? 'Repair' : 'Repairs'}
+                              </span>
+                              {isDateFiltered && row.calls_in_range != null && row.calls_in_range !== row.total_calls && (
+                                <span className="text-[10px] text-blue-600 font-medium">
+                                  ({row.calls_in_range} in period)
                                 </span>
-                              ) : (
-                                <span className="text-slate-400 italic text-xs font-mono">-</span>
                               )}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700 text-xs">
+                            </div>
+                          </AdminTd>
+                          <AdminTd className="py-2.5">
+                            {row.avg_days_gap != null ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200/80">
+                                {row.avg_days_gap} {row.avg_days_gap === 1 ? 'day' : 'days'}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-xs">—</span>
+                            )}
+                          </AdminTd>
+                          <AdminTd className="py-2.5">
+                            {row.current_barcode && row.current_barcode !== '-' ? (
+                              <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded text-[11px] font-mono font-semibold">
+                                {row.current_barcode}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 italic text-[11px] font-mono">-</span>
+                            )}
+                          </AdminTd>
+                          <AdminTd className="text-slate-700 text-[12px] py-2.5 max-w-[190px]">
+                            <span className="truncate block" title={row.latest_branch || ''}>
                               {row.latest_branch || '—'}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700 text-xs font-medium">
-                              <span>{row.latest_office || '—'}</span>
+                            </span>
+                          </AdminTd>
+                          <AdminTd className="text-slate-800 text-[12px] font-medium py-2.5 max-w-[220px]">
+                            <div className="truncate flex items-center" title={row.latest_office || ''}>
+                              <span className="truncate">{row.latest_office || '—'}</span>
                               {row.latest_sap_vendor_code ? (
-                                <span className="text-slate-400 font-mono text-[11px] ml-1">
+                                <span className="text-slate-400 font-mono text-[10px] ml-1 shrink-0">
                                   ({row.latest_sap_vendor_code})
                                 </span>
                               ) : null}
-                            </td>
-                            <td className="px-4 py-3 text-slate-600 text-xs font-medium">
-                              {formatDate(row.latest_solve_date)}
-                            </td>
-                            <td className="px-4 py-3 text-slate-600 text-xs">
-                              {formatDate(row.latest_call_date)}
-                            </td>
-                          </tr>
+                            </div>
+                          </AdminTd>
+                          <AdminTd className="text-slate-600 text-[12px] font-medium tabular-nums py-2.5">
+                            {formatDate(row.latest_solve_date)}
+                          </AdminTd>
+                          <AdminTd className="text-slate-500 text-[12px] tabular-nums py-2.5">
+                            {formatDate(row.latest_call_date)}
+                          </AdminTd>
+                        </AdminTr>
 
-                          {/* Expanded Child Accordion Lineage Table */}
-                          {isExpanded && (
-                            <tr className="bg-slate-50/80">
-                              <td colSpan={9} className="p-0 border-b border-slate-200">
-                                <div className="p-4 pl-10 bg-slate-50/95 border-t border-slate-200">
-                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-                                    <div className="text-xs font-semibold text-slate-700 flex items-center gap-2 flex-wrap">
-                                      <span>Compressor Replacement Lineage for Serial:</span>
-                                      <span className="font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                                        {row.serial_number}
+                        {/* Expanded Child Accordion Lineage Table */}
+                        {isExpanded && (
+                          <tr className="bg-slate-50/70 border-b border-slate-200">
+                            <td colSpan={9} className="p-0">
+                              <div className="p-3 sm:p-4 pl-6 sm:pl-10 bg-slate-50/90 border-t border-slate-200/80">
+                                {/* Accordion Header Strip */}
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+                                  <div className="text-xs font-semibold text-slate-700 flex items-center gap-2 flex-wrap">
+                                    <span>Replacement Lineage for Serial:</span>
+                                    <span className="font-mono text-blue-700 bg-blue-50/80 px-2 py-0.5 rounded border border-blue-200 font-bold">
+                                      {row.serial_number}
+                                    </span>
+                                    {isDateFiltered && (
+                                      <span className="text-xs text-slate-500 font-normal">
+                                        (Showing {displayedCalls.length} call{displayedCalls.length === 1 ? '' : 's'} in selected period
+                                        {row.total_calls > displayedCalls.length ? ` of ${row.total_calls} total` : ''})
                                       </span>
-                                      {isDateFiltered && (
-                                        <span className="text-xs text-slate-500 font-normal">
-                                          (Showing {displayedCalls.length} call{displayedCalls.length === 1 ? '' : 's'} in selected period
-                                          {row.total_calls > displayedCalls.length ? ` of ${row.total_calls} total` : ''})
-                                        </span>
-                                      )}
-                                    </div>
-
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      {isDateFiltered && row.total_calls > (row.calls?.length || 0) && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setShowAllHistorySerials((prev) => {
-                                              const next = new Set(prev);
-                                              if (next.has(row.serial_number)) next.delete(row.serial_number);
-                                              else next.add(row.serial_number);
-                                              return next;
-                                            });
-                                          }}
-                                          className="text-[11px] font-medium text-blue-600 hover:text-blue-800 underline cursor-pointer"
-                                        >
-                                          {showAllHistorySerials.has(row.serial_number)
-                                            ? `Show filtered period only (${row.calls?.length || 0} call${row.calls?.length === 1 ? '' : 's'})`
-                                            : `View all ${row.total_calls} historical calls`}
-                                        </button>
-                                      )}
-                                      {isBroken && (
-                                        <div className="inline-flex items-center gap-1.5 text-xs text-amber-900 bg-amber-100/90 border border-amber-300 px-2.5 py-1 rounded-md font-medium">
-                                          <AlertTriangle className="h-3.5 w-3.5 text-amber-700" />
-                                          <span>Continuity break detected: technician recorded an unexpected old barcode midway</span>
-                                        </div>
-                                      )}
-                                    </div>
+                                    )}
                                   </div>
 
-                                  <div className="overflow-x-auto bg-white rounded-lg border border-slate-200 shadow-2xs">
-                                    <table className="w-full text-xs text-left border-collapse">
-                                      <thead className="bg-slate-100 text-slate-600 uppercase text-[10px] font-semibold border-b border-slate-200">
-                                        <tr>
-                                          <th className="px-2.5 py-2.5 w-10 text-center">#</th>
-                                          <th className="px-3 py-2.5">Call No</th>
-                                          <th className="px-3 py-2.5">Status</th>
-                                          <th className="px-3 py-2.5">Call Date</th>
-                                          <th className="px-3 py-2.5">Solve Date</th>
-                                          <th className="px-3 py-2.5">Days Gap</th>
-                                          <th className="px-3 py-2.5">Branch</th>
-                                          <th className="px-3 py-2.5">Office / Workshop</th>
-                                          <th className="px-3 py-2.5">Old Barcode (Item)</th>
-                                          <th className="px-1 py-2.5 text-center w-6"></th>
-                                          <th className="px-3 py-2.5">New Barcode (Item)</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-slate-100">
-                                        {displayedCalls.map((call, idx) => {
-                                          const isCallBroken = call.is_continuity_broken;
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {isDateFiltered && row.total_calls > (row.calls?.length || 0) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setShowAllHistorySerials((prev) => {
+                                            const next = new Set(prev);
+                                            if (next.has(row.serial_number)) next.delete(row.serial_number);
+                                            else next.add(row.serial_number);
+                                            return next;
+                                          });
+                                        }}
+                                        className="text-[11px] font-medium text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                                      >
+                                        {showAllHistorySerials.has(row.serial_number)
+                                          ? `Show filtered period only (${row.calls?.length || 0} call${row.calls?.length === 1 ? '' : 's'})`
+                                          : `View all ${row.total_calls} historical calls`}
+                                      </button>
+                                    )}
+                                    {isBroken && (
+                                      <div className="inline-flex items-center gap-1.5 text-xs text-amber-900 bg-amber-100/90 border border-amber-300 px-2.5 py-1 rounded-md font-medium">
+                                        <AlertTriangle className="h-3.5 w-3.5 text-amber-700 shrink-0" />
+                                        <span>Continuity break: technician entered unexpected old barcode</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
 
-                                          return (
-                                            <tr
-                                              key={call.id || `${call.call_no}-${idx}`}
-                                              className={`transition-colors ${
-                                                isCallBroken
-                                                  ? 'bg-amber-50/70 hover:bg-amber-50 border-l-4 border-l-amber-500'
-                                                  : 'hover:bg-slate-50/60'
-                                              }`}
-                                            >
-                                              <td className="px-2.5 py-2.5 text-center text-slate-400 font-mono text-[11px]">
-                                                {idx + 1}
-                                              </td>
-                                              <td className="px-3 py-2.5 font-mono font-medium text-slate-900">
-                                                {call.call_no}
-                                              </td>
-                                              <td className="px-3 py-2.5">
-                                                {renderCallStatusBadge(call.call_status, call.cancel_reason)}
-                                              </td>
-                                              <td className="px-3 py-2.5 text-slate-600">
-                                                {formatDate(call.call_date)}
-                                              </td>
-                                              <td className="px-3 py-2.5 text-slate-700 font-medium">
-                                                {formatDate(call.solve_date)}
-                                              </td>
-                                              <td className="px-3 py-2.5">
-                                                {call.call_status === 'Cancelled' ? (
-                                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
-                                                    NA
-                                                  </span>
-                                                ) : call.days_gap != null ? (
-                                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                                                    {call.days_gap} {call.days_gap === 1 ? 'day' : 'days'}
-                                                  </span>
-                                                ) : (
-                                                  <span className="text-slate-400 text-xs">—</span>
-                                                )}
-                                              </td>
-                                              <td className="px-3 py-2.5 text-slate-700">
-                                                {call.branch_name || '—'}
-                                              </td>
-                                              <td className="px-3 py-2.5 text-slate-700">
-                                                <span>{call.office_name || '—'}</span>
-                                                {call.sap_vendor_code ? (
-                                                  <span className="text-slate-400 font-mono text-[10px] ml-1">
-                                                    ({call.sap_vendor_code})
-                                                  </span>
-                                                ) : null}
-                                              </td>
-                                              <td className="px-3 py-2.5">
-                                                <div className="flex flex-col gap-0.5">
-                                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                                    {call.derived_old_barcode && call.derived_old_barcode !== '-' ? (
-                                                      <>
-                                                        <span
-                                                          className={`px-1.5 py-0.5 rounded text-xs font-mono font-medium border ${
-                                                            isCallBroken
-                                                              ? 'bg-rose-50 text-rose-800 border-rose-300 font-semibold'
-                                                              : 'bg-slate-100 text-slate-700 border-slate-200'
-                                                          }`}
-                                                        >
-                                                          {call.derived_old_barcode}
-                                                        </span>
-                                                        {(call.old_item_code || call.old_item_name) && (
-                                                          <span className="text-[11px] text-slate-500 font-normal">
-                                                            ({call.old_item_code ? `${call.old_item_code}` : ''}
-                                                            {call.old_item_code && call.old_item_name ? ' - ' : ''}
-                                                            {call.old_item_name || ''})
-                                                          </span>
-                                                        )}
-                                                      </>
-                                                    ) : (
-                                                      <span className="text-slate-400 italic text-xs">
-                                                        Initial / Blank
-                                                      </span>
-                                                    )}
-                                                  </div>
+                                {/* Lineage Table */}
+                                <div className="overflow-x-auto bg-white rounded-lg border border-slate-200/90 shadow-2xs">
+                                  <table className="w-full text-xs text-left border-collapse">
+                                    <thead className="bg-slate-100/70 text-slate-600 uppercase text-[10px] font-semibold tracking-wider border-b border-slate-200">
+                                      <tr>
+                                        <th className="px-2.5 py-2 w-10 text-center">#</th>
+                                        <th className="px-3 py-2">Call No</th>
+                                        <th className="px-3 py-2">Status</th>
+                                        <th className="px-3 py-2">Call Date</th>
+                                        <th className="px-3 py-2">Solve Date</th>
+                                        <th className="px-3 py-2">Days Gap</th>
+                                        <th className="px-3 py-2">Branch</th>
+                                        <th className="px-3 py-2">Office / Workshop</th>
+                                        <th className="px-3 py-2">Old Barcode (Removed)</th>
+                                        <th className="px-1 py-2 text-center w-6"></th>
+                                        <th className="px-3 py-2">New Barcode (Installed)</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                      {displayedCalls.map((call, idx) => {
+                                        const isCallBroken = call.is_continuity_broken;
 
-                                                  {/* Highlight continuity mismatch */}
-                                                  {isCallBroken && call.expected_old_barcode && (
-                                                    <span className="text-[10px] text-rose-600 font-medium leading-tight mt-0.5 flex items-center gap-1">
-                                                      <span>⚠️ Expected:</span>
-                                                      <span className="font-mono bg-rose-50 px-1 rounded border border-rose-200">
-                                                        {call.expected_old_barcode}
-                                                      </span>
-                                                    </span>
-                                                  )}
-                                                </div>
-                                              </td>
-                                              <td className="px-1 py-2.5 text-center text-slate-400">
-                                                <ArrowRight className="h-3 w-3 inline" />
-                                              </td>
-                                              <td className="px-3 py-2.5">
+                                        return (
+                                          <tr
+                                            key={call.id || `${call.call_no}-${idx}`}
+                                            className={`transition-colors ${
+                                              isCallBroken
+                                                ? 'bg-amber-50/70 hover:bg-amber-50 border-l-[3px] border-l-amber-500'
+                                                : 'hover:bg-slate-50/60'
+                                            }`}
+                                          >
+                                            <td className="px-2.5 py-2 text-center text-slate-400 font-mono text-[10px]">
+                                              {idx + 1}
+                                            </td>
+                                            <td className="px-3 py-2 font-mono font-medium text-slate-900 text-[11px]">
+                                              {call.call_no}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                              {renderCallStatusBadge(call.call_status, call.cancel_reason)}
+                                            </td>
+                                            <td className="px-3 py-2 text-slate-600 text-[11px] tabular-nums">
+                                              {formatDate(call.call_date)}
+                                            </td>
+                                            <td className="px-3 py-2 text-slate-800 font-medium text-[11px] tabular-nums">
+                                              {formatDate(call.solve_date)}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                              {call.call_status === 'Cancelled' ? (
+                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+                                                  NA
+                                                </span>
+                                              ) : call.days_gap != null ? (
+                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                                                  {call.days_gap} {call.days_gap === 1 ? 'day' : 'days'}
+                                                </span>
+                                              ) : (
+                                                <span className="text-slate-400 text-xs">—</span>
+                                              )}
+                                            </td>
+                                            <td className="px-3 py-2 text-slate-700 text-[11px]">
+                                              {call.branch_name || '—'}
+                                            </td>
+                                            <td className="px-3 py-2 text-slate-700 text-[11px]">
+                                              <span>{call.office_name || '—'}</span>
+                                              {call.sap_vendor_code ? (
+                                                <span className="text-slate-400 font-mono text-[10px] ml-1">
+                                                  ({call.sap_vendor_code})
+                                                </span>
+                                              ) : null}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                              <div className="flex flex-col gap-0.5">
                                                 <div className="flex items-center gap-1.5 flex-wrap">
-                                                  {call.derived_new_barcode && call.derived_new_barcode !== '-' ? (
+                                                  {call.derived_old_barcode && call.derived_old_barcode !== '-' ? (
                                                     <>
-                                                      <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded text-xs font-mono font-semibold">
-                                                        {call.derived_new_barcode}
+                                                      <span
+                                                        className={`px-1.5 py-0.5 rounded text-[11px] font-mono font-medium border ${
+                                                          isCallBroken
+                                                            ? 'bg-rose-50 text-rose-800 border-rose-300 font-semibold'
+                                                            : 'bg-slate-100 text-slate-700 border-slate-200'
+                                                        }`}
+                                                      >
+                                                        {call.derived_old_barcode}
                                                       </span>
-                                                      {(call.new_item_code || call.new_item_name) && (
-                                                        <span className="text-[11px] text-slate-500 font-normal">
-                                                          ({call.new_item_code ? `${call.new_item_code}` : ''}
-                                                          {call.new_item_code && call.new_item_name ? ' - ' : ''}
-                                                          {call.new_item_name || ''})
+                                                      {(call.old_item_code || call.old_item_name) && (
+                                                        <span className="text-[10px] text-slate-500 font-normal">
+                                                          ({call.old_item_code ? `${call.old_item_code}` : ''}
+                                                          {call.old_item_code && call.old_item_name ? ' - ' : ''}
+                                                          {call.old_item_name || ''})
                                                         </span>
                                                       )}
                                                     </>
                                                   ) : (
-                                                    <span className="text-slate-400 italic text-xs font-mono">-</span>
+                                                    <span className="text-slate-400 italic text-[11px]">
+                                                      Initial / Blank
+                                                    </span>
                                                   )}
                                                 </div>
-                                              </td>
-                                            </tr>
-                                          );
-                                        })}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={9} className="h-28 text-center align-middle text-slate-500 text-sm">
-                        No compressor repair records found
-                        {activeSearch ? ` matching "${activeSearch}"` : ''}
-                        {startDate || endDate ? ` within selected date range` : ''}
-                        {filterTab === 'broken' ? ' with broken continuity' : ''}.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
 
-          {/* Pagination Controls */}
-          <div className="flex flex-col sm:flex-row items-center justify-between py-2 gap-3 mt-1">
-            <div className="text-xs text-slate-500">
+                                                {/* Highlight continuity mismatch */}
+                                                {isCallBroken && call.expected_old_barcode && (
+                                                  <span className="text-[10px] text-rose-600 font-medium leading-tight mt-0.5 flex items-center gap-1">
+                                                    <span>⚠️ Expected:</span>
+                                                    <span className="font-mono bg-rose-50 px-1 rounded border border-rose-200 font-bold">
+                                                      {call.expected_old_barcode}
+                                                    </span>
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </td>
+                                            <td className="px-1 py-2 text-center text-slate-400">
+                                              <ArrowRight className="h-3 w-3 inline" />
+                                            </td>
+                                            <td className="px-3 py-2">
+                                              <div className="flex items-center gap-1.5 flex-wrap">
+                                                {call.derived_new_barcode && call.derived_new_barcode !== '-' ? (
+                                                  <>
+                                                    <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold">
+                                                      {call.derived_new_barcode}
+                                                    </span>
+                                                    {(call.new_item_code || call.new_item_name) && (
+                                                      <span className="text-[10px] text-slate-500 font-normal">
+                                                        ({call.new_item_code ? `${call.new_item_code}` : ''}
+                                                        {call.new_item_code && call.new_item_name ? ' - ' : ''}
+                                                        {call.new_item_name || ''})
+                                                      </span>
+                                                    )}
+                                                  </>
+                                                ) : (
+                                                  <span className="text-slate-400 italic text-[11px] font-mono">-</span>
+                                                )}
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
+                ) : null}
+              </tbody>
+            </AdminTable>
+          </AdminTableCard>
+
+          {/* Standard Pagination Controls */}
+          <div className="flex flex-col sm:flex-row items-center justify-between py-2 px-1 gap-3 text-xs text-slate-500 font-medium">
+            <div>
               Showing {data && data.total > 0 ? (page - 1) * limit + 1 : 0} to{' '}
-              {data ? Math.min(page * limit, data.total) : 0} of {data?.total?.toLocaleString() || 0} repeat machines (min. 2 repairs)
+              {data ? Math.min(page * limit, data.total) : 0} of {data?.total?.toLocaleString() || 0} machines
               {filterTab === 'broken' && (
-                <span className="ml-1 text-amber-700 font-medium">(broken continuity)</span>
+                <span className="ml-1 text-amber-700 font-semibold">(broken continuity)</span>
+              )}
+              {filterTab === 'repeat3' && (
+                <span className="ml-1 text-indigo-700 font-semibold">(3+ repairs)</span>
               )}
               {activeSearch && <span className="ml-1 text-slate-400 font-medium">(search filtered)</span>}
-              {(startDate || endDate) && <span className="ml-1 text-blue-600 font-medium">(date filtered)</span>}
+              {isDateFiltered && <span className="ml-1 text-blue-600 font-medium">(date filtered)</span>}
             </div>
+
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500 mr-2">
-                Page {page} of {Math.max(1, totalPages)}
+              <span className="text-slate-500 mr-2 text-xs">
+                Page {page} of {totalPages}
               </span>
               <button
-                className="flex items-center justify-center px-2.5 py-1 text-xs font-medium bg-white border border-slate-300 rounded-md hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                type="button"
+                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page <= 1 || isLoading}
               >
-                <ChevronLeft className="h-3.5 w-3.5 mr-0.5" /> Prev
+                <ChevronLeft className="h-3.5 w-3.5" /> Prev
               </button>
               <button
-                className="flex items-center justify-center px-2.5 py-1 text-xs font-medium bg-white border border-slate-300 rounded-md hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                type="button"
+                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={page >= totalPages || isLoading}
               >
-                Next <ChevronRight className="h-3.5 w-3.5 ml-0.5" />
+                Next <ChevronRight className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
