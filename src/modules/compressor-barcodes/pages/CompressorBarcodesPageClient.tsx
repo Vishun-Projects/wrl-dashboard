@@ -273,7 +273,6 @@ export function CompressorBarcodesPageClient() {
         if (!ignore) {
           setData(res);
           setIsLoading(false);
-          setError(null);
           if (res.data?.length === 1) {
             setExpandedSerials(new Set([res.data[0].serial_number]));
           }
@@ -281,7 +280,7 @@ export function CompressorBarcodesPageClient() {
       })
       .catch((err) => {
         if (!ignore) {
-          setError(err);
+          console.error('[Compressor Barcodes] Fetch error:', err);
           setIsLoading(false);
         }
       });
@@ -293,8 +292,6 @@ export function CompressorBarcodesPageClient() {
 
   // Background silent auto-refresh every 60s
   useEffect(() => {
-    if (!autoRefresh) return;
-
     const interval = setInterval(() => {
       const queryParams = new URLSearchParams({
         page: String(page),
@@ -315,7 +312,7 @@ export function CompressorBarcodesPageClient() {
     }, 60_000);
 
     return () => clearInterval(interval);
-  }, [autoRefresh, page, limit, activeSearch, selectedBranch, filterTab, dateType, startDate, endDate, sortKeys]);
+  }, [page, limit, activeSearch, selectedBranch, filterTab, dateType, startDate, endDate, sortKeys]);
 
   const toggleExpand = (serial: string) => {
     setExpandedSerials((prev) => {
