@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import {
   AdminTableCard,
@@ -198,13 +198,11 @@ export function CompressorBarcodesPageClient() {
 
   const [data, setData] = useState<APIResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
 
   // Set of currently expanded serial numbers
   const [expandedSerials, setExpandedSerials] = useState<Set<string>>(new Set());
   // Set of serial numbers toggled to view full history when date filter is active
   const [showAllHistorySerials, setShowAllHistorySerials] = useState<Set<string>>(new Set());
-  const [autoRefresh, setAutoRefresh] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
 
   // Multi-sort handler
