@@ -64,7 +64,7 @@ export function AdminTableCard({
   const reducedMotion = usePrefersReducedMotion();
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-bg-canvas shadow-sm">
+    <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-bg-canvas shadow-sm">
       {isEmpty ? (
         <motion.div
           className="flex flex-1 flex-col items-center justify-center gap-2 p-12 text-center"
@@ -84,7 +84,7 @@ export function AdminTableCard({
         <div
           className={
             scrollClassName ??
-            'min-h-0 flex-1 overflow-auto custom-scrollbar'
+            'min-h-0 min-w-0 w-full flex-1 overflow-auto custom-scrollbar'
           }
         >
           {children}

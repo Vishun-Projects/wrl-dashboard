@@ -13,7 +13,7 @@ import { SortableTh } from '@/components/ui/SortableTh';
 import { AnimatedMetric } from '@/components/motion';
 import { formatUiDate } from '@/lib/dates/ui-date';
 import {
-  ScanBarcode,
+  Cpu,
   Loader2,
   ChevronLeft,
   ChevronRight,
@@ -25,6 +25,11 @@ import {
   Calendar,
   AlertCircle,
   RotateCcw,
+  MapPin,
+  Download,
+  GitCommit,
+  Zap,
+  Clock,
 } from 'lucide-react';
 
 const fetcher = (url: string) =>
@@ -80,11 +85,14 @@ type APIResponse = {
     broken_machines: number;
     repeat_machines: number;
     three_plus_machines?: number;
+    premature_machines?: number;
+    top_branches?: { branch_name: string; repeat_count: number }[];
+    all_branches?: string[];
   };
 };
 
 type SortKey = { field: string; dir: 'asc' | 'desc' };
-type FilterTab = 'repeat' | 'broken' | 'repeat3' | 'all';
+type FilterTab = 'repeat' | 'broken' | 'repeat3' | 'premature' | 'all';
 
 function formatDate(val: string | null | undefined): string {
   if (!val) return '—';
@@ -180,6 +188,7 @@ export function CompressorBarcodesPageClient() {
   const [page, setPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeSearch, setActiveSearch] = useState('');
+  const [selectedBranch, setSelectedBranch] = useState('');
   const [filterTab, setFilterTab] = useState<FilterTab>('repeat');
   const [dateType, setDateType] = useState<'call_date' | 'solve_date'>('call_date');
   const [startDate, setStartDate] = useState('');
@@ -196,6 +205,7 @@ export function CompressorBarcodesPageClient() {
   // Set of serial numbers toggled to view full history when date filter is active
   const [showAllHistorySerials, setShowAllHistorySerials] = useState<Set<string>>(new Set());
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Multi-sort handler
   const handleSort = (field: string) => {
@@ -247,6 +257,9 @@ export function CompressorBarcodesPageClient() {
     if (filterTab === 'all') {
       queryParams.set('minRepairs', '1');
     }
+    if (selectedBranch) {
+      queryParams.set('branch', selectedBranch);
+    }
     if (activeSearch.trim()) {
       queryParams.set('search', activeSearch.trim());
     }
@@ -278,7 +291,7 @@ export function CompressorBarcodesPageClient() {
     return () => {
       ignore = true;
     };
-  }, [page, limit, activeSearch, filterTab, dateType, startDate, endDate, sortKeys]);
+  }, [page, limit, activeSearch, selectedBranch, filterTab, dateType, startDate, endDate, sortKeys]);
 
   // Background silent auto-refresh every 60s
   useEffect(() => {
@@ -293,6 +306,7 @@ export function CompressorBarcodesPageClient() {
         sort: buildSortParam(sortKeys),
       });
       if (filterTab === 'all') queryParams.set('minRepairs', '1');
+      if (selectedBranch) queryParams.set('branch', selectedBranch);
       if (activeSearch.trim()) queryParams.set('search', activeSearch.trim());
       if (startDate) queryParams.set('startDate', startDate);
       if (endDate) queryParams.set('endDate', endDate);
@@ -303,7 +317,7 @@ export function CompressorBarcodesPageClient() {
     }, 60_000);
 
     return () => clearInterval(interval);
-  }, [autoRefresh, page, limit, activeSearch, filterTab, dateType, startDate, endDate, sortKeys]);
+  }, [autoRefresh, page, limit, activeSearch, selectedBranch, filterTab, dateType, startDate, endDate, sortKeys]);
 
   const toggleExpand = (serial: string) => {
     setExpandedSerials((prev) => {
@@ -312,15 +326,6 @@ export function CompressorBarcodesPageClient() {
       else next.add(serial);
       return next;
     });
-  };
-
-  const expandAllOnPage = () => {
-    if (!data?.data) return;
-    setExpandedSerials(new Set(data.data.map((item) => item.serial_number)));
-  };
-
-  const collapseAllOnPage = () => {
-    setExpandedSerials(new Set());
   };
 
   const handleClearDates = () => {
@@ -332,11 +337,62 @@ export function CompressorBarcodesPageClient() {
   const handleClearFilters = () => {
     setSearchTerm('');
     setActiveSearch('');
+    setSelectedBranch('');
     setStartDate('');
     setEndDate('');
     setFilterTab('repeat');
     setSortKeys([{ field: 'solve_date', dir: 'desc' }]);
     setPage(1);
+  };
+
+  const handleExportCsv = async () => {
+    if (isExporting) return;
+    try {
+      setIsExporting(true);
+
+      const queryParams = new URLSearchParams({
+        filter: filterTab,
+        dateType,
+        sort: buildSortParam(sortKeys),
+        format: 'csv',
+      });
+
+      if (filterTab === 'all') {
+        queryParams.set('minRepairs', '1');
+      }
+      if (selectedBranch) {
+        queryParams.set('branch', selectedBranch);
+      }
+      if (activeSearch.trim()) {
+        queryParams.set('search', activeSearch.trim());
+      }
+      if (startDate) {
+        queryParams.set('startDate', startDate);
+      }
+      if (endDate) {
+        queryParams.set('endDate', endDate);
+      }
+
+      const res = await fetch(`/api/compressor-barcodes?${queryParams.toString()}`);
+      if (!res.ok) {
+        throw new Error(`Export failed with HTTP ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `compressor_barcodes_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('CSV Export Error:', err);
+      alert('Failed to export CSV. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / limit)) : 1;
@@ -348,12 +404,12 @@ export function CompressorBarcodesPageClient() {
     <PageShell
       title="Compressor Barcodes Tracker"
       subtitle="Monitor repeat compressor replacements, barcode continuity, and repair lineage across CRM calls"
-      icon={<ScanBarcode className="h-4 w-4" />}
+      icon={<Cpu className="h-4 w-4" />}
       toolbar={
         <>
           <div className="register-filter-bar !px-3 !py-1.5 bg-white border-b border-slate-200">
             <div className="flex flex-wrap items-center justify-between gap-2.5">
-              {/* Left: Date Range Filter */}
+              {/* Left: Date Range & Branch Filters */}
               <div className="flex flex-wrap items-center gap-2">
                 <div className="flex items-center h-8 gap-1.5 bg-slate-50/80 hover:bg-slate-50 border border-slate-200 rounded-lg px-2.5 text-xs text-slate-700 shadow-2xs transition-colors">
                   <Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" />
@@ -402,9 +458,45 @@ export function CompressorBarcodesPageClient() {
                     </button>
                   )}
                 </div>
+
+                {/* Branch Select Filter */}
+                {stats?.all_branches && stats.all_branches.length > 0 && (
+                  <div className="flex items-center h-8 gap-1.5 bg-slate-50/80 hover:bg-slate-50 border border-slate-200 rounded-lg px-2 text-xs text-slate-700 shadow-2xs transition-colors">
+                    <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    <select
+                      value={selectedBranch}
+                      onChange={(e) => {
+                        setSelectedBranch(e.target.value);
+                        setPage(1);
+                      }}
+                      className="bg-transparent border-0 text-[11px] font-semibold text-slate-700 focus:outline-none cursor-pointer max-w-[140px] truncate"
+                      title="Filter by Branch"
+                    >
+                      <option value="">All Branches</option>
+                      {stats.all_branches.map((b) => (
+                        <option key={b} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedBranch && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedBranch('');
+                          setPage(1);
+                        }}
+                        className="text-slate-400 hover:text-slate-600 ml-0.5 cursor-pointer"
+                        title="Clear branch filter"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
-              {/* Right Search Input & Result Count */}
+              {/* Right Search Input & Reset Button */}
               <div className="flex items-center gap-2 flex-1 max-w-sm justify-end">
                 <div className="relative w-full max-w-xs">
                   <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
@@ -431,7 +523,7 @@ export function CompressorBarcodesPageClient() {
                   )}
                 </div>
 
-                {(activeSearch || isDateFiltered || filterTab !== 'repeat') && (
+                {(activeSearch || isDateFiltered || selectedBranch || filterTab !== 'repeat') && (
                   <button
                     type="button"
                     onClick={handleClearFilters}
@@ -446,9 +538,61 @@ export function CompressorBarcodesPageClient() {
             </div>
           </div>
 
-          {/* Executive KPI Stats Bar */}
+          {/* Top Repeat Branches Hotspot Strip */}
+          {stats?.top_branches && stats.top_branches.length > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white border-b border-slate-200 overflow-x-auto custom-scrollbar shrink-0 text-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1 flex items-center gap-1">
+                <MapPin className="h-3 w-3 text-slate-400" /> Hotspot Branches:
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedBranch('');
+                  setPage(1);
+                }}
+                className={`px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors shrink-0 cursor-pointer ${
+                  !selectedBranch
+                    ? 'bg-slate-900 text-white font-semibold'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                All
+              </button>
+              {stats.top_branches.map((b) => {
+                const isSelected = selectedBranch === b.branch_name;
+                const cleanName = b.branch_name.replace(/^\d+\s*-\s*/, '').replace(/\s*BRANCH$/i, '');
+                return (
+                  <button
+                    key={b.branch_name}
+                    type="button"
+                    onClick={() => {
+                      setSelectedBranch(isSelected ? '' : b.branch_name);
+                      setPage(1);
+                    }}
+                    className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium transition-all shrink-0 cursor-pointer border ${
+                      isSelected
+                        ? 'bg-blue-600 border-blue-600 text-white font-semibold shadow-2xs'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
+                    }`}
+                    title={`Filter repeat machines in ${b.branch_name}`}
+                  >
+                    <span>{cleanName}</span>
+                    <span
+                      className={`text-[10px] px-1 rounded-full font-bold ${
+                        isSelected ? 'bg-blue-700 text-blue-100' : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      {b.repeat_count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Executive KPI Stats Bar (5 Cards) */}
           {stats && (
-            <div className="register-stats-bar !px-3 !py-2 border-b border-slate-200 bg-slate-50/60">
+            <div className="register-stats-bar !px-3 !py-2 border-b border-slate-200 bg-slate-50/60 lg:!grid-cols-5">
               {/* Card 1: 2+ Repeat Repairs */}
               <button
                 type="button"
@@ -468,7 +612,33 @@ export function CompressorBarcodesPageClient() {
                 <span className="register-stat-label">Repeat Machines (2+ Repairs)</span>
               </button>
 
-              {/* Card 2: Broken Continuity */}
+              {/* Card 2: ⚡ Rapid Re-Fail (<90d) */}
+              <button
+                type="button"
+                className={`register-stat-item register-stat-item--clickable ${
+                  filterTab === 'premature' ? 'register-stat-item--active' : ''
+                }`}
+                onClick={() => {
+                  setFilterTab('premature');
+                  setPage(1);
+                }}
+                title="Filter machines with compressor failure gap under 90 days"
+              >
+                <div className="flex items-center justify-between w-full">
+                  <AnimatedMetric
+                    value={stats.premature_machines || 0}
+                    className="register-stat-value text-rose-600"
+                  />
+                  <span className="text-[10px] font-semibold bg-rose-50 text-rose-700 border border-rose-200 px-1.5 py-0.5 rounded">
+                    &lt; 90d Gap
+                  </span>
+                </div>
+                <span className="register-stat-label flex items-center gap-1 text-rose-800">
+                  <Zap className="h-2.5 w-2.5 text-rose-600" /> Rapid Re-Fail (&lt;90d)
+                </span>
+              </button>
+
+              {/* Card 3: Broken Continuity */}
               <button
                 type="button"
                 className={`register-stat-item register-stat-item--clickable ${
@@ -494,7 +664,7 @@ export function CompressorBarcodesPageClient() {
                 </span>
               </button>
 
-              {/* Card 3: 3+ Frequent Repairs */}
+              {/* Card 4: 3+ Frequent Repairs */}
               <button
                 type="button"
                 className={`register-stat-item register-stat-item--clickable ${
@@ -513,7 +683,7 @@ export function CompressorBarcodesPageClient() {
                 <span className="register-stat-label">Frequent Repeat (3+ Repairs)</span>
               </button>
 
-              {/* Card 4: Total Tracked Universe */}
+              {/* Card 5: Total Tracked Universe */}
               <button
                 type="button"
                 className={`register-stat-item register-stat-item--clickable ${
@@ -537,7 +707,7 @@ export function CompressorBarcodesPageClient() {
       }
     >
       <PageScrollRegion className="p-3 bg-bg-soft/70">
-        <div className="flex flex-col gap-2.5">
+        <div className="flex flex-col gap-2.5 min-w-0 w-full max-w-full">
           {/* Main Table Card */}
           <AdminTableCard
             isEmpty={!isLoading && (!data?.data || data.data.length === 0)}
@@ -566,51 +736,77 @@ export function CompressorBarcodesPageClient() {
               </div>
             }
           >
-            {/* Multi-sort Chips Strip */}
-            {sortKeys.length > 1 && (
-              <div className="flex items-center gap-1.5 px-3.5 py-1.5 border-b border-slate-200 bg-slate-50/70 text-[11px] text-slate-600 flex-wrap">
-                <span className="font-semibold text-slate-500 uppercase tracking-wide text-[10px] mr-1">
-                  Active Sort Order:
-                </span>
-                {sortKeys.map((k, i) => (
-                  <span
-                    key={k.field}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50/90 border border-blue-200 text-blue-800 font-medium"
-                  >
-                    <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-blue-600 text-white text-[9px] font-bold">
-                      {i + 1}
+            {/* Table Action Bar: Multi-sort Chips & CSV Export */}
+            <div className="flex items-center justify-between gap-2 px-3.5 py-1.5 border-b border-slate-200 bg-slate-50/70 text-[11px] text-slate-600 flex-wrap">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {sortKeys.length > 1 ? (
+                  <>
+                    <span className="font-semibold text-slate-500 uppercase tracking-wide text-[10px] mr-1">
+                      Active Sort:
                     </span>
-                    <span>{SORT_LABELS[k.field] ?? k.field}</span>
+                    {sortKeys.map((k, i) => (
+                      <span
+                        key={k.field}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50/90 border border-blue-200 text-blue-800 font-medium"
+                      >
+                        <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-blue-600 text-white text-[9px] font-bold">
+                          {i + 1}
+                        </span>
+                        <span>{SORT_LABELS[k.field] ?? k.field}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleSort(k.field)}
+                          className="text-blue-600 hover:text-blue-900 font-bold px-0.5 cursor-pointer"
+                          title={`Click to reverse direction (${k.dir === 'desc' ? 'ASC' : 'DESC'})`}
+                        >
+                          {k.dir === 'desc' ? '↓' : '↑'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeSortKey(k.field)}
+                          className="text-blue-400 hover:text-blue-700 ml-0.5 cursor-pointer font-bold leading-none"
+                          title={`Remove ${SORT_LABELS[k.field]} from sort`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
                     <button
                       type="button"
-                      onClick={() => handleSort(k.field)}
-                      className="text-blue-600 hover:text-blue-900 font-bold px-0.5 cursor-pointer"
-                      title={`Click to reverse direction (${k.dir === 'desc' ? 'ASC' : 'DESC'})`}
+                      onClick={() => {
+                        setSortKeys([{ field: 'solve_date', dir: 'desc' }]);
+                        setPage(1);
+                      }}
+                      className="text-[11px] text-slate-500 hover:text-slate-800 underline cursor-pointer ml-1"
                     >
-                      {k.dir === 'desc' ? '↓' : '↑'}
+                      Reset sort
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => removeSortKey(k.field)}
-                      className="text-blue-400 hover:text-blue-700 ml-0.5 cursor-pointer font-bold leading-none"
-                      title={`Remove ${SORT_LABELS[k.field]} from sort`}
-                    >
-                      ×
-                    </button>
+                  </>
+                ) : (
+                  <span className="text-[11px] text-slate-500 font-medium">
+                    Sorted by {SORT_LABELS[sortKeys[0]?.field] || 'Solved Date'} ({sortKeys[0]?.dir?.toUpperCase() || 'DESC'})
                   </span>
-                ))}
+                )}
+              </div>
+
+              {/* Right Action: Export to CSV */}
+              <div className="flex items-center gap-2 ml-auto">
                 <button
                   type="button"
-                  onClick={() => {
-                    setSortKeys([{ field: 'solve_date', dir: 'desc' }]);
-                    setPage(1);
-                  }}
-                  className="text-[11px] text-slate-500 hover:text-slate-800 underline cursor-pointer ml-auto"
+                  onClick={handleExportCsv}
+                  disabled={!data?.total || isExporting}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-md shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                  title="Export all matching compressor records to CSV based on current filters (not limited to this page)"
                 >
-                  Reset to default
+                  {isExporting ? (
+                    <Loader2 className="h-3 w-3 text-blue-600 animate-spin" />
+                  ) : (
+                    <Download className="h-3 w-3 text-slate-500" />
+                  )}
+                  {isExporting ? 'Exporting...' : 'Export CSV'}
                 </button>
               </div>
-            )}
+            </div>
 
             <AdminTable>
               <AdminThead>
@@ -673,6 +869,14 @@ export function CompressorBarcodesPageClient() {
                           : row.calls
                         : row.calls || [];
 
+                    const allRowCalls = row.all_calls && row.all_calls.length > 0 ? row.all_calls : row.calls || [];
+                    const validGaps = allRowCalls
+                      .map((c) => c.days_gap)
+                      .filter((g): g is number => g !== null && g !== undefined);
+                    const minGap = validGaps.length > 0 ? Math.min(...validGaps) : Infinity;
+                    const isRapid30 = minGap <= 30;
+                    const isRapid90 = minGap <= 90 && minGap > 30;
+
                     return (
                       <React.Fragment key={row.serial_number}>
                         {/* Parent Machine Row */}
@@ -696,7 +900,7 @@ export function CompressorBarcodesPageClient() {
                             />
                           </td>
                           <AdminTd className="font-mono text-[12px] font-semibold text-slate-900 py-2.5">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="group-hover:text-blue-600 transition-colors">{row.serial_number}</span>
                               {isBroken && (
                                 <span
@@ -705,6 +909,24 @@ export function CompressorBarcodesPageClient() {
                                 >
                                   <AlertTriangle className="h-2.5 w-2.5 text-amber-600 shrink-0" />
                                   Broken
+                                </span>
+                              )}
+                              {isRapid30 && (
+                                <span
+                                  title={`Acute repeat failure: compressor re-failed within ${minGap} days!`}
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-300"
+                                >
+                                  <Zap className="h-2.5 w-2.5 text-rose-600 shrink-0" />
+                                  &lt;30d Re-fail
+                                </span>
+                              )}
+                              {isRapid90 && (
+                                <span
+                                  title={`Premature repeat failure: compressor re-failed within ${minGap} days`}
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200"
+                                >
+                                  <Clock className="h-2.5 w-2.5 text-amber-500 shrink-0" />
+                                  &lt;90d Gap
                                 </span>
                               )}
                             </div>
@@ -773,10 +995,10 @@ export function CompressorBarcodesPageClient() {
                         {/* Expanded Child Accordion Lineage Table */}
                         {isExpanded && (
                           <tr className="bg-slate-50/70 border-b border-slate-200">
-                            <td colSpan={9} className="p-0">
-                              <div className="p-3 sm:p-4 pl-6 sm:pl-10 bg-slate-50/90 border-t border-slate-200/80">
+                            <td colSpan={9} className="w-full max-w-0 overflow-hidden align-top p-0">
+                              <div className="p-3 sm:p-4 pl-6 sm:pl-10 bg-slate-50/90 border-t border-slate-200/80 min-w-0 max-w-full overflow-hidden">
                                 {/* Accordion Header Strip */}
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5 min-w-0">
                                   <div className="text-xs font-semibold text-slate-700 flex items-center gap-2 flex-wrap">
                                     <span>Replacement Lineage for Serial:</span>
                                     <span className="font-mono text-blue-700 bg-blue-50/80 px-2 py-0.5 rounded border border-blue-200 font-bold">
@@ -818,9 +1040,101 @@ export function CompressorBarcodesPageClient() {
                                   </div>
                                 </div>
 
+                                {/* Visual Lineage Timeline Stepper */}
+                                {displayedCalls.length > 1 && (
+                                  <div className="bg-white rounded-lg border border-slate-200/90 p-3 shadow-2xs mb-3 min-w-0 max-w-full overflow-hidden">
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2.5 flex items-center gap-1.5">
+                                      <GitCommit className="h-3.5 w-3.5 text-blue-600" />
+                                      <span>Repair Lineage Progression Timeline</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-2 min-w-0 max-w-full">
+                                      {displayedCalls.map((call, idx) => {
+                                        const isCallBroken = call.is_continuity_broken;
+                                        const isAcuteGap = call.days_gap !== null && call.days_gap <= 30;
+                                        const isShortGap = call.days_gap !== null && call.days_gap <= 90 && !isAcuteGap;
+
+                                        return (
+                                          <React.Fragment key={call.id || `stepper-${idx}`}>
+                                            {/* Elapsed Gap Arrow if not first */}
+                                            {idx > 0 && (
+                                              <div className="flex flex-col items-center shrink-0 px-1 text-center min-w-[70px]">
+                                                <span
+                                                  className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full border mb-0.5 whitespace-nowrap ${
+                                                    isAcuteGap
+                                                      ? 'bg-rose-100 text-rose-800 border-rose-300 font-bold'
+                                                      : isShortGap
+                                                      ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                                      : 'bg-slate-100 text-slate-600 border-slate-200'
+                                                  }`}
+                                                >
+                                                  +{call.days_gap ?? '?'}d gap
+                                                </span>
+                                                <div className="flex items-center w-full">
+                                                  <div
+                                                    className={`h-[2px] w-full ${
+                                                      isCallBroken ? 'bg-amber-500' : 'bg-slate-300'
+                                                    }`}
+                                                  />
+                                                  <ArrowRight
+                                                    className={`h-3.5 w-3.5 -ml-1 shrink-0 ${
+                                                      isCallBroken ? 'text-amber-600' : 'text-slate-400'
+                                                    }`}
+                                                  />
+                                                </div>
+                                                {isCallBroken && (
+                                                  <span className="text-[8px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 mt-0.5">
+                                                    Mismatch
+                                                  </span>
+                                                )}
+                                              </div>
+                                            )}
+
+                                            {/* Call Node Card */}
+                                            <div
+                                              className={`flex flex-col p-2.5 rounded-lg border min-w-[175px] max-w-[210px] shrink-0 transition-all ${
+                                                isCallBroken
+                                                  ? 'bg-amber-50/70 border-amber-300 ring-1 ring-amber-300'
+                                                  : 'bg-slate-50/80 border-slate-200 hover:border-slate-300'
+                                              }`}
+                                            >
+                                              <div className="flex items-center justify-between gap-1 mb-1">
+                                                <span className="font-mono font-bold text-[11px] text-slate-800 truncate">
+                                                  #{idx + 1} {call.call_no}
+                                                </span>
+                                                <span className="text-[9px] font-semibold px-1 py-0.2 rounded bg-white border border-slate-200 text-slate-600">
+                                                  {call.call_status}
+                                                </span>
+                                              </div>
+                                              <div className="text-[10px] text-slate-500 flex items-center gap-1 mb-1">
+                                                <Calendar className="h-3 w-3 text-slate-400 shrink-0" />
+                                                <span>{formatDate(call.solve_date || call.call_date)}</span>
+                                              </div>
+                                              <div
+                                                className="text-[10px] text-slate-700 truncate font-medium mb-1.5"
+                                                title={call.office_name}
+                                              >
+                                                {call.office_name || '—'}
+                                              </div>
+                                              <div className="mt-auto pt-1 border-t border-slate-200/80 flex items-center justify-between text-[10px] font-mono">
+                                                <span className="text-slate-400">New:</span>
+                                                <span
+                                                  className="text-emerald-700 font-semibold truncate ml-1 max-w-[120px]"
+                                                  title={call.derived_new_barcode}
+                                                >
+                                                  {call.derived_new_barcode || '—'}
+                                                </span>
+                                              </div>
+                                            </div>
+                                          </React.Fragment>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+
                                 {/* Lineage Table */}
-                                <div className="overflow-x-auto bg-white rounded-lg border border-slate-200/90 shadow-2xs">
-                                  <table className="w-full text-xs text-left border-collapse">
+                                <div className="overflow-x-auto custom-scrollbar bg-white rounded-lg border border-slate-200/90 shadow-2xs min-w-0 max-w-full">
+                                  <table className="w-full text-xs text-left border-collapse min-w-[960px]">
                                     <thead className="bg-slate-100/70 text-slate-600 uppercase text-[10px] font-semibold tracking-wider border-b border-slate-200">
                                       <tr>
                                         <th className="px-2.5 py-2 w-10 text-center">#</th>

@@ -17,63 +17,147 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(200, Math.max(1, Number(searchParams.get('limit') || 100)));
     const offset = (page - 1) * limit;
     const search = (searchParams.get('search') || '').trim();
-    const filter = (searchParams.get('filter') || 'all').trim(); // 'all' | 'broken' | 'repeat3'
+    const filter = (searchParams.get('filter') || 'all').trim(); // 'all' | 'broken' | 'repeat3' | 'premature'
+    const branch = (searchParams.get('branch') || '').trim();
     const startDate = (searchParams.get('startDate') || '').trim();
     const endDate = (searchParams.get('endDate') || '').trim();
     const rawMinRepairs = searchParams.get('minRepairs');
     const minRepairs = rawMinRepairs !== null ? Math.max(1, Number(rawMinRepairs) || 1) : 2;
 
-    return await withAppClient(async (client) => {
-      // Query global stats for the filter tabs
-      const statsRes = await client.query<{
-        total_machines: number;
-        broken_machines: number;
-        repeat_machines: number;
-        three_plus_machines: number;
-      }>(`
-        SELECT 
-          (
-            SELECT COUNT(*)::int FROM (
-              SELECT serial_number FROM compressor_barcodes GROUP BY serial_number HAVING count(*) >= 2
-            ) s2
-          ) as repeat_machines,
-          (
-            SELECT COUNT(*)::int FROM (
-              SELECT serial_number FROM compressor_barcodes GROUP BY serial_number HAVING count(*) >= 3
-            ) s3
-          ) as three_plus_machines,
-          COUNT(DISTINCT serial_number) FILTER (WHERE is_continuity_broken = true)::int as broken_machines,
-          COUNT(DISTINCT serial_number)::int as total_machines
-        FROM compressor_barcodes;
-      `);
+    const format = (searchParams.get('format') || '').trim().toLowerCase();
+    const isExport = format === 'csv' || searchParams.get('export') === 'csv' || searchParams.get('export') === 'true';
 
-      const stats = statsRes.rows[0] || {
-        total_machines: 0,
-        broken_machines: 0,
-        repeat_machines: 0,
-        three_plus_machines: 0,
+    return await withAppClient(async (client) => {
+      // Query global stats, top repeat branches, and all distinct branches in parallel
+      // NOTE: Cancelled calls must NEVER be counted as repairs or towards repeat machines.
+      const [statsRes, topBranchesRes, allBranchesRes] = await Promise.all([
+        client.query<{
+          total_machines: number;
+          broken_machines: number;
+          repeat_machines: number;
+          three_plus_machines: number;
+          premature_machines: number;
+        }>(`
+          SELECT 
+            (
+              SELECT COUNT(*)::int FROM (
+                SELECT serial_number 
+                FROM compressor_barcodes 
+                WHERE call_status IS DISTINCT FROM 'Cancelled'
+                GROUP BY serial_number 
+                HAVING count(*) >= 2
+              ) s2
+            ) as repeat_machines,
+            (
+              SELECT COUNT(*)::int FROM (
+                SELECT serial_number 
+                FROM compressor_barcodes 
+                WHERE call_status IS DISTINCT FROM 'Cancelled'
+                GROUP BY serial_number 
+                HAVING count(*) >= 3
+              ) s3
+            ) as three_plus_machines,
+            (
+              SELECT COUNT(DISTINCT serial_number)::int 
+              FROM compressor_barcodes 
+              WHERE days_gap IS NOT NULL 
+                AND days_gap <= 90
+                AND call_status IS DISTINCT FROM 'Cancelled'
+            ) as premature_machines,
+            COUNT(DISTINCT serial_number) FILTER (WHERE is_continuity_broken = true AND call_status IS DISTINCT FROM 'Cancelled')::int as broken_machines,
+            COUNT(DISTINCT serial_number) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled')::int as total_machines
+          FROM compressor_barcodes
+          WHERE call_status IS DISTINCT FROM 'Cancelled';
+        `),
+        client.query<{ branch_name: string; repeat_count: number }>(`
+          SELECT 
+            branch_name, 
+            COUNT(DISTINCT serial_number)::int as repeat_count
+          FROM compressor_barcodes
+          WHERE branch_name IS NOT NULL AND branch_name <> ''
+            AND call_status IS DISTINCT FROM 'Cancelled'
+            AND serial_number IN (
+              SELECT serial_number 
+              FROM compressor_barcodes 
+              WHERE call_status IS DISTINCT FROM 'Cancelled'
+              GROUP BY serial_number 
+              HAVING COUNT(*) >= 2
+            )
+          GROUP BY branch_name
+          ORDER BY repeat_count DESC
+          LIMIT 8;
+        `),
+        client.query<{ branch_name: string }>(`
+          SELECT DISTINCT branch_name
+          FROM compressor_barcodes
+          WHERE branch_name IS NOT NULL AND branch_name <> ''
+            AND call_status IS DISTINCT FROM 'Cancelled'
+          ORDER BY branch_name ASC;
+        `),
+      ]);
+
+      const stats = {
+        ...(statsRes.rows[0] || {
+          total_machines: 0,
+          broken_machines: 0,
+          repeat_machines: 0,
+          three_plus_machines: 0,
+          premature_machines: 0,
+        }),
+        top_branches: topBranchesRes.rows,
+        all_branches: allBranchesRes.rows.map((r) => r.branch_name),
       };
 
-      // Build WHERE conditions based on filter, date range, minRepairs & search
+      // Build WHERE conditions based on filter, branch, date range, minRepairs & search
       const conditions: string[] = [];
       const queryParams: unknown[] = [];
+
+      // Base constraint: Only include machines with at least 1 actual non-cancelled repair
+      conditions.push(`
+        serial_number IN (
+          SELECT serial_number FROM compressor_barcodes WHERE call_status IS DISTINCT FROM 'Cancelled'
+        )
+      `);
 
       if (filter === 'broken') {
         conditions.push(`
           serial_number IN (
-            SELECT serial_number FROM compressor_barcodes WHERE is_continuity_broken = true
+            SELECT serial_number FROM compressor_barcodes 
+            WHERE is_continuity_broken = true AND call_status IS DISTINCT FROM 'Cancelled'
           )
         `);
       } else if (filter === 'repeat3') {
         conditions.push(`
           serial_number IN (
-            SELECT serial_number FROM compressor_barcodes GROUP BY serial_number HAVING count(*) >= 3
+            SELECT serial_number FROM compressor_barcodes 
+            WHERE call_status IS DISTINCT FROM 'Cancelled'
+            GROUP BY serial_number HAVING count(*) >= 3
+          )
+        `);
+      } else if (filter === 'premature') {
+        conditions.push(`
+          serial_number IN (
+            SELECT serial_number FROM compressor_barcodes 
+            WHERE days_gap IS NOT NULL AND days_gap <= 90 AND call_status IS DISTINCT FROM 'Cancelled'
           )
         `);
       } else if (minRepairs > 1) {
         conditions.push(`
           serial_number IN (
-            SELECT serial_number FROM compressor_barcodes GROUP BY serial_number HAVING count(*) >= ${minRepairs}
+            SELECT serial_number FROM compressor_barcodes 
+            WHERE call_status IS DISTINCT FROM 'Cancelled'
+            GROUP BY serial_number HAVING count(*) >= ${minRepairs}
+          )
+        `);
+      }
+
+      if (branch) {
+        queryParams.push(branch);
+        const bIdx = queryParams.length;
+        conditions.push(`
+          serial_number IN (
+            SELECT serial_number FROM compressor_barcodes 
+            WHERE branch_name = $${bIdx} AND call_status IS DISTINCT FROM 'Cancelled'
           )
         `);
       }
@@ -90,7 +174,7 @@ export async function GET(req: NextRequest) {
         conditions.push(`
           serial_number IN (
             SELECT serial_number FROM compressor_barcodes 
-            WHERE ${dateConditionSql}
+            WHERE ${dateConditionSql} AND call_status IS DISTINCT FROM 'Cancelled'
           )
         `);
       } else if (startDate) {
@@ -100,7 +184,7 @@ export async function GET(req: NextRequest) {
         conditions.push(`
           serial_number IN (
             SELECT serial_number FROM compressor_barcodes 
-            WHERE ${dateConditionSql}
+            WHERE ${dateConditionSql} AND call_status IS DISTINCT FROM 'Cancelled'
           )
         `);
       } else if (endDate) {
@@ -110,7 +194,7 @@ export async function GET(req: NextRequest) {
         conditions.push(`
           serial_number IN (
             SELECT serial_number FROM compressor_barcodes 
-            WHERE ${dateConditionSql}
+            WHERE ${dateConditionSql} AND call_status IS DISTINCT FROM 'Cancelled'
           )
         `);
       }
@@ -141,23 +225,18 @@ export async function GET(req: NextRequest) {
 
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-      const countQuery = `
-        SELECT COUNT(DISTINCT serial_number)::int as total
-        FROM compressor_barcodes
-        ${whereClause}
-      `;
-
       // Multi-sort: `sort=total_calls:desc,solve_date:asc` takes priority.
       // Falls back to legacy `sortBy` / `sortOrder` params.
+      // Cancelled calls are ignored when aggregating sort metrics.
       const SORT_SQL: Record<string, (dir: 'ASC' | 'DESC') => string> = {
         serial_number:  (d) => `serial_number ${d}`,
-        total_calls:    (d) => `COUNT(*) ${d}`,
-        avg_days_gap:   (d) => `ROUND(AVG(days_gap) FILTER (WHERE days_gap IS NOT NULL)) ${d} NULLS LAST`,
-        current_barcode:(d) => `current_barcode ${d} NULLS LAST`,
-        branch:         (d) => `latest_branch ${d} NULLS LAST`,
-        office:         (d) => `latest_office ${d} NULLS LAST`,
-        solve_date:     (d) => `MAX(solve_date) ${d} NULLS LAST`,
-        call_date:      (d) => `MAX(call_date) ${d}`,
+        total_calls:    (d) => `COUNT(*) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') ${d}`,
+        avg_days_gap:   (d) => `ROUND(AVG(days_gap) FILTER (WHERE days_gap IS NOT NULL AND call_status IS DISTINCT FROM 'Cancelled')) ${d} NULLS LAST`,
+        current_barcode:(d) => `COALESCE((ARRAY_AGG(derived_new_barcode ORDER BY call_date DESC) FILTER (WHERE derived_new_barcode <> '-' AND call_status IS DISTINCT FROM 'Cancelled'))[1], '-') ${d} NULLS LAST`,
+        branch:         (d) => `(ARRAY_AGG(branch_name ORDER BY call_date DESC) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'))[1] ${d} NULLS LAST`,
+        office:         (d) => `(ARRAY_AGG(office_name ORDER BY call_date DESC) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'))[1] ${d} NULLS LAST`,
+        solve_date:     (d) => `MAX(solve_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') ${d} NULLS LAST`,
+        call_date:      (d) => `MAX(call_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') ${d}`,
       };
 
       type SortKey = { field: string; dir: 'ASC' | 'DESC' };
@@ -184,22 +263,112 @@ export async function GET(req: NextRequest) {
 
       const orderBySql = sortKeys.length > 0
         ? sortKeys.map((k) => SORT_SQL[k.field](k.dir)).join(', ')
-        : 'MAX(COALESCE(solve_date, call_date)) DESC, serial_number ASC';
+        : 'MAX(COALESCE(solve_date, call_date)) FILTER (WHERE call_status IS DISTINCT FROM \'Cancelled\') DESC NULLS LAST, serial_number ASC';
+
+      // --- FULL CSV EXPORT BRANCH (Exports ALL records matching active filters, no pagination cap) ---
+      if (isExport) {
+        const exportQuery = `
+          SELECT 
+            serial_number,
+            COUNT(*) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled')::int as total_calls,
+            ${dateConditionSql ? `COUNT(*) FILTER (WHERE ${dateConditionSql} AND call_status IS DISTINCT FROM 'Cancelled')::int as calls_in_range,` : `COUNT(*) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled')::int as calls_in_range,`}
+            MAX(call_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') as latest_call_date,
+            MAX(solve_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') as latest_solve_date,
+            ROUND(AVG(days_gap) FILTER (WHERE days_gap IS NOT NULL AND call_status IS DISTINCT FROM 'Cancelled'))::int as avg_days_gap,
+            (ARRAY_AGG(office_name ORDER BY call_date DESC) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'))[1] as latest_office,
+            (ARRAY_AGG(branch_name ORDER BY call_date DESC) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'))[1] as latest_branch,
+            (ARRAY_AGG(sap_vendor_code ORDER BY call_date DESC) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'))[1] as latest_sap_vendor_code,
+            BOOL_OR(is_continuity_broken AND call_status IS DISTINCT FROM 'Cancelled') as has_continuity_break,
+            COALESCE(
+              (ARRAY_AGG(derived_new_barcode ORDER BY call_date DESC) FILTER (WHERE derived_new_barcode <> '-' AND call_status IS DISTINCT FROM 'Cancelled'))[1],
+              '-'
+            ) as current_barcode
+          FROM compressor_barcodes
+          ${whereClause}
+          GROUP BY serial_number
+          ORDER BY ${orderBySql}
+        `;
+
+        const exportRes = await client.query<{
+          serial_number: string;
+          total_calls: number;
+          calls_in_range: number;
+          latest_call_date: string | null;
+          latest_solve_date: string | null;
+          avg_days_gap: number | null;
+          latest_office: string | null;
+          latest_branch: string | null;
+          latest_sap_vendor_code: string | null;
+          has_continuity_break: boolean;
+          current_barcode: string | null;
+        }>(exportQuery, queryParams);
+
+        const headers = [
+          'Serial Number',
+          'Total Repairs',
+          'Avg Days Gap (Days)',
+          'Current Barcode',
+          'Branch',
+          'Latest Office / Workshop',
+          'SAP Vendor Code',
+          'Latest Solved Date',
+          'Latest Call Date',
+          'Has Continuity Break',
+        ];
+
+        const csvRows = [
+          headers.join(','),
+          ...exportRes.rows.map((row) =>
+            [
+              row.serial_number || '',
+              row.total_calls ?? 0,
+              row.avg_days_gap ?? '',
+              row.current_barcode ?? '',
+              row.latest_branch ?? '',
+              row.latest_office ?? '',
+              row.latest_sap_vendor_code ?? '',
+              row.latest_solve_date ? new Date(row.latest_solve_date).toISOString().slice(0, 10) : '',
+              row.latest_call_date ? new Date(row.latest_call_date).toISOString().slice(0, 10) : '',
+              row.has_continuity_break ? 'YES' : 'NO',
+            ]
+              .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+              .join(',')
+          ),
+        ];
+
+        const csvContent = csvRows.join('\r\n');
+        const filename = `compressor_barcodes_${new Date().toISOString().slice(0, 10)}.csv`;
+
+        return new NextResponse(csvContent, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': `attachment; filename="${filename}"`,
+          },
+        });
+      }
+
+      // --- PAGINATED JSON BRANCH ---
+      const countQuery = `
+        SELECT COUNT(DISTINCT serial_number)::int as total
+        FROM compressor_barcodes
+        ${whereClause}
+      `;
 
       const dataQuery = `
         SELECT 
           serial_number,
-          COUNT(*)::int as total_calls,
-          ${dateConditionSql ? `COUNT(*) FILTER (WHERE ${dateConditionSql})::int as calls_in_range,` : `COUNT(*)::int as calls_in_range,`}
-          MAX(call_date) as latest_call_date,
-          MAX(solve_date) as latest_solve_date,
-          ROUND(AVG(days_gap) FILTER (WHERE days_gap IS NOT NULL))::int as avg_days_gap,
-          (ARRAY_AGG(office_name ORDER BY call_date DESC))[1] as latest_office,
-          (ARRAY_AGG(branch_name ORDER BY call_date DESC))[1] as latest_branch,
-          (ARRAY_AGG(sap_vendor_code ORDER BY call_date DESC))[1] as latest_sap_vendor_code,
-          BOOL_OR(is_continuity_broken) as has_continuity_break,
+          COUNT(*) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled')::int as total_calls,
+          ${dateConditionSql ? `COUNT(*) FILTER (WHERE ${dateConditionSql} AND call_status IS DISTINCT FROM 'Cancelled')::int as calls_in_range,` : `COUNT(*) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled')::int as calls_in_range,`}
+          MAX(call_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') as latest_call_date,
+          MAX(solve_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') as latest_solve_date,
+          ROUND(AVG(days_gap) FILTER (WHERE days_gap IS NOT NULL AND call_status IS DISTINCT FROM 'Cancelled'))::int as avg_days_gap,
+          (ARRAY_AGG(office_name ORDER BY call_date DESC) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'))[1] as latest_office,
+          (ARRAY_AGG(branch_name ORDER BY call_date DESC) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'))[1] as latest_branch,
+          (ARRAY_AGG(sap_vendor_code ORDER BY call_date DESC) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'))[1] as latest_sap_vendor_code,
+          BOOL_OR(is_continuity_broken AND call_status IS DISTINCT FROM 'Cancelled') as has_continuity_break,
           COALESCE(
-            (ARRAY_AGG(derived_new_barcode ORDER BY call_date DESC) FILTER (WHERE derived_new_barcode <> '-'))[1],
+            (ARRAY_AGG(derived_new_barcode ORDER BY call_date DESC) FILTER (WHERE derived_new_barcode <> '-' AND call_status IS DISTINCT FROM 'Cancelled'))[1],
             '-'
           ) as current_barcode,
           JSON_AGG(

@@ -283,11 +283,15 @@ export async function syncCompressorBarcodesToPostgres(opts?: {
       const crmNew = cleanBarcode(call.resolved_new || call.s_newbarcode || call.p_newbarcode);
       const crmOld = cleanBarcode(call.resolved_old || call.s_oldbarcode || call.p_oldbarcode);
 
+      const callStatus = String(call.call_status || 'Open').trim();
+      const cancelReason = call.cancel_reason ? String(call.cancel_reason).trim() : null;
+
       let isContinuityBroken = false;
       let expectedOldBarcode: string | null = null;
 
       // Detect continuity break: technician reports old barcode that does NOT match previously installed compressor
-      if (previousNewBarcode) {
+      // (Skip for cancelled calls since no actual repair was performed)
+      if (previousNewBarcode && callStatus !== 'Cancelled') {
         if (crmOld && crmOld !== previousNewBarcode) {
           isContinuityBroken = true;
           expectedOldBarcode = previousNewBarcode;
@@ -297,8 +301,6 @@ export async function syncCompressorBarcodesToPostgres(opts?: {
       // Prefer technician's entered old barcode from CRM, fallback to chronological chain
       const oldBarcode = crmOld || previousNewBarcode || '';
       const newBarcode = crmNew || '-';
-      const callStatus = String(call.call_status || 'Open').trim();
-      const cancelReason = call.cancel_reason ? String(call.cancel_reason).trim() : null;
 
       // New item code and name (only if a valid new barcode was replaced/installed)
       const hasValidNewBarcode = Boolean(newBarcode && newBarcode !== '-');

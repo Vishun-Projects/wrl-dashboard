@@ -26,6 +26,7 @@ import {
   History,
   GitCompareArrows,
   Ban,
+  Cpu,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -124,7 +125,7 @@ export function Sidebar({ user }: SidebarProps) {
             : path === '/report/location-audit'
               ? MapPin
               : path === '/compressor-barcodes'
-                ? ScanBarcode
+                ? Cpu
               : path === '/report/warranty-master'
                 ? Shield
                 : path === '/report/athena-reconciliation'

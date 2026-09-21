@@ -26,7 +26,7 @@ export function PageShell({
   subtitle,
   icon,
   actions,
-  bodyClassName = 'flex-1 flex flex-col min-h-0 overflow-hidden bg-bg-soft',
+  bodyClassName = 'flex-1 flex flex-col min-h-0 min-w-0 w-full overflow-hidden bg-bg-soft',
 }: PageShellProps) {
   const headerContent = header ?? (
     <>
@@ -48,7 +48,7 @@ export function PageShell({
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg-canvas text-slate-900">
+    <div className="flex h-full min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden bg-bg-canvas text-slate-900">
       <header
         className={`${DASHBOARD_HEADER_HEIGHT_CLASS} flex flex-shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-bg-canvas px-4`}
       >
@@ -70,7 +70,7 @@ export function PageScrollRegion({
 }) {
   return (
     <div
-      className={`flex min-h-0 flex-1 flex-col overflow-y-auto custom-scrollbar ${className}`.trim()}
+      className={`flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col overflow-y-auto overflow-x-hidden custom-scrollbar ${className}`.trim()}
     >
       {children}
     </div>
