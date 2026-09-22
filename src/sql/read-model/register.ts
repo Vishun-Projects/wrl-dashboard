@@ -301,7 +301,15 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
   }
 
   if (!params.isHod && params.assignedOffices.length > 0) {
-    clauses.push(`h.nofficeid = ANY($${idx}::bigint[])`);
+    // Match CRM register: call office in assigned set, or franchisee under an assigned branch.
+    clauses.push(`(
+      h.nofficeid = ANY($${idx}::bigint[])
+      OR EXISTS (
+        SELECT 1 FROM dim_offices o
+        WHERE o.ncode = h.nofficeid
+          AND o.nunder = ANY($${idx}::bigint[])
+      )
+    )`);
     values.push(params.assignedOffices.map(Number));
     idx++;
   }

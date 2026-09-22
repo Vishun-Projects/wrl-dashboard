@@ -7,21 +7,22 @@ import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import { WarrantyMasterToolbar } from '@/modules/warranty-master/components/WarrantyMasterToolbar';
 import { WarrantyMasterHeaderActions } from '@/modules/warranty-master/components/WarrantyMasterHeaderActions';
 import { WarrantyMasterSummaryPanel } from '@/modules/warranty-master/components/WarrantyMasterSummaryPanel';
-import { WarrantyMasterTable } from '@/modules/warranty-master/components/WarrantyMasterTable';
+import { WarrantyMasterHierarchyTable } from '@/modules/warranty-master/components/WarrantyMasterHierarchyTable';
+import { WarrantyMasterSerialTable } from '@/modules/warranty-master/components/WarrantyMasterSerialTable';
+import { WarrantyMasterImportModal } from '@/modules/warranty-master/components/WarrantyMasterImportModal';
 import { AdminTableCard } from '@/components/admin/AdminUi';
 import { AnimatedChipList } from '@/components/motion';
 import {
   aggregateWarrantyMasterFgLines,
-  aggregateRowKey,
+  buildWarrantyMasterHierarchy,
+  normalizeWarrantyMasterFgLinesForUi,
   buildWarrantyMasterDimsFromFgLines,
-  buildWarrantyMasterFgDetailIndex,
-  exportWarrantyMasterCsv,
   filterWarrantyMasterFgLines,
   sortWarrantyMonthValues,
   summarizeWarrantyMasterRows,
-  type WarrantyMasterAggregateRow,
   type WarrantyMasterClientFilters,
   type WarrantyMasterFgLineRow,
+  type WarrantyMasterSerialRow,
 } from '@/modules/warranty-master/services';
 import {
   clearWarrantyMasterCache,
@@ -44,6 +45,7 @@ const EMPTY_FILTERS: WarrantyMasterClientFilters = {
   warrEndFrom: '',
   warrEndTo: '',
   activeOnly: false,
+  serialSearch: '',
 };
 
 function cloneFilters(filters: WarrantyMasterClientFilters): WarrantyMasterClientFilters {
@@ -55,6 +57,7 @@ function cloneFilters(filters: WarrantyMasterClientFilters): WarrantyMasterClien
     warrEndFrom: filters.warrEndFrom,
     warrEndTo: filters.warrEndTo,
     activeOnly: filters.activeOnly,
+    serialSearch: filters.serialSearch,
   };
 }
 
@@ -66,7 +69,8 @@ function isEmptyFilters(filters: WarrantyMasterClientFilters): boolean {
     filters.selectedWarrantyMonths.length === 0 &&
     !filters.warrEndFrom.trim() &&
     !filters.warrEndTo.trim() &&
-    !filters.activeOnly
+    !filters.activeOnly &&
+    !filters.serialSearch.trim()
   );
 }
 
@@ -98,7 +102,10 @@ export default function WarrantyMasterPage() {
   const [cacheLabel, setCacheLabel] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const { alert: pageAlert, setError: setPageError, clear: clearPageAlert } = usePageAlert();
-  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [serialResults, setSerialResults] = useState<WarrantyMasterSerialRow[]>([]);
+  const [serialLoading, setSerialLoading] = useState(false);
+  const [serialTotal, setSerialTotal] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const loadGenerationRef = useRef(0);
   const filtersRef = useRef(filters);
@@ -106,21 +113,26 @@ export default function WarrantyMasterPage() {
 
   const isFilterStale = deferredFilters !== filters;
 
-  const dims = useMemo(() => buildWarrantyMasterDimsFromFgLines(allFgLines), [allFgLines]);
-
-  const catalogMachineTotal = useMemo(
-    () => allFgLines.reduce((sum, line) => sum + line.machineCount, 0),
+  const normalizedFgLines = useMemo(
+    () => normalizeWarrantyMasterFgLinesForUi(allFgLines),
     [allFgLines]
   );
 
-  const filteredFgLines = useMemo(
-    () => filterWarrantyMasterFgLines(allFgLines, deferredFilters),
-    [allFgLines, deferredFilters]
+  const dims = useMemo(() => buildWarrantyMasterDimsFromFgLines(normalizedFgLines), [normalizedFgLines]);
+
+  const catalogMachineTotal = useMemo(
+    () => normalizedFgLines.reduce((sum, line) => sum + line.machineCount, 0),
+    [normalizedFgLines]
   );
 
-  const fgDetailIndex = useMemo(
-    () => buildWarrantyMasterFgDetailIndex(filteredFgLines),
-    [filteredFgLines]
+  const filteredFgLines = useMemo(
+    () => filterWarrantyMasterFgLines(normalizedFgLines, deferredFilters),
+    [normalizedFgLines, deferredFilters]
+  );
+
+  const hierarchyRows = useMemo(
+    () => buildWarrantyMasterHierarchy(filteredFgLines, deferredFilters),
+    [filteredFgLines, deferredFilters]
   );
 
   const displayRows = useMemo(
@@ -137,8 +149,7 @@ export default function WarrantyMasterPage() {
     (updater: (prev: WarrantyMasterClientFilters) => WarrantyMasterClientFilters) => {
       startTransition(() => {
         setFilters((prev) => cloneFilters(updater(prev)));
-        setExpandedKey(null);
-      });
+        });
     },
     []
   );
@@ -177,7 +188,6 @@ export default function WarrantyMasterPage() {
       const generation = ++loadGenerationRef.current;
       const abort = new AbortController();
       abortRef.current = abort;
-      setExpandedKey(null);
       clearPageAlert();
       const isStale = () => generation !== loadGenerationRef.current;
 
@@ -228,6 +238,79 @@ export default function WarrantyMasterPage() {
       abortRef.current?.abort();
     };
   }, [loadFromDatabase]);
+
+  const hasSerialSearch = deferredFilters.serialSearch.trim().length > 0;
+
+  useEffect(() => {
+    const term = deferredFilters.serialSearch.trim();
+    if (!term) {
+      setSerialResults([]);
+      setSerialTotal(0);
+      setSerialLoading(false);
+      return;
+    }
+
+    const abort = new AbortController();
+    setSerialLoading(true);
+
+    const params = new URLSearchParams({
+      mode: 'serials',
+      serial: term,
+      limit: '200',
+    });
+    if (deferredFilters.selectedCustomer.length > 0) {
+      params.set('customer', deferredFilters.selectedCustomer.join(','));
+    }
+    if (deferredFilters.selectedGroup.length === 1) {
+      params.set('groupKey', deferredFilters.selectedGroup[0]);
+    }
+    if (deferredFilters.selectedFgModel.length === 1) {
+      params.set('fgModel', deferredFilters.selectedFgModel[0]);
+    }
+    if (deferredFilters.selectedWarrantyMonths.length === 1) {
+      params.set('warrantyMonths', String(deferredFilters.selectedWarrantyMonths[0]));
+    }
+    if (deferredFilters.activeOnly) {
+      params.set('activeOnly', 'true');
+    }
+    if (deferredFilters.warrEndFrom) {
+      params.set('warrEndFrom', deferredFilters.warrEndFrom);
+    }
+    if (deferredFilters.warrEndTo) {
+      params.set('warrEndTo', deferredFilters.warrEndTo);
+    }
+
+    fetch(`/api/report/warranty-master?${params.toString()}`, {
+      credentials: 'include',
+      signal: abort.signal,
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(res.statusText);
+        return res.json();
+      })
+      .then((data: { rows?: WarrantyMasterSerialRow[]; serials?: WarrantyMasterSerialRow[]; total?: number }) => {
+        const list = data.rows ?? data.serials ?? [];
+        setSerialResults(list);
+        setSerialTotal(data.total ?? list.length);
+      })
+      .catch((err) => {
+        if (abort.signal.aborted) return;
+        setPageError(
+          sanitizeUserFacingMessage(
+            err instanceof Error ? err.message : 'Failed to search serial numbers'
+          )
+        );
+      })
+      .finally(() => {
+        if (!abort.signal.aborted) {
+          setSerialLoading(false);
+        }
+      });
+
+    return () => {
+      abort.abort();
+    };
+  }, [deferredFilters, setPageError]);
 
   const handleForceRefresh = useCallback(() => {
     clearWarrantyMasterCache();
@@ -285,41 +368,64 @@ export default function WarrantyMasterPage() {
   const handleReset = useCallback(() => {
     startTransition(() => {
       setFilters(cloneFilters(EMPTY_FILTERS));
-      setExpandedKey(null);
     });
   }, []);
 
-  const toggleRowExpand = useCallback((row: WarrantyMasterAggregateRow) => {
-    const key = aggregateRowKey(row);
-    setExpandedKey((prev) => (prev === key ? null : key));
-  }, []);
-
   const handleExportCsv = async () => {
-    if (displayRows.length === 0) {
-      feedback.actionFailed('Nothing to export');
-      return;
-    }
     setExporting(true);
     try {
-      const csv = exportWarrantyMasterCsv(displayRows);
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-      const fileName = `warranty-master-${new Date().toISOString().slice(0, 10)}.csv`;
+      const params = new URLSearchParams({ format: 'csv' });
+
+      if (deferredFilters.serialSearch.trim()) {
+        params.set('serialNumber', deferredFilters.serialSearch.trim());
+      }
+      if (deferredFilters.selectedCustomer.length > 0) {
+        params.set('customer', deferredFilters.selectedCustomer.join(','));
+      }
+      if (deferredFilters.selectedGroup.length > 0) {
+        params.set('group', deferredFilters.selectedGroup.join(','));
+      }
+      if (deferredFilters.selectedFgModel.length > 0) {
+        params.set('fgModel', deferredFilters.selectedFgModel.join(','));
+      }
+      if (deferredFilters.selectedWarrantyMonths.length > 0) {
+        params.set('warrantyMonths', deferredFilters.selectedWarrantyMonths.join(','));
+      }
+      if (deferredFilters.activeOnly) {
+        params.set('activeOnly', '1');
+      }
+      if (deferredFilters.warrEndFrom.trim()) {
+        params.set('warrEndFrom', deferredFilters.warrEndFrom.trim());
+      }
+      if (deferredFilters.warrEndTo.trim()) {
+        params.set('warrEndTo', deferredFilters.warrEndTo.trim());
+      }
+
+      const res = await fetch(`/api/report/warranty-master?${params.toString()}`, {
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(String((errJson as { error?: string }).error ?? res.statusText));
+      }
+
+      const blob = await res.blob();
+      const fileName = `warranty-master-detailed-${new Date().toISOString().slice(0, 10)}.csv`;
       await triggerBlobDownload(blob, fileName);
       logClientExportAction({
         action: 'report.export.complete',
-        reportName: 'warranty_master',
+        reportName: 'warranty_master_detailed',
         format: 'csv',
         filename: fileName,
-        rowCount: displayRows.length,
-        summary: `Exported warranty master (${displayRows.length} rows)`,
+        summary: 'Exported detailed Warranty Master rows',
       });
       feedback.actionSuccess(`Downloading ${fileName}`);
     } catch (err: unknown) {
       logClientExportAction({
         action: 'report.export.failure',
-        reportName: 'warranty_master',
+        reportName: 'warranty_master_detailed',
         format: 'csv',
-        summary: 'Warranty master export failed',
+        summary: 'Detailed Warranty Master export failed',
         metadata: { message: err instanceof Error ? err.message : String(err) },
       });
       feedback.actionFailed(
@@ -377,6 +483,13 @@ export default function WarrantyMasterPage() {
           }),
       });
     }
+    if (current.serialSearch.trim()) {
+      chips.push({
+        id: 'serial-search',
+        label: `Serial: "${current.serialSearch.trim()}"`,
+        onRemove: () => patch({ serialSearch: '' }),
+      });
+    }
     return chips;
   }, [filters, customerOptions, groupOptions, labelFor, updateFilters]);
 
@@ -396,7 +509,7 @@ export default function WarrantyMasterPage() {
     return parts.join(' · ');
   }, [cacheLabel]);
 
-  const showSummaryPanel = allFgLines.length > 0 || loading;
+  const showSummaryPanel = !hasSerialSearch && (allFgLines.length > 0 || loading);
 
   const toolbar = (
     <WarrantyMasterToolbar
@@ -412,6 +525,7 @@ export default function WarrantyMasterPage() {
       onActiveOnlyChange={(value) => updateFilters((d) => ({ ...d, activeOnly: value }))}
       onWarrEndFromChange={(value) => updateFilters((d) => ({ ...d, warrEndFrom: value }))}
       onWarrEndToChange={(value) => updateFilters((d) => ({ ...d, warrEndTo: value }))}
+      onSerialSearchChange={(value) => updateFilters((d) => ({ ...d, serialSearch: value }))}
       onResetAll={handleReset}
       isFiltering={hasAppliedFilters}
     />
@@ -421,8 +535,9 @@ export default function WarrantyMasterPage() {
     <WarrantyMasterHeaderActions
       onRefresh={() => void handleForceRefresh()}
       onExportCsv={() => void handleExportCsv()}
+      onImportExcel={() => setImportModalOpen(true)}
       refreshDisabled={loading}
-      exportDisabled={exporting || displayRows.length === 0}
+      exportDisabled={exporting || (hasSerialSearch ? serialResults.length === 0 : displayRows.length === 0)}
       exporting={exporting}
       cacheLabel={null}
     />
@@ -478,7 +593,7 @@ export default function WarrantyMasterPage() {
           <WarrantyMasterSummaryPanel
             summary={summary}
             catalogMachineTotal={catalogMachineTotal}
-            rowCount={displayRows.length}
+            rowCount={hierarchyRows.length}
             isFiltered={hasAppliedFilters}
             isStale={isFilterStale}
           />
@@ -486,41 +601,81 @@ export default function WarrantyMasterPage() {
       </div>
 
       <PageScrollRegion>
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="register-table-meta shrink-0">
-            <span className="text-[11px] font-medium text-slate-700">
-              {displayRows.length.toLocaleString('en-IN')} customer · group · warranty rows
-            </span>
-            <span className="text-[10px] text-slate-400">Expand a row for FG model split</span>
-          </div>
-          <AdminTableCard
-            isEmpty={!loading && displayRows.length === 0}
-            empty={
-              <>
-                <p className="text-sm font-medium text-slate-600">No data available</p>
-                <p className="text-[11px] text-slate-400">{emptyMessage}</p>
-              </>
-            }
-            scrollClassName="min-h-0 flex-1 overflow-x-hidden overflow-y-auto custom-scrollbar"
-          >
-            <DataTableLoading
-              loading={tableLoading}
-              updating={tableUpdating || isFilterStale}
-              hasContent={displayRows.length > 0}
-              loadingLabel="Loading warranty data…"
-              updatingLabel="Updating view…"
+        {hasSerialSearch ? (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="register-table-meta shrink-0">
+              <span className="text-[11px] font-medium text-slate-700">
+                {serialResults.length.toLocaleString('en-IN')} machine serial{serialResults.length === 1 ? '' : 's'} matching &ldquo;{deferredFilters.serialSearch.trim()}&rdquo;
+              </span>
+              {serialTotal > serialResults.length && (
+                <span className="text-[10px] text-slate-400">
+                  (showing first {serialResults.length} of {serialTotal.toLocaleString('en-IN')})
+                </span>
+              )}
+            </div>
+            <AdminTableCard
+              isEmpty={!serialLoading && serialResults.length === 0}
+              empty={
+                <>
+                  <p className="text-sm font-medium text-slate-600">No serial numbers found</p>
+                  <p className="text-[11px] text-slate-400">
+                    No machines matched serial number &ldquo;{deferredFilters.serialSearch.trim()}&rdquo;. Check the spelling or clear the serial filter.
+                  </p>
+                </>
+              }
+              scrollClassName="min-h-0 flex-1 overflow-x-hidden overflow-y-auto custom-scrollbar"
             >
-              <WarrantyMasterTable
-                rows={displayRows}
-                filters={deferredFilters}
-                fgDetailIndex={fgDetailIndex}
-                expandedKey={expandedKey}
-                onToggleExpand={toggleRowExpand}
-              />
-            </DataTableLoading>
-          </AdminTableCard>
-        </div>
+              <DataTableLoading
+                loading={serialLoading && serialResults.length === 0}
+                updating={serialLoading && serialResults.length > 0}
+                hasContent={serialResults.length > 0}
+                loadingLabel="Searching serial numbers…"
+                updatingLabel="Updating results…"
+              >
+                <WarrantyMasterSerialTable rows={serialResults} />
+              </DataTableLoading>
+            </AdminTableCard>
+          </div>
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="register-table-meta shrink-0">
+              <span className="text-[11px] font-medium text-slate-700">
+                {hierarchyRows.length.toLocaleString('en-IN')} customer subgroups
+              </span>
+              <span className="text-[10px] text-slate-400">Subgroup → group → warranty → serials</span>
+            </div>
+            <AdminTableCard
+              isEmpty={!loading && displayRows.length === 0}
+              empty={
+                <>
+                  <p className="text-sm font-medium text-slate-600">No data available</p>
+                  <p className="text-[11px] text-slate-400">{emptyMessage}</p>
+                </>
+              }
+              scrollClassName="min-h-0 flex-1 overflow-x-hidden overflow-y-auto custom-scrollbar"
+            >
+              <DataTableLoading
+                loading={tableLoading}
+                updating={tableUpdating || isFilterStale}
+                hasContent={displayRows.length > 0}
+                loadingLabel="Loading warranty data…"
+                updatingLabel="Updating view…"
+              >
+                <WarrantyMasterHierarchyTable
+                  rows={hierarchyRows}
+                  filters={deferredFilters}
+                />
+              </DataTableLoading>
+            </AdminTableCard>
+          </div>
+        )}
       </PageScrollRegion>
+
+      <WarrantyMasterImportModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onSuccess={() => void handleForceRefresh()}
+      />
     </PageShell>
   );
 }

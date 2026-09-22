@@ -39,10 +39,14 @@ export function buildWarrantyMasterWhereClause(params: WarrantyMasterQueryParams
   if (params.activeOnly) {
     condition += ` AND ${WARR_END_DT_EXPR} >= CAST(GETDATE() AS DATE)`;
   }
+  if (params.serialNumber?.trim()) {
+    const safeSerial = escapeSql(params.serialNumber.trim());
+    condition += ` AND po.vserialno LIKE '%${safeSerial}%'`;
+  }
   const q = params.q?.trim();
   if (q) {
     const safe = escapeSql(q);
-    condition += ` AND (pp.vname LIKE '%${safe}%' OR mi.vitemcode LIKE '%${safe}%')`;
+    condition += ` AND (pp.vname LIKE '%${safe}%' OR mi.vitemcode LIKE '%${safe}%' OR po.vserialno LIKE '%${safe}%')`;
   }
   return condition;
 }

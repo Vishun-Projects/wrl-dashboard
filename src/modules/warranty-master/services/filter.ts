@@ -5,8 +5,96 @@ import type {
   WarrantyMasterDims,
   WarrantyMasterFgDetailRow,
   WarrantyMasterFgLineRow,
+  WarrantyMasterHierarchyGroup,
+  WarrantyMasterHierarchySubgroup,
+  WarrantyMasterHierarchyWarranty,
   WarrantyMasterSummary,
 } from './types';
+
+function compactLabel(value: unknown): string {
+  return String(value ?? '').trim().replace(/\s+/g, ' ');
+}
+
+export function normalizedTextKey(value: unknown): string {
+  const text = compactLabel(value);
+  return text ? text.toLocaleLowerCase() : '__unknown__';
+}
+
+function displayScore(value: string): number {
+  const text = compactLabel(value);
+  if (!text) return -1;
+  const hasLower = /[a-z]/.test(text);
+  const hasUpper = /[A-Z]/.test(text);
+  const mixed = hasLower && hasUpper ? 2 : 0;
+  const titleLike = text
+    .split(/\s+/)
+    .every((part) => !part || part[0] === part[0]?.toUpperCase());
+  return mixed + (titleLike ? 1 : 0);
+}
+
+function chooseDisplayLabel(values: string[]): string {
+  const counts = new Map<string, number>();
+  for (const value of values) {
+    const text = compactLabel(value);
+    if (text) counts.set(text, (counts.get(text) ?? 0) + 1);
+  }
+  if (counts.size === 0) return '(Unknown)';
+  return [...counts.entries()]
+    .sort((a, b) =>
+      b[1] - a[1] ||
+      displayScore(b[0]) - displayScore(a[0]) ||
+      a[0].localeCompare(b[0], undefined, { sensitivity: 'base', numeric: true })
+    )[0][0];
+}
+
+/**
+ * Canonicalize subgroup/group display values without destroying source data.
+ * e.g. VADILAL / Vadilal / vadilal become one UI value: Vadilal.
+ */
+export function normalizeWarrantyMasterFgLinesForUi(
+  lines: WarrantyMasterFgLineRow[]
+): WarrantyMasterFgLineRow[] {
+  const subgroupVariants = new Map<string, string[]>();
+  const groupVariants = new Map<string, string[]>();
+
+  for (const line of lines) {
+    const subgroup = compactLabel(line.customerSubgroup);
+    const group = compactLabel(line.groupName);
+    const subgroupKey = normalizedTextKey(subgroup);
+    const groupKey = normalizedTextKey(group);
+    if (subgroup) {
+      const bucket = subgroupVariants.get(subgroupKey);
+      if (bucket) bucket.push(subgroup);
+      else subgroupVariants.set(subgroupKey, [subgroup]);
+    }
+    if (group) {
+      const bucket = groupVariants.get(groupKey);
+      if (bucket) bucket.push(group);
+      else groupVariants.set(groupKey, [group]);
+    }
+  }
+
+  const subgroupLabels = new Map(
+    [...subgroupVariants.entries()].map(([key, values]) => [key, chooseDisplayLabel(values)] as const)
+  );
+  const groupLabels = new Map(
+    [...groupVariants.entries()].map(([key, values]) => [key, chooseDisplayLabel(values)] as const)
+  );
+
+  return lines.map((line) => {
+    const subgroup = compactLabel(line.customerSubgroup);
+    const group = compactLabel(line.groupName);
+    const subgroupKey = normalizedTextKey(subgroup);
+    const groupKey = normalizedTextKey(group);
+    return {
+      ...line,
+      customerSubgroup: subgroupLabels.get(subgroupKey) ?? '(Unknown)',
+      customerKey: subgroupKey,
+      groupName: groupLabels.get(groupKey) ?? '(Unknown)',
+      groupKey,
+    };
+  });
+}
 
 function includesAny(selected: string[], value: string): boolean {
   return selected.length === 0 || selected.includes(value);
@@ -36,7 +124,7 @@ export function filterWarrantyMasterFgLines(
   const warrEndTo = filters.warrEndTo.trim();
 
   return lines.filter((line) => {
-    if (!includesAny(filters.selectedCustomer, line.customerKey)) return false;
+    if (!includesAny(filters.selectedCustomer, line.customerSubgroup)) return false;
     if (!includesAny(filters.selectedGroup, line.groupKey)) return false;
     if (!includesAny(filters.selectedFgModel, line.fgModel)) return false;
     if (
@@ -68,6 +156,7 @@ export function aggregateWarrantyMasterFgLines(
     } else {
       buckets.set(key, {
         customerName: line.customerName,
+        customerSubgroup: line.customerSubgroup,
         groupName: line.groupName,
         customerKey: line.customerKey,
         groupKey: line.groupKey,
@@ -80,6 +169,75 @@ export function aggregateWarrantyMasterFgLines(
   return sortWarrantyMasterAggregateRows([...buckets.values()]);
 }
 
+export function buildWarrantyMasterHierarchy(
+  lines: WarrantyMasterFgLineRow[],
+  filters: WarrantyMasterClientFilters
+): WarrantyMasterHierarchySubgroup[] {
+  const subgroupMap = new Map<
+    string,
+    {
+      label: string;
+      machineCount: number;
+      groups: Map<string, { label: string; machineCount: number; warranties: Map<number, WarrantyMasterHierarchyWarranty> }>;
+    }
+  >();
+
+  for (const line of lines) {
+    const count = effectiveCount(line, filters);
+    if (count <= 0) continue;
+
+    const subgroupKey = line.customerKey || normalizedTextKey(line.customerSubgroup);
+    const groupKey = line.groupKey || normalizedTextKey(line.groupName);
+    let subgroup = subgroupMap.get(subgroupKey);
+    if (!subgroup) {
+      subgroup = { label: line.customerSubgroup || '(Unknown)', machineCount: 0, groups: new Map() };
+      subgroupMap.set(subgroupKey, subgroup);
+    }
+    subgroup.machineCount += count;
+
+    let group = subgroup.groups.get(groupKey);
+    if (!group) {
+      group = { label: line.groupName || '(Unknown)', machineCount: 0, warranties: new Map() };
+      subgroup.groups.set(groupKey, group);
+    }
+    group.machineCount += count;
+
+    const existingWarranty = group.warranties.get(line.warrantyMonths);
+    if (existingWarranty) {
+      existingWarranty.machineCount += count;
+      if (line.minWarrEnd && (!existingWarranty.minWarrEnd || line.minWarrEnd < existingWarranty.minWarrEnd)) {
+        existingWarranty.minWarrEnd = line.minWarrEnd;
+      }
+      if (line.maxWarrEnd && (!existingWarranty.maxWarrEnd || line.maxWarrEnd > existingWarranty.maxWarrEnd)) {
+        existingWarranty.maxWarrEnd = line.maxWarrEnd;
+      }
+    } else {
+      group.warranties.set(line.warrantyMonths, {
+        warrantyMonths: line.warrantyMonths,
+        machineCount: count,
+        minWarrEnd: line.minWarrEnd,
+        maxWarrEnd: line.maxWarrEnd,
+      });
+    }
+  }
+
+  return [...subgroupMap.entries()]
+    .map(([subgroupKey, subgroup]) => ({
+      subgroupKey,
+      customerSubgroup: subgroup.label,
+      machineCount: subgroup.machineCount,
+      groups: [...subgroup.groups.entries()]
+        .map(([groupKey, group]): WarrantyMasterHierarchyGroup => ({
+          groupKey,
+          groupName: group.label,
+          machineCount: group.machineCount,
+          warranties: [...group.warranties.values()].sort((a, b) => a.warrantyMonths - b.warrantyMonths),
+        }))
+        .sort((a, b) => a.groupName.localeCompare(b.groupName, undefined, { sensitivity: 'base', numeric: true })),
+    }))
+    .sort((a, b) => a.customerSubgroup.localeCompare(b.customerSubgroup, undefined, { sensitivity: 'base', numeric: true }));
+}
+
 export function buildWarrantyMasterDimsFromFgLines(
   lines: WarrantyMasterFgLineRow[]
 ): WarrantyMasterDims {
@@ -89,7 +247,7 @@ export function buildWarrantyMasterDimsFromFgLines(
   const monthsSet = new Set<number>();
 
   for (const line of lines) {
-    customerMap.set(line.customerKey, line.customerName);
+    customerMap.set(line.customerSubgroup, line.customerSubgroup);
     groupMap.set(line.groupKey, line.groupName);
     if (line.fgModel) fgSet.add(line.fgModel);
     monthsSet.add(line.warrantyMonths);
@@ -113,7 +271,7 @@ export function buildWarrantyMasterDimsFromFgLines(
 
 export function summarizeWarrantyMasterRows(rows: WarrantyMasterAggregateRow[]): WarrantyMasterSummary {
   const totalMachines = rows.reduce((sum, r) => sum + r.machineCount, 0);
-  const distinctCustomers = new Set(rows.map((r) => r.customerKey)).size;
+  const distinctCustomers = new Set(rows.map((r) => r.customerSubgroup)).size;
   const distinctGroups = new Set(rows.map((r) => r.groupName)).size;
   return { totalMachines, distinctCustomers, distinctGroups };
 }
@@ -141,7 +299,6 @@ export function fgDetailRowsForAggregate(
 
 export type WarrantyMasterFgDetailIndex = Map<string, WarrantyMasterFgLineRow[]>;
 
-/** O(1) bucket lookup for expanded-row FG detail (avoids scanning all lines per row). */
 export function buildWarrantyMasterFgDetailIndex(
   lines: WarrantyMasterFgLineRow[]
 ): WarrantyMasterFgDetailIndex {

@@ -66,3 +66,8 @@ eslint-hooks.json
 /scratch/
 /artifacts/
 =
+
+# Local data dumps / Excel (never commit)
+*.xlsx
+*.xls
+*.bak

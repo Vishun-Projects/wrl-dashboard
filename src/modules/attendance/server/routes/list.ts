@@ -2,7 +2,12 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
+import { isHodUser } from '@/lib/auth/report-security';
 import { jsonSafeError } from '@/lib/api/safe-error';
+import {
+  resolveAllowedAttendanceOfficeIds,
+  scopeAttendanceOfficeIds,
+} from '@/modules/attendance/server/office-scope';
 import { getAttendanceSettings } from '@/modules/attendance/services/org-settings';
 import {
   type ActivityHeaderFilterField,
@@ -107,6 +112,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
+  const isHod = isHodUser(auth.profile, auth.permissions);
+  const assignedOffices = (auth.profile?.office_ids || []).map(String);
+  const allowedOfficeIds = await resolveAllowedAttendanceOfficeIds(isHod, assignedOffices);
+
   try {
     const { searchParams } = new URL(request.url);
     const activityDateFrom = parseYmd(
@@ -121,7 +130,10 @@ export async function GET(request: Request) {
     const callDateTo = parseOptionalYmd(searchParams.get('callDateTo'));
     const searchBy = parseSearchBy(searchParams.get('searchBy'));
     const q = searchParams.get('q')?.trim() || searchParams.get('search')?.trim() || '';
-    const officeIds = parseOfficeIds(searchParams.get('officeIds'));
+    const officeIds = scopeAttendanceOfficeIds(
+      parseOfficeIds(searchParams.get('officeIds')),
+      allowedOfficeIds
+    );
     const callTypes = parseCallTypes(searchParams.get('callTypes'));
     const officeNames = parseCsvStrings(
       searchParams.get('officeNames') ?? searchParams.get('officeName')
@@ -150,7 +162,11 @@ export async function GET(request: Request) {
     const settings = await getAttendanceSettings();
 
     if (wantOffices) {
-      const offices = await queryAttendanceOfficeOptions(activityDateFrom, activityDateTo);
+      const offices = await queryAttendanceOfficeOptions(
+        activityDateFrom,
+        activityDateTo,
+        allowedOfficeIds
+      );
       return NextResponse.json({ offices, settings });
     }
 

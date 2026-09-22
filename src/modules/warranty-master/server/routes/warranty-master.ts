@@ -7,6 +7,8 @@ import {
   fetchWarrantyMasterMeta,
   fetchWarrantyMasterRowDetail,
   fetchWarrantyMasterRows,
+  fetchWarrantyMasterSerials,
+  countWarrantyMasterSerials,
   parseWarrantyMasterDetailParams,
   parseWarrantyMasterParams,
   runWarrantyMasterCsvExport,
@@ -24,8 +26,8 @@ export async function GET(req: NextRequest) {
     const format = searchParams.get('format');
 
     if (format === 'csv') {
-      const csv = await runWarrantyMasterCsvExport(params);
       const stamp = new Date().toISOString().slice(0, 10);
+      const csv = await runWarrantyMasterCsvExport(params);
       const { body, headers } = gzippedCsvPayload(
         csv,
         `warranty-master-${stamp}.csv`,
@@ -43,6 +45,31 @@ export async function GET(req: NextRequest) {
       const fgLines = await fetchWarrantyMasterFgLines();
       const meta = await fetchWarrantyMasterMeta();
       return NextResponse.json({ fgLines, meta });
+    }
+
+    if (mode === 'serials') {
+      const customerKey = searchParams.get('customerKey') ?? undefined;
+      const customerSubgroup = searchParams.get('customerSubgroup') ?? undefined;
+      const groupKey = searchParams.get('groupKey') ?? undefined;
+      const rowWarrantyMonthsRaw = searchParams.get('rowWarrantyMonths');
+      const rowWarrantyMonths = rowWarrantyMonthsRaw ? Number(rowWarrantyMonthsRaw) : undefined;
+      const limitRaw = searchParams.get('limit');
+      const limit = limitRaw ? Number(limitRaw) : undefined;
+      const offsetRaw = searchParams.get('offset');
+      const offset = offsetRaw ? Number(offsetRaw) : undefined;
+
+      const serialParams = {
+        ...params,
+        customerKey,
+        customerSubgroup,
+        groupKey,
+        rowWarrantyMonths,
+      };
+      const [serials, total] = await Promise.all([
+        fetchWarrantyMasterSerials({ ...serialParams, limit, offset }),
+        countWarrantyMasterSerials(serialParams),
+      ]);
+      return NextResponse.json({ serials, rows: serials, total });
     }
 
     if (mode === 'detail') {

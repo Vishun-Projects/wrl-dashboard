@@ -4,6 +4,10 @@ import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { isGzipBuffer } from '@/modules/mis/client-import/services/upload-gzip';
 import { enrichMissingItemCategories } from '@/modules/spare-loan-check/server/item-category';
+import {
+  isPlantInScope,
+  resolveAllowedSpareLoanPlants,
+} from '@/modules/spare-loan-check/server/office-scope';
 import { enrichMissingPlantMeta } from '@/modules/spare-loan-check/server/plant-meta';
 import { runSpareLoanCheck } from '@/modules/spare-loan-check/server/run-check';
 import {
@@ -36,18 +40,23 @@ export async function GET(req: NextRequest) {
     const auth = await requireRbac(req, { pageId: 'spare_loan_check' });
     if (!auth.ok) return auth.response;
 
+    const allowedPlants = await resolveAllowedSpareLoanPlants(
+      auth.security.isHod,
+      auth.security.assignedOffices
+    );
+
     const { searchParams } = new URL(req.url);
     const mode = searchParams.get('mode') ?? 'plants';
     const plant = searchParams.get('plant')?.trim() ?? '';
 
     if (mode === 'plants') {
-      const plants = await listSpareLoanSavedPlants();
+      const plants = await listSpareLoanSavedPlants(allowedPlants);
       return NextResponse.json({ plants });
     }
 
     if (mode === 'rows') {
       if (!plant) {
-        const loaded = await loadSpareLoanAllPlants();
+        const loaded = await loadSpareLoanAllPlants(allowedPlants);
         const withCats = await enrichMissingItemCategories(loaded.rows);
         const rows = await enrichMissingPlantMeta(withCats);
         return NextResponse.json({
@@ -55,6 +64,9 @@ export async function GET(req: NextRequest) {
           rows,
           savedPlants: loaded.savedPlants,
         });
+      }
+      if (!isPlantInScope(plant, allowedPlants)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
       const loaded = await loadSpareLoanPlant(plant);
       if (!loaded) {

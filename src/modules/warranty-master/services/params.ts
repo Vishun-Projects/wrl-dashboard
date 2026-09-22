@@ -14,6 +14,7 @@ export function parseWarrantyMasterParams(searchParams: URLSearchParams): Warran
     warrEndTo: searchParams.get('warrEndTo'),
     activeOnly: searchParams.get('activeOnly') === '1',
     q: searchParams.get('q'),
+    serialNumber: searchParams.get('serialNumber') ?? searchParams.get('serial'),
   };
 }
 
@@ -33,6 +34,7 @@ export function warrantyMasterParamsToSearchParams(
   if (params.warrEndTo) qs.set('warrEndTo', params.warrEndTo);
   if (params.activeOnly) qs.set('activeOnly', '1');
   if (params.q) qs.set('q', params.q);
+  if (params.serialNumber) qs.set('serialNumber', params.serialNumber);
   return qs;
 }
 

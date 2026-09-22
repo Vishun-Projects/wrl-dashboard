@@ -40,6 +40,7 @@
     "sync-worker:editedon-catchup": "npx tsx src/lib/read-model/cli.ts editedon-catchup",
     "sync-worker:backfill-bm-approval": "npx tsx src/lib/read-model/cli.ts backfill-bm-approval",
     "sync-worker:backfill-wco": "npx tsx src/lib/read-model/cli.ts backfill-wco",
+    "sync-worker:warranty-master": "npx tsx scripts/sync-warranty-master.mjs",
     "sync-worker:dims": "npx tsx src/lib/read-model/cli.ts dims",
     "sync-worker:nightly": "npx tsx src/lib/read-model/cli.ts nightly",
     "sync-worker:midnight-calls": "bash scripts/vps-hosting/midnight-calls-sync.sh",

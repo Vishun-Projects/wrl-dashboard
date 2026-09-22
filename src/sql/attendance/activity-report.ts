@@ -966,8 +966,19 @@ export async function queryRelatedActivities(params: {
 
 export async function queryAttendanceOfficeOptions(
   activityDateFrom: string,
-  activityDateTo: string
+  activityDateTo: string,
+  allowedOfficeIds?: number[] | null
 ): Promise<OfficeOption[]> {
+  const restrict = allowedOfficeIds != null;
+  const values: unknown[] = [
+    dateStartBound(activityDateFrom),
+    dateEndBound(activityDateTo),
+  ];
+  let officeFilter = '';
+  if (restrict) {
+    values.push(allowedOfficeIds);
+    officeFilter = `AND office_id = ANY($${values.length}::bigint[])`;
+  }
   return (await prisma.$queryRawUnsafe(
     `
     SELECT DISTINCT
@@ -977,10 +988,10 @@ export async function queryAttendanceOfficeOptions(
     WHERE activity_date >= $1::timestamptz
       AND activity_date <= $2::timestamptz
       AND office_id IS NOT NULL
+      ${officeFilter}
     ORDER BY office_name ASC
     `,
-    dateStartBound(activityDateFrom),
-    dateEndBound(activityDateTo)
+    ...values
   )) as OfficeOption[];
 }
 
@@ -1069,7 +1080,8 @@ export async function queryActivityReportDistinctHeaderValues(
   const expr = HEADER_FIELD_EXPR[field];
   const whereParams: Omit<ActivityReportParams, 'page' | 'pageSize'> = {
     ...params,
-    ...(field === 'office' ? { officeNames: undefined, officeIds: undefined } : {}),
+    // Keep officeIds (may be security scope); only drop name filter for the office facet.
+    ...(field === 'office' ? { officeNames: undefined } : {}),
     ...(field === 'technician' ? { technicianNames: undefined } : {}),
     ...(field === 'call_no' ? { callNos: undefined } : {}),
     ...(field === 'call_type' ? { callTypes: undefined } : {}),

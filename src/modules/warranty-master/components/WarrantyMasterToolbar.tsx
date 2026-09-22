@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { Search, X } from 'lucide-react';
 import { FilterSelect } from '@/components/filters/FilterSelect';
 import { UiDateInput } from '@/components/ui/UiDateInput';
 import type { WarrantyMasterClientFilters } from '@/modules/warranty-master/services';
@@ -20,6 +21,7 @@ type WarrantyMasterToolbarProps = {
   onActiveOnlyChange: (value: boolean) => void;
   onWarrEndFromChange: (value: string) => void;
   onWarrEndToChange: (value: string) => void;
+  onSerialSearchChange?: (value: string) => void;
   onResetAll: () => void;
   isFiltering: boolean;
 };
@@ -37,6 +39,7 @@ export function WarrantyMasterToolbar({
   onActiveOnlyChange,
   onWarrEndFromChange,
   onWarrEndToChange,
+  onSerialSearchChange,
   onResetAll,
   isFiltering,
 }: WarrantyMasterToolbarProps) {
@@ -44,10 +47,30 @@ export function WarrantyMasterToolbar({
 
   return (
     <div className="relative z-20 shrink-0 border-b border-slate-200 bg-bg-canvas">
-      <div className="report-toolbar-filters-row px-3 py-1.5">
+      <div className="report-toolbar-filters-row px-3 py-1.5 flex flex-wrap items-center gap-2">
+        <div className="relative flex items-center min-w-[180px] max-w-[220px]">
+          <Search className="absolute left-2.5 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            value={filters.serialSearch}
+            onChange={(e) => onSerialSearchChange?.(e.target.value)}
+            placeholder="Search serial no…"
+            className="h-7 w-full rounded border border-slate-200 bg-white pl-8 pr-7 text-[11px] text-slate-800 placeholder-slate-400 transition-colors focus:border-slate-400 focus:outline-none"
+          />
+          {filters.serialSearch ? (
+            <button
+              type="button"
+              onClick={() => onSerialSearchChange?.('')}
+              className="absolute right-2 text-slate-400 hover:text-slate-600"
+              title="Clear serial search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
         <FilterSelect
-          label="Customer"
-          emptyLabel="All customers"
+          label="Customer Subgroup"
+          emptyLabel="All subgroups"
           layout="inline"
           options={customerOptions}
           selected={filters.selectedCustomer}

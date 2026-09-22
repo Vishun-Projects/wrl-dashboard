@@ -72,7 +72,11 @@ export async function GET(req: NextRequest) {
     if (!auth.ok) return auth.response;
 
     const { searchParams } = new URL(req.url);
-    const params = parseFilterParams(searchParams);
+    const params = {
+      ...parseFilterParams(searchParams),
+      isHod: auth.security.isHod,
+      assignedOffices: auth.security.assignedOffices,
+    };
     const mode = searchParams.get('mode') ?? 'summary';
     const format = searchParams.get('format');
 
@@ -97,7 +101,10 @@ export async function GET(req: NextRequest) {
       if (!Number.isFinite(id) || id <= 0) {
         return NextResponse.json({ error: 'id is required' }, { status: 400 });
       }
-      const detail = await fetchAthenaFailedCallDetail(id);
+      const detail = await fetchAthenaFailedCallDetail(id, {
+        isHod: auth.security.isHod,
+        assignedOffices: auth.security.assignedOffices,
+      });
       if (!detail) {
         return NextResponse.json({ error: 'Record not found' }, { status: 404 });
       }

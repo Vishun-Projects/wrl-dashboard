@@ -5,6 +5,7 @@ export {
   WARR_END_DT_EXPR,
   WARR_START_DT_EXPR,
   WARRANTY_MONTHS_EXPR,
+  SERIAL_NO_EXPR,
 } from './expressions';
 export { buildWarrantyMasterWhereClause } from './where-clause';
 export {
@@ -12,4 +13,6 @@ export {
   buildWarrantyMasterFgLinesSql,
   buildWarrantyMasterMetaSql,
   buildWarrantyMasterRowDetailSql,
+  buildWarrantyMasterSerialsSql,
+  buildWarrantyMasterSyncBatchSql,
 } from './queries';

@@ -1,75 +1,110 @@
 import 'server-only';
 
-import { postQuery } from '@/lib/db/proxy';
-import { exportWarrantyMasterCsv } from '../services/export-csv';
+import { exportWarrantyMasterDetailedCsv } from '../services/export-csv';
 import { summarizeWarrantyMasterRows } from '../services/filter';
 import {
-  normalizeAggregateRows,
-  normalizeFgDetailRows,
-  normalizeFgLineRows,
-} from '../services/normalize';
-import {
-  buildWarrantyMasterAggregateSql,
-  buildWarrantyMasterFgLinesSql,
-  buildWarrantyMasterMetaSql,
-  buildWarrantyMasterRowDetailSql,
-} from '@/sql/warranty-master';
-import { sortWarrantyMasterAggregateRows } from '../services/sort';
+  getWarrantyMasterDbStats,
+  queryWarrantyMasterFgLinesFromDb,
+  queryWarrantyMasterSerialsFromDb,
+  countWarrantyMasterSerialsFromDb,
+  queryWarrantyMasterExportRowsFromDb,
+} from './db';
 import type {
   WarrantyMasterAggregateRow,
   WarrantyMasterFgDetailRow,
   WarrantyMasterFgLineRow,
   WarrantyMasterQueryParams,
   WarrantyMasterRowDetailParams,
+  WarrantyMasterSerialRow,
 } from '../services/types';
-
-const QUERY_TIMEOUT_MS = 300_000;
-
-async function fetchCrmSql(rawSql: string): Promise<Record<string, unknown>[]> {
-  const res = await postQuery({ rawSql, timeoutMs: QUERY_TIMEOUT_MS });
-  return (res.data || []) as Record<string, unknown>[];
-}
 
 export type WarrantyMasterMeta = {
   totalMachines: number;
+  dbCount?: number;
+  lastSyncedAt?: string | null;
 };
 
-/** Lightweight count for client cache invalidation (monthly refresh). */
+/** Count for client cache invalidation and UI machine totals directly from local Postgres. */
 export async function fetchWarrantyMasterMeta(): Promise<WarrantyMasterMeta> {
-  const raw = await fetchCrmSql(buildWarrantyMasterMetaSql());
-  const row = raw[0] ?? {};
+  const stats = await getWarrantyMasterDbStats();
   return {
-    totalMachines: Number(row.totalMachines ?? 0),
+    totalMachines: stats.totalCount,
+    dbCount: stats.totalCount,
+    lastSyncedAt: stats.lastSyncedAt,
   };
 }
 
-/** Primary load: full FG-line dataset for client-side filtering. */
+/** Primary load: full FG-line dataset for client-side filtering directly from local Postgres. */
 export async function fetchWarrantyMasterFgLines(): Promise<WarrantyMasterFgLineRow[]> {
-  const raw = await fetchCrmSql(buildWarrantyMasterFgLinesSql());
-  return normalizeFgLineRows(raw);
+  return queryWarrantyMasterFgLinesFromDb();
 }
 
-/** Legacy: filtered aggregate rows (CSV export / mode=rows). */
+/** Fetch machine serials matching search query or row/FG breakdown directly from local Postgres. */
+export async function fetchWarrantyMasterSerials(
+  params: WarrantyMasterQueryParams & {
+    customerKey?: string;
+    customerSubgroup?: string;
+    groupKey?: string;
+    rowWarrantyMonths?: number;
+    limit?: number;
+    offset?: number;
+  }
+): Promise<WarrantyMasterSerialRow[]> {
+  return queryWarrantyMasterSerialsFromDb(params);
+}
+
+export async function countWarrantyMasterSerials(
+  params: WarrantyMasterQueryParams & {
+    customerKey?: string;
+    customerSubgroup?: string;
+    groupKey?: string;
+    rowWarrantyMonths?: number;
+  }
+): Promise<number> {
+  return countWarrantyMasterSerialsFromDb(params);
+}
+
+/** Filtered aggregate rows directly from Postgres. */
 export async function fetchWarrantyMasterRows(
-  params: WarrantyMasterQueryParams
+  _params: WarrantyMasterQueryParams
 ): Promise<WarrantyMasterAggregateRow[]> {
-  const aggRaw = await fetchCrmSql(buildWarrantyMasterAggregateSql(params));
-  return sortWarrantyMasterAggregateRows(normalizeAggregateRows(aggRaw));
+  const lines = await queryWarrantyMasterFgLinesFromDb();
+  return lines.map((l) => ({
+    customerName: l.customerName,
+    customerSubgroup: l.customerSubgroup,
+    groupName: l.groupName,
+    customerKey: l.customerKey,
+    groupKey: l.groupKey,
+    warrantyMonths: l.warrantyMonths,
+    machineCount: l.machineCount,
+  }));
 }
 
-/** Legacy: row expand via API (UI uses cached fg lines). */
+/** Row expand via local Postgres. */
 export async function fetchWarrantyMasterRowDetail(
   detail: WarrantyMasterRowDetailParams
 ): Promise<WarrantyMasterFgDetailRow[]> {
-  const raw = await fetchCrmSql(buildWarrantyMasterRowDetailSql(detail));
-  return normalizeFgDetailRows(raw);
+  const serials = await queryWarrantyMasterSerialsFromDb({
+    customerKey: detail.customerKey ?? detail.customerName,
+    groupKey: detail.groupKey ?? detail.groupName,
+    rowWarrantyMonths: Number(detail.rowWarrantyMonths),
+    limit: 1000,
+  });
+  const modelCounts = new Map<string, number>();
+  for (const s of serials) {
+    modelCounts.set(s.fgModel, (modelCounts.get(s.fgModel) ?? 0) + 1);
+  }
+  return Array.from(modelCounts.entries()).map(([fgModel, machineCount]) => ({
+    fgModel,
+    machineCount,
+  }));
 }
 
 export async function runWarrantyMasterCsvExport(
   params: WarrantyMasterQueryParams
 ): Promise<string> {
-  const rows = await fetchWarrantyMasterRows(params);
-  return exportWarrantyMasterCsv(rows);
+  const rows = await queryWarrantyMasterExportRowsFromDb(params);
+  return exportWarrantyMasterDetailedCsv(rows);
 }
 
 export { summarizeWarrantyMasterRows };

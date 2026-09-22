@@ -3,6 +3,8 @@ export {
   fetchWarrantyMasterMeta,
   fetchWarrantyMasterRowDetail,
   fetchWarrantyMasterRows,
+  fetchWarrantyMasterSerials,
+  countWarrantyMasterSerials,
   runWarrantyMasterCsvExport,
   summarizeWarrantyMasterRows,
 } from './fetch';

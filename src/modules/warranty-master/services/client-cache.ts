@@ -1,6 +1,6 @@
 import type { WarrantyMasterFgLineRow } from '@/modules/warranty-master/services/types';
 
-const CACHE_KEY = 'warranty-master-fg-lines-v1';
+const CACHE_KEY = 'warranty-master-fg-lines-v2';
 
 type WarrantyMasterClientCache = {
   totalMachines: number;

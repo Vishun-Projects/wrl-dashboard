@@ -525,6 +525,10 @@ export function buildMainBranchOptions(
   branchesList: Array<{ ncode: string; vcompanyname: string }> = []
 ): RegisterMultiSelectOption[] {
   const byLabel = new Map<string, RegisterMultiSelectOption>();
+  // Only allow cascade/list entries that are in the scoped offices payload.
+  const allowedIds = new Set(
+    offices.map((o) => String(o.ncode ?? '').trim()).filter(Boolean)
+  );
 
   const add = (opt: RegisterMultiSelectOption) => {
     const label = String(opt.label || opt.value).trim();
@@ -536,6 +540,9 @@ export function buildMainBranchOptions(
 
   branchesList.forEach((branch) => {
     const value = String(branch.ncode);
+    // Never surface cascade branches without a scoped offices list (avoids national leak
+    // when /api/offices failed or is still empty).
+    if (allowedIds.size === 0 || !allowedIds.has(value)) return;
     const label =
       branch.vcompanyname ||
       (branch as { vname?: string }).vname ||

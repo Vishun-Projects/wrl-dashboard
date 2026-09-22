@@ -1,4 +1,5 @@
 import type { AthenaReconciliationFilterParams } from '@/modules/athena-reconciliation/types';
+import { shouldRestrictToAssignedOffices } from '@/sql/trhcalls/office-security';
 
 export type AthenaFilterSqlOptions = {
   omitField?: 'branch' | 'client' | 'callType' | 'failureReason';
@@ -41,6 +42,18 @@ export function buildAthenaFilterSql(
   if (params.endDate) {
     conditions.push(`${alias}.call_date <= $${paramIdx++}::date + interval '1 day'`);
     values.push(params.endDate);
+  }
+
+  const assigned = (params.assignedOffices ?? []).map(String);
+  if (shouldRestrictToAssignedOffices(params.isHod === true, assigned)) {
+    const ids = assigned.map(Number).filter((n) => Number.isFinite(n));
+    conditions.push(`EXISTS (
+      SELECT 1 FROM dim_offices o
+      WHERE o.ncode::text = ${alias}.asp_office_id
+        AND (o.ncode = ANY($${paramIdx}::bigint[]) OR o.nunder = ANY($${paramIdx}::bigint[]))
+    )`);
+    values.push(ids);
+    paramIdx++;
   }
 
   const branchList = toList(params.branches);

@@ -8,11 +8,26 @@ export type {
   WarrantyMasterClientFilters,
   WarrantyMasterFgDetailRow,
   WarrantyMasterFgLineRow,
+  WarrantyMasterSerialRow,
+  WarrantyMasterExportRow,
   WarrantyMasterSummary,
+  WarrantyMasterHierarchyGroup,
+  WarrantyMasterHierarchySubgroup,
+  WarrantyMasterHierarchyWarranty,
 } from './types';
 
 export {
+  normalizeAggregateRows,
+  normalizeFgDetailRows,
+  normalizeFgLineRows,
+  normalizeSerialRows,
+} from './normalize';
+
+export {
   aggregateWarrantyMasterFgLines,
+  buildWarrantyMasterHierarchy,
+  normalizeWarrantyMasterFgLinesForUi,
+  normalizedTextKey,
   aggregateRowKey,
   buildWarrantyMasterDimsFromFgLines,
   buildWarrantyMasterFgDetailIndex,
@@ -29,7 +44,7 @@ export {
   sortWarrantyMonthValues,
 } from './sort';
 
-export { exportWarrantyMasterCsv } from './export-csv';
+export { exportWarrantyMasterCsv, exportWarrantyMasterDetailedCsv, exportWarrantyMasterSerialsCsv } from './export-csv';
 
 export {
   parseWarrantyMasterDetailParams,

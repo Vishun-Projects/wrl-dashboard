@@ -100,8 +100,16 @@ import { formatCorpusLastSync } from '@/modules/mis/lib/corpus-sync-time';
 import { buildReportFilterOptions, deriveCascadeFilterLists } from '@/modules/mis/services/report-filter-options';
 import type { ReportFiltersContextValue } from '@/modules/mis/components/report-filters-context.types';
 
-let cachedReportResources: { offices: unknown[]; callTypes: string[] } | null = null;
-let reportResourcesInflight: Promise<{ offices: unknown[]; callTypes: string[] }> | null = null;
+let cachedReportResources: {
+  userId: string;
+  offices: unknown[];
+  callTypes: string[];
+} | null = null;
+let reportResourcesInflight: Promise<{
+  userId: string;
+  offices: unknown[];
+  callTypes: string[];
+}> | null = null;
 
 const ReportFiltersContext = createContext<ReportFiltersContextValue | null>(null);
 
@@ -519,16 +527,16 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
       return;
     }
 
+    const userId = userProfile?.id ? String(userProfile.id) : '';
     let cancelled = false;
     (async () => {
       try {
-        if (cachedReportResources) {
-          const resources = cachedReportResources;
+        if (userId && cachedReportResources?.userId === userId) {
           if (!cancelled) {
-            setOffices(resources.offices);
-            setCallTypes(resources.callTypes);
-            if (!defaultCallTypesAppliedRef.current && resources.callTypes.length > 0) {
-              const breakdown = findBreakdownCallType(resources.callTypes);
+            setOffices(cachedReportResources.offices);
+            setCallTypes(cachedReportResources.callTypes);
+            if (!defaultCallTypesAppliedRef.current && cachedReportResources.callTypes.length > 0) {
+              const breakdown = findBreakdownCallType(cachedReportResources.callTypes);
               if (breakdown) {
                 setSelectedCallTypes((prev) => (prev.length > 0 ? prev : [breakdown]));
               }
@@ -539,23 +547,35 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
           return;
         }
 
+        // User changed (or first load) — drop prior national/other-user office list.
+        if (cachedReportResources && cachedReportResources.userId !== userId) {
+          cachedReportResources = null;
+          reportResourcesInflight = null;
+        }
+
         if (!reportResourcesInflight) {
-          reportResourcesInflight = (async () => {
+          const fetchForUserId = userId;
+          const inflight = (async () => {
             const [officeRes, typesRes] = await Promise.all([
               axios.get('/api/offices', { withCredentials: true }),
               axios.get('/api/report/call-types', { withCredentials: true }),
             ]);
             const payload = {
+              userId: fetchForUserId,
               offices: officeRes.data || [],
               callTypes: typesRes.data || [],
             };
             cachedReportResources = payload;
             return payload;
           })();
+          reportResourcesInflight = inflight.finally(() => {
+            if (reportResourcesInflight === inflight) reportResourcesInflight = null;
+          });
         }
 
         const payload = await reportResourcesInflight;
-        if (cancelled) return;
+        if (cancelled || !payload) return;
+        if (payload.userId !== userId) return;
         setOffices(payload.offices);
         setCallTypes(payload.callTypes);
         if (!defaultCallTypesAppliedRef.current && payload.callTypes.length > 0) {
@@ -574,7 +594,7 @@ export function ReportFiltersProvider({ children }: { children: React.ReactNode 
     return () => {
       cancelled = true;
     };
-  }, [supabase, needsSharedResources]);
+  }, [supabase, needsSharedResources, userProfile?.id]);
 
   const syncUserRoleFromProfile = useCallback(() => {
     if (!userProfile) return false;

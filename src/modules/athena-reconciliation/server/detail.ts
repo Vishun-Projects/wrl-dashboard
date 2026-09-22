@@ -5,6 +5,7 @@ import type {
   AthenaFailedNormalizedRow,
   AthenaInspectionDetail,
 } from '@/modules/athena-reconciliation/types';
+import { shouldRestrictToAssignedOffices } from '@/sql/trhcalls/office-security';
 
 const INVALID_SERIALS = new Set(['', '0', '00000000000000']);
 
@@ -106,11 +107,30 @@ function toAttemptSummary(
   };
 }
 
-export async function fetchAthenaFailedCallDetail(id: number): Promise<AthenaInspectionDetail | null> {
+export async function fetchAthenaFailedCallDetail(
+  id: number,
+  scope?: { isHod: boolean; assignedOffices: string[] }
+): Promise<AthenaInspectionDetail | null> {
   return withClient(async (client) => {
+    const restrict = scope
+      ? shouldRestrictToAssignedOffices(scope.isHod, scope.assignedOffices)
+      : false;
+    const officeIds = restrict
+      ? scope!.assignedOffices.map(Number).filter((n) => Number.isFinite(n))
+      : [];
+
     const rowRes = await client.query<AthenaFailedNormalizedRow>(
-      `SELECT ${ROW_SELECT} FROM athena_failed_calls_normalized a WHERE a.id = $1`,
-      [id]
+      restrict
+        ? `SELECT ${ROW_SELECT}
+           FROM athena_failed_calls_normalized a
+           WHERE a.id = $1
+             AND EXISTS (
+               SELECT 1 FROM dim_offices o
+               WHERE o.ncode::text = a.asp_office_id
+                 AND (o.ncode = ANY($2::bigint[]) OR o.nunder = ANY($2::bigint[]))
+             )`
+        : `SELECT ${ROW_SELECT} FROM athena_failed_calls_normalized a WHERE a.id = $1`,
+      restrict ? [id, officeIds] : [id]
     );
     const row = rowRes.rows[0];
     if (!row) return null;
@@ -120,7 +140,34 @@ export async function fetchAthenaFailedCallDetail(id: number): Promise<AthenaIns
 
     if (serialNorm) {
       const relatedRes = await client.query<AthenaFailedNormalizedRow>(
+        restrict
+          ? `
+        SELECT ${ROW_SELECT}
+        FROM (
+          SELECT DISTINCT ON (
+            COALESCE(a.client_ticket_no, ''),
+            COALESCE(a.failure_reason, ''),
+            COALESCE(a.serial_no, ''),
+            COALESCE(a.call_type, '')
+          ) a.*
+          FROM athena_failed_calls_normalized a
+          WHERE UPPER(REGEXP_REPLACE(COALESCE(a.serial_no, ''), '\\s+', '', 'g')) = $1
+            AND EXISTS (
+              SELECT 1 FROM dim_offices o
+              WHERE o.ncode::text = a.asp_office_id
+                AND (o.ncode = ANY($2::bigint[]) OR o.nunder = ANY($2::bigint[]))
+            )
+          ORDER BY
+            COALESCE(a.client_ticket_no, ''),
+            COALESCE(a.failure_reason, ''),
+            COALESCE(a.serial_no, ''),
+            COALESCE(a.call_type, ''),
+            CASE a.reconciliation_status WHEN 'REGISTERED' THEN 0 ELSE 1 END,
+            a.id DESC
+        ) a
+        ORDER BY a.call_date ASC NULLS LAST, a.id ASC
         `
+          : `
         SELECT ${ROW_SELECT}
         FROM (
           SELECT DISTINCT ON (
@@ -141,7 +188,7 @@ export async function fetchAthenaFailedCallDetail(id: number): Promise<AthenaIns
         ) a
         ORDER BY a.call_date ASC NULLS LAST, a.id ASC
         `,
-        [serialNorm]
+        restrict ? [serialNorm, officeIds] : [serialNorm]
       );
       relatedRows = relatedRes.rows;
     }

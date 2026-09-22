@@ -7,6 +7,7 @@ import {
   WARR_END_DT_EXPR,
   WARR_START_DT_EXPR,
   WARRANTY_MONTHS_EXPR,
+  SERIAL_NO_EXPR,
 } from './expressions';
 import { escapeSql } from './helpers';
 import { buildWarrantyMasterWhereClause } from './where-clause';
@@ -130,5 +131,59 @@ export function buildWarrantyMasterRowDetailSql(detail: WarrantyMasterRowDetailP
     ${rowMatch}
     GROUP BY mi.vitemcode
     ORDER BY machineCount DESC, fgModel
+  `;
+}
+
+/** Fetch individual machine serial numbers matching filters or specific row/FG model. */
+export function buildWarrantyMasterSerialsSql(
+  params: WarrantyMasterQueryParams & { limit?: number }
+): string {
+  const where = buildWarrantyMasterWhereClause(params);
+  const limit = params.limit ?? 200;
+  return `
+    SELECT TOP ${limit}
+      po.ncode AS ncode,
+      ${SERIAL_NO_EXPR} AS serialNo,
+      ${CUSTOMER_NAME_EXPR} AS customerName,
+      ${GROUP_NAME_EXPR} AS groupName,
+      CAST(po.npartyprofile AS NVARCHAR(50)) AS customerKey,
+      CAST(mi.nitemtype AS NVARCHAR(50)) AS groupKey,
+      ${WARRANTY_MONTHS_EXPR} AS warrantyMonths,
+      ${FG_MODEL_EXPR} AS fgModel,
+      CONVERT(VARCHAR(10), ${WARR_START_DT_EXPR}, 23) AS warrStartDt,
+      CONVERT(VARCHAR(10), ${WARR_END_DT_EXPR}, 23) AS warrEndDt,
+      CASE WHEN ${WARR_END_DT_EXPR} >= CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END AS isActive
+    ${WARRANTY_MASTER_BASE_FROM}
+    ${where}
+      AND ${SERIAL_NO_EXPR} <> ''
+      AND ${WARRANTY_MONTHS_EXPR} IS NOT NULL
+    ORDER BY po.vserialno
+  `;
+}
+
+/** Keyset pagination batch for sync worker to populate Postgres. */
+export function buildWarrantyMasterSyncBatchSql(lastNcode: number, batchSize = 3000): string {
+  const where = buildWarrantyMasterWhereClause({});
+  return `
+    SELECT TOP ${batchSize}
+      po.ncode AS ncode,
+      ${SERIAL_NO_EXPR} AS serialNo,
+      ${CUSTOMER_NAME_EXPR} AS customerName,
+      CAST(po.npartyprofile AS NVARCHAR(50)) AS customerKey,
+      ${GROUP_NAME_EXPR} AS groupName,
+      CAST(mi.nitemtype AS NVARCHAR(50)) AS groupKey,
+      ${FG_MODEL_EXPR} AS fgModel,
+      ${WARRANTY_MONTHS_EXPR} AS warrantyMonths,
+      CONVERT(VARCHAR(10), ${WARR_START_DT_EXPR}, 23) AS warrStartDt,
+      CONVERT(VARCHAR(10), ${WARR_END_DT_EXPR}, 23) AS warrEndDt,
+      CASE WHEN ${WARR_END_DT_EXPR} >= CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END AS isActive,
+      po.editedon AS crmEditedAt,
+      po.addedon AS crmAddedAt
+    ${WARRANTY_MASTER_BASE_FROM}
+    ${where}
+      AND TRY_CAST(po.ncode AS FLOAT) > ${lastNcode}
+      AND ${SERIAL_NO_EXPR} <> ''
+      AND ${WARRANTY_MONTHS_EXPR} IS NOT NULL
+    ORDER BY TRY_CAST(po.ncode AS FLOAT) ASC
   `;
 }

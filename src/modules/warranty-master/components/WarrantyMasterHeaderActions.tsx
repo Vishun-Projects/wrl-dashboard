@@ -1,11 +1,12 @@
 'use client';
 
 import React from 'react';
-import { Download, RefreshCw } from 'lucide-react';
+import { Download, FileSpreadsheet, RefreshCw } from 'lucide-react';
 
 type WarrantyMasterHeaderActionsProps = {
   onRefresh: () => void;
   onExportCsv: () => void;
+  onImportExcel?: () => void;
   refreshDisabled: boolean;
   exportDisabled: boolean;
   exporting: boolean;
@@ -15,6 +16,7 @@ type WarrantyMasterHeaderActionsProps = {
 export function WarrantyMasterHeaderActions({
   onRefresh,
   onExportCsv,
+  onImportExcel,
   refreshDisabled,
   exportDisabled,
   exporting,
@@ -22,6 +24,17 @@ export function WarrantyMasterHeaderActions({
 }: WarrantyMasterHeaderActionsProps) {
   return (
     <div className="flex shrink-0 items-center gap-1.5">
+      {onImportExcel ? (
+        <button
+          type="button"
+          onClick={onImportExcel}
+          title="Import Excel or CSV file"
+          className="inline-flex h-8 items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+        >
+          <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
+          <span className="hidden sm:inline">Import Excel</span>
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={onRefresh}

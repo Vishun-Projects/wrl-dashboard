@@ -49,7 +49,7 @@ export function WarrantyMasterSummaryPanel({
             value={summary.distinctCustomers}
             className="register-stat-value text-blue-600 tabular-nums"
           />
-          <span className="register-stat-label">Customers</span>
+          <span className="register-stat-label">Customer subgroups</span>
         </div>
         <div className="register-stat-item">
           <AnimatedMetric

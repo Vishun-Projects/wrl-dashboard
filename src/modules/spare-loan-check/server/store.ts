@@ -71,19 +71,30 @@ function emptySummary(): SpareLoanCheckSummary {
   };
 }
 
-export async function listSpareLoanSavedPlants(): Promise<SpareLoanSavedPlant[]> {
+export async function listSpareLoanSavedPlants(
+  allowedPlants?: string[] | null
+): Promise<SpareLoanSavedPlant[]> {
   return withAppClient(async (client) => {
+    const restrict = allowedPlants != null;
     const { rows } = await client.query<{
       plant: string;
       file_name: string;
       problems: number;
       imported_at: Date;
     }>(
+      restrict
+        ? `
+      SELECT plant, file_name, problems, imported_at
+      FROM spare_loan_check_imports
+      WHERE plant = ANY($1::text[])
+      ORDER BY plant
       `
+        : `
       SELECT plant, file_name, problems, imported_at
       FROM spare_loan_check_imports
       ORDER BY plant
-      `
+      `,
+      restrict ? [allowedPlants] : []
     );
     return rows.map((r) => ({
       plant: r.plant,
@@ -146,12 +157,13 @@ export async function loadSpareLoanPlant(
 }
 
 /** Load all saved plants' problem rows (combined summary). */
-export async function loadSpareLoanAllPlants(): Promise<{
+export async function loadSpareLoanAllPlants(allowedPlants?: string[] | null): Promise<{
   summary: SpareLoanCheckSummary;
   rows: SpareLoanProblemRow[];
   savedPlants: string[];
 }> {
   return withAppClient(async (client) => {
+    const restrict = allowedPlants != null;
     const { rows: imports } = await client.query<{
       plant: string;
       parsed: number;
@@ -160,11 +172,19 @@ export async function loadSpareLoanAllPlants(): Promise<{
       problems: number;
       by_reason: Record<string, number> | null;
     }>(
+      restrict
+        ? `
+      SELECT plant, parsed, skipped, ok, problems, by_reason
+      FROM spare_loan_check_imports
+      WHERE plant = ANY($1::text[])
+      ORDER BY plant
       `
+        : `
       SELECT plant, parsed, skipped, ok, problems, by_reason
       FROM spare_loan_check_imports
       ORDER BY plant
-      `
+      `,
+      restrict ? [allowedPlants] : []
     );
 
     const summary = emptySummary();
@@ -182,11 +202,19 @@ export async function loadSpareLoanAllPlants(): Promise<{
     }
 
     const { rows } = await client.query(
+      restrict
+        ? `
+      SELECT ${ROW_SELECT}
+      FROM spare_loan_check_rows
+      WHERE plant = ANY($1::text[])
+      ORDER BY plant, reason, match_key, vendor_no, material
       `
+        : `
       SELECT ${ROW_SELECT}
       FROM spare_loan_check_rows
       ORDER BY plant, reason, match_key, vendor_no, material
-      `
+      `,
+      restrict ? [allowedPlants] : []
     );
 
     return {

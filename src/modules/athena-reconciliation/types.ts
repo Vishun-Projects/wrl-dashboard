@@ -123,6 +123,9 @@ export type AthenaReconciliationFilterParams = {
   sortDir?: 'asc' | 'desc';
   /** Preset label from DateRangeSelector (e.g. This Month, Last 7 Days). */
   dateRangeLabel?: string | null;
+  /** Office scope from resolveReportSecurity (empty + !isHod still means national). */
+  isHod?: boolean;
+  assignedOffices?: string[];
 };
 
 export type AthenaReconciliationKpis = {

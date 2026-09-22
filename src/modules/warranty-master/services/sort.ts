@@ -19,7 +19,7 @@ export function sortWarrantyMasterAggregateRows(
   rows: WarrantyMasterAggregateRow[]
 ): WarrantyMasterAggregateRow[] {
   return [...rows].sort((a, b) => {
-    const byCustomer = compareText(a.customerName, b.customerName);
+    const byCustomer = compareText(a.customerSubgroup, b.customerSubgroup);
     if (byCustomer !== 0) return byCustomer;
     const byGroup = compareText(a.groupName, b.groupName);
     if (byGroup !== 0) return byGroup;
