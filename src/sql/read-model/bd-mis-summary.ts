@@ -45,7 +45,14 @@ function buildOfficeFilter(
   const parts: string[] = [];
 
   if (!params.isHod && params.assignedOffices && params.assignedOffices.length > 0) {
-    parts.push(`${alias}.${officeColumn} = ANY($${idx}::bigint[])`);
+    parts.push(`(
+      ${alias}.${officeColumn} = ANY($${idx}::bigint[])
+      OR EXISTS (
+        SELECT 1 FROM dim_offices o
+        WHERE o.ncode = ${alias}.${officeColumn}
+          AND o.nunder = ANY($${idx}::bigint[])
+      )
+    )`);
     values.push(params.assignedOffices.map((id) => Number(id)));
     idx++;
   }

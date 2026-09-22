@@ -382,7 +382,15 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
   }
 
   if (params.branch && params.branch !== 'All') {
-    clauses.push(`h.nofficeid = ANY($${idx}::bigint[])`);
+    // Match CRM register: branch HQ or franchisee offices under that branch (nunder).
+    clauses.push(`(
+      h.nofficeid = ANY($${idx}::bigint[])
+      OR EXISTS (
+        SELECT 1 FROM dim_offices o
+        WHERE o.ncode = h.nofficeid
+          AND o.nunder = ANY($${idx}::bigint[])
+      )
+    )`);
     values.push(params.branch.split(',').map(Number));
     idx++;
   }

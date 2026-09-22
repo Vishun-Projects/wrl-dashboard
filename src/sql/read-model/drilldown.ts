@@ -115,7 +115,14 @@ export async function querySummaryDrilldown(
   ];
 
   if (!params.isHod && params.assignedOffices && params.assignedOffices.length > 0) {
-    clauses.push(`h.nofficeid = ANY($${idx}::bigint[])`);
+    clauses.push(`(
+      h.nofficeid = ANY($${idx}::bigint[])
+      OR EXISTS (
+        SELECT 1 FROM dim_offices o
+        WHERE o.ncode = h.nofficeid
+          AND o.nunder = ANY($${idx}::bigint[])
+      )
+    )`);
     values.push(params.assignedOffices.map((id) => Number(id)));
     idx++;
   }

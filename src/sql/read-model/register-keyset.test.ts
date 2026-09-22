@@ -246,5 +246,12 @@ describe('register composite keyset', () => {
     // DEVELOPER: do not bring bapproval back — Jul 2026 Tech. Solve = 0 outage
     expect(sql).not.toContain('bapproval');
   });
+
+  it('expands branch filter to franchisees under the branch (nunder)', () => {
+    const { sql, values } = buildWhere(baseParams({ branch: '8' }));
+    expect(sql).toContain('h.nofficeid = ANY');
+    expect(sql).toContain('o.nunder = ANY');
+    expect(values).toEqual(expect.arrayContaining([[8]]));
+  });
 });
 
