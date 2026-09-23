@@ -246,7 +246,7 @@ for sheet_file, year in sheets:
                     ship_to_state = vals[9]
                     ship_to_city = vals[10]
                     inventory_number = vals[11]
-                    warr_start_dt = parse_date_str(vals[12]) or billing_date
+                    warr_start_dt = parse_date_str(vals[12])
                     warr_end_dt = parse_date_str(vals[13])
                     city = vals[14]
                     pin_code = vals[15]

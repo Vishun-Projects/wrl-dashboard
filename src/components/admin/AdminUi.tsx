@@ -148,7 +148,7 @@ export function AdminTh({
 
   return (
     <th
-      className={`ui-field-label px-4 py-2.5 font-semibold text-slate-600 ${alignClass} ${
+      className={`ui-field-label px-3 py-1.5 font-semibold text-slate-600 ${alignClass} ${
         clickable ? 'table-th-sortable' : ''
       } ${className}`}
       onClick={
@@ -206,7 +206,7 @@ export function AdminTd({
   const alignClass =
     align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left';
   return (
-    <td className={`px-4 py-3 align-middle text-[12px] text-slate-700 ${alignClass} ${className}`}>
+    <td className={`px-3 py-1.5 align-middle text-[12px] text-slate-700 ${alignClass} ${className}`}>
       {children}
     </td>
   );

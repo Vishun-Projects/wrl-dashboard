@@ -464,19 +464,19 @@ export function CompressorBarcodesPageClient() {
       icon={<Cpu className="h-4 w-4" />}
       toolbar={
         <>
-          <div className="register-filter-bar !px-3 !py-1.5 bg-white border-b border-slate-200">
-            <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div className="register-filter-bar !px-3 !py-1 bg-white border-b border-slate-200">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               {/* Left: Date Range & Branch Filters */}
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center h-8 gap-1.5 bg-slate-50/80 hover:bg-slate-50 border border-slate-200 rounded-lg px-2.5 text-xs text-slate-700 shadow-2xs transition-colors">
-                  <Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+              <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex items-center h-7.5 gap-1.5 bg-slate-50/80 hover:bg-slate-50 border border-slate-200 rounded-md px-2 text-xs text-slate-700 shadow-2xs transition-colors">
+                  <Calendar className="h-3 w-3 text-slate-400 shrink-0" />
                   <select
                     value={dateType}
                     onChange={(e) => {
                       setDateType(e.target.value as 'call_date' | 'solve_date');
                       setPage(1);
                     }}
-                    className="bg-transparent border-0 text-[11px] font-semibold text-slate-700 focus:outline-none cursor-pointer pr-1"
+                    className="bg-transparent border-0 text-[11px] font-semibold text-slate-700 focus:outline-none cursor-pointer pr-0.5"
                     title="Filter by Call Date or Solved Date"
                   >
                     <option value="call_date">Call Date</option>
@@ -490,10 +490,10 @@ export function CompressorBarcodesPageClient() {
                       setStartDate(e.target.value);
                       setPage(1);
                     }}
-                    className="bg-transparent border-0 text-xs text-slate-700 focus:outline-none cursor-pointer"
+                    className="bg-transparent border-0 text-[11px] text-slate-700 focus:outline-none cursor-pointer"
                     title="Filter start date"
                   />
-                  <span className="text-slate-400 text-xs font-medium">to</span>
+                  <span className="text-slate-400 text-[10px] font-medium">to</span>
                   <input
                     type="date"
                     value={endDate}
@@ -501,32 +501,32 @@ export function CompressorBarcodesPageClient() {
                       setEndDate(e.target.value);
                       setPage(1);
                     }}
-                    className="bg-transparent border-0 text-xs text-slate-700 focus:outline-none cursor-pointer"
+                    className="bg-transparent border-0 text-[11px] text-slate-700 focus:outline-none cursor-pointer"
                     title="Filter end date"
                   />
                   {(startDate || endDate) && (
                     <button
                       type="button"
                       onClick={handleClearDates}
-                      className="text-slate-400 hover:text-slate-600 ml-1 cursor-pointer"
+                      className="text-slate-400 hover:text-slate-600 ml-0.5 cursor-pointer"
                       title="Clear date filter"
                     >
-                      <X className="h-3.5 w-3.5" />
+                      <X className="h-3 w-3" />
                     </button>
                   )}
                 </div>
 
                 {/* Branch Select Filter */}
                 {stats?.all_branches && stats.all_branches.length > 0 && (
-                  <div className="flex items-center h-8 gap-1.5 bg-slate-50/80 hover:bg-slate-50 border border-slate-200 rounded-lg px-2 text-xs text-slate-700 shadow-2xs transition-colors">
-                    <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                  <div className="flex items-center h-7.5 gap-1 bg-slate-50/80 hover:bg-slate-50 border border-slate-200 rounded-md px-2 text-xs text-slate-700 shadow-2xs transition-colors">
+                    <MapPin className="h-3 w-3 text-slate-400 shrink-0" />
                     <select
                       value={selectedBranch}
                       onChange={(e) => {
                         setSelectedBranch(e.target.value);
                         setPage(1);
                       }}
-                      className="bg-transparent border-0 text-[11px] font-semibold text-slate-700 focus:outline-none cursor-pointer max-w-[140px] truncate"
+                      className="bg-transparent border-0 text-[11px] font-semibold text-slate-700 focus:outline-none cursor-pointer max-w-[130px] truncate"
                       title="Filter by Branch"
                     >
                       <option value="">All Branches</option>
@@ -554,15 +554,15 @@ export function CompressorBarcodesPageClient() {
               </div>
 
               {/* Right Search Input & Reset Button */}
-              <div className="flex items-center gap-2 flex-1 max-w-sm justify-end">
+              <div className="flex items-center gap-1.5 flex-1 max-w-sm justify-end">
                 <div className="relative w-full max-w-xs">
-                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                  <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" />
                   <input
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder="Search serial, barcode, call no, office..."
-                    className="h-8 w-full pl-8 pr-7 bg-slate-50/80 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 focus:border-slate-400 shadow-2xs transition-all"
+                    className="h-7.5 w-full pl-8 pr-7 bg-slate-50/80 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-md text-[11px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 focus:border-slate-400 shadow-2xs transition-all"
                   />
                   {searchTerm && (
                     <button
@@ -572,10 +572,10 @@ export function CompressorBarcodesPageClient() {
                         setActiveSearch('');
                         setPage(1);
                       }}
-                      className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 cursor-pointer"
                       title="Clear search"
                     >
-                      <X className="h-3.5 w-3.5" />
+                      <X className="h-3 w-3" />
                     </button>
                   )}
                 </div>
@@ -584,10 +584,10 @@ export function CompressorBarcodesPageClient() {
                   <button
                     type="button"
                     onClick={handleClearFilters}
-                    className="h-8 inline-flex items-center gap-1 px-2.5 text-xs font-medium text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg shadow-2xs transition-colors cursor-pointer shrink-0"
+                    className="h-7.5 inline-flex items-center gap-1 px-2 text-[11px] font-medium text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 rounded-md shadow-2xs transition-colors cursor-pointer shrink-0"
                     title="Reset all filters"
                   >
-                    <RotateCcw className="h-3 w-3 text-slate-400" />
+                    <RotateCcw className="h-2.5 w-2.5 text-slate-400" />
                     Reset
                   </button>
                 )}
@@ -597,9 +597,9 @@ export function CompressorBarcodesPageClient() {
 
           {/* Top Repeat Branches Hotspot Strip */}
           {stats?.top_branches && stats.top_branches.length > 0 && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white border-b border-slate-200 overflow-x-auto custom-scrollbar shrink-0 text-xs">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1 flex items-center gap-1">
-                <MapPin className="h-3 w-3 text-slate-400" /> Hotspot Branches:
+            <div className="flex items-center gap-1 px-3 py-1 bg-white border-b border-slate-200 overflow-x-auto custom-scrollbar shrink-0 text-xs">
+              <span className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1 flex items-center gap-1">
+                <MapPin className="h-2.5 w-2.5 text-slate-400" /> Hotspots:
               </span>
               <button
                 type="button"
@@ -607,7 +607,7 @@ export function CompressorBarcodesPageClient() {
                   setSelectedBranch('');
                   setPage(1);
                 }}
-                className={`px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors shrink-0 cursor-pointer ${!selectedBranch
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-medium transition-colors shrink-0 cursor-pointer ${!selectedBranch
                     ? 'bg-slate-900 text-white font-semibold'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
@@ -625,7 +625,7 @@ export function CompressorBarcodesPageClient() {
                       setSelectedBranch(isSelected ? '' : b.branch_name);
                       setPage(1);
                     }}
-                    className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium transition-all shrink-0 cursor-pointer border ${isSelected
+                    className={`inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[10px] font-medium transition-all shrink-0 cursor-pointer border ${isSelected
                         ? 'bg-blue-600 border-blue-600 text-white font-semibold shadow-2xs'
                         : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
                       }`}
@@ -633,7 +633,7 @@ export function CompressorBarcodesPageClient() {
                   >
                     <span>{cleanName}</span>
                     <span
-                      className={`text-[10px] px-1 rounded-full font-bold ${isSelected ? 'bg-blue-700 text-blue-100' : 'bg-slate-100 text-slate-600'
+                      className={`text-[9px] px-1 rounded-full font-bold ${isSelected ? 'bg-blue-700 text-blue-100' : 'bg-slate-100 text-slate-600'
                         }`}
                     >
                       {b.repeat_count}
@@ -646,11 +646,11 @@ export function CompressorBarcodesPageClient() {
 
           {/* Executive KPI Stats Bar (5 Cards) */}
           {stats && (
-            <div className="register-stats-bar !px-3 !py-2 border-b border-slate-200 bg-slate-50/60 lg:!grid-cols-5">
+            <div className="register-stats-bar !px-3 !py-1.5 border-b border-slate-200 bg-slate-50/60 lg:!grid-cols-5 !gap-1.5">
               {/* Card 1: 2+ Repeat Repairs */}
               <button
                 type="button"
-                className={`register-stat-item register-stat-item--clickable ${filterTab === 'repeat' ? 'register-stat-item--active' : ''
+                className={`register-stat-item register-stat-item--clickable !min-h-0 !py-1 !px-2.5 !gap-0.5 rounded-md ${filterTab === 'repeat' ? 'register-stat-item--active' : ''
                   }`}
                 onClick={() => {
                   setFilterTab('repeat');
@@ -660,15 +660,15 @@ export function CompressorBarcodesPageClient() {
               >
                 <AnimatedMetric
                   value={stats.repeat_machines || 0}
-                  className="register-stat-value text-slate-900"
+                  className="register-stat-value !text-base font-bold text-slate-900"
                 />
-                <span className="register-stat-label">Repeat Machines (2+ Repairs)</span>
+                <span className="register-stat-label !text-[9.5px]">Repeat Machines (2+ Repairs)</span>
               </button>
 
               {/* Card 2: ⚡ Rapid Re-Fail (<90d) */}
               <button
                 type="button"
-                className={`register-stat-item register-stat-item--clickable ${filterTab === 'premature' ? 'register-stat-item--active' : ''
+                className={`register-stat-item register-stat-item--clickable !min-h-0 !py-1 !px-2.5 !gap-0.5 rounded-md ${filterTab === 'premature' ? 'register-stat-item--active' : ''
                   }`}
                 onClick={() => {
                   setFilterTab('premature');
@@ -679,13 +679,13 @@ export function CompressorBarcodesPageClient() {
                 <div className="flex items-center justify-between w-full">
                   <AnimatedMetric
                     value={stats.premature_machines || 0}
-                    className="register-stat-value text-rose-600"
+                    className="register-stat-value !text-base font-bold text-rose-600"
                   />
-                  <span className="text-[10px] font-semibold bg-rose-50 text-rose-700 border border-rose-200 px-1.5 py-0.5 rounded">
+                  <span className="text-[9px] font-semibold bg-rose-50 text-rose-700 border border-rose-200 px-1 py-0.2 rounded">
                     &lt; 90d Gap
                   </span>
                 </div>
-                <span className="register-stat-label flex items-center gap-1 text-rose-800">
+                <span className="register-stat-label !text-[9.5px] flex items-center gap-1 text-rose-800">
                   <Zap className="h-2.5 w-2.5 text-rose-600" /> Rapid Re-Fail (&lt;90d)
                 </span>
               </button>
@@ -693,7 +693,7 @@ export function CompressorBarcodesPageClient() {
               {/* Card 3: Broken Continuity */}
               <button
                 type="button"
-                className={`register-stat-item register-stat-item--clickable ${filterTab === 'broken' ? 'register-stat-item--active' : ''
+                className={`register-stat-item register-stat-item--clickable !min-h-0 !py-1 !px-2.5 !gap-0.5 rounded-md ${filterTab === 'broken' ? 'register-stat-item--active' : ''
                   }`}
                 onClick={() => {
                   setFilterTab('broken');
@@ -704,13 +704,13 @@ export function CompressorBarcodesPageClient() {
                 <div className="flex items-center justify-between w-full">
                   <AnimatedMetric
                     value={stats.broken_machines || 0}
-                    className="register-stat-value text-amber-600"
+                    className="register-stat-value !text-base font-bold text-amber-600"
                   />
-                  <span className="text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded">
+                  <span className="text-[9px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 px-1 py-0.2 rounded">
                     Integrity Risk
                   </span>
                 </div>
-                <span className="register-stat-label flex items-center gap-1 text-amber-800">
+                <span className="register-stat-label !text-[9.5px] flex items-center gap-1 text-amber-800">
                   <AlertTriangle className="h-2.5 w-2.5 text-amber-600" /> Broken Continuity
                 </span>
               </button>
@@ -718,7 +718,7 @@ export function CompressorBarcodesPageClient() {
               {/* Card 4: 3+ Frequent Repairs */}
               <button
                 type="button"
-                className={`register-stat-item register-stat-item--clickable ${filterTab === 'repeat3' ? 'register-stat-item--active' : ''
+                className={`register-stat-item register-stat-item--clickable !min-h-0 !py-1 !px-2.5 !gap-0.5 rounded-md ${filterTab === 'repeat3' ? 'register-stat-item--active' : ''
                   }`}
                 onClick={() => {
                   setFilterTab('repeat3');
@@ -728,15 +728,15 @@ export function CompressorBarcodesPageClient() {
               >
                 <AnimatedMetric
                   value={stats.three_plus_machines || 0}
-                  className="register-stat-value text-indigo-600"
+                  className="register-stat-value !text-base font-bold text-indigo-600"
                 />
-                <span className="register-stat-label">Frequent Repeat (3+ Repairs)</span>
+                <span className="register-stat-label !text-[9.5px]">Frequent Repeat (3+ Repairs)</span>
               </button>
 
               {/* Card 5: Total Tracked Universe */}
               <button
                 type="button"
-                className={`register-stat-item register-stat-item--clickable ${filterTab === 'all' ? 'register-stat-item--active' : ''
+                className={`register-stat-item register-stat-item--clickable !min-h-0 !py-1 !px-2.5 !gap-0.5 rounded-md ${filterTab === 'all' ? 'register-stat-item--active' : ''
                   }`}
                 onClick={() => {
                   setFilterTab('all');
@@ -746,17 +746,17 @@ export function CompressorBarcodesPageClient() {
               >
                 <AnimatedMetric
                   value={stats.total_machines || 0}
-                  className="register-stat-value text-slate-700"
+                  className="register-stat-value !text-base font-bold text-slate-700"
                 />
-                <span className="register-stat-label">Total Serial Universe</span>
+                <span className="register-stat-label !text-[9.5px]">Total Serial Universe</span>
               </button>
             </div>
           )}
         </>
       }
     >
-      <PageScrollRegion className="p-3 bg-bg-soft/70">
-        <div className="flex flex-col gap-2.5 min-w-0 w-full max-w-full">
+      <PageScrollRegion className="p-2 sm:p-2.5 bg-bg-soft/70">
+        <div className="flex flex-col gap-2 min-w-0 w-full max-w-full">
           {/* Main Table Card */}
           <AdminTableCard
             isEmpty={!isLoading && (!data?.data || data.data.length === 0)}
@@ -777,7 +777,7 @@ export function CompressorBarcodesPageClient() {
                   <button
                     type="button"
                     onClick={handleClearFilters}
-                    className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-white border border-slate-200 rounded-md text-slate-700 hover:bg-slate-50 shadow-2xs cursor-pointer"
+                    className="mt-3 inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-white border border-slate-200 rounded-md text-slate-700 hover:bg-slate-50 shadow-2xs cursor-pointer"
                   >
                     <RotateCcw className="h-3 w-3" /> Reset all filters
                   </button>
@@ -786,19 +786,19 @@ export function CompressorBarcodesPageClient() {
             }
           >
             {/* Table Action Bar: Multi-sort Chips & CSV Export */}
-            <div className="flex items-center justify-between gap-2 px-3.5 py-1.5 border-b border-slate-200 bg-slate-50/70 text-[11px] text-slate-600 flex-wrap">
+            <div className="flex items-center justify-between gap-2 px-3 py-1 border-b border-slate-200 bg-slate-50/70 text-[11px] text-slate-600 flex-wrap">
               <div className="flex items-center gap-1.5 flex-wrap">
                 {sortKeys.length > 1 ? (
                   <>
-                    <span className="font-semibold text-slate-500 uppercase tracking-wide text-[10px] mr-1">
+                    <span className="font-semibold text-slate-500 uppercase tracking-wide text-[9.5px] mr-1">
                       Active Sort:
                     </span>
                     {sortKeys.map((k, i) => (
                       <span
                         key={k.field}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50/90 border border-blue-200 text-blue-800 font-medium"
+                        className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-blue-50/90 border border-blue-200 text-blue-800 text-[10px] font-medium"
                       >
-                        <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-blue-600 text-white text-[9px] font-bold">
+                        <span className="inline-flex items-center justify-center w-3 h-3 rounded-full bg-blue-600 text-white text-[8px] font-bold">
                           {i + 1}
                         </span>
                         <span>{SORT_LABELS[k.field] ?? k.field}</span>
@@ -826,13 +826,13 @@ export function CompressorBarcodesPageClient() {
                         setSortKeys([{ field: 'solve_date', dir: 'desc' }]);
                         setPage(1);
                       }}
-                      className="text-[11px] text-slate-500 hover:text-slate-800 underline cursor-pointer ml-1"
+                      className="text-[10px] text-slate-500 hover:text-slate-800 underline cursor-pointer ml-1"
                     >
                       Reset sort
                     </button>
                   </>
                 ) : (
-                  <span className="text-[11px] text-slate-500 font-medium">
+                  <span className="text-[10.5px] text-slate-500 font-medium">
                     Sorted by {SORT_LABELS[sortKeys[0]?.field] || 'Solved Date'} ({sortKeys[0]?.dir?.toUpperCase() || 'DESC'})
                   </span>
                 )}
@@ -844,7 +844,7 @@ export function CompressorBarcodesPageClient() {
                   type="button"
                   onClick={handleExportCsv}
                   disabled={!data?.total || isExporting}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-md shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-[10.5px] font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
                   title="Export all matching compressor records to CSV based on current filters (not limited to this page)"
                 >
                   {isExporting ? (
@@ -859,8 +859,8 @@ export function CompressorBarcodesPageClient() {
 
             <AdminTable>
               <AdminThead>
-                <tr className="border-b border-slate-200 bg-slate-50/90 text-[11px] uppercase tracking-wider text-slate-500 font-semibold select-none">
-                  <th className="w-10 px-3 py-2.5 text-center"></th>
+                <tr className="border-b border-slate-200 bg-slate-50/90 text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold select-none">
+                  <th className="w-8 px-2 py-1.5 text-center"></th>
                   {([
                     { field: 'serial_number', label: 'Serial Number' },
                     { field: 'total_calls', label: 'Total Repairs' },
@@ -881,14 +881,14 @@ export function CompressorBarcodesPageClient() {
                         active={active}
                         dir={dir}
                         onClick={() => handleSort(field)}
-                        className={`!bg-transparent hover:!bg-slate-100/70 transition-colors px-3.5 py-2.5 text-[11px] font-semibold uppercase tracking-wider ${active ? '!text-slate-900 font-bold' : 'text-slate-500'
+                        className={`!bg-transparent hover:!bg-slate-100/70 transition-colors !px-2.5 !py-1.5 text-[10.5px] font-semibold uppercase tracking-wider ${active ? '!text-slate-900 font-bold' : 'text-slate-500'
                           }`}
                         title={`Click to sort by ${label}. Click again to toggle ASC/DESC.`}
                       >
-                        <span className="flex items-center gap-1.5">
+                        <span className="flex items-center gap-1">
                           <span>{label}</span>
                           {priority !== null && (
-                            <span className="inline-flex items-center justify-center w-3.5 h-3.5 text-[9px] font-bold rounded-full bg-blue-600 text-white leading-none">
+                            <span className="inline-flex items-center justify-center w-3 h-3 text-[8.5px] font-bold rounded-full bg-blue-600 text-white leading-none">
                               {priority}
                             </span>
                           )}
@@ -939,19 +939,19 @@ export function CompressorBarcodesPageClient() {
                                 : 'hover:bg-slate-50/70'
                             }`}
                         >
-                          <td className="w-10 px-3 py-2 text-center align-middle">
+                          <td className="w-8 px-2 py-1 text-center align-middle">
                             <ChevronDown
-                              className={`h-4 w-4 text-slate-400 group-hover:text-slate-600 transition-transform duration-200 inline-block ${isExpanded ? 'transform rotate-180 text-blue-600' : ''
+                              className={`h-3.5 w-3.5 text-slate-400 group-hover:text-slate-600 transition-transform duration-200 inline-block ${isExpanded ? 'transform rotate-180 text-blue-600' : ''
                                 }`}
                             />
                           </td>
-                          <AdminTd className="font-mono text-[12px] font-semibold text-slate-900 py-2.5">
+                          <AdminTd className="font-mono text-[11px] font-semibold text-slate-900 !py-1.5 !px-2.5">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="group-hover:text-blue-600 transition-colors">{row.serial_number}</span>
                               {isBroken && (
                                 <span
                                   title="Continuity break detected midway in compressor replacement history"
-                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] font-semibold bg-amber-100/80 text-amber-800 border border-amber-300/80"
+                                  className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[9px] font-semibold bg-amber-100/80 text-amber-800 border border-amber-300/80"
                                 >
                                   <AlertTriangle className="h-2.5 w-2.5 text-amber-600 shrink-0" />
                                   Broken
@@ -960,7 +960,7 @@ export function CompressorBarcodesPageClient() {
                               {isRapid30 && (
                                 <span
                                   title={`Acute repeat failure: compressor re-failed within ${minGap} days!`}
-                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-300"
+                                  className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-300"
                                 >
                                   <Zap className="h-2.5 w-2.5 text-rose-600 shrink-0" />
                                   &lt;30d Re-fail
@@ -969,7 +969,7 @@ export function CompressorBarcodesPageClient() {
                               {isRapid90 && (
                                 <span
                                   title={`Premature repeat failure: compressor re-failed within ${minGap} days`}
-                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200"
+                                  className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[9px] font-medium bg-amber-50 text-amber-700 border border-amber-200"
                                 >
                                   <Clock className="h-2.5 w-2.5 text-amber-500 shrink-0" />
                                   &lt;90d Gap
@@ -977,10 +977,10 @@ export function CompressorBarcodesPageClient() {
                               )}
                             </div>
                           </AdminTd>
-                          <AdminTd className="py-2.5">
+                          <AdminTd className="!py-1.5 !px-2.5">
                             <div className="flex items-center gap-1">
                               <span
-                                className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold border ${row.total_calls >= 5
+                                className={`inline-flex items-center px-1.5 py-0.2 rounded text-[10.5px] font-semibold border ${row.total_calls >= 5
                                     ? 'bg-rose-50 text-rose-700 border-rose-200'
                                     : row.total_calls >= 2
                                       ? 'bg-amber-50 text-amber-800 border-amber-200'
@@ -990,49 +990,49 @@ export function CompressorBarcodesPageClient() {
                                 {row.total_calls} {row.total_calls === 1 ? 'Repair' : 'Repairs'}
                               </span>
                               {isDateFiltered && row.calls_in_range != null && row.calls_in_range !== row.total_calls && (
-                                <span className="text-[10px] text-blue-600 font-medium">
+                                <span className="text-[9.5px] text-blue-600 font-medium">
                                   ({row.calls_in_range} in period)
                                 </span>
                               )}
                             </div>
                           </AdminTd>
-                          <AdminTd className="py-2.5">
+                          <AdminTd className="!py-1.5 !px-2.5">
                             {row.avg_days_gap != null ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200/80">
+                              <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10.5px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200/80">
                                 {row.avg_days_gap} {row.avg_days_gap === 1 ? 'day' : 'days'}
                               </span>
                             ) : (
-                              <span className="text-slate-400 text-xs">—</span>
+                              <span className="text-slate-400 text-[11px]">—</span>
                             )}
                           </AdminTd>
-                          <AdminTd className="py-2.5">
+                          <AdminTd className="!py-1.5 !px-2.5">
                             {row.current_barcode && row.current_barcode !== '-' ? (
-                              <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded text-[11px] font-mono font-semibold">
+                              <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.2 rounded text-[10.5px] font-mono font-semibold">
                                 {row.current_barcode}
                               </span>
                             ) : (
-                              <span className="text-slate-400 italic text-[11px] font-mono">-</span>
+                              <span className="text-slate-400 italic text-[10.5px] font-mono">-</span>
                             )}
                           </AdminTd>
-                          <AdminTd className="text-slate-700 text-[12px] py-2.5 max-w-[190px]">
+                          <AdminTd className="text-slate-700 text-[11px] !py-1.5 !px-2.5 max-w-[170px]">
                             <span className="truncate block" title={row.latest_branch || ''}>
                               {row.latest_branch || '—'}
                             </span>
                           </AdminTd>
-                          <AdminTd className="text-slate-800 text-[12px] font-medium py-2.5 max-w-[220px]">
+                          <AdminTd className="text-slate-800 text-[11px] font-medium !py-1.5 !px-2.5 max-w-[200px]">
                             <div className="truncate flex items-center" title={row.latest_office || ''}>
                               <span className="truncate">{row.latest_office || '—'}</span>
                               {row.latest_sap_vendor_code ? (
-                                <span className="text-slate-400 font-mono text-[10px] ml-1 shrink-0">
+                                <span className="text-slate-400 font-mono text-[9.5px] ml-1 shrink-0">
                                   ({row.latest_sap_vendor_code})
                                 </span>
                               ) : null}
                             </div>
                           </AdminTd>
-                          <AdminTd className="text-slate-600 text-[12px] font-medium tabular-nums py-2.5">
+                          <AdminTd className="text-slate-600 text-[11px] font-medium tabular-nums !py-1.5 !px-2.5">
                             {formatDate(row.latest_solve_date)}
                           </AdminTd>
-                          <AdminTd className="text-slate-500 text-[12px] tabular-nums py-2.5">
+                          <AdminTd className="text-slate-500 text-[11px] tabular-nums !py-1.5 !px-2.5">
                             {formatDate(row.latest_call_date)}
                           </AdminTd>
                         </AdminTr>
@@ -1041,23 +1041,23 @@ export function CompressorBarcodesPageClient() {
                         {isExpanded && (
                           <tr className="bg-slate-50/70 border-b border-slate-200">
                             <td colSpan={9} className="w-full max-w-0 overflow-hidden align-top p-0">
-                              <div className="p-3 sm:p-4 pl-6 sm:pl-10 bg-slate-50/90 border-t border-slate-200/80 min-w-0 max-w-full overflow-hidden">
+                              <div className="p-2.5 sm:p-3 pl-5 sm:pl-8 bg-slate-50/90 border-t border-slate-200/80 min-w-0 max-w-full overflow-hidden">
                                 {/* Accordion Header Strip */}
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5 min-w-0">
-                                  <div className="text-xs font-semibold text-slate-700 flex items-center gap-2 flex-wrap">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-2 min-w-0">
+                                  <div className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 flex-wrap">
                                     <span>Replacement Lineage for Serial:</span>
-                                    <span className="font-mono text-blue-700 bg-blue-50/80 px-2 py-0.5 rounded border border-blue-200 font-bold">
+                                    <span className="font-mono text-blue-700 bg-blue-50/80 px-1.5 py-0.2 rounded border border-blue-200 font-bold">
                                       {row.serial_number}
                                     </span>
                                     {isDateFiltered && (
-                                      <span className="text-xs text-slate-500 font-normal">
+                                      <span className="text-[10.5px] text-slate-500 font-normal">
                                         (Showing {displayedCalls.length} call{displayedCalls.length === 1 ? '' : 's'} in selected period
                                         {row.total_calls > displayedCalls.length ? ` of ${row.total_calls} total` : ''})
                                       </span>
                                     )}
                                   </div>
 
-                                  <div className="flex items-center gap-2 flex-wrap">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
                                     {isDateFiltered && row.total_calls > (row.calls?.length || 0) && (
                                       <button
                                         type="button"
@@ -1069,7 +1069,7 @@ export function CompressorBarcodesPageClient() {
                                             return next;
                                           });
                                         }}
-                                        className="text-[11px] font-medium text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                                        className="text-[10.5px] font-medium text-blue-600 hover:text-blue-800 underline cursor-pointer"
                                       >
                                         {showAllHistorySerials.has(row.serial_number)
                                           ? `Show filtered period only (${row.calls?.length || 0} call${row.calls?.length === 1 ? '' : 's'})`
@@ -1077,8 +1077,8 @@ export function CompressorBarcodesPageClient() {
                                       </button>
                                     )}
                                     {isBroken && (
-                                      <div className="inline-flex items-center gap-1.5 text-xs text-amber-900 bg-amber-100/90 border border-amber-300 px-2.5 py-1 rounded-md font-medium">
-                                        <AlertTriangle className="h-3.5 w-3.5 text-amber-700 shrink-0" />
+                                      <div className="inline-flex items-center gap-1 text-[10.5px] text-amber-900 bg-amber-100/90 border border-amber-300 px-2 py-0.5 rounded font-medium">
+                                        <AlertTriangle className="h-3 w-3 text-amber-700 shrink-0" />
                                         <span>Continuity break: technician entered unexpected old barcode</span>
                                       </div>
                                     )}
@@ -1087,12 +1087,12 @@ export function CompressorBarcodesPageClient() {
 
                                 {/* Visual Lineage Timeline Stepper */}
                                 {displayedCalls.length > 1 && (
-                                  <div className="bg-white rounded-lg border border-slate-200/90 p-3 shadow-2xs mb-3 min-w-0 max-w-full overflow-hidden">
-                                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2.5 flex items-center gap-1.5">
-                                      <GitCommit className="h-3.5 w-3.5 text-blue-600" />
+                                  <div className="bg-white rounded-md border border-slate-200/90 p-2 shadow-2xs mb-2 min-w-0 max-w-full overflow-hidden">
+                                    <div className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1">
+                                      <GitCommit className="h-3 w-3 text-blue-600" />
                                       <span>Repair Lineage Progression Timeline</span>
                                     </div>
-                                    <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-2 min-w-0 max-w-full">
+                                    <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar pb-1.5 min-w-0 max-w-full">
                                       {displayedCalls.map((call, idx) => {
                                         const isCallBroken = call.is_continuity_broken;
                                         const isAcuteGap = call.days_gap !== null && call.days_gap <= 30;
@@ -1102,9 +1102,9 @@ export function CompressorBarcodesPageClient() {
                                           <React.Fragment key={call.id || `stepper-${idx}`}>
                                             {/* Elapsed Gap Arrow if not first */}
                                             {idx > 0 && (
-                                              <div className="flex flex-col items-center shrink-0 px-1 text-center min-w-[70px]">
+                                              <div className="flex flex-col items-center shrink-0 px-1 text-center min-w-[64px]">
                                                 <span
-                                                  className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full border mb-0.5 whitespace-nowrap ${isAcuteGap
+                                                  className={`text-[8.5px] font-bold px-1.5 py-0.2 rounded-full border mb-0.5 whitespace-nowrap ${isAcuteGap
                                                       ? 'bg-rose-100 text-rose-800 border-rose-300 font-bold'
                                                       : isShortGap
                                                         ? 'bg-amber-100 text-amber-800 border-amber-300'
@@ -1119,12 +1119,12 @@ export function CompressorBarcodesPageClient() {
                                                       }`}
                                                   />
                                                   <ArrowRight
-                                                    className={`h-3.5 w-3.5 -ml-1 shrink-0 ${isCallBroken ? 'text-amber-600' : 'text-slate-400'
+                                                    className={`h-3 w-3 -ml-1 shrink-0 ${isCallBroken ? 'text-amber-600' : 'text-slate-400'
                                                       }`}
                                                   />
                                                 </div>
                                                 {isCallBroken && (
-                                                  <span className="text-[8px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 mt-0.5">
+                                                  <span className="text-[8px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-0.5 mt-0.5">
                                                     Mismatch
                                                   </span>
                                                 )}
@@ -1133,33 +1133,33 @@ export function CompressorBarcodesPageClient() {
 
                                             {/* Call Node Card */}
                                             <div
-                                              className={`flex flex-col p-2.5 rounded-lg border min-w-[175px] max-w-[210px] shrink-0 transition-all ${isCallBroken
+                                              className={`flex flex-col p-2 rounded-md border min-w-[155px] max-w-[190px] shrink-0 transition-all ${isCallBroken
                                                   ? 'bg-amber-50/70 border-amber-300 ring-1 ring-amber-300'
                                                   : 'bg-slate-50/80 border-slate-200 hover:border-slate-300'
                                                 }`}
                                             >
-                                              <div className="flex items-center justify-between gap-1 mb-1">
-                                                <span className="font-mono font-bold text-[11px] text-slate-800 truncate">
+                                              <div className="flex items-center justify-between gap-1 mb-0.5">
+                                                <span className="font-mono font-bold text-[10.5px] text-slate-800 truncate">
                                                   #{idx + 1} {call.call_no}
                                                 </span>
-                                                <span className="text-[9px] font-semibold px-1 py-0.2 rounded bg-white border border-slate-200 text-slate-600">
+                                                <span className="text-[8.5px] font-semibold px-1 py-0.2 rounded bg-white border border-slate-200 text-slate-600">
                                                   {call.call_status}
                                                 </span>
                                               </div>
-                                              <div className="text-[10px] text-slate-500 flex items-center gap-1 mb-1">
-                                                <Calendar className="h-3 w-3 text-slate-400 shrink-0" />
+                                              <div className="text-[9.5px] text-slate-500 flex items-center gap-1 mb-0.5">
+                                                <Calendar className="h-2.5 w-2.5 text-slate-400 shrink-0" />
                                                 <span>{formatDate(call.solve_date || call.call_date)}</span>
                                               </div>
                                               <div
-                                                className="text-[10px] text-slate-700 truncate font-medium mb-1.5"
+                                                className="text-[9.5px] text-slate-700 truncate font-medium mb-1"
                                                 title={call.office_name}
                                               >
                                                 {call.office_name || '—'}
                                               </div>
-                                              <div className="mt-auto pt-1 border-t border-slate-200/80 flex items-center justify-between text-[10px] font-mono">
+                                              <div className="mt-auto pt-1 border-t border-slate-200/80 flex items-center justify-between text-[9.5px] font-mono">
                                                 <span className="text-slate-400">New:</span>
                                                 <span
-                                                  className="text-emerald-700 font-semibold truncate ml-1 max-w-[120px]"
+                                                  className="text-emerald-700 font-semibold truncate ml-1 max-w-[110px]"
                                                   title={call.derived_new_barcode}
                                                 >
                                                   {call.derived_new_barcode || '—'}
@@ -1174,21 +1174,21 @@ export function CompressorBarcodesPageClient() {
                                 )}
 
                                 {/* Lineage Table */}
-                                <div className="overflow-x-auto custom-scrollbar bg-white rounded-lg border border-slate-200/90 shadow-2xs min-w-0 max-w-full">
+                                <div className="overflow-x-auto custom-scrollbar bg-white rounded-md border border-slate-200/90 shadow-2xs min-w-0 max-w-full">
                                   <table className="w-full text-xs text-left border-collapse min-w-[960px]">
-                                    <thead className="bg-slate-100/70 text-slate-600 uppercase text-[10px] font-semibold tracking-wider border-b border-slate-200">
+                                    <thead className="bg-slate-100/70 text-slate-600 uppercase text-[9.5px] font-semibold tracking-wider border-b border-slate-200">
                                       <tr>
-                                        <th className="px-2.5 py-2 w-10 text-center">#</th>
-                                        <th className="px-3 py-2">Call No</th>
-                                        <th className="px-3 py-2">Status</th>
-                                        <th className="px-3 py-2">Call Date</th>
-                                        <th className="px-3 py-2">Solve Date</th>
-                                        <th className="px-3 py-2">Days Gap</th>
-                                        <th className="px-3 py-2">Branch</th>
-                                        <th className="px-3 py-2">Office / Workshop</th>
-                                        <th className="px-3 py-2">Old Barcode (Removed)</th>
-                                        <th className="px-1 py-2 text-center w-6"></th>
-                                        <th className="px-3 py-2">New Barcode (Installed)</th>
+                                        <th className="px-2 py-1.5 w-8 text-center">#</th>
+                                        <th className="px-2.5 py-1.5">Call No</th>
+                                        <th className="px-2.5 py-1.5">Status</th>
+                                        <th className="px-2.5 py-1.5">Call Date</th>
+                                        <th className="px-2.5 py-1.5">Solve Date</th>
+                                        <th className="px-2.5 py-1.5">Days Gap</th>
+                                        <th className="px-2.5 py-1.5">Branch</th>
+                                        <th className="px-2.5 py-1.5">Office / Workshop</th>
+                                        <th className="px-2.5 py-1.5">Old Barcode (Removed)</th>
+                                        <th className="px-1 py-1.5 text-center w-5"></th>
+                                        <th className="px-2.5 py-1.5">New Barcode (Installed)</th>
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
@@ -1203,52 +1203,52 @@ export function CompressorBarcodesPageClient() {
                                                 : 'hover:bg-slate-50/60'
                                               }`}
                                           >
-                                            <td className="px-2.5 py-2 text-center text-slate-400 font-mono text-[10px]">
+                                            <td className="px-2 py-1.5 text-center text-slate-400 font-mono text-[9.5px]">
                                               {idx + 1}
                                             </td>
-                                            <td className="px-3 py-2 font-mono font-medium text-slate-900 text-[11px]">
+                                            <td className="px-2.5 py-1.5 font-mono font-medium text-slate-900 text-[10.5px]">
                                               {call.call_no}
                                             </td>
-                                            <td className="px-3 py-2">
+                                            <td className="px-2.5 py-1.5">
                                               {renderCallStatusBadge(call.call_status, call.cancel_reason)}
                                             </td>
-                                            <td className="px-3 py-2 text-slate-600 text-[11px] tabular-nums">
+                                            <td className="px-2.5 py-1.5 text-slate-600 text-[10.5px] tabular-nums">
                                               {formatDate(call.call_date)}
                                             </td>
-                                            <td className="px-3 py-2 text-slate-800 font-medium text-[11px] tabular-nums">
+                                            <td className="px-2.5 py-1.5 text-slate-800 font-medium text-[10.5px] tabular-nums">
                                               {formatDate(call.solve_date)}
                                             </td>
-                                            <td className="px-3 py-2">
+                                            <td className="px-2.5 py-1.5">
                                               {call.call_status === 'Cancelled' ? (
-                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+                                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9.5px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
                                                   NA
                                                 </span>
                                               ) : call.days_gap != null ? (
-                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9.5px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
                                                   {call.days_gap} {call.days_gap === 1 ? 'day' : 'days'}
                                                 </span>
                                               ) : (
                                                 <span className="text-slate-400 text-xs">—</span>
                                               )}
                                             </td>
-                                            <td className="px-3 py-2 text-slate-700 text-[11px]">
+                                            <td className="px-2.5 py-1.5 text-slate-700 text-[10.5px]">
                                               {call.branch_name || '—'}
                                             </td>
-                                            <td className="px-3 py-2 text-slate-700 text-[11px]">
+                                            <td className="px-2.5 py-1.5 text-slate-700 text-[10.5px]">
                                               <span>{call.office_name || '—'}</span>
                                               {call.sap_vendor_code ? (
-                                                <span className="text-slate-400 font-mono text-[10px] ml-1">
+                                                <span className="text-slate-400 font-mono text-[9px] ml-1">
                                                   ({call.sap_vendor_code})
                                                 </span>
                                               ) : null}
                                             </td>
-                                            <td className="px-3 py-2">
+                                            <td className="px-2.5 py-1.5">
                                               <div className="flex flex-col gap-0.5">
-                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                <div className="flex items-center gap-1 flex-wrap">
                                                   {call.derived_old_barcode && call.derived_old_barcode !== '-' ? (
                                                     <>
                                                       <span
-                                                        className={`px-1.5 py-0.5 rounded text-[11px] font-mono font-medium border ${isCallBroken
+                                                        className={`px-1.5 py-0.2 rounded text-[10.5px] font-mono font-medium border ${isCallBroken
                                                             ? 'bg-rose-50 text-rose-800 border-rose-300 font-semibold'
                                                             : 'bg-slate-100 text-slate-700 border-slate-200'
                                                           }`}
@@ -1256,7 +1256,7 @@ export function CompressorBarcodesPageClient() {
                                                         {call.derived_old_barcode}
                                                       </span>
                                                       {(call.old_item_code || call.old_item_name) && (
-                                                        <span className="text-[10px] text-slate-500 font-normal">
+                                                        <span className="text-[9.5px] text-slate-500 font-normal">
                                                           ({call.old_item_code ? `${call.old_item_code}` : ''}
                                                           {call.old_item_code && call.old_item_name ? ' - ' : ''}
                                                           {call.old_item_name || ''})
@@ -1264,7 +1264,7 @@ export function CompressorBarcodesPageClient() {
                                                       )}
                                                     </>
                                                   ) : (
-                                                    <span className="text-slate-400 italic text-[11px]">
+                                                    <span className="text-slate-400 italic text-[10.5px]">
                                                       Initial / Blank
                                                     </span>
                                                   )}
@@ -1272,7 +1272,7 @@ export function CompressorBarcodesPageClient() {
 
                                                 {/* Highlight continuity mismatch */}
                                                 {isCallBroken && call.expected_old_barcode && (
-                                                  <span className="text-[10px] text-rose-600 font-medium leading-tight mt-0.5 flex items-center gap-1">
+                                                  <span className="text-[9.5px] text-rose-600 font-medium leading-tight mt-0.5 flex items-center gap-1">
                                                     <span>⚠️ Expected:</span>
                                                     <span className="font-mono bg-rose-50 px-1 rounded border border-rose-200 font-bold">
                                                       {call.expected_old_barcode}
@@ -1281,18 +1281,18 @@ export function CompressorBarcodesPageClient() {
                                                 )}
                                               </div>
                                             </td>
-                                            <td className="px-1 py-2 text-center text-slate-400">
+                                            <td className="px-1 py-1.5 text-center text-slate-400">
                                               <ArrowRight className="h-3 w-3 inline" />
                                             </td>
-                                            <td className="px-3 py-2">
-                                              <div className="flex items-center gap-1.5 flex-wrap">
+                                            <td className="px-2.5 py-1.5">
+                                              <div className="flex items-center gap-1 flex-wrap">
                                                 {call.derived_new_barcode && call.derived_new_barcode !== '-' ? (
                                                   <>
-                                                    <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold">
+                                                    <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.2 rounded text-[10.5px] font-mono font-semibold">
                                                       {call.derived_new_barcode}
                                                     </span>
                                                     {(call.new_item_code || call.new_item_name) && (
-                                                      <span className="text-[10px] text-slate-500 font-normal">
+                                                      <span className="text-[9.5px] text-slate-500 font-normal">
                                                         ({call.new_item_code ? `${call.new_item_code}` : ''}
                                                         {call.new_item_code && call.new_item_name ? ' - ' : ''}
                                                         {call.new_item_name || ''})
@@ -1300,7 +1300,7 @@ export function CompressorBarcodesPageClient() {
                                                     )}
                                                   </>
                                                 ) : (
-                                                  <span className="text-slate-400 italic text-[11px] font-mono">-</span>
+                                                  <span className="text-slate-400 italic text-[10.5px] font-mono">-</span>
                                                 )}
                                               </div>
                                             </td>
@@ -1323,7 +1323,7 @@ export function CompressorBarcodesPageClient() {
           </AdminTableCard>
 
           {/* Standard Pagination Controls */}
-          <div className="flex flex-col sm:flex-row items-center justify-between py-2 px-1 gap-3 text-xs text-slate-500 font-medium">
+          <div className="flex flex-col sm:flex-row items-center justify-between py-1.5 px-1 gap-2 text-[11px] text-slate-500 font-medium">
             <div>
               Showing {data && data.total > 0 ? (page - 1) * limit + 1 : 0} to{' '}
               {data ? Math.min(page * limit, data.total) : 0} of {data?.total?.toLocaleString() || 0} machines
@@ -1337,25 +1337,25 @@ export function CompressorBarcodesPageClient() {
               {isDateFiltered && <span className="ml-1 text-blue-600 font-medium">(date filtered)</span>}
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="text-slate-500 mr-2 text-xs">
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-500 mr-1 text-[11px]">
                 Page {page} of {totalPages}
               </span>
               <button
                 type="button"
-                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page <= 1 || isLoading}
               >
-                <ChevronLeft className="h-3.5 w-3.5" /> Prev
+                <ChevronLeft className="h-3 w-3" /> Prev
               </button>
               <button
                 type="button"
-                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={page >= totalPages || isLoading}
               >
-                Next <ChevronRight className="h-3.5 w-3.5" />
+                Next <ChevronRight className="h-3 w-3" />
               </button>
             </div>
           </div>

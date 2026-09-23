@@ -11,7 +11,10 @@ function normalizeHeader(h: string): string {
 function parseDateVal(val: unknown): string | null {
   if (!val) return null;
   if (val instanceof Date && !Number.isNaN(val.getTime())) {
-    return val.toISOString().slice(0, 10);
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
   const str = String(val).trim();
   // Handle DD.MM.YYYY
@@ -35,18 +38,19 @@ function parseDateVal(val: unknown): string | null {
       const day = first > 12 ? first : second > 12 ? second : first;
       const month = first > 12 ? second : second > 12 ? first : second;
       if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
-        const d = new Date(Date.UTC(year, month - 1, day));
-        if (d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day) {
-          return d.toISOString().slice(0, 10);
-        }
+        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       }
     }
   }
-  // Handle Excel serial date number
+  // Handle Excel serial date number without timezone shift
   if (!Number.isNaN(Number(str)) && Number(str) > 30000 && Number(str) < 70000) {
-    const d = new Date((Number(str) - 25569) * 86400 * 1000);
-    if (!Number.isNaN(d.getTime())) {
-      return d.toISOString().slice(0, 10);
+    try {
+      return XLSX.SSF.format('yyyy-mm-dd', Number(str));
+    } catch {
+      const d = new Date((Number(str) - 25569) * 86400 * 1000);
+      if (!Number.isNaN(d.getTime())) {
+        return d.toISOString().slice(0, 10);
+      }
     }
   }
   return null;
@@ -147,7 +151,18 @@ export async function POST(req: NextRequest) {
           keyMap.serial = rawKey;
         } else if (norm.includes('billingdoc') || norm.includes('invoiceno') || norm === 'billdoc') {
           keyMap.billingDoc = rawKey;
-        } else if (norm.includes('billingdate') || norm.includes('billdate') || norm.includes('docdate')) {
+        } else if (
+          norm.includes('billingdate') ||
+          norm.includes('billdate') ||
+          norm.includes('invoicedate') ||
+          norm.includes('invdate') ||
+          norm.includes('billingdt') ||
+          norm.includes('billdt') ||
+          norm.includes('invoicedt') ||
+          norm.includes('invdt') ||
+          norm.includes('docdate') ||
+          norm.includes('documentdate')
+        ) {
           keyMap.billingDate = rawKey;
         } else if (norm === 'groupname' || norm === 'group' || norm === 'matlgroup') {
           keyMap.groupName = rawKey;
@@ -201,7 +216,7 @@ export async function POST(req: NextRequest) {
         const shipToState = keyMap.state ? String(r[keyMap.state] ?? '').trim() : '';
         const shipToCity = keyMap.shipToCity ? String(r[keyMap.shipToCity] ?? '').trim() : '';
         const inventoryNumber = keyMap.inventory ? String(r[keyMap.inventory] ?? '').trim() : '';
-        const warrStartDt = keyMap.warrStart ? parseDateVal(r[keyMap.warrStart]) : billingDate;
+        const warrStartDt = keyMap.warrStart ? parseDateVal(r[keyMap.warrStart]) : null;
         const warrEndDt = keyMap.warrEnd ? parseDateVal(r[keyMap.warrEnd]) : null;
         const city = keyMap.city ? String(r[keyMap.city] ?? '').trim() : shipToCity;
         const pinCode = keyMap.pin ? String(r[keyMap.pin] ?? '').trim() : '';

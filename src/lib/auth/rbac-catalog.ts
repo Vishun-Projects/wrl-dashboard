@@ -132,6 +132,14 @@ export const RBAC_PAGES: RbacPage[] = [
     group: 'Reports',
   },
   {
+    id: 'warranty_comparison',
+    permission: 'page_warranty_comparison',
+    path: '/report/warranty-comparison',
+    label: 'Warranty Comparison',
+    description: 'Compare service call WCO against Warranty Master expiration dates',
+    group: 'Reports',
+  },
+  {
     id: 'athena_reconciliation',
     permission: 'page_athena_reconciliation',
     path: '/report/athena-reconciliation',
@@ -357,6 +365,13 @@ export function canAccessPage(permissions: string[], pageId: string): boolean {
   // Cancelled Calls report: same audience as Reconciliation or Call Register.
   if (pageId === 'cancelled_calls') {
     if (hasPermission(permissions, 'page_athena_reconciliation')) return true;
+    if (canAccessMisTab(permissions, 'register')) return true;
+  }
+
+  // Warranty Comparison report: same audience as Warranty Master or Call Register.
+  if (pageId === 'warranty_comparison') {
+    if (hasPermission(permissions, 'page_warranty_master')) return true;
+    if (hasPermission(permissions, 'page_mis_reports')) return true;
     if (canAccessMisTab(permissions, 'register')) return true;
   }
 
