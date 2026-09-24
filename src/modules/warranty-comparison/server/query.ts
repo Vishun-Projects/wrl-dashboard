@@ -2,6 +2,7 @@ import 'server-only';
 
 import { formatUiDateDash } from '@/lib/dates/ui-date';
 import { withAppClient } from '@/lib/read-model/db';
+import { foldAccountName } from '../account-label';
 import type {
   WarrantyComparisonFilterOptions,
   WarrantyComparisonFilterParams,
@@ -94,8 +95,8 @@ function buildCallsWhereClause(
   }
 
   if (filters.accounts && filters.accounts.length > 0) {
-    conditions.push(`c.account = ANY($${idx}::text[])`);
-    values.push(filters.accounts);
+    conditions.push(`UPPER(TRIM(c.account)) = ANY($${idx}::text[])`);
+    values.push(filters.accounts.map((a) => a.trim().toUpperCase()));
     idx++;
   }
 
@@ -103,9 +104,9 @@ function buildCallsWhereClause(
     conditions.push(`EXISTS (
       SELECT 1 FROM public.warranty_master_items w
       WHERE UPPER(w.serial_no) = UPPER(c.serial)
-        AND w.customer_subgroup = ANY($${idx}::text[])
+        AND UPPER(TRIM(w.customer_subgroup)) = ANY($${idx}::text[])
     )`);
-    values.push(filters.systemAccounts);
+    values.push(filters.systemAccounts.map((a) => a.trim().toUpperCase()));
     idx++;
   }
 
@@ -420,16 +421,16 @@ export async function fetchWarrantyComparisonOptions(
     ]);
 
     const branchSet = new Set<string>();
-    const accountSet = new Set<string>();
-    const systemAccountSet = new Set<string>();
+    const accountMap = new Map<string, string>();
+    const systemAccountMap = new Map<string, string>();
     const callTypeSet = new Set<string>();
     const statusSet = new Set<string>();
 
     for (const r of [...accountRows, ...systemRows, ...otherRows]) {
       const v = r.val.trim();
       if (r.col === 'branch')        branchSet.add(v);
-      if (r.col === 'account')       accountSet.add(v);
-      if (r.col === 'systemAccount') systemAccountSet.add(v);
+      if (r.col === 'account')       foldAccountName(accountMap, v);
+      if (r.col === 'systemAccount') foldAccountName(systemAccountMap, v);
       if (r.col === 'callType')      callTypeSet.add(v);
       if (r.col === 'status')        statusSet.add(v);
     }
@@ -446,8 +447,8 @@ export async function fetchWarrantyComparisonOptions(
 
     return {
       branches: toSortedOptions(branchSet),
-      accounts: toSortedOptions(accountSet),
-      systemAccounts: toSortedOptions(systemAccountSet),
+      accounts: toSortedOptions(new Set(accountMap.values())),
+      systemAccounts: toSortedOptions(new Set(systemAccountMap.values())),
       callTypes: toSortedOptions(callTypeSet),
       statuses: toSortedOptions(statusSet),
     };
