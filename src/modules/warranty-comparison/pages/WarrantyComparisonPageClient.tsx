@@ -31,6 +31,7 @@ export default function WarrantyComparisonPageClient() {
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
+  const [selectedSystemAccounts, setSelectedSystemAccounts] = useState<string[]>([]);
   const [selectedCallTypes, setSelectedCallTypes] = useState<string[]>(['BREAKDOWN', 'P M VISIT']);
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
 
@@ -45,6 +46,7 @@ export default function WarrantyComparisonPageClient() {
   const [options, setOptions] = useState<WarrantyComparisonFilterOptions>({
     branches: [],
     accounts: [],
+    systemAccounts: [],
     callTypes: [],
     statuses: [],
   });
@@ -79,6 +81,7 @@ export default function WarrantyComparisonPageClient() {
       if (debouncedSearch) params.set('search', debouncedSearch);
       if (selectedBranches.length > 0) params.set('branches', selectedBranches.join(','));
       if (selectedAccounts.length > 0) params.set('accounts', selectedAccounts.join(','));
+      if (selectedSystemAccounts.length > 0) params.set('systemAccounts', selectedSystemAccounts.join(','));
       if (selectedCallTypes.length > 0) params.set('callTypes', selectedCallTypes.join(','));
       if (selectedStatuses.length > 0) params.set('statuses', selectedStatuses.join(','));
 
@@ -98,6 +101,7 @@ export default function WarrantyComparisonPageClient() {
       debouncedSearch,
       selectedBranches,
       selectedAccounts,
+      selectedSystemAccounts,
       selectedCallTypes,
       selectedStatuses,
       page,
@@ -283,6 +287,11 @@ export default function WarrantyComparisonPageClient() {
           selectedAccounts={selectedAccounts}
           onAccountsChange={(a) => {
             setSelectedAccounts(a);
+            setPage(1);
+          }}
+          selectedSystemAccounts={selectedSystemAccounts}
+          onSystemAccountsChange={(a) => {
+            setSelectedSystemAccounts(a);
             setPage(1);
           }}
           selectedCallTypes={selectedCallTypes}

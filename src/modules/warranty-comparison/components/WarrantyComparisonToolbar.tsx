@@ -17,6 +17,8 @@ type ToolbarProps = {
   onBranchesChange: (branches: string[]) => void;
   selectedAccounts: string[];
   onAccountsChange: (accounts: string[]) => void;
+  selectedSystemAccounts: string[];
+  onSystemAccountsChange: (accounts: string[]) => void;
   selectedCallTypes: string[];
   onCallTypesChange: (types: string[]) => void;
   selectedStatuses: string[];
@@ -39,6 +41,8 @@ export function WarrantyComparisonToolbar({
   onBranchesChange,
   selectedAccounts,
   onAccountsChange,
+  selectedSystemAccounts,
+  onSystemAccountsChange,
   selectedCallTypes,
   onCallTypesChange,
   selectedStatuses,
@@ -91,11 +95,24 @@ export function WarrantyComparisonToolbar({
 
         {options.accounts.length > 0 && (
           <FilterSelect
-            label="Account"
-            emptyLabel="All Accounts"
+            label="Account as per CRM"
+            emptyLabel="All CRM Accounts"
             options={options.accounts}
             selected={selectedAccounts}
             onChange={onAccountsChange}
+            layout="inline"
+            panelClassName="w-64"
+            searchable
+          />
+        )}
+        
+        {options.systemAccounts?.length > 0 && (
+          <FilterSelect
+            label="Account as per System"
+            emptyLabel="All System Accounts"
+            options={options.systemAccounts}
+            selected={selectedSystemAccounts}
+            onChange={onSystemAccountsChange}
             layout="inline"
             panelClassName="w-64"
             searchable

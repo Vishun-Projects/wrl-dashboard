@@ -45,6 +45,7 @@ export function parseWarrantyComparisonFilters(
     search: searchParams.get('search')?.trim() || undefined,
     branches: parseArray('branches'),
     accounts: parseArray('accounts'),
+    systemAccounts: parseArray('systemAccounts'),
     callTypes: parseArray('callTypes'),
     statuses: parseArray('statuses'),
     page: Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1),
@@ -95,6 +96,16 @@ function buildCallsWhereClause(
   if (filters.accounts && filters.accounts.length > 0) {
     conditions.push(`c.account = ANY($${idx}::text[])`);
     values.push(filters.accounts);
+    idx++;
+  }
+
+  if (filters.systemAccounts && filters.systemAccounts.length > 0) {
+    conditions.push(`EXISTS (
+      SELECT 1 FROM public.warranty_master_items w
+      WHERE UPPER(w.serial_no) = UPPER(c.serial)
+        AND w.customer_subgroup = ANY($${idx}::text[])
+    )`);
+    values.push(filters.systemAccounts);
     idx++;
   }
 
@@ -358,6 +369,11 @@ export async function fetchWarrantyComparisonOptions(
         UNION ALL
         SELECT 'account'  AS col, c.account       AS val FROM public.calls_latest_hot c ${whereSql}
         UNION ALL
+        SELECT 'systemAccount' AS col, w.customer_subgroup AS val
+          FROM public.calls_latest_hot c
+          JOIN public.warranty_master_items w ON UPPER(w.serial_no) = UPPER(c.serial)
+          ${whereSql}
+        UNION ALL
         SELECT 'callType' AS col, c.call_type     AS val FROM public.calls_latest_hot c ${whereSql}
         UNION ALL
         SELECT 'status'   AS col, c.status_label  AS val FROM public.calls_latest_hot c ${whereSql}
@@ -369,15 +385,17 @@ export async function fetchWarrantyComparisonOptions(
 
     const branchSet = new Set<string>();
     const accountSet = new Set<string>();
+    const systemAccountSet = new Set<string>();
     const callTypeSet = new Set<string>();
     const statusSet = new Set<string>();
 
     for (const r of res.rows) {
       const v = r.val.trim();
-      if (r.col === 'branch')   branchSet.add(v);
-      if (r.col === 'account')  accountSet.add(v);
-      if (r.col === 'callType') callTypeSet.add(v);
-      if (r.col === 'status')   statusSet.add(v);
+      if (r.col === 'branch')        branchSet.add(v);
+      if (r.col === 'account')       accountSet.add(v);
+      if (r.col === 'systemAccount') systemAccountSet.add(v);
+      if (r.col === 'callType')      callTypeSet.add(v);
+      if (r.col === 'status')        statusSet.add(v);
     }
 
     const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
@@ -389,6 +407,7 @@ export async function fetchWarrantyComparisonOptions(
     return {
       branches: toSortedOptions(branchSet),
       accounts: toSortedOptions(accountSet),
+      systemAccounts: toSortedOptions(systemAccountSet),
       callTypes: toSortedOptions(callTypeSet),
       statuses: toSortedOptions(statusSet),
     };

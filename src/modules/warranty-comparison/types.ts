@@ -8,6 +8,7 @@ export type WarrantyComparisonFilterParams = {
   search?: string;
   branches?: string[];
   accounts?: string[];
+  systemAccounts?: string[];
   callTypes?: string[];
   statuses?: string[];
   page?: number;
@@ -62,6 +63,7 @@ export type WarrantyComparisonRowsResponse = {
 export type WarrantyComparisonFilterOptions = {
   branches: Array<{ value: string; label: string; count?: number }>;
   accounts: Array<{ value: string; label: string; count?: number }>;
+  systemAccounts: Array<{ value: string; label: string; count?: number }>;
   callTypes: Array<{ value: string; label: string; count?: number }>;
   statuses: Array<{ value: string; label: string; count?: number }>;
 };
