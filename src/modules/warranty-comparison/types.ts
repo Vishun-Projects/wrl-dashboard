@@ -1,4 +1,4 @@
-export type WarrantyComparisonTab = 'oow_in_warr' | 'in_warr_oow' | 'all';
+export type WarrantyComparisonTab = 'oow_in_warr' | 'in_warr_oow' | 'all' | 'exception_ok';
 
 export type WarrantyComparisonFilterParams = {
   tab: WarrantyComparisonTab;
@@ -22,6 +22,7 @@ export type WarrantyComparisonSummary = {
   totalWithWarrantyMaster: number;
   oowInWarrCount: number;
   inWarrOowCount: number;
+  exceptionOkCount: number;
   uniqueSerialsCount: number;
 };
 
@@ -49,6 +50,7 @@ export type WarrantyComparisonRow = {
   billingDate: string | null;
   masterWarrantyStatus: 'EXPIRED' | 'ACTIVE';
   mismatchType: 'oow_in_warr' | 'in_warr_oow';
+  exceptionReason?: 'AMC' | 'Compressor' | null;
   daysDelta: number; // positive = days expired before call; negative = days remaining before expiry
 };
 
@@ -58,6 +60,18 @@ export type WarrantyComparisonRowsResponse = {
   page: number;
   pageSize: number;
   totalPages: number;
+};
+
+export type WarrantyExceptionAccount = {
+  id: number;
+  systemAccount: string;
+  amc: boolean;
+  amcValidUpto: string | null;
+  compressorWarrantyMonths: number | null;
+  workDoneMode: 'none' | 'selected' | 'any';
+  workDoneRepairNcodes: string[];
+  enabled: boolean;
+  updatedAt: string;
 };
 
 export type WarrantyComparisonFilterOptions = {

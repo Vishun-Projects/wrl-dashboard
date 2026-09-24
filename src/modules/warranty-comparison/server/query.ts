@@ -3,6 +3,7 @@ import 'server-only';
 import { formatUiDateDash } from '@/lib/dates/ui-date';
 import { withAppClient } from '@/lib/read-model/db';
 import { foldAccountName } from '../account-label';
+import { coverageSql, resolveCoveredVtrnnos } from './exceptions';
 import type {
   WarrantyComparisonFilterOptions,
   WarrantyComparisonFilterParams,
@@ -30,7 +31,9 @@ export function parseWarrantyComparisonFilters(
 ): WarrantyComparisonFilterParams {
   const tabParam = searchParams.get('tab') ?? 'oow_in_warr';
   const tab =
-    tabParam === 'in_warr_oow' || tabParam === 'all' ? tabParam : 'oow_in_warr';
+    tabParam === 'in_warr_oow' || tabParam === 'all' || tabParam === 'exception_ok'
+      ? tabParam
+      : 'oow_in_warr';
 
   const parseArray = (paramName: string) => {
     const raw = searchParams.get(paramName);
@@ -141,7 +144,7 @@ function buildCallsWhereClause(
 }
 
 function buildTabCondition(tab: WarrantyComparisonFilterParams['tab']): string {
-  if (tab === 'oow_in_warr') {
+  if (tab === 'oow_in_warr' || tab === 'exception_ok') {
     return `
         AND w.warr_end_dt IS NOT NULL
         AND CAST(c.logged_at AS DATE) > CAST(w.warr_end_dt AS DATE)
@@ -179,15 +182,19 @@ const OPTION_COL_SQL = {
 async function fetchDistinctOptionCols(
   client: { query: (sql: string, values?: unknown[]) => Promise<{ rows: { col: string; val: string }[] }> },
   filters: WarrantyComparisonFilterParams & UserScope,
-  cols: Array<keyof typeof OPTION_COL_SQL>
+  cols: Array<keyof typeof OPTION_COL_SQL>,
+  coveredList?: string[]
 ): Promise<{ col: string; val: string }[]> {
   const values: unknown[] = [];
-  const { whereSql } = buildCallsWhereClause(filters, values);
+  const { whereSql, nextIdx } = buildCallsWhereClause(filters, values);
+  const extraSql = coveredList ? coverageSql(filters.tab, nextIdx) : '';
+  if (extraSql) values.push(coveredList);
   const fromSql = `
     FROM public.calls_latest_hot c
     JOIN public.warranty_master_items w ON UPPER(w.serial_no) = UPPER(c.serial)
     ${whereSql}
     ${buildTabCondition(filters.tab)}
+    ${extraSql}
   `;
   const sql = `
     SELECT DISTINCT ON (col, val) col, val FROM (
@@ -267,12 +274,17 @@ export async function fetchWarrantyComparisonSummary(
 
     const res = await client.query(sql, values);
     const row = res.rows[0] ?? {};
+    const covered = await resolveCoveredVtrnnos(client, whereSql, values);
+    const rawOow = row.oow_in_warr_count ?? 0;
+    const exceptionOkCount = covered.size;
+    const oowInWarrCount = Math.max(0, rawOow - exceptionOkCount);
 
     return {
       totalCallsAnalyzed: row.total_calls ?? 0,
       totalWithWarrantyMaster: row.total_with_master ?? 0,
-      oowInWarrCount: row.oow_in_warr_count ?? 0,
+      oowInWarrCount,
       inWarrOowCount: row.in_warr_oow_count ?? 0,
+      exceptionOkCount,
       uniqueSerialsCount: row.unique_serials_count ?? 0,
     };
   });
@@ -288,6 +300,11 @@ export async function fetchWarrantyComparisonRows(
     const values: unknown[] = [];
     const { whereSql, nextIdx } = buildCallsWhereClause(filters, values);
     const tabCondition = buildTabCondition(filters.tab);
+    const covered = await resolveCoveredVtrnnos(client, whereSql, values);
+    const coveredList = [...covered.keys()];
+    const extraSql = coverageSql(filters.tab, nextIdx);
+    const queryValues = extraSql ? [...values, coveredList] : values;
+    const limitIdx = extraSql ? nextIdx + 1 : nextIdx;
 
     // Count matching rows
     const countSql = `
@@ -297,9 +314,10 @@ export async function fetchWarrantyComparisonRows(
         ON UPPER(w.serial_no) = UPPER(c.serial)
       ${whereSql}
       ${tabCondition}
+      ${extraSql}
     `;
 
-    const countRes = await client.query<{ total: number }>(countSql, values);
+    const countRes = await client.query<{ total: number }>(countSql, queryValues);
     const total = countRes.rows[0]?.total ?? 0;
 
     const page = filters.page ?? 1;
@@ -359,18 +377,24 @@ export async function fetchWarrantyComparisonRows(
         ON UPPER(w.serial_no) = UPPER(c.serial)
       ${whereSql}
       ${tabCondition}
+      ${extraSql}
       ORDER BY ${sortCol} ${sortDirection}, c.vtrnno DESC
-      LIMIT $${nextIdx} OFFSET $${nextIdx + 1}
+      LIMIT $${limitIdx} OFFSET $${limitIdx + 1}
     `;
 
     const dataRes = await client.query<WarrantyComparisonRow>(dataSql, [
-      ...values,
+      ...queryValues,
       pageSize,
       offset,
     ]);
 
+    const rows = dataRes.rows.map((row) => ({
+      ...row,
+      exceptionReason: covered.get(row.vtrnno) ?? null,
+    }));
+
     return {
-      rows: dataRes.rows,
+      rows,
       total,
       page,
       pageSize,
@@ -402,21 +426,29 @@ export async function fetchWarrantyComparisonOptions(
       statuses: filters.statuses,
     };
 
+    const coverValues: unknown[] = [];
+    const { whereSql: coverWhere } = buildCallsWhereClause(filters, coverValues);
+    const covered = await resolveCoveredVtrnnos(client, coverWhere, coverValues);
+    const coveredList = filters.tab === 'in_warr_oow' ? undefined : [...covered.keys()];
+
     const [accountRows, systemRows, otherRows] = await Promise.all([
       fetchDistinctOptionCols(
         client,
         { ...inView, systemAccounts: filters.systemAccounts },
-        ['account']
+        ['account'],
+        coveredList
       ),
       fetchDistinctOptionCols(
         client,
         { ...inView, accounts: filters.accounts },
-        ['systemAccount']
+        ['systemAccount'],
+        coveredList
       ),
       fetchDistinctOptionCols(
         client,
         { ...shared, accounts: filters.accounts, systemAccounts: filters.systemAccounts },
-        ['branch', 'callType', 'status']
+        ['branch', 'callType', 'status'],
+        coveredList
       ),
     ]);
 
@@ -492,6 +524,7 @@ export async function buildWarrantyComparisonCsvStream(
     'Master FG Model',
     'Warranty Start Date',
     'Billing Date',
+    'Exception Cover',
   ];
 
   const escapeCsv = (val: unknown) => {
@@ -539,6 +572,7 @@ export async function buildWarrantyComparisonCsvStream(
         escapeCsv(r.fgModel),
         escapeCsv(formatUiDateDash(r.warrStartDt)),
         escapeCsv(formatUiDateDash(r.billingDate)),
+        escapeCsv(r.exceptionReason),
       ].join(',')
     );
   }

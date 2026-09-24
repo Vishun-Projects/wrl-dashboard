@@ -14,13 +14,14 @@ export function WarrantyComparisonKpiCards({ summary, loading }: KpiProps) {
   const withMaster = summary?.totalWithWarrantyMaster ?? 0;
   const oowInWarr = summary?.oowInWarrCount ?? 0;
   const inWarrOow = summary?.inWarrOowCount ?? 0;
+  const exceptionOk = summary?.exceptionOkCount ?? 0;
   const _uniqueSerials = summary?.uniqueSerialsCount ?? 0;
 
   const oowRate = withMaster > 0 ? ((oowInWarr / withMaster) * 100).toFixed(1) : '0';
   const inWarrRate = withMaster > 0 ? ((inWarrOow / withMaster) * 100).toFixed(1) : '0';
 
   return (
-    <div className="grid grid-cols-2 gap-2 px-3 py-1.5 sm:grid-cols-4 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-2 px-3 py-1.5 sm:grid-cols-4 lg:grid-cols-5">
       {/* 1. Total Calls */}
       <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 shadow-2xs">
         <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
@@ -60,6 +61,19 @@ export function WarrantyComparisonKpiCards({ summary, loading }: KpiProps) {
         </div>
         <div className="mt-0.5 text-[10px] text-slate-400 truncate">
           {loading ? '' : `${inWarrRate}% of matched calls`}
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-emerald-400 bg-white px-2.5 py-1.5 shadow-2xs">
+        <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
+          <span>AMC / Compressor</span>
+          <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+        </div>
+        <div className="mt-0.5 text-base font-bold text-emerald-800 sm:text-lg">
+          {loading ? '…' : exceptionOk.toLocaleString()}
+        </div>
+        <div className="mt-0.5 text-[10px] text-slate-400 truncate">
+          {loading ? '' : 'Covered lapsed-warranty calls'}
         </div>
       </div>
 

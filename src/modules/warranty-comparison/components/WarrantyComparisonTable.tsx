@@ -26,6 +26,7 @@ type TableProps = {
   sortDir: 'asc' | 'desc';
   onSortChange: (column: any) => void;
   loading: boolean;
+  showExceptionReason?: boolean;
 };
 
 function dashDate(value: string | null | undefined): string {
@@ -53,6 +54,7 @@ export function WarrantyComparisonTable({
   sortDir,
   onSortChange,
   loading,
+  showExceptionReason,
 }: TableProps) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const startIdx = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -152,6 +154,11 @@ export function WarrantyComparisonTable({
                 <AdminTh align="center" className="!py-1.5 !px-2 whitespace-nowrap">
                   Warranty as per Call (WCO)
                 </AdminTh>
+                {showExceptionReason && (
+                  <AdminTh align="center" className="!py-1.5 !px-2 whitespace-nowrap">
+                    Exception Cover
+                  </AdminTh>
+                )}
                 <AdminTh
                   sortable
                   sortKey="daysDelta"
@@ -271,6 +278,21 @@ export function WarrantyComparisonTable({
                       )}
                     </AdminTd>
 
+                    {showExceptionReason && (
+                      <AdminTd align="center" className="!py-1.5 !px-2 whitespace-nowrap">
+                        {row.exceptionReason === 'AMC' ? (
+                          <span className="inline-flex rounded border border-emerald-400 px-1.5 py-0.2 text-[10px] font-semibold text-emerald-800">
+                            AMC
+                          </span>
+                        ) : row.exceptionReason === 'Compressor' ? (
+                          <span className="inline-flex rounded border border-blue-400 px-1.5 py-0.2 text-[10px] font-semibold text-blue-800">
+                            Compressor
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </AdminTd>
+                    )}
                     <AdminTd align="center" className="!py-1.5 !px-2 whitespace-nowrap">
                       {isOowInWarr ? (
                         <span className="inline-flex items-center justify-center gap-0.5 text-rose-700 font-semibold text-[10px]" title={`Expired (${daysAbs}d prior)`}>

@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { AlertCircle, AlertTriangle, Layers } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Layers, ShieldCheck } from 'lucide-react';
 import type { WarrantyComparisonSummary, WarrantyComparisonTab } from '../types';
 
 type TabsProps = {
@@ -19,6 +19,7 @@ export function WarrantyComparisonTabs({
 }: TabsProps) {
   const oowInWarrCount = summary?.oowInWarrCount ?? 0;
   const inWarrOowCount = summary?.inWarrOowCount ?? 0;
+  const exceptionOkCount = summary?.exceptionOkCount ?? 0;
   const totalMismatches = oowInWarrCount + inWarrOowCount;
 
   return (
@@ -75,6 +76,32 @@ export function WarrantyComparisonTabs({
             }`}
           >
             {loading ? '…' : inWarrOowCount.toLocaleString()}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onTabChange('exception_ok')}
+          className={`group inline-flex items-center gap-1.5 border-b-2 py-1.5 text-[11px] font-medium transition-colors ${
+            activeTab === 'exception_ok'
+              ? 'border-emerald-600 text-emerald-700 font-semibold'
+              : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
+          }`}
+        >
+          <ShieldCheck
+            className={`h-3.5 w-3.5 shrink-0 ${
+              activeTab === 'exception_ok' ? 'text-emerald-600' : 'text-slate-400 group-hover:text-slate-500'
+            }`}
+          />
+          <span>AMC / Compressor</span>
+          <span
+            className={`ml-1 rounded-full px-1.5 py-0.2 text-[10px] font-semibold ${
+              activeTab === 'exception_ok'
+                ? 'bg-emerald-100 text-emerald-800'
+                : 'bg-slate-100 text-slate-600 group-hover:bg-slate-200'
+            }`}
+          >
+            {loading ? '…' : exceptionOkCount.toLocaleString()}
           </span>
         </button>
 

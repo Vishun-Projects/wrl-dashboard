@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Download, RefreshCw, Settings, ShieldAlert } from 'lucide-react';
+import Link from 'next/link';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import { PageAlert } from '@/components/ui/PageAlert';
 import { usePageAlert } from '@/hooks/usePageAlert';
@@ -238,6 +239,14 @@ export default function WarrantyComparisonPageClient() {
 
   const headerActions = (
     <div className="flex items-center gap-2">
+      <Link
+        href="/report/warranty-comparison/exceptions"
+        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-medium text-slate-700 shadow-xs hover:bg-slate-50"
+        title="Configure exception accounts"
+      >
+        <Settings className="h-3.5 w-3.5 text-slate-500" />
+        <span>Exception accounts</span>
+      </Link>
       <button
         type="button"
         onClick={() => {
@@ -349,6 +358,7 @@ export default function WarrantyComparisonPageClient() {
             sortDir={sortDir}
             onSortChange={handleSortChange}
             loading={loadingRows}
+            showExceptionReason={activeTab === 'exception_ok'}
           />
         </PageScrollRegion>
     </PageShell>
