@@ -139,6 +139,65 @@ function buildCallsWhereClause(
   };
 }
 
+function buildTabCondition(tab: WarrantyComparisonFilterParams['tab']): string {
+  if (tab === 'oow_in_warr') {
+    return `
+        AND w.warr_end_dt IS NOT NULL
+        AND CAST(c.logged_at AS DATE) > CAST(w.warr_end_dt AS DATE)
+        AND UPPER(TRIM(COALESCE(c.wco, ''))) = 'W'
+      `;
+  }
+  if (tab === 'in_warr_oow') {
+    return `
+        AND w.warr_end_dt IS NOT NULL
+        AND CAST(c.logged_at AS DATE) <= CAST(w.warr_end_dt AS DATE)
+        AND (w.warr_start_dt IS NULL OR CAST(c.logged_at AS DATE) >= CAST(w.warr_start_dt AS DATE))
+        AND UPPER(TRIM(COALESCE(c.wco, ''))) = 'O'
+      `;
+  }
+  return `
+        AND w.warr_end_dt IS NOT NULL
+        AND (
+          (CAST(c.logged_at AS DATE) > CAST(w.warr_end_dt AS DATE) AND UPPER(TRIM(COALESCE(c.wco, ''))) = 'W')
+          OR
+          (CAST(c.logged_at AS DATE) <= CAST(w.warr_end_dt AS DATE)
+           AND (w.warr_start_dt IS NULL OR CAST(c.logged_at AS DATE) >= CAST(w.warr_start_dt AS DATE))
+           AND UPPER(TRIM(COALESCE(c.wco, ''))) = 'O')
+        )
+      `;
+}
+
+const OPTION_COL_SQL = {
+  branch: 'c.branch_name',
+  account: 'c.account',
+  systemAccount: 'w.customer_subgroup',
+  callType: 'c.call_type',
+  status: 'c.status_label',
+} as const;
+
+async function fetchDistinctOptionCols(
+  client: { query: (sql: string, values?: unknown[]) => Promise<{ rows: { col: string; val: string }[] }> },
+  filters: WarrantyComparisonFilterParams & UserScope,
+  cols: Array<keyof typeof OPTION_COL_SQL>
+): Promise<{ col: string; val: string }[]> {
+  const values: unknown[] = [];
+  const { whereSql } = buildCallsWhereClause(filters, values);
+  const fromSql = `
+    FROM public.calls_latest_hot c
+    JOIN public.warranty_master_items w ON UPPER(w.serial_no) = UPPER(c.serial)
+    ${whereSql}
+    ${buildTabCondition(filters.tab)}
+  `;
+  const sql = `
+    SELECT DISTINCT ON (col, val) col, val FROM (
+      ${cols.map((col) => `SELECT '${col}' AS col, ${OPTION_COL_SQL[col]} AS val ${fromSql}`).join(' UNION ALL ')}
+    ) t
+    WHERE val IS NOT NULL AND TRIM(val) <> ''
+  `;
+  const res = await client.query(sql, values);
+  return res.rows;
+}
+
 /**
  * Fetch summary KPI metrics for the current date window and scope
  */
@@ -227,33 +286,7 @@ export async function fetchWarrantyComparisonRows(
   return withAppClient(async (client) => {
     const values: unknown[] = [];
     const { whereSql, nextIdx } = buildCallsWhereClause(filters, values);
-
-    let tabCondition = '';
-    if (filters.tab === 'oow_in_warr') {
-      tabCondition = `
-        AND w.warr_end_dt IS NOT NULL
-        AND CAST(c.logged_at AS DATE) > CAST(w.warr_end_dt AS DATE)
-        AND UPPER(TRIM(COALESCE(c.wco, ''))) = 'W'
-      `;
-    } else if (filters.tab === 'in_warr_oow') {
-      tabCondition = `
-        AND w.warr_end_dt IS NOT NULL
-        AND CAST(c.logged_at AS DATE) <= CAST(w.warr_end_dt AS DATE)
-        AND (w.warr_start_dt IS NULL OR CAST(c.logged_at AS DATE) >= CAST(w.warr_start_dt AS DATE))
-        AND UPPER(TRIM(COALESCE(c.wco, ''))) = 'O'
-      `;
-    } else {
-      tabCondition = `
-        AND w.warr_end_dt IS NOT NULL
-        AND (
-          (CAST(c.logged_at AS DATE) > CAST(warr_end_dt AS DATE) AND UPPER(TRIM(COALESCE(c.wco, ''))) = 'W')
-          OR
-          (CAST(c.logged_at AS DATE) <= CAST(warr_end_dt AS DATE)
-           AND (w.warr_start_dt IS NULL OR CAST(c.logged_at AS DATE) >= CAST(w.warr_start_dt AS DATE))
-           AND UPPER(TRIM(COALESCE(c.wco, ''))) = 'O')
-        )
-      `;
-    }
+    const tabCondition = buildTabCondition(filters.tab);
 
     // Count matching rows
     const countSql = `
@@ -346,42 +379,45 @@ export async function fetchWarrantyComparisonRows(
 }
 
 /**
- * Filter options for dropdowns (branch, account, call types)
+ * Filter options from the same mismatch join as the table, so a picked
+ * name is actually present in the current tab / call-type / date window.
  */
 export async function fetchWarrantyComparisonOptions(
   filters: WarrantyComparisonFilterParams & UserScope
 ): Promise<WarrantyComparisonFilterOptions> {
   return withAppClient(async (client) => {
-    const values: unknown[] = [];
-    // Only filter options by date and user branch scope so dropdown options don't vanish when one is selected
-    const scopeFilters: WarrantyComparisonFilterParams & UserScope = {
+    const shared: WarrantyComparisonFilterParams & UserScope = {
       tab: filters.tab,
       startDate: filters.startDate,
       endDate: filters.endDate,
+      search: filters.search,
       isHod: filters.isHod,
       assignedOffices: filters.assignedOffices,
+      callTypes: filters.callTypes,
     };
-    const { whereSql } = buildCallsWhereClause(scopeFilters, values);
+    const inView = {
+      ...shared,
+      branches: filters.branches,
+      statuses: filters.statuses,
+    };
 
-    const sql = `
-      SELECT DISTINCT ON (col, val) col, val FROM (
-        SELECT 'branch'   AS col, c.branch_name   AS val FROM public.calls_latest_hot c ${whereSql}
-        UNION ALL
-        SELECT 'account'  AS col, c.account       AS val FROM public.calls_latest_hot c ${whereSql}
-        UNION ALL
-        SELECT 'systemAccount' AS col, w.customer_subgroup AS val
-          FROM public.calls_latest_hot c
-          JOIN public.warranty_master_items w ON UPPER(w.serial_no) = UPPER(c.serial)
-          ${whereSql}
-        UNION ALL
-        SELECT 'callType' AS col, c.call_type     AS val FROM public.calls_latest_hot c ${whereSql}
-        UNION ALL
-        SELECT 'status'   AS col, c.status_label  AS val FROM public.calls_latest_hot c ${whereSql}
-      ) t
-      WHERE val IS NOT NULL AND TRIM(val) <> ''
-    `;
-
-    const res = await client.query<{ col: string; val: string }>(sql, values);
+    const [accountRows, systemRows, otherRows] = await Promise.all([
+      fetchDistinctOptionCols(
+        client,
+        { ...inView, systemAccounts: filters.systemAccounts },
+        ['account']
+      ),
+      fetchDistinctOptionCols(
+        client,
+        { ...inView, accounts: filters.accounts },
+        ['systemAccount']
+      ),
+      fetchDistinctOptionCols(
+        client,
+        { ...shared, accounts: filters.accounts, systemAccounts: filters.systemAccounts },
+        ['branch', 'callType', 'status']
+      ),
+    ]);
 
     const branchSet = new Set<string>();
     const accountSet = new Set<string>();
@@ -389,13 +425,17 @@ export async function fetchWarrantyComparisonOptions(
     const callTypeSet = new Set<string>();
     const statusSet = new Set<string>();
 
-    for (const r of res.rows) {
+    for (const r of [...accountRows, ...systemRows, ...otherRows]) {
       const v = r.val.trim();
       if (r.col === 'branch')        branchSet.add(v);
       if (r.col === 'account')       accountSet.add(v);
       if (r.col === 'systemAccount') systemAccountSet.add(v);
       if (r.col === 'callType')      callTypeSet.add(v);
       if (r.col === 'status')        statusSet.add(v);
+    }
+
+    for (const t of filters.callTypes ?? []) {
+      if (t.trim()) callTypeSet.add(t.trim());
     }
 
     const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
