@@ -3,71 +3,14 @@ import * as XLSX from 'xlsx';
 import { withAppClient } from '@/lib/read-model/db';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
-
-function normalizeHeader(h: string): string {
-  return h.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function parseDateVal(val: unknown): string | null {
-  if (!val) return null;
-  if (val instanceof Date && !Number.isNaN(val.getTime())) {
-    const y = val.getFullYear();
-    const m = String(val.getMonth() + 1).padStart(2, '0');
-    const d = String(val.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  const str = String(val).trim();
-  // Handle DD.MM.YYYY
-  if (str.length >= 10 && str[2] === '.' && str[5] === '.') {
-    return `${str.slice(6, 10)}-${str.slice(3, 5)}-${str.slice(0, 2)}`;
-  }
-  // Handle YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
-    return str.slice(0, 10);
-  }
-  // Handle common spreadsheet date strings such as DD/MM/YYYY or M/D/YY.
-  const slashParts = str.split(/[\/\-]/).map((part) => part.trim());
-  if (slashParts.length === 3 && slashParts.every(Boolean)) {
-    const [a, b, c] = slashParts;
-    let year = Number(c);
-    if (year < 100) year += year >= 70 ? 1900 : 2000;
-    const first = Number(a);
-    const second = Number(b);
-    if (Number.isInteger(first) && Number.isInteger(second) && Number.isInteger(year) && year >= 1900 && year <= 2100) {
-      // Prefer day/month for Indian-style input, while still handling obvious M/D values.
-      const day = first > 12 ? first : second > 12 ? second : first;
-      const month = first > 12 ? second : second > 12 ? first : second;
-      if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
-        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      }
-    }
-  }
-  // Handle Excel serial date number without timezone shift
-  if (!Number.isNaN(Number(str)) && Number(str) > 30000 && Number(str) < 70000) {
-    try {
-      return XLSX.SSF.format('yyyy-mm-dd', Number(str));
-    } catch {
-      const d = new Date((Number(str) - 25569) * 86400 * 1000);
-      if (!Number.isNaN(d.getTime())) {
-        return d.toISOString().slice(0, 10);
-      }
-    }
-  }
-  return null;
-}
-
-function calcMonths(start: string | null, end: string | null): number {
-  if (!start || !end) return 12;
-  try {
-    const d1 = new Date(start).getTime();
-    const d2 = new Date(end).getTime();
-    const diffDays = Math.round((d2 - d1) / (86400 * 1000));
-    const months = Math.round(diffDays / 30.4375);
-    return months > 0 ? months : 12;
-  } catch {
-    return 12;
-  }
-}
+import {
+  calcMonths,
+  cleanCustomerName,
+  mapSheetHeaders,
+  parseDateVal,
+  remapCustomerSubgroup,
+  warrantyDateRank,
+} from '../import-parse';
 
 type WarrantyImportRow = {
   serialNo: string;
@@ -90,10 +33,6 @@ type WarrantyImportRow = {
   sheetYear: number | null;
   warrantyMonths: number;
 };
-
-function warrantyDateRank(date: string | null): number {
-  return date ? new Date(`${date}T00:00:00Z`).getTime() : Number.NEGATIVE_INFINITY;
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -143,57 +82,7 @@ export async function POST(req: NextRequest) {
       if (rawRows.length === 0) continue;
 
       const firstRow = rawRows[0] || {};
-      const keyMap: Record<string, string> = {};
-
-      for (const rawKey of Object.keys(firstRow)) {
-        const norm = normalizeHeader(rawKey);
-        if (norm.includes('serial') || norm === 'vserialno' || norm === 'serialno') {
-          keyMap.serial = rawKey;
-        } else if (norm.includes('billingdoc') || norm.includes('invoiceno') || norm === 'billdoc') {
-          keyMap.billingDoc = rawKey;
-        } else if (
-          norm.includes('billingdate') ||
-          norm.includes('billdate') ||
-          norm.includes('invoicedate') ||
-          norm.includes('invdate') ||
-          norm.includes('billingdt') ||
-          norm.includes('billdt') ||
-          norm.includes('invoicedt') ||
-          norm.includes('invdt') ||
-          norm.includes('docdate') ||
-          norm.includes('documentdate')
-        ) {
-          keyMap.billingDate = rawKey;
-        } else if (norm === 'groupname' || norm === 'group' || norm === 'matlgroup') {
-          keyMap.groupName = rawKey;
-        } else if (norm.includes('materialgroup') || norm.includes('itemgroup') || norm === 'extmaterialgrp') {
-          keyMap.materialGroup = rawKey;
-        } else if (norm.includes('material') || norm.includes('fgmodel') || norm.includes('model') || norm.includes('productcode')) {
-          keyMap.material = rawKey;
-        } else if (norm.includes('productsubgroup') || norm.includes('subgroup') && !norm.includes('customer')) {
-          keyMap.productSubgroup = rawKey;
-        } else if (norm.includes('customersoldto') || norm.includes('soldto') || norm === 'customername' || norm === 'customer') {
-          keyMap.customer = rawKey;
-        } else if (norm.includes('customersubgroup') || norm.includes('custsubgrp') || norm.includes('cgrp1') || norm === 'subgroup') {
-          keyMap.customerSubgroup = rawKey;
-        } else if (norm.includes('customershipto') || norm.includes('shipto') || norm.includes('consignee')) {
-          keyMap.shipTo = rawKey;
-        } else if (norm.includes('state') || norm.includes('shiptostate')) {
-          keyMap.state = rawKey;
-        } else if (norm.includes('shiptocity') || (norm.includes('city') && !keyMap.city)) {
-          keyMap.shipToCity = rawKey;
-        } else if (norm === 'city') {
-          keyMap.city = rawKey;
-        } else if (norm.includes('inventory')) {
-          keyMap.inventory = rawKey;
-        } else if (norm.includes('warrda') || norm.includes('warrstart') || norm.includes('startdate')) {
-          keyMap.warrStart = rawKey;
-        } else if (norm.includes('wtyend') || norm.includes('warrend') || norm.includes('enddate')) {
-          keyMap.warrEnd = rawKey;
-        } else if (norm.includes('pincode') || norm.includes('pin') || norm.includes('zip')) {
-          keyMap.pin = rawKey;
-        }
-      }
+      const keyMap = mapSheetHeaders(Object.keys(firstRow));
 
       if (!keyMap.serial) continue;
 
@@ -210,8 +99,12 @@ export async function POST(req: NextRequest) {
         const groupName = keyMap.groupName ? String(r[keyMap.groupName] ?? '').trim() : '';
         const materialGroup = keyMap.materialGroup ? String(r[keyMap.materialGroup] ?? '').trim() : '';
         const productSubgroup = keyMap.productSubgroup ? String(r[keyMap.productSubgroup] ?? '').trim() : '';
-        const customerName = keyMap.customer ? String(r[keyMap.customer] ?? '').trim() : '(Unknown)';
-        const customerSubgroup = keyMap.customerSubgroup ? String(r[keyMap.customerSubgroup] ?? '').trim() : '';
+        const customerName = keyMap.customer
+          ? cleanCustomerName(String(r[keyMap.customer] ?? ''))
+          : '(Unknown)';
+        const customerSubgroup = keyMap.customerSubgroup
+          ? remapCustomerSubgroup(String(r[keyMap.customerSubgroup] ?? ''))
+          : '';
         const shipToParty = keyMap.shipTo ? String(r[keyMap.shipTo] ?? '').trim() : '';
         const shipToState = keyMap.state ? String(r[keyMap.state] ?? '').trim() : '';
         const shipToCity = keyMap.shipToCity ? String(r[keyMap.shipToCity] ?? '').trim() : '';

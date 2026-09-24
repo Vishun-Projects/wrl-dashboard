@@ -12,7 +12,7 @@ export type WarrantyComparisonFilterParams = {
   statuses?: string[];
   page?: number;
   pageSize?: number;
-  sortBy?: 'callDate' | 'vtrnno' | 'serial' | 'partyName' | 'account' | 'warrEndDt' | 'warrantyMonths' | 'daysDelta';
+  sortBy?: 'callDate' | 'vtrnno' | 'serial' | 'partyName' | 'account' | 'customerSubgroup' | 'billingDoc' | 'warrEndDt' | 'warrantyMonths' | 'daysDelta';
   sortDir?: 'asc' | 'desc';
 };
 

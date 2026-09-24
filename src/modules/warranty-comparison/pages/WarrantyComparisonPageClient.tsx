@@ -31,7 +31,7 @@ export default function WarrantyComparisonPageClient() {
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
-  const [selectedCallTypes, setSelectedCallTypes] = useState<string[]>([]);
+  const [selectedCallTypes, setSelectedCallTypes] = useState<string[]>(['BREAKDOWN', 'P M VISIT']);
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
 
   const [page, setPage] = useState<number>(1);

@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { formatUiDateDash } from '@/lib/dates/ui-date';
 import { withAppClient } from '@/lib/read-model/db';
 import type {
   WarrantyComparisonFilterOptions,
@@ -8,6 +9,15 @@ import type {
   WarrantyComparisonRowsResponse,
   WarrantyComparisonSummary,
 } from '../types';
+
+/** End − start in calendar months. Same day → 0. Missing dates → NULL. */
+const WARRANTY_MONTHS_SQL = `CASE
+  WHEN w.warr_start_dt IS NULL OR w.warr_end_dt IS NULL THEN NULL
+  ELSE GREATEST(0, (
+    EXTRACT(YEAR FROM age(w.warr_end_dt, w.warr_start_dt)) * 12
+    + EXTRACT(MONTH FROM age(w.warr_end_dt, w.warr_start_dt))
+  )::int)
+END`;
 
 export type UserScope = {
   isHod?: boolean;
@@ -89,8 +99,8 @@ function buildCallsWhereClause(
   }
 
   if (filters.callTypes && filters.callTypes.length > 0) {
-    conditions.push(`c.call_type = ANY($${idx}::text[])`);
-    values.push(filters.callTypes);
+    conditions.push(`UPPER(TRIM(c.call_type)) = ANY($${idx}::text[])`);
+    values.push(filters.callTypes.map((t) => t.trim().toUpperCase()));
     idx++;
   }
 
@@ -258,8 +268,10 @@ export async function fetchWarrantyComparisonRows(
       serial: 'c.serial',
       partyName: 'c.party_name',
       account: 'c.account',
+      customerSubgroup: 'w.customer_subgroup',
+      billingDoc: 'w.billing_doc',
       warrEndDt: 'w.warr_end_dt',
-      warrantyMonths: 'w.warranty_months',
+      warrantyMonths: WARRANTY_MONTHS_SQL,
       daysDelta: 'ABS(CAST(c.logged_at AS DATE) - CAST(w.warr_end_dt AS DATE))',
     };
     const sortCol = sortFieldMap[filters.sortBy ?? 'callDate'] ?? 'c.logged_at';
@@ -283,7 +295,7 @@ export async function fetchWarrantyComparisonRows(
         w.customer_subgroup AS "customerSubgroup",
         COALESCE(w.group_name, '') AS "groupName",
         COALESCE(w.fg_model, '') AS "fgModel",
-        w.warranty_months AS "warrantyMonths",
+        ${WARRANTY_MONTHS_SQL} AS "warrantyMonths",
         TO_CHAR(w.warr_start_dt, 'YYYY-MM-DD') AS "warrStartDt",
         TO_CHAR(w.warr_end_dt, 'YYYY-MM-DD') AS "warrEndDt",
         w.billing_doc AS "billingDoc",
@@ -397,16 +409,18 @@ export async function buildWarrantyComparisonCsvStream(
 
   const headers = [
     'Call No',
+    'Call Date',
     'Machine Serial',
     'Party Name',
     'Branch',
     'Region',
-    'Account',
+    'Account as per CRM',
+    'Account as per System',
+    'Invoice Number',
     'Item / Model Name',
-    'Call Date',
     'Master Warranty End Date',
     'Warranty Months',
-    'Call WCO',
+    'Warranty as per Call (WCO)',
     'Master Status on Call Date',
     'Mismatch Category',
     'Days Delta to Expiry',
@@ -417,7 +431,6 @@ export async function buildWarrantyComparisonCsvStream(
     'Master Group',
     'Master FG Model',
     'Warranty Start Date',
-    'Billing Doc',
     'Billing Date',
   ];
 
@@ -443,14 +456,16 @@ export async function buildWarrantyComparisonCsvStream(
     csvRows.push(
       [
         escapeCsv(r.vtrnno),
+        escapeCsv(formatUiDateDash(r.callDate)),
         escapeCsv(r.serial),
         escapeCsv(r.partyName),
         escapeCsv(r.branchName),
         escapeCsv(r.region),
         escapeCsv(r.account),
+        escapeCsv(r.customerSubgroup),
+        escapeCsv(r.billingDoc),
         escapeCsv(r.itemName),
-        escapeCsv(r.callDate),
-        escapeCsv(r.warrEndDt),
+        escapeCsv(formatUiDateDash(r.warrEndDt)),
         escapeCsv(r.warrantyMonths),
         escapeCsv(r.callWco),
         escapeCsv(r.masterWarrantyStatus),
@@ -462,9 +477,8 @@ export async function buildWarrantyComparisonCsvStream(
         escapeCsv(r.customerSubgroup),
         escapeCsv(r.groupName),
         escapeCsv(r.fgModel),
-        escapeCsv(r.warrStartDt),
-        escapeCsv(r.billingDoc),
-        escapeCsv(r.billingDate),
+        escapeCsv(formatUiDateDash(r.warrStartDt)),
+        escapeCsv(formatUiDateDash(r.billingDate)),
       ].join(',')
     );
   }

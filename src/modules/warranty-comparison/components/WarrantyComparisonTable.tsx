@@ -11,6 +11,7 @@ import {
 } from '@/components/admin/AdminUi';
 import { TrnLink } from '@/components/calls/TrnLink';
 import { TableSkeleton } from '@/components/ui/DataTableLoading';
+import { formatUiDateDash } from '@/lib/dates/ui-date';
 import { ChevronLeft, ChevronRight, ShieldAlert, ShieldCheck } from 'lucide-react';
 import type { WarrantyComparisonRow } from '../types';
 
@@ -26,6 +27,20 @@ type TableProps = {
   onSortChange: (column: any) => void;
   loading: boolean;
 };
+
+function dashDate(value: string | null | undefined): string {
+  return formatUiDateDash(value) || '—';
+}
+
+function statusTextClass(status: string): string {
+  const key = status.trim().toLowerCase();
+  if (key === 'assigned') return 'text-pink-400';
+  if (key === 'cancelled' || key === 'canceled') return 'text-red-600';
+  if (key === 'closed') return 'text-green-800';
+  if (key === 'open unallocated') return 'text-yellow-500';
+  if (key === 'tech. solve call' || key === 'tech solve call') return 'text-green-400';
+  return 'text-slate-500';
+}
 
 export function WarrantyComparisonTable({
   rows,
@@ -47,7 +62,7 @@ export function WarrantyComparisonTable({
     <div className="flex flex-1 flex-col min-h-0 min-w-0 bg-white">
       <AdminTableCard isEmpty={!loading && rows.length === 0}>
         {loading ? (
-          <TableSkeleton columns={10} rows={10} />
+          <TableSkeleton columns={11} rows={10} />
         ) : (
           <AdminTable className="w-full min-w-[1240px] border-collapse text-left">
             <AdminThead>
@@ -60,6 +75,15 @@ export function WarrantyComparisonTable({
                   className="!py-1.5 !px-2"
                 >
                   Call No
+                </AdminTh>
+                <AdminTh
+                  sortable
+                  sortKey="callDate"
+                  sort={{ key: sortBy, dir: sortDir }}
+                  onSort={onSortChange}
+                  className="!py-1.5 !px-2"
+                >
+                  Call Date
                 </AdminTh>
                 <AdminTh
                   sortable
@@ -86,23 +110,32 @@ export function WarrantyComparisonTable({
                   onSort={onSortChange}
                   className="!py-1.5 !px-2"
                 >
-                  Account
+                  Account as per CRM
                 </AdminTh>
                 <AdminTh
                   sortable
-                  sortKey="callDate"
+                  sortKey="customerSubgroup"
                   sort={{ key: sortBy, dir: sortDir }}
                   onSort={onSortChange}
-                  className="!py-1.5 !px-2 bg-blue-50/40 text-blue-900 border-l border-slate-200"
+                  className="!py-1.5 !px-2"
                 >
-                  Call Date
+                  Account as per System
+                </AdminTh>
+                <AdminTh
+                  sortable
+                  sortKey="billingDoc"
+                  sort={{ key: sortBy, dir: sortDir }}
+                  onSort={onSortChange}
+                  className="!py-1.5 !px-2"
+                >
+                  Invoice Number
                 </AdminTh>
                 <AdminTh
                   sortable
                   sortKey="warrEndDt"
                   sort={{ key: sortBy, dir: sortDir }}
                   onSort={onSortChange}
-                  className="!py-1.5 !px-2 bg-blue-50/40 text-blue-900"
+                  className="!py-1.5 !px-2"
                 >
                   Master Warranty End
                 </AdminTh>
@@ -112,24 +145,22 @@ export function WarrantyComparisonTable({
                   sort={{ key: sortBy, dir: sortDir }}
                   onSort={onSortChange}
                   align="center"
-                  className="!py-1.5 !px-2 bg-blue-50/40 text-blue-900 border-r border-slate-200"
+                  className="!py-1.5 !px-2 whitespace-nowrap"
                 >
                   Warranty Months
                 </AdminTh>
-                <AdminTh align="center" className="!py-1.5 !px-2 bg-amber-50/40 text-amber-900">
-                  Call WCO
+                <AdminTh align="center" className="!py-1.5 !px-2 whitespace-nowrap">
+                  Warranty as per Call (WCO)
                 </AdminTh>
                 <AdminTh
                   sortable
                   sortKey="daysDelta"
                   sort={{ key: sortBy, dir: sortDir }}
                   onSort={onSortChange}
-                  className="!py-1.5 !px-2 bg-amber-50/40 text-amber-900 border-r border-slate-200"
+                  align="center"
+                  className="!py-1.5 !px-2 whitespace-nowrap"
                 >
                   Master Warranty Status
-                </AdminTh>
-                <AdminTh className="!py-1.5 !px-2">
-                  Mismatch Classification
                 </AdminTh>
               </AdminTr>
             </AdminThead>
@@ -144,8 +175,7 @@ export function WarrantyComparisonTable({
                     key={`${row.vtrnno}-${row.serial}`}
                     className="hover:bg-slate-50/80 transition-colors"
                   >
-                    {/* 1. Call No */}
-                    <AdminTd className="!py-1.5 !px-2 font-mono font-medium text-blue-600">
+                    <AdminTd className="!py-1.5 !px-2 font-mono font-medium text-slate-900">
                       <TrnLink trn={row.vtrnno} className="hover:underline">
                         {row.vtrnno}
                       </TrnLink>
@@ -156,7 +186,15 @@ export function WarrantyComparisonTable({
                       )}
                     </AdminTd>
 
-                    {/* 2. Serial No */}
+                    <AdminTd className="!py-1.5 !px-2 whitespace-nowrap">
+                      <div className="font-semibold text-blue-800">{dashDate(row.callDate)}</div>
+                      {row.status && (
+                        <div className={`text-[10px] font-medium ${statusTextClass(row.status)}`}>
+                          {row.status}
+                        </div>
+                      )}
+                    </AdminTd>
+
                     <AdminTd className="!py-1.5 !px-2 font-mono font-semibold text-slate-900">
                       <span>{row.serial}</span>
                       {row.fgModel && (
@@ -166,7 +204,6 @@ export function WarrantyComparisonTable({
                       )}
                     </AdminTd>
 
-                    {/* 3. Customer & Branch */}
                     <AdminTd className="!py-1.5 !px-2">
                       <div className="font-medium text-slate-800 max-w-[200px] truncate" title={row.partyName || row.customerName}>
                         {row.partyName || row.customerName || '—'}
@@ -176,7 +213,6 @@ export function WarrantyComparisonTable({
                       </div>
                     </AdminTd>
 
-                    {/* 4. Account */}
                     <AdminTd className="!py-1.5 !px-2 whitespace-nowrap">
                       {row.account ? (
                         <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.2 text-[10px] font-medium text-slate-700">
@@ -187,71 +223,64 @@ export function WarrantyComparisonTable({
                       )}
                     </AdminTd>
 
-                    {/* 5. Call Date (Dates side-by-side 1/3) */}
-                    <AdminTd className="!py-1.5 !px-2 whitespace-nowrap text-slate-800 font-medium bg-blue-50/20 border-l border-slate-100">
-                      <div>{row.callDate}</div>
-                      {row.status && (
-                        <div className="text-[10px] text-slate-500 font-normal">
-                          {row.status}
+                    <AdminTd className="!py-1.5 !px-2 whitespace-nowrap">
+                      {row.customerSubgroup ? (
+                        <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.2 text-[10px] font-medium text-slate-700">
+                          {row.customerSubgroup}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </AdminTd>
+
+                    <AdminTd className="!py-1.5 !px-2 font-mono whitespace-nowrap text-slate-700">
+                      <div>{row.billingDoc || '—'}</div>
+                      {row.billingDate && (
+                        <div className="text-[10px] font-sans font-medium text-blue-800">
+                          {dashDate(row.billingDate)}
                         </div>
                       )}
                     </AdminTd>
 
-                    {/* 6. Master Warranty End (Dates side-by-side 2/3) */}
-                    <AdminTd className="!py-1.5 !px-2 whitespace-nowrap bg-blue-50/20">
-                      <div className="font-mono text-slate-800 font-medium">
-                        {row.warrEndDt || '—'}
+                    <AdminTd className="!py-1.5 !px-2 whitespace-nowrap">
+                      <div className="font-mono font-semibold text-blue-800">
+                        {dashDate(row.warrEndDt)}
                       </div>
-                      <div className="text-[10px] text-slate-400">
-                        {row.warrStartDt ? `Start: ${row.warrStartDt}` : ''}
+                      <div className="text-[10px] font-medium text-blue-800/80">
+                        {row.warrStartDt ? `Start: ${dashDate(row.warrStartDt)}` : ''}
                       </div>
                     </AdminTd>
 
-                    {/* 7. Warranty Months (Dates side-by-side 3/3) */}
-                    <AdminTd className="!py-1.5 !px-2 text-center whitespace-nowrap bg-blue-50/20 border-r border-slate-100">
+                    <AdminTd align="center" className="!py-1.5 !px-2 whitespace-nowrap">
                       <span className="font-mono font-medium text-slate-700">
                         {row.warrantyMonths != null ? `${row.warrantyMonths} months` : '—'}
                       </span>
                     </AdminTd>
 
-                    {/* 8. Call Register WCO (Status side-by-side 1/2) */}
-                    <AdminTd className="!py-1.5 !px-2 text-center whitespace-nowrap bg-amber-50/20">
-                      <span
-                        className={`inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold ${row.callWco === 'W'
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                          : row.callWco === 'O'
-                            ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                            : 'bg-slate-100 text-slate-700'
-                          }`}
-                      >
-                        {row.callWco === 'W' ? 'W (In Warr)' : row.callWco === 'O' ? 'O (Out Warr)' : row.callWco || '—'}
-                      </span>
-                    </AdminTd>
-
-                    {/* 9. Master Status on Call Date (Status side-by-side 2/2) */}
-                    <AdminTd className="!py-1.5 !px-2 whitespace-nowrap bg-amber-50/20 border-r border-slate-100">
-                      {isOowInWarr ? (
-                        <span className="inline-flex items-center gap-1 text-rose-700 font-semibold text-[10px]">
-                          <ShieldAlert className="h-3 w-3 text-rose-600" />
-                          <span>Expired ({daysAbs}d prior)</span>
+                    <AdminTd align="center" className="!py-1.5 !px-2 whitespace-nowrap">
+                      {row.callWco === 'W' ? (
+                        <span className="inline-flex items-center rounded border border-rose-400 px-1.5 py-0.2 text-[10px] font-semibold text-rose-700">
+                          W (In Warr)
+                        </span>
+                      ) : row.callWco === 'O' ? (
+                        <span className="inline-flex items-center rounded border border-amber-400 px-1.5 py-0.2 text-[10px] font-semibold text-amber-800">
+                          O (Out Warr)
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold text-[10px]">
-                          <ShieldCheck className="h-3 w-3 text-emerald-600" />
-                          <span>Active ({daysAbs}d left)</span>
-                        </span>
+                        <span className="text-slate-400">—</span>
                       )}
                     </AdminTd>
 
-                    {/* 10. Mismatch Classification */}
-                    <AdminTd className="!py-1.5 !px-2 whitespace-nowrap">
+                    <AdminTd align="center" className="!py-1.5 !px-2 whitespace-nowrap">
                       {isOowInWarr ? (
-                        <span className="inline-flex items-center rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 border border-rose-200">
-                          Machine OOW → Call In-Warr
+                        <span className="inline-flex items-center justify-center gap-0.5 text-rose-700 font-semibold text-[10px]" title={`Expired (${daysAbs}d prior)`}>
+                          <ShieldAlert className="h-3 w-3 shrink-0 text-rose-600" />
+                          <span>Exp {daysAbs}d</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 border border-amber-200">
-                          Machine In-Warr → Call OOW
+                        <span className="inline-flex items-center justify-center gap-0.5 text-slate-600 font-medium text-[10px]" title={`Active (${daysAbs}d left)`}>
+                          <ShieldCheck className="h-3 w-3 shrink-0 text-slate-400" />
+                          <span>Act {daysAbs}d</span>
                         </span>
                       )}
                     </AdminTd>
@@ -263,7 +292,6 @@ export function WarrantyComparisonTable({
         )}
       </AdminTableCard>
 
-      {/* Pagination Footer */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-white px-3 py-1.5 text-[11px] text-slate-600">
         <div>
           Showing <span className="font-semibold text-slate-900">{startIdx.toLocaleString()}</span> to{' '}
