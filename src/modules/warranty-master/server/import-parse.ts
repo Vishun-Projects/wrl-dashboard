@@ -77,15 +77,18 @@ export function parseDateVal(val: unknown): string | null {
   return null;
 }
 
-/** Calendar months from start → end. Same day is 0. Missing dates is 0 (do not invent 12). */
+/** Inclusive last day, then snap up to a 6-month step. Same day is 0. */
 export function calcMonths(start: string | null, end: string | null): number {
   if (!start || !end) return 0;
   const [ys, ms, ds] = start.split('-').map(Number);
   const [ye, me, de] = end.split('-').map(Number);
   if (![ys, ms, ds, ye, me, de].every(Number.isFinite)) return 0;
-  let months = (ye - ys) * 12 + (me - ms);
-  if (de < ds) months -= 1;
-  return months < 0 ? 0 : months;
+  const next = new Date(Date.UTC(ye, me - 1, de));
+  next.setUTCDate(next.getUTCDate() + 1);
+  let months = (next.getUTCFullYear() - ys) * 12 + (next.getUTCMonth() + 1 - ms);
+  if (next.getUTCDate() < ds) months -= 1;
+  if (months <= 0) return 0;
+  return Math.ceil(months / 6) * 6;
 }
 
 export function warrantyDateRank(date: string | null): number {

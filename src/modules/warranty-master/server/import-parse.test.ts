@@ -33,10 +33,13 @@ describe('cleanCustomerName', () => {
 });
 
 describe('calcMonths', () => {
-  it('is end minus start in calendar months, not a default 12', () => {
+  it('is inclusive and snaps up to a 6-month step', () => {
     expect(calcMonths('2026-01-05', '2026-01-05')).toBe(0);
     expect(calcMonths('2025-01-05', '2026-01-05')).toBe(12);
-    expect(calcMonths('2025-01-05', '2026-01-04')).toBe(11);
+    expect(calcMonths('2025-01-05', '2026-01-04')).toBe(12);
+    expect(calcMonths('2025-08-06', '2029-08-05')).toBe(48);
+    expect(calcMonths('2026-07-09', '2028-01-08')).toBe(18);
+    expect(calcMonths('2022-03-11', '2027-03-10')).toBe(60);
     expect(calcMonths(null, '2026-01-05')).toBe(0);
   });
 });
