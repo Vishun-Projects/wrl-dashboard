@@ -1,8 +1,11 @@
 import { postQuery } from '@/lib/db/proxy';
 import {
   buildCompressorBarcodesListRawSql,
-  buildCompressorBarcodesModifiedSerialsSql,
+  buildGasChargingListRawSql,
+  buildGasChargingSerialsSql,
+  buildRepeatCallsModifiedSerialsSql,
 } from '@/sql/compressor-barcodes/query';
+import type { RepeatCallKind } from '@/sql/compressor-barcodes/query';
 import { withClient } from '@/lib/read-model/db';
 
 export interface ProcessedCompressorBarcode {
@@ -24,6 +27,7 @@ export interface ProcessedCompressorBarcode {
   days_gap: number | null;
   is_continuity_broken: boolean;
   expected_old_barcode: string | null;
+  repair_kind: RepeatCallKind;
 }
 
 function cleanBarcode(raw: unknown): string {
@@ -82,16 +86,24 @@ async function ensureCompressorBarcodesTable(client: any): Promise<void> {
       new_item_name TEXT,
       solve_date TIMESTAMPTZ,
       days_gap INTEGER,
+      repair_kind TEXT NOT NULL DEFAULT 'compressor',
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       CONSTRAINT compressor_barcodes_serial_call_uq UNIQUE (serial_number, call_no)
     );
+
+    ALTER TABLE compressor_barcodes ADD COLUMN IF NOT EXISTS repair_kind TEXT NOT NULL DEFAULT 'compressor';
+    ALTER TABLE compressor_barcodes DROP CONSTRAINT IF EXISTS compressor_barcodes_serial_call_uq;
+    DROP INDEX IF EXISTS compressor_barcodes_serial_call_uq;
+    CREATE UNIQUE INDEX IF NOT EXISTS compressor_barcodes_serial_call_kind_uq
+      ON compressor_barcodes (serial_number, call_no, repair_kind);
 
     CREATE INDEX IF NOT EXISTS idx_compressor_barcodes_serial ON compressor_barcodes (serial_number);
     CREATE INDEX IF NOT EXISTS idx_compressor_barcodes_call_date ON compressor_barcodes (call_date);
     CREATE INDEX IF NOT EXISTS idx_compressor_barcodes_solve_date ON compressor_barcodes (solve_date);
     CREATE INDEX IF NOT EXISTS idx_compressor_barcodes_call_no ON compressor_barcodes (call_no);
     CREATE INDEX IF NOT EXISTS idx_compressor_barcodes_broken ON compressor_barcodes (is_continuity_broken) WHERE is_continuity_broken = true;
+    CREATE INDEX IF NOT EXISTS idx_compressor_barcodes_repair_kind ON compressor_barcodes (repair_kind);
 
     CREATE TABLE IF NOT EXISTS sync_state (
       entity TEXT PRIMARY KEY,
@@ -104,34 +116,182 @@ async function ensureCompressorBarcodesTable(client: any): Promise<void> {
   `);
 }
 
+const CRM_SERIAL_CHUNK = 100;
+
+const CALL_STATUS_PRIORITY: Record<string, number> = {
+  Closed: 4,
+  'Tech Solved': 3,
+  Assigned: 2,
+  Transferred: 2,
+  Open: 1,
+};
+
+async function fetchCrmRowsForSerials(
+  buildSql: (opts: { serials: string[] }) => string,
+  serials: string[]
+): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  for (let i = 0; i < serials.length; i += CRM_SERIAL_CHUNK) {
+    const chunk = serials.slice(i, i + CRM_SERIAL_CHUNK);
+    const res = await postQuery({
+      rawSql: buildSql({ serials: chunk }),
+      timeoutMs: 60_000,
+    });
+    if (res.data) out.push(...(res.data as Record<string, unknown>[]));
+    if (i === 0 || (i + CRM_SERIAL_CHUNK) % 500 === 0 || i + CRM_SERIAL_CHUNK >= serials.length) {
+      console.log(
+        `[Sync] CRM serial chunk ${Math.min(i + CRM_SERIAL_CHUNK, serials.length)} / ${serials.length} (${out.length} rows)`
+      );
+    }
+  }
+  return out;
+}
+
+async function fetchAllGasChargingRows(): Promise<Record<string, unknown>[]> {
+  // ponytail: serial list then 100-serial chunks. Full OFFSET paging of gas history hung CRM.
+  console.log('[Sync] Listing gas-charging serials from CRM...');
+  const res = await postQuery({
+    rawSql: buildGasChargingSerialsSql(),
+    timeoutMs: 120_000,
+  });
+  const serials = Array.from(
+    new Set(
+      ((res.data || []) as Array<{ serial_number: string }>)
+        .map((r) => String(r.serial_number || '').trim())
+        .filter(Boolean)
+    )
+  );
+  console.log(`[Sync] ${serials.length} gas-charging serials. Fetching calls...`);
+  if (serials.length === 0) return [];
+  return fetchCrmRowsForSerials(buildGasChargingListRawSql, serials);
+}
+
+function mergeCallRow(
+  existing: Record<string, unknown>,
+  row: Record<string, unknown>,
+  callStatus: string,
+  cancelReason: string | null
+) {
+  if (!existing.cancel_reason && cancelReason) existing.cancel_reason = cancelReason;
+  if (callStatus === 'Cancelled') {
+    existing.call_status = 'Cancelled';
+  } else if (existing.call_status !== 'Cancelled') {
+    const curPri = CALL_STATUS_PRIORITY[String(existing.call_status)] || 0;
+    const newPri = CALL_STATUS_PRIORITY[callStatus] || 0;
+    if (newPri > curPri || !existing.call_status) existing.call_status = callStatus;
+  }
+  if (!existing.solve_date && row.solve_date) existing.solve_date = row.solve_date;
+  if (!existing.branch_name && row.branch_name) existing.branch_name = row.branch_name;
+  if (!existing.sap_vendor_code && row.sap_vendor_code) existing.sap_vendor_code = row.sap_vendor_code;
+}
+
+function processGasChargingRows(rawRows: Record<string, unknown>[]): ProcessedCompressorBarcode[] {
+  const serialMap = new Map<string, Map<string, Record<string, unknown>>>();
+  for (const row of rawRows) {
+    const serial = String(row.serial_number || '').trim();
+    const callNo = String(row.call_no || '').trim();
+    if (!serial || !callNo) continue;
+    if (!serialMap.has(serial)) serialMap.set(serial, new Map());
+    const calls = serialMap.get(serial)!;
+    const callStatus = String(row.call_status || 'Open').trim();
+    const cancelReason = row.cancel_reason ? String(row.cancel_reason).trim() : null;
+    const existing = calls.get(callNo);
+    if (!existing) {
+      calls.set(callNo, { ...row, call_no: callNo, call_status: callStatus, cancel_reason: cancelReason });
+    } else {
+      mergeCallRow(existing, row, callStatus, cancelReason);
+    }
+  }
+
+  const processed: ProcessedCompressorBarcode[] = [];
+  for (const [serial, callsMap] of serialMap) {
+    const calls = Array.from(callsMap.values()).sort((a, b) => {
+      return new Date(String(a.call_date || 0)).getTime() - new Date(String(b.call_date || 0)).getTime();
+    });
+    let lastSolvedDate: Date | null = null;
+    for (const call of calls) {
+      const callStatus = String(call.call_status || 'Open').trim();
+      const cancelReason = call.cancel_reason ? String(call.cancel_reason).trim() : null;
+      let parsedSolveDate: Date | null = null;
+      if (call.solve_date) {
+        const d = new Date(String(call.solve_date));
+        if (!isNaN(d.getTime())) parsedSolveDate = d;
+      }
+      let daysGap: number | null = null;
+      if (callStatus !== 'Cancelled') {
+        const effectiveCurrentDate = parsedSolveDate || new Date(String(call.call_date));
+        if (!isNaN(effectiveCurrentDate.getTime())) {
+          if (lastSolvedDate) {
+            daysGap = Math.max(0, Math.round((effectiveCurrentDate.getTime() - lastSolvedDate.getTime()) / 86_400_000));
+          }
+          if (parsedSolveDate || callStatus === 'Closed' || callStatus === 'Tech Solved') {
+            lastSolvedDate = effectiveCurrentDate;
+          }
+        }
+      }
+      processed.push({
+        serial_number: serial,
+        call_no: String(call.call_no).trim(),
+        call_date: new Date(String(call.call_date || new Date().toISOString())),
+        office_name: String(call.office_name || ''),
+        branch_name: call.branch_name ? String(call.branch_name).trim() : null,
+        sap_vendor_code: call.sap_vendor_code ? String(call.sap_vendor_code).trim() : null,
+        old_item_code: null,
+        old_item_name: null,
+        new_item_code: null,
+        new_item_name: null,
+        derived_old_barcode: '',
+        derived_new_barcode: '-',
+        call_status: callStatus,
+        cancel_reason: cancelReason,
+        solve_date: parsedSolveDate,
+        days_gap: daysGap,
+        is_continuity_broken: false,
+        expected_old_barcode: null,
+        repair_kind: 'gas',
+      });
+    }
+  }
+  return processed;
+}
+
 export async function syncCompressorBarcodesToPostgres(opts?: {
   forceFull?: boolean;
 }): Promise<{ success: boolean; count: number; mode: string }> {
   console.log('[Sync] Starting compressor barcodes sync...');
 
-  const lastWatermark: Date | null = await withClient(async (client) => {
+  const { lastWatermark, needGasBackfill } = await withClient(async (client) => {
     await ensureCompressorBarcodesTable(client);
+    const gasRes = await client.query<{ n: number }>(
+      `SELECT COUNT(*)::int as n FROM compressor_barcodes WHERE COALESCE(repair_kind, 'compressor') = 'gas'`
+    );
+    const needGasBackfill = (gasRes.rows[0]?.n ?? 0) === 0;
     if (!opts?.forceFull) {
       const stateRes = await client.query<{ last_editedon: Date | null }>(
         `SELECT last_editedon FROM sync_state WHERE entity = 'compressor_barcodes'`
       );
-      return stateRes.rows[0]?.last_editedon ? new Date(stateRes.rows[0].last_editedon) : null;
+      return {
+        lastWatermark: stateRes.rows[0]?.last_editedon
+          ? new Date(stateRes.rows[0].last_editedon)
+          : null,
+        needGasBackfill,
+      };
     }
-    return null;
+    return { lastWatermark: null, needGasBackfill };
   });
 
   let rawRows: Record<string, unknown>[] = [];
+  let rawGasRows: Record<string, unknown>[] = [];
   let isIncremental = false;
 
-  // 1. If watermark exists, query only serial numbers modified since watermark (with 5-min overlap)
   if (lastWatermark && !opts?.forceFull) {
     const overlapDate = new Date(lastWatermark.getTime() - 5 * 60 * 1000);
     const sinceStr = overlapDate.toISOString().replace('T', ' ').substring(0, 19);
 
-    console.log(`[Sync] Checking CRM for compressor calls modified since ${sinceStr}...`);
+    console.log(`[Sync] Checking CRM for repeat calls modified since ${sinceStr}...`);
     const modRes = await postQuery({
-      rawSql: buildCompressorBarcodesModifiedSerialsSql(sinceStr),
-      timeoutMs: 30000,
+      rawSql: buildRepeatCallsModifiedSerialsSql(sinceStr),
+      timeoutMs: 30_000,
     });
 
     const modifiedSerials = Array.from(
@@ -142,8 +302,8 @@ export async function syncCompressorBarcodesToPostgres(opts?: {
       )
     );
 
-    if (modifiedSerials.length === 0) {
-      console.log(`[Sync] No modified compressor calls found since ${sinceStr}. Database is up to date.`);
+    if (modifiedSerials.length === 0 && !needGasBackfill) {
+      console.log(`[Sync] No modified repeat calls found since ${sinceStr}. Database is up to date.`);
       await withClient(async (client) => {
         await client.query(`
           INSERT INTO sync_state (entity, last_editedon, last_run_at, status, rows_upserted_last)
@@ -157,35 +317,35 @@ export async function syncCompressorBarcodesToPostgres(opts?: {
       return { success: true, count: 0, mode: 'incremental-skipped' };
     }
 
-    console.log(`[Sync] Found ${modifiedSerials.length} modified serial numbers. Fetching complete lineage...`);
     isIncremental = true;
-    const CHUNK_SIZE = 100;
-    for (let i = 0; i < modifiedSerials.length; i += CHUNK_SIZE) {
-      const chunk = modifiedSerials.slice(i, i + CHUNK_SIZE);
-      const res = await postQuery({
-        rawSql: buildCompressorBarcodesListRawSql({ serials: chunk }),
-        timeoutMs: 60000,
-      });
-      if (res.data) {
-        rawRows.push(...(res.data as Record<string, unknown>[]));
-      }
+    if (modifiedSerials.length > 0) {
+      console.log(`[Sync] Found ${modifiedSerials.length} modified serial numbers. Fetching complete lineage...`);
+      rawRows = await fetchCrmRowsForSerials(buildCompressorBarcodesListRawSql, modifiedSerials);
+    }
+    if (needGasBackfill) {
+      console.log('[Sync] First gas-charging backfill (no gas rows in Postgres yet)...');
+      rawGasRows = await fetchAllGasChargingRows();
+    } else if (modifiedSerials.length > 0) {
+      rawGasRows = await fetchCrmRowsForSerials(buildGasChargingListRawSql, modifiedSerials);
     }
   } else {
-    // Full sync
     console.log('[Sync] Running full baseline CRM query...');
     const res = await postQuery({
       rawSql: buildCompressorBarcodesListRawSql(),
-      timeoutMs: 120000,
+      timeoutMs: 120_000,
     });
     rawRows = (res.data || []) as Record<string, unknown>[];
+    rawGasRows = await fetchAllGasChargingRows();
   }
 
-  if (!rawRows.length) {
-    console.log('[Sync] No compressor barcodes found in CRM.');
+  if (!rawRows.length && !rawGasRows.length) {
+    console.log('[Sync] No compressor / gas charging rows found in CRM.');
     return { success: true, count: 0, mode: isIncremental ? 'incremental' : 'full' };
   }
 
-  console.log(`[Sync] Retrieved ${rawRows.length} raw rows from CRM (${isIncremental ? 'incremental' : 'full'}).`);
+  console.log(
+    `[Sync] Retrieved ${rawRows.length} compressor + ${rawGasRows.length} gas CRM rows (${isIncremental ? 'incremental' : 'full'}).`
+  );
 
   // 2. Group by serial_number -> distinct calls (collapsing duplicate parts rows per call)
   const serialMap = new Map<string, Map<string, Record<string, unknown>>>();
@@ -377,6 +537,7 @@ export async function syncCompressorBarcodesToPostgres(opts?: {
         days_gap: daysGap,
         is_continuity_broken: isContinuityBroken,
         expected_old_barcode: expectedOldBarcode,
+        repair_kind: 'compressor',
       });
 
       // Advance barcode chain only if a new barcode was installed
@@ -386,7 +547,14 @@ export async function syncCompressorBarcodesToPostgres(opts?: {
     }
   }
 
-  console.log(`[Sync] Processed ${processedRows.length} distinct call records across ${serialMap.size} serial numbers. Saving to Postgres...`);
+  processedRows.push(...processGasChargingRows(rawGasRows));
+
+  if (!processedRows.length) {
+    console.log('[Sync] No processed repeat-call rows to save.');
+    return { success: true, count: 0, mode: isIncremental ? 'incremental' : 'full' };
+  }
+
+  console.log(`[Sync] Processed ${processedRows.length} distinct call records. Saving to Postgres...`);
 
   // 4. Batch upsert into Postgres using withClient
   let totalUpserted = 0;
@@ -408,9 +576,9 @@ export async function syncCompressorBarcodesToPostgres(opts?: {
       const valueClauses: string[] = [];
 
       batch.forEach((row, idx) => {
-        const base = idx * 18;
+        const base = idx * 19;
         valueClauses.push(
-          `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${base + 14}, $${base + 15}, $${base + 16}, $${base + 17}, $${base + 18})`
+          `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${base + 14}, $${base + 15}, $${base + 16}, $${base + 17}, $${base + 18}, $${base + 19})`
         );
         values.push(
           row.serial_number,
@@ -430,7 +598,8 @@ export async function syncCompressorBarcodesToPostgres(opts?: {
           row.solve_date,
           row.days_gap,
           row.is_continuity_broken,
-          row.expected_old_barcode
+          row.expected_old_barcode,
+          row.repair_kind
         );
       });
 
@@ -453,10 +622,11 @@ export async function syncCompressorBarcodesToPostgres(opts?: {
           solve_date,
           days_gap,
           is_continuity_broken,
-          expected_old_barcode
+          expected_old_barcode,
+          repair_kind
         )
         VALUES ${valueClauses.join(', ')}
-        ON CONFLICT (serial_number, call_no) DO UPDATE SET
+        ON CONFLICT (serial_number, call_no, repair_kind) DO UPDATE SET
           call_date = EXCLUDED.call_date,
           office_name = EXCLUDED.office_name,
           branch_name = EXCLUDED.branch_name,

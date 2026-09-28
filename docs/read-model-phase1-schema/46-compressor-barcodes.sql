@@ -19,9 +19,10 @@ CREATE TABLE IF NOT EXISTS compressor_barcodes (
   new_item_name TEXT,
   solve_date TIMESTAMPTZ,
   days_gap INTEGER,
+  repair_kind TEXT NOT NULL DEFAULT 'compressor',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT compressor_barcodes_serial_call_uq UNIQUE (serial_number, call_no)
+  CONSTRAINT compressor_barcodes_serial_call_kind_uq UNIQUE (serial_number, call_no, repair_kind)
 );
 
 CREATE INDEX IF NOT EXISTS idx_compressor_barcodes_serial ON compressor_barcodes (serial_number);
@@ -29,3 +30,4 @@ CREATE INDEX IF NOT EXISTS idx_compressor_barcodes_call_date ON compressor_barco
 CREATE INDEX IF NOT EXISTS idx_compressor_barcodes_solve_date ON compressor_barcodes (solve_date);
 CREATE INDEX IF NOT EXISTS idx_compressor_barcodes_call_no ON compressor_barcodes (call_no);
 CREATE INDEX IF NOT EXISTS idx_compressor_barcodes_broken ON compressor_barcodes (is_continuity_broken) WHERE is_continuity_broken = true;
+CREATE INDEX IF NOT EXISTS idx_compressor_barcodes_repair_kind ON compressor_barcodes (repair_kind);

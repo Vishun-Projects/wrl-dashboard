@@ -175,8 +175,8 @@ export const RBAC_PAGES: RbacPage[] = [
     id: 'compressor_barcodes',
     permission: 'page_compressor_barcodes',
     path: '/compressor-barcodes',
-    label: 'Compressor Barcodes',
-    description: 'Track barcode replacements for compressor repairs',
+    label: 'Repeat calls',
+    description: 'Repeat compressor replacements and gas charging on the same machine',
     group: 'Reports',
   },
   {
