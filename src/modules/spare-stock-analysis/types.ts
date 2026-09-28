@@ -63,6 +63,7 @@ export type SpareStockLastImport = {
 
 export type SpareStockMovementRow = {
   plant: string;
+  plantLabel: string;
   postingDate: string;
   matDoc: string;
   material: string;
@@ -90,7 +91,7 @@ export type SpareStockRowsResponse = {
 };
 
 export type SpareStockOptionsResponse = {
-  plants: string[];
+  plants: Array<{ value: string; label: string }>;
   suppliers: string[];
   materials: Array<{ value: string; label: string }>;
 };
@@ -135,6 +136,7 @@ export type SpareStockDbDupesChoice = 'skip' | 'replace' | 'keep';
 
 export type DefectiveReturnRow = {
   plant: string;
+  plantLabel: string;
   callNo: string;
   supplier: string;
   material: string;

@@ -1,9 +1,29 @@
 import { parseCalendarString } from '@/lib/dates/ui-date';
+import { isSpareStockPlantExcluded } from '@/modules/spare-stock-analysis/plants';
 import { parseSapAmount, parseSapQty, txnTypeForMvt } from '@/modules/spare-stock-analysis/sap-numbers';
 import type { SpareStockParsedRow } from '@/modules/spare-stock-analysis/types';
 
+/** SAP ALV HTML uses hex entities (`&#x28;` = `(`). Decimal + a few named ones too. */
+export function decodeMb51Entities(raw: string): string {
+  return raw
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => {
+      const n = parseInt(h, 16);
+      return Number.isFinite(n) ? String.fromCodePoint(n) : _;
+    })
+    .replace(/&#(\d+);/g, (_, n) => {
+      const v = Number(n);
+      return Number.isFinite(v) ? String.fromCodePoint(v) : _;
+    })
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
 export function cellText(raw: string): string {
-  return raw.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  return decodeMb51Entities(raw).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function normHeader(raw: string): string {
@@ -54,7 +74,13 @@ export function mapHeaders(cells: string[]): ColMap | null {
   const idx = (pred: (h: string) => boolean): number => cells.findIndex(pred);
   const plant = idx((h) => h === 'plnt' || h === 'plant');
   const mvt = idx((h) => h === 'mvt' || h === 'mv t');
-  const qty = idx((h) => h === 'qty in une' || h === 'qty in un e' || h.startsWith('qty in'));
+  const qty = idx(
+    (h) =>
+      h === 'qty in une' ||
+      h === 'qty in un e' ||
+      h.startsWith('qty in') ||
+      h.startsWith('quantity in')
+  );
   const postingDate = idx((h) => h === 'pstng date' || h === 'posting date');
   const material = idx((h) => h === 'material');
   if (plant < 0 || mvt < 0 || qty < 0 || material < 0) return null;
@@ -76,7 +102,7 @@ export function mapHeaders(cells: string[]): ColMap | null {
     batch: idx((h) => h === 'batch'),
     entryDate: idx((h) => h === 'entry date'),
     entryTime: idx((h) => h === 'time'),
-    sapUser: idx((h) => h === 'user'),
+    sapUser: idx((h) => h === 'user' || h === 'user name' || h.startsWith('user')),
     materialGroup: idx((h) => h.startsWith('material group')),
     customer: idx((h) => h === 'customer'),
     headerText: idx((h) => h.startsWith('document header')),
@@ -135,7 +161,7 @@ export async function cellsToRow(
   colMap: ColMap
 ): Promise<SpareStockParsedRow | 'skip'> {
   const plant = pick(cells, colMap.plant).replace(/\s+/g, '');
-  if (!isDataPlant(plant)) return 'skip';
+  if (!isDataPlant(plant) || isSpareStockPlantExcluded(plant)) return 'skip';
 
   const postingRaw = pick(cells, colMap.postingDate) || pick(cells, colMap.docDate);
   const postingDate = sapDateToIso(postingRaw);
@@ -197,16 +223,7 @@ export async function cellsToRow(
 }
 
 function stripCellHtml(inner: string): string {
-  return cellText(
-    inner
-      .replace(/<br\s*\/?>/gi, ' ')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/gi, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
-  );
+  return cellText(inner.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, ''));
 }
 
 export function cellsFromTrHtml(trHtml: string): string[] {
@@ -327,7 +344,7 @@ export async function parseMb51FileInBatches(
 
   if (!colMap) {
     throw new Error(
-      'Could not find header row (expected Plnt/Plant, Material, MvT, Qty in UnE, Pstng Date)'
+      'Could not find header row (expected Plnt/Plant, Material, MvT, Qty or Quantity in UnE, Pstng Date)'
     );
   }
 

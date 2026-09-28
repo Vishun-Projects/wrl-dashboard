@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { assignResolvedCalls, extractCallNumbers } from '@/modules/spare-stock-analysis/server/call-no';
 import { groupByRowKey } from '@/modules/spare-stock-analysis/server/import-classify';
-import { parseMb51FileInBatches } from '@/modules/spare-stock-analysis/parse-mb51';
+import { parseMb51FileInBatches, mapHeaders, decodeMb51Entities } from '@/modules/spare-stock-analysis/parse-mb51';
 import { parseMb51Html } from '@/modules/spare-stock-analysis/server/parse-mb51-html';
 import { computeStockKpis } from '@/modules/spare-stock-analysis/server/stock';
 import {
@@ -127,5 +127,68 @@ describe('MB51 spare stock parse + stock math', () => {
     expect(result).toEqual({ parsed: 3, skipped: 0 });
     expect(streamed.map((r) => r.rowKey)).toEqual(rows.map((r) => r.rowKey));
     expect(streamed.map((r) => r.qty)).toEqual([1, 2, 6]);
+  });
+
+  it('maps the MB51_1.htm header line including Quantity in UnE', () => {
+    const cells = `Plnt	Mat. Doc. 	Doc. Date 	Pstng Date	Material          	Material Description                    	Location	EUn	Quantity in UnE	     LC Amount	MvT	Movement Type Text  	Batch     	Entry Date	Time    	User Name	Material Group	Customer	Document Header Text     	Text                                              	MatYr	Order	Supplier`
+      .split('\t')
+      .map((h) => h.replace(/\s+/g, ' ').trim().toLowerCase());
+    const colMap = mapHeaders(cells);
+    expect(colMap).not.toBeNull();
+    expect(colMap).toMatchObject({
+      plant: 0,
+      material: 4,
+      qty: 8,
+      mvt: 10,
+      sapUser: 15,
+    });
+  });
+
+  it('accepts SAP ALV Quantity in UnE / User Name headers', async () => {
+    const html = SAMPLE.replace('Qty in UnE', 'Quantity in UnE').replace('>User<', '>User Name<');
+    const streamed: Array<{ qty: number; sapUser: string }> = [];
+    const result = await parseMb51FileInBatches(new Blob([html], { type: 'text/html' }), async (batch) => {
+      streamed.push(...batch);
+    });
+    expect(result).toEqual({ parsed: 3, skipped: 0 });
+    expect(streamed.map((r) => r.qty)).toEqual([1, 2, 6]);
+    expect(streamed[0]?.sapUser).toBe('MIG04');
+  });
+
+  it('decodes SAP hex entities and skips excluded plants', async () => {
+    expect(decodeMb51Entities('MOTOR &#x28;D&#x29;')).toBe('MOTOR (D)');
+    expect(decodeMb51Entities('100&#x2f;300&#x2f;400')).toBe('100/300/400');
+    expect(decodeMb51Entities('05&#x3a;24&#x3a;29')).toBe('05:24:29');
+    expect(decodeMb51Entities('A &amp; B')).toBe('A & B');
+
+    const html = SAMPLE.replace(
+      '</table>',
+      `<tr>
+<td>1130</td><td>4900099999</td><td>31.01.2025</td><td>31.01.2025</td>
+<td>1500001</td><td>MOTOR &#x28;D&#x29;</td><td>S200</td><td>NOS</td>
+<td>    1.000 </td><td>   1.00 </td><td>561</td><td>Init.entry of stBal.</td>
+<td></td><td>02.02.2025</td><td>05&#x3a;24&#x3a;29</td><td>MIG04</td>
+<td>COMPRESOR</td><td></td><td>Legacy</td><td></td>
+<td>2025</td><td></td><td></td>
+</tr>
+<tr>
+<td>1158</td><td>4900099998</td><td>31.01.2025</td><td>31.01.2025</td>
+<td>1500002</td><td>MOTOR &#x28;D&#x29;</td><td>S200</td><td>NOS</td>
+<td>    1.000 </td><td>   1.00 </td><td>561</td><td>Init.entry of stBal.</td>
+<td></td><td>02.02.2025</td><td>05&#x3a;24&#x3a;29</td><td>MIG04</td>
+<td>COMPRESOR</td><td></td><td>Legacy</td><td></td>
+<td>2025</td><td></td><td></td>
+</tr></table>`
+    );
+    const streamed: Array<{ plant: string; materialDescription: string; entryTime: string }> = [];
+    const result = await parseMb51FileInBatches(new Blob([html], { type: 'text/html' }), async (batch) => {
+      streamed.push(...batch);
+    });
+    expect(result.skipped).toBeGreaterThanOrEqual(1);
+    const motor = streamed.find((r) => r.materialDescription.includes('MOTOR'));
+    expect(motor?.plant).toBe('1158');
+    expect(motor?.materialDescription).toBe('MOTOR (D)');
+    expect(motor?.entryTime).toBe('05:24:29');
+    expect(streamed.some((r) => r.plant === '1130')).toBe(false);
   });
 });

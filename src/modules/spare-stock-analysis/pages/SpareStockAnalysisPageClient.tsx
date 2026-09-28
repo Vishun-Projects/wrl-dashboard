@@ -107,10 +107,7 @@ export default function SpareStockAnalysisPageClient() {
   const [inFileDupes, setInFileDupes] = useState<SpareStockInFileDupesChoice>('skip');
   const [dbDupes, setDbDupes] = useState<SpareStockDbDupesChoice>('skip');
 
-  const plantOpts = useMemo<FilterSelectOption[]>(
-    () => options.plants.map((p) => ({ value: p, label: p })),
-    [options.plants]
-  );
+  const plantOpts = useMemo<FilterSelectOption[]>(() => options.plants, [options.plants]);
   const supplierOpts = useMemo<FilterSelectOption[]>(
     () => options.suppliers.map((s) => ({ value: s, label: s })),
     [options.suppliers]
@@ -305,8 +302,8 @@ export default function SpareStockAnalysisPageClient() {
                 resetPage();
                 setPlant(pickSingle(values));
               }}
-              searchPlaceholder="Search plant…"
-              panelClassName="w-56"
+              searchPlaceholder="Search plant or branch…"
+              panelClassName="w-80"
               layout="inline"
             />
             <FilterSelect
@@ -642,6 +639,7 @@ function DefectiveReturnsView({
             r.callNo.toLowerCase().includes(q) ||
             r.supplier.toLowerCase().includes(q) ||
             r.plant.toLowerCase().includes(q) ||
+            r.plantLabel.toLowerCase().includes(q) ||
             r.material.toLowerCase().includes(q) ||
             r.materialDescription.toLowerCase().includes(q)
         )
@@ -793,7 +791,9 @@ function DefectiveReturnsView({
                 callRows.map((r, i) => (
                   <AdminTr key={`${r.plant}-${r.callNo}-${r.supplier}-${i}`}>
                     <AdminTd className="whitespace-nowrap">{r.callNo}</AdminTd>
-                    <AdminTd>{r.plant}</AdminTd>
+                  <AdminTd className="whitespace-nowrap" title={r.plantLabel}>
+                    {r.plantLabel}
+                  </AdminTd>
                     <AdminTd>{r.supplier}</AdminTd>
                     <AdminTd className="max-w-[18rem] truncate" title={r.materialDescription}>
                       {r.material
@@ -970,7 +970,9 @@ function StockView({
               sortedRows.map((r, i) => (
                 <AdminTr key={`${r.matDoc}-${r.material}-${r.mvt}-${i}`}>
                   <AdminTd className="whitespace-nowrap">{formatUiDate(r.postingDate)}</AdminTd>
-                  <AdminTd>{r.plant}</AdminTd>
+                  <AdminTd className="whitespace-nowrap" title={r.plantLabel}>
+                    {r.plantLabel}
+                  </AdminTd>
                   <AdminTd>{r.matDoc}</AdminTd>
                   <AdminTd>{r.material}</AdminTd>
                   <AdminTd className="max-w-[16rem] truncate">{r.materialDescription}</AdminTd>
@@ -1071,7 +1073,7 @@ function BreakdownTable({
           ) : (
             sorted.map((r) => (
               <AdminTr key={r.key}>
-                <AdminTd className="max-w-[12rem] truncate" title={r.label}>
+                <AdminTd className="max-w-[18rem] truncate" title={r.label}>
                   {r.label}
                 </AdminTd>
                 {qtyOnly ? (

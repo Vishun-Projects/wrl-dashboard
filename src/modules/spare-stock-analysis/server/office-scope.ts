@@ -1,4 +1,6 @@
 import { postQuery } from '@/lib/db/proxy';
+import { lookupPlantMeta } from '@/modules/spare-loan-check';
+import { formatSpareStockPlantLabel } from '@/modules/spare-stock-analysis/plants';
 import { shouldRestrictToAssignedOffices } from '@/sql/trhcalls/office-security';
 
 /** null = unrestricted; otherwise SAP plant codes the user may see. */
@@ -34,4 +36,11 @@ WHERE (o.ncode IN (${inList}) OR o.nunder IN (${inList}))
 export function isPlantInScope(plant: string, allowedPlants: string[] | null): boolean {
   if (allowedPlants == null) return true;
   return allowedPlants.some((p) => p === plant.trim());
+}
+
+export async function spareStockPlantLabels(codes: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(codes.map((c) => c.trim()).filter(Boolean))];
+  if (unique.length === 0) return new Map();
+  const meta = await lookupPlantMeta(unique);
+  return new Map(unique.map((c) => [c, formatSpareStockPlantLabel(c, meta.get(c)?.plantName)]));
 }

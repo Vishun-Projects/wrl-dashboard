@@ -30,7 +30,7 @@ export async function parseMb51Html(html: string): Promise<{ rows: SpareStockPar
 
   if (!colMap) {
     throw new Error(
-      'Could not find header row (expected Plnt/Plant, Material, MvT, Qty in UnE, Pstng Date)'
+      'Could not find header row (expected Plnt/Plant, Material, MvT, Qty or Quantity in UnE, Pstng Date)'
     );
   }
 
