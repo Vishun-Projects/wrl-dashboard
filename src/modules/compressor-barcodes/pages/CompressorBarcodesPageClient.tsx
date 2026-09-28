@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import {
   AdminTableCard,
@@ -69,6 +69,17 @@ type CompressorCallItem = {
   repair_kind?: 'compressor' | 'gas';
 };
 
+type SerialWarranty = {
+  warrantyMonths: number | null;
+  warrStartDt: string | null;
+  warrEndDt: string | null;
+  crmAccount: string | null;
+  systemAccount: string | null;
+  fgModel?: string | null;
+  billingDoc?: string | null;
+  callWco?: string | null;
+};
+
 type CompressorSerialGroup = {
   serial_number: string;
   total_calls: number;
@@ -83,6 +94,7 @@ type CompressorSerialGroup = {
   has_continuity_break?: boolean;
   calls: CompressorCallItem[];
   all_calls?: CompressorCallItem[];
+  warranty?: SerialWarranty | null;
 };
 
 type APIResponse = {
@@ -127,9 +139,125 @@ function formatDate(val: string | null | undefined): string {
   }
 }
 
+function SerialWarrantyStrip({
+  warranty,
+  loading,
+}: {
+  warranty?: SerialWarranty | null;
+  loading?: boolean;
+}) {
+  const w = warranty ?? null;
+  const wco = String(w?.callWco || '').trim().toUpperCase();
+  if (loading && !w) {
+    return (
+      <div className="flex items-center gap-1.5 text-[11px] text-slate-400 px-1 py-1">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Loading warranty…
+      </div>
+    );
+  }
+  return (
+    <div className="flex w-full items-stretch gap-1.5 overflow-x-auto custom-scrollbar pb-0.5">
+      <div className="shrink-0 min-w-[88px] px-2.5 py-1.5 rounded-md border border-slate-200 bg-white">
+        <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">W Period</div>
+        <div className="text-[12px] font-semibold text-slate-800">
+          {w?.warrantyMonths != null ? `${w.warrantyMonths} Months` : '—'}
+        </div>
+      </div>
+      <div className="shrink-0 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white">
+        <div className="text-[11px] text-slate-700">
+          <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">W Start Date: </span>
+          <span className="font-semibold tabular-nums">{formatDate(w?.warrStartDt)}</span>
+        </div>
+        <div className="text-[11px] text-slate-700">
+          <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">W End Date: </span>
+          <span className="font-semibold tabular-nums">{formatDate(w?.warrEndDt)}</span>
+        </div>
+      </div>
+      <div className="shrink-0 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white min-w-[160px] max-w-[240px]">
+        <div className="text-[11px] text-slate-700 truncate" title={w?.crmAccount || ''}>
+          <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Client As per CRM: </span>
+          <span className="font-semibold">{w?.crmAccount || '—'}</span>
+        </div>
+        <div className="text-[11px] text-slate-700 truncate" title={w?.systemAccount || ''}>
+          <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Client As per System: </span>
+          <span className="font-semibold">{w?.systemAccount || '—'}</span>
+        </div>
+      </div>
+      <div className="shrink-0 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white min-w-[140px] max-w-[200px]">
+        <div className="text-[11px] text-slate-700 truncate" title={w?.fgModel || ''}>
+          <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">FG Model: </span>
+          <span className="font-semibold">{w?.fgModel || '—'}</span>
+        </div>
+        <div className="text-[11px] text-slate-700 truncate" title={w?.billingDoc || ''}>
+          <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Invoice: </span>
+          <span className="font-semibold font-mono">{w?.billingDoc || '—'}</span>
+        </div>
+      </div>
+      <div className="shrink-0 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white">
+        <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Call WCO</div>
+        <div className="text-[11px] font-semibold">
+          {wco === 'W' ? (
+            <span className="text-rose-700">W (In Warr)</span>
+          ) : wco === 'O' ? (
+            <span className="text-amber-800">O (Out Warr)</span>
+          ) : (
+            <span className="text-slate-500">—</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function callRepairKind(call: CompressorCallItem | null | undefined): 'compressor' | 'gas' {
   return call?.repair_kind === 'gas' ? 'gas' : 'compressor';
+}
+
+function uniqueVisitCount(calls: CompressorCallItem[]): number {
+  return new Set(calls.map((c) => String(c.call_no || '').trim()).filter(Boolean)).size;
+}
+
+type VisitRow = CompressorCallItem & { workKinds: Array<'compressor' | 'gas'> };
+
+function visitAnchorMs(call: CompressorCallItem): number {
+  const d = new Date(call.solve_date || call.call_date || 0).getTime();
+  return Number.isNaN(d) ? 0 : d;
+}
+
+/** Same call_no = one visit. Compressor + gas on that visit is not two repeats. */
+function groupCallsByVisit(calls: CompressorCallItem[]): VisitRow[] {
+  const order: string[] = [];
+  const groups = new Map<string, CompressorCallItem[]>();
+  for (const call of calls) {
+    const key = String(call.call_no || call.id || '').trim() || `anon-${order.length}`;
+    if (!groups.has(key)) {
+      order.push(key);
+      groups.set(key, []);
+    }
+    groups.get(key)!.push(call);
+  }
+
+  const visits = order.map((key) => {
+    const rows = groups.get(key)!;
+    const compressor = rows.find((r) => callRepairKind(r) === 'compressor');
+    const primary = compressor ?? rows[0];
+    return {
+      ...primary,
+      workKinds: [...new Set(rows.map(callRepairKind))],
+      days_gap: null as number | null,
+    };
+  });
+
+  return visits.map((visit, i) => {
+    if (i === 0) return visit;
+    const prev = visitAnchorMs(visits[i - 1]);
+    const curr = visitAnchorMs(visit);
+    if (!prev || !curr) return visit;
+    const gap = Math.max(0, Math.round((curr - prev) / 86_400_000));
+    return { ...visit, days_gap: gap === 0 ? null : gap };
+  });
 }
 
 function RepairKindBadge({ kind }: { kind: 'compressor' | 'gas' }) {
@@ -180,8 +308,8 @@ function normalizeCompressorResponse(res: APIResponse): APIResponse {
 
       return {
         ...row,
-        total_calls: allCalls.length,
-        calls_in_range: rangeCalls.length,
+        total_calls: uniqueVisitCount(allCalls),
+        calls_in_range: uniqueVisitCount(rangeCalls),
         latest_call_date: latestCall?.call_date || '',
         latest_solve_date: latestCall?.solve_date || null,
         latest_office: latestCall?.office_name || row.latest_office,
@@ -193,6 +321,7 @@ function normalizeCompressorResponse(res: APIResponse): APIResponse {
             : row.current_barcode,
         calls: rangeCalls,
         all_calls: allCalls,
+        warranty: row.warranty ?? null,
       };
     })
     // A serial containing only cancelled calls is not a tracked repair serial.
@@ -308,6 +437,8 @@ export function CompressorBarcodesPageClient() {
 
   // Set of currently expanded serial numbers
   const [expandedSerials, setExpandedSerials] = useState<Set<string>>(new Set());
+  const [warrantyBySerial, setWarrantyBySerial] = useState<Record<string, SerialWarranty | null>>({});
+  const warrantyFetched = useRef<Set<string>>(new Set());
   // Set of serial numbers toggled to view full history when date filter is active
   const [showAllHistorySerials, setShowAllHistorySerials] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState(false);
@@ -425,6 +556,27 @@ export function CompressorBarcodesPageClient() {
 
     return () => clearInterval(interval);
   }, [page, limit, activeSearch, selectedBranch, filterTab, repeatKind, dateType, startDate, endDate, sortKeys]);
+
+  const loadWarranty = useCallback((serial: string) => {
+    const key = serial.trim();
+    if (!key || warrantyFetched.current.has(key)) return;
+    warrantyFetched.current.add(key);
+    fetch(`/api/compressor-barcodes?warrantySerial=${encodeURIComponent(key)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json: { warranty?: SerialWarranty | null }) => {
+        setWarrantyBySerial((prev) => ({ ...prev, [key]: json.warranty ?? null }));
+      })
+      .catch(() => {
+        setWarrantyBySerial((prev) => ({ ...prev, [key]: null }));
+      });
+  }, []);
+
+  useEffect(() => {
+    for (const serial of expandedSerials) loadWarranty(serial);
+  }, [expandedSerials, loadWarranty]);
 
   const toggleExpand = (serial: string) => {
     setExpandedSerials((prev) => {
@@ -987,7 +1139,9 @@ export function CompressorBarcodesPageClient() {
                         : row.calls || [];
 
                     const allRowCalls = row.all_calls && row.all_calls.length > 0 ? row.all_calls : row.calls || [];
-                    const validGaps = allRowCalls
+                    const displayedVisits = groupCallsByVisit(displayedCalls);
+                    const allVisits = groupCallsByVisit(allRowCalls);
+                    const validGaps = allVisits
                       .map((c) => c.days_gap)
                       .filter((g): g is number => g !== null && g !== undefined);
                     const minGap = validGaps.length > 0 ? Math.min(...validGaps) : Infinity;
@@ -1117,7 +1271,8 @@ export function CompressorBarcodesPageClient() {
                             <td colSpan={tableColSpan} className="w-full max-w-0 overflow-hidden align-top p-0">
                               <div className="p-2.5 sm:p-3 pl-5 sm:pl-8 bg-slate-50/90 border-t border-slate-200/80 min-w-0 max-w-full overflow-hidden">
                                 {/* Accordion Header Strip */}
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-2 min-w-0">
+                                <div className="flex flex-col gap-1.5 mb-2 min-w-0">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 min-w-0">
                                   <div className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 flex-wrap">
                                     <span>{isGas ? 'Gas charging history for serial:' : repeatKind === 'compressor' ? 'Replacement lineage for serial:' : 'Call history for serial:'}</span>
                                     <span className="font-mono text-blue-700 bg-blue-50/80 px-1.5 py-0.2 rounded border border-blue-200 font-bold">
@@ -1127,7 +1282,7 @@ export function CompressorBarcodesPageClient() {
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          if (row.total_calls > displayedCalls.length) {
+                                          if (row.total_calls > displayedVisits.length) {
                                             setShowAllHistorySerials((prev) => {
                                               const next = new Set(prev);
                                               next.add(row.serial_number);
@@ -1136,38 +1291,43 @@ export function CompressorBarcodesPageClient() {
                                           }
                                         }}
                                         style={{
-                                          backgroundColor: row.total_calls > displayedCalls.length ? '#fef3c7' : '#ecfdf5',
-                                          borderColor: row.total_calls > displayedCalls.length ? '#f59e0b' : '#10b981',
-                                          color: row.total_calls > displayedCalls.length ? '#78350f' : '#065f46',
+                                          backgroundColor: row.total_calls > displayedVisits.length ? '#fef3c7' : '#ecfdf5',
+                                          borderColor: row.total_calls > displayedVisits.length ? '#f59e0b' : '#10b981',
+                                          color: row.total_calls > displayedVisits.length ? '#78350f' : '#065f46',
                                         }}
                                         className={`text-[11px] px-2.5 py-1 rounded-md border font-semibold inline-flex items-center gap-1.5 transition-all ${
-                                          row.total_calls > displayedCalls.length
+                                          row.total_calls > displayedVisits.length
                                             ? 'hover:brightness-95 cursor-pointer shadow-xs active:scale-95'
                                             : 'cursor-default'
                                         }`}
                                         title={
-                                          row.total_calls > displayedCalls.length
+                                          row.total_calls > displayedVisits.length
                                             ? 'Click to reveal all historical calls'
                                             : 'Showing all calls'
                                         }
                                       >
                                         <span>
-                                          Showing {displayedCalls.length} of {row.total_calls} calls
+                                          Showing {displayedVisits.length} of {row.total_calls} calls
                                         </span>
-                                        {row.total_calls > displayedCalls.length && (
+                                        {row.total_calls > displayedVisits.length && (
                                           <span
                                             style={{ backgroundColor: '#d97706', color: '#ffffff' }}
                                             className="text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider"
                                           >
-                                            {row.total_calls - displayedCalls.length} hidden · Click to show all
+                                            {row.total_calls - displayedVisits.length} hidden · Click to show all
                                           </span>
                                         )}
                                       </button>
                                     )}
+                                    {!isDateFiltered && (
+                                      <span className="text-[11px] px-2.5 py-1 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 font-semibold">
+                                        Showing {displayedVisits.length} of {row.total_calls} calls
+                                      </span>
+                                    )}
                                   </div>
 
                                   <div className="flex items-center gap-1.5 flex-wrap">
-                                    {isDateFiltered && row.total_calls > (row.calls?.length || 0) && (
+                                    {isDateFiltered && row.total_calls > (row.calls_in_range || 0) && (
                                       <button
                                         type="button"
                                         onClick={() => {
@@ -1208,7 +1368,7 @@ export function CompressorBarcodesPageClient() {
                                               style={{ backgroundColor: '#f59e0b', color: '#0f172a' }}
                                               className="text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ml-1 shadow-xs"
                                             >
-                                              +{row.total_calls - (row.calls?.length || 0)} older
+                                              +{row.total_calls - (row.calls_in_range || 0)} older
                                             </span>
                                           </>
                                         ) : (
@@ -1218,7 +1378,7 @@ export function CompressorBarcodesPageClient() {
                                               Showing all {row.total_calls} historical calls
                                             </span>
                                             <span className="text-[11px] text-emerald-100 underline font-normal ml-1">
-                                              (Filter to {row.calls?.length || 0} in period)
+                                              (Filter to {row.calls_in_range || 0} in period)
                                             </span>
                                           </>
                                         )}
@@ -1232,16 +1392,24 @@ export function CompressorBarcodesPageClient() {
                                     )}
                                   </div>
                                 </div>
+                                <SerialWarrantyStrip
+                                  warranty={warrantyBySerial[row.serial_number] ?? row.warranty}
+                                  loading={
+                                    isExpanded &&
+                                    !Object.prototype.hasOwnProperty.call(warrantyBySerial, row.serial_number)
+                                  }
+                                />
+                                </div>
 
                                 {/* Visual Lineage Timeline Stepper */}
-                                {displayedCalls.length > 1 && (
+                                {displayedVisits.length > 1 && (
                                   <div className="bg-white rounded-md border border-slate-200/90 p-2 shadow-2xs mb-2 min-w-0 max-w-full overflow-hidden">
                                     <div className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1">
                                       <GitCommit className="h-3 w-3 text-blue-600" />
                                       <span>{isGas ? 'Call timeline' : repeatKind === 'all' ? 'Work-done timeline' : 'Repair lineage progression timeline'}</span>
                                     </div>
                                     <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar pb-1.5 min-w-0 max-w-full">
-                                      {displayedCalls.map((call, idx) => {
+                                      {displayedVisits.map((call, idx) => {
                                         const isCallBroken = call.is_continuity_broken;
                                         const isAcuteGap = call.days_gap !== null && call.days_gap <= 30;
                                         const isShortGap = call.days_gap !== null && call.days_gap <= 90 && !isAcuteGap;
@@ -1290,7 +1458,11 @@ export function CompressorBarcodesPageClient() {
                                                 <span className="font-mono font-bold text-[10.5px] text-slate-800 truncate">
                                                   #{idx + 1} {call.call_no}
                                                 </span>
-                                                <RepairKindBadge kind={callRepairKind(call)} />
+                                                <span className="inline-flex items-center gap-0.5 flex-wrap justify-end">
+                                                  {call.workKinds.map((kind) => (
+                                                    <RepairKindBadge key={kind} kind={kind} />
+                                                  ))}
+                                                </span>
                                               </div>
                                               <div className="text-[9.5px] text-slate-500 flex items-center gap-1 mb-0.5">
                                                 <Calendar className="h-2.5 w-2.5 text-slate-400 shrink-0" />
@@ -1302,7 +1474,7 @@ export function CompressorBarcodesPageClient() {
                                               >
                                                 {call.office_name || '—'}
                                               </div>
-                                              {callRepairKind(call) === 'compressor' && (
+                                              {call.workKinds.includes('compressor') && (
                                               <div className="mt-auto pt-1 border-t border-slate-200/80 flex items-center justify-between text-[9.5px] font-mono">
                                                 <span className="text-slate-400">New:</span>
                                                 <span
@@ -1345,7 +1517,7 @@ export function CompressorBarcodesPageClient() {
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
-                                      {displayedCalls.map((call, idx) => {
+                                      {displayedVisits.map((call, idx) => {
                                         const isCallBroken = call.is_continuity_broken;
 
                                         return (
@@ -1363,7 +1535,11 @@ export function CompressorBarcodesPageClient() {
                                               {call.call_no}
                                             </td>
                                             <td className="px-2.5 py-1.5">
-                                              <RepairKindBadge kind={callRepairKind(call)} />
+                                              <span className="inline-flex items-center gap-0.5 flex-wrap">
+                                                {call.workKinds.map((kind) => (
+                                                  <RepairKindBadge key={kind} kind={kind} />
+                                                ))}
+                                              </span>
                                             </td>
                                             <td className="px-2.5 py-1.5">
                                               {renderCallStatusBadge(call.call_status, call.cancel_reason)}
@@ -1471,7 +1647,7 @@ export function CompressorBarcodesPageClient() {
                                 </div>
 
                                 {/* High-visibility demanding prompt when older history is hidden by date filter */}
-                                {isDateFiltered && row.total_calls > (row.calls?.length || 0) && (
+                                {isDateFiltered && row.total_calls > (row.calls_in_range || 0) && (
                                   <div
                                     onClick={() => {
                                       setShowAllHistorySerials((prev) => {
@@ -1507,10 +1683,10 @@ export function CompressorBarcodesPageClient() {
                                           </div>
                                           <div className="min-w-0">
                                             <span className="font-bold text-blue-900">
-                                              Only showing {displayedCalls.length} of {row.total_calls} calls:
+                                              Only showing {displayedVisits.length} of {row.total_calls} calls:
                                             </span>{' '}
                                             <span className="text-slate-600">
-                                              {row.total_calls - displayedCalls.length} older historical {row.total_calls - displayedCalls.length === 1 ? 'repair is' : 'repairs are'} outside your date filter.
+                                              {row.total_calls - displayedVisits.length} older historical {row.total_calls - displayedVisits.length === 1 ? 'repair is' : 'repairs are'} outside your date filter.
                                             </span>
                                           </div>
                                         </div>
@@ -1529,7 +1705,7 @@ export function CompressorBarcodesPageClient() {
                                           </span>
                                         </div>
                                         <span className="text-[11px] text-emerald-800 hover:text-emerald-950 font-semibold underline shrink-0">
-                                          Switch back to date-filtered period ({row.calls?.length || 0} call{row.calls?.length === 1 ? '' : 's'})
+                                          Switch back to date-filtered period ({row.calls_in_range || 0} call{row.calls_in_range === 1 ? '' : 's'})
                                         </span>
                                       </>
                                     )}

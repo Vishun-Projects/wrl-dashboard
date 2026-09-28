@@ -17,6 +17,63 @@ export function repeatKindFilterSql(kind: RepeatKindFilter): string {
   return `COALESCE(repair_kind, 'compressor') = '${kind}'`;
 }
 
+/** One CRM visit = one call_no. Compressor + gas on the same visit is not two repeats. */
+export const REPEAT_VISIT_COUNT_SQL = 'COUNT(DISTINCT call_no)';
+export const REPEAT_VISIT_COUNT_ACTIVE_SQL =
+  "COUNT(DISTINCT call_no) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled')";
+
+/**
+ * Same cancel rule as Call Register (`isRegisterRowCancelled`): ncancelreason and
+ * CRM `callStatus` text. Assigned must not win when the call is already cancelled.
+ */
+export const REPEAT_CRM_CALL_STATUS_SQL = `CASE
+        WHEN (tc.vtransfercallno IS NOT NULL AND LTRIM(RTRIM(tc.vtransfercallno)) <> '') OR tc.ncancelreason = 2 THEN 'Transferred'
+        WHEN ISNULL(tc.ncancelreason, 0) NOT IN (0, 2) THEN 'Cancelled'
+        WHEN tc.callStatus IS NOT NULL AND LOWER(LTRIM(RTRIM(tc.callStatus))) LIKE '%cancel%' THEN 'Cancelled'
+        WHEN tc.bsolved = 1 THEN 'Closed'
+        WHEN tc.bfastclose = 1 THEN 'Tech Solved'
+        WHEN ISNULL(tc.nengineer, 0) <> 0 THEN 'Assigned'
+        WHEN tc.callStatus IS NOT NULL AND LTRIM(RTRIM(tc.callStatus)) NOT IN ('', 'NULL') THEN LTRIM(RTRIM(tc.callStatus))
+        ELSE 'Open'
+      END`;
+
+/**
+ * GET/stats source: Register/hot cancelled overlays a stale Assigned snapshot so
+ * cancelled visits drop out of repeat counts without waiting for CRM resync.
+ */
+export const REPEAT_BARCODES_FROM_SQL = `(
+  SELECT
+    cb.id,
+    cb.serial_number,
+    cb.call_no,
+    cb.call_date,
+    cb.office_name,
+    cb.derived_old_barcode,
+    cb.derived_new_barcode,
+    CASE
+      WHEN h.status_bucket = 'cancelled'
+        OR COALESCE(h.status_label, '') ILIKE '%cancel%'
+      THEN 'Cancelled'
+      ELSE cb.call_status
+    END AS call_status,
+    COALESCE(NULLIF(BTRIM(cb.cancel_reason), ''), h.cancel_reason) AS cancel_reason,
+    cb.is_continuity_broken,
+    cb.expected_old_barcode,
+    cb.branch_name,
+    cb.sap_vendor_code,
+    cb.old_item_code,
+    cb.old_item_name,
+    cb.new_item_code,
+    cb.new_item_name,
+    cb.solve_date,
+    cb.days_gap,
+    cb.repair_kind,
+    cb.created_at,
+    cb.updated_at
+  FROM compressor_barcodes cb
+  LEFT JOIN calls_latest_hot h ON h.vtrnno = cb.call_no
+) compressor_barcodes`;
+
 /** Pushes date params and returns a SQL predicate, or '' when unbounded. */
 export function pushRepeatDateRangeSql(
   dateColumn: RepeatDateColumn,
@@ -123,15 +180,7 @@ export function buildCompressorBarcodesListRawSql(opts?: {
         WHEN tc.bfastclose = 1 THEN CONVERT(varchar(30), tc.editedon, 126)
         ELSE CONVERT(varchar(30), tc.dsolvedatetime, 126)
       END as solve_date,
-      CASE 
-        WHEN (tc.vtransfercallno IS NOT NULL AND LTRIM(RTRIM(tc.vtransfercallno)) <> '') OR tc.ncancelreason = 2 THEN 'Transferred'
-        WHEN ISNULL(tc.ncancelreason, 0) NOT IN (0, 2) THEN 'Cancelled'
-        WHEN tc.bsolved = 1 THEN 'Closed'
-        WHEN tc.bfastclose = 1 THEN 'Tech Solved'
-        WHEN ISNULL(tc.nengineer, 0) <> 0 THEN 'Assigned'
-        WHEN tc.callStatus IS NOT NULL AND LTRIM(RTRIM(tc.callStatus)) NOT IN ('', 'NULL') THEN LTRIM(RTRIM(tc.callStatus))
-        ELSE 'Open'
-      END as call_status,
+      ${REPEAT_CRM_CALL_STATUS_SQL} as call_status,
       cr.vname as cancel_reason,
       p.vnewbarcode as p_newbarcode,
       p.voldbarcode as p_oldbarcode,
@@ -235,15 +284,7 @@ export function buildGasChargingListRawSql(opts?: {
         WHEN tc.bfastclose = 1 THEN CONVERT(varchar(30), tc.editedon, 126)
         ELSE CONVERT(varchar(30), tc.dsolvedatetime, 126)
       END as solve_date,
-      CASE
-        WHEN (tc.vtransfercallno IS NOT NULL AND LTRIM(RTRIM(tc.vtransfercallno)) <> '') OR tc.ncancelreason = 2 THEN 'Transferred'
-        WHEN ISNULL(tc.ncancelreason, 0) NOT IN (0, 2) THEN 'Cancelled'
-        WHEN tc.bsolved = 1 THEN 'Closed'
-        WHEN tc.bfastclose = 1 THEN 'Tech Solved'
-        WHEN ISNULL(tc.nengineer, 0) <> 0 THEN 'Assigned'
-        WHEN tc.callStatus IS NOT NULL AND LTRIM(RTRIM(tc.callStatus)) NOT IN ('', 'NULL') THEN LTRIM(RTRIM(tc.callStatus))
-        ELSE 'Open'
-      END as call_status,
+      ${REPEAT_CRM_CALL_STATUS_SQL} as call_status,
       cr.vname as cancel_reason,
       o.vcompanyname as office_name,
       o.vsapvendorcode as sap_vendor_code,

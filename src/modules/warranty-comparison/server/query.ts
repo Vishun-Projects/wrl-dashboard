@@ -4,6 +4,7 @@ import { formatUiDateDash } from '@/lib/dates/ui-date';
 import { withAppClient } from '@/lib/read-model/db';
 import { foldAccountName } from '../account-label';
 import { coverageSql, resolveCoveredVtrnnos } from './exceptions';
+import { WARRANTY_MONTHS_SQL } from './serial-strip';
 import type {
   WarrantyComparisonFilterOptions,
   WarrantyComparisonFilterParams,
@@ -11,20 +12,6 @@ import type {
   WarrantyComparisonRowsResponse,
   WarrantyComparisonSummary,
 } from '../types';
-
-/** Inclusive end (end+1 day), then round up to a 6-month step. Same day → 0. */
-const WARRANTY_MONTHS_SQL = `CASE
-  WHEN w.warr_start_dt IS NULL OR w.warr_end_dt IS NULL THEN NULL
-  ELSE (
-    SELECT CASE WHEN m <= 0 THEN 0 ELSE (CEIL(m / 6.0) * 6)::int END
-    FROM (
-      SELECT (
-        EXTRACT(YEAR FROM age(w.warr_end_dt + 1, w.warr_start_dt)) * 12
-        + EXTRACT(MONTH FROM age(w.warr_end_dt + 1, w.warr_start_dt))
-      )::int AS m
-    ) span
-  )
-END`;
 
 export type UserScope = {
   isHod?: boolean;

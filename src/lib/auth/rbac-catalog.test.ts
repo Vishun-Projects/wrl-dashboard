@@ -55,6 +55,13 @@ describe('canAccessPath', () => {
     expect(canAccessPath(['page_arcp_claims'], '/report/spare-stock-analysis')).toBe(false);
   });
 
+  it('allows rejected calls via dedicated or MIS register permission', () => {
+    expect(canAccessPath(['page_rejected_calls'], '/report/rejected-calls')).toBe(true);
+    expect(canAccessPath(['page_mis_reports'], '/report/rejected-calls')).toBe(true);
+    expect(canAccessPath(['tab_mis_register'], '/report/rejected-calls')).toBe(true);
+    expect(canAccessPath(['page_arcp_claims'], '/report/rejected-calls')).toBe(false);
+  });
+
   it('exactPath MIS does not leak into distribution or ARCP', () => {
     expect(canAccessPath(['page_mis_reports'], '/report')).toBe(true);
     expect(canAccessPath(['page_mis_reports'], '/report/distribution')).toBe(false);

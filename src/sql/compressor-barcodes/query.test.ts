@@ -7,6 +7,10 @@ import {
   parseRepeatCallKind,
   parseRepeatDateColumn,
   pushRepeatDateRangeSql,
+  REPEAT_BARCODES_FROM_SQL,
+  REPEAT_CRM_CALL_STATUS_SQL,
+  REPEAT_VISIT_COUNT_ACTIVE_SQL,
+  REPEAT_VISIT_COUNT_SQL,
   repeatKindFilterSql,
 } from './query';
 
@@ -57,7 +61,28 @@ describe('repeatKindFilterSql', () => {
   });
 });
 
+describe('repeat visit counting', () => {
+  it('counts distinct call numbers so same-visit compressor+gas is one visit', () => {
+    expect(REPEAT_VISIT_COUNT_SQL).toBe('COUNT(DISTINCT call_no)');
+    expect(REPEAT_VISIT_COUNT_ACTIVE_SQL).toContain('COUNT(DISTINCT call_no)');
+  });
+});
+
 describe('CRM repeat-call SQL', () => {
+  it('treats CRM callStatus cancelled before Assigned', () => {
+    const cancelIdx = REPEAT_CRM_CALL_STATUS_SQL.indexOf("LIKE '%cancel%'");
+    const assignedIdx = REPEAT_CRM_CALL_STATUS_SQL.indexOf("THEN 'Assigned'");
+    expect(cancelIdx).toBeGreaterThan(0);
+    expect(cancelIdx).toBeLessThan(assignedIdx);
+    expect(buildCompressorBarcodesListRawSql()).toContain("LIKE '%cancel%'");
+    expect(buildGasChargingListRawSql()).toContain("LIKE '%cancel%'");
+  });
+
+  it('overlays Register/hot cancelled onto stored Assigned', () => {
+    expect(REPEAT_BARCODES_FROM_SQL).toContain("h.status_bucket = 'cancelled'");
+    expect(REPEAT_BARCODES_FROM_SQL).toContain('LEFT JOIN calls_latest_hot');
+  });
+
   it('keeps compressor list on nrepair 19', () => {
     const sql = buildCompressorBarcodesListRawSql();
     expect(sql).toContain('f.nrepair = 19');

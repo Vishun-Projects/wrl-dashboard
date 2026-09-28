@@ -6,7 +6,16 @@ import {
   compressorBranchScopeClause,
   resolveAllowedCompressorBranchNames,
 } from '@/modules/compressor-barcodes/server/office-scope';
-import { parseRepeatCallKind, parseRepeatDateColumn, pushRepeatDateRangeSql, repeatKindFilterSql } from '@/sql/compressor-barcodes/query';
+import {
+  parseRepeatCallKind,
+  parseRepeatDateColumn,
+  pushRepeatDateRangeSql,
+  REPEAT_BARCODES_FROM_SQL,
+  REPEAT_VISIT_COUNT_ACTIVE_SQL,
+  REPEAT_VISIT_COUNT_SQL,
+  repeatKindFilterSql,
+} from '@/sql/compressor-barcodes/query';
+import { fetchWarrantyStripsBySerials } from '@/modules/warranty-comparison';
 
 let repairKindColumnReady = false;
 
@@ -46,6 +55,17 @@ export async function GET(req: NextRequest) {
       format === 'csv' ||
       searchParams.get('export') === 'csv' ||
       searchParams.get('export') === 'true';
+    const warrantySerial = (searchParams.get('warrantySerial') || '').trim();
+
+    if (warrantySerial) {
+      return await withAppClient(async (client) => {
+        const map = await fetchWarrantyStripsBySerials(client, [warrantySerial]);
+        const upper = warrantySerial.toUpperCase();
+        return NextResponse.json({
+          warranty: map.get(upper) ?? map.get(warrantySerial) ?? null,
+        });
+      });
+    }
 
     return await withAppClient(async (client) => {
       await ensureRepairKindColumn(client);
@@ -90,43 +110,46 @@ export async function GET(req: NextRequest) {
             (
               SELECT COUNT(*)::int FROM (
                 SELECT serial_number 
-                FROM compressor_barcodes 
+                FROM ${REPEAT_BARCODES_FROM_SQL} 
                 WHERE call_status IS DISTINCT FROM 'Cancelled'
                 ${kindSql}
                 ${scopeSql}
                 ${statsDateSql}
                 ${statsBranchSql}
                 GROUP BY serial_number 
-                HAVING count(*) >= 2
+                HAVING ${REPEAT_VISIT_COUNT_SQL} >= 2
               ) s2
             ) as repeat_machines,
             (
               SELECT COUNT(*)::int FROM (
                 SELECT serial_number 
-                FROM compressor_barcodes 
+                FROM ${REPEAT_BARCODES_FROM_SQL} 
                 WHERE call_status IS DISTINCT FROM 'Cancelled'
                 ${kindSql}
                 ${scopeSql}
                 ${statsDateSql}
                 ${statsBranchSql}
                 GROUP BY serial_number 
-                HAVING count(*) >= 3
+                HAVING ${REPEAT_VISIT_COUNT_SQL} >= 3
               ) s3
             ) as three_plus_machines,
             (
-              SELECT COUNT(DISTINCT serial_number)::int 
-              FROM compressor_barcodes 
-              WHERE days_gap IS NOT NULL 
-                AND days_gap <= 90
-                AND call_status IS DISTINCT FROM 'Cancelled'
+              SELECT COUNT(*)::int FROM (
+                SELECT serial_number 
+                FROM ${REPEAT_BARCODES_FROM_SQL} 
+                WHERE call_status IS DISTINCT FROM 'Cancelled'
                 ${kindSql}
                 ${scopeSql}
                 ${statsDateSql}
                 ${statsBranchSql}
+                GROUP BY serial_number 
+                HAVING ${REPEAT_VISIT_COUNT_SQL} >= 2
+                  AND BOOL_OR(days_gap IS NOT NULL AND days_gap <= 90)
+              ) s90
             ) as premature_machines,
             COUNT(DISTINCT serial_number) FILTER (WHERE is_continuity_broken = true AND call_status IS DISTINCT FROM 'Cancelled')::int as broken_machines,
             COUNT(DISTINCT serial_number) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled')::int as total_machines
-          FROM compressor_barcodes
+          FROM ${REPEAT_BARCODES_FROM_SQL}
           WHERE call_status IS DISTINCT FROM 'Cancelled'
           ${kindSql}
           ${scopeSql}
@@ -140,7 +163,7 @@ export async function GET(req: NextRequest) {
           SELECT 
             branch_name, 
             COUNT(DISTINCT serial_number)::int as repeat_count
-          FROM compressor_barcodes
+          FROM ${REPEAT_BARCODES_FROM_SQL}
           WHERE branch_name IS NOT NULL AND branch_name <> ''
             AND call_status IS DISTINCT FROM 'Cancelled'
             ${kindSql}
@@ -148,13 +171,13 @@ export async function GET(req: NextRequest) {
             ${statsDateSql}
             AND serial_number IN (
               SELECT serial_number 
-              FROM compressor_barcodes 
+              FROM ${REPEAT_BARCODES_FROM_SQL} 
               WHERE call_status IS DISTINCT FROM 'Cancelled'
               ${kindSql}
               ${scopeSql}
               ${statsDateSql}
               GROUP BY serial_number 
-              HAVING COUNT(*) >= 2
+              HAVING ${REPEAT_VISIT_COUNT_SQL} >= 2
             )
           GROUP BY branch_name
           ORDER BY repeat_count DESC
@@ -165,7 +188,7 @@ export async function GET(req: NextRequest) {
         client.query<{ branch_name: string }>(
           `
           SELECT DISTINCT branch_name
-          FROM compressor_barcodes
+          FROM ${REPEAT_BARCODES_FROM_SQL}
           WHERE branch_name IS NOT NULL AND branch_name <> ''
             AND call_status IS DISTINCT FROM 'Cancelled'
             ${kindSql}
@@ -204,7 +227,7 @@ export async function GET(req: NextRequest) {
         const s = pushScope();
         conditions.push(`
           serial_number IN (
-            SELECT serial_number FROM compressor_barcodes
+            SELECT serial_number FROM ${REPEAT_BARCODES_FROM_SQL}
             WHERE call_status IS DISTINCT FROM 'Cancelled'${kindSql}${s}
           )
         `);
@@ -225,7 +248,7 @@ export async function GET(req: NextRequest) {
         const s = pushScope();
         conditions.push(`
           serial_number IN (
-            SELECT serial_number FROM compressor_barcodes 
+            SELECT serial_number FROM ${REPEAT_BARCODES_FROM_SQL} 
             WHERE is_continuity_broken = true AND call_status IS DISTINCT FROM 'Cancelled'${kindSql}${s}${dateAnd}
           )
         `);
@@ -233,26 +256,29 @@ export async function GET(req: NextRequest) {
         const s = pushScope();
         conditions.push(`
           serial_number IN (
-            SELECT serial_number FROM compressor_barcodes 
+            SELECT serial_number FROM ${REPEAT_BARCODES_FROM_SQL} 
             WHERE call_status IS DISTINCT FROM 'Cancelled'${kindSql}${s}${dateAnd}
-            GROUP BY serial_number HAVING count(*) >= 3
+            GROUP BY serial_number HAVING ${REPEAT_VISIT_COUNT_SQL} >= 3
           )
         `);
       } else if (filter === 'premature') {
         const s = pushScope();
         conditions.push(`
           serial_number IN (
-            SELECT serial_number FROM compressor_barcodes 
-            WHERE days_gap IS NOT NULL AND days_gap <= 90 AND call_status IS DISTINCT FROM 'Cancelled'${kindSql}${s}${dateAnd}
+            SELECT serial_number FROM ${REPEAT_BARCODES_FROM_SQL} 
+            WHERE call_status IS DISTINCT FROM 'Cancelled'${kindSql}${s}${dateAnd}
+            GROUP BY serial_number
+            HAVING ${REPEAT_VISIT_COUNT_SQL} >= 2
+              AND BOOL_OR(days_gap IS NOT NULL AND days_gap <= 90)
           )
         `);
       } else if (minRepairs > 1) {
         const s = pushScope();
         conditions.push(`
           serial_number IN (
-            SELECT serial_number FROM compressor_barcodes 
+            SELECT serial_number FROM ${REPEAT_BARCODES_FROM_SQL} 
             WHERE call_status IS DISTINCT FROM 'Cancelled'${kindSql}${s}${dateAnd}
-            GROUP BY serial_number HAVING count(*) >= ${minRepairs}
+            GROUP BY serial_number HAVING ${REPEAT_VISIT_COUNT_SQL} >= ${minRepairs}
           )
         `);
       }
@@ -263,7 +289,7 @@ export async function GET(req: NextRequest) {
         const s = pushScope();
         conditions.push(`
           serial_number IN (
-            SELECT serial_number FROM compressor_barcodes 
+            SELECT serial_number FROM ${REPEAT_BARCODES_FROM_SQL} 
             WHERE branch_name = $${bIdx} AND call_status IS DISTINCT FROM 'Cancelled'${kindSql}${s}
           )
         `);
@@ -273,7 +299,7 @@ export async function GET(req: NextRequest) {
         const s = pushScope();
         conditions.push(`
           serial_number IN (
-            SELECT serial_number FROM compressor_barcodes 
+            SELECT serial_number FROM ${REPEAT_BARCODES_FROM_SQL} 
             WHERE ${dateConditionSql} AND call_status IS DISTINCT FROM 'Cancelled'${kindSql}${s}
           )
         `);
@@ -286,7 +312,7 @@ export async function GET(req: NextRequest) {
         conditions.push(`
           serial_number IN (
             SELECT DISTINCT serial_number
-            FROM compressor_barcodes
+            FROM ${REPEAT_BARCODES_FROM_SQL}
             WHERE (
               serial_number ILIKE $${pIdx}
                OR call_no ILIKE $${pIdx}
@@ -314,7 +340,7 @@ export async function GET(req: NextRequest) {
       const SORT_SQL: Record<string, (dir: 'ASC' | 'DESC') => string> = {
         serial_number: (d) => `serial_number ${d}`,
         total_calls: (d) =>
-          `COUNT(*) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') ${d}`,
+          `${REPEAT_VISIT_COUNT_ACTIVE_SQL} ${d}`,
         avg_days_gap: (d) =>
           `ROUND(AVG(days_gap) FILTER (WHERE days_gap IS NOT NULL AND call_status IS DISTINCT FROM 'Cancelled')) ${d} NULLS LAST`,
         current_barcode: (d) =>
@@ -360,8 +386,8 @@ export async function GET(req: NextRequest) {
         const exportQuery = `
           SELECT 
             serial_number,
-            COUNT(*) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled')::int as total_calls,
-            ${dateConditionSql ? `COUNT(*) FILTER (WHERE ${dateConditionSql} AND call_status IS DISTINCT FROM 'Cancelled')::int as calls_in_range,` : `COUNT(*) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled')::int as calls_in_range,`}
+            ${REPEAT_VISIT_COUNT_ACTIVE_SQL}::int as total_calls,
+            ${dateConditionSql ? `${REPEAT_VISIT_COUNT_SQL} FILTER (WHERE ${dateConditionSql} AND call_status IS DISTINCT FROM 'Cancelled')::int as calls_in_range,` : `${REPEAT_VISIT_COUNT_ACTIVE_SQL}::int as calls_in_range,`}
             MAX(call_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') as latest_call_date,
             MAX(solve_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') as latest_solve_date,
             ROUND(AVG(days_gap) FILTER (WHERE days_gap IS NOT NULL AND call_status IS DISTINCT FROM 'Cancelled'))::int as avg_days_gap,
@@ -373,7 +399,7 @@ export async function GET(req: NextRequest) {
               (ARRAY_AGG(derived_new_barcode ORDER BY call_date DESC) FILTER (WHERE derived_new_barcode <> '-' AND call_status IS DISTINCT FROM 'Cancelled'))[1],
               '-'
             ) as current_barcode
-          FROM compressor_barcodes
+          FROM ${REPEAT_BARCODES_FROM_SQL}
           ${whereClause}
           GROUP BY serial_number
           ORDER BY ${orderBySql}
@@ -444,15 +470,15 @@ export async function GET(req: NextRequest) {
 
       const countQuery = `
         SELECT COUNT(DISTINCT serial_number)::int as total
-        FROM compressor_barcodes
+        FROM ${REPEAT_BARCODES_FROM_SQL}
         ${whereClause}
       `;
 
       const dataQuery = `
         SELECT 
           serial_number,
-          COUNT(*) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled')::int as total_calls,
-          ${dateConditionSql ? `COUNT(*) FILTER (WHERE ${dateConditionSql} AND call_status IS DISTINCT FROM 'Cancelled')::int as calls_in_range,` : `COUNT(*) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled')::int as calls_in_range,`}
+          ${REPEAT_VISIT_COUNT_ACTIVE_SQL}::int as total_calls,
+          ${dateConditionSql ? `${REPEAT_VISIT_COUNT_SQL} FILTER (WHERE ${dateConditionSql} AND call_status IS DISTINCT FROM 'Cancelled')::int as calls_in_range,` : `${REPEAT_VISIT_COUNT_ACTIVE_SQL}::int as calls_in_range,`}
           MAX(call_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') as latest_call_date,
           MAX(solve_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') as latest_solve_date,
           ROUND(AVG(days_gap) FILTER (WHERE days_gap IS NOT NULL AND call_status IS DISTINCT FROM 'Cancelled'))::int as avg_days_gap,
@@ -510,7 +536,7 @@ export async function GET(req: NextRequest) {
               'repair_kind', COALESCE(repair_kind, 'compressor')
             ) ORDER BY call_date ASC
           ) as all_calls
-        FROM compressor_barcodes
+        FROM ${REPEAT_BARCODES_FROM_SQL}
         ${whereClause}
         GROUP BY serial_number
         ORDER BY ${orderBySql}

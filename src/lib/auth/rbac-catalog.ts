@@ -156,6 +156,14 @@ export const RBAC_PAGES: RbacPage[] = [
     group: 'Reports',
   },
   {
+    id: 'rejected_calls',
+    permission: 'page_rejected_calls',
+    path: '/report/rejected-calls',
+    label: 'Rejected Calls',
+    description: 'Calls rejected by HO or Branch Manager, with reject reasons from trhcalls',
+    group: 'Reports',
+  },
+  {
     id: 'spare_loan_check',
     permission: 'page_spare_loan_check',
     path: '/report/spare-loan-check',
@@ -373,6 +381,13 @@ export function canAccessPage(permissions: string[], pageId: string): boolean {
   // Cancelled Calls report: same audience as Reconciliation or Call Register.
   if (pageId === 'cancelled_calls') {
     if (hasPermission(permissions, 'page_athena_reconciliation')) return true;
+    if (canAccessMisTab(permissions, 'register')) return true;
+  }
+
+  // Rejected Calls report: same audience as Cancelled Calls / Call Register.
+  if (pageId === 'rejected_calls') {
+    if (hasPermission(permissions, 'page_athena_reconciliation')) return true;
+    if (hasPermission(permissions, 'page_mis_reports')) return true;
     if (canAccessMisTab(permissions, 'register')) return true;
   }
 

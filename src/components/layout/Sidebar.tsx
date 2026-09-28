@@ -29,6 +29,7 @@ import {
   Package,
   ShieldAlert,
   Repeat,
+  XCircle,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -136,6 +137,8 @@ export function Sidebar({ user }: SidebarProps) {
                   ? GitCompareArrows
                   : path === '/report/cancelled-calls'
                     ? Ban
+                    : path === '/report/rejected-calls'
+                      ? XCircle
                     : path === '/report/spare-stock-analysis'
                       ? Package
                   : path === '/admin/users'
