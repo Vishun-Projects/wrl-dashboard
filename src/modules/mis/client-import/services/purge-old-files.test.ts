@@ -95,8 +95,9 @@ describe('sweepImportFilesOlderThan', () => {
     await utimes(oldFile, nineDaysAgo, nineDaysAgo);
 
     const deleted = await sweepImportFilesOlderThan(7, {
+      ...process.env,
       MIS_CLIENT_IMPORT_DIR: root,
-    } as NodeJS.ProcessEnv);
+    });
 
     expect(deleted).toBe(1);
     await expect(access(newFile)).resolves.toBeUndefined();
