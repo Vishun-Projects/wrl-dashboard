@@ -48,6 +48,13 @@ describe('canAccessPath', () => {
     expect(canAccessPath(['page_arcp_claims'], '/report/spare-loan-check')).toBe(false);
   });
 
+  it('allows spare stock analysis via dedicated or MIS reports permission', () => {
+    expect(canAccessPath(['page_spare_stock_analysis'], '/report/spare-stock-analysis')).toBe(true);
+    expect(canAccessPath(['page_mis_reports'], '/report/spare-stock-analysis')).toBe(true);
+    expect(canAccessPath(['tab_mis_register'], '/report/spare-stock-analysis')).toBe(true);
+    expect(canAccessPath(['page_arcp_claims'], '/report/spare-stock-analysis')).toBe(false);
+  });
+
   it('exactPath MIS does not leak into distribution or ARCP', () => {
     expect(canAccessPath(['page_mis_reports'], '/report')).toBe(true);
     expect(canAccessPath(['page_mis_reports'], '/report/distribution')).toBe(false);

@@ -27,6 +27,7 @@ import {
   GitCompareArrows,
   Ban,
   Cpu,
+  Package,
   ShieldAlert,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
@@ -135,6 +136,8 @@ export function Sidebar({ user }: SidebarProps) {
                   ? GitCompareArrows
                   : path === '/report/cancelled-calls'
                     ? Ban
+                    : path === '/report/spare-stock-analysis'
+                      ? Package
                   : path === '/admin/users'
                   ? Users
                   : path === '/admin/roles'

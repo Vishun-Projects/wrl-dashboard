@@ -164,6 +164,14 @@ export const RBAC_PAGES: RbacPage[] = [
     group: 'Reports',
   },
   {
+    id: 'spare_stock_analysis',
+    permission: 'page_spare_stock_analysis',
+    path: '/report/spare-stock-analysis',
+    label: 'Spare Stock Analysis',
+    description: 'Upload SAP MB51 HTML and view spare stock opening, receipts, issues, and consumption',
+    group: 'Reports',
+  },
+  {
     id: 'compressor_barcodes',
     permission: 'page_compressor_barcodes',
     path: '/compressor-barcodes',
@@ -375,8 +383,12 @@ export function canAccessPage(permissions: string[], pageId: string): boolean {
     if (canAccessMisTab(permissions, 'register')) return true;
   }
 
-  // ZSS02 spare loan check & compressor barcodes: MIS reports audience until roles matrix is updated.
-  if (pageId === 'spare_loan_check' || pageId === 'compressor_barcodes') {
+  // ZSS02 spare loan check, MB51 spare stock, & compressor barcodes: MIS reports audience until roles matrix is updated.
+  if (
+    pageId === 'spare_loan_check' ||
+    pageId === 'spare_stock_analysis' ||
+    pageId === 'compressor_barcodes'
+  ) {
     if (hasPermission(permissions, 'page_mis_reports')) return true;
     if (canAccessMisTab(permissions, 'register')) return true;
   }

@@ -120,7 +120,7 @@ export function AdminThead({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function AdminTh({
+export function AdminTh<K extends string = string>({
   children,
   className = '',
   align = 'left',
@@ -134,9 +134,9 @@ export function AdminTh({
   className?: string;
   align?: 'left' | 'right' | 'center';
   sortable?: boolean;
-  sortKey?: string;
+  sortKey?: K;
   sort?: { key: string; dir: 'asc' | 'desc' } | null;
-  onSort?: (key: string) => void;
+  onSort?: (key: K) => void;
   title?: string;
 }) {
   const alignClass =
@@ -198,15 +198,20 @@ export function AdminTd({
   children,
   className = '',
   align = 'left',
+  title,
 }: {
   children: React.ReactNode;
   className?: string;
   align?: 'left' | 'right' | 'center';
+  title?: string;
 }) {
   const alignClass =
     align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left';
   return (
-    <td className={`px-3 py-1.5 align-middle text-[12px] text-slate-700 ${alignClass} ${className}`}>
+    <td
+      className={`px-3 py-1.5 align-middle text-[12px] text-slate-700 ${alignClass} ${className}`}
+      title={title}
+    >
       {children}
     </td>
   );
