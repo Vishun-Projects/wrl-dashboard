@@ -145,7 +145,6 @@ export default function RejectedCallsPageClient() {
       }
     })();
     return () => ac.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- rowsData only gates first-load spinner
   }, [buildParams, page, ready]);
 
   const rows: RejectedCallRow[] = rowsData?.rows ?? [];
