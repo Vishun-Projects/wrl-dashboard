@@ -196,7 +196,7 @@ describe('buildMisEmailPayload early exits', () => {
     expect(fetchDigestRegisterRows).not.toHaveBeenCalled();
   });
 
-  it('forPreview builds call-level trace for body and skips Excel builders', async () => {
+  it('forPreview uses summary counts only and skips Excel, register, and call-level trace', async () => {
     fetchDigestSummaryDataCached.mockResolvedValue({
       branchSummary: [],
       accountSummary: [],
@@ -234,9 +234,9 @@ describe('buildMisEmailPayload early exits', () => {
     expect(result.emailAttachments).toEqual([]);
     expect(result.preview.attachments.length).toBeGreaterThan(0);
     expect(fetchDigestSummaryDataCached).toHaveBeenCalledOnce();
-    expect(fetchDigestRegisterRows).toHaveBeenCalledOnce();
+    expect(fetchDigestRegisterRows).not.toHaveBeenCalled();
     expect(buildDigestAttachments).not.toHaveBeenCalled();
-    expect(buildDigestTraceableExportPayloadCached).toHaveBeenCalledOnce();
+    expect(buildDigestTraceableExportPayloadCached).not.toHaveBeenCalled();
   });
 
   it('does not filter excel data/trace payload by selected accounts but filters body keyAccountRows', async () => {

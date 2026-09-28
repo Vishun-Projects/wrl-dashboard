@@ -419,11 +419,14 @@ export async function buildMisEmailPayload(
     }
   }
 
-  let registerRows = includeDetailed
-    ? await timer.measure('fetch register rows', () =>
-        fetchDigestRegisterRows(effectiveRecipient, scope, dateRange), (rows) => `rows=${rows.length}`
-      )
-    : undefined;
+  let registerRows =
+    includeDetailed && !options.forPreview
+      ? await timer.measure(
+          'fetch register rows',
+          () => fetchDigestRegisterRows(effectiveRecipient, scope, dateRange),
+          (rows) => `rows=${rows.length}`
+        )
+      : undefined;
 
   let attachmentIncludes = effectiveIncludes;
   if (includeDetailed && registerRows !== undefined && registerRows.length === 0) {
@@ -432,15 +435,17 @@ export async function buildMisEmailPayload(
     attachmentIncludes = { ...effectiveIncludes, includeDetailed: false };
   }
 
-  // Morning mail (yesterday 4cd6dee): open Excel only → open-only pull + CRM totals overlay.
-  // Full YTD corpus only when traceable Excel is attached.
+  // Preview: summary dashboard counts only (no call-level corpus).
+  // Send: overlay opens from Excel/trace when those attachments are on.
   const needsFullTraceCorpus = includeTraceableExport;
   const needsOpenOverlay =
+    !options.forPreview &&
     (bodySectionIds.includes('regional_performance') ||
       bodySectionIds.includes('branch_performance')) &&
-    (includeOpenCallsExport || includeTraceableExport || !!options.forPreview);
+    (includeOpenCallsExport || includeTraceableExport);
   const needsTracePayload =
-    includeTraceableExport || includeOpenCallsExport || needsOpenOverlay;
+    !options.forPreview &&
+    (includeTraceableExport || includeOpenCallsExport || needsOpenOverlay);
   const skipRepairDone =
     !!options.forPreview || !(includeTraceableExport || includeOpenCallsExport);
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Midnight calls sync — 00:00 IST start, full Jan→yesterday, verify 3× vs CRM, mail only after 03:00.
+# Midnight calls sync — 00:00 IST start, full Jan→yesterday, verify 3× vs CRM, mail at 07:00 IST (SUCCESS or FAILED).
 #
 # Cron: 0 0 * * * …/nightly-ytd-calls-export.sh >> …/nightly-ytd-export-cron.log
 set -euo pipefail
@@ -27,7 +27,19 @@ if [[ -f "$LOCK_FILE" ]]; then
 fi
 
 echo $$ > "$LOCK_FILE"
-trap 'rm -f "$LOCK_FILE"' EXIT
+FAIL_REASON=""
+FAIL_ALERTED=0
+# shellcheck source=midnight-regional-fail-mail.inc.sh
+source "${SCRIPT_DIR}/midnight-regional-fail-mail.inc.sh"
+
+on_exit() {
+  local rc=$?
+  rm -f "$LOCK_FILE"
+  if [[ "$rc" -ne 0 && "$FAIL_ALERTED" != "1" ]]; then
+    send_midnight_regional_fail_mail "${FAIL_REASON:-nightly-ytd-calls-export.sh exited ${rc}}"
+  fi
+}
+trap on_exit EXIT
 
 if [[ -f "${INSTALL_ROOT}/shared/.env.sync-worker" ]]; then
   set -a
@@ -66,14 +78,15 @@ source "${SCRIPT_DIR}/vps-cron-gate.sh"
 vps_cron_gate_allow nightly_ytd_calls_export || exit 0
 
 if ! command -v npm >/dev/null 2>&1; then
-  echo "FATAL: npm not found on PATH" >&2
+  FAIL_REASON="npm not found on PATH"
+  echo "FATAL: ${FAIL_REASON}" >&2
   exit 1
 fi
 
 DEADLINE_HOUR="${MIDNIGHT_SYNC_DEADLINE_HOUR:-7}"
 DEADLINE_MIN="${MIDNIGHT_SYNC_DEADLINE_MIN:-0}"
 RETRY_SLEEP_SEC="${MIDNIGHT_SYNC_RETRY_SLEEP_SEC:-600}"
-MAIL_EARLIEST_HOUR="${MIDNIGHT_MAIL_EARLIEST_HOUR:-3}"
+MAIL_EARLIEST_HOUR="${MIDNIGHT_MAIL_EARLIEST_HOUR:-7}"
 VERIFY_PASSES="${MIDNIGHT_VERIFY_PASSES:-3}"
 
 past_deadline() {
@@ -131,7 +144,8 @@ while true; do
     break
   fi
   if past_deadline; then
-    echo "FATAL: midnight calls sync failed — past deadline" >&2
+    FAIL_REASON="midnight calls sync failed — past ${DEADLINE_HOUR}:$(printf '%02d' "$DEADLINE_MIN") IST deadline"
+    echo "FATAL: ${FAIL_REASON}" >&2
     exit 1
   fi
   echo "=== midnight calls sync retry in ${RETRY_SLEEP_SEC}s ==="
@@ -139,17 +153,23 @@ while true; do
   attempt=$((attempt + 1))
 done
 
-echo "=== CRM verify ${VERIFY_PASSES}× consecutive (hot must match CRM exactly) ==="
+echo "=== CRM verify ${VERIFY_PASSES}× consecutive (hot totals/months/sample must match CRM) ==="
 consecutive=0
 while [[ "$consecutive" -lt "$VERIFY_PASSES" ]]; do
   if run_verify; then
     consecutive=$((consecutive + 1))
     echo "=== verify pass ${consecutive}/${VERIFY_PASSES} ==="
+    if [[ "$consecutive" -lt "$VERIFY_PASSES" ]] && past_deadline; then
+      FAIL_REASON="verify only ${consecutive}/${VERIFY_PASSES} at ${DEADLINE_HOUR}:$(printf '%02d' "$DEADLINE_MIN") IST — sending FAILED"
+      echo "FATAL: ${FAIL_REASON}" >&2
+      exit 1
+    fi
   else
     consecutive=0
     echo "=== verify FAIL — repair and retry (need ${VERIFY_PASSES} consecutive passes) ===" >&2
     if past_deadline; then
-      echo "FATAL: verify failed past deadline — mail blocked" >&2
+      FAIL_REASON="verify failed past ${DEADLINE_HOUR}:$(printf '%02d' "$DEADLINE_MIN") IST deadline — regional midnight mail blocked"
+      echo "FATAL: ${FAIL_REASON}" >&2
       exit 1
     fi
     midnight_repair
@@ -167,6 +187,7 @@ echo "=== midnight CRM delta mail (after sync + ${VERIFY_PASSES}× verify, ≥${
 if bash "${SCRIPT_DIR}/midnight-crm-delta-mail.sh"; then
   echo "=== midnight-crm-delta complete ==="
 else
-  echo "FATAL: midnight CRM delta mail failed" >&2
+  FAIL_REASON="verify OK but WRL Midnight MIS Regional mail send failed"
+  echo "FATAL: ${FAIL_REASON}" >&2
   exit 1
 fi

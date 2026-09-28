@@ -62,13 +62,13 @@ export const VPS_CRON_CATALOG: readonly VpsCronJobDef[] = [
   {
     id: 'nightly_ytd_calls_export',
     label: 'Midnight calls sync',
-    schedule: '00:00 IST daily — overnight sync retries until 05:00, then CRM delta mail',
+    schedule: '00:00 IST daily — sync until 07:00, then SUCCESS or FAILED regional mail',
     script: 'nightly-ytd-calls-export.sh',
   },
   {
     id: 'midnight_crm_delta_mail',
     label: 'Midnight CRM delta mail fallback',
-    schedule: '05:30 IST daily — mail only if verify marker exists (never without CRM check)',
+    schedule: '07:05 IST — SUCCESS/FAILED if 07:00 job did not mail',
     script: 'midnight-crm-delta-mail-fallback.sh',
   },
   {

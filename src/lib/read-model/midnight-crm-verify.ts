@@ -82,6 +82,15 @@ export type MidnightCrmVerifyResult = {
   sampleMismatches: number;
 };
 
+/** Totals / month gaps / TRN sample catch 405 and incomplete catch-up. Status-bucket drift vs live CRM is expected after freeze (do not block the morning marker). */
+export function isMidnightCrmVerifyOk(input: {
+  totalsMatch: boolean;
+  monthGaps: number;
+  sampleMismatches: number;
+}): boolean {
+  return input.totalsMatch && input.monthGaps === 0 && input.sampleMismatches === 0;
+}
+
 /** YTD hot vs live CRM — totals, per-month counts, status buckets, TRN sample. */
 export async function runMidnightCrmVerify(asOf: string): Promise<MidnightCrmVerifyResult> {
   const start = YTD_START();
@@ -159,8 +168,11 @@ export async function runMidnightCrmVerify(asOf: string): Promise<MidnightCrmVer
 
   const crmTotal = n(crm.total);
   const totalsMatch = hot.total === crmTotal;
-  const ok =
-    totalsMatch && monthGaps === 0 && statusDeltas === 0 && sample.mismatches === 0;
+  const ok = isMidnightCrmVerifyOk({
+    totalsMatch,
+    monthGaps,
+    sampleMismatches: sample.mismatches,
+  });
 
   console.log(
     `[midnight-verify] ${start}..${asOf} hot=${hot.total} crm=${crmTotal} monthGaps=${monthGaps} statusDelta=${statusDeltas} sampleMismatch=${sample.mismatches} → ${ok ? 'OK' : 'FAIL'}`

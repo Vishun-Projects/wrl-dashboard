@@ -9,6 +9,7 @@ import {
   midnightCrmDiffSnapshots,
   midnightCrmSnapshotFromRows,
   midnightCrmSubtractCounts,
+  midnightRegionalMailSubject,
 } from '@/modules/mis-email/services/midnight-crm-delta';
 
 function row(overrides: Record<string, unknown>): Record<string, unknown> {
@@ -31,6 +32,14 @@ function row(overrides: Record<string, unknown>): Record<string, unknown> {
 }
 
 describe('midnight-crm-delta', () => {
+  it('07:00 subject starts with SUCCESS or FAILED', () => {
+    expect(midnightRegionalMailSubject('2026-09-27', 'SUCCESS')).toBe(
+      'SUCCESS: WRL Midnight MIS Regional — 2026-09-27'
+    );
+    expect(midnightRegionalMailSubject('2026-09-27', 'FAILED')).toBe(
+      'FAILED: WRL Midnight MIS Regional — 2026-09-27'
+    );
+  });
   it('strict call key uses vtrnno', () => {
     expect(midnightCrmCallKey(row({ vtrnno: '25I03443' }))).toBe('25I03443');
   });

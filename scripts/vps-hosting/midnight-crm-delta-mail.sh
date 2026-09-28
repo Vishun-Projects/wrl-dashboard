@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Midnight CRM delta MAIL — runs after successful midnight sync (or 05:30 fallback cron).
+# Midnight CRM delta MAIL — after successful midnight sync (or 07:05 fallback cron).
 # Always attempts the report mail when invoked.
 set -euo pipefail
 

@@ -12,8 +12,8 @@
 | `subcontractor_stock` | `*/15` daily | `subcontractor-stock-cron.sh` or `mail-scheduler.sh` | Yes (~`send_time_ist`) | `subcontractor-stock` |
 | `cancelled_call_digest` | 16:00 via evening-ops | `evening-ops-sequencer.sh` | Yes (probe → ops; prod recipients when not `forceTo`) | `mis-email` + `cancelled-calls` |
 | `evening_ops_sequencer` | 16:00 daily | `evening-ops-sequencer.sh` | Yes (status + probes) | `scripts/vps-hosting` |
-| `nightly_ytd_calls_export` | 00:00 daily | `nightly-ytd-calls-export.sh` | May (midnight CRM delta) | `mis-email` |
-| `midnight_crm_delta_mail` | 05:30 fallback | `midnight-crm-delta-mail-fallback.sh` | Yes | `mis-email` |
+| `nightly_ytd_calls_export` | 00:00 daily | `nightly-ytd-calls-export.sh` | Yes at 07:00 IST — `SUCCESS:` or `FAILED:` regional mail | `mis-email` |
+| `midnight_crm_delta_mail` | 07:05 fallback | `midnight-crm-delta-mail-fallback.sh` | Yes if 07:00 job did not mail | `mis-email` |
 | `midnight_crm_delta_watchdog` | 00:30 + 02:00 | `midnight-crm-delta-watchdog.sh` | Yes (alert) | `mis-email` |
 | `sync_worker_health` | `*/15` | `sync-worker-health-watchdog.sh` | Yes (alert) | `sync` / lib |
 

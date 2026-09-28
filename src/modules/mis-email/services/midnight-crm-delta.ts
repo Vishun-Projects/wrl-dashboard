@@ -28,6 +28,15 @@ import { queryDigestRegisterExportFromPostgres } from '@/sql/read-model/register
 import { REGISTER_BULK_MAX_ROWS } from '@/sql/read-model/register-columns';
 
 export const MIDNIGHT_CRM_DELTA_DEFAULT_TO = 'vishunvishwakarma90211@gmail.com';
+
+/** Subject first word is SUCCESS or FAILED so 07:00 IST inbox scan is instant. */
+export function midnightRegionalMailSubject(
+  asOfDate: string,
+  outcome: 'SUCCESS' | 'FAILED'
+): string {
+  return `${outcome}: WRL Midnight MIS Regional — ${asOfDate}`;
+}
+
 export const MIDNIGHT_CRM_EXCLUDED_ACCOUNTS = ['cadbury', 'mondelez', 'coke', 'hccb'] as const;
 /** Midnight YTD export must not silently truncate (UI register cap is 100k). */
 export const MIDNIGHT_CRM_EXPORT_MAX_ROWS = Math.max(500_000, REGISTER_BULK_MAX_ROWS * 5);
@@ -810,7 +819,7 @@ export async function runMidnightCrmDeltaReport(options?: {
   assertMidnightCrmTallyParity({ rows: registerRows, ytd, emailCounts: ytd });
 
   const generatedAtIst = istNowLabel();
-  const subject = `WRL Midnight MIS Regional — ${asOfDate}`;
+  const subject = midnightRegionalMailSubject(asOfDate, 'SUCCESS');
   const html = buildMidnightCrmDeltaEmailHtml({
     dateRange,
     callType,
