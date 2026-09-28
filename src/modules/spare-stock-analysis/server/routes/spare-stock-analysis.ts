@@ -2,38 +2,42 @@ import { gunzipSync } from 'zlib';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
-import { MIS_UPLOAD_CHUNK_BYTES_MAX } from '@/modules/mis/client-import/services/upload-chunk-constants';
-import {
-  deleteUploadChunks,
-  purgeStaleUploadChunks,
-  readAssembledUpload,
-  storeUploadChunk,
-} from '@/modules/mis/client-import/services/upload-chunks';
 import { isGzipBuffer } from '@/modules/mis/client-import/services/upload-gzip';
-import { parseMb51Html } from '@/modules/spare-stock-analysis/server/parse-mb51-html';
 import {
   isPlantInScope,
   resolveAllowedSpareStockPlants,
 } from '@/modules/spare-stock-analysis/server/office-scope';
 import {
+  abortSpareStockStaging,
   fetchDefectiveCompressorReport,
   fetchSpareStockOptions,
   fetchSpareStockRows,
   fetchSpareStockSummary,
-  importSpareStockMovements,
-  previewSpareStockImport,
+  importSpareStockFromStaging,
+  insertSpareStockStagingRows,
+  previewSpareStockStaging,
+  purgeStaleSpareStockStaging,
   type SpareStockDashFilters,
 } from '@/modules/spare-stock-analysis/server/store';
-import {
-  SPARE_STOCK_CHUNK_SOURCE,
-  type SpareStockDbDupesChoice,
-  type SpareStockInFileDupesChoice,
+import type {
+  SpareStockDbDupesChoice,
+  SpareStockInFileDupesChoice,
+  SpareStockParsedRow,
+  SpareStockTxnType,
 } from '@/modules/spare-stock-analysis/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
-const MAX_HTML_BYTES = 32 * 1024 * 1024;
+const MAX_ROWS_JSON_BYTES = 8 * 1024 * 1024;
+const MAX_ROWS_PER_BATCH = 2000;
+const TXN_TYPES = new Set<SpareStockTxnType>([
+  'opening',
+  'receipt',
+  'issued',
+  'consumption',
+  'other',
+]);
 
 function inflateUpload(buffer: Buffer, contentEncoding: string | null): Buffer {
   const encoding = (contentEncoding ?? '').trim().toLowerCase();
@@ -80,6 +84,42 @@ function parseFilters(
   };
 }
 
+function isParsedRow(v: unknown): v is SpareStockParsedRow {
+  if (!v || typeof v !== 'object') return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.plant === 'string' &&
+    typeof r.matDoc === 'string' &&
+    (r.docDate === null || typeof r.docDate === 'string') &&
+    typeof r.postingDate === 'string' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(r.postingDate) &&
+    typeof r.material === 'string' &&
+    typeof r.materialDescription === 'string' &&
+    typeof r.location === 'string' &&
+    typeof r.uom === 'string' &&
+    typeof r.qty === 'number' &&
+    Number.isFinite(r.qty) &&
+    (r.lcAmount === null || (typeof r.lcAmount === 'number' && Number.isFinite(r.lcAmount))) &&
+    typeof r.mvt === 'string' &&
+    typeof r.mvtText === 'string' &&
+    typeof r.txnType === 'string' &&
+    TXN_TYPES.has(r.txnType as SpareStockTxnType) &&
+    typeof r.batch === 'string' &&
+    (r.entryDate === null || typeof r.entryDate === 'string') &&
+    typeof r.entryTime === 'string' &&
+    typeof r.sapUser === 'string' &&
+    typeof r.materialGroup === 'string' &&
+    typeof r.customer === 'string' &&
+    typeof r.headerText === 'string' &&
+    typeof r.callNo === 'string' &&
+    typeof r.matYr === 'string' &&
+    typeof r.orderNo === 'string' &&
+    typeof r.supplier === 'string' &&
+    typeof r.rowKey === 'string' &&
+    /^[0-9a-f]{64}$/.test(r.rowKey)
+  );
+}
+
 export async function GET(req: NextRequest) {
   try {
     const auth = await requireRbac(req, { pageId: 'spare_stock_analysis' });
@@ -120,53 +160,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-async function loadHtmlFromForm(
-  formData: FormData,
-  userId: string
-): Promise<{ originalName: string; html: string; uploadId: string | null } | NextResponse> {
-  const uploadId = String(formData.get('uploadId') ?? '').trim();
-  const contentEncoding = String(formData.get('contentEncoding') ?? '').trim() || null;
-
-  let originalName: string;
-  let raw: Buffer;
-
-  if (uploadId) {
-    if (!isUuid(uploadId)) {
-      return NextResponse.json({ error: 'Invalid uploadId' }, { status: 400 });
-    }
-    const assembled = await readAssembledUpload(uploadId, userId);
-    if ('status' in assembled) {
-      return NextResponse.json(assembled.body, { status: assembled.status });
-    }
-    if (assembled.sourceCode !== SPARE_STOCK_CHUNK_SOURCE) {
-      return NextResponse.json({ error: 'Wrong upload type' }, { status: 400 });
-    }
-    originalName = String(formData.get('fileName') ?? assembled.fileName).trim() || assembled.fileName;
-    raw = assembled.buffer;
-  } else {
-    const file = formData.get('file');
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: 'Missing file' }, { status: 400 });
-    }
-    originalName = String(formData.get('fileName') ?? file.name).trim() || file.name;
-    raw = Buffer.from(await file.arrayBuffer());
-  }
-
-  if (!isMb51Name(originalName)) {
-    return NextResponse.json({ error: 'Upload a .htm or .html MB51 report' }, { status: 400 });
-  }
-
-  const buffer = inflateUpload(raw, contentEncoding);
-  if (buffer.byteLength > MAX_HTML_BYTES) {
-    return NextResponse.json(
-      { error: `Decompressed file exceeds ${MAX_HTML_BYTES / (1024 * 1024)} MB limit` },
-      { status: 413 }
-    );
-  }
-
-  return { originalName, html: buffer.toString('utf8'), uploadId: uploadId || null };
-}
-
 export async function POST(req: NextRequest) {
   try {
     const auth = await requireRbac(req, { pageId: 'spare_stock_analysis' });
@@ -177,69 +170,74 @@ export async function POST(req: NextRequest) {
       formData = await req.formData();
     } catch {
       return NextResponse.json(
-        {
-          error:
-            'Upload too large for the server. Large files are split automatically — retry the import.',
-        },
+        { error: 'Upload too large for the server. Rows are sent in small batches — retry the import.' },
         { status: 413 }
       );
     }
 
     const action = String(formData.get('action') ?? 'preview').trim();
+    const uploadId = String(formData.get('uploadId') ?? '').trim();
 
     if (action === 'abort') {
-      const uploadId = String(formData.get('uploadId') ?? '').trim();
-      if (uploadId && isUuid(uploadId)) await deleteUploadChunks(uploadId);
+      if (uploadId && isUuid(uploadId)) await abortSpareStockStaging(uploadId);
       return NextResponse.json({ ok: true });
     }
 
-    if (action === 'chunk') {
-      void purgeStaleUploadChunks().catch(() => {});
-      const uploadId = String(formData.get('uploadId') ?? '').trim();
-      const chunkIndex = Number(formData.get('chunkIndex'));
-      const chunkTotal = Number(formData.get('chunkTotal'));
+    if (action === 'rows') {
+      void purgeStaleSpareStockStaging().catch(() => {});
+      if (!isUuid(uploadId)) {
+        return NextResponse.json({ error: 'Invalid uploadId' }, { status: 400 });
+      }
       const fileName = String(formData.get('fileName') ?? '').trim();
-      const chunk = formData.get('chunk');
-      if (!isUuid(uploadId) || !Number.isInteger(chunkIndex) || !Number.isInteger(chunkTotal)) {
-        return NextResponse.json(
-          { error: 'uploadId, chunkIndex, chunkTotal are required' },
-          { status: 400 }
-        );
-      }
-      if (chunkTotal < 1 || chunkIndex < 0 || chunkIndex >= chunkTotal) {
-        return NextResponse.json({ error: 'Invalid chunk index' }, { status: 400 });
-      }
       if (!fileName || !isMb51Name(fileName)) {
         return NextResponse.json({ error: 'Upload a .htm or .html MB51 report' }, { status: 400 });
       }
-      if (!(chunk instanceof Blob)) {
-        return NextResponse.json({ error: 'chunk is required' }, { status: 400 });
+      const skippedDelta = Math.max(0, Number(formData.get('skipped')) || 0);
+      const rowsPart = formData.get('rows');
+      if (!(rowsPart instanceof Blob)) {
+        return NextResponse.json({ error: 'rows is required' }, { status: 400 });
       }
-      if (chunk.size > MIS_UPLOAD_CHUNK_BYTES_MAX) {
-        return NextResponse.json({ error: 'Chunk exceeds size limit' }, { status: 413 });
+      const contentEncoding = String(formData.get('contentEncoding') ?? '').trim() || null;
+      const raw = Buffer.from(await rowsPart.arrayBuffer());
+      const buffer = inflateUpload(raw, contentEncoding);
+      if (buffer.byteLength > MAX_ROWS_JSON_BYTES) {
+        return NextResponse.json({ error: 'Row batch is too large' }, { status: 413 });
       }
-      await storeUploadChunk({
+      let parsedJson: unknown;
+      try {
+        parsedJson = JSON.parse(buffer.toString('utf8'));
+      } catch {
+        return NextResponse.json({ error: 'Invalid row batch JSON' }, { status: 400 });
+      }
+      if (!Array.isArray(parsedJson)) {
+        return NextResponse.json({ error: 'Row batch must be an array' }, { status: 400 });
+      }
+      if (parsedJson.length > MAX_ROWS_PER_BATCH) {
+        return NextResponse.json({ error: 'Row batch exceeds limit' }, { status: 400 });
+      }
+      const rows: SpareStockParsedRow[] = [];
+      for (const item of parsedJson) {
+        if (!isParsedRow(item)) {
+          return NextResponse.json({ error: 'Invalid row in batch' }, { status: 400 });
+        }
+        rows.push(item);
+      }
+      const totals = await insertSpareStockStagingRows({
         uploadId,
-        chunkIndex,
-        chunkTotal,
-        sourceCode: SPARE_STOCK_CHUNK_SOURCE,
         fileName,
         uploadedBy: auth.userId,
-        data: Buffer.from(await chunk.arrayBuffer()),
+        rows,
+        skippedDelta,
       });
-      return NextResponse.json({ ok: true, chunkIndex, chunkTotal });
+      return NextResponse.json({ ok: true, ...totals });
     }
 
-    const loaded = await loadHtmlFromForm(formData, auth.userId);
-    if (loaded instanceof NextResponse) return loaded;
+    if (!isUuid(uploadId)) {
+      return NextResponse.json({ error: 'Invalid uploadId' }, { status: 400 });
+    }
 
-    const parsed = parseMb51Html(loaded.html);
     if (action !== 'commit') {
-      const preview = await previewSpareStockImport({
-        fileName: loaded.originalName,
-        rows: parsed.rows,
-        skipped: parsed.skipped,
-      });
+      const preview = await previewSpareStockStaging(uploadId);
       return NextResponse.json(preview);
     }
 
@@ -249,15 +247,12 @@ export async function POST(req: NextRequest) {
     const dbDupes: SpareStockDbDupesChoice =
       dbRaw === 'replace' || dbRaw === 'keep' ? dbRaw : 'skip';
 
-    const result = await importSpareStockMovements({
-      fileName: loaded.originalName,
+    const result = await importSpareStockFromStaging({
+      uploadId,
       uploadedBy: auth.userId,
-      rows: parsed.rows,
-      skipped: parsed.skipped,
       inFileDupes,
       dbDupes,
     });
-    if (loaded.uploadId) await deleteUploadChunks(loaded.uploadId);
     return NextResponse.json(result);
   } catch (err) {
     console.error('[spare-stock-analysis POST]', err);

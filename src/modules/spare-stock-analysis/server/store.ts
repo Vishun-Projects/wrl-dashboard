@@ -1,11 +1,11 @@
 import { withAppClient } from '@/lib/read-model/db';
 import { assignResolvedCalls, extractCallNumbers } from '@/modules/spare-stock-analysis/server/call-no';
-import { groupByRowKey, keyedCopy, toDupPreview } from '@/modules/spare-stock-analysis/server/import-classify';
 import { DEFECTIVE_COMPRESSOR_MATERIAL } from '@/modules/spare-stock-analysis/server/txn-type';
 import type {
   DefectiveReturnResponse,
   SpareStockBreakdownRow,
   SpareStockDbDupesChoice,
+  SpareStockDupPreviewRow,
   SpareStockImportPreview,
   SpareStockImportResponse,
   SpareStockInFileDupesChoice,
@@ -175,200 +175,396 @@ async function ensureResolvedCallNos(client: Queryable): Promise<void> {
   await writeResolvedCallNos(client, rows);
 }
 
-async function existingRowKeys(keys: string[]): Promise<Set<string>> {
-  const found = new Set<string>();
-  if (keys.length === 0) return found;
-  return withAppClient(async (client) => {
-    const chunkSize = 1000;
-    for (let offset = 0; offset < keys.length; offset += chunkSize) {
-      const chunk = keys.slice(offset, offset + chunkSize);
-      const { rows } = await client.query<{ row_key: string }>(
-        `SELECT row_key FROM spare_stock_movements WHERE row_key = ANY($1::text[])`,
-        [chunk]
-      );
-      for (const r of rows) found.add(r.row_key);
-    }
-    return found;
-  });
+const STAGING_DDL = `
+CREATE TABLE IF NOT EXISTS spare_stock_import_uploads (
+  upload_id             uuid PRIMARY KEY,
+  file_name             text NOT NULL,
+  uploaded_by           uuid,
+  skipped               integer NOT NULL DEFAULT 0,
+  parsed                integer NOT NULL DEFAULT 0,
+  created_at            timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS spare_stock_import_staging (
+  upload_id             uuid NOT NULL REFERENCES spare_stock_import_uploads(upload_id) ON DELETE CASCADE,
+  seq                   integer NOT NULL,
+  row_key               text NOT NULL,
+  payload               jsonb NOT NULL,
+  PRIMARY KEY (upload_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_spare_stock_import_staging_row_key
+  ON spare_stock_import_staging (upload_id, row_key);
+`;
+
+const REPLACE_CONFLICT = `ON CONFLICT (row_key) DO UPDATE SET
+  import_id = EXCLUDED.import_id,
+  plant = EXCLUDED.plant,
+  mat_doc = EXCLUDED.mat_doc,
+  doc_date = EXCLUDED.doc_date,
+  posting_date = EXCLUDED.posting_date,
+  material = EXCLUDED.material,
+  material_description = EXCLUDED.material_description,
+  location = EXCLUDED.location,
+  uom = EXCLUDED.uom,
+  qty = EXCLUDED.qty,
+  lc_amount = EXCLUDED.lc_amount,
+  mvt = EXCLUDED.mvt,
+  mvt_text = EXCLUDED.mvt_text,
+  txn_type = EXCLUDED.txn_type,
+  batch = EXCLUDED.batch,
+  entry_date = EXCLUDED.entry_date,
+  entry_time = EXCLUDED.entry_time,
+  sap_user = EXCLUDED.sap_user,
+  material_group = EXCLUDED.material_group,
+  customer = EXCLUDED.customer,
+  header_text = EXCLUDED.header_text,
+  call_no = EXCLUDED.call_no,
+  mat_yr = EXCLUDED.mat_yr,
+  order_no = EXCLUDED.order_no,
+  supplier = EXCLUDED.supplier`;
+
+function movementSelectFromPayload(rowKeySql: string, importIdPh: string): string {
+  return `
+    ${rowKeySql},
+    ${importIdPh},
+    p.payload->>'plant',
+    NULLIF(p.payload->>'matDoc', ''),
+    NULLIF(p.payload->>'docDate', '')::date,
+    (p.payload->>'postingDate')::date,
+    NULLIF(p.payload->>'material', ''),
+    NULLIF(p.payload->>'materialDescription', ''),
+    NULLIF(p.payload->>'location', ''),
+    NULLIF(p.payload->>'uom', ''),
+    COALESCE((p.payload->>'qty')::numeric, 0),
+    (p.payload->>'lcAmount')::numeric,
+    p.payload->>'mvt',
+    NULLIF(p.payload->>'mvtText', ''),
+    p.payload->>'txnType',
+    NULLIF(p.payload->>'batch', ''),
+    NULLIF(p.payload->>'entryDate', '')::date,
+    NULLIF(p.payload->>'entryTime', ''),
+    NULLIF(p.payload->>'sapUser', ''),
+    NULLIF(p.payload->>'materialGroup', ''),
+    NULLIF(p.payload->>'customer', ''),
+    NULLIF(p.payload->>'headerText', ''),
+    NULLIF(p.payload->>'callNo', ''),
+    NULLIF(p.payload->>'matYr', ''),
+    NULLIF(p.payload->>'orderNo', ''),
+    NULLIF(p.payload->>'supplier', '')
+  `;
 }
 
-export async function previewSpareStockImport(params: {
-  fileName: string;
-  rows: SpareStockParsedRow[];
-  skipped: number;
-}): Promise<SpareStockImportPreview> {
-  const groups = groupByRowKey(params.rows);
-  const firsts: SpareStockParsedRow[] = [];
-  const inFileGroups = [];
-  let extraCount = 0;
-  for (const g of groups.values()) {
-    firsts.push(g[0]);
-    if (g.length > 1) {
-      extraCount += g.length - 1;
-      inFileGroups.push(toDupPreview(g[0], g.length));
-    }
-  }
-
-  const existing = await existingRowKeys(firsts.map((r) => r.rowKey));
-  const inDbGroups = firsts.filter((r) => existing.has(r.rowKey)).map((r) => toDupPreview(r, 1));
-
+function dupPreviewFromPayload(payload: Record<string, unknown>, copies: number): SpareStockDupPreviewRow {
   return {
-    kind: 'preview',
-    fileName: params.fileName,
-    parsed: params.rows.length,
-    skipped: params.skipped,
-    newCount: firsts.length - inDbGroups.length,
-    inFile: { extraCount, groups: inFileGroups },
-    inDb: { count: inDbGroups.length, groups: inDbGroups.slice(0, 40) },
+    plant: String(payload.plant ?? ''),
+    postingDate: String(payload.postingDate ?? ''),
+    matDoc: String(payload.matDoc ?? ''),
+    material: String(payload.material ?? ''),
+    materialDescription: String(payload.materialDescription ?? ''),
+    qty: Number(payload.qty) || 0,
+    mvt: String(payload.mvt ?? ''),
+    supplier: String(payload.supplier ?? ''),
+    callNo: String(payload.callNo ?? ''),
+    copies,
   };
 }
 
-function rowValues(r: SpareStockParsedRow, importId: string): unknown[] {
-  return [
-    r.rowKey,
-    importId,
-    r.plant,
-    r.matDoc || null,
-    r.docDate,
-    r.postingDate,
-    r.material || null,
-    r.materialDescription || null,
-    r.location || null,
-    r.uom || null,
-    r.qty,
-    r.lcAmount,
-    r.mvt,
-    r.mvtText || null,
-    r.txnType,
-    r.batch || null,
-    r.entryDate,
-    r.entryTime || null,
-    r.sapUser || null,
-    r.materialGroup || null,
-    r.customer || null,
-    r.headerText || null,
-    r.callNo || null,
-    r.matYr || null,
-    r.orderNo || null,
-    r.supplier || null,
-  ];
-}
-
-async function insertMovementBatch(
-  client: { query: (sql: string, values?: unknown[]) => Promise<{ rowCount?: number | null }> },
-  importId: string,
-  rows: SpareStockParsedRow[],
-  onConflict: 'nothing' | 'replace'
-): Promise<number> {
-  if (rows.length === 0) return 0;
-  let inserted = 0;
-  const batchSize = 400;
-  const conflictSql =
-    onConflict === 'replace'
-      ? `ON CONFLICT (row_key) DO UPDATE SET
-          import_id = EXCLUDED.import_id,
-          plant = EXCLUDED.plant,
-          mat_doc = EXCLUDED.mat_doc,
-          doc_date = EXCLUDED.doc_date,
-          posting_date = EXCLUDED.posting_date,
-          material = EXCLUDED.material,
-          material_description = EXCLUDED.material_description,
-          location = EXCLUDED.location,
-          uom = EXCLUDED.uom,
-          qty = EXCLUDED.qty,
-          lc_amount = EXCLUDED.lc_amount,
-          mvt = EXCLUDED.mvt,
-          mvt_text = EXCLUDED.mvt_text,
-          txn_type = EXCLUDED.txn_type,
-          batch = EXCLUDED.batch,
-          entry_date = EXCLUDED.entry_date,
-          entry_time = EXCLUDED.entry_time,
-          sap_user = EXCLUDED.sap_user,
-          material_group = EXCLUDED.material_group,
-          customer = EXCLUDED.customer,
-          header_text = EXCLUDED.header_text,
-          call_no = EXCLUDED.call_no,
-          mat_yr = EXCLUDED.mat_yr,
-          order_no = EXCLUDED.order_no,
-          supplier = EXCLUDED.supplier`
-      : 'ON CONFLICT (row_key) DO NOTHING';
-
-  for (let offset = 0; offset < rows.length; offset += batchSize) {
-    const chunk = rows.slice(offset, offset + batchSize);
-    const values: unknown[] = [];
-    const placeholders: string[] = [];
-    let i = 1;
-    for (const r of chunk) {
-      placeholders.push(
-        `($${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++})`
-      );
-      values.push(...rowValues(r, importId));
-    }
-    const res = await client.query(
-      `
-      INSERT INTO spare_stock_movements (${INSERT_COLS})
-      VALUES ${placeholders.join(',')}
-      ${conflictSql}
-      `,
-      values
-    );
-    inserted += res.rowCount ?? 0;
+async function ensureStaging(client: Queryable): Promise<void> {
+  for (const sql of STAGING_DDL.split(';').map((s) => s.trim()).filter(Boolean)) {
+    await client.query(sql);
   }
-  return inserted;
 }
 
-export async function importSpareStockMovements(params: {
+export async function purgeStaleSpareStockStaging(): Promise<void> {
+  await withAppClient(async (client) => {
+    await ensureStaging(client);
+    await client.query(
+      `DELETE FROM spare_stock_import_uploads WHERE created_at < now() - interval '24 hours'`
+    );
+  });
+}
+
+export async function abortSpareStockStaging(uploadId: string): Promise<void> {
+  await withAppClient(async (client) => {
+    await ensureStaging(client);
+    await client.query(`DELETE FROM spare_stock_import_uploads WHERE upload_id = $1`, [uploadId]);
+  });
+}
+
+export async function insertSpareStockStagingRows(params: {
+  uploadId: string;
   fileName: string;
   uploadedBy: string | null;
   rows: SpareStockParsedRow[];
-  skipped: number;
+  skippedDelta: number;
+}): Promise<{ parsed: number; skipped: number }> {
+  const { uploadId, fileName, uploadedBy, rows, skippedDelta } = params;
+  return withAppClient(async (client) => {
+    await ensureStaging(client);
+    await client.query(
+      `
+      INSERT INTO spare_stock_import_uploads (upload_id, file_name, uploaded_by, skipped, parsed)
+      VALUES ($1, $2, $3, 0, 0)
+      ON CONFLICT (upload_id) DO NOTHING
+      `,
+      [uploadId, fileName, uploadedBy]
+    );
+
+    const { rows: maxRows } = await client.query<{ n: string }>(
+      `SELECT COALESCE(MAX(seq), 0)::text AS n FROM spare_stock_import_staging WHERE upload_id = $1`,
+      [uploadId]
+    );
+    let seq = Number(maxRows[0]?.n) || 0;
+    if (rows.length) {
+      const values: unknown[] = [];
+      const placeholders: string[] = [];
+      let i = 1;
+      for (const r of rows) {
+        seq += 1;
+        placeholders.push(`($${i++}::uuid, $${i++}::int, $${i++}::text, $${i++}::jsonb)`);
+        values.push(uploadId, seq, r.rowKey, JSON.stringify(r));
+      }
+      await client.query(
+        `
+        INSERT INTO spare_stock_import_staging (upload_id, seq, row_key, payload)
+        VALUES ${placeholders.join(',')}
+        `,
+        values
+      );
+    }
+
+    const { rows: totals } = await client.query<{ parsed: string; skipped: string }>(
+      `
+      UPDATE spare_stock_import_uploads
+      SET parsed = parsed + $2, skipped = skipped + $3
+      WHERE upload_id = $1
+      RETURNING parsed::text, skipped::text
+      `,
+      [uploadId, rows.length, skippedDelta]
+    );
+    return {
+      parsed: Number(totals[0]?.parsed) || 0,
+      skipped: Number(totals[0]?.skipped) || 0,
+    };
+  });
+}
+
+export async function previewSpareStockStaging(uploadId: string): Promise<SpareStockImportPreview> {
+  return withAppClient(async (client) => {
+    await ensureStaging(client);
+    const { rows: sessions } = await client.query<{
+      file_name: string;
+      parsed: number;
+      skipped: number;
+    }>(
+      `SELECT file_name, parsed, skipped FROM spare_stock_import_uploads WHERE upload_id = $1`,
+      [uploadId]
+    );
+    const session = sessions[0];
+    if (!session) throw new Error('Upload session expired. Parse the file again.');
+
+    const [extraRes, inFileRes, inDbCountRes, inDbSampleRes, distinctRes] = await Promise.all([
+      client.query<{ extra: string }>(
+        `
+        SELECT (COUNT(*) - COUNT(DISTINCT row_key))::text AS extra
+        FROM spare_stock_import_staging
+        WHERE upload_id = $1
+        `,
+        [uploadId]
+      ),
+      client.query<{ copies: string; payload: Record<string, unknown> }>(
+        `
+        SELECT COUNT(*)::text AS copies, (array_agg(payload ORDER BY seq))[1] AS payload
+        FROM spare_stock_import_staging
+        WHERE upload_id = $1
+        GROUP BY row_key
+        HAVING COUNT(*) > 1
+        ORDER BY COUNT(*) DESC
+        LIMIT 40
+        `,
+        [uploadId]
+      ),
+      client.query<{ n: string }>(
+        `
+        SELECT COUNT(DISTINCT s.row_key)::text AS n
+        FROM spare_stock_import_staging s
+        JOIN spare_stock_movements m ON m.row_key = s.row_key
+        WHERE s.upload_id = $1
+        `,
+        [uploadId]
+      ),
+      client.query<{ copies: string; payload: Record<string, unknown> }>(
+        `
+        SELECT 1::text AS copies, s.payload
+        FROM spare_stock_import_staging s
+        JOIN spare_stock_movements m ON m.row_key = s.row_key
+        WHERE s.upload_id = $1
+        ORDER BY s.seq
+        LIMIT 40
+        `,
+        [uploadId]
+      ),
+      client.query<{ n: string }>(
+        `
+        SELECT COUNT(DISTINCT row_key)::text AS n
+        FROM spare_stock_import_staging
+        WHERE upload_id = $1
+        `,
+        [uploadId]
+      ),
+    ]);
+
+    const extraCount = Number(extraRes.rows[0]?.extra) || 0;
+    const inDbCount = Number(inDbCountRes.rows[0]?.n) || 0;
+    const distinct = Number(distinctRes.rows[0]?.n) || 0;
+
+    return {
+      kind: 'preview',
+      fileName: session.file_name,
+      parsed: Number(session.parsed) || 0,
+      skipped: Number(session.skipped) || 0,
+      newCount: distinct - inDbCount,
+      inFile: {
+        extraCount,
+        groups: inFileRes.rows.map((r) => dupPreviewFromPayload(r.payload, Number(r.copies) || 0)),
+      },
+      inDb: {
+        count: inDbCount,
+        groups: inDbSampleRes.rows.map((r) => dupPreviewFromPayload(r.payload, 1)),
+      },
+    };
+  });
+}
+
+export async function importSpareStockFromStaging(params: {
+  uploadId: string;
+  uploadedBy: string | null;
   inFileDupes: SpareStockInFileDupesChoice;
   dbDupes: SpareStockDbDupesChoice;
 }): Promise<SpareStockImportResponse> {
-  const { fileName, uploadedBy, rows, skipped, inFileDupes, dbDupes } = params;
-  const groups = groupByRowKey(rows);
-  const firsts: SpareStockParsedRow[] = [];
-  const extras: SpareStockParsedRow[] = [];
-  for (const g of groups.values()) {
-    firsts.push(g[0]);
-    if (inFileDupes === 'import') {
-      extras.push(...g.slice(1).map((row, i) => keyedCopy(row, i + 2)));
-    }
-  }
-
-  const existing = await existingRowKeys(firsts.map((r) => r.rowKey));
-  const fresh = firsts.filter((r) => !existing.has(r.rowKey));
-  const dbHits = firsts.filter((r) => existing.has(r.rowKey));
-
-  const toInsert: SpareStockParsedRow[] = [...fresh];
-  if (inFileDupes === 'import') toInsert.push(...extras);
-
-  const replaceRows = dbDupes === 'replace' ? dbHits : [];
-  if (dbDupes === 'keep') {
-    toInsert.push(...dbHits.map((r) => keyedCopy(r, 2)));
-  }
+  const { uploadId, uploadedBy, inFileDupes, dbDupes } = params;
 
   return withAppClient(async (client) => {
+    await ensureStaging(client);
     await client.query('BEGIN');
     try {
+      const { rows: sessions } = await client.query<{
+        file_name: string;
+        parsed: number;
+        skipped: number;
+      }>(
+        `SELECT file_name, parsed, skipped FROM spare_stock_import_uploads WHERE upload_id = $1 FOR UPDATE`,
+        [uploadId]
+      );
+      const session = sessions[0];
+      if (!session) throw new Error('Upload session expired. Parse the file again.');
+
+      const { rows: stats } = await client.query<{ extras: string; db_hits: string }>(
+        `
+        WITH firsts AS (
+          SELECT DISTINCT ON (row_key) row_key
+          FROM spare_stock_import_staging
+          WHERE upload_id = $1
+          ORDER BY row_key, seq
+        )
+        SELECT
+          (SELECT (COUNT(*) - COUNT(DISTINCT row_key))::text FROM spare_stock_import_staging WHERE upload_id = $1) AS extras,
+          (
+            SELECT COUNT(*)::text FROM firsts f
+            JOIN spare_stock_movements m ON m.row_key = f.row_key
+          ) AS db_hits
+        `,
+        [uploadId]
+      );
+      const extras = Number(stats[0]?.extras) || 0;
+      const dbHits = Number(stats[0]?.db_hits) || 0;
+
       const ins = await client.query<{ id: string }>(
         `
         INSERT INTO spare_stock_imports (file_name, uploaded_by, parsed, inserted, duplicates, skipped)
         VALUES ($1, $2, $3, 0, 0, $4)
         RETURNING id
         `,
-        [fileName, uploadedBy, rows.length, skipped]
+        [session.file_name, uploadedBy, session.parsed, session.skipped]
       );
       const importId = ins.rows[0]?.id;
       if (!importId) throw new Error('Failed to create import row');
 
-      const insertedNew = await insertMovementBatch(client, importId, toInsert, 'nothing');
-      const replaced = await insertMovementBatch(client, importId, replaceRows, 'replace');
+      const numbered = `
+        WITH p AS (
+          SELECT payload, row_key, ROW_NUMBER() OVER (PARTITION BY row_key ORDER BY seq) AS rn
+          FROM spare_stock_import_staging
+          WHERE upload_id = $1
+        )
+      `;
+
+      const fresh = await client.query(
+        `
+        ${numbered}
+        INSERT INTO spare_stock_movements (${INSERT_COLS})
+        SELECT ${movementSelectFromPayload('p.row_key', '$2')}
+        FROM p
+        WHERE p.rn = 1
+          AND NOT EXISTS (SELECT 1 FROM spare_stock_movements m WHERE m.row_key = p.row_key)
+        ON CONFLICT (row_key) DO NOTHING
+        `,
+        [uploadId, importId]
+      );
+
+      let extraInserted = 0;
+      if (inFileDupes === 'import') {
+        const extraRes = await client.query(
+          `
+          ${numbered}
+          INSERT INTO spare_stock_movements (${INSERT_COLS})
+          SELECT ${movementSelectFromPayload(`p.row_key || '#' || p.rn::text`, '$2')}
+          FROM p
+          WHERE p.rn > 1
+          ON CONFLICT (row_key) DO NOTHING
+          `,
+          [uploadId, importId]
+        );
+        extraInserted = extraRes.rowCount ?? 0;
+      }
+
+      let replaced = 0;
+      if (dbDupes === 'replace') {
+        const rep = await client.query(
+          `
+          ${numbered}
+          INSERT INTO spare_stock_movements (${INSERT_COLS})
+          SELECT ${movementSelectFromPayload('p.row_key', '$2')}
+          FROM p
+          WHERE p.rn = 1
+            AND EXISTS (SELECT 1 FROM spare_stock_movements m WHERE m.row_key = p.row_key)
+          ${REPLACE_CONFLICT}
+          `,
+          [uploadId, importId]
+        );
+        replaced = rep.rowCount ?? 0;
+      }
+
+      let kept = 0;
+      if (dbDupes === 'keep') {
+        const keepRes = await client.query(
+          `
+          ${numbered}
+          INSERT INTO spare_stock_movements (${INSERT_COLS})
+          SELECT ${movementSelectFromPayload(`p.row_key || '#2'`, '$2')}
+          FROM p
+          WHERE p.rn = 1
+            AND EXISTS (SELECT 1 FROM spare_stock_movements m WHERE m.row_key = p.row_key)
+          ON CONFLICT (row_key) DO NOTHING
+          `,
+          [uploadId, importId]
+        );
+        kept = keepRes.rowCount ?? 0;
+      }
+
       await ensureResolvedCallNos(client);
-      const dbSkipped = dbDupes === 'skip' ? dbHits.length : 0;
-      const inFileImported = inFileDupes === 'import' ? extras.length : 0;
-      const duplicates =
-        (inFileDupes === 'skip' ? rows.length - firsts.length : 0) + dbSkipped;
+      const dbSkipped = dbDupes === 'skip' ? dbHits : 0;
+      const inFileImported = inFileDupes === 'import' ? extraInserted : 0;
+      const duplicates = (inFileDupes === 'skip' ? extras : 0) + dbSkipped;
+      const inserted = (fresh.rowCount ?? 0) + extraInserted + replaced + kept;
 
       await client.query(
         `
@@ -376,16 +572,17 @@ export async function importSpareStockMovements(params: {
         SET inserted = $2, duplicates = $3
         WHERE id = $1
         `,
-        [importId, insertedNew + replaced, duplicates]
+        [importId, inserted, duplicates]
       );
+      await client.query(`DELETE FROM spare_stock_import_uploads WHERE upload_id = $1`, [uploadId]);
       await client.query('COMMIT');
       return {
         kind: 'imported',
-        parsed: rows.length,
-        inserted: insertedNew + replaced,
+        parsed: Number(session.parsed) || 0,
+        inserted,
         duplicates,
-        skipped,
-        fileName,
+        skipped: Number(session.skipped) || 0,
+        fileName: session.file_name,
         inFileImported,
         dbSkipped,
         dbReplaced: replaced,

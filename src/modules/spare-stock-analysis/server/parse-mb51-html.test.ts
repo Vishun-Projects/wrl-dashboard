@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { assignResolvedCalls, extractCallNumbers } from '@/modules/spare-stock-analysis/server/call-no';
 import { groupByRowKey } from '@/modules/spare-stock-analysis/server/import-classify';
+import { parseMb51FileInBatches } from '@/modules/spare-stock-analysis/parse-mb51';
 import { parseMb51Html } from '@/modules/spare-stock-analysis/server/parse-mb51-html';
 import { computeStockKpis } from '@/modules/spare-stock-analysis/server/stock';
 import {
@@ -45,8 +46,8 @@ const SAMPLE = `<html><body><table class="list">
 </table></body></html>`;
 
 describe('MB51 spare stock parse + stock math', () => {
-  it('parses sample opening rows, maps 561, and closing equals opening 9', () => {
-    const { rows, skipped } = parseMb51Html(SAMPLE);
+  it('parses sample opening rows, maps 561, and closing equals opening 9', async () => {
+    const { rows, skipped } = await parseMb51Html(SAMPLE);
     expect(skipped).toBe(0);
     expect(rows).toHaveLength(3);
     expect(rows.map((r) => r.qty)).toEqual([1, 2, 6]);
@@ -117,5 +118,14 @@ describe('MB51 spare stock parse + stock math', () => {
     const grouped = groupByRowKey([rows[0], twin, rows[1]]);
     expect(grouped.get(rows[0].rowKey)?.length).toBe(2);
     expect([...grouped.values()].filter((g) => g.length > 1)).toHaveLength(1);
+
+    expect(rows[0].rowKey).toMatch(/^[0-9a-f]{64}$/);
+    const streamed: typeof rows = [];
+    const result = await parseMb51FileInBatches(new Blob([SAMPLE], { type: 'text/html' }), async (batch) => {
+      streamed.push(...batch);
+    });
+    expect(result).toEqual({ parsed: 3, skipped: 0 });
+    expect(streamed.map((r) => r.rowKey)).toEqual(rows.map((r) => r.rowKey));
+    expect(streamed.map((r) => r.qty)).toEqual([1, 2, 6]);
   });
 });

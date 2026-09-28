@@ -1,38 +1,20 @@
 import { gzipBlobForMisUpload } from '@/modules/mis/client-import/services/upload-gzip';
-import { MIS_UPLOAD_CHUNK_BYTES } from '@/modules/mis/client-import/services/upload-chunk-constants';
-import {
-  SPARE_STOCK_CHUNK_SOURCE,
-  type SpareStockDbDupesChoice,
-  type SpareStockInFileDupesChoice,
+import { parseMb51FileInBatches } from '@/modules/spare-stock-analysis/parse-mb51';
+import type {
+  SpareStockDbDupesChoice,
+  SpareStockInFileDupesChoice,
+  SpareStockParsedRow,
 } from '@/modules/spare-stock-analysis/types';
 
 export const SPARE_STOCK_API = '/api/report/spare-stock-analysis';
 
-/** Same-origin Vercel body cap is ~4.5 MB; stay under that including multipart. */
-export const SPARE_STOCK_CHUNK_BYTES = MIS_UPLOAD_CHUNK_BYTES;
-
-export type SpareStockWireUpload = {
-  kind: 'direct' | 'chunked';
+export type SpareStockSessionUpload = {
+  uploadId: string;
   fileName: string;
-  encoding: 'gzip' | null;
-  blob: Blob;
-  uploadId: string | null;
 };
 
-export function spareStockChunkRanges(
-  size: number,
-  chunkBytes = SPARE_STOCK_CHUNK_BYTES
-): Array<{ start: number; end: number }> {
-  if (size <= 0) return [];
-  const ranges: Array<{ start: number; end: number }> = [];
-  for (let start = 0; start < size; start += chunkBytes) {
-    ranges.push({ start, end: Math.min(size, start + chunkBytes) });
-  }
-  return ranges;
-}
-
-function isPayloadTooLarge(status: number, message: string): boolean {
-  return status === 413 || /payload.?too.?large|entity too large|function_payload/i.test(message);
+function isVercelWireLimit(message: string): boolean {
+  return /function_payload|payload.?too.?large|entity too large/i.test(message);
 }
 
 function flattenApiError(data: Record<string, unknown>, status: number): string {
@@ -58,16 +40,17 @@ export async function readSpareStockApiJson(res: Response): Promise<Record<strin
 
 function toUploadError(err: unknown): Error {
   const wrapped = err instanceof Error ? err : new Error(String(err));
-  if (wrapped.message === 'FUNCTION_PAYLOAD_TOO_LARGE' || isPayloadTooLarge(0, wrapped.message)) {
+  if (isVercelWireLimit(wrapped.message)) {
     return new Error('FUNCTION_PAYLOAD_TOO_LARGE');
   }
   return wrapped;
 }
 
-async function postForm(form: FormData): Promise<Record<string, unknown>> {
+async function postForm(formOrFactory: FormData | (() => FormData)): Promise<Record<string, unknown>> {
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
+      const form = typeof formOrFactory === 'function' ? formOrFactory() : formOrFactory;
       const res = await fetch(SPARE_STOCK_API, {
         method: 'POST',
         body: form,
@@ -75,7 +58,7 @@ async function postForm(form: FormData): Promise<Record<string, unknown>> {
       });
       const data = await readSpareStockApiJson(res);
       const rawErr = flattenApiError(data, res.status);
-      if (isPayloadTooLarge(res.status, rawErr)) {
+      if (isVercelWireLimit(rawErr)) {
         throw new Error('FUNCTION_PAYLOAD_TOO_LARGE');
       }
       if (!res.ok) throw new Error(rawErr);
@@ -92,92 +75,94 @@ async function postForm(form: FormData): Promise<Record<string, unknown>> {
   throw lastErr ?? new Error('Upload failed');
 }
 
-async function postChunks(
-  blob: Blob,
+function pct(bytesRead: number, fileBytes: number): string {
+  if (fileBytes <= 0) return '0';
+  return String(Math.min(99, Math.floor((bytesRead / fileBytes) * 100)));
+}
+
+async function postRowBatch(
+  uploadId: string,
   fileName: string,
-  encoding: 'gzip' | null,
-  onProgress?: (label: string) => void
-): Promise<string> {
-  const uploadId = crypto.randomUUID();
-  const ranges = spareStockChunkRanges(blob.size);
-  const chunkTotal = ranges.length;
-  for (let i = 0; i < ranges.length; i++) {
-    const range = ranges[i]!;
-    onProgress?.(`Uploading ${i + 1}/${chunkTotal}…`);
-    const form = new FormData();
-    form.set('action', 'chunk');
-    form.set('uploadId', uploadId);
-    form.set('chunkIndex', String(i));
-    form.set('chunkTotal', String(chunkTotal));
-    form.set('fileName', fileName);
-    form.set('sourceCode', SPARE_STOCK_CHUNK_SOURCE);
-    if (encoding) form.set('contentEncoding', encoding);
-    form.set('chunk', blob.slice(range.start, range.end), fileName);
-    await postForm(form);
-  }
-  return uploadId;
-}
-
-export async function prepareSpareStockWireUpload(
-  file: File,
-  onProgress?: (label: string) => void
-): Promise<SpareStockWireUpload> {
-  onProgress?.('Compressing…');
-  const { blob, encoding } = await gzipBlobForMisUpload(file);
-  if (blob.size <= SPARE_STOCK_CHUNK_BYTES) {
-    return { kind: 'direct', fileName: file.name, encoding, blob, uploadId: null };
-  }
-  const uploadId = await postChunks(blob, file.name, encoding, onProgress);
-  return { kind: 'chunked', fileName: file.name, encoding, blob, uploadId };
-}
-
-function importForm(
-  upload: SpareStockWireUpload,
-  action: 'preview' | 'commit',
-  choices?: { inFileDupes: SpareStockInFileDupesChoice; dbDupes: SpareStockDbDupesChoice }
-): FormData {
-  const form = new FormData();
-  form.set('action', action);
-  form.set('fileName', upload.fileName);
-  if (upload.encoding) form.set('contentEncoding', upload.encoding);
-  if (choices) {
-    form.set('inFileDupes', choices.inFileDupes);
-    form.set('dbDupes', choices.dbDupes);
-  }
-  if (upload.uploadId) {
-    form.set('uploadId', upload.uploadId);
-    return form;
-  }
-  form.set('file', upload.blob, upload.fileName);
-  return form;
-}
-
-export async function postSpareStockImport(
-  upload: SpareStockWireUpload,
-  action: 'preview' | 'commit',
-  choices?: { inFileDupes: SpareStockInFileDupesChoice; dbDupes: SpareStockDbDupesChoice },
-  onProgress?: (label: string) => void
-): Promise<Record<string, unknown>> {
-  onProgress?.(action === 'preview' ? 'Checking file…' : 'Importing…');
+  rows: SpareStockParsedRow[],
+  skippedDelta: number
+): Promise<void> {
+  const json = new Blob([JSON.stringify(rows)], { type: 'application/json' });
+  const { blob, encoding } = await gzipBlobForMisUpload(json);
   try {
-    return await postForm(importForm(upload, action, choices));
+    await postForm(() => {
+      const form = new FormData();
+      form.set('action', 'rows');
+      form.set('uploadId', uploadId);
+      form.set('fileName', fileName);
+      form.set('skipped', String(skippedDelta));
+      if (encoding) form.set('contentEncoding', encoding);
+      form.set('rows', blob, 'rows.json');
+      return form;
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (upload.kind === 'direct' && msg === 'FUNCTION_PAYLOAD_TOO_LARGE') {
-      upload.kind = 'chunked';
-      upload.uploadId = await postChunks(upload.blob, upload.fileName, upload.encoding, onProgress);
-      onProgress?.(action === 'preview' ? 'Checking file…' : 'Importing…');
-      return postForm(importForm(upload, action, choices));
-    }
-    if (msg === 'FUNCTION_PAYLOAD_TOO_LARGE') {
-      throw new Error('File is too large to import. Export a shorter MB51 date range.');
+    if (rows.length > 1 && (msg === 'FUNCTION_PAYLOAD_TOO_LARGE' || /too large/i.test(msg))) {
+      const mid = Math.ceil(rows.length / 2);
+      await postRowBatch(uploadId, fileName, rows.slice(0, mid), skippedDelta);
+      await postRowBatch(uploadId, fileName, rows.slice(mid), 0);
+      return;
     }
     throw err;
   }
 }
 
-export async function abortSpareStockUpload(upload: SpareStockWireUpload): Promise<void> {
-  if (!upload.uploadId) return;
+export async function prepareSpareStockSessionUpload(
+  file: File,
+  onProgress?: (label: string) => void
+): Promise<SpareStockSessionUpload> {
+  const uploadId = crypto.randomUUID();
+  const upload = { uploadId, fileName: file.name };
+  try {
+    onProgress?.('Parsing MB51…');
+    const result = await parseMb51FileInBatches(
+      file,
+      async (rows, skippedDelta, progress) => {
+        onProgress?.(
+          `Parsing ${pct(progress.bytesRead, progress.fileBytes)}% · ${progress.rows.toLocaleString()} rows…`
+        );
+        if (rows.length === 0 && skippedDelta === 0) return;
+        await postRowBatch(uploadId, file.name, rows, skippedDelta);
+      },
+      (progress) => {
+        onProgress?.(
+          `Parsing ${pct(progress.bytesRead, progress.fileBytes)}% · ${progress.rows.toLocaleString()} rows…`
+        );
+      }
+    );
+    if (result.parsed === 0 && result.skipped === 0) {
+      await postRowBatch(uploadId, file.name, [], 0);
+    }
+    return upload;
+  } catch (err) {
+    await abortSpareStockUpload(upload);
+    throw err;
+  }
+}
+
+export async function postSpareStockImport(
+  upload: SpareStockSessionUpload,
+  action: 'preview' | 'commit',
+  choices?: { inFileDupes: SpareStockInFileDupesChoice; dbDupes: SpareStockDbDupesChoice },
+  onProgress?: (label: string) => void
+): Promise<Record<string, unknown>> {
+  onProgress?.(action === 'preview' ? 'Checking rows…' : 'Importing…');
+  const form = new FormData();
+  form.set('action', action);
+  form.set('uploadId', upload.uploadId);
+  form.set('fileName', upload.fileName);
+  if (choices) {
+    form.set('inFileDupes', choices.inFileDupes);
+    form.set('dbDupes', choices.dbDupes);
+  }
+  return postForm(form);
+}
+
+export async function abortSpareStockUpload(upload: SpareStockSessionUpload): Promise<void> {
   const form = new FormData();
   form.set('action', 'abort');
   form.set('uploadId', upload.uploadId);

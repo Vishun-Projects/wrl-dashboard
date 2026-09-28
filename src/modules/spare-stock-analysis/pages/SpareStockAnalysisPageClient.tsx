@@ -14,10 +14,10 @@ import { toDateString, type ReportDateRange } from '@/modules/mis';
 import {
   abortSpareStockUpload,
   postSpareStockImport,
-  prepareSpareStockWireUpload,
+  prepareSpareStockSessionUpload,
   readSpareStockApiJson,
   SPARE_STOCK_API,
-  type SpareStockWireUpload,
+  type SpareStockSessionUpload,
 } from '@/modules/spare-stock-analysis/upload-client';
 import type {
   DefectiveReturnResponse,
@@ -102,7 +102,7 @@ export default function SpareStockAnalysisPageClient() {
   const [uploading, setUploading] = useState(false);
   const [uploadLabel, setUploadLabel] = useState('Importing…');
   const [fileName, setFileName] = useState('');
-  const [pendingUpload, setPendingUpload] = useState<SpareStockWireUpload | null>(null);
+  const [pendingUpload, setPendingUpload] = useState<SpareStockSessionUpload | null>(null);
   const [preview, setPreview] = useState<SpareStockImportPreview | null>(null);
   const [inFileDupes, setInFileDupes] = useState<SpareStockInFileDupesChoice>('skip');
   const [dbDupes, setDbDupes] = useState<SpareStockDbDupesChoice>('skip');
@@ -193,10 +193,10 @@ export default function SpareStockAnalysisPageClient() {
     if (!file) return;
     setFileName(file.name);
     setUploading(true);
-    setUploadLabel('Compressing…');
-    let upload: SpareStockWireUpload | null = null;
+    setUploadLabel('Parsing MB51…');
+    let upload: SpareStockSessionUpload | null = null;
     try {
-      upload = await prepareSpareStockWireUpload(file, setUploadLabel);
+      upload = await prepareSpareStockSessionUpload(file, setUploadLabel);
       const data = await postSpareStockImport(upload, 'preview', undefined, setUploadLabel);
       const next = data as unknown as SpareStockImportPreview;
       if (next.kind !== 'preview') throw new Error('Unexpected import response');
