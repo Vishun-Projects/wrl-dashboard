@@ -133,6 +133,9 @@ export type SpareStockImportPreview = {
 export type SpareStockInFileDupesChoice = 'skip' | 'import';
 export type SpareStockDbDupesChoice = 'skip' | 'replace' | 'keep';
 
+/** source_code stored on mis_client_import_upload_chunks for MB51 HTM parts. */
+export const SPARE_STOCK_CHUNK_SOURCE = 'spare-stock-analysis';
+
 export type DefectiveReturnRow = {
   plant: string;
   callNo: string;

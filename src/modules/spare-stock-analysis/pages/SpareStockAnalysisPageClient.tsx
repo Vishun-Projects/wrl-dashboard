@@ -9,9 +9,16 @@ import type { FilterSelectOption } from '@/components/filters/filter-select-type
 import { formatUiDate, formatUiDateTime } from '@/lib/dates/ui-date';
 import { useTableSort } from '@/lib/ui/table-sort';
 import { feedback } from '@/lib/ui/feedback';
-import { gzipBlobForMisUpload } from '@/modules/mis/client-import/services/upload-gzip';
 import { DateRangeSelector } from '@/modules/mis/register/components/DateRangeSelector';
 import { toDateString, type ReportDateRange } from '@/modules/mis';
+import {
+  abortSpareStockUpload,
+  postSpareStockImport,
+  prepareSpareStockWireUpload,
+  readSpareStockApiJson,
+  SPARE_STOCK_API,
+  type SpareStockWireUpload,
+} from '@/modules/spare-stock-analysis/upload-client';
 import type {
   DefectiveReturnResponse,
   SpareStockBreakdownRow,
@@ -26,7 +33,7 @@ import type {
   SpareStockSummaryResponse,
 } from '@/modules/spare-stock-analysis/types';
 
-const API = '/api/report/spare-stock-analysis';
+const API = SPARE_STOCK_API;
 
 const ALL_TIME: ReportDateRange = {
   start: new Date(0),
@@ -49,16 +56,6 @@ function formatQty(n: number): string {
 function pickSingle(values: string[]): string {
   if (values.length === 0) return '';
   return values[values.length - 1] ?? '';
-}
-
-async function readApiJson(res: Response): Promise<Record<string, unknown>> {
-  const text = await res.text();
-  if (!text) return {};
-  try {
-    return JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    throw new Error(text.replace(/\s+/g, ' ').trim().slice(0, 180) || `Request failed (${res.status})`);
-  }
 }
 
 function buildParams(opts: {
@@ -103,8 +100,9 @@ export default function SpareStockAnalysisPageClient() {
   const [defective, setDefective] = useState<DefectiveReturnResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadLabel, setUploadLabel] = useState('Importing…');
   const [fileName, setFileName] = useState('');
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingUpload, setPendingUpload] = useState<SpareStockWireUpload | null>(null);
   const [preview, setPreview] = useState<SpareStockImportPreview | null>(null);
   const [inFileDupes, setInFileDupes] = useState<SpareStockInFileDupesChoice>('skip');
   const [dbDupes, setDbDupes] = useState<SpareStockDbDupesChoice>('skip');
@@ -127,7 +125,7 @@ export default function SpareStockAnalysisPageClient() {
   const refreshOptions = useCallback(async () => {
     try {
       const res = await fetch(`${API}?mode=options`, { credentials: 'include' });
-      const data = await readApiJson(res);
+      const data = await readSpareStockApiJson(res);
       if (!res.ok) throw new Error(String(data.error || 'Failed to load filters'));
       setOptions(data as unknown as SpareStockOptionsResponse);
     } catch {
@@ -143,7 +141,7 @@ export default function SpareStockAnalysisPageClient() {
         const res = await fetch(`${API}?mode=defective&${buildParams(base).toString()}`, {
           credentials: 'include',
         });
-        const json = await readApiJson(res);
+        const json = await readSpareStockApiJson(res);
         if (!res.ok) throw new Error(String(json.error || 'Failed to load defective returns'));
         setDefective(json as unknown as DefectiveReturnResponse);
         return;
@@ -154,8 +152,8 @@ export default function SpareStockAnalysisPageClient() {
           credentials: 'include',
         }),
       ]);
-      const summaryJson = await readApiJson(summaryRes);
-      const rowsJson = await readApiJson(rowsRes);
+      const summaryJson = await readSpareStockApiJson(summaryRes);
+      const rowsJson = await readSpareStockApiJson(rowsRes);
       if (!summaryRes.ok) throw new Error(String(summaryJson.error || 'Failed to load summary'));
       if (!rowsRes.ok) throw new Error(String(rowsJson.error || 'Failed to load rows'));
       setSummary(summaryJson as unknown as SpareStockSummaryResponse);
@@ -175,33 +173,6 @@ export default function SpareStockAnalysisPageClient() {
     void load();
   }, [load]);
 
-  async function postImport(
-    file: File,
-    action: 'preview' | 'commit',
-    choices?: { inFileDupes: SpareStockInFileDupesChoice; dbDupes: SpareStockDbDupesChoice }
-  ): Promise<Record<string, unknown>> {
-    const { blob: wireBlob, encoding } = await gzipBlobForMisUpload(file);
-    const form = new FormData();
-    form.set('file', wireBlob, file.name);
-    form.set('fileName', file.name);
-    form.set('action', action);
-    if (encoding) form.set('contentEncoding', encoding);
-    if (choices) {
-      form.set('inFileDupes', choices.inFileDupes);
-      form.set('dbDupes', choices.dbDupes);
-    }
-    const res = await fetch(API, { method: 'POST', body: form, credentials: 'include' });
-    const data = await readApiJson(res);
-    if (!res.ok) {
-      const rawErr = String(data.error || `Import failed (${res.status})`);
-      if (res.status === 413 || /payload.?too.?large|entity too large/i.test(rawErr)) {
-        throw new Error('File still too large after compression. Export a shorter MB51 date range.');
-      }
-      throw new Error(rawErr);
-    }
-    return data;
-  }
-
   async function finishImport(result: SpareStockImportResponse) {
     const bits = [`Imported ${result.inserted.toLocaleString()} row(s)`];
     if (result.inFileImported) bits.push(`${result.inFileImported} same-file extra(s)`);
@@ -212,7 +183,7 @@ export default function SpareStockAnalysisPageClient() {
     }
     feedback.actionSuccess(bits.join(' · '));
     setPreview(null);
-    setPendingFile(null);
+    setPendingUpload(null);
     await refreshOptions();
     resetPage();
     await load();
@@ -222,23 +193,27 @@ export default function SpareStockAnalysisPageClient() {
     if (!file) return;
     setFileName(file.name);
     setUploading(true);
+    setUploadLabel('Compressing…');
+    let upload: SpareStockWireUpload | null = null;
     try {
-      const data = await postImport(file, 'preview');
+      upload = await prepareSpareStockWireUpload(file, setUploadLabel);
+      const data = await postSpareStockImport(upload, 'preview', undefined, setUploadLabel);
       const next = data as unknown as SpareStockImportPreview;
       if (next.kind !== 'preview') throw new Error('Unexpected import response');
       if (next.inFile.extraCount === 0 && next.inDb.count === 0) {
-        const committed = (await postImport(file, 'commit', {
+        const committed = (await postSpareStockImport(upload, 'commit', {
           inFileDupes: 'skip',
           dbDupes: 'skip',
-        })) as unknown as SpareStockImportResponse;
+        }, setUploadLabel)) as unknown as SpareStockImportResponse;
         await finishImport(committed);
         return;
       }
-      setPendingFile(file);
+      setPendingUpload(upload);
       setInFileDupes('skip');
       setDbDupes('skip');
       setPreview(next);
     } catch (err) {
+      if (upload) void abortSpareStockUpload(upload);
       feedback.actionFailed(err instanceof Error ? err.message : 'Import failed');
     } finally {
       setUploading(false);
@@ -247,13 +222,13 @@ export default function SpareStockAnalysisPageClient() {
   }
 
   async function confirmImport() {
-    if (!pendingFile) return;
+    if (!pendingUpload) return;
     setUploading(true);
     try {
-      const committed = (await postImport(pendingFile, 'commit', {
+      const committed = (await postSpareStockImport(pendingUpload, 'commit', {
         inFileDupes,
         dbDupes,
-      })) as unknown as SpareStockImportResponse;
+      }, setUploadLabel)) as unknown as SpareStockImportResponse;
       await finishImport(committed);
     } catch (err) {
       feedback.actionFailed(err instanceof Error ? err.message : 'Import failed');
@@ -301,7 +276,7 @@ export default function SpareStockAnalysisPageClient() {
             disabled={uploading}
           >
             {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-            {uploading ? 'Importing…' : fileName || 'Import MB51.htm'}
+            {uploading ? uploadLabel : fileName || 'Import MB51.htm'}
           </button>
         </div>
       }
@@ -410,8 +385,9 @@ export default function SpareStockAnalysisPageClient() {
               onInFile={setInFileDupes}
               onDb={setDbDupes}
               onCancel={() => {
+                if (pendingUpload) void abortSpareStockUpload(pendingUpload);
                 setPreview(null);
-                setPendingFile(null);
+                setPendingUpload(null);
               }}
               onConfirm={() => void confirmImport()}
             />

@@ -39,14 +39,14 @@ export async function storeUploadChunk(params: {
   });
 }
 
-type AssembledUpload = {
+export type AssembledUpload = {
   sourceCode: string;
   fileName: string;
   buffer: Buffer;
   startedAt: Date;
 };
 
-async function readAssembledUpload(
+export async function readAssembledUpload(
   uploadId: string,
   uploadedBy: string
 ): Promise<{ status: number; body: Record<string, unknown> } | AssembledUpload> {

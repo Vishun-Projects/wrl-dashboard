@@ -2,6 +2,13 @@ import { gunzipSync } from 'zlib';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
+import { MIS_UPLOAD_CHUNK_BYTES_MAX } from '@/modules/mis/client-import/services/upload-chunk-constants';
+import {
+  deleteUploadChunks,
+  purgeStaleUploadChunks,
+  readAssembledUpload,
+  storeUploadChunk,
+} from '@/modules/mis/client-import/services/upload-chunks';
 import { isGzipBuffer } from '@/modules/mis/client-import/services/upload-gzip';
 import { parseMb51Html } from '@/modules/spare-stock-analysis/server/parse-mb51-html';
 import {
@@ -17,9 +24,10 @@ import {
   previewSpareStockImport,
   type SpareStockDashFilters,
 } from '@/modules/spare-stock-analysis/server/store';
-import type {
-  SpareStockDbDupesChoice,
-  SpareStockInFileDupesChoice,
+import {
+  SPARE_STOCK_CHUNK_SOURCE,
+  type SpareStockDbDupesChoice,
+  type SpareStockInFileDupesChoice,
 } from '@/modules/spare-stock-analysis/types';
 
 export const runtime = 'nodejs';
@@ -38,6 +46,15 @@ function inflateUpload(buffer: Buffer, contentEncoding: string | null): Buffer {
     }
     return buffer;
   }
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isMb51Name(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith('.htm') || lower.endsWith('.html');
 }
 
 function csvList(raw: string | null): string[] {
@@ -103,6 +120,53 @@ export async function GET(req: NextRequest) {
   }
 }
 
+async function loadHtmlFromForm(
+  formData: FormData,
+  userId: string
+): Promise<{ originalName: string; html: string; uploadId: string | null } | NextResponse> {
+  const uploadId = String(formData.get('uploadId') ?? '').trim();
+  const contentEncoding = String(formData.get('contentEncoding') ?? '').trim() || null;
+
+  let originalName: string;
+  let raw: Buffer;
+
+  if (uploadId) {
+    if (!isUuid(uploadId)) {
+      return NextResponse.json({ error: 'Invalid uploadId' }, { status: 400 });
+    }
+    const assembled = await readAssembledUpload(uploadId, userId);
+    if ('status' in assembled) {
+      return NextResponse.json(assembled.body, { status: assembled.status });
+    }
+    if (assembled.sourceCode !== SPARE_STOCK_CHUNK_SOURCE) {
+      return NextResponse.json({ error: 'Wrong upload type' }, { status: 400 });
+    }
+    originalName = String(formData.get('fileName') ?? assembled.fileName).trim() || assembled.fileName;
+    raw = assembled.buffer;
+  } else {
+    const file = formData.get('file');
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: 'Missing file' }, { status: 400 });
+    }
+    originalName = String(formData.get('fileName') ?? file.name).trim() || file.name;
+    raw = Buffer.from(await file.arrayBuffer());
+  }
+
+  if (!isMb51Name(originalName)) {
+    return NextResponse.json({ error: 'Upload a .htm or .html MB51 report' }, { status: 400 });
+  }
+
+  const buffer = inflateUpload(raw, contentEncoding);
+  if (buffer.byteLength > MAX_HTML_BYTES) {
+    return NextResponse.json(
+      { error: `Decompressed file exceeds ${MAX_HTML_BYTES / (1024 * 1024)} MB limit` },
+      { status: 413 }
+    );
+  }
+
+  return { originalName, html: buffer.toString('utf8'), uploadId: uploadId || null };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const auth = await requireRbac(req, { pageId: 'spare_stock_analysis' });
@@ -115,40 +179,64 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'Upload too large for the server. Retry — large HTML is gzipped automatically. If it still fails, export a shorter date range.',
+            'Upload too large for the server. Large files are split automatically — retry the import.',
         },
         { status: 413 }
       );
     }
 
-    const file = formData.get('file');
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: 'Missing file' }, { status: 400 });
-    }
-
-    const originalName = String(formData.get('fileName') ?? file.name).trim() || file.name;
-    const name = originalName.toLowerCase();
-    if (!name.endsWith('.htm') && !name.endsWith('.html')) {
-      return NextResponse.json({ error: 'Upload a .htm or .html MB51 report' }, { status: 400 });
-    }
-
-    const contentEncoding = String(formData.get('contentEncoding') ?? '').trim() || null;
-    const raw = Buffer.from(await file.arrayBuffer());
-    const buffer = inflateUpload(raw, contentEncoding);
-
-    if (buffer.byteLength > MAX_HTML_BYTES) {
-      return NextResponse.json(
-        { error: `Decompressed file exceeds ${MAX_HTML_BYTES / (1024 * 1024)} MB limit` },
-        { status: 413 }
-      );
-    }
-
-    const html = buffer.toString('utf8');
-    const parsed = parseMb51Html(html);
     const action = String(formData.get('action') ?? 'preview').trim();
+
+    if (action === 'abort') {
+      const uploadId = String(formData.get('uploadId') ?? '').trim();
+      if (uploadId && isUuid(uploadId)) await deleteUploadChunks(uploadId);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === 'chunk') {
+      void purgeStaleUploadChunks().catch(() => {});
+      const uploadId = String(formData.get('uploadId') ?? '').trim();
+      const chunkIndex = Number(formData.get('chunkIndex'));
+      const chunkTotal = Number(formData.get('chunkTotal'));
+      const fileName = String(formData.get('fileName') ?? '').trim();
+      const chunk = formData.get('chunk');
+      if (!isUuid(uploadId) || !Number.isInteger(chunkIndex) || !Number.isInteger(chunkTotal)) {
+        return NextResponse.json(
+          { error: 'uploadId, chunkIndex, chunkTotal are required' },
+          { status: 400 }
+        );
+      }
+      if (chunkTotal < 1 || chunkIndex < 0 || chunkIndex >= chunkTotal) {
+        return NextResponse.json({ error: 'Invalid chunk index' }, { status: 400 });
+      }
+      if (!fileName || !isMb51Name(fileName)) {
+        return NextResponse.json({ error: 'Upload a .htm or .html MB51 report' }, { status: 400 });
+      }
+      if (!(chunk instanceof Blob)) {
+        return NextResponse.json({ error: 'chunk is required' }, { status: 400 });
+      }
+      if (chunk.size > MIS_UPLOAD_CHUNK_BYTES_MAX) {
+        return NextResponse.json({ error: 'Chunk exceeds size limit' }, { status: 413 });
+      }
+      await storeUploadChunk({
+        uploadId,
+        chunkIndex,
+        chunkTotal,
+        sourceCode: SPARE_STOCK_CHUNK_SOURCE,
+        fileName,
+        uploadedBy: auth.userId,
+        data: Buffer.from(await chunk.arrayBuffer()),
+      });
+      return NextResponse.json({ ok: true, chunkIndex, chunkTotal });
+    }
+
+    const loaded = await loadHtmlFromForm(formData, auth.userId);
+    if (loaded instanceof NextResponse) return loaded;
+
+    const parsed = parseMb51Html(loaded.html);
     if (action !== 'commit') {
       const preview = await previewSpareStockImport({
-        fileName: originalName,
+        fileName: loaded.originalName,
         rows: parsed.rows,
         skipped: parsed.skipped,
       });
@@ -162,13 +250,14 @@ export async function POST(req: NextRequest) {
       dbRaw === 'replace' || dbRaw === 'keep' ? dbRaw : 'skip';
 
     const result = await importSpareStockMovements({
-      fileName: originalName,
+      fileName: loaded.originalName,
       uploadedBy: auth.userId,
       rows: parsed.rows,
       skipped: parsed.skipped,
       inFileDupes,
       dbDupes,
     });
+    if (loaded.uploadId) await deleteUploadChunks(loaded.uploadId);
     return NextResponse.json(result);
   } catch (err) {
     console.error('[spare-stock-analysis POST]', err);
