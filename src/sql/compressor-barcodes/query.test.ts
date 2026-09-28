@@ -17,8 +17,9 @@ describe('parseRepeatCallKind', () => {
     expect(parseRepeatCallKind('repeat')).toBe('compressor');
   });
 
-  it('accepts gas', () => {
+  it('accepts gas and all', () => {
     expect(parseRepeatCallKind('gas')).toBe('gas');
+    expect(parseRepeatCallKind('all')).toBe('all');
   });
 });
 
@@ -52,6 +53,7 @@ describe('repeatKindFilterSql', () => {
       "COALESCE(repair_kind, 'compressor') = 'compressor'"
     );
     expect(repeatKindFilterSql('gas')).toBe("COALESCE(repair_kind, 'compressor') = 'gas'");
+    expect(repeatKindFilterSql('all')).toBe('TRUE');
   });
 });
 

@@ -66,6 +66,7 @@ type CompressorCallItem = {
   cancel_reason: string | null;
   is_continuity_broken?: boolean;
   expected_old_barcode?: string | null;
+  repair_kind?: 'compressor' | 'gas';
 };
 
 type CompressorSerialGroup = {
@@ -102,9 +103,10 @@ type APIResponse = {
 
 type SortKey = { field: string; dir: 'asc' | 'desc' };
 type FilterTab = 'repeat' | 'broken' | 'repeat3' | 'premature' | 'all';
-type RepeatKind = 'compressor' | 'gas';
+type RepeatKind = 'compressor' | 'gas' | 'all';
 
-const REPAIR_DONE_OPTIONS = [
+const KIND_TABS: Array<{ value: RepeatKind; label: string }> = [
+  { value: 'all', label: 'All work done' },
   { value: 'compressor', label: 'Compressor replaced' },
   { value: 'gas', label: 'Gas charging' },
 ];
@@ -125,6 +127,25 @@ function formatDate(val: string | null | undefined): string {
   }
 }
 
+
+function callRepairKind(call: CompressorCallItem | null | undefined): 'compressor' | 'gas' {
+  return call?.repair_kind === 'gas' ? 'gas' : 'compressor';
+}
+
+function RepairKindBadge({ kind }: { kind: 'compressor' | 'gas' }) {
+  const gas = kind === 'gas';
+  return (
+    <span
+      className={`inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-semibold border whitespace-nowrap ${
+        gas
+          ? 'bg-sky-50 text-sky-800 border-sky-200'
+          : 'bg-violet-50 text-violet-800 border-violet-200'
+      }`}
+    >
+      {gas ? 'Gas charging' : 'Compressor replaced'}
+    </span>
+  );
+}
 
 function isCancelledCall(call: CompressorCallItem | null | undefined): boolean {
   const norm = String(call?.call_status || '').trim().toLowerCase();
@@ -268,7 +289,7 @@ export function CompressorBarcodesPageClient() {
   const [activeSearch, setActiveSearch] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('');
   const [filterTab, setFilterTab] = useState<FilterTab>('repeat');
-  const [repeatKind, setRepeatKind] = useState<RepeatKind>('compressor');
+  const [repeatKind, setRepeatKind] = useState<RepeatKind>('all');
   const [dateType, setDateType] = useState<'call_date' | 'solve_date'>('call_date');
   const [dateRange, setDateRange] = useState<ReportDateRange>(() => defaultDateRange());
   const startDate = useMemo(
@@ -421,7 +442,7 @@ export function CompressorBarcodesPageClient() {
     setDateRange(defaultDateRange());
     setDateType('call_date');
     setFilterTab('repeat');
-    setRepeatKind('compressor');
+    setRepeatKind('all');
     setSortKeys([{ field: 'solve_date', dir: 'desc' }]);
     setPage(1);
   };
@@ -481,12 +502,19 @@ export function CompressorBarcodesPageClient() {
   const totalPages = data ? Math.max(1, Math.ceil(data.total / limit)) : 1;
   const isDateFiltered = dateRange.label !== 'All Time';
   const isGas = repeatKind === 'gas';
-  const tableColSpan = isGas ? 8 : 9;
+  const showBarcodes = repeatKind !== 'gas';
+  const tableColSpan = showBarcodes ? 9 : 8;
+  const kindCaption =
+    repeatKind === 'gas'
+      ? 'gas charging'
+      : repeatKind === 'compressor'
+        ? 'compressor replaced'
+        : 'all work done';
   const filtersDirty =
     Boolean(activeSearch) ||
     Boolean(selectedBranch) ||
     filterTab !== 'repeat' ||
-    isGas ||
+    repeatKind !== 'all' ||
     dateType !== 'call_date' ||
     !isDefaultDateRange(dateRange);
 
@@ -498,29 +526,35 @@ export function CompressorBarcodesPageClient() {
       subtitle={
         isGas
           ? 'Machines with gas charging done more than once on the same serial'
-          : 'Machines with compressor replaced more than once, including barcode continuity'
+          : repeatKind === 'compressor'
+            ? 'Machines with compressor replaced more than once, including barcode continuity'
+            : 'Repeat compressor replacements and gas charging on the same machine'
       }
       icon={<Repeat className="h-4 w-4" />}
       toolbar={
         <>
           <div className="register-filter-bar border-b border-slate-200 bg-bg-canvas px-3 py-1.5">
             <div className="report-toolbar-filters-row items-center">
-              <FilterSelect
-                label="Repair type"
-                emptyLabel="Compressor replaced"
-                mode="single"
-                searchable={false}
-                options={REPAIR_DONE_OPTIONS}
-                selected={[repeatKind]}
-                onChange={(values) => {
-                  const next = values[0] === 'gas' ? 'gas' : 'compressor';
-                  setRepeatKind(next);
-                  if (next === 'gas' && filterTab === 'broken') setFilterTab('repeat');
-                  setPage(1);
-                }}
-                layout="inline"
-                panelClassName="w-56"
-              />
+              <div className="flex items-center gap-1 self-center">
+                {KIND_TABS.map((tab) => (
+                  <button
+                    key={tab.value}
+                    type="button"
+                    className={`rounded-md px-2 py-1 text-[11px] font-semibold ${
+                      repeatKind === tab.value
+                        ? 'bg-slate-900 text-white'
+                        : 'border border-slate-200 bg-white text-slate-600'
+                    }`}
+                    onClick={() => {
+                      setRepeatKind(tab.value);
+                      if (tab.value === 'gas' && filterTab === 'broken') setFilterTab('repeat');
+                      setPage(1);
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
               <FilterSelect
                 label="Date column"
                 emptyLabel="Call Date"
@@ -650,11 +684,31 @@ export function CompressorBarcodesPageClient() {
             </div>
           )}
 
-          {/* KPI Stats Bar — counts follow the selected date range */}
+          {/* KPI Stats Bar — counts follow kind, branch, and date range */}
           {stats && (
-            <div
-              className="flex shrink-0 gap-1.5 overflow-x-auto px-3 py-1.5 border-b border-slate-200 bg-slate-50/60"
-            >
+            <div className="shrink-0 border-b border-slate-200 bg-slate-50/60">
+              <div className="flex items-center gap-1.5 px-3 pt-1.5 text-[10px] text-slate-500">
+                <span>
+                  KPIs for <span className="font-semibold text-slate-700">{kindCaption}</span>
+                  {selectedBranch ? (
+                    <>
+                      {' · '}
+                      <span className="font-semibold text-slate-700">
+                        {selectedBranch.replace(/^\d+\s*-\s*/, '').replace(/\s*BRANCH$/i, '')}
+                      </span>
+                    </>
+                  ) : null}
+                  {isDateFiltered ? (
+                    <>
+                      {' · '}
+                      <span className="font-semibold text-slate-700">{dateRange.label}</span>
+                    </>
+                  ) : (
+                    ' · all time'
+                  )}
+                </span>
+              </div>
+              <div className="flex gap-1.5 overflow-x-auto px-3 py-1.5">
               <button
                 type="button"
                 className={`register-stat-item register-stat-item--clickable min-w-0 flex-1 !min-h-0 !py-1.5 !px-2.5 ${filterTab === 'repeat' ? 'register-stat-item--active' : ''}`}
@@ -747,6 +801,7 @@ export function CompressorBarcodesPageClient() {
                 </span>
               </button>
             </div>
+            </div>
           )}
         </>
       }
@@ -760,7 +815,11 @@ export function CompressorBarcodesPageClient() {
               <div className="flex flex-col items-center justify-center p-8 text-center">
                 <AlertCircle className="h-8 w-8 text-slate-300 mb-2" />
                 <p className="text-sm font-semibold text-slate-700">
-                  {isGas ? 'No gas charging records found' : 'No compressor records found'}
+                  {isGas
+                    ? 'No gas charging records found'
+                    : repeatKind === 'compressor'
+                      ? 'No compressor records found'
+                      : 'No repeat call records found'}
                 </p>
                 <p className="text-xs text-slate-400 mt-1 max-w-sm">
                   {activeSearch
@@ -771,7 +830,9 @@ export function CompressorBarcodesPageClient() {
                         ? 'No machines with broken barcode continuity found.'
                         : isGas
                           ? 'No repeat gas charging records found.'
-                          : 'No repeat compressor repair records found.'}
+                          : repeatKind === 'compressor'
+                            ? 'No repeat compressor repair records found.'
+                            : 'No repeat compressor or gas charging records found.'}
                 </p>
                 {filtersDirty && (
                   <button
@@ -871,7 +932,7 @@ export function CompressorBarcodesPageClient() {
                     { field: 'solve_date', label: 'Latest Solved Date' },
                     { field: 'call_date', label: 'Latest Call Date' },
                   ] as Array<{ field: string; label: string }>)
-                    .filter((col) => !isGas || col.field !== 'current_barcode')
+                    .filter((col) => showBarcodes || col.field !== 'current_barcode')
                     .map(({ field, label }) => {
                     const idx = sortKeys.findIndex((k) => k.field === field);
                     const active = idx !== -1;
@@ -906,7 +967,11 @@ export function CompressorBarcodesPageClient() {
                     <td colSpan={tableColSpan} className="h-40 text-center align-middle">
                       <Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-400" />
                       <span className="text-xs text-slate-400 mt-2 block">
-                        {isGas ? 'Loading gas charging records...' : 'Loading compressor records...'}
+                  {isGas
+                    ? 'Loading gas charging records...'
+                    : repeatKind === 'compressor'
+                      ? 'Loading compressor records...'
+                      : 'Loading repeat calls...'}
                       </span>
                     </td>
                   </tr>
@@ -952,6 +1017,9 @@ export function CompressorBarcodesPageClient() {
                           <AdminTd className="font-mono text-[11px] font-semibold text-slate-900 !py-1.5 !px-2.5">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="group-hover:text-blue-600 transition-colors">{row.serial_number}</span>
+                              {[...new Set(allRowCalls.map(callRepairKind))].map((kind) => (
+                                <RepairKindBadge key={kind} kind={kind} />
+                              ))}
                               {isBroken && (
                                 <span
                                   title="Continuity break detected midway in compressor replacement history"
@@ -991,7 +1059,7 @@ export function CompressorBarcodesPageClient() {
                                       : 'bg-slate-100 text-slate-600 border-slate-200'
                                   }`}
                               >
-                                {row.total_calls} {row.total_calls === 1 ? (isGas ? 'Call' : 'Repair') : isGas ? 'Calls' : 'Repairs'}
+                                {row.total_calls} {row.total_calls === 1 ? 'call' : 'calls'}
                               </span>
                               {isDateFiltered && row.calls_in_range != null && row.calls_in_range !== row.total_calls && (
                                 <span className="text-[9.5px] text-blue-600 font-medium">
@@ -1009,7 +1077,7 @@ export function CompressorBarcodesPageClient() {
                               <span className="text-slate-400 text-[11px]">—</span>
                             )}
                           </AdminTd>
-                          {!isGas && (
+                          {showBarcodes && (
                           <AdminTd className="!py-1.5 !px-2.5">
                             {row.current_barcode && row.current_barcode !== '-' ? (
                               <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.2 rounded text-[10.5px] font-mono font-semibold">
@@ -1051,7 +1119,7 @@ export function CompressorBarcodesPageClient() {
                                 {/* Accordion Header Strip */}
                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-2 min-w-0">
                                   <div className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 flex-wrap">
-                                    <span>{isGas ? 'Call history for serial:' : 'Replacement Lineage for Serial:'}</span>
+                                    <span>{isGas ? 'Gas charging history for serial:' : repeatKind === 'compressor' ? 'Replacement lineage for serial:' : 'Call history for serial:'}</span>
                                     <span className="font-mono text-blue-700 bg-blue-50/80 px-1.5 py-0.2 rounded border border-blue-200 font-bold">
                                       {row.serial_number}
                                     </span>
@@ -1170,7 +1238,7 @@ export function CompressorBarcodesPageClient() {
                                   <div className="bg-white rounded-md border border-slate-200/90 p-2 shadow-2xs mb-2 min-w-0 max-w-full overflow-hidden">
                                     <div className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1">
                                       <GitCommit className="h-3 w-3 text-blue-600" />
-                                      <span>{isGas ? 'Call Timeline' : 'Repair Lineage Progression Timeline'}</span>
+                                      <span>{isGas ? 'Call timeline' : repeatKind === 'all' ? 'Work-done timeline' : 'Repair lineage progression timeline'}</span>
                                     </div>
                                     <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar pb-1.5 min-w-0 max-w-full">
                                       {displayedCalls.map((call, idx) => {
@@ -1222,9 +1290,7 @@ export function CompressorBarcodesPageClient() {
                                                 <span className="font-mono font-bold text-[10.5px] text-slate-800 truncate">
                                                   #{idx + 1} {call.call_no}
                                                 </span>
-                                                <span className="text-[8.5px] font-semibold px-1 py-0.2 rounded bg-white border border-slate-200 text-slate-600">
-                                                  {call.call_status}
-                                                </span>
+                                                <RepairKindBadge kind={callRepairKind(call)} />
                                               </div>
                                               <div className="text-[9.5px] text-slate-500 flex items-center gap-1 mb-0.5">
                                                 <Calendar className="h-2.5 w-2.5 text-slate-400 shrink-0" />
@@ -1236,7 +1302,7 @@ export function CompressorBarcodesPageClient() {
                                               >
                                                 {call.office_name || '—'}
                                               </div>
-                                              {!isGas && (
+                                              {callRepairKind(call) === 'compressor' && (
                                               <div className="mt-auto pt-1 border-t border-slate-200/80 flex items-center justify-between text-[9.5px] font-mono">
                                                 <span className="text-slate-400">New:</span>
                                                 <span
@@ -1257,18 +1323,19 @@ export function CompressorBarcodesPageClient() {
 
                                 {/* Lineage Table */}
                                 <div className="overflow-x-auto custom-scrollbar bg-white rounded-md border border-slate-200/90 shadow-2xs min-w-0 max-w-full">
-                                  <table className={`w-full text-xs text-left border-collapse ${isGas ? 'min-w-[720px]' : 'min-w-[960px]'}`}>
+                                  <table className={`w-full text-xs text-left border-collapse ${showBarcodes ? 'min-w-[1080px]' : 'min-w-[820px]'}`}>
                                     <thead className="bg-slate-100/70 text-slate-600 uppercase text-[9.5px] font-semibold tracking-wider border-b border-slate-200">
                                       <tr>
                                         <th className="px-2 py-1.5 w-8 text-center">#</th>
                                         <th className="px-2.5 py-1.5">Call No</th>
+                                        <th className="px-2.5 py-1.5">Work done</th>
                                         <th className="px-2.5 py-1.5">Status</th>
                                         <th className="px-2.5 py-1.5">Call Date</th>
                                         <th className="px-2.5 py-1.5">Solve Date</th>
                                         <th className="px-2.5 py-1.5">Days Gap</th>
                                         <th className="px-2.5 py-1.5">Branch</th>
                                         <th className="px-2.5 py-1.5">Office / Workshop</th>
-                                        {!isGas && (
+                                        {showBarcodes && (
                                           <>
                                             <th className="px-2.5 py-1.5">Old Barcode (Removed)</th>
                                             <th className="px-1 py-1.5 text-center w-5"></th>
@@ -1294,6 +1361,9 @@ export function CompressorBarcodesPageClient() {
                                             </td>
                                             <td className="px-2.5 py-1.5 font-mono font-medium text-slate-900 text-[10.5px]">
                                               {call.call_no}
+                                            </td>
+                                            <td className="px-2.5 py-1.5">
+                                              <RepairKindBadge kind={callRepairKind(call)} />
                                             </td>
                                             <td className="px-2.5 py-1.5">
                                               {renderCallStatusBadge(call.call_status, call.cancel_reason)}
@@ -1328,7 +1398,7 @@ export function CompressorBarcodesPageClient() {
                                                 </span>
                                               ) : null}
                                             </td>
-                                            {!isGas && (
+                                            {showBarcodes && (
                                               <>
                                             <td className="px-2.5 py-1.5">
                                               <div className="flex flex-col gap-0.5">

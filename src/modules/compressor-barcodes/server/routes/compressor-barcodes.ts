@@ -68,6 +68,11 @@ export async function GET(req: NextRequest) {
       const statsParams: unknown[] = [...scopeParams];
       const statsDatePred = pushRepeatDateRangeSql(dateColumn, startDate, endDate, statsParams);
       const statsDateSql = statsDatePred ? ` AND ${statsDatePred}` : '';
+      let statsBranchSql = '';
+      if (branch) {
+        statsParams.push(branch);
+        statsBranchSql = ` AND branch_name = $${statsParams.length}`;
+      }
 
       // Query scoped stats, top repeat branches, and distinct branches in parallel
       // NOTE: Cancelled calls must NEVER be counted as repairs or towards repeat machines.
@@ -90,6 +95,7 @@ export async function GET(req: NextRequest) {
                 ${kindSql}
                 ${scopeSql}
                 ${statsDateSql}
+                ${statsBranchSql}
                 GROUP BY serial_number 
                 HAVING count(*) >= 2
               ) s2
@@ -102,6 +108,7 @@ export async function GET(req: NextRequest) {
                 ${kindSql}
                 ${scopeSql}
                 ${statsDateSql}
+                ${statsBranchSql}
                 GROUP BY serial_number 
                 HAVING count(*) >= 3
               ) s3
@@ -115,6 +122,7 @@ export async function GET(req: NextRequest) {
                 ${kindSql}
                 ${scopeSql}
                 ${statsDateSql}
+                ${statsBranchSql}
             ) as premature_machines,
             COUNT(DISTINCT serial_number) FILTER (WHERE is_continuity_broken = true AND call_status IS DISTINCT FROM 'Cancelled')::int as broken_machines,
             COUNT(DISTINCT serial_number) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled')::int as total_machines
@@ -123,6 +131,7 @@ export async function GET(req: NextRequest) {
           ${kindSql}
           ${scopeSql}
           ${statsDateSql}
+          ${statsBranchSql}
         `,
           statsParams
         ),
@@ -474,7 +483,8 @@ export async function GET(req: NextRequest) {
               'call_status', call_status,
               'cancel_reason', cancel_reason,
               'is_continuity_broken', is_continuity_broken,
-              'expected_old_barcode', expected_old_barcode
+              'expected_old_barcode', expected_old_barcode,
+              'repair_kind', COALESCE(repair_kind, 'compressor')
             ) ORDER BY call_date ASC
           ) ${dateConditionSql ? `FILTER (WHERE ${dateConditionSql})` : ''} as calls,
           JSON_AGG(
@@ -496,7 +506,8 @@ export async function GET(req: NextRequest) {
               'call_status', call_status,
               'cancel_reason', cancel_reason,
               'is_continuity_broken', is_continuity_broken,
-              'expected_old_barcode', expected_old_barcode
+              'expected_old_barcode', expected_old_barcode,
+              'repair_kind', COALESCE(repair_kind, 'compressor')
             ) ORDER BY call_date ASC
           ) as all_calls
         FROM compressor_barcodes

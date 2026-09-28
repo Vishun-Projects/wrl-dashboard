@@ -1,8 +1,10 @@
 export type RepeatCallKind = 'compressor' | 'gas';
+export type RepeatKindFilter = RepeatCallKind | 'all';
 export type RepeatDateColumn = 'call_date' | 'solve_date';
 
-export function parseRepeatCallKind(raw: string | null | undefined): RepeatCallKind {
-  return raw === 'gas' ? 'gas' : 'compressor';
+export function parseRepeatCallKind(raw: string | null | undefined): RepeatKindFilter {
+  if (raw === 'gas' || raw === 'all') return raw;
+  return 'compressor';
 }
 
 export function parseRepeatDateColumn(raw: string | null | undefined): RepeatDateColumn {
@@ -10,7 +12,8 @@ export function parseRepeatDateColumn(raw: string | null | undefined): RepeatDat
 }
 
 /** Safe to interpolate: kind is allowlisted. */
-export function repeatKindFilterSql(kind: RepeatCallKind): string {
+export function repeatKindFilterSql(kind: RepeatKindFilter): string {
+  if (kind === 'all') return 'TRUE';
   return `COALESCE(repair_kind, 'compressor') = '${kind}'`;
 }
 
