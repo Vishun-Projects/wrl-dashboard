@@ -1,11 +1,11 @@
-import { mkdir, rmdir, unlink, writeFile, readFile } from 'fs/promises';
+import { mkdir, readdir, rmdir, stat, unlink, writeFile, readFile } from 'fs/promises';
 import path from 'path';
 
-export function resolveImportDir(): string {
-  if (process.env.MIS_CLIENT_IMPORT_DIR?.trim()) {
-    return process.env.MIS_CLIENT_IMPORT_DIR.trim();
+export function resolveImportDir(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.MIS_CLIENT_IMPORT_DIR?.trim()) {
+    return env.MIS_CLIENT_IMPORT_DIR.trim();
   }
-  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  if (env.VERCEL || env.AWS_LAMBDA_FUNCTION_NAME) {
     return path.join('/tmp', 'mis-client-import');
   }
   return path.join(/*turbopackIgnore: true*/ process.cwd(), '.cache', 'mis-client-import');
@@ -85,4 +85,48 @@ export async function deleteImportFile(storedFilePath: string | null | undefined
   } catch {
     /* not empty or already gone */
   }
+}
+
+function extraSweepDirs(env: NodeJS.ProcessEnv = process.env): string[] {
+  return (env.MIS_CLIENT_IMPORT_SWEEP_DIRS ?? '')
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+}
+
+async function sweepDirOlderThan(root: string, cutoffMs: number): Promise<number> {
+  let deleted = 0;
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  for (const ent of entries) {
+    const full = path.join(root, ent.name);
+    if (ent.isDirectory()) {
+      deleted += await sweepDirOlderThan(full, cutoffMs);
+      try {
+        await rmdir(full);
+      } catch {
+        /* not empty */
+      }
+    } else if (ent.isFile()) {
+      const st = await stat(full).catch(() => null);
+      if (st && st.mtimeMs < cutoffMs) {
+        await unlink(full).catch(() => undefined);
+        deleted += 1;
+      }
+    }
+  }
+  return deleted;
+}
+
+/** Drop original upload files whose mtime is past retention. Catches orphans the DB no longer points at. */
+export async function sweepImportFilesOlderThan(
+  retentionDays: number,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<number> {
+  const cutoffMs = Date.now() - retentionDays * 86_400_000;
+  const roots = [...new Set([resolveImportDir(env), ...extraSweepDirs(env)])];
+  let deleted = 0;
+  for (const root of roots) {
+    deleted += await sweepDirOlderThan(root, cutoffMs);
+  }
+  return deleted;
 }

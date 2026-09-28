@@ -11,9 +11,15 @@ INSTALL_ROOT="${MIS_EMAIL_INSTALL_ROOT:-/opt/wrl/database/fast-close-app}"
 
 rewrite_crontab() {
   local root="${1}"
-  local line="15 3 * * * ${root}/scripts/vps-hosting/mis-client-purge-old-files.sh >> ${root}/logs/mis-client-purge.log 2>&1"
-  chmod +x "${root}/scripts/vps-hosting/mis-client-purge-old-files.sh" 2>/dev/null || true
-  mkdir -p "${root}/logs"
+  local code="${root}"
+  local log_dir="${root}/logs"
+  if [[ -e "${root}/current/scripts/vps-hosting/mis-client-purge-old-files.sh" ]]; then
+    code="${root}/current"
+    log_dir="${root}/shared/logs"
+  fi
+  mkdir -p "${log_dir}"
+  local line="15 3 * * * ${code}/scripts/vps-hosting/mis-client-purge-old-files.sh >> ${log_dir}/mis-client-purge.log 2>&1"
+  chmod +x "${code}/scripts/vps-hosting/mis-client-purge-old-files.sh" 2>/dev/null || true
   {
     crontab -l 2>/dev/null | grep -v 'mis-client-purge-old-files.sh' | grep -v '^CRON_TZ=' || true
     echo "CRON_TZ=Asia/Kolkata"
@@ -69,10 +75,18 @@ if [[ -f "${root}/package.json" ]] && ! grep -q 'mis-client:purge-old-files' "${
   "
 fi
 
-test -f "${root}/src/modules/mis/client-import/services/purge-old-files.ts"
+test -f "${root}/src/modules/mis/client-import/services/purge-old-files.ts" \
+  || test -f "${root}/current/src/modules/mis/client-import/services/purge-old-files.ts"
 
-chmod +x "${root}/scripts/vps-hosting/mis-client-purge-old-files.sh"
-line="15 3 * * * ${root}/scripts/vps-hosting/mis-client-purge-old-files.sh >> ${root}/logs/mis-client-purge.log 2>&1"
+code="${root}"
+log_dir="${root}/logs"
+if [[ -e "${root}/current/scripts/vps-hosting/mis-client-purge-old-files.sh" ]]; then
+  code="${root}/current"
+  log_dir="${root}/shared/logs"
+fi
+mkdir -p "${log_dir}"
+chmod +x "${code}/scripts/vps-hosting/mis-client-purge-old-files.sh"
+line="15 3 * * * ${code}/scripts/vps-hosting/mis-client-purge-old-files.sh >> ${log_dir}/mis-client-purge.log 2>&1"
 {
   crontab -l 2>/dev/null | grep -v 'mis-client-purge-old-files.sh' | grep -v '^CRON_TZ=' || true
   echo "CRON_TZ=Asia/Kolkata"

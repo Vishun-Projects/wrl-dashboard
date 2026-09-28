@@ -30,6 +30,7 @@ install_systemd_unit() {
   local unit="/etc/systemd/system/${SERVICE_NAME}.service"
 
   echo "==> Installing systemd unit ${unit} (code: ${code})"
+  mkdir -p "${root}/shared/mis-client-import"
   cat >"$unit" <<EOF
 [Unit]
 Description=Fast Close MIS client file upload server (large files)
@@ -41,6 +42,7 @@ Type=simple
 WorkingDirectory=${code}
 Environment=MIS_UPLOAD_PORT=${UPLOAD_PORT}
 Environment=NODE_OPTIONS=--max-old-space-size=4096
+Environment=MIS_CLIENT_IMPORT_DIR=${root}/shared/mis-client-import
 EnvironmentFile=-${root}/.env.mis-upload
 EnvironmentFile=-${root}/shared/.env.mis-email
 EnvironmentFile=-${root}/.env.mis-email

@@ -1,3 +1,6 @@
+import { access, mkdtemp, utimes, writeFile, mkdir } from 'fs/promises';
+import { tmpdir } from 'os';
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 import {
   IMPORT_FILE_UNAVAILABLE_LABEL,
@@ -6,6 +9,7 @@ import {
   importFileRetentionTooltip,
   isImportFilePastRetention,
 } from './file-retention';
+import { sweepImportFilesOlderThan } from './file-store';
 import {
   DEFAULT_IMPORT_FILE_RETENTION_DAYS,
   resolveImportFileRetentionDays,
@@ -75,5 +79,27 @@ describe('import file retention UI rules', () => {
   it('explains retention on unavailable label', () => {
     expect(IMPORT_FILE_UNAVAILABLE_LABEL).toBe('Unavailable');
     expect(importFileRetentionTooltip()).toBe('Kept for 7 days only');
+  });
+});
+
+describe('sweepImportFilesOlderThan', () => {
+  it('deletes files older than retention and keeps recent ones', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'mis-import-sweep-'));
+    const oldFile = path.join(root, 'cadbury', 'old', 'Mondelez.csv');
+    const newFile = path.join(root, 'coke', 'new', 'HCCB.xlsx');
+    await mkdir(path.dirname(oldFile), { recursive: true });
+    await mkdir(path.dirname(newFile), { recursive: true });
+    await writeFile(oldFile, 'old');
+    await writeFile(newFile, 'new');
+    const nineDaysAgo = new Date(Date.now() - 9 * 86_400_000);
+    await utimes(oldFile, nineDaysAgo, nineDaysAgo);
+
+    const deleted = await sweepImportFilesOlderThan(7, {
+      MIS_CLIENT_IMPORT_DIR: root,
+    } as NodeJS.ProcessEnv);
+
+    expect(deleted).toBe(1);
+    await expect(access(newFile)).resolves.toBeUndefined();
+    await expect(access(oldFile)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

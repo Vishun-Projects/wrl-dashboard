@@ -14,17 +14,36 @@ echo "=== mis-client-purge-old-files $(TZ=Asia/Kolkata date -Iseconds) ==="
 # shellcheck source=vps-cron-gate.sh
 source "${SCRIPT_DIR}/vps-cron-gate.sh"
 
-if [[ -f "${INSTALL_ROOT}/.env.mis-upload" ]]; then
+load_env() {
+  local f="$1"
+  [[ -f "$f" ]] || return 1
   set -a
-  # shellcheck disable=SC1091
-  source "${INSTALL_ROOT}/.env.mis-upload"
+  # shellcheck disable=SC1090
+  source "$f"
   set +a
-elif [[ -f "${INSTALL_ROOT}/.env.mis-email" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "${INSTALL_ROOT}/.env.mis-email"
-  set +a
+  return 0
+}
+
+BASE_ROOT="${INSTALL_ROOT%/current}"
+if [[ -d "${INSTALL_ROOT}/shared" ]]; then
+  BASE_ROOT="${INSTALL_ROOT}"
+elif [[ -d "${INSTALL_ROOT}/../shared" ]]; then
+  BASE_ROOT="$(cd "${INSTALL_ROOT}/.." && pwd)"
+elif [[ -d "${INSTALL_ROOT}/../../shared" ]]; then
+  BASE_ROOT="$(cd "${INSTALL_ROOT}/../.." && pwd)"
 fi
+load_env "${INSTALL_ROOT}/.env.mis-upload" \
+  || load_env "${BASE_ROOT}/.env.mis-upload" \
+  || load_env "${INSTALL_ROOT}/.env.mis-email" \
+  || load_env "${BASE_ROOT}/shared/.env.mis-email" \
+  || true
+
+if [[ -z "${MIS_CLIENT_IMPORT_DIR:-}" ]]; then
+  if [[ -d "${BASE_ROOT}/shared" ]]; then
+    export MIS_CLIENT_IMPORT_DIR="${BASE_ROOT}/shared/mis-client-import"
+  fi
+fi
+mkdir -p "${MIS_CLIENT_IMPORT_DIR:-${INSTALL_ROOT}/.cache/mis-client-import}"
 
 vps_cron_gate_allow mis_client_purge || exit 0
 

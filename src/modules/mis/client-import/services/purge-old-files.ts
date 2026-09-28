@@ -1,5 +1,8 @@
 import { withAppClient } from '@/lib/read-model/db';
-import { deleteImportFile } from '@/modules/mis/client-import/services/file-store';
+import {
+  deleteImportFile,
+  sweepImportFilesOlderThan,
+} from '@/modules/mis/client-import/services/file-store';
 import { IMPORT_FILE_RETENTION_DAYS } from '@/modules/mis/client-import/services/file-retention';
 import { recomputeBatchRowStatsForSource } from '@/modules/mis/client-import/services/config';
 
@@ -21,6 +24,7 @@ export type PurgeExpiredImportFilesResult = {
   filesDeleted: number;
   blobsCleared: number;
   rowsPurgedBatches?: number;
+  filesSwept?: number;
 };
 
 /**
@@ -112,13 +116,16 @@ export async function purgeExpiredImportStoredFiles(opts?: {
       }
     }
 
+    const filesSwept = dryRun ? 0 : await sweepImportFilesOlderThan(retentionDays);
+
     return {
       retentionDays,
       dryRun,
       candidates: res.rows.length,
       filesDeleted,
       blobsCleared,
-      rowsPurgedBatches, // Note: Added to PurgeExpiredImportFilesResult implicitly by returning it, assuming PurgeExpiredImportFilesResult allows it or we update it
-    } as PurgeExpiredImportFilesResult & { rowsPurgedBatches: number };
+      rowsPurgedBatches,
+      filesSwept,
+    };
   });
 }
