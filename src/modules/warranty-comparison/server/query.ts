@@ -3,7 +3,8 @@ import 'server-only';
 import { formatUiDateDash } from '@/lib/dates/ui-date';
 import { withAppClient } from '@/lib/read-model/db';
 import { foldAccountName } from '../account-label';
-import { coverageSql, resolveCoveredVtrnnos } from './exceptions';
+import { resolveCoveredVtrnnos } from './exceptions';
+import { amcCoverSql } from '../exception-cover';
 import { WARRANTY_MONTHS_SQL } from './serial-strip';
 import type {
   WarrantyComparisonFilterOptions,
@@ -163,43 +164,16 @@ function buildTabCondition(tab: WarrantyComparisonFilterParams['tab']): string {
       `;
 }
 
-const OPTION_COL_SQL = {
-  branch: 'c.branch_name',
-  account: 'c.account',
-  systemAccount: 'w.customer_subgroup',
-  callType: 'c.call_type',
-  status: 'c.status_label',
-} as const;
-
-async function fetchDistinctOptionCols(
-  client: { query: (sql: string, values?: unknown[]) => Promise<{ rows: { col: string; val: string }[] }> },
-  filters: WarrantyComparisonFilterParams & UserScope,
-  cols: Array<keyof typeof OPTION_COL_SQL>,
-  coveredList?: string[]
-): Promise<{ col: string; val: string }[]> {
-  const values: unknown[] = [];
-  const { whereSql, nextIdx } = buildCallsWhereClause(filters, values);
-  const extraSql = coveredList ? coverageSql(filters.tab, nextIdx) : '';
-  if (extraSql) values.push(coveredList);
-  const fromSql = `
-    FROM public.calls_latest_hot c
-    JOIN public.warranty_master_items w ON UPPER(w.serial_no) = UPPER(c.serial)
-    ${whereSql}
-    ${buildTabCondition(filters.tab)}
-    ${extraSql}
-  `;
-  const sql = `
-    SELECT DISTINCT ON (col, val) col, val FROM (
-      ${cols.map((col) => `SELECT '${col}' AS col, ${OPTION_COL_SQL[col]} AS val ${fromSql}`).join(' UNION ALL ')}
-    ) t
-    WHERE val IS NOT NULL AND TRIM(val) <> ''
-  `;
-  const res = await client.query(sql, values);
-  return res.rows;
+function tabAmcSql(tab: WarrantyComparisonFilterParams['tab']): string {
+  if (tab === 'in_warr_oow') return '';
+  if (tab === 'exception_ok') return amcCoverSql(false);
+  // oow_in_warr + all: exclude AMC-covered from mismatch lists
+  return amcCoverSql(true);
 }
 
 /**
- * Fetch summary KPI metrics for the current date window and scope
+ * Fetch summary KPI metrics for the current date window and scope.
+ * Exception OK uses AMC cover only (no CRM compressor round-trips).
  */
 export async function fetchWarrantyComparisonSummary(
   filters: WarrantyComparisonFilterParams & UserScope
@@ -209,9 +183,10 @@ export async function fetchWarrantyComparisonSummary(
     const { whereSql } = buildCallsWhereClause(filters, values);
 
     const sql = `
-      WITH base_calls AS (
+      WITH base_calls AS MATERIALIZED (
         SELECT
           c.serial,
+          UPPER(TRIM(c.serial)) AS serial_u,
           c.logged_at,
           c.wco,
           c.vtrnno
@@ -226,10 +201,11 @@ export async function fetchWarrantyComparisonSummary(
           bc.wco,
           w.warr_start_dt,
           w.warr_end_dt,
+          w.customer_subgroup,
           (w.serial_no IS NOT NULL) AS has_master
         FROM base_calls bc
         LEFT JOIN public.warranty_master_items w
-          ON UPPER(w.serial_no) = UPPER(bc.serial)
+          ON UPPER(w.serial_no) = bc.serial_u
       )
       SELECT
         COUNT(*)::int AS total_calls,
@@ -260,30 +236,43 @@ export async function fetchWarrantyComparisonSummary(
                AND UPPER(TRIM(COALESCE(wco, ''))) = 'O')
             )
           THEN UPPER(TRIM(serial))
-        END)::int AS unique_serials_count
+        END)::int AS unique_serials_count,
+        COUNT(CASE
+          WHEN has_master
+            AND warr_end_dt IS NOT NULL
+            AND CAST(logged_at AS DATE) > CAST(warr_end_dt AS DATE)
+            AND UPPER(TRIM(COALESCE(wco, ''))) = 'W'
+            AND EXISTS (
+              SELECT 1 FROM public.warranty_exception_accounts e
+              WHERE e.enabled
+                AND e.amc AND e.amc_valid_upto IS NOT NULL
+                AND UPPER(TRIM(e.system_account)) = UPPER(TRIM(customer_subgroup))
+                AND CAST(logged_at AS DATE) <= e.amc_valid_upto
+            )
+          THEN 1
+        END)::int AS exception_ok_count
       FROM joined
     `;
 
     const res = await client.query(sql, values);
     const row = res.rows[0] ?? {};
-    const covered = await resolveCoveredVtrnnos(client, whereSql, values);
-    const rawOow = row.oow_in_warr_count ?? 0;
-    const exceptionOkCount = covered.size;
+    const rawOow = Number(row.oow_in_warr_count ?? 0);
+    const exceptionOkCount = Number(row.exception_ok_count ?? 0);
     const oowInWarrCount = Math.max(0, rawOow - exceptionOkCount);
 
     return {
-      totalCallsAnalyzed: row.total_calls ?? 0,
-      totalWithWarrantyMaster: row.total_with_master ?? 0,
+      totalCallsAnalyzed: Number(row.total_calls ?? 0),
+      totalWithWarrantyMaster: Number(row.total_with_master ?? 0),
       oowInWarrCount,
-      inWarrOowCount: row.in_warr_oow_count ?? 0,
+      inWarrOowCount: Number(row.in_warr_oow_count ?? 0),
       exceptionOkCount,
-      uniqueSerialsCount: row.unique_serials_count ?? 0,
+      uniqueSerialsCount: Number(row.unique_serials_count ?? 0),
     };
   });
 }
 
 /**
- * Fetch paginated mismatch rows
+ * Fetch paginated mismatch rows — LIMIT first, exception cover only for the page.
  */
 export async function fetchWarrantyComparisonRows(
   filters: WarrantyComparisonFilterParams & UserScope
@@ -292,31 +281,27 @@ export async function fetchWarrantyComparisonRows(
     const values: unknown[] = [];
     const { whereSql, nextIdx } = buildCallsWhereClause(filters, values);
     const tabCondition = buildTabCondition(filters.tab);
-    const covered = await resolveCoveredVtrnnos(client, whereSql, values);
-    const coveredList = [...covered.keys()];
-    const extraSql = coverageSql(filters.tab, nextIdx);
-    const queryValues = extraSql ? [...values, coveredList] : values;
-    const limitIdx = extraSql ? nextIdx + 1 : nextIdx;
+    const amcSql = tabAmcSql(filters.tab);
 
-    // Count matching rows
-    const countSql = `
-      SELECT COUNT(*)::int AS total
+    const fromSql = `
       FROM public.calls_latest_hot c
       JOIN public.warranty_master_items w
-        ON UPPER(w.serial_no) = UPPER(c.serial)
+        ON UPPER(w.serial_no) = UPPER(TRIM(c.serial))
       ${whereSql}
       ${tabCondition}
-      ${extraSql}
+      ${amcSql}
     `;
 
-    const countRes = await client.query<{ total: number }>(countSql, queryValues);
+    const countRes = await client.query<{ total: number }>(
+      `SELECT COUNT(*)::int AS total ${fromSql}`,
+      values
+    );
     const total = countRes.rows[0]?.total ?? 0;
 
     const page = filters.page ?? 1;
     const pageSize = filters.pageSize ?? 25;
     const offset = (page - 1) * pageSize;
 
-    // Sorting map
     const sortFieldMap: Record<string, string> = {
       callDate: 'c.logged_at',
       vtrnno: 'c.vtrnno',
@@ -364,21 +349,21 @@ export async function fetchWarrantyComparisonRows(
           ELSE 'in_warr_oow'
         END AS "mismatchType",
         (CAST(c.logged_at AS DATE) - CAST(w.warr_end_dt AS DATE))::int AS "daysDelta"
-      FROM public.calls_latest_hot c
-      JOIN public.warranty_master_items w
-        ON UPPER(w.serial_no) = UPPER(c.serial)
-      ${whereSql}
-      ${tabCondition}
-      ${extraSql}
+      ${fromSql}
       ORDER BY ${sortCol} ${sortDirection}, c.vtrnno DESC
-      LIMIT $${limitIdx} OFFSET $${limitIdx + 1}
+      LIMIT $${nextIdx} OFFSET $${nextIdx + 1}
     `;
 
     const dataRes = await client.query<WarrantyComparisonRow>(dataSql, [
-      ...queryValues,
+      ...values,
       pageSize,
       offset,
     ]);
+
+    const pageVtrnnos = dataRes.rows.map((r) => r.vtrnno).filter(Boolean);
+    const covered = await resolveCoveredVtrnnos(client, whereSql, values, {
+      vtrnnos: pageVtrnnos,
+    });
 
     const rows = dataRes.rows.map((row) => ({
       ...row,
@@ -396,8 +381,7 @@ export async function fetchWarrantyComparisonRows(
 }
 
 /**
- * Filter options from the same mismatch join as the table, so a picked
- * name is actually present in the current tab / call-type / date window.
+ * Filter options from filtered calls (no full mismatch join).
  */
 export async function fetchWarrantyComparisonOptions(
   filters: WarrantyComparisonFilterParams & UserScope
@@ -412,36 +396,54 @@ export async function fetchWarrantyComparisonOptions(
       assignedOffices: filters.assignedOffices,
       callTypes: filters.callTypes,
     };
-    const inView = {
-      ...shared,
-      branches: filters.branches,
-      statuses: filters.statuses,
-    };
 
-    const coverValues: unknown[] = [];
-    const { whereSql: coverWhere } = buildCallsWhereClause(filters, coverValues);
-    const covered = await resolveCoveredVtrnnos(client, coverWhere, coverValues);
-    const coveredList = filters.tab === 'in_warr_oow' ? undefined : [...covered.keys()];
+    const callValues: unknown[] = [];
+    const { whereSql: callWhere } = buildCallsWhereClause(
+      {
+        ...shared,
+        accounts: filters.accounts,
+        systemAccounts: filters.systemAccounts,
+        branches: filters.branches,
+        statuses: filters.statuses,
+      },
+      callValues
+    );
 
-    const [accountRows, systemRows, otherRows] = await Promise.all([
-      fetchDistinctOptionCols(
-        client,
-        { ...inView, systemAccounts: filters.systemAccounts },
-        ['account'],
-        coveredList
-      ),
-      fetchDistinctOptionCols(
-        client,
-        { ...inView, accounts: filters.accounts },
-        ['systemAccount'],
-        coveredList
-      ),
-      fetchDistinctOptionCols(
-        client,
-        { ...shared, accounts: filters.accounts, systemAccounts: filters.systemAccounts },
-        ['branch', 'callType', 'status'],
-        coveredList
-      ),
+    const callOptsSql = `
+      SELECT DISTINCT col, val FROM (
+        SELECT 'branch' AS col, c.branch_name AS val
+        FROM public.calls_latest_hot c
+        ${callWhere}
+        UNION ALL
+        SELECT 'account', c.account
+        FROM public.calls_latest_hot c
+        ${callWhere}
+        UNION ALL
+        SELECT 'callType', c.call_type
+        FROM public.calls_latest_hot c
+        ${callWhere}
+        UNION ALL
+        SELECT 'status', c.status_label
+        FROM public.calls_latest_hot c
+        ${callWhere}
+      ) t
+      WHERE val IS NOT NULL AND TRIM(val) <> ''
+    `;
+
+    const sysValues: unknown[] = [];
+    const { whereSql: sysWhere } = buildCallsWhereClause(shared, sysValues);
+    const sysSql = `
+      SELECT DISTINCT w.customer_subgroup AS val
+      FROM public.calls_latest_hot c
+      JOIN public.warranty_master_items w
+        ON UPPER(w.serial_no) = UPPER(TRIM(c.serial))
+      ${sysWhere}
+      ${sysWhere ? 'AND' : 'WHERE'} w.customer_subgroup IS NOT NULL AND TRIM(w.customer_subgroup) <> ''
+    `;
+
+    const [callRows, sysRows] = await Promise.all([
+      client.query<{ col: string; val: string }>(callOptsSql, callValues),
+      client.query<{ val: string }>(sysSql, sysValues),
     ]);
 
     const branchSet = new Set<string>();
@@ -450,13 +452,15 @@ export async function fetchWarrantyComparisonOptions(
     const callTypeSet = new Set<string>();
     const statusSet = new Set<string>();
 
-    for (const r of [...accountRows, ...systemRows, ...otherRows]) {
+    for (const r of callRows.rows) {
       const v = r.val.trim();
-      if (r.col === 'branch')        branchSet.add(v);
-      if (r.col === 'account')       foldAccountName(accountMap, v);
-      if (r.col === 'systemAccount') foldAccountName(systemAccountMap, v);
-      if (r.col === 'callType')      callTypeSet.add(v);
-      if (r.col === 'status')        statusSet.add(v);
+      if (r.col === 'branch') branchSet.add(v);
+      if (r.col === 'account') foldAccountName(accountMap, v);
+      if (r.col === 'callType') callTypeSet.add(v);
+      if (r.col === 'status') statusSet.add(v);
+    }
+    for (const r of sysRows.rows) {
+      foldAccountName(systemAccountMap, r.val.trim());
     }
 
     for (const t of filters.callTypes ?? []) {

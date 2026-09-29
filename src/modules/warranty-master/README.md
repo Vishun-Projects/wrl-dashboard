@@ -7,11 +7,11 @@ Warranty Master — inventory of **non-returned** machines with a real customer/
 ```text
 /report/warranty-master  →  WarrantyMasterPageClient
         ↓
-GET ?mode=meta + mode=fgLines  (full FG corpus into client)
+GET ?mode=summary + mode=options + mode=hierarchy (paginated)
         ↓
-Client filter / sort / aggregate → summary table
+Server KPIs + one page of subgroups; expand → mode=serials
         ↓
-Expand row → FG detail; optional CSV
+Optional CSV
 ```
 
 ## What is *not* here
@@ -38,9 +38,9 @@ index.ts      Public barrel
 ## Core flows
 
 1. Open `/report/warranty-master`.
-2. Fetch `mode=meta` + `mode=fgLines` → CRM corpus into client cache.
-3. Client filters/sorts/aggregates FG lines → summary.
-4. Expand row → FG detail from in-memory index (or `mode=detail`).
+2. Fetch `mode=summary` (KPIs), `mode=options` (filter dims), `mode=hierarchy` (one page of subgroups).
+3. Page/filter changes refetch hierarchy (and summary when filters change).
+4. Expand warranty → `mode=serials` (already paginated).
 5. Optional CSV (`format=csv`).
 
 ---
@@ -51,7 +51,7 @@ index.ts      Public barrel
 2. Must have **party profile code** (`npartyprofile` non-empty).
 3. Must have **resolved party name** — do **not** fall back to profile code (`WARRANTY_MASTER_HAS_PARTY_NAME_SQL`).
 4. `activeOnly` ⇒ warranty end ≥ today (`GETDATE()`); date bounds use inclusive from / exclusive end+1 day.
-5. Client loads full FG lines once then shapes in browser; meta count drives cache invalidation.
+5. Client loads KPIs + one hierarchy page from the server; pagination is server-side.
 6. Changing constants in `services/constants.ts` changes SQL — `@/sql/warranty-master/where-clause.ts` imports them.
 
 ---

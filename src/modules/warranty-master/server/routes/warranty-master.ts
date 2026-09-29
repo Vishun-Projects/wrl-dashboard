@@ -4,10 +4,13 @@ import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { gzippedCsvPayload } from '@/lib/net/csv-gzip-response';
 import {
   fetchWarrantyMasterFgLines,
+  fetchWarrantyMasterHierarchy,
   fetchWarrantyMasterMeta,
+  fetchWarrantyMasterOptions,
   fetchWarrantyMasterRowDetail,
   fetchWarrantyMasterRows,
   fetchWarrantyMasterSerials,
+  fetchWarrantyMasterSummary,
   countWarrantyMasterSerials,
   parseWarrantyMasterDetailParams,
   parseWarrantyMasterParams,
@@ -39,6 +42,32 @@ export async function GET(req: NextRequest) {
     if (mode === 'meta') {
       const meta = await fetchWarrantyMasterMeta();
       return NextResponse.json(meta);
+    }
+
+    if (mode === 'summary') {
+      const summary = await fetchWarrantyMasterSummary(params);
+      return NextResponse.json(summary);
+    }
+
+    if (mode === 'options') {
+      const options = await fetchWarrantyMasterOptions();
+      return NextResponse.json(options);
+    }
+
+    if (mode === 'hierarchy') {
+      const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1);
+      const pageSize = Math.min(
+        200,
+        Math.max(10, parseInt(searchParams.get('pageSize') ?? '50', 10) || 50)
+      );
+      const sortDir = searchParams.get('sortDir') === 'desc' ? 'desc' : 'asc';
+      const hierarchy = await fetchWarrantyMasterHierarchy({
+        ...params,
+        page,
+        pageSize,
+        sortDir,
+      });
+      return NextResponse.json(hierarchy);
     }
 
     if (mode === 'fgLines') {

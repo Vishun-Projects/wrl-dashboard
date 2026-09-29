@@ -45,3 +45,22 @@ export function coverageReason(
   }
   return null;
 }
+
+/** SQL predicate: AMC exception cover (no CRM). Uses aliases c, w. */
+export function amcCoverSql(negated: boolean): string {
+  const exists = `EXISTS (
+    SELECT 1 FROM public.warranty_exception_accounts e
+    WHERE e.enabled
+      AND e.amc AND e.amc_valid_upto IS NOT NULL
+      AND UPPER(TRIM(e.system_account)) = UPPER(TRIM(w.customer_subgroup))
+      AND CAST(c.logged_at AS DATE) <= e.amc_valid_upto
+  )`;
+  return negated ? `AND NOT ${exists}` : `AND ${exists}`;
+}
+
+export function coverageSql(tab: string, idx: number): string {
+  if (tab === 'in_warr_oow') return '';
+  if (tab === 'exception_ok') return `AND c.vtrnno = ANY($${idx}::text[])`;
+  return `AND NOT (c.vtrnno = ANY($${idx}::text[]))`;
+}
+

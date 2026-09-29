@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, ChevronDown, Copy, Loader2 } from 'lucide-react';
 import {
   AdminTable,
@@ -23,7 +23,14 @@ const SERIAL_PAGE_SIZE = 100;
 
 type Props = {
   rows: WarrantyMasterHierarchySubgroup[];
+  total: number;
+  page: number;
+  pageSize: number;
+  sortDir: 'asc' | 'desc';
   filters: WarrantyMasterClientFilters;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+  onSortDirChange: (dir: 'asc' | 'desc') => void;
 };
 
 function formatRange(min: string | null, max: string | null): string {
@@ -230,56 +237,53 @@ function SerialDetail({
   );
 }
 
-export const WarrantyMasterHierarchyTable = React.memo(function WarrantyMasterHierarchyTable({ rows, filters }: Props) {
-  const [sortAscending, setSortAscending] = useState(true);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<number>(50);
+export const WarrantyMasterHierarchyTable = React.memo(function WarrantyMasterHierarchyTable({
+  rows,
+  total,
+  page,
+  pageSize,
+  sortDir,
+  filters,
+  onPageChange,
+  onPageSizeChange,
+  onSortDirChange,
+}: Props) {
   const [expandedSubgroup, setExpandedSubgroup] = useState<string | null>(null);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [expandedWarranty, setExpandedWarranty] = useState<string | null>(null);
 
-  const sortedRows = useMemo(() => {
-    const list = [...rows].sort((a, b) =>
-      a.customerSubgroup.localeCompare(b.customerSubgroup, undefined, { sensitivity: 'base', numeric: true })
-    );
-    if (!sortAscending) list.reverse();
-    return list;
-  }, [rows, sortAscending]);
-
-  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(page, totalPages);
-  const pagedRows = sortedRows.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   useEffect(() => {
-    setPage(1);
     setExpandedSubgroup(null);
     setExpandedGroup(null);
     setExpandedWarranty(null);
-  }, [rows, pageSize, filters]);
+  }, [rows, pageSize, filters, sortDir]);
 
-  const start = sortedRows.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
-  const end = Math.min(safePage * pageSize, sortedRows.length);
+  const start = total === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const end = Math.min(safePage * pageSize, total);
 
   return (
     <div className="flex min-h-0 flex-col">
       <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3 py-2 text-[10px] text-slate-500">
-        <span>{start.toLocaleString('en-IN')}–{end.toLocaleString('en-IN')} of {sortedRows.length.toLocaleString('en-IN')} subgroups</span>
+        <span>{start.toLocaleString('en-IN')}–{end.toLocaleString('en-IN')} of {total.toLocaleString('en-IN')} subgroups</span>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-1.5">
             Rows
             <select
               value={pageSize}
-              onChange={(e) => setPageSize(Number(e.target.value))}
+              onChange={(e) => onPageSizeChange(Number(e.target.value))}
               className="rounded border border-slate-200 bg-white px-1.5 py-1 text-[10px] text-slate-700"
             >
               {TOP_PAGE_SIZE_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
           </label>
-          <button type="button" className="rounded border border-slate-200 bg-white p-1 disabled:opacity-40" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage <= 1} aria-label="Previous subgroup page">
+          <button type="button" className="rounded border border-slate-200 bg-white p-1 disabled:opacity-40" onClick={() => onPageChange(Math.max(1, safePage - 1))} disabled={safePage <= 1} aria-label="Previous subgroup page">
             <ChevronLeft className="h-3 w-3" />
           </button>
           <span className="min-w-[4.5rem] text-center">Page {safePage} / {totalPages}</span>
-          <button type="button" className="rounded border border-slate-200 bg-white p-1 disabled:opacity-40" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages} aria-label="Next subgroup page">
+          <button type="button" className="rounded border border-slate-200 bg-white p-1 disabled:opacity-40" onClick={() => onPageChange(Math.min(totalPages, safePage + 1))} disabled={safePage >= totalPages} aria-label="Next subgroup page">
             <ChevronRight className="h-3 w-3" />
           </button>
         </div>
@@ -299,11 +303,8 @@ export const WarrantyMasterHierarchyTable = React.memo(function WarrantyMasterHi
             <AdminTh
               sortable
               sortKey="customer"
-              sort={{ key: 'customer', dir: sortAscending ? 'asc' : 'desc' }}
-              onSort={() => {
-                setSortAscending((value) => !value);
-                setPage(1);
-              }}
+              sort={{ key: 'customer', dir: sortDir }}
+              onSort={() => onSortDirChange(sortDir === 'asc' ? 'desc' : 'asc')}
             >
               Customer subgroup
             </AdminTh>
@@ -313,7 +314,7 @@ export const WarrantyMasterHierarchyTable = React.memo(function WarrantyMasterHi
           </tr>
         </AdminThead>
         <tbody>
-          {pagedRows.map((subgroup) => {
+          {rows.map((subgroup) => {
             const subgroupOpen = expandedSubgroup === subgroup.subgroupKey;
             const warrantyCount = subgroup.groups.reduce((sum, group) => sum + group.warranties.length, 0);
             return (

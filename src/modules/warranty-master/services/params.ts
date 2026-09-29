@@ -12,7 +12,9 @@ export function parseWarrantyMasterParams(searchParams: URLSearchParams): Warran
     warrStartTo: searchParams.get('warrStartTo'),
     warrEndFrom: searchParams.get('warrEndFrom'),
     warrEndTo: searchParams.get('warrEndTo'),
-    activeOnly: searchParams.get('activeOnly') === '1',
+    activeOnly:
+      searchParams.get('activeOnly') === '1' ||
+      searchParams.get('activeOnly') === 'true',
     q: searchParams.get('q'),
     serialNumber: searchParams.get('serialNumber') ?? searchParams.get('serial'),
   };

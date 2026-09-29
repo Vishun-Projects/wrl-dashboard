@@ -8,9 +8,16 @@ import {
   queryWarrantyMasterSerialsFromDb,
   countWarrantyMasterSerialsFromDb,
   queryWarrantyMasterExportRowsFromDb,
+  queryWarrantyMasterSummaryFromDb,
+  queryWarrantyMasterOptionsFromDb,
+  queryWarrantyMasterHierarchyFromDb,
+  refreshWarrantyMasterRollup,
+  type WarrantyMasterHierarchyPage,
+  type WarrantyMasterSummaryResult,
 } from './db';
 import type {
   WarrantyMasterAggregateRow,
+  WarrantyMasterDims,
   WarrantyMasterFgDetailRow,
   WarrantyMasterFgLineRow,
   WarrantyMasterQueryParams,
@@ -34,10 +41,32 @@ export async function fetchWarrantyMasterMeta(): Promise<WarrantyMasterMeta> {
   };
 }
 
-/** Primary load: full FG-line dataset for client-side filtering directly from local Postgres. */
+/** Legacy full FG corpus — prefer summary + hierarchy pagination. */
 export async function fetchWarrantyMasterFgLines(): Promise<WarrantyMasterFgLineRow[]> {
   return queryWarrantyMasterFgLinesFromDb();
 }
+
+export async function fetchWarrantyMasterSummary(
+  params: WarrantyMasterQueryParams
+): Promise<WarrantyMasterSummaryResult> {
+  return queryWarrantyMasterSummaryFromDb(params);
+}
+
+export async function fetchWarrantyMasterOptions(): Promise<WarrantyMasterDims> {
+  return queryWarrantyMasterOptionsFromDb();
+}
+
+export async function fetchWarrantyMasterHierarchy(
+  params: WarrantyMasterQueryParams & {
+    page?: number;
+    pageSize?: number;
+    sortDir?: 'asc' | 'desc';
+  }
+): Promise<WarrantyMasterHierarchyPage> {
+  return queryWarrantyMasterHierarchyFromDb(params);
+}
+
+export { refreshWarrantyMasterRollup };
 
 /** Fetch machine serials matching search query or row/FG breakdown directly from local Postgres. */
 export async function fetchWarrantyMasterSerials(

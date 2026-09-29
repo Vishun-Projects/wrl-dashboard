@@ -11,6 +11,7 @@ import {
   remapCustomerSubgroup,
   warrantyDateRank,
 } from '../import-parse';
+import { refreshWarrantyMasterRollup } from '../db';
 
 type WarrantyImportRow = {
   serialNo: string;
@@ -237,6 +238,8 @@ export async function POST(req: NextRequest) {
         WHERE is_active IS DISTINCT FROM (warr_end_dt IS NOT NULL AND warr_end_dt >= CURRENT_DATE);
       `);
     });
+
+    await refreshWarrantyMasterRollup();
 
     const totalCount = await withAppClient(async (client) => {
       const r = await client.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM public.warranty_master_items');

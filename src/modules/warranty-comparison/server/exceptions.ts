@@ -4,9 +4,11 @@ import { postQuery } from '@/lib/db/proxy';
 import { withAppClient } from '@/lib/read-model/db';
 import { foldAccountName } from '../account-label';
 import type { ExceptionWorkDoneMode } from '../exception-cover';
+import { amcCoverSql, coverageSql } from '../exception-cover';
 import type { WarrantyExceptionAccount } from '../types';
 
 export type { WarrantyExceptionAccount };
+export { amcCoverSql, coverageSql };
 
 export type ExceptionCoverReason = 'AMC' | 'Compressor';
 
@@ -245,21 +247,37 @@ async function compressorCoveredVtrnnos(candidates: CompCandidate[]): Promise<Se
   return covered;
 }
 
-/** Lapsed + W rows covered by AMC or compressor work-done. AMC wins. */
+/** Lapsed + W rows covered by AMC or compressor work-done. AMC wins.
+ *  `amcOnly` skips CRM compressor checks (summary path).
+ *  `vtrnnos` limits work to a page of call ids (rows path). */
 export async function resolveCoveredVtrnnos(
   client: { query: (sql: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
   whereSql: string,
-  values: unknown[]
+  values: unknown[],
+  opts?: { amcOnly?: boolean; vtrnnos?: string[] }
 ): Promise<Map<string, ExceptionCoverReason>> {
   const reasons = new Map<string, ExceptionCoverReason>();
+  const amcOnly = opts?.amcOnly === true;
+  const vtrnnos = opts?.vtrnnos?.map((v) => v.trim()).filter(Boolean);
+
+  const scopeValues = [...values];
+  let vtrnnoSql = '';
+  if (vtrnnos && vtrnnos.length > 0) {
+    vtrnnoSql = ` AND c.vtrnno = ANY($${scopeValues.length + 1}::text[])`;
+    scopeValues.push(vtrnnos);
+  } else if (vtrnnos && vtrnnos.length === 0) {
+    return reasons;
+  }
+
   const fromSql = `
     FROM public.calls_latest_hot c
-    JOIN public.warranty_master_items w ON UPPER(w.serial_no) = UPPER(c.serial)
+    JOIN public.warranty_master_items w ON UPPER(w.serial_no) = UPPER(TRIM(c.serial))
     JOIN public.warranty_exception_accounts e
       ON e.enabled
      AND UPPER(TRIM(e.system_account)) = UPPER(TRIM(w.customer_subgroup))
     ${whereSql}
     ${OOW_W_SQL}
+    ${vtrnnoSql}
   `;
 
   try {
@@ -267,12 +285,14 @@ export async function resolveCoveredVtrnnos(
       `SELECT c.vtrnno ${fromSql}
        AND e.amc AND e.amc_valid_upto IS NOT NULL
        AND CAST(c.logged_at AS DATE) <= e.amc_valid_upto`,
-      values
+      scopeValues
     );
     for (const r of amcRes.rows) {
       const v = String(r.vtrnno ?? '').trim();
       if (v) reasons.set(v, 'AMC');
     }
+
+    if (amcOnly) return reasons;
 
     const compRes = await client.query(
       `SELECT c.vtrnno, c.ncode, c.nofficeid, e.work_done_mode, e.work_done_repair_ncodes
@@ -281,7 +301,7 @@ export async function resolveCoveredVtrnnos(
        AND e.compressor_warranty_months > 0
        AND w.warr_start_dt IS NOT NULL
        AND CAST(c.logged_at AS DATE) <= (w.warr_start_dt + make_interval(months => e.compressor_warranty_months))`,
-      values
+      scopeValues
     );
     const candidates: CompCandidate[] = [];
     for (const r of compRes.rows) {
@@ -305,10 +325,4 @@ export async function resolveCoveredVtrnnos(
     console.error('[warranty-exception-cover]', err);
   }
   return reasons;
-}
-
-export function coverageSql(tab: string, idx: number): string {
-  if (tab === 'in_warr_oow') return '';
-  if (tab === 'exception_ok') return `AND c.vtrnno = ANY($${idx}::text[])`;
-  return `AND NOT (c.vtrnno = ANY($${idx}::text[]))`;
 }
