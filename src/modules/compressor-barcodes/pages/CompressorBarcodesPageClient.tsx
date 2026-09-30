@@ -40,6 +40,7 @@ import {
   Clock,
   History,
 } from 'lucide-react';
+import { callDatesSpanDays, latestDatesFromCalls } from '@/modules/compressor-barcodes/latest-dates';
 
 const fetcher = (url: string) =>
   fetch(url).then((res) => {
@@ -85,6 +86,7 @@ type CompressorSerialGroup = {
   total_calls: number;
   calls_in_range?: number;
   latest_call_date: string;
+  earliest_call_date?: string;
   latest_solve_date: string | null;
   avg_days_gap: number | null;
   latest_office: string;
@@ -299,10 +301,15 @@ function normalizeCompressorResponse(res: APIResponse): APIResponse {
     .map((row) => {
       const allCalls = getActiveCalls(row.all_calls && row.all_calls.length > 0 ? row.all_calls : row.calls);
       const rangeCalls = getActiveCalls(row.calls);
+      // Date columns follow the filtered period visits (API `calls`), not all-time history.
+      // Solved Date / This Month → call_date can be from earlier months for those solves.
+      const dateSource = rangeCalls.length > 0 ? rangeCalls : allCalls;
+      const { latest_call_date, earliest_call_date, latest_solve_date } =
+        latestDatesFromCalls(dateSource);
 
-      const latestCall = [...allCalls].sort((a, b) => {
-        const aDate = new Date(a.call_date || a.solve_date || 0).getTime();
-        const bDate = new Date(b.call_date || b.solve_date || 0).getTime();
+      const latestByCallDate = [...dateSource].sort((a, b) => {
+        const aDate = new Date(a.call_date || 0).getTime();
+        const bDate = new Date(b.call_date || 0).getTime();
         return bDate - aDate;
       })[0];
 
@@ -310,14 +317,15 @@ function normalizeCompressorResponse(res: APIResponse): APIResponse {
         ...row,
         total_calls: uniqueVisitCount(allCalls),
         calls_in_range: uniqueVisitCount(rangeCalls),
-        latest_call_date: latestCall?.call_date || '',
-        latest_solve_date: latestCall?.solve_date || null,
-        latest_office: latestCall?.office_name || row.latest_office,
-        latest_branch: latestCall?.branch_name || row.latest_branch,
-        latest_sap_vendor_code: latestCall?.sap_vendor_code || row.latest_sap_vendor_code,
+        latest_call_date,
+        earliest_call_date,
+        latest_solve_date,
+        latest_office: latestByCallDate?.office_name || row.latest_office,
+        latest_branch: latestByCallDate?.branch_name || row.latest_branch,
+        latest_sap_vendor_code: latestByCallDate?.sap_vendor_code || row.latest_sap_vendor_code,
         current_barcode:
-          latestCall?.derived_new_barcode && latestCall.derived_new_barcode !== '-'
-            ? latestCall.derived_new_barcode
+          latestByCallDate?.derived_new_barcode && latestByCallDate.derived_new_barcode !== '-'
+            ? latestByCallDate.derived_new_barcode
             : row.current_barcode,
         calls: rangeCalls,
         all_calls: allCalls,
@@ -839,26 +847,47 @@ export function CompressorBarcodesPageClient() {
           {/* KPI Stats Bar — counts follow kind, branch, and date range */}
           {stats && (
             <div className="shrink-0 border-b border-slate-200 bg-slate-50/60">
-              <div className="flex items-center gap-1.5 px-3 pt-1.5 text-[10px] text-slate-500">
-                <span>
-                  KPIs for <span className="font-semibold text-slate-700">{kindCaption}</span>
-                  {selectedBranch ? (
-                    <>
-                      {' · '}
-                      <span className="font-semibold text-slate-700">
-                        {selectedBranch.replace(/^\d+\s*-\s*/, '').replace(/\s*BRANCH$/i, '')}
-                      </span>
-                    </>
-                  ) : null}
-                  {isDateFiltered ? (
-                    <>
-                      {' · '}
-                      <span className="font-semibold text-slate-700">{dateRange.label}</span>
-                    </>
-                  ) : (
-                    ' · all time'
-                  )}
-                </span>
+              <div className="flex flex-col gap-0.5 px-3 pt-1.5">
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                  <span>
+                    KPIs for <span className="font-semibold text-slate-700">{kindCaption}</span>
+                    {selectedBranch ? (
+                      <>
+                        {' · '}
+                        <span className="font-semibold text-slate-700">
+                          {selectedBranch.replace(/^\d+\s*-\s*/, '').replace(/\s*BRANCH$/i, '')}
+                        </span>
+                      </>
+                    ) : null}
+                    {isDateFiltered ? (
+                      <>
+                        {' · '}
+                        <span className="font-semibold text-slate-700">
+                          {dateType === 'solve_date' ? 'Solved Date' : 'Call Date'} · {dateRange.label}
+                        </span>
+                      </>
+                    ) : (
+                      ' · all time'
+                    )}
+                  </span>
+                </div>
+                {isDateFiltered ? (
+                  <p className="text-[10px] text-slate-500 leading-snug pb-0.5">
+                    {dateType === 'solve_date' ? (
+                      <>
+                        Count = machines with <span className="font-semibold text-slate-700">2+ solves</span> in
+                        this period. Call Date filter can be lower — that needs{' '}
+                        <span className="font-semibold text-slate-700">2+ logs</span> in the same period (an
+                        older log solved now still counts here).
+                      </>
+                    ) : (
+                      <>
+                        Count = machines with <span className="font-semibold text-slate-700">2+ call logs</span>{' '}
+                        in this period. Solved Date filter can be higher when older logs were solved now.
+                      </>
+                    )}
+                  </p>
+                ) : null}
               </div>
               <div className="flex gap-1.5 overflow-x-auto px-3 py-1.5">
               <button
@@ -1081,8 +1110,18 @@ export function CompressorBarcodesPageClient() {
                     { field: 'current_barcode', label: 'Current Barcode' },
                     { field: 'branch', label: 'Branch' },
                     { field: 'office', label: 'Latest Office / Workshop' },
-                    { field: 'solve_date', label: 'Latest Solved Date' },
-                    { field: 'call_date', label: 'Latest Call Date' },
+                    {
+                      field: 'solve_date',
+                      label: isDateFiltered ? 'Solved in period' : 'Latest Solved Date',
+                    },
+                    {
+                      field: 'call_date',
+                      label: isDateFiltered
+                        ? dateType === 'solve_date'
+                          ? 'Call logged (of those solves)'
+                          : 'Logged in period'
+                        : 'Latest Call Date',
+                    },
                   ] as Array<{ field: string; label: string }>)
                     .filter((col) => showBarcodes || col.field !== 'current_barcode')
                     .map(({ field, label }) => {
@@ -1261,7 +1300,24 @@ export function CompressorBarcodesPageClient() {
                             {formatDate(row.latest_solve_date)}
                           </AdminTd>
                           <AdminTd className="text-slate-500 text-[11px] tabular-nums !py-1.5 !px-2.5">
-                            {formatDate(row.latest_call_date)}
+                            {row.earliest_call_date &&
+                            callDatesSpanDays(row.earliest_call_date, row.latest_call_date) ? (
+                              <span
+                                className="inline-flex flex-col leading-tight"
+                                title="Call log dates for visits in this date filter (oldest → newest). Older logs solved in this period still count under Solved Date."
+                              >
+                                <span>
+                                  {formatDate(row.earliest_call_date)}
+                                  <span className="text-slate-400 mx-0.5">→</span>
+                                  {formatDate(row.latest_call_date)}
+                                </span>
+                                <span className="text-[9px] text-slate-400 font-medium normal-case tracking-normal">
+                                  logs of period solves
+                                </span>
+                              </span>
+                            ) : (
+                              formatDate(row.latest_call_date)
+                            )}
                           </AdminTd>
                         </AdminTr>
 

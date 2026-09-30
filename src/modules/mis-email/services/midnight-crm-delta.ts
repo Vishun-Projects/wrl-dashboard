@@ -29,7 +29,7 @@ import { REGISTER_BULK_MAX_ROWS } from '@/sql/read-model/register-columns';
 
 export const MIDNIGHT_CRM_DELTA_DEFAULT_TO = 'vishunvishwakarma90211@gmail.com';
 
-/** Subject first word is SUCCESS or FAILED so 07:00 IST inbox scan is instant. */
+/** Subject first word is SUCCESS or FAILED so 07:30 IST inbox scan is instant. */
 export function midnightRegionalMailSubject(
   asOfDate: string,
   outcome: 'SUCCESS' | 'FAILED'

@@ -20,6 +20,8 @@ const ALL_PERMISSION_SEED = [
   { name: 'page_mis_reports', description: 'Call register, summary, and accounts' },
   { name: 'page_call_distribution', description: 'Franchisee map, idle assignees, and distribution KPIs' },
   { name: 'page_arcp_claims', description: 'ARCP claims register and detail export' },
+  { name: 'page_arcp_provision', description: 'Rate card × qty vs CRM charged by branch' },
+  { name: 'page_zss02', description: 'Upload SAP ZSS02 HTML and browse spare loan / consumption rows as-is' },
   { name: 'page_serial_audit', description: 'Repeat serial complaints and repair audit' },
   { name: 'page_location_audit', description: 'Technician visit location verification' },
   { name: 'page_warranty_master', description: 'Active machines by customer, group, and warranty period' },

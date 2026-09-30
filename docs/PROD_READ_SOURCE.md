@@ -10,8 +10,9 @@
 | `READ_REGISTER_FROM` | `postgres` | Call Register + exports |
 | `READ_DISTRIBUTION_FROM` | `postgres` | Call Distribution (required; CRM rejected) |
 | `READ_DIMS_FROM` | `postgres` | Office/dimension lists |
-| `READ_ARCP_FROM` | `postgres` | ARCP claims hot table |
-| `ARCP_USE_LIVE_CRM` | unset or `false` | Forces hybrid CRM gap-fill when true |
+| `READ_ARCP_FROM` | `postgres` | ARCP Claims + Provision (`arcp_lines_hot`) |
+| `ARCP_USE_LIVE_CRM` | unset or `false` | Forces live CRM path when `true` (avoid on VPS) |
+| `SYNC_ARCP_ENABLED` | `true` | 3-minute daemon: ARCP lines + rate-card (`mstarcpcccr` → `arcp_rate_card_hot`) |
 | `READ_CALLS_FROM` | `postgres` (fallback) | Global override when per-report unset |
 
 **Staleness:** `calls_latest_hot` lags CRM by up to ~3 min (sync daemon interval). Acceptable for reporting; not for real-time ops.
@@ -28,7 +29,8 @@
 | MIS Register | Postgres (`READ_REGISTER_FROM`) | No when postgres | Yes, after sign-off |
 | MIS Accounts / BD-MIS | Postgres + client import | CRM for Cadbury subtract only | Partial — keep CRM trace paths until BD-MIS rules migrated |
 | Call Distribution | Postgres only | No (400 if CRM) | Already postgres-only |
-| ARCP Claims | `arcp_lines_hot` (+ hybrid CRM fill) | Yes until hot coverage complete | When `ARCP_USE_LIVE_CRM=false` stable |
+| ARCP Claims | `arcp_lines_hot` (3-min sync) | No — empty if not synced | Prefer postgres-only |
+| ARCP Provision | `arcp_lines_hot` ⋈ `arcp_rate_card_hot` | Rate-card sync from CRM | No live CRM report path |
 | Cancelled Calls | `calls_cancelled` | Item-code enrich only | Keep enrich CRM call |
 | Athena Reconciliation | `athena_failed_calls_*` | Sync ingest only | N/A (not register CRM path) |
 | Serial / Location / Warranty | Live CRM `postQuery` | **Yes** | No |

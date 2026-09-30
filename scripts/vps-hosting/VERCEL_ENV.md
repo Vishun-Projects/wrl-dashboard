@@ -35,8 +35,9 @@ Also copy from `.env.local`:
 - `READ_SUMMARY_FROM=postgres`
 - `READ_DISTRIBUTION_FROM=postgres`
 - `READ_DIMS_FROM=postgres`
-- `READ_ARCP_FROM=postgres` — **required** for ARCP; reads `arcp_lines_hot` on VPS instead of live CRM
+- `READ_ARCP_FROM=postgres` — **required** for ARCP Claims / Provision; reads `arcp_lines_hot` (3-min sync), not month-by-month CRM
 - `NEXT_PUBLIC_READ_ARCP_FROM=postgres` (or `NEXT_PUBLIC_READ_CALLS_FROM=postgres`)
+- Apply `docs/read-model-phase1-schema/53-arcp-provision-columns.sql` (repair/TAT + `arcp_rate_card_hot`)
 - `NEXT_PUBLIC_READ_*_FROM=postgres` (all matching keys)
 - `PG_POOL_MAX`, `PG_CONNECT_TIMEOUT_MS`, `PG_STATEMENT_TIMEOUT_MS` (optional)
 

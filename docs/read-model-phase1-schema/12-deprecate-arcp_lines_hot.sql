@@ -1,12 +1,8 @@
--- arcp_lines_hot is deprecated: ARCP Claims reads live CRM (trhcalls + trdcalls10ARCP).
--- BM dates belong on calls_latest_hot (11-calls_hot_bm_approval.sql), not ARCP line dates.
--- Stop setting SYNC_ARCP_ENABLED=true. Optional: drop arcp_lines_hot only after backup.
---
--- SAFE: this script does NOT touch calls_latest_hot or CRM trhcalls.
+-- SUPERSEDED: ARCP Claims / Provision read arcp_lines_hot with SYNC_ARCP_ENABLED
+-- and READ_ARCP_FROM=postgres (3-minute daemon). Do NOT drop this table.
+-- Historical note: an earlier cutover draft preferred live CRM; that path is retired
+-- for VPS — keep the hot table warm and set ARCP_CRM_FALLBACK_ON_EMPTY=true only
+-- when deliberately gap-filling from CRM.
 
 COMMENT ON TABLE arcp_lines_hot IS
-  'DEPRECATED — do not sync. ARCP Claims uses live Western CRM. Register BM dates use calls_latest_hot.bm_approved_at.';
-
--- Uncomment only after backup and confirming no dependency on arcp_lines_hot:
--- DROP TABLE IF EXISTS arcp_lines_hot CASCADE;
--- DELETE FROM sync_state WHERE entity = 'arcp_lines_hot';
+  'Franchise ARCP claim lines (nofficetype=3). Synced every SYNC_INTERVAL_MS when SYNC_ARCP_ENABLED=true. Claims + Provision read this when READ_ARCP_FROM=postgres.';

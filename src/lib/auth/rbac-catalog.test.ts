@@ -48,6 +48,13 @@ describe('canAccessPath', () => {
     expect(canAccessPath(['page_arcp_claims'], '/report/spare-loan-check')).toBe(false);
   });
 
+  it('allows ZSS02 via dedicated or MIS reports permission', () => {
+    expect(canAccessPath(['page_zss02'], '/report/zss02')).toBe(true);
+    expect(canAccessPath(['page_mis_reports'], '/report/zss02')).toBe(true);
+    expect(canAccessPath(['tab_mis_register'], '/report/zss02')).toBe(true);
+    expect(canAccessPath(['page_arcp_claims'], '/report/zss02')).toBe(false);
+  });
+
   it('allows spare stock analysis via dedicated or MIS reports permission', () => {
     expect(canAccessPath(['page_spare_stock_analysis'], '/report/spare-stock-analysis')).toBe(true);
     expect(canAccessPath(['page_mis_reports'], '/report/spare-stock-analysis')).toBe(true);
@@ -77,6 +84,8 @@ describe('canAccessPath', () => {
     expect(canAccessPath(['manage_roles'], '/admin')).toBe(true);
     expect(canAccessPath(['manage_roles'], '/admin/sync')).toBe(false);
     expect(canAccessPath(['page_arcp_claims'], '/report/arcp-claims')).toBe(true);
+    expect(canAccessPath(['page_arcp_provision'], '/report/arcp-provision')).toBe(true);
+    expect(canAccessPath(['page_arcp_claims'], '/report/arcp-provision')).toBe(false);
     expect(canAccessPath(['page_call_distribution'], '/report/distribution')).toBe(true);
     expect(canAccessPath([], '/profile')).toBe(true);
   });

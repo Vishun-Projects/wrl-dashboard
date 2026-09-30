@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Midnight CRM delta MAIL — after successful midnight sync (or 07:05 fallback cron).
+# Midnight CRM delta MAIL — after successful midnight sync (or 07:30 fallback cron).
 # Always attempts the report mail when invoked.
 set -euo pipefail
 
@@ -37,6 +37,23 @@ if [[ ! -d "${INSTALL_ROOT}/shared/logs" ]]; then
 fi
 if [[ -f "$MAIL_MARKER" && "${MIDNIGHT_MAIL_FORCE:-}" != "1" ]]; then
   echo "[${STAMP}] SKIP — CRM delta mail already sent today"
+  echo "=== midnight-crm-delta complete ==="
+  exit 0
+fi
+
+# Don't send SUCCESS after a 07:30 FAILED for the same AS_OF.
+if [[ -z "${MIDNIGHT_SYNC_AS_OF:-}" ]]; then
+  if TZ=Asia/Kolkata date -d yesterday +%Y-%m-%d >/dev/null 2>&1; then
+    _fail_as_of="$(TZ=Asia/Kolkata date -d yesterday +%Y-%m-%d)"
+  else
+    _fail_as_of="$(TZ=Asia/Kolkata date -v-1d +%Y-%m-%d)"
+  fi
+else
+  _fail_as_of="$MIDNIGHT_SYNC_AS_OF"
+fi
+_fail_marker="${INSTALL_ROOT}/shared/logs/midnight-regional-fail-mailed-${_fail_as_of}"
+if [[ -f "$_fail_marker" && "${MIDNIGHT_MAIL_FORCE:-}" != "1" ]]; then
+  echo "[${STAMP}] SKIP — FAILED already mailed for AS_OF=${_fail_as_of}"
   echo "=== midnight-crm-delta complete ==="
   exit 0
 fi

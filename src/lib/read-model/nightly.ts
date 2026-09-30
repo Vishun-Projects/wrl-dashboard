@@ -31,6 +31,7 @@ import {
 import { runArcpIncrementalSync } from '@/modules/arcp-claims/server/sync/incremental';
 import { runBackfillArcpBmApproved } from '@/modules/arcp-claims/server/sync/backfill-arcp-bm-approved';
 import { runArcpApprovalRescan } from '@/modules/arcp-claims/server/sync/approval-rescan';
+import { runArcpRateCardSync } from '@/modules/arcp-provision/server/sync/rate-card';
 import { runTransactionEntryIncremental } from '@/lib/read-model/transaction-entry';
 import { runAthenaFailedCallsSync } from '@/modules/athena-reconciliation/server/sync';
 import { runAttendanceDetailsSync } from '@/modules/attendance/server/sync';
@@ -135,6 +136,10 @@ export async function runNightlyReconcile(): Promise<void> {
         console.log(
           `[arcp-approval-rescan] Nightly rescan — ${rescan.rowsUpserted} rows upserted across ${rescan.chunksProcessed} chunks`
         );
+      }
+      const rateCard = await runArcpRateCardSync();
+      if (!rateCard.skipped) {
+        console.log(`[arcp-rate-card] Nightly sync — ${rateCard.rowsUpserted} rows`);
       }
     } catch (err) {
       console.error(

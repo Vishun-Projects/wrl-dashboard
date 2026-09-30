@@ -6,6 +6,7 @@ import {
   resolveArcpBmApprovedAt,
   resolveArcpHoApprovedAt,
 } from '@/modules/arcp-claims/server/sync/dates';
+import { resolveProvisionIsMajor } from '@/modules/arcp-provision';
 
 function parseAmount(value: unknown): number | null {
   if (value == null || value === '') return null;
@@ -70,7 +71,21 @@ export function transformCrmRowToArcpHot(row: Record<string, unknown>): ArcpHotR
 
   const isTravel =
     String(row.ntraveltype ?? '').trim() !== '' && String(row.ntraveltype ?? '').trim() !== '0';
-  const isMajor = String(row.major_minor ?? '').toLowerCase() === 'major';
+  const nrepairtype =
+    row.nrepairtype != null ? String(row.nrepairtype).trim() || null : null;
+  const repairLabel =
+    row.repair_label != null ? String(row.repair_label).trim() || null : null;
+  const callTypeLabel =
+    row.call_type_label != null ? String(row.call_type_label) : null;
+  const ncalltype = row.ncalltype != null ? String(row.ncalltype) : null;
+  const crmIsMajor = String(row.major_minor ?? '').toLowerCase() === 'major';
+  const isMajor = resolveProvisionIsMajor({
+    callTypeLabel,
+    ncalltype,
+    nrepairtype,
+    repairLabel,
+    crmIsMajor,
+  });
 
   return {
     ncode,
@@ -93,15 +108,18 @@ export function transformCrmRowToArcpHot(row: Record<string, unknown>): ArcpHotR
     claim_month_call: claimMonthFromDate(callAt),
     claim_month_solve: claimMonthFromDate(solveAt),
     claim_month_approve: claimMonthFromDate(approveAt),
-    ncalltype: row.ncalltype != null ? String(row.ncalltype) : null,
+    ncalltype,
     nitemcategory: row.nitemcategory != null ? String(row.nitemcategory) : null,
     nlocalupcountry: localCode || null,
-    call_type_label: row.call_type_label != null ? String(row.call_type_label) : null,
+    call_type_label: callTypeLabel,
     item_category_label:
       row.item_category_label != null ? String(row.item_category_label) : null,
     local_upcountry_label: localLabel,
     is_travel: isTravel,
     is_major: isMajor,
+    nrepairtype,
+    repair_label: repairLabel,
+    ntat: parseAmount(row.ntat),
     rate: parseAmount(row.rate_val ?? row.ndistancerate),
     amount_payable: parseAmount(row.amount_payable_val ?? row.nchargespayable),
     branch_approved: parseAmount(
@@ -150,6 +168,9 @@ export type ArcpHotRow = {
   local_upcountry_label: string | null;
   is_travel: boolean;
   is_major: boolean;
+  nrepairtype: string | null;
+  repair_label: string | null;
+  ntat: number | null;
   rate: number | null;
   amount_payable: number | null;
   branch_approved: number | null;

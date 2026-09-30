@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Midnight calls sync — 00:00 IST start, full Jan→yesterday, verify 3× vs CRM, mail at 07:00 IST (SUCCESS or FAILED).
+# Midnight calls sync — 00:00 IST start, full Jan→yesterday, verify 3× vs CRM,
+# mail at 07:30 IST (SUCCESS or FAILED). Hard deadline kills in-flight sync so
+# FAILED always fires — never silent past 07:30.
 #
 # Cron: 0 0 * * * …/nightly-ytd-calls-export.sh >> …/nightly-ytd-export-cron.log
+# Fallback: 30 7 * * * …/midnight-crm-delta-mail-fallback.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -84,9 +87,10 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 
 DEADLINE_HOUR="${MIDNIGHT_SYNC_DEADLINE_HOUR:-7}"
-DEADLINE_MIN="${MIDNIGHT_SYNC_DEADLINE_MIN:-0}"
+DEADLINE_MIN="${MIDNIGHT_SYNC_DEADLINE_MIN:-30}"
 RETRY_SLEEP_SEC="${MIDNIGHT_SYNC_RETRY_SLEEP_SEC:-600}"
 MAIL_EARLIEST_HOUR="${MIDNIGHT_MAIL_EARLIEST_HOUR:-7}"
+MAIL_EARLIEST_MIN="${MIDNIGHT_MAIL_EARLIEST_MIN:-30}"
 VERIFY_PASSES="${MIDNIGHT_VERIFY_PASSES:-3}"
 
 past_deadline() {
@@ -112,15 +116,47 @@ wait_until_mail_time() {
     local now_h now_m
     now_h="$(TZ=Asia/Kolkata date +%H)"
     now_m="$(TZ=Asia/Kolkata date +%M)"
-    if [[ "$now_h" -gt "$MAIL_EARLIEST_HOUR" ]]; then
+    now_h=$((10#$now_h))
+    now_m=$((10#$now_m))
+    local mh=$((10#$MAIL_EARLIEST_HOUR))
+    local mm=$((10#$MAIL_EARLIEST_MIN))
+    if [[ "$now_h" -gt "$mh" ]]; then
       return 0
     fi
-    if [[ "$now_h" -eq "$MAIL_EARLIEST_HOUR" && "$now_m" -ge 0 ]]; then
+    if [[ "$now_h" -eq "$mh" && "$now_m" -ge "$mm" ]]; then
       return 0
     fi
-    echo "=== waiting for mail window (${MAIL_EARLIEST_HOUR}:00 IST) — now ${now_h}:$(printf '%02d' "$now_m") ==="
+    echo "=== waiting for mail window (${mh}:$(printf '%02d' "$mm") IST) — now ${now_h}:$(printf '%02d' "$now_m") ==="
     sleep 60
   done
+}
+
+# Kill pid and descendants so a long editedon-catchup cannot outlive the deadline.
+kill_tree() {
+  local pid=$1
+  local children
+  children=$(pgrep -P "$pid" 2>/dev/null || true)
+  for c in $children; do
+    kill_tree "$c"
+  done
+  kill "$pid" 2>/dev/null || true
+}
+
+# Run sync in background; poll deadline so FAILED fires even mid-catch-up.
+run_sync_with_deadline() {
+  bash "${SCRIPT_DIR}/midnight-calls-sync.sh" &
+  local sync_pid=$!
+  while kill -0 "$sync_pid" 2>/dev/null; do
+    if past_deadline; then
+      echo "FATAL: midnight calls sync still running at ${DEADLINE_HOUR}:$(printf '%02d' "$DEADLINE_MIN") IST — killing pid ${sync_pid}" >&2
+      kill_tree "$sync_pid"
+      wait "$sync_pid" 2>/dev/null || true
+      return 1
+    fi
+    sleep 30
+  done
+  wait "$sync_pid"
+  return $?
 }
 
 midnight_repair() {
@@ -129,7 +165,8 @@ midnight_repair() {
     grep -vE '^done:(editedon-catchup|fill-hot-gaps|reconcile-open-cancel)$' "$STATE_FILE" >"${STATE_FILE}.tmp" || true
     mv "${STATE_FILE}.tmp" "$STATE_FILE"
   fi
-  bash "${SCRIPT_DIR}/midnight-calls-sync.sh" || true
+  # Repair also respects deadline (same kill-on-overrun).
+  run_sync_with_deadline || true
 }
 
 run_verify() {
@@ -139,7 +176,11 @@ run_verify() {
 attempt=1
 while true; do
   echo "=== midnight calls sync attempt ${attempt} $(TZ=Asia/Kolkata date -Iseconds) deadline=${DEADLINE_HOUR}:$(printf '%02d' "$DEADLINE_MIN") IST ==="
-  if bash "${SCRIPT_DIR}/midnight-calls-sync.sh"; then
+  set +e
+  run_sync_with_deadline
+  sync_rc=$?
+  set -e
+  if [[ "$sync_rc" -eq 0 ]]; then
     echo "=== midnight calls sync ok ==="
     break
   fi
@@ -181,9 +222,15 @@ VERIFY_MARKER="${INSTALL_ROOT}/shared/logs/midnight-crm-verify-ok-${AS_OF}"
 touch "$VERIFY_MARKER"
 echo "=== verify OK ${VERIFY_PASSES}/${VERIFY_PASSES} — marker ${VERIFY_MARKER} ==="
 
+FAIL_MARKER="${INSTALL_ROOT}/shared/logs/midnight-regional-fail-mailed-${AS_OF}"
+if [[ -f "$FAIL_MARKER" ]]; then
+  echo "=== SKIP SUCCESS mail — FAILED already mailed for AS_OF=${AS_OF} ==="
+  exit 0
+fi
+
 wait_until_mail_time
 
-echo "=== midnight CRM delta mail (after sync + ${VERIFY_PASSES}× verify, ≥${MAIL_EARLIEST_HOUR}:00 IST) ==="
+echo "=== midnight CRM delta mail (after sync + ${VERIFY_PASSES}× verify, ≥${MAIL_EARLIEST_HOUR}:$(printf '%02d' "$((10#$MAIL_EARLIEST_MIN))") IST) ==="
 if bash "${SCRIPT_DIR}/midnight-crm-delta-mail.sh"; then
   echo "=== midnight-crm-delta complete ==="
 else

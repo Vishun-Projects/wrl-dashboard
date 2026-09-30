@@ -14,7 +14,8 @@ ARCP Claims report — load, filter, aggregate, detail export, and PDF. Owns the
   PDF / CSV export
 ```
 
-Worker: `server/sync/*` (CLI / nightly) — not the browser.
+Worker: `server/sync/*` (CLI / 3-minute daemon when `SYNC_ARCP_ENABLED=true`) — not the browser.
+VPS: `READ_ARCP_FROM=postgres` — UI always reads `arcp_lines_hot`. No CRM fallback; empty means not synced yet (or no rows for filters).
 
 ## What is *not* here
 
@@ -80,4 +81,4 @@ index.ts      Public client-safe barrel
 | Date column / chunk size | `sql/arcp-claims/query.ts`, hybrid-load, load-job, fetch, client progress |
 | Office scoping | `route-auth` + every fetch opts consumer |
 | Hot columns | `sql/arcp-claims/postgres.ts`, sync upsert/transform, coverage, schema docs |
-| Postgres vs CRM mode | `@/lib/read-model/flags`, `ARCP_CRM_FALLBACK_ON_EMPTY` |
+| Postgres vs CRM mode | `@/lib/read-model/flags` (`READ_ARCP_FROM`) — no CRM fallback |

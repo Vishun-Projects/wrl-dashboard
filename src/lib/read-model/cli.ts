@@ -45,6 +45,7 @@ import {
   runCallsMirrorIncremental,
 } from '@/lib/read-model/calls-mirror';
 import { syncCompressorBarcodesToPostgres } from '@/modules/compressor-barcodes/server/sync/postgres-sync';
+import { runArcpRateCardSync } from '@/modules/arcp-provision/server/sync/rate-card';
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
 const DAEMON_MAX_CONSECUTIVE_FAILURES = Number(process.env.SYNC_DAEMON_MAX_FAILURES ?? 5) || 5;
@@ -199,6 +200,11 @@ async function runDaemon(): Promise<void> {
           await runArcpIncrementalSync();
         } catch (arcpErr) {
           console.error('[arcp-sync] Daemon incremental failed:', formatSyncWorkerError(arcpErr));
+        }
+        try {
+          await runArcpRateCardSync();
+        } catch (rateErr) {
+          console.error('[arcp-rate-card] Daemon sync failed:', formatSyncWorkerError(rateErr));
         }
       }
       if (process.env.SYNC_TRANSACTION_ENTRY_ENABLED !== 'false') {
@@ -371,8 +377,12 @@ async function main(): Promise<void> {
     case 'arcp-incremental':
       await runArcpIncrementalSync();
       break;
+    case 'arcp-rate-card':
+      console.log('[arcp-rate-card] Done:', await runArcpRateCardSync());
+      break;
     case 'arcp-nightly':
       await runArcpIncrementalSync();
+      await runArcpRateCardSync();
       break;
     case 'arcp-approval-rescan': {
       const args = process.argv.slice(3);
@@ -523,7 +533,8 @@ Commands:
   arcp-reset        Truncate arcp_lines_hot + reset sync_state (fresh start)
   arcp-backfill     Initial ARCP lines backfill (ARCP_BACKFILL_START_DATE or YEARS)
   arcp-incremental  Single ARCP incremental sync run
-  arcp-nightly      ARCP incremental only (for Task Scheduler / cron)
+  arcp-rate-card    Full refresh arcp_rate_card_hot from CRM mstarcpcccr
+  arcp-nightly      ARCP incremental + rate card (for Task Scheduler / cron)
   arcp-approval-rescan  Re-fetch last N days by call-log date to catch CRM approval updates
                     that did not touch editedon (root cause of missing July BM approvals)
                     --from YYYY-MM-DD --to YYYY-MM-DD --days N (default: ARCP_APPROVAL_RESCAN_DAYS=90)

@@ -138,8 +138,8 @@ fi
 
 run_step reconcile-open-cancel npm run sync-worker:reconcile-open-cancel \
   || fatal=1
-# After this step hot open/cancel is frozen for the day (MIS + website). Deadline 07:00 IST
-# is enforced by nightly-ytd-calls-export.sh (verify + marker).
+# After this step hot open/cancel is frozen for the day (MIS + website). Deadline 07:30 IST
+# is enforced by nightly-ytd-calls-export.sh (kill-on-overrun + verify + marker).
 
 if ! run_step reconcile-major npm run sync-worker:reconcile-major; then
   fatal=1

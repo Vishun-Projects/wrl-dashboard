@@ -32,7 +32,7 @@ function row(overrides: Record<string, unknown>): Record<string, unknown> {
 }
 
 describe('midnight-crm-delta', () => {
-  it('07:00 subject starts with SUCCESS or FAILED', () => {
+  it('07:30 subject starts with SUCCESS or FAILED', () => {
     expect(midnightRegionalMailSubject('2026-09-27', 'SUCCESS')).toBe(
       'SUCCESS: WRL Midnight MIS Regional — 2026-09-27'
     );

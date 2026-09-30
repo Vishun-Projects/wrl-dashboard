@@ -108,6 +108,14 @@ export const RBAC_PAGES: RbacPage[] = [
     group: 'Reports',
   },
   {
+    id: 'arcp_provision',
+    permission: 'page_arcp_provision',
+    path: '/report/arcp-provision',
+    label: 'ARCP Provision',
+    description: 'Rate card × qty vs CRM charged by branch',
+    group: 'Reports',
+  },
+  {
     id: 'serial_audit',
     permission: 'page_serial_audit',
     path: '/report/serial-audit',
@@ -169,6 +177,14 @@ export const RBAC_PAGES: RbacPage[] = [
     path: '/report/spare-loan-check',
     label: 'Spare Loan Check',
     description: 'Upload SAP HTML and highlight SO/vendor mismatches and cancelled/transferred calls',
+    group: 'Reports',
+  },
+  {
+    id: 'zss02',
+    permission: 'page_zss02',
+    path: '/report/zss02',
+    label: 'ZSS02',
+    description: 'Upload SAP ZSS02 HTML and browse spare loan / consumption rows as-is',
     group: 'Reports',
   },
   {
@@ -398,8 +414,9 @@ export function canAccessPage(permissions: string[], pageId: string): boolean {
     if (canAccessMisTab(permissions, 'register')) return true;
   }
 
-  // ZSS02 spare loan check, MB51 spare stock, & compressor barcodes: MIS reports audience until roles matrix is updated.
+  // ZSS02 / spare loan check / MB51 spare stock / compressor barcodes: MIS reports audience until roles matrix is updated.
   if (
+    pageId === 'zss02' ||
     pageId === 'spare_loan_check' ||
     pageId === 'spare_stock_analysis' ||
     pageId === 'compressor_barcodes'

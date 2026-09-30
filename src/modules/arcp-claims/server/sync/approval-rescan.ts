@@ -57,6 +57,7 @@ SELECT arcp.ncode, arcp.vucnno, arcp.ncalls2fault AS calls2fault_code,
   CONVERT(varchar(30), arcp.addedon, 126) AS addedon,
   CONVERT(varchar(30), arcp.editedon, 126) AS editedon,
   arcp.ncalltype, arcp.nitemcategory, arcp.nlocalupcountry, arcp.ntraveltype,
+  arcp.nrepairtype, arcp.ntat,
   arcp.breject, arcp.brejectho,
   ISNULL(NULLIF(LTRIM(RTRIM(fs_ct.vdisplayvalue)), ''), CAST(arcp.ncalltype AS VARCHAR(50))) AS call_type_label,
   COALESCE(NULLIF(LTRIM(RTRIM(ic.vname)), ''), NULLIF(LTRIM(RTRIM(ic.vshortname)), '')) AS item_category_label,
@@ -65,9 +66,27 @@ SELECT arcp.ncode, arcp.vucnno, arcp.ncalls2fault AS calls2fault_code,
       WHEN '1' THEN 'Local' WHEN '2' THEN 'Upcountry'
       WHEN '946' THEN 'Local' WHEN '947' THEN 'Upcountry'
       ELSE CAST(arcp.nlocalupcountry AS VARCHAR(50)) END) AS local_upcountry_label,
+  COALESCE(NULLIF(LTRIM(RTRIM(rr_type.vname)), ''), NULLIF(LTRIM(RTRIM(CAST(arcp.nrepairtype AS VARCHAR(50)))), '')) AS repair_label,
   arcp.ndistancerate, arcp.nchargespayable, arcp.nbmapprovedamt, arcp.nhoapprovedamt,
   arcp.napproval1amount, arcp.napproval2amount,
-  CASE WHEN major.ncalls IS NOT NULL THEN 'Major' ELSE 'Minor' END AS major_minor
+  CASE
+    WHEN (
+      UPPER(ISNULL(NULLIF(LTRIM(RTRIM(fs_ct.vdisplayvalue)), ''), CAST(arcp.ncalltype AS VARCHAR(50)))) LIKE '%BREAKDOWN%'
+      OR LTRIM(RTRIM(CAST(arcp.ncalltype AS VARCHAR(20)))) = '35'
+    )
+    AND (
+      LTRIM(RTRIM(CAST(arcp.nrepairtype AS VARCHAR(20)))) IN ('6', '19')
+      OR UPPER(LTRIM(RTRIM(ISNULL(rr_type.vname, '')))) IN ('GAS CHARGING DONE', 'COMPRESSOR REPLACED')
+    )
+    THEN 'Major'
+    WHEN (
+      UPPER(ISNULL(NULLIF(LTRIM(RTRIM(fs_ct.vdisplayvalue)), ''), CAST(arcp.ncalltype AS VARCHAR(50)))) LIKE '%BREAKDOWN%'
+      OR LTRIM(RTRIM(CAST(arcp.ncalltype AS VARCHAR(20)))) = '35'
+    )
+    THEN 'Minor'
+    WHEN major.ncalls IS NOT NULL THEN 'Major'
+    ELSE 'Minor'
+  END AS major_minor
 FROM trdcalls10ARCP arcp (NOLOCK)
 LEFT JOIN mstoffice o (NOLOCK) ON arcp.nofficeid = o.ncode
 LEFT JOIN trdcalls2fault tf (NOLOCK) ON arcp.ncalls2fault = tf.ncode
@@ -76,10 +95,16 @@ LEFT JOIN mstfixedselection fs_ct (NOLOCK)
   ON CAST(fs_ct.ncode AS VARCHAR(50)) = CAST(arcp.ncalltype AS VARCHAR(50)) AND fs_ct.vfieldname = 'ncalltype'
 LEFT JOIN mstfixedselection fs_lu (NOLOCK)
   ON CAST(fs_lu.ncode AS VARCHAR(50)) = CAST(arcp.nlocalupcountry AS VARCHAR(50)) AND fs_lu.vfieldname = 'nlocalupcountry'
+LEFT JOIN mstrepair rr_type (NOLOCK)
+  ON CAST(rr_type.ncode AS VARCHAR(50)) = CAST(arcp.nrepairtype AS VARCHAR(50))
 OUTER APPLY (
   SELECT TOP 1 tf2.ncalls FROM trdcalls2fault tf2 (NOLOCK)
   JOIN mstrepair rr (NOLOCK) ON tf2.nrepair = rr.ncode
-  WHERE tf2.ncalls = tf.ncalls AND tf2.nofficeid = arcp.nofficeid AND rr.bmajor = 'True'
+  WHERE tf2.ncalls = tf.ncalls AND tf2.nofficeid = arcp.nofficeid
+    AND (
+      CAST(rr.bmajor AS VARCHAR(10)) IN ('1', 'True', 'true', 'TRUE')
+      OR LTRIM(RTRIM(CAST(rr.ncode AS VARCHAR(20)))) IN ('6', '19')
+    )
 ) major
 WHERE ${where}`.trim();
 

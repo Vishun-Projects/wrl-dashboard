@@ -337,22 +337,26 @@ export async function GET(req: NextRequest) {
       // Multi-sort: `sort=total_calls:desc,solve_date:asc` takes priority.
       // Falls back to legacy `sortBy` / `sortOrder` params.
       // Cancelled calls are ignored when aggregating sort metrics.
+      const periodStatusFilter = dateConditionSql
+        ? `call_status IS DISTINCT FROM 'Cancelled' AND ${dateConditionSql}`
+        : `call_status IS DISTINCT FROM 'Cancelled'`;
+
       const SORT_SQL: Record<string, (dir: 'ASC' | 'DESC') => string> = {
         serial_number: (d) => `serial_number ${d}`,
         total_calls: (d) =>
           `${REPEAT_VISIT_COUNT_ACTIVE_SQL} ${d}`,
         avg_days_gap: (d) =>
-          `ROUND(AVG(days_gap) FILTER (WHERE days_gap IS NOT NULL AND call_status IS DISTINCT FROM 'Cancelled')) ${d} NULLS LAST`,
+          `ROUND(AVG(days_gap) FILTER (WHERE days_gap IS NOT NULL AND ${periodStatusFilter})) ${d} NULLS LAST`,
         current_barcode: (d) =>
-          `COALESCE((ARRAY_AGG(derived_new_barcode ORDER BY call_date DESC) FILTER (WHERE derived_new_barcode <> '-' AND call_status IS DISTINCT FROM 'Cancelled'))[1], '-') ${d} NULLS LAST`,
+          `COALESCE((ARRAY_AGG(derived_new_barcode ORDER BY call_date DESC) FILTER (WHERE derived_new_barcode <> '-' AND ${periodStatusFilter}))[1], '-') ${d} NULLS LAST`,
         branch: (d) =>
-          `(ARRAY_AGG(branch_name ORDER BY call_date DESC) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'))[1] ${d} NULLS LAST`,
+          `(ARRAY_AGG(branch_name ORDER BY call_date DESC) FILTER (WHERE ${periodStatusFilter}))[1] ${d} NULLS LAST`,
         office: (d) =>
-          `(ARRAY_AGG(office_name ORDER BY call_date DESC) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'))[1] ${d} NULLS LAST`,
+          `(ARRAY_AGG(office_name ORDER BY call_date DESC) FILTER (WHERE ${periodStatusFilter}))[1] ${d} NULLS LAST`,
         solve_date: (d) =>
-          `MAX(solve_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') ${d} NULLS LAST`,
+          `MAX(solve_date) FILTER (WHERE ${periodStatusFilter}) ${d} NULLS LAST`,
         call_date: (d) =>
-          `MAX(call_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') ${d}`,
+          `MAX(call_date) FILTER (WHERE ${periodStatusFilter}) ${d}`,
       };
 
       type SortKey = { field: string; dir: 'ASC' | 'DESC' };
@@ -380,7 +384,7 @@ export async function GET(req: NextRequest) {
       const orderBySql =
         sortKeys.length > 0
           ? sortKeys.map((k) => SORT_SQL[k.field](k.dir)).join(', ')
-          : "MAX(COALESCE(solve_date, call_date)) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') DESC NULLS LAST, serial_number ASC";
+          : `MAX(COALESCE(solve_date, call_date)) FILTER (WHERE ${periodStatusFilter}) DESC NULLS LAST, serial_number ASC`;
 
       if (isExport) {
         const exportQuery = `
@@ -388,8 +392,8 @@ export async function GET(req: NextRequest) {
             serial_number,
             ${REPEAT_VISIT_COUNT_ACTIVE_SQL}::int as total_calls,
             ${dateConditionSql ? `${REPEAT_VISIT_COUNT_SQL} FILTER (WHERE ${dateConditionSql} AND call_status IS DISTINCT FROM 'Cancelled')::int as calls_in_range,` : `${REPEAT_VISIT_COUNT_ACTIVE_SQL}::int as calls_in_range,`}
-            MAX(call_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') as latest_call_date,
-            MAX(solve_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') as latest_solve_date,
+            MAX(call_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'${dateConditionSql ? ` AND ${dateConditionSql}` : ''}) as latest_call_date,
+            MAX(solve_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'${dateConditionSql ? ` AND ${dateConditionSql}` : ''}) as latest_solve_date,
             ROUND(AVG(days_gap) FILTER (WHERE days_gap IS NOT NULL AND call_status IS DISTINCT FROM 'Cancelled'))::int as avg_days_gap,
             (ARRAY_AGG(office_name ORDER BY call_date DESC) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'))[1] as latest_office,
             (ARRAY_AGG(branch_name ORDER BY call_date DESC) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'))[1] as latest_branch,
@@ -479,8 +483,8 @@ export async function GET(req: NextRequest) {
           serial_number,
           ${REPEAT_VISIT_COUNT_ACTIVE_SQL}::int as total_calls,
           ${dateConditionSql ? `${REPEAT_VISIT_COUNT_SQL} FILTER (WHERE ${dateConditionSql} AND call_status IS DISTINCT FROM 'Cancelled')::int as calls_in_range,` : `${REPEAT_VISIT_COUNT_ACTIVE_SQL}::int as calls_in_range,`}
-          MAX(call_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') as latest_call_date,
-          MAX(solve_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled') as latest_solve_date,
+          MAX(call_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'${dateConditionSql ? ` AND ${dateConditionSql}` : ''}) as latest_call_date,
+          MAX(solve_date) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'${dateConditionSql ? ` AND ${dateConditionSql}` : ''}) as latest_solve_date,
           ROUND(AVG(days_gap) FILTER (WHERE days_gap IS NOT NULL AND call_status IS DISTINCT FROM 'Cancelled'))::int as avg_days_gap,
           (ARRAY_AGG(office_name ORDER BY call_date DESC) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'))[1] as latest_office,
           (ARRAY_AGG(branch_name ORDER BY call_date DESC) FILTER (WHERE call_status IS DISTINCT FROM 'Cancelled'))[1] as latest_branch,

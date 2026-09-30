@@ -41,9 +41,9 @@ if [[ "${1:-}" == "--local" ]]; then
         | grep -v '^CRON_TZ=' || true
       echo "CRON_TZ=Asia/Kolkata"
       echo "0 0 * * * NIGHTLY_YTD_EXPORT_TO=${DEFAULT_TO} ${code}/scripts/vps-hosting/nightly-ytd-calls-export.sh >> ${log_dir}/nightly-ytd-export-cron.log 2>&1"
-      echo "5 7 * * * NIGHTLY_YTD_EXPORT_TO=${DEFAULT_TO} ${code}/scripts/vps-hosting/midnight-crm-delta-mail-fallback.sh >> ${log_dir}/nightly-ytd-export-cron.log 2>&1"
+      echo "30 7 * * * NIGHTLY_YTD_EXPORT_TO=${DEFAULT_TO} ${code}/scripts/vps-hosting/midnight-crm-delta-mail-fallback.sh >> ${log_dir}/nightly-ytd-export-cron.log 2>&1"
     ) | awk 'NF && !seen[$0]++' | crontab -
-    echo "==> Installed midnight sync 00:00–07:00 + 07:00 SUCCESS/FAILED mail (fallback 07:05) code=${code}"
+    echo "==> Installed midnight sync 00:00–07:30 + 07:30 SUCCESS/FAILED mail (hard fallback) code=${code}"
     crontab -l | grep -E 'CRON_TZ|nightly-ytd-calls-export|midnight-crm-delta-mail' || true
   }
   install_cron "${MIS_EMAIL_INSTALL_ROOT:-$ROOT}"
@@ -113,12 +113,12 @@ to="${NIGHTLY_YTD_EXPORT_TO:-${DEFAULT_TO:-vishunvishwakarma90211@gmail.com}}"
     | grep -v '^CRON_TZ=' || true
   echo "CRON_TZ=Asia/Kolkata"
   echo "0 0 * * * NIGHTLY_YTD_EXPORT_TO=${to} ${code}/scripts/vps-hosting/nightly-ytd-calls-export.sh >> ${log_dir}/nightly-ytd-export-cron.log 2>&1"
-  echo "5 7 * * * NIGHTLY_YTD_EXPORT_TO=${to} ${code}/scripts/vps-hosting/midnight-crm-delta-mail-fallback.sh >> ${log_dir}/nightly-ytd-export-cron.log 2>&1"
+  echo "30 7 * * * NIGHTLY_YTD_EXPORT_TO=${to} ${code}/scripts/vps-hosting/midnight-crm-delta-mail-fallback.sh >> ${log_dir}/nightly-ytd-export-cron.log 2>&1"
 ) | awk 'NF && !seen[$0]++' | crontab -
 
 echo "==> Crontab now:"
 crontab -l | grep -E 'CRON_TZ|nightly-ytd-calls-export|midnight-crm-delta-mail' || true
-printf '==> Schedule: 00:00 overnight sync (retry until 07:00) + SUCCESS/FAILED mail at 07:00; fallback 07:05 → %s\n' "$to"
+printf '==> Schedule: 00:00 overnight sync (deadline 07:30) + SUCCESS/FAILED mail at 07:30 hard fallback → %s\n' "$to"
 REMOTE
 
 if [[ "$RUN_NOW" == "1" ]]; then
@@ -140,6 +140,6 @@ NIGHTLY_YTD_EXPORT_TO='${DEFAULT_TO}' env -u MIDNIGHT_SYNC_AS_OF \
 REMOTE
 fi
 
-echo "Installed. Overnight sync 00:00–07:00 IST + SUCCESS/FAILED mail at 07:00 (fallback 07:05) → ${DEFAULT_TO}."
+echo "Installed. Overnight sync 00:00–07:30 IST + SUCCESS/FAILED mail at 07:30 (hard fallback) → ${DEFAULT_TO}."
 echo "  ssh ${VPS_HOST} 'tail -n 80 ${INSTALL_BASE}/shared/logs/nightly-ytd-export-cron.log'"
 echo "  Daytime smoke: RUN_NOW=1 npm run mis-email:install-nightly-ytd-export-cron:vps"

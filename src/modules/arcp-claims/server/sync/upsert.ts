@@ -34,11 +34,48 @@ const BASE_COLUMNS = [
 ] as const;
 
 const CALL_NO_COLUMN = 'call_no' as const;
+const PROVISION_COLUMNS = ['nrepairtype', 'repair_label', 'ntat'] as const;
+
+let cachedHasCallNo: boolean | undefined;
+let cachedHasProvisionCols: boolean | undefined;
+
+async function arcpLinesHotHasProvisionCols(): Promise<boolean> {
+  if (cachedHasProvisionCols !== undefined) return cachedHasProvisionCols;
+  cachedHasProvisionCols = await withClient(async (client) => {
+    const result = await client.query<{ exists: boolean }>(`
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'arcp_lines_hot'
+          AND column_name = 'nrepairtype'
+      ) AS exists
+    `);
+    return Boolean(result.rows[0]?.exists);
+  });
+  return cachedHasProvisionCols;
+}
 
 async function resolveUpsertColumns(): Promise<readonly string[]> {
-  const hasCallNo = await arcpLinesHotHasCallNo();
-  if (!hasCallNo) return BASE_COLUMNS;
-  return ['ncode', 'vucnno', CALL_NO_COLUMN, ...BASE_COLUMNS.slice(2)];
+  const [hasCallNo, hasProvision] = await Promise.all([
+    arcpLinesHotHasCallNo(),
+    arcpLinesHotHasProvisionCols(),
+  ]);
+  let cols: string[] = [...BASE_COLUMNS];
+  if (hasCallNo) {
+    cols = ['ncode', 'vucnno', CALL_NO_COLUMN, ...BASE_COLUMNS.slice(2)];
+  }
+  if (hasProvision) {
+    const majorIdx = cols.indexOf('is_major');
+    if (majorIdx >= 0) {
+      cols = [
+        ...cols.slice(0, majorIdx + 1),
+        ...PROVISION_COLUMNS,
+        ...cols.slice(majorIdx + 1),
+      ];
+    }
+  }
+  return cols;
 }
 
 function rowToValues(row: ArcpHotRow, columns: readonly string[]): unknown[] {
@@ -65,6 +102,9 @@ function rowToValues(row: ArcpHotRow, columns: readonly string[]): unknown[] {
     local_upcountry_label: row.local_upcountry_label,
     is_travel: row.is_travel,
     is_major: row.is_major,
+    nrepairtype: row.nrepairtype,
+    repair_label: row.repair_label,
+    ntat: row.ntat,
     rate: row.rate,
     amount_payable: row.amount_payable,
     branch_approved: row.branch_approved,
@@ -128,8 +168,6 @@ export async function truncateArcpLines(client: pg.PoolClient): Promise<void> {
   await client.query(`TRUNCATE arcp_lines_hot`);
 }
 
-let cachedHasCallNo: boolean | undefined;
-
 /** True after `docs/read-model-phase1-schema/10-arcp_call_no.sql` is applied. */
 export async function arcpLinesHotHasCallNo(): Promise<boolean> {
   if (cachedHasCallNo !== undefined) return cachedHasCallNo;
@@ -150,4 +188,5 @@ export async function arcpLinesHotHasCallNo(): Promise<boolean> {
 
 export function resetArcpHotSchemaCache(): void {
   cachedHasCallNo = undefined;
+  cachedHasProvisionCols = undefined;
 }

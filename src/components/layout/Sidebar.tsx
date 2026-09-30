@@ -123,6 +123,8 @@ export function Sidebar({ user }: SidebarProps) {
         ? Map
         : path === '/report/arcp-claims'
           ? Receipt
+          : path === '/report/arcp-provision'
+            ? Receipt
           : path === '/report/serial-audit'
             ? ScanBarcode
             : path === '/report/location-audit'
@@ -141,6 +143,8 @@ export function Sidebar({ user }: SidebarProps) {
                       ? XCircle
                     : path === '/report/spare-stock-analysis'
                       ? Package
+                    : path === '/report/zss02'
+                      ? FileSpreadsheet
                   : path === '/admin/users'
                   ? Users
                   : path === '/admin/roles'

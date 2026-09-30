@@ -18,7 +18,7 @@ Requires:
 
 ```bash
 SYNC_WORKER_ENABLED=true
-SYNC_ARCP_ENABLED=true   # optional, for ARCP in the same loop
+SYNC_ARCP_ENABLED=true   # ARCP lines + rate card in the same 3-min loop
 DATABASE_URL=postgresql://...@api.wrl-fsm.cloud:5432/postgres   # direct :5432 (not pooler)
 ```
 
