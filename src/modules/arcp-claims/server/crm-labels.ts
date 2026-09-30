@@ -1,6 +1,5 @@
-import { postQuery } from '@/lib/db/proxy';
 import { withAppClient } from '@/lib/read-model/db';
-import { readArcpFromPostgres } from '@/lib/read-model/flags';
+import { loadItemCategoryLabelsByCode } from '@/lib/read-model/crm-masters';
 import {
   isBareNumericArcpLabel,
   resolveArcpItemCategoryDisplay,
@@ -28,57 +27,7 @@ function resolveLabel(
   return trimmed || code.trim();
 }
 
-async function loadItemCategoryLabelsFromPostgres(): Promise<Record<string, string>> {
-  return withAppClient(async (client) => {
-    const result = await client.query(`
-      SELECT DISTINCT
-        TRIM(nitemcategory::text) AS code,
-        TRIM(item_category_label) AS item_category_label
-      FROM arcp_lines_hot
-      WHERE item_category_label IS NOT NULL
-        AND TRIM(item_category_label) <> ''
-        AND nitemcategory IS NOT NULL
-    `);
-    const map: Record<string, string> = {};
-    for (const row of result.rows) {
-      const code = String(row.code ?? '').trim();
-      const label = String(row.item_category_label ?? '').trim();
-      if (!code || !label || isBareNumericArcpLabel(label)) continue;
-      if (!map[code] || label.length > map[code].length) map[code] = label;
-    }
-    return map;
-  });
-}
-
-async function loadItemCategoryLabelsFromCrm(): Promise<Record<string, string>> {
-  const sql = `
-SELECT
-  CAST(ic.ncode AS VARCHAR(50)) AS code,
-  COALESCE(
-    NULLIF(LTRIM(RTRIM(ic.vname)), ''),
-    NULLIF(LTRIM(RTRIM(ic.vshortname)), '')
-  ) AS item_category_label
-FROM mstitemcategory ic (NOLOCK)
-WHERE ic.ncode IS NOT NULL
-  AND LTRIM(RTRIM(CAST(ic.ncode AS VARCHAR(50)))) <> ''
-  AND LTRIM(RTRIM(CAST(ic.ncode AS VARCHAR(50)))) <> '0'`;
-
-  const res = await postQuery({ rawSql: sql, timeoutMs: 60_000 });
-  const map: Record<string, string> = {};
-  for (const row of res.data ?? []) {
-    const code = String(row.code ?? '').trim();
-    const label = String(row.item_category_label ?? '').trim();
-    if (!code || !label || isBareNumericArcpLabel(label)) continue;
-    if (!map[code] || label.length > map[code].length) map[code] = label;
-  }
-  return map;
-}
-
 export async function loadArcpCrmLabelLookups(): Promise<ArcpCrmLabelLookups> {
-  const itemCategoryLoader = readArcpFromPostgres()
-    ? loadItemCategoryLabelsFromPostgres()
-    : loadItemCategoryLabelsFromCrm();
-
   const [callTypeLabelsByCode, itemCategoryLabelsByCode] = await Promise.all([
     withAppClient(async (client) => {
       const callTypes = await client.query(`
@@ -94,7 +43,7 @@ export async function loadArcpCrmLabelLookups(): Promise<ArcpCrmLabelLookups> {
       }
       return map;
     }),
-    itemCategoryLoader,
+    loadItemCategoryLabelsByCode(),
   ]);
 
   return { callTypeLabelsByCode, itemCategoryLabelsByCode };
@@ -167,7 +116,6 @@ export function enrichArcpDetailRows(
 ): ArcpClaimsDetailRow[] {
   return rows.map((row) => {
     const callCode = row.call_type.trim();
-    
     const localCode = row.local_upcountry.trim();
 
     const call_type = resolveLabel(row.call_type, callCode, lookups.callTypeLabelsByCode);

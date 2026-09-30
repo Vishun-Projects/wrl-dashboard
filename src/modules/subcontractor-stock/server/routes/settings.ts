@@ -22,11 +22,8 @@ import {
   listSapMailLog,
 } from '../../services/settings';
 
-import {
-  fetchCrmPlants,
-  fetchCrmVendors,
-  fetchCrmActiveMaterials,
-} from '../../services/crm-query';
+import { listActiveMaterials } from '@/lib/read-model/crm-masters';
+import { fetchCrmPlants, fetchCrmVendors } from '../../services/crm-query';
 
 import { triggerSubcontractorEmails } from '../../services/email-sender';
 import { runTodayReconciliation } from '../../services/reconcile-runner';
@@ -88,7 +85,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       const [plants, vendors, materials] = await Promise.all([
         fetchCrmPlants().catch(() => []),
         fetchCrmVendors().catch(() => []),
-        fetchCrmActiveMaterials().catch(() => []),
+        listActiveMaterials().catch(() => []),
       ]);
       return NextResponse.json({ plants, vendors, materials });
     }

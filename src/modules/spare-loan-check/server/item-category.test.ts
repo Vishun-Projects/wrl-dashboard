@@ -6,5 +6,6 @@ describe('normalizeMaterialCode', () => {
     expect(normalizeMaterialCode('01513755')).toBe('1513755');
     expect(normalizeMaterialCode('1513755')).toBe('1513755');
     expect(normalizeMaterialCode('  1110714  ')).toBe('1110714');
+    expect(normalizeMaterialCode('  01513755  ')).toBe('1513755');
   });
 });

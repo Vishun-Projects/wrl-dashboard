@@ -3,7 +3,10 @@ import { assignResolvedCalls, extractCallNumbers } from '@/modules/spare-stock-a
 import { DEFECTIVE_COMPRESSOR_MATERIAL } from '@/modules/spare-stock-analysis/server/txn-type';
 import { cellText } from '@/modules/spare-stock-analysis/parse-mb51';
 import { isSpareStockPlantExcluded, SPARE_STOCK_EXCLUDED_PLANTS } from '@/modules/spare-stock-analysis/plants';
-import { spareStockPlantLabels } from '@/modules/spare-stock-analysis/server/office-scope';
+import {
+  spareStockPlantLabels,
+  spareStockSupplierLabels,
+} from '@/modules/spare-stock-analysis/server/office-scope';
 import type {
   DefectiveReturnResponse,
   SpareStockBreakdownRow,
@@ -18,9 +21,11 @@ import type {
   SpareStockOptionsResponse,
   SpareStockParsedRow,
   SpareStockPartRow,
+  SpareStockPlantMaterialRow,
   SpareStockRowsResponse,
   SpareStockSummaryResponse,
   SpareStockTxnType,
+  SpareStockUnmappedMvt,
 } from '@/modules/spare-stock-analysis/types';
 
 export type SpareStockDashFilters = {
@@ -29,20 +34,59 @@ export type SpareStockDashFilters = {
   plants: string[];
   suppliers: string[];
   materials: string[];
+  uoms: string[];
   allowedPlants: string[] | null;
 };
 
+/** Mapped clean ledger: debit/credit blank-location rule already applied. */
+const STOCK_FROM = `
+  FROM (
+    SELECT
+      c.plant,
+      c.supplier,
+      c.material,
+      c.material_description,
+      c.uom,
+      c.posting_date,
+      c.qty,
+      map.kind,
+      map.effect
+    FROM spare_stock_mvt_clean c
+    INNER JOIN spare_stock_mvt_map map ON map.mvt = c.mvt
+  ) stock
+`;
+
+/**
+ * Opening: if start ≤ 2025-01-31 → 0 + in-period 561; else all 561 + non-opening
+ * effect on [2025-02-01, start). Period receipt/consumption are negative (effect × |qty|).
+ */
 const KPI_SELECT = `
-  COALESCE(SUM(ABS(qty)) FILTER (WHERE txn_type = 'opening' AND posting_date <= $END), 0)
-    + COALESCE(SUM(ABS(qty)) FILTER (WHERE txn_type = 'receipt' AND posting_date < $START), 0)
-    - COALESCE(SUM(ABS(qty)) FILTER (WHERE txn_type IN ('issued', 'consumption') AND posting_date < $START), 0)
-    AS opening,
-  COALESCE(SUM(ABS(qty)) FILTER (WHERE txn_type = 'receipt' AND posting_date BETWEEN $START AND $END), 0)
-    AS received,
-  COALESCE(SUM(ABS(qty)) FILTER (WHERE txn_type = 'issued' AND posting_date BETWEEN $START AND $END), 0)
-    AS issued,
-  COALESCE(SUM(ABS(qty)) FILTER (WHERE txn_type = 'consumption' AND posting_date BETWEEN $START AND $END), 0)
-    AS consumption
+  COALESCE(
+    CASE WHEN $START::date <= DATE '2025-01-31' THEN 0::numeric
+    ELSE
+      COALESCE(SUM(ABS(qty)) FILTER (WHERE kind = 'opening'), 0)
+      + COALESCE(SUM(effect * ABS(qty)) FILTER (
+          WHERE kind <> 'opening'
+            AND posting_date >= DATE '2025-02-01'
+            AND posting_date < $START::date
+        ), 0)
+    END
+  , 0)
+  + COALESCE(SUM(ABS(qty)) FILTER (
+      WHERE kind = 'opening'
+        AND $START::date <= DATE '2025-01-31'
+        AND posting_date BETWEEN $START::date AND $END::date
+    ), 0)
+  AS opening,
+  COALESCE(SUM(effect * ABS(qty)) FILTER (
+    WHERE kind = 'receipt' AND posting_date BETWEEN $START::date AND $END::date
+  ), 0) AS received,
+  COALESCE(SUM(effect * ABS(qty)) FILTER (
+    WHERE kind = 'issued' AND posting_date BETWEEN $START::date AND $END::date
+  ), 0) AS issued,
+  COALESCE(SUM(effect * ABS(qty)) FILTER (
+    WHERE kind = 'consumption' AND posting_date BETWEEN $START::date AND $END::date
+  ), 0) AS consumption
 `;
 
 /** 2303393 COMPRESSOR (D) is tracked on the defective-returns report, not regular stock. */
@@ -67,12 +111,15 @@ function toKpis(row: {
     received,
     issued,
     consumption,
-    closing: opening + received - issued - consumption,
+    closing: opening + issued + received + consumption,
   };
 }
 
 function buildScopeWhere(
-  filters: Pick<SpareStockDashFilters, 'plants' | 'suppliers' | 'materials' | 'allowedPlants'>,
+  filters: Pick<
+    SpareStockDashFilters,
+    'plants' | 'suppliers' | 'materials' | 'uoms' | 'allowedPlants'
+  >,
   startIdx = 1
 ): { sql: string; values: unknown[]; next: number } {
   const conds: string[] = ['1=1'];
@@ -93,6 +140,10 @@ function buildScopeWhere(
   if (filters.materials.length) {
     conds.push(`material = ANY($${i++}::text[])`);
     values.push(filters.materials);
+  }
+  if (filters.uoms.length) {
+    conds.push(`uom = ANY($${i++}::text[])`);
+    values.push(filters.uoms);
   }
   return { sql: conds.join(' AND '), values, next: i };
 }
@@ -201,6 +252,58 @@ CREATE INDEX IF NOT EXISTS idx_spare_stock_import_staging_row_key
   ON spare_stock_import_staging (upload_id, row_key);
 `;
 
+const MVT_MAP_TABLE_DDL = `
+CREATE TABLE IF NOT EXISTS spare_stock_mvt_map (
+  mvt     text PRIMARY KEY,
+  kind    text NOT NULL CHECK (kind IN ('opening', 'issued', 'receipt', 'consumption')),
+  effect  smallint NOT NULL CHECK (effect IN (-1, 1))
+)`;
+
+const MVT_MAP_SEED_SQL = `
+INSERT INTO spare_stock_mvt_map (mvt, kind, effect) VALUES
+  ('561', 'opening', 1),
+  ('941', 'issued', 1),
+  ('942', 'issued', 1),
+  ('801', 'issued', 1),
+  ('802', 'issued', 1),
+  ('945', 'receipt', -1),
+  ('946', 'receipt', -1),
+  ('951', 'receipt', -1),
+  ('952', 'receipt', -1),
+  ('853', 'receipt', -1),
+  ('854', 'receipt', -1),
+  ('943', 'consumption', -1),
+  ('944', 'consumption', -1),
+  ('947', 'consumption', -1),
+  ('948', 'consumption', -1),
+  ('949', 'consumption', -1)
+ON CONFLICT (mvt) DO UPDATE
+SET kind = EXCLUDED.kind,
+    effect = EXCLUDED.effect`;
+
+const MVT_CLEAN_VIEW_DDL = `
+CREATE OR REPLACE VIEW spare_stock_mvt_clean AS
+WITH tagged AS (
+  SELECT
+    m.row_key, m.import_id, m.plant, m.mat_doc, m.doc_date, m.posting_date, m.material,
+    m.material_description, m.location, m.uom, m.qty, m.lc_amount, m.mvt, m.mvt_text,
+    m.txn_type, m.batch, m.entry_date, m.entry_time, m.sap_user, m.material_group,
+    m.customer, m.header_text, m.call_no, m.mat_yr, m.order_no, m.supplier,
+    BOOL_OR(m.qty > 0) OVER w AS has_pos,
+    BOOL_OR(m.qty < 0) OVER w AS has_neg
+  FROM spare_stock_movements m
+  WINDOW w AS (
+    PARTITION BY m.plant, m.mat_doc, m.material, ABS(m.qty), m.mvt
+  )
+)
+SELECT
+  row_key, import_id, plant, mat_doc, doc_date, posting_date, material, material_description,
+  location, uom, qty, lc_amount, mvt, mvt_text, txn_type, batch, entry_date, entry_time,
+  sap_user, material_group, customer, header_text, call_no, mat_yr, order_no, supplier
+FROM tagged
+WHERE NOT (has_pos AND has_neg)
+   OR NULLIF(TRIM(COALESCE(location, '')), '') IS NULL`;
+
 const REPLACE_CONFLICT = `ON CONFLICT (row_key) DO UPDATE SET
   import_id = EXCLUDED.import_id,
   plant = EXCLUDED.plant,
@@ -297,6 +400,12 @@ async function ensureStaging(client: Queryable): Promise<void> {
   for (const sql of STAGING_DDL.split(';').map((s) => s.trim()).filter(Boolean)) {
     await client.query(sql);
   }
+}
+
+async function ensureMvtMap(client: Queryable): Promise<void> {
+  await client.query(MVT_MAP_TABLE_DDL);
+  await client.query(MVT_MAP_SEED_SQL);
+  await client.query(MVT_CLEAN_VIEW_DDL);
 }
 
 export async function purgeStaleSpareStockStaging(): Promise<void> {
@@ -662,7 +771,7 @@ export async function fetchSpareStockOptions(
     const plantClause = restrict ? 'WHERE plant = ANY($1::text[])' : '';
     const params = restrict ? [allowedPlants] : [];
 
-    const [plants, suppliers, materials] = await Promise.all([
+    const [plants, suppliers, materials, uoms] = await Promise.all([
       client.query<{ plant: string }>(
         `
         SELECT DISTINCT plant
@@ -693,18 +802,33 @@ export async function fetchSpareStockOptions(
         `,
         params
       ),
+      client.query<{ uom: string }>(
+        `
+        SELECT DISTINCT uom
+        FROM spare_stock_movements
+        ${plantClause}
+        ${restrict ? 'AND' : 'WHERE'} uom IS NOT NULL AND btrim(uom) <> ''
+        ORDER BY uom
+        `,
+        params
+      ),
     ]);
 
     const plantCodes = plants.rows.map((r) => r.plant);
-    const plantLabels = await spareStockPlantLabels(plantCodes);
+    const supplierCodes = suppliers.rows.map((r) => r.supplier);
+    const [plantLabels, supplierLabels] = await Promise.all([
+      spareStockPlantLabels(plantCodes),
+      spareStockSupplierLabels(supplierCodes),
+    ]);
 
     return {
       plants: plantCodes.map((p) => ({ value: p, label: plantLabels.get(p) ?? p })),
-      suppliers: suppliers.rows.map((r) => r.supplier),
+      suppliers: supplierCodes.map((s) => ({ value: s, label: supplierLabels.get(s) ?? s })),
       materials: materials.rows.map((r) => ({
         value: r.material,
         label: r.material_description ? `${r.material} — ${r.material_description}` : r.material,
       })),
+      uoms: uoms.rows.map((r) => r.uom),
     };
   });
 }
@@ -716,14 +840,15 @@ export async function fetchSpareStockSummary(
   const kpi = bindKpiSql(KPI_SELECT, 1);
 
   return withAppClient(async (client) => {
+    await ensureMvtMap(client);
     await ensureResolvedCallNos(client);
     const kpiValues = [filters.startDate, filters.endDate, ...scope.values];
 
-    const [kpiRes, topRes, branchRes, franchiseeRes, lastRes] = await Promise.all([
+    const [kpiRes, topRes, plantMatRes, branchRes, franchiseeRes, lastRes] = await Promise.all([
       client.query<{ opening: string; received: string; issued: string; consumption: string }>(
         `
         SELECT ${kpi.sql}
-        FROM spare_stock_movements
+        ${STOCK_FROM}
         WHERE ${scope.sql}
           ${STOCK_EXCLUDE_DEFECTIVE}
         `,
@@ -732,14 +857,37 @@ export async function fetchSpareStockSummary(
       client.query<{ material: string; material_description: string | null; qty: string }>(
         `
         SELECT material, MIN(material_description) AS material_description, SUM(ABS(qty)) AS qty
-        FROM spare_stock_movements
+        ${STOCK_FROM}
         WHERE ${scope.sql}
           ${STOCK_EXCLUDE_DEFECTIVE}
-          AND txn_type = 'consumption'
+          AND kind = 'consumption'
           AND posting_date BETWEEN $1 AND $2
         GROUP BY material
         ORDER BY SUM(ABS(qty)) DESC
         LIMIT 20
+        `,
+        kpiValues
+      ),
+      client.query<{
+        plant: string;
+        material: string;
+        material_description: string | null;
+        uom: string | null;
+        opening: string;
+        received: string;
+        issued: string;
+        consumption: string;
+      }>(
+        `
+        SELECT plant, material,
+               MIN(material_description) AS material_description,
+               MIN(NULLIF(TRIM(uom), '')) AS uom,
+               ${kpi.sql}
+        ${STOCK_FROM}
+        WHERE ${scope.sql}
+          ${STOCK_EXCLUDE_DEFECTIVE}
+        GROUP BY plant, material
+        ORDER BY plant, material
         `,
         kpiValues
       ),
@@ -752,7 +900,7 @@ export async function fetchSpareStockSummary(
       }>(
         `
         SELECT plant, ${kpi.sql}
-        FROM spare_stock_movements
+        ${STOCK_FROM}
         WHERE ${scope.sql}
           ${STOCK_EXCLUDE_DEFECTIVE}
         GROUP BY plant
@@ -769,7 +917,7 @@ export async function fetchSpareStockSummary(
       }>(
         `
         SELECT COALESCE(NULLIF(supplier, ''), '(blank)') AS supplier, ${kpi.sql}
-        FROM spare_stock_movements
+        ${STOCK_FROM}
         WHERE ${scope.sql}
           ${STOCK_EXCLUDE_DEFECTIVE}
         GROUP BY COALESCE(NULLIF(supplier, ''), '(blank)')
@@ -804,7 +952,19 @@ export async function fetchSpareStockSummary(
       ...toKpis(row),
     });
 
-    const plantLabels = await spareStockPlantLabels(branchRes.rows.map((r) => r.plant));
+    const plantCodes = [
+      ...new Set([
+        ...branchRes.rows.map((r) => r.plant),
+        ...plantMatRes.rows.map((r) => r.plant),
+      ]),
+    ];
+    const supplierCodes = franchiseeRes.rows
+      .map((r) => r.supplier)
+      .filter((s) => s && s !== '(blank)');
+    const [plantLabels, supplierLabels] = await Promise.all([
+      spareStockPlantLabels(plantCodes),
+      spareStockSupplierLabels(supplierCodes),
+    ]);
 
     return {
       kpis: toKpis(kpiRes.rows[0] ?? {}),
@@ -815,10 +975,62 @@ export async function fetchSpareStockSummary(
           qty: num(r.qty),
         })
       ),
+      byPlantMaterial: plantMatRes.rows.map((r): SpareStockPlantMaterialRow => {
+        const kpis = toKpis(r);
+        const plantLabel = plantLabels.get(r.plant) ?? r.plant;
+        return {
+          key: `${r.plant}|${r.material}`,
+          plant: r.plant,
+          plantLabel,
+          material: r.material,
+          materialDescription: r.material_description ?? '',
+          uom: r.uom ?? '',
+          ...kpis,
+        };
+      }),
       byBranch: branchRes.rows.map((r) => mapBreakdown(r.plant, plantLabels.get(r.plant) ?? r.plant, r)),
-      byFranchisee: franchiseeRes.rows.map((r) => mapBreakdown(r.supplier, r.supplier, r)),
+      byFranchisee: franchiseeRes.rows.map((r) =>
+        mapBreakdown(r.supplier, supplierLabels.get(r.supplier) ?? r.supplier, r)
+      ),
       lastImport: mapLastImport(lastRes.rows[0]),
     };
+  });
+}
+
+export async function fetchSpareStockUnmapped(
+  allowedPlants: string[] | null
+): Promise<SpareStockUnmappedMvt[]> {
+  return withAppClient(async (client) => {
+    await ensureMvtMap(client);
+    const values: unknown[] = [];
+    let plantFilter = '';
+    if (allowedPlants != null) {
+      values.push(allowedPlants);
+      plantFilter = `AND m.plant = ANY($1::text[])`;
+    }
+    const { rows } = await client.query<{
+      mvt: string;
+      mvt_text: string | null;
+      n: string;
+    }>(
+      `
+      SELECT m.mvt, MIN(NULLIF(TRIM(m.mvt_text), '')) AS mvt_text, COUNT(*)::text AS n
+      FROM spare_stock_movements m
+      LEFT JOIN spare_stock_mvt_map map ON map.mvt = m.mvt
+      WHERE map.mvt IS NULL
+        ${plantFilter}
+      GROUP BY m.mvt
+      ORDER BY COUNT(*) DESC, m.mvt
+      `,
+      values
+    );
+    return rows.map(
+      (r): SpareStockUnmappedMvt => ({
+        mvt: r.mvt,
+        mvtText: r.mvt_text ?? '',
+        count: Number(r.n) || 0,
+      })
+    );
   });
 }
 
@@ -848,6 +1060,7 @@ export async function fetchSpareStockRows(
       mat_doc: string | null;
       material: string | null;
       material_description: string | null;
+      uom: string | null;
       qty: string;
       mvt: string;
       txn_type: string;
@@ -855,7 +1068,7 @@ export async function fetchSpareStockRows(
       call_no: string | null;
     }>(
       `
-      SELECT plant, posting_date, mat_doc, material, material_description, qty, mvt, txn_type, supplier,
+      SELECT plant, posting_date, mat_doc, material, material_description, uom, qty, mvt, txn_type, supplier,
              NULLIF(TRIM(resolved_call_no), '') AS call_no
       FROM spare_stock_movements
       WHERE ${scope.sql}
@@ -880,6 +1093,7 @@ export async function fetchSpareStockRows(
           matDoc: r.mat_doc ?? '',
           material: r.material ?? '',
           materialDescription: r.material_description ?? '',
+          uom: r.uom ?? '',
           qty: num(r.qty),
           mvt: r.mvt,
           txnType: r.txn_type as SpareStockTxnType,
@@ -961,7 +1175,14 @@ export async function fetchDefectiveCompressorReport(
       values
     );
 
-    const plantLabels = await spareStockPlantLabels(rows.map((r) => r.plant));
+    const supplierCodes = [
+      ...new Set(rows.map((r) => r.supplier).filter((s) => s && s !== '(blank)')),
+    ];
+    const [plantLabels, supplierLabels] = await Promise.all([
+      spareStockPlantLabels(rows.map((r) => r.plant)),
+      spareStockSupplierLabels(supplierCodes),
+    ]);
+
     const mapped = rows.map((r) => {
       const consumed = num(r.consumed);
       const received = num(r.received);
@@ -970,6 +1191,7 @@ export async function fetchDefectiveCompressorReport(
         plantLabel: plantLabels.get(r.plant) ?? r.plant,
         callNo: r.call_no,
         supplier: r.supplier,
+        supplierLabel: supplierLabels.get(r.supplier) ?? r.supplier,
         material: r.material ?? '',
         materialDescription: r.material_description ?? '',
         consumed,
@@ -988,9 +1210,17 @@ export async function fetchDefectiveCompressorReport(
       { consumed: 0, received: 0, outstanding: 0 }
     );
 
-    const byFr = new Map<string, { consumed: number; received: number; outstanding: number }>();
+    const byFr = new Map<
+      string,
+      { supplierLabel: string; consumed: number; received: number; outstanding: number }
+    >();
     for (const r of mapped) {
-      const cur = byFr.get(r.supplier) ?? { consumed: 0, received: 0, outstanding: 0 };
+      const cur = byFr.get(r.supplier) ?? {
+        supplierLabel: r.supplierLabel,
+        consumed: 0,
+        received: 0,
+        outstanding: 0,
+      };
       cur.consumed += r.consumed;
       cur.received += r.received;
       cur.outstanding += r.outstanding;

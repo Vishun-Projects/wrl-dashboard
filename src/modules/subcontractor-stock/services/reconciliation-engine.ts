@@ -1,5 +1,8 @@
+import { normalizeMaterialCode } from '@/lib/read-model/crm-masters';
 import { SapSupplierGroup } from './sap-parser';
 import { CrmStockRow, CrmVendorPlant } from './crm-query';
+
+export { normalizeMaterialCode };
 
 export type ReconciledRow = {
   plant: string;
@@ -31,13 +34,6 @@ export type ReconciliationSummary = {
 export function normalizeVendorCode(code: string): string {
   const match = code.trim().match(/^(\d+)/);
   return match ? match[1] : code.trim();
-}
-
-/**
- * Normalizes material code to strip leading zeros and trim whitespace
- */
-export function normalizeMaterialCode(code: string): string {
-  return code.replace(/^0+/, '').trim();
 }
 
 /**

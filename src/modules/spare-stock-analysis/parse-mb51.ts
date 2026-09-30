@@ -1,6 +1,11 @@
 import { parseCalendarString } from '@/lib/dates/ui-date';
 import { isSpareStockPlantExcluded } from '@/modules/spare-stock-analysis/plants';
-import { parseSapAmount, parseSapQty, txnTypeForMvt } from '@/modules/spare-stock-analysis/sap-numbers';
+import {
+  applyUneToKg,
+  parseSapAmount,
+  parseSapQty,
+  txnTypeForMvt,
+} from '@/modules/spare-stock-analysis/sap-numbers';
 import type { SpareStockParsedRow } from '@/modules/spare-stock-analysis/types';
 
 /** SAP ALV HTML uses hex entities (`&#x28;` = `(`). Decimal + a few named ones too. */
@@ -169,7 +174,9 @@ export async function cellsToRow(
 
   const mvt = pick(cells, colMap.mvt).replace(/\s+/g, '');
   const material = pick(cells, colMap.material).replace(/\s+/g, '');
-  const qty = parseSapQty(pick(cells, colMap.qty));
+  const rawQty = parseSapQty(pick(cells, colMap.qty));
+  const une = applyUneToKg(pick(cells, colMap.uom), rawQty);
+  const qty = une.qty;
   const matDoc = pick(cells, colMap.matDoc).replace(/\s+/g, '');
   const matYr = pick(cells, colMap.matYr).replace(/\s+/g, '');
   const location = pick(cells, colMap.location);
@@ -187,7 +194,7 @@ export async function cellsToRow(
     material,
     materialDescription: pick(cells, colMap.materialDescription),
     location,
-    uom: pick(cells, colMap.uom),
+    uom: une.uom,
     qty,
     lcAmount: parseSapAmount(pick(cells, colMap.lcAmount)),
     mvt,

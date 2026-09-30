@@ -46,6 +46,7 @@ import {
 } from '@/lib/read-model/calls-mirror';
 import { syncCompressorBarcodesToPostgres } from '@/modules/compressor-barcodes/server/sync/postgres-sync';
 import { runArcpRateCardSync } from '@/modules/arcp-provision/server/sync/rate-card';
+import { refreshCrmMasters } from '@/lib/read-model/crm-masters';
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
 const DAEMON_MAX_CONSECUTIVE_FAILURES = Number(process.env.SYNC_DAEMON_MAX_FAILURES ?? 5) || 5;
@@ -351,6 +352,11 @@ async function main(): Promise<void> {
     case 'dims':
       await runDimsRefresh();
       break;
+    case 'crm-masters': {
+      const masters = await refreshCrmMasters();
+      console.log('[crm-masters] Done:', masters);
+      break;
+    }
     case 'fill-ytd':
       await runFillYtdHot();
       break;
@@ -544,6 +550,7 @@ Commands:
   transaction-entry-verify       Compare CRM vs mirror for all TransactionEntry clients; re-fetch mismatches
                     --to YYYY-MM-DD  (default today; lookback = TRANSACTION_ENTRY_VERIFY_DAYS)
   dims              Refresh dimension tables only
+  crm-masters       Refresh crm_mstitems / crm_mstitemcategory / crm_mstrepair from live CRM
   nightly           Calls nightly + ARCP + TransactionEntry when enabled
   retention         Purge old sync logs and ingest batches
   full-audit        Full read-model audit vs live CRM (npm run sync-worker -- full-audit)

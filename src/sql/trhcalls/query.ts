@@ -949,18 +949,6 @@ export function buildSerialAuditRepairCountsBySerialSql(opts?: SerialAuditSqlOpt
   `;
 }
 
-/** Active repair types from mstrepair (visit work done). */
-export function buildMstRepairMasterListSql(): string {
-  return `
-    SELECT
-      CAST(ncode AS VARCHAR(50)) AS ncode,
-      LTRIM(RTRIM(vname)) AS vname
-    FROM mstrepair (NOLOCK)
-    WHERE LTRIM(RTRIM(ISNULL(vname, ''))) <> ''
-      AND ISNULL(bactive, 'True') IN ('True', 'true', '1', '')
-  `;
-}
-
 /** Call ncodes that have selected repairs on a visit fault row in the date window. */
 export function buildSerialAuditCallIdsWithRepairSql(opts: {
   repair: string;

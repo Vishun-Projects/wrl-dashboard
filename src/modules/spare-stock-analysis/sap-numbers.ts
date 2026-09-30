@@ -2,11 +2,16 @@ import type { SpareStockTxnType } from '@/modules/spare-stock-analysis/types';
 
 const TXN_BY_MVT: Record<string, SpareStockTxnType> = {
   '561': 'opening',
-  '853': 'receipt',
-  '952': 'receipt',
-  '801': 'issued',
   '941': 'issued',
   '942': 'issued',
+  '801': 'issued',
+  '802': 'issued',
+  '945': 'receipt',
+  '946': 'receipt',
+  '951': 'receipt',
+  '952': 'receipt',
+  '853': 'receipt',
+  '854': 'receipt',
   '943': 'consumption',
   '944': 'consumption',
   '947': 'consumption',
@@ -14,8 +19,24 @@ const TXN_BY_MVT: Record<string, SpareStockTxnType> = {
   '949': 'consumption',
 };
 
+/** Stock effect for mapped kinds: opening/issued add; receipt/consumption reduce. */
+export function effectForTxnType(txnType: SpareStockTxnType): 1 | -1 | 0 {
+  if (txnType === 'opening' || txnType === 'issued') return 1;
+  if (txnType === 'receipt' || txnType === 'consumption') return -1;
+  return 0;
+}
+
 export function txnTypeForMvt(mvt: string): SpareStockTxnType {
   return TXN_BY_MVT[mvt.replace(/\s+/g, '')] ?? 'other';
+}
+
+const GRAM_UOM = new Set(['G', 'GM', 'GMS', 'GRM']);
+
+/** Exact G/GM/GMS/GRM → divide qty by 1000 and normalize UOM to KG. KG left alone. */
+export function applyUneToKg(uom: string, qty: number): { uom: string; qty: number } {
+  const key = uom.replace(/\s+/g, '').toUpperCase();
+  if (!GRAM_UOM.has(key)) return { uom, qty };
+  return { uom: 'KG', qty: qty / 1000 };
 }
 
 /** SAP trailing minus (`1.000-`) is negative. Leading minus kept as-is. */

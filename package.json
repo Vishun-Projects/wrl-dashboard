@@ -42,6 +42,7 @@
     "sync-worker:backfill-wco": "npx tsx src/lib/read-model/cli.ts backfill-wco",
     "sync-worker:warranty-master": "npx tsx scripts/sync-warranty-master.mjs",
     "sync-worker:dims": "npx tsx src/lib/read-model/cli.ts dims",
+    "sync-worker:crm-masters": "npx tsx src/lib/read-model/cli.ts crm-masters",
     "sync-worker:nightly": "npx tsx src/lib/read-model/cli.ts nightly",
     "sync-worker:midnight-calls": "bash scripts/vps-hosting/midnight-calls-sync.sh",
     "sync-worker:daemon": "npx tsx src/lib/read-model/cli.ts daemon",

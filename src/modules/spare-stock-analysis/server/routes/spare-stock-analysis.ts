@@ -13,6 +13,7 @@ import {
   fetchSpareStockOptions,
   fetchSpareStockRows,
   fetchSpareStockSummary,
+  fetchSpareStockUnmapped,
   importSpareStockFromStaging,
   insertSpareStockStagingRows,
   previewSpareStockStaging,
@@ -80,6 +81,7 @@ function parseFilters(
     plants,
     suppliers: csvList(searchParams.get('suppliers')),
     materials: csvList(searchParams.get('materials')),
+    uoms: csvList(searchParams.get('uoms')),
     allowedPlants,
   };
 }
@@ -136,6 +138,11 @@ export async function GET(req: NextRequest) {
     if (mode === 'options') {
       const options = await fetchSpareStockOptions(allowedPlants);
       return NextResponse.json(options);
+    }
+
+    if (mode === 'unmapped') {
+      const unmapped = await fetchSpareStockUnmapped(allowedPlants);
+      return NextResponse.json({ unmapped });
     }
 
     const filters = parseFilters(searchParams, allowedPlants);

@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { assertSameOriginMutation } from '@/lib/api/same-origin';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
-import { postQuery } from '@/lib/db/proxy';
+import { listRepairMaster } from '@/lib/read-model/crm-masters';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
-import { buildMstRepairMasterListSql } from '@/sql/trhcalls/query';
 import {
   deleteExceptionAccount,
   listExceptionAccounts,
@@ -47,14 +46,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ accounts: await listSystemAccountOptions() });
     }
     if (mode === 'repairs') {
-      const res = await postQuery({ rawSql: buildMstRepairMasterListSql(), timeoutMs: 60_000 });
-      const rows = (res.data || []) as Record<string, unknown>[];
-      const repairs = rows
-        .map((r) => ({
-          value: String(r.ncode ?? '').trim(),
-          label: String(r.vname ?? '').trim(),
-        }))
-        .filter((r) => r.value && r.label)
+      const repairs = (await listRepairMaster())
+        .map((r) => ({ value: r.ncode, label: r.vname }))
         .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
       return NextResponse.json({ repairs });
     }

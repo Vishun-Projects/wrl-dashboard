@@ -142,43 +142,6 @@ function buildArcpWhere(
   return { sql: parts.join(' AND '), params };
 }
 
-function isBareNumericLabel(value: string): boolean {
-  return /^\d+$/.test(value.trim());
-}
-
-async function loadItemCategoryLabelMap(
-  client: import('pg').PoolClient
-): Promise<Record<string, string>> {
-  const result = await client.query(`
-    SELECT DISTINCT nitemcategory, item_category_label
-    FROM arcp_lines_hot
-    WHERE item_category_label IS NOT NULL
-      AND TRIM(item_category_label) <> ''
-  `);
-  const map: Record<string, string> = {};
-  for (const row of result.rows) {
-    const code = String(row.nitemcategory ?? '').trim();
-    const label = String(row.item_category_label ?? '').trim();
-    if (!code || !label || isBareNumericLabel(label)) continue;
-    if (!map[code] || label.length > map[code].length) map[code] = label;
-  }
-  return map;
-}
-
-function enrichAggregateLabels(
-  rows: ArcpClaimsAggregateRow[],
-  itemCategoryLabels: Record<string, string>
-): ArcpClaimsAggregateRow[] {
-  return rows.map((row) => {
-    const code = String(row.nitemcategory ?? '').trim();
-    const label = String(row.item_category_label ?? '').trim();
-    if (!code || (label && !isBareNumericLabel(label))) return row;
-    const resolved = itemCategoryLabels[code];
-    if (!resolved) return row;
-    return { ...row, item_category_label: resolved };
-  });
-}
-
 export async function queryArcpClaimsAggregates(
   opts: ArcpClaimsQueryOpts
 ): Promise<ArcpClaimsAggregateRow[]> {
@@ -345,9 +308,8 @@ GROUP BY
 
   return withAppClient(async (client) => {
     const result = await client.query(query, params);
-    const rows = parseArcpAggregateRows(result.rows as Record<string, unknown>[]);
-    const itemLabels = await loadItemCategoryLabelMap(client);
-    return enrichAggregateLabels(rows, itemLabels);
+    // Category labels resolved once in hybrid-load via crm-masters / crm-labels.
+    return parseArcpAggregateRows(result.rows as Record<string, unknown>[]);
   });
 }
 

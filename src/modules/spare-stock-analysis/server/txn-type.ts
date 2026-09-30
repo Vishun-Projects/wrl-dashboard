@@ -1,6 +1,8 @@
 import { extractCallNumbers } from '@/modules/spare-stock-analysis/server/call-no';
 
 export {
+  applyUneToKg,
+  effectForTxnType,
   parseSapAmount,
   parseSapQty,
   txnTypeForMvt,

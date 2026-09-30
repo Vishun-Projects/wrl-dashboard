@@ -317,32 +317,43 @@ export async function listZss02Imports(
   });
 }
 
+/** zss02 material → local CRM item group (one row per norm code). */
+const ZSS02_ITEM_CAT_CTE = `
+item_cat AS (
+  SELECT DISTINCT ON (i.norm_vitemcode)
+    i.norm_vitemcode,
+    COALESCE(NULLIF(btrim(c.vname), ''), NULLIF(btrim(c.vshortname), '')) AS item_group
+  FROM crm_mstitems i
+  LEFT JOIN crm_mstitemcategory c ON c.ncode = i.nitemcategory
+  ORDER BY i.norm_vitemcode, i.bactive DESC, i.ncode
+)`;
+
 /** Distinct SAP material codes in scope that belong to the given CRM item groups. */
 async function materialsForItemGroups(
   itemGroups: string[],
   allowedPlants: string[] | null
 ): Promise<string[]> {
-  const wanted = new Set(itemGroups.map((g) => g.trim()).filter(Boolean));
-  if (!wanted.size) return [];
+  const wanted = itemGroups.map((g) => g.trim()).filter(Boolean);
+  if (!wanted.length) return [];
 
-  const materialCodes = await withAppClient(async (client) => {
-    const scope =
-      allowedPlants != null ? `WHERE plant = ANY($1::text[])` : '';
-    const params = allowedPlants != null ? [allowedPlants] : [];
+  return withAppClient(async (client) => {
+    const plantClause =
+      allowedPlants != null ? `AND z.plant = ANY($2::text[])` : '';
+    const params: unknown[] =
+      allowedPlants != null ? [wanted, allowedPlants] : [wanted];
     const { rows } = await client.query<{ material: string }>(
-      `SELECT DISTINCT material FROM zss02_rows ${scope}`,
+      `
+      WITH ${ZSS02_ITEM_CAT_CTE}
+      SELECT DISTINCT z.material
+      FROM zss02_rows z
+      JOIN item_cat ic
+        ON ic.norm_vitemcode = regexp_replace(btrim(z.material), '^0+', '')
+      WHERE ic.item_group = ANY($1::text[])
+        ${plantClause}
+      `,
       params
     );
     return rows.map((r) => r.material).filter(Boolean);
-  });
-
-  const { lookupItemCategoriesByMaterial, normalizeMaterialCode } = await import(
-    '@/modules/spare-loan-check/item-group'
-  );
-  const categoryMap = await lookupItemCategoriesByMaterial(materialCodes);
-  return materialCodes.filter((m) => {
-    const group = categoryMap.get(normalizeMaterialCode(m));
-    return group != null && wanted.has(group);
   });
 }
 
@@ -404,7 +415,6 @@ export async function fetchZss02Options(
             value: r.vendor_no,
             label: r.vendor_name ? `${r.vendor_no} — ${r.vendor_name}` : r.vendor_no,
           })),
-        materialCodes: materials.rows.map((r) => r.material).filter(Boolean),
         materials: materials.rows
           .filter((r) => r.material)
           .map((r) => ({
@@ -418,25 +428,34 @@ export async function fetchZss02Options(
     fetchLatestLoanDate(allowedPlants),
   ]);
 
-  const [{ lookupPlantMeta }, { branchFileLabel }, { lookupItemCategoriesByMaterial, normalizeMaterialCode }] =
-    await Promise.all([
-      import('@/modules/spare-loan-check/crm-match'),
-      import('@/modules/spare-loan-check/export-labels'),
-      import('@/modules/spare-loan-check/item-group'),
-    ]);
-  const [plantMeta, categoryMap] = await Promise.all([
-    lookupPlantMeta(dbOpts.plantCodes),
-    lookupItemCategoriesByMaterial(dbOpts.materialCodes),
+  const [{ lookupPlantMeta }, { branchFileLabel }, itemGroups] = await Promise.all([
+    import('@/modules/spare-loan-check/crm-match'),
+    import('@/modules/spare-loan-check/export-labels'),
+    withAppClient(async (client) => {
+      const plantClause =
+        allowedPlants != null ? `AND z.plant = ANY($1::text[])` : '';
+      const params = allowedPlants != null ? [allowedPlants] : [];
+      const { rows } = await client.query<{ item_group: string }>(
+        `
+        WITH ${ZSS02_ITEM_CAT_CTE}
+        SELECT DISTINCT ic.item_group
+        FROM zss02_rows z
+        JOIN item_cat ic
+          ON ic.norm_vitemcode = regexp_replace(btrim(z.material), '^0+', '')
+        WHERE ic.item_group IS NOT NULL
+          AND btrim(ic.item_group) <> ''
+          ${plantClause}
+        ORDER BY 1
+        `,
+        params
+      );
+      return rows.map((r) => ({
+        value: r.item_group,
+        label: r.item_group,
+      }));
+    }),
   ]);
-  const itemGroupSet = new Set<string>();
-  for (const code of dbOpts.materialCodes) {
-    const g = categoryMap.get(normalizeMaterialCode(code));
-    if (g) itemGroupSet.add(g);
-  }
-  const itemGroups = [...itemGroupSet].sort((a, b) => a.localeCompare(b)).map((g) => ({
-    value: g,
-    label: g,
-  }));
+  const plantMeta = await lookupPlantMeta(dbOpts.plantCodes);
 
   return {
     plants: dbOpts.plantCodes.map((code) => ({

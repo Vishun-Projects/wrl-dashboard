@@ -10,6 +10,7 @@ import {
   fetchCrmRowsForBackfill,
   fetchCrmRowsForRange,
 } from '@/lib/read-model/crm-fetch';
+import { refreshCrmMasters } from '@/lib/read-model/crm-masters';
 import { refreshDimensions } from '@/lib/read-model/dims';
 import {
   todayLocalDate,
@@ -115,6 +116,21 @@ export async function runNightlyReconcile(): Promise<void> {
       throw err;
     }
   });
+
+  // Masters rarely change — refresh outside the calls lock so report lookups stay local.
+  if (process.env.SYNC_CRM_MASTERS_ENABLED !== 'false') {
+    try {
+      const masters = await refreshCrmMasters();
+      console.log(
+        `[crm-masters] Nightly sync — categories ${masters.categories}, repairs ${masters.repairs}, items ${masters.items}`
+      );
+    } catch (err) {
+      console.error(
+        '[crm-masters] Nightly sync failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
 
   if (process.env.SYNC_ARCP_ENABLED === 'true') {
     try {

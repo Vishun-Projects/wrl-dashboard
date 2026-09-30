@@ -1,39 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
-import { postQuery } from '@/lib/db/proxy';
 import { resolveReportSecurity } from '@/lib/auth/report-security';
+import { listRepairMaster } from '@/lib/read-model/crm-masters';
 import {
   filterRepairMasterForPicker,
   repairMasterToPicker,
-  type RepairMasterItem,
   type RepairPickerItem,
 } from '@/sql/repair/options';
 import { jsonSafeError } from '@/lib/api/safe-error';
-import { buildMstRepairMasterListSql } from '@/sql/trhcalls/query';
 
 const REPAIR_CACHE_TTL = 60 * 60 * 1000;
-const QUERY_TIMEOUT_MS = 60000;
 
 let repairCache: { data: RepairPickerItem[]; timestamp: number } | null = null;
 let repairInflight: Promise<RepairPickerItem[]> | null = null;
-
-async function fetchMstRepairMaster(): Promise<RepairMasterItem[]> {
-  const res = await postQuery({
-    rawSql: buildMstRepairMasterListSql(),
-    timeoutMs: QUERY_TIMEOUT_MS,
-  });
-  const rows = (res.data || []) as Record<string, unknown>[];
-  const byKey = new Map<string, RepairMasterItem>();
-  for (const row of rows) {
-    const ncode = String(row.ncode ?? '').trim();
-    const vname = String(row.vname ?? '').trim();
-    if (!ncode || !vname) continue;
-    const key = vname.trim().toLowerCase();
-    if (!byKey.has(key)) byKey.set(key, { ncode, vname });
-  }
-  return [...byKey.values()];
-}
 
 export async function GET(req: NextRequest) {
   try {
@@ -64,14 +44,14 @@ export async function GET(req: NextRequest) {
     ) {
       return NextResponse.json({
         repairs: repairCache.data,
-        source: 'mstrepair',
+        source: 'crm_mstrepair',
         cached: true,
       });
     }
 
     if (!repairInflight) {
       repairInflight = (async () => {
-        const master = await fetchMstRepairMaster();
+        const master = await listRepairMaster();
         return repairMasterToPicker(filterRepairMasterForPicker(master));
       })();
     }
@@ -80,7 +60,7 @@ export async function GET(req: NextRequest) {
       repairCache = { data: repairs, timestamp: now };
       return NextResponse.json({
         repairs,
-        source: 'mstrepair',
+        source: 'crm_mstrepair',
         cached: false,
       });
     } finally {

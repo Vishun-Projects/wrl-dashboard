@@ -29,8 +29,10 @@ import type {
   SpareStockInFileDupesChoice,
   SpareStockOptionsResponse,
   SpareStockMovementRow,
+  SpareStockPlantMaterialRow,
   SpareStockRowsResponse,
   SpareStockSummaryResponse,
+  SpareStockUnmappedMvt,
 } from '@/modules/spare-stock-analysis/types';
 
 const API = SPARE_STOCK_API;
@@ -64,6 +66,7 @@ function buildParams(opts: {
   plant: string;
   supplier: string;
   material: string;
+  uom: string;
   page?: number;
   pageSize?: number;
 }): URLSearchParams {
@@ -73,6 +76,7 @@ function buildParams(opts: {
   if (opts.plant) params.set('plants', opts.plant);
   if (opts.supplier) params.set('suppliers', opts.supplier);
   if (opts.material) params.set('materials', opts.material);
+  if (opts.uom) params.set('uoms', opts.uom);
   if (opts.page) params.set('page', String(opts.page));
   if (opts.pageSize) params.set('pageSize', String(opts.pageSize));
   return params;
@@ -87,6 +91,7 @@ export default function SpareStockAnalysisPageClient() {
   const [plant, setPlant] = useState('');
   const [supplier, setSupplier] = useState('');
   const [material, setMaterial] = useState('');
+  const [uom, setUom] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 50;
 
@@ -94,9 +99,11 @@ export default function SpareStockAnalysisPageClient() {
     plants: [],
     suppliers: [],
     materials: [],
+    uoms: [],
   });
   const [summary, setSummary] = useState<SpareStockSummaryResponse | null>(null);
   const [rowsData, setRowsData] = useState<SpareStockRowsResponse | null>(null);
+  const [unmapped, setUnmapped] = useState<SpareStockUnmappedMvt[]>([]);
   const [defective, setDefective] = useState<DefectiveReturnResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -109,12 +116,16 @@ export default function SpareStockAnalysisPageClient() {
 
   const plantOpts = useMemo<FilterSelectOption[]>(() => options.plants, [options.plants]);
   const supplierOpts = useMemo<FilterSelectOption[]>(
-    () => options.suppliers.map((s) => ({ value: s, label: s })),
+    () => options.suppliers.map((s) => ({ value: s.value, label: s.label })),
     [options.suppliers]
   );
   const materialOpts = useMemo<FilterSelectOption[]>(
     () => options.materials.map((m) => ({ value: m.value, label: m.label })),
     [options.materials]
+  );
+  const uomOpts = useMemo<FilterSelectOption[]>(
+    () => options.uoms.map((u) => ({ value: u, label: u })),
+    [options.uoms]
   );
 
   const resetPage = useCallback(() => setPage(1), []);
@@ -133,7 +144,7 @@ export default function SpareStockAnalysisPageClient() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const base = { startDate, endDate, plant, supplier, material };
+      const base = { startDate, endDate, plant, supplier, material, uom };
       if (view === 'defective') {
         const res = await fetch(`${API}?mode=defective&${buildParams(base).toString()}`, {
           credentials: 'include',
@@ -143,24 +154,32 @@ export default function SpareStockAnalysisPageClient() {
         setDefective(json as unknown as DefectiveReturnResponse);
         return;
       }
-      const [summaryRes, rowsRes] = await Promise.all([
+      const [summaryRes, rowsRes, unmappedRes] = await Promise.all([
         fetch(`${API}?mode=summary&${buildParams(base).toString()}`, { credentials: 'include' }),
         fetch(`${API}?mode=rows&${buildParams({ ...base, page, pageSize }).toString()}`, {
           credentials: 'include',
         }),
+        fetch(`${API}?mode=unmapped`, { credentials: 'include' }),
       ]);
       const summaryJson = await readSpareStockApiJson(summaryRes);
       const rowsJson = await readSpareStockApiJson(rowsRes);
+      const unmappedJson = await readSpareStockApiJson(unmappedRes);
       if (!summaryRes.ok) throw new Error(String(summaryJson.error || 'Failed to load summary'));
       if (!rowsRes.ok) throw new Error(String(rowsJson.error || 'Failed to load rows'));
       setSummary(summaryJson as unknown as SpareStockSummaryResponse);
       setRowsData(rowsJson as unknown as SpareStockRowsResponse);
+      if (unmappedRes.ok) {
+        const list = (unmappedJson as { unmapped?: SpareStockUnmappedMvt[] }).unmapped;
+        setUnmapped(Array.isArray(list) ? list : []);
+      } else {
+        setUnmapped([]);
+      }
     } catch (err) {
       feedback.actionFailed(err instanceof Error ? err.message : 'Failed to load spare stock');
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, plant, supplier, material, page, view]);
+  }, [startDate, endDate, plant, supplier, material, uom, page, view]);
 
   useEffect(() => {
     void refreshOptions();
@@ -242,8 +261,8 @@ export default function SpareStockAnalysisPageClient() {
 
   const kpiCards = [
     { label: 'Opening', value: kpis?.opening ?? 0 },
-    { label: 'Received', value: kpis?.received ?? 0 },
     { label: 'Issued', value: kpis?.issued ?? 0 },
+    { label: 'Receipt', value: kpis?.received ?? 0 },
     { label: 'Consumption', value: kpis?.consumption ?? 0 },
     { label: 'Closing', value: kpis?.closing ?? 0 },
   ];
@@ -321,20 +340,36 @@ export default function SpareStockAnalysisPageClient() {
               layout="inline"
             />
             {view === 'stock' ? (
-              <FilterSelect
-                label="Part"
-                emptyLabel="All Parts"
-                options={materialOpts}
-                selected={material ? [material] : []}
-                mode="single"
-                onChange={(values) => {
-                  resetPage();
-                  setMaterial(pickSingle(values));
-                }}
-                searchPlaceholder="Search material…"
-                panelClassName="w-80"
-                layout="inline"
-              />
+              <>
+                <FilterSelect
+                  label="Part"
+                  emptyLabel="All Parts"
+                  options={materialOpts}
+                  selected={material ? [material] : []}
+                  mode="single"
+                  onChange={(values) => {
+                    resetPage();
+                    setMaterial(pickSingle(values));
+                  }}
+                  searchPlaceholder="Search material…"
+                  panelClassName="w-80"
+                  layout="inline"
+                />
+                <FilterSelect
+                  label="UOM"
+                  emptyLabel="All UOM"
+                  options={uomOpts}
+                  selected={uom ? [uom] : []}
+                  mode="single"
+                  onChange={(values) => {
+                    resetPage();
+                    setUom(pickSingle(values));
+                  }}
+                  searchPlaceholder="Search UOM…"
+                  panelClassName="w-40"
+                  layout="inline"
+                />
+              </>
             ) : null}
             <div className="flex items-center gap-1 self-end pb-0.5">
               <button
@@ -397,6 +432,7 @@ export default function SpareStockAnalysisPageClient() {
               loading={loading}
               kpiCards={kpiCards}
               summary={summary}
+              unmapped={unmapped}
               rows={rows}
               page={page}
               totalPages={totalPages}
@@ -621,13 +657,20 @@ function DefectiveReturnsView({
   loading: boolean;
   data: DefectiveReturnResponse | null;
 }) {
+  const [panel, setPanel] = useState<'calls' | 'franchisee'>('calls');
   const [search, setSearch] = useState('');
-  const frSort = useTableSort<'supplier' | 'consumed' | 'received' | 'outstanding'>({
+  const frSort = useTableSort<'supplierLabel' | 'consumed' | 'received' | 'outstanding'>({
     key: 'outstanding',
     dir: 'desc',
   });
   const callSort = useTableSort<
-    'callNo' | 'plant' | 'supplier' | 'material' | 'consumed' | 'received' | 'outstanding'
+    | 'callNo'
+    | 'plantLabel'
+    | 'supplierLabel'
+    | 'material'
+    | 'consumed'
+    | 'received'
+    | 'outstanding'
   >({ key: 'outstanding', dir: 'desc' });
 
   const q = search.trim().toLowerCase();
@@ -638,6 +681,7 @@ function DefectiveReturnsView({
           (r) =>
             r.callNo.toLowerCase().includes(q) ||
             r.supplier.toLowerCase().includes(q) ||
+            r.supplierLabel.toLowerCase().includes(q) ||
             r.plant.toLowerCase().includes(q) ||
             r.plantLabel.toLowerCase().includes(q) ||
             r.material.toLowerCase().includes(q) ||
@@ -654,6 +698,10 @@ function DefectiveReturnsView({
     [data?.byFranchisee, frSort]
   );
 
+  const empty = !loading && (data?.rows.length ?? 0) === 0;
+  const callCount = data?.rows.length ?? 0;
+  const frCount = data?.byFranchisee.length ?? 0;
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
       <KpiRow
@@ -663,155 +711,247 @@ function DefectiveReturnsView({
           { label: 'Outstanding (not returned)', value: data?.kpis.outstanding ?? 0 },
         ]}
       />
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 xl:grid-cols-[20rem_minmax(0,1fr)]">
-        <ScrollTableCard
-          title="Franchisee-wise"
-          className="h-52 xl:h-auto"
-        >
-          <AdminTable className="w-full border-collapse text-left">
-            <AdminThead>
-              <tr>
-                <AdminTh sortable sortKey="supplier" sort={frSort.sort} onSort={frSort.onSort}>
-                  Franchisee
-                </AdminTh>
-                <AdminTh align="right" sortable sortKey="consumed" sort={frSort.sort} onSort={frSort.onSort}>
-                  Cons
-                </AdminTh>
-                <AdminTh align="right" sortable sortKey="received" sort={frSort.sort} onSort={frSort.onSort}>
-                  Recv
-                </AdminTh>
-                <AdminTh
-                  align="right"
-                  sortable
-                  sortKey="outstanding"
-                  sort={frSort.sort}
-                  onSort={frSort.onSort}
-                >
-                  Out
-                </AdminTh>
-              </tr>
-            </AdminThead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td className="px-3 py-6 text-center text-[12px] text-slate-500" colSpan={4}>
-                    Loading…
-                  </td>
-                </tr>
-              ) : frRows.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-6 text-center text-[12px] text-slate-500" colSpan={4}>
-                    No franchisee rows.
-                  </td>
-                </tr>
-              ) : (
-                frRows.map((r) => (
-                  <AdminTr key={r.supplier}>
-                    <AdminTd className="whitespace-nowrap">{r.supplier}</AdminTd>
-                    <AdminTd align="right">{formatQty(r.consumed)}</AdminTd>
-                    <AdminTd align="right">{formatQty(r.received)}</AdminTd>
-                    <AdminTd align="right">{formatQty(r.outstanding)}</AdminTd>
-                  </AdminTr>
-                ))
-              )}
-            </tbody>
-          </AdminTable>
-        </ScrollTableCard>
+      {empty ? (
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-6 text-[13px] leading-relaxed text-slate-700">
+          <p className="font-semibold text-slate-900">Nothing to match yet</p>
+          <p className="mt-1.5 max-w-2xl">
+            This tab compares <span className="font-medium">compressor consumption</span> (material
+            group COMPRES…) against <span className="font-medium">defective receipts of part
+            2303393</span>, matched by call number. An opening-stock file (MvT 561 only) will not
+            appear here — import the MB51 that includes consumption and 2303393 receipts.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="flex shrink-0 items-center gap-1">
+            {(
+              [
+                { id: 'calls' as const, label: `By call (${callCount.toLocaleString()})` },
+                { id: 'franchisee' as const, label: `By franchisee (${frCount.toLocaleString()})` },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
+                  panel === t.id
+                    ? 'bg-slate-900 text-white'
+                    : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+                onClick={() => setPanel(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
 
-        <ScrollTableCard
-          title="Call-wise vs 2303393"
-          extra={
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search call, franchisee, part…"
-              className="h-6 w-52 rounded border border-slate-200 px-2 text-[11px] text-slate-700"
-            />
-          }
-        >
-          <AdminTable className="w-full min-w-[720px] border-collapse text-left">
-            <AdminThead>
-              <tr>
-                <AdminTh sortable sortKey="callNo" sort={callSort.sort} onSort={callSort.onSort}>
-                  Call
-                </AdminTh>
-                <AdminTh sortable sortKey="plant" sort={callSort.sort} onSort={callSort.onSort}>
-                  Branch
-                </AdminTh>
-                <AdminTh sortable sortKey="supplier" sort={callSort.sort} onSort={callSort.onSort}>
-                  Franchisee
-                </AdminTh>
-                <AdminTh sortable sortKey="material" sort={callSort.sort} onSort={callSort.onSort}>
-                  Consumed part
-                </AdminTh>
-                <AdminTh
-                  align="right"
-                  sortable
-                  sortKey="consumed"
-                  sort={callSort.sort}
-                  onSort={callSort.onSort}
-                >
-                  Consumed
-                </AdminTh>
-                <AdminTh
-                  align="right"
-                  sortable
-                  sortKey="received"
-                  sort={callSort.sort}
-                  onSort={callSort.onSort}
-                >
-                  Defective in
-                </AdminTh>
-                <AdminTh
-                  align="right"
-                  sortable
-                  sortKey="outstanding"
-                  sort={callSort.sort}
-                  onSort={callSort.onSort}
-                >
-                  Outstanding
-                </AdminTh>
-              </tr>
-            </AdminThead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td className="px-3 py-8 text-center text-[12px] text-slate-500" colSpan={7}>
-                    Loading…
-                  </td>
-                </tr>
-              ) : callRows.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-8 text-center text-[12px] text-slate-500" colSpan={7}>
-                    No compressor consumption or defective receipts in this range.
-                  </td>
-                </tr>
-              ) : (
-                callRows.map((r, i) => (
-                  <AdminTr key={`${r.plant}-${r.callNo}-${r.supplier}-${i}`}>
-                    <AdminTd className="whitespace-nowrap">{r.callNo}</AdminTd>
-                  <AdminTd className="whitespace-nowrap" title={r.plantLabel}>
-                    {r.plantLabel}
-                  </AdminTd>
-                    <AdminTd>{r.supplier}</AdminTd>
-                    <AdminTd className="max-w-[18rem] truncate" title={r.materialDescription}>
-                      {r.material
+          {panel === 'franchisee' ? (
+            <ScrollTableCard className="min-h-0 flex-1" title="By franchisee">
+              <AdminTable className="w-full border-collapse text-left">
+                <AdminThead>
+                  <tr>
+                    <AdminTh
+                      sortable
+                      sortKey="supplierLabel"
+                      sort={frSort.sort}
+                      onSort={frSort.onSort}
+                    >
+                      Franchisee
+                    </AdminTh>
+                    <AdminTh
+                      align="right"
+                      sortable
+                      sortKey="consumed"
+                      sort={frSort.sort}
+                      onSort={frSort.onSort}
+                    >
+                      Consumed
+                    </AdminTh>
+                    <AdminTh
+                      align="right"
+                      sortable
+                      sortKey="received"
+                      sort={frSort.sort}
+                      onSort={frSort.onSort}
+                    >
+                      Defective in
+                    </AdminTh>
+                    <AdminTh
+                      align="right"
+                      sortable
+                      sortKey="outstanding"
+                      sort={frSort.sort}
+                      onSort={frSort.onSort}
+                    >
+                      Outstanding
+                    </AdminTh>
+                  </tr>
+                </AdminThead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td className="px-3 py-6 text-center text-[12px] text-slate-500" colSpan={4}>
+                        Loading…
+                      </td>
+                    </tr>
+                  ) : (
+                    frRows.map((r) => (
+                      <AdminTr key={r.supplier}>
+                        <AdminTd title={r.supplierLabel}>{r.supplierLabel}</AdminTd>
+                        <AdminTd align="right">{formatQty(r.consumed)}</AdminTd>
+                        <AdminTd align="right">{formatQty(r.received)}</AdminTd>
+                        <AdminTd align="right">{formatQty(r.outstanding)}</AdminTd>
+                      </AdminTr>
+                    ))
+                  )}
+                </tbody>
+              </AdminTable>
+            </ScrollTableCard>
+          ) : (
+            <ScrollTableCard
+              className="min-h-0 flex-1"
+              title="By call (vs 2303393)"
+              extra={
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search call, franchisee, part…"
+                  className="h-6 w-52 rounded border border-slate-200 px-2 text-[11px] text-slate-700"
+                />
+              }
+            >
+              <AdminTable className="w-full border-collapse text-left">
+                <AdminThead>
+                  <tr>
+                    <AdminTh sortable sortKey="callNo" sort={callSort.sort} onSort={callSort.onSort}>
+                      Call
+                    </AdminTh>
+                    <AdminTh
+                      sortable
+                      sortKey="plantLabel"
+                      sort={callSort.sort}
+                      onSort={callSort.onSort}
+                    >
+                      Branch
+                    </AdminTh>
+                    <AdminTh
+                      sortable
+                      sortKey="supplierLabel"
+                      sort={callSort.sort}
+                      onSort={callSort.onSort}
+                    >
+                      Franchisee
+                    </AdminTh>
+                    <AdminTh sortable sortKey="material" sort={callSort.sort} onSort={callSort.onSort}>
+                      Consumed part
+                    </AdminTh>
+                    <AdminTh
+                      align="right"
+                      sortable
+                      sortKey="consumed"
+                      sort={callSort.sort}
+                      onSort={callSort.onSort}
+                    >
+                      Consumed
+                    </AdminTh>
+                    <AdminTh
+                      align="right"
+                      sortable
+                      sortKey="received"
+                      sort={callSort.sort}
+                      onSort={callSort.onSort}
+                    >
+                      Defective in
+                    </AdminTh>
+                    <AdminTh
+                      align="right"
+                      sortable
+                      sortKey="outstanding"
+                      sort={callSort.sort}
+                      onSort={callSort.onSort}
+                    >
+                      Outstanding
+                    </AdminTh>
+                  </tr>
+                </AdminThead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td className="px-3 py-8 text-center text-[12px] text-slate-500" colSpan={7}>
+                        Loading…
+                      </td>
+                    </tr>
+                  ) : (
+                    callRows.map((r, i) => {
+                      const partLabel = r.material
                         ? r.materialDescription
                           ? `${r.material} — ${r.materialDescription}`
                           : r.material
-                        : '—'}
-                    </AdminTd>
-                    <AdminTd align="right">{formatQty(r.consumed)}</AdminTd>
-                    <AdminTd align="right">{formatQty(r.received)}</AdminTd>
-                    <AdminTd align="right">{formatQty(r.outstanding)}</AdminTd>
-                  </AdminTr>
-                ))
-              )}
-            </tbody>
-          </AdminTable>
-        </ScrollTableCard>
-      </div>
+                        : '—';
+                      return (
+                        <AdminTr key={`${r.plant}-${r.callNo}-${r.supplier}-${i}`}>
+                          <AdminTd className="whitespace-nowrap">{r.callNo}</AdminTd>
+                          <AdminTd className="whitespace-nowrap" title={r.plantLabel}>
+                            {r.plantLabel}
+                          </AdminTd>
+                          <AdminTd title={r.supplierLabel}>{r.supplierLabel}</AdminTd>
+                          <AdminTd title={partLabel}>{partLabel}</AdminTd>
+                          <AdminTd align="right" className="whitespace-nowrap">
+                            {formatQty(r.consumed)}
+                          </AdminTd>
+                          <AdminTd align="right" className="whitespace-nowrap">
+                            {formatQty(r.received)}
+                          </AdminTd>
+                          <AdminTd align="right" className="whitespace-nowrap">
+                            {formatQty(r.outstanding)}
+                          </AdminTd>
+                        </AdminTr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </AdminTable>
+            </ScrollTableCard>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function StockPanelTabs({
+  panel,
+  onChange,
+  balanceCount,
+  movementCount,
+}: {
+  panel: 'balance' | 'movements' | 'branch';
+  onChange: (p: 'balance' | 'movements' | 'branch') => void;
+  balanceCount: number;
+  movementCount: number;
+}) {
+  const tabs: Array<{ id: 'balance' | 'movements' | 'branch'; label: string }> = [
+    { id: 'balance', label: `Balance (${balanceCount.toLocaleString()})` },
+    { id: 'movements', label: `Movements (${movementCount.toLocaleString()})` },
+    { id: 'branch', label: 'By branch' },
+  ];
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
+            panel === t.id
+              ? 'bg-slate-900 text-white'
+              : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+          }`}
+          onClick={() => onChange(t.id)}
+        >
+          {t.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -820,6 +960,7 @@ function StockView({
   loading,
   kpiCards,
   summary,
+  unmapped,
   rows,
   page,
   totalPages,
@@ -829,18 +970,21 @@ function StockView({
   loading: boolean;
   kpiCards: Array<{ label: string; value: number }>;
   summary: SpareStockSummaryResponse | null;
+  unmapped: SpareStockUnmappedMvt[];
   rows: SpareStockMovementRow[];
   page: number;
   totalPages: number;
   total: number;
   onPage: (n: number | ((p: number) => number)) => void;
 }) {
+  const [panel, setPanel] = useState<'balance' | 'movements' | 'branch'>('balance');
   const moveSort = useTableSort<
     | 'postingDate'
     | 'plant'
     | 'matDoc'
     | 'material'
     | 'materialDescription'
+    | 'uom'
     | 'qty'
     | 'mvt'
     | 'txnType'
@@ -852,142 +996,289 @@ function StockView({
     [rows, moveSort]
   );
 
+  const kpis = summary?.kpis;
+  const onlyOpening =
+    !!kpis &&
+    kpis.opening !== 0 &&
+    kpis.issued === 0 &&
+    kpis.received === 0 &&
+    kpis.consumption === 0;
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
       <KpiRow cards={kpiCards} />
-      <div className="grid h-44 shrink-0 grid-cols-1 gap-2 md:grid-cols-3">
-        <BreakdownTable
-          title="High consumption parts"
-          empty="No consumption in this range."
+      <p className="shrink-0 px-0.5 text-[11px] text-slate-500">
+        Closing = Opening + Issued + Receipt + Consumption (Receipt and Consumption are negative).
+      </p>
+      {onlyOpening ? (
+        <div className="shrink-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-700">
+          Only opening (MvT 561) is in range — Issued / Receipt / Consumption stay 0 until those
+          movements are imported.
+        </div>
+      ) : null}
+      {unmapped.length > 0 ? (
+        <div className="shrink-0 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-950">
+          <span className="font-semibold">Unmapped movement types</span>
+          {' — '}
+          excluded from stock totals:{' '}
+          {unmapped
+            .map((u) => `${u.mvt}${u.mvtText ? ` (${u.mvtText})` : ''} × ${u.count.toLocaleString()}`)
+            .join(' · ')}
+        </div>
+      ) : null}
+      <StockPanelTabs
+        panel={panel}
+        onChange={setPanel}
+        balanceCount={summary?.byPlantMaterial.length ?? 0}
+        movementCount={total}
+      />
+      {panel === 'balance' ? (
+        <PlantMaterialTable
+          className="min-h-0 flex-1"
           loading={loading}
-          rows={(summary?.topConsumption ?? []).map((r) => ({
-            key: r.material,
-            label: r.materialDescription ? `${r.material} — ${r.materialDescription}` : r.material,
-            opening: 0,
-            received: 0,
-            issued: 0,
-            consumption: r.qty,
-            closing: r.qty,
-          }))}
-          qtyOnly
+          rows={summary?.byPlantMaterial ?? []}
         />
-        <BreakdownTable
-          title="Branch-wise"
-          empty="No branch rows."
-          loading={loading}
-          rows={summary?.byBranch ?? []}
-        />
-        <BreakdownTable
-          title="Franchisee-wise"
-          empty="No franchisee rows."
-          loading={loading}
-          rows={summary?.byFranchisee ?? []}
-        />
-      </div>
-      <ScrollTableCard
-        className="min-h-0 flex-1"
-        title={`Movements (${total.toLocaleString()})`}
-        extra={
-          totalPages > 1 ? (
-            <div className="flex items-center gap-1 text-[11px] text-slate-600">
-              <button
-                type="button"
-                className="rounded border border-slate-200 bg-white px-1.5 py-0.5 disabled:opacity-40"
-                disabled={page <= 1}
-                onClick={() => onPage((p) => Math.max(1, p - 1))}
-              >
-                <ChevronLeft className="h-3.5 w-3.5" />
-              </button>
-              <span>
-                {page} / {totalPages}
-              </span>
-              <button
-                type="button"
-                className="rounded border border-slate-200 bg-white px-1.5 py-0.5 disabled:opacity-40"
-                disabled={page >= totalPages}
-                onClick={() => onPage((p) => p + 1)}
-              >
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ) : null
-        }
-      >
-        <AdminTable className="w-full min-w-[880px] border-collapse text-left">
-          <AdminThead>
-            <tr>
-              <AdminTh sortable sortKey="postingDate" sort={moveSort.sort} onSort={moveSort.onSort}>
-                Posting Date
-              </AdminTh>
-              <AdminTh sortable sortKey="plant" sort={moveSort.sort} onSort={moveSort.onSort}>
-                Branch
-              </AdminTh>
-              <AdminTh sortable sortKey="matDoc" sort={moveSort.sort} onSort={moveSort.onSort}>
-                Mat. Doc.
-              </AdminTh>
-              <AdminTh sortable sortKey="material" sort={moveSort.sort} onSort={moveSort.onSort}>
-                Part
-              </AdminTh>
-              <AdminTh
-                sortable
-                sortKey="materialDescription"
-                sort={moveSort.sort}
-                onSort={moveSort.onSort}
-              >
-                Description
-              </AdminTh>
-              <AdminTh align="right" sortable sortKey="qty" sort={moveSort.sort} onSort={moveSort.onSort}>
-                Qty
-              </AdminTh>
-              <AdminTh sortable sortKey="mvt" sort={moveSort.sort} onSort={moveSort.onSort}>
-                MvT
-              </AdminTh>
-              <AdminTh sortable sortKey="txnType" sort={moveSort.sort} onSort={moveSort.onSort}>
-                Type
-              </AdminTh>
-              <AdminTh sortable sortKey="supplier" sort={moveSort.sort} onSort={moveSort.onSort}>
-                Franchisee
-              </AdminTh>
-              <AdminTh sortable sortKey="callNo" sort={moveSort.sort} onSort={moveSort.onSort}>
-                Call
-              </AdminTh>
-            </tr>
-          </AdminThead>
-          <tbody>
-            {loading ? (
+      ) : null}
+      {panel === 'branch' ? (
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 md:grid-cols-2">
+          <BreakdownTable
+            title="By branch"
+            empty="No branch rows."
+            loading={loading}
+            rows={summary?.byBranch ?? []}
+          />
+          <BreakdownTable
+            title="By franchisee"
+            empty="No franchisee rows."
+            loading={loading}
+            rows={summary?.byFranchisee ?? []}
+          />
+        </div>
+      ) : null}
+      {panel === 'movements' ? (
+        <ScrollTableCard
+          className="min-h-0 flex-1"
+          title={`Movement lines`}
+          extra={
+            totalPages > 1 ? (
+              <div className="flex items-center gap-1 text-[11px] text-slate-600">
+                <button
+                  type="button"
+                  className="rounded border border-slate-200 bg-white px-1.5 py-0.5 disabled:opacity-40"
+                  disabled={page <= 1}
+                  onClick={() => onPage((p) => Math.max(1, p - 1))}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+                <span>
+                  {page} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  className="rounded border border-slate-200 bg-white px-1.5 py-0.5 disabled:opacity-40"
+                  disabled={page >= totalPages}
+                  onClick={() => onPage((p) => p + 1)}
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : null
+          }
+        >
+          <AdminTable className="w-full min-w-[880px] border-collapse text-left">
+            <AdminThead>
               <tr>
-                <td className="px-3 py-8 text-center text-[12px] text-slate-500" colSpan={10}>
-                  Loading…
-                </td>
+                <AdminTh sortable sortKey="postingDate" sort={moveSort.sort} onSort={moveSort.onSort}>
+                  Posting Date
+                </AdminTh>
+                <AdminTh sortable sortKey="plant" sort={moveSort.sort} onSort={moveSort.onSort}>
+                  Branch
+                </AdminTh>
+                <AdminTh sortable sortKey="matDoc" sort={moveSort.sort} onSort={moveSort.onSort}>
+                  Mat. Doc.
+                </AdminTh>
+                <AdminTh sortable sortKey="material" sort={moveSort.sort} onSort={moveSort.onSort}>
+                  Part
+                </AdminTh>
+                <AdminTh
+                  sortable
+                  sortKey="materialDescription"
+                  sort={moveSort.sort}
+                  onSort={moveSort.onSort}
+                >
+                  Description
+                </AdminTh>
+                <AdminTh
+                  align="right"
+                  sortable
+                  sortKey="qty"
+                  sort={moveSort.sort}
+                  onSort={moveSort.onSort}
+                >
+                  Qty
+                </AdminTh>
+                <AdminTh sortable sortKey="uom" sort={moveSort.sort} onSort={moveSort.onSort}>
+                  UOM
+                </AdminTh>
+                <AdminTh sortable sortKey="mvt" sort={moveSort.sort} onSort={moveSort.onSort}>
+                  MvT
+                </AdminTh>
+                <AdminTh sortable sortKey="txnType" sort={moveSort.sort} onSort={moveSort.onSort}>
+                  Type
+                </AdminTh>
+                <AdminTh sortable sortKey="supplier" sort={moveSort.sort} onSort={moveSort.onSort}>
+                  Franchisee
+                </AdminTh>
+                <AdminTh sortable sortKey="callNo" sort={moveSort.sort} onSort={moveSort.onSort}>
+                  Call
+                </AdminTh>
               </tr>
-            ) : sortedRows.length === 0 ? (
-              <tr>
-                <td className="px-3 py-8 text-center text-[12px] text-slate-500" colSpan={10}>
-                  No movements in this date range.
-                </td>
-              </tr>
-            ) : (
-              sortedRows.map((r, i) => (
-                <AdminTr key={`${r.matDoc}-${r.material}-${r.mvt}-${i}`}>
-                  <AdminTd className="whitespace-nowrap">{formatUiDate(r.postingDate)}</AdminTd>
-                  <AdminTd className="whitespace-nowrap" title={r.plantLabel}>
-                    {r.plantLabel}
-                  </AdminTd>
-                  <AdminTd>{r.matDoc}</AdminTd>
-                  <AdminTd>{r.material}</AdminTd>
-                  <AdminTd className="max-w-[16rem] truncate">{r.materialDescription}</AdminTd>
-                  <AdminTd align="right">{formatQty(r.qty)}</AdminTd>
-                  <AdminTd>{r.mvt}</AdminTd>
-                  <AdminTd>{TXN_LABEL[r.txnType] ?? r.txnType}</AdminTd>
-                  <AdminTd>{r.supplier}</AdminTd>
-                  <AdminTd className="whitespace-nowrap">{r.callNo}</AdminTd>
-                </AdminTr>
-              ))
-            )}
-          </tbody>
-        </AdminTable>
-      </ScrollTableCard>
+            </AdminThead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td className="px-3 py-8 text-center text-[12px] text-slate-500" colSpan={11}>
+                    Loading…
+                  </td>
+                </tr>
+              ) : sortedRows.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-8 text-center text-[12px] text-slate-500" colSpan={11}>
+                    No movements in this date range.
+                  </td>
+                </tr>
+              ) : (
+                sortedRows.map((r, i) => (
+                  <AdminTr key={`${r.matDoc}-${r.material}-${r.mvt}-${i}`}>
+                    <AdminTd className="whitespace-nowrap">{formatUiDate(r.postingDate)}</AdminTd>
+                    <AdminTd className="whitespace-nowrap" title={r.plantLabel}>
+                      {r.plantLabel}
+                    </AdminTd>
+                    <AdminTd>{r.matDoc}</AdminTd>
+                    <AdminTd>{r.material}</AdminTd>
+                    <AdminTd className="max-w-[16rem] truncate">{r.materialDescription}</AdminTd>
+                    <AdminTd align="right">{formatQty(r.qty)}</AdminTd>
+                    <AdminTd>{r.uom}</AdminTd>
+                    <AdminTd>{r.mvt}</AdminTd>
+                    <AdminTd>{TXN_LABEL[r.txnType] ?? r.txnType}</AdminTd>
+                    <AdminTd>{r.supplier}</AdminTd>
+                    <AdminTd className="whitespace-nowrap">{r.callNo}</AdminTd>
+                  </AdminTr>
+                ))
+              )}
+            </tbody>
+          </AdminTable>
+        </ScrollTableCard>
+      ) : null}
     </div>
+  );
+}
+
+function PlantMaterialTable({
+  loading,
+  rows,
+  className = 'h-56 shrink-0',
+}: {
+  loading: boolean;
+  rows: SpareStockPlantMaterialRow[];
+  className?: string;
+}) {
+  const sort = useTableSort<
+    | 'plantLabel'
+    | 'material'
+    | 'materialDescription'
+    | 'uom'
+    | 'opening'
+    | 'received'
+    | 'issued'
+    | 'consumption'
+    | 'closing'
+  >({ key: 'closing', dir: 'desc' });
+  const sorted = useMemo(() => sort.sorted(rows, (row, key) => row[key]), [rows, sort]);
+
+  return (
+    <ScrollTableCard
+      className={className}
+      title={`Stock by plant + part (${rows.length.toLocaleString()})`}
+    >
+      <AdminTable className="w-full min-w-[760px] border-collapse text-left">
+        <AdminThead>
+          <tr>
+            <AdminTh sortable sortKey="plantLabel" sort={sort.sort} onSort={sort.onSort}>
+              Branch
+            </AdminTh>
+            <AdminTh sortable sortKey="material" sort={sort.sort} onSort={sort.onSort}>
+              Part
+            </AdminTh>
+            <AdminTh
+              sortable
+              sortKey="materialDescription"
+              sort={sort.sort}
+              onSort={sort.onSort}
+            >
+              Description
+            </AdminTh>
+            <AdminTh sortable sortKey="uom" sort={sort.sort} onSort={sort.onSort}>
+              UOM
+            </AdminTh>
+            <AdminTh align="right" sortable sortKey="opening" sort={sort.sort} onSort={sort.onSort}>
+              Opening
+            </AdminTh>
+            <AdminTh align="right" sortable sortKey="issued" sort={sort.sort} onSort={sort.onSort}>
+              Issued
+            </AdminTh>
+            <AdminTh align="right" sortable sortKey="received" sort={sort.sort} onSort={sort.onSort}>
+              Receipt
+            </AdminTh>
+            <AdminTh
+              align="right"
+              sortable
+              sortKey="consumption"
+              sort={sort.sort}
+              onSort={sort.onSort}
+            >
+              Cons
+            </AdminTh>
+            <AdminTh align="right" sortable sortKey="closing" sort={sort.sort} onSort={sort.onSort}>
+              Closing
+            </AdminTh>
+          </tr>
+        </AdminThead>
+        <tbody>
+          {loading ? (
+            <tr>
+              <td className="px-3 py-4 text-center text-[12px] text-slate-500" colSpan={9}>
+                Loading…
+              </td>
+            </tr>
+          ) : sorted.length === 0 ? (
+            <tr>
+              <td className="px-3 py-4 text-center text-[12px] text-slate-500" colSpan={9}>
+                No stock rows for this range.
+              </td>
+            </tr>
+          ) : (
+            sorted.map((r) => (
+              <AdminTr key={r.key}>
+                <AdminTd className="max-w-[12rem] truncate" title={r.plantLabel}>
+                  {r.plantLabel}
+                </AdminTd>
+                <AdminTd>{r.material}</AdminTd>
+                <AdminTd className="max-w-[16rem] truncate" title={r.materialDescription}>
+                  {r.materialDescription}
+                </AdminTd>
+                <AdminTd>{r.uom}</AdminTd>
+                <AdminTd align="right">{formatQty(r.opening)}</AdminTd>
+                <AdminTd align="right">{formatQty(r.issued)}</AdminTd>
+                <AdminTd align="right">{formatQty(r.received)}</AdminTd>
+                <AdminTd align="right">{formatQty(r.consumption)}</AdminTd>
+                <AdminTd align="right">{formatQty(r.closing)}</AdminTd>
+              </AdminTr>
+            ))
+          )}
+        </tbody>
+      </AdminTable>
+    </ScrollTableCard>
   );
 }
 
@@ -1033,13 +1324,13 @@ function BreakdownTable({
             ) : (
               <>
                 <AdminTh align="right" sortable sortKey="opening" sort={sort.sort} onSort={sort.onSort}>
-                  Open
-                </AdminTh>
-                <AdminTh align="right" sortable sortKey="received" sort={sort.sort} onSort={sort.onSort}>
-                  In
+                  Opening
                 </AdminTh>
                 <AdminTh align="right" sortable sortKey="issued" sort={sort.sort} onSort={sort.onSort}>
-                  Out
+                  Issued
+                </AdminTh>
+                <AdminTh align="right" sortable sortKey="received" sort={sort.sort} onSort={sort.onSort}>
+                  Receipt
                 </AdminTh>
                 <AdminTh
                   align="right"
@@ -1051,7 +1342,7 @@ function BreakdownTable({
                   Cons
                 </AdminTh>
                 <AdminTh align="right" sortable sortKey="closing" sort={sort.sort} onSort={sort.onSort}>
-                  Close
+                  Closing
                 </AdminTh>
               </>
             )}
@@ -1081,8 +1372,8 @@ function BreakdownTable({
                 ) : (
                   <>
                     <AdminTd align="right">{formatQty(r.opening)}</AdminTd>
-                    <AdminTd align="right">{formatQty(r.received)}</AdminTd>
                     <AdminTd align="right">{formatQty(r.issued)}</AdminTd>
+                    <AdminTd align="right">{formatQty(r.received)}</AdminTd>
                     <AdminTd align="right">{formatQty(r.consumption)}</AdminTd>
                     <AdminTd align="right">{formatQty(r.closing)}</AdminTd>
                   </>

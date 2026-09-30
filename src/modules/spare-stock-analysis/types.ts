@@ -46,10 +46,30 @@ export type SpareStockBreakdownRow = {
   closing: number;
 };
 
+export type SpareStockPlantMaterialRow = {
+  key: string;
+  plant: string;
+  plantLabel: string;
+  material: string;
+  materialDescription: string;
+  uom: string;
+  opening: number;
+  received: number;
+  issued: number;
+  consumption: number;
+  closing: number;
+};
+
 export type SpareStockPartRow = {
   material: string;
   materialDescription: string;
   qty: number;
+};
+
+export type SpareStockUnmappedMvt = {
+  mvt: string;
+  mvtText: string;
+  count: number;
 };
 
 export type SpareStockLastImport = {
@@ -68,6 +88,7 @@ export type SpareStockMovementRow = {
   matDoc: string;
   material: string;
   materialDescription: string;
+  uom: string;
   qty: number;
   mvt: string;
   txnType: SpareStockTxnType;
@@ -78,6 +99,7 @@ export type SpareStockMovementRow = {
 export type SpareStockSummaryResponse = {
   kpis: SpareStockKpis;
   topConsumption: SpareStockPartRow[];
+  byPlantMaterial: SpareStockPlantMaterialRow[];
   byBranch: SpareStockBreakdownRow[];
   byFranchisee: SpareStockBreakdownRow[];
   lastImport: SpareStockLastImport | null;
@@ -92,8 +114,9 @@ export type SpareStockRowsResponse = {
 
 export type SpareStockOptionsResponse = {
   plants: Array<{ value: string; label: string }>;
-  suppliers: string[];
+  suppliers: Array<{ value: string; label: string }>;
   materials: Array<{ value: string; label: string }>;
+  uoms: string[];
 };
 
 export type SpareStockImportResponse = {
@@ -139,6 +162,7 @@ export type DefectiveReturnRow = {
   plantLabel: string;
   callNo: string;
   supplier: string;
+  supplierLabel: string;
   material: string;
   materialDescription: string;
   consumed: number;
@@ -157,6 +181,7 @@ export type DefectiveReturnResponse = {
   rows: DefectiveReturnRow[];
   byFranchisee: Array<{
     supplier: string;
+    supplierLabel: string;
     consumed: number;
     received: number;
     outstanding: number;

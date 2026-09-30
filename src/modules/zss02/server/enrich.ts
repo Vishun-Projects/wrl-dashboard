@@ -7,7 +7,7 @@ import {
 import {
   lookupItemCategoriesByMaterial,
   normalizeMaterialCode,
-} from '@/modules/spare-loan-check/item-group';
+} from '@/lib/read-model/crm-masters';
 import type { Zss02IssueFlag, Zss02Row } from '@/modules/zss02/types';
 
 /** Attach CRM plant name, item group, + cancelled / franchisee-change flags. */
