@@ -41,6 +41,8 @@ export type Zss02RowFilters = {
   allowedPlants: string[] | null;
   plants: string[];
   vendors: string[];
+  /** CRM item category names (mstitemcategory.vname). */
+  itemGroups: string[];
   materials: string[];
   /** Raw paste; parsed into one or more barcodes. */
   barcode: string;
@@ -114,6 +116,7 @@ function mapRow(r: Record<string, unknown>): Zss02Row {
     importId: String(r.import_id ?? ''),
     plant: String(r.plant ?? ''),
     plantName: null,
+    itemGroup: null,
     issue: null,
     issueDetail: null,
     vendorNo: String(r.vendor_no ?? ''),
@@ -314,6 +317,51 @@ export async function listZss02Imports(
   });
 }
 
+/** Distinct SAP material codes in scope that belong to the given CRM item groups. */
+async function materialsForItemGroups(
+  itemGroups: string[],
+  allowedPlants: string[] | null
+): Promise<string[]> {
+  const wanted = new Set(itemGroups.map((g) => g.trim()).filter(Boolean));
+  if (!wanted.size) return [];
+
+  const materialCodes = await withAppClient(async (client) => {
+    const scope =
+      allowedPlants != null ? `WHERE plant = ANY($1::text[])` : '';
+    const params = allowedPlants != null ? [allowedPlants] : [];
+    const { rows } = await client.query<{ material: string }>(
+      `SELECT DISTINCT material FROM zss02_rows ${scope}`,
+      params
+    );
+    return rows.map((r) => r.material).filter(Boolean);
+  });
+
+  const { lookupItemCategoriesByMaterial, normalizeMaterialCode } = await import(
+    '@/modules/spare-loan-check/item-group'
+  );
+  const categoryMap = await lookupItemCategoriesByMaterial(materialCodes);
+  return materialCodes.filter((m) => {
+    const group = categoryMap.get(normalizeMaterialCode(m));
+    return group != null && wanted.has(group);
+  });
+}
+
+async function resolveRowFilters(
+  filters: Omit<Zss02RowFilters, 'page' | 'pageSize'>
+): Promise<Omit<Zss02RowFilters, 'page' | 'pageSize'> | 'empty'> {
+  if (!filters.itemGroups.length) return filters;
+
+  const inGroup = await materialsForItemGroups(filters.itemGroups, filters.allowedPlants);
+  if (!inGroup.length) return 'empty';
+
+  const materials = filters.materials.length
+    ? filters.materials.filter((m) => inGroup.includes(m))
+    : inGroup;
+  if (!materials.length) return 'empty';
+
+  return { ...filters, materials };
+}
+
 export async function fetchZss02Options(
   allowedPlants: string[] | null
 ): Promise<Zss02OptionsResponse> {
@@ -356,6 +404,7 @@ export async function fetchZss02Options(
             value: r.vendor_no,
             label: r.vendor_name ? `${r.vendor_no} — ${r.vendor_name}` : r.vendor_no,
           })),
+        materialCodes: materials.rows.map((r) => r.material).filter(Boolean),
         materials: materials.rows
           .filter((r) => r.material)
           .map((r) => ({
@@ -369,24 +418,44 @@ export async function fetchZss02Options(
     fetchLatestLoanDate(allowedPlants),
   ]);
 
-  const [{ lookupPlantMeta }, { branchFileLabel }] = await Promise.all([
-    import('@/modules/spare-loan-check'),
-    import('@/modules/spare-loan-check/export-labels'),
+  const [{ lookupPlantMeta }, { branchFileLabel }, { lookupItemCategoriesByMaterial, normalizeMaterialCode }] =
+    await Promise.all([
+      import('@/modules/spare-loan-check/crm-match'),
+      import('@/modules/spare-loan-check/export-labels'),
+      import('@/modules/spare-loan-check/item-group'),
+    ]);
+  const [plantMeta, categoryMap] = await Promise.all([
+    lookupPlantMeta(dbOpts.plantCodes),
+    lookupItemCategoriesByMaterial(dbOpts.materialCodes),
   ]);
-  const plantMeta = await lookupPlantMeta(dbOpts.plantCodes);
+  const itemGroupSet = new Set<string>();
+  for (const code of dbOpts.materialCodes) {
+    const g = categoryMap.get(normalizeMaterialCode(code));
+    if (g) itemGroupSet.add(g);
+  }
+  const itemGroups = [...itemGroupSet].sort((a, b) => a.localeCompare(b)).map((g) => ({
+    value: g,
+    label: g,
+  }));
+
   return {
     plants: dbOpts.plantCodes.map((code) => ({
       value: code,
       label: branchFileLabel(code, plantMeta.get(code.trim())?.plantName ?? null),
     })),
     vendors: dbOpts.vendors,
+    itemGroups,
     materials: dbOpts.materials,
     latestLoanDate,
   };
 }
 
 export async function queryZss02Rows(filters: Zss02RowFilters): Promise<Zss02RowsResponse> {
-  const where = buildWhere(filters, 1);
+  const resolved = await resolveRowFilters(filters);
+  if (resolved === 'empty') {
+    return { rows: [], total: 0, page: filters.page, pageSize: filters.pageSize };
+  }
+  const where = buildWhere(resolved, 1);
   const offset = (filters.page - 1) * filters.pageSize;
   const limitPh = `$${where.next}`;
   const offsetPh = `$${where.next + 1}`;
@@ -423,4 +492,36 @@ export async function queryZss02Rows(filters: Zss02RowFilters): Promise<Zss02Row
     page: filters.page,
     pageSize: filters.pageSize,
   };
+}
+
+const EXPORT_PAGE = 2000;
+const MAX_EXPORT_ROWS = 100_000;
+
+/** All matching rows for Excel (capped). */
+export async function queryZss02AllRows(
+  filters: Omit<Zss02RowFilters, 'page' | 'pageSize'>
+): Promise<{ rows: Zss02Row[]; total: number; truncated: boolean }> {
+  const resolved = await resolveRowFilters(filters);
+  if (resolved === 'empty') return { rows: [], total: 0, truncated: false };
+
+  const rows: Zss02Row[] = [];
+  let total = 0;
+  let page = 1;
+  for (;;) {
+    const batch = await queryZss02Rows({
+      ...resolved,
+      itemGroups: [], // already resolved into materials
+      page,
+      pageSize: EXPORT_PAGE,
+    });
+    total = batch.total;
+    rows.push(...batch.rows);
+    if (rows.length >= total || batch.rows.length === 0) {
+      return { rows, total, truncated: false };
+    }
+    if (rows.length >= MAX_EXPORT_ROWS) {
+      return { rows: rows.slice(0, MAX_EXPORT_ROWS), total, truncated: true };
+    }
+    page += 1;
+  }
 }

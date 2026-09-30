@@ -9,10 +9,16 @@ import {
 } from '@/modules/zss02/server/office-scope';
 import { parseZss02Html } from '@/modules/zss02/server/parse';
 import {
+  buildZss02Workbook,
+  zss02WorkbookFilename,
+} from '@/modules/zss02/server/excel-export';
+import {
+  fetchLatestLoanDate,
   fetchZss02Options,
   insertZss02Import,
   listZss02Imports,
   partitionByPlantScope,
+  queryZss02AllRows,
   queryZss02Rows,
 } from '@/modules/zss02/server/store';
 import type { Zss02ImportResult } from '@/modules/zss02/types';
@@ -66,26 +72,49 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(options);
     }
 
-    if (mode === 'rows') {
+    if (mode === 'rows' || mode === 'export') {
       const plants = csvParam(searchParams.get('plants'));
       const vendors = csvParam(searchParams.get('vendors'));
+      const itemGroups = csvParam(searchParams.get('itemGroups'));
       const materials = csvParam(searchParams.get('materials'));
       for (const p of plants) {
         if (!isPlantInScope(p, allowedPlants)) {
           return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
       }
-      const page = Math.max(1, Number(searchParams.get('page') ?? 1) || 1);
-      const pageSize = Math.min(200, Math.max(1, Number(searchParams.get('pageSize') ?? 50) || 50));
-      const data = await queryZss02Rows({
+      const baseFilters = {
         allowedPlants,
         plants,
         vendors,
+        itemGroups,
         materials,
         barcode: (searchParams.get('barcode') ?? '').trim(),
         importId: (searchParams.get('importId') ?? '').trim(),
         loanFrom: (searchParams.get('loanFrom') ?? '').trim(),
         loanTo: (searchParams.get('loanTo') ?? '').trim(),
+      };
+
+      if (mode === 'export') {
+        const [{ rows, truncated }, asOn] = await Promise.all([
+          queryZss02AllRows(baseFilters),
+          fetchLatestLoanDate(allowedPlants),
+        ]);
+        const workbook = await buildZss02Workbook(rows);
+        const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+        const filename = zss02WorkbookFilename(asOn);
+        return new NextResponse(buffer, {
+          headers: {
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition': `attachment; filename="${filename}"`,
+            ...(truncated ? { 'X-ZSS02-Export-Truncated': '1' } : {}),
+          },
+        });
+      }
+
+      const page = Math.max(1, Number(searchParams.get('page') ?? 1) || 1);
+      const pageSize = Math.min(200, Math.max(1, Number(searchParams.get('pageSize') ?? 50) || 50));
+      const data = await queryZss02Rows({
+        ...baseFilters,
         page,
         pageSize,
       });

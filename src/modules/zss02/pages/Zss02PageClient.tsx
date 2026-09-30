@@ -6,6 +6,7 @@ import {
   Ban,
   ChevronLeft,
   ChevronRight,
+  Download,
   FileSpreadsheet,
   Loader2,
   Upload,
@@ -14,7 +15,7 @@ import { PageShell } from '@/components/layout/PageShell';
 import { AdminTable, AdminTd, AdminTh, AdminThead, AdminTr } from '@/components/admin/AdminUi';
 import { FilterSelect } from '@/components/filters/FilterSelect';
 import type { FilterSelectOption } from '@/components/filters/filter-select-types';
-import { formatUiDateTime } from '@/lib/dates/ui-date';
+import { useTableSort } from '@/lib/ui/table-sort';
 import { feedback } from '@/lib/ui/feedback';
 import { DateRangeSelector } from '@/modules/mis/register/components/DateRangeSelector';
 import { toDateString, type ReportDateRange } from '@/modules/mis';
@@ -24,6 +25,7 @@ import type {
   Zss02ImportMeta,
   Zss02ImportResponse,
   Zss02OptionsResponse,
+  Zss02Row,
   Zss02RowsResponse,
 } from '@/modules/zss02/types';
 
@@ -36,18 +38,35 @@ const ALL_TIME: ReportDateRange = {
 };
 
 type FilterState = {
-  importId: string;
   plant: string;
   vendor: string;
+  itemGroup: string;
   material: string;
   barcode: string;
   loanRange: ReportDateRange;
 };
 
+type SortKey =
+  | 'plant'
+  | 'vendorNo'
+  | 'vendorName'
+  | 'itemGroup'
+  | 'material'
+  | 'materialDescription'
+  | 'barcode'
+  | 'soConRtn'
+  | 'soLoan'
+  | 'loanDate'
+  | 'loanRtnDate'
+  | 'cnsmpDate'
+  | 'noCnsmpCount'
+  | 'saleDate'
+  | 'saleRtnDate';
+
 const EMPTY_FILTERS: FilterState = {
-  importId: '',
   plant: '',
   vendor: '',
+  itemGroup: '',
   material: '',
   barcode: '',
   loanRange: ALL_TIME,
@@ -61,6 +80,13 @@ function pickSingle(values: string[]): string {
 function loanBounds(range: ReportDateRange): { loanFrom: string; loanTo: string } {
   if (range.label === 'All Time') return { loanFrom: '', loanTo: '' };
   return { loanFrom: toDateString(range.start), loanTo: toDateString(range.end) };
+}
+
+/** SAP DD.MM.YYYY → YYYYMMDD for sort; blank / invalid stay empty (sort last). */
+function sapDateSortKey(raw: string): string {
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(raw.replace(/\s+/g, '').trim());
+  if (!m) return '';
+  return `${m[3]}${m[2]}${m[1]}`;
 }
 
 async function readApiJson(res: Response): Promise<Record<string, unknown>> {
@@ -98,16 +124,55 @@ function IssueCell({
   return <span className="text-slate-300">—</span>;
 }
 
+function sortValue(row: Zss02Row, key: SortKey): unknown {
+  switch (key) {
+    case 'plant':
+      return branchFileLabel(row.plant, row.plantName);
+    case 'vendorNo':
+      return row.vendorNo;
+    case 'vendorName':
+      return row.vendorName;
+    case 'itemGroup':
+      return row.itemGroup;
+    case 'material':
+      return row.material;
+    case 'materialDescription':
+      return row.materialDescription;
+    case 'barcode':
+      return row.barcode;
+    case 'soConRtn':
+      return row.soConRtn;
+    case 'soLoan':
+      return row.soLoan;
+    case 'loanDate':
+      return sapDateSortKey(row.loanDate);
+    case 'loanRtnDate':
+      return sapDateSortKey(row.loanRtnDate);
+    case 'cnsmpDate':
+      return sapDateSortKey(row.cnsmpDate);
+    case 'noCnsmpCount':
+      return row.noCnsmpCount;
+    case 'saleDate':
+      return sapDateSortKey(row.saleDate);
+    case 'saleRtnDate':
+      return sapDateSortKey(row.saleRtnDate);
+    default:
+      return null;
+  }
+}
+
 export default function Zss02PageClient() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadLabel, setUploadLabel] = useState('Importing…');
+  const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const [imports, setImports] = useState<Zss02ImportMeta[]>([]);
   const [options, setOptions] = useState<Zss02OptionsResponse>({
     plants: [],
     vendors: [],
+    itemGroups: [],
     materials: [],
     latestLoanDate: null,
   });
@@ -118,6 +183,7 @@ export default function Zss02PageClient() {
   const [page, setPage] = useState(1);
   const [reloadToken, setReloadToken] = useState(0);
   const pageSize = 50;
+  const { sort, onSort, sorted } = useTableSort<SortKey>(null);
 
   const appliedBounds = useMemo(() => loanBounds(applied.loanRange), [applied.loanRange]);
 
@@ -141,9 +207,9 @@ export default function Zss02PageClient() {
       params.set('mode', 'rows');
       params.set('page', String(page));
       params.set('pageSize', String(pageSize));
-      if (applied.importId) params.set('importId', applied.importId);
       if (applied.plant) params.set('plants', applied.plant);
       if (applied.vendor) params.set('vendors', applied.vendor);
+      if (applied.itemGroup) params.set('itemGroups', applied.itemGroup);
       if (applied.material) params.set('materials', applied.material);
       if (applied.barcode) params.set('barcode', applied.barcode);
       if (appliedBounds.loanFrom) params.set('loanFrom', appliedBounds.loanFrom);
@@ -180,6 +246,46 @@ export default function Zss02PageClient() {
       ...draft,
       barcode: draft.barcode.trim(),
     });
+  }
+
+  async function exportExcel() {
+    if (exporting || uploading) return;
+    setExporting(true);
+    try {
+      const params = new URLSearchParams();
+      params.set('mode', 'export');
+      if (applied.plant) params.set('plants', applied.plant);
+      if (applied.vendor) params.set('vendors', applied.vendor);
+      if (applied.itemGroup) params.set('itemGroups', applied.itemGroup);
+      if (applied.material) params.set('materials', applied.material);
+      if (applied.barcode) params.set('barcode', applied.barcode);
+      if (appliedBounds.loanFrom) params.set('loanFrom', appliedBounds.loanFrom);
+      if (appliedBounds.loanTo) params.set('loanTo', appliedBounds.loanTo);
+      const res = await fetch(`${API}?${params}`, { credentials: 'include' });
+      if (!res.ok) {
+        const data = await readApiJson(res);
+        throw new Error(String(data.error || `Export failed (${res.status})`));
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get('Content-Disposition') ?? '';
+      const match = /filename="([^"]+)"/.exec(cd);
+      const filename = match?.[1] || 'ZSS02.xlsx';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      if (res.headers.get('X-ZSS02-Export-Truncated') === '1') {
+        feedback.actionWarning('Export capped at 100,000 rows — narrow filters for a full file');
+      } else {
+        feedback.actionSuccess('Excel downloaded');
+      }
+    } catch (err) {
+      feedback.actionFailed(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setExporting(false);
+    }
   }
 
   async function uploadFiles(fileList: FileList | null) {
@@ -225,8 +331,6 @@ export default function Zss02PageClient() {
           (totalSkipped ? ` · ${totalSkipped.toLocaleString()} out of scope skipped` : '')
       );
       setPage(1);
-      setDraft((d) => ({ ...d, importId: '' }));
-      setApplied((a) => ({ ...a, importId: '' }));
       await refreshMeta();
       setReloadToken((n) => n + 1);
     } catch (err) {
@@ -238,17 +342,17 @@ export default function Zss02PageClient() {
     }
   }
 
-  const importOpts: FilterSelectOption[] = imports.map((i) => ({
-    value: i.id,
-    label: `${i.fileName} · ${i.parsed.toLocaleString()} · ${formatUiDateTime(i.importedAt)}`,
-  }));
   const plantOpts: FilterSelectOption[] = options.plants;
   const vendorOpts: FilterSelectOption[] = options.vendors;
+  const itemGroupOpts: FilterSelectOption[] = options.itemGroups;
   const materialOpts: FilterSelectOption[] = options.materials;
 
   const total = rowsData?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const rows = rowsData?.rows ?? [];
+  const rows = useMemo(
+    () => sorted(rowsData?.rows ?? [], sortValue),
+    [rowsData?.rows, sorted]
+  );
   const subtitle = options.latestLoanDate
     ? `Details as on ${options.latestLoanDate}`
     : 'Upload SAP ZSS02 HTML — re-upload overwrites those plants';
@@ -260,6 +364,16 @@ export default function Zss02PageClient() {
       icon={<FileSpreadsheet className="h-4 w-4" />}
       actions={
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            onClick={() => void exportExcel()}
+            disabled={exporting || uploading || loading || total === 0}
+            title="Export applied filters to Excel"
+          >
+            {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            {exporting ? 'Exporting…' : 'Export Excel'}
+          </button>
           <input
             ref={inputRef}
             type="file"
@@ -272,7 +386,7 @@ export default function Zss02PageClient() {
             type="button"
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             onClick={() => inputRef.current?.click()}
-            disabled={uploading}
+            disabled={uploading || exporting}
           >
             {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
             {uploading ? uploadLabel : 'Import ZSS02 HTML'}
@@ -282,17 +396,6 @@ export default function Zss02PageClient() {
       toolbar={
         <div className="register-filter-bar border-b border-slate-200 bg-bg-canvas px-3 py-1.5">
           <div className="report-toolbar-filters-row items-end">
-            <FilterSelect
-              label="Import"
-              emptyLabel="All imports"
-              options={importOpts}
-              selected={draft.importId ? [draft.importId] : []}
-              mode="single"
-              onChange={(values) => setDraft((d) => ({ ...d, importId: pickSingle(values) }))}
-              searchPlaceholder="Search file…"
-              panelClassName="w-96"
-              layout="inline"
-            />
             <div className="report-toolbar-filters-date shrink-0">
               <DateRangeSelector
                 value={draft.loanRange.label}
@@ -322,6 +425,17 @@ export default function Zss02PageClient() {
               onChange={(values) => setDraft((d) => ({ ...d, vendor: pickSingle(values) }))}
               searchPlaceholder="Search vendor…"
               panelClassName="w-80"
+              layout="inline"
+            />
+            <FilterSelect
+              label="Item Group"
+              emptyLabel="All item groups"
+              options={itemGroupOpts}
+              selected={draft.itemGroup ? [draft.itemGroup] : []}
+              mode="single"
+              onChange={(values) => setDraft((d) => ({ ...d, itemGroup: pickSingle(values) }))}
+              searchPlaceholder="Search item group…"
+              panelClassName="w-72"
               layout="inline"
             />
             <FilterSelect
@@ -366,26 +480,57 @@ export default function Zss02PageClient() {
             <AdminThead>
               <tr>
                 <AdminTh className="w-10"> </AdminTh>
-                <AdminTh>Plant</AdminTh>
-                <AdminTh>Vendor No.</AdminTh>
-                <AdminTh>Vendor Name</AdminTh>
-                <AdminTh>Material</AdminTh>
-                <AdminTh>Material Description</AdminTh>
-                <AdminTh>Barcode of Spare Part</AdminTh>
-                <AdminTh>SO.No. (Con/Rtn)</AdminTh>
-                <AdminTh>SO.No. (Loan)</AdminTh>
-                <AdminTh>Loan Date</AdminTh>
-                <AdminTh>Loan Rtn Date</AdminTh>
-                <AdminTh>Cnsmp.Date</AdminTh>
-                <AdminTh align="right">No Cnsmp.Count</AdminTh>
-                <AdminTh>Sale Date</AdminTh>
-                <AdminTh>Sale Rtn Date</AdminTh>
+                <AdminTh sortable sortKey="plant" sort={sort} onSort={onSort}>
+                  Plant
+                </AdminTh>
+                <AdminTh sortable sortKey="vendorNo" sort={sort} onSort={onSort}>
+                  Vendor No.
+                </AdminTh>
+                <AdminTh sortable sortKey="vendorName" sort={sort} onSort={onSort}>
+                  Vendor Name
+                </AdminTh>
+                <AdminTh sortable sortKey="itemGroup" sort={sort} onSort={onSort}>
+                  Item Group
+                </AdminTh>
+                <AdminTh sortable sortKey="material" sort={sort} onSort={onSort}>
+                  Material
+                </AdminTh>
+                <AdminTh sortable sortKey="materialDescription" sort={sort} onSort={onSort}>
+                  Material Description
+                </AdminTh>
+                <AdminTh sortable sortKey="barcode" sort={sort} onSort={onSort}>
+                  Barcode of Spare Part
+                </AdminTh>
+                <AdminTh sortable sortKey="soConRtn" sort={sort} onSort={onSort}>
+                  SO.No. (Con/Rtn)
+                </AdminTh>
+                <AdminTh sortable sortKey="soLoan" sort={sort} onSort={onSort}>
+                  SO.No. (Loan)
+                </AdminTh>
+                <AdminTh sortable sortKey="loanDate" sort={sort} onSort={onSort}>
+                  Loan Date
+                </AdminTh>
+                <AdminTh sortable sortKey="loanRtnDate" sort={sort} onSort={onSort}>
+                  Loan Rtn Date
+                </AdminTh>
+                <AdminTh sortable sortKey="cnsmpDate" sort={sort} onSort={onSort}>
+                  Cnsmp.Date
+                </AdminTh>
+                <AdminTh align="right" sortable sortKey="noCnsmpCount" sort={sort} onSort={onSort}>
+                  No Cnsmp.Count
+                </AdminTh>
+                <AdminTh sortable sortKey="saleDate" sort={sort} onSort={onSort}>
+                  Sale Date
+                </AdminTh>
+                <AdminTh sortable sortKey="saleRtnDate" sort={sort} onSort={onSort}>
+                  Sale Rtn Date
+                </AdminTh>
               </tr>
             </AdminThead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={15} className="px-3 py-8 text-center text-[12px] text-slate-500">
+                  <td colSpan={16} className="px-3 py-8 text-center text-[12px] text-slate-500">
                     {loading
                       ? 'Loading…'
                       : imports.length === 0
@@ -412,6 +557,9 @@ export default function Zss02PageClient() {
                         title={r.vendorName}
                       >
                         {r.vendorName}
+                      </AdminTd>
+                      <AdminTd className="max-w-[12rem] truncate" title={r.itemGroup ?? undefined}>
+                        {r.itemGroup || '—'}
                       </AdminTd>
                       <AdminTd>{r.material}</AdminTd>
                       <AdminTd className="max-w-[16rem] truncate" title={r.materialDescription}>

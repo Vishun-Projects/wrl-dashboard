@@ -17,6 +17,8 @@ export type Zss02Row = Zss02ParsedRow & {
   id: number;
   importId: string;
   plantName: string | null;
+  /** CRM mstitemcategory.vname via material → mstitems. */
+  itemGroup: string | null;
   issue: Zss02IssueFlag;
   issueDetail: string | null;
 };
@@ -24,6 +26,7 @@ export type Zss02Row = Zss02ParsedRow & {
 export type Zss02OptionsResponse = {
   plants: Array<{ value: string; label: string }>;
   vendors: Array<{ value: string; label: string }>;
+  itemGroups: Array<{ value: string; label: string }>;
   materials: Array<{ value: string; label: string }>;
   /** Latest loan_date across stored rows as DD-MM-YYYY, or null. */
   latestLoanDate: string | null;

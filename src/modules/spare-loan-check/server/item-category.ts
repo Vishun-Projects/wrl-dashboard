@@ -60,7 +60,7 @@ async function lookupFromOldCrm(codes: string[]): Promise<Map<string, string>> {
   return map;
 }
 
-/** Live CRM fallback when old_crm mirror is unset / unreachable (VPS Next often lacks OLD_CRM). */
+/** Live Western CRM (source of truth). old_crm mirror can lag — e.g. 1528318 still SPARES there. */
 async function lookupFromLiveCrm(codes: string[]): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   for (let i = 0; i < codes.length; i += CRM_CHUNK) {
@@ -76,6 +76,14 @@ FROM mstitems i (NOLOCK)
 LEFT JOIN mstitemcategory cat (NOLOCK)
   ON CAST(cat.ncode AS VARCHAR(50)) = CAST(i.nitemcategory AS VARCHAR(50))
 WHERE LTRIM(RTRIM(i.vitemcode)) IN (${inList})
+   OR (
+     PATINDEX('%[^0]%', LTRIM(RTRIM(i.vitemcode)) + '.') > 0
+     AND SUBSTRING(
+       LTRIM(RTRIM(i.vitemcode)),
+       PATINDEX('%[^0]%', LTRIM(RTRIM(i.vitemcode)) + '.'),
+       50
+     ) IN (${inList})
+   )
 `,
         timeoutMs: 60_000,
       });
@@ -97,7 +105,7 @@ WHERE LTRIM(RTRIM(i.vitemcode)) IN (${inList})
 
 /**
  * Map SAP material codes → CRM mstitemcategory.vname via mstitems.
- * Prefer old_crm (same as SAP vs CRM stock); fall back to live CRM.
+ * Prefer live CRM (current master); fill gaps from old_crm mirror.
  */
 export async function lookupItemCategoriesByMaterial(
   materialCodes: string[]
@@ -109,17 +117,17 @@ export async function lookupItemCategoriesByMaterial(
   ];
   if (unique.length === 0) return new Map();
 
-  const fromOld = await lookupFromOldCrm(unique);
-  if (fromOld.size >= unique.length) return fromOld;
+  const fromLive = await lookupFromLiveCrm(unique);
+  if (fromLive.size >= unique.length) return fromLive;
 
-  const missing = unique.filter((c) => !fromOld.has(c));
-  if (missing.length === 0) return fromOld;
+  const missing = unique.filter((c) => !fromLive.has(c));
+  if (missing.length === 0) return fromLive;
 
-  const fromLive = await lookupFromLiveCrm(missing);
-  for (const [k, v] of fromLive) {
-    if (!fromOld.has(k)) fromOld.set(k, v);
+  const fromOld = await lookupFromOldCrm(missing);
+  for (const [k, v] of fromOld) {
+    if (!fromLive.has(k)) fromLive.set(k, v);
   }
-  return fromOld;
+  return fromLive;
 }
 
 async function persistItemCategories(byNormMaterial: Map<string, string>): Promise<void> {

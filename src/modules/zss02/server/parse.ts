@@ -1,1 +1,2 @@
-export { parseZss02Html } from '@/modules/spare-loan-check';
+export { parseZss02Html } from '@/modules/spare-loan-check/parse-html';
+
