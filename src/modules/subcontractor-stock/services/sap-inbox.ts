@@ -15,31 +15,45 @@ type ParsedMailHeaders = {
   receivedAt: Date;
 };
 
+// VPS Maildir paths are absolute (/home, /root/…). Without turbopackIgnore, NFT traces the whole repo into the serverless bundle and Vercel deploy fails.
+function existsSync(p: string): boolean {
+  return fs.existsSync(/*turbopackIgnore: true*/ p);
+}
+function readdirSync(p: string): string[] {
+  return fs.readdirSync(/*turbopackIgnore: true*/ p);
+}
+function statSync(p: string): fs.Stats {
+  return fs.statSync(/*turbopackIgnore: true*/ p);
+}
+function readFileSync(p: string): Buffer {
+  return fs.readFileSync(/*turbopackIgnore: true*/ p);
+}
+function joinPath(...parts: string[]): string {
+  return path.join(/*turbopackIgnore: true*/ parts[0] ?? '', ...parts.slice(1));
+}
+function resolvePath(p: string): string {
+  return path.resolve(/*turbopackIgnore: true*/ p);
+}
+
 function findMaildirPaths(): string[] {
   const roots = ['/home', '/var/mail', '/root', '/var/spool/mail'];
   const found = new Set<string>();
 
   for (const root of roots) {
-    if (!fs.existsSync(root)) continue;
+    if (!existsSync(root)) continue;
     try {
-      for (const entry of fs.readdirSync(root)) {
-        const candidate = path.join(root, entry);
-        if (!fs.existsSync(candidate)) continue;
-        const stat = fs.statSync(candidate);
+      for (const entry of readdirSync(root)) {
+        const candidate = joinPath(root, entry);
+        if (!existsSync(candidate)) continue;
+        const stat = statSync(candidate);
         if (!stat.isDirectory()) continue;
-        if (
-          fs.existsSync(path.join(candidate, 'new')) ||
-          fs.existsSync(path.join(candidate, 'cur'))
-        ) {
-          found.add(path.resolve(candidate));
+        if (existsSync(joinPath(candidate, 'new')) || existsSync(joinPath(candidate, 'cur'))) {
+          found.add(resolvePath(candidate));
         }
         if (entry === 'Maildir' && root !== '/root') {
           const parent = path.dirname(candidate);
-          if (
-            fs.existsSync(path.join(parent, 'new')) ||
-            fs.existsSync(path.join(parent, 'cur'))
-          ) {
-            found.add(path.resolve(parent));
+          if (existsSync(joinPath(parent, 'new')) || existsSync(joinPath(parent, 'cur'))) {
+            found.add(resolvePath(parent));
           }
         }
       }
@@ -48,13 +62,10 @@ function findMaildirPaths(): string[] {
     }
   }
 
-  if (fs.existsSync('/root/Maildir')) {
+  if (existsSync('/root/Maildir')) {
     const rootMaildir = '/root/Maildir';
-    if (
-      fs.existsSync(path.join(rootMaildir, 'new')) ||
-      fs.existsSync(path.join(rootMaildir, 'cur'))
-    ) {
-      found.add(path.resolve(rootMaildir));
+    if (existsSync(joinPath(rootMaildir, 'new')) || existsSync(joinPath(rootMaildir, 'cur'))) {
+      found.add(resolvePath(rootMaildir));
     }
   }
 
@@ -106,15 +117,13 @@ function listExtractedAttachmentsForMail(
   extractDir: string,
   mailKey: string
 ): string[] {
-  if (!fs.existsSync(extractDir)) return [];
+  if (!existsSync(extractDir)) return [];
   const prefix = `${mailKey}_`;
-  return fs
-    .readdirSync(extractDir)
-    .filter(
-      (name) =>
-        name.startsWith(prefix) &&
-        (name.toLowerCase().endsWith('.htm') || name.toLowerCase().endsWith('.html'))
-    );
+  return readdirSync(extractDir).filter(
+    (name) =>
+      name.startsWith(prefix) &&
+      (name.toLowerCase().endsWith('.htm') || name.toLowerCase().endsWith('.html'))
+  );
 }
 
 function parsePlantCodesFromAttachments(
@@ -123,8 +132,8 @@ function parsePlantCodesFromAttachments(
 ): string[] {
   const plants = new Set<string>();
   for (const name of attachmentNames) {
-    const filepath = path.join(extractDir, name);
-    if (!fs.existsSync(filepath)) continue;
+    const filepath = joinPath(extractDir, name);
+    if (!existsSync(filepath)) continue;
     try {
       const groups = parseSapMblbHtml(filepath);
       for (const group of groups) {
@@ -157,7 +166,7 @@ function scanMaildirMessage(
 
   let raw: Buffer;
   try {
-    raw = fs.readFileSync(filepath);
+    raw = readFileSync(filepath);
   } catch {
     return null;
   }
@@ -175,7 +184,7 @@ function scanMaildirMessage(
   if (attachmentNames.length > 0) {
     extractedAt = new Date(
       Math.max(
-        ...attachmentNames.map((name) => fs.statSync(path.join(extractDir, name)).mtimeMs)
+        ...attachmentNames.map((name) => statSync(joinPath(extractDir, name)).mtimeMs)
       )
     );
   }
@@ -201,11 +210,11 @@ export async function syncSapMailInbox(): Promise<{ upserted: number; entries: S
 
   for (const maildir of maildirs) {
     for (const sub of ['new', 'cur'] as const) {
-      const dirPath = path.join(maildir, sub);
-      if (!fs.existsSync(dirPath)) continue;
-      for (const entry of fs.readdirSync(dirPath)) {
-        const filepath = path.join(dirPath, entry);
-        if (!fs.statSync(filepath).isFile()) continue;
+      const dirPath = joinPath(maildir, sub);
+      if (!existsSync(dirPath)) continue;
+      for (const entry of readdirSync(dirPath)) {
+        const filepath = joinPath(dirPath, entry);
+        if (!statSync(filepath).isFile()) continue;
         const parsed = scanMaildirMessage(filepath, extractDir);
         if (!parsed) continue;
         seenKeys.add(parsed.mailKey);
@@ -225,8 +234,8 @@ export async function syncSapMailInbox(): Promise<{ upserted: number; entries: S
   }
 
   // Orphan extracted files (no Maildir parent on disk) — log by filename prefix
-  if (fs.existsSync(extractDir)) {
-    for (const name of fs.readdirSync(extractDir)) {
+  if (existsSync(extractDir)) {
+    for (const name of readdirSync(extractDir)) {
       if (
         !name.toLowerCase().endsWith('.htm') &&
         !name.toLowerCase().endsWith('.html')
@@ -237,7 +246,7 @@ export async function syncSapMailInbox(): Promise<{ upserted: number; entries: S
       const mailKey = mailKeyMatch?.[1] ?? name;
       if (seenKeys.has(mailKey)) continue;
       seenKeys.add(mailKey);
-      const stats = fs.statSync(path.join(extractDir, name));
+      const stats = statSync(joinPath(extractDir, name));
       const reportDate = getIstLocalDateStr(stats.mtime);
       const attachmentNames = listExtractedAttachmentsForMail(extractDir, mailKey);
       const plantCodes = parsePlantCodesFromAttachments(extractDir, attachmentNames);
@@ -284,28 +293,28 @@ export async function getSapInboxDashboard(days = 14): Promise<{
 /** Latest mtime among today's extracted SAP HTML files (ms since epoch). */
 export function getLatestTodaySapFileMtimeMs(): number | null {
   const extractDir = resolveSubcontractorExtractDir();
-  if (!fs.existsSync(extractDir)) return null;
+  if (!existsSync(extractDir)) return null;
 
   const today = getIstLocalDateStr();
   let latest: number | null = null;
 
-  for (const filename of fs.readdirSync(extractDir)) {
+  for (const filename of readdirSync(extractDir)) {
     if (
       !filename.toLowerCase().endsWith('.htm') &&
       !filename.toLowerCase().endsWith('.html')
     ) {
       continue;
     }
-    const filepath = path.join(extractDir, filename);
+    const filepath = joinPath(extractDir, filename);
     const match = filename.match(/^(\d+)\./);
     let dateStr: string;
     if (match) {
       dateStr = getIstLocalDateStr(new Date(parseInt(match[1], 10) * 1000));
     } else {
-      dateStr = getIstLocalDateStr(fs.statSync(filepath).mtime);
+      dateStr = getIstLocalDateStr(statSync(filepath).mtime);
     }
     if (dateStr !== today) continue;
-    const mtime = fs.statSync(filepath).mtimeMs;
+    const mtime = statSync(filepath).mtimeMs;
     if (latest === null || mtime > latest) latest = mtime;
   }
 
