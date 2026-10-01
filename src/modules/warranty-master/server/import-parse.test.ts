@@ -1,34 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   calcMonths,
-  cleanCustomerName,
+  cellText,
   mapSheetHeaders,
   parseDateVal,
-  remapCustomerSubgroup,
 } from './import-parse';
 
-describe('remapCustomerSubgroup', () => {
-  it('renames exact Pepsi only', () => {
-    expect(remapCustomerSubgroup('Pepsi')).toBe('Pepsi-Bott');
-    expect(remapCustomerSubgroup('pepsi')).toBe('Pepsi-Bott');
-    expect(remapCustomerSubgroup(' PEPSI ')).toBe('Pepsi-Bott');
-  });
-
-  it('leaves Pepsi-Bott and other values alone', () => {
-    expect(remapCustomerSubgroup('Pepsi-Bott')).toBe('Pepsi-Bott');
-    expect(remapCustomerSubgroup('PepsiCo')).toBe('PepsiCo');
-    expect(remapCustomerSubgroup('Nestle')).toBe('Nestle');
-  });
-});
-
-describe('cleanCustomerName', () => {
-  it('drops digit-only sold-to numbers', () => {
-    expect(cleanCustomerName('1000123')).toBe('');
-    expect(cleanCustomerName(' 55 ')).toBe('');
-  });
-
-  it('keeps real names', () => {
-    expect(cleanCustomerName('PepsiCo India')).toBe('PepsiCo India');
+describe('cellText', () => {
+  it('trims and returns null for empty', () => {
+    expect(cellText(null)).toBeNull();
+    expect(cellText('')).toBeNull();
+    expect(cellText('   ')).toBeNull();
+    expect(cellText(' FG FREEZR ')).toBe('FG FREEZR');
+    expect(cellText(1000123)).toBe('1000123');
   });
 });
 
@@ -47,30 +31,52 @@ describe('calcMonths', () => {
 describe('parseDateVal', () => {
   it('parses dotted Indian dates and Excel serials', () => {
     expect(parseDateVal('11.06.2022')).toBe('2022-06-11');
+    expect(parseDateVal('02.08.2022')).toBe('2022-08-02');
+    expect(parseDateVal('02.01.2019')).toBe('2019-01-02');
     expect(parseDateVal(43102)).toBe('2018-01-02');
     expect(parseDateVal('2022-06-11')).toBe('2022-06-11');
   });
 });
 
 describe('mapSheetHeaders', () => {
-  it('maps Warrantydwnlod and FINAL header names', () => {
-    const dwn = mapSheetHeaders([
+  it('maps the canonical 15 Excel headers', () => {
+    const mapped = mapSheetHeaders([
       'Bill.Doc.',
       'Invoice Dt',
+      'Material',
       'Serial Number',
+      'Group Name',
+      'Material Group',
       'Customer Number-Sold-To-Party',
       'Customer Subgroup',
+      'Ship-To-Party Name1',
+      'Ship-To-Party State',
+      'Ship-To-Party City',
+      'Inventory Number',
       'Warranty Start Date',
       'Warranty End Date',
+      'PIN Code',
     ]);
-    expect(dwn.billingDoc).toBe('Bill.Doc.');
-    expect(dwn.billingDate).toBe('Invoice Dt');
-    expect(dwn.serial).toBe('Serial Number');
-    expect(dwn.customer).toBe('Customer Number-Sold-To-Party');
-    expect(dwn.customerSubgroup).toBe('Customer Subgroup');
-    expect(dwn.warrStart).toBe('Warranty Start Date');
-    expect(dwn.warrEnd).toBe('Warranty End Date');
+    expect(mapped.billingDoc).toBe('Bill.Doc.');
+    expect(mapped.billingDate).toBe('Invoice Dt');
+    expect(mapped.material).toBe('Material');
+    expect(mapped.serial).toBe('Serial Number');
+    expect(mapped.groupName).toBe('Group Name');
+    expect(mapped.materialGroup).toBe('Material Group');
+    expect(mapped.customer).toBe('Customer Number-Sold-To-Party');
+    expect(mapped.customerSubgroup).toBe('Customer Subgroup');
+    expect(mapped.shipTo).toBe('Ship-To-Party Name1');
+    expect(mapped.state).toBe('Ship-To-Party State');
+    expect(mapped.shipToCity).toBe('Ship-To-Party City');
+    expect(mapped.inventory).toBe('Inventory Number');
+    expect(mapped.warrStart).toBe('Warranty Start Date');
+    expect(mapped.warrEnd).toBe('Warranty End Date');
+    expect(mapped.pin).toBe('PIN Code');
+    expect(mapped.productSubgroup).toBeUndefined();
+    expect(mapped.city).toBeUndefined();
+  });
 
+  it('still maps FINAL-style aliases', () => {
     const final = mapSheetHeaders([
       'Billing Document',
       'Billing Date',

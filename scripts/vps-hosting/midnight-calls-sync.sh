@@ -5,6 +5,9 @@
 # Hard rule: never ingest past previous IST calendar day (ceiling = AS_OF 23:59:59 IST).
 # Default AS_OF = yesterday IST. Override with MIDNIGHT_SYNC_AS_OF=YYYY-MM-DD only when intentional.
 #
+# Catch-up window is rolling last N days through AS_OF (default 7) — not full YTD.
+# Override: MIDNIGHT_CATCHUP_DAYS=N or SYNC_EDITEDON_CATCHUP_FROM=YYYY-MM-DD.
+#
 # Resilient: per-step retries + checkpoint file so retries/deadline loops skip finished work.
 set -uo pipefail
 
@@ -46,7 +49,6 @@ if [[ "${SYNC_WORKER_ENABLED}" != "true" ]]; then
   exit 1
 fi
 
-YTD_START="${SYNC_EDITEDON_CATCHUP_FROM:-$(TZ=Asia/Kolkata date +%Y)-01-01}"
 IST_TODAY="$(TZ=Asia/Kolkata date +%Y-%m-%d)"
 
 # Default = yesterday IST — never a second into calendar "today".
@@ -67,6 +69,25 @@ fi
 if [[ "$AS_OF" == "$IST_TODAY" ]]; then
   echo "FATAL: MIDNIGHT_SYNC_AS_OF cannot be today (${IST_TODAY}) — use yesterday or earlier" >&2
   exit 1
+fi
+
+# Rolling last N days through AS_OF (inclusive). Not Jan→AS_OF.
+CATCHUP_DAYS="${MIDNIGHT_CATCHUP_DAYS:-7}"
+if [[ -n "${SYNC_EDITEDON_CATCHUP_FROM:-}" ]]; then
+  CATCHUP_FROM="${SYNC_EDITEDON_CATCHUP_FROM}"
+else
+  days_back=$((CATCHUP_DAYS - 1))
+  if [[ "$days_back" -lt 0 ]]; then
+    days_back=0
+  fi
+  if date -d "${AS_OF} -${days_back} days" +%Y-%m-%d >/dev/null 2>&1; then
+    CATCHUP_FROM="$(date -d "${AS_OF} -${days_back} days" +%Y-%m-%d)"
+  elif date -v-"${days_back}"d -j -f "%Y-%m-%d" "${AS_OF}" +%Y-%m-%d >/dev/null 2>&1; then
+    CATCHUP_FROM="$(date -v-"${days_back}"d -j -f "%Y-%m-%d" "${AS_OF}" +%Y-%m-%d)"
+  else
+    echo "FATAL: cannot compute CATCHUP_FROM from AS_OF=${AS_OF} days=${CATCHUP_DAYS}" >&2
+    exit 1
+  fi
 fi
 
 STATE_DIR="${INSTALL_ROOT}/shared/logs/midnight-sync"
@@ -109,15 +130,15 @@ run_step() {
 fatal=0
 
 echo "=== midnight-calls-sync $(TZ=Asia/Kolkata date -Iseconds) ==="
-echo "YTD status window ${YTD_START} .. ${AS_OF} (hard cap; calendar today=${IST_TODAY})"
+echo "catch-up window ${CATCHUP_FROM} .. ${AS_OF} (${CATCHUP_DAYS}d; calendar today=${IST_TODAY})"
 echo "checkpoint=${STATE_FILE} step_retries=${STEP_RETRIES}"
 
 # NEVER run watermark incremental here — would pull through CRM now / today.
 echo "→ skip incremental (forbidden on midnight path — would pull through CRM now / today)"
 
 run_editedon_catchup() {
-  # Full YTD replay Jan 1 → AS_OF every midnight (not cursor-shortcut).
-  MIDNIGHT_SYNC_AS_OF="${AS_OF}" npm run sync-worker:editedon-catchup -- --from "${YTD_START}" --to "${AS_OF}" --no-resume
+  # Rolling last-N-days replay through AS_OF (not full YTD).
+  MIDNIGHT_SYNC_AS_OF="${AS_OF}" npm run sync-worker:editedon-catchup -- --from "${CATCHUP_FROM}" --to "${AS_OF}" --no-resume
 }
 
 if ! run_step editedon-catchup run_editedon_catchup; then
@@ -159,7 +180,7 @@ fi
 run_step backfill-wco npm run sync-worker:backfill-wco -- --from "${WCO_FROM}" --to "${AS_OF}" \
   || echo "WARN: WCO backfill failed (non-fatal)"
 
-run_step fill-hot-gaps npm run sync-worker:fill-hot-gaps -- --from "${YTD_START}" --to "${AS_OF}" \
+run_step fill-hot-gaps npm run sync-worker:fill-hot-gaps -- --from "${CATCHUP_FROM}" --to "${AS_OF}" \
   || echo "WARN: fill-hot-gaps failed (non-fatal)"
 
 run_step athena-reconcile npm run sync-worker:athena-reconcile \

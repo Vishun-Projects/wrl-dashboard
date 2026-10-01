@@ -77,15 +77,10 @@ function normalizeHeader(h) {
   return String(h).toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function remapCustomerSubgroup(raw) {
-  const t = String(raw ?? '').trim();
-  return t.toLowerCase() === 'pepsi' ? 'Pepsi-Bott' : t;
-}
-
-function cleanCustomerName(raw) {
-  const t = String(raw ?? '').trim();
-  if (!t || /^\d+$/.test(t)) return '';
-  return t;
+function cellText(val) {
+  if (val == null || val === '') return null;
+  const t = String(val).trim();
+  return t || null;
 }
 
 function parseDateVal(val) {
@@ -146,9 +141,12 @@ function calcMonths(start, end) {
   const [ys, ms, ds] = String(start).split('-').map(Number);
   const [ye, me, de] = String(end).split('-').map(Number);
   if (![ys, ms, ds, ye, me, de].every(Number.isFinite)) return 0;
-  let months = (ye - ys) * 12 + (me - ms);
-  if (de < ds) months -= 1;
-  return months < 0 ? 0 : months;
+  const next = new Date(Date.UTC(ye, me - 1, de));
+  next.setUTCDate(next.getUTCDate() + 1);
+  let months = (next.getUTCFullYear() - ys) * 12 + (next.getUTCMonth() + 1 - ms);
+  if (next.getUTCDate() < ds) months -= 1;
+  if (months <= 0) return 0;
+  return Math.ceil(months / 6) * 6;
 }
 
 function warrantyDateRank(date) {
@@ -182,20 +180,24 @@ function mapSheetHeaders(rawKeys) {
       keyMap.materialGroup = rawKey;
     } else if (norm.includes('material') || norm.includes('fgmodel') || norm.includes('model') || norm.includes('productcode')) {
       keyMap.material = rawKey;
-    } else if (norm.includes('productsubgroup') || (norm.includes('subgroup') && !norm.includes('customer'))) {
-      keyMap.productSubgroup = rawKey;
     } else if (norm.includes('customersoldto') || norm.includes('soldto') || norm === 'customername' || norm === 'customer') {
       keyMap.customer = rawKey;
     } else if (norm.includes('customersubgroup') || norm.includes('custsubgrp') || norm.includes('cgrp1') || norm === 'subgroup') {
       keyMap.customerSubgroup = rawKey;
-    } else if (norm.includes('customershipto') || norm.includes('shipto') || norm.includes('consignee')) {
-      keyMap.shipTo = rawKey;
-    } else if (norm.includes('state') || norm.includes('shiptostate')) {
-      keyMap.state = rawKey;
-    } else if (norm.includes('shiptocity') || (norm.includes('city') && !keyMap.city)) {
+    } else if (norm.includes('shiptocity') || (norm.includes('city') && norm.includes('shipto'))) {
       keyMap.shipToCity = rawKey;
+    } else if (norm.includes('shiptostate') || (norm.includes('state') && norm.includes('shipto'))) {
+      keyMap.state = rawKey;
+    } else if (
+      (norm.includes('customershipto') || norm.includes('shipto') || norm.includes('consignee')) &&
+      !norm.includes('city') &&
+      !norm.includes('state')
+    ) {
+      keyMap.shipTo = rawKey;
+    } else if (norm.includes('state')) {
+      keyMap.state = rawKey;
     } else if (norm === 'city') {
-      keyMap.city = rawKey;
+      keyMap.shipToCity = rawKey;
     } else if (norm.includes('inventory')) {
       keyMap.inventory = rawKey;
     } else if (norm.includes('warrda') || norm.includes('warrstart') || norm.includes('startdate')) {
@@ -257,43 +259,29 @@ function parseWorkbook(filePath) {
       continue;
     }
 
-    const sheetYearNum = Number(String(sheetName).trim());
-    const sheetYear =
-      Number.isFinite(sheetYearNum) && sheetYearNum >= 2000 && sheetYearNum <= 2100
-        ? sheetYearNum
-        : null;
-
     for (const r of rawRows) {
-      const serial = String(r[keyMap.serial] ?? '').trim();
+      const serial = cellText(r[keyMap.serial]);
       if (!serial) continue;
       const warrStartDt = keyMap.warrStart ? parseDateVal(r[keyMap.warrStart]) : null;
       const warrEndDt = keyMap.warrEnd ? parseDateVal(r[keyMap.warrEnd]) : null;
-      const customerName = keyMap.customer ? cleanCustomerName(r[keyMap.customer]) : '';
-      const customerSubgroup = keyMap.customerSubgroup
-        ? remapCustomerSubgroup(r[keyMap.customerSubgroup])
-        : '';
       const candidate = {
         serialNo: serial,
-        billingDoc: keyMap.billingDoc ? String(r[keyMap.billingDoc] ?? '').trim() : '',
+        billingDoc: keyMap.billingDoc ? cellText(r[keyMap.billingDoc]) : null,
         billingDate: keyMap.billingDate ? parseDateVal(r[keyMap.billingDate]) : null,
-        fgModel: keyMap.material ? String(r[keyMap.material] ?? '').trim() : '',
-        groupName: keyMap.groupName ? String(r[keyMap.groupName] ?? '').trim() : '',
-        materialGroup: keyMap.materialGroup ? String(r[keyMap.materialGroup] ?? '').trim() : '',
-        productSubgroup: keyMap.productSubgroup ? String(r[keyMap.productSubgroup] ?? '').trim() : '',
-        customerName,
-        customerSubgroup,
-        shipToParty: keyMap.shipTo ? String(r[keyMap.shipTo] ?? '').trim() : '',
-        shipToState: keyMap.state ? String(r[keyMap.state] ?? '').trim() : '',
-        shipToCity: keyMap.shipToCity ? String(r[keyMap.shipToCity] ?? '').trim() : '',
-        inventoryNumber: keyMap.inventory ? String(r[keyMap.inventory] ?? '').trim() : '',
+        material: keyMap.material ? cellText(r[keyMap.material]) : null,
+        groupName: keyMap.groupName ? cellText(r[keyMap.groupName]) : null,
+        materialGroup: keyMap.materialGroup ? cellText(r[keyMap.materialGroup]) : null,
+        customerName: keyMap.customer ? cellText(r[keyMap.customer]) : null,
+        customerSubgroup: keyMap.customerSubgroup ? cellText(r[keyMap.customerSubgroup]) : null,
+        shipToParty: keyMap.shipTo ? cellText(r[keyMap.shipTo]) : null,
+        shipToState: keyMap.state ? cellText(r[keyMap.state]) : null,
+        shipToCity: keyMap.shipToCity ? cellText(r[keyMap.shipToCity]) : null,
+        inventoryNumber: keyMap.inventory ? cellText(r[keyMap.inventory]) : null,
         warrStartDt,
         warrEndDt,
-        city: keyMap.city ? String(r[keyMap.city] ?? '').trim() : '',
-        pinCode: keyMap.pin ? String(r[keyMap.pin] ?? '').trim() : '',
-        sheetYear,
+        pinCode: keyMap.pin ? cellText(r[keyMap.pin]) : null,
         warrantyMonths: calcMonths(warrStartDt, warrEndDt),
       };
-      if (!candidate.city) candidate.city = candidate.shipToCity;
       const current = rowsBySerial.get(serial);
       if (!current || warrantyDateRank(candidate.warrEndDt) >= warrantyDateRank(current.warrEndDt)) {
         rowsBySerial.set(serial, candidate);
@@ -312,16 +300,14 @@ async function upsertIngest(client, rows) {
     const slice = list.slice(i, i + CHUNK);
     const values = [];
     const placeholders = slice.map((row, j) => {
-      const p = j * 21;
+      const p = j * 17;
       values.push(
         row.serialNo,
         row.billingDoc,
         row.billingDate,
-        row.fgModel,
-        row.fgModel,
+        row.material,
         row.groupName,
-        row.materialGroup || '(Unknown)',
-        row.productSubgroup,
+        row.materialGroup,
         row.customerName,
         row.customerSubgroup,
         row.shipToParty,
@@ -330,42 +316,36 @@ async function upsertIngest(client, rows) {
         row.inventoryNumber,
         row.warrStartDt,
         row.warrEndDt,
-        row.city,
         row.pinCode,
-        row.sheetYear,
         row.warrantyMonths,
         Boolean(row.warrEndDt && row.warrEndDt >= today)
       );
-      return `($${p + 1}, $${p + 2}, $${p + 3}, $${p + 4}, $${p + 5}, $${p + 6}, $${p + 7}, $${p + 8}, $${p + 9}, $${p + 10}, $${p + 11}, $${p + 12}, $${p + 13}, $${p + 14}, $${p + 15}, $${p + 16}, $${p + 17}, $${p + 18}, $${p + 19}, $${p + 20}, $${p + 21})`;
+      return `($${p + 1}, $${p + 2}, $${p + 3}, $${p + 4}, $${p + 5}, $${p + 6}, $${p + 7}, $${p + 8}, $${p + 9}, $${p + 10}, $${p + 11}, $${p + 12}, $${p + 13}, $${p + 14}, $${p + 15}, $${p + 16}, $${p + 17})`;
     });
     await client.query(
       `
       INSERT INTO ${INGEST} (
-        serial_no, billing_doc, billing_date, fg_model, material,
-        group_name, material_group, product_subgroup, customer_name,
+        serial_no, billing_doc, billing_date, material,
+        group_name, material_group, customer_name,
         customer_subgroup, ship_to_party, ship_to_state, ship_to_city,
-        inventory_number, warr_start_dt, warr_end_dt, city, pin_code,
-        sheet_year, warranty_months, is_active
+        inventory_number, warr_start_dt, warr_end_dt, pin_code,
+        warranty_months, is_active
       ) VALUES ${placeholders.join(', ')}
       ON CONFLICT (serial_no) DO UPDATE SET
-        billing_doc = COALESCE(NULLIF(EXCLUDED.billing_doc, ''), warranty_master_items_ingest.billing_doc),
+        billing_doc = COALESCE(EXCLUDED.billing_doc, warranty_master_items_ingest.billing_doc),
         billing_date = COALESCE(EXCLUDED.billing_date, warranty_master_items_ingest.billing_date),
-        fg_model = COALESCE(NULLIF(EXCLUDED.fg_model, ''), NULLIF(EXCLUDED.fg_model, '(Unknown)'), warranty_master_items_ingest.fg_model),
-        material = COALESCE(NULLIF(EXCLUDED.material, ''), NULLIF(EXCLUDED.material, '(Unknown)'), warranty_master_items_ingest.material),
-        group_name = COALESCE(NULLIF(EXCLUDED.group_name, ''), NULLIF(EXCLUDED.group_name, '(Unknown)'), warranty_master_items_ingest.group_name),
-        material_group = COALESCE(NULLIF(EXCLUDED.material_group, ''), NULLIF(EXCLUDED.material_group, '(Unknown)'), warranty_master_items_ingest.material_group),
-        product_subgroup = COALESCE(NULLIF(EXCLUDED.product_subgroup, ''), warranty_master_items_ingest.product_subgroup),
-        customer_name = COALESCE(NULLIF(EXCLUDED.customer_name, ''), NULLIF(EXCLUDED.customer_name, '(Unknown)'), warranty_master_items_ingest.customer_name),
-        customer_subgroup = COALESCE(NULLIF(EXCLUDED.customer_subgroup, ''), warranty_master_items_ingest.customer_subgroup),
-        ship_to_party = COALESCE(NULLIF(EXCLUDED.ship_to_party, ''), warranty_master_items_ingest.ship_to_party),
-        ship_to_state = COALESCE(NULLIF(EXCLUDED.ship_to_state, ''), warranty_master_items_ingest.ship_to_state),
-        ship_to_city = COALESCE(NULLIF(EXCLUDED.ship_to_city, ''), warranty_master_items_ingest.ship_to_city),
-        inventory_number = COALESCE(NULLIF(EXCLUDED.inventory_number, ''), warranty_master_items_ingest.inventory_number),
+        material = COALESCE(EXCLUDED.material, warranty_master_items_ingest.material),
+        group_name = COALESCE(EXCLUDED.group_name, warranty_master_items_ingest.group_name),
+        material_group = COALESCE(EXCLUDED.material_group, warranty_master_items_ingest.material_group),
+        customer_name = COALESCE(EXCLUDED.customer_name, warranty_master_items_ingest.customer_name),
+        customer_subgroup = COALESCE(EXCLUDED.customer_subgroup, warranty_master_items_ingest.customer_subgroup),
+        ship_to_party = COALESCE(EXCLUDED.ship_to_party, warranty_master_items_ingest.ship_to_party),
+        ship_to_state = COALESCE(EXCLUDED.ship_to_state, warranty_master_items_ingest.ship_to_state),
+        ship_to_city = COALESCE(EXCLUDED.ship_to_city, warranty_master_items_ingest.ship_to_city),
+        inventory_number = COALESCE(EXCLUDED.inventory_number, warranty_master_items_ingest.inventory_number),
         warr_start_dt = COALESCE(EXCLUDED.warr_start_dt, warranty_master_items_ingest.warr_start_dt),
         warr_end_dt = COALESCE(EXCLUDED.warr_end_dt, warranty_master_items_ingest.warr_end_dt),
-        city = COALESCE(NULLIF(EXCLUDED.city, ''), warranty_master_items_ingest.city),
-        pin_code = COALESCE(NULLIF(EXCLUDED.pin_code, ''), warranty_master_items_ingest.pin_code),
-        sheet_year = COALESCE(EXCLUDED.sheet_year, warranty_master_items_ingest.sheet_year),
+        pin_code = COALESCE(EXCLUDED.pin_code, warranty_master_items_ingest.pin_code),
         warranty_months = EXCLUDED.warranty_months,
         is_active = (COALESCE(EXCLUDED.warr_end_dt, warranty_master_items_ingest.warr_end_dt) IS NOT NULL
           AND COALESCE(EXCLUDED.warr_end_dt, warranty_master_items_ingest.warr_end_dt) >= CURRENT_DATE),
@@ -467,24 +447,19 @@ try {
   const stats = await client.query(`
     SELECT
       COUNT(*)::int AS total,
-      COUNT(*) FILTER (WHERE warr_end_dt IS NULL)::int AS null_end,
-      COUNT(*) FILTER (WHERE LOWER(TRIM(customer_subgroup)) = 'pepsi')::int AS pepsi,
-      COUNT(*) FILTER (WHERE customer_subgroup = 'Pepsi-Bott')::int AS pepsi_bott
+      COUNT(*) FILTER (WHERE warr_end_dt IS NULL)::int AS null_end
     FROM ${INGEST}
   `);
-  const { total, null_end, pepsi, pepsi_bott } = stats.rows[0];
+  const { total, null_end } = stats.rows[0];
   const nullPct = total > 0 ? null_end / total : 1;
   console.log(`\nIngest checks:`);
   console.log(`  rows           ${total}`);
   console.log(`  null warr_end  ${null_end} (${(nullPct * 100).toFixed(1)}%)`);
-  console.log(`  Pepsi          ${pepsi}`);
-  console.log(`  Pepsi-Bott     ${pepsi_bott}`);
 
   if (total <= 0) throw new Error('Ingest is empty — aborting swap');
   if (nullPct > NULL_END_MAX) {
     throw new Error(`Null warr_end_dt share ${(nullPct * 100).toFixed(1)}% exceeds ${NULL_END_MAX * 100}% — aborting swap`);
   }
-  if (pepsi > 0) throw new Error(`Found ${pepsi} leftover Pepsi subgroup rows — aborting swap`);
 
   if (samples.length) {
     console.log('\nSample serials (Excel parse vs ingest):');
@@ -508,18 +483,18 @@ try {
   await client.query('TRUNCATE public.warranty_master_items RESTART IDENTITY');
   await client.query(`
     INSERT INTO public.warranty_master_items (
-      serial_no, billing_doc, billing_date, fg_model, material,
-      group_name, material_group, product_subgroup, customer_name,
+      serial_no, billing_doc, billing_date, material,
+      group_name, material_group, customer_name,
       customer_subgroup, ship_to_party, ship_to_state, ship_to_city,
-      inventory_number, warr_start_dt, warr_end_dt, city, pin_code,
-      sheet_year, warranty_months, is_active, imported_at
+      inventory_number, warr_start_dt, warr_end_dt, pin_code,
+      warranty_months, is_active, imported_at
     )
     SELECT
-      serial_no, billing_doc, billing_date, fg_model, material,
-      group_name, material_group, product_subgroup, customer_name,
+      serial_no, billing_doc, billing_date, material,
+      group_name, material_group, customer_name,
       customer_subgroup, ship_to_party, ship_to_state, ship_to_city,
-      inventory_number, warr_start_dt, warr_end_dt, city, pin_code,
-      sheet_year, warranty_months, is_active, imported_at
+      inventory_number, warr_start_dt, warr_end_dt, pin_code,
+      warranty_months, is_active, imported_at
     FROM ${INGEST}
   `);
   await client.query(`

@@ -39,7 +39,7 @@ export function buildWarrantyStripBySerialsSql(): string {
       TO_CHAR(w.warr_end_dt, 'YYYY-MM-DD') AS "warrEndDt",
       NULLIF(BTRIM(c.account), '') AS "crmAccount",
       COALESCE(NULLIF(BTRIM(w.customer_subgroup), ''), NULLIF(BTRIM(w.customer_name), '')) AS "systemAccount",
-      NULLIF(BTRIM(w.fg_model), '') AS "fgModel",
+      NULLIF(BTRIM(w.material), '') AS "fgModel",
       NULLIF(BTRIM(w.billing_doc), '') AS "billingDoc",
       NULLIF(BTRIM(c.wco), '') AS "callWco"
     FROM (

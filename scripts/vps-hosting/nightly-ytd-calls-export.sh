@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Midnight calls sync — 00:00 IST start, full Jan→yesterday, verify 3× vs CRM,
-# mail at 07:30 IST (SUCCESS or FAILED). Hard deadline kills in-flight sync so
-# FAILED always fires — never silent past 07:30.
+# Midnight calls sync — 00:00 IST start, rolling last-7-days→yesterday
+# (editedon + CRM vs hot fill), verify 3× vs CRM, mail at 07:30 IST
+# (SUCCESS or FAILED). Hard deadline kills in-flight sync so FAILED always
+# fires — never silent past 07:30.
 #
 # Cron: 0 0 * * * …/nightly-ytd-calls-export.sh >> …/nightly-ytd-export-cron.log
 # Fallback: 30 7 * * * …/midnight-crm-delta-mail-fallback.sh

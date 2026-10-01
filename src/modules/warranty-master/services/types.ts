@@ -48,20 +48,17 @@ export type WarrantyMasterSerialRow = {
   shipToState?: string | null;
   shipToCity?: string | null;
   inventoryNumber?: string | null;
-  city?: string | null;
   pinCode?: string | null;
-  sheetYear?: number | null;
 };
 
 export type WarrantyMasterExportRow = {
   billingDoc: string | null;
   billingDate: string | null;
-  material: string;
+  material: string | null;
   serialNo: string;
-  groupName: string;
-  materialGroup: string;
-  productSubgroup: string | null;
-  customerName: string;
+  groupName: string | null;
+  materialGroup: string | null;
+  customerName: string | null;
   customerSubgroup: string | null;
   shipToParty: string | null;
   shipToState: string | null;
@@ -69,9 +66,7 @@ export type WarrantyMasterExportRow = {
   inventoryNumber: string | null;
   warrStartDt: string | null;
   warrEndDt: string | null;
-  city: string | null;
   pinCode: string | null;
-  sheetYear: number | null;
   warrantyMonths: number;
   isActive: boolean;
 };

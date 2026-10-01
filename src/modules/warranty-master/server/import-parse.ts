@@ -6,17 +6,11 @@ export function normalizeHeader(h: string): string {
   return h.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-/** Exact "Pepsi" only → Pepsi-Bott. Leaves Pepsi-Bott and other Pepsi* values alone. */
-export function remapCustomerSubgroup(raw: string): string {
-  const t = raw.trim();
-  return t.toLowerCase() === 'pepsi' ? 'Pepsi-Bott' : t;
-}
-
-/** Digit-only sold-to (SAP customer number) is not a name. */
-export function cleanCustomerName(raw: string): string {
-  const t = raw.trim();
-  if (!t || /^\d+$/.test(t)) return '';
-  return t;
+/** Trim; empty → null. No synthetic defaults. */
+export function cellText(val: unknown): string | null {
+  if (val == null || val === '') return null;
+  const t = String(val).trim();
+  return t || null;
 }
 
 export function parseDateVal(val: unknown): string | null {
@@ -122,20 +116,24 @@ export function mapSheetHeaders(rawKeys: string[]): Record<string, string> {
       keyMap.materialGroup = rawKey;
     } else if (norm.includes('material') || norm.includes('fgmodel') || norm.includes('model') || norm.includes('productcode')) {
       keyMap.material = rawKey;
-    } else if (norm.includes('productsubgroup') || (norm.includes('subgroup') && !norm.includes('customer'))) {
-      keyMap.productSubgroup = rawKey;
     } else if (norm.includes('customersoldto') || norm.includes('soldto') || norm === 'customername' || norm === 'customer') {
       keyMap.customer = rawKey;
     } else if (norm.includes('customersubgroup') || norm.includes('custsubgrp') || norm.includes('cgrp1') || norm === 'subgroup') {
       keyMap.customerSubgroup = rawKey;
-    } else if (norm.includes('customershipto') || norm.includes('shipto') || norm.includes('consignee')) {
-      keyMap.shipTo = rawKey;
-    } else if (norm.includes('state') || norm.includes('shiptostate')) {
-      keyMap.state = rawKey;
-    } else if (norm.includes('shiptocity') || (norm.includes('city') && !keyMap.city)) {
+    } else if (norm.includes('shiptocity') || (norm.includes('city') && norm.includes('shipto'))) {
       keyMap.shipToCity = rawKey;
+    } else if (norm.includes('shiptostate') || (norm.includes('state') && norm.includes('shipto'))) {
+      keyMap.state = rawKey;
+    } else if (
+      (norm.includes('customershipto') || norm.includes('shipto') || norm.includes('consignee')) &&
+      !norm.includes('city') &&
+      !norm.includes('state')
+    ) {
+      keyMap.shipTo = rawKey;
+    } else if (norm.includes('state')) {
+      keyMap.state = rawKey;
     } else if (norm === 'city') {
-      keyMap.city = rawKey;
+      keyMap.shipToCity = rawKey;
     } else if (norm.includes('inventory')) {
       keyMap.inventory = rawKey;
     } else if (norm.includes('warrda') || norm.includes('warrstart') || norm.includes('startdate')) {

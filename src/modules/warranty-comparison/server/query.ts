@@ -334,7 +334,7 @@ export async function fetchWarrantyComparisonRows(
         COALESCE(w.customer_name, '') AS "customerName",
         w.customer_subgroup AS "customerSubgroup",
         COALESCE(w.group_name, '') AS "groupName",
-        COALESCE(w.fg_model, '') AS "fgModel",
+        COALESCE(w.material, '') AS "fgModel",
         ${WARRANTY_MONTHS_SQL} AS "warrantyMonths",
         TO_CHAR(w.warr_start_dt, 'YYYY-MM-DD') AS "warrStartDt",
         TO_CHAR(w.warr_end_dt, 'YYYY-MM-DD') AS "warrEndDt",

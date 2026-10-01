@@ -76,7 +76,7 @@ export function normalizeSerialRows(raw: Record<string, unknown>[]): WarrantyMas
       customerKey: String(row.customerKey ?? row.CustomerKey ?? row.customer_key ?? '').trim(),
       groupKey: String(row.groupKey ?? row.GroupKey ?? row.group_key ?? '').trim(),
       warrantyMonths: toNumber(row.warrantyMonths ?? row.WarrantyMonths ?? row.warranty_months),
-      fgModel: String(row.fgModel ?? row.FgModel ?? row.FGModel ?? row.fg_model ?? ''),
+      fgModel: String(row.fgModel ?? row.FgModel ?? row.FGModel ?? row.material ?? row.fg_model ?? ''),
       warrStartDt: warrStartDt != null && warrStartDt !== '' ? String(warrStartDt).slice(0, 10) : null,
       warrEndDt: warrEndDt != null && warrEndDt !== '' ? String(warrEndDt).slice(0, 10) : null,
       isActive,

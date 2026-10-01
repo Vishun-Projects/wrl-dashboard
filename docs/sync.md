@@ -96,7 +96,8 @@ See `package.json` for all `sync-worker:*` commands.
 | `SYNC_PIPELINE_RECONCILE_BATCH` | Pipeline TRNs checked per incremental run (default 400) |
 | `SYNC_EDITEDON_CATCHUP_ENABLED` | Replay editedon day windows each incremental (default on) |
 | `SYNC_EDITEDON_CATCHUP_DAYS_PER_RUN` | Calendar days per incremental catch-up step (default 1) |
-| `SYNC_EDITEDON_CATCHUP_FROM` | YTD start for nightly editedon catch-up (default Jan 1) |
+| `SYNC_EDITEDON_CATCHUP_FROM` | Optional fixed start for midnight catch-up (overrides rolling window) |
+| `MIDNIGHT_CATCHUP_DAYS` | Rolling days through yesterday for midnight editedon + fill-hot-gaps (default 7) |
 | `SYNC_CRM_INCREMENTAL_CHUNK_DAYS` | CRM window for short catch-up (default 1) |
 | `SYNC_CRM_CATCHUP_CHUNK_DAYS` | CRM window when catch-up > 3 days (default 1) |
 | `SYNC_CRM_INCREMENTAL_TIMEOUT_MS` | HTTP timeout per CRM chunk (default 300000) |

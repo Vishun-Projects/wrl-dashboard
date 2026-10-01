@@ -40,12 +40,26 @@ function resolveCodeRoot(): string {
   return resolve(cwd, '../..');
 }
 
+/** Midnight / manual catch-up start (matches midnight-calls-sync.sh default). */
+export function catchupFromYmd(asOf: string, now = new Date()): string {
+  const fixed = process.env.SYNC_EDITEDON_CATCHUP_FROM?.trim();
+  if (fixed) return fixed;
+  const days = Math.max(1, Number(process.env.MIDNIGHT_CATCHUP_DAYS ?? 7) || 7);
+  const [y, m, d] = asOf.split('-').map(Number);
+  if (!y || !m || !d) {
+    const year = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+    }).format(now);
+    return `${year}-01-01`;
+  }
+  const utc = Date.UTC(y, m - 1, d);
+  return new Date(utc - (days - 1) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/** @deprecated use catchupFromYmd — kept for callers that still say "YTD". */
 export function ytdStartYmd(now = new Date()): string {
-  const year = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-  }).format(now);
-  return process.env.SYNC_EDITEDON_CATCHUP_FROM?.trim() || `${year}-01-01`;
+  return catchupFromYmd(istYesterdayYmd(now), now);
 }
 
 export function startCallsHotSyncThroughYesterday(
@@ -53,7 +67,7 @@ export function startCallsHotSyncThroughYesterday(
 ): StartCallsHotSyncResult {
   const root = options?.rootDir ?? resolveCodeRoot();
   const asOf = options?.asOf?.trim() || istYesterdayYmd();
-  const ytdStart = ytdStartYmd();
+  const from = catchupFromYmd(asOf);
   const script = join(root, 'scripts', 'vps-hosting', 'midnight-calls-sync.sh');
   if (!existsSync(script)) {
     throw new Error(`missing ${script}`);
@@ -87,7 +101,7 @@ export function startCallsHotSyncThroughYesterday(
   const outFd = openSync(logPath, 'a');
   writeSync(
     outFd,
-    `\n=== manual calls-hot sync start ${new Date().toISOString()} YTD ${ytdStart} → ${asOf} ===\n`
+    `\n=== manual calls-hot sync start ${new Date().toISOString()} ${from} → ${asOf} ===\n`
   );
 
   const child = spawn('bash', [script], {
@@ -120,6 +134,6 @@ export function startCallsHotSyncThroughYesterday(
     asOf,
     pid,
     logPath,
-    detail: `Started YTD calls register sync ${ytdStart} → ${asOf} in background (pid ${pid ?? '?'})`,
+    detail: `Started calls register sync ${from} → ${asOf} in background (pid ${pid ?? '?'})`,
   };
 }

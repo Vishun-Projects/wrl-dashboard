@@ -115,7 +115,9 @@ export async function queryWarrantyMasterSerialsFromDb(
     if (params.fgModel?.trim()) {
       const models = params.fgModel.split(',').map((s) => s.trim()).filter(Boolean);
       if (models.length > 0) {
-        conditions.push(`fg_model = ANY($${idx})`);
+        conditions.push(
+          `LOWER(COALESCE(NULLIF(BTRIM(material), ''), '(Unknown)')) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`
+        );
         values.push(models);
         idx++;
       }
@@ -154,7 +156,7 @@ export async function queryWarrantyMasterSerialsFromDb(
         customer_name AS "customerKey",
         group_name AS "groupName",
         group_name AS "groupKey",
-        fg_model AS "fgModel",
+        material AS "fgModel",
         warranty_months AS "warrantyMonths",
         TO_CHAR(warr_start_dt, 'YYYY-MM-DD') AS "warrStartDt",
         TO_CHAR(warr_end_dt, 'YYYY-MM-DD') AS "warrEndDt",
@@ -165,9 +167,7 @@ export async function queryWarrantyMasterSerialsFromDb(
         ship_to_state AS "shipToState",
         ship_to_city AS "shipToCity",
         inventory_number AS "inventoryNumber",
-        city AS "city",
-        pin_code AS "pinCode",
-        sheet_year AS "sheetYear"
+        pin_code AS "pinCode"
       FROM public.warranty_master_items
       WHERE ${conditions.join(' AND ')}
       ORDER BY serial_no ASC
@@ -239,7 +239,9 @@ export async function countWarrantyMasterSerialsFromDb(
     if (params.fgModel?.trim()) {
       const models = params.fgModel.split(',').map((s) => s.trim()).filter(Boolean);
       if (models.length > 0) {
-        conditions.push(`fg_model = ANY($${idx})`);
+        conditions.push(
+          `LOWER(COALESCE(NULLIF(BTRIM(material), ''), '(Unknown)')) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`
+        );
         values.push(models);
         idx++;
       }
@@ -316,7 +318,9 @@ export async function queryWarrantyMasterExportRowsFromDb(
     if (params.fgModel?.trim()) {
       const models = params.fgModel.split(',').map((s) => s.trim()).filter(Boolean);
       if (models.length > 0) {
-        conditions.push(`fg_model = ANY($${idx})`);
+        conditions.push(
+          `LOWER(COALESCE(NULLIF(BTRIM(material), ''), '(Unknown)')) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`
+        );
         values.push(models);
         idx++;
       }
@@ -363,7 +367,6 @@ export async function queryWarrantyMasterExportRowsFromDb(
         serial_no AS "serialNo",
         group_name AS "groupName",
         material_group AS "materialGroup",
-        product_subgroup AS "productSubgroup",
         customer_name AS "customerName",
         customer_subgroup AS "customerSubgroup",
         ship_to_party AS "shipToParty",
@@ -372,9 +375,7 @@ export async function queryWarrantyMasterExportRowsFromDb(
         inventory_number AS "inventoryNumber",
         TO_CHAR(warr_start_dt, 'YYYY-MM-DD') AS "warrStartDt",
         TO_CHAR(warr_end_dt, 'YYYY-MM-DD') AS "warrEndDt",
-        city AS "city",
         pin_code AS "pinCode",
-        sheet_year AS "sheetYear",
         warranty_months AS "warrantyMonths",
         (warr_end_dt IS NOT NULL AND warr_end_dt >= CURRENT_DATE) AS "isActive"
       FROM public.warranty_master_items
@@ -402,36 +403,43 @@ export async function queryWarrantyMasterFgLinesFromDb(): Promise<WarrantyMaster
         subgroup_key AS "customerKey",
         group_key AS "groupKey",
         warranty_months AS "warrantyMonths",
-        fg_model AS "fgModel",
+        material AS "fgModel",
         machine_count AS "machineCount",
         active_machine_count AS "activeMachineCount",
         TO_CHAR(min_warr_end, 'YYYY-MM-DD') AS "minWarrEnd",
         TO_CHAR(max_warr_end, 'YYYY-MM-DD') AS "maxWarrEnd"
       FROM public.warranty_master_rollup
-      ORDER BY subgroup_label, group_label, warranty_months, fg_model
+      ORDER BY subgroup_label, group_label, warranty_months, material
     `);
     return res.rows;
   });
 }
 
-const ROLLUP_DDL = `
+const ROLLUP_CREATE_DDL = `
 CREATE TABLE IF NOT EXISTS public.warranty_master_rollup (
   subgroup_key          text NOT NULL,
   subgroup_label        text NOT NULL,
   group_key             text NOT NULL,
   group_label           text NOT NULL,
   warranty_months       smallint NOT NULL,
-  fg_model              text NOT NULL,
+  material              text NOT NULL,
   machine_count         integer NOT NULL,
   active_machine_count  integer NOT NULL,
   min_warr_end          date,
   max_warr_end          date,
-  PRIMARY KEY (subgroup_key, group_key, warranty_months, fg_model)
+  PRIMARY KEY (subgroup_key, group_key, warranty_months, material)
 );
 CREATE INDEX IF NOT EXISTS idx_wm_rollup_subgroup ON public.warranty_master_rollup (subgroup_key);
 CREATE INDEX IF NOT EXISTS idx_wm_rollup_group ON public.warranty_master_rollup (group_key);
-CREATE INDEX IF NOT EXISTS idx_wm_rollup_fg ON public.warranty_master_rollup (fg_model);
+CREATE INDEX IF NOT EXISTS idx_wm_rollup_material ON public.warranty_master_rollup (material);
 CREATE INDEX IF NOT EXISTS idx_wm_rollup_months ON public.warranty_master_rollup (warranty_months);
+`;
+
+/** Drop leftover composite type if a prior CREATE raced/failed mid-flight. */
+const ROLLUP_RECREATE_DDL = `
+DROP TABLE IF EXISTS public.warranty_master_rollup CASCADE;
+DROP TYPE IF EXISTS public.warranty_master_rollup CASCADE;
+${ROLLUP_CREATE_DDL}
 `;
 
 type PgClient = {
@@ -441,59 +449,120 @@ type PgClient = {
   ) => Promise<{ rows: T[]; rowCount?: number | null }>;
 };
 
-let rollupEnsured = false;
+let rollupSchemaOk = false;
+/** Last successful items↔rollup count check (process-local). */
+let rollupSyncCheckedAt = 0;
+// ponytail: 5s TTL avoids COUNT(*) on every parallel mode= call; upgrade to NOTIFY/trigger if deletes must show instantly.
+const ROLLUP_SYNC_CHECK_MS = 5_000;
 
+async function rollupHasMaterialColumn(client: PgClient): Promise<boolean> {
+  const col = await client.query<{ exists: boolean }>(`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'warranty_master_rollup'
+        AND column_name = 'material'
+    ) AS exists
+  `);
+  return Boolean(col.rows[0]?.exists);
+}
+
+async function rollupMatchesItems(client: PgClient): Promise<boolean> {
+  const res = await client.query<{ items: string; rollup: string }>(`
+    SELECT
+      (SELECT COUNT(*)::text FROM public.warranty_master_items) AS items,
+      (SELECT COALESCE(SUM(machine_count), 0)::text FROM public.warranty_master_rollup) AS rollup
+  `);
+  return Number(res.rows[0]?.items ?? 0) === Number(res.rows[0]?.rollup ?? 0);
+}
+
+/**
+ * Before any rollup read: schema ok + machine totals match items.
+ * Catches manual DB deletes/imports that skipped refreshWarrantyMasterRollup.
+ */
 async function ensureWarrantyMasterRollup(client: PgClient): Promise<void> {
-  await client.query(ROLLUP_DDL);
-  if (rollupEnsured) return;
-  const cnt = await client.query<{ n: string }>(
-    `SELECT COUNT(*)::text AS n FROM public.warranty_master_rollup`
-  );
-  if (Number(cnt.rows[0]?.n ?? 0) === 0) {
-    await refreshWarrantyMasterRollupWithClient(client);
+  if (rollupSchemaOk && Date.now() - rollupSyncCheckedAt < ROLLUP_SYNC_CHECK_MS) return;
+  // Serialize concurrent page loads that all try to rebuild an empty/stale rollup.
+  await client.query(`SELECT pg_advisory_lock(87201452)`);
+  try {
+    if (rollupSchemaOk && Date.now() - rollupSyncCheckedAt < ROLLUP_SYNC_CHECK_MS) return;
+    if (!(await rollupHasMaterialColumn(client))) {
+      await client.query(ROLLUP_RECREATE_DDL);
+    } else {
+      await client.query(ROLLUP_CREATE_DDL);
+    }
+    rollupSchemaOk = true;
+    if (!(await rollupMatchesItems(client))) {
+      await rebuildWarrantyMasterRollupRows(client);
+    }
+    rollupSyncCheckedAt = Date.now();
+  } finally {
+    await client.query(`SELECT pg_advisory_unlock(87201452)`);
   }
-  rollupEnsured = true;
+}
+
+async function rebuildWarrantyMasterRollupRows(client: PgClient): Promise<void> {
+  // Grain keys are case-folded so 'Amul'/'AMUL' and material casing variants collapse.
+  // PK material stores the folded key (same as group_key) — avoids pkey clashes from MODE() casing.
+  await client.query('BEGIN');
+  try {
+    await client.query(`TRUNCATE public.warranty_master_rollup`);
+    await client.query(`
+      INSERT INTO public.warranty_master_rollup (
+        subgroup_key, subgroup_label, group_key, group_label,
+        warranty_months, material, machine_count, active_machine_count,
+        min_warr_end, max_warr_end
+      )
+      SELECT
+        LOWER(COALESCE(NULLIF(BTRIM(customer_subgroup), ''), '(Unknown)')) AS subgroup_key,
+        MODE() WITHIN GROUP (
+          ORDER BY COALESCE(NULLIF(BTRIM(customer_subgroup), ''), '(Unknown)')
+        ) AS subgroup_label,
+        LOWER(COALESCE(NULLIF(BTRIM(group_name), ''), '(Unknown)')) AS group_key,
+        MODE() WITHIN GROUP (
+          ORDER BY COALESCE(NULLIF(BTRIM(group_name), ''), '(Unknown)')
+        ) AS group_label,
+        COALESCE(warranty_months, 0) AS warranty_months,
+        LOWER(COALESCE(NULLIF(BTRIM(material), ''), '(Unknown)')) AS material,
+        COUNT(*)::int AS machine_count,
+        SUM(CASE WHEN warr_end_dt IS NOT NULL AND warr_end_dt >= CURRENT_DATE THEN 1 ELSE 0 END)::int
+          AS active_machine_count,
+        MIN(warr_end_dt) AS min_warr_end,
+        MAX(warr_end_dt) AS max_warr_end
+      FROM public.warranty_master_items
+      GROUP BY
+        LOWER(COALESCE(NULLIF(BTRIM(customer_subgroup), ''), '(Unknown)')),
+        LOWER(COALESCE(NULLIF(BTRIM(group_name), ''), '(Unknown)')),
+        COALESCE(warranty_months, 0),
+        LOWER(COALESCE(NULLIF(BTRIM(material), ''), '(Unknown)'))
+    `);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  }
 }
 
 async function refreshWarrantyMasterRollupWithClient(client: PgClient): Promise<void> {
-  await client.query(ROLLUP_DDL);
-  await client.query(`TRUNCATE public.warranty_master_rollup`);
-  await client.query(`
-    INSERT INTO public.warranty_master_rollup (
-      subgroup_key, subgroup_label, group_key, group_label,
-      warranty_months, fg_model, machine_count, active_machine_count,
-      min_warr_end, max_warr_end
-    )
-    SELECT
-      LOWER(COALESCE(NULLIF(BTRIM(customer_subgroup), ''), '(Unknown)')) AS subgroup_key,
-      MODE() WITHIN GROUP (
-        ORDER BY COALESCE(NULLIF(BTRIM(customer_subgroup), ''), '(Unknown)')
-      ) AS subgroup_label,
-      LOWER(COALESCE(NULLIF(BTRIM(group_name), ''), '(Unknown)')) AS group_key,
-      MODE() WITHIN GROUP (
-        ORDER BY COALESCE(NULLIF(BTRIM(group_name), ''), '(Unknown)')
-      ) AS group_label,
-      warranty_months,
-      COALESCE(NULLIF(BTRIM(fg_model), ''), '(Unknown)') AS fg_model,
-      COUNT(*)::int AS machine_count,
-      SUM(CASE WHEN warr_end_dt IS NOT NULL AND warr_end_dt >= CURRENT_DATE THEN 1 ELSE 0 END)::int
-        AS active_machine_count,
-      MIN(warr_end_dt) AS min_warr_end,
-      MAX(warr_end_dt) AS max_warr_end
-    FROM public.warranty_master_items
-    GROUP BY
-      LOWER(COALESCE(NULLIF(BTRIM(customer_subgroup), ''), '(Unknown)')),
-      LOWER(COALESCE(NULLIF(BTRIM(group_name), ''), '(Unknown)')),
-      warranty_months,
-      COALESCE(NULLIF(BTRIM(fg_model), ''), '(Unknown)')
-  `);
+  await client.query(`SELECT pg_advisory_lock(87201452)`);
+  try {
+    if (!(await rollupHasMaterialColumn(client))) {
+      await client.query(ROLLUP_RECREATE_DDL);
+    } else {
+      await client.query(ROLLUP_CREATE_DDL);
+    }
+    await rebuildWarrantyMasterRollupRows(client);
+  } finally {
+    await client.query(`SELECT pg_advisory_unlock(87201452)`);
+  }
 }
 
 /** Rebuild rollup after Excel import (or empty table). One 5M scan, then reports are cheap. */
 export async function refreshWarrantyMasterRollup(): Promise<void> {
   await withAppClient(async (client) => {
     await refreshWarrantyMasterRollupWithClient(client);
-    rollupEnsured = true;
+    rollupSchemaOk = true;
+    rollupSyncCheckedAt = Date.now();
   });
 }
 
@@ -532,9 +601,9 @@ function buildRollupFilterWhere(params: WarrantyMasterQueryParams): {
   }
 
   if (params.fgModel?.trim()) {
-    const models = params.fgModel.split(',').map((s) => s.trim()).filter(Boolean);
+    const models = params.fgModel.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
     if (models.length > 0) {
-      conditions.push(`fg_model = ANY($${idx})`);
+      conditions.push(`material = ANY($${idx})`);
       values.push(models);
       idx++;
     }
@@ -614,36 +683,36 @@ export async function queryWarrantyMasterSummaryFromDb(
 export async function queryWarrantyMasterOptionsFromDb(): Promise<WarrantyMasterDims> {
   return withAppClient(async (client) => {
     await ensureWarrantyMasterRollup(client);
-    const [customers, groups, fgModels, months] = await Promise.all([
-      client.query<{ val: string; label: string }>(`
-        SELECT subgroup_key AS val, MIN(subgroup_label) AS label
-        FROM public.warranty_master_rollup
-        GROUP BY subgroup_key
-        ORDER BY 2
-      `),
-      client.query<{ val: string; label: string }>(`
-        SELECT group_key AS val, MIN(group_label) AS label
-        FROM public.warranty_master_rollup
-        GROUP BY group_key
-        ORDER BY 2
-      `),
-      client.query<{ val: string }>(`
-        SELECT DISTINCT fg_model AS val
-        FROM public.warranty_master_rollup
-        WHERE fg_model <> ''
-        ORDER BY 1
-      `),
-      client.query<{ val: number }>(`
-        SELECT DISTINCT warranty_months AS val
-        FROM public.warranty_master_rollup
-        ORDER BY 1
-      `),
-    ]);
+    // Sequential: node-pg forbids concurrent queries on one client.
+    const customers = await client.query<{ val: string; label: string }>(`
+      SELECT subgroup_key AS val, MIN(subgroup_label) AS label
+      FROM public.warranty_master_rollup
+      GROUP BY subgroup_key
+      ORDER BY 2
+    `);
+    const groups = await client.query<{ val: string; label: string }>(`
+      SELECT group_key AS val, MIN(group_label) AS label
+      FROM public.warranty_master_rollup
+      GROUP BY group_key
+      ORDER BY 2
+    `);
+    const fgModels = await client.query<{ val: string; label: string }>(`
+      SELECT material AS val, MIN(material) AS label
+      FROM public.warranty_master_rollup
+      WHERE material <> ''
+      GROUP BY material
+      ORDER BY 1
+    `);
+    const months = await client.query<{ val: number }>(`
+      SELECT DISTINCT warranty_months AS val
+      FROM public.warranty_master_rollup
+      ORDER BY 1
+    `);
 
     return {
       customers: customers.rows.map((r) => ({ value: r.label, label: r.label })),
       groups: groups.rows.map((r) => ({ value: r.label, label: r.label })),
-      fgModels: fgModels.rows.map((r) => ({ value: r.val, label: r.val })),
+      fgModels: fgModels.rows.map((r) => ({ value: r.val, label: r.label })),
       warrantyMonths: months.rows.map((r) => Number(r.val)).filter(Number.isFinite),
     };
   });

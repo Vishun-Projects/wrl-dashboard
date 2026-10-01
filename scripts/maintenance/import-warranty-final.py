@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 Stream 2022-2025 FINAL.xlsx into warranty_master_items (merge, later-end wins).
-Prints progress so a 196 MB file does not look stuck.
+No truncate. New schema (no fg_model / product_subgroup / city / sheet_year).
 
   python scripts/maintenance/import-warranty-final.py
-  node scripts/maintenance/reimport-warranty-master.mjs --final
+  python scripts/maintenance/import-warranty-final.py --merge-only
 """
 import csv
 import io
+import math
 import os
 import re
 import sys
@@ -42,23 +43,12 @@ def get_database_url():
                 line = line.strip()
                 if line and not line.startswith("#") and line.startswith("DATABASE_URL="):
                     val = line.split("=", 1)[1].strip()
-                    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+                    if (val.startswith('"') and val.endswith('"')) or (
+                        val.startswith("'") and val.endswith("'")
+                    ):
                         val = val[1:-1]
                     return val
     return None
-
-
-def excel_serial_to_date(n):
-    try:
-        serial = float(n)
-    except (TypeError, ValueError):
-        return None
-    if serial <= 30000 or serial >= 70000:
-        return None
-    d = date(1899, 12, 30) + timedelta(days=int(serial))
-    if d.year < 1990 or d.year > 2100:
-        return None
-    return d.isoformat()
 
 
 def parse_date_str(s):
@@ -80,33 +70,38 @@ def parse_date_str(s):
                 return f"{yyyy:04d}-{mm:02d}-{dd:02d}"
         except Exception:
             return None
-    return excel_serial_to_date(s)
+    try:
+        serial = float(s)
+        if 30000 < serial < 70000:
+            d = date(1899, 12, 30) + timedelta(days=int(serial))
+            if 1990 <= d.year <= 2100:
+                return d.isoformat()
+    except Exception:
+        pass
+    return None
 
 
 def calc_warranty_months(start_str, end_str):
+    """Inclusive end+1 day, snap up to 6-month step (same as app import)."""
     if not start_str or not end_str:
         return 0
     try:
         d1 = datetime.strptime(start_str, "%Y-%m-%d").date()
         d2 = datetime.strptime(end_str, "%Y-%m-%d").date()
-        months = (d2.year - d1.year) * 12 + (d2.month - d1.month)
-        if d2.day < d1.day:
+        nxt = d2 + timedelta(days=1)
+        months = (nxt.year - d1.year) * 12 + (nxt.month - d1.month)
+        if nxt.day < d1.day:
             months -= 1
-        return months if months > 0 else 0
+        if months <= 0:
+            return 0
+        return int(math.ceil(months / 6.0) * 6)
     except Exception:
         return 0
 
 
-def remap_subgroup(raw):
+def cell_text(raw):
     t = (raw or "").strip()
-    return "Pepsi-Bott" if t.lower() == "pepsi" else t
-
-
-def clean_customer_name(raw):
-    t = (raw or "").strip()
-    if not t or t.isdigit() or t == "(Unknown)":
-        return ""
-    return t
+    return t or None
 
 
 MERGE_BATCHES = 32
@@ -114,41 +109,37 @@ MERGE_ONLY = "--merge-only" in sys.argv
 
 MERGE_SQL = f"""
 INSERT INTO public.warranty_master_items (
-  serial_no, billing_doc, billing_date, fg_model, material, group_name, material_group,
-  product_subgroup, customer_name, customer_subgroup, ship_to_party, ship_to_state,
-  ship_to_city, inventory_number, warr_start_dt, warr_end_dt, city, pin_code,
-  sheet_year, warranty_months, is_active
+  serial_no, billing_doc, billing_date, material, group_name, material_group,
+  customer_name, customer_subgroup, ship_to_party, ship_to_state,
+  ship_to_city, inventory_number, warr_start_dt, warr_end_dt, pin_code,
+  warranty_months, is_active
 )
 SELECT
-  serial_no, billing_doc, billing_date, fg_model, material, group_name, material_group,
-  product_subgroup, customer_name, customer_subgroup, ship_to_party, ship_to_state,
-  ship_to_city, inventory_number, warr_start_dt, warr_end_dt, city, pin_code,
-  sheet_year, warranty_months, is_active
+  serial_no, billing_doc, billing_date, material, group_name, material_group,
+  customer_name, customer_subgroup, ship_to_party, ship_to_state,
+  ship_to_city, inventory_number, warr_start_dt, warr_end_dt, pin_code,
+  warranty_months, is_active
 FROM (
   SELECT DISTINCT ON (serial_no) *
   FROM {STAGING}
   WHERE MOD(ABS(HASHTEXT(serial_no)), %s) = %s
-  ORDER BY serial_no, sheet_year DESC, billing_date DESC NULLS LAST
+  ORDER BY serial_no, warr_end_dt DESC NULLS LAST, billing_date DESC NULLS LAST
 ) s
 ON CONFLICT (serial_no) DO UPDATE SET
-  billing_doc = COALESCE(NULLIF(EXCLUDED.billing_doc, ''), warranty_master_items.billing_doc),
+  billing_doc = COALESCE(EXCLUDED.billing_doc, warranty_master_items.billing_doc),
   billing_date = COALESCE(EXCLUDED.billing_date, warranty_master_items.billing_date),
-  fg_model = COALESCE(NULLIF(EXCLUDED.fg_model, ''), NULLIF(EXCLUDED.fg_model, '(Unknown)'), warranty_master_items.fg_model),
-  material = COALESCE(NULLIF(EXCLUDED.material, ''), NULLIF(EXCLUDED.material, '(Unknown)'), warranty_master_items.material),
-  group_name = COALESCE(NULLIF(EXCLUDED.group_name, ''), NULLIF(EXCLUDED.group_name, '(Unknown)'), warranty_master_items.group_name),
-  material_group = COALESCE(NULLIF(EXCLUDED.material_group, ''), NULLIF(EXCLUDED.material_group, '(Unknown)'), warranty_master_items.material_group),
-  product_subgroup = COALESCE(NULLIF(EXCLUDED.product_subgroup, ''), warranty_master_items.product_subgroup),
-  customer_name = COALESCE(NULLIF(EXCLUDED.customer_name, ''), NULLIF(EXCLUDED.customer_name, '(Unknown)'), warranty_master_items.customer_name),
-  customer_subgroup = COALESCE(NULLIF(EXCLUDED.customer_subgroup, ''), warranty_master_items.customer_subgroup),
-  ship_to_party = COALESCE(NULLIF(EXCLUDED.ship_to_party, ''), warranty_master_items.ship_to_party),
-  ship_to_state = COALESCE(NULLIF(EXCLUDED.ship_to_state, ''), warranty_master_items.ship_to_state),
-  ship_to_city = COALESCE(NULLIF(EXCLUDED.ship_to_city, ''), warranty_master_items.ship_to_city),
-  inventory_number = COALESCE(NULLIF(EXCLUDED.inventory_number, ''), warranty_master_items.inventory_number),
+  material = COALESCE(EXCLUDED.material, warranty_master_items.material),
+  group_name = COALESCE(EXCLUDED.group_name, warranty_master_items.group_name),
+  material_group = COALESCE(EXCLUDED.material_group, warranty_master_items.material_group),
+  customer_name = COALESCE(EXCLUDED.customer_name, warranty_master_items.customer_name),
+  customer_subgroup = COALESCE(EXCLUDED.customer_subgroup, warranty_master_items.customer_subgroup),
+  ship_to_party = COALESCE(EXCLUDED.ship_to_party, warranty_master_items.ship_to_party),
+  ship_to_state = COALESCE(EXCLUDED.ship_to_state, warranty_master_items.ship_to_state),
+  ship_to_city = COALESCE(EXCLUDED.ship_to_city, warranty_master_items.ship_to_city),
+  inventory_number = COALESCE(EXCLUDED.inventory_number, warranty_master_items.inventory_number),
   warr_start_dt = COALESCE(EXCLUDED.warr_start_dt, warranty_master_items.warr_start_dt),
   warr_end_dt = COALESCE(EXCLUDED.warr_end_dt, warranty_master_items.warr_end_dt),
-  city = COALESCE(NULLIF(EXCLUDED.city, ''), warranty_master_items.city),
-  pin_code = COALESCE(NULLIF(EXCLUDED.pin_code, ''), warranty_master_items.pin_code),
-  sheet_year = COALESCE(EXCLUDED.sheet_year, warranty_master_items.sheet_year),
+  pin_code = COALESCE(EXCLUDED.pin_code, warranty_master_items.pin_code),
   warranty_months = EXCLUDED.warranty_months,
   is_active = (COALESCE(EXCLUDED.warr_end_dt, warranty_master_items.warr_end_dt) IS NOT NULL
     AND COALESCE(EXCLUDED.warr_end_dt, warranty_master_items.warr_end_dt) >= CURRENT_DATE),
@@ -159,6 +150,63 @@ WHERE
       AND EXCLUDED.warr_end_dt >= warranty_master_items.warr_end_dt)
   OR (warranty_master_items.warr_end_dt IS NULL AND EXCLUDED.warr_end_dt IS NULL)
 """
+
+
+def rebuild_rollup(cursor):
+    print("  rebuilding rollup...")
+    cursor.execute("DROP TABLE IF EXISTS public.warranty_master_rollup CASCADE")
+    cursor.execute("DROP TYPE IF EXISTS public.warranty_master_rollup CASCADE")
+    cursor.execute(
+        """
+        CREATE TABLE public.warranty_master_rollup (
+          subgroup_key text NOT NULL,
+          subgroup_label text NOT NULL,
+          group_key text NOT NULL,
+          group_label text NOT NULL,
+          warranty_months smallint NOT NULL,
+          material text NOT NULL,
+          machine_count integer NOT NULL,
+          active_machine_count integer NOT NULL,
+          min_warr_end date,
+          max_warr_end date,
+          PRIMARY KEY (subgroup_key, group_key, warranty_months, material)
+        )
+        """
+    )
+    cursor.execute(
+        """
+        INSERT INTO public.warranty_master_rollup (
+          subgroup_key, subgroup_label, group_key, group_label,
+          warranty_months, material, machine_count, active_machine_count,
+          min_warr_end, max_warr_end
+        )
+        SELECT
+          LOWER(COALESCE(NULLIF(BTRIM(customer_subgroup), ''), '(Unknown)')),
+          MODE() WITHIN GROUP (ORDER BY COALESCE(NULLIF(BTRIM(customer_subgroup), ''), '(Unknown)')),
+          LOWER(COALESCE(NULLIF(BTRIM(group_name), ''), '(Unknown)')),
+          MODE() WITHIN GROUP (ORDER BY COALESCE(NULLIF(BTRIM(group_name), ''), '(Unknown)')),
+          COALESCE(warranty_months, 0),
+          LOWER(COALESCE(NULLIF(BTRIM(material), ''), '(Unknown)')),
+          COUNT(*)::int,
+          SUM(CASE WHEN warr_end_dt IS NOT NULL AND warr_end_dt >= CURRENT_DATE THEN 1 ELSE 0 END)::int,
+          MIN(warr_end_dt),
+          MAX(warr_end_dt)
+        FROM public.warranty_master_items
+        GROUP BY 1, 3, 5, 6
+        """
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_wm_rollup_subgroup ON public.warranty_master_rollup (subgroup_key)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_wm_rollup_group ON public.warranty_master_rollup (group_key)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_wm_rollup_material ON public.warranty_master_rollup (material)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_wm_rollup_months ON public.warranty_master_rollup (warranty_months)"
+    )
 
 
 def merge_into_live(cursor):
@@ -191,13 +239,10 @@ def merge_into_live(cursor):
         """
     )
     cursor.execute(f"DROP TABLE IF EXISTS {STAGING}")
+    rebuild_rollup(cursor)
     cursor.execute("SELECT COUNT(*) FROM public.warranty_master_items")
     live = cursor.fetchone()[0]
-    cursor.execute(
-        "SELECT COUNT(*) FROM public.warranty_master_items WHERE customer_subgroup = 'Pepsi-Bott'"
-    )
-    pepsi_bott = cursor.fetchone()[0]
-    return live, pepsi_bott
+    return live
 
 
 raw_url = get_database_url()
@@ -209,7 +254,9 @@ if not MERGE_ONLY and not os.path.exists(EXCEL):
     sys.exit(1)
 
 parsed = urlparse(raw_url)
-valid_params = {k: v for k, v in parse_qsl(parsed.query) if k.lower() not in ("pgbouncer", "connection_limit")}
+valid_params = {
+    k: v for k, v in parse_qsl(parsed.query) if k.lower() not in ("pgbouncer", "connection_limit")
+}
 db_url = urlunparse(parsed._replace(query=urlencode(valid_params)))
 
 conn = psycopg2.connect(db_url)
@@ -217,9 +264,10 @@ conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
 cursor = conn.cursor()
 cursor.execute("SET statement_timeout = 0")
 cursor.execute("SET idle_in_transaction_session_timeout = 0")
+cursor.execute("SET synchronous_commit = off")
 
 print("==========================================================")
-print("  FINAL.xlsx stream merge → warranty_master_items")
+print("  FINAL.xlsx stream MERGE -> warranty_master_items (no truncate)")
 print("==========================================================")
 if MERGE_ONLY:
     print("Mode: --merge-only (reuse existing staging, skip Excel)")
@@ -233,10 +281,9 @@ if MERGE_ONLY:
         print("Error: staging table not found. Re-run without --merge-only.")
         sys.exit(1)
     print("\n[4/4] Merging existing staging into live...")
-    live, pepsi_bott = merge_into_live(cursor)
+    live = merge_into_live(cursor)
     print("\n==========================================================")
     print(f"  Live warranty_master_items: {live:,}")
-    print(f"  Pepsi-Bott: {pepsi_bott:,}")
     print(f"  Total time: {(time.time() - t0) / 60:.1f} min")
     print("==========================================================")
     cursor.close()
@@ -265,16 +312,15 @@ print(f"  loaded {len(strings):,} strings in {time.time() - t0:.1f}s")
 
 print("\n[2/4] Creating staging table...")
 cursor.execute(f"DROP TABLE IF EXISTS {STAGING}")
-cursor.execute(f"""
+cursor.execute(
+    f"""
 CREATE UNLOGGED TABLE {STAGING} (
   serial_no VARCHAR(100),
   billing_doc VARCHAR(100),
   billing_date DATE,
-  fg_model VARCHAR(100),
   material VARCHAR(100),
   group_name VARCHAR(100),
   material_group VARCHAR(100),
-  product_subgroup VARCHAR(100),
   customer_name VARCHAR(255),
   customer_subgroup VARCHAR(100),
   ship_to_party VARCHAR(255),
@@ -283,13 +329,12 @@ CREATE UNLOGGED TABLE {STAGING} (
   inventory_number VARCHAR(100),
   warr_start_dt DATE,
   warr_end_dt DATE,
-  city VARCHAR(100),
   pin_code VARCHAR(50),
-  sheet_year SMALLINT,
   warranty_months SMALLINT,
   is_active BOOLEAN
 )
-""")
+"""
+)
 print("  staging ready")
 
 sheets = [
@@ -304,11 +349,11 @@ row_split_regex = re.compile(rb"<row[^>]*>(.*?)</row>")
 today = date.today()
 COPY_SQL = f"""
 COPY {STAGING} (
-  serial_no, billing_doc, billing_date, fg_model, material,
-  group_name, material_group, product_subgroup, customer_name,
+  serial_no, billing_doc, billing_date, material,
+  group_name, material_group, customer_name,
   customer_subgroup, ship_to_party, ship_to_state, ship_to_city,
-  inventory_number, warr_start_dt, warr_end_dt, city, pin_code,
-  sheet_year, warranty_months, is_active
+  inventory_number, warr_start_dt, warr_end_dt, pin_code,
+  warranty_months, is_active
 ) FROM STDIN WITH (FORMAT text, DELIMITER E'\\t', NULL '')
 """
 
@@ -321,7 +366,9 @@ for sheet_file, year in sheets:
     with zipfile.ZipFile(EXCEL) as z:
         with z.open(f"xl/worksheets/{sheet_file}") as f:
             csv_buffer = io.StringIO()
-            csv_writer = csv.writer(csv_buffer, delimiter="\t", quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
+            csv_writer = csv.writer(
+                csv_buffer, delimiter="\t", quoting=csv.QUOTE_MINIMAL, lineterminator="\n"
+            )
             chunk_size = 32 * 1024 * 1024
             tail = b""
             sheet_rows = 0
@@ -380,27 +427,25 @@ for sheet_file, year in sheets:
                         except Exception:
                             is_active = False
 
+                    # FINAL layout A–P: bill, date, material, serial, group, colF, cust, subgrp,
+                    # ship, state, city, inv, warrStart, warrEnd, city2, pin
                     csv_writer.writerow(
                         [
                             serial_no,
-                            vals[0] or "",
+                            cell_text(vals[0]) or "",
                             parse_date_str(vals[1]) or "",
-                            vals[2] or "",
-                            vals[2] or "",
-                            vals[4] or "",
-                            vals[4] or "",
-                            vals[5] or "",
-                            clean_customer_name(vals[6]),
-                            remap_subgroup(vals[7]),
-                            vals[8] or "",
-                            vals[9] or "",
-                            vals[10] or "",
-                            vals[11] or "",
+                            cell_text(vals[2]) or "",
+                            cell_text(vals[4]) or "",
+                            cell_text(vals[5]) or "",
+                            cell_text(vals[6]) or "",
+                            cell_text(vals[7]) or "",
+                            cell_text(vals[8]) or "",
+                            cell_text(vals[9]) or "",
+                            cell_text(vals[10]) or "",
+                            cell_text(vals[11]) or "",
                             warr_start_dt or "",
                             warr_end_dt or "",
-                            vals[14] or "",
-                            vals[15] or "",
-                            year,
+                            cell_text(vals[15]) or cell_text(vals[14]) or "",
                             calc_warranty_months(warr_start_dt, warr_end_dt),
                             "t" if is_active else "f",
                         ]
@@ -427,11 +472,10 @@ for sheet_file, year in sheets:
 print(f"\n  Staged {total_staged:,} rows from FINAL")
 
 print("\n[4/4] Merging into live warranty_master_items (32 batches, later end wins)...")
-live, pepsi_bott = merge_into_live(cursor)
+live = merge_into_live(cursor)
 
 print("\n==========================================================")
 print(f"  Live warranty_master_items: {live:,}")
-print(f"  Pepsi-Bott: {pepsi_bott:,}")
 print(f"  Total time: {(time.time() - t0) / 60:.1f} min")
 print("==========================================================")
 

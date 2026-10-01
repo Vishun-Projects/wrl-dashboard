@@ -11,7 +11,7 @@ describe('warranty serial strip SQL', () => {
     expect(sql).toContain('calls_latest_hot');
     expect(sql).toContain(WARRANTY_MONTHS_SQL);
     expect(sql).toContain('customer_subgroup');
-    expect(sql).toContain('fg_model');
+    expect(sql).toContain('material');
     expect(sql).toContain('billing_doc');
     expect(sql).toContain('unnest($1::text[])');
     expect(sql).toContain('serial = s.raw');
