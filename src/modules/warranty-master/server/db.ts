@@ -373,33 +373,55 @@ async function rollupMatchesItems(client: PgClient): Promise<boolean> {
 
 /**
  * Before any rollup read: schema ok + machine totals match items.
- * Catches manual DB deletes/imports that skipped refreshWarrantyMasterRollup.
+ * Never block page reads on session advisory locks — those leak on pooled
+ * connections and surface as "canceling statement due to lock timeout".
  */
 async function ensureWarrantyMasterRollup(client: PgClient): Promise<void> {
   if (rollupSchemaOk && Date.now() - rollupSyncCheckedAt < ROLLUP_SYNC_CHECK_MS) return;
-  // Serialize concurrent page loads that all try to rebuild an empty/stale rollup.
-  await client.query(`SELECT pg_advisory_lock(87201452)`);
-  try {
-    if (rollupSchemaOk && Date.now() - rollupSyncCheckedAt < ROLLUP_SYNC_CHECK_MS) return;
-    if (!(await rollupHasMaterialColumn(client))) {
-      await client.query(ROLLUP_RECREATE_DDL);
-    } else {
-      await client.query(ROLLUP_CREATE_DDL);
-    }
-    rollupSchemaOk = true;
-    if (!(await rollupMatchesItems(client))) {
-      await rebuildWarrantyMasterRollupRows(client);
-    }
+
+  if (!(await rollupHasMaterialColumn(client))) {
+    await client.query(ROLLUP_RECREATE_DDL);
+  } else if (!rollupSchemaOk) {
+    await client.query(ROLLUP_CREATE_DDL);
+  }
+  rollupSchemaOk = true;
+
+  // Count check without holding a lock (readers must never wait 15s for rebuild).
+  if (await rollupMatchesItems(client)) {
     rollupSyncCheckedAt = Date.now();
-  } finally {
-    await client.query(`SELECT pg_advisory_unlock(87201452)`);
+    return;
+  }
+
+  await client.query('BEGIN');
+  try {
+    const got = await client.query<{ ok: boolean }>(
+      `SELECT pg_try_advisory_xact_lock(87201452) AS ok`
+    );
+    if (!got.rows[0]?.ok) {
+      await client.query('ROLLBACK');
+      // Another request is rebuilding — serve current rollup rather than lock_timeout.
+      rollupSyncCheckedAt = Date.now();
+      return;
+    }
+    if (!(await rollupMatchesItems(client))) {
+      await rebuildWarrantyMasterRollupRows(client, { alreadyInTxn: true });
+    }
+    await client.query('COMMIT');
+    rollupSyncCheckedAt = Date.now();
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
   }
 }
 
-async function rebuildWarrantyMasterRollupRows(client: PgClient): Promise<void> {
+async function rebuildWarrantyMasterRollupRows(
+  client: PgClient,
+  opts?: { alreadyInTxn?: boolean }
+): Promise<void> {
   // Grain keys are case-folded so 'Amul'/'AMUL' and material casing variants collapse.
   // PK material stores the folded key (same as group_key) — avoids pkey clashes from MODE() casing.
-  await client.query('BEGIN');
+  const ownTxn = !opts?.alreadyInTxn;
+  if (ownTxn) await client.query('BEGIN');
   try {
     await client.query(`TRUNCATE public.warranty_master_rollup`);
     await client.query(`
@@ -431,24 +453,28 @@ async function rebuildWarrantyMasterRollupRows(client: PgClient): Promise<void> 
         COALESCE(warranty_months, 0),
         LOWER(COALESCE(NULLIF(BTRIM(material), ''), '(Unknown)'))
     `);
-    await client.query('COMMIT');
+    if (ownTxn) await client.query('COMMIT');
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (ownTxn) await client.query('ROLLBACK');
     throw err;
   }
 }
 
 async function refreshWarrantyMasterRollupWithClient(client: PgClient): Promise<void> {
-  await client.query(`SELECT pg_advisory_lock(87201452)`);
+  // Transaction-scoped lock auto-releases on commit/rollback (safe with pooled clients).
+  await client.query('BEGIN');
   try {
+    await client.query(`SELECT pg_advisory_xact_lock(87201452)`);
     if (!(await rollupHasMaterialColumn(client))) {
       await client.query(ROLLUP_RECREATE_DDL);
     } else {
       await client.query(ROLLUP_CREATE_DDL);
     }
-    await rebuildWarrantyMasterRollupRows(client);
-  } finally {
-    await client.query(`SELECT pg_advisory_unlock(87201452)`);
+    await rebuildWarrantyMasterRollupRows(client, { alreadyInTxn: true });
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
   }
 }
 
