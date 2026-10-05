@@ -124,6 +124,7 @@ export function filterWarrantyMasterFgLines(
   const warrEndTo = filters.warrEndTo.trim();
 
   return lines.filter((line) => {
+    if (!includesAny(filters.selectedSoldTo, line.customerName)) return false;
     if (!includesAny(filters.selectedCustomer, line.customerSubgroup)) return false;
     if (!includesAny(filters.selectedGroup, line.groupKey)) return false;
     if (!includesAny(filters.selectedFgModel, line.fgModel)) return false;
@@ -241,12 +242,14 @@ export function buildWarrantyMasterHierarchy(
 export function buildWarrantyMasterDimsFromFgLines(
   lines: WarrantyMasterFgLineRow[]
 ): WarrantyMasterDims {
+  const soldToMap = new Map<string, string>();
   const customerMap = new Map<string, string>();
   const groupMap = new Map<string, string>();
   const fgSet = new Set<string>();
   const monthsSet = new Set<number>();
 
   for (const line of lines) {
+    if (line.customerName) soldToMap.set(line.customerName, line.customerName);
     customerMap.set(line.customerSubgroup, line.customerSubgroup);
     groupMap.set(line.groupKey, line.groupName);
     if (line.fgModel) fgSet.add(line.fgModel);
@@ -256,6 +259,9 @@ export function buildWarrantyMasterDimsFromFgLines(
   const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
 
   return {
+    soldToParties: [...soldToMap.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => collator.compare(a.label, b.label)),
     customers: [...customerMap.entries()]
       .map(([value, label]) => ({ value, label }))
       .sort((a, b) => collator.compare(a.label, b.label)),

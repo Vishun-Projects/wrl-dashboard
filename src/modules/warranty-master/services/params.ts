@@ -3,6 +3,7 @@ import type { WarrantyMasterQueryParams, WarrantyMasterRowDetailParams } from '.
 export function parseWarrantyMasterParams(searchParams: URLSearchParams): WarrantyMasterQueryParams {
   return {
     customer: searchParams.get('customer'),
+    soldTo: searchParams.get('soldTo'),
     group: searchParams.get('group'),
     fgModel: searchParams.get('fgModel'),
     warrantyMonths: searchParams.get('warrantyMonths'),
@@ -25,6 +26,7 @@ export function warrantyMasterParamsToSearchParams(
 ): URLSearchParams {
   const qs = new URLSearchParams();
   if (params.customer) qs.set('customer', params.customer);
+  if (params.soldTo) qs.set('soldTo', params.soldTo);
   if (params.group) qs.set('group', params.group);
   if (params.fgModel) qs.set('fgModel', params.fgModel);
   if (params.warrantyMonths) qs.set('warrantyMonths', params.warrantyMonths);

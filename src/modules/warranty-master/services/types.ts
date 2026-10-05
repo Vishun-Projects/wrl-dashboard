@@ -3,6 +3,8 @@
 /** Server/API query string filters (legacy CSV export path). */
 export type WarrantyMasterQueryParams = {
   customer?: string | null;
+  /** Comma-separated Sold-To-Party / customer_name values. */
+  soldTo?: string | null;
   group?: string | null;
   fgModel?: string | null;
   warrantyMonths?: string | null;
@@ -19,6 +21,7 @@ export type WarrantyMasterQueryParams = {
 
 /** UI filter state — applied client-side after the full dataset is loaded. */
 export type WarrantyMasterClientFilters = {
+  selectedSoldTo: string[];
   selectedCustomer: string[];
   selectedGroup: string[];
   selectedFgModel: string[];
@@ -115,6 +118,7 @@ export type WarrantyMasterDimOption = {
 };
 
 export type WarrantyMasterDims = {
+  soldToParties: WarrantyMasterDimOption[];
   customers: WarrantyMasterDimOption[];
   groups: WarrantyMasterDimOption[];
   fgModels: WarrantyMasterDimOption[];

@@ -29,6 +29,7 @@ import { usePageAlert } from '@/hooks/usePageAlert';
 import { DataTableLoading } from '@/components/ui/DataTableLoading';
 
 const EMPTY_FILTERS: WarrantyMasterClientFilters = {
+  selectedSoldTo: [],
   selectedCustomer: [],
   selectedGroup: [],
   selectedFgModel: [],
@@ -47,6 +48,7 @@ const EMPTY_SUMMARY: WarrantyMasterSummary = {
 
 function cloneFilters(filters: WarrantyMasterClientFilters): WarrantyMasterClientFilters {
   return {
+    selectedSoldTo: [...filters.selectedSoldTo],
     selectedCustomer: [...filters.selectedCustomer],
     selectedGroup: [...filters.selectedGroup],
     selectedFgModel: [...filters.selectedFgModel],
@@ -60,6 +62,7 @@ function cloneFilters(filters: WarrantyMasterClientFilters): WarrantyMasterClien
 
 function isEmptyFilters(filters: WarrantyMasterClientFilters): boolean {
   return (
+    filters.selectedSoldTo.length === 0 &&
     filters.selectedCustomer.length === 0 &&
     filters.selectedGroup.length === 0 &&
     filters.selectedFgModel.length === 0 &&
@@ -81,6 +84,9 @@ function sortDimOptions(options: { value: string; label: string }[]) {
 }
 
 function appendFilterParams(params: URLSearchParams, filters: WarrantyMasterClientFilters) {
+  if (filters.selectedSoldTo.length > 0) {
+    params.set('soldTo', filters.selectedSoldTo.join(','));
+  }
   if (filters.selectedCustomer.length > 0) {
     params.set('customer', filters.selectedCustomer.join(','));
   }
@@ -111,6 +117,7 @@ export default function WarrantyMasterPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [loadingSummary, setLoadingSummary] = useState(true);
   const [loadingHierarchy, setLoadingHierarchy] = useState(true);
+  const [soldToOptions, setSoldToOptions] = useState<{ value: string; label: string }[]>([]);
   const [customerOptions, setCustomerOptions] = useState<{ value: string; label: string }[]>([]);
   const [groupOptions, setGroupOptions] = useState<{ value: string; label: string }[]>([]);
   const [fgModelOptions, setFgModelOptions] = useState<{ value: string; label: string }[]>([]);
@@ -150,11 +157,13 @@ export default function WarrantyMasterPage() {
       throw new Error(String((errJson as { error?: string }).error ?? res.statusText));
     }
     const data = (await res.json()) as {
+      soldToParties?: { value: string; label: string }[];
       customers: { value: string; label: string }[];
       groups: { value: string; label: string }[];
       fgModels: { value: string; label: string }[];
       warrantyMonths: number[];
     };
+    setSoldToOptions(sortDimOptions(data.soldToParties ?? []));
     setCustomerOptions(sortDimOptions(data.customers ?? []));
     setGroupOptions(sortDimOptions(data.groups ?? []));
     setFgModelOptions(sortDimOptions(data.fgModels ?? []));
@@ -396,6 +405,16 @@ export default function WarrantyMasterPage() {
       updateFilters((base) => ({ ...base, ...next }));
     };
 
+    for (const id of current.selectedSoldTo) {
+      chips.push({
+        id: `sold-${id}`,
+        label: `Sold-to: ${labelFor(soldToOptions, id)}`,
+        onRemove: () =>
+          patch({
+            selectedSoldTo: filtersRef.current.selectedSoldTo.filter((v) => v !== id),
+          }),
+      });
+    }
     for (const id of current.selectedCustomer) {
       chips.push({
         id: `cust-${id}`,
@@ -444,7 +463,7 @@ export default function WarrantyMasterPage() {
       });
     }
     return chips;
-  }, [filters, customerOptions, groupOptions, labelFor, updateFilters]);
+  }, [filters, soldToOptions, customerOptions, groupOptions, labelFor, updateFilters]);
 
   const hasAppliedFilters = !isEmptyFilters(filters);
   const tableLoading = loadingHierarchy && hierarchyRows.length === 0;
@@ -460,11 +479,13 @@ export default function WarrantyMasterPage() {
 
   const toolbar = (
     <WarrantyMasterToolbar
+      soldToOptions={soldToOptions}
       customerOptions={customerOptions}
       groupOptions={groupOptions}
       fgModelOptions={fgModelOptions}
       warrantyMonthOptions={warrantyMonthOptions}
       filters={filters}
+      onSoldToChange={(v) => updateFilters((d) => ({ ...d, selectedSoldTo: v }))}
       onCustomerChange={(v) => updateFilters((d) => ({ ...d, selectedCustomer: v }))}
       onGroupChange={(v) => updateFilters((d) => ({ ...d, selectedGroup: v }))}
       onFgModelChange={(v) => updateFilters((d) => ({ ...d, selectedFgModel: v }))}

@@ -9,11 +9,13 @@ import type { WarrantyMasterClientFilters } from '@/modules/warranty-master/serv
 type SelectOption = { value: string; label: string };
 
 type WarrantyMasterToolbarProps = {
+  soldToOptions: SelectOption[];
   customerOptions: SelectOption[];
   groupOptions: SelectOption[];
   fgModelOptions: SelectOption[];
   warrantyMonthOptions: SelectOption[];
   filters: WarrantyMasterClientFilters;
+  onSoldToChange: (values: string[]) => void;
   onCustomerChange: (values: string[]) => void;
   onGroupChange: (values: string[]) => void;
   onFgModelChange: (values: string[]) => void;
@@ -27,11 +29,13 @@ type WarrantyMasterToolbarProps = {
 };
 
 export function WarrantyMasterToolbar({
+  soldToOptions,
   customerOptions,
   groupOptions,
   fgModelOptions,
   warrantyMonthOptions,
   filters,
+  onSoldToChange,
   onCustomerChange,
   onGroupChange,
   onFgModelChange,
@@ -68,6 +72,19 @@ export function WarrantyMasterToolbar({
             </button>
           ) : null}
         </div>
+        <FilterSelect
+          label="Sold To Party"
+          emptyLabel="All sold-to parties"
+          layout="inline"
+          options={soldToOptions}
+          selected={filters.selectedSoldTo}
+          onChange={onSoldToChange}
+          searchable
+          showSelectAll
+          selectAllLabel="Select all"
+          searchPlaceholder="Search sold-to…"
+          panelClassName="w-80"
+        />
         <FilterSelect
           label="Customer Subgroup"
           emptyLabel="All subgroups"

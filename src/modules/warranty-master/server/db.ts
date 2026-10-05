@@ -54,6 +54,133 @@ export async function getWarrantyMasterDbStats(): Promise<WarrantyMasterDbStats>
 /**
  * Query matching machine serial numbers directly from Postgres.
  */
+type ItemsFilterParams = WarrantyMasterQueryParams & {
+  customerKey?: string;
+  customerSubgroup?: string;
+  groupKey?: string;
+  rowWarrantyMonths?: number;
+};
+
+function splitCsvParam(value?: string | null): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Shared WHERE for warranty_master_items (serials / export / sold-to-aware KPIs). */
+function buildItemsFilterWhere(params: ItemsFilterParams): {
+  sql: string;
+  values: unknown[];
+} {
+  const conditions: string[] = ['1=1'];
+  const values: unknown[] = [];
+  let idx = 1;
+
+  const serial = (params.serialNumber ?? params.q)?.trim();
+  if (serial) {
+    conditions.push(`serial_no ILIKE $${idx}`);
+    values.push(`%${serial}%`);
+    idx++;
+  }
+
+  const soldTo = splitCsvParam(params.soldTo);
+  if (soldTo.length > 0) {
+    conditions.push(
+      `LOWER(BTRIM(customer_name)) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`
+    );
+    values.push(soldTo);
+    idx++;
+  }
+
+  if (params.customerSubgroup?.trim()) {
+    conditions.push(`LOWER(BTRIM(customer_subgroup)) = LOWER(BTRIM($${idx}))`);
+    values.push(params.customerSubgroup.trim());
+    idx++;
+  } else if (params.customerKey?.trim()) {
+    conditions.push(`(
+      LOWER(BTRIM(customer_name)) = LOWER(BTRIM($${idx}))
+      OR LOWER(BTRIM(customer_subgroup)) = LOWER(BTRIM($${idx}))
+    )`);
+    values.push(params.customerKey.trim());
+    idx++;
+  } else {
+    const subgroups = splitCsvParam(params.customer);
+    if (subgroups.length > 0) {
+      conditions.push(
+        `LOWER(BTRIM(customer_subgroup)) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`
+      );
+      values.push(subgroups);
+      idx++;
+    }
+  }
+
+  if (params.groupKey?.trim()) {
+    conditions.push(`LOWER(BTRIM(group_name)) = LOWER(BTRIM($${idx}))`);
+    values.push(params.groupKey.trim());
+    idx++;
+  } else {
+    const groups = splitCsvParam(params.group);
+    if (groups.length > 0) {
+      conditions.push(
+        `LOWER(BTRIM(group_name)) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`
+      );
+      values.push(groups);
+      idx++;
+    }
+  }
+
+  const models = splitCsvParam(params.fgModel);
+  if (models.length > 0) {
+    conditions.push(
+      `LOWER(COALESCE(NULLIF(BTRIM(material), ''), '(Unknown)')) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`
+    );
+    values.push(models);
+    idx++;
+  }
+
+  if (params.rowWarrantyMonths != null && Number.isFinite(params.rowWarrantyMonths)) {
+    conditions.push(`warranty_months = $${idx}`);
+    values.push(params.rowWarrantyMonths);
+    idx++;
+  } else {
+    const months = splitCsvParam(params.warrantyMonths)
+      .map((s) => Number(s))
+      .filter(Number.isFinite);
+    if (months.length > 0) {
+      conditions.push(`warranty_months = ANY($${idx}::int[])`);
+      values.push(months);
+      idx++;
+    }
+  }
+
+  if (params.activeOnly) {
+    conditions.push(`warr_end_dt IS NOT NULL AND warr_end_dt >= CURRENT_DATE`);
+  }
+  if (params.warrStartFrom?.trim()) {
+    conditions.push(`warr_start_dt >= $${idx}::date`);
+    values.push(params.warrStartFrom.trim());
+    idx++;
+  }
+  if (params.warrStartTo?.trim()) {
+    conditions.push(`warr_start_dt <= $${idx}::date`);
+    values.push(params.warrStartTo.trim());
+    idx++;
+  }
+  if (params.warrEndFrom?.trim()) {
+    conditions.push(`warr_end_dt >= $${idx}::date`);
+    values.push(params.warrEndFrom.trim());
+    idx++;
+  }
+  if (params.warrEndTo?.trim()) {
+    conditions.push(`warr_end_dt <= $${idx}::date`);
+    values.push(params.warrEndTo.trim());
+    idx++;
+  }
+
+  return { sql: conditions.join(' AND '), values };
+}
+
 export async function queryWarrantyMasterSerialsFromDb(
   params: WarrantyMasterQueryParams & {
     customerKey?: string;
@@ -65,86 +192,7 @@ export async function queryWarrantyMasterSerialsFromDb(
   }
 ): Promise<WarrantyMasterSerialRow[]> {
   return withAppClient(async (client) => {
-    const conditions: string[] = ['1=1'];
-    const values: unknown[] = [];
-    let idx = 1;
-
-    const serial = (params.serialNumber ?? params.q)?.trim();
-    if (serial) {
-      conditions.push(`serial_no ILIKE $${idx}`);
-      values.push(`%${serial}%`);
-      idx++;
-    }
-
-    if (params.customerSubgroup?.trim()) {
-      conditions.push(`LOWER(BTRIM(customer_subgroup)) = LOWER(BTRIM($${idx}))`);
-      values.push(params.customerSubgroup.trim());
-      idx++;
-    } else if (params.customerKey?.trim()) {
-      conditions.push(`(
-        LOWER(BTRIM(customer_name)) = LOWER(BTRIM($${idx}))
-        OR LOWER(BTRIM(customer_subgroup)) = LOWER(BTRIM($${idx}))
-      )`);
-      values.push(params.customerKey.trim());
-      idx++;
-    } else if (params.customer?.trim()) {
-      const keys = params.customer.split(',').map((s) => s.trim()).filter(Boolean);
-      if (keys.length > 0) {
-        conditions.push(`(
-          LOWER(BTRIM(customer_name)) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)
-          OR LOWER(BTRIM(customer_subgroup)) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)
-        )`);
-        values.push(keys);
-        idx++;
-      }
-    }
-
-    if (params.groupKey?.trim()) {
-      conditions.push(`LOWER(BTRIM(group_name)) = LOWER(BTRIM($${idx}))`);
-      values.push(params.groupKey.trim());
-      idx++;
-    } else if (params.group?.trim()) {
-      const keys = params.group.split(',').map((s) => s.trim()).filter(Boolean);
-      if (keys.length > 0) {
-        conditions.push(`LOWER(BTRIM(group_name)) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`);
-        values.push(keys);
-        idx++;
-      }
-    }
-
-    if (params.fgModel?.trim()) {
-      const models = params.fgModel.split(',').map((s) => s.trim()).filter(Boolean);
-      if (models.length > 0) {
-        conditions.push(
-          `LOWER(COALESCE(NULLIF(BTRIM(material), ''), '(Unknown)')) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`
-        );
-        values.push(models);
-        idx++;
-      }
-    }
-
-    const months = params.rowWarrantyMonths ?? (params.warrantyMonths ? Number(params.warrantyMonths) : NaN);
-    if (Number.isFinite(months)) {
-      conditions.push(`warranty_months = $${idx}`);
-      values.push(months);
-      idx++;
-    }
-
-    if (params.activeOnly) {
-      conditions.push(`warr_end_dt IS NOT NULL AND warr_end_dt >= CURRENT_DATE`);
-    }
-
-    if (params.warrEndFrom?.trim()) {
-      conditions.push(`warr_end_dt >= $${idx}::date`);
-      values.push(params.warrEndFrom.trim());
-      idx++;
-    }
-    if (params.warrEndTo?.trim()) {
-      conditions.push(`warr_end_dt <= $${idx}::date`);
-      values.push(params.warrEndTo.trim());
-      idx++;
-    }
-
+    const { sql: whereSql, values } = buildItemsFilterWhere(params);
     const limit = Math.min(Math.max(params.limit ?? 250, 1), 500);
     const offset = Math.max(params.offset ?? 0, 0);
     const sql = `
@@ -169,7 +217,7 @@ export async function queryWarrantyMasterSerialsFromDb(
         inventory_number AS "inventoryNumber",
         pin_code AS "pinCode"
       FROM public.warranty_master_items
-      WHERE ${conditions.join(' AND ')}
+      WHERE ${whereSql}
       ORDER BY serial_no ASC
       LIMIT ${limit}
       OFFSET ${offset}
@@ -189,86 +237,8 @@ export async function countWarrantyMasterSerialsFromDb(
   }
 ): Promise<number> {
   return withAppClient(async (client) => {
-    const conditions: string[] = ['1=1'];
-    const values: unknown[] = [];
-    let idx = 1;
-
-    const serial = (params.serialNumber ?? params.q)?.trim();
-    if (serial) {
-      conditions.push(`serial_no ILIKE $${idx}`);
-      values.push(`%${serial}%`);
-      idx++;
-    }
-
-    if (params.customerSubgroup?.trim()) {
-      conditions.push(`LOWER(BTRIM(customer_subgroup)) = LOWER(BTRIM($${idx}))`);
-      values.push(params.customerSubgroup.trim());
-      idx++;
-    } else if (params.customerKey?.trim()) {
-      conditions.push(`(
-        LOWER(BTRIM(customer_name)) = LOWER(BTRIM($${idx}))
-        OR LOWER(BTRIM(customer_subgroup)) = LOWER(BTRIM($${idx}))
-      )`);
-      values.push(params.customerKey.trim());
-      idx++;
-    } else if (params.customer?.trim()) {
-      const keys = params.customer.split(',').map((s) => s.trim()).filter(Boolean);
-      if (keys.length > 0) {
-        conditions.push(`(
-          LOWER(BTRIM(customer_name)) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)
-          OR LOWER(BTRIM(customer_subgroup)) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)
-        )`);
-        values.push(keys);
-        idx++;
-      }
-    }
-
-    if (params.groupKey?.trim()) {
-      conditions.push(`LOWER(BTRIM(group_name)) = LOWER(BTRIM($${idx}))`);
-      values.push(params.groupKey.trim());
-      idx++;
-    } else if (params.group?.trim()) {
-      const keys = params.group.split(',').map((s) => s.trim()).filter(Boolean);
-      if (keys.length > 0) {
-        conditions.push(`LOWER(BTRIM(group_name)) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`);
-        values.push(keys);
-        idx++;
-      }
-    }
-
-    if (params.fgModel?.trim()) {
-      const models = params.fgModel.split(',').map((s) => s.trim()).filter(Boolean);
-      if (models.length > 0) {
-        conditions.push(
-          `LOWER(COALESCE(NULLIF(BTRIM(material), ''), '(Unknown)')) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`
-        );
-        values.push(models);
-        idx++;
-      }
-    }
-
-    const months = params.rowWarrantyMonths ?? (params.warrantyMonths ? Number(params.warrantyMonths) : NaN);
-    if (Number.isFinite(months)) {
-      conditions.push(`warranty_months = $${idx}`);
-      values.push(months);
-      idx++;
-    }
-
-    if (params.activeOnly) {
-      conditions.push(`warr_end_dt IS NOT NULL AND warr_end_dt >= CURRENT_DATE`);
-    }
-    if (params.warrEndFrom?.trim()) {
-      conditions.push(`warr_end_dt >= $${idx}::date`);
-      values.push(params.warrEndFrom.trim());
-      idx++;
-    }
-    if (params.warrEndTo?.trim()) {
-      conditions.push(`warr_end_dt <= $${idx}::date`);
-      values.push(params.warrEndTo.trim());
-      idx++;
-    }
-
-    const sql = `SELECT COUNT(*)::int AS count FROM public.warranty_master_items WHERE ${conditions.join(' AND ')}`;
+    const { sql: whereSql, values } = buildItemsFilterWhere(params);
+    const sql = `SELECT COUNT(*)::int AS count FROM public.warranty_master_items WHERE ${whereSql}`;
     const res = await client.query<{ count: number }>(sql, values);
     return Number(res.rows[0]?.count ?? 0);
   });
@@ -283,82 +253,7 @@ export async function queryWarrantyMasterExportRowsFromDb(
   params: WarrantyMasterQueryParams
 ): Promise<import('../services/types').WarrantyMasterExportRow[]> {
   return withAppClient(async (client) => {
-    const conditions: string[] = ['1=1'];
-    const values: unknown[] = [];
-    let idx = 1;
-
-    const serial = (params.serialNumber ?? params.q)?.trim();
-    if (serial) {
-      conditions.push(`serial_no ILIKE $${idx}`);
-      values.push(`%${serial}%`);
-      idx++;
-    }
-
-    if (params.customer?.trim()) {
-      const keys = params.customer.split(',').map((s) => s.trim()).filter(Boolean);
-      if (keys.length > 0) {
-        conditions.push(`(
-          LOWER(BTRIM(customer_name)) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)
-          OR LOWER(BTRIM(customer_subgroup)) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)
-        )`);
-        values.push(keys);
-        idx++;
-      }
-    }
-
-    if (params.group?.trim()) {
-      const keys = params.group.split(',').map((s) => s.trim()).filter(Boolean);
-      if (keys.length > 0) {
-        conditions.push(`LOWER(BTRIM(group_name)) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`);
-        values.push(keys);
-        idx++;
-      }
-    }
-
-    if (params.fgModel?.trim()) {
-      const models = params.fgModel.split(',').map((s) => s.trim()).filter(Boolean);
-      if (models.length > 0) {
-        conditions.push(
-          `LOWER(COALESCE(NULLIF(BTRIM(material), ''), '(Unknown)')) = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`
-        );
-        values.push(models);
-        idx++;
-      }
-    }
-
-    if (params.warrantyMonths?.trim()) {
-      const months = params.warrantyMonths.split(',').map((s) => Number(s.trim())).filter(Number.isFinite);
-      if (months.length > 0) {
-        conditions.push(`warranty_months = ANY($${idx}::int[])`);
-        values.push(months);
-        idx++;
-      }
-    }
-
-    if (params.activeOnly) {
-      conditions.push(`warr_end_dt IS NOT NULL AND warr_end_dt >= CURRENT_DATE`);
-    }
-    if (params.warrStartFrom?.trim()) {
-      conditions.push(`warr_start_dt >= $${idx}::date`);
-      values.push(params.warrStartFrom.trim());
-      idx++;
-    }
-    if (params.warrStartTo?.trim()) {
-      conditions.push(`warr_start_dt <= $${idx}::date`);
-      values.push(params.warrStartTo.trim());
-      idx++;
-    }
-    if (params.warrEndFrom?.trim()) {
-      conditions.push(`warr_end_dt >= $${idx}::date`);
-      values.push(params.warrEndFrom.trim());
-      idx++;
-    }
-    if (params.warrEndTo?.trim()) {
-      conditions.push(`warr_end_dt <= $${idx}::date`);
-      values.push(params.warrEndTo.trim());
-      idx++;
-    }
-
+    const { sql: whereSql, values } = buildItemsFilterWhere(params);
     const sql = `
       SELECT
         billing_doc AS "billingDoc",
@@ -379,7 +274,7 @@ export async function queryWarrantyMasterExportRowsFromDb(
         warranty_months AS "warrantyMonths",
         (warr_end_dt IS NOT NULL AND warr_end_dt >= CURRENT_DATE) AS "isActive"
       FROM public.warranty_master_items
-      WHERE ${conditions.join(' AND ')}
+      WHERE ${whereSql}
       ORDER BY serial_no ASC
     `;
 
@@ -638,19 +533,47 @@ function buildRollupFilterWhere(params: WarrantyMasterQueryParams): {
   return { sql: conditions.join(' AND '), values, countExpr };
 }
 
-/** KPI counts for the current filter window — from rollup. */
+/** KPI counts for the current filter window — rollup, or items when Sold-To filter is set. */
 export async function queryWarrantyMasterSummaryFromDb(
   params: WarrantyMasterQueryParams
 ): Promise<WarrantyMasterSummaryResult> {
   return withAppClient(async (client) => {
     await ensureWarrantyMasterRollup(client);
-    const { sql: whereSql, values, countExpr } = buildRollupFilterWhere(params);
-
     const catalogRes = await client.query<{ total: string }>(
       `SELECT COALESCE(SUM(machine_count), 0)::text AS total FROM public.warranty_master_rollup`
     );
     const catalogMachineTotal = Number(catalogRes.rows[0]?.total ?? 0);
 
+    if (splitCsvParam(params.soldTo).length > 0) {
+      const { sql: whereSql, values } = buildItemsFilterWhere(params);
+      const res = await client.query<{
+        total_machines: number;
+        distinct_customers: number;
+        distinct_groups: number;
+        table_rows: number;
+      }>(
+        `
+        SELECT
+          COUNT(*)::int AS total_machines,
+          COUNT(DISTINCT LOWER(BTRIM(customer_subgroup)))::int AS distinct_customers,
+          COUNT(DISTINCT LOWER(BTRIM(group_name)))::int AS distinct_groups,
+          COUNT(DISTINCT LOWER(BTRIM(customer_subgroup)))::int AS table_rows
+        FROM public.warranty_master_items
+        WHERE ${whereSql}
+        `,
+        values
+      );
+      const row = res.rows[0];
+      return {
+        totalMachines: Number(row?.total_machines ?? 0),
+        distinctCustomers: Number(row?.distinct_customers ?? 0),
+        distinctGroups: Number(row?.distinct_groups ?? 0),
+        tableRows: Number(row?.table_rows ?? 0),
+        catalogMachineTotal,
+      };
+    }
+
+    const { sql: whereSql, values, countExpr } = buildRollupFilterWhere(params);
     const res = await client.query<{
       total_machines: number;
       distinct_customers: number;
@@ -679,11 +602,20 @@ export async function queryWarrantyMasterSummaryFromDb(
   });
 }
 
-/** Filter dropdown values from rollup (tiny). */
+/** Filter dropdown values from rollup (tiny) + Sold-To parties from items. */
 export async function queryWarrantyMasterOptionsFromDb(): Promise<WarrantyMasterDims> {
   return withAppClient(async (client) => {
     await ensureWarrantyMasterRollup(client);
     // Sequential: node-pg forbids concurrent queries on one client.
+    const soldToParties = await client.query<{ val: string; label: string }>(`
+      SELECT customer_name AS val, customer_name AS label
+      FROM (
+        SELECT DISTINCT NULLIF(BTRIM(customer_name), '') AS customer_name
+        FROM public.warranty_master_items
+      ) t
+      WHERE customer_name IS NOT NULL
+      ORDER BY 1
+    `);
     const customers = await client.query<{ val: string; label: string }>(`
       SELECT subgroup_key AS val, MIN(subgroup_label) AS label
       FROM public.warranty_master_rollup
@@ -710,6 +642,7 @@ export async function queryWarrantyMasterOptionsFromDb(): Promise<WarrantyMaster
     `);
 
     return {
+      soldToParties: soldToParties.rows.map((r) => ({ value: r.label, label: r.label })),
       customers: customers.rows.map((r) => ({ value: r.label, label: r.label })),
       groups: groups.rows.map((r) => ({ value: r.label, label: r.label })),
       fgModels: fgModels.rows.map((r) => ({ value: r.val, label: r.label })),
@@ -729,7 +662,54 @@ type HierarchyFlatRow = {
   maxWarrEnd: string | null;
 };
 
-/** One page of customer subgroups with nested groups → warranties — from rollup. */
+function nestHierarchyRows(detailRows: HierarchyFlatRow[]): WarrantyMasterHierarchySubgroup[] {
+  const subgroupMap = new Map<string, WarrantyMasterHierarchySubgroup>();
+  for (const row of detailRows) {
+    let subgroup = subgroupMap.get(row.subgroupKey);
+    if (!subgroup) {
+      subgroup = {
+        subgroupKey: row.subgroupKey,
+        customerSubgroup: row.subgroup,
+        machineCount: 0,
+        groups: [],
+      };
+      subgroupMap.set(row.subgroupKey, subgroup);
+    }
+    subgroup.machineCount += row.machineCount;
+
+    let group = subgroup.groups.find((g) => g.groupKey === row.groupKey);
+    if (!group) {
+      group = {
+        groupKey: row.groupKey,
+        groupName: row.groupName,
+        machineCount: 0,
+        warranties: [],
+      };
+      subgroup.groups.push(group);
+    }
+    group.machineCount += row.machineCount;
+    group.warranties.push({
+      warrantyMonths: Number(row.warrantyMonths),
+      machineCount: row.machineCount,
+      minWarrEnd: row.minWarrEnd,
+      maxWarrEnd: row.maxWarrEnd,
+    });
+  }
+
+  const order = [...new Set(detailRows.map((r) => r.subgroupKey))];
+  return order
+    .map((key) => subgroupMap.get(key))
+    .filter((r): r is WarrantyMasterHierarchySubgroup => Boolean(r))
+    .map((subgroup) => ({
+      ...subgroup,
+      groups: subgroup.groups.map((g): WarrantyMasterHierarchyGroup => ({
+        ...g,
+        warranties: [...g.warranties].sort((a, b) => a.warrantyMonths - b.warrantyMonths),
+      })),
+    }));
+}
+
+/** One page of customer subgroups with nested groups → warranties — from rollup (or items when Sold-To is set). */
 export async function queryWarrantyMasterHierarchyFromDb(
   params: WarrantyMasterQueryParams & {
     page?: number;
@@ -743,6 +723,75 @@ export async function queryWarrantyMasterHierarchyFromDb(
     const pageSize = Math.min(200, Math.max(10, params.pageSize ?? 50));
     const offset = (page - 1) * pageSize;
     const sortDir = params.sortDir === 'desc' ? 'DESC' : 'ASC';
+
+    if (splitCsvParam(params.soldTo).length > 0) {
+      const { sql: whereSql, values } = buildItemsFilterWhere(params);
+      const countExpr = params.activeOnly
+        ? `SUM(CASE WHEN warr_end_dt IS NOT NULL AND warr_end_dt >= CURRENT_DATE THEN 1 ELSE 0 END)`
+        : `COUNT(*)`;
+
+      const countRes = await client.query<{ total: number }>(
+        `
+        SELECT COUNT(*)::int AS total FROM (
+          SELECT LOWER(COALESCE(NULLIF(BTRIM(customer_subgroup), ''), '(Unknown)')) AS subgroup_key
+          FROM public.warranty_master_items
+          WHERE ${whereSql}
+          GROUP BY 1
+        ) t
+        `,
+        values
+      );
+      const total = Number(countRes.rows[0]?.total ?? 0);
+      if (total === 0) {
+        return { rows: [], total: 0, page, pageSize };
+      }
+
+      const limitIdx = values.length + 1;
+      const offsetIdx = values.length + 2;
+      const detailRes = await client.query<HierarchyFlatRow>(
+        `
+        WITH filtered AS (
+          SELECT *
+          FROM public.warranty_master_items
+          WHERE ${whereSql}
+        ),
+        page_subgroups AS (
+          SELECT
+            LOWER(COALESCE(NULLIF(BTRIM(customer_subgroup), ''), '(Unknown)')) AS subgroup_key,
+            MODE() WITHIN GROUP (
+              ORDER BY COALESCE(NULLIF(BTRIM(customer_subgroup), ''), '(Unknown)')
+            ) AS subgroup_label
+          FROM filtered
+          GROUP BY 1
+          ORDER BY MIN(COALESCE(NULLIF(BTRIM(customer_subgroup), ''), '(Unknown)')) ${sortDir}
+          LIMIT $${limitIdx} OFFSET $${offsetIdx}
+        )
+        SELECT
+          p.subgroup_key AS "subgroupKey",
+          p.subgroup_label AS "subgroup",
+          LOWER(COALESCE(NULLIF(BTRIM(f.group_name), ''), '(Unknown)')) AS "groupKey",
+          MODE() WITHIN GROUP (
+            ORDER BY COALESCE(NULLIF(BTRIM(f.group_name), ''), '(Unknown)')
+          ) AS "groupName",
+          COALESCE(f.warranty_months, 0) AS "warrantyMonths",
+          ${countExpr}::int AS "machineCount",
+          TO_CHAR(MIN(f.warr_end_dt), 'YYYY-MM-DD') AS "minWarrEnd",
+          TO_CHAR(MAX(f.warr_end_dt), 'YYYY-MM-DD') AS "maxWarrEnd"
+        FROM filtered f
+        INNER JOIN page_subgroups p
+          ON LOWER(COALESCE(NULLIF(BTRIM(f.customer_subgroup), ''), '(Unknown)')) = p.subgroup_key
+        GROUP BY p.subgroup_key, p.subgroup_label,
+          LOWER(COALESCE(NULLIF(BTRIM(f.group_name), ''), '(Unknown)')),
+          COALESCE(f.warranty_months, 0)
+        HAVING ${countExpr} > 0
+        ORDER BY p.subgroup_label ${sortDir}, 4 ASC, 5 ASC
+        `,
+        [...values, pageSize, offset]
+      );
+
+      return { rows: nestHierarchyRows(detailRes.rows), total, page, pageSize };
+    }
+
     const { sql: whereSql, values, countExpr } = buildRollupFilterWhere(params);
 
     const countRes = await client.query<{ total: number }>(
@@ -792,52 +841,7 @@ export async function queryWarrantyMasterHierarchyFromDb(
       [...values, pageSize, offset]
     );
 
-    const subgroupMap = new Map<string, WarrantyMasterHierarchySubgroup>();
-    for (const row of detailRes.rows) {
-      let subgroup = subgroupMap.get(row.subgroupKey);
-      if (!subgroup) {
-        subgroup = {
-          subgroupKey: row.subgroupKey,
-          customerSubgroup: row.subgroup,
-          machineCount: 0,
-          groups: [],
-        };
-        subgroupMap.set(row.subgroupKey, subgroup);
-      }
-      subgroup.machineCount += row.machineCount;
-
-      let group = subgroup.groups.find((g) => g.groupKey === row.groupKey);
-      if (!group) {
-        group = {
-          groupKey: row.groupKey,
-          groupName: row.groupName,
-          machineCount: 0,
-          warranties: [],
-        };
-        subgroup.groups.push(group);
-      }
-      group.machineCount += row.machineCount;
-      group.warranties.push({
-        warrantyMonths: Number(row.warrantyMonths),
-        machineCount: row.machineCount,
-        minWarrEnd: row.minWarrEnd,
-        maxWarrEnd: row.maxWarrEnd,
-      });
-    }
-
-    const order = [...new Set(detailRes.rows.map((r) => r.subgroupKey))];
-    const rows: WarrantyMasterHierarchySubgroup[] = order
-      .map((key) => subgroupMap.get(key))
-      .filter((r): r is WarrantyMasterHierarchySubgroup => Boolean(r))
-      .map((subgroup) => ({
-        ...subgroup,
-        groups: subgroup.groups.map((g): WarrantyMasterHierarchyGroup => ({
-          ...g,
-          warranties: [...g.warranties].sort((a, b) => a.warrantyMonths - b.warrantyMonths),
-        })),
-      }));
-
-    return { rows, total, page, pageSize };
+    return { rows: nestHierarchyRows(detailRes.rows), total, page, pageSize };
   });
 }
 
