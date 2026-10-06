@@ -59,6 +59,13 @@ if [[ ! -f "${SCRIPT_DIR}/evening-ops-sequencer.ts" ]]; then
   exit 1
 fi
 
+# Subcontractor stock: once daily with evening ops (not mail-scheduler */15).
+echo "--- Subcontractor stock (16:00 only) ---"
+mkdir -p "${INSTALL_ROOT}/logs"
+"${SCRIPT_DIR}/subcontractor-stock-cron.sh" \
+  >> "${INSTALL_ROOT}/logs/subcontractor-stock-cron.log" 2>&1 \
+  || echo "WARN: subcontractor stock failed" >&2
+
 npx tsx "${SCRIPT_DIR}/evening-ops-sequencer.ts"
 rc=$?
 

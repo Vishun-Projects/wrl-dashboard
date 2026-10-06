@@ -103,4 +103,34 @@ describe('classifyRegisterRowStatus — Tech. Solve vs Closed (no bapproval)', (
     expect(classifyRegisterRowStatus({ ...base, bapproval: '1' })).toBe('techSolved');
     expect(classifyRegisterRowStatus({ ...base, bm_approved_at: new Date() })).toBe('techSolved');
   });
+
+  it('real cancel wins over leftover vtransfercallno (rebook note)', () => {
+    expect(
+      classifyRegisterRowStatus({
+        ncancelreason: 9,
+        cancel_reason: 'Wrong Call',
+        callstatus: 'Cancel',
+        vtransfercallno: '24C09037',
+        bsolved: false,
+        bfastclose: false,
+      })
+    ).toBe('cancelled');
+  });
+
+  it('true transfer still wins when ncancelreason=2 or bare vtransfercallno', () => {
+    expect(
+      classifyRegisterRowStatus({
+        ncancelreason: 2,
+        vtransfercallno: '26J05318',
+        bsolved: false,
+      })
+    ).toBe('transferred');
+    expect(
+      classifyRegisterRowStatus({
+        ncancelreason: 0,
+        vtransfercallno: '26J05318',
+        bsolved: false,
+      })
+    ).toBe('transferred');
+  });
 });

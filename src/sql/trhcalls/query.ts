@@ -10,8 +10,9 @@ import {
 } from '@/sql/register/arcp-approve-dates';
 import { REGISTER_MSTPRORG_JOIN_SQL, SQL_WCO_EXPR } from '@/sql/register/wco';
 
+/** Drop true transfers; keep real cancels even if CRM left a rebook vtransfercallno. */
 export const TRHCALLS_EXCLUDE_TRANSFERRED =
-  " AND ISNULL(tc.vtransfercallno, '') = '' AND ISNULL(CAST(tc.ncancelreason AS INT), 0) <> 2";
+  " AND ISNULL(CAST(tc.ncancelreason AS INT), 0) <> 2 AND (ISNULL(tc.vtransfercallno, '') = '' OR ISNULL(CAST(tc.ncancelreason AS INT), 0) NOT IN (0, 2))";
 
 /** Parent office codes that are not regional branches (aligned with distribution route). */
 export const TRHCALLS_PARENT_OFFICE_EXCLUDE = [605, 606, 607, 608, 612, 1, 0];
@@ -720,7 +721,7 @@ export const SERIAL_AUDIT_VALID_SERIAL_WHERE =
   "ISNULL(vserialno, '') <> '' AND LTRIM(RTRIM(vserialno)) NOT IN ('0', 'N/A', 'NA', 'NONE', 'NULL', '-', '—')";
 
 export const SERIAL_AUDIT_TRANSFER_EXCLUDE_WHERE =
-  "ISNULL(vtransfercallno, '') = '' AND ISNULL(CAST(ncancelreason AS INT), 0) <> 2";
+  "ISNULL(CAST(ncancelreason AS INT), 0) <> 2 AND (ISNULL(vtransfercallno, '') = '' OR ISNULL(CAST(ncancelreason AS INT), 0) NOT IN (0, 2))";
 
 /** Canonical serial key for list grouping and detail filter (must stay in sync). */
 export const SERIAL_AUDIT_SERIAL_KEY_EXPR = 'UPPER(LTRIM(RTRIM(vserialno)))';

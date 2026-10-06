@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Unified mail poller — MIS digest + subcontractor stock (every 15 min IST).
-# Replaces separate mis-email-digest.sh + subcontractor-stock-cron.sh crontab lines.
+# Unified mail poller — MIS digest only (every 15 min IST).
+# Subcontractor stock runs from evening-ops-sequencer at 16:00 IST (not here).
 #
 # Install (example):
 #   */15 * * * * /opt/fast-close-app/current/scripts/vps-hosting/mail-scheduler.sh >> /opt/fast-close-app/logs/mail-scheduler.log 2>&1
@@ -37,8 +37,5 @@ if [[ "$(TZ=Asia/Kolkata date +%u)" != "7" ]]; then
 else
   echo "--- MIS email digest skipped (Sunday IST) ---"
 fi
-
-echo "--- Subcontractor stock ---"
-"${SCRIPT_DIR}/subcontractor-stock-cron.sh" || echo "WARN: subcontractor stock failed" >&2
 
 echo "=== mail-scheduler complete ==="

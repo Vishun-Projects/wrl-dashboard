@@ -192,6 +192,11 @@ export function useRegisterDataFetch({
   
   const lastAppliedFilterSnapshotRef = useRef<string | null>(null);
   const filterEffectInFlightRef = useRef(false);
+  /** Set when applied filters change while a load is in flight — retry after it finishes. */
+  const filterEffectPendingRef = useRef(false);
+  const runRegisterFilterLoadRef = useRef<(opts?: { force?: boolean }) => Promise<void>>(
+    async () => undefined
+  );
 
   const currentViewFilters = useMemo(
     () => ({
@@ -1279,6 +1284,29 @@ export function useRegisterDataFetch({
   const runRegisterFilterLoad = useCallback(async (opts?: { force?: boolean }) => {
     if (!dbInitialized || activeTab !== 'register' || !misAccess.register) return;
 
+    const snapshotKeyFor = (snap: NonNullable<ReturnType<typeof getAppliedFiltersSnapshot>>) =>
+      JSON.stringify({
+        startDateStr: toDateString(snap.dateRange.start),
+        endDateStr: toDateString(snap.dateRange.end),
+        dateFilterColumn: snap.dateFilterColumn,
+        selectedCallTypes: snap.selectedCallTypes,
+        selectedOfficeIds: snap.selectedOfficeIds,
+        selectedState: snap.selectedState,
+        selectedCity: snap.selectedCity,
+        selectedRegion: snap.selectedRegion,
+        selectedAccount: snap.selectedAccount,
+        selectedBranch: snap.selectedBranch,
+        selectedFranchisee: snap.selectedFranchisee,
+        selectedTechnician: snap.selectedTechnician,
+        selectedStatus: snap.selectedStatus,
+        priorityFilter: snap.priorityFilter,
+        portalFilter: snap.portalFilter,
+        repairFilter: snap.repairFilter,
+        agingAsOf,
+        debouncedSearch: snap.search || '',
+        debouncedPincodeSearch: snap.pincodeSearch || '',
+      });
+
     const applied = getAppliedFiltersSnapshot();
     if (!applied) return;
     registerViewFilterRef.current = appliedFilterPartsFromSnapshot(applied);
@@ -1286,32 +1314,15 @@ export function useRegisterDataFetch({
     const endDateStr = toDateString(applied.dateRange.end);
     const appliedDateColumn = applied.dateFilterColumn;
     const searchOrPinActive = !!(applied.search?.trim() || applied.pincodeSearch?.trim());
-    const filterSnapshot = JSON.stringify({
-      startDateStr,
-      endDateStr,
-      dateFilterColumn: appliedDateColumn,
-      selectedCallTypes: applied.selectedCallTypes,
-      selectedOfficeIds: applied.selectedOfficeIds,
-      selectedState: applied.selectedState,
-      selectedCity: applied.selectedCity,
-      selectedRegion: applied.selectedRegion,
-      selectedAccount: applied.selectedAccount,
-      selectedBranch: applied.selectedBranch,
-      selectedFranchisee: applied.selectedFranchisee,
-      selectedTechnician: applied.selectedTechnician,
-      selectedStatus: applied.selectedStatus,
-      priorityFilter: applied.priorityFilter,
-      portalFilter: applied.portalFilter,
-      repairFilter: applied.repairFilter,
-      agingAsOf,
-      debouncedSearch: applied.search || '',
-      debouncedPincodeSearch: applied.pincodeSearch || '',
-    });
+    const filterSnapshot = snapshotKeyFor(applied);
 
     if (!opts?.force && filterSnapshot === lastAppliedFilterSnapshotRef.current) {
       return;
     }
+    // Default BREAKDOWN (and any other late-applied filter) often lands while the first
+    // unfiltered load is still running — dropping that reload left the Type chip lying.
     if (filterEffectInFlightRef.current) {
+      filterEffectPendingRef.current = true;
       return;
     }
 
@@ -1339,21 +1350,25 @@ export function useRegisterDataFetch({
 
       if (applyRegisterFromSharedCalls(1, limit)) {
         setLoading(false);
-        lastAppliedFilterSnapshotRef.current = filterSnapshot;
-        return;
-      }
-
-      if (applyRegisterFromCorpus(1, limit)) {
+      } else if (applyRegisterFromCorpus(1, limit)) {
         setLoading(false);
-        lastAppliedFilterSnapshotRef.current = filterSnapshot;
-        return;
+      } else {
+        await fetchData(1, { skipCache: searchOrPinActive });
       }
 
-      await fetchData(1, { skipCache: searchOrPinActive });
-      lastAppliedFilterSnapshotRef.current = filterSnapshot;
+      const latest = getAppliedFiltersSnapshot();
+      if (latest && snapshotKeyFor(latest) === filterSnapshot) {
+        lastAppliedFilterSnapshotRef.current = filterSnapshot;
+      } else {
+        filterEffectPendingRef.current = true;
+      }
     } finally {
       filterEffectInFlightRef.current = false;
       reportPerf('filterEffect', 'register load done', f0);
+      if (filterEffectPendingRef.current) {
+        filterEffectPendingRef.current = false;
+        void runRegisterFilterLoadRef.current();
+      }
     }
   }, [
     dbInitialized,
@@ -1369,6 +1384,8 @@ export function useRegisterDataFetch({
     registerViewFilterRef,
     registerPagesCacheRef,
   ]);
+
+  runRegisterFilterLoadRef.current = runRegisterFilterLoad;
 
   useEffect(() => {
     void runRegisterFilterLoad();

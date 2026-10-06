@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Subcontractor stock reconciliation & emailing - run via cron every 15 minutes.
+# Subcontractor stock reconciliation & emailing — evening-ops 16:00 IST only
+# (also safe for manual runs; not invoked from mail-scheduler */15).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

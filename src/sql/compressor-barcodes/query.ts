@@ -27,8 +27,8 @@ export const REPEAT_VISIT_COUNT_ACTIVE_SQL =
  * CRM `callStatus` text. Assigned must not win when the call is already cancelled.
  */
 export const REPEAT_CRM_CALL_STATUS_SQL = `CASE
-        WHEN (tc.vtransfercallno IS NOT NULL AND LTRIM(RTRIM(tc.vtransfercallno)) <> '') OR tc.ncancelreason = 2 THEN 'Transferred'
         WHEN ISNULL(tc.ncancelreason, 0) NOT IN (0, 2) THEN 'Cancelled'
+        WHEN (tc.vtransfercallno IS NOT NULL AND LTRIM(RTRIM(tc.vtransfercallno)) <> '') OR tc.ncancelreason = 2 THEN 'Transferred'
         WHEN tc.callStatus IS NOT NULL AND LOWER(LTRIM(RTRIM(tc.callStatus))) LIKE '%cancel%' THEN 'Cancelled'
         WHEN tc.bsolved = 1 THEN 'Closed'
         WHEN tc.bfastclose = 1 THEN 'Tech Solved'

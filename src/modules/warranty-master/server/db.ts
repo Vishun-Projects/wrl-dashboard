@@ -488,11 +488,16 @@ export async function refreshWarrantyMasterRollup(): Promise<void> {
 }
 
 /** Rollup WHERE — case-folded keys; date filters use end-date range overlap. */
-function buildRollupFilterWhere(params: WarrantyMasterQueryParams): {
+function buildRollupFilterWhere(
+  params: WarrantyMasterQueryParams,
+  /** Qualify columns when joining rollup to page_subgroups (avoids ambiguous subgroup_key). */
+  tableAlias?: string
+): {
   sql: string;
   values: unknown[];
   countExpr: string;
 } {
+  const col = (name: string) => (tableAlias ? `${tableAlias}.${name}` : name);
   const conditions: string[] = ['1=1'];
   const values: unknown[] = [];
   let idx = 1;
@@ -503,7 +508,7 @@ function buildRollupFilterWhere(params: WarrantyMasterQueryParams): {
     const keys = params.customer.split(',').map((s) => s.trim()).filter(Boolean);
     if (keys.length > 0) {
       conditions.push(
-        `subgroup_key = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`
+        `${col('subgroup_key')} = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`
       );
       values.push(keys);
       idx++;
@@ -514,7 +519,7 @@ function buildRollupFilterWhere(params: WarrantyMasterQueryParams): {
     const keys = params.group.split(',').map((s) => s.trim()).filter(Boolean);
     if (keys.length > 0) {
       conditions.push(
-        `group_key = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`
+        `${col('group_key')} = ANY(SELECT LOWER(BTRIM(x)) FROM unnest($${idx}::text[]) AS x)`
       );
       values.push(keys);
       idx++;
@@ -524,7 +529,7 @@ function buildRollupFilterWhere(params: WarrantyMasterQueryParams): {
   if (params.fgModel?.trim()) {
     const models = params.fgModel.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
     if (models.length > 0) {
-      conditions.push(`material = ANY($${idx})`);
+      conditions.push(`${col('material')} = ANY($${idx})`);
       values.push(models);
       idx++;
     }
@@ -536,22 +541,26 @@ function buildRollupFilterWhere(params: WarrantyMasterQueryParams): {
       .map((s) => Number(s.trim()))
       .filter(Number.isFinite);
     if (months.length > 0) {
-      conditions.push(`warranty_months = ANY($${idx}::int[])`);
+      conditions.push(`${col('warranty_months')} = ANY($${idx}::int[])`);
       values.push(months);
       idx++;
     }
   }
 
   if (activeOnly) {
-    conditions.push(`active_machine_count > 0`);
+    conditions.push(`${col('active_machine_count')} > 0`);
   }
   if (params.warrEndFrom?.trim()) {
-    conditions.push(`max_warr_end IS NOT NULL AND max_warr_end >= $${idx}::date`);
+    conditions.push(
+      `${col('max_warr_end')} IS NOT NULL AND ${col('max_warr_end')} >= $${idx}::date`
+    );
     values.push(params.warrEndFrom.trim());
     idx++;
   }
   if (params.warrEndTo?.trim()) {
-    conditions.push(`min_warr_end IS NOT NULL AND min_warr_end <= $${idx}::date`);
+    conditions.push(
+      `${col('min_warr_end')} IS NOT NULL AND ${col('min_warr_end')} <= $${idx}::date`
+    );
     values.push(params.warrEndTo.trim());
     idx++;
   }
@@ -819,6 +828,7 @@ export async function queryWarrantyMasterHierarchyFromDb(
     }
 
     const { sql: whereSql, values, countExpr } = buildRollupFilterWhere(params);
+    const { sql: whereSqlR } = buildRollupFilterWhere(params, 'r');
 
     const countRes = await client.query<{ total: number }>(
       `
@@ -859,7 +869,7 @@ export async function queryWarrantyMasterHierarchyFromDb(
         TO_CHAR(MAX(r.max_warr_end), 'YYYY-MM-DD') AS "maxWarrEnd"
       FROM public.warranty_master_rollup r
       INNER JOIN page_subgroups p ON p.subgroup_key = r.subgroup_key
-      WHERE ${whereSql}
+      WHERE ${whereSqlR}
       GROUP BY r.subgroup_key, p.subgroup_label, r.group_key, r.warranty_months
       HAVING SUM(r.${countExpr}) > 0
       ORDER BY p.subgroup_label ${sortDir}, MIN(r.group_label) ASC, r.warranty_months ASC

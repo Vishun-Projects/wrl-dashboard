@@ -306,7 +306,7 @@ async function collectInventory(code: string, today: string): Promise<Inventory>
     'MIS morning digest | */15 Mon–Sat (prefs often 09:30) | Profile To/Cc + routing | evening: test→ops',
     'MIS test digest | often 14:00 | ops test To | evening: re-run→ops',
     'Cancelled-call digest | evening ops 16:00 only | force→ops (no */15 poller)',
-    'Subcontractor SAP vs CRM | morning via stock cron | stock recipients | evening: force→ops',
+    'Subcontractor SAP vs CRM | evening ops 16:00 only | stock recipients | evening: force→ops',
     'SAP inbound mis@ | continuous (Postfix→Maildir) | extract every 15 min | live check below',
     'Midnight CRM delta | 00:15 IST (always) | configured ops | evening: log-check only',
     'Morning MIS watchdog | ~09:50 alert-on-fail | watchdog To | status only',

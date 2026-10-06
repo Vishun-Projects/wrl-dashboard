@@ -1,6 +1,12 @@
+import { applyCrmRowsToHot } from '@/lib/read-model/apply-crm-delta';
 import { withClient } from '@/lib/read-model/db';
 import { fetchCrmRowsByTrns } from '@/lib/read-model/crm-fetch';
 import { registerHotRetentionStart } from '@/lib/read-model/hot-window';
+import {
+  getSyncState,
+  releaseSyncLock,
+  tryAcquireSyncLock,
+} from '@/lib/read-model/lock';
 import { hotRowNeedsCrmRefresh } from '@/lib/read-model/pipeline-reconcile';
 import { transformCrmRowToHot } from '@/lib/read-model/transform';
 import type { HotRow } from '@/lib/read-model/types';
@@ -10,12 +16,15 @@ const SAMPLE =
 
 /**
  * Sample open + terminal hot rows vs live CRM; log mismatches (status / is_major).
- * Returns mismatch count for CLI exit codes.
+ * Default heal=true: upsert stale CRM rows immediately so midnight verify doesn't
+ * spin all night on the same oldest-synced terminal TRN (e.g. solved→cancelled).
  */
 export async function runHotCrmMismatchSampleCheck(opts?: {
   sample?: number;
-}): Promise<{ checked: number; mismatches: number }> {
+  heal?: boolean;
+}): Promise<{ checked: number; mismatches: number; healed: number }> {
   const limit = opts?.sample ?? SAMPLE;
+  const heal = opts?.heal !== false;
   const ytdStart = registerHotRetentionStart();
 
   const openRows = await withClient(async (client) => {
@@ -49,12 +58,14 @@ export async function runHotCrmMismatchSampleCheck(opts?: {
   const candidates = [...openRows, ...terminalRows];
   if (!candidates.length) {
     console.log('[sync-worker] hot/CRM mismatch sample — no candidates');
-    return { checked: 0, mismatches: 0 };
+    return { checked: 0, mismatches: 0, healed: 0 };
   }
 
   const hotByTrn = new Map(candidates.map((r) => [r.vtrnno, r]));
-  let mismatches = 0;
+  let orphans = 0;
+  let stale = 0;
   const examples: string[] = [];
+  const staleCrmRows: Record<string, unknown>[] = [];
 
   for (let i = 0; i < candidates.length; i += 40) {
     const chunk = candidates.slice(i, i + 40).map((r) => r.vtrnno);
@@ -68,7 +79,7 @@ export async function runHotCrmMismatchSampleCheck(opts?: {
       if (!hot) continue;
       const crm = crmByTrn.get(trn);
       if (!crm) {
-        mismatches += 1;
+        orphans += 1;
         if (examples.length < 10) examples.push(`${trn}: missing in CRM (orphan)`);
         continue;
       }
@@ -76,7 +87,8 @@ export async function runHotCrmMismatchSampleCheck(opts?: {
       const majorDrift =
         fresh != null && Boolean(hot.is_major) !== Boolean(fresh.is_major);
       if (majorDrift || hotRowNeedsCrmRefresh(hot, crm)) {
-        mismatches += 1;
+        stale += 1;
+        staleCrmRows.push(crm);
         if (examples.length < 10) {
           examples.push(
             `${trn}: hot=${hot.status_bucket}/major=${hot.is_major} crm=${fresh?.status_bucket ?? '?'}/major=${fresh?.is_major ?? '?'}`
@@ -86,11 +98,42 @@ export async function runHotCrmMismatchSampleCheck(opts?: {
     }
   }
 
+  const found = orphans + stale;
   console.log(
-    `[sync-worker] hot/CRM mismatch sample — checked ${candidates.length}, mismatches ${mismatches}`
+    `[sync-worker] hot/CRM mismatch sample — checked ${candidates.length}, mismatches ${found}`
   );
   for (const line of examples) {
     console.log(`[sync-worker] mismatch: ${line}`);
   }
-  return { checked: candidates.length, mismatches };
+
+  let healed = 0;
+  if (heal && staleCrmRows.length) {
+    healed = await withClient(async (client) => {
+      const acquired = await tryAcquireSyncLock(client);
+      if (!acquired) {
+        console.warn('[sync-worker] mismatch sample heal skipped — sync lock held');
+        return 0;
+      }
+      try {
+        const state = await getSyncState(client);
+        const applied = await applyCrmRowsToHot(client, staleCrmRows, {
+          state,
+          advanceWatermarks: false,
+        });
+        await releaseSyncLock(client, 'ok', applied.rowsUpserted);
+        return applied.rowsUpserted;
+      } catch (err) {
+        await releaseSyncLock(client, 'error', 0);
+        throw err;
+      }
+    });
+    console.log(
+      `[sync-worker] mismatch sample healed — upserted ${healed}/${staleCrmRows.length}`
+    );
+  }
+
+  // After a successful heal, only orphans (and unhealed stale) block verify.
+  const mismatches =
+    healed > 0 ? orphans + Math.max(0, staleCrmRows.length - healed) : found;
+  return { checked: candidates.length, mismatches, healed };
 }

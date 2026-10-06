@@ -418,11 +418,20 @@ export function buildMailPipelineHealth(params: {
     cronLines: params.cronLines,
     needles: [/subcontractor-stock-cron\.sh/],
   });
-  pipes.push(
-    params.catalogPaused.has('subcontractor_stock')
-      ? { ...cronSap, ok: true, status: 'WARN', detail: 'PAUSED in portal' }
-      : cronSap
-  );
+  // Standalone */15 poller removed — evening-ops covers extract + force→ops at 16:00.
+  if (!cronSap.ok && params.cronLines.some((l) => /evening-ops-sequencer\.sh/.test(l))) {
+    pipes.push({
+      id: 'cron_sap_stock',
+      label: 'Subcontractor SAP vs CRM',
+      ok: true,
+      status: 'WORKING',
+      detail: 'no standalone cron (by design) — covered by evening-ops 16:00',
+    });
+  } else if (params.catalogPaused.has('subcontractor_stock')) {
+    pipes.push({ ...cronSap, ok: true, status: 'WARN', detail: 'PAUSED in portal' });
+  } else {
+    pipes.push(cronSap);
+  }
   pipes.push(
     scoreCronLogRecent({
       id: 'sap_stock_log',

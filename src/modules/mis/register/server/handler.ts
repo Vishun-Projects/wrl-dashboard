@@ -23,6 +23,7 @@ import {
   sqlRegisterDateColumn,
   sqlRegisterDateColumnBare,
   buildRegisterRepairNcodeExistsWhere,
+  TRHCALLS_EXCLUDE_TRANSFERRED,
 } from '@/sql/trhcalls/query';
 import { enrichRegisterRowsRepairDone } from '@/sql/register/repair-done-enrich';
 import { parseRepairQueryParam } from '@/modules/serial-audit';
@@ -421,7 +422,7 @@ export async function handleRegisterGet(req: NextRequest) {
       );
     }
 
-    const excludeTransferred = " AND ISNULL(tc.vtransfercallno, '') = '' AND ISNULL(tc.ncancelreason, 0) <> 2";
+    const excludeTransferred = TRHCALLS_EXCLUDE_TRANSFERRED;
     const isLookupSearch = !!(search && search.trim());
     const registerDateCol = resolveRegisterDateSqlColumn(dateFilterColumnParam);
     const registerDateSql = sqlRegisterDateColumn(registerDateCol);

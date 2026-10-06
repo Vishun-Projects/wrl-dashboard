@@ -7,6 +7,7 @@ import {
   buildTrhcallsDedupSubquery,
   sqlFranchiseeCodeExpr,
   sqlFranchiseeNameExpr,
+  TRHCALLS_EXCLUDE_TRANSFERRED,
 } from '@/sql/trhcalls/query';
 import { SUMMARY_DEFAULT_CALL_TYPE } from '@/modules/mis';
 
@@ -120,9 +121,7 @@ export function buildLocationAuditWhereClause(opts: LocationAuditQueryParams): s
     opts.callType && opts.callType !== 'All' ? opts.callType : SUMMARY_DEFAULT_CALL_TYPE;
   const dateColumn = opts.dateColumn ?? 'dtrndate';
 
-  let condition = `(tc.vtrnno IS NOT NULL AND tc.vtrnno <> '')
-    AND ISNULL(tc.vtransfercallno, '') = ''
-    AND ISNULL(CAST(tc.ncancelreason AS INT), 0) <> 2
+  let condition = `(tc.vtrnno IS NOT NULL AND tc.vtrnno <> '')${TRHCALLS_EXCLUDE_TRANSFERRED}
     AND ${MAJOR_REPAIR_EXISTS}
     AND ${TECH_SOLVED_WHERE}`;
   condition = appendCallTypeFilter(condition, callType);

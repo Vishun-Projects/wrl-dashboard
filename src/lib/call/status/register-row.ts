@@ -9,9 +9,12 @@ export type RegisterSummaryBucket =
   | 'transferred';
 
 export function isRegisterRowTransferred(row: Record<string, unknown>): boolean {
+  // Real cancel (e.g. Wrong Call ncancelreason=9) wins over a leftover vtransfercallno
+  // from rebook notes — otherwise midnight CRM counts drop the TRN while hot still has it.
+  if (isRealCancelReasonCode(row.ncancelreason ?? row.ncancelReason)) return false;
   return (
     Boolean(row.vtransfercallno && String(row.vtransfercallno).trim() !== '') ||
-    String(row.ncancelreason) === '2'
+    String(row.ncancelreason ?? row.ncancelReason ?? '') === '2'
   );
 }
 

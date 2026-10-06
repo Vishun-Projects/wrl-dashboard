@@ -122,8 +122,7 @@ const pipes = buildMailPipelineHealth({
   cronLines: [
     '*/15 * * * * /x/mis-email-digest.sh',
     '0 14 * * * /x/mis-email-test-digest.sh',
-    '*/15 * * * * /x/cancelled-call-digest.sh',
-    '*/15 * * * * /x/subcontractor-stock-cron.sh',
+    // cancelled + subcontractor: no standalone cron — evening-ops 16:00 covers them
     '0 0 * * * /x/nightly-ytd-calls-export.sh',
     '15 0 * * * /x/midnight-crm-delta-mail.sh',
     '0 16 * * * /x/evening-ops-sequencer.sh',

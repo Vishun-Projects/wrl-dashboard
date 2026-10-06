@@ -86,7 +86,7 @@ export const VPS_CRON_CATALOG: readonly VpsCronJobDef[] = [
   {
     id: 'subcontractor_stock',
     label: 'Subcontractor SAP stock reconciliation',
-    schedule: 'Every 15 min daily IST (extract SAP mail, reconcile, morning send)',
+    schedule: 'Evening ops 16:00 IST only (extract/reconcile + force→ops; no */15 poller)',
     script: 'subcontractor-stock-cron.sh',
   },
   {

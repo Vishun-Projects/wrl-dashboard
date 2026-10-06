@@ -120,7 +120,8 @@ async function crmCorpusTrnsInRange(
         FROM trhcalls tc (NOLOCK)
         WHERE tc.dtrndate >= '${start}' AND tc.dtrndate <= '${end} 23:59:59'
           AND tc.vtrnno IS NOT NULL AND tc.vtrnno <> ''
-          AND ISNULL(tc.vtransfercallno, '') = ''
+          AND ISNULL(CAST(tc.ncancelreason AS INT), 0) <> 2
+          AND (ISNULL(tc.vtransfercallno, '') = '' OR ISNULL(CAST(tc.ncancelreason AS INT), 0) NOT IN (0, 2))
           AND ISNULL(CAST(tc.ncancelreason AS INT), 0) <> 2
           ${typeSql}
       `,

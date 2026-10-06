@@ -23,7 +23,7 @@ Same as ponytail-review:
 - `shrink:` same logic, fewer lines. Show the shorter form.
 
 ## Hunt
-
+  
 Deps the stdlib or platform already ships, single-implementation interfaces,
 factories with one product, wrappers that only delegate, files exporting one
 thing, dead flags and config, hand-rolled stdlib.
