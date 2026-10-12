@@ -70,36 +70,22 @@ export default function DefectiveSerialsPageClient() {
   const startDate = useMemo(() => toDateString(dateRange.start), [dateRange.start]);
   const endDate = useMemo(() => toDateString(dateRange.end), [dateRange.end]);
   const [status, setStatus] = useState<DefectiveSerialStatus>('all');
-  const [plant, setPlant] = useState('');
   const [branch, setBranch] = useState('');
-  const [callType, setCallType] = useState('');
   const [search, setSearch] = useState('');
   const [searchDraft, setSearchDraft] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 50;
-  const [plantOptions, setPlantOptions] = useState<string[]>([]);
   const [branchOptions, setBranchOptions] = useState<string[]>([]);
-  const [callTypeOptions, setCallTypeOptions] = useState<string[]>([]);
   const [data, setData] = useState<DefectiveSerialsRowsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const plants = plant ? [plant] : [];
   const branches = branch ? [branch] : [];
-  const callTypes = callType ? [callType] : [];
 
-  const plantSelectOptions = useMemo<FilterSelectOption[]>(
-    () => plantOptions.map((p) => ({ value: p, label: p })),
-    [plantOptions]
-  );
   const branchSelectOptions = useMemo<FilterSelectOption[]>(
     () => branchOptions.map((b) => ({ value: b, label: b })),
     [branchOptions]
-  );
-  const callTypeSelectOptions = useMemo<FilterSelectOption[]>(
-    () => callTypeOptions.map((t) => ({ value: t, label: t })),
-    [callTypeOptions]
   );
 
   const buildParams = useCallback(
@@ -109,16 +95,14 @@ export default function DefectiveSerialsPageClient() {
         startDate,
         endDate,
       });
-      if (plant) params.set('plants', plant);
       if (branch) params.set('branches', branch);
-      if (callType) params.set('callTypes', callType);
       if (search) params.set('search', search);
       if (opts?.page) params.set('page', String(opts.page));
       if (opts?.pageSize) params.set('pageSize', String(opts.pageSize));
       if (opts?.format) params.set('format', opts.format);
       return params;
     },
-    [status, startDate, endDate, plant, branch, callType, search]
+    [status, startDate, endDate, branch, search]
   );
 
   useEffect(() => {
@@ -132,15 +116,9 @@ export default function DefectiveSerialsPageClient() {
         const res = await axios.get<DefectiveSerialsOptionsResponse>(`${API}?${params}`, {
           withCredentials: true,
         });
-        const plantsList = res.data.plants ?? [];
         const branchesList = res.data.branches ?? [];
-        const typesList = res.data.callTypes ?? [];
-        setPlantOptions(plantsList);
         setBranchOptions(branchesList);
-        setCallTypeOptions(typesList);
-        setPlant((prev) => (prev && plantsList.includes(prev) ? prev : ''));
         setBranch((prev) => (prev && branchesList.includes(prev) ? prev : ''));
-        setCallType((prev) => (prev && typesList.includes(prev) ? prev : ''));
       } catch {
         /* options are best-effort */
       }
@@ -243,20 +221,6 @@ export default function DefectiveSerialsPageClient() {
               layout="inline"
             />
             <FilterSelect
-              label="Plant"
-              emptyLabel="All Plants"
-              options={plantSelectOptions}
-              selected={plants}
-              mode="single"
-              onChange={(values) => {
-                setPlant(pickSingleFilterValue(values));
-                setPage(1);
-              }}
-              searchPlaceholder="Search plant…"
-              panelClassName="w-44"
-              layout="inline"
-            />
-            <FilterSelect
               label="Branch"
               emptyLabel="All Branches"
               options={branchSelectOptions}
@@ -268,20 +232,6 @@ export default function DefectiveSerialsPageClient() {
               }}
               searchPlaceholder="Search branch…"
               panelClassName="w-72"
-              layout="inline"
-            />
-            <FilterSelect
-              label="Call Type"
-              emptyLabel="All Call Types"
-              options={callTypeSelectOptions}
-              selected={callTypes}
-              mode="single"
-              onChange={(values) => {
-                setCallType(pickSingleFilterValue(values));
-                setPage(1);
-              }}
-              searchPlaceholder="Search call type…"
-              panelClassName="w-52"
               layout="inline"
             />
             <label className="flex flex-col gap-0.5 text-xs">

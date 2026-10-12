@@ -12,10 +12,10 @@ import type {
 } from '@/modules/mb51-aging/types';
 
 const BUCKETS: Mb51AgingBucket[] = [
-  { k: 'b1', l: 'Below 30 days', min: 0, max: 29, c: 'var(--b1)' },
-  { k: 'b2', l: '30 to 60 days', min: 30, max: 59, c: 'var(--b2)' },
-  { k: 'b3', l: '60 to 180 days', min: 60, max: 179, c: 'var(--b3)' },
-  { k: 'b4', l: '180 to 365 days', min: 180, max: 364, c: 'var(--b4)' },
+  { k: 'b1', l: 'Below 30 days', min: 0, max: 30, c: 'var(--b1)' },
+  { k: 'b2', l: '31 to 90 days', min: 31, max: 90, c: 'var(--b2)' },
+  { k: 'b3', l: '91 to 180 days', min: 91, max: 180, c: 'var(--b3)' },
+  { k: 'b4', l: '181 to 365 days', min: 181, max: 364, c: 'var(--b4)' },
   { k: 'b5', l: '1 year to 2 years', min: 365, max: 729, c: 'var(--b5)' },
   { k: 'b6', l: '2 to 3 years', min: 730, max: 1094, c: 'var(--b6)' },
   { k: 'b7', l: 'More than 3 years', min: 1095, max: 1e9, c: 'var(--b7)' },
