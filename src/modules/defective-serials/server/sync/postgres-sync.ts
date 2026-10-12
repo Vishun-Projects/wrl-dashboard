@@ -350,6 +350,102 @@ async function fetchCrmChunk(editedFrom: string | null, afterNcode: string | nul
     .filter((r): r is DefectiveSerialSyncRow => r != null);
 }
 
+const HOT_DIMS_SRC = `
+  SELECT
+    d2.ncode,
+    d2.nofficeid,
+    COALESCE(
+      NULLIF(btrim(h.call_type), ''),
+      NULLIF(btrim(m.call_type), '')
+    ) AS call_type,
+    COALESCE(
+      NULLIF(btrim(h.franchisee_name), ''),
+      NULLIF(btrim(m.franchisee_name), '')
+    ) AS vendor_name,
+    NULLIF(btrim(fo.vsapvendorcode), '') AS vendor_code,
+    COALESCE(
+      NULLIF(btrim(h.branch_name), ''),
+      NULLIF(btrim(m.branch_name), ''),
+      NULLIF(btrim(d2.branch_name), '')
+    ) AS branch_name
+  FROM defective_serials d2
+  LEFT JOIN calls_latest_hot h ON h.vtrnno = d2.vtrnno
+  LEFT JOIN calls_crm_mirror m ON m.vtrnno = d2.vtrnno
+  LEFT JOIN dim_offices fo ON fo.ncode = (
+    CASE
+      WHEN btrim(COALESCE(h.franchisee_code, m.franchisee_code, '')) ~ '^[0-9]+(\\.[0-9]+)?$'
+      THEN trunc(btrim(COALESCE(h.franchisee_code, m.franchisee_code))::numeric)::bigint
+      ELSE NULL
+    END
+  )
+`;
+
+/** Apply hot/mirror dims onto defective_serials. Optional vtrnno list scopes to a sync chunk. */
+async function applyHotDimsToDefectiveSerials(
+  client: { query: (sql: string, params?: unknown[]) => Promise<{ rowCount: number | null }> },
+  vtrnNos?: string[]
+): Promise<number> {
+  const params: unknown[] = [];
+  const scope =
+    vtrnNos && vtrnNos.length > 0
+      ? (() => {
+          params.push(vtrnNos);
+          return `AND d2.vtrnno = ANY($1::text[])`;
+        })()
+      : '';
+
+  const res = await client.query(
+    `
+    UPDATE defective_serials d
+    SET
+      call_type = COALESCE(src.call_type, NULLIF(btrim(d.call_type), '')),
+      vendor_name = COALESCE(src.vendor_name, NULLIF(btrim(d.vendor_name), '')),
+      vendor_code = COALESCE(src.vendor_code, NULLIF(btrim(d.vendor_code), '')),
+      branch_name = COALESCE(src.branch_name, NULLIF(btrim(d.branch_name), '')),
+      plant_code = COALESCE(
+        NULLIF(substring(btrim(COALESCE(src.branch_name, d.branch_name)) from '^[0-9]+'), ''),
+        NULLIF(btrim(d.plant_code), '')
+      )
+    FROM (
+      ${HOT_DIMS_SRC}
+      WHERE 1=1
+        ${scope}
+    ) src
+    WHERE d.ncode = src.ncode
+      AND d.nofficeid = src.nofficeid
+      AND (
+        d.call_type IS DISTINCT FROM COALESCE(src.call_type, NULLIF(btrim(d.call_type), ''))
+        OR d.vendor_name IS DISTINCT FROM COALESCE(src.vendor_name, NULLIF(btrim(d.vendor_name), ''))
+        OR d.vendor_code IS DISTINCT FROM COALESCE(src.vendor_code, NULLIF(btrim(d.vendor_code), ''))
+        OR d.branch_name IS DISTINCT FROM COALESCE(src.branch_name, NULLIF(btrim(d.branch_name), ''))
+        OR d.plant_code IS DISTINCT FROM COALESCE(
+          NULLIF(substring(btrim(COALESCE(src.branch_name, d.branch_name)) from '^[0-9]+'), ''),
+          NULLIF(btrim(d.plant_code), '')
+        )
+      )
+    `,
+    params
+  );
+
+  // Rows with no hot hit still get plant from stored branch_name ("1173 - DELHI BRANCH").
+  const plantRes = await client.query(
+    `
+    UPDATE defective_serials
+    SET plant_code = substring(btrim(branch_name) from '^[0-9]+')
+    WHERE (plant_code IS NULL OR btrim(plant_code) = '')
+      AND btrim(branch_name) ~ '^[0-9]+'
+      ${
+        vtrnNos && vtrnNos.length > 0
+          ? `AND vtrnno = ANY($1::text[])`
+          : ''
+      }
+    `,
+    vtrnNos && vtrnNos.length > 0 ? [vtrnNos] : []
+  );
+
+  return (res.rowCount ?? 0) + (plantRes.rowCount ?? 0);
+}
+
 /**
  * Fill call_type / vendor / branch / plant from Postgres hot+mirror only (no CRM).
  * Plant = leading digits of branch_name (e.g. "1173 - DELHI BRANCH").
@@ -357,59 +453,7 @@ async function fetchCrmChunk(editedFrom: string | null, afterNcode: string | nul
 export async function backfillDefectiveSerialsCallDims(): Promise<{ updated: number }> {
   const updated = await withClient(async (client) => {
     await ensureDefectiveSerialsTable(client);
-    const res = await client.query(
-      `
-      UPDATE defective_serials d
-      SET
-        call_type = COALESCE(NULLIF(btrim(d.call_type), ''), src.call_type),
-        vendor_name = COALESCE(NULLIF(btrim(d.vendor_name), ''), src.vendor_name),
-        vendor_code = COALESCE(NULLIF(btrim(d.vendor_code), ''), src.vendor_code),
-        branch_name = COALESCE(NULLIF(btrim(src.branch_name), ''), d.branch_name),
-        plant_code = COALESCE(
-          NULLIF(btrim(d.plant_code), ''),
-          NULLIF(substring(btrim(COALESCE(src.branch_name, d.branch_name)) from '^[0-9]+'), '')
-        )
-      FROM (
-        SELECT
-          d2.ncode,
-          d2.nofficeid,
-          COALESCE(
-            NULLIF(btrim(h.call_type), ''),
-            NULLIF(btrim(m.call_type), '')
-          ) AS call_type,
-          COALESCE(
-            NULLIF(btrim(h.franchisee_name), ''),
-            NULLIF(btrim(m.franchisee_name), '')
-          ) AS vendor_name,
-          NULLIF(btrim(fo.vsapvendorcode), '') AS vendor_code,
-          COALESCE(
-            NULLIF(btrim(h.branch_name), ''),
-            NULLIF(btrim(m.branch_name), '')
-          ) AS branch_name
-        FROM defective_serials d2
-        LEFT JOIN calls_latest_hot h ON h.vtrnno = d2.vtrnno
-        LEFT JOIN calls_crm_mirror m ON m.vtrnno = d2.vtrnno
-        LEFT JOIN dim_offices fo ON fo.ncode = (
-          CASE
-            WHEN btrim(COALESCE(h.franchisee_code, m.franchisee_code, '')) ~ '^[0-9]+(\\.[0-9]+)?$'
-            THEN trunc(btrim(COALESCE(h.franchisee_code, m.franchisee_code))::numeric)::bigint
-            ELSE NULL
-          END
-        )
-        WHERE h.vtrnno IS NOT NULL OR m.vtrnno IS NOT NULL
-      ) src
-      WHERE d.ncode = src.ncode
-        AND d.nofficeid = src.nofficeid
-        AND (
-          (NULLIF(btrim(d.call_type), '') IS NULL AND src.call_type IS NOT NULL)
-          OR (NULLIF(btrim(d.vendor_name), '') IS NULL AND src.vendor_name IS NOT NULL)
-          OR (NULLIF(btrim(d.vendor_code), '') IS NULL AND src.vendor_code IS NOT NULL)
-          OR (NULLIF(btrim(d.plant_code), '') IS NULL AND src.branch_name IS NOT NULL)
-          OR (src.branch_name IS NOT NULL AND d.branch_name IS DISTINCT FROM src.branch_name)
-        )
-      `
-    );
-    return res.rowCount ?? 0;
+    return applyHotDimsToDefectiveSerials(client);
   });
 
   console.log(`[defective-serials] call-dims backfill (hot/mirror only): ${updated} rows`);
@@ -454,7 +498,13 @@ export async function syncDefectiveSerialsToPostgres(opts?: {
     const batch = await fetchCrmChunk(editedFrom, afterNcode);
     if (batch.length === 0) break;
 
-    const upserted = await withClient(async (client) => upsertRows(client, batch));
+    const vtrnNos = [...new Set(batch.map((r) => r.vtrnno).filter((v): v is string => Boolean(v)))];
+    const upserted = await withClient(async (client) => {
+      const n = await upsertRows(client, batch);
+      // Stamp plant/vendor/call_type from hot/mirror for this chunk (no CRM).
+      if (vtrnNos.length) await applyHotDimsToDefectiveSerials(client, vtrnNos);
+      return n;
+    });
     total += upserted;
 
     const last = batch[batch.length - 1]!;
@@ -487,10 +537,10 @@ export async function syncDefectiveSerialsToPostgres(opts?: {
     );
   });
 
-  // Existing rows may predate plant/call_type/vendor columns — fill from hot + CRM offices.
-  await backfillDefectiveSerialsCallDims();
+  // Full table pass so older rows get hot dims even when CRM chunk was empty.
+  const dims = await backfillDefectiveSerialsCallDims();
 
-  console.log(`[defective-serials] Done ${mode}: ${total} rows`);
+  console.log(`[defective-serials] Done ${mode}: ${total} rows, dims=${dims.updated}`);
   return { success: true, count: total, mode };
 }
 
