@@ -75,6 +75,8 @@
     "sync-worker:cancelled-register-sync": "npx tsx src/modules/cancelled-calls/server/sync/run.ts",
     "sync-worker:compressor-barcodes": "npx tsx src/modules/compressor-barcodes/server/sync/run.ts",
     "sync-worker:compressor-barcodes:daemon": "npx tsx src/modules/compressor-barcodes/server/sync/daemon.ts",
+    "sync-worker:defective-serials": "npx tsx src/modules/defective-serials/server/sync/run.ts",
+    "rbac:grant-defective-serials": "node scripts/rbac/grant-defective-serials.mjs",
     "sync-worker:midnight-crm-verify": "npx tsx src/lib/read-model/midnight-crm-verify.run.ts",
     "crm-mirror:status": "python scripts/crm_mirror_sync.py status",
     "db:apply-old-crm": "node scripts/db/apply-old-crm-schema.mjs",

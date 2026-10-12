@@ -45,11 +45,15 @@ import {
   runCallsMirrorIncremental,
 } from '@/lib/read-model/calls-mirror';
 import { syncCompressorBarcodesToPostgres } from '@/modules/compressor-barcodes/server/sync/postgres-sync';
+import { syncDefectiveSerialsToPostgres } from '@/modules/defective-serials/server/sync/postgres-sync';
 import { runArcpRateCardSync } from '@/modules/arcp-provision/server/sync/rate-card';
 import { refreshCrmMasters } from '@/lib/read-model/crm-masters';
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
 const DAEMON_MAX_CONSECUTIVE_FAILURES = Number(process.env.SYNC_DAEMON_MAX_FAILURES ?? 5) || 5;
+const DEFECTIVE_SERIALS_SYNC_INTERVAL_MS =
+  Number(process.env.DEFECTIVE_SERIALS_SYNC_INTERVAL_MS ?? 3_600_000) || 3_600_000;
+let lastDefectiveSerialsSyncAt = 0;
 
 const SYNC_SCHEDULE_ACTOR = {
   userId: null,
@@ -254,6 +258,22 @@ async function runDaemon(): Promise<void> {
           }
         } catch (cbErr) {
           console.error('[compressor-barcodes] Daemon incremental failed:', formatSyncWorkerError(cbErr));
+        }
+      }
+      if (process.env.SYNC_DEFECTIVE_SERIALS_ENABLED !== 'false') {
+        const due =
+          Date.now() - lastDefectiveSerialsSyncAt >= DEFECTIVE_SERIALS_SYNC_INTERVAL_MS;
+        if (due) {
+          try {
+            const ds = await syncDefectiveSerialsToPostgres();
+            lastDefectiveSerialsSyncAt = Date.now();
+            console.log(`[defective-serials] Daemon sync complete (${ds.mode}):`, ds.count);
+          } catch (dsErr) {
+            console.error(
+              '[defective-serials] Daemon incremental failed:',
+              formatSyncWorkerError(dsErr)
+            );
+          }
         }
       }
     } catch (err) {
@@ -492,6 +512,12 @@ async function main(): Promise<void> {
       console.log('[cancelled-register] Complete:', result);
       break;
     }
+    case 'defective-serials-sync': {
+      const full = process.argv.slice(3).includes('--full');
+      const result = await syncDefectiveSerialsToPostgres({ forceFull: full });
+      console.log('[defective-serials] Complete:', result);
+      break;
+    }
     case 'daemon':
       await runDaemon();
       break;
@@ -536,6 +562,7 @@ Commands:
                     --from YYYY-MM-DD --to YYYY-MM-DD  (default: watermark-2d or year start → today)
   cancelled-register-sync  calls_crm_mirror (or hot) → calls_cancelled for /report/cancelled-calls
                     --from YYYY-MM-DD --to YYYY-MM-DD  (default: watermark-2d) | --full
+  defective-serials-sync   CRM trdcalls3parts1serialno → defective_serials (| --full)
   arcp-reset        Truncate arcp_lines_hot + reset sync_state (fresh start)
   arcp-backfill     Initial ARCP lines backfill (ARCP_BACKFILL_START_DATE or YEARS)
   arcp-incremental  Single ARCP incremental sync run
@@ -565,6 +592,8 @@ Environment:
   SYNC_WORKER_ENABLED    Must be "true" for incremental/nightly/daemon
   SYNC_CALLS_DAEMON_ENABLED  If "true", daemon runs calls incremental every SYNC_INTERVAL_MS (default off — midnight only)
   SYNC_CANCELLED_REGISTER_ENABLED  Mirror/hot → calls_cancelled in daemon (default on; no CRM report SQL)
+  SYNC_DEFECTIVE_SERIALS_ENABLED  CRM defective serials → defective_serials in daemon (default on; hourly)
+  DEFECTIVE_SERIALS_SYNC_INTERVAL_MS  Daemon min gap between defective-serials syncs (default 3600000)
   SYNC_ARCP_ENABLED      Run ARCP incremental in daemon / API sync
   SYNC_TRANSACTION_ENTRY_ENABLED  TransactionEntry sync in daemon/nightly (default on; set false to disable)
   TRANSACTION_ENTRY_RECENT_DAYS   Recent-window bulk refresh for all CRM clients (default 14)

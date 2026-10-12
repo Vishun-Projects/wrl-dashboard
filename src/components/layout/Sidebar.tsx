@@ -32,6 +32,7 @@ import {
   XCircle,
   Hourglass,
   Table,
+  PackageSearch,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -141,6 +142,8 @@ export function Sidebar({ user }: SidebarProps) {
                   ? GitCompareArrows
                   : path === '/report/cancelled-calls'
                     ? Ban
+                    : path === '/report/defective-serials'
+                      ? PackageSearch
                     : path === '/report/rejected-calls'
                       ? XCircle
                     : path === '/report/spare-stock-analysis'

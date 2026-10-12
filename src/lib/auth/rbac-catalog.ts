@@ -164,6 +164,14 @@ export const RBAC_PAGES: RbacPage[] = [
     group: 'Reports',
   },
   {
+    id: 'defective_serials',
+    permission: 'page_defective_serials',
+    path: '/report/defective-serials',
+    label: 'Defective Serials',
+    description: 'Defective part serials returned to branch — pending vs done from CRM',
+    group: 'Reports',
+  },
+  {
     id: 'rejected_calls',
     permission: 'page_rejected_calls',
     path: '/report/rejected-calls',
@@ -418,6 +426,13 @@ export function canAccessPage(permissions: string[], pageId: string): boolean {
 
   // Rejected Calls report: same audience as Cancelled Calls / Call Register.
   if (pageId === 'rejected_calls') {
+    if (hasPermission(permissions, 'page_athena_reconciliation')) return true;
+    if (hasPermission(permissions, 'page_mis_reports')) return true;
+    if (canAccessMisTab(permissions, 'register')) return true;
+  }
+
+  // Defective serials: same audience as Call Register / Cancelled Calls.
+  if (pageId === 'defective_serials') {
     if (hasPermission(permissions, 'page_athena_reconciliation')) return true;
     if (hasPermission(permissions, 'page_mis_reports')) return true;
     if (canAccessMisTab(permissions, 'register')) return true;
