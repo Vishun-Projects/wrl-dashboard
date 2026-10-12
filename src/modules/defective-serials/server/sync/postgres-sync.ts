@@ -136,6 +136,13 @@ async function ensureDefectiveSerialsTable(client: {
       PRIMARY KEY (ncode, nofficeid)
     );
 
+    -- Existing installs: add cols before any index that references them.
+    ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS return_by_name TEXT;
+    ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS plant_code TEXT;
+    ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS call_type TEXT;
+    ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS vendor_name TEXT;
+    ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS vendor_code TEXT;
+
     CREATE INDEX IF NOT EXISTS idx_defective_serials_editedon
       ON defective_serials (editedon);
     CREATE INDEX IF NOT EXISTS idx_defective_serials_breturn
@@ -155,12 +162,6 @@ async function ensureDefectiveSerialsTable(client: {
     CREATE INDEX IF NOT EXISTS idx_defective_serials_call_type
       ON defective_serials (upper(btrim(call_type)))
       WHERE coalesce(btrim(call_type), '') <> '';
-
-    ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS return_by_name TEXT;
-    ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS plant_code TEXT;
-    ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS call_type TEXT;
-    ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS vendor_name TEXT;
-    ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS vendor_code TEXT;
 
     INSERT INTO sync_state (entity, last_editedon, status)
     VALUES ('${ENTITY}', NULL, 'ok')
