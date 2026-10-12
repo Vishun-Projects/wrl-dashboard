@@ -6,6 +6,7 @@ function sqlLit(value: string): string {
 /**
  * CRM pull for defective part serials + call dims.
  * Keyset page on (editedon, ncode) to avoid DBQUERY OOM and same-second skips.
+ * Plant / vendor / call_type come from calls_latest_hot at read time — not CRM.
  */
 export function buildDefectiveSerialsCrmSql(opts: {
   /** Inclusive lower bound on editedon (ISO-ish datetime string). */

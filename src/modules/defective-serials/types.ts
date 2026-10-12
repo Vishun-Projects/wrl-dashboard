@@ -13,6 +13,10 @@ export type DefectiveSerialRow = {
   city: string | null;
   call_centre_call_id: string | null;
   branch_name: string | null;
+  plant_code: string | null;
+  call_type: string | null;
+  vendor_name: string | null;
+  vendor_code: string | null;
   defective_item_code: string | null;
   defective_item_name: string | null;
   voldserialno: string | null;
@@ -30,4 +34,10 @@ export type DefectiveSerialsRowsResponse = {
   pageSize: number;
   pendingCount: number;
   doneCount: number;
+};
+
+export type DefectiveSerialsOptionsResponse = {
+  plants: string[];
+  branches: string[];
+  callTypes: string[];
 };

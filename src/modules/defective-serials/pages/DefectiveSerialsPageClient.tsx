@@ -17,9 +17,12 @@ import { FilterSelect } from '@/components/filters/FilterSelect';
 import type { FilterSelectOption } from '@/components/filters/filter-select-types';
 import { TrnLink } from '@/components/calls/TrnLink';
 import { feedback } from '@/lib/ui/feedback';
+import { DateRangeSelector } from '@/modules/mis/register/components/DateRangeSelector';
+import { defaultDateRange, toDateString, type ReportDateRange } from '@/modules/mis';
 import type {
   DefectiveSerialRow,
   DefectiveSerialStatus,
+  DefectiveSerialsOptionsResponse,
   DefectiveSerialsRowsResponse,
 } from '@/modules/defective-serials/types';
 
@@ -34,6 +37,18 @@ const STATUS_OPTIONS: FilterSelectOption[] = [
 function pickSingle(values: string[]): DefectiveSerialStatus {
   const v = values[values.length - 1] ?? 'all';
   return v === 'done' || v === 'pending' ? v : 'all';
+}
+
+function pickSingleFilterValue(values: string[]): string {
+  if (values.length === 0) return '';
+  return values[values.length - 1] ?? '';
+}
+
+function vendorLabel(code: string | null, name: string | null): string {
+  const c = (code ?? '').trim();
+  const n = (name ?? '').trim();
+  if (c && n) return `${c} - ${n}`;
+  return c || n || '—';
 }
 
 function Cell({
@@ -51,26 +66,92 @@ function Cell({
 }
 
 export default function DefectiveSerialsPageClient() {
+  const [dateRange, setDateRange] = useState<ReportDateRange>(() => defaultDateRange());
+  const startDate = useMemo(() => toDateString(dateRange.start), [dateRange.start]);
+  const endDate = useMemo(() => toDateString(dateRange.end), [dateRange.end]);
   const [status, setStatus] = useState<DefectiveSerialStatus>('all');
+  const [plant, setPlant] = useState('');
+  const [branch, setBranch] = useState('');
+  const [callType, setCallType] = useState('');
   const [search, setSearch] = useState('');
   const [searchDraft, setSearchDraft] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 50;
+  const [plantOptions, setPlantOptions] = useState<string[]>([]);
+  const [branchOptions, setBranchOptions] = useState<string[]>([]);
+  const [callTypeOptions, setCallTypeOptions] = useState<string[]>([]);
   const [data, setData] = useState<DefectiveSerialsRowsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const plants = plant ? [plant] : [];
+  const branches = branch ? [branch] : [];
+  const callTypes = callType ? [callType] : [];
+
+  const plantSelectOptions = useMemo<FilterSelectOption[]>(
+    () => plantOptions.map((p) => ({ value: p, label: p })),
+    [plantOptions]
+  );
+  const branchSelectOptions = useMemo<FilterSelectOption[]>(
+    () => branchOptions.map((b) => ({ value: b, label: b })),
+    [branchOptions]
+  );
+  const callTypeSelectOptions = useMemo<FilterSelectOption[]>(
+    () => callTypeOptions.map((t) => ({ value: t, label: t })),
+    [callTypeOptions]
+  );
+
+  const buildParams = useCallback(
+    (opts?: { page?: number; pageSize?: number; format?: string }) => {
+      const params = new URLSearchParams({
+        status,
+        startDate,
+        endDate,
+      });
+      if (plant) params.set('plants', plant);
+      if (branch) params.set('branches', branch);
+      if (callType) params.set('callTypes', callType);
+      if (search) params.set('search', search);
+      if (opts?.page) params.set('page', String(opts.page));
+      if (opts?.pageSize) params.set('pageSize', String(opts.pageSize));
+      if (opts?.format) params.set('format', opts.format);
+      return params;
+    },
+    [status, startDate, endDate, plant, branch, callType, search]
+  );
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const params = new URLSearchParams({
+          mode: 'options',
+          startDate,
+          endDate,
+        });
+        const res = await axios.get<DefectiveSerialsOptionsResponse>(`${API}?${params}`, {
+          withCredentials: true,
+        });
+        const plantsList = res.data.plants ?? [];
+        const branchesList = res.data.branches ?? [];
+        const typesList = res.data.callTypes ?? [];
+        setPlantOptions(plantsList);
+        setBranchOptions(branchesList);
+        setCallTypeOptions(typesList);
+        setPlant((prev) => (prev && plantsList.includes(prev) ? prev : ''));
+        setBranch((prev) => (prev && branchesList.includes(prev) ? prev : ''));
+        setCallType((prev) => (prev && typesList.includes(prev) ? prev : ''));
+      } catch {
+        /* options are best-effort */
+      }
+    })();
+  }, [startDate, endDate]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({
-        status,
-        page: String(page),
-        pageSize: String(pageSize),
-      });
-      if (search) params.set('search', search);
+      const params = buildParams({ page, pageSize });
       const res = await axios.get<DefectiveSerialsRowsResponse>(`${API}?${params}`, {
         withCredentials: true,
       });
@@ -85,7 +166,7 @@ export default function DefectiveSerialsPageClient() {
     } finally {
       setLoading(false);
     }
-  }, [status, page, search]);
+  }, [buildParams, page]);
 
   useEffect(() => {
     void load();
@@ -101,8 +182,7 @@ export default function DefectiveSerialsPageClient() {
   async function exportCsv() {
     setExporting(true);
     try {
-      const params = new URLSearchParams({ status, format: 'csv' });
-      if (search) params.set('search', search);
+      const params = buildParams({ format: 'csv' });
       const res = await fetch(`${API}?${params}`, { credentials: 'include' });
       if (!res.ok) throw new Error('Export failed');
       const blob = await res.blob();
@@ -139,6 +219,17 @@ export default function DefectiveSerialsPageClient() {
       toolbar={
         <div className="register-filter-bar border-b border-slate-200 bg-bg-canvas px-3 py-1.5">
           <div className="flex flex-wrap items-end gap-3">
+            <div className="shrink-0">
+              <DateRangeSelector
+                value={dateRange.label}
+                startDate={dateRange.start}
+                endDate={dateRange.end}
+                onChange={(range) => {
+                  setDateRange(range);
+                  setPage(1);
+                }}
+              />
+            </div>
             <FilterSelect
               label="Status"
               options={STATUS_OPTIONS}
@@ -151,12 +242,54 @@ export default function DefectiveSerialsPageClient() {
               panelClassName="w-40"
               layout="inline"
             />
+            <FilterSelect
+              label="Plant"
+              emptyLabel="All Plants"
+              options={plantSelectOptions}
+              selected={plants}
+              mode="single"
+              onChange={(values) => {
+                setPlant(pickSingleFilterValue(values));
+                setPage(1);
+              }}
+              searchPlaceholder="Search plant…"
+              panelClassName="w-44"
+              layout="inline"
+            />
+            <FilterSelect
+              label="Branch"
+              emptyLabel="All Branches"
+              options={branchSelectOptions}
+              selected={branches}
+              mode="single"
+              onChange={(values) => {
+                setBranch(pickSingleFilterValue(values));
+                setPage(1);
+              }}
+              searchPlaceholder="Search branch…"
+              panelClassName="w-72"
+              layout="inline"
+            />
+            <FilterSelect
+              label="Call Type"
+              emptyLabel="All Call Types"
+              options={callTypeSelectOptions}
+              selected={callTypes}
+              mode="single"
+              onChange={(values) => {
+                setCallType(pickSingleFilterValue(values));
+                setPage(1);
+              }}
+              searchPlaceholder="Search call type…"
+              panelClassName="w-52"
+              layout="inline"
+            />
             <label className="flex flex-col gap-0.5 text-xs">
               <span className="font-medium text-slate-600">Search</span>
               <input
                 className="h-8 min-w-[180px] rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-800 shadow-2xs"
                 value={searchDraft}
-                placeholder="TRN, party, serial…"
+                placeholder="TRN, party, serial, vendor…"
                 onChange={(e) => setSearchDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -200,6 +333,10 @@ export default function DefectiveSerialsPageClient() {
                 <AdminTr>
                   <AdminTh className="px-1 py-1 text-[10px]">SO</AdminTh>
                   <AdminTh className="px-1 py-1 text-[10px]">Logged</AdminTh>
+                  <AdminTh className="px-1 py-1 text-[10px]">Plant</AdminTh>
+                  <AdminTh className="px-1 py-1 text-[10px]">Branch</AdminTh>
+                  <AdminTh className="px-1 py-1 text-[10px]">Call type</AdminTh>
+                  <AdminTh className="px-1 py-1 text-[10px]">Vendor</AdminTh>
                   <AdminTh className="px-1 py-1 text-[10px]">Party</AdminTh>
                   <AdminTh className="px-1 py-1 text-[10px]">Client</AdminTh>
                   <AdminTh className="px-1 py-1 text-[10px]">Model</AdminTh>
@@ -242,6 +379,10 @@ export default function DefectiveSerialsPageClient() {
                           )}
                         </Cell>
                         <Cell>{r.dtrndate ? formatUiDateTime(r.dtrndate) : '—'}</Cell>
+                        <Cell>{r.plant_code || '—'}</Cell>
+                        <Cell>{r.branch_name || '—'}</Cell>
+                        <Cell>{r.call_type || '—'}</Cell>
+                        <Cell>{vendorLabel(r.vendor_code, r.vendor_name)}</Cell>
                         <Cell>{r.party_name || '—'}</Cell>
                         <Cell>{r.client_name || '—'}</Cell>
                         <Cell>{r.model || '—'}</Cell>
@@ -298,4 +439,3 @@ export default function DefectiveSerialsPageClient() {
     </PageShell>
   );
 }
- 

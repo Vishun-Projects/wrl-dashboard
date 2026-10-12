@@ -2,6 +2,7 @@
 import '@/lib/read-model/bootstrap-env';
 import { closePool } from '@/lib/read-model/db';
 import {
+  backfillDefectiveSerialsCallDims,
   backfillDefectiveSerialsReturnByNames,
   syncDefectiveSerialsToPostgres,
 } from './postgres-sync';
@@ -10,10 +11,19 @@ async function main(): Promise<void> {
   const t0 = Date.now();
   const forceFull = process.argv.includes('--full');
   const backfillNamesOnly = process.argv.includes('--backfill-return-by');
+  const backfillDimsOnly = process.argv.includes('--backfill-dims');
 
   if (backfillNamesOnly) {
     console.log('[defective-serials-sync] Backfilling return_by_name…');
     const result = await backfillDefectiveSerialsReturnByNames();
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+    console.log(`[defective-serials-sync] Finished in ${elapsed}s:`, result);
+    return;
+  }
+
+  if (backfillDimsOnly) {
+    console.log('[defective-serials-sync] Backfilling plant/vendor/call_type from hot/mirror only…');
+    const result = await backfillDefectiveSerialsCallDims();
     const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
     console.log(`[defective-serials-sync] Finished in ${elapsed}s:`, result);
     return;

@@ -1,14 +1,19 @@
 import { withBulkReadClient } from '@/lib/read-model/db';
 import { responseForCsvStream } from '@/lib/net/csv-gzip-response';
 import { escapeCsvCell } from '@/lib/utils/csv';
-import { shouldRestrictToAssignedOffices } from '@/sql/trhcalls/office-security';
 import type { DefectiveSerialsFilters } from '@/modules/defective-serials/server/query';
 import { ensureDefectiveSerialsTable } from '@/modules/defective-serials/server/sync/postgres-sync';
+import { shouldRestrictToAssignedOffices } from '@/sql/trhcalls/office-security';
 
 const HEADERS = [
   'status',
   'vtrnno',
   'dtrndate',
+  'plant_code',
+  'branch_name',
+  'call_type',
+  'vendor_code',
+  'vendor_name',
   'party_name',
   'client_name',
   'model',
@@ -21,13 +26,86 @@ const HEADERS = [
   'dreturntobranchdate',
   'return_by_name',
   'nreturntobranch',
-  'branch_name',
   'ncalls',
   'nofficeid',
 ] as const;
 
 const FETCH_SIZE = 5_000;
 const EXPORT_CAP = 100_000;
+
+const HOT_DIMS_JOIN = `
+LEFT JOIN calls_latest_hot h ON h.vtrnno = d.vtrnno
+LEFT JOIN calls_crm_mirror m ON m.vtrnno = d.vtrnno
+LEFT JOIN dim_offices fo ON fo.ncode = (
+  CASE
+    WHEN btrim(COALESCE(h.franchisee_code, m.franchisee_code, '')) ~ '^[0-9]+(\\.[0-9]+)?$'
+    THEN trunc(btrim(COALESCE(h.franchisee_code, m.franchisee_code))::numeric)::bigint
+    ELSE NULL
+  END
+)
+`;
+
+const EFF_CALL_TYPE = `COALESCE(NULLIF(btrim(d.call_type), ''), NULLIF(btrim(h.call_type), ''), NULLIF(btrim(m.call_type), ''))`;
+const EFF_BRANCH = `COALESCE(NULLIF(btrim(h.branch_name), ''), NULLIF(btrim(m.branch_name), ''), NULLIF(btrim(d.branch_name), ''))`;
+const EFF_VENDOR_NAME = `COALESCE(NULLIF(btrim(d.vendor_name), ''), NULLIF(btrim(h.franchisee_name), ''), NULLIF(btrim(m.franchisee_name), ''))`;
+const EFF_VENDOR_CODE = `COALESCE(NULLIF(btrim(d.vendor_code), ''), NULLIF(btrim(fo.vsapvendorcode), ''))`;
+const EFF_PLANT = `COALESCE(
+  NULLIF(btrim(d.plant_code), ''),
+  NULLIF(substring(btrim(${EFF_BRANCH}) from '^[0-9]+'), '')
+)`;
+
+function buildExportWhere(filters: DefectiveSerialsFilters): {
+  whereSql: string;
+  params: unknown[];
+} {
+  const params: unknown[] = [];
+  const where: string[] = [];
+
+  if (filters.status === 'pending') {
+    where.push(`NOT COALESCE(d.breturntobranch, false)`);
+  } else if (filters.status === 'done') {
+    where.push(`COALESCE(d.breturntobranch, false)`);
+  }
+  if (filters.startDate) {
+    params.push(filters.startDate);
+    where.push(
+      `(d.dtrndate AT TIME ZONE 'Asia/Kolkata')::date >= $${params.length}::date`
+    );
+  }
+  if (filters.endDate) {
+    params.push(filters.endDate);
+    where.push(
+      `(d.dtrndate AT TIME ZONE 'Asia/Kolkata')::date <= $${params.length}::date`
+    );
+  }
+  if (shouldRestrictToAssignedOffices(filters.isHod, filters.assignedOffices)) {
+    params.push(filters.assignedOffices.map(Number));
+    where.push(`d.nofficeid::bigint = ANY($${params.length}::bigint[])`);
+  }
+  if (filters.plants.length > 0) {
+    params.push(filters.plants.map((p) => p.toUpperCase()));
+    where.push(`upper(btrim(${EFF_PLANT})) = ANY($${params.length}::text[])`);
+  }
+  if (filters.branches.length > 0) {
+    params.push(filters.branches.map((b) => b.toUpperCase()));
+    where.push(`upper(btrim(${EFF_BRANCH})) = ANY($${params.length}::text[])`);
+  }
+  if (filters.callTypes.length > 0) {
+    params.push(filters.callTypes.map((t) => t.toUpperCase()));
+    where.push(`upper(btrim(${EFF_CALL_TYPE})) = ANY($${params.length}::text[])`);
+  }
+  if (filters.search) {
+    params.push(`%${filters.search}%`);
+    const i = params.length;
+    where.push(
+      `(d.vtrnno ILIKE $${i} OR COALESCE(d.voldserialno,'') ILIKE $${i} OR COALESCE(d.party_name,'') ILIKE $${i} OR COALESCE(d.machine_serial,'') ILIKE $${i} OR COALESCE(d.defective_item_code,'') ILIKE $${i} OR COALESCE(d.return_by_name,'') ILIKE $${i} OR COALESCE(${EFF_VENDOR_NAME},'') ILIKE $${i} OR COALESCE(${EFF_PLANT},'') ILIKE $${i})`
+    );
+  }
+  return {
+    whereSql: where.length ? `WHERE ${where.join(' AND ')}` : '',
+    params,
+  };
+}
 
 export async function buildDefectiveSerialsCsvStream(
   filters: DefectiveSerialsFilters
@@ -52,26 +130,7 @@ export async function buildDefectiveSerialsCsvStream(
       try {
         await withBulkReadClient(async (client) => {
           await ensureDefectiveSerialsTable(client);
-          const params: unknown[] = [];
-          const where: string[] = [];
-
-          if (filters.status === 'pending') {
-            where.push(`NOT COALESCE(breturntobranch, false)`);
-          } else if (filters.status === 'done') {
-            where.push(`COALESCE(breturntobranch, false)`);
-          }
-          if (shouldRestrictToAssignedOffices(filters.isHod, filters.assignedOffices)) {
-            params.push(filters.assignedOffices.map(Number));
-            where.push(`nofficeid::bigint = ANY($${params.length}::bigint[])`);
-          }
-          if (filters.search) {
-            params.push(`%${filters.search}%`);
-            const i = params.length;
-            where.push(
-              `(vtrnno ILIKE $${i} OR COALESCE(voldserialno,'') ILIKE $${i} OR COALESCE(party_name,'') ILIKE $${i} OR COALESCE(machine_serial,'') ILIKE $${i} OR COALESCE(defective_item_code,'') ILIKE $${i} OR COALESCE(return_by_name,'') ILIKE $${i})`
-            );
-          }
-          const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+          const { whereSql, params } = buildExportWhere(filters);
 
           if (!enqueue(encoder.encode(`${HEADERS.join(',')}\r\n`))) return;
 
@@ -83,14 +142,21 @@ export async function buildDefectiveSerialsCsvStream(
             const res = await client.query(
               `
               SELECT
-                CASE WHEN COALESCE(breturntobranch, false) THEN 'done' ELSE 'pending' END AS status,
-                vtrnno, dtrndate, party_name, client_name, model, machine_serial, city,
-                call_centre_call_id, defective_item_code, defective_item_name, voldserialno,
-                dreturntobranchdate, return_by_name, nreturntobranch, branch_name,
-                ncalls, nofficeid
-              FROM defective_serials
+                CASE WHEN COALESCE(d.breturntobranch, false) THEN 'done' ELSE 'pending' END AS status,
+                d.vtrnno, d.dtrndate,
+                ${EFF_PLANT} AS plant_code,
+                ${EFF_BRANCH} AS branch_name,
+                ${EFF_CALL_TYPE} AS call_type,
+                ${EFF_VENDOR_CODE} AS vendor_code,
+                ${EFF_VENDOR_NAME} AS vendor_name,
+                d.party_name, d.client_name, d.model, d.machine_serial, d.city,
+                d.call_centre_call_id, d.defective_item_code, d.defective_item_name, d.voldserialno,
+                d.dreturntobranchdate, d.return_by_name, d.nreturntobranch,
+                d.ncalls, d.nofficeid
+              FROM defective_serials d
+              ${HOT_DIMS_JOIN}
               ${whereSql}
-              ORDER BY dtrndate DESC NULLS LAST, vtrnno DESC, ncode DESC
+              ORDER BY d.dtrndate DESC NULLS LAST, d.vtrnno DESC, d.ncode DESC
               LIMIT $${qParams.length - 1} OFFSET $${qParams.length}
               `,
               qParams

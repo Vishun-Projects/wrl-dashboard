@@ -8,6 +8,8 @@ assert.match(full, /breturntobranch/);
 assert.match(full, /voldserialno/);
 assert.match(full, /return_by_name/);
 assert.match(full, /mstusers retuser/);
+assert.doesNotMatch(full, /vsapplantcode/);
+assert.doesNotMatch(full, /mstfixedselection/);
 assert.doesNotMatch(full, /WHERE/);
 
 const page = buildDefectiveSerialsCrmSql({

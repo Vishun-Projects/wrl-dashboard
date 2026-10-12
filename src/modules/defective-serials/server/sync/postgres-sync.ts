@@ -35,6 +35,10 @@ export type DefectiveSerialSyncRow = {
   city: string | null;
   call_centre_call_id: string | null;
   branch_name: string | null;
+  plant_code: string | null;
+  call_type: string | null;
+  vendor_name: string | null;
+  vendor_code: string | null;
   defective_item_code: string | null;
   defective_item_name: string | null;
 };
@@ -83,6 +87,11 @@ function mapCrmRow(row: Record<string, unknown>): DefectiveSerialSyncRow | null 
     city: str(row.city),
     call_centre_call_id: str(row.call_centre_call_id),
     branch_name: str(row.branch_name),
+    // Plant / call_type / vendor filled from hot+mirror (backfill / query join) — never CRM.
+    plant_code: null,
+    call_type: null,
+    vendor_name: null,
+    vendor_code: null,
     defective_item_code: str(row.defective_item_code),
     defective_item_name: str(row.defective_item_name),
   };
@@ -117,6 +126,10 @@ async function ensureDefectiveSerialsTable(client: {
       city TEXT,
       call_centre_call_id TEXT,
       branch_name TEXT,
+      plant_code TEXT,
+      call_type TEXT,
+      vendor_name TEXT,
+      vendor_code TEXT,
       defective_item_code TEXT,
       defective_item_name TEXT,
       synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -133,8 +146,21 @@ async function ensureDefectiveSerialsTable(client: {
       ON defective_serials (vtrnno);
     CREATE INDEX IF NOT EXISTS idx_defective_serials_composite
       ON defective_serials (ncalls, nitem, vserialno, nitemserialno, nofficeid);
+    CREATE INDEX IF NOT EXISTS idx_defective_serials_plant
+      ON defective_serials (plant_code)
+      WHERE plant_code IS NOT NULL AND btrim(plant_code) <> '';
+    CREATE INDEX IF NOT EXISTS idx_defective_serials_branch
+      ON defective_serials (upper(btrim(branch_name)))
+      WHERE coalesce(btrim(branch_name), '') <> '';
+    CREATE INDEX IF NOT EXISTS idx_defective_serials_call_type
+      ON defective_serials (upper(btrim(call_type)))
+      WHERE coalesce(btrim(call_type), '') <> '';
 
     ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS return_by_name TEXT;
+    ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS plant_code TEXT;
+    ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS call_type TEXT;
+    ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS vendor_name TEXT;
+    ALTER TABLE defective_serials ADD COLUMN IF NOT EXISTS vendor_code TEXT;
 
     INSERT INTO sync_state (entity, last_editedon, status)
     VALUES ('${ENTITY}', NULL, 'ok')
@@ -142,7 +168,7 @@ async function ensureDefectiveSerialsTable(client: {
   `);
 }
 
-const UPSERT_COLS = 26;
+const UPSERT_COLS = 30;
 
 async function upsertRows(
   client: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
@@ -181,6 +207,10 @@ async function upsertRows(
           r.city,
           r.call_centre_call_id,
           r.branch_name,
+          r.plant_code,
+          r.call_type,
+          r.vendor_name,
+          r.vendor_code,
           r.defective_item_code,
           r.defective_item_name
         );
@@ -196,7 +226,8 @@ async function upsertRows(
         noldnitem, voldserialno, nnewnitem, vnewserialno, editedon,
         breturntobranch, dreturntobranchdate, nreturntobranch, return_by_name,
         vtrnno, dtrndate, party_name, client_name, model, machine_serial,
-        city, call_centre_call_id, branch_name,
+        city, call_centre_call_id, branch_name, plant_code, call_type,
+        vendor_name, vendor_code,
         defective_item_code, defective_item_name, synced_at
       ) VALUES ${valuesSql}
       ON CONFLICT (ncode, nofficeid) DO UPDATE SET
@@ -221,7 +252,11 @@ async function upsertRows(
         machine_serial = EXCLUDED.machine_serial,
         city = EXCLUDED.city,
         call_centre_call_id = EXCLUDED.call_centre_call_id,
-        branch_name = EXCLUDED.branch_name,
+        branch_name = COALESCE(NULLIF(BTRIM(EXCLUDED.branch_name), ''), defective_serials.branch_name),
+        plant_code = COALESCE(NULLIF(BTRIM(EXCLUDED.plant_code), ''), defective_serials.plant_code),
+        call_type = COALESCE(NULLIF(BTRIM(EXCLUDED.call_type), ''), defective_serials.call_type),
+        vendor_name = COALESCE(NULLIF(BTRIM(EXCLUDED.vendor_name), ''), defective_serials.vendor_name),
+        vendor_code = COALESCE(NULLIF(BTRIM(EXCLUDED.vendor_code), ''), defective_serials.vendor_code),
         defective_item_code = EXCLUDED.defective_item_code,
         defective_item_name = EXCLUDED.defective_item_name,
         synced_at = now()
@@ -315,6 +350,72 @@ async function fetchCrmChunk(editedFrom: string | null, afterNcode: string | nul
 }
 
 /**
+ * Fill call_type / vendor / branch / plant from Postgres hot+mirror only (no CRM).
+ * Plant = leading digits of branch_name (e.g. "1173 - DELHI BRANCH").
+ */
+export async function backfillDefectiveSerialsCallDims(): Promise<{ updated: number }> {
+  const updated = await withClient(async (client) => {
+    await ensureDefectiveSerialsTable(client);
+    const res = await client.query(
+      `
+      UPDATE defective_serials d
+      SET
+        call_type = COALESCE(NULLIF(btrim(d.call_type), ''), src.call_type),
+        vendor_name = COALESCE(NULLIF(btrim(d.vendor_name), ''), src.vendor_name),
+        vendor_code = COALESCE(NULLIF(btrim(d.vendor_code), ''), src.vendor_code),
+        branch_name = COALESCE(NULLIF(btrim(src.branch_name), ''), d.branch_name),
+        plant_code = COALESCE(
+          NULLIF(btrim(d.plant_code), ''),
+          NULLIF(substring(btrim(COALESCE(src.branch_name, d.branch_name)) from '^[0-9]+'), '')
+        )
+      FROM (
+        SELECT
+          d2.ncode,
+          d2.nofficeid,
+          COALESCE(
+            NULLIF(btrim(h.call_type), ''),
+            NULLIF(btrim(m.call_type), '')
+          ) AS call_type,
+          COALESCE(
+            NULLIF(btrim(h.franchisee_name), ''),
+            NULLIF(btrim(m.franchisee_name), '')
+          ) AS vendor_name,
+          NULLIF(btrim(fo.vsapvendorcode), '') AS vendor_code,
+          COALESCE(
+            NULLIF(btrim(h.branch_name), ''),
+            NULLIF(btrim(m.branch_name), '')
+          ) AS branch_name
+        FROM defective_serials d2
+        LEFT JOIN calls_latest_hot h ON h.vtrnno = d2.vtrnno
+        LEFT JOIN calls_crm_mirror m ON m.vtrnno = d2.vtrnno
+        LEFT JOIN dim_offices fo ON fo.ncode = (
+          CASE
+            WHEN btrim(COALESCE(h.franchisee_code, m.franchisee_code, '')) ~ '^[0-9]+(\\.[0-9]+)?$'
+            THEN trunc(btrim(COALESCE(h.franchisee_code, m.franchisee_code))::numeric)::bigint
+            ELSE NULL
+          END
+        )
+        WHERE h.vtrnno IS NOT NULL OR m.vtrnno IS NOT NULL
+      ) src
+      WHERE d.ncode = src.ncode
+        AND d.nofficeid = src.nofficeid
+        AND (
+          (NULLIF(btrim(d.call_type), '') IS NULL AND src.call_type IS NOT NULL)
+          OR (NULLIF(btrim(d.vendor_name), '') IS NULL AND src.vendor_name IS NOT NULL)
+          OR (NULLIF(btrim(d.vendor_code), '') IS NULL AND src.vendor_code IS NOT NULL)
+          OR (NULLIF(btrim(d.plant_code), '') IS NULL AND src.branch_name IS NOT NULL)
+          OR (src.branch_name IS NOT NULL AND d.branch_name IS DISTINCT FROM src.branch_name)
+        )
+      `
+    );
+    return res.rowCount ?? 0;
+  });
+
+  console.log(`[defective-serials] call-dims backfill (hot/mirror only): ${updated} rows`);
+  return { updated };
+}
+
+/**
  * Full backfill pages by (editedon, ncode) keyset; incremental uses sync_state watermark.
  */
 export async function syncDefectiveSerialsToPostgres(opts?: {
@@ -384,6 +485,9 @@ export async function syncDefectiveSerialsToPostgres(opts?: {
       [ENTITY, maxEdited, total]
     );
   });
+
+  // Existing rows may predate plant/call_type/vendor columns — fill from hot + CRM offices.
+  await backfillDefectiveSerialsCallDims();
 
   console.log(`[defective-serials] Done ${mode}: ${total} rows`);
   return { success: true, count: total, mode };

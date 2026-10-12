@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import {
+  fetchDefectiveSerialsOptions,
   fetchDefectiveSerialsRows,
   parseDefectiveSerialsFilters,
 } from '@/modules/defective-serials/server/query';
@@ -18,6 +19,16 @@ export async function GET(req: NextRequest) {
       isHod: auth.security.isHod,
       assignedOffices: auth.security.assignedOffices,
     };
+
+    if (searchParams.get('mode') === 'options') {
+      const options = await fetchDefectiveSerialsOptions({
+        startDate: filters.startDate,
+        endDate: filters.endDate,
+        isHod: filters.isHod,
+        assignedOffices: filters.assignedOffices,
+      });
+      return NextResponse.json(options);
+    }
 
     if (searchParams.get('format') === 'csv') {
       return buildDefectiveSerialsCsvStream(filters);
