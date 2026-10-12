@@ -31,6 +31,7 @@ import {
   Repeat,
   XCircle,
   Hourglass,
+  Table,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -148,6 +149,8 @@ export function Sidebar({ user }: SidebarProps) {
                       ? FileSpreadsheet
                     : path === '/report/mb51-aging'
                       ? Hourglass
+                    : path === '/report/mb51-table'
+                      ? Table
                   : path === '/admin/users'
                   ? Users
                   : path === '/admin/roles'

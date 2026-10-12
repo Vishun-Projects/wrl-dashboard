@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import type {
   Mb51AgingMovement,
@@ -972,15 +973,23 @@ export default function Mb51AgingPageClient() {
           </div>
         </div>
         <div className="spacer" />
-        {rows.length > 0 && (
-          <button
-            type="button"
-            className="btn sec"
-            onClick={() => setShowUpload((s) => !s)}
-          >
-            {showUpload ? 'Back to report' : 'Load another file'}
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <span className="btn" style={{ cursor: 'default' }}>
+            Aging Report (FIFO)
+          </span>
+          <Link href="/report/mb51-table" className="btn sec" style={{ textDecoration: 'none' }}>
+            Movements Table
+          </Link>
+          {rows.length > 0 && (
+            <button
+              type="button"
+              className="btn sec"
+              onClick={() => setShowUpload((s) => !s)}
+            >
+              {showUpload ? 'Back to report' : 'Load another file'}
+            </button>
+          )}
+        </div>
       </header>
 
       <main>
