@@ -20,6 +20,9 @@ export { normalizeSerial } from '@/lib/serial/normalize';
 /** Minimum calls on same serial to count as a repeat offender. */
 export const MIN_REPEAT_COMPLAINTS = 2;
 
+/** Cap flagged serials loaded for ASP involvement (large windows can have hundreds). */
+export const MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS = 150;
+
 /** Non-cancelled call count for list display when cancelled are excluded. */
 export function activeComplaintCount(row: SerialAuditRow): number {
   return Math.max(0, row.complaintCount - row.cancelledCount);

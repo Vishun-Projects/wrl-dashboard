@@ -231,7 +231,7 @@ fi
 
 wait_until_mail_time
 
-echo "=== midnight CRM delta mail (after sync + ${VERIFY_PASSES}× verify, ≥${MAIL_EARLIEST_HOUR}:$(printf '%02d' "$((10#$MAIL_EARLIEST_MIN))") IST) ==="
+echo "=== midnight-crm-delta mail $(TZ=Asia/Kolkata date -Iseconds) AS_OF=${AS_OF} (after sync + ${VERIFY_PASSES}× verify, ≥${MAIL_EARLIEST_HOUR}:$(printf '%02d' "$((10#$MAIL_EARLIEST_MIN))") IST) ==="
 if bash "${SCRIPT_DIR}/midnight-crm-delta-mail.sh"; then
   echo "=== midnight-crm-delta complete ==="
 else

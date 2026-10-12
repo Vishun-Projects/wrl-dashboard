@@ -196,6 +196,14 @@ export const RBAC_PAGES: RbacPage[] = [
     group: 'Reports',
   },
   {
+    id: 'mb51_aging',
+    permission: 'page_mb51_aging',
+    path: '/report/mb51-aging',
+    label: 'MB51 Aging',
+    description: 'MB51 Material Aging Report (FIFO) calculated on Posting Date',
+    group: 'Reports',
+  },
+  {
     id: 'compressor_barcodes',
     permission: 'page_compressor_barcodes',
     path: '/compressor-barcodes',
@@ -414,12 +422,13 @@ export function canAccessPage(permissions: string[], pageId: string): boolean {
     if (canAccessMisTab(permissions, 'register')) return true;
   }
 
-  // ZSS02 / spare loan check / MB51 spare stock / compressor barcodes: MIS reports audience until roles matrix is updated.
+  // ZSS02 / spare loan check / MB51 spare stock / compressor barcodes / MB51 aging: MIS reports audience until roles matrix is updated.
   if (
     pageId === 'zss02' ||
     pageId === 'spare_loan_check' ||
     pageId === 'spare_stock_analysis' ||
-    pageId === 'compressor_barcodes'
+    pageId === 'compressor_barcodes' ||
+    pageId === 'mb51_aging'
   ) {
     if (hasPermission(permissions, 'page_mis_reports')) return true;
     if (canAccessMisTab(permissions, 'register')) return true;

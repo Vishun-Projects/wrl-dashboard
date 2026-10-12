@@ -120,11 +120,11 @@ const pipes = buildMailPipelineHealth({
   listenPublic25: true,
   newestVendorHoursAgo: 5,
   cronLines: [
-    '*/15 * * * * /x/mis-email-digest.sh',
+    '*/15 * * * * /x/mail-scheduler.sh',
     '0 14 * * * /x/mis-email-test-digest.sh',
     // cancelled + subcontractor: no standalone cron — evening-ops 16:00 covers them
     '0 0 * * * /x/nightly-ytd-calls-export.sh',
-    '15 0 * * * /x/midnight-crm-delta-mail.sh',
+    '30 7 * * * /x/midnight-crm-delta-mail-fallback.sh',
     '0 16 * * * /x/evening-ops-sequencer.sh',
   ],
   misEmailLog: '2026-08-27 Digest complete — sent 1',
@@ -136,6 +136,40 @@ const pipes = buildMailPipelineHealth({
 });
 assert.ok(pipes.every((p) => p.ok));
 assert.ok(pipes.some((p) => p.id === 'inbound_mis_maildir' && p.status === 'WORKING'));
+assert.ok(
+  pipes.some(
+    (p) => p.id === 'cron_mis_digest' && p.ok && /mail-scheduler/.test(p.detail)
+  )
+);
+assert.ok(pipes.some((p) => p.id === 'cron_midnight_mail' && p.ok));
+
+// Unified nightly job: sync-only + FAIL mailed (no SUCCESS complete) → fail with real reason
+assert.equal(
+  scoreMidnightCronLog(
+    '2026-10-06',
+    [
+      '=== midnight-crm-delta sync-only 2026-10-06T00:00:01+05:30 AS_OF=2026-10-05 ===',
+      '=== midnight calls sync ok ===',
+      '[2026-10-06T07:30:01+05:30] 07:30 fallback — 00:00 job still running',
+      'FATAL: 07:30 hard deadline — verify marker missing',
+      '→ FAIL mail already sent for AS_OF=2026-10-05',
+    ].join('\n')
+  ).ok,
+  false
+);
+assert.match(
+  scoreMidnightCronLog(
+    '2026-10-06',
+    [
+      '=== midnight-crm-delta sync-only 2026-10-06T00:00:01+05:30 AS_OF=2026-10-05 ===',
+      '=== midnight calls sync ok ===',
+      '[2026-10-06T07:30:01+05:30] 07:30 fallback — 00:00 job still running',
+      'FATAL: 07:30 hard deadline — verify marker missing',
+      '→ FAIL mail already sent for AS_OF=2026-10-05',
+    ].join('\n')
+  ).detail,
+  /FAILED mailed|CRM delta MAIL failed/i
+);
 
 const brokenInbound = buildMailPipelineHealth({
   inetInterfaces: 'loopback-only',

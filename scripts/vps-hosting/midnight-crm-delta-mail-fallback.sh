@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # 07:30 IST hard guarantee — SUCCESS if verify OK, FAILED otherwise.
-# Never silent: does NOT skip when the 00:00 job still holds the lock.
+#
+# If the 00:00 job is still alive AFTER verify OK, it is in wait_until_mail_time
+# and will send SUCCESS itself — do NOT start a second workbook (OOM exit 137).
+# Only mail-while-primary-running when verify is missing (stuck sync).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,10 +40,13 @@ fi
 still_running=0
 if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
   still_running=1
-  echo "[$(TZ=Asia/Kolkata date -Iseconds)] 07:30 fallback — 00:00 job still running (pid ${lock_pid}); mailing anyway"
 fi
 
 if [[ -f "$VERIFY_OK" ]]; then
+  if [[ "$still_running" == "1" ]]; then
+    echo "[$(TZ=Asia/Kolkata date -Iseconds)] SKIP fallback — verify OK and 00:00 job still running (pid ${lock_pid}); primary will send SUCCESS at mail window"
+    exit 0
+  fi
   echo "[$(TZ=Asia/Kolkata date -Iseconds)] FALLBACK SUCCESS mail — verify OK, primary job did not send"
   exec bash "${SCRIPT_DIR}/midnight-crm-delta-mail.sh"
 fi
@@ -48,6 +54,7 @@ fi
 reason="07:30 hard deadline — verify marker missing"
 if [[ "$still_running" == "1" ]]; then
   reason="07:30 hard deadline — verify marker missing; midnight sync still running (pid ${lock_pid})"
+  echo "[$(TZ=Asia/Kolkata date -Iseconds)] 07:30 fallback — 00:00 job still running without verify (pid ${lock_pid}); sending FAILED"
 fi
 echo "FATAL: ${reason}" >&2
 FAIL_ALERTED=0

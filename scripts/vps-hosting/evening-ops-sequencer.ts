@@ -143,14 +143,37 @@ function istYesterdayYmd(today = istTodayYmd()): string {
   return prev.toISOString().slice(0, 10);
 }
 
-function readLogOrNull(logName: string): string | null {
+function readLogOrNull(logName: string, maxBytes = 256_000): string | null {
   const logPath = join(sharedLogs(), logName);
   if (!existsSync(logPath)) return null;
-  return readTail(logPath, 256_000);
+  // Midnight cron log is multi‑MB; 256KB tail often misses the 00:00 sync-only start line.
+  const bytes =
+    logName === 'nightly-ytd-export-cron.log' ? Math.max(maxBytes, 3_000_000) : maxBytes;
+  return readTail(logPath, bytes);
 }
 
 function watchdogStatus(logName: string, today: string): { ok: boolean; detail: string } {
-  return scoreWatchdogLogForToday(today, readLogOrNull(logName), logName);
+  const st = scoreWatchdogLogForToday(today, readLogOrNull(logName), logName);
+  // Morning MIS watchdog fires at 09:50; digest may complete later once verify-ok lands.
+  if (!st.ok && logName === 'mis-email-watchdog.log') {
+    const sched = readLogOrNull('mail-scheduler.log', 512_000) ?? '';
+    let sawToday = false;
+    let completeAfter = false;
+    for (const line of sched.split(/\r?\n/)) {
+      if (line.includes(today)) sawToday = true;
+      if (sawToday && /mis-email-digest complete/i.test(line)) {
+        completeAfter = true;
+        break;
+      }
+    }
+    if (completeAfter) {
+      return {
+        ok: true,
+        detail: `HEALED — mail-scheduler has mis-email-digest complete for ${today} (watchdog: ${st.detail})`,
+      };
+    }
+  }
+  return st;
 }
 
 /** Last-night midnight job: cron complete (date on start line only) → snapshot → watchdog OK. */
@@ -422,9 +445,7 @@ async function main(): Promise<void> {
         ? join(code, '.env.mis-email')
         : join(installRoot(), 'shared', '.env.mis-email');
       if (!existsSync(envMis)) issues.push('missing .env.mis-email');
-      if (!process.env.OLD_CRM_DATABASE_URL?.trim()) {
-        issues.push('OLD_CRM_DATABASE_URL unset (SAP vs CRM / subcontractor stock needs old_crm)');
-      }
+      // old_crm was dropped — stock/SAP probes use hot DATABASE_URL. Do not require OLD_CRM_*.
       const cli = join(code, 'src', 'modules', 'mis-email', 'services', 'cli.ts');
       if (!existsSync(cli)) issues.push('missing cli.ts');
       for (const script of [

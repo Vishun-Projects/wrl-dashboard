@@ -30,6 +30,7 @@ import {
   ShieldAlert,
   Repeat,
   XCircle,
+  Hourglass,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -145,6 +146,8 @@ export function Sidebar({ user }: SidebarProps) {
                       ? Package
                     : path === '/report/zss02'
                       ? FileSpreadsheet
+                    : path === '/report/mb51-aging'
+                      ? Hourglass
                   : path === '/admin/users'
                   ? Users
                   : path === '/admin/roles'

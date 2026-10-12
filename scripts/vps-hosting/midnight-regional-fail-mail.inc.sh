@@ -19,6 +19,11 @@ send_midnight_regional_fail_mail() {
   if [[ -f "$log" ]]; then
     verify_line="$(grep -F '[midnight-verify]' "$log" | tail -1 || true)"
   fi
+  local verify_ok="${INSTALL_ROOT}/shared/logs/midnight-crm-verify-ok-${as_of}"
+  local morning_note="Morning 09:30 company MIS will stay blocked (no verify marker)."
+  if [[ -f "$verify_ok" ]]; then
+    morning_note="Verify marker EXISTS (${verify_ok}) — 09:30 company MIS is NOT blocked by verify. Only the regional midnight report failed."
+  fi
   local subject="FAILED: WRL Midnight MIS Regional — ${as_of}"
   local body="FAILED — WRL Midnight MIS Regional did not send.
 
@@ -26,7 +31,7 @@ AS_OF: ${as_of}
 Time: $(TZ=Asia/Kolkata date -Iseconds)
 Reason: ${reason}
 
-Morning 09:30 company MIS will stay blocked (no verify marker).
+${morning_note}
 "
   if [[ -n "$verify_line" ]]; then
     body+="Last verify: ${verify_line}
@@ -35,7 +40,7 @@ Morning 09:30 company MIS will stay blocked (no verify marker).
   body+="Log: ${log}
 Portal: https://wrl-dashboard.vercel.app/admin/sync
 
-Ramp-up: run catch-up/verify on Sync UI, then send 09:30 from Mail & Alerts if needed."
+Ramp-up: if verify marker missing, run catch-up/verify on Sync UI; then resend regional from Mail & Alerts / MIDNIGHT_MAIL_FORCE=1 if needed."
   if [[ ! -f "${SCRIPT_DIR}/send-vps-ops-alert.ts" ]]; then
     echo "WARN: send-vps-ops-alert.ts missing — ${subject}" >&2
     return 0

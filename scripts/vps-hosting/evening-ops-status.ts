@@ -64,10 +64,11 @@ export type MidnightCronScore = {
 };
 
 /**
- * New layout (from 2026-08-27):
- *   00:00  === midnight-crm-delta sync-only DATE ===
- *   00:15  === midnight-crm-delta mail DATE === … === midnight-crm-delta complete ===
+ * Midnight layout (current):
+ *   00:00  === midnight-crm-delta sync-only DATE AS_OF=… ===  (nightly-ytd-calls-export.sh)
+ *   ≥07:30 === midnight-crm-delta mail DATE === … complete   (same job or 07:30 fallback)
  *
+ * Older split used a separate 00:15 `midnight-crm-delta mail` cron — still accepted.
  * Evening check cares most about MAIL complete. Sync FATAL alone is not enough to FAIL
  * if mail completed later (mail is intentionally always-send).
  */
@@ -88,11 +89,15 @@ export function scoreMidnightCronLog(
   let lastSyncStart = -1;
   let lastMailStart = -1;
   let lastLegacyStart = -1;
+  let lastFallback = -1;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line.includes(today)) continue;
     if (/midnight-crm-delta sync-only\s+20\d{2}-/.test(line)) lastSyncStart = i;
     else if (/midnight-crm-delta mail\s+20\d{2}-/.test(line)) lastMailStart = i;
+    // Undated banner inside nightly-ytd (mail after verify) — still a mail start.
+    else if (/midnight CRM delta mail\b/i.test(line)) lastMailStart = i;
+    else if (/07:30 fallback|FALLBACK SUCCESS mail/i.test(line)) lastFallback = i;
     else if (/midnight-crm-delta\s+20\d{2}-/.test(line)) lastLegacyStart = i;
   }
 
@@ -103,14 +108,18 @@ export function scoreMidnightCronLog(
     let fatal: string | null = null;
     let complete = false;
     let syncOk = false;
+    let failMailed = false;
     for (let i = start + 1; i < lines.length; i++) {
       const line = lines[i];
       if (untilNextStart(line)) break;
-      if (/FATAL:\s*midnight/i.test(line)) fatal = line;
+      if (/FATAL:\s*(midnight|07:30)/i.test(line)) fatal = line;
       if (/midnight calls sync ok/i.test(line)) syncOk = true;
       if (/midnight-crm-delta complete/i.test(line)) complete = true;
+      if (/FAIL mail already sent|regional fail mailed|send_midnight_regional_fail/i.test(line)) {
+        failMailed = true;
+      }
     }
-    return { fatal, complete, syncOk };
+    return { fatal, complete, syncOk, failMailed };
   };
 
   const isJobStart = (line: string) =>
@@ -120,10 +129,19 @@ export function scoreMidnightCronLog(
   if (lastSyncStart >= 0) {
     const r = scanAfter(lastSyncStart, isJobStart);
     sync = r.fatal && !r.syncOk ? 'fail' : r.syncOk ? 'ok' : r.fatal ? 'fail' : 'unknown';
+    // Unified job: mail/complete/fail often sit after sync-only with no separate dated mail line.
+    if (lastMailStart < 0) {
+      if (r.complete) mail = 'ok';
+      else if (r.failMailed || r.fatal) mail = 'fail';
+    }
   }
   if (lastMailStart >= 0) {
     const r = scanAfter(lastMailStart, isJobStart);
-    mail = r.complete ? 'ok' : r.fatal ? 'fail' : 'unknown';
+    mail = r.complete ? 'ok' : r.fatal || r.failMailed ? 'fail' : 'unknown';
+  }
+  if (mail === 'missing' && lastFallback >= 0) {
+    const r = scanAfter(lastFallback, isJobStart);
+    mail = r.complete ? 'ok' : r.fatal || r.failMailed ? 'fail' : 'unknown';
   }
 
   // Legacy single job (pre-split): one start, complete or FATAL.
@@ -150,10 +168,10 @@ export function scoreMidnightCronLog(
       ok: true,
       detail:
         sync === 'fail'
-          ? '00:15 CRM delta MAIL ok (00:00 sync had FATAL — mail still sent by design)'
+          ? 'CRM delta MAIL ok (00:00 sync had FATAL — mail still sent by design)'
           : sync === 'ok'
-            ? '00:00 sync ok + 00:15 CRM delta mail ok'
-            : '00:15 CRM delta MAIL ok',
+            ? '00:00 sync ok + CRM delta mail ok'
+            : 'CRM delta MAIL ok',
       sync,
       mail,
     };
@@ -162,7 +180,7 @@ export function scoreMidnightCronLog(
   if (mail === 'fail') {
     return {
       ok: false,
-      detail: '00:15 CRM delta MAIL failed — you did not get last night’s midnight delta report',
+      detail: 'CRM delta MAIL failed / regional FAILED mailed — no SUCCESS midnight delta report',
       sync,
       mail,
     };
@@ -172,13 +190,13 @@ export function scoreMidnightCronLog(
     return {
       ok: false,
       detail:
-        '00:00 calls sync FATAL and no 00:15 mail marker yet — midnight delta report likely missing',
+        '00:00 calls sync FATAL and no CRM delta mail marker yet — midnight delta report likely missing',
       sync,
       mail,
     };
   }
 
-  if (lastSyncStart < 0 && lastMailStart < 0) {
+  if (lastSyncStart < 0 && lastMailStart < 0 && lastFallback < 0) {
     return {
       ok: false,
       detail: `no midnight sync/mail start lines for ${today} in nightly-ytd-export-cron.log`,
@@ -349,12 +367,27 @@ export function buildMailPipelineHealth(params: {
   );
   pipes.push(scoreSapMaildirFreshness({ newestVendorHoursAgo: params.newestVendorHoursAgo }));
 
-  const cronMis = scoreCronLinePresent({
+  // Digest runs via mail-scheduler.sh */15 (not a standalone mis-email-digest.sh cron).
+  const cronMisDirect = scoreCronLinePresent({
     id: 'cron_mis_digest',
     label: 'MIS digest cron',
     cronLines: params.cronLines,
     needles: [/mis-email-digest\.sh/],
   });
+  const cronMisScheduler = scoreCronLinePresent({
+    id: 'cron_mis_digest',
+    label: 'MIS digest cron',
+    cronLines: params.cronLines,
+    needles: [/mail-scheduler\.sh/],
+  });
+  const cronMis = cronMisDirect.ok
+    ? cronMisDirect
+    : cronMisScheduler.ok
+      ? {
+          ...cronMisScheduler,
+          detail: 'crontab line present (via mail-scheduler.sh)',
+        }
+      : cronMisDirect;
   pipes.push(
     params.catalogPaused.has('mis_email_digest')
       ? {
@@ -449,14 +482,40 @@ export function buildMailPipelineHealth(params: {
       needles: [/nightly-ytd-calls-export\.sh/],
     })
   );
-  pipes.push(
-    scoreCronLinePresent({
-      id: 'cron_midnight_mail',
-      label: 'Midnight CRM delta mail cron (00:15)',
-      cronLines: params.cronLines,
-      needles: [/midnight-crm-delta-mail\.sh/],
-    })
-  );
+  // Mail is inside nightly-ytd-calls-export.sh + 07:30 midnight-crm-delta-mail-fallback.sh
+  // (standalone 00:15 midnight-crm-delta-mail.sh cron is legacy).
+  const cronMidnightMailDirect = scoreCronLinePresent({
+    id: 'cron_midnight_mail',
+    label: 'Midnight CRM delta mail cron',
+    cronLines: params.cronLines,
+    needles: [/midnight-crm-delta-mail\.sh/],
+  });
+  const cronMidnightMailFallback = scoreCronLinePresent({
+    id: 'cron_midnight_mail',
+    label: 'Midnight CRM delta mail cron',
+    cronLines: params.cronLines,
+    needles: [/midnight-crm-delta-mail-fallback\.sh/],
+  });
+  const cronMidnightMail =
+    cronMidnightMailDirect.ok || cronMidnightMailFallback.ok
+      ? {
+          ...(cronMidnightMailDirect.ok ? cronMidnightMailDirect : cronMidnightMailFallback),
+          ok: true,
+          status: 'WORKING' as const,
+          detail: cronMidnightMailDirect.ok
+            ? 'crontab line present'
+            : 'crontab line present (07:30 fallback; mail also in 00:00 nightly-ytd)',
+        }
+      : params.cronLines.some((l) => /nightly-ytd-calls-export\.sh/.test(l))
+        ? {
+            id: 'cron_midnight_mail',
+            label: 'Midnight CRM delta mail cron',
+            ok: true,
+            status: 'WORKING' as const,
+            detail: 'covered by 00:00 nightly-ytd-calls-export.sh (mail after verify)',
+          }
+        : cronMidnightMailDirect;
+  pipes.push(cronMidnightMail);
   pipes.push(
     scoreCronLogRecent({
       id: 'midnight_log',
@@ -494,7 +553,8 @@ export function explainFailedStep(step: EveningOpsStepResult): {
       if (/no midnight sync\/mail start/i.test(step.detail)) {
         return {
           plain: 'No midnight sync/mail ran today (cron may be missing or did not fire).',
-          action: 'Confirm crontab has 0 0 (sync) and 15 0 (mail); run: npm run mis-email:install-nightly-ytd-export-cron:vps',
+          action:
+            'Confirm crontab has 0 0 nightly-ytd-calls-export.sh and 30 7 midnight-crm-delta-mail-fallback.sh; run: npm run mis-email:install-nightly-ytd-export-cron:vps',
         };
       }
       return {

@@ -7,8 +7,8 @@ import {
   type SerialAuditSqlOpts,
 } from '@/sql/trhcalls/query';
 
-/** Cap flagged serials loaded for ASP involvement (large windows can have hundreds). */
-export const MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS = 150;
+import { MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS } from '@/modules/serial-audit/services/complaint-audit';
+export { MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS };
 
 const DEFAULT_QUERY_TIMEOUT_MS = 300000;
 

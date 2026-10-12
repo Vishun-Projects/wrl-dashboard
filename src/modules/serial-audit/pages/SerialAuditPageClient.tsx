@@ -82,9 +82,9 @@ import {
   summarizeSerialAudit,
   type SerialAuditCallDetail,
   type SerialAuditRow,
+  MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS,
 } from '@/modules/serial-audit/services/complaint-audit';
 import type { ExtraActiveFilterChip } from '@/modules/mis';
-import { MAX_SERIAL_AUDIT_INVOLVEMENT_SERIALS } from '@/modules/serial-audit/server/batch-fetch';
 import { SerialAuditCallsDetailTable } from '@/modules/serial-audit/components/SerialAuditCallsDetailTable';
 import { SerialAuditAnalysisPanel } from '@/modules/serial-audit/components/SerialAuditAnalysisPanel';
 import { SerialRepairLegend } from '@/modules/serial-audit/components/SerialRepairLegend';
