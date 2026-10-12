@@ -1,15 +1,5 @@
 import assert from 'node:assert/strict';
-import type { Mb51AgingMovement, Mb51AgingBucket } from '@/modules/mb51-aging/types';
-
-const BUCKETS: Mb51AgingBucket[] = [
-  { k: 'b1', l: 'Below 30 days', min: 0, max: 29, c: '#2e9e6b' },
-  { k: 'b2', l: '30 to 60 days', min: 30, max: 59, c: '#7cb342' },
-  { k: 'b3', l: '60 to 180 days', min: 60, max: 179, c: '#f2b01e' },
-  { k: 'b4', l: '180 to 365 days', min: 180, max: 364, c: '#f08a24' },
-  { k: 'b5', l: '1 year to 2 years', min: 365, max: 729, c: '#e0592a' },
-  { k: 'b6', l: '2 to 3 years', min: 730, max: 1094, c: '#c0392b' },
-  { k: 'b7', l: 'More than 3 years', min: 1095, max: 1e9, c: '#8e1f2f' },
-];
+import type { Mb51AgingMovement } from '@/modules/mb51-aging/types';
 
 function computeFifoInMemory(movs: Mb51AgingMovement[], basis: number) {
   let bal = 0;
