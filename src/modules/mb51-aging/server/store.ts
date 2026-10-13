@@ -273,10 +273,28 @@ export async function saveMb51AgingImport(opts: {
       if (existingImportId) {
         await client.query('BEGIN');
         try {
+          const exists = await client.query<{ id: string }>(
+            `SELECT id FROM mb51_aging_imports WHERE id = $1`,
+            [existingImportId]
+          );
+          if (!exists.rows[0]) {
+            throw new Error(`MB51 import ${existingImportId} not found for append`);
+          }
           await insertRowBatch(client, existingImportId, rows, seqOffset);
           const saved = seqOffset + rows.length;
           const done = expectedTotal != null && saved >= expectedTotal;
           await refreshImportCounts(existingImportId, saved, done);
+          if (done && expectedTotal != null) {
+            const actual = await client.query<{ n: number }>(
+              `SELECT count(*)::int AS n FROM mb51_aging_rows WHERE import_id = $1`,
+              [existingImportId]
+            );
+            if (actual.rows[0]?.n !== expectedTotal) {
+              throw new Error(
+                `MB51 import incomplete: expected ${expectedTotal} rows, have ${actual.rows[0]?.n ?? 0}`
+              );
+            }
+          }
           await client.query('COMMIT');
           return await fetchImportMeta(client, existingImportId);
         } catch (err) {
@@ -309,6 +327,17 @@ export async function saveMb51AgingImport(opts: {
         const saved = seqOffset + rows.length;
         const done = expectedTotal == null || saved >= expectedTotal;
         await refreshImportCounts(importId, saved, done);
+        if (done && expectedTotal != null) {
+          const actual = await client.query<{ n: number }>(
+            `SELECT count(*)::int AS n FROM mb51_aging_rows WHERE import_id = $1`,
+            [importId]
+          );
+          if (actual.rows[0]?.n !== expectedTotal) {
+            throw new Error(
+              `MB51 import incomplete: expected ${expectedTotal} rows, have ${actual.rows[0]?.n ?? 0}`
+            );
+          }
+        }
 
         await client.query('COMMIT');
         return await fetchImportMeta(client, importId);

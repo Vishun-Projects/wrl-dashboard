@@ -30,4 +30,12 @@ describe('rateLimitClassForPath', () => {
     expect(rateLimitClassForPath('/api/report/corpus').keySuffix).toBe('heavy');
     expect(rateLimitClassForPath('/api/report/summary').keySuffix).toBe('default');
   });
+
+  it('allows chunked MB51 aging uploads a higher budget', () => {
+    expect(rateLimitClassForPath('/api/report/mb51-aging')).toEqual({
+      limit: 400,
+      windowMs: 60_000,
+      keySuffix: 'mb51-upload',
+    });
+  });
 });

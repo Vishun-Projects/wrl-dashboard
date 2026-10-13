@@ -114,10 +114,10 @@ const COLS: Record<string, string[]> = {
   mat: ['material'],
   desc: ['materialdescription'],
   grp: ['materialgroup'],
-  qty: ['qtyinunitofentry', 'quantity', 'qty'],
+  qty: ['quantity', 'qtyinunitofentry', 'qty'],
   sup: ['supplier', 'vendor'],
   supn: ['suppliername', 'vendorname'],
-  uom: ['unitofentry', 'uom', 'baseunitofmeasure'],
+  uom: ['baseunitofmeasure', 'unitofentry', 'uom'],
   mov: ['movementtype'],
   movt: ['movementtypetext'],
   doc: ['materialdocument'],
@@ -408,7 +408,16 @@ export default function Mb51TablePageClient() {
 
             const headers = (data[0] as unknown[]).map(norm);
             const indexes: Record<string, number> = {};
-            for (const key in COLS) indexes[key] = headers.findIndex((header) => COLS[key].includes(header));
+            for (const key in COLS) {
+              indexes[key] = -1;
+              for (const alias of COLS[key]) {
+                const i = headers.indexOf(alias);
+                if (i >= 0) {
+                  indexes[key] = i;
+                  break;
+                }
+              }
+            }
 
             const required = ['date', 'mat', 'qty'].filter((key) => indexes[key] < 0);
             if (required.length) {

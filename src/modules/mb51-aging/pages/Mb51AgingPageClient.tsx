@@ -6,21 +6,16 @@ import * as XLSX from 'xlsx';
 import type {
   Mb51AgingMovement,
   Mb51AgingImportMeta,
-  Mb51AgingBucket,
   Mb51AgingAggRow,
   Mb51AgingResult,
 } from '@/modules/mb51-aging/types';
 import { saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
-
-const BUCKETS: Mb51AgingBucket[] = [
-  { k: 'b1', l: 'Below 30 days', min: 0, max: 30, c: 'var(--b1)' },
-  { k: 'b2', l: '31 to 90 days', min: 31, max: 90, c: 'var(--b2)' },
-  { k: 'b3', l: '91 to 180 days', min: 91, max: 180, c: 'var(--b3)' },
-  { k: 'b4', l: '181 to 365 days', min: 181, max: 364, c: 'var(--b4)' },
-  { k: 'b5', l: '1 year to 2 years', min: 365, max: 729, c: 'var(--b5)' },
-  { k: 'b6', l: '2 to 3 years', min: 730, max: 1094, c: 'var(--b6)' },
-  { k: 'b7', l: 'More than 3 years', min: 1095, max: 1e9, c: 'var(--b7)' },
-];
+import {
+  BUCKETS,
+  DEFAULT_DEFECTIVE_MATERIALS,
+  bucketOf,
+  computeFifoAging,
+} from '@/modules/mb51-aging/fifo';
 
 const DAY = 86400000;
 const EPOCH_OFFSET = 25569;
@@ -71,15 +66,16 @@ const norm = (s: unknown) =>
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
 
+/** Match MB51_Aging_Report.html — prefer Quantity + Base Unit of Measure when both exist. */
 const COLS: Record<string, string[]> = {
   date: ['postingdate'],
   mat: ['material'],
   desc: ['materialdescription'],
   grp: ['materialgroup'],
-  qty: ['qtyinunitofentry', 'quantity', 'qty'],
+  qty: ['quantity', 'qtyinunitofentry', 'qty'],
   sup: ['supplier', 'vendor'],
   supn: ['suppliername', 'vendorname'],
-  uom: ['unitofentry', 'uom', 'baseunitofmeasure'],
+  uom: ['baseunitofmeasure', 'unitofentry', 'uom'],
   mov: ['movementtype'],
   movt: ['movementtypetext'],
   doc: ['materialdocument'],
@@ -112,12 +108,6 @@ const HEAD: Record<string, [string, string][]> = {
   ],
 };
 
-function bucketOf(age: number): number {
-  let i = 0;
-  while (i < BUCKETS.length - 1 && age > BUCKETS[i].max) i++;
-  return i;
-}
-
 type OptionItem = { id: string; text: string; lc: string };
 
 function MultiSelectDropdown({
@@ -125,14 +115,21 @@ function MultiSelectDropdown({
   items,
   selected,
   onChange,
+  emptyText,
+  selectedOnlyLabel = 'Selected only',
 }: {
   label: string;
   items: OptionItem[];
   selected: Set<string>;
   onChange: (s: Set<string>) => void;
+  /** Shown when nothing is selected (default: All {label}). */
+  emptyText?: string;
+  /** Toggle button label to list only checked items (e.g. "Excluded only"). */
+  selectedOnlyLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [selectedOnly, setSelectedOnly] = useState(false);
   const popRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -147,23 +144,30 @@ function MultiSelectDropdown({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [open]);
 
+  // If selection cleared while viewing selected-only, fall back to full list
+  useEffect(() => {
+    if (selectedOnly && selected.size === 0) setSelectedOnly(false);
+  }, [selected, selectedOnly]);
+
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return q ? items.filter((i) => i.lc.includes(q)) : items;
-  }, [items, query]);
+    let list = items;
+    if (selectedOnly) list = list.filter((i) => selected.has(i.id));
+    return q ? list.filter((i) => i.lc.includes(q)) : list;
+  }, [items, query, selectedOnly, selected]);
 
   const lim = 400;
   const part = shown.slice(0, lim);
 
   const buttonText = useMemo(() => {
     const n = selected.size;
-    if (n === 0) return `All ${label} (${items.length})`;
+    if (n === 0) return emptyText ?? `All ${label} (${items.length})`;
     if (n === 1) {
       const match = items.find((i) => selected.has(i.id));
       return match ? match.text : '1 selected';
     }
     return `${n} selected`;
-  }, [selected, label, items]);
+  }, [selected, label, items, emptyText]);
 
   return (
     <div className={`ms ${open ? 'open' : ''}`} ref={popRef}>
@@ -180,6 +184,21 @@ function MultiSelectDropdown({
               onChange={(e) => setQuery(e.target.value)}
               autoFocus
             />
+            <button
+              type="button"
+              className={selectedOnly ? 'on' : undefined}
+              disabled={selected.size === 0}
+              title={
+                selected.size === 0
+                  ? 'Select items first'
+                  : selectedOnly
+                    ? 'Show full list'
+                    : `Show only ${selectedOnlyLabel.toLowerCase()}`
+              }
+              onClick={() => setSelectedOnly((v) => !v)}
+            >
+              {selectedOnly ? 'Show all' : selectedOnlyLabel}
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -212,190 +231,21 @@ function MultiSelectDropdown({
                 </label>
               ))
             ) : (
-              <div className="empty">No match</div>
+              <div className="empty">
+                {selectedOnly ? 'No excluded materials' : 'No match'}
+              </div>
             )}
           </div>
           <div className="ms-foot">
-            {shown.length} of {items.length} shown
+            {selectedOnly
+              ? `${shown.length} excluded`
+              : `${shown.length} of ${items.length} shown`}
             {shown.length > lim ? ` (first ${lim} – refine search)` : ''}
           </div>
         </div>
       )}
     </div>
   );
-}
-
-// Pure FIFO calculation helper
-function computeFifoAging(opts: {
-  rows: Mb51AgingMovement[];
-  basisDateStr: string;
-  dateFromStr: string;
-  dateToStr: string;
-  groupBy: 'mat' | 'vendor' | 'group' | 'vm';
-  selectedPlants: Set<string>;
-  selectedVendors: Set<string>;
-  selectedGroups: Set<string>;
-  selectedMaterials: Set<string>;
-}): Mb51AgingResult | null {
-  const {
-    rows,
-    basisDateStr,
-    dateFromStr,
-    dateToStr,
-    groupBy,
-    selectedPlants,
-    selectedVendors,
-    selectedGroups,
-    selectedMaterials,
-  } = opts;
-
-  if (!rows.length) return null;
-  const basis = dateToSerial(basisDateStr);
-  if (basis == null) return null;
-  const from = dateToSerial(dateFromStr) ?? -1e9;
-  const to = dateToSerial(dateToStr) ?? 1e9;
-
-  // Build index grouped by Plant + Vendor + Material + UoM
-  const m = new Map<string, Mb51AgingMovement[]>();
-  for (const r of rows) {
-    const k = `${r.mv}|${r.v}|${r.m}|${r.u}`;
-    let a = m.get(k);
-    if (!a) {
-      a = [];
-      m.set(k, a);
-    }
-    a.push(r);
-  }
-  const groups = [...m.values()];
-  groups.forEach((a) => a.sort((x, y) => x.d - y.d || x.s - y.s));
-
-  const agg = new Map<string, Mb51AgingAggRow>();
-  const tot = BUCKETS.map(() => 0);
-  let layers = 0,
-    negMat = 0,
-    negQty = 0,
-    plugged = 0,
-    plugQty = 0,
-    stockMat = 0;
-  const EPS = 1e-6;
-
-  for (const a of groups) {
-    const f = a[0];
-    if (selectedPlants.size && !selectedPlants.has(f.mv)) continue;
-    if (selectedVendors.size && !selectedVendors.has(f.v)) continue;
-    if (selectedGroups.size && !selectedGroups.has(f.g)) continue;
-    if (selectedMaterials.size && !selectedMaterials.has(f.m)) continue;
-
-    // Closing balance as on basis date (all postings up to basis date)
-    let bal = 0;
-    for (const r of a) {
-      if (r.d > basis) break;
-      bal += r.q;
-    }
-    if (bal <= EPS) {
-      if (bal < -EPS) {
-        negMat++;
-        negQty += bal;
-      }
-      continue;
-    }
-    stockMat++;
-
-    // FIFO: remaining stock = latest receipts -> walk receipts newest to oldest
-    let rem = bal;
-    const lay: [Mb51AgingMovement, number][] = [];
-    for (let i = a.length - 1; i >= 0 && rem > EPS; i--) {
-      const r = a[i];
-      if (r.d > basis || r.q <= 0) continue;
-      const take = Math.min(r.q, rem);
-      rem -= take;
-      lay.push([r, take]);
-    }
-    if (rem > EPS) {
-      // Balance not covered by receipts in file -> treat as oldest stock
-      const r = a[0];
-      lay.push([
-        {
-          d: r.d,
-          v: r.v,
-          vn: r.vn,
-          m: r.m,
-          md: r.md,
-          g: r.g,
-          u: r.u,
-          mv: r.mv,
-          dc: '(balance not covered by receipts in file)',
-          mt: '',
-          mtx: '',
-          q: rem,
-          s: r.s,
-        },
-        rem,
-      ]);
-      plugged++;
-      plugQty += rem;
-    }
-
-    for (const [r, q] of lay) {
-      if (r.d < from || r.d > to) continue;
-      const age = basis - r.d;
-      let bi = 0;
-      while (bi < BUCKETS.length - 1 && age > BUCKETS[bi].max) bi++;
-
-      let key = '';
-      let o: Partial<Mb51AgingAggRow> = {};
-      switch (groupBy) {
-        case 'vendor':
-          key = `${r.v}|${r.u}`;
-          o = { a: r.v, b: r.vn, c: '', d: '', u: r.u };
-          break;
-        case 'group':
-          key = `${r.g}|${r.u}`;
-          o = { a: '', b: '', c: r.g, d: '', u: r.u };
-          break;
-        case 'vm':
-          key = `${r.v}|${r.m}|${r.u}`;
-          o = { a: r.v, b: r.vn, c: r.g, d: r.m, e: r.md, u: r.u };
-          break;
-        default:
-          key = `${r.m}|${r.u}`;
-          o = { a: '', b: '', c: r.g, d: r.m, e: r.md, u: r.u };
-      }
-
-      let rec = agg.get(key);
-      if (!rec) {
-        rec = {
-          bk: BUCKETS.map(() => 0),
-          det: BUCKETS.map(() => []),
-          total: 0,
-          n: 0,
-          ...o,
-        };
-        agg.set(key, rec);
-      }
-      rec.det[bi].push([r, q, age]);
-      rec.bk[bi] += q;
-      rec.total += q;
-      rec.n++;
-      tot[bi] += q;
-      layers++;
-    }
-  }
-
-  return {
-    rows: [...agg.values()],
-    tot,
-    gb: groupBy,
-    basis,
-    from,
-    to,
-    used: layers,
-    negMat,
-    negQty,
-    plugged,
-    plugQty,
-    stockMat,
-  };
 }
 
 export default function Mb51AgingPageClient() {
@@ -410,7 +260,7 @@ export default function Mb51AgingPageClient() {
   const [availableSheets, setAvailableSheets] = useState<{ name: string; rowCount: number }[]>([]);
   const [selectedSheets, setSelectedSheets] = useState<Set<string>>(new Set());
 
-  // Default group by to 'vm' (Vendor + Material) as requested
+  // Default group by Vendor + Material
   const [groupBy, setGroupBy] = useState<'mat' | 'vendor' | 'group' | 'vm'>('vm');
 
   // Filters state
@@ -419,6 +269,11 @@ export default function Mb51AgingPageClient() {
   const [dateTo, setDateTo] = useState<string>('');
   const [minDateLimit, setMinDateLimit] = useState<string>('');
   const [maxDateLimit, setMaxDateLimit] = useState<string>('');
+  const [maxPostingSerial, setMaxPostingSerial] = useState(0);
+  /** Any materials the user wants dropped from aging (not limited to the known 6). */
+  const [excludedMaterials, setExcludedMaterials] = useState<Set<string>>(new Set());
+  const [sheetLabel, setSheetLabel] = useState('');
+  const [uomInfo, setUomInfo] = useState('');
 
   const [selectedVendors, setSelectedVendors] = useState<Set<string>>(new Set());
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
@@ -437,6 +292,46 @@ export default function Mb51AgingPageClient() {
   const [modalTitle, setModalTitle] = useState('');
   const [modalBucketIdx, setModalBucketIdx] = useState<number>(-1);
   const [modalLines, setModalLines] = useState<[Mb51AgingMovement, number, number][]>([]);
+  const [modalNet, setModalNet] = useState<{
+    pos: number;
+    neg: number;
+    net: number;
+    n: number;
+    r: Mb51AgingMovement;
+  }[] | null>(null);
+
+  const runAging = useCallback(
+    (opts: {
+      movRows: Mb51AgingMovement[];
+      basisDateStr: string;
+      dateFromStr: string;
+      dateToStr: string;
+      gb: 'mat' | 'vendor' | 'group' | 'vm';
+      plants: Set<string>;
+      vendors: Set<string>;
+      groups: Set<string>;
+      materials: Set<string>;
+      excluded: Set<string>;
+      maxD: number;
+    }) => {
+      const basis = dateToSerial(opts.basisDateStr);
+      if (basis == null) return null;
+      return computeFifoAging({
+        rows: opts.movRows,
+        basis,
+        from: dateToSerial(opts.dateFromStr) ?? -1e9,
+        to: dateToSerial(opts.dateToStr) ?? 1e9,
+        groupBy: opts.gb,
+        selectedPlants: opts.plants,
+        selectedVendors: opts.vendors,
+        selectedGroups: opts.groups,
+        selectedMaterials: opts.materials,
+        excludedMaterials: opts.excluded,
+        maxD: opts.maxD,
+      });
+    },
+    []
+  );
 
   // Function to initialize dates & report synchronously from a dataset
   const initFromRows = useCallback(
@@ -444,9 +339,11 @@ export default function Mb51AgingPageClient() {
       if (!movRows.length) return;
       let mn = 1e9,
         mx = -1e9;
+      const codes = new Set<string>();
       for (const r of movRows) {
         if (r.d < mn) mn = r.d;
         if (r.d > mx) mx = r.d;
+        if (r.m) codes.add(r.m);
       }
       const isoMn = serialToISO(mn);
       const isoMx = serialToISO(mx);
@@ -454,31 +351,43 @@ export default function Mb51AgingPageClient() {
       const todayIso = new Date(today.getTime() - today.getTimezoneOffset() * 60000)
         .toISOString()
         .slice(0, 10);
+      // Seed with known defective codes present in this file; user can add any more / all
+      const seedExcluded = new Set(
+        DEFAULT_DEFECTIVE_MATERIALS.filter((m) => codes.has(m))
+      );
 
       setDateFrom(isoMn);
       setDateTo(isoMx);
       setMinDateLimit(isoMn);
       setMaxDateLimit(isoMx);
+      setMaxPostingSerial(mx);
       setBasisDate(todayIso);
       setGroupBy(gb);
+      setExcludedMaterials(seedExcluded);
+      setSelectedVendors(new Set());
+      setSelectedGroups(new Set());
+      setSelectedMaterials(new Set());
+      setSelectedPlants(new Set());
 
-      const computed = computeFifoAging({
-        rows: movRows,
+      const computed = runAging({
+        movRows,
         basisDateStr: todayIso,
         dateFromStr: isoMn,
         dateToStr: isoMx,
-        groupBy: gb,
-        selectedPlants: new Set(),
-        selectedVendors: new Set(),
-        selectedGroups: new Set(),
-        selectedMaterials: new Set(),
+        gb,
+        plants: new Set(),
+        vendors: new Set(),
+        groups: new Set(),
+        materials: new Set(),
+        excluded: seedExcluded,
+        maxD: mx,
       });
 
       setReportResult(computed);
       setRows(movRows);
       setShowUpload(false);
     },
-    []
+    [runAging]
   );
 
   // Initial load from database
@@ -497,9 +406,7 @@ export default function Mb51AgingPageClient() {
 
         if (data.rows && data.rows.length > 0) {
           setLatestImport(data.latestImport || null);
-          setLoadMsg(
-            `Loaded ${data.rows.length.toLocaleString('en-IN')} rows from database (${data.latestImport?.fileName ?? 'latest export'}).`
-          );
+          setLoadMsg('');
           setIsErrMsg(false);
           initFromRows(data.rows, 'vm');
         } else {
@@ -524,31 +431,34 @@ export default function Mb51AgingPageClient() {
   }, [initFromRows]);
 
   // Filter options derived from current rows
-  const { vendorOptions, groupOptions, matOptions, plantOptions } = useMemo(() => {
-    const V = new Map<string, string>();
-    const G = new Map<string, string>();
-    const M = new Map<string, string>();
-    const MV = new Map<string, string>();
+  const { vendorOptions, groupOptions, matOptions, plantOptions, excludeMatOptions } =
+    useMemo(() => {
+      const V = new Map<string, string>();
+      const G = new Map<string, string>();
+      const M = new Map<string, string>();
+      const MV = new Map<string, string>();
 
-    for (const r of rows) {
-      if (!V.has(r.v)) V.set(r.v, `${r.v || '(blank)'} - ${r.vn || ''}`);
-      G.set(r.g, r.g || '(blank)');
-      if (!M.has(r.m)) M.set(r.m, `${r.m} - ${r.md}`);
-      MV.set(r.mv, r.mv || '(blank)');
-    }
+      for (const r of rows) {
+        if (!V.has(r.v)) V.set(r.v, `${r.v || '(blank)'} - ${r.vn || ''}`);
+        G.set(r.g, r.g || '(blank)');
+        if (!M.has(r.m)) M.set(r.m, `${r.m} - ${r.md}`);
+        MV.set(r.mv, r.mv || '(blank)');
+      }
 
-    const sortOpt = (map: Map<string, string>): OptionItem[] =>
-      [...map.entries()]
-        .sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true }))
-        .map(([id, text]) => ({ id, text, lc: text.toLowerCase() }));
+      const sortOpt = (map: Map<string, string>): OptionItem[] =>
+        [...map.entries()]
+          .sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true }))
+          .map(([id, text]) => ({ id, text, lc: text.toLowerCase() }));
 
-    return {
-      vendorOptions: sortOpt(V),
-      groupOptions: sortOpt(G),
-      matOptions: sortOpt(M),
-      plantOptions: sortOpt(MV),
-    };
-  }, [rows]);
+      const allMats = sortOpt(M);
+      return {
+        vendorOptions: sortOpt(V),
+        groupOptions: sortOpt(G),
+        matOptions: allMats.filter((i) => !excludedMaterials.has(i.id)),
+        excludeMatOptions: allMats,
+        plantOptions: sortOpt(MV),
+      };
+    }, [rows, excludedMaterials]);
 
   // Main calculation runner
   const handleRun = useCallback(() => {
@@ -557,16 +467,18 @@ export default function Mb51AgingPageClient() {
       alert('Please select an aging basis date.');
       return;
     }
-    const computed = computeFifoAging({
-      rows,
+    const computed = runAging({
+      movRows: rows,
       basisDateStr: basisDate,
       dateFromStr: dateFrom,
       dateToStr: dateTo,
-      groupBy,
-      selectedPlants,
-      selectedVendors,
-      selectedGroups,
-      selectedMaterials,
+      gb: groupBy,
+      plants: selectedPlants,
+      vendors: selectedVendors,
+      groups: selectedGroups,
+      materials: selectedMaterials,
+      excluded: excludedMaterials,
+      maxD: maxPostingSerial,
     });
     setReportResult(computed);
   }, [
@@ -579,6 +491,9 @@ export default function Mb51AgingPageClient() {
     selectedVendors,
     selectedGroups,
     selectedMaterials,
+    excludedMaterials,
+    maxPostingSerial,
+    runAging,
   ]);
 
   // Save parsed data to backend (chunked — large MB51 JSON cannot go in one POST)
@@ -592,9 +507,7 @@ export default function Mb51AgingPageClient() {
         );
       });
       setLatestImport(meta);
-      setLoadMsg(
-        `Saved ${parsedRows.length.toLocaleString('en-IN')} rows to database (${meta.fileName}). Reload will restore this data.`
-      );
+      setLoadMsg('');
       setIsErrMsg(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database save failed';
@@ -618,7 +531,10 @@ export default function Mb51AgingPageClient() {
         try {
           const out: Mb51AgingMovement[] = [];
           const miss: string[] = [];
-          let _skipped = 0;
+          let skipped = 0;
+          let qtyCol = '';
+          let uomCol = '';
+          const uomSeen = new Map<string, number>();
 
           sheetNames.forEach((sn) => {
             const ws = wb.Sheets[sn];
@@ -630,11 +546,22 @@ export default function Mb51AgingPageClient() {
             });
             if (!data.length) return;
 
-            const hdr = (data[0] as unknown[]).map(norm);
+            const hdrRaw = data[0] as unknown[];
+            const hdr = hdrRaw.map(norm);
             const ix: Record<string, number> = {};
+            // Prefer alias order from COLS (Quantity before Qty in unit of entry)
             for (const k in COLS) {
-              ix[k] = hdr.findIndex((h) => COLS[k].includes(h));
+              ix[k] = -1;
+              for (const nm of COLS[k]) {
+                const i = hdr.indexOf(nm);
+                if (i >= 0) {
+                  ix[k] = i;
+                  break;
+                }
+              }
             }
+            if (!qtyCol && ix.qty >= 0) qtyCol = String(hdrRaw[ix.qty] ?? '');
+            if (!uomCol && ix.uom >= 0) uomCol = String(hdrRaw[ix.uom] ?? '');
             const need = ['date', 'mat', 'qty'].filter((k) => ix[k] < 0);
             if (need.length) {
               miss.push(`${sn}: ${need.join(', ')}`);
@@ -645,14 +572,16 @@ export default function Mb51AgingPageClient() {
               const row = data[r] as unknown[];
               const ds = toSerial(row[ix.date]);
               if (ds == null) {
-                _skipped++;
+                skipped++;
                 continue;
               }
               const q = Number(row[ix.qty]);
               if (isNaN(q)) {
-                _skipped++;
+                skipped++;
                 continue;
               }
+              const uo = ix.uom >= 0 ? String(row[ix.uom] ?? '').trim() : '';
+              uomSeen.set(uo, (uomSeen.get(uo) || 0) + 1);
               const sup = ix.sup >= 0 ? String(row[ix.sup] ?? '').trim() : '';
               const supn = ix.supn >= 0 ? String(row[ix.supn] ?? '').trim() : '';
 
@@ -662,7 +591,7 @@ export default function Mb51AgingPageClient() {
                 m: String(row[ix.mat] ?? '').trim(),
                 md: ix.desc >= 0 ? String(row[ix.desc] ?? '').trim() : '',
                 g: ix.grp >= 0 ? String(row[ix.grp] ?? '').trim() : '',
-                u: ix.uom >= 0 ? String(row[ix.uom] ?? '').trim() : '',
+                u: uo,
                 v: sup,
                 vn: supn,
                 mv: ix.plant >= 0 ? String(row[ix.plant] ?? '').trim() : '',
@@ -682,10 +611,33 @@ export default function Mb51AgingPageClient() {
             return;
           }
 
+          const mu = new Map<string, Set<string>>();
+          for (const r of out) {
+            let s = mu.get(r.m);
+            if (!s) {
+              s = new Set();
+              mu.set(r.m, s);
+            }
+            s.add(r.u);
+          }
+          const multi = [...mu.entries()]
+            .filter(([, s]) => s.size > 1)
+            .map(([m, s]) => `${m} (${[...s].join('/')})`);
+          setUomInfo(
+            `Quantity taken from column "${qtyCol}" and unit from "${uomCol}" (no conversion). Units in data: ${[
+              ...uomSeen.entries(),
+            ]
+              .map(([u, n]) => `${u || '(blank)'} ${n.toLocaleString('en-IN')}`)
+              .join(', ')}.${
+              multi.length
+                ? ` Materials with more than one unit (reported separately): ${multi.join(', ')}.`
+                : ''
+            }`
+          );
+          setSheetLabel(sheetNames.join(', '));
           setAvailableSheets([]);
           setWbInstance(null);
 
-          // Initialize view with Vendor + Material default
           initFromRows(out, 'vm');
 
           // Save to database
@@ -752,10 +704,15 @@ export default function Mb51AgingPageClient() {
   };
 
   const handleResetFilters = () => {
+    const codes = new Set(rows.map((r) => r.m).filter(Boolean));
+    const seedExcluded = new Set(
+      DEFAULT_DEFECTIVE_MATERIALS.filter((m) => codes.has(m))
+    );
     setSelectedVendors(new Set());
     setSelectedGroups(new Set());
     setSelectedMaterials(new Set());
     setSelectedPlants(new Set());
+    setExcludedMaterials(seedExcluded);
     setGroupBy('vm');
     setSearchQuery('');
     if (minDateLimit) setDateFrom(minDateLimit);
@@ -767,16 +724,18 @@ export default function Mb51AgingPageClient() {
     setBasisDate(todayIso);
 
     if (rows.length) {
-      const computed = computeFifoAging({
-        rows,
+      const computed = runAging({
+        movRows: rows,
         basisDateStr: todayIso,
         dateFromStr: minDateLimit || '',
         dateToStr: maxDateLimit || '',
-        groupBy: 'vm',
-        selectedPlants: new Set(),
-        selectedVendors: new Set(),
-        selectedGroups: new Set(),
-        selectedMaterials: new Set(),
+        gb: 'vm',
+        plants: new Set(),
+        vendors: new Set(),
+        groups: new Set(),
+        materials: new Set(),
+        excluded: seedExcluded,
+        maxD: maxPostingSerial,
       });
       setReportResult(computed);
     }
@@ -800,17 +759,22 @@ export default function Mb51AgingPageClient() {
       [
         'Basis date',
         serialToDMY(R.basis),
-        'Receipt posting date from',
+        'Posting date from',
         R.from < -1e8 ? '' : serialToDMY(R.from),
         'to',
         R.to > 1e8 ? '' : serialToDMY(R.to),
       ],
       [],
-      [...cols.map((c) => c[1]), ...BUCKETS.map((b) => b.l), 'Total'],
+      [
+        ...cols.map((c) => c[1]),
+        ...BUCKETS.map((b) => b.l),
+        `Stock as on ${serialToDMY(R.basis)}`,
+        `Stock as on ${serialToDMY(R.maxD)}`,
+      ],
     ];
 
     rws.forEach((r) => {
-      aoa.push([...cols.map(([k]) => String(r[k] ?? '')), ...r.bk, r.total]);
+      aoa.push([...cols.map(([k]) => String(r[k] ?? '')), ...r.bk, r.total, r.full]);
     });
 
     aoa.push([
@@ -818,13 +782,15 @@ export default function Mb51AgingPageClient() {
       ...cols.slice(1).map(() => ''),
       ...BUCKETS.map((_, i) => rws.reduce((s, r) => s + r.bk[i], 0)),
       rws.reduce((s, r) => s + r.total, 0),
+      rws.reduce((s, r) => s + r.full, 0),
     ]);
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols'] = [
       ...cols.map(([k]) => ({ wch: k === 'e' || k === 'b' ? 38 : 14 })),
       ...BUCKETS.map(() => ({ wch: 16 })),
-      { wch: 14 },
+      { wch: 20 },
+      { wch: 20 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Aging');
@@ -850,6 +816,9 @@ export default function Mb51AgingPageClient() {
       if (sortKey === 'total') {
         a = x.total;
         b = y.total;
+      } else if (sortKey === 'full') {
+        a = x.full;
+        b = y.full;
       } else if (sortKey.startsWith('b') && /^b\d$/.test(sortKey)) {
         const i = +sortKey[1] - 1;
         a = x.bk[i];
@@ -868,7 +837,7 @@ export default function Mb51AgingPageClient() {
   const gt = reportResult ? reportResult.tot.reduce((s, v) => s + v, 0) : 0;
   const currentCols = reportResult ? HEAD[reportResult.gb] || HEAD.vm : HEAD.vm;
 
-  // Drill-down Collector matching line 436 in updated HTML
+  // Drill-down Collector matching MB51_Aging_Report.html
   const openDetail = (
     targetRows: Mb51AgingAggRow[],
     bucketIdx: number,
@@ -888,15 +857,68 @@ export default function Mb51AgingPageClient() {
       (x, y) => x[0].d - y[0].d || String(x[0].dc ?? '').localeCompare(String(y[0].dc ?? ''))
     );
 
+    setModalNet(null);
     setModalLines(out);
     setModalTitle(title);
     setModalBucketIdx(bucketIdx);
     setModalOpen(true);
   };
 
+  const openNet = (targetRows: Mb51AgingAggRow[], title: string) => {
+    const seen = new Set<Mb51AgingMovement[]>();
+    const L: { r: Mb51AgingMovement; pos: number; neg: number; net: number; n: number }[] = [];
+    targetRows.forEach((r) =>
+      r.fg.forEach(([a, full]) => {
+        if (seen.has(a)) return;
+        seen.add(a);
+        let pos = 0,
+          neg = 0;
+        a.forEach((x) => {
+          if (x.q > 0) pos += x.q;
+          else neg += x.q;
+        });
+        L.push({ r: a[0], pos, neg, net: full, n: a.length });
+      })
+    );
+    L.sort((x, y) => x.net - y.net);
+    setModalLines([]);
+    setModalNet(L);
+    setModalTitle(title);
+    setModalBucketIdx(-2);
+    setModalOpen(true);
+  };
+
   // Export Excel for Drill-down modal
   const exportModalXls = () => {
-    if (!modalLines.length || !reportResult) return;
+    if (!reportResult) return;
+    if (modalNet) {
+      const aoa: (string | number)[][] = [
+        [`${modalTitle} – net stock by vendor (all records)`],
+        [],
+        [
+          'Plant',
+          'Vendor code',
+          'Vendor name',
+          'Material',
+          'Description',
+          'UoM',
+          'Lines',
+          'Receipts (+)',
+          'Issues / returns (-)',
+          'Net stock',
+        ],
+      ];
+      modalNet.forEach((x) =>
+        aoa.push([x.r.mv, x.r.v, x.r.vn, x.r.m, x.r.md, x.r.u, x.n, x.pos, x.neg, x.net])
+      );
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = [8, 12, 28, 12, 34, 6, 8, 14, 16, 12].map((w) => ({ wch: w }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Net stock');
+      XLSX.writeFile(wb, 'MB51_Net_Stock_Detail.xlsx');
+      return;
+    }
+    if (!modalLines.length) return;
     const bucketLabel = modalBucketIdx < 0 ? 'All periods' : BUCKETS[modalBucketIdx].l;
     const aoa: (string | number)[][] = [
       [`${modalTitle} – ${bucketLabel}`],
@@ -993,17 +1015,17 @@ export default function Mb51AgingPageClient() {
           </div>
         )}
 
-        {/* Persist status after load/save — save failures used to vanish once the report showed */}
-        {!loading && loadMsg && !(showUpload && rows.length === 0) && (
+        {/* Errors only (save failure) — success "Loaded N rows…" banner removed */}
+        {!loading && isErrMsg && loadMsg && !(showUpload && rows.length === 0) && (
           <div
-            className="card"
+            className="card status-banner"
             style={{
-              padding: '10px 14px',
-              borderColor: isErrMsg ? 'var(--neg)' : undefined,
-              background: isErrMsg ? '#fdf2f1' : '#f3faf6',
+              padding: '6px 10px',
+              borderColor: 'var(--neg)',
+              background: '#fdf2f1',
             }}
           >
-            <div className={`msg ${isErrMsg ? 'err' : ''}`} style={{ marginTop: 0 }}>
+            <div className="msg err" style={{ marginTop: 0, fontSize: 12 }}>
               {loadMsg}
             </div>
           </div>
@@ -1108,7 +1130,7 @@ export default function Mb51AgingPageClient() {
                   />
                 </div>
                 <div className="f">
-                  <label>Receipt posting date from</label>
+                  <label>Posting date from</label>
                   <input
                     type="date"
                     id="dFrom"
@@ -1121,7 +1143,7 @@ export default function Mb51AgingPageClient() {
                   />
                 </div>
                 <div className="f">
-                  <label>Receipt posting date to</label>
+                  <label>Posting date to</label>
                   <input
                     type="date"
                     id="dTo"
@@ -1158,6 +1180,24 @@ export default function Mb51AgingPageClient() {
                     items={matOptions}
                     selected={selectedMaterials}
                     onChange={setSelectedMaterials}
+                  />
+                </div>
+                <div className="f">
+                  <label>Exclude materials</label>
+                  <MultiSelectDropdown
+                    label="materials to exclude"
+                    emptyText={`None excluded (${excludeMatOptions.length})`}
+                    selectedOnlyLabel="Excluded only"
+                    items={excludeMatOptions}
+                    selected={excludedMaterials}
+                    onChange={(next) => {
+                      setExcludedMaterials(next);
+                      setSelectedMaterials((prev) => {
+                        if (!prev.size) return prev;
+                        const kept = new Set([...prev].filter((id) => !next.has(id)));
+                        return kept;
+                      });
+                    }}
                   />
                 </div>
                 <div className="f">
@@ -1256,15 +1296,25 @@ export default function Mb51AgingPageClient() {
               </div>
             </div>
 
-            {/* Meta and Table */}
-            <div className="card">
+            {/* Meta and Table — scroll stays inside .tw */}
+            <div className="card table-card">
               {reportResult && (
                 <div className="meta">
                   <span>
                     Basis date: <b>{serialToDMY(reportResult.basis)}</b>
                   </span>
+                  {sheetLabel && (
+                    <span>
+                      Sheets: <b>{sheetLabel}</b>
+                    </span>
+                  )}
+                  {excludedMaterials.size > 0 && (
+                    <span style={{ color: 'var(--neg)' }}>
+                      Excluded materials: <b>{excludedMaterials.size.toLocaleString('en-IN')}</b>
+                    </span>
+                  )}
                   <span>
-                    Receipt posting date:{' '}
+                    Posting date range:{' '}
                     <b>{reportResult.from < -1e8 ? '–' : serialToDMY(reportResult.from)}</b> to{' '}
                     <b>{reportResult.to > 1e8 ? '–' : serialToDMY(reportResult.to)}</b>
                   </span>
@@ -1278,7 +1328,11 @@ export default function Mb51AgingPageClient() {
                     Result rows: <b>{displayedRows.length.toLocaleString('en-IN')}</b>
                   </span>
                   <span>
-                    Closing stock qty: <b>{fmtQty(gt)}</b>
+                    Stock as on {serialToDMY(reportResult.basis)}: <b>{fmtQty(gt)}</b>
+                  </span>
+                  <span>
+                    Stock as on {serialToDMY(reportResult.maxD)}:{' '}
+                    <b>{fmtQty(reportResult.fullTot)}</b>
                   </span>
                 </div>
               )}
@@ -1327,6 +1381,7 @@ export default function Mb51AgingPageClient() {
                       })}
                       <th
                         className="n tot"
+                        title="Net stock as on the selected basis date"
                         onClick={() => {
                           if (sortKey === 'total') setSortDir((d) => -d);
                           else {
@@ -1335,8 +1390,24 @@ export default function Mb51AgingPageClient() {
                           }
                         }}
                       >
-                        Total
+                        Stock as on {reportResult ? serialToDMY(reportResult.basis) : '–'}
                         {sortKey === 'total' && (
+                          <span className="ar">{sortDir > 0 ? '▲' : '▼'}</span>
+                        )}
+                      </th>
+                      <th
+                        className="n tot2"
+                        title="Net qty of all records in the file"
+                        onClick={() => {
+                          if (sortKey === 'full') setSortDir((d) => -d);
+                          else {
+                            setSortKey('full');
+                            setSortDir(-1);
+                          }
+                        }}
+                      >
+                        Stock as on {reportResult ? serialToDMY(reportResult.maxD) : '–'}
+                        {sortKey === 'full' && (
                           <span className="ar">{sortDir > 0 ? '▲' : '▼'}</span>
                         )}
                       </th>
@@ -1372,12 +1443,19 @@ export default function Mb51AgingPageClient() {
                           >
                             {fmtQty(r.total)}
                           </td>
+                          <td
+                            className={`n tot2 click ${r.full < 0 ? 'neg' : ''}`}
+                            title="Click for net stock breakdown (all records)"
+                            onClick={() => openNet([r], rowTitle(r))}
+                          >
+                            {fmtQty(r.full)}
+                          </td>
                         </tr>
                       ))
                     ) : (
                       <tr>
                         <td
-                          colSpan={currentCols.length + BUCKETS.length + 1}
+                          colSpan={currentCols.length + BUCKETS.length + 2}
                           className="empty"
                         >
                           No movements match the selected filters.
@@ -1418,6 +1496,13 @@ export default function Mb51AgingPageClient() {
                         >
                           {fmtQty(displayedRows.reduce((s, r) => s + r.total, 0))}
                         </td>
+                        <td
+                          className="n tot2 click"
+                          title="Click for net stock breakdown (all records)"
+                          onClick={() => openNet(displayedRows, 'All displayed rows')}
+                        >
+                          {fmtQty(displayedRows.reduce((s, r) => s + r.full, 0))}
+                        </td>
                       </tr>
                     </tfoot>
                   )}
@@ -1426,12 +1511,16 @@ export default function Mb51AgingPageClient() {
 
               {reportResult && (
                 <div className="note">
-                  FIFO basis: closing balance (net qty of all postings up to the basis date)
-                  per Plant + Vendor + Material is allocated to the latest receipts (positive qty),
-                  because the oldest receipts are consumed first. Age = Basis date − receipt
-                  Posting Date. Buckets: 0–29, 30–59, 60–179, 180–364, 365–729 (1–2 yr),
-                  730–1094 (2–3 yr), 1095+ days (&gt;3 yr). Items with zero/negative balance are
-                  excluded (no negative aging).
+                  FIFO basis: closing balance (net qty of postings within the selected
+                  posting-date range, up to the basis date) per Plant + Vendor + Material is
+                  allocated to the latest receipts (positive qty), because the oldest receipts
+                  are consumed first. Age = Basis date − receipt Posting Date.{' '}
+                  {uomInfo}{' '}
+                  Buckets (age in days): 0–30, 31–90, 91–180, 181–365, 366–730 (1–2 yr),
+                  731–1095 (2–3 yr), 1096+ (&gt;3 yr). Stock as on basis date = sum of buckets
+                  (items with zero/negative balance excluded, so aging is never negative). Stock
+                  as on {serialToDMY(reportResult.maxD)} = net qty of all records in the file
+                  (not limited by basis date or range).
                   {reportResult.negMat > 0 &&
                     ` ${reportResult.negMat.toLocaleString(
                       'en-IN'
@@ -1466,14 +1555,35 @@ export default function Mb51AgingPageClient() {
             <div className="mhead">
               <div>
                 <div id="mTitle" className="mt">
-                  {modalTitle} –{' '}
-                  {modalBucketIdx < 0 ? 'All periods' : BUCKETS[modalBucketIdx]?.l}
+                  {modalNet
+                    ? `${modalTitle} – Net stock as on ${
+                        reportResult ? serialToDMY(reportResult.maxD) : '–'
+                      } (all records)`
+                    : `${modalTitle} – ${
+                        modalBucketIdx < 0 ? 'All periods' : BUCKETS[modalBucketIdx]?.l
+                      }`}
                 </div>
                 <div id="mSub" className="msub">
-                  Basis date <b>{reportResult ? serialToDMY(reportResult.basis) : '–'}</b>{' '}
-                  &nbsp;|&nbsp; Receipt lines: <b>{modalLines.length}</b> &nbsp;|&nbsp;
-                  Stock qty (FIFO allocated):{' '}
-                  <b>{fmtQty(modalLines.reduce((s, x) => s + x[1], 0))}</b>
+                  {modalNet ? (
+                    <>
+                      Net stock = all receipts (+) less all issues/returns (−) per Plant +
+                      Vendor + Material
+                      {sheetLabel ? (
+                        <>
+                          , from the sheet(s) loaded: <b>{sheetLabel}</b>
+                        </>
+                      ) : null}
+                      . Sorted lowest first.
+                    </>
+                  ) : (
+                    <>
+                      Basis date{' '}
+                      <b>{reportResult ? serialToDMY(reportResult.basis) : '–'}</b>{' '}
+                      &nbsp;|&nbsp; Receipt lines: <b>{modalLines.length}</b> &nbsp;|&nbsp;
+                      Stock qty (FIFO allocated):{' '}
+                      <b>{fmtQty(modalLines.reduce((s, x) => s + x[1], 0))}</b>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="mact">
@@ -1496,57 +1606,112 @@ export default function Mb51AgingPageClient() {
               </div>
             </div>
             <div className="mbody" id="mBody">
-              <table id="mTbl">
-                <thead>
-                  <tr>
-                    <th>Plant</th>
-                    <th>Vendor</th>
-                    <th>Material</th>
-                    <th>Description</th>
-                    <th>Material doc</th>
-                    <th>Mov. type</th>
-                    <th>Receipt posting date</th>
-                    <th className="n">Receipt qty</th>
-                    <th className="n">Qty in stock (FIFO)</th>
-                    <th className="n">Age (days)</th>
-                    <th>Aging bucket</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {modalLines.map(([r, q, age], idx) => (
-                    <tr key={idx}>
-                      <td>{r.mv}</td>
-                      <td>
-                        {r.v} - {r.vn}
-                      </td>
-                      <td>{r.m}</td>
-                      <td>{r.md}</td>
-                      <td>{r.dc}</td>
-                      <td>
-                        {r.mt} {r.mtx}
-                      </td>
-                      <td>{serialToDMY(r.d)}</td>
-                      <td className="n">{fmtQty(r.q || 0)}</td>
-                      <td className="n tot">{fmtQty(q)}</td>
-                      <td className="n">{age}</td>
-                      <td>{BUCKETS[bucketOf(age)].l}</td>
+              {modalNet ? (
+                <table id="mTbl">
+                  <thead>
+                    <tr>
+                      <th>Plant</th>
+                      <th>Vendor</th>
+                      <th>Material</th>
+                      <th>Description</th>
+                      <th>UoM</th>
+                      <th className="n">Lines</th>
+                      <th className="n">Receipts (+)</th>
+                      <th className="n">Issues / returns (−)</th>
+                      <th className="n">Net stock</th>
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td colSpan={7}>Total</td>
-                    <td className="n">
-                      {fmtQty(modalLines.reduce((s, x) => s + (x[0].q || 0), 0))}
-                    </td>
-                    <td className="n">
-                      {fmtQty(modalLines.reduce((s, x) => s + x[1], 0))}
-                    </td>
-                    <td />
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
+                  </thead>
+                  <tbody>
+                    {modalNet.map((x, idx) => (
+                      <tr key={idx}>
+                        <td>{x.r.mv}</td>
+                        <td>
+                          {x.r.v} - {x.r.vn}
+                        </td>
+                        <td>{x.r.m}</td>
+                        <td>{x.r.md}</td>
+                        <td>{x.r.u}</td>
+                        <td className="n">{x.n}</td>
+                        <td className="n">{fmtQty(x.pos)}</td>
+                        <td className="n neg">{fmtQty(x.neg)}</td>
+                        <td className={`n tot ${x.net < -1e-9 ? 'neg' : ''}`}>
+                          {fmtQty(x.net)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={6}>Total ({modalNet.length} vendor lines)</td>
+                      <td className="n">
+                        {fmtQty(modalNet.reduce((s, x) => s + x.pos, 0))}
+                      </td>
+                      <td className="n neg">
+                        {fmtQty(modalNet.reduce((s, x) => s + x.neg, 0))}
+                      </td>
+                      <td
+                        className={`n ${
+                          modalNet.reduce((s, x) => s + x.net, 0) < -1e-9 ? 'neg' : ''
+                        }`}
+                      >
+                        {fmtQty(modalNet.reduce((s, x) => s + x.net, 0))}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              ) : (
+                <table id="mTbl">
+                  <thead>
+                    <tr>
+                      <th>Plant</th>
+                      <th>Vendor</th>
+                      <th>Material</th>
+                      <th>Description</th>
+                      <th>Material doc</th>
+                      <th>Mov. type</th>
+                      <th>Receipt posting date</th>
+                      <th className="n">Receipt qty</th>
+                      <th className="n">Qty in stock (FIFO)</th>
+                      <th className="n">Age (days)</th>
+                      <th>Aging bucket</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modalLines.map(([r, q, age], idx) => (
+                      <tr key={idx}>
+                        <td>{r.mv}</td>
+                        <td>
+                          {r.v} - {r.vn}
+                        </td>
+                        <td>{r.m}</td>
+                        <td>{r.md}</td>
+                        <td>{r.dc}</td>
+                        <td>
+                          {r.mt} {r.mtx}
+                        </td>
+                        <td>{serialToDMY(r.d)}</td>
+                        <td className="n">{fmtQty(r.q || 0)}</td>
+                        <td className="n tot">{fmtQty(q)}</td>
+                        <td className="n">{age}</td>
+                        <td>{BUCKETS[bucketOf(age)].l}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={7}>Total</td>
+                      <td className="n">
+                        {fmtQty(modalLines.reduce((s, x) => s + (x[0].q || 0), 0))}
+                      </td>
+                      <td className="n">
+                        {fmtQty(modalLines.reduce((s, x) => s + x[1], 0))}
+                      </td>
+                      <td />
+                      <td />
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
             </div>
           </div>
         </div>
@@ -1574,7 +1739,10 @@ export default function Mb51AgingPageClient() {
           font: 13px/1.4 "Segoe UI", Roboto, Arial, sans-serif;
           background: var(--bg);
           color: var(--ink);
-          min-height: 100vh;
+          /* Contain width so wide tables never scroll the whole portal page */
+          max-width: 100%;
+          overflow-x: hidden;
+          min-width: 0;
         }
         .mb51-app * {
           box-sizing: border-box;
@@ -1582,40 +1750,58 @@ export default function Mb51AgingPageClient() {
         .mb51-app header {
           background: var(--brand-d);
           color: #fff;
-          padding: 12px 20px;
+          padding: 8px 14px;
           display: flex;
           align-items: center;
-          gap: 16px;
+          gap: 12px;
           flex-wrap: wrap;
         }
         .mb51-app header h1 {
-          font-size: 18px;
+          font-size: 16px;
           margin: 0;
           font-weight: 600;
         }
         .mb51-app header .sub {
           opacity: 0.75;
-          font-size: 12px;
+          font-size: 11px;
         }
         .mb51-app header .spacer {
           flex: 1;
         }
         .mb51-app main {
-          padding: 14px 20px;
-          max-width: 1800px;
+          padding: 8px 12px;
+          max-width: 100%;
           margin: 0 auto;
+          overflow-x: hidden;
+          min-width: 0;
+        }
+        .mb51-app #app {
+          display: flex;
+          flex-direction: column;
+          gap: 0;
+          min-width: 0;
+          max-width: 100%;
         }
         .mb51-app .card {
           background: var(--card);
           border: 1px solid var(--line);
-          border-radius: 8px;
-          padding: 12px 14px;
-          margin-bottom: 12px;
+          border-radius: 6px;
+          padding: 8px 10px;
+          margin-bottom: 8px;
+          min-width: 0;
+          max-width: 100%;
+        }
+        .mb51-app .card.table-card {
+          display: flex;
+          flex-direction: column;
+          flex: 1 1 auto;
+          min-height: 0;
+          margin-bottom: 0;
         }
         .mb51-app .filters {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-          gap: 12px 14px;
+          grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+          gap: 6px 8px;
           align-items: end;
         }
         .mb51-app .f label {
@@ -1632,12 +1818,13 @@ export default function Mb51AgingPageClient() {
         .mb51-app .ms-btn,
         .mb51-app input[type='text'] {
           width: 100%;
-          height: 32px;
+          height: 28px;
           border: 1px solid #c5cdd7;
           border-radius: 5px;
-          padding: 0 8px;
+          padding: 0 6px;
           background: #fff;
           font: inherit;
+          font-size: 12px;
           color: var(--ink);
         }
         .mb51-app input:focus,
@@ -1648,13 +1835,14 @@ export default function Mb51AgingPageClient() {
         }
         .mb51-app .btn {
           white-space: nowrap;
-          height: 32px;
-          padding: 0 14px;
+          height: 28px;
+          padding: 0 10px;
           border-radius: 5px;
           border: 1px solid var(--brand);
           background: var(--brand);
           color: #fff;
           font: inherit;
+          font-size: 12px;
           font-weight: 600;
           cursor: pointer;
         }
@@ -1700,10 +1888,11 @@ export default function Mb51AgingPageClient() {
         .mb51-app .ms-pop {
           position: absolute;
           z-index: 50;
-          top: 36px;
+          top: 32px;
           left: 0;
           min-width: 100%;
-          width: max(100%, 380px);
+          width: max(100%, 320px);
+          max-width: min(420px, 92vw);
           background: #fff;
           border: 1px solid #b7c2cf;
           border-radius: 6px;
@@ -1726,6 +1915,17 @@ export default function Mb51AgingPageClient() {
           cursor: pointer;
           font: inherit;
           font-size: 11px;
+          white-space: nowrap;
+        }
+        .mb51-app .ms-top button.on {
+          background: var(--accent);
+          border-color: var(--brand);
+          color: var(--brand-d);
+          font-weight: 600;
+        }
+        .mb51-app .ms-top button:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
         }
         .mb51-app .ms-list {
           max-height: 260px;
@@ -1780,15 +1980,18 @@ export default function Mb51AgingPageClient() {
         }
         .mb51-app .kpis {
           display: grid;
-          grid-template-columns: repeat(7, minmax(120px, 1fr));
-          gap: 10px;
+          grid-template-columns: repeat(7, minmax(0, 1fr));
+          gap: 6px;
+          min-width: 0;
         }
         .mb51-app .kpi {
           border: 1px solid var(--line);
-          border-radius: 7px;
-          padding: 8px 10px;
+          border-radius: 5px;
+          padding: 4px 6px;
           background: #fff;
-          border-top: 4px solid var(--c);
+          border-top: 3px solid var(--c);
+          min-width: 0;
+          overflow: hidden;
         }
         .mb51-app .kpi.click,
         .mb51-app td.click {
@@ -1803,25 +2006,30 @@ export default function Mb51AgingPageClient() {
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
         }
         .mb51-app .kpi .l {
-          font-size: 11px;
+          font-size: 10px;
           color: var(--muted);
           font-weight: 600;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .mb51-app .kpi .v {
-          font-size: 18px;
+          font-size: 14px;
           font-weight: 700;
-          margin-top: 2px;
+          margin-top: 1px;
           font-variant-numeric: tabular-nums;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .mb51-app .kpi .p {
-          font-size: 11px;
-          color: var(--muted);
+          display: none; /* compact chrome — % is secondary to qty */
         }
         .mb51-app .kpi .bar {
-          height: 5px;
+          height: 3px;
           background: #eef1f5;
-          border-radius: 3px;
-          margin-top: 5px;
+          border-radius: 2px;
+          margin-top: 3px;
           overflow: hidden;
         }
         .mb51-app .kpi .bar i {
@@ -1831,32 +2039,73 @@ export default function Mb51AgingPageClient() {
         }
         .mb51-app .meta {
           display: flex;
-          gap: 18px;
+          gap: 12px;
           flex-wrap: wrap;
           color: var(--muted);
-          font-size: 12px;
-          margin-bottom: 8px;
+          font-size: 11px;
+          margin-bottom: 6px;
+          flex-shrink: 0;
         }
         .mb51-app .meta b {
           color: var(--ink);
         }
+        /* Scroll lives on the table pane only — not the portal page */
         .mb51-app .tw {
-          overflow: auto;
-          max-height: 68vh;
+          display: block;
+          overflow-x: scroll; /* always show horizontal track so it's obvious */
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          min-height: 220px;
+          /* Give the grid most of the viewport after compact filters/KPIs */
+          height: min(72vh, calc(100dvh - 260px));
+          max-height: min(72vh, calc(100dvh - 260px));
           border: 1px solid var(--line);
           border-radius: 6px;
+          /* Force a real scrollport even inside nested flex layouts */
+          contain: inline-size;
+          scrollbar-gutter: stable;
+          scrollbar-width: auto;
+          scrollbar-color: #5f82a8 #e9eef4;
         }
-        .mb51-app table {
+        .mb51-app .tw::-webkit-scrollbar {
+          width: 14px;
+          height: 14px;
+        }
+        .mb51-app .tw::-webkit-scrollbar-track {
+          background: #e9eef4;
+        }
+        .mb51-app .tw::-webkit-scrollbar-thumb {
+          background: #5f82a8;
+          border-radius: 7px;
+          border: 2px solid #e9eef4;
+        }
+        .mb51-app .tw::-webkit-scrollbar-thumb:hover {
+          background: #3f6a94;
+        }
+        .mb51-app .tw table {
           border-collapse: separate;
           border-spacing: 0;
-          width: 100%;
+          /* Wider than the pane → horizontal scrollbar on .tw */
+          width: max-content;
+          min-width: 1600px;
           font-variant-numeric: tabular-nums;
         }
-        .mb51-app th,
-        .mb51-app td {
+        .mb51-app .tw th,
+        .mb51-app .tw td {
           padding: 5px 9px;
           border-bottom: 1px solid #edf0f4;
           white-space: nowrap;
+        }
+        .mb51-app .tw th:nth-child(1),
+        .mb51-app .tw td:nth-child(1) {
+          min-width: 100px;
+        }
+        .mb51-app .tw th:nth-child(2),
+        .mb51-app .tw td:nth-child(2) {
+          min-width: 220px;
         }
         .mb51-app thead th {
           position: sticky;
@@ -1904,15 +2153,27 @@ export default function Mb51AgingPageClient() {
           background: #f6f9fc;
           font-weight: 700;
         }
+        .mb51-app td.tot2,
+        .mb51-app th.tot2 {
+          background: #fff6e6;
+          font-weight: 700;
+        }
+        .mb51-app tfoot td.tot2 {
+          background: #eaf0f7;
+        }
         .mb51-app .empty {
           padding: 40px;
           text-align: center;
           color: var(--muted);
         }
         .mb51-app .note {
-          font-size: 11px;
+          font-size: 10px;
           color: var(--muted);
-          margin-top: 8px;
+          margin-top: 6px;
+          line-height: 1.35;
+          max-height: 3.2em;
+          overflow: auto;
+          flex-shrink: 0;
         }
 
         /* Modal Styles */
@@ -1965,7 +2226,11 @@ export default function Mb51AgingPageClient() {
 
         @media (max-width: 1100px) {
           .mb51-app .kpis {
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+          }
+          .mb51-app .tw {
+            height: min(65vh, calc(100dvh - 300px));
+            max-height: min(65vh, calc(100dvh - 300px));
           }
         }
         @media print {

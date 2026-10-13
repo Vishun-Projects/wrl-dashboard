@@ -52,7 +52,9 @@ export type Mb51AgingAggRow = {
   u?: string;  // UoM
   bk: number[];
   det: [Mb51AgingMovement, number, number][][]; // per bucket: [movement, allocatedQty, ageInDays]
-  total: number;
+  total: number; // stock as on basis (sum of aging buckets)
+  full: number; // net stock of all records in file (no date limit)
+  fg: [Mb51AgingMovement[], number][]; // plant+vendor+material groups contributing to full
   n: number;
   [key: string]: unknown;
 };
@@ -64,6 +66,8 @@ export type Mb51AgingResult = {
   basis: number;
   from: number;
   to: number;
+  maxD: number; // latest posting date in file
+  fullTot: number; // sum of full stock for displayed groups
   used: number;
   negMat: number;
   negQty: number;

@@ -21,5 +21,10 @@ export function rateLimitClassForPath(pathname: string): {
   ) {
     return { limit: 10, windowMs: 60_000, keySuffix: 'heavy' };
   }
+  // Chunked MB51 uploads (~15 POSTs per file) must not share the default 120/min bucket
+  // with other portal traffic or they get 429 mid-import after TRUNCATE.
+  if (pathname === '/api/report/mb51-aging' || pathname.startsWith('/api/report/mb51-aging/')) {
+    return { limit: 400, windowMs: 60_000, keySuffix: 'mb51-upload' };
+  }
   return { limit: 120, windowMs: 60_000, keySuffix: 'default' };
 }

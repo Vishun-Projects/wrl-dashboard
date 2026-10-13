@@ -38,13 +38,23 @@ export async function POST(req: NextRequest) {
 
     const fileName = String(body.fileName || 'MB51_Export.xlsx').trim();
     const rows = body.rows as Mb51AgingMovement[];
-    const replaceExisting = body.replaceExisting !== false;
     const importId =
       typeof body.importId === 'string' && body.importId.trim()
         ? body.importId.trim()
         : null;
     const seqOffset = Math.max(0, Number(body.seqOffset) || 0);
     const expectedTotal = Math.max(0, Number(body.expectedTotal) || 0) || undefined;
+
+    // Chunk 2+ must append — never create a second import (that hid most rows on GET).
+    if (seqOffset > 0 && !importId) {
+      return NextResponse.json(
+        { error: 'importId required for append chunks (seqOffset > 0)' },
+        { status: 400 }
+      );
+    }
+
+    // Append chunks must never "replace"; only the first chunk may wipe.
+    const replaceExisting = importId ? false : body.replaceExisting !== false;
 
     const result = await saveMb51AgingImport({
       fileName,
