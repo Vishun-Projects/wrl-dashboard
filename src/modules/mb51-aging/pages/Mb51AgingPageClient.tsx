@@ -10,6 +10,7 @@ import type {
   Mb51AgingAggRow,
   Mb51AgingResult,
 } from '@/modules/mb51-aging/types';
+import { saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
 
 const BUCKETS: Mb51AgingBucket[] = [
   { k: 'b1', l: 'Below 30 days', min: 0, max: 30, c: 'var(--b1)' },
@@ -487,7 +488,7 @@ export default function Mb51AgingPageClient() {
       try {
         setLoading(true);
         setLoadMsg('Loading MB51 Aging Report from portal database…');
-        const res = await fetch('/api/report/mb51-aging');
+        const res = await fetch('/api/report/mb51-aging', { credentials: 'include' });
         if (!res.ok) {
           throw new Error(`Failed to load data (${res.status})`);
         }
@@ -580,35 +581,27 @@ export default function Mb51AgingPageClient() {
     selectedMaterials,
   ]);
 
-  // Save parsed data to backend
+  // Save parsed data to backend (chunked — large MB51 JSON cannot go in one POST)
   const saveRowsToDatabase = async (fileName: string, parsedRows: Mb51AgingMovement[]) => {
     try {
       setLoading(true);
-      setLoadMsg(`Saving ${parsedRows.length.toLocaleString('en-IN')} rows to database…`);
-
-      const res = await fetch('/api/report/mb51-aging', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileName,
-          rows: parsedRows,
-          replaceExisting: true,
-        }),
+      setIsErrMsg(false);
+      const meta = await saveMb51AgingRows(fileName, parsedRows, (saved, total) => {
+        setLoadMsg(
+          `Saving to database… ${saved.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')} rows`
+        );
       });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || `Save failed (${res.status})`);
-      }
-
-      const resData = await res.json();
-      setLatestImport(resData.import);
-      setLoadMsg(`Successfully saved ${parsedRows.length.toLocaleString('en-IN')} rows to database.`);
+      setLatestImport(meta);
+      setLoadMsg(
+        `Saved ${parsedRows.length.toLocaleString('en-IN')} rows to database (${meta.fileName}). Reload will restore this data.`
+      );
       setIsErrMsg(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database save failed';
       console.error('[MB51 Save Error]', err);
-      setLoadMsg(`Parsed file locally, but database save failed: ${msg}`);
+      setLoadMsg(
+        `Parsed file locally, but database save failed — data will be lost on reload. ${msg}`
+      );
       setIsErrMsg(true);
     } finally {
       setLoading(false);
@@ -993,10 +986,26 @@ export default function Mb51AgingPageClient() {
       </header>
 
       <main>
-        {/* Loading banner while reading DB */}
+        {/* Loading banner while reading/saving DB */}
         {loading && (
           <div className="card" style={{ textAlign: 'center', padding: '24px' }}>
             <b style={{ fontSize: '15px' }}>{loadMsg}</b>
+          </div>
+        )}
+
+        {/* Persist status after load/save — save failures used to vanish once the report showed */}
+        {!loading && loadMsg && !(showUpload && rows.length === 0) && (
+          <div
+            className="card"
+            style={{
+              padding: '10px 14px',
+              borderColor: isErrMsg ? 'var(--neg)' : undefined,
+              background: isErrMsg ? '#fdf2f1' : '#f3faf6',
+            }}
+          >
+            <div className={`msg ${isErrMsg ? 'err' : ''}`} style={{ marginTop: 0 }}>
+              {loadMsg}
+            </div>
           </div>
         )}
 

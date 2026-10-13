@@ -39,17 +39,28 @@ export async function POST(req: NextRequest) {
     const fileName = String(body.fileName || 'MB51_Export.xlsx').trim();
     const rows = body.rows as Mb51AgingMovement[];
     const replaceExisting = body.replaceExisting !== false;
+    const importId =
+      typeof body.importId === 'string' && body.importId.trim()
+        ? body.importId.trim()
+        : null;
+    const seqOffset = Math.max(0, Number(body.seqOffset) || 0);
+    const expectedTotal = Math.max(0, Number(body.expectedTotal) || 0) || undefined;
 
     const result = await saveMb51AgingImport({
       fileName,
       uploadedBy: auth.userId,
       rows,
       replaceExisting,
+      importId,
+      seqOffset,
+      expectedTotal,
     });
 
     return NextResponse.json({
       success: true,
       import: result,
+      // alias kept for older table-page clients that read `meta`
+      meta: result,
     });
   } catch (err) {
     console.error('[mb51-aging POST]', err);

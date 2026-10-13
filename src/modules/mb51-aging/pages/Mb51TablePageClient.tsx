@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import * as XLSX from 'xlsx';
-import type { Mb51AgingImportMeta } from '@/modules/mb51-aging/types';
+import type { Mb51AgingImportMeta, Mb51AgingMovement } from '@/modules/mb51-aging/types';
+import { saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
 
 const DAY = 86400000;
 const EPOCH_OFFSET = 25569;
@@ -283,7 +284,7 @@ export default function Mb51TablePageClient() {
       try {
         setLoading(true);
         setLoadMsg('Loading MB51 Movements Data from portal database…');
-        const response = await fetch('/api/report/mb51-aging');
+        const response = await fetch('/api/report/mb51-aging', { credentials: 'include' });
         if (!response.ok) throw new Error(`Failed to load data (${response.status})`);
 
         const data: {
@@ -351,27 +352,34 @@ export default function Mb51TablePageClient() {
     };
   }, [rows]);
 
-  // Save imported rows to the database
+  // Save imported rows to the database (chunked — same store as Aging report)
   const saveRowsToDatabase = useCallback(async (fileName: string, movementRows: MovementRow[]) => {
     try {
-      setLoadMsg(`Saving ${movementRows.length.toLocaleString('en-IN')} rows to portal database…`);
+      setLoading(true);
       setIsErrMsg(false);
-      const response = await fetch('/api/report/mb51-aging', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileName, rows: movementRows }),
-      });
-      const data: { error?: string; meta?: Mb51AgingImportMeta } = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to save imported rows to database');
-
-      setLatestImport(data.meta || null);
-      setLoadMsg(`Successfully saved ${movementRows.length.toLocaleString('en-IN')} rows to database.`);
+      const meta = await saveMb51AgingRows(
+        fileName,
+        movementRows as Mb51AgingMovement[],
+        (saved, total) => {
+          setLoadMsg(
+            `Saving to database… ${saved.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')} rows`
+          );
+        }
+      );
+      setLatestImport(meta);
+      setLoadMsg(
+        `Saved ${movementRows.length.toLocaleString('en-IN')} rows to database (${meta.fileName}). Reload will restore this data.`
+      );
       setIsErrMsg(false);
     } catch (error: unknown) {
       console.error(error);
       const message = error instanceof Error ? error.message : 'Database save failed';
-      setLoadMsg(`File parsed successfully, but saving to DB failed: ${message}`);
+      setLoadMsg(
+        `Parsed file locally, but database save failed — data will be lost on reload. ${message}`
+      );
       setIsErrMsg(true);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -701,6 +709,12 @@ export default function Mb51TablePageClient() {
       <main>
         {loading && <div className="card loading-card"><b>{loadMsg}</b></div>}
 
+        {!loading && loadMsg && !(showUpload && rows.length === 0) && (
+          <div className={`card ${isErrMsg ? 'status-err' : 'status-ok'}`}>
+            <div className={`msg ${isErrMsg ? 'err' : ''}`}>{loadMsg}</div>
+          </div>
+        )}
+
         {showUpload && (
           <div className="card" id="upCard">
             <div
@@ -991,6 +1005,9 @@ export default function Mb51TablePageClient() {
         .sheets label { display: inline-flex; align-items: center; gap: 4px; }
         .msg { margin-top: 8px; color: var(--muted); }
         .err { color: var(--neg); }
+        .status-ok { background: #f3faf6; }
+        .status-err { background: #fdf2f1; border-color: var(--neg); }
+        .status-ok .msg, .status-err .msg { margin-top: 0; }
         .kpis { display: grid; grid-template-columns: repeat(7, minmax(120px, 1fr)); gap: 10px; }
         .kpi { min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; background: #fff; border-top: 4px solid var(--c); }
         .kpi .l { font-size: 11px; color: var(--muted); font-weight: 600; }
