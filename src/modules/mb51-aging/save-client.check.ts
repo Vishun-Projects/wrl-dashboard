@@ -44,6 +44,8 @@ const large = Array.from({ length: 147_045 }, (_, i) => row(i));
 const largePlan = planMb51SaveBatches('big.xlsx', large);
 assert.ok(largePlan.length <= 20, `expected ≤20 chunks, got ${largePlan.length}`);
 assert.equal(largePlan[0].expectedTotal, 147_045);
-assert.equal(largePlan.at(-1)?.seqOffset! + largePlan.at(-1)!.rows.length, 147_045);
+const last = largePlan.at(-1);
+assert.ok(last);
+assert.equal(last.seqOffset + last.rows.length, 147_045);
 
 console.log('mb51-aging save-client check: ok');

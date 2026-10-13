@@ -531,7 +531,6 @@ export default function Mb51AgingPageClient() {
         try {
           const out: Mb51AgingMovement[] = [];
           const miss: string[] = [];
-          let skipped = 0;
           let qtyCol = '';
           let uomCol = '';
           const uomSeen = new Map<string, number>();
@@ -571,15 +570,9 @@ export default function Mb51AgingPageClient() {
             for (let r = 1; r < data.length; r++) {
               const row = data[r] as unknown[];
               const ds = toSerial(row[ix.date]);
-              if (ds == null) {
-                skipped++;
-                continue;
-              }
+              if (ds == null) continue;
               const q = Number(row[ix.qty]);
-              if (isNaN(q)) {
-                skipped++;
-                continue;
-              }
+              if (isNaN(q)) continue;
               const uo = ix.uom >= 0 ? String(row[ix.uom] ?? '').trim() : '';
               uomSeen.set(uo, (uomSeen.get(uo) || 0) + 1);
               const sup = ix.sup >= 0 ? String(row[ix.sup] ?? '').trim() : '';
