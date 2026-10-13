@@ -773,7 +773,7 @@ export default function Mb51AgingPageClient() {
         ...cols.map((c) => c[1]),
         ...BUCKETS.map((b) => b.l),
         `Stock as on ${serialToDMY(R.basis)}`,
-        `Stock as on ${serialToDMY(R.maxD)}`,
+        `Stock as per last updated on ${serialToDMY(R.maxD)}`,
       ],
     ];
 
@@ -1337,7 +1337,7 @@ export default function Mb51AgingPageClient() {
                     Stock as on {serialToDMY(reportResult.basis)}: <b>{fmtQty(gt)}</b>
                   </span>
                   <span>
-                    Stock as on {serialToDMY(reportResult.maxD)}:{' '}
+                    Stock as per last updated on {serialToDMY(reportResult.maxD)}:{' '}
                     <b>{fmtQty(reportResult.fullTot)}</b>
                   </span>
                 </div>
@@ -1425,7 +1425,7 @@ export default function Mb51AgingPageClient() {
                           }
                         }}
                       >
-                        Stock as on
+                        Stock as per last updated on
                         <br />
                         {reportResult ? serialToDMY(reportResult.maxD) : '–'}
                         {sortKey === 'full' && (
