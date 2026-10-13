@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createCsvRecordCounter,
   escapeCsvCell,
+  excelTextFormula,
   feedCsvRecordCounter,
   finalizeCsvRecordCounter,
 } from '@/lib/utils/csv';
@@ -23,6 +24,16 @@ function countCsvDataRowsInChunks(chunks: string[]): number {
 describe('escapeCsvCell', () => {
   it('quotes fields with embedded newlines', () => {
     expect(escapeCsvCell('line1\nline2')).toBe('"line1\nline2"');
+  });
+});
+
+describe('excelTextFormula', () => {
+  it('wraps long digit strings so Excel keeps them as text', () => {
+    expect(excelTextFormula('241223456789012345')).toBe('="241223456789012345"');
+  });
+
+  it('escapes embedded quotes', () => {
+    expect(excelTextFormula('a"b')).toBe('="a""b"');
   });
 });
 

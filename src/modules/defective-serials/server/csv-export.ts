@@ -1,34 +1,41 @@
 import { withBulkReadClient } from '@/lib/read-model/db';
 import { responseForCsvStream } from '@/lib/net/csv-gzip-response';
-import { escapeCsvCell } from '@/lib/utils/csv';
+import { formatUiDateTime } from '@/lib/dates/ui-date';
+import { escapeCsvCell, excelTextFormula } from '@/lib/utils/csv';
 import type { DefectiveSerialsFilters } from '@/modules/defective-serials/server/query';
 import { ensureDefectiveSerialsTable } from '@/modules/defective-serials/server/sync/postgres-sync';
 import { shouldRestrictToAssignedOffices } from '@/sql/trhcalls/office-security';
 
-const HEADERS = [
-  'status',
-  'vtrnno',
-  'dtrndate',
-  'plant_code',
-  'branch_name',
-  'call_type',
-  'vendor_code',
-  'vendor_name',
-  'party_name',
-  'client_name',
-  'model',
-  'machine_serial',
-  'city',
-  'call_centre_call_id',
-  'defective_item_code',
-  'defective_item_name',
-  'voldserialno',
-  'dreturntobranchdate',
-  'return_by_name',
-  'nreturntobranch',
-  'ncalls',
-  'nofficeid',
-] as const;
+type ExportCol = {
+  header: string;
+  /** DB / computed field key on the query row */
+  key: string;
+  /** Keep long digit IDs/serials as Excel text */
+  asText?: boolean;
+  /** Format Date / ISO as UI datetime */
+  asDateTime?: boolean;
+};
+
+const COLUMNS: ExportCol[] = [
+  { header: 'Status', key: 'status' },
+  { header: 'Call No.', key: 'vtrnno', asText: true },
+  { header: 'Logged', key: 'dtrndate', asDateTime: true },
+  { header: 'Plant', key: 'plant_code', asText: true },
+  { header: 'Branch', key: 'branch_name' },
+  { header: 'Call Type', key: 'call_type' },
+  { header: 'Vendor', key: 'vendor' },
+  { header: 'Party', key: 'party_name' },
+  { header: 'Client', key: 'client_name' },
+  { header: 'Model', key: 'model' },
+  { header: 'Serial', key: 'machine_serial', asText: true },
+  { header: 'City', key: 'city' },
+  { header: 'Call Centre Call ID', key: 'call_centre_call_id', asText: true },
+  { header: 'Defective Code', key: 'defective_item_code', asText: true },
+  { header: 'Defective Item', key: 'defective_item_name' },
+  { header: 'Defective Serial', key: 'voldserialno', asText: true },
+  { header: 'Return By', key: 'return_by_name' },
+  { header: 'Return Date', key: 'dreturntobranchdate', asDateTime: true },
+];
 
 const FETCH_SIZE = 5_000;
 const EXPORT_CAP = 100_000;
@@ -53,6 +60,30 @@ const EFF_PLANT = `COALESCE(
   NULLIF(btrim(d.plant_code), ''),
   NULLIF(substring(btrim(${EFF_BRANCH}) from '^[0-9]+'), '')
 )`;
+
+function vendorLabel(code: unknown, name: unknown): string {
+  const c = String(code ?? '').trim();
+  const n = String(name ?? '').trim();
+  if (c && n) return `${c} - ${n}`;
+  return c || n;
+}
+
+function formatCell(col: ExportCol, row: Record<string, unknown>): string {
+  let raw: unknown = row[col.key];
+  if (col.key === 'vendor') {
+    raw = vendorLabel(row.vendor_code, row.vendor_name);
+  }
+  if (raw == null || raw === '') return '';
+
+  if (col.asDateTime) {
+    return escapeCsvCell(formatUiDateTime(raw));
+  }
+
+  const s = String(raw).trim();
+  if (!s) return '';
+  if (col.asText) return escapeCsvCell(excelTextFormula(s));
+  return escapeCsvCell(s);
+}
 
 function buildExportWhere(filters: DefectiveSerialsFilters): {
   whereSql: string;
@@ -132,7 +163,9 @@ export async function buildDefectiveSerialsCsvStream(
           await ensureDefectiveSerialsTable(client);
           const { whereSql, params } = buildExportWhere(filters);
 
-          if (!enqueue(encoder.encode(`${HEADERS.join(',')}\r\n`))) return;
+          // UTF-8 BOM so Excel opens headers correctly
+          const headerLine = `${COLUMNS.map((c) => escapeCsvCell(c.header)).join(',')}\r\n`;
+          if (!enqueue(encoder.encode(`\uFEFF${headerLine}`))) return;
 
           let exported = 0;
           let offset = 0;
@@ -142,7 +175,7 @@ export async function buildDefectiveSerialsCsvStream(
             const res = await client.query(
               `
               SELECT
-                CASE WHEN COALESCE(d.breturntobranch, false) THEN 'done' ELSE 'pending' END AS status,
+                CASE WHEN COALESCE(d.breturntobranch, false) THEN 'Done' ELSE 'Pending' END AS status,
                 d.vtrnno, d.dtrndate,
                 ${EFF_PLANT} AS plant_code,
                 ${EFF_BRANCH} AS branch_name,
@@ -151,8 +184,7 @@ export async function buildDefectiveSerialsCsvStream(
                 ${EFF_VENDOR_NAME} AS vendor_name,
                 d.party_name, d.client_name, d.model, d.machine_serial, d.city,
                 d.call_centre_call_id, d.defective_item_code, d.defective_item_name, d.voldserialno,
-                d.dreturntobranchdate, d.return_by_name, d.nreturntobranch,
-                d.ncalls, d.nofficeid
+                d.dreturntobranchdate, d.return_by_name
               FROM defective_serials d
               ${HOT_DIMS_JOIN}
               ${whereSql}
@@ -163,11 +195,8 @@ export async function buildDefectiveSerialsCsvStream(
             );
             if (res.rows.length === 0) break;
             for (const row of res.rows) {
-              const line = HEADERS.map((h) => {
-                const v = (row as Record<string, unknown>)[h];
-                if (v instanceof Date) return escapeCsvCell(v.toISOString());
-                return escapeCsvCell(v == null ? '' : String(v));
-              }).join(',');
+              const rec = row as Record<string, unknown>;
+              const line = COLUMNS.map((c) => formatCell(c, rec)).join(',');
               if (!enqueue(encoder.encode(`${line}\r\n`))) return;
               exported += 1;
             }

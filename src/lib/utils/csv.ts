@@ -5,6 +5,13 @@ export function escapeCsvCell(value: unknown): string {
   return s;
 }
 
+/** Force Excel to treat a CSV cell as text (avoids scientific notation / dropped leading zeros). */
+export function excelTextFormula(value: string): string {
+  const s = String(value ?? '');
+  if (!s) return '';
+  return `="${s.replace(/"/g, '""')}"`;
+}
+
 export type CsvRecordCounter = {
   inQuotes: boolean;
   headerDone: boolean;
