@@ -322,7 +322,7 @@ export default function DefectiveSerialsPageClient() {
                               trn={r.vtrnno}
                               callId={r.ncalls}
                               officeId={r.nofficeid}
-                              className="text-left text-[10px] font-medium text-slate-800 hover:underline"
+                              className="text-left text-[10px] font-medium text-blue-600 hover:underline"
                             />
                           ) : (
                             '—'

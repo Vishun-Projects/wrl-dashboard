@@ -57,8 +57,10 @@ function toSerial(v: unknown): number | null {
 
 const fmtQty = (v: number): string => {
   if (v === 0 || Math.abs(v) < 1e-9) return '–';
-  const s = Math.abs(v).toLocaleString('en-IN', { maximumFractionDigits: 3 });
-  return v < 0 ? `(${s})` : s;
+  const n = Math.round(v);
+  if (n === 0) return '–';
+  const s = Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+  return n < 0 ? `(${s})` : s;
 };
 
 const norm = (s: unknown) =>
@@ -290,8 +292,8 @@ export default function Mb51AgingPageClient() {
   const [selectedPlants, setSelectedPlants] = useState<Set<string>>(new Set());
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortKey, setSortKey] = useState<string>('total');
-  const [sortDir, setSortDir] = useState<number>(-1);
+  const [sortKey, setSortKey] = useState('');
+  const [sortDir, setSortDir] = useState(-1);
 
   // Result state
   const [reportResult, setReportResult] = useState<Mb51AgingResult | null>(null);
@@ -811,6 +813,8 @@ export default function Mb51AgingPageClient() {
         cols.some(([k]) => String(r[k] || '').toLowerCase().includes(q))
       );
     }
+
+    if (!sortKey) return list;
 
     return [...list].sort((x, y) => {
       let a: number | string = 0;
@@ -2110,68 +2114,46 @@ export default function Mb51AgingPageClient() {
         .mb51-app .tw::-webkit-scrollbar-thumb:hover {
           background: #3f6a94;
         }
+        /* Main report table only — modal keeps its own auto layout below */
         .mb51-app .tw table {
           border-collapse: separate;
           border-spacing: 0;
-          width: 100%;
-          table-layout: fixed;
+          width: max-content;
+          min-width: 100%;
+          table-layout: auto;
           font-variant-numeric: tabular-nums;
         }
         .mb51-app .tw th,
         .mb51-app .tw td {
           padding: 4px 6px;
           border-bottom: 1px solid #edf0f4;
-          overflow: hidden;
-          text-overflow: ellipsis;
           white-space: nowrap;
         }
-        /* Fixed ID cols — 6–7 digit codes, no leftover stretch */
-        .mb51-app .tw th.code,
-        .mb51-app .tw td.code {
-          width: 4.5rem;
-          max-width: 4.5rem;
-        }
-        .mb51-app .tw th.grp,
-        .mb51-app .tw td.grp {
-          width: 5rem;
-          max-width: 5rem;
-        }
-        /* Name / description absorb remaining width */
         .mb51-app .tw th.clip,
         .mb51-app .tw td.clip {
-          width: auto;
+          max-width: 160px;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .mb51-app .tw th.uom,
         .mb51-app .tw td.uom {
-          width: 2.75rem;
-          max-width: 2.75rem;
           text-align: center;
-        }
-        .mb51-app .tw th.n,
-        .mb51-app .tw td.n {
-          white-space: nowrap;
-        }
-        /* Aging buckets: 1–2 digit qty — narrow cols, 2-line headers */
-        .mb51-app .tw th.bk,
-        .mb51-app .tw td.bk {
-          width: 2.85rem;
-          max-width: 2.85rem;
-          padding-left: 2px;
-          padding-right: 2px;
         }
         .mb51-app .tw th.bk {
           white-space: normal;
           line-height: 1.15;
           font-size: 10px;
           text-align: center;
-          hyphens: none;
+          max-width: 4.25rem;
+          padding-left: 3px;
+          padding-right: 3px;
+        }
+        .mb51-app .tw td.bk {
+          padding-left: 3px;
+          padding-right: 3px;
         }
         .mb51-app .tw th.tot,
-        .mb51-app .tw th.tot2,
-        .mb51-app .tw td.tot,
-        .mb51-app .tw td.tot2 {
-          width: 5.5rem;
-          max-width: 5.5rem;
+        .mb51-app .tw th.tot2 {
           white-space: normal;
           line-height: 1.2;
         }
@@ -2188,47 +2170,47 @@ export default function Mb51AgingPageClient() {
           border-bottom: 2px solid #b9c7d8;
           white-space: normal;
         }
-        .mb51-app thead th.n {
+        .mb51-app .tw thead th.n {
           text-align: right;
         }
-        .mb51-app thead th:hover {
+        .mb51-app .tw thead th:hover {
           background: #dce7f4;
         }
-        .mb51-app thead th .ar {
+        .mb51-app .tw thead th .ar {
           opacity: 0.5;
           font-size: 10px;
           margin-left: 3px;
         }
-        .mb51-app td.n {
+        .mb51-app .tw td.n {
           text-align: right;
         }
-        .mb51-app td.neg {
+        .mb51-app .tw td.neg {
           color: var(--neg);
         }
-        .mb51-app td.z {
+        .mb51-app .tw td.z {
           color: #b6bfca;
         }
-        .mb51-app tbody tr:hover td {
+        .mb51-app .tw tbody tr:hover td {
           background: #f3f8fe;
         }
-        .mb51-app tfoot td {
+        .mb51-app .tw tfoot td {
           position: sticky;
           bottom: 0;
           background: #eaf0f7;
           font-weight: 700;
           border-top: 2px solid #b9c7d8;
         }
-        .mb51-app td.tot,
-        .mb51-app th.tot {
+        .mb51-app .tw td.tot,
+        .mb51-app .tw th.tot {
           background: #f6f9fc;
           font-weight: 700;
         }
-        .mb51-app td.tot2,
-        .mb51-app th.tot2 {
+        .mb51-app .tw td.tot2,
+        .mb51-app .tw th.tot2 {
           background: #fff6e6;
           font-weight: 700;
         }
-        .mb51-app tfoot td.tot2 {
+        .mb51-app .tw tfoot td.tot2 {
           background: #eaf0f7;
         }
         .mb51-app .empty {
@@ -2292,6 +2274,55 @@ export default function Mb51AgingPageClient() {
           flex: 1;
           overflow: auto;
           padding: 0 16px;
+        }
+        /* Modal table: content-sized columns (do not inherit main-grid clamps) */
+        .mb51-app .mbody table {
+          border-collapse: separate;
+          border-spacing: 0;
+          width: max-content;
+          min-width: 100%;
+          table-layout: auto;
+          font-variant-numeric: tabular-nums;
+        }
+        .mb51-app .mbody th,
+        .mb51-app .mbody td {
+          padding: 5px 9px;
+          border-bottom: 1px solid #edf0f4;
+          white-space: nowrap;
+          overflow: visible;
+          max-width: none;
+        }
+        .mb51-app .mbody thead th {
+          position: sticky;
+          top: 0;
+          background: #eaf0f7;
+          z-index: 2;
+          text-align: left;
+          font-size: 12px;
+          border-bottom: 2px solid #b9c7d8;
+          white-space: nowrap;
+        }
+        .mb51-app .mbody thead th.n,
+        .mb51-app .mbody td.n {
+          text-align: right;
+        }
+        .mb51-app .mbody td.neg {
+          color: var(--neg);
+        }
+        .mb51-app .mbody td.tot,
+        .mb51-app .mbody th.tot {
+          background: #f6f9fc;
+          font-weight: 700;
+        }
+        .mb51-app .mbody tfoot td {
+          position: sticky;
+          bottom: 0;
+          background: #eaf0f7;
+          font-weight: 700;
+          border-top: 2px solid #b9c7d8;
+        }
+        .mb51-app .mbody tbody tr:hover td {
+          background: #f3f8fe;
         }
 
         @media (max-width: 1100px) {
