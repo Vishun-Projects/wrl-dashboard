@@ -108,6 +108,15 @@ const HEAD: Record<string, [string, string][]> = {
   ],
 };
 
+/** Column width class — codes stay tight; name/description take leftover. */
+function headColClass(k: string): string | undefined {
+  if (k === 'a' || k === 'd') return 'code';
+  if (k === 'b' || k === 'e') return 'clip';
+  if (k === 'c') return 'grp';
+  if (k === 'u') return 'uom';
+  return undefined;
+}
+
 type OptionItem = { id: string; text: string; lc: string };
 
 function MultiSelectDropdown({
@@ -1337,6 +1346,7 @@ export default function Mb51AgingPageClient() {
                       {currentCols.map(([k, label]) => (
                         <th
                           key={k}
+                          className={headColClass(k)}
                           onClick={() => {
                             if (sortKey === k) setSortDir((d) => -d);
                             else {
@@ -1353,10 +1363,12 @@ export default function Mb51AgingPageClient() {
                       ))}
                       {BUCKETS.map((b, i) => {
                         const bkKey = `b${i + 1}`;
+                        const split = b.l.match(/^(.*)\s+(days|years)$/i);
                         return (
                           <th
                             key={bkKey}
-                            className="n"
+                            className="n bk"
+                            title={b.l}
                             onClick={() => {
                               if (sortKey === bkKey) setSortDir((d) => -d);
                               else {
@@ -1365,7 +1377,15 @@ export default function Mb51AgingPageClient() {
                               }
                             }}
                           >
-                            {b.l}
+                            {split ? (
+                              <>
+                                {split[1]}
+                                <br />
+                                {split[2]}
+                              </>
+                            ) : (
+                              b.l
+                            )}
                             {sortKey === bkKey && (
                               <span className="ar">{sortDir > 0 ? '▲' : '▼'}</span>
                             )}
@@ -1383,7 +1403,9 @@ export default function Mb51AgingPageClient() {
                           }
                         }}
                       >
-                        Stock as on {reportResult ? serialToDMY(reportResult.basis) : '–'}
+                        Stock as on
+                        <br />
+                        {reportResult ? serialToDMY(reportResult.basis) : '–'}
                         {sortKey === 'total' && (
                           <span className="ar">{sortDir > 0 ? '▲' : '▼'}</span>
                         )}
@@ -1399,7 +1421,9 @@ export default function Mb51AgingPageClient() {
                           }
                         }}
                       >
-                        Stock as on {reportResult ? serialToDMY(reportResult.maxD) : '–'}
+                        Stock as on
+                        <br />
+                        {reportResult ? serialToDMY(reportResult.maxD) : '–'}
                         {sortKey === 'full' && (
                           <span className="ar">{sortDir > 0 ? '▲' : '▼'}</span>
                         )}
@@ -1410,13 +1434,23 @@ export default function Mb51AgingPageClient() {
                     {shownRows.length > 0 ? (
                       shownRows.map((r, rowIdx) => (
                         <tr key={rowIdx}>
-                          {currentCols.map(([k]) => (
-                            <td key={k}>{String(r[k] ?? '')}</td>
-                          ))}
+                          {currentCols.map(([k]) => {
+                            const text = String(r[k] ?? '');
+                            const cls = headColClass(k);
+                            return (
+                              <td
+                                key={k}
+                                className={cls}
+                                title={cls === 'clip' ? text : undefined}
+                              >
+                                {text}
+                              </td>
+                            );
+                          })}
                           {r.bk.map((val, bIdx) => (
                             <td
                               key={bIdx}
-                              className={`n ${val < 0 ? 'neg' : ''} ${
+                              className={`n bk ${val < 0 ? 'neg' : ''} ${
                                 Math.abs(val) < 1e-9 ? 'z' : 'click'
                               }`}
                               title={Math.abs(val) < 1e-9 ? undefined : 'Click to see receipt details'}
@@ -1470,7 +1504,7 @@ export default function Mb51AgingPageClient() {
                           return (
                             <td
                               key={i}
-                              className="n click"
+                              className="n bk click"
                               title="Click to see receipt details"
                               onClick={() =>
                                 openDetail(displayedRows, i, 'All displayed rows')
@@ -2045,7 +2079,7 @@ export default function Mb51AgingPageClient() {
         /* Scroll lives on the table pane only — not the portal page */
         .mb51-app .tw {
           display: block;
-          overflow-x: scroll; /* always show horizontal track so it's obvious */
+          overflow-x: auto;
           overflow-y: auto;
           overscroll-behavior: contain;
           width: 100%;
@@ -2057,22 +2091,20 @@ export default function Mb51AgingPageClient() {
           max-height: min(72vh, calc(100dvh - 260px));
           border: 1px solid var(--line);
           border-radius: 6px;
-          /* Force a real scrollport even inside nested flex layouts */
           contain: inline-size;
-          scrollbar-gutter: stable;
-          scrollbar-width: auto;
+          scrollbar-width: thin;
           scrollbar-color: #5f82a8 #e9eef4;
         }
         .mb51-app .tw::-webkit-scrollbar {
-          width: 14px;
-          height: 14px;
+          width: 10px;
+          height: 10px;
         }
         .mb51-app .tw::-webkit-scrollbar-track {
           background: #e9eef4;
         }
         .mb51-app .tw::-webkit-scrollbar-thumb {
           background: #5f82a8;
-          border-radius: 7px;
+          border-radius: 5px;
           border: 2px solid #e9eef4;
         }
         .mb51-app .tw::-webkit-scrollbar-thumb:hover {
@@ -2081,35 +2113,80 @@ export default function Mb51AgingPageClient() {
         .mb51-app .tw table {
           border-collapse: separate;
           border-spacing: 0;
-          /* Wider than the pane → horizontal scrollbar on .tw */
-          width: max-content;
-          min-width: 1600px;
+          width: 100%;
+          table-layout: fixed;
           font-variant-numeric: tabular-nums;
         }
         .mb51-app .tw th,
         .mb51-app .tw td {
-          padding: 5px 9px;
+          padding: 4px 6px;
           border-bottom: 1px solid #edf0f4;
+          overflow: hidden;
+          text-overflow: ellipsis;
           white-space: nowrap;
         }
-        .mb51-app .tw th:nth-child(1),
-        .mb51-app .tw td:nth-child(1) {
-          min-width: 100px;
+        /* Fixed ID cols — 6–7 digit codes, no leftover stretch */
+        .mb51-app .tw th.code,
+        .mb51-app .tw td.code {
+          width: 4.5rem;
+          max-width: 4.5rem;
         }
-        .mb51-app .tw th:nth-child(2),
-        .mb51-app .tw td:nth-child(2) {
-          min-width: 220px;
+        .mb51-app .tw th.grp,
+        .mb51-app .tw td.grp {
+          width: 5rem;
+          max-width: 5rem;
         }
-        .mb51-app thead th {
+        /* Name / description absorb remaining width */
+        .mb51-app .tw th.clip,
+        .mb51-app .tw td.clip {
+          width: auto;
+        }
+        .mb51-app .tw th.uom,
+        .mb51-app .tw td.uom {
+          width: 2.75rem;
+          max-width: 2.75rem;
+          text-align: center;
+        }
+        .mb51-app .tw th.n,
+        .mb51-app .tw td.n {
+          white-space: nowrap;
+        }
+        /* Aging buckets: 1–2 digit qty — narrow cols, 2-line headers */
+        .mb51-app .tw th.bk,
+        .mb51-app .tw td.bk {
+          width: 2.85rem;
+          max-width: 2.85rem;
+          padding-left: 2px;
+          padding-right: 2px;
+        }
+        .mb51-app .tw th.bk {
+          white-space: normal;
+          line-height: 1.15;
+          font-size: 10px;
+          text-align: center;
+          hyphens: none;
+        }
+        .mb51-app .tw th.tot,
+        .mb51-app .tw th.tot2,
+        .mb51-app .tw td.tot,
+        .mb51-app .tw td.tot2 {
+          width: 5.5rem;
+          max-width: 5.5rem;
+          white-space: normal;
+          line-height: 1.2;
+        }
+        .mb51-app .tw thead th {
           position: sticky;
           top: 0;
           background: #eaf0f7;
           z-index: 2;
           text-align: left;
-          font-size: 12px;
+          font-size: 11px;
+          line-height: 1.25;
           cursor: pointer;
           user-select: none;
           border-bottom: 2px solid #b9c7d8;
+          white-space: normal;
         }
         .mb51-app thead th.n {
           text-align: right;
