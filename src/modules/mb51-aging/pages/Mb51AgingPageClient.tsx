@@ -294,6 +294,8 @@ export default function Mb51AgingPageClient() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState('');
   const [sortDir, setSortDir] = useState(-1);
+  /** Keep DOM small — full result stays in memory; Export still has all rows. */
+  const [page, setPage] = useState(0);
 
   // Result state
   const [reportResult, setReportResult] = useState<Mb51AgingResult | null>(null);
@@ -838,8 +840,31 @@ export default function Mb51AgingPageClient() {
     });
   }, [reportResult, searchQuery, sortKey, sortDir]);
 
-  const MAXR = 3000;
-  const shownRows = displayedRows.slice(0, MAXR);
+  // Sidebar width animates 300ms — thousands of <tr> reflow every frame and lag the UI.
+  const PAGE_SIZE = 200;
+  useEffect(() => {
+    setPage(0);
+  }, [reportResult, searchQuery, sortKey, sortDir]);
+
+  const pageCount = Math.max(1, Math.ceil(displayedRows.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const pageFrom = displayedRows.length === 0 ? 0 : safePage * PAGE_SIZE + 1;
+  const pageTo = Math.min(displayedRows.length, (safePage + 1) * PAGE_SIZE);
+  const shownRows = displayedRows.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
+
+  const footerTotals = useMemo(() => {
+    const bk = BUCKETS.map((_, i) =>
+      displayedRows.reduce((s, r) => s + (r.bk[i] || 0), 0)
+    );
+    let total = 0;
+    let full = 0;
+    for (const r of displayedRows) {
+      total += r.total;
+      full += r.full;
+    }
+    return { bk, total, full };
+  }, [displayedRows]);
+
   const gt = reportResult ? reportResult.tot.reduce((s, v) => s + v, 0) : 0;
   const currentCols = reportResult ? HEAD[reportResult.gb] || HEAD.vm : HEAD.vm;
 
@@ -1340,6 +1365,31 @@ export default function Mb51AgingPageClient() {
                     Stock as per last updated on {serialToDMY(reportResult.maxD)}:{' '}
                     <b>{fmtQty(reportResult.fullTot)}</b>
                   </span>
+                  {displayedRows.length > PAGE_SIZE && (
+                    <span className="pager">
+                      Showing{' '}
+                      <b>
+                        {pageFrom.toLocaleString('en-IN')}–{pageTo.toLocaleString('en-IN')}
+                      </b>{' '}
+                      of <b>{displayedRows.length.toLocaleString('en-IN')}</b>
+                      <button
+                        type="button"
+                        className="btn sec"
+                        disabled={safePage <= 0}
+                        onClick={() => setPage((p) => Math.max(0, p - 1))}
+                      >
+                        Prev
+                      </button>
+                      <button
+                        type="button"
+                        className="btn sec"
+                        disabled={safePage >= pageCount - 1}
+                        onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                      >
+                        Next
+                      </button>
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -1500,24 +1550,18 @@ export default function Mb51AgingPageClient() {
                         <td colSpan={currentCols.length}>
                           Grand total ({displayedRows.length.toLocaleString('en-IN')} rows)
                         </td>
-                        {BUCKETS.map((_, i) => {
-                          const bucketSum = displayedRows.reduce(
-                            (s, r) => s + (r.bk[i] || 0),
-                            0
-                          );
-                          return (
-                            <td
-                              key={i}
-                              className="n bk click"
-                              title="Click to see receipt details"
-                              onClick={() =>
-                                openDetail(displayedRows, i, 'All displayed rows')
-                              }
-                            >
-                              {fmtQty(bucketSum)}
-                            </td>
-                          );
-                        })}
+                        {BUCKETS.map((_, i) => (
+                          <td
+                            key={i}
+                            className="n bk click"
+                            title="Click to see receipt details"
+                            onClick={() =>
+                              openDetail(displayedRows, i, 'All displayed rows')
+                            }
+                          >
+                            {fmtQty(footerTotals.bk[i])}
+                          </td>
+                        ))}
                         <td
                           className="n click"
                           title="Click to see receipt details"
@@ -1525,14 +1569,14 @@ export default function Mb51AgingPageClient() {
                             openDetail(displayedRows, -1, 'All displayed rows')
                           }
                         >
-                          {fmtQty(displayedRows.reduce((s, r) => s + r.total, 0))}
+                          {fmtQty(footerTotals.total)}
                         </td>
                         <td
                           className="n tot2 click"
                           title="Click for net stock breakdown (all records)"
                           onClick={() => openNet(displayedRows, 'All displayed rows')}
                         >
-                          {fmtQty(displayedRows.reduce((s, r) => s + r.full, 0))}
+                          {fmtQty(footerTotals.full)}
                         </td>
                       </tr>
                     </tfoot>
@@ -1564,8 +1608,8 @@ export default function Mb51AgingPageClient() {
                     )} item(s) had balance (${fmtQty(
                       reportResult.plugQty
                     )}) exceeding receipts in the file – shown in the oldest bucket of its first posting.`}
-                  {displayedRows.length > MAXR &&
-                    ` Showing first ${MAXR} rows on screen – Export Excel contains all.`}
+                  {displayedRows.length > PAGE_SIZE &&
+                    ` Table shows ${PAGE_SIZE} rows per page for responsiveness – Export Excel contains all.`}
                 </div>
               )}
             </div>
@@ -2080,6 +2124,17 @@ export default function Mb51AgingPageClient() {
         .mb51-app .meta b {
           color: var(--ink);
         }
+        .mb51-app .meta .pager {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          margin-left: 4px;
+        }
+        .mb51-app .meta .pager .btn {
+          height: 24px;
+          padding: 0 8px;
+          font-size: 11px;
+        }
         /* Scroll lives on the table pane only — not the portal page */
         .mb51-app .tw {
           display: block;
@@ -2095,7 +2150,8 @@ export default function Mb51AgingPageClient() {
           max-height: min(72vh, calc(100dvh - 260px));
           border: 1px solid var(--line);
           border-radius: 6px;
-          contain: inline-size;
+          /* Limit layout work when sidebar width animates */
+          contain: inline-size layout;
           scrollbar-width: thin;
           scrollbar-color: #5f82a8 #e9eef4;
         }
@@ -2189,6 +2245,10 @@ export default function Mb51AgingPageClient() {
         }
         .mb51-app .tw td.z {
           color: #b6bfca;
+        }
+        .mb51-app .tw tbody tr {
+          content-visibility: auto;
+          contain-intrinsic-size: auto 28px;
         }
         .mb51-app .tw tbody tr:hover td {
           background: #f3f8fe;
