@@ -302,8 +302,7 @@ export default function Mb51AgingPageClient() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState('');
   const [sortDir, setSortDir] = useState(-1);
-  /** Same page size as cancelled-calls / defective-serials — keeps sidebar resize cheap. */
-  const PAGE_SIZE = 50;
+  const PAGE_SIZE = 100;
   const [page, setPage] = useState(1);
 
   // Result state
@@ -2134,13 +2133,14 @@ export default function Mb51AgingPageClient() {
         .mb51-app .meta b {
           color: var(--ink);
         }
-        /* Scrollport — same idea as AdminTableCard / register-table-wrap */
+        /* Vertical scroll only — table fills pane width (no horizontal bar) */
         .mb51-app .tw {
           flex: 1 1 0;
           min-height: 10rem;
           min-width: 0;
           width: 100%;
-          overflow: auto;
+          overflow-x: hidden;
+          overflow-y: auto;
           overscroll-behavior: contain;
           border: 1px solid var(--line);
           border-radius: 6px;
@@ -2149,7 +2149,6 @@ export default function Mb51AgingPageClient() {
         }
         .mb51-app .tw::-webkit-scrollbar {
           width: 10px;
-          height: 10px;
         }
         .mb51-app .tw::-webkit-scrollbar-track {
           background: #e9eef4;
@@ -2181,34 +2180,65 @@ export default function Mb51AgingPageClient() {
           padding: 0 10px;
           font-size: 12px;
         }
-        /* Auto column widths from content; horizontal scroll inside .tw */
         .mb51-app .tw table {
           border-collapse: separate;
           border-spacing: 0;
-          width: max-content;
-          table-layout: auto;
+          width: 100%;
+          table-layout: fixed;
           font-variant-numeric: tabular-nums;
+        }
+        /* Skip layout of off-screen rows so sidebar resize stays cheap */
+        .mb51-app .tw tbody tr {
+          content-visibility: auto;
+          contain-intrinsic-size: auto 28px;
         }
         .mb51-app .tw th,
         .mb51-app .tw td {
-          padding: 4px 8px;
+          padding: 4px 5px;
           border-bottom: 1px solid #edf0f4;
+          overflow: hidden;
+          text-overflow: ellipsis;
           white-space: nowrap;
+        }
+        .mb51-app .tw th.code,
+        .mb51-app .tw td.code {
+          width: 6%;
+        }
+        .mb51-app .tw th.clip,
+        .mb51-app .tw td.clip {
+          width: 11%;
+        }
+        .mb51-app .tw th.grp,
+        .mb51-app .tw td.grp {
+          width: 7%;
         }
         .mb51-app .tw th.uom,
         .mb51-app .tw td.uom {
+          width: 3.5%;
           text-align: center;
+        }
+        .mb51-app .tw th.bk,
+        .mb51-app .tw td.bk {
+          width: 5.5%;
         }
         .mb51-app .tw th.bk {
           white-space: normal;
           line-height: 1.15;
           font-size: 10px;
           text-align: center;
+          text-overflow: clip;
+        }
+        .mb51-app .tw th.tot,
+        .mb51-app .tw th.tot2,
+        .mb51-app .tw td.tot,
+        .mb51-app .tw td.tot2 {
+          width: 6.5%;
         }
         .mb51-app .tw th.tot,
         .mb51-app .tw th.tot2 {
           white-space: normal;
           line-height: 1.2;
+          text-overflow: clip;
         }
         .mb51-app .tw thead th {
           position: sticky;
