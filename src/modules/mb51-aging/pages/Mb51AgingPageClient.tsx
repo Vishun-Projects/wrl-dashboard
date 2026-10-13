@@ -55,12 +55,20 @@ function toSerial(v: unknown): number | null {
   return null;
 }
 
+/** Table / modal — whole numbers. */
 const fmtQty = (v: number): string => {
   if (v === 0 || Math.abs(v) < 1e-9) return '–';
   const n = Math.round(v);
   if (n === 0) return '–';
   const s = Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 0 });
   return n < 0 ? `(${s})` : s;
+};
+
+/** KPI cards — keep decimals (up to 3). */
+const fmtQtyDec = (v: number): string => {
+  if (v === 0 || Math.abs(v) < 1e-9) return '–';
+  const s = Math.abs(v).toLocaleString('en-IN', { maximumFractionDigits: 3 });
+  return v < 0 ? `(${s})` : s;
 };
 
 const norm = (s: unknown) =>
@@ -294,8 +302,9 @@ export default function Mb51AgingPageClient() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState('');
   const [sortDir, setSortDir] = useState(-1);
-  /** Keep DOM small — full result stays in memory; Export still has all rows. */
-  const [page, setPage] = useState(0);
+  /** Same page size as cancelled-calls / defective-serials — keeps sidebar resize cheap. */
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(1);
 
   // Result state
   const [reportResult, setReportResult] = useState<Mb51AgingResult | null>(null);
@@ -840,31 +849,12 @@ export default function Mb51AgingPageClient() {
     });
   }, [reportResult, searchQuery, sortKey, sortDir]);
 
-  // Sidebar width animates 300ms — thousands of <tr> reflow every frame and lag the UI.
-  const PAGE_SIZE = 200;
   useEffect(() => {
-    setPage(0);
-  }, [reportResult, searchQuery, sortKey, sortDir]);
+    setPage(1);
+  }, [searchQuery, sortKey, sortDir, reportResult]);
 
-  const pageCount = Math.max(1, Math.ceil(displayedRows.length / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount - 1);
-  const pageFrom = displayedRows.length === 0 ? 0 : safePage * PAGE_SIZE + 1;
-  const pageTo = Math.min(displayedRows.length, (safePage + 1) * PAGE_SIZE);
-  const shownRows = displayedRows.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
-
-  const footerTotals = useMemo(() => {
-    const bk = BUCKETS.map((_, i) =>
-      displayedRows.reduce((s, r) => s + (r.bk[i] || 0), 0)
-    );
-    let total = 0;
-    let full = 0;
-    for (const r of displayedRows) {
-      total += r.total;
-      full += r.full;
-    }
-    return { bk, total, full };
-  }, [displayedRows]);
-
+  const totalPages = Math.max(1, Math.ceil(displayedRows.length / PAGE_SIZE) || 1);
+  const shownRows = displayedRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const gt = reportResult ? reportResult.tot.reduce((s, v) => s + v, 0) : 0;
   const currentCols = reportResult ? HEAD[reportResult.gb] || HEAD.vm : HEAD.vm;
 
@@ -1007,7 +997,7 @@ export default function Mb51AgingPageClient() {
     [r.a, r.b, r.d, r.e, r.c].filter(Boolean).join(' | ') || 'Total';
 
   return (
-    <div className="mb51-app">
+    <div className="mb51-app h-full min-h-0 min-w-0 w-full flex-1 overflow-hidden">
       <header>
         <div>
           <h1>MB51 Material Aging Report (FIFO)</h1>
@@ -1316,7 +1306,7 @@ export default function Mb51AgingPageClient() {
                       }}
                     >
                       <div className="l">{b.l}</div>
-                      <div className="v">{fmtQty(val)}</div>
+                      <div className="v">{fmtQtyDec(val)}</div>
                       <div className="p">{pct.toFixed(1)}% of |qty|</div>
                       <div className="bar">
                         <i style={{ width: `${pct}%` }} />
@@ -1365,35 +1355,10 @@ export default function Mb51AgingPageClient() {
                     Stock as per last updated on {serialToDMY(reportResult.maxD)}:{' '}
                     <b>{fmtQty(reportResult.fullTot)}</b>
                   </span>
-                  {displayedRows.length > PAGE_SIZE && (
-                    <span className="pager">
-                      Showing{' '}
-                      <b>
-                        {pageFrom.toLocaleString('en-IN')}–{pageTo.toLocaleString('en-IN')}
-                      </b>{' '}
-                      of <b>{displayedRows.length.toLocaleString('en-IN')}</b>
-                      <button
-                        type="button"
-                        className="btn sec"
-                        disabled={safePage <= 0}
-                        onClick={() => setPage((p) => Math.max(0, p - 1))}
-                      >
-                        Prev
-                      </button>
-                      <button
-                        type="button"
-                        className="btn sec"
-                        disabled={safePage >= pageCount - 1}
-                        onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-                      >
-                        Next
-                      </button>
-                    </span>
-                  )}
                 </div>
               )}
 
-              <div className="tw">
+              <div className="tw" role="region" aria-label="Aging results">
                 <table>
                   <thead>
                     <tr>
@@ -1550,18 +1515,24 @@ export default function Mb51AgingPageClient() {
                         <td colSpan={currentCols.length}>
                           Grand total ({displayedRows.length.toLocaleString('en-IN')} rows)
                         </td>
-                        {BUCKETS.map((_, i) => (
-                          <td
-                            key={i}
-                            className="n bk click"
-                            title="Click to see receipt details"
-                            onClick={() =>
-                              openDetail(displayedRows, i, 'All displayed rows')
-                            }
-                          >
-                            {fmtQty(footerTotals.bk[i])}
-                          </td>
-                        ))}
+                        {BUCKETS.map((_, i) => {
+                          const bucketSum = displayedRows.reduce(
+                            (s, r) => s + (r.bk[i] || 0),
+                            0
+                          );
+                          return (
+                            <td
+                              key={i}
+                              className="n bk click"
+                              title="Click to see receipt details"
+                              onClick={() =>
+                                openDetail(displayedRows, i, 'All displayed rows')
+                              }
+                            >
+                              {fmtQty(bucketSum)}
+                            </td>
+                          );
+                        })}
                         <td
                           className="n click"
                           title="Click to see receipt details"
@@ -1569,20 +1540,51 @@ export default function Mb51AgingPageClient() {
                             openDetail(displayedRows, -1, 'All displayed rows')
                           }
                         >
-                          {fmtQty(footerTotals.total)}
+                          {fmtQty(displayedRows.reduce((s, r) => s + r.total, 0))}
                         </td>
                         <td
                           className="n tot2 click"
                           title="Click for net stock breakdown (all records)"
                           onClick={() => openNet(displayedRows, 'All displayed rows')}
                         >
-                          {fmtQty(footerTotals.full)}
+                          {fmtQty(displayedRows.reduce((s, r) => s + r.full, 0))}
                         </td>
                       </tr>
                     </tfoot>
                   )}
                 </table>
               </div>
+
+              {displayedRows.length > 0 && (
+                <div className="pager">
+                  <span>
+                    Page {page} of {totalPages} · showing{' '}
+                    {shownRows.length.toLocaleString('en-IN')} of{' '}
+                    {displayedRows.length.toLocaleString('en-IN')} rows
+                    {displayedRows.length > PAGE_SIZE
+                      ? ' · Export Excel contains all'
+                      : ''}
+                  </span>
+                  <div className="pager-btns">
+                    <button
+                      type="button"
+                      className="btn sec"
+                      disabled={page <= 1}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    >
+                      Prev
+                    </button>
+                    <button
+                      type="button"
+                      className="btn sec"
+                      disabled={page >= totalPages}
+                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {reportResult && (
                 <div className="note">
@@ -1608,8 +1610,6 @@ export default function Mb51AgingPageClient() {
                     )} item(s) had balance (${fmtQty(
                       reportResult.plugQty
                     )}) exceeding receipts in the file – shown in the oldest bucket of its first posting.`}
-                  {displayedRows.length > PAGE_SIZE &&
-                    ` Table shows ${PAGE_SIZE} rows per page for responsiveness – Export Excel contains all.`}
                 </div>
               )}
             </div>
@@ -1814,15 +1814,16 @@ export default function Mb51AgingPageClient() {
           font: 13px/1.4 "Segoe UI", Roboto, Arial, sans-serif;
           background: var(--bg);
           color: var(--ink);
-          /* Contain width so wide tables never scroll the whole portal page */
+          display: flex;
+          flex-direction: column;
           max-width: 100%;
-          overflow-x: hidden;
           min-width: 0;
         }
         .mb51-app * {
           box-sizing: border-box;
         }
         .mb51-app header {
+          flex-shrink: 0;
           background: var(--brand-d);
           color: #fff;
           padding: 8px 14px;
@@ -1844,18 +1845,25 @@ export default function Mb51AgingPageClient() {
           flex: 1;
         }
         .mb51-app main {
-          padding: 8px 12px;
-          max-width: 100%;
-          margin: 0 auto;
-          overflow-x: hidden;
+          flex: 1 1 0;
+          min-height: 0;
           min-width: 0;
+          max-width: 100%;
+          margin: 0;
+          padding: 8px 12px;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
         }
         .mb51-app #app {
+          flex: 1 1 0;
+          min-height: 0;
+          min-width: 0;
+          max-width: 100%;
           display: flex;
           flex-direction: column;
           gap: 0;
-          min-width: 0;
-          max-width: 100%;
+          overflow: hidden;
         }
         .mb51-app .card {
           background: var(--card);
@@ -1865,13 +1873,15 @@ export default function Mb51AgingPageClient() {
           margin-bottom: 8px;
           min-width: 0;
           max-width: 100%;
+          flex-shrink: 0;
         }
         .mb51-app .card.table-card {
           display: flex;
           flex-direction: column;
-          flex: 1 1 auto;
+          flex: 1 1 0;
           min-height: 0;
           margin-bottom: 0;
+          overflow: hidden;
         }
         .mb51-app .filters {
           display: grid;
@@ -2124,34 +2134,16 @@ export default function Mb51AgingPageClient() {
         .mb51-app .meta b {
           color: var(--ink);
         }
-        .mb51-app .meta .pager {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          margin-left: 4px;
-        }
-        .mb51-app .meta .pager .btn {
-          height: 24px;
-          padding: 0 8px;
-          font-size: 11px;
-        }
-        /* Scroll lives on the table pane only — not the portal page */
+        /* Scrollport — same idea as AdminTableCard / register-table-wrap */
         .mb51-app .tw {
-          display: block;
-          overflow-x: auto;
-          overflow-y: auto;
-          overscroll-behavior: contain;
-          width: 100%;
-          max-width: 100%;
+          flex: 1 1 0;
+          min-height: 10rem;
           min-width: 0;
-          min-height: 220px;
-          /* Give the grid most of the viewport after compact filters/KPIs */
-          height: min(72vh, calc(100dvh - 260px));
-          max-height: min(72vh, calc(100dvh - 260px));
+          width: 100%;
+          overflow: auto;
+          overscroll-behavior: contain;
           border: 1px solid var(--line);
           border-radius: 6px;
-          /* Limit layout work when sidebar width animates */
-          contain: inline-size layout;
           scrollbar-width: thin;
           scrollbar-color: #5f82a8 #e9eef4;
         }
@@ -2170,26 +2162,38 @@ export default function Mb51AgingPageClient() {
         .mb51-app .tw::-webkit-scrollbar-thumb:hover {
           background: #3f6a94;
         }
-        /* Main report table only — modal keeps its own auto layout below */
+        .mb51-app .pager {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          flex-shrink: 0;
+          padding-top: 6px;
+          font-size: 12px;
+          color: var(--muted);
+        }
+        .mb51-app .pager-btns {
+          display: flex;
+          gap: 6px;
+        }
+        .mb51-app .pager .btn {
+          height: 28px;
+          padding: 0 10px;
+          font-size: 12px;
+        }
+        /* Auto column widths from content; horizontal scroll inside .tw */
         .mb51-app .tw table {
           border-collapse: separate;
           border-spacing: 0;
           width: max-content;
-          min-width: 100%;
           table-layout: auto;
           font-variant-numeric: tabular-nums;
         }
         .mb51-app .tw th,
         .mb51-app .tw td {
-          padding: 4px 6px;
+          padding: 4px 8px;
           border-bottom: 1px solid #edf0f4;
           white-space: nowrap;
-        }
-        .mb51-app .tw th.clip,
-        .mb51-app .tw td.clip {
-          max-width: 160px;
-          overflow: hidden;
-          text-overflow: ellipsis;
         }
         .mb51-app .tw th.uom,
         .mb51-app .tw td.uom {
@@ -2200,13 +2204,6 @@ export default function Mb51AgingPageClient() {
           line-height: 1.15;
           font-size: 10px;
           text-align: center;
-          max-width: 4.25rem;
-          padding-left: 3px;
-          padding-right: 3px;
-        }
-        .mb51-app .tw td.bk {
-          padding-left: 3px;
-          padding-right: 3px;
         }
         .mb51-app .tw th.tot,
         .mb51-app .tw th.tot2 {
@@ -2245,10 +2242,6 @@ export default function Mb51AgingPageClient() {
         }
         .mb51-app .tw td.z {
           color: #b6bfca;
-        }
-        .mb51-app .tw tbody tr {
-          content-visibility: auto;
-          contain-intrinsic-size: auto 28px;
         }
         .mb51-app .tw tbody tr:hover td {
           background: #f3f8fe;
