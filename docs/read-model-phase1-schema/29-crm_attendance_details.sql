@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS crm_attendance_details (
   activity_day            text,
   office_name             text,
   attd_user               text,
-  user_id                 bigint,
+  user_id                 numeric,
   office_id               bigint,
   attd_total_time         text,
   day_start               timestamptz,

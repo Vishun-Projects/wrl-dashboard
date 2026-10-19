@@ -1,6 +1,9 @@
 /**
- * After chunk 59 (nengineer numeric) + dim_engineers refresh:
- * remap truncated hot nengineer values to the matching dim_engineers.ncode by name.
+ * After chunks 59/60 (numeric CRM user codes) + dim_engineers refresh:
+ * remap truncated nengineer / attendance user_id values to dim_engineers.ncode by name.
+ *
+ * Match key = normalized name + trunc(code), so "Sanjay Banik" at 492 maps to 492.46
+ * even when another office also has "SANJAY BANIK" as 1107.11.
  *
  * Usage: npx tsx scripts/ops/remap-nengineer-from-dim.ts
  */
@@ -11,97 +14,81 @@ config({ path: join(process.cwd(), '.env.local') });
 import '@/lib/read-model/bootstrap-env';
 import { closePool, withClient } from '@/lib/read-model/db';
 import { refreshDimensions } from '@/lib/read-model/dims';
-import { tryAcquireSyncLock, releaseSyncLock } from '@/lib/read-model/lock';
+
+const NAME = (col: string) =>
+  `upper(btrim(regexp_replace(regexp_replace(${col}, E'[\\t\\n\\r]+', ' ', 'g'), '\\s+', ' ', 'g')))`;
+
+const CANDIDATES_CTE = `
+  candidates AS (
+    SELECT
+      ${NAME('vname')} AS name_key,
+      trunc(ncode) AS trunc_id,
+      (array_agg(ncode ORDER BY ncode))[1] AS ncode
+    FROM dim_engineers
+    WHERE nullif(btrim(vname), '') IS NOT NULL
+    GROUP BY 1, 2
+    HAVING count(*) = 1
+  )
+`;
 
 async function main() {
   await withClient(async (client) => {
-    if (!(await tryAcquireSyncLock(client))) {
-      throw new Error('sync lock not acquired');
-    }
-    try {
-      const dims = await refreshDimensions(client);
-      console.log('dims refreshed', dims);
+    const dims = await refreshDimensions(client);
+    console.log('dims refreshed', dims);
 
-      const before = await client.query<{
-        collided_ids: number;
-        sample_trn: string | null;
-        sample_eng: string | null;
-        sample_name: string | null;
-      }>(`
-        SELECT
-          (SELECT count(*)::int FROM (
-             SELECT nengineer FROM calls_latest_hot
-             WHERE nengineer IS NOT NULL
-             GROUP BY nengineer
-             HAVING count(DISTINCT engineer_name) > 1
-           ) t) AS collided_ids,
-          (SELECT vtrnno FROM calls_latest_hot WHERE vtrnno = '26H101059' LIMIT 1) AS sample_trn,
-          (SELECT nengineer::text FROM calls_latest_hot WHERE vtrnno = '26H101059' LIMIT 1) AS sample_eng,
-          (SELECT engineer_name FROM calls_latest_hot WHERE vtrnno = '26H101059' LIMIT 1) AS sample_name
-      `);
-      console.log('before', before.rows[0]);
+    const hot = await client.query(`
+      WITH ${CANDIDATES_CTE}
+      UPDATE calls_latest_hot h
+      SET nengineer = c.ncode
+      FROM candidates c
+      WHERE h.engineer_name IS NOT NULL
+        AND ${NAME('h.engineer_name')} = c.name_key
+        AND trunc(h.nengineer) = c.trunc_id
+        AND h.nengineer IS DISTINCT FROM c.ncode
+    `);
+    console.log('hot nengineer remapped', hot.rowCount);
 
-      // Unique name → single dim code only (skip ambiguous names).
-      const result = await client.query(`
-        WITH unique_names AS (
-          SELECT
-            upper(btrim(regexp_replace(vname, '\\s+', ' ', 'g'))) AS name_key,
-            (array_agg(ncode ORDER BY ncode))[1] AS ncode
-          FROM dim_engineers
-          WHERE nullif(btrim(vname), '') IS NOT NULL
-          GROUP BY 1
-          HAVING count(*) = 1
-        )
-        UPDATE calls_latest_hot h
-        SET nengineer = u.ncode
-        FROM unique_names u
-        WHERE h.engineer_name IS NOT NULL
-          AND upper(btrim(regexp_replace(h.engineer_name, '\\s+', ' ', 'g'))) = u.name_key
-          AND h.nengineer IS DISTINCT FROM u.ncode
-          AND trunc(h.nengineer) = trunc(u.ncode)
-      `);
-      console.log('hot rows remapped', result.rowCount);
+    const mirror = await client.query(`
+      WITH ${CANDIDATES_CTE}
+      UPDATE calls_crm_mirror m
+      SET nengineer = c.ncode
+      FROM candidates c
+      WHERE m.engineer_name IS NOT NULL
+        AND ${NAME('m.engineer_name')} = c.name_key
+        AND trunc(m.nengineer) = c.trunc_id
+        AND m.nengineer IS DISTINCT FROM c.ncode
+    `);
+    console.log('mirror nengineer remapped', mirror.rowCount);
 
-      const mirror = await client.query(`
-        WITH unique_names AS (
-          SELECT
-            upper(btrim(regexp_replace(vname, '\\s+', ' ', 'g'))) AS name_key,
-            (array_agg(ncode ORDER BY ncode))[1] AS ncode
-          FROM dim_engineers
-          WHERE nullif(btrim(vname), '') IS NOT NULL
-          GROUP BY 1
-          HAVING count(*) = 1
-        )
-        UPDATE calls_crm_mirror m
-        SET nengineer = u.ncode
-        FROM unique_names u
-        WHERE m.engineer_name IS NOT NULL
-          AND upper(btrim(regexp_replace(m.engineer_name, '\\s+', ' ', 'g'))) = u.name_key
-          AND m.nengineer IS DISTINCT FROM u.ncode
-          AND trunc(m.nengineer) = trunc(u.ncode)
-      `);
-      console.log('mirror rows remapped', mirror.rowCount);
+    const attendance = await client.query(`
+      WITH ${CANDIDATES_CTE}
+      UPDATE crm_attendance_details a
+      SET user_id = c.ncode
+      FROM candidates c
+      WHERE a.attd_user IS NOT NULL
+        AND ${NAME('a.attd_user')} = c.name_key
+        AND trunc(a.user_id) = c.trunc_id
+        AND a.user_id IS DISTINCT FROM c.ncode
+    `);
+    console.log('attendance user_id remapped', attendance.rowCount);
 
-      const check = await client.query(`
-        SELECT
-          (SELECT count(*)::int FROM (
-             SELECT nengineer FROM calls_latest_hot
-             WHERE nengineer IS NOT NULL
-             GROUP BY nengineer
-             HAVING count(DISTINCT engineer_name) > 1
-           ) t) AS collided_ids,
-          (SELECT ncode::text FROM dim_engineers WHERE upper(btrim(vname)) = 'MITHLESH KUMAR SAH' LIMIT 1) AS mithlesh_code,
-          (SELECT ncode::text FROM dim_engineers WHERE upper(btrim(vname)) = 'CHHOTU KUMAR' LIMIT 1) AS chhotu_code,
-          (SELECT nengineer::text FROM calls_latest_hot WHERE vtrnno = '26H101059') AS call_eng,
-          (SELECT engineer_name FROM calls_latest_hot WHERE vtrnno = '26H101059') AS call_name
-      `);
-      console.log('verify', check.rows[0]);
-
-      await releaseSyncLock(client, 'ok', result.rowCount ?? 0);
-    } catch (err) {
-      await releaseSyncLock(client, 'error', 0);
-      throw err;
-    }
+    const check = await client.query(`
+      SELECT
+        (SELECT count(*)::int FROM (
+           SELECT nengineer FROM calls_latest_hot
+           WHERE nengineer IS NOT NULL
+           GROUP BY nengineer
+           HAVING count(DISTINCT engineer_name) > 1
+         ) t) AS hot_collided_ids,
+        (SELECT count(*)::int FROM (
+           SELECT user_id FROM crm_attendance_details
+           WHERE user_id IS NOT NULL
+           GROUP BY user_id
+           HAVING count(DISTINCT attd_user) > 1
+         ) t) AS attendance_collided_ids,
+        (SELECT nengineer::text FROM calls_latest_hot WHERE vtrnno = '26H101059') AS call_eng
+    `);
+    console.log('verify', check.rows[0]);
   });
 }
 

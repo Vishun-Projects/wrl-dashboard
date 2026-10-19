@@ -14,7 +14,7 @@ describe('mapCrmAttendanceRow', () => {
       nofficeid: '133',
     });
     expect(row?.ncode).toBe(76);
-    expect(row?.user_id).toBe(133);
+    expect(row?.user_id).toBe(133.2);
     expect(row?.unique_call).toBe('26H05036');
     expect(row?.row_key).toBe(
       attendanceRowKey({

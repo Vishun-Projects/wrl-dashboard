@@ -748,7 +748,7 @@ async function queryPagedActivityRaw(
           a.customer_latlong
         FROM crm_attendance_details a
         WHERE a.heading = 'Work Done - Service'
-          AND a.user_id = ANY($1::bigint[])
+          AND a.user_id = ANY($1::numeric[])
           AND a.activity_date >= $2::timestamptz
           AND a.activity_date <= $3::timestamptz
       )
@@ -859,8 +859,8 @@ export async function queryRelatedActivities(params: {
   const dayEnd = dateEndBound(params.day);
   const tech = params.attdUser?.trim() || '';
 
-  // Resolve CRM nuser (numeric, may be fractional e.g. 590.3) from this tech's
-  // service punches — attendance userid is a different id space.
+  // Prefer CRM nuser from this tech's location punches on the same call/day
+  // (may be fractional e.g. 590.3). Fall back to attendance userid.
   let locationUserId: number | null = null;
   if (tech) {
     const resolved = (await prisma.$queryRawUnsafe(

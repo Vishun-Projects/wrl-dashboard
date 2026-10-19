@@ -1,4 +1,5 @@
 import { parseCrmDate } from '@/lib/read-model/dates';
+import { toCrmDecimalId } from '@/lib/read-model/transform';
 
 export type AttendanceDetailRow = {
   row_key: string;
@@ -73,6 +74,11 @@ function parseId(value: string): number | null {
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
   return Math.trunc(n);
+}
+
+/** CRM attendance userid may be fractional (133.2). Truncating merges office techs. */
+function parseUserId(value: string): number | null {
+  return toCrmDecimalId(value);
 }
 
 function parseAmt(value: string): number | null {
@@ -150,7 +156,7 @@ export function mapCrmAttendanceRow(raw: Record<string, unknown>): AttendanceDet
     activity_day: emptyToNull(pick(raw, 'activityday')),
     office_name: emptyToNull(pick(raw, 'officename')),
     attd_user: emptyToNull(pick(raw, 'attduser')),
-    user_id: parseId(pick(raw, 'userid')),
+    user_id: parseUserId(pick(raw, 'userid')),
     office_id: parseId(pick(raw, 'nofficeid')),
     attd_total_time: emptyToNull(pick(raw, 'attdtotaltime')),
     day_start: parseCrmDate(dayStartRaw),

@@ -210,7 +210,7 @@ export async function GET(request: Request) {
       relatedDay
     ) {
       const related = await queryRelatedActivities({
-        userId: Math.trunc(relatedUserId),
+        userId: relatedUserId,
         day: relatedDay,
         attdUser: relatedAttdUser || null,
       });
