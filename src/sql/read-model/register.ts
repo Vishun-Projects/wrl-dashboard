@@ -402,7 +402,7 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
   }
 
   if (params.technician && params.technician !== 'All') {
-    clauses.push(`h.nengineer = ANY($${idx}::bigint[])`);
+    clauses.push(`h.nengineer = ANY($${idx}::numeric[])`);
     values.push(params.technician.split(',').map(Number));
     idx++;
   }

@@ -107,7 +107,7 @@ export function transformCrmRowToHot(row: Record<string, unknown>): HotRow | nul
   const nofficeid = toBigInt(enriched.nofficeid ?? enriched.officeId);
   if (!ncode || !nofficeid) return null;
 
-  const nengineerRaw = toBigInt(enriched.nengineer) ?? 0;
+  const nengineerRaw = toCrmDecimalId(enriched.nengineer) ?? 0;
   const nengineer = nengineerRaw > 0 ? nengineerRaw : null;
   const editedAt = parseCrmDate(enriched.editedon);
   const addedAt = parseCrmDate(enriched.addedon);
@@ -238,4 +238,15 @@ export function toBigInt(value: unknown): number | null {
   const n = Number(String(value).trim());
   if (Number.isNaN(n)) return null;
   return Math.trunc(n);
+}
+
+/**
+ * CRM user / engineer codes can be fractional (108.2 vs 108.3).
+ * Truncating merges distinct techs — same bug as crm_user_locations.user_id.
+ */
+export function toCrmDecimalId(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const n = Number(String(value).trim().replace(/,/g, ''));
+  if (!Number.isFinite(n)) return null;
+  return n;
 }

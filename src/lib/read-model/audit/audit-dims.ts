@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import { toBigInt } from '@/lib/read-model/transform';
+import { toBigInt, toCrmDecimalId } from '@/lib/read-model/transform';
 import {
   fetchDimCallTypes,
   fetchDimEngineers,
@@ -62,8 +62,8 @@ function buildCrmOfficeMap(rows: Record<string, string>[]) {
 function buildCrmEngineerMap(rows: Record<string, string>[]) {
   const map = new Map<number, Record<string, string>>();
   for (const row of rows) {
-    const ncode = toBigInt(row.ncode);
-    if (!ncode || map.has(ncode)) continue;
+    const ncode = toCrmDecimalId(row.ncode);
+    if (ncode == null || ncode === 0 || map.has(ncode)) continue;
     map.set(ncode, row);
   }
   return map;

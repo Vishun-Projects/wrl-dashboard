@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { isHotEligibleRow, processCrmRowsForYtdLoad } from './transform';
+import {
+  isHotEligibleRow,
+  processCrmRowsForYtdLoad,
+  toCrmDecimalId,
+  transformCrmRowToHot,
+} from './transform';
+
+describe('toCrmDecimalId', () => {
+  it('keeps fractional CRM engineer codes (do not trunc)', () => {
+    expect(toCrmDecimalId('108.200000000')).toBe(108.2);
+    expect(toCrmDecimalId('108.300000000')).toBe(108.3);
+    expect(toCrmDecimalId(108)).toBe(108);
+  });
+});
 
 describe('isHotEligibleRow', () => {
   it('rejects rows without TRN', () => {
@@ -64,6 +77,25 @@ describe('isHotEligibleRow', () => {
         ncancelreason: 2,
       })
     ).toBe(false);
+  });
+});
+
+describe('transformCrmRowToHot nengineer', () => {
+  it('stores fractional nengineer instead of truncating to bigint', () => {
+    const hot = transformCrmRowToHot({
+      ncode: 1,
+      vtrnno: '26H101059',
+      nofficeid: 100,
+      nengineer: '108.200000000',
+      serviceman: 'Mithlesh Kumar Sah',
+      callsdtrndate: '2026-08-10',
+      bsolved: 0,
+      bfastclose: 1,
+      ncancelreason: 0,
+      officename: 'Branch',
+    });
+    expect(hot?.nengineer).toBe(108.2);
+    expect(hot?.engineer_name).toBe('Mithlesh Kumar Sah');
   });
 });
 

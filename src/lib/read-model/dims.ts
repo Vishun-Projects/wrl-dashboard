@@ -6,7 +6,7 @@ import {
   looksLikeBranchOffice,
 } from '@/lib/read-model/crm-fetch';
 
-import { toBigInt } from '@/lib/read-model/transform';
+import { toBigInt, toCrmDecimalId } from '@/lib/read-model/transform';
 
 async function batchInsert(
   client: pg.PoolClient,
@@ -69,13 +69,13 @@ export async function refreshDimensions(client: pg.PoolClient): Promise<{
   const engineerRows: unknown[][] = [];
   const engineerByCode = new Map<number, (typeof engineers)[0]>();
   for (const row of engineers) {
-    const ncode = toBigInt(row.ncode);
-    if (!ncode || engineerByCode.has(ncode)) continue;
+    const ncode = toCrmDecimalId(row.ncode);
+    if (ncode == null || ncode === 0 || engineerByCode.has(ncode)) continue;
     engineerByCode.set(ncode, row);
   }
   for (const row of engineerByCode.values()) {
-    const ncode = toBigInt(row.ncode);
-    if (!ncode) continue;
+    const ncode = toCrmDecimalId(row.ncode);
+    if (ncode == null || ncode === 0) continue;
     engineerRows.push([ncode, String(row.vname ?? '').trim(), toBigInt(row.nofficeid)]);
   }
 

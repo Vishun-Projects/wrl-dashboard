@@ -1,4 +1,4 @@
-import { toBigInt } from '@/lib/read-model/transform';
+import { toBigInt, toCrmDecimalId } from '@/lib/read-model/transform';
 import type { HotRow } from '@/lib/read-model/types';
 import type { ColumnMismatch } from '@/lib/read-model/audit/types';
 
@@ -102,10 +102,17 @@ function compareColumn(column: HotAuditColumn, hot: HotRow, expected: HotRow): C
   switch (column) {
     case 'ncode':
     case 'nofficeid':
-    case 'nengineer':
     case 'office_under': {
       const hotVal = normalizeBigInt(hotRaw);
       const expectedVal = normalizeBigInt(expectedRaw);
+      if (hotVal !== expectedVal) {
+        return { column, hot_value: hotVal, expected_value: expectedVal };
+      }
+      return null;
+    }
+    case 'nengineer': {
+      const hotVal = toCrmDecimalId(hotRaw);
+      const expectedVal = toCrmDecimalId(expectedRaw);
       if (hotVal !== expectedVal) {
         return { column, hot_value: hotVal, expected_value: expectedVal };
       }
@@ -192,7 +199,7 @@ export function normalizeHotRowFromDb(row: Record<string, unknown>): HotRow {
     vtrnno: String(row.vtrnno ?? '').trim(),
     vcclid: normalizeString(row.vcclid),
     nofficeid: toBigInt(row.nofficeid) ?? 0,
-    nengineer: toBigInt(row.nengineer),
+    nengineer: toCrmDecimalId(row.nengineer),
     office_under: toBigInt(row.office_under),
     franchisee_code: normalizeString(row.franchisee_code),
     party_name: normalizeString(row.party_name),

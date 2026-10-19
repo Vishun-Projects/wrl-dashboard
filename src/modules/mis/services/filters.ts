@@ -262,18 +262,19 @@ export function matchesFilterSelection(value: string, selected: string[] | strin
   return value === selected;
 }
 
-/** Display name for register grid — prefer roster label for nengineer over stale serviceman text. */
+/** Display name for register grid — this call's engineer_name; roster only if blank. */
 export function resolveTechnicianDisplayName(
   row: Record<string, unknown>,
   roster?: Array<{ value: string; label: string }>
 ): string {
-  const id = String(row.nengineer ?? '').trim();
-  if (id && id !== '0' && roster?.length) {
-    const match = roster.find((o) => String(o.value) === id);
+  const fromRow = String(row.serviceman ?? row.technician_name ?? '').trim();
+  if (fromRow) return fromRow;
+  const idNum = Number(row.nengineer);
+  if (Number.isFinite(idNum) && idNum !== 0 && roster?.length) {
+    const match = roster.find((o) => Number(o.value) === idNum);
     if (match?.label?.trim()) return match.label.trim();
   }
-  const fromRow = String(row.serviceman ?? row.technician_name ?? '').trim();
-  return fromRow || '—';
+  return '—';
 }
 
 /** Match technician toolbar filter by engineer id and exact display name. */
@@ -289,7 +290,7 @@ export function rowMatchesTechnicianFilter(
       : [];
   if (list.length === 0) return true;
 
-  const engineerId = String(row.nengineer ?? '').trim();
+  const engineerIdNum = Number(row.nengineer);
   const rowName = String(row.serviceman ?? row.technician_name ?? '')
     .trim()
     .toUpperCase();
@@ -297,8 +298,18 @@ export function rowMatchesTechnicianFilter(
   return list.some((sel) => {
     const key = String(sel).trim();
     if (!key) return false;
-    if (engineerId && engineerId !== '0' && engineerId === key) return true;
-    const rosterLabel = roster?.find((o) => String(o.value) === key)?.label?.trim().toUpperCase();
+    const keyNum = Number(key);
+    if (
+      Number.isFinite(engineerIdNum) &&
+      engineerIdNum !== 0 &&
+      Number.isFinite(keyNum) &&
+      engineerIdNum === keyNum
+    ) {
+      return true;
+    }
+    const rosterLabel = roster?.find((o) => Number(o.value) === keyNum || String(o.value) === key)
+      ?.label?.trim()
+      .toUpperCase();
     const cmp = (rosterLabel || key).toUpperCase();
     return rowName.length > 0 && cmp.length > 0 && rowName === cmp;
   });

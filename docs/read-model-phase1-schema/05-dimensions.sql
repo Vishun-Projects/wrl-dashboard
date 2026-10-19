@@ -14,7 +14,7 @@ CREATE INDEX IF NOT EXISTS idx_dim_offices_nunder ON dim_offices (nunder);
 CREATE INDEX IF NOT EXISTS idx_dim_offices_name ON dim_offices (vcompanyname);
 
 CREATE TABLE IF NOT EXISTS dim_engineers (
-  ncode                 bigint NOT NULL,
+  ncode                 numeric NOT NULL,
   vname                 varchar(255) NOT NULL,
   nofficeid             bigint,
   synced_at             timestamptz NOT NULL DEFAULT now(),

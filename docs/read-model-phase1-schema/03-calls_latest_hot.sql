@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS calls_latest_hot (
   vtrnno                varchar(50) NOT NULL,
   vcclid                varchar(50),
   nofficeid             bigint NOT NULL,
-  nengineer             bigint,
+  nengineer             numeric,
   office_under          bigint,
   franchisee_code       varchar(50),
   party_name            text,
