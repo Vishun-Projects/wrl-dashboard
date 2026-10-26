@@ -276,8 +276,6 @@ export default function CallVisitsPageClient() {
     } finally {
       setLoading(false);
     }
-    // filterArgs is a fresh object; depend on the fields instead.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, search, plant, branch, client, customer, engineer, status, part, sort, page]);
 
   useEffect(() => {
