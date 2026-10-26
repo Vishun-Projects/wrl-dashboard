@@ -183,7 +183,7 @@ export const RBAC_PAGES: RbacPage[] = [
     id: 'call_visits',
     permission: 'page_call_visits',
     path: '/report/call-visits',
-    label: 'Call Parts',
+    label: 'Parts Consumption as per CRM',
     description: 'Every CRM visit with on-site times and work done, synced into Postgres',
     group: 'Reports',
   },

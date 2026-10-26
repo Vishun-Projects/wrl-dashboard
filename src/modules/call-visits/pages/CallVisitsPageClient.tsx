@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Download, Loader2, Package } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Columns3, Download, Loader2, Package } from 'lucide-react';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
-import { AdminTable, AdminTableCard, AdminTd, AdminTh, AdminThead, AdminTr } from '@/components/admin/AdminUi';
+import { AdminTable, AdminTableCard, AdminTd, AdminTh, AdminTr } from '@/components/admin/AdminUi';
 import { TrnLink } from '@/components/calls/TrnLink';
 import { FilterSelect } from '@/components/filters/FilterSelect';
 import type { FilterSelectOption } from '@/components/filters/filter-select-types';
@@ -143,6 +143,9 @@ const CALL_TONE = 'bg-[#FFFFEB]';
 const WORK_TONE = 'bg-[#FFF3FF]';
 const PART_TONE = 'bg-[#E7F9F4]';
 const CALL_HEAD = 'bg-[#E6E2B8]';
+const PIN = 'sticky left-0 z-10 min-w-[7.25rem] border-r border-slate-300/80';
+const HEAD_STICKY = 'sticky top-0 z-20';
+const PIN_HEAD = 'sticky top-0 left-0 z-30 min-w-[7.25rem] border-r border-slate-400/70';
 const WORK_HEAD = 'bg-[#E8C6EA]';
 const PART_HEAD = 'bg-[#C5E6DC]';
 
@@ -169,6 +172,76 @@ const COLUMNS: Array<{ key: SortKey; label: string; tone: string; head: string }
   { key: 'oldBarcode', label: 'Old barcode', tone: PART_TONE, head: PART_HEAD },
   { key: 'remarks', label: 'Remarks', tone: PART_TONE, head: PART_HEAD },
 ];
+
+const COLUMN_KEYS = COLUMNS.map((col) => col.key);
+const HIDDEN_COLUMNS_KEY = 'call_parts_hidden_columns';
+
+function loadHiddenColumns(): SortKey[] {
+  try {
+    const raw = localStorage.getItem(HIDDEN_COLUMNS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const hidden = parsed.filter((key): key is SortKey => COLUMN_KEYS.includes(key as SortKey));
+    return hidden.length >= COLUMN_KEYS.length ? [] : hidden;
+  } catch {
+    return [];
+  }
+}
+
+function ColumnPicker({
+  hidden,
+  onToggle,
+}: {
+  hidden: SortKey[];
+  onToggle: (key: SortKey) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const visibleCount = COLUMNS.length - hidden.length;
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50"
+        title="Show or hide columns"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Columns3 className="h-3.5 w-3.5" />
+        {hidden.length === 0 ? 'All columns' : `${visibleCount} columns`}
+        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full z-50 mt-1 w-52 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
+            <div className="custom-scrollbar max-h-64 overflow-y-auto p-1">
+              {COLUMNS.map((col) => {
+                const shown = !hidden.includes(col.key);
+                return (
+                  <label
+                    key={col.key}
+                    className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-slate-50"
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 rounded border-slate-300"
+                      checked={shown}
+                      disabled={shown && visibleCount === 1}
+                      onChange={() => onToggle(col.key)}
+                    />
+                    <span className={`text-[12px] ${shown ? 'font-medium text-slate-900' : 'text-slate-600'}`}>
+                      {col.label}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
 
 export default function CallVisitsPageClient() {
   const [range, setRange] = useState<ReportDateRange>(() => defaultDateRange());
@@ -230,9 +303,25 @@ export default function CallVisitsPageClient() {
     [options.statuses]
   );
   const categoryOptions = useMemo<FilterSelectOption[]>(
-    () => options.categories.map((b) => ({ value: b, label: b })),
+    () => (options.categories ?? []).map((b) => ({ value: b, label: b })),
     [options.categories]
   );
+  const [hiddenColumns, setHiddenColumns] = useState<SortKey[]>([]);
+  useEffect(() => {
+    setHiddenColumns(loadHiddenColumns());
+  }, []);
+  const visibleColumns = useMemo(
+    () => COLUMNS.filter((col) => !hiddenColumns.includes(col.key)),
+    [hiddenColumns]
+  );
+  const toggleColumn = (key: SortKey) => {
+    setHiddenColumns((prev) => {
+      const next = prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key];
+      if (next.length >= COLUMN_KEYS.length) return prev;
+      localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
 
   const filterArgs = {
     range,
@@ -332,12 +421,12 @@ export default function CallVisitsPageClient() {
 
   return (
     <PageShell
-      title="Call Parts"
+      title="Parts Consumption as per CRM"
       subtitle={subtitle}
       icon={<Package className="h-4 w-4" />}
       toolbar={
-        <div className="register-filter-bar register-filter-row-compact !px-2 !py-1">
-          <div className="flex flex-wrap items-center gap-1.5 [&_.filter-select-root]:!min-w-[7.5rem] [&_.filter-select-root]:!max-w-[11rem] [&_.filter-select-root]:!flex-[0_1_9rem] [&_.register-filter-btn]:!h-6 [&_.register-filter-btn]:!px-1.5 [&_.register-filter-btn]:!text-[10px] [&_.register-filter-btn]:!shadow-none">
+        <div className="register-filter-bar register-filter-row-compact shrink-0 !px-2 !py-1">
+          <div className="flex flex-wrap items-center gap-1.5 overflow-visible [&_.filter-select-root]:!min-w-[7.5rem] [&_.filter-select-root]:!max-w-[11rem] [&_.filter-select-root]:!shrink-0 [&_.filter-select-root]:!flex-[0_0_9rem] [&_.register-filter-btn]:!h-6 [&_.register-filter-btn]:!px-1.5 [&_.register-filter-btn]:!text-[10px] [&_.register-filter-btn]:!shadow-none">
             <input
               type="search"
               value={searchInput}
@@ -430,9 +519,20 @@ export default function CallVisitsPageClient() {
               panelClassName="w-56"
               layout="inline"
             />
+            <input
+              type="search"
+              value={partInput}
+              onChange={(e) => {
+                setPage(1);
+                setPartInput(e.target.value);
+              }}
+              placeholder="Part contains…"
+              aria-label="Part contains"
+              className="h-6 w-32 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
+            />
             <FilterSelect
               label="Part category"
-              emptyLabel="All categories"
+              emptyLabel="All part categories"
               options={categoryOptions}
               selected={category ? [category] : []}
               mode="single"
@@ -443,17 +543,6 @@ export default function CallVisitsPageClient() {
               searchPlaceholder="Search category…"
               panelClassName="w-64"
               layout="inline"
-            />
-            <input
-              type="search"
-              value={partInput}
-              onChange={(e) => {
-                setPage(1);
-                setPartInput(e.target.value);
-              }}
-              placeholder="Part contains…"
-              aria-label="Part contains"
-              className="h-6 w-32 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
             />
             <div className="min-w-[7.5rem] max-w-[10rem] shrink-0 [&_button]:!h-6 [&_button]:!px-1.5 [&_button]:!text-[10px] [&_button]:!shadow-none">
               <DateRangeSelector
@@ -474,15 +563,18 @@ export default function CallVisitsPageClient() {
         </div>
       }
       actions={
-        <button
-          type="button"
-          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          onClick={() => void exportCsv()}
-          disabled={exporting || total === 0}
-        >
-          {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-          {exporting ? 'Exporting…' : 'CSV'}
-        </button>
+        <>
+          <ColumnPicker hidden={hiddenColumns} onToggle={toggleColumn} />
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            onClick={() => void exportCsv()}
+            disabled={exporting || total === 0}
+          >
+            {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            {exporting ? 'Exporting…' : 'CSV'}
+          </button>
+        </>
       }
     >
       <PageScrollRegion>
@@ -497,13 +589,13 @@ export default function CallVisitsPageClient() {
               </p>
             }
           >
-            <AdminTable className="w-full min-w-[1100px] border-collapse text-left [&_td]:!px-1.5 [&_td]:!py-1 [&_td]:text-[11px] [&_td]:leading-snug">
-              <AdminThead>
+            <AdminTable className="w-full min-w-[1100px] border-separate border-spacing-0 text-left [&_td]:!px-1.5 [&_td]:!py-1 [&_td]:text-[11px] [&_td]:leading-snug">
+              <thead>
                 <tr>
-                  {COLUMNS.map((col) => (
+                  {visibleColumns.map((col) => (
                     <AdminTh
                       key={col.key}
-                      className={`${col.head} !font-bold text-slate-800`}
+                      className={`${col.head} !font-bold text-slate-800 ${col.key === 'callNo' ? PIN_HEAD : HEAD_STICKY}`}
                       sortable
                       sortKey={col.key}
                       sort={sort}
@@ -516,11 +608,11 @@ export default function CallVisitsPageClient() {
                     </AdminTh>
                   ))}
                 </tr>
-              </AdminThead>
+              </thead>
               <tbody>
                 {loading ? (
                   <AdminTr>
-                    <td className="px-3 py-3 text-[12px] text-slate-500" colSpan={21}>
+                    <td className="px-3 py-3 text-[12px] text-slate-500" colSpan={visibleColumns.length}>
                       Loading…
                     </td>
                   </AdminTr>
@@ -529,6 +621,7 @@ export default function CallVisitsPageClient() {
                     <PartRow
                       key={`${r.ncode}-${r.nofficeid}`}
                       row={r}
+                      columns={visibleColumns}
                       groupStart={i > 0 && r.callNo !== rows[i - 1]?.callNo}
                     />
                   ))
@@ -567,47 +660,97 @@ export default function CallVisitsPageClient() {
   );
 }
 
-function PartRow({ row: r, groupStart }: { row: CallPartRow; groupStart: boolean }) {
+function PartRow({
+  row: r,
+  columns,
+  groupStart,
+}: {
+  row: CallPartRow;
+  columns: typeof COLUMNS;
+  groupStart: boolean;
+}) {
   const edge = groupStart
     ? 'border-b border-slate-100 shadow-[inset_0_1px_0_0_#94a3b8]'
     : 'border-b border-slate-100';
   return (
     <AdminTr>
-      <AdminTd className={`font-mono ${CALL_TONE} ${edge}`}>
-        {r.callNo ? (
-          <TrnLink trn={r.callNo} officeId={r.nofficeid} className="text-left font-mono text-blue-700 hover:underline" />
-        ) : (
-          '—'
-        )}
-      </AdminTd>
-      <AdminTd className={`whitespace-nowrap ${CALL_TONE} ${edge}`}>{r.callLoggedAt ? formatUiDate(r.callLoggedAt) : '—'}</AdminTd>
-      <Clip value={r.visitNo} width="max-w-[8.5rem]" mono tone={`${CALL_TONE} ${edge}`} />
-      <AdminTd className={`whitespace-nowrap ${CALL_TONE} ${edge}`}>{r.visitAt ? formatUiDate(r.visitAt) : '—'}</AdminTd>
-      <Clip value={shown(r.plantName)} width="max-w-[9rem]" tone={`${CALL_TONE} ${edge}`} />
-      <Clip value={shown(r.branchName)} width="max-w-[9rem]" tone={`${CALL_TONE} ${edge}`} />
-      <Clip value={shown(r.clientName)} width="max-w-[7rem]" tone={`${CALL_TONE} ${edge}`} />
-      <Clip value={shown(r.partyName)} width="max-w-[8rem]" tone={`${CALL_TONE} ${edge}`} />
-      <Clip value={r.city} width="max-w-[5rem]" tone={`${CALL_TONE} ${edge}`} />
-      <AdminTd className={`${WORK_TONE} ${edge}`}>
-        {r.statusLabel ? (
-          <span className={`block max-w-[7rem] truncate font-medium ${statusTextClass(r.statusLabel)}`} title={r.statusLabel}>
-            {r.statusLabel}
-          </span>
-        ) : (
-          '—'
-        )}
-      </AdminTd>
-      <Clip value={r.engineerName} width="max-w-[8rem]" tone={`${WORK_TONE} ${edge}`} />
-      <Clip value={r.modelCode} width="max-w-[7rem]" mono tone={`${WORK_TONE} ${edge}`} />
-      <Clip value={r.machineName} width="max-w-[10rem]" tone={`${WORK_TONE} ${edge}`} />
-      <Clip value={r.barcode} width="max-w-[8rem]" mono tone={`${WORK_TONE} ${edge}`} />
-      <Clip value={r.partCategory} width="max-w-[8rem]" tone={`${PART_TONE} ${edge}`} />
-      <Clip value={r.partCode} width="max-w-[6rem]" mono tone={`${PART_TONE} ${edge}`} />
-      <Clip value={r.partName} width="max-w-[11rem]" tone={`${PART_TONE} ${edge}`} />
-      <AdminTd className={`whitespace-nowrap ${PART_TONE} ${edge}`}>{qtyText(r.qty)}</AdminTd>
-      <Clip value={r.newBarcode} width="max-w-[8rem]" mono tone={`${PART_TONE} ${edge}`} />
-      <Clip value={r.oldBarcode} width="max-w-[8rem]" mono tone={`${PART_TONE} ${edge}`} />
-      <Clip value={r.remarks} width="max-w-[9rem]" tone={`${PART_TONE} ${edge}`} />
+      {columns.map((col) => (
+        <PartCell key={col.key} col={col} row={r} edge={edge} />
+      ))}
     </AdminTr>
   );
+}
+
+function PartCell({
+  col,
+  row: r,
+  edge,
+}: {
+  col: (typeof COLUMNS)[number];
+  row: CallPartRow;
+  edge: string;
+}) {
+  const tone = `${col.tone} ${edge}`;
+  switch (col.key) {
+    case 'callNo':
+      return (
+        <AdminTd className={`font-mono ${tone} ${PIN}`}>
+          {r.callNo ? (
+            <TrnLink trn={r.callNo} officeId={r.nofficeid} className="text-left font-mono text-blue-700 hover:underline" />
+          ) : (
+            '—'
+          )}
+        </AdminTd>
+      );
+    case 'callLoggedAt':
+      return <AdminTd className={`whitespace-nowrap ${tone}`}>{r.callLoggedAt ? formatUiDate(r.callLoggedAt) : '—'}</AdminTd>;
+    case 'visitNo':
+      return <Clip value={r.visitNo} width="max-w-[8.5rem]" mono tone={tone} />;
+    case 'visitAt':
+      return <AdminTd className={`whitespace-nowrap ${tone}`}>{r.visitAt ? formatUiDate(r.visitAt) : '—'}</AdminTd>;
+    case 'plantName':
+      return <Clip value={shown(r.plantName)} width="max-w-[9rem]" tone={tone} />;
+    case 'branchName':
+      return <Clip value={shown(r.branchName)} width="max-w-[9rem]" tone={tone} />;
+    case 'clientName':
+      return <Clip value={shown(r.clientName)} width="max-w-[7rem]" tone={tone} />;
+    case 'partyName':
+      return <Clip value={shown(r.partyName)} width="max-w-[8rem]" tone={tone} />;
+    case 'city':
+      return <Clip value={r.city} width="max-w-[5rem]" tone={tone} />;
+    case 'statusLabel':
+      return (
+        <AdminTd className={tone}>
+          {r.statusLabel ? (
+            <span className={`block max-w-[7rem] truncate font-medium ${statusTextClass(r.statusLabel)}`} title={r.statusLabel}>
+              {r.statusLabel}
+            </span>
+          ) : (
+            '—'
+          )}
+        </AdminTd>
+      );
+    case 'engineerName':
+      return <Clip value={r.engineerName} width="max-w-[8rem]" tone={tone} />;
+    case 'modelCode':
+      return <Clip value={r.modelCode} width="max-w-[7rem]" mono tone={tone} />;
+    case 'machineName':
+      return <Clip value={r.machineName} width="max-w-[10rem]" tone={tone} />;
+    case 'barcode':
+      return <Clip value={r.barcode} width="max-w-[8rem]" mono tone={tone} />;
+    case 'partCategory':
+      return <Clip value={r.partCategory} width="max-w-[8rem]" tone={tone} />;
+    case 'partCode':
+      return <Clip value={r.partCode} width="max-w-[6rem]" mono tone={tone} />;
+    case 'partName':
+      return <Clip value={r.partName} width="max-w-[11rem]" tone={tone} />;
+    case 'qty':
+      return <AdminTd className={`whitespace-nowrap ${tone}`}>{qtyText(r.qty)}</AdminTd>;
+    case 'newBarcode':
+      return <Clip value={r.newBarcode} width="max-w-[8rem]" mono tone={tone} />;
+    case 'oldBarcode':
+      return <Clip value={r.oldBarcode} width="max-w-[8rem]" mono tone={tone} />;
+    case 'remarks':
+      return <Clip value={r.remarks} width="max-w-[9rem]" tone={tone} />;
+  }
 }
