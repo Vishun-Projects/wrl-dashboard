@@ -31,6 +31,7 @@ type SortKey =
   | 'barcode'
   | 'machineName'
   | 'modelCode'
+  | 'partCategory'
   | 'partCode'
   | 'partName'
   | 'qty'
@@ -53,6 +54,7 @@ function buildParams(opts: {
   engineer: string;
   status: string;
   part: string;
+  category: string;
   sort: { key: SortKey; dir: 'asc' | 'desc' } | null;
   page?: number;
   pageSize?: number;
@@ -71,6 +73,7 @@ function buildParams(opts: {
   if (opts.engineer) params.set('engineer', opts.engineer);
   if (opts.status) params.set('status', opts.status);
   if (opts.part.trim()) params.set('part', opts.part.trim());
+  if (opts.category) params.set('category', opts.category);
   if (opts.sort) {
     params.set('sort', opts.sort.key);
     params.set('dir', opts.sort.dir);
@@ -158,6 +161,7 @@ const COLUMNS: Array<{ key: SortKey; label: string; tone: string; head: string }
   { key: 'modelCode', label: 'Model', tone: WORK_TONE, head: WORK_HEAD },
   { key: 'machineName', label: 'Description', tone: WORK_TONE, head: WORK_HEAD },
   { key: 'barcode', label: 'M/C Serial no.', tone: WORK_TONE, head: WORK_HEAD },
+  { key: 'partCategory', label: 'Part category', tone: PART_TONE, head: PART_HEAD },
   { key: 'partCode', label: 'Part code', tone: PART_TONE, head: PART_HEAD },
   { key: 'partName', label: 'Part', tone: PART_TONE, head: PART_HEAD },
   { key: 'qty', label: 'Qty', tone: PART_TONE, head: PART_HEAD },
@@ -179,6 +183,7 @@ export default function CallVisitsPageClient() {
   const [client, setClient] = useState('');
   const [engineer, setEngineer] = useState('');
   const [status, setStatus] = useState('');
+  const [category, setCategory] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 50;
   const [options, setOptions] = useState<CallPartsOptions>({
@@ -187,6 +192,7 @@ export default function CallVisitsPageClient() {
     clients: [],
     engineers: [],
     statuses: [],
+    categories: [],
   });
   const [data, setData] = useState<CallPartsRowsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -223,6 +229,10 @@ export default function CallVisitsPageClient() {
     () => options.statuses.map((b) => ({ value: b, label: b })),
     [options.statuses]
   );
+  const categoryOptions = useMemo<FilterSelectOption[]>(
+    () => options.categories.map((b) => ({ value: b, label: b })),
+    [options.categories]
+  );
 
   const filterArgs = {
     range,
@@ -234,6 +244,7 @@ export default function CallVisitsPageClient() {
     engineer,
     status,
     part,
+    category,
   };
 
   const loadOptions = useCallback(async () => {
@@ -247,6 +258,7 @@ export default function CallVisitsPageClient() {
       engineer: '',
       status: '',
       part: '',
+      category: '',
       sort: null,
     });
     params.set('mode', 'options');
@@ -260,6 +272,7 @@ export default function CallVisitsPageClient() {
       clients: list('clients'),
       engineers: list('engineers'),
       statuses: list('statuses'),
+      categories: list('categories'),
     });
   }, [range]);
 
@@ -276,7 +289,7 @@ export default function CallVisitsPageClient() {
     } finally {
       setLoading(false);
     }
-  }, [range, search, plant, branch, client, customer, engineer, status, part, sort, page]);
+  }, [range, search, plant, branch, client, customer, engineer, status, part, category, sort, page]);
 
   useEffect(() => {
     void loadOptions();
@@ -417,6 +430,20 @@ export default function CallVisitsPageClient() {
               panelClassName="w-56"
               layout="inline"
             />
+            <FilterSelect
+              label="Part category"
+              emptyLabel="All categories"
+              options={categoryOptions}
+              selected={category ? [category] : []}
+              mode="single"
+              onChange={(values) => {
+                setPage(1);
+                setCategory(pickSingle(values));
+              }}
+              searchPlaceholder="Search category…"
+              panelClassName="w-64"
+              layout="inline"
+            />
             <input
               type="search"
               value={partInput}
@@ -493,7 +520,7 @@ export default function CallVisitsPageClient() {
               <tbody>
                 {loading ? (
                   <AdminTr>
-                    <td className="px-3 py-3 text-[12px] text-slate-500" colSpan={20}>
+                    <td className="px-3 py-3 text-[12px] text-slate-500" colSpan={21}>
                       Loading…
                     </td>
                   </AdminTr>
@@ -574,6 +601,7 @@ function PartRow({ row: r, groupStart }: { row: CallPartRow; groupStart: boolean
       <Clip value={r.modelCode} width="max-w-[7rem]" mono tone={`${WORK_TONE} ${edge}`} />
       <Clip value={r.machineName} width="max-w-[10rem]" tone={`${WORK_TONE} ${edge}`} />
       <Clip value={r.barcode} width="max-w-[8rem]" mono tone={`${WORK_TONE} ${edge}`} />
+      <Clip value={r.partCategory} width="max-w-[8rem]" tone={`${PART_TONE} ${edge}`} />
       <Clip value={r.partCode} width="max-w-[6rem]" mono tone={`${PART_TONE} ${edge}`} />
       <Clip value={r.partName} width="max-w-[11rem]" tone={`${PART_TONE} ${edge}`} />
       <AdminTd className={`whitespace-nowrap ${PART_TONE} ${edge}`}>{qtyText(r.qty)}</AdminTd>

@@ -4,6 +4,7 @@ export type CallPartRow = {
   callNo: string | null;
   visitNo: string | null;
   visitAt: string | null;
+  partCategory: string | null;
   partCode: string | null;
   partName: string | null;
   qty: string | null;
@@ -37,4 +38,5 @@ export type CallPartsOptions = {
   clients: string[];
   engineers: string[];
   statuses: string[];
+  categories: string[];
 };

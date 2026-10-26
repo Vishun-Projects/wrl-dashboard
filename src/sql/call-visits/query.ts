@@ -13,6 +13,8 @@ export type CallPartsFilterInput = {
   status: string;
   /** Part name or code contains. */
   part: string;
+  /** Exact item-category name (compressor, motor, …). */
+  category: string;
   isHod: boolean;
   assignedOffices: string[];
 };
@@ -42,6 +44,19 @@ export const CALL_PARTS_CUSTOMER = `NULLIF(btrim(h.party_name), '')`;
 export const CALL_PARTS_STATUS = `NULLIF(btrim(h.status_label), '')`;
 export const CALL_PARTS_ENGINEER = `NULLIF(btrim(h.engineer_name), '')`;
 export const CALL_PARTS_MODEL = `NULLIF(btrim(h.item_code), '')`;
+
+/** mstitems category (compressor, motor, …) via the synced item master. Not on the count path. */
+export const CALL_PARTS_CATEGORY_JOIN = `
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(NULLIF(btrim(c.vname), ''), NULLIF(btrim(c.vshortname), '')) AS item_category
+    FROM crm_mstitems i
+    LEFT JOIN crm_mstitemcategory c ON c.ncode = i.nitemcategory
+    WHERE i.norm_vitemcode = regexp_replace(btrim(p.part_code), '^0+', '')
+    ORDER BY i.bactive DESC, i.ncode
+    LIMIT 1
+  ) part_cat ON true
+`;
+export const CALL_PARTS_CATEGORY = `part_cat.item_category`;
 
 export const CALL_PARTS_HOT_COLS = `
   h.logged_at AS call_logged_at,
@@ -91,6 +106,7 @@ export function buildCallPartsFilterSql(filters: CallPartsFilterInput): CallPart
   exact(CALL_PARTS_CLIENT, filters.client);
   exact(CALL_PARTS_ENGINEER, filters.engineer);
   exact(CALL_PARTS_STATUS, filters.status);
+  exact(CALL_PARTS_CATEGORY, filters.category);
 
   const customer = filters.customer.trim();
   if (customer) {

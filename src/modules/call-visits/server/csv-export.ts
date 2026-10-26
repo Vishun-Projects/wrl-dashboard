@@ -2,7 +2,13 @@ import { withBulkReadClient } from '@/lib/read-model/db';
 import { responseForCsvStream, csvDownloadHeaders } from '@/lib/net/csv-gzip-response';
 import { escapeCsvCell } from '@/lib/utils/csv';
 import { formatUiDate } from '@/lib/dates/ui-date';
-import { buildCallPartsFilterSql, CALL_PARTS_FROM, CALL_PARTS_HOT_COLS } from '@/sql/call-visits/query';
+import {
+  buildCallPartsFilterSql,
+  CALL_PARTS_CATEGORY,
+  CALL_PARTS_CATEGORY_JOIN,
+  CALL_PARTS_FROM,
+  CALL_PARTS_HOT_COLS,
+} from '@/sql/call-visits/query';
 import type { CallPartsFilters } from '@/modules/call-visits/server/query';
 
 const PAGE = 2_000;
@@ -24,6 +30,7 @@ const HEADERS = [
   'Model',
   'Description',
   'M/C Serial no.',
+  'Part category',
   'Part code',
   'Part',
   'Qty',
@@ -38,6 +45,7 @@ type CsvDbRow = {
   call_no: string | null;
   visit_no: string | null;
   visit_at: string | Date | null;
+  part_category: string | null;
   part_code: string | null;
   part_name: string | null;
   qty: string | null;
@@ -73,6 +81,7 @@ function line(row: CsvDbRow): string {
     row.model_code,
     row.machine_name,
     row.barcode,
+    row.part_category,
     row.part_code,
     row.part_name,
     row.qty,
@@ -121,10 +130,13 @@ export function buildCallPartsCsvStream(filters: CallPartsFilters): Response {
             }
             pageParams.push(limit);
             const res = await client.query<CsvDbRow>(
-              `SELECT p.ncode, p.nofficeid, p.call_no, p.visit_no, p.visit_at, p.part_code, p.part_name, p.qty,
+              `SELECT p.ncode, p.nofficeid, p.call_no, p.visit_no, p.visit_at,
+                      ${CALL_PARTS_CATEGORY} AS part_category,
+                      p.part_code, p.part_name, p.qty,
                       p.old_barcode, p.new_barcode, p.remarks,
                       ${CALL_PARTS_HOT_COLS}
                ${CALL_PARTS_FROM}
+               ${CALL_PARTS_CATEGORY_JOIN}
                WHERE ${where}
                ${keyset}
                ORDER BY p.ncode, p.nofficeid

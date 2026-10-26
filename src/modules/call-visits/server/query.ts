@@ -5,6 +5,8 @@ import {
   CALL_PARTS_CLIENT,
   CALL_PARTS_CUSTOMER,
   CALL_PARTS_ENGINEER,
+  CALL_PARTS_CATEGORY,
+  CALL_PARTS_CATEGORY_JOIN,
   CALL_PARTS_FROM,
   CALL_PARTS_HOT_COLS,
   CALL_PARTS_MODEL,
@@ -53,6 +55,7 @@ const SORT_EXPR = {
   barcode: `NULLIF(btrim(h.serial), '')`,
   machineName: `NULLIF(btrim(h.item_name), '')`,
   modelCode: CALL_PARTS_MODEL,
+  partCategory: CALL_PARTS_CATEGORY,
   partCode: 'p.part_code',
   partName: 'p.part_name',
   qty: `CASE WHEN p.qty ~ '^[0-9]+(\\.[0-9]+)?$' THEN p.qty::numeric END`,
@@ -99,6 +102,7 @@ export function parseCallPartsFilters(
     engineer: searchParams.get('engineer')?.trim() ?? '',
     status: searchParams.get('status')?.trim() ?? '',
     part: searchParams.get('part')?.trim() ?? '',
+    category: searchParams.get('category')?.trim() ?? '',
     page,
     pageSize,
     sort,
@@ -129,6 +133,7 @@ type DbRow = {
   call_no: string | null;
   visit_no: string | null;
   visit_at: string | Date | null;
+  part_category: string | null;
   part_code: string | null;
   part_name: string | null;
   qty: string | null;
@@ -155,6 +160,7 @@ function mapRow(row: DbRow): CallPartRow {
     callNo: row.call_no,
     visitNo: row.visit_no,
     visitAt: ymd(row.visit_at),
+    partCategory: row.part_category,
     partCode: row.part_code,
     partName: row.part_name,
     qty: row.qty,
@@ -180,17 +186,25 @@ export async function fetchCallPartsRows(filters: CallPartsFilters): Promise<Cal
   const offset = (filters.page - 1) * filters.pageSize;
   const order = listOrder(filters.sort, filters.dir);
   const pageParams = [...params, filters.pageSize, offset];
-  const pageSql = `SELECT p.ncode, p.nofficeid, p.call_no, p.visit_no, p.visit_at, p.part_code, p.part_name, p.qty,
+  const pageSql = `SELECT p.ncode, p.nofficeid, p.call_no, p.visit_no, p.visit_at,
+              ${CALL_PARTS_CATEGORY} AS part_category,
+              p.part_code, p.part_name, p.qty,
               p.old_barcode, p.new_barcode, p.remarks,
               ${CALL_PARTS_HOT_COLS}
        ${CALL_PARTS_FROM}
+       ${CALL_PARTS_CATEGORY_JOIN}
        WHERE ${where}
        ORDER BY ${order}
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
   const [res, counted, state] = await Promise.all([
     withAppClient((client) => client.query<DbRow>(pageSql, pageParams)),
     withAppClient((client) =>
-      client.query<{ total: number }>(`SELECT count(*)::int AS total ${CALL_PARTS_FROM} WHERE ${where}`, params)
+      client.query<{ total: number }>(
+        `SELECT count(*)::int AS total ${CALL_PARTS_FROM} ${
+          filters.category.trim() ? CALL_PARTS_CATEGORY_JOIN : ''
+        } WHERE ${where}`,
+        params
+      )
     ),
     withAppClient((client) =>
       client.query<{ last_run_at: Date | null }>(`SELECT last_run_at FROM sync_state WHERE entity = $1`, [
@@ -218,6 +232,7 @@ export async function fetchCallPartsOptions(filters: CallPartsFilters): Promise<
     engineer: '',
     status: '',
     part: '',
+    category: '',
   };
   const { where, params } = buildCallPartsFilterSql(scoped);
   const res = await withAppClient((client) =>
@@ -227,14 +242,17 @@ export async function fetchCallPartsOptions(filters: CallPartsFilters): Promise<
       clients: string[] | null;
       engineers: string[] | null;
       statuses: string[] | null;
+      categories: string[] | null;
     }>(
       `SELECT
          coalesce(array_agg(DISTINCT ${CALL_PARTS_PLANT}) FILTER (WHERE coalesce(${CALL_PARTS_PLANT}, '') <> ''), '{}') AS plants,
          coalesce(array_agg(DISTINCT ${CALL_PARTS_BRANCH}) FILTER (WHERE coalesce(${CALL_PARTS_BRANCH}, '') <> '' AND upper(${CALL_PARTS_BRANCH}) <> 'UNALLOCATED'), '{}') AS branches,
          coalesce(array_agg(DISTINCT ${CALL_PARTS_CLIENT}) FILTER (WHERE coalesce(${CALL_PARTS_CLIENT}, '') <> ''), '{}') AS clients,
          coalesce(array_agg(DISTINCT ${CALL_PARTS_ENGINEER}) FILTER (WHERE coalesce(${CALL_PARTS_ENGINEER}, '') <> ''), '{}') AS engineers,
-         coalesce(array_agg(DISTINCT ${CALL_PARTS_STATUS}) FILTER (WHERE coalesce(${CALL_PARTS_STATUS}, '') <> ''), '{}') AS statuses
+         coalesce(array_agg(DISTINCT ${CALL_PARTS_STATUS}) FILTER (WHERE coalesce(${CALL_PARTS_STATUS}, '') <> ''), '{}') AS statuses,
+         coalesce(array_agg(DISTINCT ${CALL_PARTS_CATEGORY}) FILTER (WHERE coalesce(${CALL_PARTS_CATEGORY}, '') <> ''), '{}') AS categories
        ${CALL_PARTS_FROM}
+       ${CALL_PARTS_CATEGORY_JOIN}
        WHERE ${where}`,
       params
     )
@@ -247,5 +265,6 @@ export async function fetchCallPartsOptions(filters: CallPartsFilters): Promise<
     clients: labels(row?.clients),
     engineers: labels(row?.engineers),
     statuses: labels(row?.statuses),
+    categories: labels(row?.categories),
   };
 }
