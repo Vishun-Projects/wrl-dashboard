@@ -11,6 +11,7 @@
 | Attendance sync | `sync-worker:attendance-sync` | `attendance/server/sync/run.ts` | nightly timer | — | `modules/attendance/server/sync` |
 | User locations | `sync-worker:user-locations-sync` | `attendance/.../user-locations/run.ts` | nightly timer | — | `modules/attendance` |
 | Cancelled register | `sync-worker:cancelled-register-sync` | `cancelled-calls/server/sync/run.ts` | nightly timer | — | `modules/cancelled-calls` |
+| Call parts | `sync-worker:call-visits` | `call-visits/server/sync/run.ts` | `call-visits-sync.sh` | `call_visits_sync` | `modules/call-visits` |
 | ARCP incremental | `sync-worker:arcp-incremental` | `cli.ts arcp-incremental` | sync daemon | — | `modules/arcp-claims/server/sync` |
 | MIS email digest | `mis-email:digest` | `mis-email/services/cli.ts digest` | `mis-email-digest.sh` / `mail-scheduler.sh` | `mis_email_digest` | `mis-email` |
 | Subcontractor stock | `subcontractor-stock:cron` | `subcontractor-stock/services/cli.ts` | `subcontractor-stock-cron.sh` / `mail-scheduler.sh` | `subcontractor_stock` | `subcontractor-stock` |

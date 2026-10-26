@@ -41,6 +41,13 @@ describe('canAccessPath', () => {
     expect(canAccessPath(['manage_users'], '/admin/vps-cron')).toBe(false);
   });
 
+  it('allows call visits via dedicated or MIS reports permission', () => {
+    expect(canAccessPath(['page_call_visits'], '/report/call-visits')).toBe(true);
+    expect(canAccessPath(['page_mis_reports'], '/report/call-visits')).toBe(true);
+    expect(canAccessPath(['tab_mis_register'], '/report/call-visits')).toBe(true);
+    expect(canAccessPath(['page_arcp_claims'], '/report/call-visits')).toBe(false);
+  });
+
   it('allows spare loan check via dedicated or MIS reports permission', () => {
     expect(canAccessPath(['page_spare_loan_check'], '/report/spare-loan-check')).toBe(true);
     expect(canAccessPath(['page_mis_reports'], '/report/spare-loan-check')).toBe(true);

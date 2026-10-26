@@ -11,6 +11,7 @@ export const VPS_CRON_JOB_IDS = [
   'cancelled_call_digest',
   'subcontractor_stock',
   'evening_ops_sequencer',
+  'call_visits_sync',
 ] as const;
 
 export type VpsCronJobId = (typeof VPS_CRON_JOB_IDS)[number];
@@ -94,6 +95,12 @@ export const VPS_CRON_CATALOG: readonly VpsCronJobDef[] = [
     label: 'Evening ops mail sequencer',
     schedule: '16:00 IST daily (inventory + probe mails to ops → final OK/FAIL status)',
     script: 'evening-ops-sequencer.sh',
+  },
+  {
+    id: 'call_visits_sync',
+    label: 'Call visits sync',
+    schedule: 'Every 2 hours IST (full backfill, then edited visits)',
+    script: 'call-visits-sync.sh',
   },
 ] as const;
 

@@ -180,6 +180,14 @@ export const RBAC_PAGES: RbacPage[] = [
     group: 'Reports',
   },
   {
+    id: 'call_visits',
+    permission: 'page_call_visits',
+    path: '/report/call-visits',
+    label: 'Call Parts',
+    description: 'Every CRM visit with on-site times and work done, synced into Postgres',
+    group: 'Reports',
+  },
+  {
     id: 'spare_loan_check',
     permission: 'page_spare_loan_check',
     path: '/report/spare-loan-check',
@@ -445,10 +453,11 @@ export function canAccessPage(permissions: string[], pageId: string): boolean {
     if (canAccessMisTab(permissions, 'register')) return true;
   }
 
-  // ZSS02 / spare loan check / MB51 spare stock / compressor barcodes / MB51 aging / MB51 table: MIS reports audience until roles matrix is updated.
+  // ZSS02 / spare loan / call visits / MB51 spare stock / compressor barcodes / MB51 aging: MIS reports audience until roles matrix is updated.
   if (
     pageId === 'zss02' ||
     pageId === 'spare_loan_check' ||
+    pageId === 'call_visits' ||
     pageId === 'spare_stock_analysis' ||
     pageId === 'compressor_barcodes' ||
     pageId === 'mb51_aging' ||

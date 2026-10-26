@@ -28,6 +28,7 @@ const ALL_PERMISSION_SEED = [
   { name: 'page_athena_reconciliation', description: 'Failed CRM ingestion calls matched against the call register' },
   { name: 'page_cancelled_calls', description: 'Cancelled call register from Postgres — view and download' },
   { name: 'page_defective_serials', description: 'Defective part serials returned to branch — pending vs done from CRM' },
+  { name: 'page_call_visits', description: 'Every CRM visit with on-site times and work done, synced into Postgres' },
   { name: 'manage_users', description: 'Create and edit portal users' },
   { name: 'manage_roles', description: 'Define roles and page permissions' },
   { name: 'page_mis_email_settings', description: 'Org settings, MIS email routing, major repair and cancelled-call digests' },
