@@ -337,6 +337,18 @@ export default function CallVisitsPageClient() {
   const [status, setStatus] = useState('');
   const [category, setCategory] = useState('');
   const [barcodeMismatch, setBarcodeMismatch] = useState(false);
+  /** Rectangular cell select (browser table select always grabs whole rows). */
+  type CellSel = { colLo: number; colHi: number; rowLo: number; rowHi: number };
+  const colDragRef = useRef<{
+    col: number;
+    row: number;
+    armed: boolean;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [colSel, setColSel] = useState<CellSel | null>(null);
+  const colSelRef = useRef<CellSel | null>(null);
+  colSelRef.current = colSel;
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(250);
   const [options, setOptions] = useState<CallPartsOptions>({
@@ -621,6 +633,55 @@ export default function CallVisitsPageClient() {
   const subtitle = data?.syncedAt
     ? `One row per part used on a call · last sync ${formatUiDateTime(data.syncedAt)}`
     : 'One row per part used on a call · sync has not run yet';
+
+  useEffect(() => {
+    const endDrag = () => {
+      const drag = colDragRef.current;
+      if (!drag) return;
+      const table = document.querySelector('.call-parts-grid table') as HTMLElement | null;
+      if (table) table.style.userSelect = '';
+      colDragRef.current = null;
+    };
+    window.addEventListener('mouseup', endDrag);
+    return () => window.removeEventListener('mouseup', endDrag);
+  }, []);
+
+  // Drag clears the native selection, so Ctrl+C won't hit a focused table onCopy —
+  // listen on document and write TSV (+ HTML table) from the highlighted range.
+  useEffect(() => {
+    if (!colSel) return;
+
+    const onCopy = (e: ClipboardEvent) => {
+      const sel = colSelRef.current;
+      if (!sel) return;
+      const root = document.querySelector('.call-parts-grid');
+      if (!root) return;
+      const lines: string[] = [];
+      const rowsHtml: string[] = [];
+      for (let r = sel.rowLo; r <= sel.rowHi; r++) {
+        const tr = root.querySelector(`tbody tr[data-row-index="${r}"]`);
+        if (!tr) continue;
+        const cells: string[] = [];
+        const tds: string[] = [];
+        for (let c = sel.colLo; c <= sel.colHi; c++) {
+          const td = tr.children[c] as HTMLElement | undefined;
+          const text = (td?.innerText ?? td?.textContent ?? '').replace(/\s+/g, ' ').trim();
+          cells.push(text);
+          tds.push(`<td>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</td>`);
+        }
+        lines.push(cells.join('\t'));
+        rowsHtml.push(`<tr>${tds.join('')}</tr>`);
+      }
+      const plain = lines.join('\n');
+      if (!plain) return;
+      e.preventDefault();
+      e.clipboardData?.setData('text/plain', plain);
+      e.clipboardData?.setData('text/html', `<table>${rowsHtml.join('')}</table>`);
+    };
+
+    document.addEventListener('copy', onCopy);
+    return () => document.removeEventListener('copy', onCopy);
+  }, [colSel]);
 
   return (
     <PageShell
@@ -930,45 +991,108 @@ export default function CallVisitsPageClient() {
               </p>
             }
           >
-            <AdminTable className="w-full min-w-[1100px] border-separate border-spacing-0 text-left [&_td]:!px-1.5 [&_td]:!py-1 [&_td]:text-[11px] [&_td]:leading-snug">
-              <thead>
-                <tr>
-                  {visibleColumns.map((col) => (
-                    <AdminTh
-                      key={col.key}
-                      className={`${col.head} !font-bold text-slate-800 ${col.key === 'callNo' ? PIN_HEAD : HEAD_STICKY}`}
-                      sortable
-                      sortKey={col.key}
-                      sort={sort}
-                      onSort={(k) => {
-                        setPage(1);
-                        onSort(k as SortKey);
-                      }}
-                    >
-                      {col.label}
-                    </AdminTh>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className={loading && rows.length > 0 ? 'opacity-60' : undefined}>
-                {loading && rows.length === 0 ? (
-                  <AdminTr>
-                    <td className="px-3 py-3 text-[12px] text-slate-500" colSpan={visibleColumns.length}>
-                      Loading…
-                    </td>
-                  </AdminTr>
-                ) : rows.length === 0 ? null : (
-                  rows.map((r, i) => (
-                    <PartRow
-                      key={`${r.ncode}-${r.nofficeid}`}
-                      row={r}
-                      columns={visibleColumns}
-                      groupStart={i > 0 && r.callNo !== rows[i - 1]?.callNo}
-                    />
-                  ))
-                )}
-              </tbody>
-            </AdminTable>
+            <div
+              className="call-parts-grid"
+              onMouseDown={(e) => {
+                if (e.button !== 0) return;
+                const td = (e.target as HTMLElement).closest('tbody td');
+                if (!td || (td as HTMLTableCellElement).colSpan > 1) {
+                  setColSel(null);
+                  colDragRef.current = null;
+                  return;
+                }
+                const tr = td.parentElement;
+                const rowIdx = Number(tr?.getAttribute('data-row-index'));
+                if (!Number.isFinite(rowIdx)) return;
+                setColSel(null);
+                colDragRef.current = {
+                  col: (td as HTMLTableCellElement).cellIndex,
+                  row: rowIdx,
+                  armed: false,
+                  x: e.clientX,
+                  y: e.clientY,
+                };
+              }}
+              onMouseMove={(e) => {
+                const drag = colDragRef.current;
+                if (!drag || (e.buttons & 1) === 0) return;
+                if (!drag.armed) {
+                  if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 5) return;
+                  drag.armed = true;
+                  const table = e.currentTarget.querySelector('table');
+                  if (table) table.style.userSelect = 'none';
+                  window.getSelection()?.removeAllRanges();
+                  setColSel({
+                    colLo: drag.col,
+                    colHi: drag.col,
+                    rowLo: drag.row,
+                    rowHi: drag.row,
+                  });
+                }
+                const under = document.elementFromPoint(e.clientX, e.clientY);
+                const td = under?.closest?.('tbody td') as HTMLTableCellElement | null;
+                if (!td || td.colSpan > 1) return;
+                const rowIdx = Number(td.parentElement?.getAttribute('data-row-index'));
+                if (!Number.isFinite(rowIdx)) return;
+                const next: CellSel = {
+                  colLo: Math.min(drag.col, td.cellIndex),
+                  colHi: Math.max(drag.col, td.cellIndex),
+                  rowLo: Math.min(drag.row, rowIdx),
+                  rowHi: Math.max(drag.row, rowIdx),
+                };
+                setColSel((prev) =>
+                  prev &&
+                  prev.colLo === next.colLo &&
+                  prev.colHi === next.colHi &&
+                  prev.rowLo === next.rowLo &&
+                  prev.rowHi === next.rowHi
+                    ? prev
+                    : next
+                );
+              }}
+            >
+              <AdminTable className="w-full min-w-[1100px] border-separate border-spacing-0 text-left [&_td]:!px-1.5 [&_td]:!py-1 [&_td]:text-[11px] [&_td]:leading-snug">
+                <thead>
+                  <tr>
+                    {visibleColumns.map((col) => (
+                      <AdminTh
+                        key={col.key}
+                        className={`${col.head} !font-bold text-slate-800 ${col.key === 'callNo' ? PIN_HEAD : HEAD_STICKY}`}
+                        sortable
+                        sortKey={col.key}
+                        sort={sort}
+                        onSort={(k) => {
+                          setPage(1);
+                          onSort(k as SortKey);
+                        }}
+                      >
+                        {col.label}
+                      </AdminTh>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className={loading && rows.length > 0 ? 'opacity-60' : undefined}>
+                  {loading && rows.length === 0 ? (
+                    <AdminTr>
+                      <td className="px-3 py-3 text-[12px] text-slate-500" colSpan={visibleColumns.length}>
+                        Loading…
+                      </td>
+                    </AdminTr>
+                  ) : rows.length === 0 ? null : (
+                    rows.map((r, i) => (
+                      <PartRow
+                        key={`${r.ncode}-${r.nofficeid}`}
+                        row={r}
+                        rowIndex={i}
+                        columns={visibleColumns}
+                        groupStart={i > 0 && r.callNo !== rows[i - 1]?.callNo}
+                        colSel={colSel}
+                      />
+                    ))
+                  )}
+                </tbody>
+              </AdminTable>
+            </div>
           </AdminTableCard>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[12px] text-slate-600">
             <span>
@@ -1021,20 +1145,33 @@ export default function CallVisitsPageClient() {
 
 function PartRow({
   row: r,
+  rowIndex,
   columns,
   groupStart,
+  colSel,
 }: {
   row: CallPartRow;
+  rowIndex: number;
   columns: typeof COLUMNS;
   groupStart: boolean;
+  colSel: { colLo: number; colHi: number; rowLo: number; rowHi: number } | null;
 }) {
   const edge = groupStart
     ? 'border-b border-slate-100 shadow-[inset_0_1px_0_0_#94a3b8]'
     : 'border-b border-slate-100';
+  const rowInSel = colSel != null && rowIndex >= colSel.rowLo && rowIndex <= colSel.rowHi;
   return (
-    <AdminTr>
-      {columns.map((col) => (
-        <PartCell key={col.key} col={col} row={r} edge={edge} />
+    <AdminTr data-row-index={rowIndex}>
+      {columns.map((col, colIndex) => (
+        <PartCell
+          key={col.key}
+          col={col}
+          row={r}
+          edge={edge}
+          selected={
+            rowInSel && colIndex >= colSel!.colLo && colIndex <= colSel!.colHi
+          }
+        />
       ))}
     </AdminTr>
   );
@@ -1044,12 +1181,14 @@ function PartCell({
   col,
   row: r,
   edge,
+  selected,
 }: {
   col: (typeof COLUMNS)[number];
   row: CallPartRow;
   edge: string;
+  selected: boolean;
 }) {
-  const tone = `${col.tone} ${edge}`;
+  const tone = `${col.tone} ${edge}${selected ? ' !bg-sky-200' : ''}`;
   switch (col.key) {
     case 'callNo':
       return (

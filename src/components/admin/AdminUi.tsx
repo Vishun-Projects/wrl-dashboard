@@ -177,17 +177,19 @@ export function AdminTr({
   children,
   className = '',
   onClick,
+  ...rest
 }: {
   children: React.ReactNode;
   className?: string;
   onClick?: () => void;
-}) {
+} & Omit<React.HTMLAttributes<HTMLTableRowElement>, 'onClick' | 'className' | 'children'>) {
   return (
     <tr
       className={`border-b border-slate-100 transition-colors hover:bg-bg-soft/80 ${
         onClick ? 'cursor-pointer' : ''
       } ${className}`}
       onClick={onClick}
+      {...rest}
     >
       {children}
     </tr>
