@@ -212,8 +212,6 @@ export function Sidebar({ user }: SidebarProps) {
         break;
       }
     }
-    // reportSections is derived from pathname + permissions each render
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to route changes
   }, [pathname]);
 
   const sidebarContent = (
