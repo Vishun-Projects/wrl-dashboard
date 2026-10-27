@@ -165,7 +165,7 @@ export default function RolesPage() {
       });
     } catch {
       feedback.actionFailed('Failed to load access control data');
-      router.push('/report');
+      router.push('/dashboard');
     } finally {
       setLoading(false);
     }

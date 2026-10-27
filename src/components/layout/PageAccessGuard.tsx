@@ -37,12 +37,7 @@ export function PageAccessGuard({ children }: PageAccessGuardProps) {
     if (accessAllowed !== false || !pathname) return;
 
     feedback.accessDenied();
-    const permissions: string[] = userProfile?.permissions ?? [];
-    const fallback =
-      pathname.startsWith('/report') || pathname.startsWith('/admin')
-        ? defaultLandingPath(permissions)
-        : '/report';
-    router.replace(fallback);
+    router.replace(defaultLandingPath(userProfile?.permissions ?? []));
   }, [accessAllowed, pathname, router, userProfile]);
 
   if (loadingProfile || !userProfile || accessAllowed === null) {

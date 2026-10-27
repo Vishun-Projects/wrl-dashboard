@@ -40,7 +40,7 @@ function routeGuards(request: NextRequest, hasUser: boolean): NextResponse | nul
 
   if (hasUser && request.nextUrl.pathname === '/calls') {
     const url = request.nextUrl.clone();
-    url.pathname = '/report';
+    url.pathname = '/dashboard';
     return NextResponse.redirect(url);
   }
 

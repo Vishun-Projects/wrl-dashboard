@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db/prisma';
 import type { SummaryDashboard } from '@/lib/summary/derive';
 import { normalizeCallTypeDisplay } from '@/lib/call/display/call-type';
+import { formatLocalDate } from '@/lib/dates/local-date';
 import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/sql/read-model/summary-call-filters';
 import { AGING_BUCKET_SQL, openCallsFromAging } from '@/lib/aging/buckets';
 import {
@@ -455,4 +456,188 @@ export function parseCsvFilter(value: string | null | undefined): string[] {
 
 export function parseCallTypes(value: string | null | undefined): string[] {
   return parseCsvFilter(value);
+}
+
+export type OpsKpiRow = {
+  total_calls: number;
+  solved_calls: number;
+  cancelled_calls: number;
+  open_calls: number;
+  open_unallocated: number;
+  assigned: number;
+  tech_solved: number;
+  age_2: number;
+  age_3: number;
+  age_7: number;
+  age_15: number;
+};
+
+export type OpsRegionRow = OpsKpiRow & { region: string };
+export type OpsBranchRow = OpsKpiRow & { branch: string; region: string };
+export type OpsCallTypeRow = { call_type: string; total_calls: number; open_calls: number };
+
+export type OpsKpis = OpsKpiRow & {
+  startDate: string;
+  endDate: string;
+  agingAsOf: string;
+  regions: OpsRegionRow[];
+  topBranches: OpsBranchRow[];
+  callTypes: OpsCallTypeRow[];
+};
+
+const OPS_KPI_SELECT = `
+  count(*)::int AS total_calls,
+  count(*) FILTER (WHERE h.status_bucket IN ('solved', 'tech_solved'))::int AS solved_calls,
+  count(*) FILTER (WHERE h.status_bucket = 'cancelled')::int AS cancelled_calls,
+  count(*) FILTER (WHERE h.status_bucket IN ('open_unallocated', 'assigned'))::int AS open_calls,
+  count(*) FILTER (WHERE h.status_bucket = 'open_unallocated')::int AS open_unallocated,
+  count(*) FILTER (WHERE h.status_bucket = 'assigned')::int AS assigned,
+  count(*) FILTER (WHERE h.status_bucket = 'tech_solved')::int AS tech_solved,
+  count(*) FILTER (
+    WHERE h.status_bucket IN ('open_unallocated', 'assigned')
+      AND ($3::date - h.logged_at::date) <= 2
+  )::int AS age_2,
+  count(*) FILTER (
+    WHERE h.status_bucket IN ('open_unallocated', 'assigned')
+      AND ($3::date - h.logged_at::date) BETWEEN 3 AND 7
+  )::int AS age_3,
+  count(*) FILTER (
+    WHERE h.status_bucket IN ('open_unallocated', 'assigned')
+      AND ($3::date - h.logged_at::date) BETWEEN 8 AND 15
+  )::int AS age_7,
+  count(*) FILTER (
+    WHERE h.status_bucket IN ('open_unallocated', 'assigned')
+      AND ($3::date - h.logged_at::date) > 15
+  )::int AS age_15
+`;
+
+function normalizeOpsRow(row: Partial<OpsKpiRow> | undefined): OpsKpiRow {
+  const age_2 = row?.age_2 ?? 0;
+  const age_3 = row?.age_3 ?? 0;
+  const age_7 = row?.age_7 ?? 0;
+  const age_15 = row?.age_15 ?? 0;
+  const openFromAging = openCallsFromAging({ age_2, age_3, age_7, age_15 });
+  const open_unallocated = row?.open_unallocated ?? 0;
+  const assigned = row?.assigned ?? 0;
+  return {
+    total_calls: row?.total_calls ?? 0,
+    solved_calls: row?.solved_calls ?? 0,
+    cancelled_calls: row?.cancelled_calls ?? 0,
+    open_calls: openFromAging > 0 ? openFromAging : (row?.open_calls ?? 0),
+    open_unallocated,
+    assigned,
+    tech_solved: row?.tech_solved ?? 0,
+    age_2,
+    age_3,
+    age_7,
+    age_15,
+  };
+}
+
+/** National + regional MIS ops rollup for the home dashboard (this month by default). */
+export async function queryOpsKpis(params: SummaryQueryParams): Promise<OpsKpis> {
+  const now = new Date();
+  const startDate =
+    params.startDate || formatLocalDate(new Date(now.getFullYear(), now.getMonth(), 1));
+  const endDate = params.endDate || formatLocalDate(now);
+  const agingDate = params.agingAsOf || endDate;
+
+  const periodStart = `${startDate}T00:00:00`;
+  const periodEnd = `${endDate}T23:59:59`;
+
+  const officeFilter = buildOfficeFilter(params, 'h', 4, 'nofficeid');
+  const callTypeFilter = buildCallTypeFilter(params, 'h', officeFilter.nextIdx);
+  const values = [
+    periodStart,
+    periodEnd,
+    agingDate,
+    ...officeFilter.values,
+    ...callTypeFilter.values,
+  ];
+
+  // $3 (agingAsOf) must appear even when office/call-type filters are empty (HOD/national),
+  // otherwise call-type mix query binds 3 args against a 2-placeholder statement.
+  const fromWhere = `
+    FROM calls_latest_hot h
+    LEFT JOIN dim_offices d ON d.ncode = h.nofficeid
+    ${HOT_OFFICE_JOINS_SQL}
+    WHERE h.logged_at >= $1::timestamptz
+      AND h.logged_at <= $2::timestamptz
+      AND $3::date IS NOT NULL
+      ${officeFilter.clause}
+      ${callTypeFilter.clause}
+      ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
+  `;
+
+  const [totals, regionRows, branchRows, callTypeRows] = await Promise.all([
+    prisma.$queryRawUnsafeBulk<Array<OpsKpiRow>>(
+      `SELECT ${OPS_KPI_SELECT} ${fromWhere}`,
+      ...values
+    ),
+    prisma.$queryRawUnsafeBulk<Array<OpsKpiRow & { region: string }>>(
+      `
+      SELECT
+        ${HOT_RESOLVED_REGION_SQL} AS region,
+        ${OPS_KPI_SELECT}
+      ${fromWhere}
+      GROUP BY ${HOT_RESOLVED_REGION_SQL}
+      ORDER BY open_calls DESC, region ASC
+      `,
+      ...values
+    ),
+    prisma.$queryRawUnsafeBulk<Array<OpsKpiRow & { branch: string; region: string }>>(
+      `
+      SELECT
+        ${HOT_MAIN_BRANCH_NAME_SQL} AS branch,
+        ${HOT_RESOLVED_REGION_SQL} AS region,
+        ${OPS_KPI_SELECT}
+      ${fromWhere}
+      GROUP BY ${HOT_MAIN_BRANCH_NAME_SQL}, ${HOT_RESOLVED_REGION_SQL}
+      ORDER BY open_calls DESC, branch ASC
+      LIMIT 10
+      `,
+      ...values
+    ),
+    prisma.$queryRawUnsafeBulk<Array<OpsCallTypeRow>>(
+      `
+      SELECT
+        COALESCE(NULLIF(upper(trim(h.call_type)), ''), 'UNKNOWN') AS call_type,
+        count(*)::int AS total_calls,
+        count(*) FILTER (
+          WHERE h.status_bucket IN ('open_unallocated', 'assigned')
+        )::int AS open_calls
+      ${fromWhere}
+      GROUP BY 1
+      ORDER BY total_calls DESC, call_type ASC
+      LIMIT 8
+      `,
+      ...values
+    ),
+  ]);
+
+  const summary = normalizeOpsRow(totals[0]);
+  const regions = regionRows.map((row) => ({
+    region: String(row.region ?? 'OTHER').toUpperCase(),
+    ...normalizeOpsRow(row),
+  }));
+  const topBranches = branchRows.map((row) => ({
+    branch: row.branch ?? 'UNKNOWN',
+    region: String(row.region ?? 'OTHER').toUpperCase(),
+    ...normalizeOpsRow(row),
+  }));
+  const callTypes = callTypeRows.map((row) => ({
+    call_type: row.call_type ?? 'UNKNOWN',
+    total_calls: Number(row.total_calls ?? 0),
+    open_calls: Number(row.open_calls ?? 0),
+  }));
+
+  return {
+    startDate,
+    endDate,
+    agingAsOf: agingDate,
+    ...summary,
+    regions,
+    topBranches,
+    callTypes,
+  };
 }

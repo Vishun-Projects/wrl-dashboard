@@ -94,7 +94,7 @@ function LoginForm() {
           Welcome back
         </h2>
         <p className="mt-1.5 text-[13px] leading-relaxed text-slate-500">
-          Enter your credentials to open the reports portal
+          Enter your credentials to open the WRL portal
         </p>
       </div>
 

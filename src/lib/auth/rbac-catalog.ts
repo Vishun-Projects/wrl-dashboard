@@ -5,6 +5,11 @@
 
 export type RbacPageGroup = 'Reports' | 'Administration';
 
+/** Sidebar report buckets (CRM-only vs hybrid vs SAP-only). */
+export type RbacNavSection = 'CRM' | 'CRM + SAP' | 'SAP';
+
+export const RBAC_NAV_SECTIONS: RbacNavSection[] = ['CRM', 'CRM + SAP', 'SAP'];
+
 export type RbacTab = {
   id: string;
   permission: string;
@@ -20,6 +25,8 @@ export type RbacPage = {
   description: string;
   exactPath?: boolean;
   group: RbacPageGroup;
+  /** Sidebar subgroup for Reports. Ignored for Administration. */
+  navSection?: RbacNavSection;
   tabs?: RbacTab[];
   /** When false, omitted from sidebar (still used for Roles / path access). */
   nav?: boolean;
@@ -89,6 +96,7 @@ export const RBAC_PAGES: RbacPage[] = [
     description: 'Call register, summary, and accounts',
     exactPath: true,
     group: 'Reports',
+    navSection: 'CRM',
     tabs: MIS_TABS,
   },
   {
@@ -98,6 +106,7 @@ export const RBAC_PAGES: RbacPage[] = [
     label: 'Call Distribution',
     description: 'Franchisee map, idle assignees, and distribution KPIs',
     group: 'Reports',
+    navSection: 'CRM',
   },
   {
     id: 'arcp_claims',
@@ -106,6 +115,7 @@ export const RBAC_PAGES: RbacPage[] = [
     label: 'ARCP Claims',
     description: 'ARCP claims register and detail export',
     group: 'Reports',
+    navSection: 'CRM',
   },
   {
     id: 'arcp_provision',
@@ -114,6 +124,7 @@ export const RBAC_PAGES: RbacPage[] = [
     label: 'ARCP Provision',
     description: 'Rate card × qty vs CRM charged by branch',
     group: 'Reports',
+    navSection: 'CRM',
   },
   {
     id: 'serial_audit',
@@ -122,6 +133,7 @@ export const RBAC_PAGES: RbacPage[] = [
     label: 'Serial Wise History',
     description: 'Repeat serial complaints and repair audit',
     group: 'Reports',
+    navSection: 'CRM',
   },
   {
     id: 'location_audit',
@@ -130,6 +142,7 @@ export const RBAC_PAGES: RbacPage[] = [
     label: 'Location Audit',
     description: 'Technician visit location verification',
     group: 'Reports',
+    navSection: 'CRM',
   },
   {
     id: 'warranty_master',
@@ -138,6 +151,7 @@ export const RBAC_PAGES: RbacPage[] = [
     label: 'Warranty Master',
     description: 'Active machines by customer, group, and warranty period',
     group: 'Reports',
+    navSection: 'CRM',
   },
   {
     id: 'warranty_comparison',
@@ -146,6 +160,7 @@ export const RBAC_PAGES: RbacPage[] = [
     label: 'Warranty Comparison',
     description: 'Compare service call WCO against Warranty Master expiration dates',
     group: 'Reports',
+    navSection: 'CRM',
   },
   {
     id: 'athena_reconciliation',
@@ -154,6 +169,7 @@ export const RBAC_PAGES: RbacPage[] = [
     label: 'Failed Calls - Athena API',
     description: 'Failed CRM ingestion calls matched against the call register',
     group: 'Reports',
+    navSection: 'CRM',
   },
   {
     id: 'cancelled_calls',
@@ -162,6 +178,7 @@ export const RBAC_PAGES: RbacPage[] = [
     label: 'Cancelled Calls',
     description: 'Cancelled call register from Postgres — view and download',
     group: 'Reports',
+    navSection: 'CRM',
   },
   {
     id: 'defective_serials',
@@ -170,6 +187,7 @@ export const RBAC_PAGES: RbacPage[] = [
     label: 'Defective Serials',
     description: 'Defective part serials returned to branch — pending vs done from CRM',
     group: 'Reports',
+    navSection: 'CRM',
   },
   {
     id: 'rejected_calls',
@@ -178,54 +196,7 @@ export const RBAC_PAGES: RbacPage[] = [
     label: 'Rejected Calls',
     description: 'Calls rejected by HO or Branch Manager, with reject reasons from trhcalls',
     group: 'Reports',
-  },
-  {
-    id: 'call_visits',
-    permission: 'page_call_visits',
-    path: '/report/call-visits',
-    label: 'Parts Consumption as per CRM',
-    description: 'Every CRM visit with on-site times and work done, synced into Postgres',
-    group: 'Reports',
-  },
-  {
-    id: 'spare_loan_check',
-    permission: 'page_spare_loan_check',
-    path: '/report/spare-loan-check',
-    label: 'Spare Loan Check',
-    description: 'Upload SAP HTML and highlight SO/vendor mismatches and cancelled/transferred calls',
-    group: 'Reports',
-  },
-  {
-    id: 'zss02',
-    permission: 'page_zss02',
-    path: '/report/zss02',
-    label: 'ZSS02',
-    description: 'Upload SAP ZSS02 HTML and browse spare loan / consumption rows as-is',
-    group: 'Reports',
-  },
-  {
-    id: 'spare_stock_analysis',
-    permission: 'page_spare_stock_analysis',
-    path: '/report/spare-stock-analysis',
-    label: 'Spare Stock Analysis',
-    description: 'Upload SAP MB51 HTML and view spare stock opening, receipts, issues, and consumption',
-    group: 'Reports',
-  },
-  {
-    id: 'mb51_aging',
-    permission: 'page_mb51_aging',
-    path: '/report/mb51-aging',
-    label: 'MB51 Aging',
-    description: 'MB51 Material Aging Report (FIFO) calculated on Posting Date',
-    group: 'Reports',
-  },
-  {
-    id: 'mb51_table',
-    permission: 'page_mb51_aging',
-    path: '/report/mb51-table',
-    label: 'MB51 Movements',
-    description: 'Tabular view of all imported SAP MB51 material movement records',
-    group: 'Reports',
+    navSection: 'CRM',
   },
   {
     id: 'compressor_barcodes',
@@ -234,6 +205,61 @@ export const RBAC_PAGES: RbacPage[] = [
     label: 'Repeat calls',
     description: 'Repeat compressor replacements and gas charging on the same machine',
     group: 'Reports',
+    navSection: 'CRM',
+  },
+  {
+    id: 'call_visits',
+    permission: 'page_call_visits',
+    path: '/report/call-visits',
+    label: 'Parts Consumption as per CRM',
+    description: 'Every CRM visit with on-site times and work done, synced into Postgres',
+    group: 'Reports',
+    navSection: 'CRM + SAP',
+  },
+  {
+    id: 'spare_loan_check',
+    permission: 'page_spare_loan_check',
+    path: '/report/spare-loan-check',
+    label: 'Spare Loan Check',
+    description: 'Upload SAP HTML and highlight SO/vendor mismatches and cancelled/transferred calls',
+    group: 'Reports',
+    navSection: 'CRM + SAP',
+  },
+  {
+    id: 'zss02',
+    permission: 'page_zss02',
+    path: '/report/zss02',
+    label: 'ZSS02',
+    description: 'Upload SAP ZSS02 HTML and browse spare loan / consumption rows as-is',
+    group: 'Reports',
+    navSection: 'SAP',
+  },
+  {
+    id: 'spare_stock_analysis',
+    permission: 'page_spare_stock_analysis',
+    path: '/report/spare-stock-analysis',
+    label: 'Spare Stock Analysis',
+    description: 'Upload SAP MB51 HTML and view spare stock opening, receipts, issues, and consumption',
+    group: 'Reports',
+    navSection: 'SAP',
+  },
+  {
+    id: 'mb51_aging',
+    permission: 'page_mb51_aging',
+    path: '/report/mb51-aging',
+    label: 'MB51 Aging',
+    description: 'MB51 Material Aging Report (FIFO) calculated on Posting Date',
+    group: 'Reports',
+    navSection: 'SAP',
+  },
+  {
+    id: 'mb51_table',
+    permission: 'page_mb51_aging',
+    path: '/report/mb51-table',
+    label: 'MB51 Movements',
+    description: 'Tabular view of all imported SAP MB51 material movement records',
+    group: 'Reports',
+    navSection: 'SAP',
   },
   {
     id: 'admin_users',
@@ -453,19 +479,9 @@ export function canAccessPage(permissions: string[], pageId: string): boolean {
     if (canAccessMisTab(permissions, 'register')) return true;
   }
 
-  // ZSS02 / spare loan / call visits / MB51 spare stock / compressor barcodes / MB51 aging: MIS reports audience until roles matrix is updated.
-  if (
-    pageId === 'zss02' ||
-    pageId === 'spare_loan_check' ||
-    pageId === 'call_visits' ||
-    pageId === 'spare_stock_analysis' ||
-    pageId === 'compressor_barcodes' ||
-    pageId === 'mb51_aging' ||
-    pageId === 'mb51_table'
-  ) {
-    if (hasPermission(permissions, 'page_mis_reports')) return true;
-    if (canAccessMisTab(permissions, 'register')) return true;
-    if (hasPermission(permissions, 'page_mb51_aging')) return true;
+  // MB51 Movements shares the MB51 Aging permission (same data, second view).
+  if (pageId === 'mb51_table' && hasPermission(permissions, 'page_mb51_aging')) {
+    return true;
   }
 
   if (page.tabs?.length) {
@@ -567,8 +583,15 @@ export function canAccessPath(
   permissions: string[],
   path: string
 ): boolean {
-  // Authenticated users always reach /profile; public auth routes need no RBAC.
-  if (isPublicAuthRoute(path) || path.startsWith('/profile')) return true;
+  // Authenticated users always reach home + profile; public auth routes need no RBAC.
+  if (
+    isPublicAuthRoute(path) ||
+    path === '/dashboard' ||
+    path.startsWith('/dashboard/') ||
+    path.startsWith('/profile')
+  ) {
+    return true;
+  }
 
   if (path === '/admin' || path === '/admin/') {
     return hasPermission(permissions, 'manage_users') || hasPermission(permissions, 'manage_roles');
@@ -584,15 +607,8 @@ export function canAccessPath(
   return canAccessPage(permissions, page.id);
 }
 
-export function defaultLandingPath(permissions: string[]): string {
-  const reportPages = RBAC_PAGES.filter((p) => p.group === 'Reports');
-  for (const page of reportPages) {
-    if (canAccessPage(permissions, page.id)) return page.path;
-  }
-  for (const page of RBAC_PAGES) {
-    if (canAccessPage(permissions, page.id)) return page.path;
-  }
-  return '/login';
+export function defaultLandingPath(_permissions?: string[]): string {
+  return '/dashboard';
 }
 
 /** @deprecated Use defaultLandingPath */

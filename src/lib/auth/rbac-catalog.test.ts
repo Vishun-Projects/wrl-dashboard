@@ -24,8 +24,9 @@ describe('expandPermissionList', () => {
 });
 
 describe('canAccessPath', () => {
-  it('allows login and profile without permissions', () => {
+  it('allows login, dashboard, and profile without permissions', () => {
     expect(canAccessPath([], '/login')).toBe(true);
+    expect(canAccessPath([], '/dashboard')).toBe(true);
     expect(canAccessPath([], '/profile')).toBe(true);
     expect(canAccessPath([], '/forgot-password')).toBe(true);
     expect(canAccessPath([], '/reset-password')).toBe(true);
@@ -41,32 +42,28 @@ describe('canAccessPath', () => {
     expect(canAccessPath(['manage_users'], '/admin/vps-cron')).toBe(false);
   });
 
-  it('allows call visits via dedicated or MIS reports permission', () => {
+  it('requires dedicated permission for call visits / SAP pages (no MIS inheritance)', () => {
     expect(canAccessPath(['page_call_visits'], '/report/call-visits')).toBe(true);
-    expect(canAccessPath(['page_mis_reports'], '/report/call-visits')).toBe(true);
-    expect(canAccessPath(['tab_mis_register'], '/report/call-visits')).toBe(true);
-    expect(canAccessPath(['page_arcp_claims'], '/report/call-visits')).toBe(false);
-  });
+    expect(canAccessPath(['page_mis_reports'], '/report/call-visits')).toBe(false);
+    expect(canAccessPath(['tab_mis_register'], '/report/call-visits')).toBe(false);
 
-  it('allows spare loan check via dedicated or MIS reports permission', () => {
     expect(canAccessPath(['page_spare_loan_check'], '/report/spare-loan-check')).toBe(true);
-    expect(canAccessPath(['page_mis_reports'], '/report/spare-loan-check')).toBe(true);
-    expect(canAccessPath(['tab_mis_register'], '/report/spare-loan-check')).toBe(true);
-    expect(canAccessPath(['page_arcp_claims'], '/report/spare-loan-check')).toBe(false);
-  });
+    expect(canAccessPath(['page_mis_reports'], '/report/spare-loan-check')).toBe(false);
 
-  it('allows ZSS02 via dedicated or MIS reports permission', () => {
     expect(canAccessPath(['page_zss02'], '/report/zss02')).toBe(true);
-    expect(canAccessPath(['page_mis_reports'], '/report/zss02')).toBe(true);
-    expect(canAccessPath(['tab_mis_register'], '/report/zss02')).toBe(true);
-    expect(canAccessPath(['page_arcp_claims'], '/report/zss02')).toBe(false);
-  });
+    expect(canAccessPath(['page_mis_reports'], '/report/zss02')).toBe(false);
+    expect(canAccessPath(['tab_mis_register'], '/report/zss02')).toBe(false);
 
-  it('allows spare stock analysis via dedicated or MIS reports permission', () => {
     expect(canAccessPath(['page_spare_stock_analysis'], '/report/spare-stock-analysis')).toBe(true);
-    expect(canAccessPath(['page_mis_reports'], '/report/spare-stock-analysis')).toBe(true);
-    expect(canAccessPath(['tab_mis_register'], '/report/spare-stock-analysis')).toBe(true);
-    expect(canAccessPath(['page_arcp_claims'], '/report/spare-stock-analysis')).toBe(false);
+    expect(canAccessPath(['page_mis_reports'], '/report/spare-stock-analysis')).toBe(false);
+
+    expect(canAccessPath(['page_mb51_aging'], '/report/mb51-aging')).toBe(true);
+    expect(canAccessPath(['page_mb51_aging'], '/report/mb51-table')).toBe(true);
+    expect(canAccessPath(['page_mis_reports'], '/report/mb51-aging')).toBe(false);
+    expect(canAccessPath(['page_mis_reports'], '/report/mb51-table')).toBe(false);
+
+    expect(canAccessPath(['page_compressor_barcodes'], '/compressor-barcodes')).toBe(true);
+    expect(canAccessPath(['page_mis_reports'], '/compressor-barcodes')).toBe(false);
   });
 
   it('allows rejected calls via dedicated or MIS register permission', () => {
@@ -121,9 +118,10 @@ describe('defaultMisTab', () => {
 });
 
 describe('defaultLandingPath', () => {
-  it('returns first accessible report page', () => {
-    expect(defaultLandingPath(['page_arcp_claims'])).toBe('/report/arcp-claims');
-    expect(defaultLandingPath(['manage_users'])).toBe('/admin/users');
+  it('returns the home dashboard for any signed-in user', () => {
+    expect(defaultLandingPath(['page_arcp_claims'])).toBe('/dashboard');
+    expect(defaultLandingPath(['manage_users'])).toBe('/dashboard');
+    expect(defaultLandingPath([])).toBe('/dashboard');
   });
 });
 

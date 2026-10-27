@@ -172,7 +172,7 @@ export default function AdminUsersPage() {
         return;
       }
       if (status === 403) {
-        router.push('/report');
+        router.push('/dashboard');
       }
     } finally {
       setLoading(false);
