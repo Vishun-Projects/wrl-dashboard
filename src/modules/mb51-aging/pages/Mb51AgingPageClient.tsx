@@ -88,6 +88,7 @@ const COLS: Record<string, string[]> = {
   uom: ['baseunitofmeasure', 'unitofentry', 'uom'],
   mov: ['movementtype'],
   movt: ['movementtypetext'],
+  text: ['text'],
   doc: ['materialdocument'],
   plant: ['plant'],
 };
@@ -613,6 +614,7 @@ export default function Mb51AgingPageClient() {
                 dc: ix.doc >= 0 ? String(row[ix.doc] ?? '').trim() : '',
                 mt: ix.mov >= 0 ? String(row[ix.mov] ?? '').trim() : '',
                 mtx: ix.movt >= 0 ? String(row[ix.movt] ?? '').trim() : '',
+                tx: ix.text >= 0 ? String(row[ix.text] ?? '').trim() : '',
               });
             }
           });
@@ -955,6 +957,7 @@ export default function Mb51AgingPageClient() {
         'Material doc',
         'Movement type',
         'Movement text',
+        'Text',
         'Receipt posting date',
         'Receipt qty',
         'Qty in stock (FIFO)',
@@ -975,6 +978,7 @@ export default function Mb51AgingPageClient() {
         r.dc ?? '',
         r.mt ?? '',
         r.mtx ?? '',
+        r.tx ?? '',
         serialToDMY(r.d),
         r.q || 0,
         q,
@@ -984,7 +988,7 @@ export default function Mb51AgingPageClient() {
     });
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [8, 12, 28, 12, 34, 12, 6, 14, 8, 22, 14, 12, 14, 10, 18].map((w) => ({
+    ws['!cols'] = [8, 12, 28, 12, 34, 12, 6, 14, 8, 22, 16, 14, 12, 14, 10, 18].map((w) => ({
       wch: w,
     }));
     const wb = XLSX.utils.book_new();
@@ -1743,6 +1747,7 @@ export default function Mb51AgingPageClient() {
                       <th>Description</th>
                       <th>Material doc</th>
                       <th>Mov. type</th>
+                      <th>Text</th>
                       <th>Receipt posting date</th>
                       <th className="n">Receipt qty</th>
                       <th className="n">Qty in stock (FIFO)</th>
@@ -1763,6 +1768,7 @@ export default function Mb51AgingPageClient() {
                         <td>
                           {r.mt} {r.mtx}
                         </td>
+                        <td>{r.tx}</td>
                         <td>{serialToDMY(r.d)}</td>
                         <td className="n">{fmtQty(r.q || 0)}</td>
                         <td className="n tot">{fmtQty(q)}</td>
@@ -1773,7 +1779,7 @@ export default function Mb51AgingPageClient() {
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td colSpan={7}>Total</td>
+                      <td colSpan={8}>Total</td>
                       <td className="n">
                         {fmtQty(modalLines.reduce((s, x) => s + (x[0].q || 0), 0))}
                       </td>

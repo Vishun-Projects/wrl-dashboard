@@ -60,7 +60,7 @@ async function insertRowBatch(
       const isoDate = serialToIsoDate(row.d);
 
       placeholders.push(
-        `($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`
+        `($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`
       );
       values.push(
         importId,
@@ -77,6 +77,7 @@ async function insertRowBatch(
         row.dc ?? '',
         row.mt ?? '',
         row.mtx ?? '',
+        row.tx ?? '',
         seq
       );
     }
@@ -99,6 +100,7 @@ async function insertRowBatch(
           material_document,
           movement_type,
           movement_type_text,
+          item_text,
           seq_order
         ) VALUES ${placeholders.join(',')}
         `,
@@ -175,6 +177,7 @@ export async function fetchLatestMb51AgingData(): Promise<{
         material_document: string;
         movement_type: string;
         movement_type_text: string;
+        item_text: string;
         seq_order: number;
       }>(
         `
@@ -191,6 +194,7 @@ export async function fetchLatestMb51AgingData(): Promise<{
         material_document,
         movement_type,
         movement_type_text,
+        item_text,
         seq_order
       FROM mb51_aging_rows
       WHERE import_id = $1
@@ -212,6 +216,7 @@ export async function fetchLatestMb51AgingData(): Promise<{
         dc: r.material_document,
         mt: r.movement_type,
         mtx: r.movement_type_text,
+        tx: r.item_text,
         s: r.seq_order,
       }));
 

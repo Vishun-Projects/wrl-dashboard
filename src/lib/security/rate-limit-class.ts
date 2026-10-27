@@ -26,5 +26,11 @@ export function rateLimitClassForPath(pathname: string): {
   if (pathname === '/api/report/mb51-aging' || pathname.startsWith('/api/report/mb51-aging/')) {
     return { limit: 400, windowMs: 60_000, keySuffix: 'mb51-upload' };
   }
+  if (
+    pathname === '/api/report/call-visits/mm-barcodes' ||
+    pathname.startsWith('/api/report/call-visits/mm-barcodes/')
+  ) {
+    return { limit: 400, windowMs: 60_000, keySuffix: 'mm-barcode-upload' };
+  }
   return { limit: 120, windowMs: 60_000, keySuffix: 'default' };
 }

@@ -171,6 +171,7 @@ export function computeFifoAging(opts: {
             dc: '(balance not covered by receipts in file)',
             mt: '',
             mtx: '',
+            tx: '',
             q: rem,
             s: first.s,
           },

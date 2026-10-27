@@ -1,7 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, Columns3, Download, Loader2, Package } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronLeft, ChevronRight, Columns3, Download, Loader2, Package, Upload } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { saveMmDocBarcodeRows } from '@/modules/call-visits/mm-barcode-save-client';
+import type { MmDocBarcodeRow } from '@/modules/call-visits/mm-barcode-types';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import { AdminTable, AdminTableCard, AdminTd, AdminTh, AdminTr } from '@/components/admin/AdminUi';
 import { TrnLink } from '@/components/calls/TrnLink';
@@ -37,7 +40,13 @@ type SortKey =
   | 'qty'
   | 'oldBarcode'
   | 'newBarcode'
-  | 'remarks';
+  | 'consDaysDiff'
+  | 'remarks'
+  | 'sapDoc'
+  | 'sapDocDefective'
+  | 'sapDocDefectiveQty'
+  | 'sapDocDefectiveReceipt'
+  | 'sapDocDefectiveReceiptQty';
 
 function pickSingle(values: string[]): string {
   if (values.length === 0) return '';
@@ -55,6 +64,8 @@ function buildParams(opts: {
   status: string;
   part: string;
   category: string;
+  sapDoc: string;
+  barcodeMismatch?: boolean;
   sort: { key: SortKey; dir: 'asc' | 'desc' } | null;
   page?: number;
   pageSize?: number;
@@ -74,6 +85,8 @@ function buildParams(opts: {
   if (opts.status) params.set('status', opts.status);
   if (opts.part.trim()) params.set('part', opts.part.trim());
   if (opts.category) params.set('category', opts.category);
+  if (opts.sapDoc.trim()) params.set('sapDoc', opts.sapDoc.trim());
+  if (opts.barcodeMismatch) params.set('barcodeMismatch', '1');
   if (opts.sort) {
     params.set('sort', opts.sort.key);
     params.set('dir', opts.sort.dir);
@@ -104,21 +117,60 @@ function Clip({
   width,
   mono,
   tone,
+  textClass,
 }: {
   value: string | null;
   width: string;
   mono?: boolean;
   tone: string;
+  textClass?: string;
 }) {
   const text = value?.trim() ? value.trim() : '—';
   return (
     <AdminTd className={tone}>
       <span
-        className={`block truncate ${width}${mono ? ' font-mono' : ''}`}
+        className={`block truncate ${width}${mono ? ' font-mono' : ''}${textClass && text !== '—' ? ` ${textClass}` : ''}`}
         title={text === '—' ? undefined : text}
       >
         {text}
       </span>
+    </AdminTd>
+  );
+}
+
+function SapDocCell({
+  docs,
+  barcode,
+  mismatch,
+  tone,
+}: {
+  docs: string | null;
+  barcode: string | null;
+  mismatch: boolean;
+  tone: string;
+}) {
+  const docText = docs?.trim() || '';
+  const bcText = barcode?.trim() || '';
+  if (!docText && !bcText) {
+    return <Clip value={null} width="max-w-[11rem]" mono tone={tone} />;
+  }
+  const title = [docText, bcText ? `SAP Barcode: ${bcText}` : '']
+    .filter(Boolean)
+    .join('\n');
+  return (
+    <AdminTd className={`${tone}${mismatch ? ' bg-rose-100/80' : ''}`}>
+      <div className="max-w-[11rem]" title={title}>
+        {docText ? <span className="block truncate font-mono text-[11px]">{docText}</span> : null}
+        {bcText ? (
+          <span
+            className={`block truncate text-[10px] leading-tight ${
+              mismatch ? 'font-medium text-red-700' : 'text-slate-600'
+            }`}
+          >
+            SAP Barcode: {bcText}
+          </span>
+        ) : null}
+      </div>
     </AdminTd>
   );
 }
@@ -142,12 +194,14 @@ function statusTextClass(label: string): string {
 const CALL_TONE = 'bg-[#FFFFEB]';
 const WORK_TONE = 'bg-[#FFF3FF]';
 const PART_TONE = 'bg-[#E7F9F4]';
+const DEFECT_TONE = 'bg-[#FFF1F0]';
 const CALL_HEAD = 'bg-[#E6E2B8]';
 const PIN = 'sticky left-0 z-10 min-w-[7.25rem] border-r border-slate-300/80';
 const HEAD_STICKY = 'sticky top-0 z-20';
 const PIN_HEAD = 'sticky top-0 left-0 z-30 min-w-[7.25rem] border-r border-slate-400/70';
 const WORK_HEAD = 'bg-[#E8C6EA]';
 const PART_HEAD = 'bg-[#C5E6DC]';
+const DEFECT_HEAD = 'bg-[#E8C0BC]';
 
 const COLUMNS: Array<{ key: SortKey; label: string; tone: string; head: string }> = [
   { key: 'callNo', label: 'Call no', tone: CALL_TONE, head: CALL_HEAD },
@@ -166,10 +220,21 @@ const COLUMNS: Array<{ key: SortKey; label: string; tone: string; head: string }
   { key: 'barcode', label: 'M/C Serial no.', tone: WORK_TONE, head: WORK_HEAD },
   { key: 'partCategory', label: 'Part category', tone: PART_TONE, head: PART_HEAD },
   { key: 'partCode', label: 'Part code', tone: PART_TONE, head: PART_HEAD },
+  { key: 'sapDoc', label: 'SAP doc', tone: PART_TONE, head: PART_HEAD },
   { key: 'partName', label: 'Part', tone: PART_TONE, head: PART_HEAD },
   { key: 'qty', label: 'Qty', tone: PART_TONE, head: PART_HEAD },
   { key: 'newBarcode', label: 'New barcode', tone: PART_TONE, head: PART_HEAD },
-  { key: 'oldBarcode', label: 'Old barcode', tone: PART_TONE, head: PART_HEAD },
+  {
+    key: 'consDaysDiff',
+    label: 'Days Diff (Cons in SAP - techSolve)',
+    tone: PART_TONE,
+    head: PART_HEAD,
+  },
+  { key: 'sapDocDefective', label: 'SAP doc (Defective)', tone: DEFECT_TONE, head: DEFECT_HEAD },
+  { key: 'sapDocDefectiveQty', label: 'Defective qty', tone: DEFECT_TONE, head: DEFECT_HEAD },
+  { key: 'sapDocDefectiveReceipt', label: 'SAP doc (Defective Receipt)', tone: DEFECT_TONE, head: DEFECT_HEAD },
+  { key: 'sapDocDefectiveReceiptQty', label: 'Defc Recpt Qty', tone: DEFECT_TONE, head: DEFECT_HEAD },
+  { key: 'oldBarcode', label: 'Old barcode', tone: DEFECT_TONE, head: DEFECT_HEAD },
   { key: 'remarks', label: 'Remarks', tone: PART_TONE, head: PART_HEAD },
 ];
 
@@ -249,6 +314,9 @@ export default function CallVisitsPageClient() {
   const [search, setSearch] = useState('');
   const [partInput, setPartInput] = useState('');
   const [part, setPart] = useState('');
+  const [sapInput, setSapInput] = useState('');
+  const [sapDoc, setSapDoc] = useState('');
+  const [sapMode, setSapMode] = useState<'' | 'has' | 'blank'>('');
   const [customerInput, setCustomerInput] = useState('');
   const [customer, setCustomer] = useState('');
   const [plant, setPlant] = useState('');
@@ -257,8 +325,9 @@ export default function CallVisitsPageClient() {
   const [engineer, setEngineer] = useState('');
   const [status, setStatus] = useState('');
   const [category, setCategory] = useState('');
+  const [barcodeMismatch, setBarcodeMismatch] = useState(false);
   const [page, setPage] = useState(1);
-  const pageSize = 50;
+  const pageSize = 250;
   const [options, setOptions] = useState<CallPartsOptions>({
     plants: [],
     branches: [],
@@ -270,6 +339,8 @@ export default function CallVisitsPageClient() {
   const [data, setData] = useState<CallPartsRowsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [importingMm, setImportingMm] = useState(false);
+  const mmFileRef = useRef<HTMLInputElement>(null);
   const { sort, onSort } = useTableSort<SortKey>(null);
 
   useEffect(() => {
@@ -278,9 +349,10 @@ export default function CallVisitsPageClient() {
       setSearch(searchInput);
       setPart(partInput);
       setCustomer(customerInput);
+      setSapDoc(sapInput);
     }, 300);
     return () => clearTimeout(t);
-  }, [searchInput, partInput, customerInput]);
+  }, [searchInput, partInput, customerInput, sapInput]);
 
   const plantOptions = useMemo<FilterSelectOption[]>(
     () => options.plants.map((b) => ({ value: b, label: b })),
@@ -334,6 +406,9 @@ export default function CallVisitsPageClient() {
     status,
     part,
     category,
+    sapDoc:
+      sapMode === 'blank' ? '__blank__' : sapDoc.trim() || (sapMode === 'has' ? '__has__' : ''),
+    barcodeMismatch,
   };
 
   const loadOptions = useCallback(async () => {
@@ -348,6 +423,7 @@ export default function CallVisitsPageClient() {
       status: '',
       part: '',
       category: '',
+      sapDoc: '',
       sort: null,
     });
     params.set('mode', 'options');
@@ -365,27 +441,33 @@ export default function CallVisitsPageClient() {
     });
   }, [range]);
 
-  const loadRows = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = buildParams({ ...filterArgs, sort, page, pageSize });
-      const res = await fetch(`${API}?${params.toString()}`, { credentials: 'include' });
-      const body = await readJson(res);
-      if (!res.ok) throw new Error(String(body.error ?? 'Failed to load parts'));
-      setData(body as unknown as CallPartsRowsResponse);
-    } catch (err) {
-      feedback.actionFailed(err instanceof Error ? err.message : 'Failed to load parts');
-    } finally {
-      setLoading(false);
-    }
-  }, [range, search, plant, branch, client, customer, engineer, status, part, category, sort, page]);
+  const loadRows = useCallback(
+    async (signal: AbortSignal) => {
+      setLoading(true);
+      try {
+        const params = buildParams({ ...filterArgs, sort, page, pageSize });
+        const res = await fetch(`${API}?${params.toString()}`, { credentials: 'include', signal });
+        const body = await readJson(res);
+        if (!res.ok) throw new Error(String(body.error ?? 'Failed to load parts'));
+        setData(body as unknown as CallPartsRowsResponse);
+      } catch (err) {
+        if (signal.aborted) return;
+        feedback.actionFailed(err instanceof Error ? err.message : 'Failed to load parts');
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    },
+    [range, search, plant, branch, client, customer, engineer, status, part, category, sapDoc, sapMode, barcodeMismatch, sort, page]
+  );
 
   useEffect(() => {
     void loadOptions();
   }, [loadOptions]);
 
   useEffect(() => {
-    void loadRows();
+    const ac = new AbortController();
+    void loadRows(ac.signal);
+    return () => ac.abort();
   }, [loadRows]);
 
   async function exportCsv() {
@@ -409,6 +491,83 @@ export default function CallVisitsPageClient() {
       feedback.actionFailed(err instanceof Error ? err.message : 'CSV export failed');
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function importMmBarcodes(file: File) {
+    setImportingMm(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: false, dense: true });
+      const sn = wb.SheetNames[0];
+      if (!sn) throw new Error('Workbook has no sheets');
+      const data = XLSX.utils.sheet_to_json(wb.Sheets[sn]!, {
+        header: 1,
+        raw: true,
+        defval: '',
+      }) as unknown[][];
+      if (data.length < 2) throw new Error('No usable rows found.');
+      const norm = (s: unknown) =>
+        String(s ?? '')
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '');
+      const hdr = (data[0] ?? []).map(norm);
+      const ix = (names: string[]) => {
+        for (const n of names) {
+          const i = hdr.indexOf(n);
+          if (i >= 0) return i;
+        }
+        return -1;
+      };
+      const iDoc = ix(['materialdocument']);
+      const iMat = ix(['material']);
+      const iObj = ix(['objectdescription']);
+      const iPlant = ix(['plant']);
+      const iStor = ix(['storagelocation']);
+      const iDate = ix(['postingdate']);
+      const iMov = ix(['movementtype']);
+      if (iDoc < 0 || iMat < 0 || iObj < 0) {
+        throw new Error('Missing columns → Material Document, Material, Object Description');
+      }
+      const toYmd = (v: unknown): string | null => {
+        if (v == null || v === '') return null;
+        if (typeof v === 'number' && Number.isFinite(v)) {
+          const dt = new Date(Math.round((v - 25569) * 86400000));
+          if (Number.isNaN(dt.getTime())) return null;
+          return dt.toISOString().slice(0, 10);
+        }
+        if (v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString().slice(0, 10);
+        const s = String(v).trim();
+        return /^(\d{4})-(\d{2})-(\d{2})/.test(s) ? s.slice(0, 10) : null;
+      };
+      const rows: MmDocBarcodeRow[] = [];
+      for (let r = 1; r < data.length; r++) {
+        const row = data[r] as unknown[];
+        const materialDocument = String(row[iDoc] ?? '').trim();
+        const material = String(row[iMat] ?? '').trim();
+        const objectDescription = String(row[iObj] ?? '').trim();
+        if (!materialDocument && !material && !objectDescription) continue;
+        rows.push({
+          plant: iPlant >= 0 ? String(row[iPlant] ?? '').trim() : '',
+          storageLocation: iStor >= 0 ? String(row[iStor] ?? '').trim() : '',
+          materialDocument,
+          postingDate: iDate >= 0 ? toYmd(row[iDate]) : null,
+          material,
+          objectDescription,
+          movementType: iMov >= 0 ? String(row[iMov] ?? '').trim() : '',
+        });
+      }
+      if (!rows.length) throw new Error('No usable rows found.');
+      const meta = await saveMmDocBarcodeRows(file.name, rows);
+      feedback.actionSuccess(
+        `Imported ${meta.rowCount.toLocaleString('en-IN')} MM barcodes from ${meta.fileName}`
+      );
+      void loadRows(new AbortController().signal);
+    } catch (err) {
+      feedback.actionFailed(err instanceof Error ? err.message : 'MM barcode import failed');
+    } finally {
+      setImportingMm(false);
+      if (mmFileRef.current) mmFileRef.current.value = '';
     }
   }
 
@@ -531,6 +690,55 @@ export default function CallVisitsPageClient() {
               className="h-6 w-32 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
             />
             <FilterSelect
+              label="SAP doc (Defective)"
+              emptyLabel="All defective docs"
+              options={[
+                { value: 'has', label: 'Has a value' },
+                { value: 'blank', label: 'Is blank' },
+              ]}
+              selected={sapMode ? [sapMode] : []}
+              mode="single"
+              searchable={false}
+              onChange={(values) => {
+                setPage(1);
+                const next = pickSingle(values);
+                setSapMode(next === 'blank' || next === 'has' ? next : '');
+                setSapInput('');
+                setSapDoc('');
+              }}
+              panelClassName="w-56"
+              layout="inline"
+            />
+            {sapMode !== 'blank' ? (
+              <input
+                type="search"
+                value={sapInput}
+                onChange={(e) => {
+                  setPage(1);
+                  setSapInput(e.target.value);
+                  if (sapMode) setSapMode('');
+                }}
+                placeholder="Defective doc contains…"
+                aria-label="Defective SAP doc contains"
+                className="h-6 w-36 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
+              />
+            ) : null}
+            <button
+              type="button"
+              aria-pressed={barcodeMismatch}
+              onClick={() => {
+                setPage(1);
+                setBarcodeMismatch((v) => !v);
+              }}
+              className={`h-6 shrink-0 rounded-md border px-1.5 text-[10px] font-medium ${
+                barcodeMismatch
+                  ? 'border-rose-300 bg-rose-50 text-rose-800'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              Mismatched only
+            </button>
+            <FilterSelect
               label="Part category"
               emptyLabel="All part categories"
               options={categoryOptions}
@@ -557,7 +765,9 @@ export default function CallVisitsPageClient() {
               />
             </div>
             <span className="ml-auto text-[10px] text-slate-500">
-              {loading ? 'Loading…' : `${total.toLocaleString()} parts`}
+              {loading
+                ? 'Loading…'
+                : `${total.toLocaleString()}${barcodeMismatch ? ' mismatched' : ''} parts`}
             </span>
           </div>
         </div>
@@ -565,6 +775,25 @@ export default function CallVisitsPageClient() {
       actions={
         <>
           <ColumnPicker hidden={hiddenColumns} onToggle={toggleColumn} />
+          <input
+            ref={mmFileRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void importMmBarcodes(file);
+            }}
+          />
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            onClick={() => mmFileRef.current?.click()}
+            disabled={importingMm}
+          >
+            {importingMm ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+            {importingMm ? 'Importing…' : 'MM barcodes'}
+          </button>
           <button
             type="button"
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
@@ -609,14 +838,14 @@ export default function CallVisitsPageClient() {
                   ))}
                 </tr>
               </thead>
-              <tbody>
-                {loading ? (
+              <tbody className={loading && rows.length > 0 ? 'opacity-60' : undefined}>
+                {loading && rows.length === 0 ? (
                   <AdminTr>
                     <td className="px-3 py-3 text-[12px] text-slate-500" colSpan={visibleColumns.length}>
                       Loading…
                     </td>
                   </AdminTr>
-                ) : (
+                ) : rows.length === 0 ? null : (
                   rows.map((r, i) => (
                     <PartRow
                       key={`${r.ncode}-${r.nofficeid}`}
@@ -742,12 +971,63 @@ function PartCell({
       return <Clip value={r.partCategory} width="max-w-[8rem]" tone={tone} />;
     case 'partCode':
       return <Clip value={r.partCode} width="max-w-[6rem]" mono tone={tone} />;
+    case 'sapDoc':
+      return (
+        <SapDocCell
+          docs={r.sapDoc}
+          barcode={r.sapDocBarcode}
+          mismatch={r.sapDocBarcodeMismatch}
+          tone={tone}
+        />
+      );
+    case 'sapDocDefective':
+      return (
+        <SapDocCell
+          docs={r.sapDocDefective}
+          barcode={r.sapDocDefectiveBarcode}
+          mismatch={r.sapDocDefectiveBarcodeMismatch}
+          tone={tone}
+        />
+      );
+    case 'sapDocDefectiveQty':
+      return (
+        <Clip value={r.sapDocDefectiveQty} width="max-w-[5rem]" mono tone={tone} textClass="text-red-600" />
+      );
+    case 'sapDocDefectiveReceipt':
+      return (
+        <SapDocCell
+          docs={r.sapDocDefectiveReceipt}
+          barcode={r.sapDocDefectiveReceiptBarcode}
+          mismatch={r.sapDocDefectiveReceiptBarcodeMismatch}
+          tone={tone}
+        />
+      );
+    case 'sapDocDefectiveReceiptQty':
+      return (
+        <Clip
+          value={r.sapDocDefectiveReceiptQty}
+          width="max-w-[5rem]"
+          mono
+          tone={tone}
+          textClass="text-red-600"
+        />
+      );
     case 'partName':
       return <Clip value={r.partName} width="max-w-[11rem]" tone={tone} />;
     case 'qty':
       return <AdminTd className={`whitespace-nowrap ${tone}`}>{qtyText(r.qty)}</AdminTd>;
     case 'newBarcode':
       return <Clip value={r.newBarcode} width="max-w-[8rem]" mono tone={tone} />;
+    case 'consDaysDiff':
+      return (
+        <AdminTd
+          className={`whitespace-nowrap tabular-nums ${tone}${
+            r.consDaysDiff != null && r.consDaysDiff < 0 ? ' text-red-600' : ''
+          }`}
+        >
+          {r.consDaysDiff == null ? '—' : r.consDaysDiff}
+        </AdminTd>
+      );
     case 'oldBarcode':
       return <Clip value={r.oldBarcode} width="max-w-[8rem]" mono tone={tone} />;
     case 'remarks':

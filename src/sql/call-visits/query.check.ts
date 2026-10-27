@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
-import { buildCallPartsFilterSql, CALL_PARTS_CATEGORY_JOIN } from '@/sql/call-visits/query';
+import {
+  buildCallPartsFilterSql,
+  CALL_PARTS_CATEGORY_JOIN,
+  CALL_PARTS_SAP_CTE,
+  SAP_DOC_BLANK,
+  SAP_DOC_HAS,
+  sapDocOuterSql,
+} from '@/sql/call-visits/query';
 
 const dated = buildCallPartsFilterSql({
   allTime: false,
@@ -14,6 +21,7 @@ const dated = buildCallPartsFilterSql({
   status: '',
   part: 'compressor',
   category: '',
+  sapDoc: '',
   isHod: false,
   assignedOffices: ['12', '18'],
 });
@@ -40,6 +48,7 @@ const all = buildCallPartsFilterSql({
   status: '',
   part: '',
   category: '',
+  sapDoc: '',
   isHod: true,
   assignedOffices: [],
 });
@@ -67,6 +76,7 @@ function allInput() {
     status: '',
     part: '',
     category: '',
+    sapDoc: '',
     isHod: true,
     assignedOffices: [] as string[],
   };
@@ -75,5 +85,15 @@ function allInput() {
 assert.match(CALL_PARTS_CATEGORY_JOIN, /crm_mstitems i/);
 assert.match(CALL_PARTS_CATEGORY_JOIN, /crm_mstitemcategory c/);
 assert.match(CALL_PARTS_CATEGORY_JOIN, /i\.norm_vitemcode/);
+
+const sapParams: unknown[] = [];
+assert.equal(sapDocOuterSql(SAP_DOC_HAS, sapParams), 'sap_doc_defective IS NOT NULL');
+assert.equal(sapDocOuterSql(SAP_DOC_BLANK, sapParams), 'sap_doc_defective IS NULL');
+assert.equal(sapDocOuterSql('4908_1%', sapParams), `sap_doc_defective ILIKE $1 ESCAPE '\\'`);
+assert.equal(sapParams[0], '%4908\\_1\\%%');
+assert.match(CALL_PARTS_SAP_CTE, /2303393/);
+assert.match(CALL_PARTS_SAP_CTE, /MOTOR/);
+assert.match(CALL_PARTS_SAP_CTE, /947/);
+assert.match(CALL_PARTS_SAP_CTE, /IN \('947'/);
 
 console.log('call-parts query.check: ok');

@@ -12,6 +12,7 @@ export type Mb51AgingMovement = {
   dc?: string;    // Material document
   mt?: string;    // Movement type
   mtx?: string;   // Movement type text
+  tx?: string;    // SAP Text (item text)
 };
 
 export type Mb51AgingImportMeta = {

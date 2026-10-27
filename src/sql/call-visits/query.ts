@@ -15,6 +15,8 @@ export type CallPartsFilterInput = {
   part: string;
   /** Exact item-category name (compressor, motor, …). */
   category: string;
+  /** SAP material document contains. */
+  sapDoc: string;
   isHod: boolean;
   assignedOffices: string[];
 };
@@ -57,6 +59,70 @@ export const CALL_PARTS_CATEGORY_JOIN = `
   ) part_cat ON true
 `;
 export const CALL_PARTS_CATEGORY = `part_cat.item_category`;
+
+/** Same codes as DEFAULT_DEFECTIVE_MATERIALS in the MB51 aging report. */
+const DEFECTIVE_MATERIALS_SQL = `'1301709','1301712','1301714','2303393','2303396','2303398'`;
+/** Defective Generation movements → SAP doc (Defective). See sap-doc.ts matrix. */
+const DEFECTIVE_GENERATION_MOVEMENT_SQL = `'947','943','944','948'`;
+
+export const SAP_DOC_HAS = '__has__';
+export const SAP_DOC_BLANK = '__blank__';
+
+/** Defective Generation docs. Used when filtering/sorting SAP Doc (Defective). */
+export const CALL_PARTS_SAP_CTE = `
+  sap_docs AS MATERIALIZED (
+    SELECT upper(btrim(r.item_text)) AS call_no,
+           btrim(r.plant) AS plant,
+           btrim(r.vendor) AS vendor,
+           regexp_replace(btrim(r.material), '^0+', '') AS material,
+           CASE
+             WHEN upper(btrim(r.material_description)) LIKE 'MOTOR%' THEN 'MOTOR'
+             WHEN upper(btrim(r.material_description)) LIKE 'COMPRESSOR%'
+               OR upper(btrim(r.material_description)) LIKE 'COMPRESOR%' THEN 'COMPRESOR'
+             ELSE ''
+           END AS family,
+           string_agg(DISTINCT NULLIF(btrim(r.material_document), ''), ', '
+                      ORDER BY NULLIF(btrim(r.material_document), '')) AS docs,
+           coalesce(sum(r.qty), 0) AS qty
+    FROM mb51_aging_rows r
+    WHERE r.import_id = (SELECT id FROM mb51_aging_imports ORDER BY imported_at DESC LIMIT 1)
+      AND btrim(r.movement_type) IN (${DEFECTIVE_GENERATION_MOVEMENT_SQL})
+      AND r.material IN (${DEFECTIVE_MATERIALS_SQL})
+      AND btrim(r.item_text) <> ''
+    GROUP BY 1, 2, 3, 4, 5
+  )
+`;
+
+/** Equality join only, so Postgres hash-joins the doc groups. Family match is in the aggregate. */
+export const CALL_PARTS_SAP_ATTACH = `
+  LEFT JOIN dim_offices sap_fr
+    ON sap_fr.ncode::text = NULLIF(btrim(h.franchisee_code), '')
+  LEFT JOIN sap_docs d
+    ON d.call_no = upper(btrim(p.call_no))
+   AND d.plant = COALESCE(substring(btrim(h.branch_name) FROM '^[0-9]+'), '')
+   AND d.vendor = btrim(sap_fr.vsapvendorcode)
+`;
+
+const CALL_PARTS_SAP_MATCH = `
+    d.material = regexp_replace(btrim(p.part_code), '^0+', '')
+    OR (d.family = 'MOTOR' AND upper(btrim(part_cat.item_category)) = 'MOTOR')
+    OR (d.family = 'COMPRESOR' AND upper(btrim(part_cat.item_category)) IN ('COMPRESOR', 'COMPRESSOR'))
+`;
+
+export const CALL_PARTS_SAP_AGG = `string_agg(DISTINCT NULLIF(btrim(d.docs), ''), ', ' ORDER BY NULLIF(btrim(d.docs), ''))
+  FILTER (WHERE ${CALL_PARTS_SAP_MATCH})`;
+
+export const CALL_PARTS_SAP_QTY_AGG = `sum(d.qty) FILTER (WHERE ${CALL_PARTS_SAP_MATCH})`;
+
+/** Filter on the grouped defective SAP doc column. Pushes a contains param when needed. */
+export function sapDocOuterSql(raw: string, params: unknown[]): string {
+  const value = raw.trim();
+  if (!value) return '';
+  if (value === SAP_DOC_HAS) return 'sap_doc_defective IS NOT NULL';
+  if (value === SAP_DOC_BLANK) return 'sap_doc_defective IS NULL';
+  params.push(ilikeParam(value));
+  return `sap_doc_defective ILIKE $${params.length} ESCAPE '\\'`;
+}
 
 export const CALL_PARTS_HOT_COLS = `
   h.logged_at AS call_logged_at,

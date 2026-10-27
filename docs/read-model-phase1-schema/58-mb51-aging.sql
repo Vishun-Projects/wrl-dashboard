@@ -29,8 +29,12 @@ CREATE TABLE IF NOT EXISTS mb51_aging_rows (
   material_document     text NOT NULL DEFAULT '',
   movement_type         text NOT NULL DEFAULT '',
   movement_type_text    text NOT NULL DEFAULT '',
+  item_text             text NOT NULL DEFAULT '',
   seq_order             integer NOT NULL DEFAULT 0
 );
+
+ALTER TABLE mb51_aging_rows
+  ADD COLUMN IF NOT EXISTS item_text text NOT NULL DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_import_id
   ON mb51_aging_rows (import_id);

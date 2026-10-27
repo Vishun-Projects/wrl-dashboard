@@ -23,6 +23,7 @@ type MovementRow = {
   dc: string;
   mt: string;
   mtx: string;
+  tx: string;
 };
 
 type OptionItem = { id: string; text: string; lc: string };
@@ -106,6 +107,7 @@ function normalizeMovement(value: unknown, index: number): MovementRow {
     dc: asString(row.dc),
     mt: asString(row.mt),
     mtx: asString(row.mtx),
+    tx: asString(row.tx),
   };
 }
 
@@ -120,6 +122,7 @@ const COLS: Record<string, string[]> = {
   uom: ['baseunitofmeasure', 'unitofentry', 'uom'],
   mov: ['movementtype'],
   movt: ['movementtypetext'],
+  text: ['text'],
   doc: ['materialdocument'],
   plant: ['plant'],
 };
@@ -455,6 +458,7 @@ export default function Mb51TablePageClient() {
                 dc: indexes.doc >= 0 ? asString(sourceRow[indexes.doc]) : '',
                 mt: indexes.mov >= 0 ? asString(sourceRow[indexes.mov]) : '',
                 mtx: indexes.movt >= 0 ? asString(sourceRow[indexes.movt]) : '',
+                tx: indexes.text >= 0 ? asString(sourceRow[indexes.text]) : '',
               });
             }
           });
@@ -574,7 +578,8 @@ export default function Mb51TablePageClient() {
           row.mv.toLowerCase().includes(query) ||
           row.g.toLowerCase().includes(query) ||
           row.mt.toLowerCase().includes(query) ||
-          row.mtx.toLowerCase().includes(query);
+          row.mtx.toLowerCase().includes(query) ||
+          row.tx.toLowerCase().includes(query);
         if (!matches) return false;
       }
       return true;
@@ -594,6 +599,7 @@ export default function Mb51TablePageClient() {
         case 'mv': a = left.mv; b = right.mv; break;
         case 'mt': a = left.mt; b = right.mt; break;
         case 'mtx': a = left.mtx; b = right.mtx; break;
+        case 'tx': a = left.tx; b = right.tx; break;
         case 'm': a = left.m; b = right.m; break;
         case 'md': a = left.md; b = right.md; break;
         case 'g': a = left.g; b = right.g; break;
@@ -666,21 +672,21 @@ export default function Mb51TablePageClient() {
       ['Total exported rows', target.length, 'Posting date range', dateFrom || '–', 'to', dateTo || '–'],
       [],
       [
-        'Seq #', 'Posting Date', 'Plant', 'Material Document', 'Movement Type', 'Movement Text',
+        'Seq #', 'Posting Date', 'Plant', 'Material Document', 'Movement Type', 'Movement Text', 'Text',
         'Material Code', 'Material Description', 'Material Group', 'Quantity', 'UoM', 'Vendor Code', 'Vendor Name',
       ],
     ];
 
     target.forEach((row, index) => {
       aoa.push([
-        index + 1, serialToDMY(row.d), row.mv, row.dc, row.mt, row.mtx, row.m, row.md, row.g,
+        index + 1, serialToDMY(row.d), row.mv, row.dc, row.mt, row.mtx, row.tx, row.m, row.md, row.g,
         row.q, row.u, row.v, row.vn,
       ]);
     });
 
     const worksheet = XLSX.utils.aoa_to_sheet(aoa);
     worksheet['!cols'] = [
-      { wch: 8 }, { wch: 14 }, { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 24 },
+      { wch: 8 }, { wch: 14 }, { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 24 }, { wch: 18 },
       { wch: 16 }, { wch: 36 }, { wch: 16 }, { wch: 14 }, { wch: 8 }, { wch: 14 }, { wch: 32 },
     ];
     const workbook = XLSX.utils.book_new();
@@ -837,7 +843,7 @@ export default function Mb51TablePageClient() {
                 </div>
                 <div className="f">
                   <label htmlFor="table-search">Search in table</label>
-                  <input id="table-search" type="text" placeholder="Search material, doc, vendor, plant…" value={searchQuery}
+                  <input id="table-search" type="text" placeholder="Search material, doc, vendor, plant, text…" value={searchQuery}
                     onChange={(event) => { setSearchQuery(event.target.value); setPage(1); }} />
                 </div>
                 <div className="actions">
@@ -903,6 +909,7 @@ export default function Mb51TablePageClient() {
                       <th onClick={() => handleSort('dc')}>Material Doc {sortArrow('dc')}</th>
                       <th onClick={() => handleSort('mt')}>Mov. Type {sortArrow('mt')}</th>
                       <th onClick={() => handleSort('mtx')}>Movement Text {sortArrow('mtx')}</th>
+                      <th onClick={() => handleSort('tx')}>Text {sortArrow('tx')}</th>
                       <th onClick={() => handleSort('m')}>Material {sortArrow('m')}</th>
                       <th onClick={() => handleSort('md')}>Description {sortArrow('md')}</th>
                       <th onClick={() => handleSort('g')}>Group {sortArrow('g')}</th>
@@ -921,6 +928,7 @@ export default function Mb51TablePageClient() {
                         <td className="document-number">{row.dc}</td>
                         <td><span className="badge">{row.mt}</span></td>
                         <td className="truncate movement-text" title={row.mtx}>{row.mtx}</td>
+                        <td className="truncate item-text" title={row.tx}>{row.tx}</td>
                         <td><b className="material-code">{row.m}</b></td>
                         <td className="truncate description-text" title={row.md}>{row.md}</td>
                         <td>{row.g}</td>
@@ -930,13 +938,13 @@ export default function Mb51TablePageClient() {
                         <td className="truncate vendor-name" title={row.vn}>{row.vn}</td>
                       </tr>
                     )) : (
-                      <tr><td colSpan={13} className="empty">No movements match the selected filters.</td></tr>
+                      <tr><td colSpan={14} className="empty">No movements match the selected filters.</td></tr>
                     )}
                   </tbody>
                   {pagedRows.length > 0 && (
                     <tfoot>
                       <tr>
-                        <td colSpan={9}>Total Filtered ({sortedRows.length.toLocaleString('en-IN')} rows)</td>
+                        <td colSpan={10}>Total Filtered ({sortedRows.length.toLocaleString('en-IN')} rows)</td>
                         <td className="n">{fmtQty(kpis.netQty)}</td>
                         <td colSpan={3} />
                       </tr>
@@ -1045,6 +1053,7 @@ export default function Mb51TablePageClient() {
         .material-code { color: var(--brand); }
         .truncate { overflow: hidden; text-overflow: ellipsis; }
         .movement-text { max-width: 220px; }
+        .item-text { max-width: 160px; }
         .description-text { max-width: 320px; }
         .vendor-name { max-width: 240px; }
         .empty { padding: 40px; text-align: center; color: var(--muted); }
