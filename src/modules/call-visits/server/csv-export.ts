@@ -8,6 +8,7 @@ import {
   CALL_PARTS_CATEGORY_JOIN,
   CALL_PARTS_FROM,
   CALL_PARTS_HOT_COLS,
+  matchesSapDocFilter,
   sapDocOuterSql,
 } from '@/sql/call-visits/query';
 import { sapBaseSql, type CallPartsFilters } from '@/modules/call-visits/server/query';
@@ -145,7 +146,11 @@ export function buildCallPartsCsvStream(filters: CallPartsFilters): Response {
   const encoder = new TextEncoder();
   const stamp = new Date().toISOString().slice(0, 10);
   let exported = 0;
-  const sapFilter = Boolean(filters.sapDoc.trim());
+  const sapDefFilter = Boolean(filters.sapDocDefective.trim());
+  const jsSapFilter =
+    Boolean(filters.sapDoc.trim()) ||
+    Boolean(filters.sapDocReceipt.trim()) ||
+    filters.barcodeMismatch;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -167,8 +172,8 @@ export function buildCallPartsCsvStream(filters: CallPartsFilters): Response {
           const lookup = await getCachedSapDocLookup(client);
 
           const cursorParams = [...params];
-          const sapOuter = sapFilter ? sapDocOuterSql(filters.sapDoc, cursorParams) : '';
-          const cursorSql = sapFilter
+          const sapOuter = sapDefFilter ? sapDocOuterSql(filters.sapDocDefective, cursorParams) : '';
+          const cursorSql = sapDefFilter
             ? `${sapBaseSql(where)}
                SELECT ncode, nofficeid, call_no, visit_no, visit_at, part_category,
                       part_code, part_name, qty, old_barcode, new_barcode, remarks, franchisee_code,
@@ -197,7 +202,7 @@ export function buildCallPartsCsvStream(filters: CallPartsFilters): Response {
             );
 
             while (!closed() && exported < EXPORT_CAP) {
-              const limit = filters.barcodeMismatch
+              const limit = jsSapFilter
                 ? FETCH_SIZE
                 : Math.min(FETCH_SIZE, EXPORT_CAP - exported);
               const res = await client.query<CsvDbRow>(`FETCH ${limit} FROM call_parts_csv`);
@@ -216,18 +221,20 @@ export function buildCallPartsCsvStream(filters: CallPartsFilters): Response {
                 });
                 const sap: SapDocPair = {
                   ...matched,
-                  sapDocDefective: sapFilter
+                  sapDocDefective: sapDefFilter
                     ? (row.sap_doc_defective ?? null)
                     : matched.sapDocDefective,
-                  sapDocDefectiveQty: sapFilter
+                  sapDocDefectiveQty: sapDefFilter
                     ? formatSapQty(row.sap_doc_defective_qty)
                     : matched.sapDocDefectiveQty,
                 };
                 if (filters.barcodeMismatch && !hasSapBarcodeMismatch(sap)) continue;
+                if (!matchesSapDocFilter(sap.sapDoc, filters.sapDoc)) continue;
+                if (!matchesSapDocFilter(sap.sapDocDefectiveReceipt, filters.sapDocReceipt)) continue;
                 lines.push(line(row, sap));
               }
               if (lines.length > 0 && !enqueue(encoder.encode(`${lines.join('\r\n')}\r\n`))) break;
-              exported += filters.barcodeMismatch ? lines.length : res.rows.length;
+              exported += jsSapFilter ? lines.length : res.rows.length;
               if (res.rows.length < limit) break;
             }
 

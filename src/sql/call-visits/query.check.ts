@@ -5,6 +5,7 @@ import {
   CALL_PARTS_SAP_CTE,
   SAP_DOC_BLANK,
   SAP_DOC_HAS,
+  matchesSapDocFilter,
   sapDocOuterSql,
 } from '@/sql/call-visits/query';
 
@@ -22,6 +23,8 @@ const dated = buildCallPartsFilterSql({
   part: 'compressor',
   category: '',
   sapDoc: '',
+  sapDocDefective: '',
+  sapDocReceipt: '',
   isHod: false,
   assignedOffices: ['12', '18'],
 });
@@ -49,6 +52,8 @@ const all = buildCallPartsFilterSql({
   part: '',
   category: '',
   sapDoc: '',
+  sapDocDefective: '',
+  sapDocReceipt: '',
   isHod: true,
   assignedOffices: [],
 });
@@ -77,6 +82,8 @@ function allInput() {
     part: '',
     category: '',
     sapDoc: '',
+    sapDocDefective: '',
+    sapDocReceipt: '',
     isHod: true,
     assignedOffices: [] as string[],
   };
@@ -91,6 +98,11 @@ assert.equal(sapDocOuterSql(SAP_DOC_HAS, sapParams), 'sap_doc_defective IS NOT N
 assert.equal(sapDocOuterSql(SAP_DOC_BLANK, sapParams), 'sap_doc_defective IS NULL');
 assert.equal(sapDocOuterSql('4908_1%', sapParams), `sap_doc_defective ILIKE $1 ESCAPE '\\'`);
 assert.equal(sapParams[0], '%4908\\_1\\%%');
+assert.equal(matchesSapDocFilter('4901000001', SAP_DOC_HAS), true);
+assert.equal(matchesSapDocFilter(null, SAP_DOC_HAS), false);
+assert.equal(matchesSapDocFilter(null, SAP_DOC_BLANK), true);
+assert.equal(matchesSapDocFilter('4901000001', '4901'), true);
+assert.equal(matchesSapDocFilter('4901000001', '9999'), false);
 assert.match(CALL_PARTS_SAP_CTE, /2303393/);
 assert.match(CALL_PARTS_SAP_CTE, /MOTOR/);
 assert.match(CALL_PARTS_SAP_CTE, /947/);

@@ -16,6 +16,7 @@ import {
   CALL_PARTS_SAP_CTE,
   CALL_PARTS_SAP_QTY_AGG,
   CALL_PARTS_STATUS,
+  matchesSapDocFilter,
   sapDocOuterSql,
   type CallPartsFilterInput,
 } from '@/sql/call-visits/query';
@@ -184,7 +185,7 @@ export function parseCallPartsFilters(
     throw new Error('startDate and endDate must be YYYY-MM-DD');
   }
   const page = Math.max(1, Number(searchParams.get('page') ?? 1) || 1);
-  const pageSize = Math.min(250, Math.max(1, Number(searchParams.get('pageSize') ?? 250) || 250));
+  const pageSize = Math.min(1000, Math.max(1, Number(searchParams.get('pageSize') ?? 250) || 250));
   const sortRaw = searchParams.get('sort')?.trim() ?? '';
   const sort = SORT_KEYS.has(sortRaw) ? (sortRaw as CallPartSortKey) : null;
   const dir = searchParams.get('dir') === 'desc' ? 'desc' : 'asc';
@@ -202,6 +203,8 @@ export function parseCallPartsFilters(
     part: searchParams.get('part')?.trim() ?? '',
     category: searchParams.get('category')?.trim() ?? '',
     sapDoc: searchParams.get('sapDoc')?.trim() ?? '',
+    sapDocDefective: searchParams.get('sapDocDefective')?.trim() ?? '',
+    sapDocReceipt: searchParams.get('sapDocReceipt')?.trim() ?? '',
     barcodeMismatch: searchParams.get('barcodeMismatch') === '1',
     page,
     pageSize,
@@ -311,14 +314,26 @@ function formatSapQty(value: number | string | null | undefined): string | null 
 
 function usesSapSql(filters: CallPartsFilters): boolean {
   return (
-    Boolean(filters.sapDoc.trim()) ||
+    Boolean(filters.sapDocDefective.trim()) ||
     filters.sort === 'sapDocDefective' ||
     filters.sort === 'sapDocDefectiveQty'
   );
 }
 
 function needsEnrichedScan(filters: CallPartsFilters): boolean {
-  return filters.barcodeMismatch || isJsSortKey(filters.sort);
+  return (
+    filters.barcodeMismatch ||
+    isJsSortKey(filters.sort) ||
+    Boolean(filters.sapDoc.trim()) ||
+    Boolean(filters.sapDocReceipt.trim())
+  );
+}
+
+function passesJsSapFilters(row: CallPartRow, filters: CallPartsFilters): boolean {
+  return (
+    matchesSapDocFilter(row.sapDoc, filters.sapDoc) &&
+    matchesSapDocFilter(row.sapDocDefectiveReceipt, filters.sapDocReceipt)
+  );
 }
 
 function jsSortValue(row: CallPartRow, key: JsSortKey): string | number | null {
@@ -367,6 +382,8 @@ function scanFingerprint(filters: CallPartsFilters): string {
     part: filters.part,
     category: filters.category,
     sapDoc: filters.sapDoc,
+    sapDocDefective: filters.sapDocDefective,
+    sapDocReceipt: filters.sapDocReceipt,
     barcodeMismatch: filters.barcodeMismatch,
     sort: filters.sort,
     dir: filters.dir,
@@ -408,10 +425,10 @@ async function scanEnrichedRows(filters: CallPartsFilters): Promise<{
 
   const { where, params } = buildCallPartsFilterSql(filters);
   const sap = usesSapSql(filters);
-  const sapFilter = Boolean(filters.sapDoc.trim());
+  const sapDefFilter = Boolean(filters.sapDocDefective.trim());
   const order = listOrder(isJsSortKey(filters.sort) ? null : filters.sort, filters.dir);
   const cursorParams = [...params];
-  const sapOuter = sapFilter ? sapDocOuterSql(filters.sapDoc, cursorParams) : '';
+  const sapOuter = sapDefFilter ? sapDocOuterSql(filters.sapDocDefective, cursorParams) : '';
   const cursorSql = sap
     ? `${sapBaseSql(where)}
        SELECT * FROM base
@@ -441,7 +458,9 @@ async function scanEnrichedRows(filters: CallPartsFilters): Promise<{
           for (const row of res.rows) {
             const matched = matchPart(lookup, row);
             if (filters.barcodeMismatch && !hasSapBarcodeMismatch(matched)) continue;
-            out.push(mapRow(row, matched, sapFilter));
+            const mapped = mapRow(row, matched, sapDefFilter);
+            if (!passesJsSapFilters(mapped, filters)) continue;
+            out.push(mapped);
           }
           if (res.rows.length < SCAN_FETCH) break;
         }
@@ -494,11 +513,11 @@ export async function fetchCallPartsRows(filters: CallPartsFilters): Promise<Cal
   const offset = (filters.page - 1) * filters.pageSize;
   const order = listOrder(filters.sort, filters.dir);
   const sap = usesSapSql(filters);
-  const sapFilter = Boolean(filters.sapDoc.trim());
+  const sapDefFilter = Boolean(filters.sapDocDefective.trim());
   const pageParams = [...params, filters.pageSize, offset];
-  const sapOuter = sapDocOuterSql(filters.sapDoc, pageParams);
+  const sapOuter = sapDocOuterSql(filters.sapDocDefective, pageParams);
   const countParams = [...params];
-  const countOuter = sapDocOuterSql(filters.sapDoc, countParams);
+  const countOuter = sapDocOuterSql(filters.sapDocDefective, countParams);
   const pageSql = sap
     ? `${sapBaseSql(where)}
        SELECT * FROM base
@@ -520,12 +539,12 @@ export async function fetchCallPartsRows(filters: CallPartsFilters): Promise<Cal
     withAppClient((client) => client.query<DbRow>(pageSql, pageParams)),
     withAppClient((client) =>
       client.query<{ total: number }>(
-        sapFilter
+        sapDefFilter
           ? `${sapBaseSql(where)} SELECT count(*)::int AS total FROM base ${countOuter ? `WHERE ${countOuter}` : ''}`
           : `SELECT count(*)::int AS total ${CALL_PARTS_FROM} ${
               filters.category.trim() ? CALL_PARTS_CATEGORY_JOIN : ''
             } WHERE ${where}`,
-        sapFilter ? countParams : params
+        sapDefFilter ? countParams : params
       )
     ),
     withAppClient((client) =>
@@ -536,7 +555,7 @@ export async function fetchCallPartsRows(filters: CallPartsFilters): Promise<Cal
     getCachedSapDocLookup(),
   ]);
   return {
-    rows: res.rows.map((row) => mapRow(row, matchPart(lookup, row), sapFilter)),
+    rows: res.rows.map((row) => mapRow(row, matchPart(lookup, row), sapDefFilter)),
     total: counted.rows[0]?.total ?? 0,
     page: filters.page,
     pageSize: filters.pageSize,
@@ -557,6 +576,8 @@ export async function fetchCallPartsOptions(filters: CallPartsFilters): Promise<
     part: '',
     category: '',
     sapDoc: '',
+    sapDocDefective: '',
+    sapDocReceipt: '',
   };
   const { where, params } = buildCallPartsFilterSql(scoped);
   const res = await withAppClient((client) =>

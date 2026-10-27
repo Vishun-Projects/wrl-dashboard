@@ -18,6 +18,7 @@ import { defaultDateRange, toDateString, type ReportDateRange } from '@/modules/
 import type { CallPartRow, CallPartsOptions, CallPartsRowsResponse } from '@/modules/call-visits/types';
 
 const API = '/api/report/call-visits';
+const PAGE_SIZE_OPTIONS = [100, 250, 500, 1000] as const;
 
 type SortKey =
   | 'callNo'
@@ -65,6 +66,8 @@ function buildParams(opts: {
   part: string;
   category: string;
   sapDoc: string;
+  sapDocDefective: string;
+  sapDocReceipt: string;
   barcodeMismatch?: boolean;
   sort: { key: SortKey; dir: 'asc' | 'desc' } | null;
   page?: number;
@@ -86,6 +89,8 @@ function buildParams(opts: {
   if (opts.part.trim()) params.set('part', opts.part.trim());
   if (opts.category) params.set('category', opts.category);
   if (opts.sapDoc.trim()) params.set('sapDoc', opts.sapDoc.trim());
+  if (opts.sapDocDefective.trim()) params.set('sapDocDefective', opts.sapDocDefective.trim());
+  if (opts.sapDocReceipt.trim()) params.set('sapDocReceipt', opts.sapDocReceipt.trim());
   if (opts.barcodeMismatch) params.set('barcodeMismatch', '1');
   if (opts.sort) {
     params.set('sort', opts.sort.key);
@@ -314,9 +319,15 @@ export default function CallVisitsPageClient() {
   const [search, setSearch] = useState('');
   const [partInput, setPartInput] = useState('');
   const [part, setPart] = useState('');
-  const [sapInput, setSapInput] = useState('');
-  const [sapDoc, setSapDoc] = useState('');
-  const [sapMode, setSapMode] = useState<'' | 'has' | 'blank'>('');
+  const [sapConsInput, setSapConsInput] = useState('');
+  const [sapCons, setSapCons] = useState('');
+  const [sapConsMode, setSapConsMode] = useState<'' | 'has' | 'blank'>('');
+  const [sapDefInput, setSapDefInput] = useState('');
+  const [sapDef, setSapDef] = useState('');
+  const [sapDefMode, setSapDefMode] = useState<'' | 'has' | 'blank'>('');
+  const [sapRecInput, setSapRecInput] = useState('');
+  const [sapRec, setSapRec] = useState('');
+  const [sapRecMode, setSapRecMode] = useState<'' | 'has' | 'blank'>('');
   const [customerInput, setCustomerInput] = useState('');
   const [customer, setCustomer] = useState('');
   const [plant, setPlant] = useState('');
@@ -327,7 +338,7 @@ export default function CallVisitsPageClient() {
   const [category, setCategory] = useState('');
   const [barcodeMismatch, setBarcodeMismatch] = useState(false);
   const [page, setPage] = useState(1);
-  const pageSize = 250;
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(250);
   const [options, setOptions] = useState<CallPartsOptions>({
     plants: [],
     branches: [],
@@ -349,10 +360,19 @@ export default function CallVisitsPageClient() {
       setSearch(searchInput);
       setPart(partInput);
       setCustomer(customerInput);
-      setSapDoc(sapInput);
+      setSapCons(sapConsInput);
+      setSapDef(sapDefInput);
+      setSapRec(sapRecInput);
     }, 300);
     return () => clearTimeout(t);
-  }, [searchInput, partInput, customerInput, sapInput]);
+  }, [searchInput, partInput, customerInput, sapConsInput, sapDefInput, sapRecInput]);
+
+  function sapFilterValue(mode: '' | 'has' | 'blank', text: string): string {
+    if (mode === 'blank') return '__blank__';
+    if (text.trim()) return text.trim();
+    if (mode === 'has') return '__has__';
+    return '';
+  }
 
   const plantOptions = useMemo<FilterSelectOption[]>(
     () => options.plants.map((b) => ({ value: b, label: b })),
@@ -406,8 +426,9 @@ export default function CallVisitsPageClient() {
     status,
     part,
     category,
-    sapDoc:
-      sapMode === 'blank' ? '__blank__' : sapDoc.trim() || (sapMode === 'has' ? '__has__' : ''),
+    sapDoc: sapFilterValue(sapConsMode, sapCons),
+    sapDocDefective: sapFilterValue(sapDefMode, sapDef),
+    sapDocReceipt: sapFilterValue(sapRecMode, sapRec),
     barcodeMismatch,
   };
 
@@ -424,6 +445,8 @@ export default function CallVisitsPageClient() {
       part: '',
       category: '',
       sapDoc: '',
+      sapDocDefective: '',
+      sapDocReceipt: '',
       sort: null,
     });
     params.set('mode', 'options');
@@ -457,7 +480,28 @@ export default function CallVisitsPageClient() {
         if (!signal.aborted) setLoading(false);
       }
     },
-    [range, search, plant, branch, client, customer, engineer, status, part, category, sapDoc, sapMode, barcodeMismatch, sort, page]
+    [
+      range,
+      search,
+      plant,
+      branch,
+      client,
+      customer,
+      engineer,
+      status,
+      part,
+      category,
+      sapCons,
+      sapConsMode,
+      sapDef,
+      sapDefMode,
+      sapRec,
+      sapRecMode,
+      barcodeMismatch,
+      sort,
+      page,
+      pageSize,
+    ]
   );
 
   useEffect(() => {
@@ -690,36 +734,104 @@ export default function CallVisitsPageClient() {
               className="h-6 w-32 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
             />
             <FilterSelect
+              label="SAP doc"
+              emptyLabel="All SAP docs"
+              options={[
+                { value: 'has', label: 'Has a value' },
+                { value: 'blank', label: 'Is blank' },
+              ]}
+              selected={sapConsMode ? [sapConsMode] : []}
+              mode="single"
+              searchable={false}
+              onChange={(values) => {
+                setPage(1);
+                const next = pickSingle(values);
+                setSapConsMode(next === 'blank' || next === 'has' ? next : '');
+                setSapConsInput('');
+                setSapCons('');
+              }}
+              panelClassName="w-56"
+              layout="inline"
+            />
+            {sapConsMode !== 'blank' ? (
+              <input
+                type="search"
+                value={sapConsInput}
+                onChange={(e) => {
+                  setPage(1);
+                  setSapConsInput(e.target.value);
+                  if (sapConsMode) setSapConsMode('');
+                }}
+                placeholder="SAP doc contains…"
+                aria-label="SAP doc contains"
+                className="h-6 w-36 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
+              />
+            ) : null}
+            <FilterSelect
               label="SAP doc (Defective)"
               emptyLabel="All defective docs"
               options={[
                 { value: 'has', label: 'Has a value' },
                 { value: 'blank', label: 'Is blank' },
               ]}
-              selected={sapMode ? [sapMode] : []}
+              selected={sapDefMode ? [sapDefMode] : []}
               mode="single"
               searchable={false}
               onChange={(values) => {
                 setPage(1);
                 const next = pickSingle(values);
-                setSapMode(next === 'blank' || next === 'has' ? next : '');
-                setSapInput('');
-                setSapDoc('');
+                setSapDefMode(next === 'blank' || next === 'has' ? next : '');
+                setSapDefInput('');
+                setSapDef('');
               }}
               panelClassName="w-56"
               layout="inline"
             />
-            {sapMode !== 'blank' ? (
+            {sapDefMode !== 'blank' ? (
               <input
                 type="search"
-                value={sapInput}
+                value={sapDefInput}
                 onChange={(e) => {
                   setPage(1);
-                  setSapInput(e.target.value);
-                  if (sapMode) setSapMode('');
+                  setSapDefInput(e.target.value);
+                  if (sapDefMode) setSapDefMode('');
                 }}
                 placeholder="Defective doc contains…"
                 aria-label="Defective SAP doc contains"
+                className="h-6 w-36 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
+              />
+            ) : null}
+            <FilterSelect
+              label="SAP doc (Defective Receipt)"
+              emptyLabel="All receipt docs"
+              options={[
+                { value: 'has', label: 'Has a value' },
+                { value: 'blank', label: 'Is blank' },
+              ]}
+              selected={sapRecMode ? [sapRecMode] : []}
+              mode="single"
+              searchable={false}
+              onChange={(values) => {
+                setPage(1);
+                const next = pickSingle(values);
+                setSapRecMode(next === 'blank' || next === 'has' ? next : '');
+                setSapRecInput('');
+                setSapRec('');
+              }}
+              panelClassName="w-56"
+              layout="inline"
+            />
+            {sapRecMode !== 'blank' ? (
+              <input
+                type="search"
+                value={sapRecInput}
+                onChange={(e) => {
+                  setPage(1);
+                  setSapRecInput(e.target.value);
+                  if (sapRecMode) setSapRecMode('');
+                }}
+                placeholder="Receipt doc contains…"
+                aria-label="Defective Receipt SAP doc contains"
                 className="h-6 w-36 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
               />
             ) : null}
@@ -858,11 +970,29 @@ export default function CallVisitsPageClient() {
               </tbody>
             </AdminTable>
           </AdminTableCard>
-          <div className="mt-3 flex items-center justify-between text-[12px] text-slate-600">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[12px] text-slate-600">
             <span>
               Page {page} of {totalPages}
             </span>
-            <div className="flex gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="inline-flex items-center gap-1.5">
+                <span className="text-slate-500">Rows</span>
+                <select
+                  value={pageSize}
+                  aria-label="Rows per page"
+                  onChange={(e) => {
+                    setPage(1);
+                    setPageSize(Number(e.target.value) as (typeof PAGE_SIZE_OPTIONS)[number]);
+                  }}
+                  className="h-7 rounded border border-slate-200 bg-white px-1.5 text-[12px] text-slate-700"
+                >
+                  {PAGE_SIZE_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <button
                 type="button"
                 className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-1 disabled:opacity-40"

@@ -15,8 +15,12 @@ export type CallPartsFilterInput = {
   part: string;
   /** Exact item-category name (compressor, motor, …). */
   category: string;
-  /** SAP material document contains. */
+  /** Consumption SAP doc: __has__ / __blank__ / contains. */
   sapDoc: string;
+  /** Defective Generation SAP doc: __has__ / __blank__ / contains (SQL). */
+  sapDocDefective: string;
+  /** Defective Receipt SAP doc: __has__ / __blank__ / contains. */
+  sapDocReceipt: string;
   isHod: boolean;
   assignedOffices: string[];
 };
@@ -122,6 +126,16 @@ export function sapDocOuterSql(raw: string, params: unknown[]): string {
   if (value === SAP_DOC_BLANK) return 'sap_doc_defective IS NULL';
   params.push(ilikeParam(value));
   return `sap_doc_defective ILIKE $${params.length} ESCAPE '\\'`;
+}
+
+/** Presence / contains match for post-lookup SAP doc fields (consumption, receipt). */
+export function matchesSapDocFilter(value: string | null | undefined, raw: string): boolean {
+  const filter = raw.trim();
+  if (!filter) return true;
+  const v = (value ?? '').trim();
+  if (filter === SAP_DOC_HAS) return v !== '';
+  if (filter === SAP_DOC_BLANK) return v === '';
+  return v.toLowerCase().includes(filter.toLowerCase());
 }
 
 export const CALL_PARTS_HOT_COLS = `
