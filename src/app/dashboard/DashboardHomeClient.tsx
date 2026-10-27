@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Ban,
   CheckCircle2,
@@ -8,7 +8,7 @@ import {
   Hourglass,
   LayoutDashboard,
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useUser } from '@/components/layout/DashboardLayout';
 import { PageLoadingState, PageScrollRegion, PageShell } from '@/components/layout/PageShell';
 import { AnimatedMetric } from '@/components/motion';
@@ -86,10 +86,35 @@ function closeRatePct(solved: number, total: number): number {
   return Math.round((solved / total) * 1000) / 10;
 }
 
-function formatMonthLabel(startDate: string, endDate: string): string {
+type OpsPeriod = 'month' | 'year' | 'all';
+
+const PERIOD_OPTIONS: Array<{ id: OpsPeriod; label: string }> = [
+  { id: 'month', label: 'This month' },
+  { id: 'year', label: 'This year' },
+  { id: 'all', label: 'All time' },
+];
+
+function formatPeriodLabel(
+  period: OpsPeriod,
+  startDate: string,
+  endDate: string
+): string {
   try {
     const start = new Date(`${startDate}T12:00:00`);
     const end = new Date(`${endDate}T12:00:00`);
+    if (period === 'all') {
+      return `All time · through ${new Intl.DateTimeFormat(undefined, {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      }).format(end)}`;
+    }
+    if (period === 'year') {
+      return `${start.getFullYear()} · through ${new Intl.DateTimeFormat(undefined, {
+        day: 'numeric',
+        month: 'short',
+      }).format(end)}`;
+    }
     const month = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(
       start
     );
@@ -218,9 +243,11 @@ function OverviewTable({
 
 export function DashboardHomeClient() {
   const { userProfile, loadingProfile } = useUser();
+  const [period, setPeriod] = useState<OpsPeriod>('month');
   const [kpis, setKpis] = useState<OpsKpisPayload | null>(null);
   const [kpisLoading, setKpisLoading] = useState(false);
   const [kpisError, setKpisError] = useState<string | null>(null);
+  const cacheRef = useRef<Partial<Record<OpsPeriod, OpsKpisPayload>>>({});
   const reduceMotion = usePrefersReducedMotion();
 
   const permissions = userProfile?.permissions ?? [];
@@ -228,28 +255,37 @@ export function DashboardHomeClient() {
 
   useEffect(() => {
     if (!userProfile || !canSeeMisKpis) return;
+
+    const cached = cacheRef.current[period];
+    if (cached) {
+      setKpis(cached);
+      setKpisLoading(false);
+      setKpisError(null);
+      return;
+    }
+
     let cancelled = false;
     setKpisLoading(true);
     setKpisError(null);
 
     void (async () => {
       try {
-        const res = await fetch('/api/report/ops-kpis', { credentials: 'include' });
+        const res = await fetch(`/api/report/ops-kpis?period=${period}`, {
+          credentials: 'include',
+        });
         const payload = await res.json().catch(() => ({}));
         if (cancelled) return;
         if (!res.ok) {
-          setKpis(null);
           setKpisError(
             typeof payload.error === 'string' ? payload.error : 'Could not load ops summary'
           );
           return;
         }
-        setKpis(payload as OpsKpisPayload);
+        const next = payload as OpsKpisPayload;
+        cacheRef.current[period] = next;
+        setKpis(next);
       } catch {
-        if (!cancelled) {
-          setKpis(null);
-          setKpisError('Could not load ops summary');
-        }
+        if (!cancelled) setKpisError('Could not load ops summary');
       } finally {
         if (!cancelled) setKpisLoading(false);
       }
@@ -258,7 +294,7 @@ export function DashboardHomeClient() {
     return () => {
       cancelled = true;
     };
-  }, [userProfile, canSeeMisKpis]);
+  }, [userProfile, canSeeMisKpis, period]);
 
   const greeting = greetingForHour(new Date().getHours());
 
@@ -268,26 +304,80 @@ export function DashboardHomeClient() {
 
   const solvedRate = kpis ? closeRatePct(kpis.solved_calls, kpis.total_calls) : 0;
   const agingOver7 = kpis ? kpis.age_7 + kpis.age_15 : 0;
+  const periodMeta = PERIOD_OPTIONS.find((o) => o.id === period) ?? PERIOD_OPTIONS[0];
+  const periodSubtitle = periodMeta.label;
+  const isUpdating = Boolean(kpisLoading && kpis);
+  const periodRangeLabel = kpis
+    ? formatPeriodLabel(period, kpis.startDate, kpis.endDate)
+    : 'Your assigned branches';
 
   return (
     <PageShell
       title="Dashboard"
-      subtitle="This month ops overview"
+      subtitle={`${periodSubtitle} ops overview`}
       icon={<LayoutDashboard size={16} />}
       bodyClassName="flex-1 flex flex-col min-h-0 min-w-0 w-full overflow-hidden bg-bg-soft"
     >
       <PageScrollRegion className="p-4 md:p-6">
         <div className="flex w-full min-w-0 flex-col gap-5">
-          <div>
-            <h2 className="text-[1.35rem] font-semibold tracking-[-0.02em] text-slate-900 dark:text-white">
-              {greeting}, {firstName(userProfile.name)}
-            </h2>
-            <p className="mt-1 text-[13px] text-slate-500 dark:text-slate-400">
-              {kpis
-                ? formatMonthLabel(kpis.startDate, kpis.endDate)
-                : 'This month · your assigned branches'}
-              {userProfile.role ? ` · ${userProfile.role}` : ''}
-            </p>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-[1.35rem] font-semibold tracking-[-0.02em] text-slate-900 dark:text-white">
+                {greeting}, {firstName(userProfile.name)}
+              </h2>
+              <div className="mt-1 flex min-h-[1.25rem] items-center gap-2 text-[13px] text-slate-500 dark:text-slate-400">
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.p
+                    key={isUpdating ? `pending-${period}` : periodRangeLabel}
+                    initial={reduceMotion ? false : { opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={reduceMotion ? undefined : { opacity: 0, y: -3 }}
+                    transition={{ duration: MOTION_DURATION.fast, ease: MOTION_EASE_OUT }}
+                  >
+                    {isUpdating ? `Refreshing · ${periodSubtitle.toLowerCase()}` : periodRangeLabel}
+                  </motion.p>
+                </AnimatePresence>
+              </div>
+            </div>
+
+            {canSeeMisKpis ? (
+              <div
+                className="inline-flex rounded-lg border border-slate-200 bg-bg-canvas p-0.5 shadow-sm dark:border-slate-800"
+                role="group"
+                aria-label="Dashboard period"
+              >
+                {PERIOD_OPTIONS.map((opt) => {
+                  const active = period === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setPeriod(opt.id)}
+                      aria-pressed={active}
+                      disabled={isUpdating && active}
+                      className={`relative rounded-md px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
+                        active
+                          ? 'text-white dark:text-slate-900'
+                          : 'text-slate-600 hover:bg-bg-soft hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white'
+                      }`}
+                    >
+                      {active ? (
+                        <motion.span
+                          layoutId={reduceMotion ? undefined : 'dashboard-period-pill'}
+                          className="absolute inset-0 rounded-md bg-slate-900 dark:bg-slate-100"
+                          transition={
+                            reduceMotion
+                              ? instantTransition()
+                              : { type: 'spring', stiffness: 420, damping: 34 }
+                          }
+                        />
+                      ) : null}
+                      <span className="relative z-[1]">{opt.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
 
           {!canSeeMisKpis ? (
@@ -312,10 +402,14 @@ export function DashboardHomeClient() {
             </div>
           ) : kpis ? (
             <motion.div
-              className="flex flex-col gap-5"
+              key={`${period}-${kpis.startDate}-${kpis.endDate}`}
+              className={`flex flex-col gap-5 transition-[opacity,filter] duration-200 ease-out ${
+                isUpdating ? 'pointer-events-none opacity-50 saturate-50' : 'opacity-100'
+              }`}
               initial={reduceMotion ? false : 'hidden'}
               animate="show"
               variants={reduceMotion ? undefined : staggerContainer}
+              aria-busy={isUpdating}
             >
               <motion.section
                 variants={reduceMotion ? undefined : staggerContainer}
@@ -532,7 +626,7 @@ export function DashboardHomeClient() {
 
                 <OverviewTable
                   title="Call type mix"
-                  subtitle="Top types this month"
+                  subtitle={`Top types · ${periodSubtitle.toLowerCase()}`}
                   reduceMotion={reduceMotion}
                   columns={[
                     { key: 'type', label: 'Call type' },
