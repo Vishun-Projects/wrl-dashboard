@@ -1148,16 +1148,26 @@ function PartCell({
       return <AdminTd className={`whitespace-nowrap ${tone}`}>{qtyText(r.qty)}</AdminTd>;
     case 'newBarcode':
       return <Clip value={r.newBarcode} width="max-w-[8rem]" mono tone={tone} />;
-    case 'consDaysDiff':
+    case 'consDaysDiff': {
+      const d = r.consDaysDiff;
+      if (d == null) {
+        return <AdminTd className={`whitespace-nowrap ${tone}`}>—</AdminTd>;
+      }
+      // Positive (Cons after visit) is the review signal — amber chip; negatives stay red.
+      const chip =
+        d > 0
+          ? 'bg-amber-200 font-bold text-amber-950 ring-1 ring-amber-400/70'
+          : d < 0
+            ? 'bg-red-50 font-medium text-red-700 ring-1 ring-red-200/80'
+            : 'font-medium text-slate-500';
       return (
-        <AdminTd
-          className={`whitespace-nowrap tabular-nums ${tone}${
-            r.consDaysDiff != null && r.consDaysDiff < 0 ? ' text-red-600' : ''
-          }`}
-        >
-          {r.consDaysDiff == null ? '—' : r.consDaysDiff}
+        <AdminTd className={`whitespace-nowrap ${tone}`}>
+          <span className={`inline-block rounded px-1.5 py-0.5 tabular-nums ${chip}`}>
+            {d > 0 ? `+${d}` : d}
+          </span>
         </AdminTd>
       );
+    }
     case 'oldBarcode':
       return <Clip value={r.oldBarcode} width="max-w-[8rem]" mono tone={tone} />;
     case 'remarks':
