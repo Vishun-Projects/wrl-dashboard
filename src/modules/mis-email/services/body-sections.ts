@@ -277,9 +277,12 @@ function buildPerformanceTableHtml(params: {
 
 function buildKeyAccountTableHtml(
   context: MisEmailBodyContext,
-  options?: { mergeRegionCells?: boolean; maxRows?: number }
+  options?: { mergeRegionCells?: boolean; maxRows?: number; orderByGt7?: boolean }
 ): string {
-  const allRows = sortAccountRowsByZoneThenAccount(context.accountRows ?? []);
+  const sourceRows = context.accountRows ?? [];
+  const allRows = options?.orderByGt7
+    ? sourceRows
+    : sortAccountRowsByZoneThenAccount(sourceRows);
   if (!allRows.length) return '';
 
   const totalRows = allRows.length;
@@ -310,7 +313,7 @@ function buildKeyAccountTableHtml(
   const accountMergeFlagsForBody: MergeSelection = context.accountMetricsFromTrace
     ? { crm: true, client: false }
     : DIGEST_MERGE_FLAGS;
-  const mergedRows = accountRows.map((row) =>
+  const mergedSource = accountRows.map((row) =>
     buildMergedAccountMetricRow(
       row,
       context.accountMetricsFromTrace ? undefined : context.clientAccountSummary,
@@ -318,6 +321,9 @@ function buildKeyAccountTableHtml(
       DEFAULT_CLIENT_MERGE_WITH_CRM
     )
   );
+  const mergedRows = options?.orderByGt7
+    ? sortByGt7Desc(mergedSource, (row) => `${row.region}\0${row.account}`)
+    : mergedSource;
 
   const bodyRows: string[] = [];
   for (let i = 0; i < mergedRows.length; i++) {
@@ -423,10 +429,25 @@ export function renderRegionalPerformanceTableHtml(
   });
 }
 
-function buildRegionalPerformanceHtml(bodyContext: MisEmailBodyContext): string {
+function buildRegionalPerformanceHtml(
+  bodyContext: MisEmailBodyContext,
+  orderByGt7 = false
+): string {
+  const rows = regionalRowsForBody(bodyContext.summary, bodyContext);
   return renderRegionalPerformanceTableHtml(
-    resolveRegionalPerformanceRows(bodyContext.summary, bodyContext)
+    orderByGt7 ? sortByGt7Desc(rows, (row) => row.region) : rows
   );
+}
+
+/** Shown in Excel; omitted from digest preview and mail body only. */
+const MAIL_BODY_HIDDEN_BRANCHES = new Set([
+  '1155 - CHANDIGARH BRANCH',
+  'AGRA BRANCH - 1160',
+  'WRL GUJRAT BRANCH OFFICE',
+]);
+
+function isMailBodyHiddenBranch(name: string): boolean {
+  return MAIL_BODY_HIDDEN_BRANCHES.has(name.trim().toUpperCase().replace(/\s+/g, ' '));
 }
 
 function isNonZeroBranchPerformanceRow(row: {
@@ -456,37 +477,96 @@ function isNonZeroBranchPerformanceRow(row: {
   );
 }
 
+const BRANCH_COUNT_FIELDS = [
+  'total_calls',
+  'solved_calls',
+  'cancelled_calls',
+  'open_calls',
+  'age_2',
+  'age_3',
+  'age_7',
+  'age_15',
+  'part_pending',
+  'active_eng',
+] as const satisfies ReadonlyArray<keyof RegionalPerformanceRow>;
+
+function regionMatchKey(region: string): string {
+  return region.trim().toUpperCase().replace(/\s+ZONE$/, '');
+}
+
+function rawBranchPerformanceRows(
+  data: SummaryDashboard,
+  bodyContext: MisEmailBodyContext
+): BranchPerformanceRow[] {
+  if (bodyContext.branchPerformanceRows?.length) return bodyContext.branchPerformanceRows;
+  return mergeBranchSummaryRowsByName(buildTopLevelBranchRows(data.branchSummary))
+    .map((row) => ({
+      branch: row.branch,
+      region: row.region,
+      total_calls: row.total_calls,
+      solved_calls: row.solved_calls,
+      cancelled_calls: row.cancelled_calls,
+      open_calls: row.open_calls,
+      age_2: row.age_2,
+      age_3: row.age_3,
+      age_7: row.age_7,
+      age_15: row.age_15,
+      part_pending: row.part_pending,
+      active_eng: row.active_eng,
+    }))
+    .sort((a, b) => {
+      const age15Diff = Number(b.age_15 || 0) - Number(a.age_15 || 0);
+      if (age15Diff !== 0) return age15Diff;
+      return String(a.branch).localeCompare(String(b.branch));
+    });
+}
+
+/** Drop hidden-branch metrics from zone rows. All is summed from those zones. */
+function omitHiddenBranchCounts(
+  regional: RegionalPerformanceRow[],
+  branches: BranchPerformanceRow[]
+): RegionalPerformanceRow[] {
+  const hidden = branches.filter((row) => isMailBodyHiddenBranch(row.branch));
+  if (!hidden.length) return regional;
+  return regional.map((zone) => {
+    const key = regionMatchKey(zone.region);
+    const cuts = hidden.filter((row) => regionMatchKey(row.region) === key);
+    if (!cuts.length) return zone;
+    const next = { ...zone };
+    for (const field of BRANCH_COUNT_FIELDS) {
+      const cut = cuts.reduce((sum, row) => sum + Number(row[field] || 0), 0);
+      next[field] = Math.max(0, Number(zone[field] || 0) - cut);
+    }
+    return next;
+  });
+}
+
+function regionalRowsForBody(
+  data: SummaryDashboard,
+  bodyContext: MisEmailBodyContext
+): RegionalPerformanceRow[] {
+  return omitHiddenBranchCounts(
+    resolveRegionalPerformanceRows(data, bodyContext),
+    rawBranchPerformanceRows(data, bodyContext)
+  );
+}
+
 function resolveBranchPerformanceRows(
   data: SummaryDashboard,
   bodyContext: MisEmailBodyContext
 ): BranchPerformanceRow[] {
-  const rows = bodyContext.branchPerformanceRows?.length
-    ? bodyContext.branchPerformanceRows
-    : mergeBranchSummaryRowsByName(buildTopLevelBranchRows(data.branchSummary)).map((row) => ({
-          branch: row.branch,
-          region: row.region,
-          total_calls: row.total_calls,
-          solved_calls: row.solved_calls,
-          cancelled_calls: row.cancelled_calls,
-          open_calls: row.open_calls,
-          age_2: row.age_2,
-          age_3: row.age_3,
-          age_7: row.age_7,
-          age_15: row.age_15,
-          part_pending: row.part_pending,
-          active_eng: row.active_eng,
-        }))
-        .sort((a, b) => {
-          const age15Diff = Number(b.age_15 || 0) - Number(a.age_15 || 0);
-          if (age15Diff !== 0) return age15Diff;
-          return String(a.branch).localeCompare(String(b.branch));
-        });
-
-  return rows.filter(isNonZeroBranchPerformanceRow);
+  return rawBranchPerformanceRows(data, bodyContext).filter(
+    (row) => isNonZeroBranchPerformanceRow(row) && !isMailBodyHiddenBranch(row.branch)
+  );
 }
 
-function buildBranchPerformanceHtml(data: SummaryDashboard, bodyContext: MisEmailBodyContext): string {
-  const branches = resolveBranchPerformanceRows(data, bodyContext);
+function buildBranchPerformanceHtml(
+  data: SummaryDashboard,
+  bodyContext: MisEmailBodyContext,
+  orderByGt7 = false
+): string {
+  const resolved = resolveBranchPerformanceRows(data, bodyContext);
+  const branches = orderByGt7 ? sortByGt7Desc(resolved, (row) => row.branch) : resolved;
 
   return buildPerformanceTableHtml({
     title: 'Branch-wise Performance',
@@ -511,7 +591,24 @@ function buildBranchPerformanceHtml(data: SummaryDashboard, bodyContext: MisEmai
 export type MisEmailBodyRenderOptions = {
   layout?: MisEmailBodyLayout | null;
   keyAccountMaxRows?: number;
+  /** Rank rows by the displayed >7 days column (age_7 + age_15), high to low. */
+  orderByGt7?: boolean;
 };
+
+function gt7Count(row: { age_7?: number; age_15?: number }): number {
+  return Number(row.age_7 || 0) + Number(row.age_15 || 0);
+}
+
+function sortByGt7Desc<T extends { age_7?: number; age_15?: number }>(
+  rows: T[],
+  tie: (row: T) => string
+): T[] {
+  return [...rows].sort((a, b) => {
+    const diff = gt7Count(b) - gt7Count(a);
+    if (diff !== 0) return diff;
+    return tie(a).localeCompare(tie(b));
+  });
+}
 
 function resolveBodyRenderOptions(
   options?: MisEmailBodyLayout | null | MisEmailBodyRenderOptions
@@ -535,13 +632,14 @@ function buildSectionHtmlMap(
 
   for (const id of sectionIds) {
     if (id === 'regional_performance') {
-      map[id] = buildRegionalPerformanceHtml(bodyContext);
+      map[id] = buildRegionalPerformanceHtml(bodyContext, renderOptions.orderByGt7);
     } else if (id === 'branch_performance') {
-      map[id] = buildBranchPerformanceHtml(data, bodyContext);
+      map[id] = buildBranchPerformanceHtml(data, bodyContext, renderOptions.orderByGt7);
     } else if (id === 'key_account_performance') {
       const html = buildKeyAccountTableHtml(bodyContext, {
         mergeRegionCells,
         maxRows: renderOptions.keyAccountMaxRows,
+        orderByGt7: renderOptions.orderByGt7,
       });
       if (html) map[id] = html;
     }
@@ -582,7 +680,8 @@ function buildPerformancePlainLines(
 
 export function buildEmailBodySectionsPlainText(
   sectionIds: MisEmailBodySectionId[],
-  context: MisEmailBodyContext | SummaryDashboard
+  context: MisEmailBodyContext | SummaryDashboard,
+  options?: { orderByGt7?: boolean }
 ): string {
   const bodyContext: MisEmailBodyContext =
     'summary' in context ? context : { summary: context };
@@ -590,7 +689,10 @@ export function buildEmailBodySectionsPlainText(
   const blocks: string[] = [];
 
   if (sectionIds.includes('regional_performance')) {
-    const regionalRows = resolveRegionalPerformanceRows(data, bodyContext);
+    const resolvedRegional = regionalRowsForBody(data, bodyContext);
+    const regionalRows = options?.orderByGt7
+      ? sortByGt7Desc(resolvedRegional, (row) => row.region)
+      : resolvedRegional;
     const grand = sumRegionalRows(regionalRows);
     blocks.push(
       ...buildPerformancePlainLines('Regional Performance', [
@@ -601,7 +703,10 @@ export function buildEmailBodySectionsPlainText(
   }
 
   if (sectionIds.includes('branch_performance')) {
-    const branches = resolveBranchPerformanceRows(data, bodyContext);
+    const resolvedBranches = resolveBranchPerformanceRows(data, bodyContext);
+    const branches = options?.orderByGt7
+      ? sortByGt7Desc(resolvedBranches, (row) => row.branch)
+      : resolvedBranches;
     blocks.push(
       '',
       ...buildPerformancePlainLines(
@@ -624,19 +729,27 @@ export function buildEmailBodySectionsPlainText(
   }
 
   if (sectionIds.includes('key_account_performance') && (bodyContext.accountRows?.length ?? 0) > 0) {
-    const accountRows = sortAccountRowsByZoneThenAccount(bodyContext.accountRows ?? []);
+    const accountSource = bodyContext.accountRows ?? [];
+    const accountRows = options?.orderByGt7
+      ? accountSource
+      : sortAccountRowsByZoneThenAccount(accountSource);
     if (accountRows.length > 0) {
       const accountMergeFlagsForBody: MergeSelection = bodyContext.accountMetricsFromTrace
         ? { crm: true, client: false }
         : DIGEST_MERGE_FLAGS;
       blocks.push('', 'Key Account Breakdown', '');
-      for (const row of accountRows) {
-        const merged = buildMergedAccountMetricRow(
+      const mergedAccounts = accountRows.map((row) =>
+        buildMergedAccountMetricRow(
           row,
           bodyContext.accountMetricsFromTrace ? undefined : bodyContext.clientAccountSummary,
           accountMergeFlagsForBody,
           DEFAULT_CLIENT_MERGE_WITH_CRM
-        );
+        )
+      );
+      const orderedAccounts = options?.orderByGt7
+        ? sortByGt7Desc(mergedAccounts, (row) => `${row.region}\0${row.account}`)
+        : mergedAccounts;
+      for (const merged of orderedAccounts) {
         blocks.push(
           `${formatRegionLabel(merged.region)} / ${clientAccountDisplayName(merged.account)}: calls ${formatNum(merged.total_solved + merged.open_calls + Number(merged.cancelled_calls || 0))}, solved ${formatNum(merged.total_solved)}, cancelled ${formatNum(Number(merged.cancelled_calls || 0))}, open ${formatNum(merged.open_calls)}, % >7 days ${merged.pct_gt_7}`
         );

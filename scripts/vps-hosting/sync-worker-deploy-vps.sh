@@ -9,7 +9,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${ROOT}/.env.vps-setup"
-INSTALL_BASE="${SYNC_WORKER_INSTALL_ROOT:-/opt/fast-close-app}"
+# Same tree as crontab (mail-scheduler / evening-ops). Override with SYNC_WORKER_INSTALL_ROOT.
+INSTALL_BASE="${SYNC_WORKER_INSTALL_ROOT:-/opt/wrl/database/fast-close-app}"
 # Strip trailing /current if someone passes the code root by mistake
 INSTALL_BASE="${INSTALL_BASE%/current}"
 

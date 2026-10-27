@@ -274,16 +274,20 @@ function buildDigestEmailContent(params: {
     : 0;
 
   const render = (keyAccountMaxRows?: number) => {
+    // Digest body and preview: rank by the >7 days column, high to low.
+    // Excel attachments and the send schedule are unchanged.
+    const orderByGt7 = true;
     const bodyHtml =
       bodySectionIds.length > 0
         ? buildEmailBodySectionsHtml(bodySectionIds, bodyContext, {
             layout: bodyLayout,
             keyAccountMaxRows,
+            orderByGt7,
           })
         : undefined;
     const bodyPlainText =
       bodySectionIds.length > 0
-        ? buildEmailBodySectionsPlainText(bodySectionIds, bodyContext)
+        ? buildEmailBodySectionsPlainText(bodySectionIds, bodyContext, { orderByGt7 })
         : undefined;
     const emailParams = {
       recipientName: params.recipientName,

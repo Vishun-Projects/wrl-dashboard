@@ -17,7 +17,7 @@ if [[ "$RUN_DIGEST" == "1" ]]; then
   # shellcheck disable=SC1090
   source "$ENV_FILE"
   VPS_HOST="${VPS_HOST:?Set VPS_HOST in .env.vps-setup}"
-  INSTALL_BASE="${MIS_EMAIL_INSTALL_ROOT:-/opt/fast-close-app}"
+  INSTALL_BASE="${MIS_EMAIL_INSTALL_ROOT:-/opt/wrl/database/fast-close-app}"
   INSTALL_BASE="${INSTALL_BASE%/current}"
   echo "==> Running today's digest via current…"
   ssh "$VPS_HOST" bash -s <<REMOTE

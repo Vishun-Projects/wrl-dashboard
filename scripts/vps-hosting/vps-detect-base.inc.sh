@@ -2,11 +2,12 @@
 # Shared remote one-liner: print install base (parent of current/releases).
 # Prefer known paths; find under releases/ (find does not follow current →).
 vps_ssh_detect_base_script() {
-  local hint="${1:-/opt/fast-close-app}"
+  # Live cron uses /opt/wrl/...; prefer that over a stale /opt/fast-close-app twin.
+  local hint="${1:-/opt/wrl/database/fast-close-app}"
   cat <<EOF
 hint='${hint}'
 hint="\${hint%/current}"
-for candidate in "\$hint" /opt/wrl/database/fast-close-app /opt/fast-close-app; do
+for candidate in /opt/wrl/database/fast-close-app "\$hint" /opt/fast-close-app; do
   [[ -n "\$candidate" ]] || continue
   candidate="\${candidate%/current}"
   if [[ -e "\${candidate}/current/scripts/vps-hosting/mis-email-digest.sh" ]] \\

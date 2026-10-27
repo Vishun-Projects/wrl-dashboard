@@ -313,6 +313,49 @@ describe('buildEmailBodySectionsHtml', () => {
     expect(html).toContain('color:#065f46');
   });
 
+  it('orderByGt7 ranks branch rows by the >7 days column, high to low', () => {
+    const context: MisEmailBodyContext = {
+      summary: sampleData,
+      branchPerformanceRows: [
+        {
+          branch: 'Delhi',
+          region: 'NORTH ZONE',
+          total_calls: 100,
+          solved_calls: 90,
+          cancelled_calls: 2,
+          open_calls: 8,
+          age_2: 5,
+          age_3: 2,
+          age_7: 1,
+          age_15: 0,
+          part_pending: 1,
+          active_eng: 12,
+        },
+        {
+          branch: 'Pune',
+          region: 'WEST ZONE',
+          total_calls: 10,
+          solved_calls: 4,
+          cancelled_calls: 0,
+          open_calls: 6,
+          age_2: 0,
+          age_3: 0,
+          age_7: 2,
+          age_15: 4,
+          part_pending: 0,
+          active_eng: 1,
+        },
+      ],
+    };
+    const unsorted = buildEmailBodySectionsHtml(['branch_performance'], context);
+    expect(unsorted.indexOf('Delhi')).toBeLessThan(unsorted.indexOf('Pune'));
+    const sorted = buildEmailBodySectionsHtml(['branch_performance'], context, {
+      orderByGt7: true,
+    });
+    // Pune >7 days = 2 + 4; Delhi = 1
+    expect(sorted.indexOf('Pune')).toBeLessThan(sorted.indexOf('Delhi'));
+  });
+
   it('colors only the label column with zone bands in branch performance', () => {
     const html = buildEmailBodySectionsHtml(['branch_performance'], {
       summary: sampleData,
@@ -379,6 +422,118 @@ describe('buildEmailBodySectionsHtml', () => {
     const html = buildEmailBodySectionsHtml(['branch_performance'], { summary });
     expect(html).toContain('Delhi');
     expect(html).not.toContain('AGRA BRANCH - 1160');
+  });
+
+  it('omits Chandigarh, Agra, and WRL Gujrat from the mail body even when they have calls', () => {
+    const hidden = [
+      '1155 - CHANDIGARH BRANCH',
+      'AGRA BRANCH - 1160',
+      'WRL GUJRAT BRANCH OFFICE',
+    ];
+    const summary: SummaryDashboard = {
+      ...sampleData,
+      branchSummary: [
+        sampleData.branchSummary[0],
+        ...hidden.map((branch, index) => ({
+          ...sampleData.branchSummary[0],
+          officeId: 1155 + index,
+          branch,
+          total_calls: index + 1,
+          solved_calls: 0,
+          cancelled_calls: index + 1,
+          open_calls: 0,
+          age_2: 0,
+          age_3: 0,
+          age_7: 0,
+          age_15: 0,
+          part_pending: 0,
+          active_eng: 0,
+        })),
+      ],
+    };
+    const html = buildEmailBodySectionsHtml(['branch_performance'], { summary });
+    expect(html).toContain('Delhi');
+    for (const branch of hidden) expect(html).not.toContain(branch);
+  });
+
+  it('drops hidden branch counts from the zone and All totals', () => {
+    const north = {
+      region: 'NORTH ZONE',
+      total_calls: 3,
+      solved_calls: 0,
+      cancelled_calls: 3,
+      open_calls: 0,
+      age_2: 0,
+      age_3: 0,
+      age_7: 0,
+      age_15: 0,
+      part_pending: 0,
+      active_eng: 0,
+    };
+    const west = {
+      region: 'WEST ZONE',
+      total_calls: 10,
+      solved_calls: 8,
+      cancelled_calls: 0,
+      open_calls: 2,
+      age_2: 2,
+      age_3: 0,
+      age_7: 0,
+      age_15: 0,
+      part_pending: 0,
+      active_eng: 1,
+    };
+    const hiddenBranch = (branch: string, cancelled: number) => ({
+      branch,
+      region: 'NORTH ZONE',
+      total_calls: cancelled,
+      solved_calls: 0,
+      cancelled_calls: cancelled,
+      open_calls: 0,
+      age_2: 0,
+      age_3: 0,
+      age_7: 0,
+      age_15: 0,
+      part_pending: 0,
+      active_eng: 0,
+    });
+    const html = buildEmailBodySectionsHtml(['regional_performance'], {
+      summary: sampleData,
+      regionalPerformanceRows: [north, west],
+      branchPerformanceRows: [
+        hiddenBranch('1155 - CHANDIGARH BRANCH', 1),
+        hiddenBranch('AGRA BRANCH - 1160', 1),
+        hiddenBranch('WRL GUJRAT BRANCH OFFICE', 1),
+        {
+          branch: 'Pune',
+          region: 'WEST ZONE',
+          total_calls: 10,
+          solved_calls: 8,
+          cancelled_calls: 0,
+          open_calls: 2,
+          age_2: 2,
+          age_3: 0,
+          age_7: 0,
+          age_15: 0,
+          part_pending: 0,
+          active_eng: 1,
+        },
+      ],
+    });
+    // North 3 cancelled removed; All is West only (solved 8 + open 2).
+    expect(html).not.toContain('>12<');
+    expect(html).toContain('>10<');
+    const text = buildEmailBodySectionsPlainText(['regional_performance'], {
+      summary: sampleData,
+      regionalPerformanceRows: [north, west],
+      branchPerformanceRows: [
+        hiddenBranch('1155 - CHANDIGARH BRANCH', 1),
+        hiddenBranch('AGRA BRANCH - 1160', 1),
+        hiddenBranch('WRL GUJRAT BRANCH OFFICE', 1),
+      ],
+    });
+    expect(text).toContain('NORTH: total 0');
+    expect(text).toContain('All: total 10');
   });
 
   it('sorts key account rows NORTH → EAST → WEST → SOUTH, then account name', () => {
