@@ -6,6 +6,8 @@ import type { Mb51AgingImportMeta, Mb51AgingMovement } from '@/modules/mb51-agin
  * ~147k rows → ~19 chunks at 8k (was ~90 at 1.2k → 429).
  */
 export const MB51_SAVE_CHUNK = 8000;
+/** GET page size — full dump of multi‑M rows was ~350MB JSON → API 500. */
+export const MB51_LOAD_CHUNK = 40_000;
 
 export type Mb51SaveBatch = {
   fileName: string;
@@ -115,4 +117,45 @@ export async function saveMb51AgingRows(
     );
   }
   return latest;
+}
+
+type LoadPage = {
+  latestImport?: Mb51AgingImportMeta | null;
+  rows?: Mb51AgingMovement[];
+  nextAfter?: number;
+  done?: boolean;
+  error?: string;
+};
+
+/**
+ * Load latest MB51 import in pages (afterSeq cursor).
+ * Progress: (loaded, totalHint) — totalHint from meta.rowCount when known.
+ */
+export async function fetchMb51AgingRows(
+  onProgress?: (loaded: number, totalHint: number | null) => void
+): Promise<{ latestImport: Mb51AgingImportMeta | null; rows: Mb51AgingMovement[] }> {
+  const rows: Mb51AgingMovement[] = [];
+  let afterSeq = -1;
+  let latestImport: Mb51AgingImportMeta | null = null;
+
+  for (;;) {
+    const res = await fetchWithRetry(
+      `/api/report/mb51-aging?afterSeq=${afterSeq}&limit=${MB51_LOAD_CHUNK}`,
+      { credentials: 'include', retries: 4, retryDelayMs: 1000 }
+    );
+    const data = (await res.json().catch(() => ({}))) as LoadPage;
+    if (!res.ok) {
+      throw new Error(data.error || `Failed to load data (${res.status})`);
+    }
+
+    if (data.latestImport) latestImport = data.latestImport;
+    const chunk = Array.isArray(data.rows) ? data.rows : [];
+    rows.push(...chunk);
+    onProgress?.(rows.length, latestImport?.rowCount ?? null);
+
+    if (data.done || chunk.length === 0) break;
+    afterSeq = typeof data.nextAfter === 'number' ? data.nextAfter : afterSeq + chunk.length;
+  }
+
+  return { latestImport, rows };
 }

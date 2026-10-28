@@ -135,10 +135,27 @@ async function fetchImportMeta(
   return toMeta(imp);
 }
 
-export async function fetchLatestMb51AgingData(): Promise<{
+const DEFAULT_PAGE = 40_000;
+const MAX_PAGE = 80_000;
+
+export type Mb51AgingPage = {
   latestImport: Mb51AgingImportMeta | null;
   rows: Mb51AgingMovement[];
-}> {
+  nextAfter: number;
+  done: boolean;
+};
+
+/** One page of the latest import (seq_order cursor). Avoids ~350MB single JSON for multi‑M row files. */
+export async function fetchLatestMb51AgingPage(opts?: {
+  afterSeq?: number;
+  limit?: number;
+}): Promise<Mb51AgingPage> {
+  const afterSeq = Number.isFinite(opts?.afterSeq) ? Number(opts?.afterSeq) : -1;
+  const limit = Math.min(
+    MAX_PAGE,
+    Math.max(1, Math.floor(opts?.limit ?? DEFAULT_PAGE))
+  );
+
   return withAppClient(
     async (client) => {
       const importRes = await client.query<{
@@ -159,7 +176,7 @@ export async function fetchLatestMb51AgingData(): Promise<{
       );
 
       if (importRes.rows.length === 0) {
-        return { latestImport: null, rows: [] };
+        return { latestImport: null, rows: [], nextAfter: afterSeq, done: true };
       }
 
       const latestImport = toMeta(importRes.rows[0]);
@@ -198,9 +215,11 @@ export async function fetchLatestMb51AgingData(): Promise<{
         seq_order
       FROM mb51_aging_rows
       WHERE import_id = $1
+        AND seq_order > $2
       ORDER BY seq_order ASC
+      LIMIT $3
       `,
-        [latestImport.id]
+        [latestImport.id, afterSeq, limit]
       );
 
       const rows: Mb51AgingMovement[] = rowsRes.rows.map((r) => ({
@@ -220,10 +239,34 @@ export async function fetchLatestMb51AgingData(): Promise<{
         s: r.seq_order,
       }));
 
-      return { latestImport, rows };
+      const nextAfter = rows.length ? rows[rows.length - 1].s : afterSeq;
+      return {
+        latestImport,
+        rows,
+        nextAfter,
+        done: rows.length < limit,
+      };
     },
     { statementTimeoutMs: LOAD_STATEMENT_TIMEOUT_MS }
   );
+}
+
+/** @deprecated Prefer fetchLatestMb51AgingPage — full dump OOMs on multi‑M row imports. */
+export async function fetchLatestMb51AgingData(): Promise<{
+  latestImport: Mb51AgingImportMeta | null;
+  rows: Mb51AgingMovement[];
+}> {
+  const rows: Mb51AgingMovement[] = [];
+  let afterSeq = -1;
+  let latestImport: Mb51AgingImportMeta | null = null;
+  for (;;) {
+    const page = await fetchLatestMb51AgingPage({ afterSeq, limit: DEFAULT_PAGE });
+    latestImport = page.latestImport;
+    rows.push(...page.rows);
+    if (page.done) break;
+    afterSeq = page.nextAfter;
+  }
+  return { latestImport, rows };
 }
 
 export async function saveMb51AgingImport(opts: {

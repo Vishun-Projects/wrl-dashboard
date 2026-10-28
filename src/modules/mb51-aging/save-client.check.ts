@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  MB51_LOAD_CHUNK,
   MB51_SAVE_CHUNK,
   buildMb51SaveBody,
   planMb51SaveBatches,
@@ -22,6 +23,7 @@ function row(i: number): Mb51AgingMovement {
 }
 
 assert.ok(MB51_SAVE_CHUNK >= 5000, 'chunk must stay large enough to avoid API rate limits');
+assert.ok(MB51_LOAD_CHUNK >= 10_000 && MB51_LOAD_CHUNK <= 80_000, 'load page must stay under JSON size ceiling');
 
 const rows = Array.from({ length: 2501 }, (_, i) => row(i));
 const batches = planMb51SaveBatches('x.xlsx', rows, 1200);

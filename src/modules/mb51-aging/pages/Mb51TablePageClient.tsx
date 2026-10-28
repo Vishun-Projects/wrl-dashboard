@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import type { Mb51AgingImportMeta, Mb51AgingMovement } from '@/modules/mb51-aging/types';
-import { saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
+import { fetchMb51AgingRows, saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
 
 const DAY = 86400000;
 const EPOCH_OFFSET = 25569;
@@ -279,7 +279,7 @@ export default function Mb51TablePageClient() {
     setPage(1);
   }, []);
 
-  // Initial load from the database
+  // Initial load from the database (paged — full dump OOMs / 500 on multi‑M row imports)
   useEffect(() => {
     let active = true;
 
@@ -287,17 +287,17 @@ export default function Mb51TablePageClient() {
       try {
         setLoading(true);
         setLoadMsg('Loading MB51 Movements Data from portal database…');
-        const response = await fetch('/api/report/mb51-aging', { credentials: 'include' });
-        if (!response.ok) throw new Error(`Failed to load data (${response.status})`);
-
-        const data: {
-          rows?: unknown[];
-          latestImport?: Mb51AgingImportMeta | null;
-        } = await response.json();
+        const data = await fetchMb51AgingRows((loaded, total) => {
+          if (!active) return;
+          const hint = total
+            ? `${loaded.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')}`
+            : loaded.toLocaleString('en-IN');
+          setLoadMsg(`Loading MB51 rows… ${hint}`);
+        });
         if (!active) return;
 
-        if (data.rows && data.rows.length > 0) {
-          setLatestImport(data.latestImport || null);
+        if (data.rows.length > 0) {
+          setLatestImport(data.latestImport);
           setLoadMsg(
             `Loaded ${data.rows.length.toLocaleString('en-IN')} rows from database (${data.latestImport?.fileName ?? 'latest export'}).`,
           );

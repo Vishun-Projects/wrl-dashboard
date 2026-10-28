@@ -39,6 +39,9 @@ ALTER TABLE mb51_aging_rows
 CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_import_id
   ON mb51_aging_rows (import_id);
 
+CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_import_seq
+  ON mb51_aging_rows (import_id, seq_order);
+
 CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_plant
   ON mb51_aging_rows (plant);
 

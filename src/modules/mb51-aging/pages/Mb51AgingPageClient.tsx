@@ -9,7 +9,7 @@ import type {
   Mb51AgingAggRow,
   Mb51AgingResult,
 } from '@/modules/mb51-aging/types';
-import { saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
+import { fetchMb51AgingRows, saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
 import {
   BUCKETS,
   DEFAULT_DEFECTIVE_MATERIALS,
@@ -412,22 +412,24 @@ export default function Mb51AgingPageClient() {
     [runAging]
   );
 
-  // Initial load from database
+  // Initial load from database (paged — full dump OOMs / 500 on multi‑M row imports)
   useEffect(() => {
     let active = true;
     async function loadSavedData() {
       try {
         setLoading(true);
         setLoadMsg('Loading MB51 Aging Report from portal database…');
-        const res = await fetch('/api/report/mb51-aging', { credentials: 'include' });
-        if (!res.ok) {
-          throw new Error(`Failed to load data (${res.status})`);
-        }
-        const data = await res.json();
+        const data = await fetchMb51AgingRows((loaded, total) => {
+          if (!active) return;
+          const hint = total
+            ? `${loaded.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')}`
+            : loaded.toLocaleString('en-IN');
+          setLoadMsg(`Loading MB51 rows… ${hint}`);
+        });
         if (!active) return;
 
-        if (data.rows && data.rows.length > 0) {
-          setLatestImport(data.latestImport || null);
+        if (data.rows.length > 0) {
+          setLatestImport(data.latestImport);
           setLoadMsg('');
           setIsErrMsg(false);
           initFromRows(data.rows, 'vm');
