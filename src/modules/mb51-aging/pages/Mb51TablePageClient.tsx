@@ -648,7 +648,6 @@ export default function Mb51TablePageClient() {
   };
 
   // Server returns the current page + KPIs for the active filter set
-  const filteredRows = rows;
   const sortedRows = rows;
   const kpis = {
     totalCount,

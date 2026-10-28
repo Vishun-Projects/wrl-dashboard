@@ -341,7 +341,7 @@ export default function Mb51AgingPageClient() {
   const [dateTo, setDateTo] = useState<string>('');
   const [minDateLimit, setMinDateLimit] = useState<string>('');
   const [maxDateLimit, setMaxDateLimit] = useState<string>('');
-  const [maxPostingSerial, setMaxPostingSerial] = useState(0);
+  const [, setMaxPostingSerial] = useState(0);
   /** Any materials the user wants dropped from aging (not limited to the known 6). */
   const [excludedMaterials, setExcludedMaterials] = useState<Set<string>>(new Set());
   const [sheetLabel, setSheetLabel] = useState('');
@@ -742,7 +742,6 @@ export default function Mb51AgingPageClient() {
         }
       }, 30);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- saveRowsToDatabase closes over loadSnapshotView
     []
   );
 
