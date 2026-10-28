@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 import { prisma } from '@/lib/db/prisma';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
@@ -29,6 +30,8 @@ async function loadMisEmailRow(userId: string): Promise<MisEmailRow | null> {
 }
 
 export async function POST(request: Request) {
+  const originDenied = assertSameOriginMutation(request);
+  if (originDenied) return originDenied;
   const supabase = await createClient();
   const user = await requireRequestUser(request, supabase);
 

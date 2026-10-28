@@ -2,6 +2,7 @@ import type { AccountSummaryRow, BranchSummaryRow } from '@/lib/summary/derive';
 import { withBulkReadClient } from '@/lib/read-model/db';
 import { SNAPSHOT_IMPORT_SOURCE_CODES } from '@/modules/mis/client-import/services/snapshot-sources';
 import type { StatusBucket } from '@/modules/mis/client-import/services/types';
+import { todayIst } from '@/lib/dates/local-date';
 
 export type ClientAggregateParams = {
   sourceCode?: string | null;
@@ -25,10 +26,15 @@ type DbRow = {
   engineer_name: string | null;
 };
 
+
+function yearStart(): string {
+  return `${todayIst().slice(0, 4)}-01-01`;
+}
+
 function resolveAgingDate(params: ClientAggregateParams): string {
   if (params.agingAsOf) return params.agingAsOf;
   if (params.endDate) return params.endDate;
-  return new Date().toISOString().slice(0, 10);
+  return todayIst();
 }
 
 import { incrementAgingBucket, openCallsFromAging } from '@/lib/aging/buckets';
@@ -481,8 +487,8 @@ export async function queryClientAggregates(params: ClientAggregateParams): Prom
   accountSummary: AccountSummaryRow[];
   rowsInDateRange: number;
 }> {
-  const startDate = params.startDate ?? `${new Date().getFullYear()}-01-01`;
-  const endDate = params.endDate ?? new Date().toISOString().slice(0, 10);
+  const startDate = params.startDate ?? yearStart();
+  const endDate = params.endDate ?? todayIst();
   const sourceCodes = resolveSourceFilter(params);
   const values: unknown[] = [startDate, endDate, [...SNAPSHOT_IMPORT_SOURCE_CODES]];
   let sourceClause = '';
@@ -546,8 +552,8 @@ export async function queryAllClientAccountSummary(
 }
 
 export async function countClientRowsInRange(params: ClientAggregateParams): Promise<number> {
-  const startDate = params.startDate ?? `${new Date().getFullYear()}-01-01`;
-  const endDate = params.endDate ?? new Date().toISOString().slice(0, 10);
+  const startDate = params.startDate ?? yearStart();
+  const endDate = params.endDate ?? todayIst();
   const sourceCodes = resolveSourceFilter(params);
 
   return withBulkReadClient(async (client) => {
@@ -575,8 +581,8 @@ export async function countClientRowsInRange(params: ClientAggregateParams): Pro
 export async function countClientRowsInRangeBySource(
   params: ClientAggregateParams
 ): Promise<{ total: number; bySource: Record<string, number> }> {
-  const startDate = params.startDate ?? `${new Date().getFullYear()}-01-01`;
-  const endDate = params.endDate ?? new Date().toISOString().slice(0, 10);
+  const startDate = params.startDate ?? yearStart();
+  const endDate = params.endDate ?? todayIst();
   const sourceCodes = resolveSourceFilter(params);
 
   return withBulkReadClient(async (client) => {
@@ -733,8 +739,8 @@ function buildDedupedTraceRowsSql(
 }
 
 async function queryDedupedTraceRows(params: ClientAggregateParams): Promise<ClientCallTraceDbRow[]> {
-  const startDate = params.startDate ?? `${new Date().getFullYear()}-01-01`;
-  const endDate = params.endDate ?? new Date().toISOString().slice(0, 10);
+  const startDate = params.startDate ?? yearStart();
+  const endDate = params.endDate ?? todayIst();
   const sourceCodes = resolveSourceFilter(params);
   const bdMisSnapshotMode = params.bdMisSnapshotMode === true;
 

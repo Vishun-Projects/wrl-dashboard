@@ -80,7 +80,6 @@ function mapCrmRow(row: Record<string, unknown>): CallPartSyncRow | null {
 type Pg = { query: (sql: string, params?: unknown[]) => Promise<unknown> };
 
 export async function ensureCallPartsTable(client: Pg): Promise<void> {
-  await client.query(`DROP TABLE IF EXISTS call_visits`);
   await client.query(`
     CREATE TABLE IF NOT EXISTS call_parts (
       ncode TEXT NOT NULL,

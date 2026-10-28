@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 import { authenticateArcpClaimsRequest } from '@/modules/arcp-claims/server/route-auth';
 import {
   mergeJobAggregatesFromDisk,
@@ -43,6 +44,8 @@ function startDetailJobRunner(jobId: string, opts: ArcpFetchOpts): void {
 }
 
 export async function POST(req: NextRequest) {
+  const originDenied = assertSameOriginMutation(req);
+  if (originDenied) return originDenied;
   try {
     const { searchParams } = new URL(req.url);
     const kind = (searchParams.get('kind') === 'detail' ? 'detail' : 'agg') as ArcpChunkCacheKind;

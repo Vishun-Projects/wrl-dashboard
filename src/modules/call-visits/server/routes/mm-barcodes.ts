@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import type { MmDocBarcodeRow } from '@/modules/call-visits/mm-barcode-types';
@@ -30,6 +31,8 @@ type SaveBody = {
 };
 
 export async function POST(req: NextRequest) {
+  const originDenied = assertSameOriginMutation(req);
+  if (originDenied) return originDenied;
   try {
     const auth = await resolveRequestReportSecurity(req, { pageId: 'call_visits' });
     if (!auth.ok) return auth.response;

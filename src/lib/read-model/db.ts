@@ -227,6 +227,23 @@ export async function withAppClient<T>(
   }
 }
 
+export async function withAppTransaction<T>(
+  fn: (client: pg.PoolClient) => Promise<T>,
+  opts?: { statementTimeoutMs?: number }
+): Promise<T> {
+  return withAppClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const result = await fn(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    }
+  }, opts);
+}
+
 function isConnectionTerminatedError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return /connection terminated|ECONNRESET|ECONNREFUSED|Connection terminated unexpectedly/i.test(

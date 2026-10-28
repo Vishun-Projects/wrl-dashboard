@@ -1,9 +1,11 @@
-/** Local calendar date YYYY-MM-DD — avoids UTC shift from toISOString() (e.g. IST May 1 → Apr 30). */
+/** Calendar date YYYY-MM-DD in Asia/Kolkata — avoids UTC shift when running on UTC server (e.g. IST early morning). */
 export function formatLocalDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(d);
+}
+
+export function todayIst(): string {
+  return formatLocalDate(new Date());
 }
 
 export function toDateString(value: Date | string): string {

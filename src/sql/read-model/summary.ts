@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/db/prisma';
 import type { SummaryDashboard } from '@/lib/summary/derive';
 import { normalizeCallTypeDisplay } from '@/lib/call/display/call-type';
-import { formatLocalDate } from '@/lib/dates/local-date';
+import { formatLocalDate, todayIst } from '@/lib/dates/local-date';
 import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/sql/read-model/summary-call-filters';
 import { AGING_BUCKET_SQL, openCallsFromAging } from '@/lib/aging/buckets';
 import {
@@ -24,13 +24,13 @@ export type SummaryQueryParams = {
 };
 
 function yearStart(): string {
-  return `${new Date().getFullYear()}-01-01`;
+  return `${todayIst().slice(0, 4)}-01-01`;
 }
 
 function resolveAgingDate(params: SummaryQueryParams): string {
   if (params.agingAsOf) return params.agingAsOf;
   if (params.endDate) return params.endDate;
-  return new Date().toISOString().slice(0, 10);
+  return todayIst();
 }
 
 function buildOfficeFilter(
@@ -135,7 +135,7 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
   await ensureNormalizeCallTypeFunction();
 
   const startDate = params.startDate || yearStart();
-  const endDate = params.endDate || new Date().toISOString().slice(0, 10);
+  const endDate = params.endDate || todayIst();
   const agingDate = resolveAgingDate(params);
 
   const periodStart = `${startDate}T00:00:00`;

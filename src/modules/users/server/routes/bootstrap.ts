@@ -51,7 +51,7 @@ export async function GET(request: Request) {
       }
     }
 
-    const [users, roles] = await Promise.all([
+    const [users, roles, countResult] = await Promise.all([
       prisma.$queryRawUnsafe(USER_LIST_SQL, limit, offset),
       prisma.$queryRawUnsafe(
         `SELECT r.id, r.name, r.description,
@@ -62,9 +62,17 @@ export async function GET(request: Request) {
          GROUP BY r.id, r.name, r.description
          ORDER BY r.name ASC`
       ),
+      prisma.$queryRawUnsafe<Array<{ count: number | bigint }>>(
+        'SELECT COUNT(*)::int AS count FROM public.app_users'
+      ),
     ]);
 
-    const total = Array.isArray(users) ? users.length : 0;
+    const total =
+      Array.isArray(countResult) && countResult[0]?.count != null
+        ? Number(countResult[0].count)
+        : Array.isArray(users)
+          ? users.length
+          : 0;
     const payload = {
       users,
       roles,

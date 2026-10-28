@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { gzippedCsvPayload } from '@/lib/net/csv-gzip-response';
@@ -133,6 +134,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const originDenied = assertSameOriginMutation(req);
+  if (originDenied) return originDenied;
   try {
     const auth = await resolveRequestReportSecurity(req, { pageId: 'athena_reconciliation' });
     if (!auth.ok) return auth.response;

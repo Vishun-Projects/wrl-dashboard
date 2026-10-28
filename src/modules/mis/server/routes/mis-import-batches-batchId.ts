@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { deleteImportFile } from '@/modules/mis/client-import/services/file-store';
@@ -15,6 +16,8 @@ import { logAction } from '@/lib/security/audit';
 type RouteContext = { params: Promise<{ batchId: string }> };
 
 export async function DELETE(req: NextRequest, context: RouteContext) {
+  const originDenied = assertSameOriginMutation(req);
+  if (originDenied) return originDenied;
   try {
     const auth = await requireRbac(req, { pageId: 'mis_reports', shared: true });
     if (!auth.ok) return auth.response;

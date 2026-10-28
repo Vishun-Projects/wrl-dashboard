@@ -8,6 +8,8 @@ import { logAccessDenied, logAction } from '@/lib/security/audit';
 import { safeErrorMessage } from '@/lib/api/safe-error';
 import { assertSameOriginMutation } from '@/lib/api/same-origin';
 
+import { isSuperAdmin } from '@/lib/auth/rbac-catalog';
+
 const supabaseAdmin = createSupabaseClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -66,6 +68,22 @@ export async function POST(request: Request) {
 
     if (!userId || !newPassword) {
       return NextResponse.json({ error: 'Missing userId or newPassword' }, { status: 400 });
+    }
+
+    const callerIsSuper = isSuperAdmin(auth.permissions);
+    const targetAuth = await loadUserAuth(String(userId));
+    if (targetAuth && isSuperAdmin(targetAuth.permissions) && !callerIsSuper) {
+      await logAccessDenied({
+        request,
+        actorUserId: adminUser.id,
+        actorEmail: actor.email,
+        statusCode: 403,
+        reason: 'admin_user_password_forbidden_super_admin',
+      });
+      return NextResponse.json(
+        { error: 'Forbidden — Only super administrators can reset passwords for super admin accounts.' },
+        { status: 403 }
+      );
     }
 
     const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {

@@ -23,6 +23,12 @@ vi.mock('@/lib/db/prisma', () => ({
   },
 }));
 
+vi.mock('@/lib/read-model/db', () => ({
+  withAppTransaction: vi.fn(async (fn: (client: { query: () => Promise<unknown> }) => Promise<unknown>) =>
+    fn({ query: async () => ({ rows: [] }) })
+  ),
+}));
+
 vi.mock('@/lib/security/audit', () => ({
   logAccessDenied: vi.fn(async () => {}),
   logSecurityEventBestEffort: (...args: unknown[]) => logSecurityEventBestEffort(...args),
@@ -52,7 +58,7 @@ describe('admin roles audit metadata', () => {
     queryRawUnsafe
       .mockResolvedValueOnce([{ name: 'Branch Manager', description: 'ops' }])
       .mockResolvedValueOnce([{ permission_id: 'p1' }, { permission_id: 'p2' }])
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce([]);
 
     const { DELETE } = await import('@/modules/roles/server/routes/roles');
     const res = await DELETE(

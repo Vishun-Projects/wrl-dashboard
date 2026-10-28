@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
+import { withAppTransaction } from '@/lib/read-model/db';
 import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
-import { groupPermissionsForRolesUi } from '@/lib/auth/rbac-catalog';
+import { groupPermissionsForRolesUi, isSuperAdmin } from '@/lib/auth/rbac-catalog';
 import { logAccessDenied, logSecurityEventBestEffort, requestAuditContext } from '@/lib/security/audit';
 import { jsonSafeError, safeErrorMessage } from '@/lib/api/safe-error';
 import { assertSameOriginMutation } from '@/lib/api/same-origin';
@@ -205,35 +206,52 @@ export async function PUT(request: Request) {
   try {
     const { id, name, description, permissionIds } = await request.json();
 
-    const beforePermRows = (await prisma.$queryRawUnsafe(
-      'SELECT permission_id FROM public.app_role_permissions WHERE role_id = $1',
-      id
-    )) as Array<{ permission_id: string }>;
-    const beforePermissionIds = beforePermRows.map((r) => String(r.permission_id)).sort();
-    const nextPermissionIds = Array.isArray(permissionIds)
-      ? permissionIds.map((p: unknown) => String(p)).sort()
-      : [];
+    const callerIsSuper = isSuperAdmin(auth?.permissions);
     const beforeRoleRows = (await prisma.$queryRawUnsafe(
       'SELECT name, description FROM public.app_roles WHERE id = $1 LIMIT 1',
       id
     )) as Array<{ name: string | null; description: string | null }>;
     const beforeRole = beforeRoleRows[0] ?? null;
 
-    await prisma.$queryRawUnsafe(
-      'UPDATE public.app_roles SET name = $1, description = $2 WHERE id = $3',
-      name, description, id
-    );
+    const beforePermRows = (await prisma.$queryRawUnsafe(
+      `SELECT p.name, rp.permission_id
+       FROM public.app_role_permissions rp
+       JOIN public.app_permissions p ON p.id = rp.permission_id
+       WHERE rp.role_id = $1`,
+      id
+    )) as Array<{ name: string; permission_id: string }>;
+    const beforePermissionIds = beforePermRows.map((r) => String(r.permission_id)).sort();
+    const beforePermissionNames = beforePermRows.map((r) => r.name);
+    const nextPermissionIds = Array.isArray(permissionIds)
+      ? permissionIds.map((p: unknown) => String(p)).sort()
+      : [];
 
-    await prisma.$queryRawUnsafe('DELETE FROM public.app_role_permissions WHERE role_id = $1', id);
+    const isSuperRole =
+      beforePermissionNames.includes('super_admin') ||
+      beforeRole?.name?.toLowerCase().replace(/\s+/g, '_') === 'super_admin';
 
-    if (permissionIds && permissionIds.length > 0) {
-      for (const pId of permissionIds) {
-        await prisma.$queryRawUnsafe(
-          'INSERT INTO public.app_role_permissions (role_id, permission_id) VALUES ($1, $2)',
-          id, pId
-        );
-      }
+    if (isSuperRole && !callerIsSuper) {
+      return NextResponse.json(
+        { error: 'Forbidden — Only super administrators can modify the Super Administrator role.' },
+        { status: 403 }
+      );
     }
+
+    await withAppTransaction(async (client) => {
+      await client.query(
+        'UPDATE public.app_roles SET name = $1, description = $2 WHERE id = $3',
+        [name, description, id]
+      );
+      await client.query('DELETE FROM public.app_role_permissions WHERE role_id = $1', [id]);
+      if (permissionIds && permissionIds.length > 0) {
+        for (const pId of permissionIds) {
+          await client.query(
+            'INSERT INTO public.app_role_permissions (role_id, permission_id) VALUES ($1, $2)',
+            [id, pId]
+          );
+        }
+      }
+    });
 
     clearRolesCache();
     const added = nextPermissionIds.filter((p) => !beforePermissionIds.includes(p));
@@ -320,20 +338,55 @@ export async function DELETE(request: Request) {
       id
     )) as Array<{ name: string | null; description: string | null }>;
     const beforeRole = beforeRoleRows[0] ?? null;
-    const beforePermRows = (await prisma.$queryRawUnsafe(
-      'SELECT permission_id FROM public.app_role_permissions WHERE role_id = $1',
-      id
-    )) as Array<{ permission_id: string }>;
-    const beforePermissionIds = beforePermRows.map((r) => String(r.permission_id)).sort();
-    const before = beforeRole
-      ? {
-          name: beforeRole.name,
-          description: beforeRole.description,
-          permissionIds: beforePermissionIds,
-        }
-      : null;
+    if (!beforeRole) {
+      return NextResponse.json({ error: 'Role not found' }, { status: 404 });
+    }
 
-    await prisma.$queryRawUnsafe('DELETE FROM public.app_roles WHERE id = $1', id);
+    const beforePermRows = (await prisma.$queryRawUnsafe(
+      `SELECT p.name, rp.permission_id
+       FROM public.app_role_permissions rp
+       JOIN public.app_permissions p ON p.id = rp.permission_id
+       WHERE rp.role_id = $1`,
+      id
+    )) as Array<{ name: string; permission_id: string }>;
+    const beforePermissionIds = beforePermRows.map((r) => String(r.permission_id)).sort();
+    const beforePermissionNames = beforePermRows.map((r) => r.name);
+
+    const isSuperRole =
+      beforePermissionNames.includes('super_admin') ||
+      beforeRole.name?.toLowerCase().replace(/\s+/g, '_') === 'super_admin';
+
+    if (isSuperRole) {
+      return NextResponse.json(
+        { error: 'Cannot delete the system Super Administrator role' },
+        { status: 403 }
+      );
+    }
+
+    const assigned = (await prisma.$queryRawUnsafe(
+      `SELECT 1 FROM public.app_user_roles WHERE role_id = $1
+       UNION
+       SELECT 1 FROM public.app_users WHERE role_id = $1
+       LIMIT 1`,
+      id
+    )) as unknown[];
+    if (assigned.length > 0) {
+      return NextResponse.json(
+        { error: 'Cannot delete role because it is currently assigned to one or more users.' },
+        { status: 400 }
+      );
+    }
+
+    const before = {
+      name: beforeRole.name,
+      description: beforeRole.description,
+      permissionIds: beforePermissionIds,
+    };
+
+    await withAppTransaction(async (client) => {
+      await client.query('DELETE FROM public.app_role_permissions WHERE role_id = $1', [id]);
+      await client.query('DELETE FROM public.app_roles WHERE id = $1', [id]);
+    });
 
     clearRolesCache();
     await logSecurityEventBestEffort({

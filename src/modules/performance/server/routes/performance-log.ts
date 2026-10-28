@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 import { getUserInfo } from '@/lib/auth/session';
 import { canAccessPerformanceInsights } from '@/lib/auth/insights-access';
 import { performanceLogEnabledServer } from '@/modules/performance/lib/log-config';
@@ -22,6 +23,8 @@ function sanitizeEntry(entry: PerformanceLogEntry, userEmail: string | null): Pe
 }
 
 export async function POST(req: NextRequest) {
+  const originDenied = assertSameOriginMutation(req);
+  if (originDenied) return originDenied;
   if (!performanceLogEnabledServer()) {
     return NextResponse.json({ ok: false, disabled: true, written: 0 });
   }

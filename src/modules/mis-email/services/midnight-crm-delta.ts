@@ -728,21 +728,29 @@ async function fetchMidnightCrmRows(
 function loadPreviousSnapshot(asOfDate: string, root: string): MidnightCrmDeltaSnapshot | null {
   const path = midnightCrmDeltaSnapshotPath(asOfDate, root);
   if (!existsSync(path)) return null;
-  const raw = JSON.parse(readFileSync(path, 'utf8')) as MidnightCrmDeltaSnapshot;
-  if (!raw.counts) {
-    raw.counts = midnightCrmBuildYtdSummary(
-      Object.entries(raw.calls).map(([key, bucket]) => ({
-        vtrnno: key.includes(':') ? '' : key,
-        ncode: key.includes(':') ? key.split(':')[0] : '',
-        nofficeid: key.includes(':') ? key.split(':')[1] : '',
-        bsolved: bucket === 'closed',
-        bfastclose: bucket === 'techSolved',
-        ncancelreason: bucket === 'cancelled' ? 5 : 0,
-        nengineer: bucket === 'assigned' ? 1 : 0,
-      }))
-    );
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as MidnightCrmDeltaSnapshot;
+    if (!raw || typeof raw !== 'object' || !raw.calls) {
+      return null;
+    }
+    if (!raw.counts) {
+      raw.counts = midnightCrmBuildYtdSummary(
+        Object.entries(raw.calls).map(([key, bucket]) => ({
+          vtrnno: key.includes(':') ? '' : key,
+          ncode: key.includes(':') ? key.split(':')[0] : '',
+          nofficeid: key.includes(':') ? key.split(':')[1] : '',
+          bsolved: bucket === 'closed',
+          bfastclose: bucket === 'techSolved',
+          ncancelreason: bucket === 'cancelled' ? 5 : 0,
+          nengineer: bucket === 'assigned' ? 1 : 0,
+        }))
+      );
+    }
+    return raw;
+  } catch (err) {
+    console.warn(`[midnight-crm-delta] Failed to parse previous snapshot at ${path}:`, err);
+    return null;
   }
-  return raw;
 }
 
 function saveSnapshot(snapshot: MidnightCrmDeltaSnapshot, root: string): void {

@@ -1,5 +1,6 @@
 import { gunzipSync } from 'zlib';
 import { NextRequest, NextResponse } from 'next/server';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { isGzipBuffer } from '@/modules/mis/client-import/services/upload-gzip';
@@ -168,6 +169,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const originDenied = assertSameOriginMutation(req);
+  if (originDenied) return originDenied;
   try {
     const auth = await requireRbac(req, { pageId: 'spare_stock_analysis' });
     if (!auth.ok) return auth.response;

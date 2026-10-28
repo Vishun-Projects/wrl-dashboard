@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
+import { todayIst } from '@/lib/dates/local-date';
 import { normalizeCallTypeDisplay } from '@/lib/call/display/call-type';
 import {
   HOT_MAIN_BRANCH_OFFICE_ID_SQL,
@@ -21,13 +22,13 @@ export type DrilldownQueryParams = {
 };
 
 function yearStart(): string {
-  return `${new Date().getFullYear()}-01-01`;
+  return `${todayIst().slice(0, 4)}-01-01`;
 }
 
 function resolveAgingDate(params: DrilldownQueryParams): string {
   if (params.agingAsOf) return params.agingAsOf;
   if (params.endDate) return params.endDate;
-  return new Date().toISOString().slice(0, 10);
+  return todayIst();
 }
 
 function normalizeRegionFilter(region: string): string {
@@ -102,7 +103,7 @@ export async function querySummaryDrilldown(
   params: DrilldownQueryParams
 ): Promise<Record<string, string>[]> {
   const startDate = params.startDate || yearStart();
-  const endDate = params.endDate || new Date().toISOString().slice(0, 10);
+  const endDate = params.endDate || todayIst();
   const agingDate = resolveAgingDate(params);
 
   const values: unknown[] = [`${startDate}T00:00:00`, `${endDate}T23:59:59`];

@@ -38,7 +38,14 @@ export async function readRecentPerformanceLogEntries(
     const raw = await fs.readFile(file, 'utf8');
     const lines = raw.trim().split('\n').filter(Boolean);
     const slice = lines.slice(-limit);
-    const entries = slice.map((line) => JSON.parse(line) as PerformanceLogEntry);
+    const entries: PerformanceLogEntry[] = [];
+    for (const line of slice) {
+      try {
+        entries.push(JSON.parse(line) as PerformanceLogEntry);
+      } catch {
+        // Skip malformed or partially written lines
+      }
+    }
     return { file, entries };
   } catch (err: unknown) {
     if (

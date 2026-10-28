@@ -70,6 +70,7 @@ describe('POST /api/profile/mis-email/preview gates', () => {
     const res = await POST(
       new Request('http://localhost/api/profile/mis-email/preview', {
         method: 'POST',
+        headers: { Origin: 'http://localhost' },
         body: JSON.stringify({ preferences: {} }),
       })
     );
@@ -85,6 +86,7 @@ describe('POST /api/profile/mis-email/preview gates', () => {
     const res = await POST(
       new Request('http://localhost/api/profile/mis-email/preview', {
         method: 'POST',
+        headers: { Origin: 'http://localhost' },
         body: JSON.stringify({ preferences: {} }),
       })
     );
@@ -105,6 +107,7 @@ describe('POST /api/profile/mis-email/preview gates', () => {
     const res = await POST(
       new Request('http://localhost/api/profile/mis-email/preview', {
         method: 'POST',
+        headers: { Origin: 'http://localhost' },
         body: JSON.stringify({ preferences: { includeSummary: true } }),
       })
     );

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import {
   handleMisClientUploadChunkFormData,
@@ -32,6 +33,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const originDenied = assertSameOriginMutation(req);
+  if (originDenied) return originDenied;
   try {
     const auth = await requireRbac(req, { pageId: 'mis_reports', shared: true });
     if (!auth.ok) return auth.response;

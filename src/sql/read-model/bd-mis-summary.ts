@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
+import { todayIst } from '@/lib/dates/local-date';
 import type { SummaryDashboard } from '@/lib/summary/derive';
 import { normalizeCallTypeDisplay } from '@/lib/call/display/call-type';
 import {
@@ -21,13 +22,13 @@ const BD_MIS_NON_CANCELLED = `h.status_bucket != 'cancelled'`;
 const BD_MIS_REGION_SQL = HOT_RESOLVED_REGION_SQL;
 
 function yearStart(): string {
-  return `${new Date().getFullYear()}-01-01`;
+  return `${todayIst().slice(0, 4)}-01-01`;
 }
 
 function resolveAgingDate(params: SummaryQueryParams): string {
   if (params.agingAsOf) return params.agingAsOf;
   if (params.endDate) return params.endDate;
-  return new Date().toISOString().slice(0, 10);
+  return todayIst();
 }
 
 function buildOfficeFilter(
@@ -94,7 +95,7 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
   await ensureNormalizeCallTypeFunction();
 
   const startDate = params.startDate || yearStart();
-  const endDate = params.endDate || new Date().toISOString().slice(0, 10);
+  const endDate = params.endDate || todayIst();
   const agingDate = resolveAgingDate(params);
 
   const periodStart = `${startDate}T00:00:00`;
@@ -434,7 +435,7 @@ export async function queryBdMisCrmCallTraceRows(
   await ensureNormalizeCallTypeFunction();
 
   const startDate = params.startDate || yearStart();
-  const endDate = params.endDate || new Date().toISOString().slice(0, 10);
+  const endDate = params.endDate || todayIst();
   const periodStart = `${startDate}T00:00:00`;
   const periodEnd = `${endDate}T23:59:59`;
 

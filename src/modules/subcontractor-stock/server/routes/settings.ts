@@ -133,7 +133,8 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     const access = await requireAccess(request);
     if (access.error) return access.error;
-    await assertSameOriginMutation(request);
+    const originDenied = assertSameOriginMutation(request);
+    if (originDenied) return originDenied;
 
     const body = await request.json();
     const { type, action, data, mailKeys, recipientIds } = body;
@@ -306,7 +307,8 @@ export async function PUT(request: Request): Promise<NextResponse> {
   try {
     const access = await requireAccess(request);
     if (access.error) return access.error;
-    await assertSameOriginMutation(request);
+    const originDenied = assertSameOriginMutation(request);
+    if (originDenied) return originDenied;
 
     const body = await request.json();
     const { type, data } = body;
@@ -351,7 +353,8 @@ export async function DELETE(request: Request): Promise<NextResponse> {
   try {
     const access = await requireAccess(request);
     if (access.error) return access.error;
-    await assertSameOriginMutation(request);
+    const originDenied = assertSameOriginMutation(request);
+    if (originDenied) return originDenied;
 
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
