@@ -4,6 +4,7 @@
  */
 import { spawn } from 'node:child_process';
 import {
+  closeSync,
   existsSync,
   mkdirSync,
   openSync,
@@ -109,12 +110,15 @@ export function startCallsHotSyncThroughYesterday(
     env: {
       ...process.env,
       MIDNIGHT_SYNC_AS_OF: asOf,
+      MANUAL_SYNC_LOCK_PATH: lockPath,
       TZ: 'Asia/Kolkata',
       NODE_OPTIONS: process.env.NODE_OPTIONS || '--max-old-space-size=8192',
     },
     detached: true,
     stdio: ['ignore', outFd, outFd],
   });
+  // Close descriptor in parent process immediately; child retains duplicate
+  closeSync(outFd);
   child.unref();
 
   const pid = child.pid ?? null;

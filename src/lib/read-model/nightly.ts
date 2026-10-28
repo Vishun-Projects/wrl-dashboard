@@ -1,4 +1,4 @@
-import { withTransaction } from '@/lib/read-model/db';
+import { withAppClient } from '@/lib/read-model/db';
 import {
   completeIngestBatch,
   finishSyncRunLog,
@@ -47,7 +47,7 @@ export async function runNightlyReconcile(): Promise<void> {
   }
 
   const startedAt = new Date();
-  await withTransaction(async (client) => {
+  await withAppClient(async (client) => {
     const acquired = await tryAcquireSyncLock(client);
     if (!acquired) {
       console.log('[sync-worker] Another sync run is in progress — skipping nightly');
@@ -56,9 +56,12 @@ export async function runNightlyReconcile(): Promise<void> {
 
     const batch = await startIngestBatch(client, ENTITY, null);
     const logId = await startSyncRunLog(client, ENTITY, batch.batchId);
+    let upserted = 0;
+    let deletedOrphans = 0;
+    let factCount = 0;
 
     try {
-      console.log('[sync-worker] Nightly reconcile — refreshing hot table from CRM');
+      console.log('[sync-worker] Nightly reconcile — fetching CRM records outside DB transaction');
       const hotStart = registerHotRetentionStart();
       const hotEnd = todayLocalDate();
       const windowRows = await fetchCrmRowsForBackfill(hotStart, hotEnd);
@@ -68,22 +71,8 @@ export async function runNightlyReconcile(): Promise<void> {
       const byTrn = new Map(ytdHot.map((r) => [r.vtrnno, r]));
       for (const row of openHot) byTrn.set(row.vtrnno, row);
       const hotRows = Array.from(byTrn.values());
-      const upserted = await upsertHotRows(client, hotRows);
 
-      const crmTrns = new Set(hotRows.map((row) => row.vtrnno));
-      const existingYtd = await client.query<{ vtrnno: string }>(
-        `SELECT vtrnno FROM calls_latest_hot WHERE logged_at >= $1::timestamptz`,
-        [`${hotStart}T00:00:00`]
-      );
-      const orphanTrns = existingYtd.rows
-        .map((row) => String(row.vtrnno))
-        .filter((trn) => !crmTrns.has(trn));
-      // YTD-only orphan delete: CRM refresh set is source of truth for current-year TRNs; leave pre-YTD alone.
-      const deletedOrphans = await deleteHotRowsByTrn(client, orphanTrns);
-
-      console.log('[sync-worker] Rebuilding current-year facts');
       const yearStart = hotStart;
-      await truncateCurrentYearFacts(client, yearStart);
       const ytdRows = await fetchCrmRowsForRange(yearStart, hotEnd);
       const ytdDeduped = dedupeCrmRows(ytdRows);
       const metricRows = ytdDeduped
@@ -91,10 +80,32 @@ export async function runNightlyReconcile(): Promise<void> {
         .map((row) => transformCrmRowToHot(row))
         .filter((row): row is NonNullable<typeof row> => row != null);
       const factRows = Array.from(aggregateFactCounts(metricRows).values());
-      await upsertFactRows(client, factRows);
+      factCount = factRows.length;
 
-      console.log('[sync-worker] Refreshing dimensions');
-      await refreshDimensions(client);
+      console.log('[sync-worker] Applying nightly updates in atomic database transaction');
+      await client.query('BEGIN');
+      try {
+        upserted = await upsertHotRows(client, hotRows);
+
+        const crmTrns = new Set(hotRows.map((row) => row.vtrnno));
+        const existingYtd = await client.query<{ vtrnno: string }>(
+          `SELECT vtrnno FROM calls_latest_hot WHERE logged_at >= $1::timestamptz`,
+          [`${hotStart}T00:00:00`]
+        );
+        const orphanTrns = existingYtd.rows
+          .map((row) => String(row.vtrnno))
+          .filter((trn) => !crmTrns.has(trn));
+        // YTD-only orphan delete: CRM refresh set is source of truth for current-year TRNs; leave pre-YTD alone.
+        deletedOrphans = await deleteHotRowsByTrn(client, orphanTrns);
+
+        await truncateCurrentYearFacts(client, yearStart);
+        await upsertFactRows(client, factRows);
+        await refreshDimensions(client);
+        await client.query('COMMIT');
+      } catch (txErr) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw txErr;
+      }
 
       await releaseSyncLock(client, 'ok', upserted);
       await completeIngestBatch(client, batch.batchId, new Date(), upserted, 'completed');
@@ -106,14 +117,18 @@ export async function runNightlyReconcile(): Promise<void> {
 
       const hotCount = await countHotRows(client);
       console.log(
-        `[sync-worker] Nightly complete — hot ${hotCount}, upserted ${upserted}, deleted ${deletedOrphans}, facts ${factRows.length}`
+        `[sync-worker] Nightly complete — hot ${hotCount}, upserted ${upserted}, deleted ${deletedOrphans}, facts ${factCount}`
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      await completeIngestBatch(client, batch.batchId, null, 0, 'failed');
-      await finishSyncRunLog(client, logId, 'failed', { startedAt, errorMessage: message });
-      await markSyncError(client, message);
+      await client.query('ROLLBACK').catch(() => {});
+      await completeIngestBatch(client, batch.batchId, null, 0, 'failed').catch(() => {});
+      await finishSyncRunLog(client, logId, 'failed', { startedAt, errorMessage: message }).catch(() => {});
+      await markSyncError(client, message).catch(() => {});
       throw err;
+    } finally {
+      // Ensure advisory lock is released even if an unhandled failure occurred
+      await client.query(`SELECT pg_advisory_unlock(hashtext('read_model_sync'))`).catch(() => {});
     }
   });
 

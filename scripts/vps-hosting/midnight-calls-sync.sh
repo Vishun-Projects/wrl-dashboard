@@ -11,6 +11,10 @@
 # Resilient: per-step retries + checkpoint file so retries/deadline loops skip finished work.
 set -uo pipefail
 
+if [[ -n "${MANUAL_SYNC_LOCK_PATH:-}" ]]; then
+  trap 'rm -f "${MANUAL_SYNC_LOCK_PATH}"' EXIT
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_INSTALL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 INSTALL_ROOT="${SYNC_WORKER_INSTALL_ROOT:-${MIS_EMAIL_INSTALL_ROOT:-$DEFAULT_INSTALL_ROOT}}"

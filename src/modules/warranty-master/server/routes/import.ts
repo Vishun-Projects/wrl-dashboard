@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import { appDatabaseBulkStatementTimeoutMs, withAppClient } from '@/lib/read-model/db';
 import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
+import { isSuperAdmin } from '@/lib/auth/rbac-catalog';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import {
   calcMonths,
@@ -243,8 +246,14 @@ async function upsertChunk(
 export async function POST(req: NextRequest) {
   const started = Date.now();
   try {
+    const csrf = assertSameOriginMutation(req);
+    if (csrf) return csrf;
+
     const auth = await resolveRequestReportSecurity(req, { pageId: 'warranty_master' });
     if (!auth.ok) return auth.response;
+
+    const userAuth = await loadUserAuth(auth.userId);
+    const isSuper = userAuth ? isSuperAdmin(userAuth.permissions) : false;
 
     let formData: FormData;
     try {
@@ -259,11 +268,18 @@ export async function POST(req: NextRequest) {
     }
 
     const mode = String(formData.get('mode') ?? 'merge');
+    if (mode === 'truncate' && !isSuper) {
+      return NextResponse.json(
+        { error: 'Forbidden — Only super administrators can truncate the warranty master table' },
+        { status: 403 }
+      );
+    }
+
     const refreshRollup = String(formData.get('refreshRollup') ?? '1') !== '0';
-    // Replace-all multi-file session: faster upsert + drop secondary indexes around the load.
+    // Replace-all multi-file session: faster upsert. live index dropping restricted strictly to super_admin
     const bulkReplace = String(formData.get('bulkReplace') ?? '0') === '1' || mode === 'truncate';
-    const dropIndexes = String(formData.get('dropIndexes') ?? '0') === '1';
-    const rebuildIndexes = String(formData.get('rebuildIndexes') ?? '0') === '1';
+    const dropIndexes = isSuper && String(formData.get('dropIndexes') ?? '0') === '1';
+    const rebuildIndexes = isSuper && String(formData.get('rebuildIndexes') ?? '0') === '1';
 
     const fileName = file.name.toLowerCase();
     const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
@@ -299,69 +315,75 @@ export async function POST(req: NextRequest) {
           console.log(`[warranty-master-import] truncated in ${Date.now() - started}ms`);
         }
 
-        if (dropIndexes) {
-          await client.query(DROP_SECONDARY_INDEXES_SQL);
-          console.log(`[warranty-master-import] dropped secondary indexes in ${Date.now() - started}ms`);
-        }
-
-        for (const sheetName of workbook.SheetNames) {
-          const sheet = workbook.Sheets[sheetName];
-          if (!sheet) continue;
-
-          const sheetStarted = Date.now();
-          clampSheetUsedRange(sheet);
-          const headerInfo = readSheetHeaders(sheet);
-          if (!headerInfo) continue;
-
-          const keyMap = mapSheetHeaders(headerInfo.headers);
-          if (!keyMap.serial) continue;
-
-          const { range, headers } = headerInfo;
-          const dataStart = range.s.r + 1;
-          const dataEnd = range.e.r;
-          if (dataEnd < dataStart) continue;
-
-          const approxRows = dataEnd - dataStart + 1;
-          sheetsProcessed += 1;
-          let sheetImported = 0;
-          console.log(
-            `[warranty-master-import] sheet ${file.name}/${sheetName}: ~${approxRows.toLocaleString()} rows (ranged batches)`
-          );
-
-          // Don't sheet_to_json the whole sheet — that blocked for minutes with no logs after "parsed".
-          for (let r0 = dataStart; r0 <= dataEnd; r0 += CHUNK_SIZE) {
-            const r1 = Math.min(r0 + CHUNK_SIZE - 1, dataEnd);
-            const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-              header: 1,
-              raw: true,
-              defval: null,
-              blankrows: false,
-              range: { s: { r: r0, c: range.s.c }, e: { r: r1, c: range.e.c } },
-            });
-            const rawRows = aoaToRecords(headers, aoa);
-            const chunk: WarrantyImportRow[] = [];
-            for (const r of rawRows) {
-              const row = rowFromRaw(r, keyMap);
-              if (row) chunk.push(row);
-            }
-            if (chunk.length === 0) continue;
-
-            const n = await upsertChunk(client, dedupeChunk(chunk), today, bulkReplace);
-            totalImported += n;
-            sheetImported += n;
-            console.log(
-              `[warranty-master-import] ${file.name} / ${sheetName}: ${sheetImported.toLocaleString()} rows (${Date.now() - started}ms)`
-            );
+        let indexesWereDropped = false;
+        try {
+          if (dropIndexes) {
+            await client.query(DROP_SECONDARY_INDEXES_SQL);
+            indexesWereDropped = true;
+            console.log(`[warranty-master-import] dropped secondary indexes in ${Date.now() - started}ms`);
           }
 
-          console.log(
-            `[warranty-master-import] sheet done ${file.name}/${sheetName}: ${sheetImported.toLocaleString()} rows in ${Date.now() - sheetStarted}ms`
-          );
-        }
+          for (const sheetName of workbook.SheetNames) {
+            const sheet = workbook.Sheets[sheetName];
+            if (!sheet) continue;
 
-        if (rebuildIndexes) {
-          await client.query(CREATE_SECONDARY_INDEXES_SQL);
-          console.log(`[warranty-master-import] rebuilt secondary indexes in ${Date.now() - started}ms`);
+            const sheetStarted = Date.now();
+            clampSheetUsedRange(sheet);
+            const headerInfo = readSheetHeaders(sheet);
+            if (!headerInfo) continue;
+
+            const keyMap = mapSheetHeaders(headerInfo.headers);
+            if (!keyMap.serial) continue;
+
+            const { range, headers } = headerInfo;
+            const dataStart = range.s.r + 1;
+            const dataEnd = range.e.r;
+            if (dataEnd < dataStart) continue;
+
+            const approxRows = dataEnd - dataStart + 1;
+            sheetsProcessed += 1;
+            let sheetImported = 0;
+            console.log(
+              `[warranty-master-import] sheet ${file.name}/${sheetName}: ~${approxRows.toLocaleString()} rows (ranged batches)`
+            );
+
+            // Don't sheet_to_json the whole sheet — that blocked for minutes with no logs after "parsed".
+            for (let r0 = dataStart; r0 <= dataEnd; r0 += CHUNK_SIZE) {
+              const r1 = Math.min(r0 + CHUNK_SIZE - 1, dataEnd);
+              const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+                header: 1,
+                raw: true,
+                defval: null,
+                blankrows: false,
+                range: { s: { r: r0, c: range.s.c }, e: { r: r1, c: range.e.c } },
+              });
+              const rawRows = aoaToRecords(headers, aoa);
+              const chunk: WarrantyImportRow[] = [];
+              for (const r of rawRows) {
+                const row = rowFromRaw(r, keyMap);
+                if (row) chunk.push(row);
+              }
+              if (chunk.length === 0) continue;
+
+              const n = await upsertChunk(client, dedupeChunk(chunk), today, bulkReplace);
+              totalImported += n;
+              sheetImported += n;
+              console.log(
+                `[warranty-master-import] ${file.name} / ${sheetName}: ${sheetImported.toLocaleString()} rows (${Date.now() - started}ms)`
+              );
+            }
+
+            console.log(
+              `[warranty-master-import] sheet done ${file.name}/${sheetName}: ${sheetImported.toLocaleString()} rows in ${Date.now() - sheetStarted}ms`
+            );
+          }
+        } finally {
+          if (indexesWereDropped || rebuildIndexes) {
+            await client.query(CREATE_SECONDARY_INDEXES_SQL).catch((rebuildErr) => {
+              console.error('[warranty-master-import] Failed to rebuild secondary indexes in finally:', rebuildErr);
+            });
+            console.log(`[warranty-master-import] rebuilt secondary indexes in ${Date.now() - started}ms`);
+          }
         }
 
         if (refreshRollup) {

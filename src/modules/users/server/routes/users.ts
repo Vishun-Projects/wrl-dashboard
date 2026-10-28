@@ -13,7 +13,11 @@ import { isDbSignInAvailable } from '@/lib/auth/db-sign-in';
 import { isDevAuthBypass } from '@/lib/auth/verify-jwt';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
-import { canAssignMisEmail, resolveMisEmailReportIncludes } from '@/lib/auth/rbac-catalog';
+import {
+  canAssignMisEmail,
+  isSuperAdmin,
+  resolveMisEmailReportIncludes,
+} from '@/lib/auth/rbac-catalog';
 import { defaultPreferencesForRecipient } from '@/modules/mis-email';
 import { USER_ROLE_IDS_SUBSELECT } from '@/lib/auth/user-roles-sql';
 import {
@@ -203,6 +207,15 @@ export async function POST(request: Request) {
     }
     if (!primary) {
       return NextResponse.json({ error: 'Please select at least one system role.' }, { status: 400 });
+    }
+
+    const targetPermissions = await loadPermissionsForRoleIds(roleIds);
+    const callerIsSuper = isSuperAdmin(auth.permissions);
+    if (isSuperAdmin(targetPermissions) && !callerIsSuper) {
+      return NextResponse.json(
+        { error: 'Forbidden — Only super administrators can assign the super admin role.' },
+        { status: 403 }
+      );
     }
 
     const profileParams = {
@@ -460,7 +473,23 @@ export async function PUT(request: Request) {
     }>;
     const before = beforeRows[0] ?? null;
 
+    const callerIsSuper = isSuperAdmin(auth.permissions);
+    const beforeRoleIds = before?.role_ids ?? (before?.role_id ? [before.role_id] : []);
+    const beforePermissions = beforeRoleIds.length > 0 ? await loadPermissionsForRoleIds(beforeRoleIds) : [];
+    if (isSuperAdmin(beforePermissions) && !callerIsSuper) {
+      return NextResponse.json(
+        { error: 'Forbidden — Only super administrators can modify super admin accounts.' },
+        { status: 403 }
+      );
+    }
+
     const permissions = await loadPermissionsForRoleIds(roleIds);
+    if (isSuperAdmin(permissions) && !callerIsSuper) {
+      return NextResponse.json(
+        { error: 'Forbidden — Only super administrators can assign the super admin role.' },
+        { status: 403 }
+      );
+    }
     const includes = resolveMisEmailReportIncludes(permissions);
     const canEmail = canAssignMisEmail(permissions);
     const wantsEmail = Boolean(mis_email_enabled);
@@ -645,23 +674,40 @@ export async function DELETE(request: Request) {
         }
       : null;
 
-    await prisma.$queryRawUnsafe('DELETE FROM public.app_users WHERE id = $1', userId);
-    clearAdminBootstrapCache();
-    clearMeCache(userId);
-
-    if (isDevAuthBypass()) {
-      // Bypass has no Admin API TLS: profile gone; auth user must be deleted elsewhere.
+    const callerIsSuper = isSuperAdmin(auth.permissions);
+    const targetRoleIds = beforeRow?.role_ids ?? (beforeRow?.role_id ? [beforeRow.role_id] : []);
+    const targetPermissions = targetRoleIds.length > 0 ? await loadPermissionsForRoleIds(targetRoleIds) : [];
+    if (isSuperAdmin(targetPermissions) && !callerIsSuper) {
       return NextResponse.json(
-        {
-          error:
-            'Deleting auth users requires Supabase Admin API over HTTPS. Profile row removed; use Vercel to delete auth user.',
-          profileDeleted: true,
-        },
-        { status: 503 }
+        { error: 'Forbidden — Only super administrators can delete super admin accounts.' },
+        { status: 403 }
       );
     }
 
-    await supabaseAdmin.auth.admin.deleteUser(userId);
+    const useDbAuthFallback = isDevAuthBypass() && isDbSignInAvailable();
+    if (useDbAuthFallback) {
+      await deleteAuthUserViaDatabase(userId).catch(() => {});
+    } else if (isDevAuthBypass()) {
+      return NextResponse.json(
+        {
+          error:
+            'Deleting auth users requires Supabase Admin API over HTTPS.',
+        },
+        { status: 503 }
+      );
+    } else {
+      const { error: deleteAuthError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+      if (deleteAuthError) {
+        const notFound = /not found|user not found/i.test(deleteAuthError.message);
+        if (!notFound) {
+          throw deleteAuthError;
+        }
+      }
+    }
+
+    await prisma.$queryRawUnsafe('DELETE FROM public.app_users WHERE id = $1', userId);
+    clearAdminBootstrapCache();
+    clearMeCache(userId);
     await logSecurityEventBestEffort({
       eventType: 'admin.user.delete',
       result: 'success',

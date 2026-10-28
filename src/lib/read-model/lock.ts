@@ -29,7 +29,7 @@ export async function releaseStaleSyncLock(client: pg.PoolClient): Promise<boole
     [ENTITY, STALE_LOCK_MS]
   );
   if ((result.rowCount ?? 0) > 0) {
-    await client.query(`SELECT pg_advisory_unlock(hashtext('read_model_sync'))`);
+    await client.query(`SELECT pg_advisory_unlock(hashtext('read_model_sync'))`).catch(() => {});
     console.log('[sync-worker] Released stale sync lock');
     return true;
   }

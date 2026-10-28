@@ -170,24 +170,25 @@ async function main() {
   }
 
   for await (const worksheetReader of reader) {
-    console.log(`sheet ${worksheetReader.name}`);
+    console.log(`sheet ${(worksheetReader as { name?: string }).name ?? ''}`);
     for await (const row of worksheetReader) {
       const cells = rowValues(row);
       if (!ix) {
         const hdr = cells.map(norm);
-        ix = {};
+        const colIx: Record<string, number> = {};
         for (const k of Object.keys(COLS)) {
-          ix[k] = -1;
+          colIx[k] = -1;
           for (const alias of COLS[k]) {
             const i = hdr.indexOf(alias);
             if (i >= 0) {
-              ix[k] = i;
+              colIx[k] = i;
               break;
             }
           }
         }
-        const need = ['date', 'mat', 'qty'].filter((k) => ix[k] < 0);
+        const need = ['date', 'mat', 'qty'].filter((k) => colIx[k] < 0);
         if (need.length) throw new Error(`missing columns: ${need.join(', ')}`);
+        ix = colIx;
         console.log(
           `mapped text=${ix.text} movt=${ix.movt} qty=${ix.qty} uom=${ix.uom} date=${ix.date}`
         );

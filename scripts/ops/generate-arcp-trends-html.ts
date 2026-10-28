@@ -117,7 +117,7 @@ async function fetchCrmMonth(
     },
     CRM_TIMEOUT_MS
   );
-  return rollupMonth(rows, month);
+  return rollupMonth(rows.aggregates, month);
 }
 
 async function fetchCrmMonthlySeries(

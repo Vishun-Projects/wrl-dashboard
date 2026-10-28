@@ -66,8 +66,8 @@ const EVENING_OPS_OPEN_ONLY_PREFS = {
     'regional_performance',
     'branch_performance',
     'key_account_performance',
-  ] as const,
-} as const;
+  ] as ('regional_performance' | 'branch_performance' | 'key_account_performance')[],
+};
 
 const DEFAULT_TO = 'vishnu.vishwakarma@westernequipments.com';
 /** Final OK/FAIL status only — probe digests stay DEFAULT_TO. */

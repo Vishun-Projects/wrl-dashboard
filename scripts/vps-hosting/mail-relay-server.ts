@@ -106,8 +106,18 @@ function normalizeMailAddresses(value: string | string[] | undefined): string[] 
   ];
 }
 
-if (!SECRET) {
-  console.error('FATAL: set VPS_MAIL_RELAY_SECRET in .env.mis-email');
+import { timingSafeEqual } from 'node:crypto';
+
+function safeCompareSecret(a: string | undefined, b: string): boolean {
+  if (!a || !b) return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
+if (!SECRET || SECRET.length < 16) {
+  console.error('FATAL: VPS_MAIL_RELAY_SECRET must be set and at least 16 characters long');
   process.exit(1);
 }
 
@@ -121,8 +131,9 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  const headerSecret = req.headers['x-mail-relay-secret'];
-  if (headerSecret !== SECRET) {
+  const rawHeader = req.headers['x-mail-relay-secret'];
+  const headerSecret = typeof rawHeader === 'string' ? rawHeader.trim() : undefined;
+  if (!safeCompareSecret(headerSecret, SECRET)) {
     res.writeHead(401, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Unauthorized' }));
     return;
@@ -280,7 +291,7 @@ const server = createServer(async (req, res) => {
         );
         const result = await runFastCallsHotSyncThroughYesterday(asOf);
         res.writeHead(result.ok ? 200 : 502, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: result.ok, ...result }));
+        res.end(JSON.stringify(result));
         return;
       }
       const { startCallsHotSyncThroughYesterday } = await import(

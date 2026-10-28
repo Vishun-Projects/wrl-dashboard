@@ -3,11 +3,15 @@ import { createClient } from '@/lib/supabase/server';
 import { requireRequestUser } from '@/lib/auth/server-user';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { isSuperAdmin } from '@/lib/auth/rbac-catalog';
+import { assertSameOriginMutation } from '@/lib/api/same-origin';
 import { syncCompressorBarcodesToPostgres } from '@/modules/compressor-barcodes/server/sync/postgres-sync';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 
 export async function POST(req: NextRequest) {
   try {
+    const csrf = assertSameOriginMutation(req);
+    if (csrf) return csrf;
+
     const supabase = await createClient();
     const user = await requireRequestUser(req, supabase);
     if (!user) {
@@ -18,7 +22,6 @@ export async function POST(req: NextRequest) {
     const permissions = auth?.permissions || [];
     const hasAccess =
       isSuperAdmin(permissions) ||
-      permissions.includes('page_mis_reports') ||
       permissions.includes('manage_roles');
 
     if (!hasAccess) {

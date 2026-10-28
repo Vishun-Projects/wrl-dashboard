@@ -5,6 +5,7 @@ const loadUserAuth = vi.fn();
 const queryRawUnsafe = vi.fn();
 const logSecurityEventBestEffort = vi.fn();
 const deleteUser = vi.fn();
+const loadPermissionsForRoleIds = vi.fn(async (_ids?: string[]): Promise<string[]> => []);
 
 vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(async () => ({})),
@@ -54,7 +55,7 @@ vi.mock('@/modules/mis-email', () => ({
 }));
 
 vi.mock('@/lib/auth/user-roles', () => ({
-  loadPermissionsForRoleIds: vi.fn(async () => []),
+  loadPermissionsForRoleIds: (ids: string[]) => loadPermissionsForRoleIds(ids),
   loadRoleNamesByIds: vi.fn(async () => ({})),
   normalizeRoleIds: (ids: string[]) => ids,
   replaceUserRoles: vi.fn(),
@@ -135,6 +136,77 @@ describe('admin users audit metadata', () => {
           }),
         }),
       })
+    );
+  });
+
+  it('blocks non-super-admin from deleting a super_admin user', async () => {
+    // Calling user only has manage_users, not super_admin
+    loadUserAuth.mockResolvedValueOnce({
+      profile: { role: 'admin' },
+      permissions: ['manage_users'],
+    });
+
+    // Target user possesses super_admin permission
+    queryRawUnsafe.mockResolvedValueOnce([
+      {
+        name: 'Super Admin',
+        email: 'super@example.com',
+        role: 'super_admin',
+        role_id: 'sa1',
+        role_ids: ['sa1'],
+      },
+    ]);
+    loadPermissionsForRoleIds.mockResolvedValueOnce(['super_admin']);
+
+    const { DELETE } = await import('@/modules/users/server/routes/users');
+    const res = await DELETE(
+      new Request('http://localhost/api/admin/users?id=target-sa', {
+        method: 'DELETE',
+        headers: { Origin: 'http://localhost' },
+      })
+    );
+
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toContain('Only super administrators can delete super admin accounts');
+    expect(deleteUser).not.toHaveBeenCalled();
+    expect(queryRawUnsafe).not.toHaveBeenCalledWith(
+      expect.stringContaining('DELETE FROM public.app_users'),
+      expect.anything()
+    );
+  });
+
+  it('aborts delete if Supabase auth deleteUser fails, preserving database profile', async () => {
+    loadUserAuth.mockResolvedValueOnce({
+      profile: { role: 'super_admin' },
+      permissions: ['manage_users', 'super_admin'],
+    });
+
+    queryRawUnsafe.mockResolvedValueOnce([
+      {
+        name: 'Regular User',
+        email: 'regular@example.com',
+        role: 'viewer',
+        role_id: 'r1',
+        role_ids: ['r1'],
+      },
+    ]);
+    loadPermissionsForRoleIds.mockResolvedValueOnce([]);
+    deleteUser.mockResolvedValueOnce({ data: null, error: new Error('GoTrue connection timed out') });
+
+    const { DELETE } = await import('@/modules/users/server/routes/users');
+    const res = await DELETE(
+      new Request('http://localhost/api/admin/users?id=target-regular', {
+        method: 'DELETE',
+        headers: { Origin: 'http://localhost' },
+      })
+    );
+
+    expect(res.status).toBe(500);
+    // Verified: DB profile delete query was NOT called because auth delete failed!
+    expect(queryRawUnsafe).not.toHaveBeenCalledWith(
+      expect.stringContaining('DELETE FROM public.app_users'),
+      expect.anything()
     );
   });
 });

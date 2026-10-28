@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server';
 import { unstable_cache } from 'next/cache';
 import fs from 'fs';
 import os from 'os';
-import path from 'path';
-import { execSync } from 'child_process';
 import { getSessionUserId } from '@/lib/auth/session';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { canAccessPerformanceInsights } from '@/lib/auth/insights-access';
@@ -172,145 +170,8 @@ function getSystemInfo() {
   };
 }
 
-function getRemoteVpsTelemetryViaSsh(clientPassphrase?: string) {
-  try {
-    const passphrase = (clientPassphrase || process.env.VPS_SSH_PASSPHRASE || '').trim();
-    let env = { ...process.env };
-    let tempAskpass: string | undefined = undefined;
-
-    if (passphrase) {
-      tempAskpass = path.join(os.tmpdir(), `askpass_${Date.now()}.${process.platform === 'win32' ? 'bat' : 'sh'}`);
-      if (process.platform === 'win32') {
-        fs.writeFileSync(tempAskpass, `@echo ${passphrase}\r\n`);
-      } else {
-        fs.writeFileSync(tempAskpass, `#!/bin/sh\necho "${passphrase}"\n`, { mode: 0o755 });
-      }
-      env = {
-        ...process.env,
-        DISPLAY: 'dummy:0',
-        SSH_ASKPASS: tempAskpass,
-        SSH_ASKPASS_REQUIRE: 'force',
-      };
-    }
-
-    const keyPath = path.join(os.homedir(), '.ssh', 'id_ed25519');
-    const keyFlag = fs.existsSync(keyPath) ? `-i "${keyPath.replace(/\\/g, '/')}"` : '';
-    const cmd = `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 ${keyFlag} root@187.127.145.253 "uptime; echo ---FREE---; free -b; echo ---DF---; df -B1 /; echo ---NET---; cat /proc/net/dev"`;
-
-    let out = '';
-    try {
-      out = execSync(cmd, { env, encoding: 'utf-8', timeout: 5000 }) as string;
-    } finally {
-      if (tempAskpass) {
-        try { fs.unlinkSync(tempAskpass); } catch {}
-      }
-    }
-
-    if (!out || typeof out !== 'string') return null;
-
-    let systemUptimeSeconds = 0;
-    const loadAvg: number[] = [0, 0, 0];
-    const loadMatch = out.match(/load average:\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)/);
-    if (loadMatch) {
-      loadAvg[0] = parseFloat(loadMatch[1]);
-      loadAvg[1] = parseFloat(loadMatch[2]);
-      loadAvg[2] = parseFloat(loadMatch[3]);
-    }
-    const daysMatch = out.match(/up\s+(\d+)\s+days?,\s+(\d+):(\d+)/);
-    if (daysMatch) {
-      const days = parseInt(daysMatch[1], 10);
-      const hours = parseInt(daysMatch[2], 10);
-      const mins = parseInt(daysMatch[3], 10);
-      systemUptimeSeconds = days * 86400 + hours * 3600 + mins * 60;
-    } else {
-      const hoursMinsMatch = out.match(/up\s+(\d+):(\d+)/);
-      if (hoursMinsMatch) {
-        systemUptimeSeconds = parseInt(hoursMinsMatch[1], 10) * 3600 + parseInt(hoursMinsMatch[2], 10) * 60;
-      }
-    }
-
-    let totalMem = 0;
-    let usedMem = 0;
-    let freeMem = 0;
-    const memMatch = out.match(/Mem:\s+(\d+)\s+(\d+)\s+(\d+)/);
-    if (memMatch) {
-      totalMem = parseInt(memMatch[1], 10);
-      usedMem = parseInt(memMatch[2], 10);
-      freeMem = parseInt(memMatch[3], 10);
-    }
-    const usedMemPercent = totalMem > 0 ? Number(((usedMem / totalMem) * 100).toFixed(1)) : 0;
-
-    let diskTotal = 0;
-    let diskUsed = 0;
-    let diskAvail = 0;
-    const dfMatch = out.match(/(?:\/dev\/(?:sda|vda|root|mapper)[^\s]*|\/)\s+(\d+)\s+(\d+)\s+(\d+)/);
-    if (dfMatch) {
-      diskTotal = parseInt(dfMatch[1], 10);
-      diskUsed = parseInt(dfMatch[2], 10);
-      diskAvail = parseInt(dfMatch[3], 10);
-    } else {
-      const dfLine = out.split('\n').find((l) => l.trim().endsWith('/'));
-      if (dfLine) {
-        const parts = dfLine.trim().split(/\s+/);
-        if (parts.length >= 4) {
-          diskTotal = parseInt(parts[1], 10) || 0;
-          diskUsed = parseInt(parts[2], 10) || 0;
-          diskAvail = parseInt(parts[3], 10) || 0;
-        }
-      }
-    }
-    const diskPercent = diskTotal > 0 ? Number(((diskUsed / diskTotal) * 100).toFixed(1)) : 0;
-
-    let rxBytes = 0;
-    let txBytes = 0;
-    const netLines = out.split('\n');
-    for (const line of netLines) {
-      if (line.includes('eth0:') || line.includes('ens') || line.includes('enp')) {
-        const parts = line.trim().split(/\s+/);
-        if (parts.length >= 10) {
-          rxBytes += parseInt(parts[1], 10) || 0;
-          txBytes += parseInt(parts[9], 10) || 0;
-        }
-      }
-    }
-
-    return {
-      cpu: {
-        percent: Math.max(0, Math.min(100, Math.round((loadAvg[0] / 2) * 100))),
-        loadAvg,
-        cpuCount: 2,
-        model: 'Hostinger VPS KVM 2 Core (Live SSH)',
-      },
-      systemMemory: {
-        totalBytes: totalMem,
-        usedBytes: usedMem,
-        freeBytes: freeMem,
-        usedPercent: usedMemPercent,
-      },
-      diskStorage: {
-        totalBytes: diskTotal,
-        usedBytes: diskUsed,
-        freeBytes: diskAvail,
-        availableBytes: diskAvail,
-        usedPercent: diskPercent,
-      },
-      network: { rxBytes, txBytes },
-      systemInfo: {
-        nodeVersion: process.version,
-        platform: 'linux' as const,
-        arch: process.arch,
-        uptimeSeconds: Math.floor(process.uptime()),
-        systemUptimeSeconds,
-      },
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function fetchRemoteVpsTelemetryViaHttp(clientPassphrase?: string) {
+async function fetchRemoteVpsTelemetryViaHttp() {
   const secret = (
-    clientPassphrase ||
     process.env.VPS_TELEMETRY_PASSPHRASE ||
     process.env.VPS_MAIL_RELAY_SECRET ||
     ''
@@ -333,7 +194,6 @@ async function fetchRemoteVpsTelemetryViaHttp(clientPassphrase?: string) {
       headers: {
         'Accept': 'application/json',
         'x-telemetry-secret': secret,
-        'x-vps-passphrase': clientPassphrase || secret,
       },
       signal: controller.signal,
     });
@@ -360,7 +220,6 @@ async function fetchRemoteVpsTelemetryViaHttp(clientPassphrase?: string) {
 export async function GET(request?: Request) {
   const userId = await getSessionUserId();
   const secretHeader = request?.headers?.get('x-telemetry-secret')?.trim();
-  const clientPassphrase = request?.headers?.get('x-vps-passphrase')?.trim() ?? '';
   const expectedSecret = (
     process.env.VPS_TELEMETRY_PASSPHRASE ??
     process.env.VPS_MAIL_RELAY_SECRET ??
@@ -370,9 +229,7 @@ export async function GET(request?: Request) {
 
   // Validate authentication: session user OR valid telemetry secret header
   const isSecretAuthenticated = Boolean(
-    expectedSecret &&
-      ((secretHeader && secretHeader === expectedSecret) ||
-        (clientPassphrase && clientPassphrase === expectedSecret))
+    expectedSecret && secretHeader && secretHeader === expectedSecret
   );
 
   if (!userId && !isSecretAuthenticated) {
@@ -387,7 +244,7 @@ export async function GET(request?: Request) {
     }
   }
 
-  const passphraseInvalid = Boolean(clientPassphrase && !isSecretAuthenticated);
+  const passphraseInvalid = Boolean(secretHeader && !isSecretAuthenticated);
 
   const now = Date.now();
   if (!isSecretAuthenticated && snapshotCache && snapshotCache.expiresAt > now) {
@@ -410,30 +267,17 @@ export async function GET(request?: Request) {
   let diskStorage = getDiskStorage();
   let network = getNetworkTraffic();
   let systemInfo = getSystemInfo();
-  let sshBridgeActive = false;
-  let telemetrySource: 'ssh_bridge' | 'http_relay' | 'local_node' = 'local_node';
+  let telemetrySource: 'http_relay' | 'local_node' = 'local_node';
 
   if (process.platform !== 'linux' || process.env.VERCEL === '1' || process.env.AWS_EXECUTION_ENV) {
-    const remoteSsh = getRemoteVpsTelemetryViaSsh(clientPassphrase);
-    if (remoteSsh) {
-      cpu = remoteSsh.cpu;
-      systemMemory = remoteSsh.systemMemory;
-      diskStorage = remoteSsh.diskStorage;
-      network = remoteSsh.network;
-      systemInfo = remoteSsh.systemInfo;
-      sshBridgeActive = true;
-      telemetrySource = 'ssh_bridge';
-    } else {
-      const remoteHttp = await fetchRemoteVpsTelemetryViaHttp(clientPassphrase);
-      if (remoteHttp) {
-        cpu = remoteHttp.cpu;
-        systemMemory = remoteHttp.systemMemory;
-        diskStorage = remoteHttp.diskStorage;
-        network = remoteHttp.network;
-        systemInfo = remoteHttp.systemInfo;
-        sshBridgeActive = true;
-        telemetrySource = 'http_relay';
-      }
+    const remoteHttp = await fetchRemoteVpsTelemetryViaHttp();
+    if (remoteHttp) {
+      cpu = remoteHttp.cpu;
+      systemMemory = remoteHttp.systemMemory;
+      diskStorage = remoteHttp.diskStorage;
+      network = remoteHttp.network;
+      systemInfo = remoteHttp.systemInfo;
+      telemetrySource = 'http_relay';
     }
   }
 
@@ -444,9 +288,9 @@ export async function GET(request?: Request) {
       region: 'ap-south-1',
       gitCommit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'b8a74e2',
     },
-    passphraseAuthenticated: isSecretAuthenticated || sshBridgeActive,
+    passphraseAuthenticated: isSecretAuthenticated,
     passphraseInvalid,
-    sshBridgeActive,
+    sshBridgeActive: false,
     telemetrySource,
     cpuUsage: cpu,
     systemMemory,
