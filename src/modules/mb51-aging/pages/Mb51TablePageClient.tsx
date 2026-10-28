@@ -175,9 +175,21 @@ function MultiSelectDropdown({
 
   return (
     <div className={`ms ${open ? 'open' : ''}`} ref={popRef}>
-      <button type="button" className="ms-btn" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+      <div
+        className="ms-btn"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            setOpen((value) => !value);
+          }
+        }}
+      >
         <span className="t">{buttonText}</span>
-      </button>
+      </div>
       {open && (
         <div className="ms-pop">
           <div className="ms-top">
@@ -1001,6 +1013,145 @@ export default function Mb51TablePageClient() {
         )}
       </main>
 
+      {/* Filters/multiselect must be global — MultiSelect is a child component and scoped jsx never reaches it. */}
+      <style jsx global>{`
+        .mb51-root .filters {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+          gap: 6px 8px;
+          align-items: end;
+        }
+        .mb51-root .f label {
+          display: block;
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--muted);
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          margin-bottom: 3px;
+        }
+        .mb51-root .filters input[type='date'],
+        .mb51-root .filters select,
+        .mb51-root .filters .ms-btn,
+        .mb51-root .filters input[type='text'] {
+          width: 100%;
+          height: 28px;
+          border: 1px solid #c5cdd7;
+          border-radius: 5px;
+          padding: 0 6px;
+          background: #fff;
+          font: inherit;
+          font-size: 12px;
+          color: var(--ink);
+        }
+        .mb51-root .filters input:focus,
+        .mb51-root .filters select:focus,
+        .mb51-root .filters .ms-btn:focus {
+          outline: 2px solid #86b6e8;
+          outline-offset: 0;
+        }
+        .mb51-root .filters .actions {
+          display: flex;
+          gap: 8px;
+          align-items: end;
+          flex-wrap: nowrap;
+          /* Full filter row — a single grid cell is too narrow for 3 buttons. */
+          grid-column: 1 / -1;
+        }
+        .mb51-root .filters .actions .btn {
+          height: 28px;
+          min-height: 28px;
+          padding: 0 10px;
+          font-size: 12px;
+          flex: 0 0 auto;
+        }
+        .mb51-root .ms {
+          position: relative;
+        }
+        .mb51-root .ms-btn {
+          text-align: left;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 6px;
+        }
+        .mb51-root .ms-btn span.t {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .mb51-root .ms-btn::after {
+          content: '▾';
+          color: var(--muted);
+        }
+        .mb51-root .ms-pop {
+          position: absolute;
+          z-index: 50;
+          top: 32px;
+          left: 0;
+          min-width: 100%;
+          width: max(100%, 320px);
+          max-width: min(420px, 92vw);
+          background: #fff;
+          border: 1px solid #b7c2cf;
+          border-radius: 6px;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+        }
+        .mb51-root .ms-top {
+          padding: 6px;
+          border-bottom: 1px solid var(--line);
+          display: flex;
+          gap: 6px;
+        }
+        .mb51-root .ms-top input {
+          flex: 1;
+          min-width: 70px;
+        }
+        .mb51-root .ms-top button {
+          border: 1px solid #c5cdd7;
+          background: #f7f9fb;
+          border-radius: 5px;
+          padding: 0 8px;
+          cursor: pointer;
+          font: inherit;
+          font-size: 11px;
+          white-space: nowrap;
+        }
+        .mb51-root .ms-list {
+          max-height: 260px;
+          overflow: auto;
+        }
+        .mb51-root .ms-item {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          padding: 4px 10px;
+          cursor: pointer;
+        }
+        .mb51-root .ms-item:hover {
+          background: var(--accent);
+        }
+        .mb51-root .ms-item input {
+          margin: 0;
+        }
+        .mb51-root .ms-foot {
+          padding: 4px 10px;
+          font-size: 11px;
+          color: var(--muted);
+          border-top: 1px solid var(--line);
+        }
+        @media (max-width: 900px) {
+          .mb51-root .filters {
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+          }
+        }
+        @media (max-width: 520px) {
+          .mb51-root .ms-pop {
+            width: min(380px, 90vw);
+          }
+        }
+      `}</style>
       <style jsx>{`
         .mb51-root {
           --bg: #f4f6f9; --card: #fff; --ink: #1c2733; --muted: #64748b;
@@ -1028,10 +1179,6 @@ export default function Mb51TablePageClient() {
           border-radius: 6px;
         }
         .tw.is-paging { opacity: 0.45; pointer-events: none; }
-        .filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 14px; align-items: end; }
-        .f label { display: block; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px; }
-        input[type='date'], select, .ms-btn, input[type='text'] { width: 100%; height: 32px; border: 1px solid #c5cdd7; border-radius: 5px; padding: 0 8px; background: #fff; font: inherit; color: var(--ink); }
-        input:focus, select:focus, .ms-btn:focus { outline: 2px solid #86b6e8; outline-offset: 0; }
         .btn { white-space: nowrap; min-height: 32px; padding: 0 14px; border-radius: 5px; border: 1px solid var(--brand); background: var(--brand); color: #fff; font: inherit; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
         .btn:hover { background: var(--brand-d); }
         .btn.sec { background: #fff; color: var(--brand); }
@@ -1040,21 +1187,7 @@ export default function Mb51TablePageClient() {
         .current-view { cursor: default; }
         .current-view:hover { background: var(--brand); }
         .page-btn { min-height: 28px; padding: 0 10px; font-size: 12px; }
-        .actions { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
         .badge { display: inline-block; background: #eef4fb; color: #0b5cab; border: 1px solid #cfe0f5; border-radius: 4px; padding: 1px 6px; font-weight: 600; font-size: 11px; }
-        .ms { position: relative; }
-        .ms-btn { text-align: left; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-        .ms-btn span.t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .ms-btn::after { content: '▾'; color: var(--muted); }
-        .ms-pop { position: absolute; z-index: 30; top: 36px; left: 0; min-width: 100%; width: max(100%, 380px); max-width: min(480px, 90vw); background: #fff; border: 1px solid #b7c2cf; border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
-        .ms-top { padding: 6px; border-bottom: 1px solid var(--line); display: flex; gap: 6px; }
-        .ms-top input { flex: 1; min-width: 70px; }
-        .ms-top button { border: 1px solid #c5cdd7; background: #f7f9fb; border-radius: 5px; padding: 0 8px; cursor: pointer; font: inherit; font-size: 11px; }
-        .ms-list { max-height: 260px; overflow: auto; }
-        .ms-item { display: flex; gap: 8px; align-items: center; padding: 4px 10px; cursor: pointer; }
-        .ms-item:hover { background: var(--accent); }
-        .ms-item input { margin: 0; }
-        .ms-foot { padding: 4px 10px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); }
         .drop { border: 2px dashed #9db4cc; border-radius: 8px; padding: 28px; text-align: center; background: #fafcfe; }
         .drop.over { background: var(--accent); border-color: var(--brand); }
         .drop > b { font-size: 15px; }
@@ -1104,8 +1237,8 @@ export default function Mb51TablePageClient() {
         .pagination-actions { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
         .page-indicator { padding: 0 8px; font-size: 12px; font-weight: 600; }
         @media (max-width: 1400px) { .kpis { grid-template-columns: repeat(4, minmax(120px, 1fr)); } }
-        @media (max-width: 900px) { main { padding: 10px; } header { padding: 12px; } .kpis { grid-template-columns: repeat(2, minmax(120px, 1fr)); } .filters { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); } }
-        @media (max-width: 520px) { .kpis { grid-template-columns: 1fr 1fr; } .meta-left { gap: 8px; } .drop { padding: 18px 10px; } .ms-pop { width: min(380px, 90vw); } }
+        @media (max-width: 900px) { main { padding: 10px; } header { padding: 12px; } .kpis { grid-template-columns: repeat(2, minmax(120px, 1fr)); } }
+        @media (max-width: 520px) { .kpis { grid-template-columns: 1fr 1fr; } .meta-left { gap: 8px; } .drop { padding: 18px 10px; } }
       `}</style>
     </div>
   );
