@@ -271,8 +271,8 @@ export default function Mb51TablePageClient() {
   const [sortDir, setSortDir] = useState(1);
 
   // Pagination
+  const PAGE_SIZE = 100;
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(100);
   const [pageLoading, setPageLoading] = useState(false);
   const [serverKpis, setServerKpis] = useState({
     filteredCount: 0,
@@ -316,8 +316,8 @@ export default function Mb51TablePageClient() {
     const fromSerial = dateToSerial(dateFrom);
     const toSerial = dateToSerial(dateTo);
     const data = await fetchMb51MovementsPage({
-      offset: (page - 1) * pageSize,
-      limit: pageSize,
+      offset: (page - 1) * PAGE_SIZE,
+      limit: PAGE_SIZE,
       dateFrom: fromSerial,
       dateTo: toSerial,
       plants: [...selectedPlants],
@@ -329,12 +329,11 @@ export default function Mb51TablePageClient() {
     });
     setServerKpis(data.kpis);
     setTotalCount(data.totalCount);
-    setRows(data.rows.map((r, idx) => normalizeMovement(r, (page - 1) * pageSize + idx)));
+    setRows(data.rows.map((r, idx) => normalizeMovement(r, (page - 1) * PAGE_SIZE + idx)));
   }, [
     dateFrom,
     dateTo,
     page,
-    pageSize,
     selectedPlants,
     selectedVendors,
     selectedGroups,
@@ -436,7 +435,6 @@ export default function Mb51TablePageClient() {
     dateFrom,
     dateTo,
     page,
-    pageSize,
     selectedPlants,
     selectedVendors,
     selectedGroups,
@@ -675,7 +673,7 @@ export default function Mb51TablePageClient() {
   };
 
   // Pagination
-  const totalPages = Math.max(1, Math.ceil(kpis.filteredCount / pageSize));
+  const totalPages = Math.max(1, Math.ceil(kpis.filteredCount / PAGE_SIZE) || 1);
   const currentPage = Math.min(Math.max(1, page), totalPages);
   const pagedRows = sortedRows;
 
@@ -723,7 +721,7 @@ export default function Mb51TablePageClient() {
   };
 
   return (
-    <div className="mb51-root">
+    <div className="mb51-root h-full min-h-0 min-w-0 w-full flex-1 overflow-hidden">
       <header>
         <div>
           <h1>MB51 Material Movements Data (Tabular)</h1>
@@ -836,7 +834,7 @@ export default function Mb51TablePageClient() {
 
         {!loading && rows.length > 0 && (
           <div id="app">
-            <div className="card">
+            <div className="card filters-card">
               <div className="filters">
                 <div className="f">
                   <label htmlFor="date-from">Posting date from</label>
@@ -886,7 +884,7 @@ export default function Mb51TablePageClient() {
               </div>
             </div>
 
-            <div className="card">
+            <div className="card kpis-card">
               <div className="kpis">
                 <div className="kpi" style={{ '--c': '#0b5cab' } as React.CSSProperties}>
                   <div className="l">Filtered Rows</div>
@@ -914,25 +912,14 @@ export default function Mb51TablePageClient() {
               </div>
             </div>
 
-            <div className="card">
-              <div className="meta table-meta">
-                <div className="meta-left">
-                  <span>
-                    {pageLoading
-                      ? `Loading page ${currentPage} of ${totalPages}…`
-                      : <>Showing <b>{(sortedRows.length ? (currentPage - 1) * pageSize + 1 : 0).toLocaleString('en-IN')}</b> to{' '}
-                    <b>{Math.min(currentPage * pageSize, kpis.filteredCount).toLocaleString('en-IN')}</b> of{' '}
-                    <b>{kpis.filteredCount.toLocaleString('en-IN')}</b> movements</>}
-                  </span>
-                  <span>Net Qty: <b>{fmtQty(kpis.netQty)}</b></span>
-                </div>
-                <div className="page-size-control">
-                  <label htmlFor="page-size">Page size:</label>
-                  <select id="page-size" value={pageSize} disabled={pageLoading} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}>
-                    <option value={50}>50</option><option value={100}>100</option><option value={250}>250</option>
-                    <option value={500}>500</option><option value={1000}>1000</option>
-                  </select>
-                </div>
+            <div className="card table-card">
+              <div className="meta">
+                <span>
+                  Movements: <b>{kpis.filteredCount.toLocaleString('en-IN')}</b>
+                </span>
+                <span>
+                  Net Qty: <b>{fmtQty(kpis.netQty)}</b>
+                </span>
               </div>
 
               {pageLoading && (
@@ -963,7 +950,7 @@ export default function Mb51TablePageClient() {
                   <tbody>
                     {pagedRows.length > 0 ? pagedRows.map((row, index) => (
                       <tr key={`${row.s}-${index}`}>
-                        <td className="row-number">{((currentPage - 1) * pageSize + index + 1).toLocaleString('en-IN')}</td>
+                        <td className="row-number">{((currentPage - 1) * PAGE_SIZE + index + 1).toLocaleString('en-IN')}</td>
                         <td>{serialToDMY(row.d)}</td>
                         <td><b>{row.mv}</b></td>
                         <td className="document-number">{row.dc}</td>
@@ -994,20 +981,33 @@ export default function Mb51TablePageClient() {
                 </table>
               </div>
 
-              <div className="pagination">
-                <div className="pagination-info">
-                  {pageLoading
-                    ? <>Loading page <b>{currentPage}</b> of <b>{totalPages}</b>…</>
-                    : <>Page <b>{currentPage}</b> of <b>{totalPages}</b> ({kpis.filteredCount.toLocaleString('en-IN')} records)</>}
+              {(pagedRows.length > 0 || pageLoading) && (
+                <div className="pager">
+                  <span>
+                    {pageLoading
+                      ? `Loading page ${currentPage} of ${totalPages}…`
+                      : `Page ${currentPage} of ${totalPages} · showing ${pagedRows.length.toLocaleString('en-IN')} of ${kpis.filteredCount.toLocaleString('en-IN')} rows`}
+                  </span>
+                  <div className="pager-btns">
+                    <button
+                      type="button"
+                      className="btn sec"
+                      disabled={pageLoading || currentPage <= 1}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    >
+                      Prev
+                    </button>
+                    <button
+                      type="button"
+                      className="btn sec"
+                      disabled={pageLoading || currentPage >= totalPages}
+                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    >
+                      Next
+                    </button>
+                  </div>
                 </div>
-                <div className="pagination-actions">
-                  <button type="button" className="btn sec page-btn" disabled={pageLoading || currentPage <= 1} onClick={() => setPage(1)}>« First</button>
-                  <button type="button" className="btn sec page-btn" disabled={pageLoading || currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>‹ Prev</button>
-                  <span className="page-indicator">{currentPage} / {totalPages}</span>
-                  <button type="button" className="btn sec page-btn" disabled={pageLoading || currentPage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>Next ›</button>
-                  <button type="button" className="btn sec page-btn" disabled={pageLoading || currentPage >= totalPages} onClick={() => setPage(totalPages)}>Last »</button>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         )}
@@ -1158,19 +1158,63 @@ export default function Mb51TablePageClient() {
           --line: #dde3ea; --brand: #0b5cab; --brand-d: #084580; --accent: #e8f1fb;
           --neg: #c0392b; --ok: #1e8e5a;
           margin: 0; font: 13px/1.4 'Segoe UI', Roboto, Arial, sans-serif;
-          background: var(--bg); color: var(--ink); min-height: 100vh;
+          background: var(--bg); color: var(--ink);
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
         }
-        header { background: var(--brand-d); color: #fff; padding: 12px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+        header {
+          background: var(--brand-d); color: #fff; padding: 8px 12px;
+          display: flex; align-items: center; gap: 16px; flex-wrap: wrap; flex-shrink: 0;
+        }
         header h1 { font-size: 18px; margin: 0; font-weight: 600; }
         header .sub { opacity: .8; font-size: 12px; }
         header .spacer { flex: 1; }
         .header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-        main { padding: 14px 20px; max-width: 1800px; margin: 0 auto; }
-        .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
+        main {
+          flex: 1 1 0;
+          min-height: 0;
+          min-width: 0;
+          max-width: 100%;
+          margin: 0;
+          padding: 8px 12px;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+        #app {
+          flex: 1 1 0;
+          min-height: 0;
+          min-width: 0;
+          max-width: 100%;
+          display: flex;
+          flex-direction: column;
+          gap: 0;
+          overflow: hidden;
+        }
+        .card {
+          background: var(--card);
+          border: 1px solid var(--line);
+          border-radius: 6px;
+          padding: 8px 10px;
+          margin-bottom: 8px;
+          min-width: 0;
+          max-width: 100%;
+          flex-shrink: 0;
+        }
+        .card.table-card {
+          display: flex;
+          flex-direction: column;
+          flex: 1 1 0;
+          min-height: 0;
+          margin-bottom: 0;
+          overflow: hidden;
+        }
         .loading-card { text-align: center; padding: 24px; }
         .page-loading {
+          flex-shrink: 0;
           padding: 6px 10px;
-          margin-bottom: 8px;
+          margin-bottom: 6px;
           font-size: 13px;
           font-weight: 600;
           color: #1d4f7a;
@@ -1178,15 +1222,52 @@ export default function Mb51TablePageClient() {
           border: 1px solid #c5d8ea;
           border-radius: 6px;
         }
+        .tw {
+          flex: 1 1 0;
+          min-height: 10rem;
+          min-width: 0;
+          width: 100%;
+          overflow-x: auto;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          border: 1px solid var(--line);
+          border-radius: 6px;
+          scrollbar-width: thin;
+          scrollbar-color: #5f82a8 #e9eef4;
+        }
+        .tw::-webkit-scrollbar { width: 10px; height: 10px; }
+        .tw::-webkit-scrollbar-track { background: #e9eef4; }
+        .tw::-webkit-scrollbar-thumb {
+          background: #5f82a8;
+          border-radius: 5px;
+          border: 2px solid #e9eef4;
+        }
+        .tw::-webkit-scrollbar-thumb:hover { background: #3f6a94; }
         .tw.is-paging { opacity: 0.45; pointer-events: none; }
-        .btn { white-space: nowrap; min-height: 32px; padding: 0 14px; border-radius: 5px; border: 1px solid var(--brand); background: var(--brand); color: #fff; font: inherit; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+        .pager {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          flex-shrink: 0;
+          padding-top: 6px;
+          font-size: 12px;
+          color: var(--muted);
+        }
+        .pager-btns { display: flex; gap: 6px; }
+        .pager .btn { height: 28px; padding: 0 10px; font-size: 12px; }
+        .btn {
+          white-space: nowrap; height: 28px; min-height: 28px; padding: 0 10px;
+          border-radius: 5px; border: 1px solid var(--brand); background: var(--brand);
+          color: #fff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+          display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
+        }
         .btn:hover { background: var(--brand-d); }
         .btn.sec { background: #fff; color: var(--brand); }
         .btn.sec:hover { background: var(--accent); }
         .btn[disabled] { opacity: .5; cursor: not-allowed; }
         .current-view { cursor: default; }
         .current-view:hover { background: var(--brand); }
-        .page-btn { min-height: 28px; padding: 0 10px; font-size: 12px; }
         .badge { display: inline-block; background: #eef4fb; color: #0b5cab; border: 1px solid #cfe0f5; border-radius: 4px; padding: 1px 6px; font-weight: 600; font-size: 11px; }
         .drop { border: 2px dashed #9db4cc; border-radius: 8px; padding: 28px; text-align: center; background: #fafcfe; }
         .drop.over { background: var(--accent); border-color: var(--brand); }
@@ -1200,29 +1281,29 @@ export default function Mb51TablePageClient() {
         .status-ok { background: #f3faf6; }
         .status-err { background: #fdf2f1; border-color: var(--neg); }
         .status-ok .msg, .status-err .msg { margin-top: 0; }
-        .kpis { display: grid; grid-template-columns: repeat(7, minmax(120px, 1fr)); gap: 10px; }
+        .kpis { display: grid; grid-template-columns: repeat(7, minmax(120px, 1fr)); gap: 8px; }
         .kpi { min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; background: #fff; border-top: 4px solid var(--c); }
         .kpi .l { font-size: 11px; color: var(--muted); font-weight: 600; }
         .kpi .v { font-size: 18px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
         .kpi .p { font-size: 11px; color: var(--muted); }
-        .meta { display: flex; gap: 18px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+        .meta {
+          display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted);
+          font-size: 11px; margin-bottom: 6px; flex-shrink: 0;
+        }
         .meta b { color: var(--ink); }
-        .table-meta { justify-content: space-between; align-items: center; }
-        .meta-left, .page-size-control { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
-        .page-size-control { gap: 10px; }
-        .page-size-control label { font-size: 12px; font-weight: 600; }
-        .page-size-control select { width: 80px; height: 28px; }
-        .tw { overflow: auto; max-height: 68vh; border: 1px solid var(--line); border-radius: 6px; }
-        table { border-collapse: separate; border-spacing: 0; width: 100%; font-variant-numeric: tabular-nums; }
-        th, td { padding: 5px 9px; border-bottom: 1px solid #edf0f4; white-space: nowrap; }
-        thead th { position: sticky; top: 0; background: #eaf0f7; z-index: 2; text-align: left; font-size: 12px; cursor: pointer; user-select: none; border-bottom: 2px solid #b9c7d8; }
-        thead th.n { text-align: right; }
-        thead th:hover { background: #dce7f4; }
-        thead th .ar { opacity: .7; font-size: 10px; margin-left: 3px; }
-        td.n { text-align: right; font-weight: 600; }
-        td.neg { color: var(--neg); }
-        tbody tr:hover td { background: #f3f8fe; }
-        tfoot td { position: sticky; bottom: 0; background: #eaf0f7; font-weight: 700; border-top: 2px solid #b9c7d8; }
+        .tw table { border-collapse: separate; border-spacing: 0; width: 100%; font-variant-numeric: tabular-nums; }
+        .tw th, .tw td { padding: 5px 9px; border-bottom: 1px solid #edf0f4; white-space: nowrap; }
+        .tw thead th {
+          position: sticky; top: 0; background: #eaf0f7; z-index: 2; text-align: left;
+          font-size: 12px; cursor: pointer; user-select: none; border-bottom: 2px solid #b9c7d8;
+        }
+        .tw thead th.n { text-align: right; }
+        .tw thead th:hover { background: #dce7f4; }
+        .tw thead th .ar { opacity: .7; font-size: 10px; margin-left: 3px; }
+        .tw td.n { text-align: right; font-weight: 600; }
+        .tw td.neg { color: var(--neg); }
+        .tw tbody tr:hover td { background: #f3f8fe; }
+        .tw tfoot td { position: sticky; bottom: 0; background: #eaf0f7; font-weight: 700; border-top: 2px solid #b9c7d8; }
         .row-number { color: var(--muted); font-size: 11px; }
         .document-number { font-family: monospace; font-size: 12px; }
         .material-code { color: var(--brand); }
@@ -1232,13 +1313,14 @@ export default function Mb51TablePageClient() {
         .description-text { max-width: 320px; }
         .vendor-name { max-width: 240px; }
         .empty { padding: 40px; text-align: center; color: var(--muted); }
-        .pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; flex-wrap: wrap; gap: 8px; }
-        .pagination-info { font-size: 12px; color: var(--muted); }
-        .pagination-actions { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-        .page-indicator { padding: 0 8px; font-size: 12px; font-weight: 600; }
         @media (max-width: 1400px) { .kpis { grid-template-columns: repeat(4, minmax(120px, 1fr)); } }
-        @media (max-width: 900px) { main { padding: 10px; } header { padding: 12px; } .kpis { grid-template-columns: repeat(2, minmax(120px, 1fr)); } }
-        @media (max-width: 520px) { .kpis { grid-template-columns: 1fr 1fr; } .meta-left { gap: 8px; } .drop { padding: 18px 10px; } }
+        @media (max-width: 900px) {
+          main { padding: 10px; }
+          header { padding: 12px; }
+          .kpis { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+          .tw { height: min(65vh, calc(100dvh - 300px)); max-height: min(65vh, calc(100dvh - 300px)); }
+        }
+        @media (max-width: 520px) { .kpis { grid-template-columns: 1fr 1fr; } .drop { padding: 18px 10px; } }
       `}</style>
     </div>
   );
