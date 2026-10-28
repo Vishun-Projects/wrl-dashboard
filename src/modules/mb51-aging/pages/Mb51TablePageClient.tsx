@@ -261,6 +261,7 @@ export default function Mb51TablePageClient() {
   // Pagination
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
+  const [pageLoading, setPageLoading] = useState(false);
   const [serverKpis, setServerKpis] = useState({
     filteredCount: 0,
     netQty: 0,
@@ -399,7 +400,8 @@ export default function Mb51TablePageClient() {
     let active = true;
     void (async () => {
       try {
-        setLoading(true);
+        // Keep table mounted on page flips; only full-screen load on first paint.
+        setPageLoading(true);
         await refreshMovements();
         if (active) {
           setLoadMsg('');
@@ -411,7 +413,7 @@ export default function Mb51TablePageClient() {
         setLoadMsg(message);
         setIsErrMsg(true);
       } finally {
-        if (active) setLoading(false);
+        if (active) setPageLoading(false);
       }
     })();
     return () => {
@@ -736,7 +738,11 @@ export default function Mb51TablePageClient() {
       </header>
 
       <main>
-        {loading && <div className="card loading-card"><b>{loadMsg}</b></div>}
+        {(loading || (pageLoading && rows.length === 0)) && (
+          <div className="card loading-card">
+            <b>{loadMsg || 'Loading data…'}</b>
+          </div>
+        )}
 
         {!loading && loadMsg && !(showUpload && rows.length === 0) && (
           <div className={`card ${isErrMsg ? 'status-err' : 'status-ok'}`}>
@@ -899,21 +905,30 @@ export default function Mb51TablePageClient() {
             <div className="card">
               <div className="meta table-meta">
                 <div className="meta-left">
-                  <span>Showing <b>{(sortedRows.length ? (currentPage - 1) * pageSize + 1 : 0).toLocaleString('en-IN')}</b> to{' '}
-                    <b>{Math.min(currentPage * pageSize, sortedRows.length).toLocaleString('en-IN')}</b> of{' '}
-                    <b>{sortedRows.length.toLocaleString('en-IN')}</b> movements</span>
+                  <span>
+                    {pageLoading
+                      ? `Loading page ${currentPage} of ${totalPages}…`
+                      : <>Showing <b>{(sortedRows.length ? (currentPage - 1) * pageSize + 1 : 0).toLocaleString('en-IN')}</b> to{' '}
+                    <b>{Math.min(currentPage * pageSize, kpis.filteredCount).toLocaleString('en-IN')}</b> of{' '}
+                    <b>{kpis.filteredCount.toLocaleString('en-IN')}</b> movements</>}
+                  </span>
                   <span>Net Qty: <b>{fmtQty(kpis.netQty)}</b></span>
                 </div>
                 <div className="page-size-control">
                   <label htmlFor="page-size">Page size:</label>
-                  <select id="page-size" value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}>
+                  <select id="page-size" value={pageSize} disabled={pageLoading} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}>
                     <option value={50}>50</option><option value={100}>100</option><option value={250}>250</option>
                     <option value={500}>500</option><option value={1000}>1000</option>
                   </select>
                 </div>
               </div>
 
-              <div className="tw">
+              {pageLoading && (
+                <div className="page-loading" role="status" aria-live="polite">
+                  Loading data…
+                </div>
+              )}
+              <div className={`tw${pageLoading ? ' is-paging' : ''}`} aria-busy={pageLoading}>
                 <table>
                   <thead>
                     <tr>
@@ -969,14 +984,16 @@ export default function Mb51TablePageClient() {
 
               <div className="pagination">
                 <div className="pagination-info">
-                  Page <b>{currentPage}</b> of <b>{totalPages}</b> ({sortedRows.length.toLocaleString('en-IN')} records)
+                  {pageLoading
+                    ? <>Loading page <b>{currentPage}</b> of <b>{totalPages}</b>…</>
+                    : <>Page <b>{currentPage}</b> of <b>{totalPages}</b> ({kpis.filteredCount.toLocaleString('en-IN')} records)</>}
                 </div>
                 <div className="pagination-actions">
-                  <button type="button" className="btn sec page-btn" disabled={currentPage <= 1} onClick={() => setPage(1)}>« First</button>
-                  <button type="button" className="btn sec page-btn" disabled={currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>‹ Prev</button>
+                  <button type="button" className="btn sec page-btn" disabled={pageLoading || currentPage <= 1} onClick={() => setPage(1)}>« First</button>
+                  <button type="button" className="btn sec page-btn" disabled={pageLoading || currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>‹ Prev</button>
                   <span className="page-indicator">{currentPage} / {totalPages}</span>
-                  <button type="button" className="btn sec page-btn" disabled={currentPage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>Next ›</button>
-                  <button type="button" className="btn sec page-btn" disabled={currentPage >= totalPages} onClick={() => setPage(totalPages)}>Last »</button>
+                  <button type="button" className="btn sec page-btn" disabled={pageLoading || currentPage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>Next ›</button>
+                  <button type="button" className="btn sec page-btn" disabled={pageLoading || currentPage >= totalPages} onClick={() => setPage(totalPages)}>Last »</button>
                 </div>
               </div>
             </div>
@@ -1000,6 +1017,17 @@ export default function Mb51TablePageClient() {
         main { padding: 14px 20px; max-width: 1800px; margin: 0 auto; }
         .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
         .loading-card { text-align: center; padding: 24px; }
+        .page-loading {
+          padding: 6px 10px;
+          margin-bottom: 8px;
+          font-size: 13px;
+          font-weight: 600;
+          color: #1d4f7a;
+          background: #eef5fb;
+          border: 1px solid #c5d8ea;
+          border-radius: 6px;
+        }
+        .tw.is-paging { opacity: 0.45; pointer-events: none; }
         .filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 14px; align-items: end; }
         .f label { display: block; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px; }
         input[type='date'], select, .ms-btn, input[type='text'] { width: 100%; height: 32px; border: 1px solid #c5cdd7; border-radius: 5px; padding: 0 8px; background: #fff; font: inherit; color: var(--ink); }

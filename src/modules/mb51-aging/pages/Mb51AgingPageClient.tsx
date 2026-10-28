@@ -357,6 +357,7 @@ export default function Mb51AgingPageClient() {
   const [sortDir, setSortDir] = useState<-1 | 1>(-1);
   const PAGE_SIZE = 100;
   const [page, setPage] = useState(1);
+  const [pageLoading, setPageLoading] = useState(false);
   const [paramHash, setParamHash] = useState('default');
   const [aggTotal, setAggTotal] = useState(0);
   const [summary, setSummary] = useState<Mb51AgingSummary | null>(null);
@@ -891,11 +892,14 @@ export default function Mb51AgingPageClient() {
     if (!summary || !paramHash) return;
     let active = true;
     void (async () => {
+      setPageLoading(true);
       try {
         await loadAggPage(paramHash, page, searchQuery, sortKey || 'total', sortDir);
       } catch (err) {
         if (!active) return;
         console.error(err);
+      } finally {
+        if (active) setPageLoading(false);
       }
     })();
     return () => {
@@ -1426,7 +1430,17 @@ export default function Mb51AgingPageClient() {
                 </div>
               )}
 
-              <div className="tw" role="region" aria-label="Aging results">
+              {pageLoading && (
+                <div className="page-loading" role="status" aria-live="polite">
+                  Loading data…
+                </div>
+              )}
+              <div
+                className={`tw${pageLoading ? ' is-paging' : ''}`}
+                role="region"
+                aria-busy={pageLoading}
+                aria-label="Aging results"
+              >
                 <table>
                   <thead>
                     <tr>
@@ -1623,21 +1637,18 @@ export default function Mb51AgingPageClient() {
                 </table>
               </div>
 
-              {displayedRows.length > 0 && (
+              {(displayedRows.length > 0 || pageLoading) && (
                 <div className="pager">
                   <span>
-                    Page {page} of {totalPages} · showing{' '}
-                    {shownRows.length.toLocaleString('en-IN')} of{' '}
-                    {displayedRows.length.toLocaleString('en-IN')} rows
-                    {displayedRows.length > PAGE_SIZE
-                      ? ' · Export Excel contains all'
-                      : ''}
+                    {pageLoading
+                      ? `Loading page ${page} of ${totalPages}…`
+                      : `Page ${page} of ${totalPages} · showing ${shownRows.length.toLocaleString('en-IN')} of ${aggTotal.toLocaleString('en-IN')} rows`}
                   </span>
                   <div className="pager-btns">
                     <button
                       type="button"
                       className="btn sec"
-                      disabled={page <= 1}
+                      disabled={pageLoading || page <= 1}
                       onClick={() => setPage((p) => Math.max(1, p - 1))}
                     >
                       Prev
@@ -1645,7 +1656,7 @@ export default function Mb51AgingPageClient() {
                     <button
                       type="button"
                       className="btn sec"
-                      disabled={page >= totalPages}
+                      disabled={pageLoading || page >= totalPages}
                       onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                     >
                       Next
@@ -2231,6 +2242,21 @@ export default function Mb51AgingPageClient() {
         }
         .mb51-app .tw::-webkit-scrollbar-thumb:hover {
           background: #3f6a94;
+        }
+        .mb51-app .page-loading {
+          flex-shrink: 0;
+          padding: 6px 10px;
+          margin-bottom: 6px;
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--accent, #1d4f7a);
+          background: #eef5fb;
+          border: 1px solid #c5d8ea;
+          border-radius: 6px;
+        }
+        .mb51-app .tw.is-paging {
+          opacity: 0.45;
+          pointer-events: none;
         }
         .mb51-app .pager {
           display: flex;
