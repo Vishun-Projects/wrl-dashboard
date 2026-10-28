@@ -4,7 +4,12 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import type { Mb51AgingImportMeta, Mb51AgingMovement } from '@/modules/mb51-aging/types';
-import { fetchMb51AgingRows, saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
+import {
+  fetchMb51Facets,
+  fetchMb51Meta,
+  fetchMb51MovementsPage,
+} from '@/modules/mb51-aging/api-client';
+import { saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
 
 const DAY = 86400000;
 const EPOCH_OFFSET = 25569;
@@ -256,6 +261,21 @@ export default function Mb51TablePageClient() {
   // Pagination
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
+  const [serverKpis, setServerKpis] = useState({
+    filteredCount: 0,
+    netQty: 0,
+    receiptQty: 0,
+    issueQty: 0,
+    uniqueMaterials: 0,
+    uniqueVendors: 0,
+    uniquePlants: 0,
+  });
+  const [totalCount, setTotalCount] = useState(0);
+  const [facetVendors, setFacetVendors] = useState<OptionItem[]>([]);
+  const [facetGroups, setFacetGroups] = useState<OptionItem[]>([]);
+  const [facetMaterials, setFacetMaterials] = useState<OptionItem[]>([]);
+  const [facetPlants, setFacetPlants] = useState<OptionItem[]>([]);
+  const [facetMovements, setFacetMovements] = useState<OptionItem[]>([]);
 
   const initFromRows = useCallback((sourceRows: unknown[]) => {
     const normalizedRows = sourceRows.map((row, index) => normalizeMovement(row, index));
@@ -279,35 +299,72 @@ export default function Mb51TablePageClient() {
     setPage(1);
   }, []);
 
-  // Initial load from the database (paged — full dump OOMs / 500 on multi‑M row imports)
+  const refreshMovements = useCallback(async () => {
+    const fromSerial = dateToSerial(dateFrom);
+    const toSerial = dateToSerial(dateTo);
+    const data = await fetchMb51MovementsPage({
+      offset: (page - 1) * pageSize,
+      limit: pageSize,
+      dateFrom: fromSerial,
+      dateTo: toSerial,
+      plants: [...selectedPlants],
+      vendors: [...selectedVendors],
+      groups: [...selectedGroups],
+      materials: [...selectedMaterials],
+      movements: [...selectedMovements],
+      q: searchQuery,
+    });
+    setServerKpis(data.kpis);
+    setTotalCount(data.totalCount);
+    setRows(data.rows.map((r, idx) => normalizeMovement(r, (page - 1) * pageSize + idx)));
+  }, [
+    dateFrom,
+    dateTo,
+    page,
+    pageSize,
+    selectedPlants,
+    selectedVendors,
+    selectedGroups,
+    selectedMaterials,
+    selectedMovements,
+    searchQuery,
+  ]);
+
   useEffect(() => {
     let active = true;
-
     async function loadSavedData() {
       try {
         setLoading(true);
-        setLoadMsg('Loading MB51 Movements Data from portal database…');
-        const data = await fetchMb51AgingRows((loaded, total) => {
-          if (!active) return;
-          const hint = total
-            ? `${loaded.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')}`
-            : loaded.toLocaleString('en-IN');
-          setLoadMsg(`Loading MB51 rows… ${hint}`);
-        });
+        setLoadMsg('Loading KPIs…');
+        const meta = await fetchMb51Meta();
         if (!active) return;
-
-        if (data.rows.length > 0) {
-          setLatestImport(data.latestImport);
-          setLoadMsg(
-            `Loaded ${data.rows.length.toLocaleString('en-IN')} rows from database (${data.latestImport?.fileName ?? 'latest export'}).`,
-          );
-          setIsErrMsg(false);
-          initFromRows(data.rows);
-        } else {
+        if (!meta.latestImport) {
           setLoadMsg('No saved data found in database. Please upload your MB51 export file.');
-          setIsErrMsg(false);
           setShowUpload(true);
+          return;
         }
+        setLatestImport(meta.latestImport);
+        const mn = meta.latestImport.minPostingSerial ?? 0;
+        const mx = meta.latestImport.maxPostingSerial ?? 0;
+        const minISO = serialToISO(mn);
+        const maxISO = serialToISO(mx);
+        setDateFrom(minISO);
+        setDateTo(maxISO);
+        setMinDateLimit(minISO);
+        setMaxDateLimit(maxISO);
+        const facets = await fetchMb51Facets();
+        if (!active) return;
+        const toOpt = (xs: { id: string; text: string }[]) =>
+          xs.map((x) => ({ id: x.id, text: x.text, lc: x.text.toLowerCase() }));
+        setFacetVendors(toOpt(facets.vendors));
+        setFacetGroups(toOpt(facets.groups));
+        setFacetMaterials(toOpt(facets.materials));
+        setFacetPlants(toOpt(facets.plants));
+        setFacetMovements(toOpt(facets.movements));
+        setShowUpload(false);
+        setIsErrMsg(false);
+        setLoadMsg('');
+        setPage(1);
       } catch (error: unknown) {
         if (!active) return;
         const message = error instanceof Error ? error.message : 'Failed to query database';
@@ -318,42 +375,68 @@ export default function Mb51TablePageClient() {
         if (active) setLoading(false);
       }
     }
-
     void loadSavedData();
     return () => {
       active = false;
     };
-  }, [initFromRows]);
+  }, []);
 
-  // Filter options derived from the loaded dataset
-  const { vendorOptions, groupOptions, matOptions, plantOptions, movOptions } = useMemo(() => {
-    const vendors = new Map<string, string>();
-    const groups = new Map<string, string>();
-    const materials = new Map<string, string>();
-    const plants = new Map<string, string>();
-    const movements = new Map<string, string>();
+  useEffect(() => {
+    setPage(1);
+  }, [
+    dateFrom,
+    dateTo,
+    selectedPlants,
+    selectedVendors,
+    selectedGroups,
+    selectedMaterials,
+    selectedMovements,
+    searchQuery,
+  ]);
 
-    for (const row of rows) {
-      if (!vendors.has(row.v)) vendors.set(row.v, `${row.v || '(blank)'} - ${row.vn || ''}`);
-      groups.set(row.g, row.g || '(blank)');
-      if (!materials.has(row.m)) materials.set(row.m, `${row.m || '(blank)'} - ${row.md}`);
-      plants.set(row.mv, row.mv || '(blank)');
-      if (row.mt) movements.set(row.mt, `${row.mt}${row.mtx ? ` - ${row.mtx}` : ''}`);
-    }
-
-    const sortOptions = (map: Map<string, string>): OptionItem[] =>
-      [...map.entries()]
-        .sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true }))
-        .map(([id, text]) => ({ id, text, lc: text.toLowerCase() }));
-
-    return {
-      vendorOptions: sortOptions(vendors),
-      groupOptions: sortOptions(groups),
-      matOptions: sortOptions(materials),
-      plantOptions: sortOptions(plants),
-      movOptions: sortOptions(movements),
+  useEffect(() => {
+    if (!latestImport) return;
+    let active = true;
+    void (async () => {
+      try {
+        setLoading(true);
+        await refreshMovements();
+        if (active) {
+          setLoadMsg('');
+          setIsErrMsg(false);
+        }
+      } catch (error: unknown) {
+        if (!active) return;
+        const message = error instanceof Error ? error.message : 'Failed to load movements';
+        setLoadMsg(message);
+        setIsErrMsg(true);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
     };
-  }, [rows]);
+  }, [
+    latestImport,
+    dateFrom,
+    dateTo,
+    page,
+    pageSize,
+    selectedPlants,
+    selectedVendors,
+    selectedGroups,
+    selectedMaterials,
+    selectedMovements,
+    searchQuery,
+    refreshMovements,
+  ]);
+
+  const vendorOptions = facetVendors;
+  const groupOptions = facetGroups;
+  const matOptions = facetMaterials;
+  const plantOptions = facetPlants;
+  const movOptions = facetMovements;
 
   // Save imported rows to the database (chunked — same store as Aging report)
   const saveRowsToDatabase = useCallback(async (fileName: string, movementRows: MovementRow[]) => {
@@ -370,10 +453,21 @@ export default function Mb51TablePageClient() {
         }
       );
       setLatestImport(meta);
+      setLoadMsg('Building aging snapshot…');
+      const facets = await fetchMb51Facets();
+      const toOpt = (xs: { id: string; text: string }[]) =>
+        xs.map((x) => ({ id: x.id, text: x.text, lc: x.text.toLowerCase() }));
+      setFacetVendors(toOpt(facets.vendors));
+      setFacetGroups(toOpt(facets.groups));
+      setFacetMaterials(toOpt(facets.materials));
+      setFacetPlants(toOpt(facets.plants));
+      setFacetMovements(toOpt(facets.movements));
+      setPage(1);
       setLoadMsg(
-        `Saved ${movementRows.length.toLocaleString('en-IN')} rows to database (${meta.fileName}). Reload will restore this data.`
+        `Saved ${movementRows.length.toLocaleString('en-IN')} rows (${meta.fileName}).`
       );
       setIsErrMsg(false);
+      setShowUpload(false);
     } catch (error: unknown) {
       console.error(error);
       const message = error instanceof Error ? error.message : 'Database save failed';
@@ -553,103 +647,24 @@ export default function Mb51TablePageClient() {
     setPage(1);
   };
 
-  // Filtered dataset
-  const filteredRows = useMemo(() => {
-    if (!rows.length) return [];
-    const fromSerial = dateToSerial(dateFrom) ?? -Infinity;
-    const toSerial = dateToSerial(dateTo) ?? Infinity;
-    const query = searchQuery.trim().toLowerCase();
-
-    return rows.filter((row) => {
-      if (row.d < fromSerial || row.d > toSerial) return false;
-      if (selectedPlants.size && !selectedPlants.has(row.mv)) return false;
-      if (selectedVendors.size && !selectedVendors.has(row.v)) return false;
-      if (selectedGroups.size && !selectedGroups.has(row.g)) return false;
-      if (selectedMaterials.size && !selectedMaterials.has(row.m)) return false;
-      if (selectedMovements.size && !selectedMovements.has(row.mt)) return false;
-
-      if (query) {
-        const matches =
-          row.m.toLowerCase().includes(query) ||
-          row.md.toLowerCase().includes(query) ||
-          row.v.toLowerCase().includes(query) ||
-          row.vn.toLowerCase().includes(query) ||
-          row.dc.toLowerCase().includes(query) ||
-          row.mv.toLowerCase().includes(query) ||
-          row.g.toLowerCase().includes(query) ||
-          row.mt.toLowerCase().includes(query) ||
-          row.mtx.toLowerCase().includes(query) ||
-          row.tx.toLowerCase().includes(query);
-        if (!matches) return false;
-      }
-      return true;
-    });
-  }, [rows, dateFrom, dateTo, selectedPlants, selectedVendors, selectedGroups, selectedMaterials, selectedMovements, searchQuery]);
-
-  // Sorting
-  const sortedRows = useMemo(() => {
-    return [...filteredRows].sort((left, right) => {
-      let a: number | string;
-      let b: number | string;
-      switch (sortKey) {
-        case 's': a = left.s; b = right.s; break;
-        case 'd': a = left.d; b = right.d; break;
-        case 'q': a = left.q; b = right.q; break;
-        case 'dc': a = left.dc; b = right.dc; break;
-        case 'mv': a = left.mv; b = right.mv; break;
-        case 'mt': a = left.mt; b = right.mt; break;
-        case 'mtx': a = left.mtx; b = right.mtx; break;
-        case 'tx': a = left.tx; b = right.tx; break;
-        case 'm': a = left.m; b = right.m; break;
-        case 'md': a = left.md; b = right.md; break;
-        case 'g': a = left.g; b = right.g; break;
-        case 'u': a = left.u; b = right.u; break;
-        case 'v': a = left.v; b = right.v; break;
-        case 'vn': a = left.vn; b = right.vn; break;
-        default: a = left.s; b = right.s;
-      }
-      if (typeof a === 'number' && typeof b === 'number') return (a - b) * sortDir;
-      return String(a).localeCompare(String(b), undefined, { numeric: true }) * sortDir;
-    });
-  }, [filteredRows, sortKey, sortDir]);
-
-  // Summary KPIs
-  const kpis = useMemo(() => {
-    let netQty = 0;
-    let receiptQty = 0;
-    let issueQty = 0;
-    const materials = new Set<string>();
-    const vendors = new Set<string>();
-    const plants = new Set<string>();
-
-    for (const row of filteredRows) {
-      netQty += row.q;
-      if (row.q > 0) receiptQty += row.q;
-      else issueQty += row.q;
-      if (row.m) materials.add(row.m);
-      if (row.v) vendors.add(row.v);
-      if (row.mv) plants.add(row.mv);
-    }
-
-    return {
-      totalCount: rows.length,
-      filteredCount: filteredRows.length,
-      netQty,
-      receiptQty,
-      issueQty,
-      uniqueMaterials: materials.size,
-      uniqueVendors: vendors.size,
-      uniquePlants: plants.size,
-    };
-  }, [rows, filteredRows]);
+  // Server returns the current page + KPIs for the active filter set
+  const filteredRows = rows;
+  const sortedRows = rows;
+  const kpis = {
+    totalCount,
+    filteredCount: serverKpis.filteredCount,
+    netQty: serverKpis.netQty,
+    receiptQty: serverKpis.receiptQty,
+    issueQty: serverKpis.issueQty,
+    uniqueMaterials: serverKpis.uniqueMaterials,
+    uniqueVendors: serverKpis.uniqueVendors,
+    uniquePlants: serverKpis.uniquePlants,
+  };
 
   // Pagination
-  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(kpis.filteredCount / pageSize));
   const currentPage = Math.min(Math.max(1, page), totalPages);
-  const pagedRows = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return sortedRows.slice(start, start + pageSize);
-  }, [sortedRows, currentPage, pageSize]);
+  const pagedRows = sortedRows;
 
   const handleSort = (key: string) => {
     if (sortKey === key) setSortDir((direction) => -direction);

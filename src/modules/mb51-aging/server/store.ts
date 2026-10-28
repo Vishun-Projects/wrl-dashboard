@@ -1,4 +1,5 @@
 import { withAppClient } from '@/lib/read-model/db';
+import { buildDefaultSnapshot } from '@/modules/mb51-aging/server/fifo-from-db';
 import type {
   Mb51AgingImportMeta,
   Mb51AgingMovement,
@@ -291,7 +292,9 @@ export async function saveMb51AgingImport(opts: {
   const plants = new Set(rows.map((r) => r.mv).filter(Boolean));
   const materials = new Set(rows.map((r) => r.m).filter(Boolean));
 
-  return withAppClient(
+  let finalizeImportId: string | null = null;
+
+  const meta = await withAppClient(
     async (client) => {
       async function refreshImportCounts(id: string, rowCount: number, finalize: boolean) {
         if (finalize) {
@@ -342,6 +345,7 @@ export async function saveMb51AgingImport(opts: {
                 `MB51 import incomplete: expected ${expectedTotal} rows, have ${actual.rows[0]?.n ?? 0}`
               );
             }
+            finalizeImportId = existingImportId;
           }
           await client.query('COMMIT');
           return await fetchImportMeta(client, existingImportId);
@@ -386,6 +390,7 @@ export async function saveMb51AgingImport(opts: {
             );
           }
         }
+        if (done) finalizeImportId = importId;
 
         await client.query('COMMIT');
         return await fetchImportMeta(client, importId);
@@ -396,4 +401,15 @@ export async function saveMb51AgingImport(opts: {
     },
     { statementTimeoutMs: SAVE_STATEMENT_TIMEOUT_MS }
   );
+
+  // Materialize default FIFO snapshot after import is complete (fast page open).
+  if (finalizeImportId) {
+    try {
+      await buildDefaultSnapshot(finalizeImportId);
+    } catch (err) {
+      console.error('[mb51-aging] default snapshot build failed', err);
+    }
+  }
+
+  return meta;
 }

@@ -1,34 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
-import {
-  fetchLatestMb51AgingPage,
-  saveMb51AgingImport,
-} from '@/modules/mb51-aging/server/store';
+import { saveMb51AgingImport } from '@/modules/mb51-aging/server/store';
+import { fetchMb51Meta } from '@/modules/mb51-aging/server/snapshot-read';
 import type { Mb51AgingMovement } from '@/modules/mb51-aging/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
+/** Prefer /meta, /summary, /agg, /movements — this no longer dumps all rows. */
 export async function GET(req: NextRequest) {
   try {
     const auth = await requireRbac(req, { pageId: 'mb51_aging' });
     if (!auth.ok) return auth.response;
-
-    const url = req.nextUrl;
-    const afterRaw = url.searchParams.get('afterSeq');
-    const limitRaw = url.searchParams.get('limit');
-    const afterSeq =
-      afterRaw != null && afterRaw !== '' && Number.isFinite(Number(afterRaw))
-        ? Number(afterRaw)
-        : -1;
-    const limit =
-      limitRaw != null && limitRaw !== '' && Number.isFinite(Number(limitRaw))
-        ? Number(limitRaw)
-        : undefined;
-
-    const data = await fetchLatestMb51AgingPage({ afterSeq, limit });
-    return NextResponse.json(data);
+    return NextResponse.json(await fetchMb51Meta());
   } catch (err) {
     console.error('[mb51-aging GET]', err);
     return NextResponse.json({ error: toUserFacingError(err) }, { status: 500 });

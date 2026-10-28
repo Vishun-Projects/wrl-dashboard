@@ -42,6 +42,11 @@ CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_import_id
 CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_import_seq
   ON mb51_aging_rows (import_id, seq_order);
 
+CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_fifo_scan
+  ON mb51_aging_rows (
+    import_id, plant, vendor, material, uom, posting_date_serial, seq_order
+  );
+
 CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_plant
   ON mb51_aging_rows (plant);
 
@@ -56,6 +61,47 @@ CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_date
 
 COMMENT ON TABLE mb51_aging_rows IS
   'MB51 movement records for FIFO aging calculation.';
+
+-- Precomputed FIFO result for fast page open (KPIs + thin agg pages).
+CREATE TABLE IF NOT EXISTS mb51_aging_snapshots (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  import_id       uuid NOT NULL REFERENCES mb51_aging_imports(id) ON DELETE CASCADE,
+  param_hash      text NOT NULL,
+  params          jsonb NOT NULL DEFAULT '{}'::jsonb,
+  summary         jsonb NOT NULL DEFAULT '{}'::jsonb,
+  row_count       integer NOT NULL DEFAULT 0,
+  built_at        timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (import_id, param_hash)
+);
+
+CREATE TABLE IF NOT EXISTS mb51_aging_agg_rows (
+  id                    bigserial PRIMARY KEY,
+  snapshot_id           uuid NOT NULL REFERENCES mb51_aging_snapshots(id) ON DELETE CASCADE,
+  seq                   integer NOT NULL DEFAULT 0,
+  group_key             text NOT NULL DEFAULT '',
+  vendor                text NOT NULL DEFAULT '',
+  vendor_name           text NOT NULL DEFAULT '',
+  material_group        text NOT NULL DEFAULT '',
+  material              text NOT NULL DEFAULT '',
+  material_description  text NOT NULL DEFAULT '',
+  uom                   text NOT NULL DEFAULT '',
+  bk                    numeric(18, 3)[] NOT NULL DEFAULT ARRAY[]::numeric[],
+  total                 numeric(18, 3) NOT NULL DEFAULT 0,
+  full_qty              numeric(18, 3) NOT NULL DEFAULT 0,
+  n                     integer NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_mb51_aging_agg_snapshot_seq
+  ON mb51_aging_agg_rows (snapshot_id, seq);
+
+CREATE INDEX IF NOT EXISTS idx_mb51_aging_agg_snapshot_material
+  ON mb51_aging_agg_rows (snapshot_id, material);
+
+COMMENT ON TABLE mb51_aging_snapshots IS
+  'Materialized FIFO aging summaries keyed by import + param hash.';
+
+COMMENT ON TABLE mb51_aging_agg_rows IS
+  'Thin FIFO aggregate rows for a snapshot (no movement layers).';
 
 INSERT INTO public.app_permissions (id, name, description)
 SELECT gen_random_uuid(), 'page_mb51_aging',

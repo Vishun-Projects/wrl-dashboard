@@ -23,6 +23,66 @@ export type Mb51AgingImportMeta = {
   plantCount: number;
   materialCount: number;
   importedAt: string;
+  /** True when default FIFO snapshot is ready for fast paint. */
+  snapshotReady?: boolean;
+  minPostingSerial?: number;
+  maxPostingSerial?: number;
+};
+
+export type Mb51AgingGroupBy = 'mat' | 'vendor' | 'group' | 'vm';
+
+export type Mb51AgingReportParams = {
+  basis: number;
+  from: number;
+  to: number;
+  groupBy: Mb51AgingGroupBy;
+  plants: string[];
+  vendors: string[];
+  groups: string[];
+  materials: string[];
+  excludedMaterials: string[];
+};
+
+/** Snapshot summary — KPIs without movement layers. */
+export type Mb51AgingSummary = {
+  paramHash: string;
+  tot: number[];
+  gb: Mb51AgingGroupBy;
+  basis: number;
+  from: number;
+  to: number;
+  maxD: number;
+  fullTot: number;
+  used: number;
+  negMat: number;
+  negQty: number;
+  plugged: number;
+  plugQty: number;
+  stockMat: number;
+  rowCount: number;
+  /** True DISTINCT counts for filter labels (not capped list length). */
+  facetTotals?: {
+    vendors: number;
+    materials: number;
+    groups: number;
+    plants: number;
+    movements: number;
+  };
+};
+
+/** Thin agg row for table (no det/fg). */
+export type Mb51AgingThinRow = {
+  groupKey: string;
+  a?: string;
+  b?: string;
+  c?: string;
+  d?: string;
+  e?: string;
+  u?: string;
+  bk: number[];
+  total: number;
+  full: number;
+  n: number;
 };
 
 export type Mb51AgingApiResponse = {

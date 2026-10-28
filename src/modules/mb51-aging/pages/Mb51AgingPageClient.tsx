@@ -8,13 +8,22 @@ import type {
   Mb51AgingImportMeta,
   Mb51AgingAggRow,
   Mb51AgingResult,
+  Mb51AgingSummary,
+  Mb51AgingThinRow,
 } from '@/modules/mb51-aging/types';
-import { fetchMb51AgingRows, saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
+import {
+  fetchMb51AggPage,
+  fetchMb51Facets,
+  fetchMb51Meta,
+  fetchMb51Summary,
+  postMb51Detail,
+  postMb51Report,
+} from '@/modules/mb51-aging/api-client';
+import { saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
 import {
   BUCKETS,
   DEFAULT_DEFECTIVE_MATERIALS,
   bucketOf,
-  computeFifoAging,
 } from '@/modules/mb51-aging/fifo';
 
 const DAY = 86400000;
@@ -137,6 +146,7 @@ function MultiSelectDropdown({
   onChange,
   emptyText,
   selectedOnlyLabel = 'Selected only',
+  totalCount,
 }: {
   label: string;
   items: OptionItem[];
@@ -146,6 +156,8 @@ function MultiSelectDropdown({
   emptyText?: string;
   /** Toggle button label to list only checked items (e.g. "Excluded only"). */
   selectedOnlyLabel?: string;
+  /** True DISTINCT total — list may be capped so do not use items.length. */
+  totalCount?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -181,13 +193,14 @@ function MultiSelectDropdown({
 
   const buttonText = useMemo(() => {
     const n = selected.size;
-    if (n === 0) return emptyText ?? `All ${label} (${items.length})`;
+    const allN = totalCount ?? items.length;
+    if (n === 0) return emptyText ?? `All ${label} (${allN.toLocaleString('en-IN')})`;
     if (n === 1) {
       const match = items.find((i) => selected.has(i.id));
       return match ? match.text : '1 selected';
     }
     return `${n} selected`;
-  }, [selected, label, items, emptyText]);
+  }, [selected, label, items, emptyText, totalCount]);
 
   return (
     <div className={`ms ${open ? 'open' : ''}`} ref={popRef}>
@@ -268,8 +281,47 @@ function MultiSelectDropdown({
   );
 }
 
+function thinToAgg(r: Mb51AgingThinRow): Mb51AgingAggRow {
+  return {
+    a: r.a,
+    b: r.b,
+    c: r.c,
+    d: r.d,
+    e: r.e,
+    u: r.u,
+    bk: r.bk,
+    total: r.total,
+    full: r.full,
+    n: r.n,
+    det: BUCKETS.map(() => []),
+    fg: [],
+    groupKey: r.groupKey,
+  };
+}
+
+function summaryToResult(
+  s: Mb51AgingSummary,
+  rows: Mb51AgingThinRow[]
+): Mb51AgingResult {
+  return {
+    rows: rows.map(thinToAgg),
+    tot: s.tot,
+    gb: s.gb,
+    basis: s.basis,
+    from: s.from,
+    to: s.to,
+    maxD: s.maxD,
+    fullTot: s.fullTot,
+    used: s.used,
+    negMat: s.negMat,
+    negQty: s.negQty,
+    plugged: s.plugged,
+    plugQty: s.plugQty,
+    stockMat: s.stockMat,
+  };
+}
+
 export default function Mb51AgingPageClient() {
-  const [rows, setRows] = useState<Mb51AgingMovement[]>([]);
   const [latestImport, setLatestImport] = useState<Mb51AgingImportMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadMsg, setLoadMsg] = useState<string>('Loading MB51 Aging Report from portal database…');
@@ -301,13 +353,31 @@ export default function Mb51AgingPageClient() {
   const [selectedPlants, setSelectedPlants] = useState<Set<string>>(new Set());
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortKey, setSortKey] = useState('');
-  const [sortDir, setSortDir] = useState(-1);
+  const [sortKey, setSortKey] = useState('total');
+  const [sortDir, setSortDir] = useState<-1 | 1>(-1);
   const PAGE_SIZE = 100;
   const [page, setPage] = useState(1);
+  const [paramHash, setParamHash] = useState('default');
+  const [aggTotal, setAggTotal] = useState(0);
+  const [summary, setSummary] = useState<Mb51AgingSummary | null>(null);
+  const [thinRows, setThinRows] = useState<Mb51AgingThinRow[]>([]);
+  const [facetVendors, setFacetVendors] = useState<OptionItem[]>([]);
+  const [facetGroups, setFacetGroups] = useState<OptionItem[]>([]);
+  const [facetMaterials, setFacetMaterials] = useState<OptionItem[]>([]);
+  const [facetPlants, setFacetPlants] = useState<OptionItem[]>([]);
+  const [facetTotals, setFacetTotals] = useState({
+    vendors: 0,
+    materials: 0,
+    groups: 0,
+    plants: 0,
+    movements: 0,
+  });
 
-  // Result state
-  const [reportResult, setReportResult] = useState<Mb51AgingResult | null>(null);
+  // Result state (summary + current thin page mapped for existing UI)
+  const reportResult = useMemo(
+    () => (summary ? summaryToResult(summary, thinRows) : null),
+    [summary, thinRows]
+  );
 
   // Detail Drill-down Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -322,122 +392,129 @@ export default function Mb51AgingPageClient() {
     r: Mb51AgingMovement;
   }[] | null>(null);
 
-  const runAging = useCallback(
-    (opts: {
-      movRows: Mb51AgingMovement[];
-      basisDateStr: string;
-      dateFromStr: string;
-      dateToStr: string;
-      gb: 'mat' | 'vendor' | 'group' | 'vm';
-      plants: Set<string>;
-      vendors: Set<string>;
-      groups: Set<string>;
-      materials: Set<string>;
-      excluded: Set<string>;
-      maxD: number;
-    }) => {
-      const basis = dateToSerial(opts.basisDateStr);
-      if (basis == null) return null;
-      return computeFifoAging({
-        rows: opts.movRows,
-        basis,
-        from: dateToSerial(opts.dateFromStr) ?? -1e9,
-        to: dateToSerial(opts.dateToStr) ?? 1e9,
-        groupBy: opts.gb,
-        selectedPlants: opts.plants,
-        selectedVendors: opts.vendors,
-        selectedGroups: opts.groups,
-        selectedMaterials: opts.materials,
-        excludedMaterials: opts.excluded,
-        maxD: opts.maxD,
+  const loadAggPage = useCallback(
+    async (hash: string, pageNum: number, q: string, sort: string, dir: number) => {
+      const agg = await fetchMb51AggPage({
+        paramHash: hash,
+        page: pageNum,
+        pageSize: PAGE_SIZE,
+        q,
+        sort: sort || 'total',
+        sortDir: dir,
       });
+      setThinRows(agg.rows);
+      setAggTotal(agg.total);
+      setPage(agg.page);
     },
     []
   );
 
-  // Function to initialize dates & report synchronously from a dataset
-  const initFromRows = useCallback(
-    (movRows: Mb51AgingMovement[], gb: 'mat' | 'vendor' | 'group' | 'vm' = 'vm') => {
-      if (!movRows.length) return;
-      let mn = 1e9,
-        mx = -1e9;
-      const codes = new Set<string>();
-      for (const r of movRows) {
-        if (r.d < mn) mn = r.d;
-        if (r.d > mx) mx = r.d;
-        if (r.m) codes.add(r.m);
+  const applyMetaDates = useCallback((imp: Mb51AgingImportMeta) => {
+    const mn = imp.minPostingSerial ?? 0;
+    const mx = imp.maxPostingSerial ?? 0;
+    const isoMn = serialToISO(mn);
+    const isoMx = serialToISO(mx);
+    setDateFrom(isoMn);
+    setDateTo(isoMx);
+    setMinDateLimit(isoMn);
+    setMaxDateLimit(isoMx);
+    setMaxPostingSerial(mx);
+    if (isoMx) setBasisDate(isoMx);
+  }, []);
+
+  const loadSnapshotView = useCallback(
+    async (hash = 'default') => {
+      const [sumRes, facets] = await Promise.all([
+        fetchMb51Summary(hash),
+        fetchMb51Facets(),
+      ]);
+      if (!sumRes.latestImport) {
+        setShowUpload(true);
+        setLoadMsg('No saved data found in database. Please upload your MB51 export file.');
+        return false;
       }
-      const isoMn = serialToISO(mn);
-      const isoMx = serialToISO(mx);
-      const today = new Date();
-      const todayIso = new Date(today.getTime() - today.getTimezoneOffset() * 60000)
-        .toISOString()
-        .slice(0, 10);
-      // Seed with known defective codes present in this file; user can add any more / all
-      const seedExcluded = new Set(
-        DEFAULT_DEFECTIVE_MATERIALS.filter((m) => codes.has(m))
+      setLatestImport(sumRes.latestImport);
+      applyMetaDates(sumRes.latestImport);
+      setFacetVendors(
+        facets.vendors.map((x) => ({ id: x.id, text: x.text, lc: x.text.toLowerCase() }))
       );
+      setFacetGroups(
+        facets.groups.map((x) => ({ id: x.id, text: x.text, lc: x.text.toLowerCase() }))
+      );
+      setFacetMaterials(
+        facets.materials.map((x) => ({ id: x.id, text: x.text, lc: x.text.toLowerCase() }))
+      );
+      setFacetPlants(
+        facets.plants.map((x) => ({ id: x.id, text: x.text, lc: x.text.toLowerCase() }))
+      );
+      if (facets.totals) setFacetTotals(facets.totals);
 
-      setDateFrom(isoMn);
-      setDateTo(isoMx);
-      setMinDateLimit(isoMn);
-      setMaxDateLimit(isoMx);
-      setMaxPostingSerial(mx);
-      setBasisDate(todayIso);
-      setGroupBy(gb);
-      setExcludedMaterials(seedExcluded);
-      setSelectedVendors(new Set());
-      setSelectedGroups(new Set());
-      setSelectedMaterials(new Set());
-      setSelectedPlants(new Set());
+      // Prefer excludes baked into the snapshot (matches KPIs). Fall back to defective defaults in DB.
+      if (sumRes.params?.excludedMaterials?.length) {
+        setExcludedMaterials(new Set(sumRes.params.excludedMaterials));
+      } else {
+        setExcludedMaterials(
+          new Set(
+            DEFAULT_DEFECTIVE_MATERIALS.filter((m) =>
+              facets.materials.some((f) => f.id === m)
+            )
+          )
+        );
+      }
 
-      const computed = runAging({
-        movRows,
-        basisDateStr: todayIso,
-        dateFromStr: isoMn,
-        dateToStr: isoMx,
-        gb,
-        plants: new Set(),
-        vendors: new Set(),
-        groups: new Set(),
-        materials: new Set(),
-        excluded: seedExcluded,
-        maxD: mx,
-      });
+      if (!sumRes.summary) {
+        setSummary(null);
+        setThinRows([]);
+        setAggTotal(0);
+        setLoadMsg(
+          sumRes.latestImport.snapshotReady === false
+            ? 'Aging snapshot is still building — click Generate, or wait and refresh.'
+            : 'No aging snapshot yet — click Generate.'
+        );
+        setShowUpload(false);
+        return true;
+      }
 
-      setReportResult(computed);
-      setRows(movRows);
+      setParamHash(sumRes.summary.paramHash);
+      setSummary(sumRes.summary);
+      setGroupBy(sumRes.summary.gb);
+      // Sync date pickers to the snapshot that produced these KPIs
+      if (sumRes.params) {
+        const b = serialToISO(sumRes.params.basis);
+        const f = serialToISO(sumRes.params.from);
+        const t = serialToISO(sumRes.params.to);
+        if (b) setBasisDate(b);
+        if (f) setDateFrom(f);
+        if (t) setDateTo(t);
+      }
+      if (sumRes.summary.facetTotals) setFacetTotals(sumRes.summary.facetTotals);
+      setPage(1);
+      setSearchQuery('');
       setShowUpload(false);
+      setLoadMsg('');
+      return true;
     },
-    [runAging]
+    [applyMetaDates]
   );
 
-  // Initial load from database (paged — full dump OOMs / 500 on multi‑M row imports)
+  // Fast path: meta + summary KPIs + first agg page (no movement dump)
   useEffect(() => {
     let active = true;
     async function loadSavedData() {
       try {
         setLoading(true);
-        setLoadMsg('Loading MB51 Aging Report from portal database…');
-        const data = await fetchMb51AgingRows((loaded, total) => {
-          if (!active) return;
-          const hint = total
-            ? `${loaded.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')}`
-            : loaded.toLocaleString('en-IN');
-          setLoadMsg(`Loading MB51 rows… ${hint}`);
-        });
+        setLoadMsg('Loading KPIs…');
+        const meta = await fetchMb51Meta();
         if (!active) return;
-
-        if (data.rows.length > 0) {
-          setLatestImport(data.latestImport);
-          setLoadMsg('');
-          setIsErrMsg(false);
-          initFromRows(data.rows, 'vm');
-        } else {
+        if (!meta.latestImport) {
           setLoadMsg('No saved data found in database. Please upload your MB51 export file.');
-          setIsErrMsg(false);
           setShowUpload(true);
+          return;
         }
+        setLatestImport(meta.latestImport);
+        applyMetaDates(meta.latestImport);
+        setIsErrMsg(false);
+        await loadSnapshotView('default');
       } catch (err: unknown) {
         if (!active) return;
         const msg = err instanceof Error ? err.message : 'Failed to query database';
@@ -448,65 +525,60 @@ export default function Mb51AgingPageClient() {
         if (active) setLoading(false);
       }
     }
-    loadSavedData();
+    void loadSavedData();
     return () => {
       active = false;
     };
-  }, [initFromRows]);
+  }, [applyMetaDates, loadSnapshotView]);
 
-  // Filter options derived from current rows
-  const { vendorOptions, groupOptions, matOptions, plantOptions, excludeMatOptions } =
-    useMemo(() => {
-      const V = new Map<string, string>();
-      const G = new Map<string, string>();
-      const M = new Map<string, string>();
-      const MV = new Map<string, string>();
+  const vendorOptions = facetVendors;
+  const groupOptions = facetGroups;
+  const plantOptions = facetPlants;
+  const excludeMatOptions = facetMaterials;
+  const matOptions = useMemo(
+    () => facetMaterials.filter((i) => !excludedMaterials.has(i.id)),
+    [facetMaterials, excludedMaterials]
+  );
 
-      for (const r of rows) {
-        if (!V.has(r.v)) V.set(r.v, `${r.v || '(blank)'} - ${r.vn || ''}`);
-        G.set(r.g, r.g || '(blank)');
-        if (!M.has(r.m)) M.set(r.m, `${r.m} - ${r.md}`);
-        MV.set(r.mv, r.mv || '(blank)');
-      }
-
-      const sortOpt = (map: Map<string, string>): OptionItem[] =>
-        [...map.entries()]
-          .sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true }))
-          .map(([id, text]) => ({ id, text, lc: text.toLowerCase() }));
-
-      const allMats = sortOpt(M);
-      return {
-        vendorOptions: sortOpt(V),
-        groupOptions: sortOpt(G),
-        matOptions: allMats.filter((i) => !excludedMaterials.has(i.id)),
-        excludeMatOptions: allMats,
-        plantOptions: sortOpt(MV),
-      };
-    }, [rows, excludedMaterials]);
-
-  // Main calculation runner
-  const handleRun = useCallback(() => {
-    if (!rows.length) return;
+  // Rebuild snapshot on Generate (server FIFO), then paint KPIs + page 1
+  const handleRun = useCallback(async () => {
     if (!basisDate) {
       alert('Please select an aging basis date.');
       return;
     }
-    const computed = runAging({
-      movRows: rows,
-      basisDateStr: basisDate,
-      dateFromStr: dateFrom,
-      dateToStr: dateTo,
-      gb: groupBy,
-      plants: selectedPlants,
-      vendors: selectedVendors,
-      groups: selectedGroups,
-      materials: selectedMaterials,
-      excluded: excludedMaterials,
-      maxD: maxPostingSerial,
-    });
-    setReportResult(computed);
+    const basis = dateToSerial(basisDate);
+    if (basis == null) {
+      alert('Please select an aging basis date.');
+      return;
+    }
+    try {
+      setLoading(true);
+      setLoadMsg('Computing aging…');
+      setIsErrMsg(false);
+      const rebuilt = await postMb51Report({
+        basis,
+        from: dateToSerial(dateFrom) ?? -1e9,
+        to: dateToSerial(dateTo) ?? 1e9,
+        groupBy,
+        plants: [...selectedPlants],
+        vendors: [...selectedVendors],
+        groups: [...selectedGroups],
+        materials: [...selectedMaterials],
+        excludedMaterials: [...excludedMaterials],
+      });
+      setParamHash(rebuilt.paramHash);
+      setSummary(rebuilt.summary);
+      await loadAggPage(rebuilt.paramHash, 1, searchQuery, sortKey || 'total', sortDir);
+      setLoadMsg('');
+      setShowUpload(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Generate failed';
+      setLoadMsg(msg);
+      setIsErrMsg(true);
+    } finally {
+      setLoading(false);
+    }
   }, [
-    rows,
     basisDate,
     dateFrom,
     dateTo,
@@ -516,8 +588,10 @@ export default function Mb51AgingPageClient() {
     selectedGroups,
     selectedMaterials,
     excludedMaterials,
-    maxPostingSerial,
-    runAging,
+    searchQuery,
+    sortKey,
+    sortDir,
+    loadAggPage,
   ]);
 
   // Save parsed data to backend (chunked — large MB51 JSON cannot go in one POST)
@@ -531,6 +605,8 @@ export default function Mb51AgingPageClient() {
         );
       });
       setLatestImport(meta);
+      setLoadMsg('Building aging snapshot…');
+      await loadSnapshotView('default');
       setLoadMsg('');
       setIsErrMsg(false);
     } catch (err: unknown) {
@@ -656,10 +732,8 @@ export default function Mb51AgingPageClient() {
           setAvailableSheets([]);
           setWbInstance(null);
 
-          initFromRows(out, 'vm');
-
-          // Save to database
-          saveRowsToDatabase(fileName, out);
+          // Save to database (snapshot built on finalize; then fast KPI load)
+          void saveRowsToDatabase(fileName, out);
         } catch (err: unknown) {
           console.error(err);
           const msg = err instanceof Error ? err.message : 'Error processing sheets';
@@ -668,7 +742,8 @@ export default function Mb51AgingPageClient() {
         }
       }, 30);
     },
-    [initFromRows]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- saveRowsToDatabase closes over loadSnapshotView
+    []
   );
 
   // File loading
@@ -722,7 +797,7 @@ export default function Mb51AgingPageClient() {
   };
 
   const handleResetFilters = () => {
-    const codes = new Set(rows.map((r) => r.m).filter(Boolean));
+    const codes = new Set(facetMaterials.map((m) => m.id));
     const seedExcluded = new Set(
       DEFAULT_DEFECTIVE_MATERIALS.filter((m) => codes.has(m))
     );
@@ -734,43 +809,35 @@ export default function Mb51AgingPageClient() {
     setGroupBy('vm');
     setSearchQuery('');
     if (minDateLimit) setDateFrom(minDateLimit);
-    if (maxDateLimit) setDateTo(maxDateLimit);
-    const today = new Date();
-    const todayIso = new Date(today.getTime() - today.getTimezoneOffset() * 60000)
-      .toISOString()
-      .slice(0, 10);
-    setBasisDate(todayIso);
-
-    if (rows.length) {
-      const computed = runAging({
-        movRows: rows,
-        basisDateStr: todayIso,
-        dateFromStr: minDateLimit || '',
-        dateToStr: maxDateLimit || '',
-        gb: 'vm',
-        plants: new Set(),
-        vendors: new Set(),
-        groups: new Set(),
-        materials: new Set(),
-        excluded: seedExcluded,
-        maxD: maxPostingSerial,
-      });
-      setReportResult(computed);
+    if (maxDateLimit) {
+      setDateTo(maxDateLimit);
+      setBasisDate(maxDateLimit);
     }
+    void loadSnapshotView('default');
   };
 
-  // Main Excel Export
-  const exportXls = () => {
-    if (!reportResult) return;
+  // Main Excel Export (pull all thin pages for current snapshot/filters)
+  const exportXls = async () => {
+    if (!reportResult || !paramHash) return;
     const R = reportResult;
     const cols = HEAD[R.gb] || HEAD.vm;
-    const q = searchQuery.trim().toLowerCase();
-    let rws = R.rows;
-    if (q) {
-      rws = rws.filter((r) =>
-        cols.some(([k]) => String(r[k] || '').toLowerCase().includes(q))
-      );
+    const all: Mb51AgingThinRow[] = [];
+    let p = 1;
+    for (;;) {
+      const chunk = await fetchMb51AggPage({
+        paramHash,
+        page: p,
+        pageSize: 500,
+        q: searchQuery,
+        sort: sortKey || 'total',
+        sortDir,
+      });
+      all.push(...chunk.rows);
+      if (all.length >= chunk.total || !chunk.rows.length) break;
+      p++;
+      if (p > 500) break;
     }
+    const rws = all.map(thinToAgg);
 
     const aoa: (string | number)[][] = [
       ['MB51 Material Aging Report'],
@@ -815,101 +882,93 @@ export default function Mb51AgingPageClient() {
     XLSX.writeFile(wb, `MB51_Aging_${serialToISO(R.basis)}.xlsx`);
   };
 
-  // Filtered and sorted rows for main table
-  const displayedRows = useMemo(() => {
-    if (!reportResult) return [];
-    const cols = HEAD[reportResult.gb] || HEAD.vm;
-    const q = searchQuery.trim().toLowerCase();
-    let list = reportResult.rows;
-
-    if (q) {
-      list = list.filter((r) =>
-        cols.some(([k]) => String(r[k] || '').toLowerCase().includes(q))
-      );
-    }
-
-    if (!sortKey) return list;
-
-    return [...list].sort((x, y) => {
-      let a: number | string = 0;
-      let b: number | string = 0;
-      if (sortKey === 'total') {
-        a = x.total;
-        b = y.total;
-      } else if (sortKey === 'full') {
-        a = x.full;
-        b = y.full;
-      } else if (sortKey.startsWith('b') && /^b\d$/.test(sortKey)) {
-        const i = +sortKey[1] - 1;
-        a = x.bk[i];
-        b = y.bk[i];
-      } else {
-        a = String(x[sortKey] || '');
-        b = String(y[sortKey] || '');
-        return a.localeCompare(b, undefined, { numeric: true }) * sortDir;
-      }
-      return ((a as number) - (b as number)) * sortDir;
-    });
-  }, [reportResult, searchQuery, sortKey, sortDir]);
-
+  // Reset to page 1 when search/sort changes
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, sortKey, sortDir, reportResult]);
+  }, [searchQuery, sortKey, sortDir, paramHash]);
 
-  const totalPages = Math.max(1, Math.ceil(displayedRows.length / PAGE_SIZE) || 1);
-  const shownRows = displayedRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Server-paged thin rows (search/sort hit API)
+  useEffect(() => {
+    if (!summary || !paramHash) return;
+    let active = true;
+    void (async () => {
+      try {
+        await loadAggPage(paramHash, page, searchQuery, sortKey || 'total', sortDir);
+      } catch (err) {
+        if (!active) return;
+        console.error(err);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [paramHash, page, searchQuery, sortKey, sortDir, summary, loadAggPage]);
+
+  const displayedRows = reportResult?.rows ?? [];
+  const shownRows = displayedRows;
+  const totalPages = Math.max(1, Math.ceil(aggTotal / PAGE_SIZE) || 1);
   const gt = reportResult ? reportResult.tot.reduce((s, v) => s + v, 0) : 0;
   const currentCols = reportResult ? HEAD[reportResult.gb] || HEAD.vm : HEAD.vm;
 
-  // Drill-down Collector matching MB51_Aging_Report.html
-  const openDetail = (
+  const openDetail = async (
     targetRows: Mb51AgingAggRow[],
     bucketIdx: number,
     title: string
   ) => {
-    const out: [Mb51AgingMovement, number, number][] = [];
-    targetRows.forEach((r) => {
-      const items =
-        bucketIdx < 0
-          ? r.det.flat
-            ? r.det.flat()
-            : ([] as [Mb51AgingMovement, number, number][]).concat(...r.det)
-          : r.det[bucketIdx] || [];
-      items.forEach((x) => out.push(x));
-    });
-    out.sort(
-      (x, y) => x[0].d - y[0].d || String(x[0].dc ?? '').localeCompare(String(y[0].dc ?? ''))
-    );
-
-    setModalNet(null);
-    setModalLines(out);
     setModalTitle(title);
     setModalBucketIdx(bucketIdx);
+    setModalNet(null);
+    setModalLines([]);
     setModalOpen(true);
+    try {
+      const lines: [Mb51AgingMovement, number, number][] = [];
+      for (const r of targetRows) {
+        const key = String(r.groupKey || '');
+        if (!key) continue;
+        const data = await postMb51Detail({
+          paramHash,
+          groupKey: key,
+          bucketIdx,
+        });
+        lines.push(...(data.lines || []));
+      }
+      setModalLines(lines);
+    } catch (err) {
+      console.error(err);
+      setModalLines([]);
+    }
   };
 
-  const openNet = (targetRows: Mb51AgingAggRow[], title: string) => {
-    const seen = new Set<Mb51AgingMovement[]>();
-    const L: { r: Mb51AgingMovement; pos: number; neg: number; net: number; n: number }[] = [];
-    targetRows.forEach((r) =>
-      r.fg.forEach(([a, full]) => {
-        if (seen.has(a)) return;
-        seen.add(a);
-        let pos = 0,
-          neg = 0;
-        a.forEach((x) => {
-          if (x.q > 0) pos += x.q;
-          else neg += x.q;
-        });
-        L.push({ r: a[0], pos, neg, net: full, n: a.length });
-      })
-    );
-    L.sort((x, y) => x.net - y.net);
-    setModalLines([]);
-    setModalNet(L);
+  const openNet = async (targetRows: Mb51AgingAggRow[], title: string) => {
     setModalTitle(title);
     setModalBucketIdx(-2);
+    setModalLines([]);
+    setModalNet([]);
     setModalOpen(true);
+    try {
+      const L: {
+        pos: number;
+        neg: number;
+        net: number;
+        n: number;
+        r: Mb51AgingMovement;
+      }[] = [];
+      for (const r of targetRows) {
+        const key = String(r.groupKey || '');
+        if (!key) continue;
+        const data = await postMb51Detail({
+          paramHash,
+          groupKey: key,
+          bucketIdx: -2,
+        });
+        if (data.net) L.push(...data.net);
+      }
+      L.sort((x, y) => x.net - y.net);
+      setModalNet(L);
+    } catch (err) {
+      console.error(err);
+      setModalNet([]);
+    }
   };
 
   // Export Excel for Drill-down modal
@@ -1021,7 +1080,7 @@ export default function Mb51AgingPageClient() {
           <Link href="/report/mb51-table" className="btn sec" style={{ textDecoration: 'none' }}>
             Movements Table
           </Link>
-          {rows.length > 0 && (
+          {!!summary && (
             <button
               type="button"
               className="btn sec"
@@ -1042,7 +1101,7 @@ export default function Mb51AgingPageClient() {
         )}
 
         {/* Errors only (save failure) — success "Loaded N rows…" banner removed */}
-        {!loading && isErrMsg && loadMsg && !(showUpload && rows.length === 0) && (
+        {!loading && isErrMsg && loadMsg && !(showUpload && !summary) && (
           <div
             className="card status-banner"
             style={{
@@ -1139,7 +1198,7 @@ export default function Mb51AgingPageClient() {
         )}
 
         {/* Report Application Content */}
-        {!loading && rows.length > 0 && (
+        {!loading && !!summary && (
           <div id="app">
             {/* Filters Card */}
             <div className="card">
@@ -1188,6 +1247,7 @@ export default function Mb51AgingPageClient() {
                     items={vendorOptions}
                     selected={selectedVendors}
                     onChange={setSelectedVendors}
+                    totalCount={facetTotals.vendors}
                   />
                 </div>
                 <div className="f">
@@ -1197,6 +1257,7 @@ export default function Mb51AgingPageClient() {
                     items={groupOptions}
                     selected={selectedGroups}
                     onChange={setSelectedGroups}
+                    totalCount={facetTotals.groups}
                   />
                 </div>
                 <div className="f">
@@ -1206,16 +1267,18 @@ export default function Mb51AgingPageClient() {
                     items={matOptions}
                     selected={selectedMaterials}
                     onChange={setSelectedMaterials}
+                    totalCount={facetTotals.materials}
                   />
                 </div>
                 <div className="f">
                   <label>Exclude materials</label>
                   <MultiSelectDropdown
                     label="materials to exclude"
-                    emptyText={`None excluded (${excludeMatOptions.length})`}
+                    emptyText={`None excluded (${facetTotals.materials.toLocaleString('en-IN')})`}
                     selectedOnlyLabel="Excluded only"
                     items={excludeMatOptions}
                     selected={excludedMaterials}
+                    totalCount={facetTotals.materials}
                     onChange={(next) => {
                       setExcludedMaterials(next);
                       setSelectedMaterials((prev) => {
@@ -1233,6 +1296,7 @@ export default function Mb51AgingPageClient() {
                     items={plantOptions}
                     selected={selectedPlants}
                     onChange={setSelectedPlants}
+                    totalCount={facetTotals.plants}
                   />
                 </div>
                 <div className="f">
@@ -1351,7 +1415,7 @@ export default function Mb51AgingPageClient() {
                     Receipt layers: <b>{reportResult.used.toLocaleString('en-IN')}</b>
                   </span>
                   <span>
-                    Result rows: <b>{displayedRows.length.toLocaleString('en-IN')}</b>
+                    Result rows: <b>{aggTotal.toLocaleString('en-IN')}</b>
                   </span>
                   <span>
                     Stock as on {serialToDMY(reportResult.basis)}: <b>{fmtQty(gt)}</b>
@@ -1372,7 +1436,7 @@ export default function Mb51AgingPageClient() {
                           key={k}
                           className={headColClass(k)}
                           onClick={() => {
-                            if (sortKey === k) setSortDir((d) => -d);
+                            if (sortKey === k) setSortDir((d) => (d === 1 ? -1 : 1));
                             else {
                               setSortKey(k);
                               setSortDir(1);
@@ -1394,7 +1458,7 @@ export default function Mb51AgingPageClient() {
                             className="n bk"
                             title={b.l}
                             onClick={() => {
-                              if (sortKey === bkKey) setSortDir((d) => -d);
+                              if (sortKey === bkKey) setSortDir((d) => (d === 1 ? -1 : 1));
                               else {
                                 setSortKey(bkKey);
                                 setSortDir(-1);
@@ -1420,7 +1484,7 @@ export default function Mb51AgingPageClient() {
                         className="n tot"
                         title="Net stock as on the selected basis date"
                         onClick={() => {
-                          if (sortKey === 'total') setSortDir((d) => -d);
+                          if (sortKey === 'total') setSortDir((d) => (d === 1 ? -1 : 1));
                           else {
                             setSortKey('total');
                             setSortDir(-1);
@@ -1438,7 +1502,7 @@ export default function Mb51AgingPageClient() {
                         className="n tot2"
                         title="Net qty of all records in the file"
                         onClick={() => {
-                          if (sortKey === 'full') setSortDir((d) => -d);
+                          if (sortKey === 'full') setSortDir((d) => (d === 1 ? -1 : 1));
                           else {
                             setSortKey('full');
                             setSortDir(-1);
@@ -1518,7 +1582,7 @@ export default function Mb51AgingPageClient() {
                     <tfoot>
                       <tr>
                         <td colSpan={currentCols.length}>
-                          Grand total ({displayedRows.length.toLocaleString('en-IN')} rows)
+                          Page total ({displayedRows.length.toLocaleString('en-IN')} of {aggTotal.toLocaleString('en-IN')})
                         </td>
                         {BUCKETS.map((_, i) => {
                           const bucketSum = displayedRows.reduce(
