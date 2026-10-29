@@ -193,6 +193,11 @@ run_step athena-reconcile npm run sync-worker:athena-reconcile \
 run_step backfill-cancelled npm run sync-worker:backfill-cancelled \
   || echo "WARN: cancelled register backfill from hot failed (non-fatal)"
 
+# Seal EOD portfolio after hot is frozen for AS_OF (dashboard status trends).
+run_step ops-status-snapshot \
+  npm run sync-worker:ops-status-snapshot -- --as-of "${AS_OF}" \
+  || echo "WARN: ops status snapshot failed (non-fatal)"
+
 if [[ "$fatal" -ne 0 ]]; then
   echo "=== midnight-calls-sync INCOMPLETE $(TZ=Asia/Kolkata date -Iseconds) AS_OF=${AS_OF} ===" >&2
   exit 1

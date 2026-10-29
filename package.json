@@ -66,6 +66,7 @@
     "sync-worker:athena-sync": "npx tsx src/lib/read-model/cli.ts athena-sync",
     "sync-worker:athena-reconcile": "npx tsx src/lib/read-model/cli.ts athena-reconcile",
     "sync-worker:backfill-cancelled": "npx tsx src/lib/read-model/cli.ts backfill-cancelled",
+    "sync-worker:ops-status-snapshot": "npx tsx src/lib/read-model/cli.ts ops-status-snapshot",
     "sync-worker:calls-mirror-backfill": "npx tsx src/lib/read-model/cli.ts calls-mirror-backfill",
     "sync-worker:calls-mirror-incremental": "npx tsx src/lib/read-model/cli.ts calls-mirror-incremental",
     "sync-worker:reconcile-open-cancel": "npx tsx src/lib/read-model/cli.ts reconcile-open-cancel",

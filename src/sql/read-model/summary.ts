@@ -474,7 +474,16 @@ export type OpsKpiRow = {
 
 export type OpsRegionRow = OpsKpiRow & { region: string };
 export type OpsBranchRow = OpsKpiRow & { branch: string; region: string };
-export type OpsCallTypeRow = { call_type: string; total_calls: number; open_calls: number };
+export type OpsCallTypeRow = {
+  call_type: string;
+  total_calls: number;
+  open_calls: number;
+  open_unallocated: number;
+  assigned: number;
+  solved_calls: number;
+  tech_solved: number;
+  cancelled_calls: number;
+};
 
 export type OpsKpis = OpsKpiRow & {
   startDate: string;
@@ -598,18 +607,34 @@ export async function queryOpsKpis(params: SummaryQueryParams): Promise<OpsKpis>
       `,
       ...values
     ),
-    prisma.$queryRawUnsafeBulk<Array<OpsCallTypeRow>>(
+    prisma.$queryRawUnsafeBulk<
+      Array<{
+        call_type: string;
+        total_calls: number;
+        open_calls: number;
+        open_unallocated: number;
+        assigned: number;
+        solved_only: number;
+        tech_solved: number;
+        cancelled_calls: number;
+      }>
+    >(
       `
       SELECT
         COALESCE(NULLIF(upper(trim(h.call_type)), ''), 'UNKNOWN') AS call_type,
         count(*)::int AS total_calls,
         count(*) FILTER (
           WHERE h.status_bucket IN ('open_unallocated', 'assigned')
-        )::int AS open_calls
+        )::int AS open_calls,
+        count(*) FILTER (WHERE h.status_bucket = 'open_unallocated')::int AS open_unallocated,
+        count(*) FILTER (WHERE h.status_bucket = 'assigned')::int AS assigned,
+        count(*) FILTER (WHERE h.status_bucket = 'solved')::int AS solved_only,
+        count(*) FILTER (WHERE h.status_bucket = 'tech_solved')::int AS tech_solved,
+        count(*) FILTER (WHERE h.status_bucket = 'cancelled')::int AS cancelled_calls
       ${fromWhere}
       GROUP BY 1
       ORDER BY total_calls DESC, call_type ASC
-      LIMIT 8
+      LIMIT 12
       `,
       ...values
     ),
@@ -629,6 +654,11 @@ export async function queryOpsKpis(params: SummaryQueryParams): Promise<OpsKpis>
     call_type: row.call_type ?? 'UNKNOWN',
     total_calls: Number(row.total_calls ?? 0),
     open_calls: Number(row.open_calls ?? 0),
+    open_unallocated: Number(row.open_unallocated ?? 0),
+    assigned: Number(row.assigned ?? 0),
+    solved_calls: Number(row.solved_only ?? 0),
+    tech_solved: Number(row.tech_solved ?? 0),
+    cancelled_calls: Number(row.cancelled_calls ?? 0),
   }));
 
   return {

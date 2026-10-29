@@ -8,6 +8,14 @@ export function todayIst(): string {
   return formatLocalDate(new Date());
 }
 
+/** Previous calendar day in Asia/Kolkata (YYYY-MM-DD). */
+export function yesterdayIst(): string {
+  const [y, m, d] = todayIst().split('-').map(Number);
+  const dt = new Date(Date.UTC(y!, m! - 1, d!));
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  return dt.toISOString().slice(0, 10);
+}
+
 export function toDateString(value: Date | string): string {
   if (value instanceof Date) return formatLocalDate(value);
   return String(value);

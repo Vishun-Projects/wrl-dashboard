@@ -48,6 +48,10 @@ import { syncCompressorBarcodesToPostgres } from '@/modules/compressor-barcodes/
 import { syncDefectiveSerialsToPostgres } from '@/modules/defective-serials/server/sync/postgres-sync';
 import { runArcpRateCardSync } from '@/modules/arcp-provision/server/sync/rate-card';
 import { refreshCrmMasters } from '@/lib/read-model/crm-masters';
+import {
+  backfillOpsStatusActivity,
+  captureOpsStatusSnapshot,
+} from '@/lib/read-model/ops-status-snapshot';
 
 const INCREMENTAL_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
 const DAEMON_MAX_CONSECUTIVE_FAILURES = Number(process.env.SYNC_DAEMON_MAX_FAILURES ?? 5) || 5;
@@ -473,6 +477,31 @@ async function main(): Promise<void> {
       console.log(`[cancelled] Backfilled ${upserted} row(s) from calls_latest_hot`);
       break;
     }
+    case 'ops-status-snapshot': {
+      const args = process.argv.slice(3);
+      const fromIdx = args.indexOf('--from');
+      const toIdx = args.indexOf('--to');
+      const backfill = args.includes('--backfill') || fromIdx >= 0 || toIdx >= 0;
+      if (backfill) {
+        const from = fromIdx >= 0 ? args[fromIdx + 1] : undefined;
+        const to = toIdx >= 0 ? args[toIdx + 1] : undefined;
+        const result = await backfillOpsStatusActivity(from, to);
+        console.log(
+          `[ops-status-snapshot] Backfilled activity ${result.fromDate}..${result.toDate} → ${result.rows} grain row(s) (~${result.days}d)`
+        );
+      } else {
+        const asOfIdx = process.argv.indexOf('--as-of');
+        const asOf =
+          asOfIdx >= 0
+            ? process.argv[asOfIdx + 1]
+            : process.env.MIDNIGHT_SYNC_AS_OF || process.env.AS_OF || undefined;
+        const result = await captureOpsStatusSnapshot(asOf);
+        console.log(
+          `[ops-status-snapshot] Sealed activity ${result.rows} grain row(s) for as_of=${result.asOfDate}`
+        );
+      }
+      break;
+    }
     case 'reconcile-open-cancel': {
       const { reconcileOpenCancelDriftFromCrm } = await import('@/lib/read-model/reconcile-open-cancel');
       const typeIdx = process.argv.indexOf('--call-type');
@@ -553,6 +582,9 @@ Commands:
   backfill-wco          Fill calls_latest_hot.wco from CRM mstprorg (no truncate)
                     --from YYYY-MM-DD --to YYYY-MM-DD  (optional hot logged_at window)
   backfill-cancelled    Upsert calls_cancelled from current hot cancels (editedon = cancelled_at)
+  ops-status-snapshot   Seal daily activity from hot (--as-of YYYY-MM-DD)
+                    --backfill [--from YYYY-MM-DD] [--to YYYY-MM-DD]
+                    (default from: earliest hot activity → today IST)
   calls-mirror-backfill Full/resume CRM → calls_crm_mirror by dtrndate (excl. transfers)
   calls-mirror-incremental  Editedon watermark sync into calls_crm_mirror (status=ok only)
   reconcile-open-cancel Refresh open/assigned hot rows CRM cancelled (midnight-calls-sync only)

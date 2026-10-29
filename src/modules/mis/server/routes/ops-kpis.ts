@@ -4,9 +4,9 @@ import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { formatLocalDate } from '@/lib/dates/local-date';
 import { readSummaryFromPostgres } from '@/lib/read-model/flags';
 import { getSyncMeta } from '@/lib/read-model/sync-meta';
-import { queryOpsKpis } from '@/sql/read-model/summary';
+import { parseCallTypes, queryOpsKpis } from '@/sql/read-model/summary';
 
-function resolveOpsPeriod(period: string | null): {
+export function resolveOpsPeriod(period: string | null): {
   startDate: string;
   endDate: string;
   period: 'month' | 'year' | 'all';
@@ -49,10 +49,12 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const range = resolveOpsPeriod(searchParams.get('period'));
+    const callTypes = parseCallTypes(searchParams.get('callTypes'));
 
     const kpis = await queryOpsKpis({
       startDate: range.startDate,
       endDate: range.endDate,
+      callTypes: callTypes.length ? callTypes : undefined,
       assignedOffices: security.assignedOffices.map(String),
       isHod: security.isHod,
     });
@@ -61,6 +63,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ...kpis,
       period: range.period,
+      callTypesFilter: callTypes,
       syncMeta,
       readSource: 'postgres',
     });
