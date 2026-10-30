@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Maximize2, X } from 'lucide-react';
 import { DashboardPanel } from '@/app/dashboard/DashboardPanel';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
@@ -195,21 +195,35 @@ function TrendSparkline({
   size?: 'sm' | 'lg';
   grain?: TrendGrain;
 }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [width, setWidth] = useState(640);
   const withYear = spanNeedsYear(dates) || grain !== 'day';
   const large = size === 'lg';
-  const width = large ? 720 : 480;
-  const height = large ? 260 : 132;
-  const padL = withYear ? (large ? 40 : 36) : large ? 32 : 28;
-  const padR = large ? 10 : 6;
+  const height = large ? 260 : 144;
+  const padL = withYear ? (large ? 44 : 40) : large ? 36 : 32;
+  const padR = large ? 12 : 8;
   const padT = large ? 12 : 8;
-  const padB = withYear ? (large ? 28 : 22) : large ? 22 : 18;
-  const plotW = width - padL - padR;
+  const padB = withYear ? (large ? 28 : 24) : large ? 22 : 20;
+  const plotW = Math.max(1, width - padL - padR);
   const plotH = height - padT - padB;
   const maxY = niceMax(Math.max(0, ...series.flatMap((s) => s.values)));
 
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const sync = () => {
+      const w = Math.round(el.clientWidth);
+      if (w > 0) setWidth(w);
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [size]);
+
   const xAt = (i: number) =>
-    dates.length <= 1 ? padL + plotW / 2 : padL + (i / (dates.length - 1)) * plotW;
+    dates.length <= 1 ? padL + plotW / 2 : padL + (i / Math.max(1, dates.length - 1)) * plotW;
   const yAt = (v: number) => padT + plotH - (v / maxY) * plotH;
 
   const pathFor = (values: number[]) => {
@@ -231,10 +245,13 @@ function TrendSparkline({
   const hover = hoverIdx != null ? dates[hoverIdx] : null;
 
   return (
-    <div className="relative px-2.5 pb-1.5 pt-1">
+    <div ref={wrapRef} className="relative w-full px-2.5 pb-1.5 pt-1">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className={`w-full select-none ${large ? 'h-64' : 'h-36'}`}
+        width="100%"
+        height={height}
+        preserveAspectRatio="none"
+        className="block w-full select-none"
         role="img"
         aria-label="Ops status trend"
         onMouseLeave={() => setHoverIdx(null)}
